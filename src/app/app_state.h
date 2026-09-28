@@ -327,9 +327,8 @@ struct AppState {
     bool scrollAnimating = false;
     float scrollTargetY = 0.0f;
     std::chrono::steady_clock::time_point scrollLastUpdateTime;
-    // Keep wheel input visually attached to the content. A longer response
-    // reads as lag when a frame is already close to the 16.7 ms budget.
-    static constexpr double kScrollResponseMs = 28.0;
+    // Spread each wheel step across several frames without making navigation lag.
+    static constexpr double kScrollResponseMs = 65.0;
 
     ShotRequest shot;
     std::wstring open_path;   // folder to open as a new tab after session restore

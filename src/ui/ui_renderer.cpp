@@ -869,7 +869,7 @@ MainRenderer::TabStripMetrics MainRenderer::ComputeTabStrip(
     TabStripMetrics m;
 
     const TitleChrome chrome = MakeTitleChrome(window_w, scale_, title_bar_height_);
-    m.x0 = EffectiveSidebarWidth(window_w) + margin_;
+    m.x0 = 12.0f * scale_;
     const float tabsRight = chrome.settings_left - 8.0f * scale_;
 
     // Group chips: one at the start of each consecutive same-group run. Their

@@ -748,22 +748,19 @@ void UpdateSmoothScroll(AppState& s);
 void StartSmoothScroll(AppState& s, float delta) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
-    ClampScroll(s);
-
-    // Preserve the distance from earlier wheel pulses. Restarting from the
-    // partially animated position discards most of a fast wheel gesture.
-    if (s.scrollAnimating) {
-        UpdateSmoothScroll(s);
-    } else {
+    const float maxScroll = MaxScrollForActivePane(s);
+    tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, maxScroll);
+    if (!s.scrollAnimating) {
         s.scrollTargetY = tab->scroll_y;
         s.scrollLastUpdateTime = std::chrono::steady_clock::now();
     }
-
-    const float maxScroll = MaxScrollForActivePane(s);
     s.scrollTargetY = std::clamp(s.scrollTargetY + delta, 0.0f, maxScroll);
-    // Show the first part of a wheel gesture before the next timer tick.
-    tab->scroll_y += (s.scrollTargetY - tab->scroll_y) * 0.25f;
-    s.scrollAnimating = true;
+    // Start immediately; the UI timer requests frames and painting advances
+    // the motion. Whole-pixel offsets reuse the same text raster phase.
+    if (!s.scrollAnimating)
+        tab->scroll_y = std::round(tab->scroll_y +
+            (s.scrollTargetY - tab->scroll_y) * 0.08f);
+    s.scrollAnimating = std::abs(s.scrollTargetY - tab->scroll_y) > 0.01f;
     MaybePrefetchSearchPage(s);
 }
 
@@ -772,23 +769,24 @@ void UpdateSmoothScroll(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) { s.scrollAnimating = false; return; }
     auto now = std::chrono::steady_clock::now();
-    const double elapsed = std::clamp(
-        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count(),
-        0.0, 50.0);
+    const double elapsed = std::max(0.0,
+        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count());
     s.scrollLastUpdateTime = now;
 
+    const float maxScroll = MaxScrollForActivePane(s);
+    tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, maxScroll);
+    s.scrollTargetY = std::clamp(s.scrollTargetY, 0.0f, maxScroll);
     const float remaining = s.scrollTargetY - tab->scroll_y;
-    if (std::abs(remaining) <= 0.35f) {
+    if (std::abs(remaining) <= 1.0f) {
         tab->scroll_y = s.scrollTargetY;
         s.scrollAnimating = false;
     } else {
-        // Exponential response is independent of timer jitter and accepts a
-        // moving target without resetting its easing curve on every pulse.
+        // The elapsed-time response handles timer jitter and a moving target.
         const float response = 1.0f - static_cast<float>(
             std::exp(-elapsed / AppState::kScrollResponseMs));
-        tab->scroll_y += remaining * response;
+        const float step = std::max(1.0f, std::round(std::abs(remaining) * response));
+        tab->scroll_y += std::copysign(std::min(step, std::abs(remaining)), remaining);
     }
-    ClampScroll(s);
 }
 
 void StartSidebarFold(AppState& s, int section) {

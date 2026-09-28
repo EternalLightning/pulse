@@ -3461,6 +3461,8 @@ void TestSplitLayout() {
     Check(chrome.TabItemRect(chrome_vm, 1400.0f, 0, &tab_rc) &&
           std::abs((tab_rc.bottom - tab_rc.top) - (ui::kTitleBarHeight - 8.0f)) < 0.01f,
           L"chrome: tab height is title bar minus 8dip padding");
+    Check(std::abs(tab_rc.left - 12.0f) < 0.01f,
+          L"chrome: first tab starts beside the window edge without a logo gap");
     Check(tab_rc.right - tab_rc.left > 170.0f,
           L"chrome: a single tab can grow past the old 176px cap");
 

@@ -173,6 +173,7 @@ void Render(AppState& s) {
     bool hc = s.shot_high_contrast || ui::IsHighContrast();
     ui::Theme theme = hc ? ui::MakeHighContrastTheme() : ui::MakeTheme(s.darkMode, s.accentColor);
 
+    if (s.scrollAnimating) UpdateSmoothScroll(s);
     UpdateProcessMetrics(s);
     ui::WindowViewModel vm = BuildVm(s);
     vm.backdrop_enabled = !hc && s.compositor.UsesTransparentComposition() && s.backdropActive;
@@ -931,10 +932,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 dirty = true;
             }
             // Smooth scroll.
-            if (s->scrollAnimating) {
-                UpdateSmoothScroll(*s);
-                dirty = true;
-            }
+            if (s->scrollAnimating) dirty = true;
             // Tag slide animation.
             if (!s->tagTracks.empty() || s->tagGapFrom != s->tagGapTo) {
                 TickTagTransitions(*s);
