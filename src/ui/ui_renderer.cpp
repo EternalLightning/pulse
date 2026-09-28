@@ -727,9 +727,9 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         FillRect(dc, brStrokeDivider_.get(), 0.0f, h - 1.0f, rect.right, 1.0f);
     }
 
-    x = strip.end_x;
+    const float new_tab_x = strip.end_x;
     // New tab button follows the final rest slot (not the sliding tabs).
-    D2D1_RECT_F newRc = D2D1::RectF(x, tabY, x + 32 * scale_, tabY + tabH);
+    D2D1_RECT_F newRc = D2D1::RectF(new_tab_x, tabY, new_tab_x + 32 * scale_, tabY + tabH);
     DrawButton(newRc, theme, IsHovered(vm, HitTestResult::TabNew) ? theme.fill_hover : kTransparent,
         kIconAdd, L"+", theme.text_secondary, true, true);
 
