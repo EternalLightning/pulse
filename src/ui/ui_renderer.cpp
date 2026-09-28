@@ -9,7 +9,6 @@
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
-#include "../app/resource.h"
 #include "../app/places.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
@@ -447,6 +446,12 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                                    theme.bg, theme.text, false);
         DrawStatusBar(vm, rect, theme);
     }
+    if (vm.page_transition > 0.0f && !IsHighContrast()) {
+        const D2D1_RECT_F content = ContentRect(rect.right, rect.bottom);
+        const float alpha = 0.22f * vm.page_transition * vm.page_transition;
+        MakeBrush(dc, WithAlpha(theme.surface_sheet, alpha), brBg_);
+        dc->FillRectangle(content, brBg_.get());
+    }
 
     // Drag action badge (ui.md §7.8): tooltip-style flyout near the cursor.
     if (!vm.drag_badge.empty()) {
@@ -515,85 +520,11 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
 
 }
 
-ID2D1Bitmap* MainRenderer::LogoBitmap() {
-    ID2D1DeviceContext* dc = compositor_ ? compositor_->Dc() : nullptr;
-    if (!dc) return nullptr;
-    if (logo_bitmap_.get() && logo_dc_ == dc && std::abs(logo_scale_ - scale_) <= 0.001f) {
-        return logo_bitmap_.get();
-    }
-    logo_bitmap_.reset();
-    logo_dc_ = nullptr;
-    // Decode well above the on-screen size so the mark stays crisp at high DPI.
-    const int px = std::max(32, static_cast<int>(48.0f * scale_ + 0.5f));
-    HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
-        MAKEINTRESOURCEW(IDI_PULSE), IMAGE_ICON, px, px, LR_DEFAULTCOLOR));
-    if (!icon) return nullptr;
-    ComPtr<IWICImagingFactory> wic;
-    ComPtr<IWICBitmap> wicBitmap;
-    ComPtr<IWICFormatConverter> converter;
-    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                   IID_PPV_ARGS(&wic))) &&
-        SUCCEEDED(wic->CreateBitmapFromHICON(icon, &wicBitmap)) &&
-        SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
-        SUCCEEDED(converter->Initialize(wicBitmap.get(), GUID_WICPixelFormat32bppPBGRA,
-                                        WICBitmapDitherTypeNone, nullptr, 0.0,
-                                        WICBitmapPaletteTypeMedianCut))) {
-        dc->CreateBitmapFromWicBitmap(converter.get(), nullptr, &logo_bitmap_);
-    }
-    DestroyIcon(icon);
-    if (logo_bitmap_.get()) {
-        logo_dc_ = dc;
-        logo_scale_ = scale_;
-    }
-    return logo_bitmap_.get();
-}
-
 void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     ID2D1DeviceContext* dc = compositor_->Dc();
     const float y = 0.0f;
     const float h = title_bar_height_;
     const float right = rect.right;
-
-    // Product mark: the packaged app icon; the monogram is the fallback.
-    float x = 12.0f * scale_;
-    const float mark = 24.0f * scale_;
-    const float markY = (h - mark) * 0.5f;
-    if (ID2D1Bitmap* logo = LogoBitmap()) {
-        dc->DrawBitmap(logo, D2D1::RectF(x, markY, x + mark, markY + mark), 1.0f,
-                       D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, nullptr, nullptr);
-    } else {
-        MakeBrush(dc, theme.accent, brAccent_);
-        dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + mark * 0.5f, markY + mark * 0.5f),
-                                      mark * 0.5f, mark * 0.5f), brAccent_.get());
-        ComPtr<IDWriteTextFormat> markFmt;
-        typography::CreateTextFormat(compositor_->DwriteFactory(),
-            {typography::FontRole::Display, 11.0f * scale_, DWRITE_FONT_WEIGHT_SEMI_BOLD},
-            &markFmt);
-        if (markFmt.get()) {
-            markFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            markFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            MakeBrush(dc, theme.accent_text, brAccentText_);
-            DrawTextRect(dc, markFmt.get(), brAccentText_.get(), L"P", x, markY, mark, mark);
-        }
-    }
-    x += mark + 8.0f * scale_;
-    const float brandRight = EffectiveSidebarWidth(right) - 12.0f * scale_;
-    const float nameWidth = MeasureLayoutText(compositor_, compositor_->DwriteFactory(),
-        compositor_->HeaderFormat(), L"Pulse");
-    if (x + nameWidth <= brandRight) {
-        MakeBrush(dc, theme.text, brText_);
-        DrawTextRect(dc, compositor_->HeaderFormat(), brText_.get(), L"Pulse",
-            x, 0.0f, nameWidth + 1.0f * scale_, h);
-        x += nameWidth + 12.0f * scale_;
-        const auto description = l10n::Get(l10n::StringId::AppDescription);
-        const float descriptionWidth = MeasureLayoutText(compositor_, compositor_->DwriteFactory(),
-            compositor_->SmallFormat(), description);
-        if (x + descriptionWidth <= brandRight) {
-            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-            DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), description,
-                x, 0.0f, descriptionWidth + 1.0f * scale_, h);
-        }
-    }
 
     const float ctrlW = 46.0f * scale_;
     const TitleChrome chrome = MakeTitleChrome(right, scale_, h);
@@ -849,7 +780,7 @@ void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& r
     IDWriteTextFormat* small_fmt = compositor_->SmallFormat();
     const StatusBarMetrics sb = MakeStatusBarMetrics(
         vm, rect, scale_, status_height_, factory, small_fmt);
-    const bool centered_progress = vm.status.query_active || vm.status.task_is_update;
+    const bool centered_progress = vm.status.query_active;
     float y = sb.bar.top;
     // Sits on the shared sheet painted by Render(); no own fill or top rule.
     MakeBrush(dc, theme.text_secondary, brTextSecondary_);
@@ -891,7 +822,7 @@ void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& r
         small_fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     }
 
-    // Query/update activity shares the compact status area with operation summaries.
+    // Query activity shares the compact status area with operation summaries.
     const float taskX = sb.task.left;
     const float taskRight = sb.task.right;
     if (centered_progress) {

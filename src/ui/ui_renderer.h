@@ -4,7 +4,6 @@
 #include "ui_compositor.h"
 #include "window_material.h"
 #include "fluent_components.h"
-#include "release_note_view.h"
 #include "shell_icons.h"
 #include "view_layout.h"
 #include "column_strip_layout.h"
@@ -291,6 +290,7 @@ struct SidebarGroup {
     std::wstring icon_glyph;       // optional leading icon on the header row
     std::vector<SidebarItem> items;
     bool collapsed = false;
+    float expansion = -1.0f;    // Negative uses collapsed; otherwise animated row fraction.
     bool hidden = false;           // Section menu: the group is not laid out at all.
     SidebarAddAction add_action = SidebarAddAction::None;
 };
@@ -409,8 +409,7 @@ struct StatusBarView {
     std::wstring selection_text;
     std::wstring hint_text;        // contextual shortcut / hover prompt
     std::wstring task_text;        // active/completed op summary; empty = idle
-    float task_progress = -1.0f;   // 0..100; negative: hidden for ops, indeterminate for updates.
-    bool task_is_update = false;   // Noninteractive, centered progress; never opens file operations.
+    float task_progress = -1.0f;   // 0..100; negative hides the operation progress bar.
     std::wstring performance_text; // development diagnostics; empty hides it
     std::wstring performance_compact_text;
 };
@@ -486,6 +485,7 @@ struct WindowViewModel {
     std::vector<SplitterView> splitters;
     std::vector<SidebarGroup> sidebar;
     float sidebar_scroll = 0.0f;
+    float page_transition = 0.0f; // Remaining fraction of the page fade.
     TrayDeckView tray_deck;
     bool details_visible = false;   // right details panel toggle (view menu)
     DetailsPanelView details;
@@ -595,15 +595,6 @@ struct WindowViewModel {
     std::wstring settings_version;
     std::wstring settings_build_id;
     std::vector<std::pair<std::wstring, std::wstring>> settings_about_rows; // label, value
-    const std::vector<ReleaseNoteView>* settings_release_notes = nullptr;   // newest first
-    int settings_release_expanded = 0;                                       // -1 = none
-    std::wstring settings_update_status;
-    std::wstring settings_update_version;
-    bool settings_update_enabled = false;
-    bool settings_update_checking = false;
-    bool settings_update_downloading = false;
-    bool settings_update_installing = false;
-    bool settings_update_available = false;
     bool settings_diagnostics_exporting = false;
     bool settings_show_performance = false;
     int dup_scope = 0;
@@ -737,9 +728,7 @@ struct HitTestResult {
         SettingsNetworkAction,
         SettingsNetworkRemove,
         SettingsDiagnosticsAction,
-        SettingsUpdateAction,
-        SettingsAboutAction,   // 0 copy info, 1 project page, 2 all releases
-        SettingsReleaseNote,
+        SettingsAboutAction,   // 0 copy info, 1 project page
         SettingsDupScope,
         SettingsDupDrive,
         SettingsDupBrowse,
@@ -1119,8 +1108,6 @@ private:
     void DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
                               const D2D1_COLOR_F& color, const Theme& theme,
                               const std::vector<NameMatchRange>& matches);
-    // Title-bar product mark from the app icon resource (nullptr until loaded).
-    ID2D1Bitmap* LogoBitmap();
 
     WindowMaterial material_;
     Compositor* compositor_ = nullptr;
@@ -1192,7 +1179,6 @@ private:
     mutable ComPtr<ID2D1SolidColorBrush> brFpsBg_;
     mutable ComPtr<ID2D1SolidColorBrush> brFpsText_;
 
-    ComPtr<ID2D1Bitmap> logo_bitmap_;
     ComPtr<IDWriteTextFormat> preview_mono_format_;
     ComPtr<IDWriteTextLayout> details_text_layout_;
     std::wstring details_layout_text_;
@@ -1206,8 +1192,6 @@ private:
     ComPtr<ID2D1SvgDocument> exclude_empty_svg_;
     std::unordered_map<int, ComPtr<ID2D1SvgDocument>> fluent_svgs_;
     std::unordered_set<int> fluent_svg_failed_;
-    ID2D1DeviceContext* logo_dc_ = nullptr;
-    float logo_scale_ = 0.0f;
 
 };
 

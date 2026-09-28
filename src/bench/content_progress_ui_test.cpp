@@ -1,6 +1,5 @@
 #include "../app/app_internal.h"
 #include "../app/app_input.h"
-#include "../app/update_status.h"
 #include "../ui/ui_renderer_internal.h"
 #include <filesystem>
 #include <iostream>
@@ -124,79 +123,6 @@ int main() {
     start(); update(400,20000,true,0,true);
     check(!BuildVm(s,false).status.query_active && !tab->content_count_final && tab->banner_title==l10n::Get(l10n::StringId::ResultLimitTitle),
         "truncated query remains incomplete and hides progress");
-    // Update integration: use the production BuildVm adapter and renderer, never a network/installer.
-    tab->search_content_active = false;
-    tab->pending_generation = 0;
-    tab->current_path = L"C:\\Fixture";
-    s.shot.active = true;
-    s.shot.update_available = true;
-    s.update_result_ready = true;
-    s.update_result.update_available = true;
-    s.update_result.version = L"1.0.34"; // Fixture only; application version is unchanged.
-    const auto update_output = std::filesystem::absolute(L"../bench_data/update-status-progress-ui");
-    std::filesystem::create_directories(update_output);
-    for (const auto language : {L"zh-CN", L"en-US"}) {
-        l10n::SetLanguage(language);
-        for (const auto phase : {L"connecting", L"downloading", L"downloading-unknown", L"verifying", L"launching", L"installing"}) {
-            s.shot.update_state = phase;
-            for (const bool settings : {false, true}) {
-                tab->current_path = settings ? app::MakeSettingsPath(L"about") : L"C:\\Fixture";
-                for (float scale : {1.0f, 1.5f}) for (int width : {360, 720, 1100}) for (bool dark : {false, true}) {
-                    s.scale = scale;
-                    s.darkMode = dark;
-                    s.compositor.RecreateTextFormats(scale);
-                    s.renderer.SetScale(scale);
-                    const auto rect = D2D1::RectF(0, 0, width * scale, 720 * scale);
-                    s.compositor.Resize(static_cast<UINT>(rect.right), static_cast<UINT>(rect.bottom));
-                    auto update_vm = BuildVm(s, false);
-                    check(update_vm.settings_open == settings, "fixture exercises the intended normal or Settings tab");
-                    check(update_vm.status.task_is_update && !update_vm.status.task_text.empty(),
-                        "update snapshot reaches global status bar in both tab types and languages");
-                    const bool determinate = std::wstring_view(phase) == L"downloading";
-                    check(determinate ? update_vm.status.task_progress == 37.0f : update_vm.status.task_progress < 0,
-                        "download uses actual ratio; unknown length and installation stages stay indeterminate");
-                    const auto metrics = ui::MakeStatusBarMetrics(update_vm, rect, scale, 24 * scale,
-                        s.compositor.DwriteFactory(), s.compositor.SmallFormat());
-                    check(metrics.task.left >= rect.left && metrics.task.right <= rect.right &&
-                          metrics.task.right > metrics.task.left &&
-                          std::abs((metrics.task.left + metrics.task.right) / 2 - rect.right / 2) < 0.1f,
-                        "update label and progress group remain centered and bounded at narrow widths and DPI");
-                    check(ui::StatusBarHitRegion(update_vm, rect, (metrics.task.left + metrics.task.right) / 2,
-                        metrics.bar.top + 1, scale, 24 * scale, &s.compositor) == ui::HitTestResult::StatusBar,
-                        "update progress is not a file-operation click target");
-                    const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
-                    s.compositor.Dc()->BeginDraw();
-                    s.renderer.Render(update_vm, rect, theme);
-                    check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "actual update status-bar renderer completes");
-                    if (settings && scale == 1.0f && width == 1100 && dark) {
-                        const auto image = update_output / (std::wstring(language) + L"-" + phase + L".png");
-                        check(s.compositor.SaveSnapshot(image.c_str()), "update settings screenshot saved");
-                    }
-                }
-            }
-        }
-    }
-    for (const auto terminal : {L"cancelled", L"failed", L"completed", L""}) {
-        s.shot.update_state = terminal;
-        check(!BuildVm(s, false).status.task_is_update, "terminal/idle update removes status-bar progress");
-    }
-    ui::StatusBarView status;
-    status.task_text = L"File copy";
-    status.task_progress = 64;
-    const app::UpdateProgress download{app::UpdatePhase::Downloading, 3, 8};
-    app::ApplyUpdateStatus(status, download, true);
-    check(!status.task_is_update && status.task_progress == 64 && status.task_text == L"File copy",
-        "active file operation retains status-bar ownership");
-    status.query_active = status.query_cancellable = true;
-    status.query_progress = .36f;
-    app::ApplyUpdateStatus(status, download, false);
-    check(!status.task_is_update && status.query_cancellable && status.query_progress == .36f,
-        "query progress and cancellation retain priority over updates");
-    status.query_active = status.query_cancellable = false;
-    app::ApplyUpdateStatus(status, download, false);
-    check(status.task_is_update && status.task_progress == 37, "update replaces completed operation summary");
-    s.shot.active = false;
-    check(!BuildVm(s, false).status.task_is_update, "fixture cannot leak progress into idle runtime");
     s.renderer.SetCompositor(nullptr); s.compositor.Shutdown(); DestroyWindow(s.hwnd); s.hwnd=nullptr;
     CoUninitialize(); return failures ? 1:0;
 }

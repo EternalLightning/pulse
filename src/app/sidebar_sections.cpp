@@ -68,7 +68,11 @@ void ToggleSidebarSection(AppState& s, int group) {
 }
 
 void SetEverySidebarSectionCollapsed(AppState& s, bool collapsed) {
+    const uint32_t previous = s.sidebarCollapsedMask;
     s.sidebarCollapsedMask = collapsed ? (1u << kSectionCount) - 1u : 0u;
+    for (int section = 0; section < kSectionCount; ++section) {
+        if ((previous ^ s.sidebarCollapsedMask) & (1u << section)) StartSidebarFold(s, section);
+    }
 }
 
 void ShowSidebarSectionsMenu(AppState& s, POINT screen_pt) {

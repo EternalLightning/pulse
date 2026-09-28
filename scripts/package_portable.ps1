@@ -24,18 +24,21 @@ foreach ($license in @('PDFium', 'LumaText')) {
 }
 New-Item -ItemType Directory -Path (Join-Path $payload 'licenses/ib-pinyin') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'third_party/ib-pinyin-cpp/LICENSE.txt') -Destination (Join-Path $payload 'licenses/ib-pinyin')
+New-Item -ItemType Directory -Path (Join-Path $payload 'licenses/FilesIcon') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/LICENSE-MIT.txt') -Destination (Join-Path $payload 'licenses/FilesIcon')
+Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/README.md') -Destination (Join-Path $payload 'licenses/FilesIcon')
 @"
 Pulse $version — Windows 10 / 11 x64 免安装版
 
 解压整个文件夹后运行 pulse.exe。请保留同目录的辅助程序、DLL 和 licenses 文件夹。
 此版本无需安装，但配置、缓存和日志仍保存在当前用户的应用数据目录，并非全部数据随程序目录携带。
 解压不会注册 PulseIndex 系统服务。需要全盘后台索引服务时，请使用安装版。
-程序内下载安装更新会启动安装包；如需继续免安装使用，请下载新版 portable ZIP 并解压到新目录。
+如需升级免安装版，请下载新版 portable ZIP 并解压到新目录。
 
 Extract the complete folder and run pulse.exe. Keep all helper programs, DLLs and licenses together.
 Settings, caches and logs remain in the current user's application-data directory.
 Extraction does not register the PulseIndex service. Use the installer for the system indexing service.
-In-app updates launch an installer; download a new portable ZIP to continue using the unpacked edition.
+To upgrade the portable edition, download a new portable ZIP and extract it to a new directory.
 "@ | Set-Content -LiteralPath (Join-Path $payload 'README.txt') -Encoding utf8
 $archive = Join-Path $dist "Pulse-$version-portable-win-x64.zip"
 Compress-Archive -LiteralPath $payload -DestinationPath $archive -Force

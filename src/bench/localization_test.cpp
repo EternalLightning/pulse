@@ -96,10 +96,6 @@ int main() {
             !Get(StringId::TabRename).empty() && !Get(StringId::TabNameHint).empty() &&
             !Get(StringId::TabNameSave).empty() && !Get(StringId::TabNameReset).empty() &&
             !Get(StringId::TabColor).empty() && !Get(StringId::TabColorNone).empty());
-        passed &= Report("update installation states are translated",
-            !Get(StringId::DownloadingUpdate).empty() && !Get(StringId::InstallingUpdate).empty() &&
-            !Get(StringId::UpdateClickToInstall).empty() && !Get(StringId::UpdateCancelled).empty() &&
-            !Get(StringId::UpdateBusy).empty() && !Get(StringId::UpdateInstallFailed).empty());
     }
     SetLanguage(L"zh-CN");
     passed &= Report("zh-CN quick access and compatibility resources",
@@ -113,7 +109,6 @@ int main() {
                      Get(StringId::PreviewLoading) == L"\u6b63\u5728\u52a0\u8f7d\u9884\u89c8..." &&
                      Get(StringId::PreviewFit) == L"\u9002\u5e94" &&
                      Get(StringId::SettingsAboutDiagnostics) == L"\u5173\u4e8e\u4e0e\u8bca\u65ad" &&
-                     Get(StringId::CheckForUpdates) == L"\u68c0\u67e5\u66f4\u65b0" &&
                      Get(StringId::RecycleBin) == L"\u56de\u6536\u7ad9" &&
                      Get(StringId::BatchRename) == L"\u6279\u91cf\u91cd\u547d\u540d" &&
                      Get(StringId::BatchRenameWillRename) == L"\u5c06\u6539\u540d" &&
@@ -148,8 +143,7 @@ int main() {
     passed &= Report("en-US command resources",
                      Get(StringId::TooltipCloseTab) == L"Close tab" &&
                      Get(StringId::OpenTerminalHere) == L"Open terminal here" &&
-                     Get(StringId::SettingsAboutDiagnostics) == L"About & diagnostics" &&
-                     Get(StringId::DownloadUpdate) == L"Download and install");
+                     Get(StringId::SettingsAboutDiagnostics) == L"About & diagnostics");
     passed &= Report("en-US recycle and batch rename",
                      Get(StringId::RecycleBin) == L"Recycle Bin" &&
                      Get(StringId::BatchRename) == L"Batch rename" &&

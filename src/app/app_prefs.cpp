@@ -176,12 +176,6 @@ std::wstring AppPrefs::ToJson() const {
         pulse::json::Escape(duplicate_scan_drive, escaped);
         out += escaped;
     }
-    out += L"\",\n  \"last_seen_version\":\"";
-    {
-        std::wstring escaped;
-        pulse::json::Escape(last_seen_version, escaped);
-        out += escaped;
-    }
     out += L"\"";
     folder_views.AppendJson(out);
     out += L"\n}\n";
@@ -262,7 +256,6 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     if (duplicate_scan_scope < 0 || duplicate_scan_scope > 2) duplicate_scan_scope = 0;
     duplicate_scan_folder = pulse::json::ExtractString(json, L"duplicate_scan_folder");
     duplicate_scan_drive = pulse::json::ExtractString(json, L"duplicate_scan_drive");
-    last_seen_version = pulse::json::ExtractString(json, L"last_seen_version");
     return true;
 }
 

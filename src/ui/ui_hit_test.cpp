@@ -360,17 +360,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 }
                 if(ContainsPt(lay.context_restore,x,y)) {r.region=HitTestResult::SettingsRestore;return r;}
             } else if (vm.settings_page == 3) {
-                for (int i = 0; i < 3; ++i) {
-                    if (ContainsPt(i < 2 ? lay.about_action[i] : lay.release_all, x, y)) {
+                for (int i = 0; i < 2; ++i) {
+                    if (ContainsPt(lay.about_action[i], x, y)) {
                         r.region = HitTestResult::SettingsAboutAction;
                         r.index = i;
-                        return r;
-                    }
-                }
-                for (size_t i = 0; i < lay.release_rows.size(); ++i) {
-                    if (ContainsPt(lay.release_rows[i], x, y)) {
-                        r.region = HitTestResult::SettingsReleaseNote;
-                        r.index = static_cast<int>(i);
                         return r;
                     }
                 }
@@ -383,17 +376,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                     if (!vm.settings_diagnostics_exporting &&
                         ContainsPt(lay.diagnostics_action[i], x, y)) {
                         r.region = HitTestResult::SettingsDiagnosticsAction;
-                        r.index = i;
-                        return r;
-                    }
-                }
-                for (int i = 0; i < 2; ++i) {
-                    const bool enabled = i == 0
-                        ? vm.settings_update_enabled && !vm.settings_update_checking &&
-                            !vm.settings_update_downloading && !vm.settings_update_installing
-                        : vm.settings_update_available && !vm.settings_update_installing;
-                    if (enabled && ContainsPt(lay.update_action[i], x, y)) {
-                        r.region = HitTestResult::SettingsUpdateAction;
                         r.index = i;
                         return r;
                     }

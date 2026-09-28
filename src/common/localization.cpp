@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_UPDATED_CLICK;
+constexpr UINT kLastString = IDS_ABOUT_COPIED;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&

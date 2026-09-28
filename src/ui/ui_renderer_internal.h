@@ -335,6 +335,11 @@ void ClearTextWidthCache() {
         return m.itemH;
     }
 
+    float SidebarExpansion(const SidebarGroup& group) {
+        return group.expansion < 0.0f ? (group.collapsed ? 0.0f : 1.0f)
+                                      : group.expansion;
+    }
+
     int TrayTotalCount(const WindowViewModel& vm) { return vm.tray_deck.total_count; }
 
     // Staging tray card metrics (DIPs): thumbnail follows the "staging tray
@@ -361,10 +366,12 @@ void ClearTextWidthCache() {
             // has nothing to fold, so it never carries the header height.
             const bool has_header = !group.header.empty();
             if (has_header) height += m.headerH + 4.0f * m.scale;
-            if (!has_header || !group.collapsed) {
+            const float expansion = has_header ? SidebarExpansion(group) : 1.0f;
+            if (expansion > 0.0f) {
+                float rows_height = m.groupGap - m.itemGap;
                 for (const auto& item : group.items)
-                    height += SidebarItemHeight(item, m) + m.itemGap;
-                height += m.groupGap - m.itemGap;
+                    rows_height += SidebarItemHeight(item, m) + m.itemGap;
+                height += rows_height * expansion;
             }
         }
         return height + m.pad;
@@ -420,11 +427,15 @@ void ClearTextWidthCache() {
                     slot.run = run++;
                     out.push_back(slot);
                     y += rowH;
-                    if (group.collapsed) continue;
+                    if (SidebarExpansion(group) <= 0.0f) continue;
                 }
+                const float rows_top = y;
+                const float rows_height = static_cast<float>(group.items.size()) * rowH;
+                const float reveal_bottom = rows_top + rows_height *
+                    (group.header.empty() ? 1.0f : SidebarExpansion(group));
                 for (int i = 0; i < static_cast<int>(group.items.size()); ++i) {
                     if (group.items[i].starred_child) continue;
-                    if (y + rowH > sb.bottom - trayH) break;
+                    if (y + rowH > sb.bottom - trayH || y + rowH > reveal_bottom) break;
                     SidebarSlot slot;
                     slot.kind = group.items[i].is_drive ? SidebarSlot::Drive
                               : group.items[i].is_tag ? SidebarSlot::Tag : SidebarSlot::Item;
@@ -435,6 +446,7 @@ void ClearTextWidthCache() {
                     out.push_back(slot);
                     y += rowH;
                 }
+                y = reveal_bottom;
             }
             SidebarSlot tray;
             tray.kind = SidebarSlot::TrayPanel;
@@ -471,11 +483,17 @@ void ClearTextWidthCache() {
                     out.push_back(header);
                 y += m.headerH + 4.0f * scale;
             }
-            if (has_header && group.collapsed) {
+            if (has_header && SidebarExpansion(group) <= 0.0f) {
                 if (bands) bands->push_back(
                     { g, band_top, std::min(y + m.groupGap - m.itemGap, contentBottom) });
                 continue;
             }
+            const float rows_top = y;
+            float rows_height = m.groupGap - m.itemGap;
+            for (const auto& item : group.items)
+                rows_height += SidebarItemHeight(item, m) + m.itemGap;
+            const float reveal_bottom = rows_top + rows_height *
+                (has_header ? SidebarExpansion(group) : 1.0f);
             for (int i = 0; i < static_cast<int>(group.items.size()); ++i) {
                 const auto& item = group.items[i];
                 if (g == vm.tag_drag_group && i == vm.tag_drag_item) {
@@ -497,11 +515,12 @@ void ClearTextWidthCache() {
                 slot.group = g;
                 slot.item = i;
                 slot.run = run++;
-                if (slot.rc.bottom > sb.top && slot.rc.bottom <= contentBottom)
+                if (slot.rc.bottom > sb.top && slot.rc.bottom <= contentBottom &&
+                    slot.rc.bottom <= reveal_bottom)
                     out.push_back(slot);
                 y += h + m.itemGap;
             }
-            y += m.groupGap - m.itemGap;
+            y = reveal_bottom;
             if (bands) bands->push_back({ g, band_top, std::min(y, contentBottom) });
         }
 
@@ -1296,7 +1315,7 @@ struct StatusBarMetrics {
 StatusBarMetrics MakeStatusBarMetrics(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                                       float scale, float status_height,
                                       IDWriteFactory2* factory, IDWriteTextFormat* small_format) {
-    const bool centered_progress = vm.status.query_active || vm.status.task_is_update;
+    const bool centered_progress = vm.status.query_active;
     StatusBarMetrics m;
     m.bar = D2D1::RectF(rect.left, rect.bottom - status_height, rect.right, rect.bottom);
     m.pad = kStatusBarPadDip * scale;
@@ -1537,13 +1556,7 @@ struct SettingsLayout {
     D2D1_RECT_F diagnostics_card{};
     D2D1_RECT_F diagnostics_perf{};
     D2D1_RECT_F diagnostics_action[3]{};
-    D2D1_RECT_F update_card{};
-    D2D1_RECT_F update_action[2]{};
     D2D1_RECT_F about_action[2]{};
-    D2D1_RECT_F release_card{};
-    D2D1_RECT_F release_all{};
-    std::vector<D2D1_RECT_F> release_rows;
-    D2D1_RECT_F release_body{};
     D2D1_RECT_F dup_scope[3]{};
     D2D1_RECT_F dup_browse{};
     D2D1_RECT_F dup_scan{};
@@ -1582,19 +1595,6 @@ bool AboutTwoColumns(float card_w, float scale) {
 size_t AboutRowLines(const WindowViewModel& vm, float card_w, float scale) {
     const size_t n = vm.settings_about_rows.size();
     return AboutTwoColumns(card_w, scale) ? (n + 1) / 2 : n;
-}
-
-// Release-note body text starts 30 DIP into the row and keeps 16 DIP on the right.
-constexpr float kReleaseTextInsetDip = 30.0f;
-constexpr float kReleaseTextRightDip = 16.0f;
-constexpr float kReleaseLineGapDip = 6.0f;
-float ReleaseTextWidth(float row_w, float scale) {
-    return (std::max)(40.0f * scale, row_w - (kReleaseTextInsetDip + kReleaseTextRightDip) * scale);
-}
-float ReleaseLineHeight(const fluent::Painter* painter, const std::wstring& line, float width,
-                        float scale) {
-    const float h = painter ? painter->MeasureWrappedCaptionHeight(line, width) : 0.0f;
-    return h > 0.0f ? h : 20.0f * scale;
 }
 
 #include "settings_layout_sections.h"
@@ -1808,51 +1808,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         }
         y += diagnostics_h + 12.0f * scale;
 
-        const float available_width = std::max(0.0f, card_right - card_left - 32.0f * scale);
-        const float check_w = std::min(available_width, label_btn_w(
-            pulse::l10n::Get(pulse::l10n::StringId::CheckForUpdates)));
-        const float download_w = std::min(available_width, label_btn_w(
-            pulse::l10n::Get(pulse::l10n::StringId::DownloadUpdate)));
-        const bool stack_updates = vm.settings_update_available && check_w + gap + download_w > available_width;
-        const float update_h = 174.0f * scale +
-            (stack_updates ? 40.0f * scale : 0.0f);
-        l.update_card = D2D1::RectF(card_left, y, card_right, y + update_h);
-        const float check_y = y + update_h - (stack_updates ? 88.0f : 48.0f) * scale;
-        l.update_action[0] = D2D1::RectF(card_left + 16.0f * scale,
-                                         check_y,
-                                         card_left + 16.0f * scale + check_w,
-                                         check_y + 32.0f * scale);
-        const float download_x = stack_updates ? l.update_action[0].left : l.update_action[0].right + gap;
-        const float download_y = check_y + (stack_updates ? 40.0f * scale : 0.0f);
-        l.update_action[1] = D2D1::RectF(download_x, download_y,
-                                         download_x + download_w, download_y + 32.0f * scale);
-        y += update_h + 12.0f * scale;
-        if (!vm.settings_index_error.empty()) y += 44.0f * scale; // error text under the update card
-
-        // Release notes: a header row per embedded version; the expanded one gets a body.
-        const float release_top = y;
-        const float all_w = label_btn_w(pulse::l10n::Get(pulse::l10n::StringId::ReleaseAll));
-        l.release_all = D2D1::RectF(card_right - 16.0f * scale - all_w, release_top + 14.0f * scale,
-                                    card_right - 16.0f * scale, release_top + 46.0f * scale);
-        float ry = release_top + 70.0f * scale;
-        if (vm.settings_release_notes) {
-            const auto& notes = *vm.settings_release_notes;
-            const float row_left = card_left + 8.0f * scale;
-            const float row_right = card_right - 8.0f * scale;
-            const float text_w = ReleaseTextWidth(row_right - row_left, scale);
-            for (size_t i = 0; i < notes.size(); ++i) {
-                l.release_rows.push_back(D2D1::RectF(row_left, ry, row_right, ry + 36.0f * scale));
-                ry += 36.0f * scale;
-                if (static_cast<int>(i) != vm.settings_release_expanded) continue;
-                float body = 4.0f * scale;
-                for (const auto& line : notes[i].lines)
-                    body += ReleaseLineHeight(painter, line, text_w, scale) + kReleaseLineGapDip * scale;
-                l.release_body = D2D1::RectF(row_left, ry, row_right, ry + body);
-                ry += body + 4.0f * scale;
-            }
-        }
-        l.release_card = D2D1::RectF(card_left, release_top, card_right, ry + 10.0f * scale);
-        y = l.release_card.bottom + 24.0f * scale;
+        if (!vm.settings_index_error.empty()) y += 44.0f * scale;
     } else if (vm.settings_page == 4) {
         const float card_left = l.content.left + pad;
         const float card_right = l.content.right - pad;
@@ -1968,7 +1924,7 @@ HitTestResult::Region StatusBarHitRegion(const WindowViewModel& vm, const D2D1_R
     const StatusBarMetrics sb = MakeStatusBarMetrics(
         vm, rect, scale, status_height, factory, fmt);
     if (vm.status.query_cancellable && ContainsPt(sb.cancel_search, x, y)) return HitTestResult::StatusBarCancelSearch;
-    return !vm.status.query_active && !vm.status.task_is_update && ContainsPt(sb.task, x, y) ? HitTestResult::StatusBarTask
+    return !vm.status.query_active && ContainsPt(sb.task, x, y) ? HitTestResult::StatusBarTask
                                     : HitTestResult::StatusBar;
 }
 

@@ -64,9 +64,8 @@ jobs:
           pattern: installer-*
           path: dist
           merge-multiple: true
-      - name: Sign manifests and publish both installers
+      - name: Publish both installers
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          PULSE_UPDATE_PRIVATE_KEY: ${{ secrets.PULSE_UPDATE_PRIVATE_KEY }}
         run: ./scripts/publish_release.ps1

@@ -121,31 +121,6 @@ endif()
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(cmake/pulse_version.h.in generated/pulse_version.h @ONLY)
 
-set(PULSE_DEFAULT_UPDATE_MANIFEST "https://github.com/jimmgreen/pulse/releases/latest/download/update-manifest.json")
-if(PULSE_WIN81_CANDIDATE)
-    set(PULSE_DEFAULT_UPDATE_MANIFEST "https://github.com/jimmgreen/pulse/releases/latest/download/update-manifest-win81.json")
-endif()
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/update-public-key.txt" PULSE_DEFAULT_UPDATE_PUBLIC_KEY LIMIT_COUNT 1)
-set(PULSE_UPDATE_MANIFEST_URL "${PULSE_DEFAULT_UPDATE_MANIFEST}" CACHE STRING
-    "HTTPS URL for the signed update manifest (empty disables update checks)")
-set(PULSE_UPDATE_PUBLIC_KEY_HEX "${PULSE_DEFAULT_UPDATE_PUBLIC_KEY}" CACHE STRING
-    "ECDSA P-256 public key as an uncompressed SEC1 hex point")
-set(PULSE_UPDATE_ENABLED_VALUE 0)
-if(NOT PULSE_UPDATE_MANIFEST_URL STREQUAL "" OR
-   NOT PULSE_UPDATE_PUBLIC_KEY_HEX STREQUAL "")
-    if(NOT PULSE_UPDATE_MANIFEST_URL MATCHES "^https://[^\"]+$")
-        message(FATAL_ERROR "PULSE_UPDATE_MANIFEST_URL must be an HTTPS URL")
-    endif()
-    string(LENGTH "${PULSE_UPDATE_PUBLIC_KEY_HEX}" PULSE_UPDATE_PUBLIC_KEY_LENGTH)
-    if(NOT PULSE_UPDATE_PUBLIC_KEY_LENGTH EQUAL 130 OR
-       NOT PULSE_UPDATE_PUBLIC_KEY_HEX MATCHES "^04[0-9A-Fa-f]+$")
-        message(FATAL_ERROR
-            "PULSE_UPDATE_PUBLIC_KEY_HEX must be a 65-byte uncompressed P-256 point")
-    endif()
-    set(PULSE_UPDATE_ENABLED_VALUE 1)
-endif()
-configure_file(cmake/pulse_update_config.h.in generated/pulse_update_config.h @ONLY)
-
 function(pulse_add_version_resource target description internal_name original_filename)
     set(PULSE_FILE_DESCRIPTION "${description}")
     set(PULSE_INTERNAL_NAME "${internal_name}")
@@ -240,20 +215,6 @@ add_executable(pulse_search_query_test
     src/index/index_query.cpp
     src/index/search_kinds.cpp)
 
-add_executable(pulse_update_test
-    src/bench/update_checker_test.cpp
-    src/app/update_checker.cpp
-    src/app/update_transport.cpp)
-target_include_directories(pulse_update_test PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(pulse_update_test PRIVATE bcrypt crypt32 winhttp user32)
-
-add_executable(pulse_update_installer_test
-    src/bench/update_installer_test.cpp
-    src/app/update_installer.cpp
-    src/app/update_transport.cpp)
-target_include_directories(pulse_update_installer_test PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(pulse_update_installer_test PRIVATE bcrypt shell32 user32 winhttp)
-
 # ---- Stage 0 visual/perf sample: D2D virtual list (GUI) ----
 add_executable(pulse_d2d_list WIN32 src/bench/d2d_list.cpp)
 target_link_libraries(pulse_d2d_list PRIVATE d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore)
@@ -302,8 +263,6 @@ if(PULSE_APP_SOURCES)
         target_compile_definitions(pulse PRIVATE PULSE_WITH_SELFTEST=1)
     endif()
     target_sources(pulse PRIVATE src/app/pulse.rc)
-    include(cmake/release_notes.cmake)
-    pulse_embed_release_notes(pulse)
     set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/global-search-logo.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/app/pulse.ico"
@@ -332,7 +291,7 @@ if(PULSE_APP_SOURCES)
     target_link_options(pulse PRIVATE /MANIFEST:NO)
     target_link_libraries(pulse PRIVATE
         d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid comctl32 advapi32 shlwapi version windowscodecs gdi32 netapi32 mpr bcrypt pulse_crash_reporter)
-    target_link_libraries(pulse PRIVATE winhttp crypt32 secur32)
+    target_link_libraries(pulse PRIVATE secur32)
     target_link_libraries(pulse PRIVATE pulse_localization)
     pulse_enable_lumatext(pulse)
     pulse_add_version_resource(pulse "Pulse file manager" "pulse" "pulse.exe")
@@ -630,8 +589,8 @@ foreach(configuration_target IN LISTS configuration_targets)
     endif()
 endforeach()
 
-# Opt-in integration fixture: real view model/renderer, isolated preferences, no installer execution.
-option(PULSE_BUILD_PROGRESS_UI_TESTS "Build the content/update status-bar renderer fixture" OFF)
+# Opt-in integration fixture for content-search progress rendering.
+option(PULSE_BUILD_PROGRESS_UI_TESTS "Build the content-search progress renderer fixture" OFF)
 if(PULSE_BUILD_PROGRESS_UI_TESTS)
     get_target_property(progress_ui_sources pulse SOURCES)
     get_target_property(progress_ui_libraries pulse LINK_LIBRARIES)

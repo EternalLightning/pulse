@@ -1,85 +1,15 @@
 #include "about_info.h"
 
 #include "../common/localization.h"
-#include "pulse_release_notes.h"
 #include "pulse_version.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
-#include <iterator>
 
 namespace pulse::app {
 namespace {
-
-std::wstring Utf8ToWide(const char* data, size_t size) {
-    if (!data || !size) return {};
-    const int n = MultiByteToWideChar(CP_UTF8, 0, data, static_cast<int>(size), nullptr, 0);
-    if (n <= 0) return {};
-    std::wstring out(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, data, static_cast<int>(size), out.data(), n);
-    return out;
-}
-
-std::wstring Trim(const std::wstring& s) {
-    size_t a = 0, b = s.size();
-    while (a < b && (s[a] == L' ' || s[a] == L'\t' || s[a] == L'\r' || s[a] == 0xFEFF)) ++a;
-    while (b > a && (s[b - 1] == L' ' || s[b - 1] == L'\t' || s[b - 1] == L'\r')) --b;
-    return s.substr(a, b - a);
-}
-
-// Minimal Markdown to plain text: list items become bullets, headings and
-// emphasis/code markers are dropped, [text](url) keeps the text.
-std::wstring StripInline(const std::wstring& line) {
-    std::wstring out;
-    out.reserve(line.size());
-    for (size_t i = 0; i < line.size(); ++i) {
-        const wchar_t c = line[i];
-        if (c == L'*' && i + 1 < line.size() && line[i + 1] == L'*') { ++i; continue; }
-        if (c == L'`') continue;
-        if (c == L'[') {
-            const size_t close = line.find(L"](", i);
-            const size_t end = close == std::wstring::npos ? close : line.find(L')', close);
-            if (end != std::wstring::npos) {
-                out.append(line, i + 1, close - i - 1);
-                i = end;
-                continue;
-            }
-        }
-        out.push_back(c);
-    }
-    return Trim(out);
-}
-
-ui::ReleaseNoteView ParseNote(const wchar_t* version, const std::wstring& text) {
-    ui::ReleaseNoteView note;
-    note.version = version;
-    note.current = note.version == PULSE_VERSION_STRING;
-    size_t pos = 0;
-    while (pos < text.size()) {
-        size_t end = text.find(L'\n', pos);
-        if (end == std::wstring::npos) end = text.size();
-        std::wstring line = Trim(text.substr(pos, end - pos));
-        pos = end + 1;
-        if (line.empty() || line.rfind(L"![", 0) == 0 || line.rfind(L"<!--", 0) == 0) continue;
-        bool bullet = false;
-        if (line.size() >= 2 && (line[0] == L'-' || line[0] == L'*' || line[0] == L'+') &&
-            line[1] == L' ') {
-            bullet = true;
-            line = line.substr(2);
-        } else {
-            size_t hashes = 0;
-            while (hashes < line.size() && line[hashes] == L'#') ++hashes;
-            if (hashes) line = line.substr(hashes);
-        }
-        line = StripInline(line);
-        if (line.empty()) continue;
-        note.lines.push_back(std::move(line));
-        note.bullets.push_back(bullet);
-    }
-    return note;
-}
 
 std::wstring BuildTimeText() {
     // PULSE_BUILD_ID is "YYYYMMDDTHHMMSSZ-<hash>" in UTC; show local time.
@@ -153,33 +83,6 @@ constexpr const wchar_t* kArchitecture =
 #endif
 
 } // namespace
-
-static std::vector<ui::ReleaseNoteView> LoadReleaseNotes(bool english) {
-    std::vector<ui::ReleaseNoteView> out;
-    HMODULE module = GetModuleHandleW(nullptr);
-    const auto find = [module](int id) {
-        return FindResourceW(module, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
-    };
-    for (int i = 0; kPulseReleaseNoteVersions[i]; ++i) {
-        const int id = PULSE_RELEASE_NOTE_RESOURCE_BASE + i;
-        HRSRC res = english ? find(id + PULSE_RELEASE_NOTE_ENGLISH_OFFSET) : nullptr;
-        if (!res) res = find(id);
-        if (!res) continue;
-        HGLOBAL handle = LoadResource(module, res);
-        const DWORD size = SizeofResource(module, res);
-        const char* data = handle ? static_cast<const char*>(LockResource(handle)) : nullptr;
-        if (!data || !size) continue;
-        auto note = ParseNote(kPulseReleaseNoteVersions[i], Utf8ToWide(data, size));
-        if (!note.lines.empty()) out.push_back(std::move(note));
-    }
-    return out;
-}
-
-const std::vector<ui::ReleaseNoteView>& EmbeddedReleaseNotes() {
-    static const std::vector<ui::ReleaseNoteView> chinese = LoadReleaseNotes(false);
-    static const std::vector<ui::ReleaseNoteView> english = LoadReleaseNotes(true);
-    return l10n::effective_language() == l10n::Language::EnUS ? english : chinese;
-}
 
 std::vector<AboutRow> BuildAboutRows(bool index_service, bool index_installed, float scale) {
     using I = l10n::StringId;

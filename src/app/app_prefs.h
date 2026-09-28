@@ -55,7 +55,6 @@ struct AppPrefs {
     std::wstring duplicate_scan_folder;
     std::wstring duplicate_scan_drive;
     // Version that last ran with these prefs; drives the one-time "updated" toast.
-    std::wstring last_seen_version;
     bool had_file = false; // runtime only: app.json existed when Load() ran
 
     void ResetToDefaults();

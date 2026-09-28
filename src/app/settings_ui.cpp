@@ -143,16 +143,10 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
         if(hit.index==0) {
             if(app::CopyTextToClipboard(s.hwnd,app::AboutRowsText(BuildVm(s,false).settings_about_rows)))
                 s.notification_toast.Show(s.hwnd,l10n::Get(I::AboutPulse),l10n::Get(I::AboutCopied),false);
-        } else if(hit.index==1 || hit.index==2) {
-            ShellExecuteW(s.hwnd,L"open",hit.index==1?app::kPulseHomepage:app::kPulseReleasesPage,nullptr,nullptr,SW_SHOWNORMAL);
+        } else if(hit.index==1) {
+            ShellExecuteW(s.hwnd,L"open",app::kPulseHomepage,nullptr,nullptr,SW_SHOWNORMAL);
         }
         break;
-    case H::SettingsReleaseNote: {
-        s.settingsReleaseExpanded=s.settingsReleaseExpanded==hit.index?-1:hit.index;
-        auto vm=BuildVm(s,false);
-        const float maximum=s.renderer.SettingsMaxScroll(vm,static_cast<float>(s.compositor.Width()),static_cast<float>(s.compositor.Height()));
-        s.settings.SetScroll(s.settings.scroll(),maximum);break;
-    }
     default: return false;
     }
     InvalidateRect(s.hwnd,nullptr,FALSE);return true;

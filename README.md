@@ -35,16 +35,6 @@
 
 ![Pulse 多窗格文件管理](docs/images/panes.png)
 
-## 自动更新
-
-Pulse 会在启动后自动检查新版。有更新时，窗口内会出现提示；点击提示即可下载安装包，校验通过后打开安装向导。也可以在「设置 → 关于与诊断」中手动检查更新。
-
-下载可以取消，安装时按 Windows 提示确认管理员权限。普通版和 Windows 8.1 兼容版分别获取适用的更新。
-
-更新清单和安装包默认依次尝试 ghproxy.net、gh-proxy.com 加速源，连接失败后自动切换，最后回退到 GitHub，无需设置。所有来源均须通过签名和安装包校验。
-
-**1.0.2 及更早版本需要先手动安装一次 1.0.3 或更新版本，之后即可收到自动更新提示。**
-
 ## 从源码构建
 
 使用 Windows x64、Visual Studio C++ 工具、CMake 3.25+ 和 Ninja。发布构建另需 PowerShell 7.2+ 与 Inno Setup 6。
@@ -67,4 +57,6 @@ pwsh ./scripts/build_release_ci.ps1 -Channel win81 -BuildDir build-ci-win81
 
 技术栈为 C++20、Win32、Direct2D 和 DirectComposition。文件系统、索引、预览与 Shell 任务分别放在对应模块，避免阻塞界面。
 
-更多说明：[自动更新与发布](docs/automatic-updates.md) · [Windows 兼容性](docs/windows-compatibility.md) · [索引存储与迁移](docs/index-migration.md)
+更多说明：[Windows 兼容性](docs/windows-compatibility.md) · [索引存储与迁移](docs/index-migration.md)
+
+程序图标采用 Files Community 的 [Files 图标](third_party/files-icon/README.md)，按 MIT 许可证使用；Pulse 与 Files Community 无关联。

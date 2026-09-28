@@ -1398,6 +1398,8 @@ void NavigateTo(AppState& s, const std::wstring& path) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     std::wstring normalized = fs::NormalizePath(path);
+    if (_wcsicmp(tab->current_path.c_str(), normalized.c_str()) != 0)
+        s.pageTransitionStart = GetTickCount64();
     const std::wstring returnedChild =
         app::NavigationReturnChildName(tab->current_path, normalized);
     tab->NavigateTo(normalized);
@@ -1699,6 +1701,7 @@ void CloseActiveTab(AppState& s) {
 
 void SwitchTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
+    if (idx != s.window_tabs.active) s.pageTransitionStart = GetTickCount64();
     if (s.addressSearching) HideAddressEditor(s, false);
     RememberLayoutFocus(s);
     s.window_tabs.SwitchTab(idx);

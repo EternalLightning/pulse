@@ -45,4 +45,6 @@ void TickTagTransitions(AppState& s);
 void TickTabTransitions(AppState& s);
 void StartSmoothScroll(AppState& s, float delta);
 void UpdateSmoothScroll(AppState& s);
+void StartSidebarFold(AppState& s, int section);
+bool TickSidebarFolds(AppState& s, ULONGLONG now);
 } // namespace pulse

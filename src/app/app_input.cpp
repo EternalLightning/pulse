@@ -1,7 +1,6 @@
 // app_input.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
 #include "tab_shortcuts.h"
-#include "app_updates.h"
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "../ui/lumatext_renderer.h"
@@ -762,6 +761,8 @@ void StartSmoothScroll(AppState& s, float delta) {
 
     const float maxScroll = MaxScrollForActivePane(s);
     s.scrollTargetY = std::clamp(s.scrollTargetY + delta, 0.0f, maxScroll);
+    // Show the first part of a wheel gesture before the next timer tick.
+    tab->scroll_y += (s.scrollTargetY - tab->scroll_y) * 0.25f;
     s.scrollAnimating = true;
     MaybePrefetchSearchPage(s);
 }
@@ -788,6 +789,28 @@ void UpdateSmoothScroll(AppState& s) {
         tab->scroll_y += remaining * response;
     }
     ClampScroll(s);
+}
+
+void StartSidebarFold(AppState& s, int section) {
+    if (section < 0 || section >= app::kSidebarSectionCount) return;
+    const ULONGLONG now = GetTickCount64();
+    const float target = (s.sidebarCollapsedMask & (1u << section)) ? 0.0f : 1.0f;
+    float current = 1.0f - target;
+    if (const auto it = s.sidebarFoldTracks.find(section); it != s.sidebarFoldTracks.end()) {
+        const float t = std::clamp(static_cast<float>(now - it->second.started) / 180.0f, 0.0f, 1.0f);
+        const float eased = t * t * (3.0f - 2.0f * t);
+        current = it->second.from + (it->second.to - it->second.from) * eased;
+    }
+    s.sidebarFoldTracks[section] = {current, target, now};
+}
+
+bool TickSidebarFolds(AppState& s, ULONGLONG now) {
+    const bool active = !s.sidebarFoldTracks.empty();
+    for (auto it = s.sidebarFoldTracks.begin(); it != s.sidebarFoldTracks.end();) {
+        if (now - it->second.started >= 180) it = s.sidebarFoldTracks.erase(it);
+        else ++it;
+    }
+    return active;
 }
 
 LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2111,9 +2134,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SettingsDiagnosticsAction) {
             s->settings.DiagnosticsAction(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsUpdateAction) {
-            if (hit.index == 0) CheckForUpdates(*s);
-            else if (hit.index == 1) InstallUpdate(*s);
         } else if (hit.region == ui::HitTestResult::SettingsDupScope) {
             if (!s->duplicateScan.scanning && hit.index >= 0 && hit.index <= 2) {
                 s->duplicateScan.scope = static_cast<app::DuplicateScanScope>(hit.index);
@@ -2684,7 +2704,10 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                     // A row of a header-less section navigates on release; a
                     // header folds its section (masks are keyed by id).
                     if (!path.empty()) NavigateTo(*s, path);
-                    else if (section >= 0) s->sidebarCollapsedMask ^= 1u << section;
+                    else if (section >= 0 && section < app::kSidebarSectionCount) {
+                        s->sidebarCollapsedMask ^= 1u << section;
+                        StartSidebarFold(*s, section);
+                    }
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
@@ -3224,7 +3247,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         CancelRenameClick(*s);
         if (IsSettingsTab(ActiveTab(*s))) {
             const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-            ui::WindowViewModel svm = BuildVm(*s);
+            ui::WindowViewModel svm = BuildVm(*s, false);
             const float max_scroll = s->renderer.SettingsMaxScroll(
                 svm, static_cast<float>(s->compositor.Width()),
                 static_cast<float>(s->compositor.Height()));
@@ -3234,7 +3257,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         }
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(hwnd, &pt);
-        ui::WindowViewModel wheelVm = BuildVm(*s);
+        ui::WindowViewModel wheelVm = BuildVm(*s, false);
         D2D1_RECT_F wheelRect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult wheelHit = s->renderer.HitTest(wheelVm, wheelRect, (float)pt.x, (float)pt.y);
         if (HandleColumnStripWheel(*s, wheelVm, wheelHit, GET_WHEEL_DELTA_WPARAM(wParam))) return 0;
@@ -3326,6 +3349,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         }
         StartSmoothScroll(*s,
             -(static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA)) * distance);
+        InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 }
 

@@ -42,8 +42,6 @@
 #include "tray_controller.h"
 #include "global_search_controller.h"
 #include "tab_controller.h"
-#include "update_checker.h"
-#include "app_updates.h"
 #include "link_resolve.h"
 #include "../ui/color_picker.h"
 #include "../ui/bloom_accent_picker.h"
@@ -318,7 +316,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         ProbePinnedNetworks(*s);
         s->ctxMenuPrefs.Load();
         s->appPrefs.Load();
-        NoteRunningVersion(*s);
         if (!s->shot.active && s->appPrefs.theme_mode >= 0) {
             s->themeOverride = s->appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
                 s->appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
@@ -338,14 +335,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->shot.language != L"system")
             s->appPrefs.language = s->shot.language;
         l10n::Initialize(cs->hInstance, s->appPrefs.language);
-        if (s->shot.update_available) {
-            s->update_result_ready = true;
-            s->update_result.update_available = true;
-            s->update_result.version = L"9.8.7";
-            s->update_result.download_page = L"https://updates.example.test/pulse";
-            s->update_result.installer_sha256 =
-                L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        }
         RefreshSidebarModel(*s);
         ui::typography::InvalidateCaches();
         s->compositor.RecreateTextFormats(s->scale);
@@ -866,7 +855,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->folderSizes.TakeChanged()) dirty = true;
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
-            TickUpdates(*s, now);
+            if (TickSidebarFolds(*s, now)) dirty = true;
+            if (s->pageTransitionStart) {
+                if (now - s->pageTransitionStart < 170) dirty = true;
+                else s->pageTransitionStart = 0;
+            }
             if (s->renderer.TickDetailsPreview(now)) dirty = true;
             if (s->detailsPreviewFoldStart) {
                 const float t = std::min(1.0f, static_cast<float>(now - s->detailsPreviewFoldStart) / 150.0f);
@@ -1424,21 +1417,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
-    case WM_UPDATE_RESULT:
-        if (s) CompleteUpdateCheck(*s);
-        return 0;
-    case WM_UPDATE_DOWNLOADED:
-        if (s) CompleteUpdateDownload(*s);
-        return 0;
     case WM_SEARCH_HISTORY:
         if (s && s->addressSearching && GetFocus() == s->hwndAddressEdit)
             ShowAddressSearchHistory(*s);
-        return 0;
-    case WM_UPDATE_INSTALL:
-        if (s) InstallUpdate(*s);
-        return 0;
-    case WM_SHOW_RELEASE_NOTES:
-        if (s) ShowReleaseNotes(*s);
         return 0;
 
     case WM_CONTENT_SELECTION:
@@ -1562,8 +1543,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->folderSizes.Stop();
             s->settings.ResetUi();
             s->settings.Stop();
-            s->update_checker.Stop();
-            s->update_installer.Stop();
             s->contentSearch.Stop();
             s->duplicateSearch.Stop();
             s->networkIndex.Stop();
@@ -1979,11 +1958,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
                 static_cast<float>(_wtof(__wargv[++i])), 1.0f, 2.5f);
         } else if (wcscmp(__wargv[i], L"--shot-language") == 0 && i + 1 < __argc) {
             state.shot.language = __wargv[++i];
-        } else if (wcscmp(__wargv[i], L"--shot-update-available") == 0) {
-            state.shot.update_available = true;
-        } else if (wcscmp(__wargv[i], L"--shot-update-state") == 0 && i + 1 < __argc) {
-            state.shot.update_available = true;
-            state.shot.update_state = __wargv[++i];
         } else if (wcscmp(__wargv[i], L"--shot-high-contrast") == 0) {
             state.shot_high_contrast = true;
         } else if (wcscmp(__wargv[i], L"--dark") == 0) {
@@ -2061,10 +2035,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         WS_EX_NOREDIRECTIONBITMAP,
         wc.lpszClassName,
         L"Pulse",
-        // Pulse paints the entire title bar. WS_POPUP prevents Win32 from
-        // restoring an overlapped caption, while the remaining styles retain
-        // resizing, the system menu, min/max and Snap Layout behavior.
-        WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        // Keep an overlapped window for the native minimize/restore transition.
+        // WM_NCCALCSIZE still gives the custom title bar the full client area.
+        WS_OVERLAPPEDWINDOW,
         x, y, w, h,
         nullptr, nullptr, hInstance, &state);
 

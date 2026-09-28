@@ -32,8 +32,6 @@
 #include "global_search_hotkey.h"
 #include "global_search_window.h"
 #include "tab_controller.h"
-#include "update_checker.h"
-#include "update_installer.h"
 #include "session.h"
 #include "duplicate_scan.h"
 #include "../index/index_client.h"
@@ -78,12 +76,8 @@ constexpr UINT WM_DUPLICATE_SCAN = WM_APP + 58;
 constexpr UINT WM_QUICK_PREVIEW_NAVIGATE = WM_APP + 54;
 constexpr UINT WM_QUICK_PREVIEW_OPEN = WM_APP + 55;
 constexpr UINT WM_QUICK_PREVIEW_COMMAND = WM_APP + 65;  // wParam ui::QuickPreviewAction, lParam bit0 = Shift
-constexpr UINT WM_SHOW_RELEASE_NOTES = WM_APP + 66;  // "updated" toast clicked
-constexpr UINT WM_UPDATE_RESULT = WM_APP + 56;
 constexpr UINT WM_RECYCLE_INFO = WM_APP + 57;
 constexpr UINT WM_DUP_VOLUMES = WM_APP + 59;
-constexpr UINT WM_UPDATE_DOWNLOADED = WM_APP + 60;
-constexpr UINT WM_UPDATE_INSTALL = WM_APP + 61;
 constexpr UINT WM_SEARCH_HISTORY = WM_APP + 62;
 constexpr UINT WM_CHANGE_TRACKING = WM_APP + 63;
 constexpr UINT kTimerUi = 1;
@@ -111,8 +105,6 @@ struct ShotRequest {
     int height = 0;
     ui::ViewMode view_mode = ui::ViewMode::Details;
     std::wstring language;
-    bool update_available = false;
-    std::wstring update_state;
     std::chrono::steady_clock::time_point start;
 };
 
@@ -171,6 +163,13 @@ struct AppState {
     uint64_t recycle_ignore_items = 0;
     bool recycle_info_guard = false;
     uint32_t sidebarCollapsedMask = 0;
+    struct SidebarFoldTrack {
+        float from = 0.0f;
+        float to = 0.0f;
+        ULONGLONG started = 0;
+    };
+    std::unordered_map<int, SidebarFoldTrack> sidebarFoldTracks;
+    ULONGLONG pageTransitionStart = 0;
     uint32_t sidebarHiddenMask = 0;  // Section menu: hidden groups are not drawn.
     // Section display order (logical SidebarSectionId values). Header drags
     // rewrite it; the masks above are indexed by id, so they survive a reorder.
@@ -188,17 +187,6 @@ struct AppState {
     app::SearchHistory searchHistory;
     app::SearchHistoryWriter searchHistoryWriter;
     app::SettingsController settings;
-    app::UpdateChecker update_checker;
-    app::UpdateResult update_result;
-    bool update_result_ready = false;
-    app::UpdateInstaller update_installer;
-    DWORD update_install_error = ERROR_SUCCESS;
-    ULONGLONG next_update_progress_paint = 0;
-    ULONGLONG next_update_check = GetTickCount64() + 15000;
-    std::wstring notified_update_version;
-    int settingsReleaseExpanded = 0;   // Settings > About release-note row that is open, -1 none
-    std::wstring whatsNewVersion;      // set once after an upgrade; toast shown at whatsNewAt
-    ULONGLONG whatsNewAt = 0;
     app::TabController tabs;
     app::TrayController tray_controller;
     GlobalSearchHotkey globalSearchHotkey;

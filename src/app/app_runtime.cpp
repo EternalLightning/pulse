@@ -2,7 +2,6 @@
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "folder_sizes_ui.h"
-#include "update_status.h"
 #include "about_info.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -146,22 +145,6 @@ void RefreshDuplicateGroupViews(AppState& s) {
 } // namespace
 
 namespace pulse {
-namespace {
-app::UpdateProgress UpdateProgressForView(const AppState& s) {
-    if (s.shot.active) {
-        using app::UpdatePhase;
-        const auto& phase = s.shot.update_state;
-        if (phase == L"connecting") return {UpdatePhase::Connecting};
-        if (phase == L"downloading") return {UpdatePhase::Downloading, 3 * 1024 * 1024, 8 * 1024 * 1024};
-        if (phase == L"downloading-unknown") return {UpdatePhase::Downloading, 3 * 1024 * 1024, 0};
-        if (phase == L"verifying") return {UpdatePhase::Verifying};
-        if (phase == L"launching") return {UpdatePhase::Launching};
-        if (phase == L"installing") return {UpdatePhase::Installing};
-        return {};
-    }
-    return s.update_installer.Progress();
-}
-}
 
 void PrefetchDetailsMeta(HWND hwnd, const std::wstring& path) {
     GetDetailsMetaWorker().Submit(hwnd, path);
@@ -421,55 +404,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             swprintf_s(build_text,
                 l10n::Get(l10n::StringId::BuildIdFormat).c_str(), PULSE_BUILD_ID);
             vm.settings_build_id = build_text;
-            vm.settings_update_enabled = app::UpdateChecker::Enabled() ||
-                s.shot.update_available;
-            vm.settings_update_checking = s.update_checker.checking();
-            vm.settings_update_downloading = s.update_installer.downloading();
-            vm.settings_update_installing = s.update_installer.installing();
-            DWORD update_install_error = s.update_install_error;
-            if (s.shot.active) {
-                const auto progress = UpdateProgressForView(s);
-                vm.settings_update_downloading |= progress.active() && progress.phase != app::UpdatePhase::Installing;
-                vm.settings_update_installing |= s.shot.update_state == L"installing";
-                if (s.shot.update_state == L"cancelled") update_install_error = ERROR_CANCELLED;
-                if (s.shot.update_state == L"failed") update_install_error = ERROR_CRC;
-            }
-            vm.settings_update_available = s.update_result_ready &&
-                s.update_result.update_available;
-            vm.settings_update_version = s.update_result.version;
             vm.settings_diagnostics_exporting = s.settings.diagnostics_pending();
             vm.settings_show_performance = s.appPrefs.show_status_performance;
-            if (vm.settings_update_installing) {
-                vm.settings_update_status = l10n::Get(l10n::StringId::InstallingUpdate);
-            } else if (vm.settings_update_downloading) {
-                vm.settings_update_status = app::UpdateProgressText(UpdateProgressForView(s));
-                if (vm.settings_update_status.empty())
-                    vm.settings_update_status = l10n::Get(l10n::StringId::DownloadingUpdate);
-            } else if (update_install_error != ERROR_SUCCESS) {
-                const auto message = update_install_error == ERROR_CANCELLED ? l10n::StringId::UpdateCancelled :
-                    update_install_error == ERROR_BUSY ? l10n::StringId::UpdateBusy : l10n::StringId::UpdateInstallFailed;
-                vm.settings_update_status = l10n::Get(message);
-            } else if (vm.settings_update_checking) {
-                vm.settings_update_status =
-                    l10n::Get(l10n::StringId::CheckingUpdates);
-            } else if (!vm.settings_update_enabled) {
-                vm.settings_update_status = l10n::Get(l10n::StringId::UpdateDisabled);
-            } else if (!s.update_result_ready) {
-                vm.settings_update_status = l10n::Get(l10n::StringId::UpdateDesc);
-            } else if (s.update_result.error == app::UpdateError::UnsupportedWindows) {
-                vm.settings_update_status =
-                    l10n::Get(l10n::StringId::UpdateUnsupportedWindows);
-            } else if (s.update_result.error != app::UpdateError::None) {
-                vm.settings_update_status = l10n::Get(l10n::StringId::UpdateFailed);
-            } else if (s.update_result.update_available) {
-                wchar_t available[160]{};
-                swprintf_s(available,
-                    l10n::Get(l10n::StringId::UpdateAvailableFormat).c_str(),
-                    s.update_result.version.c_str());
-                vm.settings_update_status = available;
-            } else {
-                vm.settings_update_status = l10n::Get(l10n::StringId::UpdateUpToDate);
-            }
             vm.settings_bloom = &s.bloom_accent;
             vm.settings_index_service = s.index.Connected() && s.index.ServiceMode();
             vm.settings_index_installed = s.settings.service_installed();
@@ -478,8 +414,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             if (vm.settings_page == 3) {
                 vm.settings_about_rows = app::BuildAboutRows(vm.settings_index_service,
                                                              vm.settings_index_installed, s.scale);
-                vm.settings_release_notes = &app::EmbeddedReleaseNotes();
-                vm.settings_release_expanded = s.settingsReleaseExpanded;
             }
             if (s.shot.active) {
                 wchar_t simulated[2]{};
@@ -1431,6 +1365,15 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
         s.sidebarQuickAccessHiddenMask);
+    const ULONGLONG fold_now = GetTickCount64();
+    for (auto& group : vm.sidebar) {
+        group.expansion = group.collapsed ? 0.0f : 1.0f;
+        if (const auto it = s.sidebarFoldTracks.find(group.id); it != s.sidebarFoldTracks.end()) {
+            const float t = std::clamp(static_cast<float>(fold_now - it->second.started) / 180.0f, 0.0f, 1.0f);
+            const float eased = t * t * (3.0f - 2.0f * t);
+            group.expansion = it->second.from + (it->second.to - it->second.from) * eased;
+        }
+    }
     app::FillWindowTabStrip(vm, s.window_tabs);
     vm.show_pinned_tab_names = s.appPrefs.show_pinned_tab_names;
     vm.settings_list_smart_date = s.appPrefs.list_smart_date;
@@ -1438,6 +1381,10 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.settings_list_size_bar = s.appPrefs.list_size_bar;
     vm.settings_folder_sort = s.appPrefs.folder_sort_mode;
     vm.sidebar_scroll = s.sidebarScroll;
+    if (s.pageTransitionStart) {
+        const float elapsed = static_cast<float>(GetTickCount64() - s.pageTransitionStart);
+        vm.page_transition = 1.0f - std::clamp(elapsed / 170.0f, 0.0f, 1.0f);
+    }
     if (s.groupDragActive) {
         vm.sidebar_group_drag_id = s.groupDragId;
         if (s.groupGapVisible) vm.sidebar_group_gap_line_y = s.groupGapLineY;
@@ -1460,7 +1407,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         vm.status.task_progress = st.active ? st.percent : -1.0f;
         if(s.contentSelectionAction) vm.status.selection_text=l10n::Get(l10n::StringId::OpPreparingList);
     }
-    app::ApplyUpdateStatus(vm.status, UpdateProgressForView(s), st.active);
     {
         std::wstring idx = s.index.Status();
         app::Tab* active = ActiveTab(s);
@@ -1962,8 +1908,6 @@ std::wstring TooltipForHover(AppState& s) {
         return s.hoverControlIndex >= 0 && s.hoverControlIndex < 3
             ? text(actions[s.hoverControlIndex]) : L"";
     }
-    case R::SettingsUpdateAction:
-        return text(s.hoverControlIndex == 1 ? I::DownloadUpdate : I::CheckForUpdates);
     case R::Minimize: return text(I::Minimize);
     case R::Maximize: return text(s.maximized ? I::Restore : I::Maximize);
     case R::Close: return text(I::Close);
