@@ -86,10 +86,18 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         const float radius=8*scale_;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
-    const auto& create_color=create.state.enabled ? theme.accent : theme.text_disabled;
-    if (!DrawFluentSvg(create.state.enabled ? IDR_FILES_NEW_COLOR_SVG : IDR_FILES_NEW_SVG,
-        icon_bounds(icon_x,icon_y),1.0f,create.state.enabled ? nullptr : &create_color)) {
-        const auto icon=icon_bounds(icon_x,icon_y);
+    const auto enabled_color=vm.dark ? HexColor(0x8CCBFF) : theme.accent;
+    const auto& create_color=create.state.enabled ? enabled_color : theme.text_disabled;
+    const int create_icon=vm.dark ? IDR_FILES_NEW_COLOR_DARK_SVG : IDR_FILES_NEW_COLOR_SVG;
+    auto create_bounds=icon_bounds(icon_x,icon_y);
+    // Move the complete 1px icon onto pixel centers, keeping its layers concentric.
+    const float shift_x=std::floor(create_bounds.left)+0.5f-create_bounds.left;
+    const float shift_y=std::floor(create_bounds.top)+0.5f-create_bounds.top;
+    create_bounds.left+=shift_x; create_bounds.right+=shift_x;
+    create_bounds.top+=shift_y; create_bounds.bottom+=shift_y;
+    if (!DrawFluentSvg(create.state.enabled ? create_icon : IDR_FILES_NEW_SVG,
+        create_bounds,1.0f,create.state.enabled ? nullptr : &create_color)) {
+        const auto icon=create_bounds;
         DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
             kIconAdd,L"",create_color,0.82f);
     }
@@ -104,6 +112,9 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         IDR_FILES_RENAME_SVG,IDR_FILES_DELETE_SVG,IDR_FILES_PROPERTIES_SVG};
     const int color_icons[]={IDR_FILES_CUT_COLOR_SVG,IDR_FILES_COPY_COLOR_SVG,IDR_FILES_PASTE_COLOR_SVG,
         IDR_FILES_RENAME_COLOR_SVG,IDR_FILES_DELETE_COLOR_SVG,IDR_FILES_PROPERTIES_COLOR_SVG};
+    const int dark_color_icons[]={IDR_FILES_CUT_COLOR_DARK_SVG,IDR_FILES_COPY_COLOR_DARK_SVG,
+        IDR_FILES_PASTE_COLOR_DARK_SVG,IDR_FILES_RENAME_COLOR_DARK_SVG,
+        IDR_FILES_DELETE_COLOR_DARK_SVG,IDR_FILES_PROPERTIES_COLOR_DARK_SVG};
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
         HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
         HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
@@ -118,8 +129,9 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         if (i<6) {
             const auto& r=layout.commands[i];
             const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
-            const D2D1_COLOR_F color=enabled ? theme.accent : theme.text_disabled;
-            if (!DrawFluentSvg(enabled ? color_icons[i] : files_icons[i],icon_bounds(cx,cy),
+            const D2D1_COLOR_F color=enabled ? enabled_color : theme.text_disabled;
+            const int color_icon=vm.dark ? dark_color_icons[i] : color_icons[i];
+            if (!DrawFluentSvg(enabled ? color_icon : files_icons[i],icon_bounds(cx,cy),
                 1.0f,enabled ? nullptr : &color)) {
                 const auto icon=icon_bounds(cx,cy);
                 DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,

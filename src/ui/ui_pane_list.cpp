@@ -1687,13 +1687,9 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                             chipRadius - 0.5f, chipRadius - 0.5f);
                         dc->DrawRoundedRectangle(chipEdge, brTagDot_.get(), 1.0f);
                         const auto chipRc = D2D1::RectF(left, chipTop, left + chipBoxW, chipTop + chipH);
-                        if (!compositor_->DrawLumaText(chip, compositor_->SmallFormat(), chipRc,
-                                                       WithAlpha(ink, ink.a * (cut ? 0.55f : 1.0f)), theme.bg,
-                                                       DWRITE_TEXT_ALIGNMENT_CENTER)) {
-                            MakeBrush(dc, ink, brTagDot_);
-                            DrawTextRect(dc, compositor_->SmallFormat(), brTagDot_.get(), chip,
-                                         chipRc.left, chipRc.top, chipBoxW, chipH);
-                        }
+                        painter_.DrawText(chip, chipRc, compositor_->SmallFormat(),
+                            WithAlpha(ink, ink.a * (cut ? 0.55f : 1.0f)),
+                            fluent::HorizontalAlignment::Center, theme.bg);
                         typeLeft += chipW;
                     }
                     if (deleted_change) MakeBrush(dc, HexColor(0xC58A38), brTextSecondary_);

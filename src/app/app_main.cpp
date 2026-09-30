@@ -254,6 +254,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     if (s && s->notification_toast.HandleMessage(hwnd, msg, wParam, lParam)) return 0;
 
     switch (msg) {
+    case WM_NCPAINT:
+        // The renderer owns the entire frame, including all caption buttons.
+        return 0;
+
+    case WM_NCACTIVATE:
+        // Preserve activation semantics without repainting a native caption.
+        return DefWindowProcW(hwnd, msg, wParam, -1);
+
     case WM_NCCALCSIZE: {
         if (wParam && IsZoomed(hwnd)) {
             auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
@@ -2056,9 +2064,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         WS_EX_NOREDIRECTIONBITMAP,
         wc.lpszClassName,
         L"Pulse",
-        // Keep an overlapped window for the native minimize/restore transition.
-        // WM_NCCALCSIZE still gives the custom title bar the full client area.
-        WS_OVERLAPPEDWINDOW,
+        // Keep resize, system menu and min/max behavior, but only Pulse draws
+        // the caption. DWM may otherwise overlay its own buttons on Windows 11.
+        WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
         x, y, w, h,
         nullptr, nullptr, hInstance, &state);
 
