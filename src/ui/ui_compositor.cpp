@@ -140,6 +140,9 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
                               const D2D1_COLOR_F& foreground,
                               const D2D1_COLOR_F& background,
                               DWRITE_TEXT_ALIGNMENT alignment) {
+    // File names use DirectWrite in every state, including extension effects
+    // and search highlights. Keep their font fallback and metrics consistent.
+    if (format == fileNameFormat_.get()) return false;
     if (!lumaText_ || !lumaText_->Enabled()) return false;
     if (lumaText_->Draw(text, format, bounds, foreground, background, alignment)) {
         return true;
@@ -150,6 +153,7 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
 
 bool Compositor::MeasureLumaText(std::wstring_view text, IDWriteTextFormat* format,
                                  float& width, float* height) {
+    if (format == fileNameFormat_.get()) return false;
     if (!lumaText_ || !lumaText_->Enabled()) return false;
     return lumaText_->Measure(text, format, width, height);
 }
@@ -439,7 +443,7 @@ void Compositor::RecreateTextFormats(float scale) {
     CreateFormat(dwriteFactory_.get(), 14.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
         typography::FontRole::Text, textFormat_);
     if (textFormat_.get()) textFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    CreateFormat(dwriteFactory_.get(), 13.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
+    CreateFormat(dwriteFactory_.get(), 14.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
         typography::FontRole::Text, fileNameFormat_);
     if (fileNameFormat_.get()) fileNameFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     CreateFormat(dwriteFactory_.get(), 12.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,

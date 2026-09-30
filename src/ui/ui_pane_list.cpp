@@ -1223,7 +1223,8 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
     fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
     const std::wstring shown = FitHighlightedFileName(compositor_, factory, fmt, name, w, matches, scale_);
-    const D2D1_RECT_F rc = D2D1::RectF(x, y, x + w, y + h);
+    const D2D1_RECT_F rc = typography::SnapVerticalBounds(D2D1::RectF(x, y, x + w, y + h));
+    const D2D1_POINT_2F origin = D2D1::Point2F(rc.left, rc.top);
     const auto visible_matches = VisibleNameMatchRanges(name, shown, matches);
     // The extension is drawn a step dimmer so the distinguishing stem reads first.
     size_t ext_at = std::wstring::npos;
@@ -1247,7 +1248,7 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
             name_layout_format_ = fmt;
         }
         layout_key = shown + L'\0' + std::to_wstring(std::bit_cast<uint32_t>(w)) + L'x' +
-            std::to_wstring(std::bit_cast<uint32_t>(h));
+            std::to_wstring(std::bit_cast<uint32_t>(rc.bottom - rc.top));
         if (const auto it = name_layout_cache_.find(layout_key); it != name_layout_cache_.end()) {
             highlighted.p = it->second.get();
             highlighted.p->AddRef();
@@ -1255,7 +1256,7 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
     }
     if (!highlighted.get() && (!visible_matches.empty() || ext_at != std::wstring::npos))
         factory->CreateTextLayout(shown.c_str(), static_cast<UINT32>(shown.size()),
-            fmt, w, h, &highlighted);
+            fmt, w, rc.bottom - rc.top, &highlighted);
     if (highlighted.get()) {
         highlighted->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         highlighted->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -1276,8 +1277,8 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
                 name_layout_order_.pop_front();
             }
         }
-        DrawNameHighlightBackground(compositor_, highlighted.get(), {x, y}, rc, visible_matches, theme, scale_);
-        dc->DrawTextLayout({x, y}, highlighted.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        DrawNameHighlightBackground(compositor_, highlighted.get(), origin, rc, visible_matches, theme, scale_);
+        dc->DrawTextLayout(origin, highlighted.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     } else if (IsHighContrast() || !compositor_->DrawLumaText(
             shown, fmt, rc, brText_->GetColor(), theme.bg,
             DWRITE_TEXT_ALIGNMENT_LEADING)) {
@@ -1292,8 +1293,9 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
 void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
                                         const D2D1_COLOR_F& color, const Theme& theme, const std::vector<NameMatchRange>& matches) {
     if (!compositor_ || !compositor_->Dc() || !compositor_->DwriteFactory() || name.empty()) return;
-    const float width = std::max(1.0f, bounds.right - bounds.left);
-    const float height = std::max(1.0f, bounds.bottom - bounds.top);
+    const D2D1_RECT_F text_bounds = typography::SnapVerticalBounds(bounds);
+    const float width = std::max(1.0f, text_bounds.right - text_bounds.left);
+    const float height = std::max(1.0f, text_bounds.bottom - text_bounds.top);
     ComPtr<IDWriteTextLayout> layout;
     if (FAILED(compositor_->DwriteFactory()->CreateTextLayout(
             name.c_str(), static_cast<UINT32>(name.size()), compositor_->FileNameFormat(),
@@ -1307,9 +1309,9 @@ void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
     ComPtr<IDWriteInlineObject> ellipsis;
     compositor_->DwriteFactory()->CreateEllipsisTrimmingSign(layout.get(), &ellipsis);
     layout->SetTrimming(&trimming, ellipsis.get());
-    DrawNameHighlightBackground(compositor_, layout.get(), {bounds.left, bounds.top}, bounds, matches, theme, scale_);
+    DrawNameHighlightBackground(compositor_, layout.get(), {text_bounds.left, text_bounds.top}, text_bounds, matches, theme, scale_);
     MakeBrush(compositor_->Dc(), color, brText_);
-    compositor_->Dc()->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(),
+    compositor_->Dc()->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top), layout.get(),
                                       brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 D2D1_RECT_F MainRenderer::RenameFieldRect(const PaneViewModel& vm, const D2D1_RECT_F& list,
