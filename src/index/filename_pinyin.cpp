@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <string_view>
+#include <utility>
 #include <vector>
 namespace pinyin {
 template<uint16_t N> struct PinyinCombination { uint16_t n; uint16_t pinyin[N]; };
@@ -30,14 +31,16 @@ uint16_t PronunciationIndex(char32_t c) {
         if (c >= range.begin && c <= range.end) return range.table[c - range.begin];
     return 65535;
 }
-template<class F> void Readings(char32_t c, F&& fn) {
-    const uint16_t idx = PronunciationIndex(c);
+template<class F> void ReadingsByIndex(uint16_t idx, F&& fn) {
     if (idx == 65535) return;
     if (idx < 1514) fn(pinyin::pinyins[idx]);
     else if (idx - 1514 < 1104) {
         const auto& combination = pinyin::pinyin_combinations[idx - 1514];
         for (uint16_t i = 0; i < combination.n; ++i) fn(pinyin::pinyins[combination.pinyin[i]]);
     }
+}
+template<class F> void Readings(char32_t c, F&& fn) {
+    ReadingsByIndex(PronunciationIndex(c), std::forward<F>(fn));
 }
 bool Latin(wchar_t c) { return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z'); }
 // Each character is one transition. Merge equal query offsets instead of expanding
@@ -48,6 +51,7 @@ PinyinMatch Match(std::wstring_view name, std::wstring_view query, bool initials
     for (size_t pos = 0; pos < name.size();) {
         size_t width;
         const char32_t c = ReadCharacter(name, pos, width);
+        const uint16_t pronunciation = PronunciationIndex(c);
         current[0] = pos;
         std::fill(next.begin(), next.end(), absent);
         auto advance = [&](size_t offset, size_t count) {
@@ -61,7 +65,7 @@ PinyinMatch Match(std::wstring_view name, std::wstring_view query, bool initials
                     if (FoldChar(name[pos + j]) != FoldChar(query[offset + j])) same = false;
                 if (same) advance(offset, width);
             }
-            Readings(c, [&](std::string_view reading) {
+            ReadingsByIndex(pronunciation, [&](std::string_view reading) {
                 if (initials && !reading.empty() && FoldChar(query[offset]) == static_cast<wchar_t>(reading[0])) advance(offset, 1);
                 const size_t count = (std::min)(reading.size(), query.size() - offset);
                 if (!count) return;

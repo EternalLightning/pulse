@@ -63,10 +63,12 @@ D2D1_RECT_F DetailsContentRect(D2D1_RECT_F bounds, float scale) noexcept {
 
 ViewLayout::ViewLayout(ViewMode mode, D2D1_RECT_F viewport, size_t item_count,
                        float scroll_x, float scroll_y, float scale,
-                       float row_height_dip)
+                       float row_height_dip, const std::vector<DateGroup>* date_groups)
     : mode_(mode), viewport_(viewport), count_(item_count),
       scroll_x_(std::max(0.0f, scroll_x)), scroll_y_(std::max(0.0f, scroll_y)),
-      scale_(std::max(0.5f, scale)) {
+      scale_(std::max(0.5f, scale)),
+      date_groups_(mode == ViewMode::Details && date_groups && !date_groups->empty()
+          ? date_groups : nullptr) {
     if (mode_ == ViewMode::Details) viewport_ = DetailsContentRect(viewport_, scale_);
     const float width = std::max(1.0f, viewport_.right - viewport_.left);
     const float height = std::max(1.0f, viewport_.bottom - viewport_.top);
@@ -107,7 +109,8 @@ ViewLayout::ViewLayout(ViewMode mode, D2D1_RECT_F viewport, size_t item_count,
         metrics_.cell_height = (row_height_dip > 0.0f ? row_height_dip : 28.0f) * scale_;
         metrics_.icon_size = 16.0f * scale_;
         content_width_ = width;
-        content_height_ = static_cast<float>(count_) * metrics_.cell_height;
+        content_height_ = static_cast<float>(count_) * metrics_.cell_height +
+            (date_groups_ ? date_groups_->size() * kDateGroupHeaderDip * scale_ : 0.0f);
         break;
     case ViewMode::Content:
         metrics_.cell_width = width;
@@ -139,14 +142,19 @@ D2D1_RECT_F ViewLayout::ItemRect(int index) const noexcept {
         row = index / metrics_.columns;
     }
     const float left = viewport_.left + col * metrics_.cell_width - scroll_x_;
-    const float top = viewport_.top + row * metrics_.cell_height - scroll_y_;
+    float top = viewport_.top + row * metrics_.cell_height - scroll_y_;
+    if (date_groups_) {
+        const auto end = std::upper_bound(date_groups_->begin(), date_groups_->end(), index,
+            [](int value, const DateGroup& group) { return value < group.first; });
+        top += static_cast<float>(end - date_groups_->begin()) * kDateGroupHeaderDip * scale_;
+    }
     return D2D1_RECT_F{left, top, left + metrics_.cell_width, top + metrics_.cell_height};
 }
 
 D2D1_RECT_F ViewLayout::IconRect(int index) const noexcept {
     const D2D1_RECT_F cell = ItemRect(index);
     const float icon = metrics_.icon_size;
-    const float pad = 8.0f * scale_;
+    const float pad = (mode_ == ViewMode::Details ? 18.0f : 8.0f) * scale_;
     if (mode_ == ViewMode::ExtraLargeIcons || mode_ == ViewMode::LargeIcons ||
         mode_ == ViewMode::MediumIcons) {
         const float available = std::max(16.0f, cell.right - cell.left - pad * 2.0f);
@@ -160,7 +168,7 @@ D2D1_RECT_F ViewLayout::IconRect(int index) const noexcept {
 
 D2D1_RECT_F ViewLayout::NameRect(int index) const noexcept {
     D2D1_RECT_F cell = ItemRect(index);
-    const float pad = 8.0f * scale_;
+    const float pad = (mode_ == ViewMode::Details ? 18.0f : 8.0f) * scale_;
     const float icon = metrics_.icon_size;
     if (mode_ == ViewMode::ExtraLargeIcons || mode_ == ViewMode::LargeIcons ||
         mode_ == ViewMode::MediumIcons) {
@@ -174,7 +182,8 @@ D2D1_RECT_F ViewLayout::NameRect(int index) const noexcept {
         return {left, cell.top + 7.0f * scale_, cell.right - pad,
                 cell.top + 31.0f * scale_};
     }
-    const float left = cell.left + pad + icon + 8.0f * scale_;
+    const float left = cell.left + pad + icon +
+        (mode_ == ViewMode::Details ? 12.0f : 8.0f) * scale_;
     return {left, cell.top + 1.0f * scale_, cell.right - pad,
             cell.bottom - 1.0f * scale_};
 }
@@ -192,6 +201,17 @@ int ViewLayout::HitTest(float x, float y) const noexcept {
     const float local_x = x - viewport_.left + scroll_x_;
     const float local_y = y - viewport_.top + scroll_y_;
     const int col = std::max(0, static_cast<int>(local_x / metrics_.cell_width));
+    if (date_groups_) {
+        int lo = 0, hi = static_cast<int>(count_);
+        while (lo < hi) {
+            const int mid = lo + (hi - lo) / 2;
+            if (ItemRect(mid).bottom <= y) lo = mid + 1;
+            else hi = mid;
+        }
+        if (lo >= static_cast<int>(count_)) return -1;
+        const auto cell = ItemRect(lo);
+        return y >= cell.top && y < cell.bottom ? lo : -1;
+    }
     const int row = std::max(0, static_cast<int>(local_y / metrics_.cell_height));
     const int index = metrics_.column_major
         ? col * metrics_.rows_per_column + row
@@ -201,6 +221,21 @@ int ViewLayout::HitTest(float x, float y) const noexcept {
 
 std::pair<int, int> ViewLayout::VisibleRange() const noexcept {
     if (count_ == 0) return {-1, -1};
+    if (date_groups_) {
+        auto first_at = [&](float y) {
+            int lo = 0, hi = static_cast<int>(count_);
+            while (lo < hi) {
+                const int mid = lo + (hi - lo) / 2;
+                if (ItemRect(mid).bottom < y) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo;
+        };
+        const int first = std::max(0, first_at(viewport_.top) - 1);
+        const int last = std::min(static_cast<int>(count_) - 1,
+            first_at(viewport_.bottom + metrics_.cell_height));
+        return {first, last};
+    }
     int first = 0;
     int last = static_cast<int>(count_) - 1;
     if (metrics_.column_major) {

@@ -256,7 +256,7 @@ public:
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
         EnableWindow(owner_, FALSE);
-        ShowWindow(hwnd_, SW_SHOW);
+        ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
 
         MSG message{};
@@ -597,7 +597,7 @@ public:
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, placed.right - placed.left,
                           placed.bottom - placed.top);
         if (owner_) EnableWindow(owner_, FALSE);
-        ShowWindow(hwnd_, SW_SHOW);
+        ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
 
         MSG message{};
@@ -932,12 +932,13 @@ void FileOperationWindow::Show(bool activate) {
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     SetWindowPos(hwnd_, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER |
-                 (activate ? 0 : SWP_NOACTIVATE) | SWP_SHOWWINDOW);
+                 (activate ? 0 : SWP_NOACTIVATE));
+    ShowDialogWithFade(hwnd_, activate ? SW_SHOW : SW_SHOWNOACTIVATE);
     if (activate) SetForegroundWindow(hwnd_);
 }
 
 void FileOperationWindow::Hide() {
-    if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
+    if (hwnd_) HideComposedDialog(hwnd_);
 }
 
 bool FileOperationWindow::IsVisible() const {

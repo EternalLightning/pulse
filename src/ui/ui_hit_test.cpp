@@ -97,7 +97,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     // Title bar.
     if (y < title_bar_height_) {
         const float ctrlW = 46.0f * scale_;
-        const TitleChrome chrome = MakeTitleChrome(rect.right, scale_, title_bar_height_);
         const TabStripMetrics strip = ComputeTabStrip(vm, rect.right);
         auto hitTab = [&](int i) -> bool {
             if (vm.tabs[static_cast<size_t>(i)].hidden) return false;
@@ -151,14 +150,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             r.region = HitTestResult::TabNew;
             return r;
         }
-        if (x >= chrome.settings_left && x < chrome.settings_left + chrome.settings_w) {
-            r.region = HitTestResult::SettingsButton;
-            return r;
-        }
-        if (x >= chrome.theme_left && x < chrome.theme_left + chrome.theme_w) {
-            r.region = HitTestResult::ThemeToggle;
-            return r;
-        }
         float ctrlX = rect.right - ctrlW;
         if (x >= ctrlX) { r.region = HitTestResult::Close; return r; }
         ctrlX -= ctrlW;
@@ -200,14 +191,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             for(int i=0;i<3;++i) if(ContainsPt(actions[i],x,y)) {r.region=HitTestResult::SettingsContentAction;r.index=i+1;return r;}
 
             if (vm.settings_page == 0) {
-                if (vm.settings_bloom) {
-                    vm.settings_bloom->SetDisk(lay.accent_picker);
-                    const int dot = vm.settings_bloom->HitDot(x, y);
-                    if (dot >= 0) {
-                        r.region = HitTestResult::SettingsAccent;
-                        r.index = dot;
-                        return r;
-                    }
+                if (ContainsPt(lay.accent_picker,x,y) || ContainsPt(lay.accent_system,x,y)) {
+                    r.region = HitTestResult::SettingsAccent;
+                    r.index = ContainsPt(lay.accent_picker,x,y) ? 0 : 1;
+                    return r;
                 }
                 for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.density_row[i], x, y)) {
@@ -254,12 +241,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                     r.index = 1;
                     return r;
                 }
+                if (ContainsPt(lay.wallpaper_look_value,x,y)) {
+                    r.region = HitTestResult::SettingsWallpaperLook;
+                    r.index = 0;
+                    return r;
+                }
                 for (int i = 0; i < 3; ++i) {
-                    if (ContainsPt(lay.wallpaper_look_row[i], x, y)) {
-                        r.region = HitTestResult::SettingsWallpaperLook;
-                        r.index = i;
-                        return r;
-                    }
                     if (ContainsPt(lay.wallpaper_blur_row[i], x, y)) {
                         r.region = HitTestResult::SettingsWallpaperBlur;
                         r.index = i;
@@ -450,7 +437,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     // Drawing and hit testing share both toolbar rows.
     if (x >= EffectiveSidebarWidth(rect.right) && y < title_bar_height_ + toolbar_height_) {
         const auto toolbar = MakeToolbarLayout(rect.right, scale_, title_bar_height_, margin_,
-            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand);
+            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand, vm.archive_view);
         const HitTestResult::Region nav[] = {HitTestResult::NavBack, HitTestResult::NavForward,
             HitTestResult::NavUp, HitTestResult::NavRefresh};
         const bool searchOverlay=vm.address_searching && rect.right-EffectiveSidebarWidth(rect.right)<480*scale_;
@@ -482,6 +469,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             }
             return r;
         }
+        if (vm.archive_view && RectContains(toolbar.extract,x,y)) {r.region=HitTestResult::Extract; return r;}
+        if (vm.archive_view && RectContains(toolbar.extract_all,x,y)) {r.region=HitTestResult::ExtractAll; return r;}
         if (RectContains(toolbar.sort,x,y)) {r.region=HitTestResult::ToolbarSort; return r;}
         if (RectContains(toolbar.overflow,x,y)) {r.region=HitTestResult::ToolbarMore; return r;}
         if (RectContains(toolbar.filter,x,y)) {
@@ -490,10 +479,14 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 ? HitTestResult::FilterClear : HitTestResult::FilterBox;
             return r;
         }
-        if (RectContains(toolbar.create,x,y)) {r.region=HitTestResult::NewButton; return r;}
+        if (RectContains(toolbar.create,x,y)) {
+            if (!vm.archive_view) r.region=HitTestResult::NewButton;
+            return r;
+        }
         const HitTestResult::Region commands[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
-            HitTestResult::Rename,HitTestResult::Delete,HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
-        for(int i=0;i<8;++i) if(RectContains(toolbar.commands[i],x,y)) {r.region=commands[i]; return r;}
+            HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
+            HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
+        for(int i=0;i<9;++i) if(RectContains(toolbar.commands[i],x,y)) {r.region=commands[i]; return r;}
         return r;
     }
     // Status bar. Only the transfer summary (center-right) is a control;
@@ -504,6 +497,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         return r;
     }
 
+    if (RectContains(SidebarSettingsRect(rect.right, rect.bottom), x, y)) {
+        r.region = HitTestResult::SettingsButton;
+        return r;
+    }
     // Sidebar.
     D2D1_RECT_F sb = SidebarRect(rect.right, rect.bottom);
     if (x >= sb.left && x < sb.right && y >= sb.top && y < sb.bottom) {
@@ -860,7 +857,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         const DetailsColumnLayout columns = DetailsColumns(list, paneVm);
                         ViewLayout layout(paneVm.view_mode, list, paneVm.EntryCount(),
                                           paneVm.scroll_x, paneVm.scroll_y, scale_,
-                                          ListRowHeightDip(paneVm, list));
+                                          ListRowHeightDip(paneVm, list), paneVm.date_groups.get());
                         const D2D1_RECT_F nameRc = layout.NameRect(viewRow);
                         const D2D1_RECT_F cell = layout.ItemRect(viewRow);
                         const ListEntryView& entry = MakeVisibleEntry(paneVm, static_cast<size_t>(idx));

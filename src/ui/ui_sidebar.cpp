@@ -39,8 +39,14 @@ void DrawSidebarInsertionLine(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brus
 
 D2D1_RECT_F MainRenderer::SidebarRect(float w, float h) const {
     float top = title_bar_height_ + margin_;
-    float bottom = h - status_height_ - margin_;
+    float bottom = SidebarSettingsRect(w, h).top - 4.0f * scale_;
     return D2D1::RectF(0.0f, top, EffectiveSidebarWidth(w), bottom);
+}
+
+D2D1_RECT_F MainRenderer::SidebarSettingsRect(float w, float h) const {
+    const float bottom = h - status_height_ - margin_;
+    return D2D1::RectF(8.0f * scale_, bottom - 40.0f * scale_,
+        EffectiveSidebarWidth(w) - 8.0f * scale_, bottom);
 }
 
 void MainRenderer::SidebarGroupBands(const WindowViewModel& vm, float w, float h,
@@ -152,6 +158,11 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             const float pad_y = (slot.rc.bottom - slot.rc.top - icon) * 0.5f;
             const D2D1_RECT_F icon_rc = D2D1::RectF(slot.rc.left + pad_x, slot.rc.top + pad_y,
                                                     slot.rc.right - pad_x, slot.rc.bottom - pad_y);
+            if (item.use_path_icon &&
+                icon_cache_.Draw(dc, icon_rc, item.path, item.label, true,
+                                 FILE_ATTRIBUTE_DIRECTORY)) {
+                continue;
+            }
             if (IsHighContrast() || svg_id == 0 ||
                 !DrawFluentSvg(svg_id, icon_rc, 1.0f, nullptr, true)) {
                 DrawIconText(slot.rc.left, slot.rc.top, slot.rc.right - slot.rc.left,
@@ -160,6 +171,15 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             }
         }
         dc->PopAxisAlignedClip();
+        const D2D1_RECT_F settings = SidebarSettingsRect(rect.right, rect.bottom);
+        if (IsHovered(vm, HitTestResult::SettingsButton)) {
+            MakeBrush(dc, theme.fill_hover, brFillHover_);
+            FillRoundedRect(dc, brFillHover_.get(), settings.left, settings.top,
+                settings.right - settings.left, settings.bottom - settings.top,
+                theme.radius_control * scale_);
+        }
+        DrawIconText(settings.left, settings.top, settings.right - settings.left,
+            settings.bottom - settings.top, kIconSettings, L"", theme.text_secondary, 0.86f);
         return;
     }
 
@@ -316,7 +336,8 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             row.icon_color = item.icon_color;
             row.suppress_text = item.editing;
             const int row_svg = item.is_tag ? 0 : FluentSvgIdForGlyph(item.icon_glyph);
-            row.skip_glyph = !IsHighContrast() && row_svg != 0 && EnsureFluentSvg(row_svg, true);
+            row.skip_glyph = item.use_path_icon ||
+                (!IsHighContrast() && row_svg != 0 && EnsureFluentSvg(row_svg, true));
             const bool unpin = SidebarItemHasUnpin(item);
             const auto unpin_rc = WorkspaceUnpinRect(slot.rc, scale_);
             const auto expand_rc = SidebarExpandRect(slot.rc, scale_);
@@ -327,7 +348,15 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                 row.trailing_reserve = (std::max)(0.0f,
                     (slot.rc.right - expand_rc.left) - 4.0f * scale_);
             painter_.DrawSidebarItem(row);
-            if (row.skip_glyph) {
+            if (item.use_path_icon) {
+                const D2D1_RECT_F icon = painter_.SidebarItemIconRect(slot.rc, item.status_dot);
+                if (!icon_cache_.Draw(dc, icon, item.path, item.label, true,
+                                      FILE_ATTRIBUTE_DIRECTORY)) {
+                    DrawIconText(icon.left, icon.top, icon.right - icon.left,
+                                 icon.bottom - icon.top, item.icon_glyph,
+                                 item.fallback_text, item.icon_color, 0.92f);
+                }
+            } else if (row.skip_glyph) {
                 DrawFluentSvg(row_svg, painter_.SidebarItemIconRect(slot.rc, item.status_dot),
                               1.0f, nullptr, true);
             }
@@ -386,6 +415,20 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
 
     painter_.DrawScrollbar(SidebarScrollbarSpec(vm, sb, scale_));
     dc->PopAxisAlignedClip();
+    const D2D1_RECT_F settings = SidebarSettingsRect(rect.right, rect.bottom);
+    const bool hovered = IsHovered(vm, HitTestResult::SettingsButton);
+    if (hovered) {
+        MakeBrush(dc, theme.fill_hover, brFillHover_);
+        FillRoundedRect(dc, brFillHover_.get(), settings.left, settings.top,
+            settings.right - settings.left, settings.bottom - settings.top,
+            theme.radius_control * scale_);
+    }
+    DrawIconText(settings.left + 8.0f * scale_, settings.top, 24.0f * scale_,
+        settings.bottom - settings.top, kIconSettings, L"", theme.text_secondary, 0.78f);
+    painter_.DrawTextNative(l10n::Get(l10n::StringId::Settings),
+        D2D1::RectF(settings.left + 42.0f * scale_, settings.top,
+            settings.right - 8.0f * scale_, settings.bottom),
+        compositor_->TextFormat(), theme.text);
 }
 
 void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& panel_rc,

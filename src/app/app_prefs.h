@@ -3,6 +3,7 @@
 #include "folder_view_prefs.h"
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulse::app {
@@ -38,7 +39,7 @@ struct AppPrefs {
     // none / acrylic-material / mica / mica-alt  (legacy dwm-blur → acrylic)
     std::wstring window_effect = L"mica-alt";
     std::wstring background_image;
-    int wallpaper_look = 1; // image mode layer opacity: 0 subtle, 1 balanced, 2 vivid
+    int wallpaper_visibility = 50; // 0..100 percent of image visibility
     int wallpaper_blur = 1; // image mode blur: 0 off, 1 light, 2 strong
     int row_height = 34; // file-list row height in DIPs (24..48)
     int sidebar_width = 224; // DIPs
@@ -78,5 +79,7 @@ struct AppPrefs {
 std::wstring FolderOpenCommandLine(const std::wstring& exe);
 bool FolderOpenCommandIsOurs(const std::wstring& command, const std::wstring& exe);
 bool ParseAccentRgb(const std::wstring& text, uint32_t& rgb) noexcept;
+bool ParseAccentInput(const std::wstring& text, uint32_t& rgb) noexcept;
+bool ParseWallpaperVisibility(std::wstring_view text, int& percent) noexcept;
 
 } // namespace pulse::app

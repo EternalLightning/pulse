@@ -8,9 +8,16 @@
 
 namespace pulse::fs {
 
+#ifdef PULSE_NET_CACHE_TESTING
+std::wstring NetCacheTestDirectory();
+#endif
+
 namespace {
 
 std::wstring CacheDir() {
+#ifdef PULSE_NET_CACHE_TESTING
+    return NetCacheTestDirectory();
+#else
     wchar_t path[MAX_PATH] = {};
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path))) return L"";
     std::wstring dir = std::wstring(path) + L"\\Pulse";
@@ -18,6 +25,7 @@ std::wstring CacheDir() {
     dir += L"\\netcache";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir;
+#endif
 }
 
 uint64_t HashPath(const std::wstring& p) {
@@ -79,8 +87,13 @@ SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec) {
     if (!IsUncPath(path)) return nullptr;
     const std::wstring file = CacheFile(path);
     if (file.empty()) return nullptr;
-    std::ifstream f(file, std::ios::binary);
+    std::ifstream f(file, std::ios::binary | std::ios::ate);
     if (!f) return nullptr;
+    const std::streamoff file_bytes = f.tellg();
+    constexpr std::streamoff kHeaderBytes = 20;
+    constexpr std::streamoff kEntryHeaderBytes = 25;
+    if (file_bytes < kHeaderBytes) return nullptr;
+    f.seekg(0);
     char magic[4]{};
     f.read(magic, 4);
     if (std::string(magic, 4) != "PNCH") return nullptr;
@@ -89,7 +102,9 @@ SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec) {
     f.read(reinterpret_cast<char*>(&ver), 4);
     f.read(reinterpret_cast<char*>(&ts), 8);
     f.read(reinterpret_cast<char*>(&count), 4);
-    if (ver != 1 || count > 500000) return nullptr;
+    if (!f || ver != 1 || count > 500000 ||
+        count > static_cast<uint64_t>((file_bytes - kHeaderBytes) / kEntryHeaderBytes))
+        return nullptr;
     auto entries = std::make_shared<std::vector<DirEntry>>();
     entries->reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
@@ -105,6 +120,7 @@ SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec) {
         DirEntry e;
         e.name.assign(nlen, L'\0');
         f.read(reinterpret_cast<char*>(e.name.data()), nlen * sizeof(wchar_t));
+        if (!f) return nullptr;
         e.attrs = attrs;
         e.size = size;
         e.mtime.dwLowDateTime = static_cast<DWORD>(mtime);
@@ -175,7 +191,7 @@ bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id) {
         auto* result = new UncProbeResult{};
         result->probe_id = job->probe_id;
         result->unc = job->unc;
-        result->rtt_ms = job->rtt_ms;
+        result->rtt_ms = wait == WAIT_OBJECT_0 ? job->rtt_ms : 0;
         if (wait != WAIT_OBJECT_0) result->status = NetStatus::Offline;
         else if (!job->ok) result->status = NetStatus::Offline;
         else result->status = job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online;

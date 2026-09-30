@@ -664,10 +664,10 @@ int RunToolbarLayoutTest(AppState& s, const wchar_t* output) {
                   region(controls.close) == ui::HitTestResult::AddressSearchClose,
                 "search controls remain reachable across window sizes");
             const auto create = s.renderer.NewCommandRect(w);
-            const auto split = s.renderer.SplitCommandRect(w);
-            check(create.top > address.bottom && split.right < w &&
-                  region(create) == ui::HitTestResult::NewButton && region(split) == ui::HitTestResult::SplitButton,
-                "second toolbar row and popup anchors match hit targets");
+            check(create.top > address.bottom && toolbar.overflow.right < w &&
+                  region(create) == ui::HitTestResult::NewButton &&
+                  region(toolbar.overflow) == ui::HitTestResult::ToolbarMore,
+                "second toolbar row and overflow anchor match hit targets");
         }
     }
     }

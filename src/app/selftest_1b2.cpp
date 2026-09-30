@@ -1965,8 +1965,9 @@ void TestMenuModel() {
           curated[1].children.end(), [](const auto& item) { return item.enabled || item.radio; }),
           L"menu: curated views disable sorting and do not claim a selected sort");
     auto nw = BuildNewMenu();
-    Check(nw.size() == 2 && nw[0].command == CmdNewFolder && nw[1].command == CmdNewTextFile,
-          L"menu: 新建▾ dropdown has 文件夹/文本文档");
+    Check(nw.size() == 3 && nw[0].command == CmdNewFolder &&
+          nw[1].command == CmdNewFile && nw[2].command == CmdNewTextFile,
+          L"menu: 新建▾ dropdown has 文件夹/文件/文本文档");
 }
 
 // Explorer merge rules (优化.md §7): built-in verbs filtered, duplicate texts
@@ -2503,6 +2504,23 @@ void TestAppPrefsAndSettingsPath() {
     Check(ParseAccentRgb(L"#2fdff1", accent) && accent == 0x2FDFF1u,
           L"appprefs: parse accent #2fdff1");
     Check(!ParseAccentRgb(L"xyz", accent), L"appprefs: reject bad accent hex");
+    Check(ParseAccentInput(L"47,223,241", accent) && accent == 0x2FDFF1u,
+          L"appprefs: RGB channel input");
+    Check(!ParseAccentInput(L"256,0,0", accent) && !ParseAccentInput(L"1,2,3,4", accent),
+          L"appprefs: reject invalid RGB channel input");
+    AppPrefs wallpaper_migration; wallpaper_migration.persist = false;
+    Check(wallpaper_migration.FromJson(L"{\"wallpaper_look\":2}") &&
+          wallpaper_migration.wallpaper_visibility == 65,
+          L"appprefs: migrate vivid wallpaper to percentage");
+    Check(wallpaper_migration.FromJson(L"{\"wallpaper_visibility\":101}") &&
+          wallpaper_migration.wallpaper_visibility == 100,
+          L"appprefs: clamp wallpaper percentage");
+    int visibility = -1;
+    Check(ParseWallpaperVisibility(L"0%", visibility) && visibility == 0 &&
+          ParseWallpaperVisibility(L"100", visibility) && visibility == 100 &&
+          !ParseWallpaperVisibility(L"101", visibility) &&
+          !ParseWallpaperVisibility(L"-1", visibility),
+          L"appprefs: validate wallpaper percentage input");
     AppPrefs follow;
     follow.persist = false;
     Check(follow.FromJson(L"{}") && follow.accent_rgb.empty(),
@@ -4923,12 +4941,19 @@ void TestLinkResolve() {
           L"link: folder target resolves");
     e1.name = L"a.txt.lnk";
     e2.name = L"z-folder.lnk";
-    for (const auto column : {ui::SortColumn::Name, ui::SortColumn::Size, ui::SortColumn::Mtime, ui::SortColumn::Type}) {
+    for (const auto column : {ui::SortColumn::Name, ui::SortColumn::Size, ui::SortColumn::Type}) {
         for (const auto direction : {ui::SortDirection::Asc, ui::SortDirection::Desc})
             Check(EntryLess(e2, e1, column, direction) && !EntryLess(e1, e2, column, direction),
                 L"link: folder shortcuts sort before files in both directions");
     }
     Check(!e2.is_dir, L"link: sorting preserves shortcut file identity for operations");
+    e1.mtime.dwLowDateTime = 2;
+    e2.mtime.dwLowDateTime = 1;
+    Check(EntryLess(e1, e2, ui::SortColumn::Mtime, ui::SortDirection::Desc,
+                    FolderSortMode::FoldersFirst) &&
+          EntryLess(e2, e1, ui::SortColumn::Mtime, ui::SortDirection::Asc,
+                    FolderSortMode::FollowDirection),
+          L"sort: date order mixes folders and files by modification time");
     // Folder sort modes: the pref only changes how folders group, never the names.
     Check(EntryLess(e2, e1, ui::SortColumn::Name, ui::SortDirection::Asc,
                     FolderSortMode::FoldersFirst) &&

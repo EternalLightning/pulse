@@ -1,13 +1,14 @@
 #include "ui_renderer_internal.h"
 #include "toolbar_layout.h"
 #include "pane_header_icons.h"
+#include "../app/resource.h"
 
 namespace pulse::ui {
 void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     auto* dc = compositor_->Dc();
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
-    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand);
+    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view);
     const bool searchOverlay=vm.address_searching && rect.right-left<480*scale_;
     if (!searchOverlay) {
         const wchar_t* nav_glyphs[] = {kIconBack,kIconForward,kIconUp,kIconRefresh};
@@ -53,14 +54,14 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                 // so the trailing glyph is not shaved by the clip rect.
                 DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), seg.text,
                     seg.rc.left + 8 * scale_, seg.rc.top, seg.rc.right - seg.rc.left - 8 * scale_,
-                    seg.rc.bottom - seg.rc.top);
+                    seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP, true);
             }
             if (placed.empty() && !vm.pane.path.empty()) {
                 MakeBrush(dc, theme.text, brText_);
                 DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), vm.pane.path,
                     addrRc.left + 12.0f * scale_, addrRc.top,
                     addrRc.right - addrRc.left - 18.0f * scale_,
-                    addrRc.bottom - addrRc.top);
+                    addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP, true);
             }
         }
         dc->PopAxisAlignedClip();
@@ -71,31 +72,80 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     const std::wstring label=l10n::Get(l10n::StringId::New);
     fluent::ButtonSpec create;
     create.bounds=layout.create; create.text=compact ? std::wstring_view{} : std::wstring_view{label};
-    create.glyph=kIconAdd; create.kind=fluent::ButtonKind::Primary;
+    create.glyph=kIconAdd; create.kind=fluent::ButtonKind::Transparent;
+    create.bordered=false;
     create.icon_only=compact; create.drop_down=!compact;
-    create.state.hovered=IsHovered(vm,HitTestResult::NewButton);
+    create.skip_glyph=true;
+    create.state.enabled=!vm.archive_view;
+    create.state.hovered=create.state.enabled && IsHovered(vm,HitTestResult::NewButton);
     painter_.DrawButton(create);
-    const wchar_t* glyphs[]={kIconCut,kIconCopy,kIconPaste,kIconRename,kIconDelete,kIconSplit,
+    const float icon_x=compact ? (layout.create.left+layout.create.right)*0.5f
+                               : layout.create.left+18*scale_;
+    const float icon_y=(layout.create.top+layout.create.bottom)*0.5f;
+    const auto icon_bounds=[&](float cx,float cy) {
+        const float radius=8*scale_;
+        return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
+    };
+    const auto& create_color=create.state.enabled ? theme.text : theme.text_disabled;
+    if (!DrawFluentSvg(IDR_FILES_NEW_SVG,icon_bounds(icon_x,icon_y),1.0f,&create_color)) {
+        const auto icon=icon_bounds(icon_x,icon_y);
+        DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
+            kIconAdd,L"",create_color,0.82f);
+    }
+    if (layout.commands[0].right > layout.commands[0].left) {
+        MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
+        FillRect(dc,brStrokeDivider_.get(),layout.create.right+6*scale_,
+            layout.create.top+7*scale_,scale_,18*scale_);
+    }
+    const wchar_t* glyphs[]={kIconCut,kIconCopy,kIconPaste,kIconRename,kIconDelete,kIconSettings,kIconSplit,
         vm.details_visible ? kIconDetailsClose : kIconDetailsOpen,L""};
+    const int files_icons[]={IDR_FILES_CUT_SVG,IDR_FILES_COPY_SVG,IDR_FILES_PASTE_SVG,
+        IDR_FILES_RENAME_SVG,IDR_FILES_DELETE_SVG,IDR_FILES_PROPERTIES_SVG};
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
-        HitTestResult::Rename,HitTestResult::Delete,HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
-    for(int i=0;i<8;++i) {
+        HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
+        HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
+    for(int i=0;i<9;++i) {
         if (layout.commands[i].right <= layout.commands[i].left) continue;
-        const bool enabled=i==2 || i>=5 || vm.pane.selected_count>0;
-        const bool selected=(i==5 && vm.pane_slots.size()>1) || (i==6 && vm.details_visible) ||
-            (i==7 && vm.pane.column_strip.enabled);
+        const bool enabled=vm.archive_view ? i>=5 : i==2 || i>=6 || vm.pane.selected_count>0;
+        const bool selected=(i==6 && vm.pane_slots.size()>1) || (i==7 && vm.details_visible) ||
+            (i==8 && vm.pane.column_strip.enabled);
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :
             selected ? theme.fill_selected : kTransparent,
-            i==5 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent : theme.text_secondary,true,true);
-        if (i==5) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent : theme.text_secondary);
-        if (i==7) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent : theme.text_secondary);
+            i<=6 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent : theme.text_secondary,true,true,0.82f);
+        if (i<6) {
+            const auto& r=layout.commands[i];
+            const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
+            const D2D1_COLOR_F color=enabled ? theme.text_secondary : theme.text_disabled;
+            if (!DrawFluentSvg(files_icons[i],icon_bounds(cx,cy),1.0f,&color)) {
+                const auto icon=icon_bounds(cx,cy);
+                DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
+                    glyphs[i],L"",color,0.82f);
+            }
+        }
+        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent : theme.text_secondary);
+        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent : theme.text_secondary);
+    }
+    if (vm.archive_view) {
+        const auto extract_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
+                                        const wchar_t* text, bool enabled) {
+            if (bounds.right <= bounds.left) return;
+            fluent::ButtonSpec button;
+            button.bounds=bounds; button.text=text;
+            button.kind=fluent::ButtonKind::Transparent; button.bordered=false;
+            button.state.hovered=enabled && IsHovered(vm,hit);
+            button.state.enabled=enabled;
+            painter_.DrawButton(button);
+        };
+        const bool english=l10n::effective_language()==l10n::Language::EnUS;
+        extract_button(layout.extract,HitTestResult::Extract,english ? L"Extract" : L"解压",vm.pane.selected_count>0);
+        extract_button(layout.extract_all,HitTestResult::ExtractAll,english ? L"Extract all" : L"解压全部项目",!vm.pane.loading);
     }
     if (layout.overflow.right > layout.overflow.left) {
         DrawButton(layout.overflow,theme,IsHovered(vm,HitTestResult::ToolbarMore) ? theme.fill_hover : kTransparent,
             L"\xE712",L"",theme.text_secondary,true,true);
     }
-    const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, l10n::StringId label,
-                             HitTestResult::Region region, bool dropdown) {
+    const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, int files_icon,
+                             l10n::StringId label, HitTestResult::Region region, bool dropdown) {
         fluent::ButtonSpec button;
         button.bounds=bounds;
         button.glyph=glyph;
@@ -104,14 +154,22 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         button.kind=fluent::ButtonKind::Transparent;
         button.bordered=false;
         button.drop_down=dropdown && !button.icon_only;
+        button.skip_glyph=true;
         button.state.hovered=IsHovered(vm,region);
         painter_.DrawButton(button);
+        const float cx=button.icon_only ? (bounds.left+bounds.right)*0.5f : bounds.left+18*scale_;
+        const float cy=(bounds.top+bounds.bottom)*0.5f;
+        if (!DrawFluentSvg(files_icon,icon_bounds(cx,cy),1.0f,&theme.text)) {
+            const auto icon=icon_bounds(cx,cy);
+            DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
+                glyph,L"",theme.text_secondary,0.82f);
+        }
     };
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),layout.sort.left-6*scale_,layout.sort.top+7*scale_,scale_,18*scale_);
-    command(layout.sort,L"\xE8CB",l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
+    command(layout.sort,L"\xE8CB",IDR_FILES_SORT_SVG,l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
     if (vm.pane.filter_expand <= 0.015f && !vm.filter_editing) {
-        command(layout.filter,kIconFilter,l10n::StringId::ToolbarFilter,HitTestResult::FilterBox,false);
+        command(layout.filter,kIconFilter,IDR_FILES_FILTER_SVG,l10n::StringId::ToolbarFilter,HitTestResult::FilterBox,false);
     } else {
         fluent::TextFieldSpec field;
         field.bounds=layout.filter;
@@ -119,11 +177,17 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         field.text=vm.pane.filter_text;
         field.leading_glyph=kIconFilter;
         field.compact_leading_glyph=true;
+        field.suppress_leading_glyph=true;
         field.suppress_text=vm.filter_editing;
         field.state.focused=vm.filter_editing;
         field.state.hovered=IsHovered(vm,HitTestResult::FilterBox);
         if (!vm.pane.filter_text.empty()) field.trailing_width=30;
         painter_.DrawTextField(field);
+        const float cx=layout.filter.left+19*scale_;
+        const float cy=(layout.filter.top+layout.filter.bottom)*0.5f;
+        if (!DrawFluentSvg(IDR_FILES_FILTER_SVG,icon_bounds(cx,cy),1.0f,&theme.text_secondary))
+            DrawIconText(layout.filter.left,layout.filter.top,30*scale_,
+                layout.filter.bottom-layout.filter.top,kIconFilter,L"",theme.text_secondary,0.82f);
         if (!vm.pane.filter_text.empty() && vm.pane.filter_expand >= 0.985f) {
             DrawButton(FilterClearRect(rect,vm.pane.filter_expand),theme,
                 IsHovered(vm,HitTestResult::FilterClear) ? theme.fill_hover : kTransparent,

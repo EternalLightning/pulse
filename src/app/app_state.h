@@ -104,6 +104,7 @@ struct ShotRequest {
     int width = 0;
     int height = 0;
     ui::ViewMode view_mode = ui::ViewMode::Details;
+    bool sort_date = false;
     std::wstring language;
     std::chrono::steady_clock::time_point start;
 };
@@ -169,7 +170,6 @@ struct AppState {
         ULONGLONG started = 0;
     };
     std::unordered_map<int, SidebarFoldTrack> sidebarFoldTracks;
-    ULONGLONG pageTransitionStart = 0;
     uint32_t sidebarHiddenMask = 0;  // Section menu: hidden groups are not drawn.
     // Section display order (logical SidebarSectionId values). Header drags
     // rewrite it; the masks above are indexed by id, so they survive a reorder.
@@ -326,9 +326,10 @@ struct AppState {
     // Smooth scroll animation.
     bool scrollAnimating = false;
     float scrollTargetY = 0.0f;
+    float scrollVelocityY = 0.0f;
     std::chrono::steady_clock::time_point scrollLastUpdateTime;
-    // Spread each wheel step across several frames without making navigation lag.
-    static constexpr double kScrollResponseMs = 65.0;
+    // Wheel velocity decays over this interval; no work runs after it settles.
+    static constexpr double kScrollResponseMs = 105.0;
 
     ShotRequest shot;
     std::wstring open_path;   // folder to open as a new tab after session restore

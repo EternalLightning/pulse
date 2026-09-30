@@ -91,24 +91,19 @@ void ClearTextWidthCache() {
     struct LayerAlphas { float title = 1.0f, sheet = 1.0f, card = 1.0f; };
     inline LayerAlphas ComputeLayerAlphas(bool image_mode, bool backdrop_drawn,
                                           bool backdrop_enabled, bool dark,
-                                          int wallpaper_look, int wallpaper_blur) noexcept {
+                                          int wallpaper_visibility, int wallpaper_blur) noexcept {
         LayerAlphas a;
         if (image_mode) {
             // Decode failure stays opaque rather than exposing the desktop.
             if (!backdrop_drawn) return a;
-            // Rows: subtle, balanced, vivid. Columns: title, sheet, card.
-            // Dark wallpaper uses the legacy single scrim. Balanced restores
-            // its 55% cover; blur affects image detail, not the tint strength.
+            const float visibility = std::clamp(wallpaper_visibility, 0, 100) / 100.0f;
             if (dark) {
-                static constexpr float cover[] = {0.70f, 0.55f, 0.40f};
-                return {cover[std::clamp(wallpaper_look, 0, 2)], 0.0f, 0.0f};
+                const float pane_cover = (std::max)(0.0f, 1.0f - 2.0f * visibility);
+                return {1.0f - 0.9f * visibility, pane_cover, pane_cover};
             }
-            static constexpr float kLight[3][3] = {
-                {0.60f, 0.68f, 0.94f}, {0.50f, 0.55f, 0.90f}, {0.40f, 0.45f, 0.85f}};
-            const float* v = kLight[std::clamp(wallpaper_look, 0, 2)];
-            a.title = v[0];
-            a.sheet = v[1];
-            a.card = v[2];
+            a.title = 1.0f - visibility;
+            a.sheet = 1.0f - 0.9f * visibility;
+            a.card = 1.0f - 0.2f * visibility;
             // Sidebar text sits directly on the sheet; unblurred detail needs more cover.
             if (wallpaper_blur <= 0) {
                 a.title = (std::min)(1.0f, a.title + 0.10f);
@@ -1483,10 +1478,8 @@ TitleChrome MakeTitleChrome(float window_w, float scale, float title_h) {
     TitleChrome c;
     const float ctrl_w = 46.0f * scale;
     c.chrome_left = window_w - ctrl_w * 3.0f;
-    c.theme_w = 36.0f * scale;
-    c.settings_w = 36.0f * scale;
-    c.theme_left = c.chrome_left - c.theme_w - 6.0f * scale;
-    c.settings_left = c.theme_left - c.settings_w - 6.0f * scale;
+    c.theme_left = c.chrome_left;
+    c.settings_left = c.chrome_left;
     c.cmd_w = 0.0f;
     c.cmd_left = c.settings_left;
     const float cmd_pad = 8.0f * scale;
@@ -1512,6 +1505,7 @@ struct SettingsLayout {
     D2D1_RECT_F nav_row[kSettingsNavCount]{};
     D2D1_RECT_F accent_card{};
     D2D1_RECT_F accent_picker{};
+    D2D1_RECT_F accent_system{};
     D2D1_RECT_F effect_card{};
     D2D1_RECT_F effect_row[kWindowEffectCount]{};
     D2D1_RECT_F density_card{};
@@ -1528,7 +1522,7 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_choose{};
     D2D1_RECT_F wallpaper_clear{};
     D2D1_RECT_F wallpaper_look_card{};
-    D2D1_RECT_F wallpaper_look_row[3]{};
+    D2D1_RECT_F wallpaper_look_value{};
     D2D1_RECT_F wallpaper_blur_card{};
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};

@@ -139,7 +139,7 @@ public:
         CenterOwnedWindow(hwnd_, owner_, width, height);
         if (owner_) EnableWindow(owner_, FALSE);
         Render();
-        ShowWindow(hwnd_, SW_SHOW);
+        ShowDialogWithFade(hwnd_);
         LayoutEdits();
         SetForegroundWindow(hwnd_);
         if (edit_name_) SetFocus(edit_name_);

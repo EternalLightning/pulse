@@ -1,3 +1,4 @@
+#include "archive_navigation.h"
 // app_input.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
 #include "tab_shortcuts.h"
@@ -21,6 +22,7 @@
 #include "batch_rename.h"
 #include "blank_pane_click.h"
 #include "link_resolve.h"
+#include "settings_value_dialog.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
 #include "../ipc/ctx_menu_util.h"
@@ -647,6 +649,7 @@ bool PointInHitItemName(AppState& s, const ui::WindowViewModel& vm,
 
 void CancelScrollAnimation(AppState& s) {
     s.scrollAnimating = false;
+    s.scrollVelocityY = 0.0f;
 }
 
 // --- Tag slide animation ------------------------------------------------------
@@ -745,48 +748,77 @@ void TickTabTransitions(AppState& s) {
 
 void UpdateSmoothScroll(AppState& s);
 
+static float SmoothScrollMaximum(AppState& s) {
+    if (!IsSettingsTab(ActiveTab(s))) return MaxScrollForActivePane(s);
+    return s.renderer.SettingsMaxScroll(BuildVm(s, false),
+        static_cast<float>(s.compositor.Width()), static_cast<float>(s.compositor.Height()));
+}
+
+static void SetSmoothScrollOffset(AppState& s, app::Tab& tab, float value, float maximum) {
+    if (IsSettingsTab(&tab)) s.settings.SetScroll(value, maximum);
+    else tab.scroll_y = value;
+}
+
 void StartSmoothScroll(AppState& s, float delta) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
-    const float maxScroll = MaxScrollForActivePane(s);
-    tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, maxScroll);
+    if (s.scrollAnimating) UpdateSmoothScroll(s);
+    const bool settings = IsSettingsTab(tab);
+    const float maxScroll = SmoothScrollMaximum(s);
+    const float offset = std::clamp(settings ? s.settings.scroll() : tab->scroll_y, 0.0f, maxScroll);
+    SetSmoothScrollOffset(s, *tab, offset, maxScroll);
     if (!s.scrollAnimating) {
-        s.scrollTargetY = tab->scroll_y;
-        s.scrollLastUpdateTime = std::chrono::steady_clock::now();
+        s.scrollVelocityY = 0.0f;
+        s.scrollLastUpdateTime = std::chrono::steady_clock::now() -
+            std::chrono::milliseconds(8);
     }
-    s.scrollTargetY = std::clamp(s.scrollTargetY + delta, 0.0f, maxScroll);
-    // Start immediately; the UI timer requests frames and painting advances
-    // the motion. Whole-pixel offsets reuse the same text raster phase.
-    if (!s.scrollAnimating)
-        tab->scroll_y = std::round(tab->scroll_y +
-            (s.scrollTargetY - tab->scroll_y) * 0.08f);
-    s.scrollAnimating = std::abs(s.scrollTargetY - tab->scroll_y) > 0.01f;
-    MaybePrefetchSearchPage(s);
+    // Each wheel event adds momentum. Reversing direction should respond to
+    // the new gesture immediately instead of first coasting the old way.
+    if (s.scrollVelocityY * delta < 0.0f) s.scrollVelocityY = 0.0f;
+    const D2D1_RECT_F list = settings
+        ? s.renderer.ContentRect(static_cast<float>(s.compositor.Width()),
+            static_cast<float>(s.compositor.Height())) : ListRect(s);
+    const float max_travel = std::max(1.0f, (list.bottom - list.top) * 1.5f);
+    const float response_ms = static_cast<float>(AppState::kScrollResponseMs);
+    s.scrollVelocityY = std::clamp(s.scrollVelocityY + delta / response_ms,
+        -max_travel / response_ms, max_travel / response_ms);
+    s.scrollTargetY = std::clamp(offset + s.scrollVelocityY * response_ms,
+                                  0.0f, maxScroll);
+    s.scrollAnimating = std::abs(s.scrollTargetY - offset) > 0.01f;
+    if (!s.scrollAnimating) s.scrollVelocityY = 0.0f;
+    if (!settings) MaybePrefetchSearchPage(s);
 }
 
 void UpdateSmoothScroll(AppState& s) {
     if (!s.scrollAnimating) return;
     app::Tab* tab = ActiveTab(s);
-    if (!tab) { s.scrollAnimating = false; return; }
+    if (!tab) { CancelScrollAnimation(s); return; }
     auto now = std::chrono::steady_clock::now();
-    const double elapsed = std::max(0.0,
-        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count());
+    const double elapsed = std::clamp(
+        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count(),
+        0.0, 100.0);
     s.scrollLastUpdateTime = now;
 
-    const float maxScroll = MaxScrollForActivePane(s);
-    tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, maxScroll);
+    const float maxScroll = SmoothScrollMaximum(s);
+    float offset = std::clamp(IsSettingsTab(tab) ? s.settings.scroll() : tab->scroll_y,
+        0.0f, maxScroll);
     s.scrollTargetY = std::clamp(s.scrollTargetY, 0.0f, maxScroll);
-    const float remaining = s.scrollTargetY - tab->scroll_y;
-    if (std::abs(remaining) <= 1.0f) {
-        tab->scroll_y = s.scrollTargetY;
-        s.scrollAnimating = false;
-    } else {
-        // The elapsed-time response handles timer jitter and a moving target.
-        const float response = 1.0f - static_cast<float>(
-            std::exp(-elapsed / AppState::kScrollResponseMs));
-        const float step = std::max(1.0f, std::round(std::abs(remaining) * response));
-        tab->scroll_y += std::copysign(std::min(step, std::abs(remaining)), remaining);
+    const float decay = static_cast<float>(std::exp(-elapsed / AppState::kScrollResponseMs));
+    const float travel = s.scrollVelocityY *
+        static_cast<float>(AppState::kScrollResponseMs) * (1.0f - decay);
+    const float next = std::clamp(offset + travel, 0.0f, maxScroll);
+    const bool hit_edge = next != offset + travel;
+    offset = next;
+    s.scrollVelocityY *= decay;
+    if (hit_edge || std::abs(s.scrollVelocityY *
+            static_cast<float>(AppState::kScrollResponseMs)) <= 0.5f) {
+        offset = std::clamp(offset + s.scrollVelocityY *
+            static_cast<float>(AppState::kScrollResponseMs), 0.0f, maxScroll);
+        CancelScrollAnimation(s);
     }
+    SetSmoothScrollOffset(s, *tab, offset, maxScroll);
+    s.scrollTargetY = std::clamp(offset + s.scrollVelocityY *
+        static_cast<float>(AppState::kScrollResponseMs), 0.0f, maxScroll);
 }
 
 void StartSidebarFold(AppState& s, int section) {
@@ -816,7 +848,6 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         int mx = GET_X_LPARAM(lParam);
         int my = GET_Y_LPARAM(lParam);
         s->hoverPoint = POINT{ mx, my };
-        s->bloom_accent.SetPointer(static_cast<float>(mx), static_cast<float>(my), true);
 
         // Press-and-hold on the top staging-tray card: the card follows the
         // pointer; releasing decides between a fling to the back and a spring.
@@ -1824,7 +1855,6 @@ LRESULT HandleMouseLeave(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             s->hoverLabel.clear();
             s->hoverSince = 0;
             s->tooltipText.clear();
-            s->bloom_accent.SetPointer(0.0f, 0.0f, false);
             if (GetCapture() != hwnd) s->dragPending = false;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -2074,11 +2104,29 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             OpenSettingsTab(*s, hit.index);
         } else if (HandleSettingsControl(*s, hit)) {
         } else if (hit.region == ui::HitTestResult::SettingsToggle) {
+            if (hit.index == 3) s->settings.ClearError();
             s->settings.ToggleUi(hit.index);
+            if (hit.index == 3 && !s->settings.error().empty())
+                MessageBoxW(hwnd, s->settings.error().c_str(),
+                    l10n::Get(l10n::StringId::SettingsOpenFolders).c_str(), MB_OK | MB_ICONWARNING);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsAccent) {
-            s->bloom_accent.SetPressed(hit.index);
-            SetCapture(hwnd);
+            if (hit.index == 1) {
+                s->settings.AccentChoice(true, 0);
+            } else {
+                std::wstring value = L"#" + (s->appPrefs.accent_rgb.empty()
+                    ? vm.settings_accent_hex : s->appPrefs.accent_rgb);
+                while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsThemeColor),
+                        l10n::Get(l10n::StringId::AccentInputHint), value, value)) {
+                    uint32_t rgb = 0;
+                    if (app::ParseAccentInput(value, rgb)) {
+                        s->settings.AccentChoice(false, rgb);
+                        break;
+                    }
+                    MessageBoxW(hwnd, l10n::Get(l10n::StringId::AccentInputInvalid).c_str(),
+                        l10n::Get(l10n::StringId::SettingsThemeColor).c_str(), MB_OK | MB_ICONWARNING);
+                }
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsEffect) {
             if (hit.index >= 0 && hit.index < ui::kWindowEffectCount)
@@ -2095,7 +2143,17 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             s->settings.TrayIconSize(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsWallpaperLook) {
-            s->settings.WallpaperLook(hit.index);
+            std::wstring value = std::to_wstring(s->appPrefs.wallpaper_visibility);
+            while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsWallpaperLook),
+                    l10n::Get(l10n::StringId::WallpaperPercentHint), value, value)) {
+                int percent = 0;
+                if (app::ParseWallpaperVisibility(value, percent)) {
+                    s->settings.WallpaperVisibility(percent);
+                    break;
+                }
+                MessageBoxW(hwnd, l10n::Get(l10n::StringId::WallpaperPercentInvalid).c_str(),
+                    l10n::Get(l10n::StringId::SettingsWallpaperLook).c_str(), MB_OK | MB_ICONWARNING);
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsWallpaperBlur) {
             s->settings.WallpaperBlur(hit.index);
@@ -2209,6 +2267,12 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ShowRenameOverlay(*s);
         } else if (hit.region == ui::HitTestResult::Delete) {
             DeleteSelected(*s, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+        } else if (hit.region == ui::HitTestResult::Extract) {
+            ExtractArchiveSelection(*s, false);
+        } else if (hit.region == ui::HitTestResult::ExtractAll) {
+            ExtractArchiveSelection(*s, true);
+        } else if (hit.region == ui::HitTestResult::Properties) {
+            DispatchMenuCommand(*s, app::CmdProperties);
         } else if (hit.region == ui::HitTestResult::TrayRelease) {
             ReleaseTrayBatch(*s, (size_t)hit.index);
         } else if (hit.region == ui::HitTestResult::TrayClose) {
@@ -2668,25 +2732,6 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         if (s) {
             if (s->trayDrag.pending || s->trayDrag.active) {
                 ReleaseTrayDrag(*s, true);
-                if (GetCapture() == hwnd) ReleaseCapture();
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return 0;
-            }
-            if (s->bloom_accent.Pressed() >= 0) {
-                const int pressed = s->bloom_accent.Pressed();
-                s->bloom_accent.SetPressed(-1);
-                const int mx = GET_X_LPARAM(lParam);
-                const int my = GET_Y_LPARAM(lParam);
-                ui::WindowViewModel vm = BuildVm(*s);
-                D2D1_RECT_F rect = D2D1::RectF(0, 0,
-                    static_cast<float>(s->compositor.Width()),
-                    static_cast<float>(s->compositor.Height()));
-                const ui::HitTestResult hit =
-                    s->renderer.HitTest(vm, rect, static_cast<float>(mx), static_cast<float>(my));
-                if (hit.region == ui::HitTestResult::SettingsAccent && hit.index == pressed)
-                    if (pressed >= 0 && pressed < ui::kBloomDotCount)
-                        s->settings.AccentChoice(pressed == 0,
-                            pressed == 0 ? 0 : ui::BloomDotRgb(pressed));
                 if (GetCapture() == hwnd) ReleaseCapture();
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
@@ -3245,11 +3290,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         CancelRenameClick(*s);
         if (IsSettingsTab(ActiveTab(*s))) {
             const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-            ui::WindowViewModel svm = BuildVm(*s, false);
-            const float max_scroll = s->renderer.SettingsMaxScroll(
-                svm, static_cast<float>(s->compositor.Width()),
-                static_cast<float>(s->compositor.Height()));
-            s->settings.ScrollBy(static_cast<float>(delta), s->scale, max_scroll);
+            StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 48.0f * s->scale);
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
@@ -3431,7 +3472,7 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         } else if (wParam == VK_F2) {
             ShowRenameOverlay(*s);
         } else if (wParam == VK_F7) {
-            CreateNewItem(*s, true); // 新建文件夹并进入重命名（ui.md §7.9）
+            CreateNewItem(*s, true);
         } else if (alt && wParam == VK_RETURN) {
             DispatchMenuCommand(*s, app::CmdProperties);
         } else if (wParam == VK_DELETE) {

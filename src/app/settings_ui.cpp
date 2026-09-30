@@ -111,6 +111,7 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
     case H::SettingsFind: FindSetting(s);break;
     case H::SettingsDisclosure: {
         if(hit.index!=0 && hit.index!=1 && (hit.index<8 || hit.index>12)) return true;
+        CancelScrollAnimation(s);
         s.settingsExpanded^=1u<<hit.index;
         auto vm=BuildVm(s,false);
         const float maximum=s.renderer.SettingsMaxScroll(vm,static_cast<float>(s.compositor.Width()),static_cast<float>(s.compositor.Height()));

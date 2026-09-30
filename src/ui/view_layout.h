@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace pulse::ui {
 
@@ -38,13 +39,22 @@ struct ViewLayoutMetrics {
     bool column_major = false;
 };
 
+struct DateGroup {
+    int first = 0;
+    int count = 0;
+    unsigned char bucket = 0;
+};
+
+constexpr float kDateGroupHeaderDip = 36.0f;
+
 // Pure, O(1) virtual geometry. Coordinates returned by ItemRect are in the
 // same pixel space as viewport; no per-item state is allocated.
 class ViewLayout {
 public:
     ViewLayout(ViewMode mode, D2D1_RECT_F viewport, size_t item_count,
                float scroll_x, float scroll_y, float scale,
-               float row_height_dip = 0.0f); // >0: Details-mode row height override
+               float row_height_dip = 0.0f,
+               const std::vector<DateGroup>* date_groups = nullptr);
 
     ViewMode Mode() const noexcept { return mode_; }
     const ViewLayoutMetrics& Metrics() const noexcept { return metrics_; }
@@ -71,6 +81,7 @@ private:
     ViewLayoutMetrics metrics_{};
     float content_width_ = 0.0f;
     float content_height_ = 0.0f;
+    const std::vector<DateGroup>* date_groups_ = nullptr;
 };
 
 } // namespace pulse::ui

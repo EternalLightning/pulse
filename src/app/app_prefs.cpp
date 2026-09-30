@@ -8,6 +8,7 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <cwctype>
+#include <algorithm>
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
@@ -68,7 +69,7 @@ void AppPrefs::ResetToDefaults() {
     language = L"system";
     window_effect = L"mica-alt";
     background_image.clear();
-    wallpaper_look = 1;
+    wallpaper_visibility = 50;
     wallpaper_blur = 1;
     row_height = 34;
     sidebar_width = 224;
@@ -142,8 +143,8 @@ std::wstring AppPrefs::ToJson() const {
     out += L",\n  \"address_search_content\":" + std::to_wstring(address_search_content);
     out += L",\n  \"tray_icon_size\":";
     out += std::to_wstring(tray_icon_size);
-    out += L",\n  \"wallpaper_look\":";
-    out += std::to_wstring(wallpaper_look);
+    out += L",\n  \"wallpaper_visibility\":";
+    out += std::to_wstring(wallpaper_visibility);
     out += L",\n  \"wallpaper_blur\":";
     out += std::to_wstring(wallpaper_blur);
     out += L",\n  \"accent_rgb\":\"";
@@ -228,8 +229,10 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     if (row_height < 24 || row_height > 48) row_height = 34;
     tray_icon_size = pulse::json::ExtractInt(json, L"tray_icon_size", 48);
     if (tray_icon_size < 32 || tray_icon_size > 64) tray_icon_size = 48;
-    wallpaper_look = pulse::json::ExtractInt(json, L"wallpaper_look", 1);
-    if (wallpaper_look < 0 || wallpaper_look > 2) wallpaper_look = 1;
+    const int legacy_look = pulse::json::ExtractInt(json, L"wallpaper_look", 1);
+    const int migrated = legacy_look == 0 ? 35 : legacy_look == 2 ? 65 : 50;
+    wallpaper_visibility = pulse::json::ExtractInt(json, L"wallpaper_visibility", migrated);
+    wallpaper_visibility = std::clamp(wallpaper_visibility, 0, 100);
     wallpaper_blur = pulse::json::ExtractInt(json, L"wallpaper_blur", 1);
     if (wallpaper_blur < 0 || wallpaper_blur > 2) wallpaper_blur = 1;
     accent_rgb = pulse::json::ExtractString(json, L"accent_rgb");
@@ -462,8 +465,7 @@ bool AppPrefs::ReadFolderOpen() const {
 }
 
 bool AppPrefs::ApplyFolderOpen(bool on) {
-    open_folders_in_pulse = on;
-    if (!persist) return true;
+    if (!persist) { open_folders_in_pulse = on; return true; }
     const std::wstring exe = ExePath();
     if (exe.empty()) return false;
     bool ok = true;
@@ -485,6 +487,7 @@ bool AppPrefs::ApplyFolderOpen(bool on) {
         }
     }
     if (changed) NotifyAssocChanged();
+    open_folders_in_pulse = ok ? on : ReadFolderOpen();
     return ok;
 }
 
@@ -500,6 +503,41 @@ bool ParseAccentRgb(const std::wstring& text, uint32_t& rgb) noexcept {
     const unsigned long v = wcstoul(p, &end, 16);
     if (!end || *end != L'\0' || v > 0xFFFFFFul) return false;
     rgb = static_cast<uint32_t>(v);
+    return true;
+}
+
+bool ParseAccentInput(const std::wstring& text, uint32_t& rgb) noexcept {
+    if (ParseAccentRgb(text, rgb)) return true;
+    const wchar_t* p = text.c_str();
+    unsigned channel[3]{};
+    for (int i = 0; i < 3; ++i) {
+        while (*p == L' ' || *p == L'\t') ++p;
+        if (*p < L'0' || *p > L'9') return false;
+        unsigned value = 0;
+        do {
+            value = value * 10 + static_cast<unsigned>(*p++ - L'0');
+            if (value > 255) return false;
+        } while (*p >= L'0' && *p <= L'9');
+        channel[i] = value;
+        while (*p == L' ' || *p == L'\t') ++p;
+        if (i < 2) { if (*p++ != L',') return false; }
+    }
+    if (*p != L'\0') return false;
+    rgb = (channel[0] << 16) | (channel[1] << 8) | channel[2];
+    return true;
+}
+
+bool ParseWallpaperVisibility(std::wstring_view text, int& percent) noexcept {
+    if (text.empty()) return false;
+    if (text.back() == L'%') text.remove_suffix(1);
+    if (text.empty()) return false;
+    int value = 0;
+    for (wchar_t ch : text) {
+        if (ch < L'0' || ch > L'9') return false;
+        value = value * 10 + (ch - L'0');
+        if (value > 100) return false;
+    }
+    percent = value;
     return true;
 }
 

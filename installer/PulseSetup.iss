@@ -75,6 +75,7 @@ Name: "startup"; Description: "开机自动启动 Pulse / Launch Pulse at sign-i
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "其他 / Other:"; Flags: unchecked
 
 [Files]
+Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Flags: ignoreversion recursesubdirs createallsubdirs
 #ifdef AppLocalRuntime
 ; Local MD builds bundle the matching CRT; the static Win81 CI path is unchanged.
 Source: "{#BuildDir}\msvc-runtime\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -107,6 +108,12 @@ Name: "{group}\{cm:UninstallProgram,Pulse}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Pulse"; Filename: "{app}\pulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
+Root: HKCU; Subkey: "Software\Classes\Pulse.Archive"; ValueType: string; ValueData: "Pulse Archive"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\DefaultIcon"; ValueType: string; ValueData: "{app}\pulse.exe,0"
+Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\shell\open\command"; ValueType: string; ValueData: """{app}\pulse.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.zip\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.7z\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.rar\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
 ; Same key the in-app preference manages (src/app/app_prefs.cpp).
 ; Note: with an elevated install this lands in the installing user's hive.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Pulse"; ValueData: """{app}\pulse.exe"""; Tasks: startup; Flags: uninsdeletevalue

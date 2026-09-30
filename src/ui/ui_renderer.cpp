@@ -27,6 +27,9 @@ void MainRenderer::SetCompositor(Compositor* comp) {
     paneHeaderStroke_.reset();
     tray_shadows_.clear();
     ClearTextWidthCache();
+    name_layout_cache_.clear();
+    name_layout_order_.clear();
+    name_layout_format_ = nullptr;
     sized_icon_formats_.clear();
     empty_state_svg_.reset();
     no_selection_svg_.reset();
@@ -50,6 +53,9 @@ void MainRenderer::SetCompositor(Compositor* comp) {
 
 void MainRenderer::InvalidateTypography() {
     ClearTextWidthCache();
+    name_layout_cache_.clear();
+    name_layout_order_.clear();
+    name_layout_format_ = nullptr;
     sized_icon_formats_.clear();
     preview_mono_format_.reset();
     painter_.InvalidateTypography();
@@ -67,6 +73,9 @@ void MainRenderer::SetScale(float scale) {
         preview_mono_format_.reset();
         sized_icon_formats_.clear();
         ClearTextWidthCache();
+        name_layout_cache_.clear();
+        name_layout_order_.clear();
+        name_layout_format_ = nullptr;
     }
     scale_ = scale;
     title_bar_height_ = kTitleBarHeight * scale;
@@ -141,7 +150,7 @@ D2D1_RECT_F MainRenderer::NewCommandRect(float w) const {
     return MakeToolbarLayout(w,scale_,title_bar_height_,margin_,NewButtonWidthPx(w-EffectiveSidebarWidth(w)<600*scale_),EffectiveSidebarWidth(w)).create;
 }
 D2D1_RECT_F MainRenderer::SplitCommandRect(float w) const {
-    return MakeToolbarLayout(w,scale_,title_bar_height_,margin_,NewButtonWidthPx(w-EffectiveSidebarWidth(w)<600*scale_),EffectiveSidebarWidth(w)).commands[5];
+    return MakeToolbarLayout(w,scale_,title_bar_height_,margin_,NewButtonWidthPx(w-EffectiveSidebarWidth(w)<600*scale_),EffectiveSidebarWidth(w)).commands[6];
 }
 float MainRenderer::NewButtonWidthPx(bool compact) const {
     if (compact) return kCommandIconButtonDip * scale_;
@@ -297,10 +306,14 @@ void MainRenderer::BreadcrumbLayout(const PaneViewModel& vm, float w,
 }
 void MainRenderer::DrawTextRect(ID2D1DeviceContext* dc, IDWriteTextFormat* fmt,
     ID2D1SolidColorBrush* br, std::wstring_view text, float x, float y, float w, float h,
-    D2D1_DRAW_TEXT_OPTIONS opts) {
+    D2D1_DRAW_TEXT_OPTIONS opts, bool native_text) {
     D2D1_RECT_F rc = typography::SnapVerticalBounds(D2D1::RectF(x, y, x + w, y + h));
+    if (native_text) {
+        rc.left = std::round(rc.left);
+        rc.right = rc.left + w;
+    }
     if (compositor_ && DrawLegacyIcon(dc, compositor_->DwriteFactory(), text, rc, br, fmt->GetFontSize())) return;
-    if (!IsHighContrast() && compositor_ && br && compositor_->DrawLumaText(
+    if (!native_text && !IsHighContrast() && compositor_ && br && compositor_->DrawLumaText(
             text, fmt, rc, br->GetColor(), text_background_, fmt->GetTextAlignment())) {
         return;
     }
@@ -395,7 +408,8 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     // the window base; the title scrim, one shared sheet and the pane cards
     // stack over it with the opacities from ComputeLayerAlphas.
     const bool image_mode = vm.window_effect == WindowEffect::None &&
-                            !vm.background_image.empty() && !IsHighContrast();
+                            !vm.background_image.empty() && vm.wallpaper_visibility > 0 &&
+                            !IsHighContrast();
     bool backdrop_drawn = false;
     if (image_mode) {
         backdrop_drawn = material_.DrawSourceCover(dc, rect, vm.background_image,
@@ -406,7 +420,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
             (vm.window_effect == WindowEffect::None) ? std::wstring{} : vm.background_image);
     }
     const LayerAlphas layers = ComputeLayerAlphas(image_mode, backdrop_drawn,
-        vm.backdrop_enabled, vm.dark, vm.wallpaper_look, vm.wallpaper_blur);
+        vm.backdrop_enabled, vm.dark, vm.wallpaper_visibility, vm.wallpaper_blur);
     if (!backdrop_drawn && !vm.backdrop_enabled) {
         // Lower pane opacity must reveal the theme canvas when no material or
         // wallpaper exists, instead of exposing an unpainted transparent base.
@@ -445,12 +459,6 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         else preview_handler_.Sync(notify_hwnd_, {}, L"", 0, 0, 0, 0, vm.dark,
                                    theme.bg, theme.text, false);
         DrawStatusBar(vm, rect, theme);
-    }
-    if (vm.page_transition > 0.0f && !IsHighContrast()) {
-        const D2D1_RECT_F content = ContentRect(rect.right, rect.bottom);
-        const float alpha = 0.22f * vm.page_transition * vm.page_transition;
-        MakeBrush(dc, WithAlpha(theme.surface_sheet, alpha), brBg_);
-        dc->FillRectangle(content, brBg_.get());
     }
 
     // Drag action badge (ui.md §7.8): tooltip-style flyout near the cursor.
@@ -527,8 +535,6 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     const float right = rect.right;
 
     const float ctrlW = 46.0f * scale_;
-    const TitleChrome chrome = MakeTitleChrome(right, scale_, h);
-
     const TabStripMetrics strip = ComputeTabStrip(vm, rect.right);
     const float tabH = strip.h;
     const float tabY = strip.y;
@@ -586,8 +592,9 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
         if (active) {
             MakeBrush(dc, vm.tabs[i].color_rgb ? HexColor(vm.tabs[i].color_rgb) : theme.accent, brAccent_);
-            FillRoundedRect(dc, brAccent_.get(), tabRc.left + 15*scale_, tabRc.bottom - 3*scale_,
-                std::min(28*scale_, tabW - 24*scale_), 2*scale_, scale_);
+            const float inset = pinned && !vm.show_pinned_tab_names ? 8.0f * scale_ : 16.0f * scale_;
+            FillRoundedRect(dc, brAccent_.get(), tabRc.left + inset, tabRc.bottom - 3*scale_,
+                (std::max)(0.0f, tabW - 2.0f * inset), 2*scale_, scale_);
         }
         if (pinned && !vm.show_pinned_tab_names) {
             // Chrome pinned tab: centered icon, no title, no close button.
@@ -733,17 +740,6 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     DrawButton(newRc, theme, IsHovered(vm, HitTestResult::TabNew) ? theme.fill_hover : kTransparent,
         kIconAdd, L"+", theme.text_secondary, true, true);
 
-    const D2D1_RECT_F settingsRc = D2D1::RectF(chrome.settings_left, tabY,
-        chrome.settings_left + chrome.settings_w, tabY + tabH);
-    DrawButton(settingsRc, theme,
-        IsHovered(vm, HitTestResult::SettingsButton) ? theme.fill_hover : kTransparent,
-        kIconSettings, L"S", theme.text_secondary, true, true);
-
-    const D2D1_RECT_F themeRc = D2D1::RectF(chrome.theme_left, tabY,
-        chrome.theme_left + chrome.theme_w, tabY + tabH);
-    DrawButton(themeRc, theme, IsHovered(vm, HitTestResult::ThemeToggle) ? theme.fill_hover : kTransparent,
-        kIconTheme, L"T", theme.text_secondary, true, true);
-
     // Window controls, right-aligned in Win11 order: min, max/restore, close.
     const float ctrlY = y;
     const float ctrlH = h;
@@ -870,7 +866,7 @@ MainRenderer::TabStripMetrics MainRenderer::ComputeTabStrip(
 
     const TitleChrome chrome = MakeTitleChrome(window_w, scale_, title_bar_height_);
     m.x0 = 12.0f * scale_;
-    const float tabsRight = chrome.settings_left - 8.0f * scale_;
+    const float tabsRight = chrome.chrome_left - 8.0f * scale_;
 
     // Group chips: one at the start of each consecutive same-group run. Their
     // widths come out of the strip budget before tabs are sized; positions

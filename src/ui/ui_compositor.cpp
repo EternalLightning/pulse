@@ -1,4 +1,4 @@
-// ui_compositor.cpp
+#include "dialog_lifecycle.h"
 #include "ui_compositor.h"
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
@@ -51,10 +51,12 @@ bool Compositor::Init(HWND hwnd) {
     height_ = std::max(1L, rc.bottom - rc.top);
     if (!CreateSwapChain()) return false;
     ResizeSwapChain();
+    BindDialogComposition(hwnd_, compositionDevice_.get(), compositionVisual_.get());
     return targetBitmap_.get() != nullptr;
 }
 
 void Compositor::Shutdown() {
+    BindDialogComposition(hwnd_, nullptr, nullptr);
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
     targetBitmap_.reset();

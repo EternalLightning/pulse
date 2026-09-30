@@ -47,7 +47,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             MakeBrush(dc,theme.fill_hover,brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
         }
-        label(r,l10n::Get(title),l10n::Get(desc),icon,0.0f,hit==15 ? 43.0f : 21.0f);
+        label(r,l10n::Get(title),l10n::Get(desc),icon,0.0f,(hit==15 || hit==3) ? 43.0f : 21.0f);
         fluent::ControlState state{}; state.checked=on; state.hovered=IsHovered(vm,H::SettingsToggle,hit);
         painter_.DrawSwitch(D2D1::RectF(r.right-60*scale_,r.top+16*scale_,r.right-16*scale_,r.top+48*scale_),L"",state);
     };
@@ -100,8 +100,12 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             painter_.DrawText(l10n::Get(theme_names[i]),D2D1::RectF(r.left,preview.bottom+2*scale_,r.right,r.bottom),compositor_->SmallFormat(),theme.text,fluent::HorizontalAlignment::Center);
         }
         divider(lay.theme_row);
-        label(lay.accent_card,l10n::Get(I::SettingsThemeColor),l10n::Get(I::SettingsThemeColorDesc),L"\xE790",lay.accent_picker.left-16*scale_);
-        if(vm.settings_bloom) {vm.settings_bloom->SetDisk(lay.accent_picker);vm.settings_bloom->Draw(dc,theme);}
+        const bool narrow_accent=lay.accent_picker.left<lay.accent_card.left+250*scale_;
+        label(lay.accent_card,l10n::Get(I::SettingsThemeColor),l10n::Get(I::SettingsThemeColorDesc),L"\xE790",
+            narrow_accent ? lay.accent_card.right-16*scale_ : lay.accent_picker.left-12*scale_);
+        button(lay.accent_picker,L"#"+vm.settings_accent_hex,H::SettingsAccent,0);
+        button(lay.accent_system,l10n::Get(I::SettingsThemeSystem),H::SettingsAccent,1,false,true,
+            vm.settings_accent_system ? L"\xE73E" : L"");
         divider(lay.accent_card);
         const I effects[]={I::EffectNone,I::EffectAcrylic,I::EffectMica,I::EffectMicaAlt};
         const I languages[]={I::LanguageSystem,I::LanguageZhCN,I::LanguageEnUS};
@@ -160,7 +164,8 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         divider(lay.effect_card);
         dropdown(lay.language_card,lay.language_choice,I::SettingsLanguage,I::SettingsLanguageDesc,l10n::Get(languages[vm.settings_language]),1);
         toggle(lay.startup_row[0],I::SettingsLaunch,I::SettingsLaunchDesc,L"\xE7E8",vm.settings_launch_on_startup,1);divider(lay.startup_row[0]);
-        toggle(lay.startup_row[1],I::SettingsKeepRunning,I::SettingsKeepRunningDesc,L"\xE737",vm.settings_keep_running,2);
+        toggle(lay.startup_row[1],I::SettingsKeepRunning,I::SettingsKeepRunningDesc,L"\xE737",vm.settings_keep_running,2);divider(lay.startup_row[1]);
+        toggle(lay.startup_row[2],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
         toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);
@@ -212,13 +217,15 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                               fluent::ButtonKind::Standard, clear });
 
 
-            const I looks[]={I::WallpaperLookSubtle,I::WallpaperLookBalanced,I::WallpaperLookVivid};const int levels[]={0,1,2};
-            draw_card(lay.wallpaper_look_card);segmented(lay.wallpaper_look_card,lay.wallpaper_look_row,looks,levels,vm.wallpaper_look,H::SettingsWallpaperLook,I::SettingsWallpaperLook,I::SettingsWallpaperLookDesc);
+            const int levels[]={0,1,2};
+            draw_card(lay.wallpaper_look_card);
+            label(lay.wallpaper_look_card,l10n::Get(I::SettingsWallpaperLook),l10n::Get(I::SettingsWallpaperLookDesc),L"\xE8A4",
+                lay.wallpaper_look_value.left<lay.wallpaper_look_card.left+100*scale_ ? lay.wallpaper_look_card.right-16*scale_ : lay.wallpaper_look_value.left-12*scale_);
+            button(lay.wallpaper_look_value,std::to_wstring(vm.wallpaper_visibility)+L"%",H::SettingsWallpaperLook,0);
             const I blurs[]={I::WallpaperBlurOff,I::WallpaperBlurLight,I::WallpaperBlurStrong};
             draw_card(lay.wallpaper_blur_card);segmented(lay.wallpaper_blur_card,lay.wallpaper_blur_row,blurs,levels,vm.wallpaper_blur,H::SettingsWallpaperBlur,I::SettingsWallpaperBlur,I::SettingsWallpaperBlurDesc);
             const I sizes[]={I::SettingsTraySmall,I::SettingsTrayStandard,I::SettingsTrayLarge};const int icons[]={40,48,56};
             draw_card(lay.tray_icon_card);segmented(lay.tray_icon_card,lay.tray_icon_row,sizes,icons,vm.settings_tray_icon,H::SettingsTrayIcon,I::SettingsTrayIcon,I::SettingsTrayIconDesc);
-            draw_card(lay.startup_row[2]);toggle(lay.startup_row[2],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);
             draw_card(lay.hidden_files_row);toggle(lay.hidden_files_row,I::SettingsShowHidden,I::SettingsShowHiddenDesc,L"\xE890",vm.settings_show_hidden_files,5);
             // Hidden + system entries: File Explorer keeps these behind a second option.
             draw_card(lay.protected_files_row);toggle(lay.protected_files_row,I::SettingsShowProtected,I::SettingsShowProtectedDesc,L"\xE72E",vm.settings_show_protected_os_files,16);

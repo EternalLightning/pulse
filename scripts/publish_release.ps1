@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 $version = (Get-Content version.txt -Raw).Trim()
-if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
+if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw 'Invalid release version' }
 $tag = "v$version"
 $repository = 'jimmgreen/pulse'
 $base = "https://github.com/$repository/releases/download/$tag"

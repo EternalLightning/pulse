@@ -55,9 +55,9 @@ struct PaneHeaderIconTest {
                     check(hit(search.input)==HitTestResult::AddressSearchInput && hit(search.close)==HitTestResult::AddressSearchClose,
                         "compact search overlay routes input and close before navigation");
                 } else {
-                    check(layout.address.right <= layout.navigation[3].left &&
-                        layout.navigation[3].right <= layout.search.left,
-                        "refresh sits between address and search without overlap");
+                    check(layout.navigation[2].right <= layout.navigation[3].left &&
+                        layout.navigation[3].right <= layout.address.left,
+                        "refresh follows Up before the address field");
                     check(hit(layout.navigation[3]) == HitTestResult::NavRefresh,
                         "relocated refresh routes to refresh action");
                     check(layout.address.right+2*scale<=layout.search.left,"address and search do not overlap");
@@ -65,16 +65,14 @@ struct PaneHeaderIconTest {
                 }
                 check(hit(layout.sort)==HitTestResult::ToolbarSort,"toolbar sort hit target");
                 check(hit(layout.filter)==HitTestResult::FilterBox,"toolbar filter hit target");
-                if (layout.overflow.right>layout.overflow.left) {
-                    check(layout.filter.right+4*scale<=layout.overflow.left,"compact filter and overflow do not overlap");
-                    check(hit(layout.overflow)==HitTestResult::ToolbarMore,"compact overflow remains accessible");
-                } else {
-                    check(layout.filter.right+4*scale<=layout.commands[5].left,"filter and layout controls do not overlap");
-                    check(hit(layout.commands[5])==HitTestResult::SplitButton,"layout hit target");
-                    check(hit(layout.commands[6])==HitTestResult::DetailsToggle,"preview hit target");
-                    check(hit(layout.commands[7])==HitTestResult::PaneColumnLayout,"column view has its own toolbar hit target");
-                    check(layout.commands[7].right<=window.right-renderer.Margin(),"column view stays inside toolbar");
-                }
+                check(layout.filter.right+4*scale<=layout.overflow.left,"filter and overflow do not overlap");
+                check(hit(layout.overflow)==HitTestResult::ToolbarMore,"overflow remains accessible");
+                if (layout.commands[5].right>layout.commands[5].left)
+                    check(hit(layout.commands[5])==HitTestResult::Properties,"properties button routes to properties");
+                check(layout.commands[6].right<=layout.commands[6].left &&
+                    layout.commands[7].right<=layout.commands[7].left &&
+                    layout.commands[8].right<=layout.commands[8].left,
+                    "secondary layout controls live in overflow");
                 if (expanded) {
                     const auto edit=renderer.FilterEditRect(window,1,true);
                     const auto clear=renderer.FilterClearRect(window,1);

@@ -5,7 +5,7 @@
 namespace pulse {
 bool EnsureMenu(AppState& s);
 void CopySelectedPath(AppState& s);
-void CreateNewItem(AppState& s, bool folder);
+void CreateNewItem(AppState& s, bool folder, bool arbitrary_file = false);
 void QueueTagAds(AppState& s, std::vector<app::TagAdsUpdate> updates);
 std::vector<app::TagAdsUpdate> BuildTagAdsUpdates(
         const app::PlacesCatalog& places, const std::vector<std::wstring>& paths,

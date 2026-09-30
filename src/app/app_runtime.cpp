@@ -1,3 +1,5 @@
+#include "archive_navigation.h"
+#include "../ops/archive.h"
 // app_runtime.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "app_column_view.h"
@@ -238,6 +240,7 @@ std::wstring ResolveOpenFolderPath(std::wstring path) {
     const DWORD attrs = GetFileAttributesW(path.c_str());
     if (attrs != INVALID_FILE_ATTRIBUTES &&
         (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        if (ops::IsArchivePath(path)) return ArchiveViewPath(fs::NormalizePath(path));
         path = fs::ParentPath(path);
     }
     return fs::NormalizePath(path);
@@ -1381,10 +1384,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.settings_list_size_bar = s.appPrefs.list_size_bar;
     vm.settings_folder_sort = s.appPrefs.folder_sort_mode;
     vm.sidebar_scroll = s.sidebarScroll;
-    if (s.pageTransitionStart) {
-        const float elapsed = static_cast<float>(GetTickCount64() - s.pageTransitionStart);
-        vm.page_transition = 1.0f - std::clamp(elapsed / 170.0f, 0.0f, 1.0f);
-    }
     if (s.groupDragActive) {
         vm.sidebar_group_drag_id = s.groupDragId;
         if (s.groupGapVisible) vm.sidebar_group_gap_line_y = s.groupGapLineY;
@@ -1806,9 +1805,19 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     FillFolderSizes(s, vm);
     vm.window_effect = ui::WindowEffectFromId(s.appPrefs.window_effect);
     vm.background_image = s.appPrefs.background_image;
-    vm.wallpaper_look = s.appPrefs.wallpaper_look;
+    vm.wallpaper_visibility = s.appPrefs.wallpaper_visibility;
+    vm.settings_accent_hex = s.appPrefs.accent_rgb;
+    if (vm.settings_accent_hex.empty()) {
+        const auto color = s.accentColor;
+        const auto channel = [](float value) { return static_cast<unsigned>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        wchar_t hex[8]{};
+        swprintf_s(hex, L"%02X%02X%02X", channel(color.r), channel(color.g), channel(color.b));
+        vm.settings_accent_hex = hex;
+    }
+    vm.settings_accent_system = s.appPrefs.accent_follow_system;
     vm.wallpaper_blur = s.appPrefs.wallpaper_blur;
     vm.safe_mode = s.safeMode;
+    vm.archive_view = ActiveTab(s) && IsArchiveView(ActiveTab(s)->current_path);
     return vm;
 }
 
@@ -1921,6 +1930,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::Paste: return text(I::PasteShortcut);
     case R::Rename: return text(I::RenameShortcut);
     case R::Delete: return text(I::DeleteShortcut);
+    case R::Properties: return text(I::Properties);
     case R::SplitButton: return text(I::SplitLayout);
     case R::DetailsToggle: return text(s.showDetailsPanel ? I::CollapseDetails : I::ExpandDetails);
     case R::PaneMediumIcons: return text(I::MediumIcons);
@@ -2046,6 +2056,7 @@ std::wstring TooltipForHover(AppState& s) {
 
 // Full path of a directory entry (normalized, empty when out of range).
 std::wstring EntryFullPath(const app::Tab& tab, int index) {
+    if (IsArchiveView(tab.current_path)) return L"";
     if (!tab.snapshot || index < 0 || index >= static_cast<int>(tab.EntryCount())) return L"";
     const fs::DirEntry& e = tab.EntryAt(static_cast<size_t>(index));
     if (e.change_record_only) return L"";

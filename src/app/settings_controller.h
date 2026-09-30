@@ -135,7 +135,7 @@ public:
     void RowHeight(int index);
     void FolderSort(int index);
     void TrayIconSize(int index);
-    void WallpaperLook(int index);
+    void WallpaperVisibility(int percent);
     void WallpaperBlur(int index);
     void Language(std::wstring_view language_id);
     void Wallpaper(int action);

@@ -92,7 +92,7 @@ void PasteIntoCurrent(AppState& s) {
 void DeleteSelected(AppState& s, bool permanent) {
     if(DeferContentSelection(s,[=](AppState& v){DeleteSelected(v,permanent);})) return;
     app::Tab* tab = ActiveTab(s);
-    if (!tab) return;
+    if (!tab || tab->net_readonly) return;
     if (IsRecycleTab(tab)) {
         std::vector<std::wstring> paths;
         if (tab->snapshot) {

@@ -43,8 +43,8 @@ std::uint64_t Generation() noexcept;
 // text boxes stable while preserving DirectWrite's natural horizontal spacing.
 D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept;
 
-// Dest rects clip ink, not advance. Luma's optical weight and Mitchell
-// filter extend past DWrite's cluster width by about this much.
+// Dest rects clip ink, not advance. Leave room for glyph overhang beyond
+// DWrite's cluster width.
 float InkPad(IDWriteTextFormat* format) noexcept;
 
 // DWrite advance plus right overhang. Empty text is 0.

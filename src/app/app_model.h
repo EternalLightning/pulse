@@ -9,6 +9,7 @@
 #include "pane_header_animation.h"
 #include "../index/content_result_store.h"
 #include <map>
+#include <atomic>
 #include <memory>
 #include <array>
 #include <string>
@@ -31,6 +32,9 @@ std::wstring NavigationReturnChildName(const std::wstring& from_path,
 
 struct Tab {
     std::wstring current_path;
+    std::wstring archive_file, archive_prefix, archive_password;
+    std::shared_ptr<std::atomic_bool> archive_cancel;
+    std::unordered_set<std::wstring> archive_encrypted;
     std::stack<std::wstring> back_stack;
     std::stack<std::wstring> forward_stack;
     // Search origins belong to history entries, not to query strings.
@@ -47,6 +51,9 @@ struct Tab {
     uint64_t view_generation = 1;
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
+    bool downloads_auto_sort = false;
+    ui::SortColumn sort_before_downloads = ui::SortColumn::Name;
+    ui::SortDirection direction_before_downloads = ui::SortDirection::Asc;
     std::array<float, 3> details_column_dividers{};
     std::array<float, 4> search_column_dividers{};
     std::wstring filter_text;
@@ -151,6 +158,9 @@ struct Tab {
     mutable uint64_t view_cache_places_revision = 0;
     mutable std::wstring view_cache_filter_text;
     mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_filter_map;
+    mutable std::shared_ptr<const std::vector<ui::DateGroup>> view_date_groups;
+    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_date_filter;
+    mutable unsigned view_date_day = 0;
     mutable std::shared_ptr<const ui::PaneViewModel::TagDots> view_tag_dots;
     mutable std::shared_ptr<ui::RowPresentationCache> view_row_cache;
 

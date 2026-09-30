@@ -1,3 +1,5 @@
+#include "archive_navigation.h"
+#include "../ops/archive.h"
 // app_navigation.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "app_column_view.h"
@@ -781,6 +783,7 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
         tab.virtual_title = l10n::Get(l10n::StringId::Settings);
         tab.loading = false;
         tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
+        CancelScrollAnimation(s);
         s.settings.SelectPage(app::SettingsController::PageFromName(rest));
         return;
     }
@@ -790,11 +793,31 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
 }
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    if (tab.archive_cancel) tab.archive_cancel->store(true);
     s.index.CancelSession(tab.search_session_id);
     std::erase_if(s.pendingIndexSearches,[&](const auto& item){return item.second.query.session_id==tab.search_session_id;});
     tab.filename_live_generation=0;
     tab.search_retaining_results = false;
     std::wstring normalized = fs::NormalizePath(path);
+    bool downloads = false;
+    for (const auto& entry : s.sidebar.quick_access) {
+        if (entry.builtin == static_cast<int>(app::BuiltinQuickAccess::Downloads) &&
+            !entry.path.empty() && _wcsicmp(entry.path.c_str(), normalized.c_str()) == 0) {
+            downloads = true;
+            break;
+        }
+    }
+    if (downloads && !tab.downloads_auto_sort) {
+        tab.sort_before_downloads = tab.sort_column;
+        tab.direction_before_downloads = tab.sort_direction;
+        tab.sort_column = ui::SortColumn::Mtime;
+        tab.sort_direction = ui::SortDirection::Desc;
+        tab.downloads_auto_sort = true;
+    } else if (!downloads && tab.downloads_auto_sort) {
+        tab.sort_column = tab.sort_before_downloads;
+        tab.sort_direction = tab.direction_before_downloads;
+        tab.downloads_auto_sort = false;
+    }
     tab.current_path = normalized;
     if (const auto git = s.gitRoots.find(normalized); git != s.gitRoots.end())
         tab.git_root = git->second;
@@ -826,6 +849,11 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.search_content_active = false;
     tab.search_content_stopped = false;
     tab.search_snippets.reset();
+    if (IsArchiveView(normalized)) {
+        LoadArchiveView(s, tab);
+        SyncVisibleWatches(s);
+        return;
+    }
     if (fs::IsVirtualPath(normalized)) {
         LoadVirtualView(s, tab, normalized, reason);
         return;
@@ -1083,6 +1111,11 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
         if (tab && tab->current_path == normalized) tabs.push_back(tab);
     });
     if (tabs.empty()) return;
+    if (IsArchiveView(normalized)) {
+        for (app::Tab* tab : tabs) LoadArchiveView(s, *tab);
+        InvalidateRect(s.hwnd, nullptr, FALSE);
+        return;
+    }
     if (fs::IsVirtualPath(normalized) && !fs::IsRecycleViewPath(normalized)) {
         for (app::Tab* tab : tabs) {
             if (tab->search_content_stopped && reason != RefreshReason::Explicit) continue;
@@ -1398,8 +1431,6 @@ void NavigateTo(AppState& s, const std::wstring& path) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     std::wstring normalized = fs::NormalizePath(path);
-    if (_wcsicmp(tab->current_path.c_str(), normalized.c_str()) != 0)
-        s.pageTransitionStart = GetTickCount64();
     const std::wstring returnedChild =
         app::NavigationReturnChildName(tab->current_path, normalized);
     tab->NavigateTo(normalized);
@@ -1549,6 +1580,7 @@ void OpenSelected(AppState& s) {
     if(DeferContentSelection(s,[=](AppState& v){OpenSelected(v);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot) return;
+    if (OpenArchiveSelection(s)) return;
     if (IsRecycleTab(tab)) {
         RestoreSelected(s);
         return;
@@ -1568,6 +1600,7 @@ void OpenSelected(AppState& s) {
         }
         std::wstring full = EntryFullPath(*tab, indices[0]);
         if (e.is_dir) NavigateTo(s, full);
+        else if (ops::IsArchivePath(full)) NavigateTo(s, ArchiveViewPath(full));
         else {
             s.ops.OpenWith(full);
             RecordRecentOpen(s, full, app::PlaceItemKind::File);
@@ -1598,6 +1631,10 @@ void GoUp(AppState& s) {
     if (!tab) return;
     if (IsRecycleTab(tab)) {
         NavigateTo(s, L"");
+        return;
+    }
+    if (IsArchiveView(tab->current_path)) {
+        NavigateTo(s, ArchiveParent(tab->current_path));
         return;
     }
     if (fs::IsVirtualPath(tab->current_path)) {
@@ -1659,6 +1696,7 @@ void NewTab(AppState& s, const std::wstring& path) {
 }
 
 void OpenSettingsTab(AppState& s, int page) {
+    CancelScrollAnimation(s);
     s.settings.SelectPage(page);
     const std::wstring path = app::MakeSettingsPath(
         app::SettingsController::PageName(s.settings.page()));
@@ -1701,7 +1739,6 @@ void CloseActiveTab(AppState& s) {
 
 void SwitchTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
-    if (idx != s.window_tabs.active) s.pageTransitionStart = GetTickCount64();
     if (s.addressSearching) HideAddressEditor(s, false);
     RememberLayoutFocus(s);
     s.window_tabs.SwitchTab(idx);

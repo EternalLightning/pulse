@@ -404,7 +404,80 @@ int RunAdaptiveColumnsTest(AppState& s, const wchar_t* output) {
     return failures ? 1 : 0;
 }
 
+int RunSettingsSmoothScrollTest(AppState& s, const wchar_t* output) {
+    std::ofstream log{std::filesystem::path(output)};
+    int failures = 0;
+    auto check = [&](bool ok, const char* label) {
+        log << (ok ? "[PASS] " : "[FAIL] ") << label << '\n';
+        if (!ok) ++failures;
+    };
+    s.compositor.Resize(1000, 700);
+    OpenSettingsTab(s, 0);
+    const float file_offset = ActiveTab(s)->scroll_y;
+    auto maximum = [&] {
+        return s.renderer.SettingsMaxScroll(BuildVm(s, false),
+            static_cast<float>(s.compositor.Width()), static_cast<float>(s.compositor.Height()));
+    };
+    auto wheel = [&](short delta) {
+        HandleMouseWheel(&s, s.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, delta), 0);
+    };
+    auto frame = [&] {
+        s.scrollLastUpdateTime = std::chrono::steady_clock::now() - std::chrono::milliseconds(16);
+        UpdateSmoothScroll(s);
+    };
+    for (float scale : {1.0f, 1.5f, 2.0f}) {
+        s.scale = scale;
+        s.renderer.SetScale(scale);
+        s.compositor.RecreateTextFormats(scale);
+        s.settings.SetScroll(0, maximum());
+        wheel(-120);
+        check(s.scrollAnimating && s.settings.scroll() == 0,
+            "wheel starts animation without jumping at common DPI scales");
+        frame();
+        check(s.settings.scroll() > 0 && s.settings.scroll() < 48*scale,
+            "first frame advances only part of the wheel distance");
+        wheel(-120);
+        check(s.scrollVelocityY > 48*scale / AppState::kScrollResponseMs,
+            "repeated wheel input accumulates momentum");
+        wheel(120);
+        check(s.scrollVelocityY < 0, "reverse wheel input changes direction immediately");
+        for (int i = 0; i < 100 && s.scrollAnimating; ++i) frame();
+        check(!s.scrollAnimating && s.settings.scroll() >= 0 && s.settings.scroll() <= maximum(),
+            "animation settles within settings bounds");
+        s.settings.SetScroll(maximum() - 1, maximum());
+        wheel(-120); frame();
+        check(!s.scrollAnimating && s.settings.scroll() == maximum(), "bottom edge stops momentum");
+        s.settings.SetScroll(1, maximum());
+        wheel(120); frame();
+        check(!s.scrollAnimating && s.settings.scroll() == 0, "top edge stops momentum");
+        check(ActiveTab(s)->scroll_y == file_offset, "settings animation preserves file scroll offset");
+    }
+    wheel(-120);
+    OpenSettingsTab(s, 3);
+    check(!s.scrollAnimating && s.settings.scroll() == 0, "page switch cancels old animation");
+    s.compositor.Resize(1000, 4000);
+    check(maximum() == 0, "large viewport has no settings overflow");
+    wheel(-120);
+    check(!s.scrollAnimating && s.settings.scroll() == 0, "non-scrollable page stays idle");
+    s.compositor.Resize(1000, 700);
+    OpenSettingsTab(s, 0);
+    wheel(-120);
+    ui::HitTestResult disclosure;
+    disclosure.region = ui::HitTestResult::SettingsDisclosure;
+    disclosure.index = 0;
+    HandleSettingsControl(s, disclosure);
+    check(!s.scrollAnimating && s.settings.scroll() <= maximum(), "disclosure cancels and clamps animation");
+    s.settings.SetScroll(150, maximum());
+    Render(s);
+    check(s.compositor.SaveSnapshot((std::filesystem::path(output).parent_path() /
+        L"settings-smooth-scroll.png").c_str()), "scrolled settings frame captured");
+    log << "failures=" << failures << '\n';
+    return failures ? 1 : 0;
+}
+
 int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
+    if (GetEnvironmentVariableW(L"PULSE_TEST_SETTINGS_SMOOTH_SCROLL", nullptr, 0))
+        return RunSettingsSmoothScrollTest(s, output);
     if (GetEnvironmentVariableW(L"PULSE_TEST_ADAPTIVE_COLUMNS", nullptr, 0))
         return RunAdaptiveColumnsTest(s, output);
     if (GetEnvironmentVariableW(L"PULSE_TEST_SEARCH_COLUMNS", nullptr, 0))
@@ -469,14 +542,18 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
                 check(layout.nav_row[4].bottom<layout.nav_row[3].top,"about is pinned below primary navigation");
                 if(page==0) {
                     check(hit(layout.theme_tile[0]).region==H::SettingsTheme && hit(layout.theme_tile[0]).index==1,"light theme preview hit target");
-                    check(hit(layout.accent_picker).region==H::SettingsAccent,"original color wheel remains interactive");
+                    check(hit(layout.accent_picker).region==H::SettingsAccent && hit(layout.accent_picker).index==0,
+                        "accent value input remains reachable");
+                    check(hit(layout.accent_system).region==H::SettingsAccent && hit(layout.accent_system).index==1,
+                        "system accent button remains reachable");
                     check(layout.effect_choice.right == 0 && hit(layout.language_choice).index==1,"window effect has no duplicate dropdown; language dropdown remains");
                     auto scrolled=vm;
                     scrolled.settings_scroll=layout.density_card.top-layout.content.top;
                     const auto density_layout=ui::MakeSettingsLayout(scrolled,window,scale,s.renderer.TitleBarHeight(),28*scale,&painter);
                     const auto density=density_layout.density_row[2];
                     check(s.renderer.HitTest(scrolled,window,(density.left+density.right)/2,(density.top+density.bottom)/2).region==H::SettingsDensity,"density segments remain reachable after scrolling into view");
-                    check(layout.wallpaper_card.bottom==0 && layout.startup_row[2].bottom==0,"collapsed advanced settings have no invisible hit targets");
+                    check(layout.wallpaper_card.bottom==0 && layout.startup_row[2].bottom>0,
+                        "default file manager remains visible when advanced settings are collapsed");
                     for(const auto* locale:{L"zh-CN",L"en-US"}) {
                         l10n::SetLanguage(locale);bool fits=true;
                         const I labels[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy,I::SettingsTraySmall,I::SettingsTrayStandard,I::SettingsTrayLarge};
@@ -531,6 +608,12 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
     H toggle;toggle.region=H::SettingsDisclosure;toggle.index=0;HandleSettingsControl(s,toggle);
     vm=BuildVm(s,false);const auto expanded_max=s.renderer.SettingsMaxScroll(vm,window.right,window.bottom);
     check((s.settingsExpanded&1u) && expanded_max>collapsed_max,"expanding advanced settings updates scroll range");
+    vm.settings_scroll = expanded_max;
+    const auto advanced_layout = ui::MakeSettingsLayout(vm,window,s.scale,
+        s.renderer.TitleBarHeight(),28*s.scale,&painter);
+    const auto percent_rect = advanced_layout.wallpaper_look_value;
+    check(percent_rect.right>percent_rect.left,
+        "background percentage input is laid out in expanded settings");
     {
         // The advanced group owns both the hidden-files switch and the protected
         // operating system files switch; both need a reachable row and fitting text.

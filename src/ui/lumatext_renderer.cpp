@@ -106,7 +106,6 @@ struct LumaTextRenderer::Impl {
         // surface key at 1/64 creates a new command list for every smooth
         // scroll tick even though the rasterized glyphs are identical.
         std::uint8_t x_phase_8 = 0;
-        std::uint8_t y_phase_8 = 0;
         std::uint32_t foreground = 0;
         std::uint32_t background = 0;
         bool dark = false;
@@ -125,7 +124,6 @@ struct LumaTextRenderer::Impl {
             combine(std::hash<std::int32_t>{}(key.height_64));
             combine(std::hash<std::uint32_t>{}(
                 static_cast<std::uint32_t>(key.x_phase_8) << 24 |
-                static_cast<std::uint32_t>(key.y_phase_8) << 16 |
                 (key.dark ? 1u : 0u)));
             combine(std::hash<std::uint32_t>{}(key.foreground));
             combine(std::hash<std::uint32_t>{}(key.background));
@@ -391,7 +389,10 @@ struct LumaTextRenderer::Impl {
         profile_desc.light = LumaText::Descriptor<lt_render_config>();
         profile_desc.light.coverage_gamma = 0.85f;
         profile_desc.light.coverage_contrast = 1.00f;
-        profile_desc.light.raster_filter = LT_RASTER_FILTER_MITCHELL;
+        profile_desc.light.raster_filter = LT_RASTER_FILTER_DIRECT;
+        // Small CJK glyphs need the font's grid fitting to keep adjacent
+        // horizontal strokes distinct at the filename's 13 px size.
+        profile_desc.light.flags = LT_RENDER_CONFIG_HINTED_OUTLINES;
         profile_desc.dark = profile_desc.light;
         profile_desc.regular_optical_weight = 0.0f;
         profile_desc.bold_optical_weight = 0.0f;
@@ -573,7 +574,7 @@ struct LumaTextRenderer::Impl {
         auto metrics = LumaText::Descriptor<lt_text_metrics>();
         if (lt_text_layout_get_metrics(layout->get(), &metrics) != LT_OK) return false;
         // Dest is an ink clip. Advance-only overflow left the last glyph's
-        // optical weight / Mitchell lobe shaved off ("File" → "Fil").
+        // glyph overhang shaved off ("File" → "Fil").
         const float ink = pulse::ui::typography::InkPad(format);
         if (metrics.width + ink > width + 0.5f) {
             key.width_64 = static_cast<std::int32_t>(
@@ -584,20 +585,15 @@ struct LumaTextRenderer::Impl {
             if (lt_text_layout_get_metrics(layout->get(), &metrics) != LT_OK) return false;
         }
         const float floor_x = std::floor(bounds.left);
-        const float floor_y = std::floor(bounds.top);
+        const float snapped_y = std::round(bounds.top);
         const float phase_x = bounds.left - floor_x;
-        const float phase_y = bounds.top - floor_y;
         const auto phase_bucket = [](float phase, int buckets) {
             const long rounded = std::lround(phase * static_cast<float>(buckets));
             return static_cast<std::uint8_t>(std::clamp<long>(
                 rounded, 0l, static_cast<long>(buckets - 1)));
         };
         const std::uint8_t x_phase_8 = phase_bucket(phase_x, 8);
-        // Keep four vertical raster buckets so scrolling preserves more of
-        // LumaText's baseline precision without returning to 1/64 variants.
-        const std::uint8_t y_phase_4 = phase_bucket(phase_y, 4);
         const float cached_phase_x = static_cast<float>(x_phase_8) / 8.0f;
-        const float cached_phase_y = static_cast<float>(y_phase_4) / 4.0f;
         const auto color_byte = [](float value) {
             return static_cast<std::uint32_t>(std::clamp(
                 std::lround(value * 255.0f), 0l, 255l));
@@ -620,7 +616,6 @@ struct LumaTextRenderer::Impl {
             static_cast<std::int32_t>(std::lround(width * 64.0f)),
             static_cast<std::int32_t>(std::lround(height * 64.0f)),
             x_phase_8,
-            y_phase_4,
             packed_foreground,
             packed_background,
             dark,
@@ -629,7 +624,7 @@ struct LumaTextRenderer::Impl {
                 TouchSurface(cached);
                 const auto offset = D2D1::Point2F(
                     floor_x + phase_x - cached_phase_x,
-                    floor_y + phase_y - cached_phase_y);
+                    snapped_y);
                 // The command list already contains the canonical text clip;
                 // avoid repeating target clip state changes for every row.
                 dc->DrawImage(cached->second.commands.Get(), &offset, nullptr,
@@ -662,9 +657,10 @@ struct LumaTextRenderer::Impl {
         } else if (alignment == DWRITE_TEXT_ALIGNMENT_TRAILING) {
             draw.origin_x += std::max(0.0f, width - metrics.width);
         }
-        draw.origin_y = cached_phase_y + (height - metrics.height) * 0.5f;
-        draw.clip = {cached_phase_x, cached_phase_y,
-                     cached_phase_x + width, cached_phase_y + height};
+        // The target uses physical pixels: keep stems on full scan lines and
+        // avoid smoothing small UI text a second time with a raster filter.
+        draw.origin_y = std::round((height - metrics.height) * 0.5f + metrics.ascent) - metrics.ascent;
+        draw.clip = {cached_phase_x, 0.0f, cached_phase_x + width, height};
         draw.clip_enabled = true;
         draw.foreground = {foreground.r, foreground.g, foreground.b, foreground.a};
         draw.background = {background.r, background.g, background.b, background.a};
@@ -672,7 +668,8 @@ struct LumaTextRenderer::Impl {
         draw.render_config = LumaText::Descriptor<lt_render_config>();
         draw.render_config.coverage_gamma = 0.85f;
         draw.render_config.coverage_contrast = 1.00f;
-        draw.render_config.raster_filter = LT_RASTER_FILTER_MITCHELL;
+        draw.render_config.raster_filter = LT_RASTER_FILTER_DIRECT;
+        draw.render_config.flags = LT_RENDER_CONFIG_HINTED_OUTLINES;
         draw.profile = profile.get();
 
         const lt_result result = lt_frame_draw_text_layout(frame.get(), layout->get(), &draw);
@@ -697,7 +694,7 @@ struct LumaTextRenderer::Impl {
 
         const auto offset = D2D1::Point2F(
             floor_x + phase_x - cached_phase_x,
-            floor_y + phase_y - cached_phase_y);
+            snapped_y);
         dc->DrawImage(commands.Get(), &offset, nullptr,
                       D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                       D2D1_COMPOSITE_MODE_SOURCE_OVER);

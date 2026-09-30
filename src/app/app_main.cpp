@@ -1,3 +1,5 @@
+#include "archive_navigation.h"
+#include "../ops/archive.h"
 #include "../common/windows_compat.h"
 #include "quick_access.h"
 #include "filter_animation.h"
@@ -575,9 +577,16 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         std::wstring startPath = s->shot.active ? s->shot.path : L"C:\\";
         if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
         else if (!s->shot.active && !s->open_path.empty())
-            startPath = ResolveOpenFolderPath(s->open_path);
+            startPath = ops::IsArchivePath(s->open_path) ? ArchiveViewPath(fs::NormalizePath(s->open_path))
+                : ResolveOpenFolderPath(s->open_path);
         s->pane->NewTab(startPath);
-        if (s->shot.active) s->pane->ActiveTab()->view_mode = s->shot.view_mode;
+        if (s->shot.active) {
+            s->pane->ActiveTab()->view_mode = s->shot.view_mode;
+            if (s->shot.sort_date) {
+                s->pane->ActiveTab()->sort_column = ui::SortColumn::Mtime;
+                s->pane->ActiveTab()->sort_direction = ui::SortDirection::Desc;
+            }
+        }
         StartLoadingPath(*s, *s->pane->ActiveTab(), startPath,
             !s->shot.active && !s->session_path.empty()
                 ? PathLoadReason::RestoreSession : PathLoadReason::Navigate);
@@ -832,6 +841,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         BeginPaint(hwnd, &ps);
         if (s) Render(*s);
         EndPaint(hwnd, &ps);
+        // Present throttles scrolling to the display. Queue the next low-priority
+        // paint after EndPaint so high-refresh monitors are not capped by WM_TIMER.
+        if (s && s->scrollAnimating && !s->compositor.NeedsRecovery() &&
+            IsWindowVisible(hwnd) && !IsIconic(hwnd))
+            InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
     }
 
@@ -857,10 +871,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
             if (TickSidebarFolds(*s, now)) dirty = true;
-            if (s->pageTransitionStart) {
-                if (now - s->pageTransitionStart < 170) dirty = true;
-                else s->pageTransitionStart = 0;
-            }
             if (s->renderer.TickDetailsPreview(now)) dirty = true;
             if (s->detailsPreviewFoldStart) {
                 const float t = std::min(1.0f, static_cast<float>(now - s->detailsPreviewFoldStart) / 150.0f);
@@ -931,8 +941,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 s->scrollbarHoverWidth = target;
                 dirty = true;
             }
-            // Smooth scroll.
-            if (s->scrollAnimating) dirty = true;
+            // Active scrolling queues its own next paint after Present.
             // Tag slide animation.
             if (!s->tagTracks.empty() || s->tagGapFrom != s->tagGapTo) {
                 TickTagTransitions(*s);
@@ -948,7 +957,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 if (app::ParsePulsePath(tab->current_path, &kind, &rest) &&
                     kind == L"settings") {
                     const int page = app::SettingsController::PageFromName(rest);
-                    if (page == 0 && s->bloom_accent.Tick(0.016f)) dirty = true;
                     if (page == 4 && s->duplicateScan.scanning) dirty = true;
                 }
             }
@@ -1140,6 +1148,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     }
+
+    case WM_ARCHIVE_RESULT:
+        if (s) HandleArchiveResult(*s, lParam);
+        else DiscardArchiveResult(lParam);
+        return 0;
 
     case WM_WORKER_RESULT: {
         if (s) {
@@ -1546,7 +1559,15 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->networkIndex.Stop();
             s->changes.client.Stop();
             s->index.Stop();
+            ForEachPane(*s, [](app::Pane& pane) {
+                if (pane.view.archive_cancel) pane.view.archive_cancel->store(true);
+            });
             s->worker.Stop();
+            MSG archive_message{};
+            while (PeekMessageW(&archive_message, hwnd, WM_ARCHIVE_RESULT, WM_ARCHIVE_RESULT, PM_REMOVE))
+                DiscardArchiveResult(archive_message.lParam);
+            std::thread archive_cleanup(CleanupArchiveFiles);
+            archive_cleanup.join();
             ShutdownDetailsSizeWalk(*s);
 
             if (s->dropTarget) {
@@ -1971,6 +1992,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
             state.showFps = true;
         } else if (wcscmp(__wargv[i], L"--view") == 0 && i + 1 < __argc) {
             state.shot.view_mode = ui::ParseViewMode(__wargv[++i]);
+        } else if (wcscmp(__wargv[i], L"--shot-sort-date") == 0) {
+            state.shot.sort_date = true;
         } else if (wcscmp(__wargv[i], L"--size") == 0 && i + 1 < __argc) {
             int requestedWidth = 0;
             int requestedHeight = 0;

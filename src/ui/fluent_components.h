@@ -364,6 +364,9 @@ public:
     void DrawText(std::wstring_view text, const D2D1_RECT_F& bounds,
                   IDWriteTextFormat* format, const D2D1_COLOR_F& color,
                   HorizontalAlignment alignment, const D2D1_COLOR_F& background);
+    void DrawTextNative(std::wstring_view text, const D2D1_RECT_F& bounds,
+                        IDWriteTextFormat* format, const D2D1_COLOR_F& color,
+                        HorizontalAlignment alignment = HorizontalAlignment::Left);
     void DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                    const D2D1_COLOR_F& color);
     void DrawFocusRing(const D2D1_RECT_F& bounds, float radius);

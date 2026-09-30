@@ -75,7 +75,7 @@ using D2D1CreateFactoryFn = HRESULT(WINAPI*)(D2D1_FACTORY_TYPE, REFIID,
 
 D3D11CreateDeviceFn D3D11CreateDeviceProc() {
     static const D3D11CreateDeviceFn proc = [] {
-        const HMODULE module = LoadLibraryW(L"d3d11.dll");
+        const HMODULE module = LoadLibraryExW(L"d3d11.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         return module ? reinterpret_cast<D3D11CreateDeviceFn>(
             GetProcAddress(module, "D3D11CreateDevice")) : nullptr;
     }();
@@ -84,7 +84,7 @@ D3D11CreateDeviceFn D3D11CreateDeviceProc() {
 
 D2D1CreateFactoryFn D2D1CreateFactoryProc() {
     static const D2D1CreateFactoryFn proc = [] {
-        const HMODULE module = LoadLibraryW(L"d2d1.dll");
+        const HMODULE module = LoadLibraryExW(L"d2d1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         return module ? reinterpret_cast<D2D1CreateFactoryFn>(
             GetProcAddress(module, "D2D1CreateFactory")) : nullptr;
     }();

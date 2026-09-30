@@ -158,6 +158,7 @@ struct PaneViewModel {
     // 100k rows, so copying these containers for every animation frame is not
     // acceptable.
     std::shared_ptr<const FilterMap> filter_map;
+    std::shared_ptr<const std::vector<DateGroup>> date_groups;
     std::vector<ListEntryView> entries;
     // Real directory views retain the immutable filesystem snapshot and only
     // materialize visible rows. entries remains available to gallery/tests.
@@ -277,6 +278,7 @@ struct SidebarItem {
     bool expandable = false;
     bool expanded = false;
     bool starred_child = false;
+    bool use_path_icon = false;
 };
 
 enum class SidebarAddAction { None, CreateTag, AddNetwork };
@@ -472,6 +474,7 @@ struct DuplicateDriveView {
 };
 
 struct WindowViewModel {
+    bool archive_view = false;
     std::wstring window_title;
     std::vector<TabView> tabs;
     std::vector<TabGroupView> tab_groups;
@@ -485,7 +488,6 @@ struct WindowViewModel {
     std::vector<SplitterView> splitters;
     std::vector<SidebarGroup> sidebar;
     float sidebar_scroll = 0.0f;
-    float page_transition = 0.0f; // Remaining fraction of the page fade.
     TrayDeckView tray_deck;
     bool details_visible = false;   // right details panel toggle (view menu)
     DetailsPanelView details;
@@ -531,7 +533,9 @@ struct WindowViewModel {
     bool backdrop_enabled = false;
     WindowEffect window_effect = WindowEffect::MicaAlt;
     std::wstring background_image;
-    int wallpaper_look = 1;  // image mode: 0 subtle, 1 balanced, 2 vivid
+    int wallpaper_visibility = 50; // image visibility, 0..100 percent
+    std::wstring settings_accent_hex;
+    bool settings_accent_system = false;
     int wallpaper_blur = 1;  // image mode: 0 off, 1 light, 2 strong
     bool safe_mode = false;
     bool address_editing = false;
@@ -638,6 +642,9 @@ struct HitTestResult {
         Paste,
         Rename,
         Delete,
+        Properties,
+        Extract,
+        ExtractAll,
         SplitButton,
         DetailsToggle,
         PaneMediumIcons,
@@ -951,7 +958,8 @@ public:
                              const std::array<float, 3>& column_dividers = {},
                              bool search_view = false,
                              const std::array<float, 4>& search_dividers = {},
-                             float row_height_px = 0.0f) const;
+                             float row_height_px = 0.0f,
+                             const std::vector<DateGroup>* date_groups = nullptr) const;
     bool PointInItemName(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
                          int source_index, float x, float y) const;
     // Exact geometry of the Fluent frame drawn for the rename row; the hosted
@@ -959,6 +967,7 @@ public:
     D2D1_RECT_F RenameFieldRect(const PaneViewModel& vm, const D2D1_RECT_F& list,
                                 int source_index);
     D2D1_RECT_F SidebarRect(float w, float h) const;
+    D2D1_RECT_F SidebarSettingsRect(float w, float h) const;
     D2D1_RECT_F StagingTrayRect(const WindowViewModel& vm, float w, float h) const;
     D2D1_RECT_F TitleBarRect(float w) const;
     D2D1_RECT_F ToolbarRect(float w) const;
@@ -1087,7 +1096,8 @@ private:
     void DrawTextRect(ID2D1DeviceContext* dc, IDWriteTextFormat* format,
                       ID2D1SolidColorBrush* brush, std::wstring_view text,
                       float x, float y, float width, float height,
-                      D2D1_DRAW_TEXT_OPTIONS options = D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                      D2D1_DRAW_TEXT_OPTIONS options = D2D1_DRAW_TEXT_OPTIONS_CLIP,
+                      bool native_text = false);
     void DrawFolderIcon(float x, float y, float size, const Theme& theme);
     void DrawFileIcon(float x, float y, float size, const Theme& theme);
     void DrawEntryIcon(const ListEntryView& entry, float x, float y, float size, const Theme& theme);
@@ -1133,6 +1143,9 @@ private:
     mutable std::wstring auto_widths_language_;
     mutable std::unordered_map<std::wstring, float> cell_text_widths_;
     mutable float cell_text_widths_scale_ = 0.0f;
+    std::unordered_map<std::wstring, ComPtr<IDWriteTextLayout>> name_layout_cache_;
+    std::deque<std::wstring> name_layout_order_;
+    IDWriteTextFormat* name_layout_format_ = nullptr;
     std::array<uint32_t, 8> painted_columns_{};
     float tray_icon_dip_ = 48.0f;
     // Staging tray card text: 13 px semibold name, 11 px folder line.

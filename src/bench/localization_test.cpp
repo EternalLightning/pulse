@@ -13,10 +13,20 @@ bool Report(const char* name, bool passed) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse::l10n;
     bool passed = true;
     Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    for (const auto language : {L"zh-CN", L"en-US"}) {
+        SetLanguage(language);
+        const bool chinese = std::wstring_view(language) == L"zh-CN";
+        passed &= Report("new item dialog prompt and action follow display language",
+            Get(StringId::CreateItemNamePrompt) ==
+                (chinese ? L"输入项目名称" : L"Enter an item name") &&
+            Get(StringId::CreateItemAction) == (chinese ? L"创建" : L"Create"));
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--new-item") return passed ? 0 : 1;
+    SetLanguage(L"zh-CN");
     const auto& held_chinese = Get(StringId::TabRename);
     SetLanguage(L"en-US");
     passed &= Report("language switch preserves strings held by worker tasks",

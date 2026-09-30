@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" PULSE_VERSION LIMIT_COUNT 1)
 project(Pulse VERSION ${PULSE_VERSION} LANGUAGES C CXX)
+if(NOT DEFINED PROJECT_VERSION_TWEAK OR PROJECT_VERSION_TWEAK STREQUAL "")
+    set(PROJECT_VERSION_TWEAK 0)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +24,8 @@ if(PULSE_WIN81_CANDIDATE AND MSVC_VERSION GREATER_EQUAL 1950)
 endif()
 
 add_compile_options(/utf-8 /permissive- /W4 /EHsc)
+add_compile_options(/guard:cf)
+add_link_options(/guard:cf /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT)
 # Expose optional SDK COM interfaces; runtime calls are capability-checked.
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0603 WINVER=0x0603 _WIN32_IE=0x0A00 NTDDI_VERSION=NTDDI_WIN10_NI)
 
@@ -236,6 +241,9 @@ pulse_enable_lumatext(pulse_fluent_gallery)
 add_executable(pulse_command_icon_test src/bench/command_icon_test.cpp)
 target_link_libraries(pulse_command_icon_test PRIVATE d2d1 dwrite dwmapi ole32 windowscodecs user32)
 
+add_executable(pulse_date_group_layout_test src/bench/date_group_layout_test.cpp
+    src/app/date_groups.cpp src/ui/view_layout.cpp)
+
 # ---- Pulse.exe: main UI process ----
 file(GLOB_RECURSE PULSE_APP_SOURCES CONFIGURE_DEPENDS
     src/app/*.cpp src/ui/*.cpp src/fs/*.cpp src/ops/*.cpp src/ipc/*.cpp src/index/*.cpp)
@@ -259,6 +267,9 @@ endif()
 list(APPEND PULSE_APP_SOURCES src/index/network_agent_client.cpp)
 if(PULSE_APP_SOURCES)
     add_executable(pulse WIN32 ${PULSE_APP_SOURCES})
+    add_custom_command(TARGET pulse POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip" "$<TARGET_FILE_DIR:pulse>/7zip")
     if(PULSE_WITH_SELFTEST)
         target_compile_definitions(pulse PRIVATE PULSE_WITH_SELFTEST=1)
     endif()
@@ -360,7 +371,7 @@ target_link_libraries(pulse_preview PRIVATE ole32 shell32 gdi32 uuid windowscode
 # SVG previews are rasterized with Direct2D, but d2d1/d3d11/dxgi are
 # deliberately not linked: implicit imports would load them at every preview
 # host start-up (the first preview of any file type) while only SVG needs them.
-# svg_raster.cpp resolves them on demand with LoadLibraryW instead.
+# svg_raster.cpp resolves them on demand from System32 instead.
 target_link_libraries(pulse_preview PRIVATE pulse_crash_reporter)
 pulse_add_version_resource(pulse_preview "Pulse preview host" "Pulse.Preview" "Pulse.Preview.exe")
 
@@ -441,6 +452,18 @@ target_compile_features(pulse_dialog_close_test PRIVATE cxx_std_20)
 target_compile_options(pulse_dialog_close_test PRIVATE /W4 /permissive- /utf-8)
 target_compile_definitions(pulse_dialog_close_test PRIVATE UNICODE _UNICODE NOMINMAX)
 target_link_libraries(pulse_dialog_close_test PRIVATE dwmapi user32)
+
+add_executable(pulse_dialog_fade_test
+    src/bench/dialog_fade_test.cpp src/bench/localization_test.rc
+    src/app/new_item_dialog.cpp src/app/archive_dialog.cpp
+    src/app/batch_rename.cpp src/fs/fs_enum.cpp
+    src/ui/dialog_lifecycle.cpp
+    src/ui/typography.cpp src/ui/ui_compositor.cpp)
+target_include_directories(pulse_dialog_fade_test PRIVATE src)
+target_link_libraries(pulse_dialog_fade_test PRIVATE
+    pulse_localization comctl32 user32 gdi32 dwmapi dcomp d3d11 d2d1 dwrite dxgi
+    shcore ole32 shell32 uuid windowscodecs netapi32 shlwapi)
+pulse_enable_lumatext(pulse_dialog_fade_test)
 
 add_executable(pulse_child_edit_test
     src/bench/child_edit_test.cpp src/bench/child_edit_test.rc
@@ -603,3 +626,21 @@ if(PULSE_BUILD_PROGRESS_UI_TESTS)
         endif()
     endforeach()
 endif()
+
+add_executable(pulse_archive_test src/bench/archive_test.cpp src/ops/archive.cpp)
+target_include_directories(pulse_archive_test PRIVATE src)
+target_compile_definitions(pulse_archive_test PRIVATE PULSE_ARCHIVE_PROCESS_TEST)
+add_executable(pulse_archive_process_fixture src/bench/archive_process_fixture.cpp)
+add_dependencies(pulse_archive_test pulse_archive_process_fixture)
+add_executable(pulse_net_cache_test src/bench/net_cache_test.cpp
+    src/fs/fs_net_cache.cpp src/fs/fs_enum.cpp)
+target_include_directories(pulse_net_cache_test PRIVATE src)
+target_compile_definitions(pulse_net_cache_test PRIVATE PULSE_NET_CACHE_TESTING)
+target_link_libraries(pulse_net_cache_test PRIVATE shell32 shlwapi netapi32)
+add_executable(pulse_archive_dialog_test src/bench/archive_dialog_test.cpp
+    src/app/archive_dialog.cpp src/ui/dialog_lifecycle.cpp src/bench/localization_test.rc)
+target_include_directories(pulse_archive_dialog_test PRIVATE src)
+target_link_libraries(pulse_archive_dialog_test PRIVATE pulse_localization comctl32 dwmapi ole32 shell32 uuid)
+add_custom_command(TARGET pulse_archive_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip" "$<TARGET_FILE_DIR:pulse_archive_test>/7zip")

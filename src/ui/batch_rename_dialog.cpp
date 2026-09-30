@@ -70,7 +70,7 @@ public:
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
         if (owner_) EnableWindow(owner_, FALSE);
-        ShowWindow(hwnd_, SW_SHOW);
+        ShowDialogWithFade(hwnd_);
         LayoutEdits();
         SetForegroundWindow(hwnd_);
         if (edit_find_) SetFocus(edit_find_);

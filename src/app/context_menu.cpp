@@ -158,6 +158,7 @@ std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_und
                                                     const std::wstring& undo_label) {
     std::vector<ui::FluentMenuItem> items;
     items.push_back(Item(CmdNewFolder, l10n::Get(l10n::StringId::NewFolder).c_str(), kGlyphNewFolder, L"F7"));
+    items.push_back(Item(CmdNewFile, l10n::Get(l10n::StringId::File).c_str(), kGlyphNewFile));
     items.push_back(Item(CmdNewTextFile, l10n::Get(l10n::StringId::NewTextDocument).c_str(), kGlyphNewFile));
     items.back().separator_after = true;
     items.push_back(Item(CmdPaste, l10n::Get(l10n::StringId::Paste).c_str(), kGlyphPaste, L"Ctrl+V", can_paste));
@@ -261,6 +262,7 @@ void AppendBackgroundViewCommands(std::vector<ui::FluentMenuItem>& items,
 std::vector<ui::FluentMenuItem> BuildNewMenu() {
     std::vector<ui::FluentMenuItem> items;
     items.push_back(Item(CmdNewFolder, l10n::Get(l10n::StringId::Folder).c_str(), kGlyphNewFolder, L"F7"));
+    items.push_back(Item(CmdNewFile, l10n::Get(l10n::StringId::File).c_str(), kGlyphNewFile));
     items.push_back(Item(CmdNewTextFile, l10n::Get(l10n::StringId::TextDocument).c_str(), kGlyphNewFile));
     return items;
 }

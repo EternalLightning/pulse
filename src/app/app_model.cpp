@@ -1,6 +1,7 @@
 // app_model.cpp
 #include "app_model.h"
 #include "search_query.h"
+#include "date_groups.h"
 #include "../common/json_utils.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
@@ -117,6 +118,8 @@ void Tab::SetSnapshot(fs::SnapshotPtr value) {
     view_cache_places_revision = 0;
     view_cache_filter_text.clear();
     view_filter_map.reset();
+    view_date_groups.reset();
+    view_date_filter.reset();
     view_tag_dots.reset();
     snapshot_path = snapshot ? current_path : L"";
     if(content_results) { directory_count=0; file_count=content_results->Count(); return; }
@@ -982,7 +985,7 @@ static SidebarEntry MakeKnownEntry(REFKNOWNFOLDERID fid, const wchar_t* glyph, c
         e.label = override_name ? override_name : TabTitle(e.path);
         CoTaskMemFree(path);
     } else {
-        e.label = fallback;
+        e.label = override_name ? override_name : fallback;
     }
     return e;
 }
@@ -1121,7 +1124,7 @@ SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
     desktop.builtin = static_cast<int>(BuiltinQuickAccess::Desktop);
     m.quick_access.push_back(std::move(desktop));
     SidebarEntry downloads = MakeKnownEntry(FOLDERID_Downloads, L"\xE896", L"Downloads",
-        ui::HexColor(0xC084FC), L"Downloads");
+        ui::HexColor(0xC084FC), l10n::Get(l10n::StringId::Downloads).c_str());
     downloads.builtin = static_cast<int>(BuiltinQuickAccess::Downloads);
     m.quick_access.push_back(std::move(downloads));
     // OneDrive leads its own section: one row per signed-in account, the way
@@ -1396,6 +1399,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.banner_message = tab->banner_message;
     out.banner_kind = tab->net_readonly ? 2 : 0;
     out.filter_map.reset();
+    out.date_groups.reset();
     out.tag_dots.reset();
     out.loading = tab->loading;
     out.search_retaining_results = tab->search_retaining_results;
@@ -1403,7 +1407,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.can_go_forward = tab->CanGoForward();
     std::wstring virtual_kind;
     ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
-    out.can_go_up = virtual_kind == L"recycle"
+    out.can_go_up = (virtual_kind == L"recycle" || virtual_kind == L"archive")
         ? true
         : (fs::IsVirtualPath(tab->current_path) ? tab->CanGoBack() : !tab->current_path.empty());
     out.is_file_system = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
@@ -1479,6 +1483,21 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
             tab->view_filter_map = std::move(filtered);
         }
         out.filter_map = tab->view_filter_map;
+    }
+    if (out.view_mode == ui::ViewMode::Details && out.is_file_system &&
+        out.sort_column == ui::SortColumn::Mtime && out.snapshot && out.EntryCount()) {
+        SYSTEMTIME today{};
+        GetLocalTime(&today);
+        const unsigned day_key = today.wYear * 10000u + today.wMonth * 100u + today.wDay;
+        if (!tab->view_date_groups || source_changed ||
+            tab->view_date_filter.get() != out.filter_map.get() ||
+            tab->view_date_day != day_key) {
+            tab->view_date_groups = std::make_shared<const std::vector<ui::DateGroup>>(
+                BuildDateGroups(out.snapshot, out.filter_map.get(), today));
+            tab->view_date_filter = out.filter_map;
+            tab->view_date_day = day_key;
+        }
+        out.date_groups = tab->view_date_groups;
     }
 }
 
@@ -1678,6 +1697,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             item.icon_glyph = L"\xE8B7";
             item.fallback_text = L"Dir";
             item.icon_color = ui::HexColor(0xFBBF24);
+            item.use_path_icon = true;
             access.items.push_back(std::move(item));
         }
     }

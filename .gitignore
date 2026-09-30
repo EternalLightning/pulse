@@ -20,6 +20,8 @@ compile_commands.json
 *.obj
 *.lib
 *.dll
+!third_party/7zip/7z.exe
+!third_party/7zip/7z.dll
 !third_party/pdfium/bin/pdfium.dll
 /third_party/pdfium/*.tgz
 !third_party/lumatext/bin/lumatext.dll

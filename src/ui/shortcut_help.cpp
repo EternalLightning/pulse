@@ -1,3 +1,4 @@
+#include "dialog_lifecycle.h"
 #include "shortcut_help.h"
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
@@ -184,13 +185,14 @@ void ShowShortcutHelp(HWND owner,bool dark,D2D1_COLOR_F accent) {
         p.x,p.y,r.right,r.bottom,owner,nullptr,wc.hInstance,&window);
     if (!hwnd) return;
     EnableWindow(owner,FALSE);
-    ShowWindow(hwnd,SW_SHOW); SetFocus(hwnd);
+    ShowDialogWithFade(hwnd); SetFocus(hwnd);
     MSG msg{};
     int status=1;
     while (!window.done && (status=GetMessageW(&msg,nullptr,0,0))>0) {
         TranslateMessage(&msg); DispatchMessageW(&msg);
     }
     EnableWindow(owner,TRUE);
+    HideComposedDialog(hwnd, owner);
     DestroyWindow(hwnd);
     SetForegroundWindow(owner);
     if (IsWindow(previous)) SetFocus(previous);

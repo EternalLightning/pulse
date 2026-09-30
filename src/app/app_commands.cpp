@@ -1,3 +1,4 @@
+#include "archive_navigation.h"
 #include "../ui/shortcut_help.h"
 // app_commands.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
@@ -24,6 +25,7 @@
 #include "context_menu.h"
 #include "app_change_tracking.h"
 #include "batch_rename.h"
+#include "new_item_dialog.h"
 #include "search_query.h"
 #include "link_resolve.h"
 #include "resource.h"
@@ -88,23 +90,30 @@ void CopySelectedPath(AppState& s) {
     ops::WriteClipboardText(text);
 }
 
-// Creates "新建文件夹"/"新建文本文档.txt" via the ops layer, then (on the next
-// snapshot) selects it and enters the rename overlay.
-void CreateNewItem(AppState& s, bool folder) {
+void CreateNewItem(AppState& s, bool folder, bool arbitrary_file) {
     app::Tab* tab = ActiveTab(s);
-    if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
-    std::wstring name = folder
-        ? app::UniqueChildName(tab->current_path,
-            l10n::Get(l10n::StringId::NewFolder), L"")
-        : app::UniqueChildName(tab->current_path,
-            l10n::Get(l10n::StringId::NewTextDocument), L".txt");
-    std::wstring full = tab->current_path;
+    if (!tab || tab->current_path.empty() || IsArchiveView(tab->current_path) ||
+        fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
+    const std::wstring parent_path = tab->current_path;
+    std::wstring name;
+    const auto title = folder ? l10n::StringId::NewFolder
+        : arbitrary_file ? l10n::StringId::NewFile : l10n::StringId::NewTextDocument;
+    const auto channel = [](float value) {
+        return static_cast<int>(std::clamp(value, 0.0f, 1.0f) * 255.0f);
+    };
+    const COLORREF accent = RGB(channel(s.accentColor.r), channel(s.accentColor.g),
+                                channel(s.accentColor.b));
+    if (!app::PromptNewItemName(s.hwnd, l10n::Get(title), s.darkMode, accent, name,
+            !folder && !arbitrary_file ? 251 : 255)) return;
+    if (!folder && !arbitrary_file && name.find(L'.') == std::wstring::npos) {
+        name += L".txt";
+    }
+    std::wstring full = parent_path;
     if (!full.ends_with(L"\\")) full += L"\\";
     full += name;
     ops::OpRequest req;
     req.type = folder ? ops::OpType::CreateFolder : ops::OpType::CreateTextFile;
     req.sources.push_back(full);
-    s.pendingRenameName = name;
     s.ops.Submit(std::move(req));
 }
 
@@ -442,6 +451,8 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         return;
     }
     switch (cmd) {
+    case app::CmdExtract: ExtractArchiveSelection(s, false); return;
+    case app::CmdExtractAll: ExtractArchiveSelection(s, true); return;
     case app::CmdRefresh:
         if (const auto* tab = ActiveTab(s)) {
             s.store.MarkDirty(tab->current_path);
@@ -544,6 +555,10 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         ShowWildcardSelect(s);
         break;
     case app::CmdProperties: {
+        if (auto* tab = ActiveTab(s); tab && IsArchiveView(tab->current_path)) {
+            s.ops.ShowProperties(tab->archive_file);
+            return;
+        }
         // Shell properties on the ops open thread. A multi-selection opens one
         // merged sheet (like Explorer) instead of the focused item's sheet.
         std::vector<std::wstring> paths;
@@ -585,6 +600,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         if (s.ops.CanUndo()) s.ops.Undo();
         break;
     case app::CmdNewFolder: CreateNewItem(s, true); break;
+    case app::CmdNewFile: CreateNewItem(s, false, true); break;
     case app::CmdNewTextFile: CreateNewItem(s, false); break;
     case app::CmdTags: {
         POINT point{};
@@ -1055,6 +1071,8 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
 }
 
 void ShowNewDropdown(AppState& s) {
+    const auto* tab = ActiveTab(s);
+    if (!tab || IsArchiveView(tab->current_path)) return;
     if (!EnsureMenu(s)) return;
     const auto anchor = s.renderer.NewCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
     ClientToScreen(s.hwnd, &pt);
@@ -1341,19 +1359,28 @@ void ShowToolbarMore(AppState& s) {
     auto* tab=ActiveTab(s);
     if (!tab) return;
     std::vector<ui::FluentMenuItem> items;
-    const int commands[]={app::CmdCut,app::CmdCopy,app::CmdPaste,app::CmdRename,app::CmdDelete};
+    const int commands[]={app::CmdCut,app::CmdCopy,app::CmdPaste,app::CmdRename,app::CmdDelete,app::CmdProperties};
     const l10n::StringId labels[]={l10n::StringId::Cut,l10n::StringId::Copy,l10n::StringId::Paste,
-        l10n::StringId::Rename,l10n::StringId::Delete};
-    const wchar_t* glyphs[]={L"\xE8C6",L"\xE8C8",L"\xE77F",L"\xE8AC",L"\xE74D"};
-    const wchar_t* shortcuts[]={L"Ctrl+X",L"Ctrl+C",L"Ctrl+V",L"F2",L"Delete"};
-    for (int i=0;i<5;++i) {
+        l10n::StringId::Rename,l10n::StringId::Delete,l10n::StringId::Properties};
+    const wchar_t* glyphs[]={L"\xE8C6",L"\xE8C8",L"\xE77F",L"\xE8AC",L"\xE74D",L"\xE946"};
+    const wchar_t* shortcuts[]={L"Ctrl+X",L"Ctrl+C",L"Ctrl+V",L"F2",L"Delete",L"Alt+Enter"};
+    const float width=static_cast<float>(s.compositor.Width());
+    const float left=s.renderer.EffectiveSidebarWidth(width);
+    if (width-left < 540*s.scale) for (int i=0;i<6;++i) {
         ui::FluentMenuItem item;
         item.command=commands[i]; item.text=l10n::Get(labels[i]); item.glyph=glyphs[i];
         item.shortcut=shortcuts[i];
-        item.enabled=i==2 || tab->SelectedCount()>0;
+        item.enabled=IsArchiveView(tab->current_path) ? i==5 : i==2 || tab->SelectedCount()>0;
         items.push_back(std::move(item));
     }
-    items.back().separator_after=true;
+    if (!items.empty() && width-left < 540*s.scale) items.back().separator_after=true;
+    if (IsArchiveView(tab->current_path)) {
+        ui::FluentMenuItem extract;
+        extract.command=app::CmdExtract; extract.text=l10n::effective_language()==l10n::Language::EnUS ? L"Extract" : L"解压"; extract.enabled=tab->SelectedCount()>0;
+        items.push_back(extract);
+        extract.command=app::CmdExtractAll; extract.text=l10n::effective_language()==l10n::Language::EnUS ? L"Extract all" : L"解压全部项目"; extract.enabled=!tab->loading;
+        items.push_back(extract);
+    }
     ui::FluentMenuItem split;
     split.text=l10n::Get(l10n::StringId::SplitLayout);
     split.children=app::BuildSplitMenu(-1);
@@ -1370,8 +1397,6 @@ void ShowToolbarMore(AppState& s) {
     column.separator_after=true;
     items.push_back(std::move(column));
     items.push_back(app::BuildShortcutHints());
-    const float width=static_cast<float>(s.compositor.Width());
-    const float left=s.renderer.EffectiveSidebarWidth(width);
     const auto layout=ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
         s.renderer.NewButtonWidthPx(true),left);
     POINT anchor{static_cast<LONG>(layout.overflow.left),static_cast<LONG>(layout.overflow.bottom)};

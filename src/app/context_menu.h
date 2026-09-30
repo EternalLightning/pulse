@@ -96,6 +96,9 @@ enum MenuCmd : int {
     CmdViewRecentChanges = 180,
     CmdColumnLayout = 181,
     CmdShortcutHelp = 182,
+    CmdNewFile = 183,
+    CmdExtract = 184,
+    CmdExtractAll = 185,
     CmdRecentBase = 200,
     CmdIndexBase = 1000,
     // Explorer integration (优化.md §7): registry static verbs bound to the

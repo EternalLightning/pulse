@@ -58,7 +58,7 @@ bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
     const bool b_folder = b.is_dir || (!b.link_target.empty() && b.link_target_is_dir);
     // FoldersFirst pins folders above the direction flip below; FollowDirection
     // feeds the group through it so descending order sends folders down.
-    if (a_folder != b_folder) {
+    if (col != ui::SortColumn::Mtime && a_folder != b_folder) {
         if (folders == FolderSortMode::FoldersFirst) return a_folder;
         if (folders == FolderSortMode::FollowDirection)
             return (dir == ui::SortDirection::Desc) ? !a_folder : a_folder;

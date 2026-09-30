@@ -31,6 +31,12 @@ constexpr std::wstring_view kSuccess = L"\xE73E";
 constexpr std::wstring_view kWarning = L"\xE7BA";
 constexpr std::wstring_view kError = L"\xEA39";
 
+bool ContainsHan(std::wstring_view text) noexcept {
+    return std::any_of(text.begin(), text.end(), [](wchar_t c) {
+        return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF);
+    });
+}
+
 float Clamp01(float value) noexcept {
     return std::clamp(value, 0.0f, 1.0f);
 }
@@ -485,7 +491,7 @@ void Painter::DrawText(std::wstring_view text, const D2D1_RECT_F& bounds,
     } else if (alignment == HorizontalAlignment::Right) {
         text_alignment = DWRITE_TEXT_ALIGNMENT_TRAILING;
     }
-    if (!high_contrast_ && compositor_->DrawLumaText(
+    if (!high_contrast_ && !ContainsHan(text) && compositor_->DrawLumaText(
             text, format, snapped, color, background, text_alignment)) {
         return;
     }
@@ -494,6 +500,26 @@ void Painter::DrawText(std::wstring_view text, const D2D1_RECT_F& bounds,
     if (!layout) return;
     dc_->DrawTextLayout(D2D1::Point2F(snapped.left, snapped.top), layout,
                         ScratchBrush(color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+}
+
+void Painter::DrawTextNative(std::wstring_view text, const D2D1_RECT_F& bounds,
+                             IDWriteTextFormat* format, const D2D1_COLOR_F& color,
+                             HorizontalAlignment alignment) {
+    if (!dc_ || !format || text.empty() || !compositor_) return;
+    D2D1_RECT_F snapped = typography::SnapVerticalBounds(bounds);
+    const float width = snapped.right - snapped.left;
+    const float height = snapped.bottom - snapped.top;
+    if (width <= 0.0f || height <= 0.0f) return;
+    snapped.left = std::round(snapped.left);
+    const DWRITE_TEXT_ALIGNMENT text_alignment = alignment == HorizontalAlignment::Center
+        ? DWRITE_TEXT_ALIGNMENT_CENTER
+        : alignment == HorizontalAlignment::Right
+            ? DWRITE_TEXT_ALIGNMENT_TRAILING
+            : DWRITE_TEXT_ALIGNMENT_LEADING;
+    IDWriteTextLayout* layout = GetTextLayout(
+        compositor_, format, text, width, height, text_alignment);
+    if (layout) dc_->DrawTextLayout(D2D1::Point2F(snapped.left, snapped.top), layout,
+                                    ScratchBrush(color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
 void Painter::DrawTextWithBrush(std::wstring_view text, const D2D1_RECT_F& bounds,
@@ -515,7 +541,7 @@ void Painter::DrawTextWithBrush(std::wstring_view text, const D2D1_RECT_F& bound
             : DWRITE_TEXT_ALIGNMENT_LEADING;
     ID2D1SolidColorBrush* text_brush = Brush(brush);
     if (DrawLegacyIcon(dc_, compositor_->DwriteFactory(), text, bounds, text_brush, format->GetFontSize())) return;
-    if (!high_contrast_ && theme_ && text_brush && compositor_->DrawLumaText(
+    if (!high_contrast_ && !ContainsHan(text) && theme_ && text_brush && compositor_->DrawLumaText(
             text, format, snapped, text_brush->GetColor(), theme_->bg, text_alignment)) {
         return;
     }
@@ -1540,7 +1566,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     } else if (spec.show_count || spec.badge_count > 0) {
         const auto count = std::to_wstring(std::min(spec.badge_count, 99));
         const float count_width = Px(spec.badge_count > 9 ? 22.0f : 14.0f);
-        DrawText(count,
+        DrawTextNative(count,
                  D2D1::RectF(content.right - count_width, content.top, content.right,
                             content.bottom),
                  CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -1550,15 +1576,15 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
         return;
     }
     if (spec.detail.empty()) {
-        DrawText(spec.text, content, NavFormat(), foreground);
+        DrawTextNative(spec.text, content, NavFormat(), foreground);
     } else {
         const float detail_width = MeasureTextWidth(compositor_->DwriteFactory(),
                                                     CaptionFormat(), spec.detail) + Px(8.0f);
-        DrawText(spec.text,
+        DrawTextNative(spec.text,
                  D2D1::RectF(content.left, content.top, content.right - detail_width,
                             content.bottom),
                  NavFormat(), foreground);
-        DrawText(spec.detail,
+        DrawTextNative(spec.detail,
                  D2D1::RectF(content.right - detail_width, content.top, content.right,
                             content.bottom),
                  CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -2236,7 +2262,7 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
                                      : spec.bounds.left + Px(10.0f);
     // Disclosure chevron sits at the trailing edge and mirrors collapsed state.
     const float chevron_slot = Px(14.0f);
-    DrawText(spec.text,
+    DrawTextNative(spec.text,
              D2D1::RectF(text_left, spec.bounds.top,
                         spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.bottom),
              SectionFormat(), foreground);
@@ -2280,11 +2306,11 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     const float text_left = content.left + icon_slot + Px(8.0f);
     const float detail_width = MeasureTextWidth(compositor_->DwriteFactory(),
                                                 CaptionFormat(), spec.detail) + Px(6.0f);
-    DrawText(spec.name,
+    DrawTextNative(spec.name,
              D2D1::RectF(text_left, content.top, content.right - detail_width,
                         content.top + text_row),
              NavFormat(), foreground);
-    DrawText(spec.detail,
+    DrawTextNative(spec.detail,
              D2D1::RectF(content.right - detail_width, content.top, content.right,
                         content.top + text_row),
              CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -2442,7 +2468,7 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
     }
     const float radius = Px(theme_->radius_flyout);
     const D2D1_COLOR_F fill = high_contrast_ ? theme_->surface_flyout
-                              : dark_ ? Rgba(0x0D1422, 220) : Rgba(0xF3F7FD, 245);
+                              : dark_ ? Rgba(0x0D1422, 170) : Rgba(0xF3F7FD, 210);
     const D2D1_COLOR_F border = spec.state.hovered
                                     ? theme_->accent
                                     : (dark_ ? RgbaF(0x3B82F6, 0.30f) : RgbaF(0x3B82F6, 0.35f));

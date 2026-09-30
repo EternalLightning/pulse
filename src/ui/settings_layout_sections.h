@@ -19,10 +19,10 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     const float tile_left=narrow ? left+16*scale : right-16*scale-3*tw;
     for(int i=0;i<3;++i) l.theme_tile[i]=D2D1::RectF(tile_left+i*tw+4*scale,
         l.theme_row.bottom-90*scale,tile_left+(i+1)*tw-4*scale,l.theme_row.bottom-12*scale);
-    l.accent_card=row(96);
-    const float picker=kBloomPickerDip*scale;
-    l.accent_picker=D2D1::RectF(right-16*scale-picker,l.accent_card.top+(96*scale-picker)/2,
-        right-16*scale,l.accent_card.top+(96*scale+picker)/2);
+    l.accent_card=row(narrow ? 116.0f : 96.0f);
+    const float accent_top=l.accent_card.bottom-(narrow ? 44.0f : 64.0f)*scale;
+    l.accent_system=D2D1::RectF(right-116*scale,accent_top,right-16*scale,accent_top+32*scale);
+    l.accent_picker=D2D1::RectF(right-232*scale,accent_top,right-124*scale,accent_top+32*scale);
     // The tiles reuse SettingsEffect's existing hit regions and controller.
     // A single tile selector avoids duplicate controls for the same setting.
     const int effect_columns = right-left < 440*scale ? 2 : 4;
@@ -40,7 +40,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     l.language_card=row(narrow ? 98.0f : 64.0f); l.language_choice=choice(l.language_card,176);
     l.group[0]=D2D1::RectF(left,l.theme_row.top,right,y);
     section(1);
-    l.startup_row[0]=row(64); l.startup_row[1]=row(64);
+    l.startup_row[0]=row(64); l.startup_row[1]=row(64); l.startup_row[2]=row(88);
     l.group[1]=D2D1::RectF(left,l.startup_row[0].top,right,y);
     section(2);
     l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);
@@ -58,10 +58,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         const float bw=painter ? painter->MeasureButtonWidth(l10n::Get(l10n::StringId::ChooseImage)) : 120*scale;
         l.wallpaper_clear=D2D1::RectF(right-16*scale-cw,y-44*scale,right-16*scale,y-12*scale);
         l.wallpaper_choose=D2D1::RectF(l.wallpaper_clear.left-8*scale-bw,y-44*scale,l.wallpaper_clear.left-8*scale,y-12*scale);
-        y+=8*scale; l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_look_card,l.wallpaper_look_row,3,282);
+        y+=8*scale; l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); l.wallpaper_look_value=choice(l.wallpaper_look_card,112);
         y+=8*scale; l.wallpaper_blur_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_blur_card,l.wallpaper_blur_row,3,282);
         y+=8*scale; l.tray_icon_card=row(narrow ? 98.0f : 64.0f); segments(l.tray_icon_card,l.tray_icon_row,3,282);
-        y+=8*scale; l.startup_row[2]=row(64);
         y+=8*scale; l.hidden_files_row=row(64);
         y+=8*scale; l.protected_files_row=row(64);
         y+=8*scale; l.pinned_names_row=row(64);

@@ -169,7 +169,7 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
         result = modern->CreateCustomRenderingParams(
             base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
             base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
-            DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC, DWRITE_GRID_FIT_MODE_DISABLED,
+            DWRITE_RENDERING_MODE1_NATURAL, DWRITE_GRID_FIT_MODE_ENABLED,
             &modern_params);
         modern->Release();
         if (SUCCEEDED(result) && modern_params) {
@@ -181,8 +181,8 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
     result = factory->CreateCustomRenderingParams(
         base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
         base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
-        DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-        DWRITE_GRID_FIT_MODE_DISABLED, params);
+        DWRITE_RENDERING_MODE_NATURAL,
+        DWRITE_GRID_FIT_MODE_ENABLED, params);
     base->Release();
     return result;
 }

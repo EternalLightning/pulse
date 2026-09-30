@@ -294,10 +294,12 @@ void SettingsController::TrayIconSize(int index) {
 }
 
 // Both only change how the next frame is painted; the caller invalidates.
-void SettingsController::WallpaperLook(int index) {
-    static constexpr int values[] = {0, 1, 2};
-    if (prefs_ && SelectValue(index, values, prefs_->wallpaper_look))
+void SettingsController::WallpaperVisibility(int percent) {
+    if (prefs_ && percent >= 0 && percent <= 100 &&
+        prefs_->wallpaper_visibility != percent) {
+        prefs_->wallpaper_visibility = percent;
         SaveAndApply(SettingsEffect::None);
+    }
 }
 
 void SettingsController::WallpaperBlur(int index) {
@@ -387,7 +389,10 @@ void SettingsController::ToggleUi(int index) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
     } else if (index == 3) {
-        prefs_->ApplyFolderOpen(!prefs_->open_folders_in_pulse);
+        if (!prefs_->ApplyFolderOpen(!prefs_->open_folders_in_pulse)) {
+            error_ = l10n::Get(l10n::StringId::DefaultFileManagerError);
+            return;
+        }
         SaveAndApply(SettingsEffect::None);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;

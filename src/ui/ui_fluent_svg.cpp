@@ -243,6 +243,12 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
     svg->GetRoot(&root);
     if (root.get())
         root->SetAttributeValue(L"opacity", std::clamp(opacity, 0.0f, 1.0f));
+    if (root.get() && foreground && resource_id >= IDR_FILES_NEW_SVG &&
+        resource_id <= IDR_FILES_FILTER_SVG) {
+        ComPtr<ID2D1SvgPaint> fill;
+        if (SUCCEEDED(root->GetAttributeValue(L"fill", IID_PPV_ARGS(&fill))) && fill.get())
+            fill->SetColor(foreground);
+    }
 
     const float available_width = std::max(0.0f, bounds.right - bounds.left);
     const float available_height = std::max(0.0f, bounds.bottom - bounds.top);
