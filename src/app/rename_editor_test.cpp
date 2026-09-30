@@ -299,6 +299,7 @@ bool RunRenameEditorTest() {
         tab->SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>(1, entry));
         tab->loading = false;
         tab->selected_index = 0;
+        tab->selected.insert(0);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         if (capture_editor) SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -318,6 +319,62 @@ bool RunRenameEditorTest() {
         if (log) fprintf(log, "editor rectangle: %ld,%ld - %ld,%ld\n", editor_rect.left, editor_rect.top, editor_rect.right, editor_rect.bottom);
         check(editor_rect.right > editor_rect.left && editor_rect.bottom > editor_rect.top,
             "rename editor has a nonempty visible text area");
+        check(editor_rect.right - editor_rect.left > 180 * state->scale,
+            "short original name opens a wide rename editor");
+        {
+            ui::PaneViewModel pane;
+            pane.entries.resize(1);
+            pane.entries[0].name = L"a.txt";
+            const ui::ViewMode modes[] = {ui::ViewMode::Details, ui::ViewMode::List,
+                ui::ViewMode::SmallIcons, ui::ViewMode::MediumIcons, ui::ViewMode::LargeIcons,
+                ui::ViewMode::ExtraLargeIcons, ui::ViewMode::Tiles, ui::ViewMode::Content};
+            for (const auto mode : modes) {
+                pane.view_mode = mode;
+                for (const float width : {320.0f, 900.0f}) {
+                    const auto list = D2D1::RectF(0, 0, width * state->scale, 500 * state->scale);
+                    pane.entries[0].name = L"a.txt";
+                    const auto short_field = state->renderer.RenameFieldRect(pane, list, 0);
+                    pane.entries[0].name = L"a much longer original filename.txt";
+                    const auto long_field = state->renderer.RenameFieldRect(pane, list, 0);
+                    check(short_field.left == long_field.left && short_field.right == long_field.right,
+                        "rename width does not depend on original name in any view");
+                    check(short_field.right > short_field.left && short_field.left >= list.left &&
+                        short_field.right <= list.right,
+                        "rename field stays inside wide and narrow viewports");
+                }
+            }
+        }
+        SendMessageW(state->hwndRenameEdit, EM_REPLACESEL, TRUE,
+            reinterpret_cast<LPARAM>(L"a longer filename"));
+        LayoutRenameOverlay(*state);
+        RECT longer_rect{};
+        GetWindowRect(state->hwndRenameEdit, &longer_rect);
+        wchar_t longer_name[64]{};
+        GetWindowTextW(state->hwndRenameEdit, longer_name, ARRAYSIZE(longer_name));
+        check(wcscmp(longer_name, L"a longer filename.txt") == 0 &&
+            longer_rect.right - longer_rect.left == editor_rect.right - editor_rect.left,
+            "typing a longer stem preserves extension and editor width");
+        SetWindowTextW(state->hwndRenameEdit, L"before.txt");
+        SendMessageW(state->hwndRenameEdit, EM_SETSEL, 0, 6);
+        {
+            auto vm = BuildVm(*state, false);
+            const auto theme = ui::MakeTheme(state->darkMode, state->accentColor);
+            const auto snapshot = [&](const wchar_t* name) {
+                auto* dc = state->compositor.Dc();
+                dc->BeginDraw();
+                dc->Clear(theme.bg);
+                state->renderer.Render(vm, D2D1::RectF(0, 0, 1000, 700), theme);
+                const HRESULT result = dc->EndDraw();
+                const auto path = std::filesystem::path(L"bench_data/rename-editor") / name;
+                check(SUCCEEDED(result) && state->compositor.SaveSnapshot(path.c_str()),
+                    "toolbar and rename frame render to an offscreen snapshot");
+            };
+            snapshot(L"toolbar-enabled.png");
+            vm.pane.selected_count = 0;
+            snapshot(L"toolbar-disabled.png");
+            vm.archive_view = true;
+            snapshot(L"toolbar-archive.png");
+        }
         if (capture_editor) {
             Pump();
             EditorPixels sampled;

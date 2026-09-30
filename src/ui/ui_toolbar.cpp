@@ -86,8 +86,9 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         const float radius=8*scale_;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
-    const auto& create_color=create.state.enabled ? theme.text : theme.text_disabled;
-    if (!DrawFluentSvg(IDR_FILES_NEW_SVG,icon_bounds(icon_x,icon_y),1.0f,&create_color)) {
+    const auto& create_color=create.state.enabled ? theme.accent : theme.text_disabled;
+    if (!DrawFluentSvg(create.state.enabled ? IDR_FILES_NEW_COLOR_SVG : IDR_FILES_NEW_SVG,
+        icon_bounds(icon_x,icon_y),1.0f,create.state.enabled ? nullptr : &create_color)) {
         const auto icon=icon_bounds(icon_x,icon_y);
         DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
             kIconAdd,L"",create_color,0.82f);
@@ -101,6 +102,8 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         vm.details_visible ? kIconDetailsClose : kIconDetailsOpen,L""};
     const int files_icons[]={IDR_FILES_CUT_SVG,IDR_FILES_COPY_SVG,IDR_FILES_PASTE_SVG,
         IDR_FILES_RENAME_SVG,IDR_FILES_DELETE_SVG,IDR_FILES_PROPERTIES_SVG};
+    const int color_icons[]={IDR_FILES_CUT_COLOR_SVG,IDR_FILES_COPY_COLOR_SVG,IDR_FILES_PASTE_COLOR_SVG,
+        IDR_FILES_RENAME_COLOR_SVG,IDR_FILES_DELETE_COLOR_SVG,IDR_FILES_PROPERTIES_COLOR_SVG};
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
         HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
         HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
@@ -115,8 +118,9 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         if (i<6) {
             const auto& r=layout.commands[i];
             const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
-            const D2D1_COLOR_F color=enabled ? theme.text_secondary : theme.text_disabled;
-            if (!DrawFluentSvg(files_icons[i],icon_bounds(cx,cy),1.0f,&color)) {
+            const D2D1_COLOR_F color=enabled ? theme.accent : theme.text_disabled;
+            if (!DrawFluentSvg(enabled ? color_icons[i] : files_icons[i],icon_bounds(cx,cy),
+                1.0f,enabled ? nullptr : &color)) {
                 const auto icon=icon_bounds(cx,cy);
                 DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
                     glyphs[i],L"",color,0.82f);

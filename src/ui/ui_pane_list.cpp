@@ -1316,56 +1316,20 @@ void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
 }
 D2D1_RECT_F MainRenderer::RenameFieldRect(const PaneViewModel& vm, const D2D1_RECT_F& list,
                                           int source_index) {
-    // Mirror of the frame geometry in DrawList for vm.rename_index — keep in sync.
+    // The frame and hosted EDIT share the entire available name area.
     if (!compositor_ || !compositor_->DwriteFactory() || source_index < 0) return {};
     const int view = vm.ViewIndex(source_index);
     if (view < 0) return {};
-    const ListEntryView& e = MakeVisibleEntry(vm, static_cast<size_t>(source_index));
     ViewLayout layout(vm.view_mode, list, vm.EntryCount(), vm.scroll_x, vm.scroll_y,
                       scale_, ListRowHeightDip(vm, list), vm.date_groups.get());
-    const D2D1_RECT_F cell = layout.ItemRect(view);
     const D2D1_RECT_F nameRc = layout.NameRect(view);
-    const bool iconGrid = vm.view_mode == ViewMode::ExtraLargeIcons ||
-                          vm.view_mode == ViewMode::LargeIcons ||
-                          vm.view_mode == ViewMode::MediumIcons;
-    float nameX = nameRc.left;
-    float textY = nameRc.top;
-    float textH = std::max(1.0f, nameRc.bottom - nameRc.top);
-    const float dot = 8.0f * scale_;
-    const std::vector<D2D1_COLOR_F>* tagDots = nullptr;
-    const std::vector<int>* tagIndices = vm.tag_catalog
-        ? vm.tag_catalog->TagIndicesForPath(e.path) : nullptr;
-    if (!tagIndices && vm.tag_dots) {
-        const auto found = vm.tag_dots->find(source_index);
-        if (found != vm.tag_dots->end()) tagDots = &found->second;
-    }
-    const size_t totalTags = tagIndices ? tagIndices->size() : (tagDots ? tagDots->size() : 0);
-    const int tagDotCount = static_cast<int>(std::min<size_t>(3, totalTags));
+    const float nameX = std::max(list.left, nameRc.left);
+    const float textY = nameRc.top;
+    const float textH = std::max(1.0f, nameRc.bottom - nameRc.top);
     const float nameColRight = vm.view_mode == ViewMode::Details
         ? DetailsColumns(list, vm).DividerX(0) - margin_
         : nameRc.right;
-    if (iconGrid && tagDotCount > 0) {
-        const float fullNameW = MeasureLayoutText(
-            compositor_, compositor_->DwriteFactory(), compositor_->TextFormat(), e.name);
-        const float nameGap = 4.0f * scale_;
-        const float cellW = nameRc.right - nameRc.left;
-        const float leftover = std::max(0.0f, cellW - fullNameW - nameGap);
-        const float dotsW = SpreadTagsWidth(tagDotCount, dot, nameGap) <= leftover + 0.5f
-            ? SpreadTagsWidth(tagDotCount, dot, nameGap)
-            : OverlapTagsWidth(tagDotCount, dot);
-        const float groupW = std::min(cellW, fullNameW + nameGap + dotsW);
-        nameX = nameRc.left + std::max(0.0f, (cellW - groupW) * 0.5f);
-        const float lineH = std::min(textH, 24.0f * scale_);
-        textY = nameRc.top + (textH - lineH) * 0.5f;
-        textH = lineH;
-    }
-    const NameTrail trail = LayoutNameTrail(
-        nameX, textY, textH, nameColRight, cell.top, cell.bottom, scale_,
-        e.name, tagDotCount, 0.0f, false, false, false,
-        compositor_, compositor_->DwriteFactory(), compositor_->TextFormat());
-    // Reserve the frame inset and EDIT margins as well as the name's ink width.
-    const float field_w = std::max(40.0f * scale_,
-        std::min(nameColRight - nameX, trail.name_w + 14.0f * scale_));
+    const float field_w = std::max(0.0f, std::min(list.right, nameColRight) - nameX);
     const float field_h = std::max(22.0f * scale_, std::min(textH, 30.0f * scale_));
     return D2D1::RectF(nameX, textY, nameX + field_w, textY + field_h);
 }
