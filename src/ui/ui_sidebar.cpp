@@ -475,13 +475,14 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
     };
 
     // -------------------------------------------------------------------
-    // Empty state: dashed outline + hint, fading in as exiting cards leave.
+    // Empty state: dashed outline + hint, revealed after exiting cards leave.
     // -------------------------------------------------------------------
     float ghost_alpha = 0.0f;
     for (const auto& c : deck.cards)
         if (c.ghost) ghost_alpha = std::max(ghost_alpha, std::clamp(c.opacity, 0.0f, 1.0f));
     if (deck.live_count == 0) {
-        const float a = 1.0f - ghost_alpha;
+        // Reveal the empty hint only after cards leave, avoiding overlapping text.
+        const float a = ghost_alpha <= 0.005f ? 1.0f : 0.0f;
         if (a > 0.01f) {
             const D2D1_RECT_F box = D2D1::RectF(panel_rc.left + 10.0f * scale_,
                 panel_rc.top + 36.0f * scale_, panel_rc.right - 10.0f * scale_,
@@ -531,9 +532,12 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
     const D2D1_COLOR_F subColor = vm.dark ? rgba(0x9FB0C4, 1.0f) : rgba(0x5B6675, 1.0f);
     const D2D1_COLOR_F folderColor = vm.dark ? rgba(0x71829A, 1.0f) : rgba(0x8A95A3, 1.0f);
     const std::wstring cutLabel = pulse::l10n::Get(pulse::l10n::StringId::Cut);
+    const float stack_opacity = deck.live_count == 0 && ghost_alpha > 0.005f
+        ? ghost_alpha : 1.0f;
 
     auto draw_card = [&](const TrayCardView& card, bool is_top) {
-        const TrayCardPose pose = TrayCardPoseOf(g, card, deck.spread);
+        TrayCardPose pose = TrayCardPoseOf(g, card, deck.spread);
+        pose.opacity = std::clamp(pose.opacity / stack_opacity, 0.0f, 1.0f);
         if (pose.opacity <= 0.005f) return;
         dc->SetTransform(pose.m * old);
         const bool layered = pose.opacity < 0.995f;
@@ -660,10 +664,16 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
     };
 
     const std::vector<int> order = TrayCardPaintOrder(deck);
+    const bool fading_stack = stack_opacity < 0.995f;
+    if (fading_stack) {
+        dc->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), stack_opacity), nullptr);
+    }
     for (const int idx : order) {
         const TrayCardView& card = deck.cards[static_cast<size_t>(idx)];
         draw_card(card, !card.ghost && idx == 0);
     }
+    if (fading_stack) dc->PopLayer();
 
     // Dismiss smoke: radial puffs drifting out of the × badge.
     if (!deck.puffs.empty() && !hc) {
@@ -699,7 +709,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         }
     }
 
-    // Footer: pager (‹ n / N ›) + totals left, 清空 right. Skip while only
+    // Footer: item count or pager (‹ n / N ›) left, 清空 right. Skip while only
     // exiting ghosts remain (tray already cleared).
     if (deck.live_count > 0) {
         const std::wstring index_text = TrayIndexText(deck);
@@ -721,28 +731,13 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
             painter_.DrawText(index_text, f.index, compositor_->SmallFormat(),
                               theme.text_secondary, fluent::HorizontalAlignment::Center);
         }
-        wchar_t footer[96]{};
-        const std::wstring size_text = pulse::format::ByteSize(deck.total_size, true);
-        if (deck.batch_count > 1)
-            swprintf_s(footer,
-                pulse::l10n::Get(pulse::l10n::StringId::TotalSizeBatchesFormat).c_str(),
-                size_text.c_str(), deck.batch_count);
-        else
-            swprintf_s(footer,
-                pulse::l10n::Get(pulse::l10n::StringId::TotalSizeFormat).c_str(),
-                size_text.c_str());
-        std::wstring totals = f.pager ? std::wstring(L"\xB7 ") + footer : std::wstring(footer);
-        if (factory) {
-            auto measure = [&](const std::wstring& s) {
-                return MeasureTextWidth(factory, compositor_->SmallFormat(), s);
-            };
-            const float avail = std::max(0.0f, f.totals.right - f.totals.left);
-            // Next to the pager the sentence rarely fits: fall back to the bare
-            // size ("1.6 MB") before cutting anything with an ellipsis.
-            if (f.pager && measure(totals) > avail) totals = size_text;
-            totals = FitEndEllipsis(totals, avail, measure);
+        if (!f.pager) {
+            wchar_t count_text[32]{};
+            swprintf_s(count_text, l10n::Get(l10n::StringId::ItemsCountFormat).c_str(),
+                       deck.total_count);
+            painter_.DrawText(count_text, f.totals, compositor_->SmallFormat(),
+                              theme.text_secondary);
         }
-        painter_.DrawText(totals, f.totals, compositor_->SmallFormat(), theme.text_secondary);
         const bool clear_hovered =
             vm.hover_region == static_cast<int>(HitTestResult::TrayClear);
         const float clear_w = 72.0f * scale_;

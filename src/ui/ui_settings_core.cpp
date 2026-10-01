@@ -235,7 +235,19 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const I days[]={I::ChangeToday,I::ChangeLast3Days,I::ChangeLast7Days};const int day_values[]={1,3,7};
             draw_card(lay.change_days_row);segmented(lay.change_days_row,lay.change_days,days,day_values,vm.settings_change_days,H::SettingsChangeDays,I::SettingsChangeDays,I::SettingsChangeTrackingDesc);
         }
-        text(l10n::Get(I::SettingsImmediate),lay.footer,true);
+        draw_card(lay.configuration_path);
+        const auto config = lay.configuration_path;
+        text(l10n::Get(I::ConfigurationLocation),D2D1::RectF(config.left+16*scale_,config.top+8*scale_,config.right-16*scale_,config.top+32*scale_));
+        text(vm.settings_configuration_path,D2D1::RectF(config.left+16*scale_,config.top+34*scale_,config.right-16*scale_,config.top+56*scale_),true);
+        const auto status_bounds = D2D1::RectF(config.left+16*scale_,config.top+60*scale_,config.right-16*scale_,config.top+100*scale_);
+        dc->PushAxisAlignedClip(status_bounds,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        painter_.DrawWrappedCaption(vm.settings_configuration_status.empty() ? l10n::Get(I::StorageRestartDescription) : vm.settings_configuration_status,D2D1::Point2F(status_bounds.left,status_bounds.top),status_bounds.right-status_bounds.left,theme.text_secondary);
+        dc->PopAxisAlignedClip();
+        button(lay.configuration_action[0],l10n::Get(I::OpenLocation),H::SettingsConfigurationAction,0);
+        button(lay.configuration_action[1],l10n::Get(I::ChangeLocation),H::SettingsConfigurationAction,1,true,!vm.settings_storage_pending);
+        dc->PushAxisAlignedClip(lay.footer,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        painter_.DrawWrappedCaption(l10n::Get(I::SettingsStorageFooter),D2D1::Point2F(lay.footer.left,lay.footer.top),lay.footer.right-lay.footer.left,theme.text_secondary);
+        dc->PopAxisAlignedClip();
     } else {
         section(0,I::SearchModeName);section(1,I::SearchModeContent);
         draw_card(lay.group[0]);draw_card(lay.group[1]);

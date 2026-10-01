@@ -1,7 +1,9 @@
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "settings_controller.h"
+#include "../common/user_storage.h"
 #include "../index/index_client.h"
+#include "../index/index_config.h"
 #include "../index/network_agent_client.h"
 
 #include <algorithm>
@@ -53,7 +55,7 @@ void SettingsController::SetScroll(float value, float maximum) noexcept {
 }
 
 void SettingsController::ScrollBy(float delta, float scale, float maximum) noexcept {
-    SetScroll(scroll_ - delta / 120.0f * 48.0f * scale, maximum);
+    SetScroll(scroll_ - delta / 120.0f * 72.0f * scale, maximum);
 }
 
 bool SettingsController::VolumePending(std::wstring_view id) const {
@@ -94,7 +96,8 @@ bool SettingsController::StartTask(SettingsTask task, SettingsTaskOperation oper
                 (task.kind == SettingsTaskKind::Volume && task.key.empty()) ||
                 (task.kind == SettingsTaskKind::Exclude && task.path.empty())) return false;
             task_state_->local_pending = true;
-            task_state_->migration_pending = task.kind == SettingsTaskKind::ConfigureIndexPath;
+            task_state_->migration_pending = task.kind == SettingsTaskKind::ConfigureIndexPath ||
+                task.kind == SettingsTaskKind::ConfigureConfigurationPath;
             task_state_->diagnostics_pending =
                 task.kind == SettingsTaskKind::DiagnosticsExport;
             if (task.kind == SettingsTaskKind::Volume)
@@ -171,7 +174,11 @@ bool SettingsController::StartUiTask(SettingsTask task) {
         case SettingsTaskKind::RebuildIndex:
             return index::IndexClient::RebuildElevated();
         case SettingsTaskKind::ConfigureIndexPath:
-            return index::IndexClient::ConfigureIndexPathElevated(value.path, &error);
+            return value.enabled
+                ? index::IndexClient::ConfigureIndexPathElevated(value.path, &error)
+                : storage::Schedule(storage::Kind::Index, value.path, error);
+        case SettingsTaskKind::ConfigureConfigurationPath:
+            return storage::Schedule(storage::Kind::Configuration, value.path, error);
         case SettingsTaskKind::NetworkAdd:
             return network->AddRoot(value.path, &error);
         case SettingsTaskKind::NetworkRemove:
@@ -190,7 +197,9 @@ bool SettingsController::StartUiTask(SettingsTask task) {
 SettingsTaskEffect SettingsController::CompleteTask(const SettingsTaskResult& result,
                                                     bool service_installed) {
     SettingsTaskEffect effect;
-    if (result.task.kind == SettingsTaskKind::ConfigureIndexPath) effect.refresh_index = true;
+    if (result.task.kind == SettingsTaskKind::ConfigureIndexPath ||
+        result.task.kind == SettingsTaskKind::ConfigureConfigurationPath) RefreshStorage();
+    if (result.task.kind == SettingsTaskKind::ConfigureIndexPath && result.task.enabled) effect.refresh_index = true;
     if (result.ok) {
         error_.clear();
         if (result.task.kind == SettingsTaskKind::NetworkAdd && result.task.pin)
@@ -198,7 +207,9 @@ SettingsTaskEffect SettingsController::CompleteTask(const SettingsTaskResult& re
         if (result.task.kind == SettingsTaskKind::DiagnosticsExport)
             effect.open_path = result.task.path;
         if (!IsNetworkTask(result.task.kind) &&
-            result.task.kind != SettingsTaskKind::DiagnosticsExport) {
+            result.task.kind != SettingsTaskKind::DiagnosticsExport &&
+            result.task.kind != SettingsTaskKind::ConfigureConfigurationPath &&
+            !(result.task.kind == SettingsTaskKind::ConfigureIndexPath && !result.task.enabled)) {
             service_installed_ = service_installed;
             effect.refresh_index = true;
         }
@@ -230,6 +241,7 @@ void SettingsController::BindUi(AppPrefs& prefs, ContextMenuPrefs& context,
     index_ = &index;
     network_ = &network;
     ui_ = std::move(callbacks);
+    RefreshStorage();
 }
 
 void SettingsController::ResetUi() noexcept {
@@ -485,17 +497,47 @@ void SettingsController::RemoveExclude(int position) {
     StartUiTask(std::move(task));
 }
 
+void SettingsController::RefreshStorage() {
+    configuration_path_ = storage::ConfigurationRoot();
+    configuration_pending_path_ = storage::Pending(storage::Kind::Configuration);
+    configuration_storage_error_ = storage::LastError(storage::Kind::Configuration);
+    index_storage_path_ = storage::UserIndexRoot();
+    if (index_ && (index_->ServiceMode() || index_->ServiceInstalled())) {
+        index::IndexConfig config;
+        index::LoadMachineConfig(config);
+        index_storage_path_ = config.index_path.empty() ? index::MachineIndexRoot() : config.index_path;
+    }
+    index_pending_path_ = storage::Pending(storage::Kind::Index);
+    index_storage_error_ = storage::LastError(storage::Kind::Index);
+}
+
+void SettingsController::ConfigurationAction(int action) {
+    if (action == 0) {
+        if (ui_.open_path) ui_.open_path(configuration_path_);
+        return;
+    }
+    if (action != 1 || migration_pending() || !ui_.task_completion) return;
+    std::wstring path;
+    if (!ui_.pick_folder || !ui_.pick_folder(path, l10n::Get(l10n::StringId::SettingsPickConfiguration))) return;
+    ClearError();
+    SettingsTask task{SettingsTaskKind::ConfigureConfigurationPath};
+    task.path = std::move(path);
+    StartUiTask(std::move(task));
+}
+
 void SettingsController::IndexAction(int action) {
     if (!index_) return;
     if (action != 1 && migration_pending()) return;
     if (action == 1) {
-        const std::wstring path = index_->IndexPath();
+        const std::wstring reported = index_->IndexPath();
+        const std::wstring path = reported.empty() ? index_storage_path_ : reported;
         if (!path.empty() && ui_.open_path) ui_.open_path(path);
         return;
     }
-    if ((action != 0 && action != 2) || !ui_.task_completion) return;
+    if ((action != 0 && action != 2 && action != 3) || !ui_.task_completion) return;
+    if (action == 3 && (index_->ServiceMode() || index_->ServiceInstalled())) return;
     std::wstring path;
-    const bool set_path = action == 2 && index_->ServiceMode();
+    const bool set_path = action == 2;
     if (set_path && (!ui_.pick_folder ||
         !ui_.pick_folder(path, l10n::Get(l10n::StringId::SettingsPickStorage).c_str()))) return;
     ClearError();
@@ -503,6 +545,7 @@ void SettingsController::IndexAction(int action) {
         : set_path ? SettingsTaskKind::ConfigureIndexPath
                    : SettingsTaskKind::InstallService};
     task.path = std::move(path);
+    task.enabled = index_->ServiceMode() || index_->ServiceInstalled();
     StartUiTask(std::move(task));
 }
 

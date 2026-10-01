@@ -151,20 +151,25 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         MakeBrush(dc, theme.text_secondary, brTextSecondary_);
         DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), vm.settings_index_path,
                      lay.index_path.left + 16.0f * scale_, lay.index_path.top + 32.0f * scale_,
-                     lay.index_action[0].top > lay.index_path.top + 60.0f * scale_
-                         ? lay.index_path.right - lay.index_path.left - 32.0f * scale_
-                         : lay.index_action[2].left - lay.index_path.left - 28.0f * scale_,
+                     lay.index_path.right - lay.index_path.left - 32.0f * scale_,
                      20.0f * scale_);
+        const auto storage_status_bounds = D2D1::RectF(lay.index_path.left + 16.0f * scale_, lay.index_path.top + 56.0f * scale_,
+                                                       lay.index_path.right - 16.0f * scale_, lay.index_path.top + 92.0f * scale_);
+        dc->PushAxisAlignedClip(storage_status_bounds,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        const auto& storage_status = vm.settings_index_storage_status.empty() && !vm.settings_index_service && !vm.settings_index_installed
+            ? l10n::Get(l10n::StringId::StorageRestartDescription) : vm.settings_index_storage_status;
+        painter_.DrawWrappedCaption(storage_status,D2D1::Point2F(storage_status_bounds.left,storage_status_bounds.top),
+                                    storage_status_bounds.right-storage_status_bounds.left,theme.text_secondary);
+        dc->PopAxisAlignedClip();
         const std::wstring actions[] = {
             pulse::l10n::Get(pulse::l10n::StringId::Rebuild),
             pulse::l10n::Get(pulse::l10n::StringId::OpenLocation),
-            pulse::l10n::Get(vm.settings_index_service
-                ? pulse::l10n::StringId::ChangeLocation
-                : pulse::l10n::StringId::InstallService),
+            pulse::l10n::Get(pulse::l10n::StringId::ChangeLocation),
+            pulse::l10n::Get(pulse::l10n::StringId::InstallService),
         };
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < ((vm.settings_index_service || vm.settings_index_installed) ? 3 : 4); ++i) {
             fluent::ControlState st{};
-            st.enabled = (i == 2 || vm.settings_index_service) && (!vm.settings_index_migrating || i == 1);
+            st.enabled = (i != 0 || vm.settings_index_service) && (!vm.settings_index_migrating || i == 1);
             st.hovered = st.enabled && IsHovered(vm, HitTestResult::SettingsIndexAction, i);
             painter_.DrawButton({ lay.index_action[i], actions[i], {},
                                   i == 2 ? fluent::ButtonKind::Primary : fluent::ButtonKind::Standard,
@@ -671,8 +676,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     const float view = lay.content.bottom - lay.content.top;
     if (lay.content_h > view + 1.0f) {
         fluent::ScrollbarSpec bar;
-        bar.viewport = D2D1::RectF(lay.content.right - 10.0f * scale_, lay.content.top,
-                                   lay.content.right - 2.0f * scale_, lay.content.bottom);
+        bar.viewport = D2D1::RectF(lay.content.right - 18.0f * scale_, lay.content.top,
+                                   lay.content.right - 10.0f * scale_, lay.content.bottom);
         bar.offset = vm.settings_scroll;
         bar.viewport_extent = view;
         bar.content_extent = lay.content_h;
@@ -717,6 +722,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::GlobalSearchHotkey: target=l.global_search_hotkey_row;break;
     case I::SearchPinyin: target=l.search_pinyin_row;break;
     case I::ContentIndexManage: target=l.content_header;break;
+    case I::ConfigurationLocation: target=l.configuration_path;break;
     case I::IndexLocation: target=l.index_path;break;
     case I::LocalDrives: if(!l.index_volume_rows.empty()) target=l.index_volume_rows.front();break;
     case I::Exclusions: target=l.index_exclude_action;break;
@@ -732,6 +738,24 @@ float MainRenderer::SettingsMaxScroll(const WindowViewModel& vm, float window_w,
                                                   status_height_, &painter_);
     const float view = (std::max)(0.0f, lay.content.bottom - lay.content.top);
     return (std::max)(0.0f, lay.content_h - view);
+}
+
+bool MainRenderer::SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w,
+                                            float window_h, D2D1_RECT_F& track,
+                                            D2D1_RECT_F& thumb, float& maximum) const {
+    const auto lay = MakeSettingsLayout(vm, D2D1::RectF(0, 0, window_w, window_h), scale_,
+                                       title_bar_height_, status_height_, &painter_);
+    fluent::ScrollbarSpec bar;
+    bar.viewport = D2D1::RectF(lay.content.right - 18.0f * scale_, lay.content.top,
+                              lay.content.right - 10.0f * scale_, lay.content.bottom);
+    bar.offset = vm.settings_scroll;
+    bar.viewport_extent = lay.content.bottom - lay.content.top;
+    bar.content_extent = lay.content_h;
+    bar.expand_progress = 1.0f;
+    track = bar.viewport;
+    thumb = fluent::ScrollbarThumbRect(bar, scale_);
+    maximum = (std::max)(0.0f, bar.content_extent - bar.viewport_extent);
+    return maximum > 1.0f;
 }
 
 } // namespace pulse::ui

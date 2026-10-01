@@ -19,6 +19,7 @@
 #include "network_agent_host.h"
 #include "content_agent.h"
 #include "../common/current_user_security.h"
+#include "../common/user_storage.h"
 #include <windows.h>
 #include <sddl.h>
 #include <shellapi.h>
@@ -533,7 +534,8 @@ void ClientThread(std::shared_ptr<Client> c) {
             Query query;
             if (!ParseQuery(payload.data(), payload.size(), query)) break;
             QueueSearch(c, id, std::move(query));
-        } else if (hdr.type == REQ_IDX_TEST_SHUTDOWN && g.test_mode) {
+        } else if ((hdr.type == REQ_IDX_TEST_SHUTDOWN && g.test_mode) ||
+                   (hdr.type == REQ_IDX_STORAGE_SHUTDOWN && !g.as_service && payload.empty())) {
             TraceSearch("filename_shutdown_requested");
             g.running = false;
             if (g.stop) SetEvent(g.stop);
@@ -712,6 +714,12 @@ int RunHost(bool as_service, bool test_mode = false,
             CloseHandle(g.mutex);
             g.mutex = nullptr;
             return 0;
+        }
+        if (!test_mode && fixture_root.empty()) {
+            // The singleton excludes an old writer until its final checkpoint finishes.
+            std::wstring error;
+            pulse::storage::ApplyUserIndex(error);
+            SetActiveIndexDirectory(UserIndexRoot());
         }
     }
 

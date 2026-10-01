@@ -1,6 +1,7 @@
 #pragma once
 #include "content_search_protocol.h"
 #include "../common/current_user_security.h"
+#include "../common/user_storage.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -64,9 +65,19 @@ inline bool WriteSidecar(const std::wstring& path, uint32_t type, const std::vec
     if (!ok) DeleteFileW(temp.c_str());
     return ok;
 }
+inline std::wstring ConfigurationPath(const std::wstring& path) {
+    if (!SameStoredPath(path, DatabasePath())) return path + L".config";
+    storage::Refresh();
+    const auto root = storage::ConfigurationRoot();
+    return root.empty() ? path + L".config" : root + L"\\content-index.config";
+}
 inline bool ReadConfigFile(const std::wstring& path, ContentIndexConfig& config) {
     std::vector<uint8_t> bytes;
-    if (!ReadSidecar(path + L".config", 1, bytes)) return false;
+    auto sidecar = ConfigurationPath(path);
+    if (GetFileAttributesW(sidecar.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND))
+        sidecar = path + L".config";
+    if (!ReadSidecar(sidecar, 1, bytes)) return false;
     ipc::PayloadReader r(bytes.data() + 8, bytes.size() - 8);
     return content::GetConfig(r, config) && r.remaining() == 0;
 }
@@ -77,7 +88,7 @@ inline bool WriteConfigFile(const std::wstring& path, const ContentIndexConfig& 
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) { CloseHandle(mutex); return false; }
     ContentIndexConfig existing;
     bool ok = ReadConfigFile(path, existing) && SameConfig(existing, config);
-    if (!ok) { ipc::PayloadWriter w; content::PutConfig(w, config); ok = WriteSidecar(path + L".config", 1, w.data()); }
+    if (!ok) { ipc::PayloadWriter w; content::PutConfig(w, config); ok = WriteSidecar(ConfigurationPath(path), 1, w.data()); }
     ReleaseMutex(mutex); CloseHandle(mutex); return ok;
 }
 inline bool LoadOrCreateConfig(const std::wstring& path, const ContentIndexConfig& fallback, ContentIndexConfig& actual) {
@@ -86,7 +97,7 @@ inline bool LoadOrCreateConfig(const std::wstring& path, const ContentIndexConfi
     const DWORD wait = WaitForSingleObject(mutex, 5000);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) { CloseHandle(mutex); return false; }
     bool ok = ReadConfigFile(path, actual);
-    if (!ok) { actual = fallback; ipc::PayloadWriter w; content::PutConfig(w, actual); ok = WriteSidecar(path + L".config", 1, w.data()); }
+    if (!ok) { actual = fallback; ipc::PayloadWriter w; content::PutConfig(w, actual); ok = WriteSidecar(ConfigurationPath(path), 1, w.data()); }
     ReleaseMutex(mutex); CloseHandle(mutex); return ok;
 }
 inline bool ReadStatusFile(const std::wstring& path, ContentIndexStatus& status) {

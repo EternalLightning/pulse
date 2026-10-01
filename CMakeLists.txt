@@ -142,6 +142,16 @@ target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32)
 
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
+add_library(pulse_user_storage STATIC src/common/user_storage.cpp)
+target_link_libraries(pulse_user_storage PUBLIC shell32 ole32)
+add_executable(pulse_user_storage_test src/bench/user_storage_test.cpp)
+target_link_libraries(pulse_user_storage_test PRIVATE pulse_user_storage)
+add_executable(pulse_user_index_storage_test
+    src/bench/user_index_storage_test.cpp
+    src/index/user_index_storage.cpp
+    src/index/index_migration.cpp)
+target_link_libraries(pulse_user_index_storage_test PRIVATE pulse_user_storage shell32 advapi32)
+
 add_library(pulse_localization STATIC src/common/localization.cpp)
 target_link_libraries(pulse_localization PUBLIC user32)
 
@@ -169,7 +179,7 @@ add_executable(pulse_index_test
     src/index/index_shard.cpp
     src/index/network_index.cpp
     src/index/change_tracking.cpp)
-target_link_libraries(pulse_index_test PRIVATE shell32 mpr advapi32)
+target_link_libraries(pulse_index_test PRIVATE shell32 mpr advapi32 pulse_user_storage)
 
 add_executable(pulse_index_migration_test
     src/bench/index_migration_test.cpp
@@ -189,7 +199,7 @@ add_executable(pulse_index_engine_test
     src/index/index_delta.cpp
     src/index/index_shard.cpp
     src/fs/fs_enum.cpp)
-target_link_libraries(pulse_index_engine_test PRIVATE advapi32 shlwapi ole32 shell32 netapi32 mpr)
+target_link_libraries(pulse_index_engine_test PRIVATE pulse_user_storage advapi32 shlwapi ole32 shell32 netapi32 mpr)
 
 # End-to-end index latency probe. It talks to the installed/running service so
 # timings include the production pipe, query engine, paging, and serialization.
@@ -212,7 +222,7 @@ target_link_libraries(pulse_duplicate_scan_test PRIVATE ole32)
 add_executable(pulse_saved_search_test
     src/bench/saved_search_test.cpp
     src/app/saved_search.cpp)
-target_link_libraries(pulse_saved_search_test PRIVATE shell32 ole32)
+target_link_libraries(pulse_saved_search_test PRIVATE shell32 ole32 pulse_user_storage)
 
 add_executable(pulse_search_query_test
     src/bench/search_query_test.cpp
@@ -272,6 +282,7 @@ if(PULSE_APP_SOURCES)
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip" "$<TARGET_FILE_DIR:pulse>/7zip")
     if(PULSE_WITH_SELFTEST)
         target_compile_definitions(pulse PRIVATE PULSE_WITH_SELFTEST=1)
+        target_compile_definitions(pulse_user_storage PRIVATE PULSE_WITH_SELFTEST=1)
     endif()
     target_sources(pulse PRIVATE src/app/pulse.rc)
     set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
@@ -303,7 +314,7 @@ if(PULSE_APP_SOURCES)
     target_link_libraries(pulse PRIVATE
         d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid comctl32 advapi32 shlwapi version windowscodecs gdi32 netapi32 mpr bcrypt pulse_crash_reporter)
     target_link_libraries(pulse PRIVATE secur32)
-    target_link_libraries(pulse PRIVATE pulse_localization)
+    target_link_libraries(pulse PRIVATE pulse_localization pulse_user_storage)
     pulse_enable_lumatext(pulse)
     pulse_add_version_resource(pulse "Pulse file manager" "pulse" "pulse.exe")
 endif()
@@ -311,6 +322,7 @@ endif()
 # ---- Pulse.Index.exe: index + query host (session helper or Windows service) ----
 add_executable(pulse_index WIN32
     src/index/index_host.cpp
+    src/index/user_index_storage.cpp
     src/index/index_path_service.cpp
     src/index/index_migration.cpp
     src/index/network_agent_main.cpp
@@ -332,7 +344,7 @@ add_executable(pulse_index WIN32
 target_sources(pulse_index PRIVATE src/index/index_host.rc)
 target_link_options(pulse_index PRIVATE /MANIFEST:NO)
 set_target_properties(pulse_index PROPERTIES OUTPUT_NAME "Pulse.Index")
-target_link_libraries(pulse_index PRIVATE advapi32 shlwapi ole32 shell32 netapi32 mpr bcrypt
+target_link_libraries(pulse_index PRIVATE pulse_user_storage advapi32 shlwapi ole32 shell32 netapi32 mpr bcrypt
     pulse_crash_reporter pulse_text)
 pulse_add_version_resource(pulse_index "Pulse index host" "Pulse.Index" "Pulse.Index.exe")
 add_dependencies(pulse_index_host_stress pulse_index)
@@ -501,7 +513,7 @@ add_executable(pulse_index_pinyin_test
     src/index/change_tracking.cpp src/index/index_visibility.cpp src/index/index_config.cpp
     src/index/index_query.cpp src/index/search_kinds.cpp src/index/index_mft.cpp
     src/index/index_paths.cpp src/index/index_delta.cpp src/index/index_shard.cpp src/fs/fs_enum.cpp)
-target_link_libraries(pulse_index_pinyin_test PRIVATE advapi32 shlwapi ole32 shell32 netapi32 mpr)
+target_link_libraries(pulse_index_pinyin_test PRIVATE pulse_user_storage advapi32 shlwapi ole32 shell32 netapi32 mpr)
 foreach(folder_size_target pulse_index pulse_index_engine_test pulse_index_pinyin_test)
     target_sources(${folder_size_target} PRIVATE src/index/index_folder_sizes.cpp)
 endforeach()
@@ -553,6 +565,7 @@ target_link_libraries(pulse_content_paging_test PRIVATE pulse_sqlite pulse_text 
 add_dependencies(pulse_content_paging_test pulse_index)
 
 foreach(content_client_target pulse pulse_content_search_test pulse_content_index_test pulse_content_paging_test)
+    target_link_libraries(${content_client_target} PRIVATE pulse_user_storage)
     target_sources(${content_client_target} PRIVATE src/index/content_search_session.cpp)
 endforeach()
 
@@ -586,7 +599,7 @@ target_link_libraries(pulse_office_ooxml_test PRIVATE ole32 uuid xmllite)
 add_executable(pulse_office_index_test src/bench/office_index_test.cpp
     src/index/content_index.cpp src/index/content_search.cpp src/index/content_result_store.cpp
     src/index/index_query.cpp src/index/search_kinds.cpp src/index/filename_pinyin.cpp)
-target_link_libraries(pulse_office_index_test PRIVATE pulse_document_reader pulse_sqlite ole32 uuid bcrypt psapi)
+target_link_libraries(pulse_office_index_test PRIVATE pulse_user_storage pulse_document_reader pulse_sqlite ole32 uuid bcrypt psapi)
 add_dependencies(pulse_office_index_test pulse_document)
 add_library(pulse_content_task STATIC src/index/content_task_search.cpp src/index/text_task_reader.cpp src/index/content_timing.cpp)
 target_link_libraries(pulse_content_task PUBLIC pulse_document_reader pulse_text)

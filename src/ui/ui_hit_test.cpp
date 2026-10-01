@@ -160,6 +160,13 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     }
 
     if (vm.settings_open) {
+        D2D1_RECT_F track{}, thumb{};
+        float maximum = 0.0f;
+        if (SettingsScrollbarGeometry(vm, rect.right, rect.bottom, track, thumb, maximum) &&
+            ContainsPt(track, x, y)) {
+            r.region = HitTestResult::Scrollbar;
+            return r;
+        }
         const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
                                                       status_height_, &painter_);
         if (y >= rect.bottom - status_height_) {
@@ -284,6 +291,9 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         return r;
                     }
                 }
+                for (int i = 0; i < 2; ++i) if (ContainsPt(lay.configuration_action[i], x, y)) {
+                    r.region = HitTestResult::SettingsConfigurationAction; r.index = i; return r;
+                }
             } else if (vm.settings_page == 1) {
                 if (ContainsPt(lay.global_search_row, x, y)) {
                     r.region = HitTestResult::SettingsToggle; r.index = 15; return r;
@@ -297,7 +307,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 if (ContainsPt(lay.content_index_row, x, y)) {
                     r.region = HitTestResult::SettingsContentIndex; return r;
                 }
-                for (int i = 0; i < 3; ++i) {
+                for (int i = 0; i < 4; ++i) {
                     if (ContainsPt(lay.index_action[i], x, y)) {
                         r.region = HitTestResult::SettingsIndexAction;
                         r.index = i;

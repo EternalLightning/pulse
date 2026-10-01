@@ -1,5 +1,6 @@
 #include "network_index.h"
 #include "index_config.h"
+#include "../common/user_storage.h"
 #include "index_query.h"
 #include "../common/utf8_file.h"
 #include "../common/json_utils.h"
@@ -499,7 +500,9 @@ std::wstring NormalizeNetworkRoot(std::wstring path) {
 }
 
 std::wstring NetworkConfigPath() {
-    const std::wstring root = UserIndexRoot();
+    // The network agent can survive an app restart that relocates configuration.
+    storage::Refresh();
+    const std::wstring root = storage::ConfigurationRoot();
     return root.empty() ? L"" : root + L"\\network-index.json";
 }
 

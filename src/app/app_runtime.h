@@ -80,7 +80,7 @@ void ThrowTrayTop(AppState& s, float dir, float dx, float dy);
 void TrayStepBack(AppState& s);
 void ReleaseTrayDrag(AppState& s, bool commit);
 void SpawnTrayPuffs(AppState& s);
-void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool stagger);
+void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool clearing);
 void RefreshStarredViews(AppState& s);
 void RefreshRecentViews(AppState& s);
 bool IsRecycleTab(const app::Tab* tab);
@@ -99,7 +99,8 @@ void StopDetailsSizeWalk(AppState& s);
 void StartDetailsSizeWalk(AppState& s, const std::wstring& path);
 void ShutdownDetailsSizeWalk(AppState& s);
 std::wstring DetailsAttributeText(DWORD attrs);
-bool TickTrayDeck(AppState& s);
+double TrayAnimationNow();
+bool TickTrayDeck(AppState& s, double now = TrayAnimationNow());
 ui::WindowViewModel BuildVm(AppState& s, bool probe_details = true);
 std::wstring TooltipForHover(AppState& s);
 // Records what the pointer is over. Both mouse-move paths (client and frame)

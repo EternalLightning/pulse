@@ -1,4 +1,5 @@
 #include "index_config.h"
+#include "../common/user_storage.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
 #include <algorithm>
@@ -241,9 +242,8 @@ std::wstring MachineIndexRoot() {
 }
 
 std::wstring UserIndexRoot() {
-    std::wstring root = KnownFolder(CSIDL_LOCAL_APPDATA);
-    if (root.empty()) return {};
-    const std::wstring pulse = root + L"\\Pulse";
+    const std::wstring pulse = storage::UserIndexRoot();
+    if (pulse.empty()) return {};
     if (!EnsureDirectory(pulse)) return {};
     return pulse;
 }

@@ -197,6 +197,8 @@ struct FluentMenuTestPeer {
 };
 } // namespace pulse::ui
 
+LRESULT CALLBACK WndProcImpl(HWND, UINT, WPARAM, LPARAM);
+
 namespace pulse::app {
 bool RunPaneHeaderIconTest();
 bool RunFolderSizesTest();
@@ -4662,6 +4664,172 @@ void TrayStackSettle(AppState& s, int ms) {
     TickTrayDeck(s);
 }
 
+void TestSettingsStorage() {
+    using H = ui::HitTestResult;
+    using I = l10n::StringId;
+    Check(!l10n::Get(I::ConfigurationLocation).empty() &&
+          !l10n::Get(I::StorageNextStartup).empty(), L"settings storage: localized strings resolve");
+    ui::MainRenderer renderer;
+    for (float scale : {1.0f, 1.5f, 2.0f}) {
+        renderer.SetScale(scale);
+        for (float width : {600.0f, 1200.0f}) {
+            const auto window = D2D1::RectF(0, 0, width * scale, 600 * scale);
+            for (int mode = 0; mode < 4; ++mode) {
+                ui::WindowViewModel vm;
+                vm.settings_open = true;
+                vm.settings_page = mode == 0 ? 0 : 1;
+                vm.settings_expanded = 3;
+                vm.settings_index_service = mode == 2;
+                vm.settings_index_installed = mode == 3;
+                vm.settings_index_storage_status = l10n::Get(I::StorageNextStartup) + LR"(D:\PulseStorageFixture)";
+                vm.settings_configuration_path = LR"(C:\PulseStorageFixture)";
+                vm.settings_configuration_status = l10n::Get(I::StorageNextStartup) + LR"(D:\PulseStorageFixture)";
+                vm.settings_scroll = renderer.SettingsDestinationOffset(vm,
+                    static_cast<int>(mode == 0 ? I::ConfigurationLocation : I::IndexLocation),
+                    window.right, window.bottom);
+                const auto region = mode == 0 ? H::SettingsConfigurationAction : H::SettingsIndexAction;
+                const int count = mode == 0 ? 2 : mode == 1 ? 4 : 3;
+                D2D1_RECT_F buttons[4]{};
+                bool found[4]{};
+                for (float y = 0; y < 320 * scale; y += 4 * scale) {
+                    for (float x = 0; x < window.right; x += 4 * scale) {
+                        const auto hit = renderer.HitTest(vm, window, x, y);
+                        if (hit.region != region || hit.index < 0 || hit.index >= 4) continue;
+                        auto& bounds = buttons[hit.index];
+                        if (!found[hit.index]) bounds = D2D1::RectF(x, y, x, y);
+                        found[hit.index] = true;
+                        bounds.left = (std::min)(bounds.left, x);
+                        bounds.top = (std::min)(bounds.top, y);
+                        bounds.right = (std::max)(bounds.right, x);
+                        bounds.bottom = (std::max)(bounds.bottom, y);
+                    }
+                }
+                for (int i = 0; i < count; ++i) {
+                    Check(found[i] && buttons[i].right > buttons[i].left &&
+                          buttons[i].bottom > buttons[i].top,
+                          L"settings storage: configuration and index actions visible at each width and DPI");
+                    if (!found[i]) continue;
+                    const auto center = renderer.HitTest(vm, window,
+                        (buttons[i].left + buttons[i].right) * 0.5f,
+                        (buttons[i].top + buttons[i].bottom) * 0.5f);
+                    Check(center.region == region && center.index == i,
+                          L"settings storage: button center maps to its action");
+                    for (int j = 0; j < i; ++j) {
+                        Check(buttons[i].right < buttons[j].left || buttons[j].right < buttons[i].left ||
+                              buttons[i].bottom < buttons[j].top || buttons[j].bottom < buttons[i].top,
+                              L"settings storage: action buttons do not overlap");
+                    }
+                }
+                if (mode >= 2) Check(!found[3], L"settings storage: service mode hides installation action");
+                if (found[0]) {
+                    const float status_y = buttons[0].top - 28 * scale;
+                    Check(status_y > 0 && renderer.HitTest(vm, window,
+                          (buttons[0].left + buttons[1].right) * 0.5f, status_y).region != region,
+                          mode == 0 ? L"settings storage: next startup status has space above configuration controls"
+                                    : L"settings storage: next startup status has space above index controls");
+                }
+            }
+        }
+    }
+}
+
+void TestSettingsScrollbar() {
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"PulseSettingsScrollbarTest";
+    wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+        if (msg == WM_NCCALCSIZE && wp) return 0;
+        return BlankPaneTestProc(hwnd, msg, wp, lp);
+    };
+    RegisterClassW(&wc);
+    auto state = std::make_unique<AppState>();
+    state->isolatedTest = true;
+    state->places.persist = false;
+    state->appPrefs.persist = false;
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"",
+        WS_OVERLAPPEDWINDOW & ~WS_CAPTION, 100, 100, 1000, 600,
+        nullptr, nullptr, wc.hInstance, nullptr);
+    state->hwnd = hwnd;
+    Check(hwnd && state->compositor.Init(hwnd), L"settings scrollbar: isolated graphics initialized");
+    if (!hwnd || !state->compositor.Dc()) return;
+    state->renderer.SetCompositor(&state->compositor);
+    state->window_tabs.NewTab(L"C:\\PulseScrollbarFixture");
+    state->pane = state->window_tabs.Active()->panes.front().get();
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state.get()));
+    BYTE saved_keys[256]{};
+    GetKeyboardState(saved_keys);
+    for (float scale : {1.0f, 1.5f, 2.0f}) {
+        state->scale = scale;
+        SetWindowPos(hwnd, nullptr, 100, 100, static_cast<int>(1000 * scale),
+                     static_cast<int>(600 * scale), SWP_NOZORDER | SWP_NOACTIVATE);
+        state->compositor.Resize(static_cast<int>(1000 * scale), static_cast<int>(600 * scale));
+        state->compositor.RecreateTextFormats(scale);
+        state->renderer.SetScale(scale);
+        OpenSettingsTab(*state, 0);
+        state->settingsExpanded = 3;
+        state->settings.SetScroll(0, 0);
+        auto* tab = ActiveTab(*state);
+        tab->scroll_y = 17.0f;
+        auto vm = BuildVm(*state, false);
+        D2D1_RECT_F track{}, thumb{};
+        float maximum = 0.0f;
+        Check(state->renderer.SettingsScrollbarGeometry(vm, 1000 * scale, 600 * scale,
+              track, thumb, maximum), L"settings scrollbar: overflow supplies a draggable thumb");
+        const int x = static_cast<int>((thumb.left + thumb.right) * 0.5f);
+        const int y = static_cast<int>((thumb.top + thumb.bottom) * 0.5f);
+        Check(state->renderer.HitTest(vm, D2D1::RectF(0, 0, 1000 * scale, 600 * scale),
+              static_cast<float>(x), static_cast<float>(y)).region == ui::HitTestResult::Scrollbar,
+              L"settings scrollbar: painted thumb receives the scrollbar hit");
+        POINT screen{x, y};
+        ClientToScreen(hwnd, &screen);
+        Check(::WndProcImpl(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screen.x, screen.y)) == HTCLIENT,
+              L"settings scrollbar: thumb is client input instead of window resizing");
+        RECT wr{};
+        GetWindowRect(hwnd, &wr);
+        Check(::WndProcImpl(hwnd, WM_NCHITTEST, 0,
+              MAKELPARAM(wr.right - 1, screen.y)) == HTRIGHT,
+              L"settings scrollbar: outer window edge remains resizable");
+        BYTE keys[256]{};
+        memcpy(keys, saved_keys, sizeof(keys));
+        keys[VK_LBUTTON] |= 0x80;
+        SetKeyboardState(keys);
+        SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x, y));
+        Check(state->scrollbarDragging && GetCapture() == hwnd,
+              L"settings scrollbar: thumb press captures dragging");
+        SendMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, y + static_cast<int>(80 * scale)));
+        Check(state->settings.scroll() > 0 && tab->scroll_y == 17.0f,
+              L"settings scrollbar: dragging scrolls settings without changing the file pane");
+        SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+        Check(!state->scrollbarDragging && GetCapture() != hwnd,
+              L"settings scrollbar: release ends capture");
+        auto* dc = state->compositor.Dc();
+        const auto theme = ui::MakeTheme(state->darkMode, state->accentColor);
+        dc->BeginDraw();
+        dc->Clear(theme.bg);
+        state->renderer.Render(BuildVm(*state, false),
+            D2D1::RectF(0, 0, 1000 * scale, 600 * scale), theme);
+        const auto shot = WorkspacePath((L"bench_data/settings-scrollbar-" +
+            std::to_wstring(static_cast<int>(scale * 100)) + L".png").c_str());
+        Check(SUCCEEDED(dc->EndDraw()) && state->compositor.SaveSnapshot(shot.c_str()),
+              L"settings scrollbar: capture the scrollbar and reserved window edge");
+        state->settings.SetScroll(0, maximum);
+        SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON,
+                     MAKELPARAM(x, static_cast<int>(track.bottom - 2 * scale)));
+        Check(state->settings.scroll() > maximum * 0.9f,
+              L"settings scrollbar: clicking the track jumps near the bottom");
+        SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+        OpenSettingsTab(*state, 3);
+        Check(!state->renderer.SettingsScrollbarGeometry(BuildVm(*state, false),
+              1000 * scale, 4000 * scale, track, thumb, maximum),
+              L"settings scrollbar: a page without overflow has no draggable bar");
+    }
+    SetKeyboardState(saved_keys);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    state->compositor.Shutdown();
+    DestroyWindow(hwnd);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+}
+
 void TestTrayStack() {
     Check(!l10n::Get(l10n::StringId::StagingTrayEmpty).empty() &&
           !l10n::Get(l10n::StringId::TrayPrev).empty() &&
@@ -4691,7 +4859,57 @@ void TestTrayStack() {
     state->appPrefs.persist = false;
     state->isolatedTest = true;
     state->tray.Collect(files, false);
+    state->tray.Collect(files, false);
+    Check(state->tray.batches().size() == 1, L"tray stack: repeated copy does not add a batch");
     Check(TrayItemTotalCount(state->tray) == 5, L"tray stack: five staged items");
+    {
+        auto sample = [&](int frames) {
+            auto anim = std::make_unique<AppState>();
+            anim->isolatedTest = true;
+            anim->places.persist = false;
+            anim->appPrefs.persist = false;
+            anim->tray.Collect({files[0]}, false);
+            const double start = TrayAnimationNow();
+            TickTrayDeck(*anim, start);
+            auto& card = anim->trayCards.begin()->second;
+            card.appear = 0.0f;
+            for (int i = 1; i <= frames; ++i)
+                TickTrayDeck(*anim, start + 100.0 * i / frames);
+            return card.appear;
+        };
+        const float coarse = sample(6);
+        const float fine = sample(24);
+        Check(std::abs(coarse - fine) < 0.0001f && fine < 0.9f,
+              L"tray stack: 60 and 240 Hz advance equally without early snapping");
+        auto anim = std::make_unique<AppState>();
+        anim->isolatedTest = true;
+        anim->places.persist = false;
+        anim->appPrefs.persist = false;
+        anim->tray.Collect({files[0]}, false);
+        const double start = TrayAnimationNow();
+        TickTrayDeck(*anim, start);
+        auto& card = anim->trayCards.begin()->second;
+        card.appear = 0.25f;
+        TickTrayDeck(*anim, start + 0.25);
+        Check(card.appear > 0.25f && card.appear < 0.26f,
+              L"tray stack: sub-millisecond frames advance without snapping");
+        for (int frame = 1; frame <= 70; ++frame)
+            TickTrayDeck(*anim, start + frame * 16.0);
+        Check(!TickTrayDeck(*anim, start + 1200.0),
+              L"tray stack: completed animation stops requesting frames");
+        anim->dropTray = true;
+        TickTrayDeck(*anim, start + 10000.0);
+        Check(anim->trayOpen > 0.0f && anim->trayOpen < 0.3f,
+              L"tray stack: first frame after idle does not skip the new animation");
+    }
+    {
+        StagingTray folders;
+        folders.Collect({dir, dir + L"\\"}, false);
+        folders.Collect({dir}, true);
+        Check(folders.batches().size() == 1 && folders.batches()[0].items.size() == 1 &&
+              folders.batches()[0].items[0].is_dir && !folders.batches()[0].move_intent,
+              L"tray stack: repeated folder keeps one card and its original intent");
+    }
     {
         const auto all = TrayDeckEntries(state->tray, 0, 5);
         const auto wrap = TrayDeckEntries(state->tray, 3, 4);
@@ -4735,6 +4953,34 @@ void TestTrayStack() {
         // addresses its batch item, and the footer pager is present.
         const D2D1_RECT_F panel = state->renderer.StagingTrayRect(vm, 1000.0f, 700.0f);
         Check(panel.bottom - panel.top > 60.0f, L"tray stack: panel has room for the stack");
+        bool idle_stable = true;
+        for (int frame = 0; frame < 32; ++frame) {
+            Sleep(16);
+            idle_stable = !TickTrayDeck(*state) && idle_stable;
+        }
+        Check(idle_stable, L"tray stack: settled idle cards stop requesting animation frames");
+        const std::filesystem::path frame_dir = WorkspacePath(L"bench_data/tray-idle");
+        std::filesystem::create_directories(frame_dir);
+        const auto background_path = frame_dir / L"background.png";
+        auto* background_dc = state->compositor.Dc();
+        background_dc->BeginDraw();
+        background_dc->Clear(D2D1::ColorF(0x173752));
+        Check(SUCCEEDED(background_dc->EndDraw()) &&
+              state->compositor.SaveSnapshot(background_path.c_str()),
+              L"tray stack: generate isolated custom background");
+        state->appPrefs.window_effect = L"none";
+        state->appPrefs.background_image = background_path.wstring();
+        const auto frame_theme = ui::MakeTheme(state->darkMode, state->accentColor);
+        for (int frame = 0; frame < 4; ++frame) {
+            auto frame_vm = BuildVm(*state, false);
+            auto* dc = state->compositor.Dc();
+            dc->BeginDraw();
+            dc->Clear(frame_theme.bg);
+            state->renderer.Render(frame_vm, D2D1::RectF(0, 0, 1000, 700), frame_theme);
+            const auto frame_path = frame_dir / (L"frame-" + std::to_wstring(frame) + L".png");
+            Check(SUCCEEDED(dc->EndDraw()) && state->compositor.SaveSnapshot(frame_path.c_str()),
+                  L"tray stack: capture successive idle renders");
+        }
         float cx0 = 1e9f, cy0 = 1e9f, cx1 = -1e9f, cy1 = -1e9f;
         POINT close_pt{-1, -1}, prev_pt{-1, -1}, next_pt{-1, -1};
         bool foreign_card = false, close_ok = true;
@@ -4863,7 +5109,7 @@ void TestTrayStack() {
             if (c.ghost) lingering = true;
         Check(!lingering && vm.tray_deck.puffs.empty(), L"tray stack: exit animations finish");
 
-        // Clear: every visible card tumbles off, staggered; nothing lingers.
+        // Clear: visible cards fade together without motion, delays or smoke.
         std::vector<std::wstring> all;
         for (const auto& b : state->tray.batches())
             for (const auto& item : b.items) all.push_back(item.path);
@@ -4872,13 +5118,63 @@ void TestTrayStack() {
         TickTrayDeck(*state);
         vm = BuildVm(*state, false);
         int ghosts = 0;
-        for (const auto& c : vm.tray_deck.cards) if (c.ghost) ++ghosts;
+        bool fading = state->trayPuffs.empty();
+        for (const auto& [path, anim] : state->trayCards) {
+            if (!anim.ghost) continue;
+            ++ghosts;
+            fading = fading && anim.exit == AppState::TrayExit::Fade && anim.exit_delay == 0 &&
+                     anim.motion == AppState::TrayMotion::None;
+        }
         Check(vm.tray_deck.live_count == 0 && ghosts >= 3 && ghosts <= 8,
-              L"tray stack: clear tumbles the visible cards");
-        TrayStackSettle(*state, 1300);
+              L"tray stack: clear keeps visible cards for the fade");
+        Check(fading, L"tray stack: clear uses simultaneous stationary fades without smoke");
+        TrayStackSettle(*state, 200);
         vm = BuildVm(*state, false);
         Check(vm.tray_deck.cards.empty() && state->trayCards.empty(),
               L"tray stack: clear leaves no animation state behind");
+        const auto empty_panel = state->renderer.StagingTrayRect(vm, 1000.0f, 700.0f);
+        Check(empty_panel.left == panel.left && empty_panel.top == panel.top &&
+              empty_panel.right == panel.right && empty_panel.bottom == panel.bottom,
+              L"tray stack: clearing preserves the occupied panel bounds");
+        state->tray.Collect({files[0], files[1]}, false);
+        TrayStackSettle(*state, 900);
+        Check(state->trayCards.size() == 2 && !TickTrayDeck(*state),
+              L"tray stack: recollected cards settle without stale animation state");
+        ThrowTrayTop(*state, 1.0f, 48.0f, 12.0f);
+        state->traySpread = 0.6f;
+        SpawnTrayPuffs(*state);
+        MarkTrayExit(*state, {files[0], files[1]}, true);
+        state->tray.Clear();
+        TickTrayDeck(*state);
+        const auto fading_cards = state->trayCards;
+        Sleep(32);
+        TickTrayDeck(*state);
+        bool stationary = state->trayPuffs.empty() && state->traySpread == 0.6f;
+        for (const auto& [path, anim] : state->trayCards) {
+            const auto& before = fading_cards.at(path);
+            stationary = stationary && anim.fly == before.fly && anim.dx == before.dx &&
+                anim.dy == before.dy && anim.angle == before.angle && anim.shrink == before.shrink &&
+                anim.opacity <= before.opacity;
+        }
+        Check(stationary, L"tray stack: clear stops a fling and fades at its current pose");
+        TrayStackSettle(*state, 200);
+        Check(state->trayCards.empty(), L"tray stack: interrupted motion leaves no cards after fade");
+        for (int count = 1; count <= 2; ++count) {
+            state->tray.Collect({count == 1 ? dir : frame_dir.wstring()}, false);
+            TrayStackSettle(*state, 900);
+            state->darkMode = count == 1;
+            const auto folder_vm = BuildVm(*state, false);
+            Check(folder_vm.tray_deck.total_count == count && !TickTrayDeck(*state),
+                  L"tray stack: folder-only cards keep their count and settle");
+            const auto folder_theme = ui::MakeTheme(state->darkMode, state->accentColor);
+            auto* dc = state->compositor.Dc();
+            dc->BeginDraw();
+            dc->Clear(folder_theme.bg);
+            state->renderer.Render(folder_vm, D2D1::RectF(0, 0, 1000, 700), folder_theme);
+            const auto shot = frame_dir / (L"folders-" + std::to_wstring(count) + L".png");
+            Check(SUCCEEDED(dc->EndDraw()) && state->compositor.SaveSnapshot(shot.c_str()),
+                  L"tray stack: capture folder-only count and pager footer");
+        }
         SetKeyboardState(saved_keys);
     } else Check(false, L"tray stack: graphics initialized");
     if (GetCapture() == hwnd) ReleaseCapture();
@@ -5304,10 +5600,10 @@ void TestStagingTrayDeletion() {
                        L"C:\\tray-test\\folder-other\\keep.txt" }, false);
         tray.Collect({ L"C:\\tray-test\\a.txt" }, true);
         tray.RemoveDeleted({});
-        Check(tray.batches().size() == 2, L"tray: no successful deletions keep batches");
+        Check(tray.batches().size() == 1, L"tray: duplicate cut does not add a batch");
         tray.RemoveDeleted({ L"c:\\TRAY-test\\A.txt" });
         Check(tray.batches().size() == 1 && tray.batches()[0].items.size() == 2,
-              L"tray: deletion removes duplicate copy and cut entries and empty batches");
+              L"tray: deletion removes the unique staged path");
         tray.RemoveDeleted({ L"C:\\tray-test\\folder" });
         Check(tray.batches().size() == 1 && tray.batches()[0].items.size() == 1 &&
               tray.batches()[0].items[0].path.find(L"folder-other") != std::wstring::npos,
@@ -5315,9 +5611,10 @@ void TestStagingTrayDeletion() {
         tray.RemoveDeleted({ L"C:\\tray-test" });
         Check(tray.batches().empty(), L"tray: deleting final ancestor clears tray");
         const auto source = WorkspacePath(L"src\\app\\app_model.cpp");
-        tray.Collect({ source, source }, false);
+        tray.Collect({ source, source, WorkspacePath(L"src\\app\\app_model.h") }, false);
         const auto size = tray.batches()[0].items[0].size;
-        tray.RemoveItem(0, 0);
+        Check(tray.batches()[0].items.size() == 2, L"tray: duplicates within a batch are skipped");
+        tray.RemoveItem(0, 1);
         Check(size > 0 && tray.batches()[0].total_size == size,
               L"tray: removing an item updates batch size");
         std::wstring saved;
@@ -5327,6 +5624,10 @@ void TestStagingTrayDeletion() {
               L"tray: restored batch retains size accounting");
         restored.RemoveDeleted({ source });
         Check(restored.batches().empty(), L"tray: deletion also clears restored entries");
+        Check(restored.FromJson(L"[{\"move\":false,\"items\":[\"C:\\\\tray-test\\\\folder\\\\\","
+              L"\"c:/TRAY-test/folder\"]},{\"move\":true,\"items\":[\"C:/tray-test/folder\"]}]") &&
+              restored.batches().size() == 1 && restored.batches()[0].items.size() == 1,
+              L"tray: restoring old sessions removes duplicate paths across batches");
     }
 }
 
@@ -5684,6 +5985,18 @@ int RunSelfTest1B2() {
     if (g_skip_visual) LogLine(L"[SKIP] Screenshot capture disabled\n");
     wchar_t test_case[64]{};
     if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
+        wcscmp(test_case, L"settings-storage") == 0) {
+        TestSettingsStorage();
+        if (g_log) { fclose(g_log); g_log = nullptr; }
+        return g_fail ? 1 : 0;
+    }
+    if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
+        wcscmp(test_case, L"settings-scrollbar") == 0) {
+        TestSettingsScrollbar();
+        if (g_log) { fclose(g_log); g_log = nullptr; }
+        return g_fail ? 1 : 0;
+    }
+    if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
         wcscmp(test_case, L"column-resize-ui") == 0) {
         const bool passed = RunColumnResizeUiTest();
         if (g_log) { fclose(g_log); g_log = nullptr; }
@@ -5745,6 +6058,7 @@ int RunSelfTest1B2() {
     if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
         wcscmp(test_case, L"tray-stack") == 0) {
         TestTrayStack();
+        TestStagingTrayDeletion();
         if (g_log) { fclose(g_log); g_log = nullptr; }
         return g_fail ? 1 : 0;
     }

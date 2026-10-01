@@ -47,6 +47,7 @@ enum class SettingsTaskKind : uint8_t {
     InstallService,
     RebuildIndex,
     ConfigureIndexPath,
+    ConfigureConfigurationPath,
     NetworkAdd,
     NetworkRebuild,
     NetworkRemove,
@@ -152,6 +153,13 @@ public:
     void AddExclude();
     void RemoveExclude(int index);
     void IndexAction(int action);
+    void ConfigurationAction(int action);
+    const std::wstring& configuration_path() const noexcept { return configuration_path_; }
+    const std::wstring& configuration_pending_path() const noexcept { return configuration_pending_path_; }
+    const std::wstring& configuration_storage_error() const noexcept { return configuration_storage_error_; }
+    const std::wstring& index_storage_path() const noexcept { return index_storage_path_; }
+    const std::wstring& index_pending_path() const noexcept { return index_pending_path_; }
+    const std::wstring& index_storage_error() const noexcept { return index_storage_error_; }
     void NetworkAction(int action, bool pin_after_add = false);
     void RemoveNetwork(int index);
     void DiagnosticsAction(int action);
@@ -187,6 +195,13 @@ private:
     bool StartTask(SettingsTask task, SettingsTaskOperation operation,
                    SettingsTaskCompletion completion);
     bool StartUiTask(SettingsTask task);
+    void RefreshStorage();
+    std::wstring configuration_path_;
+    std::wstring configuration_pending_path_;
+    std::wstring configuration_storage_error_;
+    std::wstring index_storage_path_;
+    std::wstring index_pending_path_;
+    std::wstring index_storage_error_;
     void Apply(SettingsEffect effect) const;
     void SaveAndApply(SettingsEffect effect) const;
 };

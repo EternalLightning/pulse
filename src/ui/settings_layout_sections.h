@@ -68,7 +68,13 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         y+=8*scale; l.change_tracking_row=row(64);
         l.change_days_row=row(narrow ? 98.0f : 64.0f); segments(l.change_days_row,l.change_days,3,282);
     }
-    y+=12*scale; l.footer=row(28); y+=16*scale;
+    y+=18*scale; l.configuration_path=row(152);
+    const float config_width=(right-left-40*scale)/2;
+    for(int i=0;i<2;++i) {
+        const float x=left+16*scale+i*(config_width+8*scale);
+        l.configuration_action[i]=D2D1::RectF(x,l.configuration_path.top+108*scale,x+config_width,l.configuration_path.top+140*scale);
+    }
+    y+=12*scale; l.footer=row(44); y+=16*scale;
     return y;
 }
 

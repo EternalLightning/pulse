@@ -591,6 +591,10 @@ struct WindowViewModel {
     bool settings_index_installed = false;
     std::wstring settings_index_status;
     std::wstring settings_index_path;
+    std::wstring settings_index_storage_status;
+    std::wstring settings_configuration_path;
+    std::wstring settings_configuration_status;
+    bool settings_storage_pending = false;
     bool settings_index_migrating = false;
     std::wstring settings_index_error;
     std::vector<IndexVolumeRowView> settings_index_volumes;
@@ -730,6 +734,7 @@ struct HitTestResult {
         SettingsLanguage,
         SettingsIndexVolume,
         SettingsIndexAction,
+        SettingsConfigurationAction,
         SettingsIndexExcludeAction,
         SettingsIndexExcludeRemove,
         SettingsNetworkAction,
@@ -1029,6 +1034,8 @@ public:
     // Uniform tab pitch (excludes group-chip offsets); used by drag math.
     float TabPitchPx(const WindowViewModel& vm, float window_w) const;
     float SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;
+    bool SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w, float window_h,
+                                   D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maximum) const;
     D2D1_RECT_F SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const;
     float SettingsDestinationOffset(const WindowViewModel& vm, int setting_id, float window_w, float window_h) const;
     float SidebarMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;

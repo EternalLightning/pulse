@@ -345,8 +345,7 @@ void ClearTextWidthCache() {
     inline float TrayCardHeightDip(float thumb_dip) { return TrayThumbDip(thumb_dip) + 20.0f; }
 
     float ExpandedTrayHeight(const WindowViewModel& vm, const SidebarMetrics& m) {
-        if (vm.tray_deck.cards.empty())
-            return 112.0f * m.scale; // header + dashed empty state
+        // Keep empty and occupied bounds identical so clearing only fades content.
         // Card stack: header (38) + top card + peeking layers when fanned
         // out (25) + gap + footer row (31).
         return (TrayCardHeightDip(vm.tray_deck.thumb_dip) + 94.0f) * m.scale;
@@ -1537,7 +1536,9 @@ struct SettingsLayout {
     D2D1_RECT_F index_info{};
     D2D1_RECT_F index_status{};
     D2D1_RECT_F index_path{};
-    D2D1_RECT_F index_action[3]{};
+    D2D1_RECT_F index_action[4]{};
+    D2D1_RECT_F configuration_path{};
+    D2D1_RECT_F configuration_action[2]{};
     std::vector<D2D1_RECT_F> index_volume_rows;
     D2D1_RECT_F index_exclude_action{};
     D2D1_RECT_F index_exclude_empty{};
@@ -1643,33 +1644,17 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         y += 70.0f * scale;
         l.index_status = D2D1::RectF(card_left, y, card_right, y + 82.0f * scale);
         y += 94.0f * scale;
-        const std::wstring index_actions[] = {
-            pulse::l10n::Get(pulse::l10n::StringId::Rebuild),
-            pulse::l10n::Get(pulse::l10n::StringId::OpenLocation),
-            pulse::l10n::Get(vm.settings_index_service
-                ? pulse::l10n::StringId::ChangeLocation
-                : pulse::l10n::StringId::InstallService),
-        };
-        const bool compact_actions = card_right - card_left < 650.0f * scale;
-        const float path_h = compact_actions ? 116.0f * scale : 64.0f * scale;
+        const int action_count = (vm.settings_index_service || vm.settings_index_installed) ? 3 : 4;
+        const int columns = card_right - card_left < 560.0f * scale ? 2 : action_count;
+        const int rows = (action_count + columns - 1) / columns;
+        const float path_h = (112.0f + 40.0f * rows) * scale;
         l.index_path = D2D1::RectF(card_left, y, card_right, y + path_h);
-        if (compact_actions) {
-            const float gap = 8.0f * scale;
-            const float available = card_right - card_left - 32.0f * scale - gap * 2.0f;
-            const float width = available / 3.0f;
-            for (int i = 0; i < 3; ++i) {
-                const float left = card_left + 16.0f * scale + i * (width + gap);
-                l.index_action[i] = D2D1::RectF(left, y + 68.0f * scale,
-                                                left + width, y + 100.0f * scale);
-            }
-        } else {
-            float cursor = card_right - 12.0f * scale;
-            for (int i = 0; i < 3; ++i) {
-                const float width = label_btn_w(index_actions[i]);
-                l.index_action[i] = D2D1::RectF(cursor - width, y + 16.0f * scale,
-                                                cursor, y + 48.0f * scale);
-                cursor -= width + 8.0f * scale;
-            }
+        const float gap = 8.0f * scale;
+        const float width = (card_right - card_left - 32.0f * scale - gap * (columns - 1)) / columns;
+        for (int i = 0; i < action_count; ++i) {
+            const float left = card_left + 16.0f * scale + (i % columns) * (width + gap);
+            const float top = y + (100.0f + 40.0f * (i / columns)) * scale;
+            l.index_action[i] = D2D1::RectF(left, top, left + width, top + 32.0f * scale);
         }
         y += path_h + 44.0f * scale;
         l.index_volume_rows.reserve(vm.settings_index_volumes.size());

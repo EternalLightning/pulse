@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cwctype>
 #include <utility>
+#include <set>
 
 namespace pulse::app {
 
@@ -816,14 +817,33 @@ static std::wstring DisplayPath(const std::wstring& path) {
 // ---------------------------------------------------------------------------
 // StagingTray
 // ---------------------------------------------------------------------------
+namespace {
+struct TrayPathLess {
+    bool operator()(const std::wstring& left, const std::wstring& right) const {
+        return CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
+            right.data(), static_cast<int>(right.size()), TRUE) == CSTR_LESS_THAN;
+    }
+};
+std::wstring NormalizeTrayPath(const std::wstring& path) {
+    auto normalized = fs::NormalizePath(path);
+    while (normalized.size() > 1 && normalized.back() == L'\\' &&
+           normalized[normalized.size() - 2] != L':') normalized.pop_back();
+    return normalized;
+}
+}
 void StagingTray::Collect(const std::vector<std::wstring>& paths, bool move_intent) {
     if (paths.empty()) return;
+    std::set<std::wstring, TrayPathLess> seen;
+    for (const auto& batch : batches_)
+        for (const auto& item : batch.items) seen.insert(item.path);
     TrayBatch batch;
     batch.move_intent = move_intent;
     batch.total_size = 0;
     for (const auto& p : paths) {
         TrayItem it;
-        it.path = fs::NormalizePath(p);
+        if (p.empty()) continue;
+        it.path = NormalizeTrayPath(p);
+        if (!seen.insert(it.path).second) continue;
         // One probe covers existence, icon attrs and the rough size sum.
         WIN32_FILE_ATTRIBUTE_DATA fad{};
         if (GetFileAttributesExW(it.path.c_str(), GetFileExInfoStandard, &fad)) {
@@ -842,7 +862,7 @@ void StagingTray::Collect(const std::vector<std::wstring>& paths, bool move_inte
         }
         batch.items.push_back(std::move(it));
     }
-    batches_.push_back(std::move(batch));
+    if (!batch.items.empty()) batches_.push_back(std::move(batch));
 }
 
 void StagingTray::RemoveBatch(size_t idx) {
@@ -900,6 +920,7 @@ void StagingTray::ToJson(std::wstring& out) const {
 
 bool StagingTray::FromJson(const std::wstring& in) {
     batches_.clear();
+    std::set<std::wstring, TrayPathLess> seen;
     // Minimal parser: enough for our own serialization.
     size_t i = in.find(L'[');
     if (i == std::wstring::npos) return false;
@@ -946,7 +967,9 @@ bool StagingTray::FromJson(const std::wstring& in) {
                     }
                     if (i < in.size()) ++i;
                     TrayItem it;
-                    it.path = fs::NormalizePath(path);
+                    if (path.empty()) continue;
+                    it.path = NormalizeTrayPath(path);
+                    if (!seen.insert(it.path).second) continue;
                     WIN32_FILE_ATTRIBUTE_DATA data{};
                     it.exists = GetFileAttributesExW(it.path.c_str(),
                         GetFileExInfoStandard, &data) != FALSE;

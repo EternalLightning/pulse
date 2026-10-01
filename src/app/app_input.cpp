@@ -862,8 +862,8 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             const float dy = static_cast<float>(my - s->trayDrag.y0) / sc;
             if (!s->trayDrag.active && std::abs(dx) + std::abs(dy) > 3.0f)
                 s->trayDrag.active = true;
-            const ULONGLONG now = GetTickCount64();
-            const float dt = static_cast<float>(std::max<ULONGLONG>(1, now - s->trayDrag.last_t));
+            const double now = TrayAnimationNow();
+            const float dt = static_cast<float>(std::max(1.0, now - s->trayDrag.last_t));
             const float inst = static_cast<float>(mx - s->trayDrag.last_x) / sc / dt;
             s->trayDrag.vx = s->trayDrag.vx * 0.4f + inst * 0.6f;
             s->trayDrag.last_x = mx;
@@ -981,15 +981,20 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                         (mx - s->scrollbarDragStartX) * maxScroll / travel, 0.0f, maxScroll);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else if (!s->scrollbarSidebar && !s->scrollbarHorizontal &&
-                           ScrollbarGeometry(*s, dragVm.pane, track, thumb, maxScroll)) {
+                           (dragVm.settings_open
+                            ? s->renderer.SettingsScrollbarGeometry(dragVm,
+                                static_cast<float>(s->compositor.Width()),
+                                static_cast<float>(s->compositor.Height()), track, thumb, maxScroll)
+                            : ScrollbarGeometry(*s, dragVm.pane, track, thumb, maxScroll))) {
                     const float travel = std::max(1.0f,
                         (track.bottom - track.top) - (thumb.bottom - thumb.top));
-                    tab->scroll_y = std::clamp(
+                    const float value = std::clamp(
                         (my - track.top - std::min(s->scrollbarGrabOffset, thumb.bottom - thumb.top))
                             * maxScroll / travel,
                         0.0f, maxScroll);
-                    s->scrollTargetY = tab->scroll_y;
-                    MaybePrefetchSearchPage(*s);
+                    SetSmoothScrollOffset(*s, *tab, value, maxScroll);
+                    s->scrollTargetY = value;
+                    if (!dragVm.settings_open) MaybePrefetchSearchPage(*s);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 return 0;
@@ -1906,7 +1911,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 s->trayDrag.x0 = mx;
                 s->trayDrag.y0 = my;
                 s->trayDrag.last_x = mx;
-                s->trayDrag.last_t = GetTickCount64();
+                s->trayDrag.last_t = TrayAnimationNow();
                 SetCapture(hwnd);
                 return 0;
             }
@@ -2011,6 +2016,9 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                                                        track, thumb, maxScroll)
                 : s->scrollbarHorizontal
                 ? HorizontalScrollbarGeometry(*s, scrollPane, track, thumb, maxScroll)
+                : vm.settings_open
+                ? s->renderer.SettingsScrollbarGeometry(vm, rect.right, rect.bottom,
+                                                        track, thumb, maxScroll)
                 : ScrollbarGeometry(*s, scrollPane, track, thumb, maxScroll);
             if (tab && hasGeometry) {
                 const bool outside = s->scrollbarHorizontal
@@ -2028,14 +2036,19 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                                                    0.0f,maxScroll);
                     if (s->scrollbarSidebar) s->sidebarScroll=value;
                     else if (s->scrollbarHorizontal) tab->scroll_x=value;
-                    else { tab->scroll_y=value; s->scrollTargetY=value; MaybePrefetchSearchPage(*s); }
+                    else {
+                        SetSmoothScrollOffset(*s, *tab, value, maxScroll);
+                        s->scrollTargetY = value;
+                        if (!vm.settings_open) MaybePrefetchSearchPage(*s);
+                    }
                 }
                 s->scrollbarGrabOffset = outside ? (thumb.bottom - thumb.top) * 0.5f : my - thumb.top;
                 s->scrollbarDragging = true;
                 s->scrollbarDragStartX = mx;
                 s->scrollbarDragStartY = my;
                 s->scrollbarDragStartScroll = s->scrollbarSidebar ? s->sidebarScroll
-                    : s->scrollbarHorizontal ? tab->scroll_x : tab->scroll_y;
+                    : s->scrollbarHorizontal ? tab->scroll_x
+                    : vm.settings_open ? s->settings.scroll() : tab->scroll_y;
                 SetCapture(hwnd);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -2168,6 +2181,9 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SettingsIndexVolume) {
             s->settings.ToggleVolume(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (hit.region == ui::HitTestResult::SettingsConfigurationAction) {
+            s->settings.ConfigurationAction(hit.index);
+            InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsIndexAction) {
             s->settings.IndexAction(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2291,13 +2307,12 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             s->tray.RemoveItem((size_t)hit.index, (size_t)hit.sub_index);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::TrayClear) {
-            // Clear: the visible cards tumble off one after another.
+            // Clear: the visible cards fade out together.
             std::vector<std::wstring> all;
             for (const auto& b : s->tray.batches())
                 for (const auto& item : b.items) all.push_back(item.path);
             if (!all.empty()) {
                 MarkTrayExit(*s, all, true);
-                SpawnTrayPuffs(*s);
             }
             s->tray.Clear();
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -3290,7 +3305,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         CancelRenameClick(*s);
         if (IsSettingsTab(ActiveTab(*s))) {
             const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-            StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 48.0f * s->scale);
+            StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 72.0f * s->scale);
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }

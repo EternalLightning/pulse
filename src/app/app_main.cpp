@@ -18,6 +18,7 @@
 #include "../common/crash_reporter.h"
 #include "../common/diagnostics_exporter.h"
 #include "../common/localization.h"
+#include "../common/user_storage.h"
 #include "pulse_version.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
@@ -147,11 +148,11 @@ static bool IndexStatusVisible(AppState& s) {
     return visible;
 }
 
-void Render(AppState& s) {
+bool Render(AppState& s) {
     auto t0 = std::chrono::steady_clock::now();
 
     if (s.compositor.NeedsRecovery()) {
-        if (!s.compositor.Recover()) return;
+        if (!s.compositor.Recover()) return false;
         s.compositor.RecreateTextFormats(s.scale);
         s.renderer.SetCompositor(&s.compositor);
         s.renderer.SetScale(s.scale);
@@ -176,6 +177,7 @@ void Render(AppState& s) {
     ui::Theme theme = hc ? ui::MakeHighContrastTheme() : ui::MakeTheme(s.darkMode, s.accentColor);
 
     if (s.scrollAnimating) UpdateSmoothScroll(s);
+    const bool tray_animating = TickTrayDeck(s);
     UpdateProcessMetrics(s);
     ui::WindowViewModel vm = BuildVm(s);
     vm.backdrop_enabled = !hc && s.compositor.UsesTransparentComposition() && s.backdropActive;
@@ -191,7 +193,7 @@ void Render(AppState& s) {
     if (end_hr == D2DERR_RECREATE_TARGET || end_hr == DXGI_ERROR_DEVICE_REMOVED ||
         end_hr == DXGI_ERROR_DEVICE_RESET || end_hr == DXGI_ERROR_DRIVER_INTERNAL_ERROR) {
         s.compositor.NotifyDeviceLost(end_hr);
-        return;
+        return false;
     }
     const auto present_start = std::chrono::steady_clock::now();
     wchar_t hidden_frame[4]{};
@@ -234,6 +236,7 @@ void Render(AppState& s) {
             s.lastFps = static_cast<double>(s.fpsWindow.size() - 1) / span;
     }
     s.lastFrameTime = t1;
+    return tray_animating;
 }
 
 // kTimerUi drives animations and light polling. Minimized or hidden to the
@@ -640,6 +643,20 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_NCHITTEST: {
         POINT screenPt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (s && IsSettingsTab(ActiveTab(*s))) {
+            POINT client = screenPt;
+            ScreenToClient(hwnd, &client);
+            if (client.x >= s->compositor.Width() - 32.0f * s->scale) {
+                D2D1_RECT_F track{}, thumb{};
+                float maximum = 0.0f;
+                if (s->renderer.SettingsScrollbarGeometry(BuildVm(*s, false),
+                        static_cast<float>(s->compositor.Width()),
+                        static_cast<float>(s->compositor.Height()), track, thumb, maximum) &&
+                    client.x >= track.left && client.x < track.right &&
+                    client.y >= track.top && client.y < track.bottom)
+                    return HTCLIENT;
+            }
+        }
         if (!IsZoomed(hwnd)) {
             RECT wr{};
             GetWindowRect(hwnd, &wr);
@@ -847,11 +864,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
-        if (s) Render(*s);
+        const bool tray_animating = s && Render(*s);
         EndPaint(hwnd, &ps);
-        // Present throttles scrolling to the display. Queue the next low-priority
+        // Present throttles animations to the display. Queue the next low-priority
         // paint after EndPaint so high-refresh monitors are not capped by WM_TIMER.
-        if (s && s->scrollAnimating && !s->compositor.NeedsRecovery() &&
+        if (s && (s->scrollAnimating || tray_animating) && !s->compositor.NeedsRecovery() &&
             IsWindowVisible(hwnd) && !IsIconic(hwnd))
             InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
@@ -959,7 +976,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 TickTabTransitions(*s);
                 dirty = true;
             }
-            if (TickTrayDeck(*s)) dirty = true;
+            // Tray animation advances during painting, like smooth scrolling.
             if (app::Tab* tab = ActiveTab(*s)) {
                 std::wstring kind, rest;
                 if (app::ParsePulsePath(tab->current_path, &kind, &rest) &&
@@ -1772,7 +1789,6 @@ static void ApplyShotTrayAction(AppState& state) {
             for (const auto& b : state.tray.batches())
                 for (const auto& item : b.items) all.push_back(item.path);
             MarkTrayExit(state, all, true);
-            SpawnTrayPuffs(state);
             state.tray.Clear();
         } else if (wcscmp(tray_action, L"hover") == 0) {
             state.hoverRegion = static_cast<int>(ui::HitTestResult::TrayCard);
@@ -1905,6 +1921,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         }
     }
 #endif
+
+    if (!SkipSingletonFromArgv() &&
+        state.single_instance.Acquire() == app::SingleInstanceCoordinator::AcquireResult::Primary) {
+        std::wstring migration_error;
+        // No window exists yet. Keep filesystem migration off the UI thread.
+        std::thread migration([&] {
+            pulse::storage::ApplyConfiguration(migration_error);
+            std::wstring index_error;
+            if (!pulse::storage::ApplyUserIndex(index_error) && migration_error.empty())
+                migration_error = std::move(index_error);
+        });
+        migration.join();
+        if (!migration_error.empty()) state.settings.SetError(std::move(migration_error));
+    }
 
     // Load previous session before parsing overrides.
     app::SessionSnapshot session;

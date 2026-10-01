@@ -541,7 +541,7 @@ struct AppState {
         uint64_t size = 0;
         bool ghost = false;     // left the stack window, playing its exit
         TrayExit exit = TrayExit::Fade;
-        ULONGLONG exit_started = 0;
+        double exit_started = 0;
         ULONGLONG exit_delay = 0;   // ms, staggered clear
         float exit_opacity = 1.0f;
         float depth = 0.0f;     // eases toward the window index (0 = top)
@@ -554,12 +554,12 @@ struct AppState {
         float angle = 0.0f;     // degrees
         float shrink = 1.0f;
         TrayMotion motion = TrayMotion::None;
-        ULONGLONG motion_started = 0;
+        double motion_started = 0;
         float from_fly = 0.0f, from_dx = 0.0f, from_dy = 0.0f, from_angle = 0.0f;
         float to_fly = 0.0f, to_dy = 0.0f, to_angle = 0.0f;
     };
     struct TrayPuff {
-        ULONGLONG start = 0;
+        double start = 0;
         float angle = 0.0f;
         float dist = 0.0f;
         float size = 1.0f;
@@ -575,7 +575,7 @@ struct AppState {
         std::wstring path;
         int x0 = 0, y0 = 0;
         int last_x = 0;
-        ULONGLONG last_t = 0;
+        double last_t = 0;
         float vx = 0.0f;        // DIP/ms, smoothed
         float dx = 0.0f;        // DIPs
         float dy = 0.0f;
@@ -587,7 +587,7 @@ struct AppState {
     std::wstring trayRaisePath; // stepping back: this card drops in on top
     float trayOpen = 0.0f;      // eased drag-over highlight
     float traySpread = 0.0f;    // eased stack fan-out while hovered
-    ULONGLONG trayLastTick = 0;
+    double trayLastTick = 0;
     int trayDeckOffset = 0;     // cyclic index of the top card (newest-first order)
     int trayWheelAccum = 0;     // sub-notch wheel delta accumulator
     size_t trayDeckLastTotal = 0; // collect detection (stack resets to newest)

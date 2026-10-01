@@ -3,6 +3,7 @@
 #include "../ui/panel_metrics.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
+#include "../common/user_storage.h"
 #include <commctrl.h>
 #include <prsht.h>
 #include <shlobj.h>
@@ -301,21 +302,9 @@ bool ParseLayoutTabs(const std::wstring& array_json,
 }
 
 std::wstring GetPulseDataDir() {
-#ifdef PULSE_WITH_SELFTEST
-    wchar_t test_dir[32768]{};
-    const DWORD length = GetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", test_dir, ARRAYSIZE(test_dir));
-    if (length > 0 && length < ARRAYSIZE(test_dir)) {
-        CreateDirectoryW(test_dir, nullptr);
-        return test_dir;
-    }
-#endif
-    wchar_t path[MAX_PATH] = {};
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path))) {
-        std::wstring dir = std::wstring(path) + L"\\Pulse";
-        CreateDirectoryW(dir.c_str(), nullptr);
-        return dir;
-    }
-    return L"";
+    const auto root = storage::ConfigurationRoot();
+    if (!root.empty()) CreateDirectoryW(root.c_str(), nullptr);
+    return root;
 }
 
 bool SaveSession(const SessionSnapshot& snap) {

@@ -426,6 +426,19 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             if (vm.settings_index_migrating)
                 vm.settings_index_status = l10n::Get(l10n::StringId::IndexMigrating);
             vm.settings_index_path = s.index.IndexPath();
+            if (vm.settings_index_path.empty()) vm.settings_index_path = s.settings.index_storage_path();
+            vm.settings_storage_pending = s.settings.migration_pending();
+            vm.settings_configuration_path = s.settings.configuration_path();
+            vm.settings_configuration_status = s.settings.configuration_storage_error();
+            if (vm.settings_configuration_status.empty() && !s.settings.configuration_pending_path().empty())
+                vm.settings_configuration_status = l10n::Get(l10n::StringId::StorageNextStartup) + s.settings.configuration_pending_path();
+            vm.settings_index_storage_status = s.settings.index_storage_error();
+            if (!vm.settings_index_service && vm.settings_index_storage_status.empty() && !s.settings.index_pending_path().empty())
+                vm.settings_index_storage_status = l10n::Get(l10n::StringId::StorageNextStartup) + s.settings.index_pending_path();
+            if (!vm.settings_index_service && !s.settings.index_storage_error().empty())
+                vm.settings_index_status = s.settings.index_storage_error();
+            if (vm.settings_page == 0 && !s.settings.error().empty())
+                vm.settings_configuration_status = s.settings.error();
             vm.settings_index_error = s.settings.error();
             vm.settings_index_volumes.clear();
             vm.settings_index_excluded_paths = s.index.ExcludedPaths();
@@ -1010,7 +1023,7 @@ constexpr float kTrayTumbleMs = 560.0f;
 constexpr float kTrayPuffMs = 620.0f;
 constexpr float kTrayFadeMs = 140.0f;
 
-void StartTrayMotion(AppState::TrayCardAnim& a, AppState::TrayMotion motion, ULONGLONG now) {
+void StartTrayMotion(AppState::TrayCardAnim& a, AppState::TrayMotion motion, double now) {
     a.motion = motion;
     a.motion_started = now;
     a.from_fly = a.fly;
@@ -1020,7 +1033,7 @@ void StartTrayMotion(AppState::TrayCardAnim& a, AppState::TrayMotion motion, ULO
 }
 
 // Advance throw / spring motion. Returns true while still moving.
-bool AdvanceTrayMotion(AppState::TrayCardAnim& a, ULONGLONG now) {
+bool AdvanceTrayMotion(AppState::TrayCardAnim& a, double now) {
     using M = AppState::TrayMotion;
     const float ms = static_cast<float>(now - a.motion_started);
     switch (a.motion) {
@@ -1066,6 +1079,11 @@ std::wstring TrayFolderOf(const std::wstring& path) {
 }
 } // namespace
 
+double TrayAnimationNow() {
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 int TrayStackTop(const AppState& s) {
     const int total = TrayItemTotalCount(s.tray);
     return total > 0 ? ((s.trayDeckOffset % total) + total) % total : 0;
@@ -1079,7 +1097,7 @@ void ThrowTrayTop(AppState& s, float dir, float dx, float dy) {
     if (total < 2) return;
     const auto entries = TrayDeckEntries(s.tray, static_cast<size_t>(TrayStackTop(s)), 1);
     if (entries.empty()) return;
-    const ULONGLONG now = GetTickCount64();
+    const double now = TrayAnimationNow();
     AppState::TrayCardAnim& a = s.trayCards[entries.front().item->path];
     a.dx = dx;
     a.dy = dy;
@@ -1100,7 +1118,7 @@ void ReleaseTrayDrag(AppState& s, bool commit) {
     s.trayDrag = AppState::TrayDrag{};
     if (!drag.active) return;
     float vx = drag.vx;
-    if (GetTickCount64() - drag.last_t > 80) vx = 0.0f; // stopped before letting go
+    if (TrayAnimationNow() - drag.last_t > 80) vx = 0.0f; // stopped before letting go
     const bool fling = std::abs(drag.dx) > 70.0f || std::abs(vx) > 0.55f;
     if (commit && fling && TrayItemTotalCount(s.tray) > 1) {
         const float dir = std::abs(drag.dx) > 8.0f ? (drag.dx < 0.0f ? -1.0f : 1.0f)
@@ -1114,7 +1132,7 @@ void ReleaseTrayDrag(AppState& s, bool commit) {
         a.dx = drag.dx;
         a.dy = drag.dy * 0.35f;
         a.angle = drag.dx * 0.07f;
-        StartTrayMotion(a, AppState::TrayMotion::Spring, GetTickCount64());
+        StartTrayMotion(a, AppState::TrayMotion::Spring, TrayAnimationNow());
     }
     if (s.hwnd) InvalidateRect(s.hwnd, nullptr, FALSE);
 }
@@ -1131,15 +1149,15 @@ void TrayStepBack(AppState& s) {
 
 // Smoke burst at the top card's close badge (renderer anchors it).
 void SpawnTrayPuffs(AppState& s) {
-    const ULONGLONG now = GetTickCount64();
-    uint32_t seed = static_cast<uint32_t>(now * 2654435761u);
+    const double now = TrayAnimationNow();
+    uint32_t seed = static_cast<uint32_t>(GetTickCount64()) * 2654435761u;
     auto frand = [&seed]() {
         seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
         return static_cast<float>(seed & 0xFFFFFF) / 16777216.0f;
     };
     for (int i = 0; i < 10; ++i) {
         AppState::TrayPuff p;
-        p.start = now + static_cast<ULONGLONG>(frand() * 60.0f);
+        p.start = now + static_cast<double>(frand() * 60.0f);
         p.angle = static_cast<float>(i) / 10.0f * 6.2831853f + frand() * 0.5f;
         p.dist = 16.0f + frand() * 16.0f;
         p.size = 0.8f + frand() * 0.9f;
@@ -1148,30 +1166,45 @@ void SpawnTrayPuffs(AppState& s) {
 }
 
 // Tell the next tick how the currently visible cards of `paths` should
-// leave: tumble off (dismiss / clear / release), staggered by stack order.
-void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool stagger) {
+// leave: a stationary fade for clear, or a tumble for a single dismissal.
+void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool clearing) {
+    if (clearing) {
+        s.trayPuffs.clear();
+        const double now = TrayAnimationNow();
+        for (auto& [path, anim] : s.trayCards) {
+            s.trayExitHints[path] = { AppState::TrayExit::Fade, 0 };
+            anim.motion = AppState::TrayMotion::None;
+            if (anim.ghost) {
+                anim.exit = AppState::TrayExit::Fade;
+                anim.exit_started = now;
+                anim.exit_delay = 0;
+                anim.exit_opacity = anim.opacity;
+            }
+        }
+        return;
+    }
     const auto entries = TrayDeckEntries(s.tray, static_cast<size_t>(TrayStackTop(s)), 4);
-    ULONGLONG delay = 0;
     for (const auto& e : entries) {
         if (std::find(paths.begin(), paths.end(), e.item->path) == paths.end()) continue;
-        s.trayExitHints[e.item->path] = { AppState::TrayExit::Tumble, delay };
-        if (stagger) delay += 60;
+        s.trayExitHints[e.item->path] = { AppState::TrayExit::Tumble, 0 };
     }
 }
 
 // Per-frame stack animation on the 16 ms UI timer. Returns true while
 // anything is still moving (caller invalidates).
-bool TickTrayDeck(AppState& s) {
+bool TickTrayDeck(AppState& s, double now) {
     using M = AppState::TrayMotion;
     using X = AppState::TrayExit;
     bool dirty = false;
-    const ULONGLONG now = GetTickCount64();
-    const float elapsed = s.trayLastTick ? static_cast<float>(now - s.trayLastTick) : 16.0f;
+    const float elapsed = s.trayLastTick
+        ? static_cast<float>(std::clamp(now - s.trayLastTick, 0.0, 100.0)) : 16.0f;
     s.trayLastTick = now;
     auto ease = [&dirty, elapsed](float& cur, float target, float k) {
         const float timed_k = 1.0f - std::pow(1.0f - k, std::min(elapsed, 100.0f) / 16.0f);
-        const float next = cur + (target - cur) * timed_k;
-        if (std::abs(next - cur) > 0.0015f) { cur = next; dirty = true; }
+        if (std::abs(target - cur) > 0.0015f) {
+            cur += (target - cur) * timed_k;
+            dirty = true;
+        }
         else if (cur != target) { cur = target; dirty = true; }
     };
 
@@ -1190,7 +1223,9 @@ bool TickTrayDeck(AppState& s) {
     const int n = static_cast<int>(entries.size());
     const int hovered = TrayDeckHoverIndex(s);
     const bool stackHot = hovered >= 0 || s.trayDrag.active;
-    ease(s.traySpread, stackHot ? 1.0f : 0.0f, 0.20f);
+    // Preserve the stack's pose while its cards fade after clearing.
+    if (total > 0) ease(s.traySpread, stackHot ? 1.0f : 0.0f, 0.20f);
+    else if (s.trayCards.empty()) s.traySpread = 0.0f;
 
     std::unordered_set<std::wstring> live;
     live.reserve(entries.size() * 2);
@@ -1270,7 +1305,7 @@ bool TickTrayDeck(AppState& s) {
             if (a.exit == X::Tumble) StartTrayMotion(a, M::None, now);
         }
         bool done = false;
-        const float local = static_cast<float>(now) - static_cast<float>(a.exit_started)
+        const float local = static_cast<float>(now - a.exit_started)
                           - static_cast<float>(a.exit_delay);
         switch (a.exit) {
         case X::Fade: {
@@ -1316,6 +1351,8 @@ bool TickTrayDeck(AppState& s) {
             return now > p.start && static_cast<float>(now - p.start) >= kTrayPuffMs;
         }), s.trayPuffs.end());
     if (!s.trayPuffs.empty() || puffs != s.trayPuffs.size()) dirty = true;
+    // A new interaction must not inherit a long gap since the last idle paint.
+    if (!dirty) s.trayLastTick = 0;
     return dirty;
 }
 
@@ -1627,7 +1664,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             fill(card, anim);
             deck.cards.push_back(std::move(card));
         }
-        const ULONGLONG now = GetTickCount64();
+        const double now = TrayAnimationNow();
         for (const auto& p : s.trayPuffs) {
             if (now < p.start) continue;
             ui::TrayPuffView view;
