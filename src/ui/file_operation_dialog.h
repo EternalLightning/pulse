@@ -74,6 +74,10 @@ struct ConfirmDialogSpec {
     std::wstring confirm_text;
     std::wstring cancel_text;
     bool danger = false;
+    bool cancel_is_default = false;
+    // Deletion may expire/cancel while the native modal message loop is open.
+    std::function<bool()> still_valid;
+    bool fit_to_work_area = false;
 };
 
 bool ShowConfirmDialog(HWND owner, const ConfirmDialogSpec& spec, bool dark,

@@ -51,6 +51,7 @@ void AppPrefs::ResetToDefaults() {
     verify_copies = false;
     show_status_performance = false;
     show_pinned_tab_names = true;
+    new_tab_home = false;
     list_smart_date = true;
     list_zebra_rows = true;
     list_size_bar = false;
@@ -103,6 +104,8 @@ std::wstring AppPrefs::ToJson() const {
     out += show_status_performance ? L"true" : L"false";
     out += L",\n  \"show_pinned_tab_names\":";
     out += show_pinned_tab_names ? L"true" : L"false";
+    out += L",\n  \"new_tab_home\":";
+    out += new_tab_home ? L"true" : L"false";
     out += L",\n  \"list_smart_date\":";
     out += list_smart_date ? L"true" : L"false";
     out += L",\n  \"list_zebra_rows\":";
@@ -192,6 +195,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     verify_copies = pulse::json::ExtractBool(json, L"verify_copies", false);
     show_status_performance = pulse::json::ExtractBool(json, L"show_status_performance", false);
     show_pinned_tab_names = pulse::json::ExtractBool(json, L"show_pinned_tab_names", true);
+    new_tab_home = pulse::json::ExtractBool(json, L"new_tab_home", false);
     list_smart_date = pulse::json::ExtractBool(json, L"list_smart_date", true);
     list_zebra_rows = pulse::json::ExtractBool(json, L"list_zebra_rows", true);
     list_size_bar = pulse::json::ExtractBool(json, L"list_size_bar", false);

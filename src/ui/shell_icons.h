@@ -32,6 +32,7 @@ public:
     bool Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
               const std::wstring& path, const std::wstring& name,
               bool is_dir, DWORD attrs);
+    bool DrawSystemIcon(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest, int index);
 
     // Icon bitmap at (about) desired_dips, or nullptr while unresolved —
     // caller leaves the slot empty. Lets owners apply their own opacity

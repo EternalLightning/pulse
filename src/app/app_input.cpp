@@ -372,6 +372,7 @@ float MaxScrollForActivePane(AppState& s, ui::PaneViewModel* out) {
     if (!s.pane || !s.pane->ActiveTab()) return 0.0f;
     ui::PaneViewModel pane;
     app::FillPaneViewModel(pane, *s.pane, &s.places);
+    s.home_catalog.Fill(pane, &s.places);
     const float max_scroll = s.renderer.MaxScrollForPane(pane, FocusedPaneRect(s));
     if (out) *out = std::move(pane);
     return max_scroll;
@@ -2107,6 +2108,19 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::TabClose && hit.index >= 0) {
             CloseLayoutTab(*s, static_cast<size_t>(hit.index));
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (hit.region == ui::HitTestResult::HomeButton) {
+            NavigateTo(*s, app::MakeHomePath());
+        } else if (hit.region == ui::HitTestResult::HomeCard) {
+            if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
+            NavigateTo(*s, hit.path);
+        } else if (hit.region == ui::HitTestResult::HomeGroup && hit.index >= 0 && hit.index < 3) {
+            if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
+            if (auto* tab = ActiveTab(*s)) {
+                CancelScrollAnimation(*s);
+                tab->home_collapsed_mask ^= 1u << hit.index;
+                tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, MaxScrollForActivePane(*s));
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
         } else if (hit.region == ui::HitTestResult::TabNew) {
             NewTab(*s, NewTabPath(*s));
         } else if (hit.region == ui::HitTestResult::ThemeToggle) {

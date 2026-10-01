@@ -47,7 +47,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             MakeBrush(dc,theme.fill_hover,brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
         }
-        label(r,l10n::Get(title),l10n::Get(desc),icon,0.0f,(hit==15 || hit==3) ? 43.0f : 21.0f);
+        label(r,l10n::Get(title),l10n::Get(desc),icon,0.0f,(hit==15 || hit==3 || hit==20) ? 43.0f : 21.0f);
         fluent::ControlState state{}; state.checked=on; state.hovered=IsHovered(vm,H::SettingsToggle,hit);
         painter_.DrawSwitch(D2D1::RectF(r.right-60*scale_,r.top+16*scale_,r.right-16*scale_,r.top+48*scale_),L"",state);
     };
@@ -166,6 +166,8 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         toggle(lay.startup_row[0],I::SettingsLaunch,I::SettingsLaunchDesc,L"\xE7E8",vm.settings_launch_on_startup,1);divider(lay.startup_row[0]);
         toggle(lay.startup_row[1],I::SettingsKeepRunning,I::SettingsKeepRunningDesc,L"\xE737",vm.settings_keep_running,2);divider(lay.startup_row[1]);
         toggle(lay.startup_row[2],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);
+        divider(lay.startup_row[2]);
+        toggle(lay.new_tab_row,I::SettingsNewTabHome,I::SettingsNewTabHomeDesc,L"\xE80F",vm.settings_new_tab_home,20);
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
         toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);
@@ -254,7 +256,8 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         toggle(lay.global_search_row,I::GlobalSearch,I::GlobalSearchDesc,L"\xE721",vm.settings_global_search_enabled,15);divider(lay.global_search_row);
         label(lay.global_search_hotkey_row,l10n::Get(I::GlobalSearchHotkey),
             vm.settings_global_search_error.empty() ? l10n::Get(I::GlobalSearchHotkeyDesc) : vm.settings_global_search_error,
-            L"\xE765",lay.global_search_hotkey_row.right-16*scale_);
+            L"\xE765",lay.global_search_hotkey_button.top >= lay.global_search_hotkey_row.top+56*scale_
+                ? lay.global_search_hotkey_row.right-16*scale_ : lay.global_search_hotkey_button.left-12*scale_);
         button(lay.global_search_hotkey_button,vm.settings_global_search_capturing ? l10n::Get(I::GlobalSearchRecording) : vm.settings_global_search_hotkey,H::SettingsGlobalSearchHotkey,0);
         divider(lay.global_search_hotkey_row);
         toggle(lay.search_pinyin_row,I::SearchPinyin,I::SearchPinyinDesc,L"\xE721",vm.settings_search_pinyin,9);divider(lay.search_pinyin_row);

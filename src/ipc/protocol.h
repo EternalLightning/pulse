@@ -78,6 +78,9 @@ enum MsgType : uint32_t {
     REQ_CTX_QUERY = 12,
     REQ_CTX_INVOKE = 13,
     REQ_CTX_CLOSE = 14,
+    // Exact permanent roots; legacy deletion frames are fail-closed.
+    // Payload: host creation FILETIME(u64), one-shot token(u64), paths(array).
+    REQ_AUTHORIZED_DELETE = 15,
     RSP_PROGRESS = 100,
     RSP_DONE = 101,
     RSP_PONG = 102,

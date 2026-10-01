@@ -1,5 +1,6 @@
 // fs_enum.cpp
 #include "fs_enum.h"
+#include "../common/unique_resource.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlwapi.h>
@@ -11,6 +12,15 @@
 #pragma comment(lib, "shlwapi.lib")
 
 namespace pulse::fs {
+
+namespace {
+struct CloseWinHandle { void operator()(HANDLE value) const noexcept { CloseHandle(value); } };
+struct CloseFindHandle { void operator()(HANDLE value) const noexcept { FindClose(value); } };
+struct FreeNetBuffer { void operator()(BYTE* value) const noexcept { NetApiBufferFree(value); } };
+using WinHandleOwner = UniqueResource<HANDLE, nullptr, CloseWinHandle>;
+using FindHandleOwner = UniqueResource<HANDLE, nullptr, CloseFindHandle>;
+using NetBufferOwner = UniqueResource<BYTE*, nullptr, FreeNetBuffer>;
+}
 
 using NTSTATUS = LONG;
 constexpr NTSTATUS STATUS_SUCCESS = 0;
@@ -101,17 +111,25 @@ using NtQueryDirectoryFile_t = NTSTATUS (NTAPI*)(
     NtUnicodeString* FileName,
     BOOLEAN RestartScan);
 
-static NtCreateFile_t g_NtCreateFile = nullptr;
-static NtQueryDirectoryFile_t g_NtQueryDirectoryFile = nullptr;
+struct NtApi {
+    NtCreateFile_t create_file = nullptr;
+    NtQueryDirectoryFile_t query_directory = nullptr;
+};
 
-static void InitNtApi() {
-    if (g_NtCreateFile) return;
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll) throw std::runtime_error("ntdll.dll not loaded");
-    g_NtCreateFile = reinterpret_cast<NtCreateFile_t>(GetProcAddress(ntdll, "NtCreateFile"));
-    g_NtQueryDirectoryFile = reinterpret_cast<NtQueryDirectoryFile_t>(GetProcAddress(ntdll, "NtQueryDirectoryFile"));
-    if (!g_NtCreateFile || !g_NtQueryDirectoryFile)
-        throw std::runtime_error("NtCreateFile / NtQueryDirectoryFile not found");
+static const NtApi& InitNtApi() {
+    // C++ local-static publication is synchronized, and exceptions retry the
+    // initializer rather than exposing one populated function pointer.
+    static const NtApi api = [] {
+        const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (!ntdll) throw std::runtime_error("ntdll.dll not loaded");
+        NtApi result;
+        result.create_file = reinterpret_cast<NtCreateFile_t>(GetProcAddress(ntdll, "NtCreateFile"));
+        result.query_directory = reinterpret_cast<NtQueryDirectoryFile_t>(GetProcAddress(ntdll, "NtQueryDirectoryFile"));
+        if (!result.create_file || !result.query_directory)
+            throw std::runtime_error("NtCreateFile / NtQueryDirectoryFile not found");
+        return result;
+    }();
+    return api;
 }
 
 bool IsVirtualPath(const std::wstring& path) {
@@ -195,6 +213,7 @@ static void EnumerateFindFirstFileEx(const std::wstring& path, std::vector<DirEn
         oss << "FindFirstFileExW failed, error=" << err;
         throw std::runtime_error(oss.str());
     }
+    const FindHandleOwner find_owner(h);
     do {
         if (fd.cFileName[0] == L'.' &&
             (fd.cFileName[1] == L'\0' || (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
@@ -209,11 +228,10 @@ static void EnumerateFindFirstFileEx(const std::wstring& path, std::vector<DirEn
         e.cloud_recall = (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
         out.push_back(std::move(e));
     } while (FindNextFileW(h, &fd));
-    FindClose(h);
 }
 
 static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& out) {
-    InitNtApi();
+    const auto& api = InitNtApi();
 
     std::wstring target = path;
     // Convert Win32 long-path prefix to NT object prefix.
@@ -232,7 +250,7 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
 
     NtIoStatusBlock iosb{};
     HANDLE h;
-    NTSTATUS status = g_NtCreateFile(
+    NTSTATUS status = api.create_file(
         &h,
         NT_FILE_LIST_DIRECTORY | NT_SYNCHRONIZE,
         &oa,
@@ -251,18 +269,17 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
         throw std::runtime_error(oss.str());
     }
 
+    const WinHandleOwner directory_owner(h);
     constexpr SIZE_T kBufSize = 64 * 1024;
     std::vector<BYTE> buffer(kBufSize);
     bool restart = true;
     HANDLE hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!hEvent) {
-        CloseHandle(h);
-        throw std::runtime_error("CreateEvent failed");
-    }
+    if (!hEvent) throw std::runtime_error("CreateEvent failed");
+    const WinHandleOwner event_owner(hEvent);
 
     for (;;) {
         iosb = {};
-        status = g_NtQueryDirectoryFile(
+        status = api.query_directory(
             h,
             hEvent,
             nullptr,
@@ -284,8 +301,6 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
 
         if (status == STATUS_NO_MORE_FILES) break;
         if (status != STATUS_SUCCESS) {
-            CloseHandle(hEvent);
-            CloseHandle(h);
             std::ostringstream oss;
             oss << "NtQueryDirectoryFile failed, status=0x" << std::hex << status;
             throw std::runtime_error(oss.str());
@@ -312,9 +327,6 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
                 reinterpret_cast<BYTE*>(info) + info->NextEntryOffset);
         }
     }
-
-    CloseHandle(hEvent);
-    CloseHandle(h);
 }
 
 // "This PC" view (empty path): one entry per logical drive, label matches
@@ -348,6 +360,7 @@ static void EnumerateServerShares(const std::wstring& server, std::vector<DirEnt
     NET_API_STATUS status = NetShareEnum(
         const_cast<LPWSTR>(host.c_str()), 1, &buf, MAX_PREFERRED_LENGTH,
         &read, &total, nullptr);
+    const NetBufferOwner buffer_owner(buf);
     if (status != NERR_Success) {
         std::ostringstream oss;
         oss << "NetShareEnum failed, error=" << status;
@@ -366,7 +379,6 @@ static void EnumerateServerShares(const std::wstring& server, std::vector<DirEnt
         e.attrs = FILE_ATTRIBUTE_DIRECTORY;
         out.push_back(std::move(e));
     }
-    NetApiBufferFree(buf);
 }
 
 void EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out) {

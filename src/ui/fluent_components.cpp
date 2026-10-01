@@ -154,7 +154,8 @@ IDWriteTextLayout* GetTextLayout(Compositor* compositor, IDWriteTextFormat* form
 
 // Unbounded-height, word-wrapped layout; height_64 = 0 marks it in the key.
 IDWriteTextLayout* GetWrappedTextLayout(Compositor* compositor, IDWriteTextFormat* format,
-                                        std::wstring_view text, float width) {
+                                        std::wstring_view text, float width,
+                                        DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
     if (!compositor || !compositor->DwriteFactory() || !format || text.empty() || width <= 0.0f)
         return nullptr;
     TextLayoutKey key{
@@ -162,7 +163,7 @@ IDWriteTextLayout* GetWrappedTextLayout(Compositor* compositor, IDWriteTextForma
         std::wstring(text),
         static_cast<int>(std::lround(width * 64.0f)),
         0,
-        DWRITE_TEXT_ALIGNMENT_LEADING,
+        alignment,
         typography::Generation(),
     };
     if (const auto found = g_wrapped_layout_cache.find(key); found != g_wrapped_layout_cache.end()) {
@@ -173,7 +174,7 @@ IDWriteTextLayout* GetWrappedTextLayout(Compositor* compositor, IDWriteTextForma
             text.data(), static_cast<UINT32>(text.size()), format,
             width, 100000.0f, &layout)) || !layout.get()) return nullptr;
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    layout->SetTextAlignment(alignment);
     layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     const DWRITE_TRIMMING no_trimming{DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
     layout->SetTrimming(&no_trimming, nullptr);
@@ -875,9 +876,19 @@ void Painter::DrawButton(const ButtonSpec& spec) {
             body->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
         const bool center = spec.glyph.empty() && !spec.drop_down;
-        DrawText(spec.text, D2D1::RectF(left, content.top, right, content.bottom),
-                 body, foreground,
-                 center ? HorizontalAlignment::Center : HorizontalAlignment::Left);
+        if (spec.wrap_text && MeasureButtonWidth(spec.text, spec.glyph, spec.drop_down) > Width(spec.bounds)) {
+            auto* layout = GetWrappedTextLayout(compositor_, body, spec.text, right - left,
+                center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_LEADING);
+            DWRITE_TEXT_METRICS metrics{};
+            if (layout && SUCCEEDED(layout->GetMetrics(&metrics)))
+                dc_->DrawTextLayout(D2D1::Point2F(left,
+                    content.top + std::max(0.0f, (Height(content) - metrics.height) * 0.5f)),
+                    layout, ScratchBrush(foreground), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        } else {
+            DrawText(spec.text, D2D1::RectF(left, content.top, right, content.bottom),
+                     body, foreground,
+                     center ? HorizontalAlignment::Center : HorizontalAlignment::Left);
+        }
         if (body) body->SetWordWrapping(old_wrap);
     }
 
@@ -2123,6 +2134,14 @@ float Painter::MeasureButtonWidth(std::wstring_view text, std::wstring_view glyp
     if (drop_down) width += Px(16.0f) + Px(4.0f);
     width += typography::MeasureLine(compositor_, BodyFormat(), text);
     return std::max(Px(32.0f), std::ceil(width));
+}
+
+float Painter::MeasureWrappedButtonHeight(std::wstring_view text, float width) const {
+    if (MeasureButtonWidth(text) <= width) return Px(32.0f);
+    auto* layout = GetWrappedTextLayout(compositor_, BodyFormat(), text, width - Px(16.0f));
+    DWRITE_TEXT_METRICS metrics{};
+    const float height = layout && SUCCEEDED(layout->GetMetrics(&metrics)) ? metrics.height : 0;
+    return std::max(Px(32.0f), std::ceil(height) + Px(12.0f));
 }
 
 float Painter::MeasureButtonHeight() const {

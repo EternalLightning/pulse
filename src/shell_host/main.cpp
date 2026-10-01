@@ -10,6 +10,7 @@
 // The process is a stateless proxy: if it dies the UI side restarts it and
 // retries the in-flight request once (see src/ipc/shell_client.cpp).
 #include "../ipc/protocol.h"
+#include "../ipc/delete_plan_protocol.h"
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
 #include "../common/current_user_security.h"
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <atomic>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -58,6 +60,8 @@ struct Request {
     uint32_t id = 0;
     std::wstring new_name;
     std::vector<std::wstring> sources;
+    uint64_t delete_epoch = 0;
+    uint64_t delete_token = 0;
 };
 
 struct HostState {
@@ -112,6 +116,14 @@ void SendProgress(uint32_t id, float percent, const std::wstring& item,
     SendMsg(RSP_PROGRESS, id, w.data());
 }
 
+void SendDeleteDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error,
+                    const std::vector<std::wstring>& deleted_paths) {
+    PayloadWriter writer;
+    writer.PutU32(static_cast<uint32_t>(hr)); writer.PutU32(cancelled ? 1 : 0);
+    writer.PutString(error); writer.PutStringArray(deleted_paths);
+    SendMsg(RSP_DONE, id, writer.data());
+}
+
 void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error) {
     PayloadWriter w;
     w.PutU32((uint32_t)hr);
@@ -125,8 +137,9 @@ void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error
 // ---------------------------------------------------------------------------
 class ProgressSink : public IFileOperationProgressSink {
 public:
-    ProgressSink(uint32_t req_id, size_t total_items)
-        : req_id_(req_id), total_items_(total_items ? total_items : 1) {}
+    ProgressSink(uint32_t req_id, size_t total_items, std::wstring authorized_root = {})
+        : authorized_root_(std::move(authorized_root)), req_id_(req_id),
+          total_items_(total_items ? total_items : 1) {}
 
     // IUnknown — stack-allocated, no real refcounting.
     IFACEMETHODIMP QueryInterface(REFIID riid, void** out) override {
@@ -179,8 +192,25 @@ public:
         RememberItem(psi);
         return CheckCancel();
     }
-    IFACEMETHODIMP PostDeleteItem(DWORD, IShellItem*, HRESULT hr, IShellItem*) override {
+    IFACEMETHODIMP PostDeleteItem(DWORD, IShellItem* source, HRESULT hr, IShellItem* destination) override {
         NoteItemResult(hr);
+        if (GetEnvironmentVariableW(L"PULSE_DELETE_DIAGNOSTICS", nullptr, 0)) {
+            wchar_t result[96]{};
+            swprintf_s(result, L"post-delete hr=0x%08X destination=%d", static_cast<unsigned>(hr), destination != nullptr);
+            delete_diagnostics_ += result;
+            PWSTR diagnostic_path = nullptr;
+            const HRESULT path_hr = source ? source->GetDisplayName(SIGDN_FILESYSPATH, &diagnostic_path) : E_POINTER;
+            swprintf_s(result, L" path_hr=0x%08X path=", static_cast<unsigned>(path_hr));
+            delete_diagnostics_ += result;
+            if (diagnostic_path) { delete_diagnostics_ += diagnostic_path; CoTaskMemFree(diagnostic_path); }
+        }
+        // Per-item sinks bind the result to the exact queued root. A Shell item
+        // queried after deletion may already resolve only to its parent/root.
+        // DONT_PROCESS_CHILDREN is a completed-item success, not a skipped item.
+        if (!authorized_root_.empty() && !destination &&
+            (hr == S_OK || hr == COPYENGINE_S_DONT_PROCESS_CHILDREN)) {
+            deleted_paths_.push_back(authorized_root_);
+        }
         ++items_done_;
         MaybeReport(items_done_ == total_items_);
         return CheckCancel();
@@ -202,6 +232,10 @@ public:
 
     const std::wstring& last_failed_item() const { return last_failed_item_; }
     HRESULT item_failure() const { return item_failure_; }
+    const std::wstring& delete_diagnostics() const { return delete_diagnostics_; }
+    std::wstring delete_diagnostics_;
+    const std::vector<std::wstring>& deleted_paths() const { return deleted_paths_; }
+    std::vector<std::wstring> deleted_paths_;
     void NoteSetupFailure(const std::wstring& src) { last_failed_item_ = src; }
 
 private:
@@ -239,6 +273,7 @@ private:
         SendProgress(req_id_, pct, current_item_, items_done_, total_items_);
     }
 
+    std::wstring authorized_root_;
     uint32_t req_id_ = 0;
     size_t total_items_ = 1;
     size_t items_done_ = 0;
@@ -445,7 +480,8 @@ bool RestoreOneFromRecycle(const std::wstring& wanted_canon, std::wstring& error
             FindClose(iFind);
             return false;
         }
-        DeleteFileW(iPath.c_str());
+        // Restoring content does not authorize irreversible metadata deletion.
+        // Retain the orphan $I record rather than bypass the deletion service.
         restored = true;
         break;
     } while (FindNextFileW(iFind, &iFd));
@@ -473,6 +509,24 @@ HRESULT ExecuteRestore(const std::vector<std::wstring>& paths, std::wstring& err
 }
 
 void ExecuteRequest(Request* req) {
+    if (req->type == REQ_DELETE_RECYCLE || req->type == REQ_REALDELETE) {
+        SendDone(req->id, E_ACCESSDENIED, false, L"Legacy deletion frame has no deletion-service authorization.");
+        delete req;
+        return;
+    }
+    if (req->type == REQ_AUTHORIZED_DELETE) {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        ULARGE_INTEGER epoch{};
+        const bool have_epoch = GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) != FALSE;
+        epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
+        static DeleteHostAdmission admission;
+        const DeleteWirePlan authorized{req->delete_epoch, req->delete_token, req->sources};
+        if (!have_epoch || !admission.Consume(authorized, epoch.QuadPart)) {
+            SendDeleteDone(req->id, E_ACCESSDENIED, false, L"Expired or repeated deletion authorization.", {});
+            delete req;
+            return;
+        }
+    }
     if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
         HRESULT hr = req->sources.empty() ? E_INVALIDARG
                                           : ExecuteCreate(req->type, req->sources.front());
@@ -506,15 +560,29 @@ void ExecuteRequest(Request* req) {
         DWORD flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | kDontDisplayUi;
         if (req->type != REQ_REALDELETE) flags |= FOF_ALLOWUNDO;
         if (req->type == REQ_DELETE_RECYCLE) flags |= FOFX_RECYCLEONDELETE;
-        op->SetOperationFlags(flags);
-        op->Advise(&sink, &sink_cookie);
+        if (req->type == REQ_AUTHORIZED_DELETE) {
+            flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
+            hr = op->SetOperationFlags(flags);
+            if (SUCCEEDED(hr)) hr = op->Advise(&sink, &sink_cookie);
+        } else {
+            op->SetOperationFlags(flags);
+            op->Advise(&sink, &sink_cookie);
+        }
     }
 
+    std::vector<std::unique_ptr<ProgressSink>> root_sinks;
     bool setup_failed = false;
     if (SUCCEEDED(hr)) {
         for (const auto& src : req->sources) {
             IShellItem* item = nullptr;
             HRESULT ihr = MakeItem(src, &item);
+            if (SUCCEEDED(ihr) && req->type == REQ_AUTHORIZED_DELETE) {
+                PWSTR resolved = nullptr;
+                ihr = item->GetDisplayName(SIGDN_FILESYSPATH, &resolved);
+                if (SUCCEEDED(ihr) && (!resolved || pulse::path::StripExtendedPathPrefix(resolved) != ToParsingPath(src))) ihr = E_ACCESSDENIED;
+                if (resolved) CoTaskMemFree(resolved);
+                if (FAILED(ihr)) { item->Release(); item = nullptr; }
+            }
             if (FAILED(ihr)) {
                 hr = ihr;
                 setup_failed = true;
@@ -524,6 +592,10 @@ void ExecuteRequest(Request* req) {
             switch (req->type) {
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE: ihr = op->DeleteItem(item, nullptr); break;
+            case REQ_AUTHORIZED_DELETE:
+                root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src));
+                ihr = op->DeleteItem(item, root_sinks.back().get());
+                break;
             case REQ_RENAME: ihr = op->RenameItem(item, req->new_name.c_str(), nullptr); break;
             default: ihr = E_INVALIDARG; break;
             }
@@ -536,7 +608,8 @@ void ExecuteRequest(Request* req) {
     if (SUCCEEDED(hr)) {
         hr = op->PerformOperations();
         BOOL aborted = FALSE;
-        op->GetAnyOperationsAborted(&aborted);
+        const HRESULT aborted_hr = op->GetAnyOperationsAborted(&aborted);
+        if (req->type == REQ_AUTHORIZED_DELETE && FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
         cancelled = (g.cancel_id.load() == req->id) || hr == HRESULT_FROM_WIN32(ERROR_CANCELLED);
         if (SUCCEEDED(hr) && FAILED(sink.item_failure())) hr = sink.item_failure();
         if (aborted && !cancelled && SUCCEEDED(hr)) {
@@ -556,6 +629,51 @@ void ExecuteRequest(Request* req) {
         hr = S_OK;
 
     std::wstring error;
+    if (req->type == REQ_AUTHORIZED_DELETE && FAILED(hr) &&
+        GetEnvironmentVariableW(L"PULSE_DELETE_DIAGNOSTICS", nullptr, 0)) {
+        wchar_t stage[160]{};
+        swprintf_s(stage, L"delete diagnostics: setup_failed=%d hr=0x%08X item_hr=0x%08X", setup_failed,
+            static_cast<unsigned>(hr), static_cast<unsigned>(sink.item_failure()));
+        error = stage;
+        HANDLE token = nullptr;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+            error += IsTokenRestricted(token) ? L"; token restricted" : L"; token unrestricted";
+            for (const auto kind : {TokenUser, TokenIntegrityLevel, TokenRestrictedSids}) {
+                DWORD needed = 0;
+                GetTokenInformation(token, kind, nullptr, 0, &needed);
+                std::vector<BYTE> bytes(needed);
+                if (needed && GetTokenInformation(token, kind, bytes.data(), needed, &needed)) {
+                    auto append_sid = [&](PSID sid) {
+                        PWSTR text = nullptr;
+                        if (ConvertSidToStringSidW(sid, &text)) { error += L" " + std::wstring(text); LocalFree(text); }
+                    };
+                    if (kind == TokenUser) { error += L"; user"; append_sid(reinterpret_cast<TOKEN_USER*>(bytes.data())->User.Sid); }
+                    else if (kind == TokenIntegrityLevel) { error += L"; integrity"; append_sid(reinterpret_cast<TOKEN_MANDATORY_LABEL*>(bytes.data())->Label.Sid); }
+                    else {
+                        error += L"; restrictions";
+                        auto* groups = reinterpret_cast<TOKEN_GROUPS*>(bytes.data());
+                        for (DWORD i = 0; i < groups->GroupCount; ++i) append_sid(groups->Groups[i].Sid);
+                    }
+                }
+            }
+            CloseHandle(token);
+        }
+        if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token)) {
+            error += L"; thread impersonation active"; CloseHandle(token);
+        } else error += L"; thread token error=" + std::to_wstring(GetLastError());
+        for (const auto& source : req->sources) {
+            for (const DWORD access : {DWORD(DELETE), DWORD(FILE_READ_ATTRIBUTES | DELETE), DWORD(GENERIC_READ | DELETE)}) {
+                const HANDLE probe = CreateFileW(source.c_str(), access,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                const DWORD code = probe == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+                if (probe != INVALID_HANDLE_VALUE) CloseHandle(probe);
+                wchar_t result[96]{};
+                swprintf_s(result, L"; open access=0x%08X error=%lu", access, code);
+                error += result;
+            }
+        }
+    }
     if (FAILED(hr) && !cancelled) {
         LPWSTR msg = nullptr;
         const DWORD win_error = HRESULT_FACILITY(hr) == FACILITY_WIN32
@@ -573,8 +691,14 @@ void ExecuteRequest(Request* req) {
         }
     }
 
+    if (FAILED(hr) && !sink.delete_diagnostics().empty()) error += L"; " + sink.delete_diagnostics();
     if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
-    SendDone(req->id, hr, cancelled, error);
+    if (req->type == REQ_AUTHORIZED_DELETE) {
+        std::vector<std::wstring> deleted;
+        for (const auto& root_sink : root_sinks)
+            deleted.insert(deleted.end(), root_sink->deleted_paths().begin(), root_sink->deleted_paths().end());
+        SendDeleteDone(req->id, hr, cancelled, error, deleted);
+    } else SendDone(req->id, hr, cancelled, error);
     delete req;
 }
 
@@ -668,6 +792,7 @@ DWORD WINAPI ReaderThreadImpl() {
             }
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE:
+            case REQ_AUTHORIZED_DELETE:
             case REQ_RENAME:
             case REQ_NEW_FOLDER:
             case REQ_NEW_FILE:
@@ -686,7 +811,12 @@ DWORD WINAPI ReaderThreadImpl() {
                     ok = r.GetString(path);
                     req->sources.push_back(std::move(path));
                 } else {
-                    ok = r.GetStringArray(req->sources);
+                    if (req->type == REQ_AUTHORIZED_DELETE) {
+                        DeleteWirePlan plan;
+                        ok = ReadDeleteWirePlan(r, plan);
+                        req->delete_epoch = plan.host_epoch; req->delete_token = plan.token;
+                        req->sources = std::move(plan.paths);
+                    } else ok = r.GetStringArray(req->sources);
                 }
                 if (!ok) {
                     SendDone(req->id, E_INVALIDARG, false, L"malformed request payload");

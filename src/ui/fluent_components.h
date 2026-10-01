@@ -68,6 +68,7 @@ struct ButtonSpec {
     bool drop_down = false;
     bool bordered = true;
     bool skip_glyph = false;
+    bool wrap_text = false;
 };
 
 struct TextFieldSpec {
@@ -408,6 +409,7 @@ public:
                              std::wstring_view glyph = {},
                              bool drop_down = false) const;
     float MeasureButtonHeight() const;
+    float MeasureWrappedButtonHeight(std::wstring_view text, float width) const;
     // Word-wrapped caption text (release notes): height for a width, and drawing.
     float MeasureWrappedCaptionHeight(std::wstring_view text, float width) const;
     void DrawWrappedCaption(std::wstring_view text, D2D1_POINT_2F origin, float width,

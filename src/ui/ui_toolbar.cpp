@@ -18,7 +18,7 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             if (r.right<=r.left) continue;
             const bool enabled=i==0 ? vm.can_go_back : i==1 ? vm.can_go_forward : true;
             DrawButton(r,theme,enabled && IsHovered(vm,nav_hits[i]) ? theme.fill_hover : kTransparent,
-                nav_glyphs[i],L"",enabled ? theme.text_secondary : theme.text_disabled,true,true);
+                nav_glyphs[i],L"",vm.dark ? HexColor(0xFFFFFF) : enabled ? theme.text_secondary : theme.text_disabled,true,true);
         }
         // Breadcrumb address bar: segments clickable, empty area -> edit mode.
         D2D1_RECT_F addrRc = AddressBarRect(rect.right);

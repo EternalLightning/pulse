@@ -27,12 +27,17 @@ int wmain() {
     const fs::path fixture = fs::path(temp) / (L"pulse-storage-test-" + std::to_wstring(GetCurrentProcessId()));
     const auto original = (fixture / L"original").wstring();
     const auto migrated = (fixture / L"配置目录").wstring();
+    const auto locator_key = L"Software\\Pulse\\StorageTests\\" + std::to_wstring(GetCurrentProcessId());
+    RegDeleteTreeW(HKEY_CURRENT_USER, locator_key.c_str());
     fs::create_directories(original);
-    pulse::storage::OverrideDefaultRootForTesting(original);
+    pulse::storage::OverrideDefaultRootForTesting(original, locator_key);
     int failed = 0;
-    auto check = [&](bool ok, const char* name) { std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name); if (!ok) ++failed; };
-    using namespace pulse::storage;
     std::wstring error;
+    auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+        if (!ok) { ++failed; std::fwprintf(stderr, L"  storage error: %ls\n", error.c_str()); }
+    };
+    using namespace pulse::storage;
     std::wstring image; pulse::json::Escape(original + L"\\wallpaper.png", image);
     pulse::WriteUtf8FileAtomic(original + L"\\app.json", L"{\"background_image\":\"" + image + L"\",\"theme_mode\":2}");
     pulse::WriteUtf8FileAtomic(original + L"\\session.json", L"{\"version\":7}");
@@ -86,9 +91,29 @@ int wmain() {
     const auto index = (fixture / L"index").wstring();
     check(Schedule(Kind::Index, index, error) && ClearPending(Kind::Index, error) && !Commit(Kind::Index, index, error), "reject stale migration commit");
     check(Schedule(Kind::Index, index, error) && Commit(Kind::Index, index, error) && UserIndexRoot() == index, "commit independent user index root");
-    OverrideDefaultRootForTesting(original);
+    OverrideDefaultRootForTesting(original, locator_key);
     check(ConfigurationRoot() == final_configuration && UserIndexRoot() == index, "locator survives fresh process cache");
+    const auto pending = (fixture / L"pending-after-removal").wstring();
+    check(Schedule(Kind::Configuration, pending, error), "schedule before deleting former AppData directory");
+    fs::remove_all(original);
+    OverrideDefaultRootForTesting(original, locator_key);
+    check(ConfigurationRoot() == final_configuration && UserIndexRoot() == index &&
+          Pending(Kind::Configuration) == pending,
+          "custom roots and pending migration survive deletion of former AppData directory");
+    check(ApplyConfiguration(error) && ConfigurationRoot() == pending && UserIndexRoot() == index,
+          "configuration migration remains functional after former directory deletion");
+    RegDeleteTreeW(HKEY_CURRENT_USER, locator_key.c_str());
+    fs::create_directories(original);
+    std::wstring legacy_root; pulse::json::Escape(final_configuration, legacy_root);
+    check(pulse::WriteUtf8FileAtomic(original + L"\\storage-locations.json",
+          L"{\"configuration\":\"" + legacy_root + L"\"}"), "create legacy locator fixture");
+    OverrideDefaultRootForTesting(original, locator_key);
+    check(ConfigurationRoot() == final_configuration, "import legacy file locator into registry");
+    fs::remove_all(original);
+    OverrideDefaultRootForTesting(original, locator_key);
+    check(ConfigurationRoot() == final_configuration, "imported locator survives former AppData deletion");
     OverrideDefaultRootForTesting((fixture / L"isolated-end").wstring());
+    RegDeleteTreeW(HKEY_CURRENT_USER, locator_key.c_str());
     std::error_code ec; fs::remove_all(fixture, ec);
     return failed ? 1 : 0;
 }

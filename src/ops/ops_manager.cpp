@@ -1,6 +1,7 @@
 // ops_manager.cpp — See ops_manager.h for the contract.
 #include "ops_manager.h"
 #include "operation_presentation.h"
+#include "delete_operation.h"
 #include "../ipc/shell_client.h"
 #include "../common/json_utils.h"
 #include "../common/path_utils.h"
@@ -686,42 +687,15 @@ bool ParseRecoveryEntry(const std::wstring& object, RecoveryEntry& entry) {
     entry.request.new_name = json::ExtractString(object, L"name");
     entry.request.new_names = json::ExtractStringArray(object, L"names");
     entry.request.is_undo = json::ExtractBool(object, L"undo", false);
+    for (const auto& target_json : ExtractObjectArray(object, L"delete_targets")) {
+        DeleteRequestTarget target;
+        target.path = json::ExtractString(target_json, L"path", L"");
+        target.physical_paths = json::ExtractStringArray(target_json, L"roots");
+        target.recycle_item = json::ExtractBool(target_json, L"recycle_item", false);
+        entry.request.delete_targets.push_back(std::move(target));
+    }
     if (entry.request.type == OpType::EmptyRecycle) return entry.sequence != 0;
     return entry.sequence != 0 && !entry.request.sources.empty();
-}
-
-void ReconcileTemporaryFiles(const std::wstring& root) {
-    if (root.empty()) return;
-    namespace fsys = std::filesystem;
-    std::vector<fsys::path> temporary;
-    std::error_code error;
-    fsys::recursive_directory_iterator it(fsys::path(root),
-        fsys::directory_options::skip_permission_denied, error);
-    fsys::recursive_directory_iterator end;
-    for (; !error && it != end; it.increment(error)) {
-        const std::wstring path = it->path().wstring();
-        if (path.find(L".pulse-copy-") != std::wstring::npos ||
-            path.find(L".pulse-backup-") != std::wstring::npos) {
-            temporary.push_back(it->path());
-            if (it->is_directory(error)) it.disable_recursion_pending();
-        }
-    }
-    std::sort(temporary.begin(), temporary.end(), [](const auto& left, const auto& right) {
-        return left.native().size() > right.native().size();
-    });
-    for (const auto& item : temporary) {
-        const std::wstring path = item.wstring();
-        const size_t backup = path.find(L".pulse-backup-");
-        if (backup != std::wstring::npos) {
-            const std::wstring original = path.substr(0, backup);
-            if (!PathExists(original)) {
-                MoveFileExW(path.c_str(), original.c_str(), MOVEFILE_WRITE_THROUGH);
-                continue;
-            }
-        }
-        std::error_code ignored;
-        fsys::remove_all(item, ignored);
-    }
 }
 
 } // namespace
@@ -743,7 +717,10 @@ void OpsManager::LoadRecoveryJournal() {
     if (!ReadUtf8File(journal_path_, text) || json::ExtractInt(text, L"schema", 0) != 1) return;
     for (const auto& object : ExtractObjectArray(text, L"entries")) {
         RecoveryEntry entry;
-        if (ParseRecoveryEntry(object, entry)) pending_recovery_.push_back(std::move(entry));
+        if (ParseRecoveryEntry(object, entry)) {
+            next_seq_ = std::max(next_seq_, entry.sequence + 1);
+            pending_recovery_.push_back(std::move(entry));
+        }
     }
 }
 
@@ -753,7 +730,7 @@ RecoverySnapshot OpsManager::PendingRecovery() const {
     result.entries = pending_recovery_;
     result.has_uncertain_destructive = std::any_of(
         result.entries.begin(), result.entries.end(), [](const RecoveryEntry& entry) {
-            return entry.was_active && entry.request.type == OpType::RealDelete;
+            return entry.was_active && IsDeleteOperation(entry.request.type);
         });
     return result;
 }
@@ -762,19 +739,31 @@ bool OpsManager::RetryRecovery() {
     bool all_retryable = true;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& recovery : pending_recovery_) {
-            if (!recovery.request.dest_dir.empty())
-                recovery_cleanup_roots_.push_back(recovery.request.dest_dir);
-            if (recovery.request.type == OpType::RealDelete) {
+        for (const auto& recovery : pending_recovery_) {
+            if (scheduled_recovery_.contains(recovery.sequence)) continue;
+            if (recovery.was_active && IsDeleteOperation(recovery.request.type)) {
                 all_retryable = false;
+                status_.last_error = L"A deletion may have partially executed. Inspect the affected paths before discarding this recovery record; it will not be replayed.";
+                status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
+                continue;
+            }
+            // A matching .pulse-copy/.pulse-backup name is not ownership proof.
+            // Recovery that first requires destructive reconciliation stops.
+            if (!recovery.request.dest_dir.empty()) {
+                all_retryable = false;
+                status_.last_error = L"Recovery stopped: temporary-file ownership cannot be proven; nothing was deleted.";
+                status_.summary = status_.last_error;
+                status_.phase = OpPhase::Failed;
                 continue;
             }
             QueueItem item;
             item.seq = next_seq_++;
-            item.req = std::move(recovery.request);
+            item.req = recovery.request;
+            item.req.delete_origin = DeleteOrigin::Recovery;
+            item.recovery_sequence = recovery.sequence;
+            scheduled_recovery_.insert(recovery.sequence);
             queue_.push_back(std::move(item));
         }
-        pending_recovery_.clear();
     }
     cv_.notify_one();
     if (notify_) notify_();
@@ -784,11 +773,11 @@ bool OpsManager::RetryRecovery() {
 void OpsManager::DiscardRecovery() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& recovery : pending_recovery_) {
-            if (!recovery.request.dest_dir.empty())
-                recovery_cleanup_roots_.push_back(recovery.request.dest_dir);
-        }
+        // Discard forgets the journal only. Never delete files by a temporary
+        // name pattern, which may also match user-owned files.
         pending_recovery_.clear();
+        scheduled_recovery_.clear();
+        std::erase_if(queue_, [](const QueueItem& item) { return item.recovery_sequence != 0; });
     }
     if (!journal_path_.empty()) DeleteFileW(journal_path_.c_str());
     cv_.notify_one();
@@ -809,10 +798,29 @@ std::wstring OpsManager::JournalJsonLocked() const {
             L",\"sources\":" + StringArrayJson(item.req.sources) +
             L",\"dest\":" + JsonString(item.req.dest_dir) +
             L",\"name\":" + JsonString(item.req.new_name) +
-            L",\"names\":" + StringArrayJson(item.req.new_names) + L"}";
+            L",\"names\":" + StringArrayJson(item.req.new_names);
+        if (!item.req.delete_targets.empty()) {
+            out += L",\"delete_targets\":[";
+            for (size_t i = 0; i < item.req.delete_targets.size(); ++i) {
+                const auto& target = item.req.delete_targets[i];
+                if (i != 0) out += L",";
+                out += L"{\"path\":" + JsonString(target.path) + L",\"roots\":" +
+                    StringArrayJson(target.physical_paths) + L",\"recycle_item\":" +
+                    (target.recycle_item ? L"true" : L"false") + L"}";
+            }
+            out += L"]";
+        }
+        out += L"}";
     };
     if (active_item_) append(*active_item_, true);
-    for (const auto& item : queue_) append(item, false);
+    for (const auto& item : queue_)
+        if (!IsDeleteOperation(item.req.type) && item.recovery_sequence == 0) append(item, false);
+    for (const auto& recovery : pending_recovery_) {
+        if (active_item_ && active_item_->recovery_sequence == recovery.sequence) continue;
+        QueueItem item;
+        item.seq = recovery.sequence; item.req = recovery.request;
+        append(item, recovery.was_active);
+    }
     out += first ? L"]\n}\n" : L"\n  ]\n}\n";
     return out;
 }
@@ -823,7 +831,10 @@ void OpsManager::PersistJournal() {
     bool empty = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        empty = !active_item_ && queue_.empty();
+        empty = !active_item_ && pending_recovery_.empty() &&
+            std::none_of(queue_.begin(), queue_.end(), [](const QueueItem& item) {
+                return !IsDeleteOperation(item.req.type);
+            });
         if (!empty) text = JournalJsonLocked();
     }
     if (empty) DeleteFileW(journal_path_.c_str());
@@ -850,7 +861,12 @@ void OpsManager::Start(std::function<void()> notify) {
 
 void OpsManager::Stop() {
     if (!running_) return;
-    stopping_ = true;
+    {
+        std::lock_guard<std::mutex> lock(delete_wait_mutex_);
+        stopping_ = true;
+    }
+    CancelCurrent(); // Release a deletion presenter before waiting on other threads.
+    delete_wait_cv_.notify_all();
     {
         std::lock_guard<std::mutex> lock(menu_mutex_);
         menu_running_ = false;
@@ -974,6 +990,14 @@ void OpsManager::OpenTerminal(const std::wstring& dir) {
 }
 
 void OpsManager::CancelCurrent() {
+    if (delete_active_.load()) {
+        {
+            std::lock_guard<std::mutex> lock(delete_wait_mutex_);
+            delete_cancel_.store(true);
+            delete_service_.Cancel();
+        }
+        delete_wait_cv_.notify_all();
+    }
     if (transfer_active_.load()) {
         transfer_cancel_.store(true);
         transfer_pause_.store(false);
@@ -1101,10 +1125,13 @@ void OpsManager::Undo() {
         if (!e.supported) {
             // Leave the entry; report why it cannot be undone.
             status_.last_error = L"回收站删除暂不支持撤销（1B-2 恢复方案：枚举 $Recycle.Bin 还原）";
-        } else {
+        } else if (e.type != OpType::Copy && e.type != OpType::CreateFolder &&
+                   e.type != OpType::CreateTextFile) {
             undo_.pop_back();
         }
     }
+    // Copy/create inverses request recycle deletion. No supported Windows
+    // preflight can prove them recyclable; leave their Undo entry untouched.
     if (!e.supported) {
         if (notify_) notify_();
         return;
@@ -1140,6 +1167,7 @@ void OpsManager::Undo() {
         OpRequest inv;
         inv.type = OpType::RecycleDelete;
         inv.is_undo = true;
+        inv.delete_origin = DeleteOrigin::Undo;
         if (!e.destinations.empty()) inv.sources = e.destinations;
         else for (const auto& src : e.sources)
             inv.sources.push_back(JoinPath(e.dest_dir, FileName(src)));
@@ -1152,6 +1180,7 @@ void OpsManager::Undo() {
         OpRequest inv;
         inv.type = OpType::RecycleDelete;
         inv.is_undo = true;
+        inv.delete_origin = DeleteOrigin::Undo;
         inv.sources = e.sources;
         Submit(std::move(inv));
         break;
@@ -1329,9 +1358,10 @@ void OpsManager::WorkerThread() {
         SetStatus([&](OpStatus& st) {
             st.percent = pct;
             st.current_item = item;
-            if (total_items > 0) st.total_items = total_items;
-            st.completed_items = (std::min)(static_cast<uint64_t>(items_done),
-                                             st.total_items);
+            if (!delete_active_.load()) {
+                if (total_items > 0) st.total_items = total_items;
+                st.completed_items = (std::min)(static_cast<uint64_t>(items_done), st.total_items);
+            }
             if (!item.empty()) {
                 std::wstring base = st.summary;
                 auto sep = base.find(L"  (");
@@ -1358,6 +1388,19 @@ void OpsManager::WorkerThread() {
             done_hr_ = hr;
             done_cancelled_ = cancelled;
             done_error_ = std::move(error);
+            done_deleted_paths_.clear();
+            done_ready_ = true;
+        }
+        done_cv_.notify_one();
+    };
+    cb.delete_done = [this](uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
+                            std::vector<std::wstring> deleted_paths) {
+        shell_activity_tick_ = GetTickCount64();
+        {
+            std::lock_guard<std::mutex> lock(done_mutex_);
+            done_id_ = id; done_hr_ = hr; done_cancelled_ = cancelled;
+            done_error_ = std::move(error);
+            done_deleted_paths_ = std::move(deleted_paths);
             done_ready_ = true;
         }
         done_cv_.notify_one();
@@ -1385,34 +1428,35 @@ void OpsManager::WorkerThread() {
 
     for (;;) {
         QueueItem item;
-        std::wstring cleanup_root;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
-                return !queue_.empty() || !recovery_cleanup_roots_.empty() || !running_;
+                return !queue_.empty() || !running_;
             });
             if (!running_) break;
-            if (!recovery_cleanup_roots_.empty()) {
-                cleanup_root = std::move(recovery_cleanup_roots_.front());
-                recovery_cleanup_roots_.pop_front();
-            } else {
+            {
                 item = std::move(queue_.front());
                 queue_.pop_front();
-                if (item.open_path.empty()) active_item_ = item;
+                if (item.open_path.empty() && !IsDeleteOperation(item.req.type)) {
+                    active_item_ = item;
+                    if (item.recovery_sequence != 0) {
+                        std::erase_if(pending_recovery_, [&](const RecoveryEntry& entry) {
+                            return entry.sequence == item.recovery_sequence;
+                        });
+                        scheduled_recovery_.erase(item.recovery_sequence);
+                    }
+                }
             }
         }
 
-        if (!cleanup_root.empty()) {
-            ReconcileTemporaryFiles(cleanup_root);
-            continue;
-        }
-
-        if (item.open_path.empty()) PersistJournal();
+        if (item.open_path.empty() && !IsDeleteOperation(item.req.type)) PersistJournal();
 
         // Opens/verbs run on OpenThread — never block transfers.
         if (!item.open_path.empty()) continue;
 
-        if (item.req.type == OpType::Copy || item.req.type == OpType::Move)
+        if (IsDeleteOperation(item.req.type))
+            RunDelete(item);
+        else if (item.req.type == OpType::Copy || item.req.type == OpType::Move)
             RunTransfer(item.req, item.seq);
         else
             RunShellOp(item.req, item.seq);
@@ -1420,7 +1464,7 @@ void OpsManager::WorkerThread() {
             std::lock_guard<std::mutex> lock(mutex_);
             active_item_.reset();
         }
-        PersistJournal();
+        if (!IsDeleteOperation(item.req.type)) PersistJournal();
     }
 
     ipc::ShellClient::Instance().Stop();
@@ -2178,6 +2222,12 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id) {
 }
 
 void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id) {
+    if (IsDeleteOperation(req.type)) {
+        QueueItem rejected;
+        rejected.req = req; rejected.seq = task_id;
+        FinishDelete(rejected, L"Deletion was not admitted by the deletion service.");
+        return;
+    }
     shell_cancel_requested_ = false;
     shell_activity_tick_ = GetTickCount64();
     // Status: active.
@@ -2201,70 +2251,6 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id) {
         st.eta_seconds = 0;
         if (req.type == OpType::EmptyRecycle) st.percent = -1.0f;
     });
-
-    if (req.type == OpType::EmptyRecycle) {
-        SHQUERYRBINFO start{};
-        start.cbSize = sizeof(start);
-        const bool have_start = SUCCEEDED(SHQueryRecycleBinW(nullptr, &start))
-            && start.i64NumItems >= 0;
-        const int64_t start_items = have_start ? start.i64NumItems : 0;
-        const int64_t start_bytes = have_start ? start.i64Size : 0;
-        SetStatus([&](OpStatus& st) {
-            st.current_item = OpVerb(OpType::EmptyRecycle);
-            st.summary = st.current_item;
-            st.total_items = start_items > 0 ? static_cast<uint64_t>(start_items) : 0;
-            st.total_bytes = start_bytes > 0 ? static_cast<uint64_t>(start_bytes) : 0;
-            st.percent = have_start && start_items > 0 ? 0.0f : -1.0f;
-        });
-
-        std::atomic<bool> emptying{true};
-        std::thread poller([&] {
-            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-            while (emptying.load(std::memory_order_relaxed) && !stopping_.load()) {
-                SHQUERYRBINFO now{};
-                now.cbSize = sizeof(now);
-                if (SUCCEEDED(SHQueryRecycleBinW(nullptr, &now)) && have_start && start_items > 0) {
-                    const int64_t left = (std::max)(int64_t{0}, now.i64NumItems);
-                    const int64_t done_items = (std::max)(int64_t{0}, start_items - left);
-                    const int64_t left_bytes = (std::max)(int64_t{0}, now.i64Size);
-                    const int64_t done_bytes = (std::max)(int64_t{0}, start_bytes - left_bytes);
-                    SetStatus([&](OpStatus& st) {
-                        if (!st.active || st.type != OpType::EmptyRecycle) return;
-                        st.completed_items = static_cast<uint64_t>(done_items);
-                        st.total_items = static_cast<uint64_t>(start_items);
-                        st.transferred_bytes = static_cast<uint64_t>(done_bytes);
-                        st.total_bytes = static_cast<uint64_t>((std::max)(start_bytes, int64_t{0}));
-                        st.percent = 100.0f * static_cast<float>(done_items)
-                            / static_cast<float>(start_items);
-                        st.current_item = OpVerb(OpType::EmptyRecycle);
-                    });
-                }
-                for (int i = 0; i < 8 && emptying.load(std::memory_order_relaxed); ++i)
-                    Sleep(50);
-            }
-            CoUninitialize();
-        });
-
-        const HRESULT hr = SHEmptyRecycleBinW(nullptr, nullptr,
-            SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
-        emptying.store(false, std::memory_order_relaxed);
-        if (poller.joinable()) poller.join();
-
-        SetStatus([&](OpStatus& st) {
-            st.active = false;
-            st.percent = -1.0f;
-            st.completed_ops++;
-            if (FAILED(hr)) {
-                st.phase = OpPhase::Failed;
-                st.last_error = L"无法清空回收站";
-            } else {
-                st.phase = OpPhase::Completed;
-                st.completed_items = st.total_items;
-                st.summary = Describe(req) + L" 完成";
-            }
-        });
-        return;
-    }
 
     auto& client = ipc::ShellClient::Instance();
 
@@ -2372,8 +2358,9 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id) {
     case OpType::EmptyRecycle:
     case OpType::BatchRename:
         break;
-    case OpType::RecycleDelete: id = client.DeleteRecycle(req.sources); break;
-    case OpType::RealDelete: id = client.RealDelete(req.sources); break;
+    case OpType::RecycleDelete:
+    case OpType::RealDelete:
+        break; // Only RunDelete can admit and execute deletion.
     case OpType::Rename: // Handled above; never send rename to the Shell host.
         break;
     case OpType::CreateFolder:

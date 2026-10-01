@@ -82,6 +82,7 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include "../common/known_folder_labels.h"
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -319,6 +320,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             [hwnd] { InvalidateRect(hwnd, nullptr, FALSE); },
             [s] { BindCurrentLayout(*s); },
             [s] { RememberLayoutFocus(*s); },
+            [s] { return NewTabPath(*s); },
         });
         if (s->isolatedTest) {
             s->places.persist = false;
@@ -914,6 +916,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 dirty = true;
             }
             if (PumpRecycleRefresh(*s, now)) dirty = true;
+            if (s->home_catalog.ConsumeUpdate()) dirty = true;
             MaybePrefetchHoverCtxMenu(*s);
             s->places.FlushPendingSave(false);
             if (s->renameClickCandidate && s->renameClickDue != 0 &&
@@ -1198,8 +1201,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_OPS_NOTIFY: {
         if (s) {
-            ops::OpStatus st = s->ops.Status();
             UpdateOperationWindow(*s, true);
+            const ops::OpStatus st = s->ops.Status();
             if (s->ops.TakeCtxInvokeDone()) {
                 if (app::Tab* tab = ActiveTab(*s)) s->store.MarkDirty(tab->current_path);
                 RefreshActiveTab(*s, RefreshReason::ShellNotification);
@@ -1207,9 +1210,19 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 RefreshRecycleViews(*s, false);
             }
             if (st.completed_ops != s->opsCompleted) {
+                const uint64_t finished_count = st.completed_ops - s->opsCompleted;
                 s->opsCompleted = st.completed_ops;
+                const auto completions = s->ops.DrainCompletions();
+                const uint64_t refused = st.deletes_without_mutation - s->deletesWithoutMutation;
+                s->deletesWithoutMutation = st.deletes_without_mutation;
+                const bool refresh_view = !completions.empty() || finished_count > refused;
+                for (const auto& outcome : s->ops.DrainDeleteOutcomes()) {
+                    if (!s->previewDeleteIntent || s->previewDeleteIntent->task_id != outcome.task_id) continue;
+                    if (outcome.mutated) s->previewDeleteIntent->succeeded = true;
+                    else if (!outcome.uncertain) s->previewDeleteIntent.reset();
+                }
                 std::vector<std::wstring> tag_metadata_paths;
-                for (const auto& completed : s->ops.DrainCompletions()) {
+                for (const auto& completed : completions) {
                     // Ask for confirmed index changes on the next tick. Keep any
                     // in-flight request and never invent a deletion before capture.
                     s->changes.last_query = 0;
@@ -1298,10 +1311,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     QueueTagAds(*s, BuildTagAdsUpdates(s->places, tag_metadata_paths, true));
                 // An op finished: refresh the view (watcher also fires, this is immediate).
                 app::Tab* tab = ActiveTab(*s);
-                if (tab) {
+                if (tab && refresh_view) {
                     s->store.MarkDirty(tab->current_path);
                     RefreshActiveTab(*s, RefreshReason::OperationCompleted);
                 }
+                if (s->previewDeleteIntent && s->previewDeleteIntent->succeeded) SyncQuickPreview(*s);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -1699,7 +1713,8 @@ bool WaitForShotReady(AppState& s) {
         }
         ProcessPendingResults(s);
         app::Tab* tab = ActiveTab(s);
-        if (tab && !tab->loading && tab->snapshot) {
+        if (tab && !tab->loading && tab->snapshot &&
+            (tab->current_path != app::MakeHomePath() || !s.home_catalog.Loading())) {
             return true;
         }
         if (s.hwnd) {
@@ -1886,6 +1901,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     pulse::compat::EnableDpiAwareness();
     // OLE init (drag & drop + clipboard); implies STA COM init.
     OleInitialize(nullptr);
+    std::thread known_folder_labels(pulse::path::InitializeKnownFolderLabels);
+    known_folder_labels.join();
     for (int i = 1; i < __argc; ++i) {
         if (wcscmp(__wargv[i], L"--material-selftest") == 0) {
             const int rc = ui::RunMaterialSelfTest();
@@ -1907,6 +1924,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     state.safeMode = pulse::crash::SafeModeRequested();
     for (int i = 1; i < __argc; ++i)
         if (wcscmp(__wargv[i], L"--test-instance") == 0) state.isolatedTest = true;
+    if (state.isolatedTest) {
+        wchar_t test_data[32768]{};
+        const DWORD length = GetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", test_data, ARRAYSIZE(test_data));
+        if (length && length < ARRAYSIZE(test_data))
+            pulse::storage::OverrideDefaultRootForTesting(test_data);
+    }
     for (int i = 1; i < __argc; ++i)
         if (state.isolatedTest && wcscmp(__wargv[i], L"--content-index-observer") == 0) state.contentIndexObserver = true;
 
@@ -2178,6 +2201,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     if (state.shot.active) {
         wchar_t settings_fixture[32]{};
+        if (state.isolatedTest && GetEnvironmentVariableW(L"PULSE_TEST_HOME_COLLAPSED", settings_fixture, ARRAYSIZE(settings_fixture))) {
+            if (auto* tab = ActiveTab(state)) tab->home_collapsed_mask = static_cast<unsigned>(wcstoul(settings_fixture, nullptr, 10)) & 7u;
+        }
         if (state.isolatedTest && GetEnvironmentVariableW(L"PULSE_TEST_SETTINGS_EXPANDED",settings_fixture,ARRAYSIZE(settings_fixture)))
             state.settingsExpanded=static_cast<unsigned>(wcstoul(settings_fixture,nullptr,10)) & 0x1f03u;
         if (state.isolatedTest && GetEnvironmentVariableW(L"PULSE_TEST_SETTINGS_SCROLL",settings_fixture,ARRAYSIZE(settings_fixture))) {

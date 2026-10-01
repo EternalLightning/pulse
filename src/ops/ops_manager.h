@@ -13,6 +13,7 @@
 //   RecycleDelete -> undo = restore the original paths from $Recycle.Bin
 //   RealDelete    -> never recorded, not undoable.
 #pragma once
+#include "delete_service.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -29,10 +30,12 @@
 
 namespace pulse::ops {
 
+struct DeleteIntegrationProbe;
+
 enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder, CreateTextFile, RestoreRecycle, EmptyRecycle, BatchRename };
 enum class CollisionPolicy { System, Replace, KeepBoth };
 enum class OpPhase { Queued, Scanning, WaitingForConflict, Running, Paused,
-                     Verifying, Cancelling, Completed, Failed };
+                     Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation };
 enum class ConflictChoice { Cancel, Replace, Skip, KeepBoth };
 
 struct ConflictItemInfo {
@@ -49,6 +52,12 @@ struct ConflictItemInfo {
     size_t remaining = 0;
 };
 
+struct DeleteRequestTarget {
+    std::wstring path;
+    std::vector<std::wstring> physical_paths;
+    bool recycle_item = false; // resolve an existing $I companion on the worker
+};
+
 struct OpRequest {
     OpType type = OpType::Copy;
     std::vector<std::wstring> sources;
@@ -57,6 +66,10 @@ struct OpRequest {
     std::vector<std::wstring> new_names; // BatchRename, parallel to sources
     CollisionPolicy collision_policy = CollisionPolicy::System; // Copy / Move
     bool is_undo = false;     // undo-originated ops do not re-enter the stack
+    DeleteOrigin delete_origin = DeleteOrigin::Selection;
+    // Logical rows may own more than one physical root (Recycle Bin $R/$I).
+    // These describe targets, never authorization or a recyclability claim.
+    std::vector<DeleteRequestTarget> delete_targets;
 };
 
 struct UndoEntry {
@@ -87,10 +100,18 @@ struct OpStatus {
     double peak_bytes_per_second = 0.0;
     uint64_t eta_seconds = 0;
     uint64_t completed_ops = 0; // bumped on every finished op (UI edge detect)
+    uint64_t deletes_without_mutation = 0; // suppress refusal-only model refresh
+};
+
+struct DeleteOutcome {
+    uint64_t task_id = 0;
+    bool mutated = false; // at least one confirmed logical target, not proof of zero side effects
+    bool uncertain = false; // attempted plan with incomplete/lost backend evidence
 };
 
 struct CompletedOperation {
     OpType type = OpType::Copy;
+    uint64_t task_id = 0;
     std::vector<std::wstring> sources;
     std::vector<std::wstring> destinations;
 };
@@ -148,6 +169,9 @@ public:
     void ResumeCurrent();
     std::optional<ConflictItemInfo> PendingConflict() const;
     void ResolveConflict(uint64_t token, ConflictChoice choice, bool apply_to_all);
+    std::optional<DeleteConfirmation> PendingDeleteConfirmation() const;
+    void ResolveDeleteConfirmation(uint64_t token, bool accepted);
+    std::vector<DeleteOutcome> DrainDeleteOutcomes();
 
     // Double-click open: ShellExecuteEx on a dedicated open thread (plan §6.2).
     void OpenWith(const std::wstring& path);
@@ -203,6 +227,7 @@ public:
     bool UndoFromJson(const std::wstring& in);
 
 private:
+    friend struct DeleteIntegrationProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -212,6 +237,7 @@ private:
         std::vector<std::wstring> open_paths; // multi-item "properties"
         uint64_t seq = 0;
         ULONGLONG enqueued_at = 0; // diagnostics: queue wait vs shell cost
+        uint64_t recovery_sequence = 0; // retained until deletion is admitted
     };
 
     struct MenuJob {
@@ -234,6 +260,15 @@ private:
     // queued opens so the dialog answers the click. Plain opens keep FIFO order.
     void EnqueueOpen(QueueItem item, bool front = false);
     void RunShellOp(const OpRequest& req, uint64_t task_id);
+    void RunDelete(const QueueItem& item);
+    void FinishDelete(const QueueItem& item, std::wstring error,
+                      const std::vector<std::wstring>& deleted_paths = {}, bool executed = false,
+                      bool uncertain = false);
+    DeleteService delete_service_;
+    std::mutex delete_wait_mutex_;
+    std::condition_variable delete_wait_cv_;
+    std::atomic<bool> delete_active_{false};
+    std::atomic<bool> delete_cancel_{false};
     bool WaitShellDone(uint32_t id, uint32_t& hr, bool& cancelled, std::wstring& error);
     void RunTransfer(const OpRequest& req, uint64_t task_id);
     void SetStatus(const std::function<void(OpStatus&)>& fn);
@@ -251,13 +286,14 @@ private:
     mutable std::mutex mutex_;            // guards queue_ + status_ + undo_
     std::condition_variable cv_;
     std::deque<QueueItem> queue_;
-    std::deque<std::wstring> recovery_cleanup_roots_;
     std::optional<QueueItem> active_item_;
     std::vector<RecoveryEntry> pending_recovery_;
     std::wstring journal_path_;
     OpStatus status_;
     std::deque<UndoEntry> undo_;
     std::deque<CompletedOperation> completions_;
+    std::deque<DeleteOutcome> delete_outcomes_;
+    std::set<uint64_t> scheduled_recovery_;
 
     std::thread thread_;
     bool running_ = false;
@@ -288,6 +324,7 @@ private:
     uint32_t done_hr_ = 0;
     bool done_cancelled_ = false;
     std::wstring done_error_;
+    std::vector<std::wstring> done_deleted_paths_;
 
     // Context-menu forwarding thread + token <-> pipe-request-id bookkeeping.
     std::thread menu_thread_;

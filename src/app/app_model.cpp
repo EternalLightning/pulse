@@ -6,6 +6,7 @@
 #include "../common/localization.h"
 #include "../common/path_utils.h"
 #include "../common/display_path.h"
+#include "../common/known_folder_labels.h"
 #include "../common/text_format.h"
 #include <commctrl.h>
 #include <prsht.h>
@@ -792,6 +793,7 @@ std::wstring TabTitle(const std::wstring& path) {
     if (path.empty()) return l10n::Get(l10n::StringId::ThisPc);
     std::wstring kind, rest;
     if (ParsePulsePath(path, &kind, &rest)) {
+        if (kind == L"home") return l10n::Get(l10n::StringId::Home);
         if (kind == L"settings") return l10n::Get(l10n::StringId::Settings);
         if (kind == L"starred") return l10n::Get(l10n::StringId::StarredItems);
         if (kind == L"recent") return l10n::Get(l10n::StringId::Recent);
@@ -803,7 +805,7 @@ std::wstring TabTitle(const std::wstring& path) {
     if (v.size() > 1 && v.back() == L'\\') v.remove_suffix(1);
     auto pos = v.find_last_of(L"\\/");
     if (pos != std::wstring_view::npos && pos + 1 < v.size())
-        return std::wstring(v.substr(pos + 1));
+        return pulse::path::KnownFolderDisplayName(path, v.substr(pos + 1));
     return std::wstring(v);
 }
 
@@ -1216,6 +1218,7 @@ static std::wstring PaneHeaderText(const Tab& tab) {
 }
 
 static std::wstring StatusText(const Tab& tab) {
+    if (tab.current_path == MakeHomePath()) return l10n::Get(l10n::StringId::Home);
     if (tab.search_content_active || tab.content_results) {
         wchar_t count[128]{};
         swprintf_s(count,l10n::Get(l10n::StringId::ContentStatusMatches).c_str(),tab.search_total);
@@ -1229,6 +1232,7 @@ static std::wstring StatusText(const Tab& tab) {
 }
 
 static std::wstring SelectionText(const Tab& tab) {
+    if (tab.current_path == MakeHomePath()) return {};
     const int count = tab.SelectedCount();
     if (count <= 0) return l10n::Get(l10n::StringId::NotSelected);
     if (count == 1 && tab.snapshot && tab.selected_index >= 0 &&
@@ -1430,9 +1434,12 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.can_go_forward = tab->CanGoForward();
     std::wstring virtual_kind;
     ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
+    out.is_home = virtual_kind == L"home";
+    out.home_collapsed_mask = tab->home_collapsed_mask;
     out.can_go_up = (virtual_kind == L"recycle" || virtual_kind == L"archive")
         ? true
         : (fs::IsVirtualPath(tab->current_path) ? tab->CanGoBack() : !tab->current_path.empty());
+    if (out.is_home) out.can_go_up = false;
     out.is_file_system = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
     out.can_create = out.is_file_system && !tab->net_readonly;
     out.curated_order = virtual_kind == L"starred" || virtual_kind == L"recent" || virtual_kind == L"changes";
@@ -1554,6 +1561,8 @@ void FillWindowTabStrip(ui::WindowViewModel& vm, const WindowTabs& tabs) {
     for (size_t i = 0; i < tabs.items.size(); ++i) {
         ui::TabView tv;
         tv.title = LayoutTabTitle(*tabs.items[i]);
+        const Tab* active_folder = tabs.items[i]->ActiveFolder();
+        tv.is_home = active_folder && active_folder->current_path == MakeHomePath();
         tv.active = i == tabs.active;
         tv.pinned = tabs.items[i]->pinned;
         tv.marker_rgb = tabs.items[i]->marker_rgb;

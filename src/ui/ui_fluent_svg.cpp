@@ -270,6 +270,8 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
 
 int FluentSvgIdForGlyph(std::wstring_view glyph) {
     if (glyph.empty()) return 0;
+    if (glyph == L"\xE80F") return IDR_FLUENT_HOME_SVG;
+    if (glyph == L"\xE753") return IDR_ONEDRIVE_SVG;
     if (glyph == L"\xE735") return IDR_FLUENT_STAR_SVG;
     if (glyph == L"\xE823") return IDR_FLUENT_HISTORY_SVG;
     if (glyph == L"\xE7F4") return IDR_FLUENT_DESKTOP_SVG;

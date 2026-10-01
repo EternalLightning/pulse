@@ -143,7 +143,7 @@ target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32)
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
 add_library(pulse_user_storage STATIC src/common/user_storage.cpp)
-target_link_libraries(pulse_user_storage PUBLIC shell32 ole32)
+target_link_libraries(pulse_user_storage PUBLIC shell32 ole32 advapi32)
 add_executable(pulse_user_storage_test src/bench/user_storage_test.cpp)
 target_link_libraries(pulse_user_storage_test PRIVATE pulse_user_storage)
 add_executable(pulse_user_index_storage_test
@@ -161,6 +161,11 @@ add_executable(pulse_localization_test
 set_property(SOURCE src/bench/localization_test.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc")
 target_link_libraries(pulse_localization_test PRIVATE pulse_localization)
+
+add_executable(pulse_known_folder_labels_test
+    src/bench/known_folder_labels_test.cpp
+    src/bench/localization_test.rc)
+target_link_libraries(pulse_known_folder_labels_test PRIVATE pulse_localization shell32 ole32 uuid)
 
 add_executable(pulse_crash_test src/bench/crash_reporter_test.cpp)
 target_link_libraries(pulse_crash_test PRIVATE pulse_crash_reporter)
@@ -253,6 +258,9 @@ target_link_libraries(pulse_command_icon_test PRIVATE d2d1 dwrite dwmapi ole32 w
 
 add_executable(pulse_date_group_layout_test src/bench/date_group_layout_test.cpp
     src/app/date_groups.cpp src/ui/view_layout.cpp)
+add_executable(pulse_home_layout_test src/bench/home_layout_test.cpp
+    src/app/home_catalog.cpp src/bench/localization_test.rc)
+target_link_libraries(pulse_home_layout_test PRIVATE pulse_localization shell32 ole32 uuid)
 
 # ---- Pulse.exe: main UI process ----
 file(GLOB_RECURSE PULSE_APP_SOURCES CONFIGURE_DEPENDS
@@ -365,6 +373,16 @@ target_link_libraries(pulse_ops_test PRIVATE ole32 shell32 uuid bcrypt)
 add_executable(pulse_rename_ops_test src/bench/rename_ops_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp)
 target_link_libraries(pulse_rename_ops_test PRIVATE ole32 shell32 uuid bcrypt)
+# Standalone OpsManager tests need the deletion service's direct dependencies.
+foreach(ops_test_target pulse_ops_test pulse_rename_ops_test)
+    target_sources(${ops_test_target} PRIVATE
+        src/ops/delete_service.cpp src/ops/delete_operation.cpp
+        src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
+    target_link_libraries(${ops_test_target} PRIVATE
+        pulse_localization advapi32 shlwapi netapi32)
+endforeach()
+add_executable(pulse_delete_service_test src/bench/delete_service_test.cpp
+    src/ops/delete_service.cpp)
 
 # ---- Pulse.Shell.exe: COM isolation process (stage 1: recycle bin / IFileOperation) ----
 file(GLOB_RECURSE PULSE_SHELL_SOURCES CONFIGURE_DEPENDS src/shell_host/*.cpp)
@@ -437,9 +455,10 @@ add_executable(pulse_app_controllers_test
     src/app/context_menu_prefs.cpp
     src/ui/view_layout.cpp
     src/index/index_client.cpp
+    src/index/index_config.cpp
     src/index/network_agent_client.cpp)
 target_link_libraries(pulse_app_controllers_test PRIVATE
-    user32 shell32 ole32 uuid advapi32 shlwapi pulse_localization)
+    user32 shell32 ole32 uuid advapi32 shlwapi pulse_localization pulse_user_storage)
 
 # Shell-only operations (recycle bin, Explorer verbs) go through pulse_shell.exe.
 # Copy/move use the in-process scheduler plus CopyFile2.

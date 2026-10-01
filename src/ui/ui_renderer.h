@@ -48,6 +48,7 @@ struct TabView {
     int group = -1;         // index into WindowViewModel::tab_groups
     bool hidden = false;    // member of a collapsed group: zero width, not drawn
     bool pinned = false;    // narrow icon-only slot, left cluster, no close
+    bool is_home = false;
 };
 
 // A named, colored tab group shown as a chip at the start of its run.
@@ -134,11 +135,22 @@ struct ColumnStripView {
     bool Active() const { return enabled && eligible; }
 };
 
+struct HomeCardView {
+    std::wstring label, detail, path, glyph;
+    int group = 0; // libraries, drives, network
+    float used_ratio = -1.0f;
+    int system_icon_index = -1;
+};
+
 struct PaneViewModel {
     using FilterMap = std::vector<int>;
     using TagDots = std::unordered_map<int, std::vector<D2D1_COLOR_F>>;
 
     std::wstring path;
+    bool is_home = false;
+    bool home_loading = false;
+    unsigned home_collapsed_mask = 0;
+    std::vector<HomeCardView> home_cards;
     std::wstring header_text;
     std::unordered_map<int, ChangeBadge> change_badges;
     std::unordered_map<int, std::wstring> folder_size_labels;
@@ -579,6 +591,7 @@ struct WindowViewModel {
     int settings_folder_sort = 0; // 0 folders first, 1 follow direction, 2 mixed
     bool settings_open_folders = false;
     bool settings_blank_click_go_back = false;
+    bool settings_new_tab_home = false;
     bool settings_change_tracking = false;
     int settings_change_days = 3;
     int settings_row_height = 34; // current row-height pref (DIPs) for density radios
@@ -633,6 +646,9 @@ struct HitTestResult {
         TabGroup,
         ThemeToggle,
         SettingsButton,
+        HomeButton,
+        HomeCard,
+        HomeGroup,
         Minimize,
         Maximize,
         Close,
@@ -1066,6 +1082,8 @@ private:
     void DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
+                  const D2D1_RECT_F& bounds, int pane_index, const Theme& theme);
     void DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                         const D2D1_RECT_F& bounds, int pane_index, bool focused, bool target,

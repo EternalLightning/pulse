@@ -47,6 +47,7 @@ struct Tab {
     std::unordered_set<int> selected;
     float scroll_y = 0.0f;
     float scroll_x = 0.0f;
+    unsigned home_collapsed_mask = 0;
     ui::ViewMode view_mode = ui::ViewMode::Details;
     uint64_t view_generation = 1;
     ui::SortColumn sort_column = ui::SortColumn::Name;

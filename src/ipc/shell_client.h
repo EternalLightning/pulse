@@ -17,6 +17,8 @@
 #include <thread>
 #include <vector>
 
+namespace pulse::ops { class OpsManager; }
+
 namespace pulse::ipc {
 
 // One Explorer verb from a host-side IContextMenu session (already filtered
@@ -40,6 +42,8 @@ public:
         std::function<void(uint32_t id, float percent, std::wstring item,
                            uint32_t items_done, uint32_t total_items)> progress;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> done;
+        std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
+                           std::vector<std::wstring> deleted_paths)> delete_done;
         // RSP_CTX_ITEMS for a REQ_CTX_QUERY; id is the query id (== session id).
         std::function<void(uint32_t id, std::vector<CtxMenuItem> items, bool partial,
                            std::vector<std::wstring> slow_clsids)> ctx_items;
@@ -73,6 +77,8 @@ public:
     void CloseContextMenu(uint32_t session_id);
 
 private:
+    friend class pulse::ops::OpsManager;
+    uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token);
     ShellClient() = default;
     ~ShellClient();
 

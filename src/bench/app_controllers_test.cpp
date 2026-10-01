@@ -7,6 +7,7 @@
 #include "../app/unc_probe_scheduler.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
+#include "../common/user_storage.h"
 #include "../ui/panel_metrics.h"
 #include "../index/index_client.h"
 #include "../index/network_agent_client.h"
@@ -44,6 +45,35 @@ bool Report(const char* name, bool passed) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--new-tab-home") {
+        wchar_t temporary[MAX_PATH]{};
+        if (!GetTempPathW(MAX_PATH, temporary)) return 1;
+        pulse::storage::OverrideDefaultRootForTesting(std::wstring(temporary) +
+            L"pulse-new-tab-prefs-" + std::to_wstring(GetCurrentProcessId()));
+        pulse::app::AppPrefs prefs;
+        prefs.persist = false;
+        pulse::app::ContextMenuPrefs context;
+        context.persist = false;
+        pulse::index::IndexClient index;
+        pulse::index::NetworkAgentClient network;
+        pulse::app::SettingsController settings;
+        settings.BindUi(prefs, context, index, network, {});
+        bool ok = Report("new tabs duplicate the current page by default", !prefs.new_tab_home);
+        settings.ToggleUi(20);
+        pulse::app::AppPrefs loaded;
+        loaded.persist = false;
+        ok &= Report("Home selection persists", prefs.new_tab_home &&
+            loaded.FromJson(prefs.ToJson()) && loaded.new_tab_home);
+        settings.ToggleUi(20);
+        ok &= Report("duplicate selection persists", !prefs.new_tab_home &&
+            loaded.FromJson(prefs.ToJson()) && !loaded.new_tab_home);
+        loaded.new_tab_home = true;
+        ok &= Report("legacy preferences keep duplicate behavior", loaded.FromJson(L"{}") && !loaded.new_tab_home);
+        loaded.new_tab_home = true;
+        loaded.ResetToDefaults();
+        ok &= Report("reset restores duplicate behavior", !loaded.new_tab_home);
+        return ok ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--layout-search-prefs") {
         pulse::app::AppPrefs prefs;
         prefs.persist = false;

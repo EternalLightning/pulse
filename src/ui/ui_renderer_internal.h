@@ -1525,6 +1525,7 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_blur_card{};
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};
+    D2D1_RECT_F new_tab_row{};
     D2D1_RECT_F hidden_files_row{};
     D2D1_RECT_F protected_files_row{};
     D2D1_RECT_F pinned_names_row{};
@@ -1552,6 +1553,11 @@ struct SettingsLayout {
     D2D1_RECT_F diagnostics_perf{};
     D2D1_RECT_F diagnostics_action[3]{};
     D2D1_RECT_F about_action[2]{};
+    D2D1_RECT_F dup_scope_row{}, dup_scope_label{}, dup_hint{};
+    D2D1_RECT_F dup_target_row{}, dup_target_label{}, dup_target_summary{};
+    D2D1_RECT_F dup_min_row{}, dup_min_label{}, dup_min_description{};
+    D2D1_RECT_F dup_actions_row{}, dup_empty{};
+    bool dup_scope_stacked = false;
     D2D1_RECT_F dup_scope[3]{};
     D2D1_RECT_F dup_browse{};
     D2D1_RECT_F dup_scan{};
@@ -1628,9 +1634,14 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         y += 30*scale;
         l.global_search_row = D2D1::RectF(card_left, y, card_right, y + 88*scale);
         y += 88*scale;
-        l.global_search_hotkey_row = D2D1::RectF(card_left, y, card_right, y + 108*scale);
-        l.global_search_hotkey_button = D2D1::RectF(card_left + 54*scale, y + 62*scale, card_right - 16*scale, y + 98*scale);
-        y += 108*scale;
+        const bool hotkey_stacked = card_right-card_left < 560*scale;
+        const float hotkey_width = std::min(card_right-card_left-70*scale, std::max(176*scale,
+            label_btn_w(vm.settings_global_search_capturing ? l10n::Get(l10n::StringId::GlobalSearchRecording) : vm.settings_global_search_hotkey)));
+        l.global_search_hotkey_row = D2D1::RectF(card_left, y, card_right, y + (hotkey_stacked ? 108 : 68)*scale);
+        const float hotkey_left = hotkey_stacked ? card_left+54*scale : card_right-16*scale-hotkey_width;
+        const float hotkey_top = y+(hotkey_stacked ? 62 : 18)*scale;
+        l.global_search_hotkey_button = D2D1::RectF(hotkey_left, hotkey_top, hotkey_left+hotkey_width, hotkey_top+32*scale);
+        y = l.global_search_hotkey_row.bottom;
         l.search_pinyin_row = D2D1::RectF(card_left, y, card_right, y + 68*scale);
         y += 68*scale;
         l.filename_status = D2D1::RectF(card_left, y, card_right, y + 72*scale);
@@ -1645,18 +1656,12 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         l.index_status = D2D1::RectF(card_left, y, card_right, y + 82.0f * scale);
         y += 94.0f * scale;
         const int action_count = (vm.settings_index_service || vm.settings_index_installed) ? 3 : 4;
-        const int columns = card_right - card_left < 560.0f * scale ? 2 : action_count;
-        const int rows = (action_count + columns - 1) / columns;
-        const float path_h = (112.0f + 40.0f * rows) * scale;
-        l.index_path = D2D1::RectF(card_left, y, card_right, y + path_h);
-        const float gap = 8.0f * scale;
-        const float width = (card_right - card_left - 32.0f * scale - gap * (columns - 1)) / columns;
-        for (int i = 0; i < action_count; ++i) {
-            const float left = card_left + 16.0f * scale + (i % columns) * (width + gap);
-            const float top = y + (100.0f + 40.0f * (i / columns)) * scale;
-            l.index_action[i] = D2D1::RectF(left, top, left + width, top + 32.0f * scale);
-        }
-        y += path_h + 44.0f * scale;
+        const l10n::StringId index_labels[] = {l10n::StringId::Rebuild, l10n::StringId::OpenLocation,
+            l10n::StringId::ChangeLocation, l10n::StringId::InstallService};
+        const float path_bottom = LayoutSettingsActions(card_left+16*scale, card_right-16*scale,
+            y+100*scale, scale, index_labels, action_count, l.index_action, painter)+4*scale;
+        l.index_path = D2D1::RectF(card_left, y, card_right, path_bottom);
+        y = path_bottom + 44*scale;
         l.index_volume_rows.reserve(vm.settings_index_volumes.size());
         for (size_t i = 0; i < vm.settings_index_volumes.size(); ++i) {
             l.index_volume_rows.push_back(D2D1::RectF(card_left, y, card_right,
@@ -1789,103 +1794,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
 
         if (!vm.settings_index_error.empty()) y += 44.0f * scale;
     } else if (vm.settings_page == 4) {
-        const float card_left = l.content.left + pad;
-        const float card_right = l.content.right - pad;
-        const float gap = 8.0f * scale;
-        const float inner = 16.0f * scale;
-        const float btn_h = 32.0f * scale;
-        y += 40.0f * scale;
-        const float options_top=y-12*scale;
-        const float scope_w = (card_right - card_left - inner * 2 - gap * 2) / 3.0f;
-        for (int i = 0; i < 3; ++i) {
-            const float left = card_left + inner + i * (scope_w + gap);
-            l.dup_scope[i] = D2D1::RectF(left, y, left + scope_w, y + 36.0f * scale);
-        }
-        y += 48.0f * scale;
-        if (vm.dup_scope == 0) {
-            const float browse_w = label_btn_w(pulse::l10n::Get(pulse::l10n::StringId::DupBrowse));
-            l.dup_browse = D2D1::RectF(card_right - inner - browse_w, y,
-                                       card_right - inner, y + btn_h);
-            y += 44.0f * scale;
-        } else if (vm.dup_scope == 1) {
-            float cx = card_left + inner;
-            float cy = y;
-            l.dup_drives.reserve(vm.dup_drives.size());
-            for (const auto& drive : vm.dup_drives) {
-                const float chip_w = (std::max)(48.0f * scale, label_btn_w(drive.label));
-                if (cx > card_left + inner && cx + chip_w > card_right - inner) {
-                    cx = card_left + inner;
-                    cy += 36.0f * scale;
-                }
-                l.dup_drives.push_back(D2D1::RectF(cx, cy, cx + chip_w, cy + 32.0f * scale));
-                cx += chip_w + gap;
-            }
-            y = cy + 40.0f * scale;
-        }
-        y += 8.0f * scale;
-        y += 40.0f * scale;
-        const float min_w = (card_right - card_left - inner * 2 - gap * 2) / 3.0f;
-        for (int i = 0; i < 3; ++i) {
-            const float left = card_left + inner + i * (min_w + gap);
-            l.dup_min_size[i] = D2D1::RectF(left, y, left + min_w, y + 32.0f * scale);
-        }
-        y += 44.0f * scale;
-        const float scan_w = label_btn_w(pulse::l10n::Get(pulse::l10n::StringId::DupScan));
-        const float cancel_w = label_btn_w(pulse::l10n::Get(pulse::l10n::StringId::Cancel));
-        l.dup_scan = D2D1::RectF(card_left + inner, y, card_left + inner + scan_w, y + btn_h);
-        l.dup_cancel = D2D1::RectF(l.dup_scan.right + gap, y,
-                                   l.dup_scan.right + gap + cancel_w, y + btn_h);
-        y += 48.0f * scale;
-        l.duplicate_options=D2D1::RectF(card_left,options_top,card_right,y);
-        y += 36.0f * scale;
-        if (vm.dup_show_progress) {
-            l.dup_progress = D2D1::RectF(card_left, y, card_right, y + 72.0f * scale);
-            y += 84.0f * scale;
-        }
-        if (!vm.dup_empty.empty()) y += 36.0f * scale;
-        const float file_h = 32.0f * scale;
-        const float delete_w = label_btn_w(pulse::l10n::Get(pulse::l10n::StringId::DupDeleteExtras));
-        const float vis_pad = 64.0f * scale;
-        l.dup_group_cards.reserve(vm.dup_groups.size());
-        l.dup_group_delete.reserve(vm.dup_groups.size());
-        for (size_t g = 0; g < vm.dup_groups.size(); ++g) {
-            const float card_h = 48.0f * scale +
-                static_cast<float>(vm.dup_groups[g].files.size()) * file_h + 48.0f * scale;
-            const D2D1_RECT_F card = D2D1::RectF(card_left, y, card_right, y + card_h);
-            l.dup_group_cards.push_back(card);
-            l.dup_group_delete.push_back(D2D1::RectF(
-                card.right - inner - delete_w,
-                card.top + 48.0f * scale +
-                    static_cast<float>(vm.dup_groups[g].files.size()) * file_h + 8.0f * scale,
-                card.right - inner,
-                card.top + 48.0f * scale +
-                    static_cast<float>(vm.dup_groups[g].files.size()) * file_h + 8.0f * scale +
-                    btn_h));
-            if (VisibleInContent(card, l.content, vis_pad)) {
-                float fy = y + 48.0f * scale;
-                l.dup_keep.reserve(l.dup_keep.size() + vm.dup_groups[g].files.size());
-                l.dup_open.reserve(l.dup_open.size() + vm.dup_groups[g].files.size());
-                for (size_t f = 0; f < vm.dup_groups[g].files.size(); ++f) {
-                    l.dup_keep.push_back(D2D1::RectF(card.left + inner, fy,
-                                                     card.left + inner + 88.0f * scale, fy + file_h));
-                    l.dup_keep_group.push_back(static_cast<int>(g));
-                    l.dup_keep_file.push_back(static_cast<int>(f));
-                    l.dup_open.push_back(D2D1::RectF(card.left + inner + 92.0f * scale, fy,
-                                                     card.right - inner, fy + file_h));
-                    l.dup_open_group.push_back(static_cast<int>(g));
-                    l.dup_open_file.push_back(static_cast<int>(f));
-                    fy += file_h;
-                }
-            }
-            y += card_h + 12.0f * scale;
-        }
-        if (vm.dup_show_delete_all) {
-            const float all_w = label_btn_w(vm.dup_delete_all.empty()
-                ? pulse::l10n::Get(pulse::l10n::StringId::DupDeleteAllExtras)
-                : vm.dup_delete_all);
-            l.dup_delete_all = D2D1::RectF(card_left, y, card_left + all_w, y + btn_h);
-            y += 48.0f * scale;
-        }
+        y = LayoutSettingsDuplicates(l, vm, scale, y, painter);
     }
     l.content_h = y - l.content_origin + pad;
     return l;

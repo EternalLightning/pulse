@@ -16,6 +16,7 @@ struct AppPrefs {
     bool verify_copies = false;
     bool show_status_performance = false;
     bool show_pinned_tab_names = true;
+    bool new_tab_home = false;
     // Details list presentation.
     bool list_smart_date = true;
     bool list_zebra_rows = true;

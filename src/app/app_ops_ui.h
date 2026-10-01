@@ -13,4 +13,6 @@ void CollectToTray(AppState& s, bool move_intent);
 void ShowBatchRename(AppState& s);
 void PinAndShowOperationWindow(AppState& s);
 void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog);
+void PresentDeleteConfirmation(AppState& s);
+ui::ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation& confirmation);
 } // namespace pulse

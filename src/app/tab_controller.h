@@ -14,6 +14,7 @@ public:
         std::function<void()> invalidate;
         std::function<void()> layout_changed;
         std::function<void()> will_change_layout;
+        std::function<std::wstring()> new_tab_path;
     };
 
     explicit TabController(Callbacks callbacks = {}) : callbacks_(std::move(callbacks)) {}

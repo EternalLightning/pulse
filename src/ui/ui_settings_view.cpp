@@ -472,20 +472,50 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
 
     } else if (vm.settings_page == 4) {
+        using I = pulse::l10n::StringId;
         auto draw_card = [&](const D2D1_RECT_F& card) {
             if (card.right <= card.left || card.bottom <= card.top) return;
-            MakeBrush(dc, theme.fill_input, brFillInput_);
+            MakeBrush(dc, WithAlpha(theme.surface_card, card_alpha_), brFillInput_);
             FillRoundedRect(dc, brFillInput_.get(), card.left, card.top,
                             card.right - card.left, card.bottom - card.top, 8.0f * scale_);
             MakeBrush(dc, theme.stroke_card, brStrokeCard_);
             dc->DrawRoundedRectangle(D2D1::RoundedRect(card, 8.0f * scale_, 8.0f * scale_),
                                      brStrokeCard_.get(), 1.0f);
         };
+        auto divider = [&](const D2D1_RECT_F& row) {
+            if (row.bottom <= row.top) return;
+            MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
+            FillRect(dc, brStrokeDivider_.get(), row.left + 16 * scale_, row.bottom,
+                row.right - row.left - 32 * scale_, 1);
+        };
+        auto label = [&](const D2D1_RECT_F& row, const D2D1_RECT_F& bounds,
+                         I title, const wchar_t* icon) {
+            DrawIconText(row.left + 16 * scale_, row.top + 17 * scale_, 24 * scale_,
+                24 * scale_, icon, L"", theme.text_secondary, 0.85f);
+            painter_.DrawText(pulse::l10n::Get(title), bounds, compositor_->TextFormat(), theme.text);
+        };
+        auto caption = [&](std::wstring_view value, const D2D1_RECT_F& bounds) {
+            if (bounds.bottom <= bounds.top) return;
+            painter_.DrawWrappedCaption(value, D2D1::Point2F(bounds.left, bounds.top),
+                bounds.right - bounds.left, theme.text_secondary);
+        };
+        auto button = [&](const D2D1_RECT_F& bounds, std::wstring_view value,
+                          fluent::ButtonKind kind, const fluent::ControlState& state) {
+            fluent::ButtonSpec spec{bounds, value, {}, kind, state};
+            spec.wrap_text = true;
+            painter_.DrawButton(spec);
+        };
         draw_card(lay.duplicate_options);
-        MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-        DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), vm.dup_hint,
-                     lay.content.left + pad, origin + pad + 44.0f * scale_,
-                     lay.content.right - lay.content.left - pad * 2, 28.0f * scale_);
+        label(lay.dup_scope_row, lay.dup_scope_label, I::DupScopeLabel, kIconSearch);
+        caption(vm.dup_hint, lay.dup_hint);
+        divider(lay.dup_scope_row);
+        if (lay.dup_target_row.bottom > lay.dup_target_row.top) {
+            label(lay.dup_target_row, lay.dup_target_label, I::DupTargetLabel, L"\xED25");
+            divider(lay.dup_target_row);
+        }
+        label(lay.dup_min_row, lay.dup_min_label, I::DupMinSize, L"\xE8A4");
+        caption(pulse::l10n::Get(I::DupMinSizeDesc), lay.dup_min_description);
+        divider(lay.dup_min_row);
         static constexpr pulse::l10n::StringId kScope[] = {
             pulse::l10n::StringId::DupScopeFolder,
             pulse::l10n::StringId::DupScopeDrive,
@@ -494,13 +524,13 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         for (int i = 0; i < 3; ++i) {
             fluent::SegmentedItemSpec segment;
             segment.bounds = lay.dup_scope[i];
-            if (i == 0) painter_.DrawSegmentedTrack(D2D1::RectF(segment.bounds.left,
-                segment.bounds.top, lay.dup_scope[2].right, lay.dup_scope[2].bottom));
-            segment.bounds = D2D1::RectF(segment.bounds.left + 3 * scale_, segment.bounds.top + 3 * scale_,
-                segment.bounds.right - 3 * scale_, segment.bounds.bottom - 3 * scale_);
-            segment.shared_track = true;
+            if (i == 0 && !lay.dup_scope_stacked)
+                painter_.DrawSegmentedTrack(D2D1::RectF(segment.bounds.left,
+                    segment.bounds.top, lay.dup_scope[2].right, lay.dup_scope[2].bottom));
+            segment.shared_track = !lay.dup_scope_stacked;
             segment.text = pulse::l10n::Get(kScope[i]);
-            segment.position = i == 0 ? fluent::SegmentPosition::First
+            segment.position = lay.dup_scope_stacked ? fluent::SegmentPosition::Single
+                             : i == 0 ? fluent::SegmentPosition::First
                              : i == 2 ? fluent::SegmentPosition::Last
                                       : fluent::SegmentPosition::Middle;
             segment.state.selected = vm.dup_scope == i;
@@ -514,16 +544,15 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             const std::wstring folder = vm.dup_folder.empty()
                 ? pulse::l10n::Get(pulse::l10n::StringId::DupFolderPlaceholder)
                 : vm.dup_folder;
-            DrawTextRect(dc, compositor_->SmallFormat(), brText_.get(), folder,
-                         lay.content.left + pad + 16.0f * scale_, lay.dup_browse.top,
-                         lay.dup_browse.left - lay.content.left - pad - 28.0f * scale_,
-                         32.0f * scale_);
+            DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(), brText_.get(), folder,
+                         lay.dup_target_summary.left, lay.dup_target_summary.top,
+                         lay.dup_target_summary.right - lay.dup_target_summary.left,
+                         lay.dup_target_summary.bottom - lay.dup_target_summary.top);
             fluent::ControlState browse{};
             browse.enabled = !vm.dup_scanning;
             browse.hovered = browse.enabled && IsHovered(vm, HitTestResult::SettingsDupBrowse);
-            painter_.DrawButton({lay.dup_browse,
-                pulse::l10n::Get(pulse::l10n::StringId::DupBrowse), {},
-                fluent::ButtonKind::Standard, browse});
+            button(lay.dup_browse, pulse::l10n::Get(I::DupBrowse),
+                fluent::ButtonKind::Standard, browse);
         } else if (vm.dup_scope == 1) {
             for (size_t i = 0; i < vm.dup_drives.size() && i < lay.dup_drives.size(); ++i) {
                 fluent::ControlState chip{};
@@ -532,8 +561,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 chip.enabled = !vm.dup_scanning;
                 chip.hovered = chip.enabled &&
                     IsHovered(vm, HitTestResult::SettingsDupDrive, static_cast<int>(i));
-                painter_.DrawButton({lay.dup_drives[i], vm.dup_drives[i].label, {},
-                    fluent::ButtonKind::Toggle, chip});
+                button(lay.dup_drives[i], vm.dup_drives[i].label,
+                    fluent::ButtonKind::Toggle, chip);
             }
         }
         static constexpr pulse::l10n::StringId kMin[] = {
@@ -541,26 +570,11 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             pulse::l10n::StringId::DupMinSize1MB,
             pulse::l10n::StringId::DupMinSize10MB,
         };
-        {
-            const float label_top = lay.dup_min_size[0].top - 40.0f * scale_;
-            MakeBrush(dc, theme.text, brText_);
-            DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
-                         pulse::l10n::Get(pulse::l10n::StringId::DupMinSize),
-                         lay.content.left + pad + 16*scale_, label_top,
-                         lay.content.right - lay.content.left - pad * 2, 20.0f * scale_);
-            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-            DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(),
-                         pulse::l10n::Get(pulse::l10n::StringId::DupMinSizeDesc),
-                         lay.content.left + pad + 16*scale_, label_top + 20.0f * scale_,
-                         lay.content.right - lay.content.left - pad * 2, 18.0f * scale_);
-        }
         for (int i = 0; i < 3; ++i) {
             fluent::SegmentedItemSpec segment;
             segment.bounds = lay.dup_min_size[i];
             if (i == 0) painter_.DrawSegmentedTrack(D2D1::RectF(segment.bounds.left,
                 segment.bounds.top, lay.dup_min_size[2].right, lay.dup_min_size[2].bottom));
-            segment.bounds = D2D1::RectF(segment.bounds.left + 3 * scale_, segment.bounds.top + 3 * scale_,
-                segment.bounds.right - 3 * scale_, segment.bounds.bottom - 3 * scale_);
             segment.shared_track = true;
             segment.text = pulse::l10n::Get(kMin[i]);
             segment.position = i == 0 ? fluent::SegmentPosition::First
@@ -575,13 +589,11 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         fluent::ControlState scan{};
         scan.enabled = vm.dup_can_scan && !vm.dup_scanning;
         scan.hovered = scan.enabled && IsHovered(vm, HitTestResult::SettingsDupScan);
-        painter_.DrawButton({lay.dup_scan, pulse::l10n::Get(pulse::l10n::StringId::DupScan), {},
-            fluent::ButtonKind::Primary, scan});
+        button(lay.dup_scan, pulse::l10n::Get(I::DupScan), fluent::ButtonKind::Primary, scan);
         fluent::ControlState cancel{};
         cancel.enabled = vm.dup_scanning;
         cancel.hovered = cancel.enabled && IsHovered(vm, HitTestResult::SettingsDupCancel);
-        painter_.DrawButton({lay.dup_cancel, pulse::l10n::Get(pulse::l10n::StringId::Cancel), {},
-            fluent::ButtonKind::Standard, cancel});
+        button(lay.dup_cancel, pulse::l10n::Get(I::Cancel), fluent::ButtonKind::Standard, cancel);
         if (vm.dup_show_progress) {
             draw_card(lay.dup_progress);
             MakeBrush(dc, theme.text, brText_);
@@ -604,14 +616,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             bar.animation_progress = vm.dup_animation;
             painter_.DrawProgressBar(bar);
         }
-        if (!vm.dup_empty.empty()) {
-            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-            DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), vm.dup_empty,
-                         lay.content.left + pad, lay.dup_progress.bottom > lay.dup_progress.top
-                             ? lay.dup_progress.bottom + 8.0f * scale_
-                             : lay.dup_scan.bottom + 12.0f * scale_,
-                         lay.content.right - lay.content.left - pad * 2, 28.0f * scale_);
-        }
+        caption(vm.dup_empty, lay.dup_empty);
+        size_t visible_file = 0;
         for (size_t g = 0; g < vm.dup_groups.size() && g < lay.dup_group_cards.size(); ++g) {
             const auto& card = lay.dup_group_cards[g];
             if (!VisibleInContent(card, lay.content)) continue;
@@ -620,20 +626,17 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), vm.dup_groups[g].title,
                          card.left + 16.0f * scale_, card.top + 12.0f * scale_,
                          card.right - card.left - 32.0f * scale_, 24.0f * scale_);
-            const float file_h = 32.0f * scale_;
-            const float inner = 16.0f * scale_;
-            float fy = card.top + 48.0f * scale_;
-            for (size_t f = 0; f < vm.dup_groups[g].files.size(); ++f) {
-                if (fy + file_h <= lay.content.top) {
-                    fy += file_h;
-                    continue;
-                }
-                if (fy >= lay.content.bottom) break;
+            while (visible_file < lay.dup_keep.size() &&
+                   lay.dup_keep_group[visible_file] < static_cast<int>(g)) ++visible_file;
+            while (visible_file < lay.dup_keep.size() &&
+                   lay.dup_keep_group[visible_file] == static_cast<int>(g)) {
+                const size_t item = visible_file++;
+                const int f = lay.dup_keep_file[item];
+                const auto& keep_rc = lay.dup_keep[item];
+                const auto& open_rc = lay.dup_open[item];
+                if (!VisibleInContent(open_rc, lay.content) &&
+                    !VisibleInContent(keep_rc, lay.content)) continue;
                 const auto& file = vm.dup_groups[g].files[f];
-                const D2D1_RECT_F keep_rc = D2D1::RectF(card.left + inner, fy,
-                    card.left + inner + 88.0f * scale_, fy + file_h);
-                const D2D1_RECT_F open_rc = D2D1::RectF(card.left + inner + 92.0f * scale_, fy,
-                    card.right - inner, fy + file_h);
                 fluent::ControlState radio{};
                 radio.checked = file.keep;
                 radio.enabled = !vm.dup_scanning;
@@ -643,14 +646,13 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 painter_.DrawRadioButton(keep_rc,
                     pulse::l10n::Get(pulse::l10n::StringId::DupKeep), radio);
                 MakeBrush(dc, theme.text, brText_);
-                DrawTextRect(dc, compositor_->SmallFormat(), brText_.get(), file.name,
-                             open_rc.left, open_rc.top, open_rc.right - open_rc.left,
-                             16.0f * scale_);
+                DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
+                    brText_.get(), file.name, open_rc.left, open_rc.top,
+                    open_rc.right - open_rc.left, 18 * scale_);
                 MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-                DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), file.detail,
-                             open_rc.left, open_rc.top + 14.0f * scale_,
-                             open_rc.right - open_rc.left, 14.0f * scale_);
-                fy += file_h;
+                DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
+                    brTextSecondary_.get(), file.detail, open_rc.left, open_rc.top + 18 * scale_,
+                    open_rc.right - open_rc.left, 18 * scale_);
             }
             if (g < lay.dup_group_delete.size() &&
                 VisibleInContent(lay.dup_group_delete[g], lay.content)) {
@@ -658,17 +660,17 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 del.enabled = !vm.dup_scanning;
                 del.hovered = del.enabled &&
                     IsHovered(vm, HitTestResult::SettingsDupGroupDelete, static_cast<int>(g));
-                painter_.DrawButton({lay.dup_group_delete[g],
-                    pulse::l10n::Get(pulse::l10n::StringId::DupDeleteExtras), {},
-                    fluent::ButtonKind::Standard, del});
+                button(lay.dup_group_delete[g], pulse::l10n::Get(I::DupDeleteExtras),
+                    fluent::ButtonKind::Danger, del);
             }
         }
         if (vm.dup_show_delete_all) {
             fluent::ControlState all{};
             all.enabled = !vm.dup_scanning;
             all.hovered = all.enabled && IsHovered(vm, HitTestResult::SettingsDupDeleteAll);
-            painter_.DrawButton({lay.dup_delete_all, vm.dup_delete_all, {},
-                fluent::ButtonKind::Primary, all});
+            button(lay.dup_delete_all, vm.dup_delete_all.empty()
+                ? std::wstring_view(pulse::l10n::Get(I::DupDeleteAllExtras))
+                : std::wstring_view(vm.dup_delete_all), fluent::ButtonKind::Danger, all);
         }
     }
     dc->PopAxisAlignedClip();
@@ -717,6 +719,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SettingsShowProtected: target=l.protected_files_row;break;
     case I::PinnedNames: target=l.pinned_names_row;break;
     case I::SettingsBlankClickBack: target=l.blank_click_row;break;
+    case I::SettingsNewTabHome: target=l.new_tab_row;break;
     case I::SettingsChangeTracking: target=l.change_tracking_row;break;
     case I::GlobalSearch: target=l.global_search_row;break;
     case I::GlobalSearchHotkey: target=l.global_search_hotkey_row;break;

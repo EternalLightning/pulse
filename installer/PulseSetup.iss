@@ -87,6 +87,10 @@ Source: "{#BuildDir}\licenses\PDFium\*"; DestDir: "{app}\licenses\PDFium"; Flags
 Source: "third_party\ib-pinyin-cpp\LICENSE.txt"; DestDir: "{app}\licenses\ib-pinyin"; Flags: ignoreversion
 Source: "third_party\files-icon\LICENSE-MIT.txt"; DestDir: "{app}\licenses\FilesIcon"; Flags: ignoreversion
 Source: "third_party\files-icon\README.md"; DestDir: "{app}\licenses\FilesIcon"; Flags: ignoreversion
+Source: "assets\microsoft_brand\LICENSE.pdf"; DestDir: "{app}\licenses\MicrosoftBrand"; Flags: ignoreversion
+Source: "assets\microsoft_brand\README.md"; DestDir: "{app}\licenses\MicrosoftBrand"; Flags: ignoreversion
+Source: "assets\fluent\LICENSE"; DestDir: "{app}\licenses\FluentSystemIcons"; Flags: ignoreversion
+Source: "assets\fluent\SOURCES.md"; DestDir: "{app}\licenses\FluentSystemIcons"; Flags: ignoreversion
 Source: "{#BuildDir}\licenses\LumaText\*"; DestDir: "{app}\licenses\LumaText"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#BuildDir}\Pulse.Index.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Document.exe"; DestDir: "{app}"; Flags: ignoreversion

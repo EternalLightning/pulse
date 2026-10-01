@@ -393,6 +393,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             }
             vm.settings_open_folders = s.appPrefs.open_folders_in_pulse;
             vm.settings_blank_click_go_back = s.appPrefs.blank_click_go_back;
+            vm.settings_new_tab_home = s.appPrefs.new_tab_home;
             vm.settings_change_tracking = s.appPrefs.change_tracking_enabled;
             vm.settings_change_days = s.appPrefs.change_tracking_days;
             vm.settings_row_height = s.appPrefs.row_height;
@@ -1838,6 +1839,12 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.tooltip_x = static_cast<float>(s.hoverPoint.x);
     vm.tooltip_y = static_cast<float>(s.hoverPoint.y);
     FillPaneSlots(s, vm);
+    s.home_catalog.Fill(vm.pane, &s.places);
+    for (auto& slot : vm.pane_slots) s.home_catalog.Fill(slot.pane, &s.places);
+    if (vm.pane.is_home) {
+        vm.status.status_text = l10n::Get(vm.pane.home_loading ? l10n::StringId::HomeLoading : l10n::StringId::Home);
+        vm.status.selection_text.clear();
+    }
     FillChangePopover(s, vm);
     FillFolderSizes(s, vm);
     vm.window_effect = ui::WindowEffectFromId(s.appPrefs.window_effect);
@@ -1914,6 +1921,8 @@ std::wstring TooltipForHover(AppState& s) {
     case R::TabNew: return text(I::TooltipNewTab);
     case R::ThemeToggle: return text(I::TooltipToggleTheme);
     case R::SettingsButton: return text(I::Settings);
+    case R::HomeButton: return text(I::Home);
+    case R::HomeCard: return s.hoverLabel + L" · " + s.hoverPath;
     case R::SettingsFind: return text(I::SettingsFind);
     case R::SettingsNav: {
         const I names[]={I::SettingsGeneral,I::SettingsSearchIndex,I::SettingsContextMenu,I::SettingsAboutDiagnostics,I::SettingsDuplicates};

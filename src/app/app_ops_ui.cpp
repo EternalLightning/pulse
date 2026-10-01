@@ -94,46 +94,24 @@ void DeleteSelected(AppState& s, bool permanent) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || tab->net_readonly) return;
     if (IsRecycleTab(tab)) {
-        std::vector<std::wstring> paths;
+        ops::OpRequest req;
+        req.type = ops::OpType::RealDelete;
         if (tab->snapshot) {
             for (int index : tab->SelectedIndices()) {
                 if (index < 0 || index >= static_cast<int>(tab->EntryCount())) continue;
                 const fs::DirEntry& entry = tab->EntryAt(static_cast<size_t>(index));
                 if (entry.recycle_path.empty()) continue;
-                paths.push_back(entry.recycle_path);
-                const std::wstring index_path = fs::RecycleIndexPath(entry.recycle_path);
-                if (!index_path.empty()) paths.push_back(index_path);
+                req.sources.push_back(entry.recycle_path);
+                req.delete_targets.push_back({entry.full_path.empty() ? entry.recycle_path : entry.full_path,
+                    {entry.recycle_path}, true});
             }
         }
-        if (paths.empty()) return;
-        std::wstring prompt = l10n::Get(l10n::StringId::PermanentDelete);
-        prompt += L"\n\n";
-        prompt += l10n::Get(l10n::StringId::EmptyRecycleConfirm);
-        if (MessageBoxW(s.hwnd, prompt.c_str(), L"Pulse", MB_YESNO | MB_ICONWARNING) != IDYES)
-            return;
-        ops::OpRequest req;
-        req.type = ops::OpType::RealDelete;
-        req.sources = std::move(paths);
+        if (req.sources.empty()) return;
         s.ops.Submit(std::move(req));
         return;
     }
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
     if (paths.empty()) return;
-    if (permanent) {
-        std::wstring prompt;
-        if (paths.size() == 1) {
-            prompt = l10n::Get(l10n::StringId::PermanentDeletePath);
-            const size_t path_marker = prompt.find(L"{path}");
-            if (path_marker != std::wstring::npos)
-                prompt.replace(path_marker, 6, ClipboardPath(paths[0]));
-        } else {
-            wchar_t buf[256]{};
-            swprintf_s(buf, l10n::Get(l10n::StringId::PermanentDeleteCountFormat).c_str(), paths.size());
-            prompt = buf;
-        }
-        if (MessageBoxW(s.hwnd, prompt.c_str(), L"Pulse", MB_YESNO | MB_ICONWARNING) != IDYES)
-            return;
-    }
     ops::OpRequest req;
     req.type = permanent ? ops::OpType::RealDelete : ops::OpType::RecycleDelete;
     req.sources = std::move(paths);
@@ -154,15 +132,9 @@ void RestoreSelected(AppState& s) {
 }
 
 void EmptyRecycleBin(AppState& s) {
-    ui::ConfirmDialogSpec confirm;
-    confirm.title = l10n::Get(l10n::StringId::EmptyRecycleConfirmTitle);
-    confirm.message = l10n::Get(l10n::StringId::EmptyRecycleConfirm);
-    confirm.confirm_text = l10n::Get(l10n::StringId::EmptyRecycleBin);
-    confirm.cancel_text = l10n::Get(l10n::StringId::Cancel);
-    confirm.danger = true;
-    if (!ui::ShowConfirmDialog(s.hwnd, confirm, s.darkMode, s.accentColor)) return;
     ops::OpRequest req;
     req.type = ops::OpType::EmptyRecycle;
+    req.delete_origin = ops::DeleteOrigin::EmptyRecycle;
     s.ops.Submit(std::move(req));
 }
 void CollectToTray(AppState& s, bool move_intent) {
@@ -214,6 +186,7 @@ void ShowBatchRename(AppState& s) {
     s.ops.Submit(std::move(req));
 }
 void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
+    if (allow_conflict_dialog) PresentDeleteConfirmation(s);
     if (!s.operationWindow) return;
     const auto now = std::chrono::steady_clock::now();
     const ops::OpStatus status = s.ops.Status();
@@ -244,7 +217,8 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
     }
 
     if (status.active) {
-        if (status.phase == ops::OpPhase::WaitingForConflict) return;
+        if (status.phase == ops::OpPhase::WaitingForConflict ||
+            status.phase == ops::OpPhase::WaitingForDeleteConfirmation) return;
         const bool show_now = status.type == ops::OpType::EmptyRecycle;
         if (!s.operationAutoShown &&
             (show_now || now - s.operationStartedAt >= std::chrono::milliseconds(2000))) {

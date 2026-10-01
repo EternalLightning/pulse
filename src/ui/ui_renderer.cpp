@@ -6,10 +6,12 @@
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
 #include "../common/display_path.h"
+#include "../common/known_folder_labels.h"
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
 #include "../app/places.h"
+#include "../app/resource.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
 #include <d2d1effects.h>
@@ -187,7 +189,9 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
         }
         BreadcrumbSegment seg;
         seg.path = path;
-        if (pulse_kind == L"search" || pulse_kind == L"saved-search")
+        if (pulse_kind == L"home")
+            seg.text = pulse::l10n::Get(pulse::l10n::StringId::Home);
+        else if (pulse_kind == L"search" || pulse_kind == L"saved-search")
             seg.text = pulse::l10n::Get(pulse::l10n::StringId::Search);
         else if (pulse_kind == L"starred")
             seg.text = pulse::l10n::Get(pulse::l10n::StringId::StarredItems);
@@ -255,7 +259,7 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
             if (!prefix.empty() && prefix.back() != L'\\') prefix += L'\\';
             prefix += part;
             BreadcrumbSegment seg;
-            seg.text = part;
+            seg.text = pulse::path::KnownFolderDisplayName(prefix, part);
             seg.path = prefix;
             out.push_back(seg);
         }
@@ -598,11 +602,19 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
         if (pinned && !vm.show_pinned_tab_names) {
             // Chrome pinned tab: centered icon, no title, no close button.
-            DrawIconText(left, tabY, tabW, tabH,
-                vm.tabs[i].title.empty() ? kIconFolder
-                    : vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
-                        ? kIconSettings : kIconFolder, L"[]",
-                active ? theme.icon_folder : theme.text_secondary, 0.85f);
+            const float icon_size = 20.0f * scale_;
+            const auto home_icon = D2D1::RectF(left + (tabW - icon_size) * 0.5f,
+                tabY + (tabH - icon_size) * 0.5f,
+                left + (tabW + icon_size) * 0.5f, tabY + (tabH + icon_size) * 0.5f);
+            if (!vm.tabs[i].is_home || IsHighContrast() ||
+                !DrawFluentSvg(IDR_FLUENT_HOME_SVG, home_icon, 1.0f, nullptr, true)) {
+                DrawIconText(left, tabY, tabW, tabH,
+                    vm.tabs[i].is_home ? kIconHome :
+                    vm.tabs[i].title.empty() ? kIconFolder
+                        : vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
+                            ? kIconSettings : kIconFolder, L"[]",
+                    active ? theme.icon_folder : theme.text_secondary, 0.85f);
+            }
             return;
         }
         const float markerReserve = vm.tabs[i].marker_rgb != 0 ? 12.0f * scale_ : 0.0f;
@@ -611,10 +623,17 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(left + 10.0f * scale_,
                 tabY + tabH * 0.5f), 3.0f * scale_, 3.0f * scale_), brAccent_.get());
         }
-        DrawIconText(left + 6.0f * scale_ + markerReserve, tabY, 16.0f * scale_, tabH,
-            vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
-                ? kIconSettings : kIconFolder, L"[]",
-            active ? theme.icon_folder : theme.text_secondary, 0.85f);
+        const float icon_left = left + 6.0f * scale_ + markerReserve;
+        const auto home_icon = D2D1::RectF(icon_left, tabY + (tabH - 16.0f * scale_) * 0.5f,
+            icon_left + 16.0f * scale_, tabY + (tabH + 16.0f * scale_) * 0.5f);
+        if (!vm.tabs[i].is_home || IsHighContrast() ||
+            !DrawFluentSvg(IDR_FLUENT_HOME_SVG, home_icon, 1.0f, nullptr, true)) {
+            DrawIconText(icon_left, tabY, 16.0f * scale_, tabH,
+                vm.tabs[i].is_home ? kIconHome :
+                vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
+                    ? kIconSettings : kIconFolder, L"[]",
+                active ? theme.icon_folder : theme.text_secondary, 0.85f);
+        }
         MakeBrush(dc, theme.text, brText_);
         const bool show_close = TabCloseVisible(vm, static_cast<int>(i), tabW, scale_);
         const float closeSz = kTabCloseSizeDip * scale_;

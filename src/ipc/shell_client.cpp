@@ -197,16 +197,45 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload)
     return p.id;
 }
 
-uint32_t ShellClient::DeleteRecycle(const std::vector<std::wstring>& paths) {
-    PayloadWriter w;
-    w.PutStringArray(paths);
-    return Submit(REQ_DELETE_RECYCLE, w.data());
+uint32_t ShellClient::DeleteRecycle(const std::vector<std::wstring>&) {
+    if (!running_.load()) return 0;
+    const uint32_t id = next_id_.fetch_add(1);
+    FireDone(id, static_cast<uint32_t>(E_ACCESSDENIED), false, L"Recycle deletion requires a proven deletion plan.");
+    return id;
 }
 
-uint32_t ShellClient::RealDelete(const std::vector<std::wstring>& paths) {
-    PayloadWriter w;
-    w.PutStringArray(paths);
-    return Submit(REQ_REALDELETE, w.data());
+uint32_t ShellClient::RealDelete(const std::vector<std::wstring>&) {
+    if (!running_.load()) return 0;
+    const uint32_t id = next_id_.fetch_add(1);
+    FireDone(id, static_cast<uint32_t>(E_ACCESSDENIED), false, L"Permanent deletion requires deletion-service authorization.");
+    return id;
+}
+
+uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token) {
+    if (!running_.load() || paths.empty() || token == 0) return 0;
+    Pending pending;
+    pending.id = next_id_.fetch_add(1);
+    pending.type = REQ_AUTHORIZED_DELETE;
+    pending.retried = true; // Never replay a destructive request on a new host.
+    bool sent = false;
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (EnsureConnected() && GetProcessTimes(child_.hProcess, &created, &exited, &kernel, &user)) {
+            ULARGE_INTEGER epoch{};
+            epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
+            PayloadWriter writer;
+            writer.PutU64(epoch.QuadPart); writer.PutU64(token); writer.PutStringArray(paths);
+            pending.payload = writer.data();
+            std::lock_guard<std::mutex> pending_lock(pending_mutex_);
+            pending_.emplace(pending.id, pending);
+            sent = SendFrame(pending.type, pending.id, pending.payload);
+            if (!sent) pending_.erase(pending.id);
+        }
+    }
+    if (!sent) FireDone(pending.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
+                        L"Deletion outcome is unknown; the destructive request was not replayed.");
+    return pending.id;
 }
 
 uint32_t ShellClient::RestoreRecycle(const std::vector<std::wstring>& paths) {
@@ -371,12 +400,24 @@ void ShellClient::ReaderThread() {
                 uint32_t hr = 0, cancelled = 0;
                 std::wstring err;
                 if (r.GetU32(hr) && r.GetU32(cancelled) && r.GetString(err)) {
-                    bool pending = false;
+                    bool pending = false, deletion = false;
                     {
                         std::lock_guard<std::mutex> lock(pending_mutex_);
-                        pending = pending_.erase(h.request_id) != 0;
+                        const auto found = pending_.find(h.request_id);
+                        if (found != pending_.end()) {
+                            deletion = found->second.type == REQ_AUTHORIZED_DELETE;
+                            pending_.erase(found); pending = true;
+                        }
                     }
-                    if (pending) FireDone(h.request_id, hr, cancelled != 0, err);
+                    if (pending && deletion) {
+                        std::vector<std::wstring> deleted_paths;
+                        if (!r.TryStringArray(deleted_paths) || r.remaining() != 0) {
+                            hr = static_cast<uint32_t>(E_INVALIDARG); err = L"Malformed deletion result"; deleted_paths.clear();
+                        }
+                        if (cb_.delete_done)
+                            cb_.delete_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(deleted_paths));
+                        else FireDone(h.request_id, hr, cancelled != 0, err);
+                    } else if (pending) FireDone(h.request_id, hr, cancelled != 0, err);
                 }
             } else if (h.type == RSP_CTX_ITEMS) {
                 uint32_t session = 0, msg_flags = 0, count = 0;
@@ -449,7 +490,9 @@ void ShellClient::HandleDisconnect() {
     }
     for (auto& p : failed)
         FireDone(p.id, HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE), false,
-                 L"shell host died twice on one request");
+                 p.type == REQ_AUTHORIZED_DELETE
+                     ? L"Deletion outcome is unknown; the destructive request was not replayed."
+                     : L"shell host died twice on one request");
     for (auto& p : retry) {
         const uint32_t id = p.id;
         bool sent = false;

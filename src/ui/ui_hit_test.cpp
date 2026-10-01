@@ -1,9 +1,11 @@
 #include "toolbar_layout.h"
 // ui_hit_test.cpp — Hit testing and tab-strip queries.
 #include "ui_renderer.h"
+#include "home_layout.h"
 #include "address_search_layout.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
+#include "../common/known_folder_labels.h"
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
@@ -191,6 +193,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             if(ContainsPt(lay.effect_choice,x,y) || ContainsPt(lay.language_choice,x,y)) {
                 r.region=HitTestResult::SettingsDropdown;r.index=ContainsPt(lay.effect_choice,x,y) ? 0 : 1;return r;
             }
+            if(ContainsPt(lay.new_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=20;return r;}
             if(ContainsPt(lay.performance_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=4;return r;}
             for(int list_row=0;list_row<3;++list_row)
                 if(ContainsPt(lay.list_style_row[list_row],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=17+list_row;return r;}
@@ -513,6 +516,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     }
     // Sidebar.
     D2D1_RECT_F sb = SidebarRect(rect.right, rect.bottom);
+    if (RectContains(HomeButtonRect(EffectiveSidebarWidth(rect.right), title_bar_height_ + margin_, scale_), x, y)) {
+        r.region = HitTestResult::HomeButton;
+        r.path = L"pulse:home";
+        r.label = l10n::Get(l10n::StringId::Home);
+        return r;
+    }
     if (x >= sb.left && x < sb.right && y >= sb.top && y < sb.bottom) {
         D2D1_RECT_F track{}, thumb{};
         float max_scroll = 0.0f;
@@ -719,6 +728,29 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         out.pane_index = paneIndex;
         if (x < paneRc.left || x >= paneRc.right || y < paneRc.top || y >= paneRc.bottom)
             return out;
+        if (paneVm.is_home) {
+            out.region = HitTestResult::Pane;
+            D2D1_RECT_F track{}, thumb{}; float max_scroll = 0;
+            if (PaneScrollbarGeometry(paneVm, paneRect, track, thumb, max_scroll) && RectContains(track, x, y)) {
+                out.region = HitTestResult::Scrollbar;
+                return out;
+            }
+            const int group = HitHomeGroup(paneVm, paneRect, scale_, x, y);
+            if (group >= 0) {
+                out.region = HitTestResult::HomeGroup;
+                out.index = group;
+                return out;
+            }
+            const int card = HitHomeCard(paneVm, paneRect, scale_, x, y);
+            if (card >= 0) {
+                out.region = HitTestResult::HomeCard;
+                out.index = card;
+                out.path = paneVm.home_cards[static_cast<size_t>(card)].path;
+                out.label = paneVm.home_cards[static_cast<size_t>(card)].label;
+                return out;
+            }
+            return out;
+        }
         const D2D1_RECT_F detailsRc = PaneDetailsRect(paneRc);
         if (compositor_ && ContainsPt(ChangeTitleRect(paneRc, detailsRc.left - 8 * scale_, pane_header_height_, paneVm.title_change_badge, scale_, compositor_, paneVm.header_text), x, y)) {
             out.region = HitTestResult::ChangeBadge; out.index = -1; return out;
@@ -871,6 +903,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         const D2D1_RECT_F nameRc = layout.NameRect(viewRow);
                         const D2D1_RECT_F cell = layout.ItemRect(viewRow);
                         const ListEntryView& entry = MakeVisibleEntry(paneVm, static_cast<size_t>(idx));
+                        const std::wstring display_name = entry.is_dir && !entry.record_only
+                            ? pulse::path::KnownFolderDisplayName(entry.path, entry.name) : entry.name;
                         if (ShowsFolderSize(paneVm.view_mode) && paneVm.folder_size_actions.contains(idx) &&
                             ContainsPt(layout.FolderSizeRect(viewRow), x, y)) {
                             out.region = HitTestResult::RowFolderSize; out.index = idx; return out;
@@ -905,12 +939,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         const NameTrail trail = LayoutNameTrail(
                             nameRc.left, nameLine.y, nameLine.h,
                             paneVm.view_mode == ViewMode::Details ? columns.DividerX(0) - margin_ : nameRc.right, cell.top, cell.bottom, scale_,
-                            entry.name, static_cast<int>(std::min<size_t>(3, tagCount)), badgeW,
+                            display_name, static_cast<int>(std::min<size_t>(3, tagCount)), badgeW,
                             showActions, showActions && paneVm.hover_index == idx && entry.is_dir,
                             showActions && rowHot,
                             compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), change != nullptr,
                             paneVm.view_mode == ViewMode::Details ? (entry.is_dir ? 3 : 2) : 0,
-                            NameMatchRanges(entry.name, NameHighlightTerms(paneVm.filter_text,
+                            NameMatchRanges(display_name, NameHighlightTerms(paneVm.filter_text,
                                 paneVm.is_search ? paneVm.search_query : L"")));
                         if (change && !grid && ContainsPt(trail.badge, x, y)) {
                             out.region = HitTestResult::ChangeBadge; out.index = idx; return out;

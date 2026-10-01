@@ -212,6 +212,7 @@ private:
 inline std::wstring MakeStarredPath() { return L"pulse:starred"; }
 inline std::wstring MakeRecentPath() { return L"pulse:recent"; }
 inline std::wstring MakeRecyclePath() { return L"pulse:recycle"; }
+inline std::wstring MakeHomePath() { return L"pulse:home"; }
 inline std::wstring MakeTagPath(const TagId& id) { return L"pulse:tag:" + id; }
 inline std::wstring MakeTagPath(int i) { return L"pulse:tag:" + std::to_wstring(i); }
 inline std::wstring MakeSearchPath(const std::wstring& q) { return L"pulse:search:" + q; }

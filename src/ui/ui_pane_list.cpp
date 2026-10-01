@@ -2,10 +2,12 @@
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
+#include "../common/known_folder_labels.h"
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
 #include "details_column_widths.h"
+#include "home_layout.h"
 #include "pane_header_icons.h"
 #include <bit>
 #include "toolbar_layout.h"
@@ -640,6 +642,8 @@ bool MainRenderer::PointInItemName(const PaneViewModel& vm, const D2D1_RECT_F& f
 
     const ListEntryView& entry = MakeVisibleEntry(vm, static_cast<size_t>(source_index));
     if (entry.name.empty()) return false;
+    const std::wstring display_name = entry.is_dir && !entry.record_only
+        ? pulse::path::KnownFolderDisplayName(entry.path, entry.name) : entry.name;
     const float extra_top = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
     D2D1_RECT_F name = NameCellRect(
         pane_bounds, view_index, vm.scroll_y, extra_top,
@@ -674,7 +678,7 @@ bool MainRenderer::PointInItemName(const PaneViewModel& vm, const D2D1_RECT_F& f
 
     const std::wstring fitted = FitFileName(
         compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(),
-        entry.name, available);
+        display_name, available);
     const float text_width = MeasureLayoutText(
         compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), fitted);
     float text_left = name.left;
@@ -874,6 +878,7 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
 void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                                   const D2D1_RECT_F& pane_rect, int pane_index, bool focused, bool target,
                                   const Theme& theme) {
+    if (pane.is_home) { DrawHome(vm, pane, pane_rect, pane_index, theme); return; }
     ID2D1DeviceContext* dc = compositor_->Dc();
     // The header spans the whole pane; in the column view everything below
     // it uses the narrowed body (see PaneBodyBounds).
@@ -1397,6 +1402,8 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             continue;
         }
         const ListEntryView& e = MakeVisibleEntry(vm, static_cast<size_t>(src));
+        const std::wstring display_name = e.is_dir && !e.record_only
+            ? pulse::path::KnownFolderDisplayName(e.path, e.name) : e.name;
 
         bool selected = vm.IsRowSelected(src);
         bool hover = (src == vm.hover_index);
@@ -1504,11 +1511,11 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             textY = nameLine.y;
             textH = nameLine.h;
         }
-        const auto name_matches = NameMatchRanges(e.name, highlight_terms);
+        const auto name_matches = NameMatchRanges(display_name, highlight_terms);
         if (iconGrid && tagDotCount > 0) {
             const float fullNameW = MeasureLayoutText(
-                compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), e.name) +
-                HighlightPaddingWidth(e.name, e.name, name_matches, scale_);
+                compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), display_name) +
+                HighlightPaddingWidth(display_name, display_name, name_matches, scale_);
             const float nameGap = 4.0f * scale_;
             const float cellW = nameRc.right - nameRc.left;
             const float leftover = std::max(0.0f, cellW - fullNameW - nameGap);
@@ -1525,7 +1532,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             ? std::min(108.0f * scale_, painter_.MeasureTagWidth(e.badge)) : 0.0f;
         const NameTrail trail = LayoutNameTrail(
             nameX, textY, textH, nameColRight, cell.top, cell.bottom, scale_,
-            e.name, tagDotCount, badgeW, showStar, showNewTab, showMore,
+            display_name, tagDotCount, badgeW, showStar, showNewTab, showMore,
             compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), change != nullptr,
             vm.view_mode == ViewMode::Details ? (e.is_dir ? 3 : 2) : 0, name_matches);
         if (src == vm.rename_index) {
@@ -1537,11 +1544,11 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             D2D1_COLOR_F nameColor = cut ? WithAlpha(theme.text, 0.55f) : theme.text;
             MakeBrush(dc, nameColor, brText_);
             if (iconGrid && tagDotCount == 0) {
-                DrawCenteredIconName(e.name, nameRc, nameColor, theme, name_matches);
+                DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);
             } else {
                 Theme name_theme = theme;
                 name_theme.text = nameColor;
-                DrawTruncatedName(e.name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
+                DrawTruncatedName(display_name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
                                   detailsView && !e.is_dir);
             }
             if (change && !iconGrid) DrawChangeBadge(compositor_, painter_, *change, trail.badge, theme, scale_);
@@ -1847,6 +1854,16 @@ void MainRenderer::DrawScrollbar(const PaneViewModel& vm, float x, float y, floa
 }
 bool MainRenderer::PaneScrollbarGeometry(const PaneViewModel& vm, const D2D1_RECT_F& full_bounds,
                                           D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& max_scroll) const {
+    if (vm.is_home) {
+        const float height = std::max(0.0f, full_bounds.bottom - full_bounds.top);
+        const float content = MakeHomeLayout(vm, full_bounds, scale_).height;
+        max_scroll = std::max(0.0f, content - height);
+        const auto metrics = ComputeScrollbar(height, content, vm.scroll_y, 100 * scale_);
+        if (!metrics.valid) return false;
+        track = D2D1::RectF(full_bounds.right - 14 * scale_, full_bounds.top, full_bounds.right, full_bounds.bottom);
+        thumb = D2D1::RectF(track.left, track.top + metrics.thumbY, track.right, track.top + metrics.thumbY + metrics.thumbH);
+        return true;
+    }
     const D2D1_RECT_F pane_bounds = PaneBodyBounds(vm, full_bounds);
     const float extra = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
     const auto list = PaneListRect(pane_bounds, extra, vm.view_mode);
@@ -1862,6 +1879,7 @@ bool MainRenderer::PaneScrollbarGeometry(const PaneViewModel& vm, const D2D1_REC
 }
 
 float MainRenderer::MaxScrollForPane(const PaneViewModel& vm, const D2D1_RECT_F& full_bounds) const {
+    if (vm.is_home) return std::max(0.0f, MakeHomeLayout(vm, full_bounds, scale_).height - (full_bounds.bottom - full_bounds.top));
     const D2D1_RECT_F pane_bounds = PaneBodyBounds(vm, full_bounds);
     const float extra = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
     D2D1_RECT_F list = PaneListRect(pane_bounds, extra, vm.view_mode);
@@ -1871,6 +1889,7 @@ float MainRenderer::MaxScrollForPane(const PaneViewModel& vm, const D2D1_RECT_F&
 
 float MainRenderer::MaxScrollXForPane(const PaneViewModel& vm,
                                       const D2D1_RECT_F& full_bounds) const {
+    if (vm.is_home) return 0.0f;
     const D2D1_RECT_F pane_bounds = PaneBodyBounds(vm, full_bounds);
     const float extra = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
     D2D1_RECT_F list = PaneListRect(pane_bounds, extra, vm.view_mode);

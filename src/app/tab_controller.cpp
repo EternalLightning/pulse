@@ -152,7 +152,8 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
         }
         if (last_member >= 0) {
             const Tab* folder = tabs.items[static_cast<size_t>(last_member)]->ActiveFolder();
-            const std::wstring path = folder ? folder->current_path : L"C:\\";
+            const std::wstring path = callbacks_.new_tab_path ? callbacks_.new_tab_path() :
+                folder ? folder->current_path : L"C:\\";
             WillChangeLayout();
             tabs.NewTabAt(static_cast<size_t>(last_member + 1), path);
             tabs.Active()->tab_group = id;

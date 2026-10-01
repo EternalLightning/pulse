@@ -14,6 +14,7 @@
 #include "../fs/fs_snapshot.h"
 #include "../fs/fs_watch.h"
 #include "app_model.h"
+#include "home_catalog.h"
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
@@ -131,6 +132,16 @@ struct AppState {
     // it; SyncQuickPreview re-anchors there once the listing drops the entry
     // so the preview steps to the neighbouring file instead of closing.
     int quickPreviewAnchorView = -1;
+    struct PreviewDeleteIntent {
+        uint64_t task_id = 0;
+        app::Tab* tab = nullptr; // compared only while validating the active tab
+        uint64_t view_generation = 0;
+        std::wstring tab_path;
+        std::wstring shown_path;
+        int view_row = -1;
+        bool succeeded = false;
+    };
+    std::optional<PreviewDeleteIntent> previewDeleteIntent;
 
     app::WindowTabs window_tabs;
     app::Pane* pane = nullptr;          // focused leaf of the current layout tab
@@ -155,6 +166,7 @@ struct AppState {
     ULONGLONG last_unc_poll = 0;
 
     app::SidebarModel sidebar;
+    app::HomeCatalog home_catalog;
     fs::RecycleBinInfo recycle_info;
     // SHQueryRecycleBin and $I files lag IFileOperation; retry occupancy/list
     // after recycle mutations and ignore occupancy that still matches the
@@ -411,6 +423,8 @@ struct AppState {
     uint64_t operationUiTaskId = 0;
     uint64_t operationDismissedTaskId = 0;
     uint64_t conflictUiToken = 0;
+    uint64_t deleteUiToken = 0;
+    uint64_t deletesWithoutMutation = 0;
     bool operationAutoShown = false;
     bool operationPinnedByUser = false;
     std::chrono::steady_clock::time_point operationStartedAt{};

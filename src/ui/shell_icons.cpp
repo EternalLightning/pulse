@@ -260,6 +260,15 @@ ID2D1Bitmap* ShellIconCache::BitmapForIndex(int index, int list_id) {
     return raw;
 }
 
+bool ShellIconCache::DrawSystemIcon(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest, int index) {
+    if (!dc || index < 0) return false;
+    const float desired = std::max(dest.right - dest.left, dest.bottom - dest.top);
+    auto* bitmap = BitmapForIndex(index, ImageListId(desired));
+    if (!bitmap) return false;
+    dc->DrawBitmap(bitmap, &dest, 1.0f, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, nullptr, nullptr);
+    return true;
+}
+
 bool ShellIconCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
                           const std::wstring& path, const std::wstring& name,
                           bool is_dir, DWORD attrs) {

@@ -87,6 +87,7 @@ void RecycleDuplicateGroup(AppState& s, size_t group) {
     if (paths.empty()) return;
     ops::OpRequest req;
     req.type = ops::OpType::RecycleDelete;
+    req.delete_origin = ops::DeleteOrigin::Duplicates;
     req.sources = std::move(paths);
     s.ops.Submit(std::move(req));
 }
@@ -96,6 +97,7 @@ void RecycleAllDuplicateExtras(AppState& s) {
     if (paths.empty()) return;
     ops::OpRequest req;
     req.type = ops::OpType::RecycleDelete;
+    req.delete_origin = ops::DeleteOrigin::Duplicates;
     req.sources = std::move(paths);
     s.ops.Submit(std::move(req));
 }

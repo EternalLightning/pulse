@@ -67,7 +67,8 @@ int main() {
                     "global search toggle has dedicated hit target");
                 check(hit(button).region == ui::HitTestResult::SettingsGlobalSearchHotkey,
                     "shortcut recorder has dedicated hit target");
-                check(toggle.bottom <= row.top && button.top >= row.top+56*scale && button.bottom <= row.bottom &&
+                const bool stacked = row.right-row.left < 560*scale;
+                check(toggle.bottom <= row.top && button.top >= row.top+(stacked ? 56 : 12)*scale && button.bottom <= row.bottom &&
                     button.left >= row.left && button.right <= row.right && row.bottom <= layout.search_pinyin_row.top,
                     "global search settings controls fit without overlap");
                 auto fits = [&](const std::wstring& text, float text_width, float text_height) {

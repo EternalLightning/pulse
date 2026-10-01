@@ -32,6 +32,14 @@ Copy-Item -LiteralPath (Join-Path $repo 'third_party/ib-pinyin-cpp/LICENSE.txt')
 New-Item -ItemType Directory -Path (Join-Path $payload 'licenses/FilesIcon') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/LICENSE-MIT.txt') -Destination (Join-Path $payload 'licenses/FilesIcon')
 Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/README.md') -Destination (Join-Path $payload 'licenses/FilesIcon')
+foreach ($license in @(@{Folder='MicrosoftBrand'; Source='assets/microsoft_brand'; Files=@('LICENSE.pdf','README.md')},
+                      @{Folder='FluentSystemIcons'; Source='assets/fluent'; Files=@('LICENSE','SOURCES.md')})) {
+    $destination = Join-Path $payload "licenses/$($license.Folder)"
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    foreach ($file in $license.Files) {
+        Copy-Item -LiteralPath (Join-Path $repo "$($license.Source)/$file") -Destination $destination
+    }
+}
 @"
 Pulse $version — Windows 10 / 11 x64 免安装版
 

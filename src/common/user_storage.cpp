@@ -13,10 +13,37 @@ namespace fs = std::filesystem;
 struct Locator { std::wstring active[2], pending[2], error[2]; };
 std::recursive_mutex gate;
 std::wstring test_root;
+std::wstring test_locator_key;
 Locator cache;
 bool loaded = false;
 size_t Slot(Kind kind) { return kind == Kind::Configuration ? 0 : 1; }
 std::wstring Anchor() { return DefaultRoot() + L"\\storage-locations.json"; }
+std::wstring LocatorKey() {
+    if (!test_root.empty()) return test_locator_key;
+#ifdef PULSE_WITH_SELFTEST
+    wchar_t isolated[2]{};
+    if (GetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", isolated, ARRAYSIZE(isolated))) return {};
+#endif
+    return L"Software\\Pulse";
+}
+bool ReadRegistryLocator(const std::wstring& key, std::wstring& text) {
+    DWORD bytes = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"StorageLocations", RRF_RT_REG_SZ,
+                    nullptr, nullptr, &bytes) != ERROR_SUCCESS || bytes > 1024 * 1024) return false;
+    std::vector<wchar_t> data(bytes / sizeof(wchar_t) + 1);
+    if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"StorageLocations", RRF_RT_REG_SZ,
+                    nullptr, data.data(), &bytes) != ERROR_SUCCESS) return false;
+    text.assign(data.data()); return true;
+}
+bool WriteRegistryLocator(const std::wstring& key, const std::wstring& text) {
+    HKEY registry = nullptr;
+    const auto created = RegCreateKeyExW(HKEY_CURRENT_USER, key.c_str(), 0, nullptr, 0, KEY_SET_VALUE,
+                        nullptr, &registry, nullptr);
+    if (created != ERROR_SUCCESS) { SetLastError(created); return false; }
+    const auto status = RegSetValueExW(registry, L"StorageLocations", 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(text.c_str()), static_cast<DWORD>((text.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(registry); SetLastError(status); return status == ERROR_SUCCESS;
+}
 bool Same(const std::wstring& a, const std::wstring& b) {
     return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
 }
@@ -58,11 +85,18 @@ struct Lock {
     ~Lock() { if (file != INVALID_HANDLE_VALUE) CloseHandle(file); }
     explicit operator bool() const { return file != INVALID_HANDLE_VALUE; }
 };
-Locator Read() {
+Locator Read(bool allow_import = true) {
     Locator result;
     if (DefaultRoot().empty()) return result;
     std::wstring text;
-    if (ReadUtf8File(Anchor(), text)) {
+    const auto key = LocatorKey();
+    bool found = !key.empty() && ReadRegistryLocator(key, text);
+    if (!found && ReadUtf8File(Anchor(), text)) {
+        found = true;
+        // Import older file locators before users remove their former AppData directory.
+        if (allow_import && !key.empty()) WriteRegistryLocator(key, text);
+    }
+    if (found) {
         result.active[0] = json::ExtractString(text, L"configuration");
         result.active[1] = json::ExtractString(text, L"index");
         result.pending[0] = json::ExtractString(text, L"pending_configuration");
@@ -81,10 +115,12 @@ bool Save(const Locator& value, std::wstring& error) {
         text += L"  \"" + std::wstring(keys[i]) + L"\":\"";
         json::Escape(*fields[i], text); text += (i == 5 ? L"\"\n}" : L"\",\n");
     }
-    if (!WriteUtf8FileAtomic(Anchor(), text)) { error = L"无法保存存储位置设置。"; return false; }
+    const auto key = LocatorKey();
+    const bool saved = key.empty() ? WriteUtf8FileAtomic(Anchor(), text) : WriteRegistryLocator(key, text);
+    if (!saved) { error = L"无法保存存储位置设置（系统错误 " + std::to_wstring(GetLastError()) + L"）。"; return false; }
     cache = value; loaded = true; return true;
 }
-void LoadCache() { if (!loaded) { cache = Read(); loaded = true; } }
+void LoadCache() { if (!loaded) { Lock disk; cache = Read(static_cast<bool>(disk)); loaded = true; } }
 std::wstring Root(const Locator& value, size_t slot) {
     return value.active[slot].empty() ? DefaultRoot() : value.active[slot];
 }
@@ -150,14 +186,15 @@ std::wstring DefaultRoot() {
     const std::wstring result = std::wstring(local) + L"\\Pulse";
     CoTaskMemFree(local); return result;
 }
-void OverrideDefaultRootForTesting(const std::wstring& root) {
-    std::lock_guard lock(gate); test_root = Normalize(root); cache = {}; loaded = false;
+void OverrideDefaultRootForTesting(const std::wstring& root, const std::wstring& locator_registry_key) {
+    std::lock_guard lock(gate); test_root = Normalize(root); test_locator_key = locator_registry_key;
+    cache = {}; loaded = false;
 }
 std::wstring ConfigurationRoot() { std::lock_guard lock(gate); LoadCache(); return Root(cache, 0); }
 std::wstring UserIndexRoot() { std::lock_guard lock(gate); LoadCache(); return Root(cache, 1); }
 std::wstring Pending(Kind kind) { std::lock_guard lock(gate); LoadCache(); return cache.pending[Slot(kind)]; }
 std::wstring LastError(Kind kind) { std::lock_guard lock(gate); LoadCache(); return cache.error[Slot(kind)]; }
-void Refresh() { std::lock_guard lock(gate); cache = Read(); loaded = true; }
+void Refresh() { std::lock_guard lock(gate); Lock disk; cache = Read(static_cast<bool>(disk)); loaded = true; }
 bool Schedule(Kind kind, const std::wstring& requested, std::wstring& error) {
     std::lock_guard lock(gate); error.clear(); Lock disk;
     if (!disk) { error = L"存储位置设置正被其他进程使用。"; return false; }

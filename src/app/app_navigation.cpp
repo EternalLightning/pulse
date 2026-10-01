@@ -684,6 +684,13 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
 
     std::wstring kind, rest;
     app::ParsePulsePath(path, &kind, &rest);
+    if (kind == L"home") {
+        tab.virtual_title = l10n::Get(l10n::StringId::Home);
+        tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
+        CancelScrollAnimation(s);
+        s.home_catalog.Refresh();
+        return;
+    }
     if (kind == L"changes") {
         LoadChangeView(s, tab, rest);
         return;
@@ -1676,8 +1683,9 @@ bool IsSettingsTab(const app::Tab* tab) {
 }
 
 std::wstring NewTabPath(const AppState& s) {
+    if (s.appPrefs.new_tab_home) return app::MakeHomePath();
     const app::Tab* tab = s.pane ? s.pane->ActiveTab() : nullptr;
-    if (!tab || IsSettingsTab(tab) || tab->current_path.empty()) {
+    if (!tab || tab->current_path.empty()) {
         const auto recent = s.places.RecentFolderPaths(1);
         return recent.empty() ? L"C:\\" : recent.front();
     }

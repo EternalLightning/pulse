@@ -1804,6 +1804,24 @@ void HandleQuickPreviewCommand(AppState& s, ui::QuickPreviewAction action, bool 
     const ui::QuickPreviewItem shown = s.quickPreview.item();
     const int index = QuickPreviewEntryIndex(*tab, shown);
     if (index < 0) return;
+    if (action == ui::QuickPreviewAction::Delete) {
+        // Capture a request-scoped target before SelectOnly or a global anchor.
+        // Refusal leaves the list selection, preview and keeper state untouched.
+        if (tab->net_readonly) return;
+        const auto& entry = tab->EntryAt(static_cast<size_t>(index));
+        ops::OpRequest request;
+        request.type = shift || IsRecycleTab(tab) ? ops::OpType::RealDelete : ops::OpType::RecycleDelete;
+        request.delete_origin = ops::DeleteOrigin::Preview;
+        const std::wstring root = IsRecycleTab(tab) ? entry.recycle_path : shown.path;
+        if (root.empty()) return;
+        request.sources = {root};
+        request.delete_targets.push_back({shown.path, {root}, IsRecycleTab(tab)});
+        const auto vm = BuildVm(s);
+        const uint64_t task = s.ops.Submit(std::move(request));
+        s.previewDeleteIntent = AppState::PreviewDeleteIntent{task, tab, tab->view_generation,
+            tab->current_path, shown.path, vm.pane.ViewIndex(index), false};
+        return;
+    }
     if (index != tab->selected_index || tab->SelectedCount() != 1) {
         tab->SelectOnly(index);
         EnsureRowVisible(s, *tab, index);
@@ -1825,12 +1843,7 @@ void HandleQuickPreviewCommand(AppState& s, ui::QuickPreviewAction action, bool 
         s.quickPreview.Close();
         ShowRenameOverlay(s);
         break;
-    case ui::QuickPreviewAction::Delete: {
-        const ui::WindowViewModel vm = BuildVm(s);
-        s.quickPreviewAnchorView = vm.pane.ViewIndex(index);
-        DeleteSelected(s, shift);
-        break;
-    }
+    case ui::QuickPreviewAction::Delete: break; // Explicit adapter above.
     case ui::QuickPreviewAction::Properties:
         DispatchMenuCommand(s, app::CmdProperties);
         break;
@@ -1843,11 +1856,16 @@ void HandleQuickPreviewCommand(AppState& s, ui::QuickPreviewAction action, bool 
 void SyncQuickPreview(AppState& s) {
     if (!s.quickPreview.visible()) {
         s.quickPreviewAnchorView = -1;
+        s.previewDeleteIntent.reset();
         return;
     }
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || tab->loading) return;
     const ui::QuickPreviewItem shown = s.quickPreview.item();
+    if (s.previewDeleteIntent && (s.previewDeleteIntent->tab != tab ||
+        s.previewDeleteIntent->tab_path != tab->current_path ||
+        s.previewDeleteIntent->view_generation != tab->view_generation ||
+        s.previewDeleteIntent->shown_path != shown.path)) s.previewDeleteIntent.reset();
     const int index = QuickPreviewEntryIndex(*tab, shown);
     if (index >= 0) {
         s.quickPreviewAnchorView = -1;
@@ -1863,7 +1881,11 @@ void SyncQuickPreview(AppState& s) {
     }
     // The previewed entry left the listing. After an in-preview delete step
     // to the nearest remaining file at the same view row; otherwise close.
-    const int anchor = s.quickPreviewAnchorView;
+    // A watcher may precede DONE. Do not consume the anchor before the exact
+    // task reports successful deletion; DONE-before-watcher works as well.
+    if (s.previewDeleteIntent && !s.previewDeleteIntent->succeeded) return;
+    const int anchor = s.previewDeleteIntent ? s.previewDeleteIntent->view_row : s.quickPreviewAnchorView;
+    s.previewDeleteIntent.reset();
     s.quickPreviewAnchorView = -1;
     if (anchor >= 0) {
         const ui::WindowViewModel vm = BuildVm(s);

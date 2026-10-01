@@ -575,6 +575,7 @@ public:
         dark_ = dark;
         accent_ = accent;
         accepted_ = false;
+        focus_ = spec_.cancel_is_default ? 1 : 0;
         scale_ = static_cast<float>(pulse::compat::WindowDpi(owner ? owner : GetDesktopWindow())) / 96.0f;
 
         WNDCLASSEXW wc{ sizeof(wc) };
@@ -599,6 +600,8 @@ public:
         if (owner_) EnableWindow(owner_, FALSE);
         ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
+        SetFocus(hwnd_);
+        if (spec_.still_valid) SetTimer(hwnd_, 1, 100, nullptr);
 
         MSG message{};
         while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
@@ -662,13 +665,21 @@ private:
         const float confirm_w = painter_.MeasureButtonWidth(spec_.confirm_text);
         float width = std::max(ScaleDip(scale_, kConfirmMinW),
                                pad + cancel_w + gap + confirm_w + pad);
+        RECT work{};
+        MONITORINFO monitor{sizeof(monitor)};
+        if (spec_.fit_to_work_area && GetMonitorInfoW(MonitorFromWindow(owner_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            work = monitor.rcWork;
+            width = std::min(width, static_cast<float>(work.right - work.left - 24));
+        }
         const float wrap = width - pad * 2.0f;
         float msg_h = typography::MeasureWrapped(compositor_.DwriteFactory(),
                                                  compositor_.TextFormat(),
                                                  spec_.message, wrap);
         msg_h = std::max(msg_h, ScaleDip(scale_, 22.0f));
-        const float height = title_h + ScaleDip(scale_, 16.0f) + msg_h
-                           + ScaleDip(scale_, 16.0f) + footer_h;
+        message_height_ = msg_h;
+        float height = title_h + ScaleDip(scale_, 16.0f) + msg_h
+                     + ScaleDip(scale_, 16.0f) + footer_h;
+        if (work.bottom > work.top) height = std::min(height, static_cast<float>(work.bottom - work.top - 24));
         SetWindowPos(hwnd_, nullptr, 0, 0,
                      static_cast<int>(std::ceil(width)),
                      static_cast<int>(std::ceil(height)),
@@ -686,7 +697,7 @@ private:
     }
 
     void Complete(bool accepted) {
-        accepted_ = accepted;
+        accepted_ = accepted && (!spec_.still_valid || spec_.still_valid());
         done_ = true;
         if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
     }
@@ -719,8 +730,14 @@ private:
                                              ScaleDip(scale_, dip_w_), divider_top_ + 1.0f),
                                  0, theme.stroke_divider);
 
-        DrawWrappedText(compositor_, compositor_.TextFormat(), message_rc_,
-                        spec_.message, theme.text);
+        dc_scroll_max_ = std::max(0.0f, message_height_ - (message_rc_.bottom - message_rc_.top));
+        message_scroll_ = std::clamp(message_scroll_, 0.0f, dc_scroll_max_);
+        compositor_.Dc()->PushAxisAlignedClip(message_rc_, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        auto text_bounds = message_rc_;
+        text_bounds.top -= message_scroll_;
+        text_bounds.bottom = text_bounds.top + message_height_;
+        DrawWrappedText(compositor_, compositor_.TextFormat(), text_bounds, spec_.message, theme.text);
+        compositor_.Dc()->PopAxisAlignedClip();
 
         painter_.FillRoundedRect(D2D1::RectF(0, divider_footer_,
                                              ScaleDip(scale_, dip_w_), divider_footer_ + 1.0f),
@@ -813,8 +830,20 @@ private:
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
+        case WM_MOUSEWHEEL:
+            message_scroll_ = std::clamp(message_scroll_ - GET_WHEEL_DELTA_WPARAM(wparam) / 120.0f * 48.0f * scale_, 0.0f, dc_scroll_max_);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        case WM_TIMER:
+            if (spec_.still_valid && !spec_.still_valid()) Complete(false);
+            return 0;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) { Complete(false); return 0; }
+            if (wparam == VK_NEXT || wparam == VK_PRIOR || wparam == VK_DOWN || wparam == VK_UP) {
+                const float direction = wparam == VK_NEXT || wparam == VK_DOWN ? 1.0f : -1.0f;
+                message_scroll_ = std::clamp(message_scroll_ + direction * 80 * scale_, 0.0f, dc_scroll_max_);
+                InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+            }
             if (wparam == VK_TAB) {
                 focus_ = focus_ == 0 ? 1 : 0;
                 InvalidateRect(hwnd_, nullptr, FALSE);
@@ -864,6 +893,9 @@ private:
     D2D1_RECT_F confirm_rc_{};
     D2D1_RECT_F message_rc_{};
     float dip_w_ = kConfirmMinW;
+    float message_height_ = 0;
+    float message_scroll_ = 0;
+    float dc_scroll_max_ = 0;
     float divider_top_ = 36.0f;
     float divider_footer_ = 120.0f;
 };

@@ -1,6 +1,7 @@
 #include "content_search.h"
 #include "document_reader.h"
 #include "../common/text_decode.h"
+#include "../common/unique_resource.h"
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -17,6 +18,13 @@
 
 namespace pulse::index {
 namespace {
+
+struct CloseHashFile { void operator()(HANDLE value) const noexcept { CloseHandle(value); } };
+struct CloseHashAlgorithm { void operator()(BCRYPT_ALG_HANDLE value) const noexcept { BCryptCloseAlgorithmProvider(value, 0); } };
+struct CloseHash { void operator()(BCRYPT_HASH_HANDLE value) const noexcept { BCryptDestroyHash(value); } };
+using HashFileOwner = UniqueResource<HANDLE, nullptr, CloseHashFile>;
+using HashAlgorithmOwner = UniqueResource<BCRYPT_ALG_HANDLE, nullptr, CloseHashAlgorithm>;
+using HashOwner = UniqueResource<BCRYPT_HASH_HANDLE, nullptr, CloseHash>;
 
 struct Candidate {
     std::wstring path;
@@ -343,6 +351,7 @@ uint64_t SampleHash(const Candidate& file) {
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS, nullptr);
     if (handle == INVALID_HANDLE_VALUE) return 0;
+    HashFileOwner file_owner(handle);
     constexpr DWORD kSample = 64 * 1024;
     std::vector<uint8_t> bytes(kSample * 2);
     DWORD first = 0;
@@ -354,7 +363,7 @@ uint64_t SampleHash(const Candidate& file) {
         ok = SetFilePointerEx(handle, offset, nullptr, FILE_BEGIN) &&
              ReadFile(handle, bytes.data() + kSample, kSample, &last, nullptr);
     }
-    CloseHandle(handle);
+    file_owner.reset();
     if (!ok) return 0;
     uint64_t hash = 1469598103934665603ull;
     for (size_t i = 0; i < static_cast<size_t>(first + last); ++i) {
@@ -370,21 +379,18 @@ bool FullSha256(const Candidate& file, const std::atomic<bool>& cancelled,
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD object_size = 0;
     DWORD returned = 0;
-    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
-        BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
-            reinterpret_cast<PUCHAR>(&object_size), sizeof(object_size), &returned, 0) < 0) {
-        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-        return false;
-    }
+    const NTSTATUS algorithm_status = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    HashAlgorithmOwner algorithm_owner(algorithm);
+    if (algorithm_status < 0 || BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
+        reinterpret_cast<PUCHAR>(&object_size), sizeof(object_size), &returned, 0) < 0) return false;
     std::vector<uint8_t> object(object_size);
-    if (BCryptCreateHash(algorithm, &hash, object.data(), object_size, nullptr, 0, 0) < 0) {
-        BCryptCloseAlgorithmProvider(algorithm, 0);
-        return false;
-    }
+    if (BCryptCreateHash(algorithm, &hash, object.data(), object_size, nullptr, 0, 0) < 0) return false;
+    HashOwner hash_owner(hash);
     HANDLE handle = CreateFileW(Win32Path(file.path).c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     bool ok = handle != INVALID_HANDLE_VALUE;
+    HashFileOwner file_owner(ok ? handle : nullptr);
     std::vector<uint8_t> bytes(1024 * 1024);
     while (ok && !cancelled.load()) {
         DWORD read = 0;
@@ -395,11 +401,9 @@ bool FullSha256(const Candidate& file, const std::atomic<bool>& cancelled,
         if (!read) break;
         if (BCryptHashData(hash, bytes.data(), read, 0) < 0) { ok = false; break; }
     }
-    if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+    file_owner.reset();
     if (ok && !cancelled.load() && BCryptFinishHash(hash, output.data(),
         static_cast<ULONG>(output.size()), 0) < 0) ok = false;
-    BCryptDestroyHash(hash);
-    BCryptCloseAlgorithmProvider(algorithm, 0);
     return ok && !cancelled.load();
 }
 

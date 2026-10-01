@@ -1,5 +1,6 @@
 // ui_sidebar.cpp — Sidebar and staging-tray deck.
 #include "ui_renderer.h"
+#include "home_layout.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
 #include "tab_shape.h"
@@ -38,7 +39,7 @@ void DrawSidebarInsertionLine(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brus
 } // namespace
 
 D2D1_RECT_F MainRenderer::SidebarRect(float w, float h) const {
-    float top = title_bar_height_ + margin_;
+    float top = title_bar_height_ + margin_ + 48 * scale_;
     float bottom = SidebarSettingsRect(w, h).top - 4.0f * scale_;
     return D2D1::RectF(0.0f, top, EffectiveSidebarWidth(w), bottom);
 }
@@ -72,6 +73,23 @@ int MainRenderer::TrayDeckCapacity(float window_w) const {
 }
 void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     ID2D1DeviceContext* dc = compositor_->Dc();
+    painter_.BeginFrame(theme, IsHighContrast());
+    const auto home = HomeButtonRect(EffectiveSidebarWidth(rect.right), title_bar_height_ + margin_, scale_);
+    const bool home_hover = vm.hover_region == HitTestResult::HomeButton;
+    const bool home_selected = vm.pane.is_home;
+    if (home_hover || home_selected)
+        painter_.FillRoundedRect(home, theme.radius_control * scale_, home_selected ? theme.fill_selected : theme.fill_hover);
+    const bool home_rail = SidebarRailLayout(EffectiveSidebarWidth(rect.right), scale_);
+    const float home_icon_size = (home_rail ? 20 : 16) * scale_;
+    const float home_icon_left = home_rail ? (home.left + home.right - home_icon_size) * 0.5f : home.left + 10 * scale_;
+    const float home_icon_top = (home.top + home.bottom - home_icon_size) * 0.5f;
+    const auto home_icon = D2D1::RectF(home_icon_left, home_icon_top,
+        home_icon_left + home_icon_size, home_icon_top + home_icon_size);
+    if (IsHighContrast() || !DrawFluentSvg(IDR_FLUENT_HOME_SVG, home_icon, 1.0f, nullptr, true))
+        DrawIconText(home_icon_left, home.top, home_icon_size, home.bottom - home.top,
+            kIconHome, L"", home_selected ? theme.accent : theme.text, 0.85f);
+    if (!SidebarRailLayout(EffectiveSidebarWidth(rect.right), scale_))
+        painter_.DrawText(l10n::Get(l10n::StringId::Home), D2D1::RectF(home.left + 40 * scale_, home.top, home.right - 8 * scale_, home.bottom), compositor_->TextFormat(), theme.text);
     D2D1_RECT_F sb = SidebarRect(rect.right, rect.bottom);
     const float w = sb.right - sb.left;
 
