@@ -1,4 +1,4 @@
-// shell_client.h — Async client for pulse_shell.exe (UI-process side).
+// shell_client.h — Async client for Pulse.Shell.exe (UI-process side).
 //
 // Owns the child process lifetime: pipe connects to \\.\pipe\pulse_shell_<pid>;
 // on send/receive failure the child is restarted (CreateProcess) and the

@@ -61,7 +61,7 @@ SetupIconFile=src\app\pulse.ico
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-UninstallDisplayIcon={app}\pulse.exe
+UninstallDisplayIcon={app}\Pulse.exe
 
 [Languages]
 ; ChineseSimplified.isl is bundled in installer/Languages (community translation,
@@ -80,7 +80,7 @@ Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Flags: ignoreversion recurs
 ; Local MD builds bundle the matching CRT; the static Win81 CI path is unchanged.
 Source: "{#BuildDir}\msvc-runtime\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 #endif
-Source: "{#BuildDir}\pulse.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\Pulse.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\lumatext.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\pdfium.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\licenses\PDFium\*"; DestDir: "{app}\licenses\PDFium"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -95,10 +95,12 @@ Source: "{#BuildDir}\licenses\LumaText\*"; DestDir: "{app}\licenses\LumaText"; F
 Source: "{#BuildDir}\Pulse.Index.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Document.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Preview.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BuildDir}\pulse_shell.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\Pulse.Shell.exe"; DestDir: "{app}"; Flags: ignoreversion
 
-#ifndef AppLocalRuntime
 [InstallDelete]
+; The Shell helper was renamed; remove only the superseded app-local binary.
+Type: files; Name: "{app}\pulse_shell.exe"
+#ifndef AppLocalRuntime
 ; Exact app-local files from older MD releases; never touch Windows runtimes.
 Type: files; Name: "{app}\msvcp140.dll"
 Type: files; Name: "{app}\msvcp140_atomic_wait.dll"
@@ -107,25 +109,25 @@ Type: files; Name: "{app}\vcruntime140_1.dll"
 #endif
 
 [Icons]
-Name: "{group}\Pulse"; Filename: "{app}\pulse.exe"; WorkingDir: "{app}"
+Name: "{group}\Pulse"; Filename: "{app}\Pulse.exe"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,Pulse}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Pulse"; Filename: "{app}\pulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\Pulse"; Filename: "{app}\Pulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\Pulse.Archive"; ValueType: string; ValueData: "Pulse Archive"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\DefaultIcon"; ValueType: string; ValueData: "{app}\pulse.exe,0"
-Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\shell\open\command"; ValueType: string; ValueData: """{app}\pulse.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\DefaultIcon"; ValueType: string; ValueData: "{app}\Pulse.exe,0"
+Root: HKCU; Subkey: "Software\Classes\Pulse.Archive\shell\open\command"; ValueType: string; ValueData: """{app}\Pulse.exe"" ""%1"""
 Root: HKCU; Subkey: "Software\Classes\.zip\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.7z\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.rar\OpenWithProgids"; ValueType: string; ValueName: "Pulse.Archive"; ValueData: ""; Flags: uninsdeletevalue
 ; Same key the in-app preference manages (src/app/app_prefs.cpp).
 ; Note: with an elevated install this lands in the installing user's hive.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Pulse"; ValueData: """{app}\pulse.exe"""; Tasks: startup; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Pulse"; ValueData: """{app}\Pulse.exe"""; Tasks: startup; Flags: uninsdeletevalue
 
 [Run]
 ; Index configuration runs in CurStepChanged so helper failures are not ignored.
-Filename: "{app}\pulse.exe"; Parameters: "--seed-shell-verbs"; StatusMsg: "正在缓存右键菜单项… / Caching context-menu verbs…"; Flags: runhidden waituntilterminated
-Filename: "{app}\pulse.exe"; Description: "{cm:LaunchProgram,Pulse}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Pulse.exe"; Parameters: "--seed-shell-verbs"; StatusMsg: "正在缓存右键菜单项… / Caching context-menu verbs…"; Flags: runhidden waituntilterminated
+Filename: "{app}\Pulse.exe"; Description: "{cm:LaunchProgram,Pulse}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 ; Runs before files are deleted.
@@ -178,7 +180,7 @@ begin
   if P > 0 then
   begin
     Delete(Command, P, Length(UpgradePreviousExe));
-    Insert(ExpandConstant('{app}\pulse.exe'), Command, P);
+    Insert(ExpandConstant('{app}\Pulse.exe'), Command, P);
   end;
   Result := Command;
 end;
@@ -443,7 +445,7 @@ var
   Exe: String;
   DefaultVerb: String;
 begin
-  Exe := Lowercase(ExpandConstant('{app}\pulse.exe'));
+  Exe := Lowercase(ExpandConstant('{app}\Pulse.exe'));
   if RegQueryStringValue(HKCU,
     'Software\Classes\' + ClassName + '\shell\open\command', '', Cmd) then
   begin
@@ -503,7 +505,7 @@ begin
   if not PreviousPulseRoot(Root) then Exit;
   if not RegQueryStringValue(Root, PulseUninstallKey, 'Inno Setup: App Path', Previous) then
     RegQueryStringValue(Root, PulseUninstallKey, 'InstallLocation', Previous);
-  if (Previous <> '') and FileExists(AddBackslash(Previous) + 'pulse.exe') then
+  if (Previous <> '') and FileExists(AddBackslash(Previous) + 'Pulse.exe') then
   begin
     Result := RemoveBackslashUnlessRoot(Previous);
     Log('Reusing registered Pulse directory: ' + Result);
@@ -601,7 +603,7 @@ begin
 
   { Silent upgrades keep user data; an interactive uninstall still lets the
     user choose cleanup through the checkbox above. }
-  CaptureUpgradePrefs(AddBackslash(ExtractFileDir(FileName)) + 'pulse.exe');
+  CaptureUpgradePrefs(AddBackslash(ExtractFileDir(FileName)) + 'Pulse.exe');
   if not Exec(FileName,
     Trim(Params + ' /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
@@ -626,10 +628,10 @@ var
   ResultCode: Integer;
 begin
   { Close the UI first so it cannot relaunch Pulse.Index.exe --network-agent. }
-  { An in-app update launches Setup as a descendant of pulse.exe. Killing
+  { An in-app update launches Setup as a descendant of Pulse.exe. Killing
     the UI's process tree would also terminate this installer. Hosts are
     stopped explicitly below, so do not use /T for the UI. }
-  Exec('taskkill.exe', '/F /IM pulse.exe', '', SW_HIDE,
+  Exec('taskkill.exe', '/F /IM Pulse.exe', '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
   Exec('net.exe', 'stop PulseIndex', '', SW_HIDE, ewWaitUntilTerminated,
     ResultCode);
@@ -637,6 +639,9 @@ begin
     ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM Pulse.Preview.exe /T', '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM Pulse.Shell.exe /T', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
+  { Stop the previous Shell helper before deleting its obsolete filename. }
   Exec('taskkill.exe', '/F /IM pulse_shell.exe /T', '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
 end;

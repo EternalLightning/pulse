@@ -38,7 +38,7 @@ int main() {
     std::cout << "[INFO] test process integrity RID=" << integrity << '\n';
     if (integrity < SECURITY_MANDATORY_MEDIUM_RID) {
         std::cout << "[FAIL] Low-integrity executable cannot validate deletion of the normal user fixture.\n"
-                     "[INFO] Inspect integrity labels on this executable AND pulse_shell.exe.\n"
+                     "[INFO] Inspect integrity labels on this executable AND Pulse.Shell.exe.\n"
                      "[INFO] Do not lower the fixture label or bypass permissions. Use a trusted normal-integrity build environment.\n"
                      "[FAIL] backend success test NOT RUN; no deletion attempted\n";
         return 2;

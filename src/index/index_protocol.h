@@ -1,4 +1,4 @@
-// index_protocol.h — pulse.exe <-> Pulse.Index.exe named-pipe protocol.
+// index_protocol.h — Pulse.exe <-> Pulse.Index.exe named-pipe protocol.
 #pragma once
 #include "../ipc/protocol.h"
 #include "index_engine.h"

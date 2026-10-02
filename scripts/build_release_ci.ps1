@@ -101,7 +101,7 @@ $selftestLogs = @{
 foreach ($testCase in $selftestCases) {
     $env:PULSE_SELFTEST_CASE = $testCase -replace '-native$', ''
     $env:PULSE_LUMATEXT = if ($testCase.EndsWith('-native')) { '0' } else { '1' }
-    $selftest = Start-Process -FilePath (Join-Path $build 'pulse.exe') -ArgumentList '--selftest' -WindowStyle Hidden -PassThru
+    $selftest = Start-Process -FilePath (Join-Path $build 'Pulse.exe') -ArgumentList '--selftest' -WindowStyle Hidden -PassThru
     $finished = $selftest.WaitForExit(120000)
     if (-not $finished) { $selftest.Kill(); $selftest.WaitForExit() }
     $selftest.Refresh()
@@ -118,7 +118,7 @@ Remove-Item Env:PULSE_SELFTEST_CASE
 $liveLog = Join-Path $build 'content-live-selection.log'
 $env:PULSE_TEST_SEARCH_FLOW = $liveLog
 $env:PULSE_TEST_CONTENT_LIVE_SELECTION = '1'
-$live = Start-Process -FilePath (Join-Path $build 'pulse.exe') -ArgumentList '--test-instance', '--shot',
+$live = Start-Process -FilePath (Join-Path $build 'Pulse.exe') -ArgumentList '--test-instance', '--shot',
     (Join-Path $build 'content-live-selection.png'), $env:TEMP -WindowStyle Hidden -PassThru
 $liveDone = $live.WaitForExit(60000)
 if (-not $liveDone) { $live.Kill(); $live.WaitForExit() }

@@ -16,11 +16,11 @@ $destination = [System.IO.Path]::GetFullPath((Join-Path $repo (Join-Path $Output
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 
 $artifacts = @(
-    "pulse.exe", "pulse.pdb",
+    "Pulse.exe", "Pulse.pdb",
     "Pulse.Index.exe", "Pulse.Index.pdb",
     "Pulse.Document.exe", "Pulse.Document.pdb",
     "Pulse.Preview.exe", "Pulse.Preview.pdb",
-    "pulse_shell.exe", "pulse_shell.pdb"
+    "Pulse.Shell.exe", "Pulse.Shell.pdb"
 )
 $manifest = @()
 foreach ($name in $artifacts) {

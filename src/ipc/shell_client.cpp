@@ -62,7 +62,7 @@ bool ShellClient::SpawnChild() {
 
     std::wstring cmd = L"\"";
     cmd += exe_dir;
-    cmd += L"pulse_shell.exe\" ";
+    cmd += L"Pulse.Shell.exe\" ";
     cmd += std::to_wstring(GetCurrentProcessId());
 
     STARTUPINFOW si{ sizeof(si) };
@@ -73,9 +73,9 @@ bool ShellClient::SpawnChild() {
         const DWORD gle = GetLastError();
         fprintf(stderr, "[shell_client] CreateProcess failed gle=%lu cmd=%ls\n", gle, cmd.c_str());
         if (gle == ERROR_FILE_NOT_FOUND) {
-            last_error_ = L"\u627E\u4E0D\u5230 pulse_shell.exe\uFF08\u9700\u4E0E Pulse \u653E\u5728\u540C\u4E00\u76EE\u5F55\uFF09";
+            last_error_ = L"\u627E\u4E0D\u5230 Pulse.Shell.exe\uFF08\u9700\u4E0E Pulse \u653E\u5728\u540C\u4E00\u76EE\u5F55\uFF09";
         } else {
-            last_error_ = L"\u65E0\u6CD5\u542F\u52A8 pulse_shell.exe\uFF08\u9519\u8BEF " +
+            last_error_ = L"\u65E0\u6CD5\u542F\u52A8 Pulse.Shell.exe\uFF08\u9519\u8BEF " +
                           std::to_wstring(gle) + L"\uFF09";
         }
         return false;
@@ -107,14 +107,14 @@ bool ShellClient::EnsureConnected() {
                 server_pid == child_.dwProcessId)
                 break;
             CloseHandle(h);
-            last_error_ = L"pulse_shell.exe pipe identity mismatch";
+            last_error_ = L"Pulse.Shell.exe pipe identity mismatch";
             return false;
         }
         const DWORD err = GetLastError();
         if (err == ERROR_PIPE_BUSY) {
             WaitNamedPipeW(name.c_str(), 200);
             if (GetTickCount64() > deadline) {
-                last_error_ = L"pulse_shell.exe \u7BA1\u9053\u5FD9\u788C";
+                last_error_ = L"Pulse.Shell.exe \u7BA1\u9053\u5FD9\u788C";
                 return false;
             }
             continue;
@@ -124,11 +124,11 @@ bool ShellClient::EnsureConnected() {
                 DWORD code = 0;
                 GetExitCodeProcess(child_.hProcess, &code);
                 fprintf(stderr, "[shell_client] child exited early code=%lu\n", code);
-                last_error_ = L"pulse_shell.exe \u542F\u52A8\u540E\u7ACB\u5373\u9000\u51FA";
+                last_error_ = L"Pulse.Shell.exe \u542F\u52A8\u540E\u7ACB\u5373\u9000\u51FA";
                 return false;
             }
             if (GetTickCount64() > deadline) {
-                last_error_ = L"pulse_shell.exe \u672A\u54CD\u5E94\u7BA1\u9053";
+                last_error_ = L"Pulse.Shell.exe \u672A\u54CD\u5E94\u7BA1\u9053";
                 return false;
             }
             Sleep(50);

@@ -27,7 +27,7 @@ cases = [
 results = []
 for name, state, language, theme, size, scale in cases:
     image = output / (name + '.png')
-    command = [str(build / 'pulse.exe'), '--test-instance', '--shot', str(image),
+    command = [str(build / 'Pulse.exe'), '--test-instance', '--shot', str(image),
                '--shot-update-state', state, '--shot-language', language, theme,
                '--size', size, '--shot-scale', scale, 'pulse:settings:about']
     process = subprocess.run(command, cwd=root, env=environment, startupinfo=startup,

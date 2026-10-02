@@ -3,7 +3,7 @@
 // Headless coverage for the parts `--shot` cannot reach (interactive menus,
 // OLE drag & drop): menu model construction + hit-test + verb dispatch,
 // IDataObject CF_HDROP contents, drop-effect modifier semantics, breadcrumb
-// splitting, and real ops-layer create/move through pulse_shell.exe.
+// splitting, and real ops-layer create/move through Pulse.Shell.exe.
 // All file operations are confined to bench_data/opstest/selftest_1b2 and
 // cleaned up afterwards.
 #include "selftest_1b2.h"
@@ -221,7 +221,7 @@ std::wstring WorkspaceRoot() {
     if (executable_separator == std::wstring::npos) return L".";
     current.resize(executable_separator);
 
-    // Support both Ninja's build/pulse.exe and multi-config build/Release/pulse.exe.
+    // Support both Ninja's build/Pulse.exe and multi-config build/Release/Pulse.exe.
     for (int depth = 0; depth < 4; ++depth) {
         if (IsFile(current + L"\\CMakeLists.txt") &&
             IsFile(current + L"\\src\\app\\selftest_1b2.cpp")) {
@@ -2465,14 +2465,14 @@ void TestAppPrefsAndSettingsPath() {
     Check(prefs.FromJson(L"{\"show_status_performance\":true}") &&
           prefs.show_status_performance,
           L"appprefs: parse show_status_performance");
-    Check(FolderOpenCommandLine(L"C:\\Pulse\\pulse.exe") ==
-              L"\"C:\\Pulse\\pulse.exe\" \"%1\"",
+    Check(FolderOpenCommandLine(L"C:\\Pulse\\Pulse.exe") ==
+              L"\"C:\\Pulse\\Pulse.exe\" \"%1\"",
           L"appprefs: folder-open command quotes exe and %1");
-    Check(FolderOpenCommandIsOurs(L"\"C:\\Pulse\\pulse.exe\" \"%1\"",
-                                  L"C:\\Pulse\\pulse.exe"),
+    Check(FolderOpenCommandIsOurs(L"\"C:\\Pulse\\Pulse.exe\" \"%1\"",
+                                  L"C:\\Pulse\\Pulse.exe"),
           L"appprefs: folder-open command matches our exe");
     Check(!FolderOpenCommandIsOurs(L"\"C:\\Windows\\explorer.exe\" \"%1\"",
-                                   L"C:\\Pulse\\pulse.exe"),
+                                   L"C:\\Pulse\\Pulse.exe"),
           L"appprefs: folder-open command ignores explorer");
     AppPrefs density;
     density.persist = false;
@@ -4345,7 +4345,7 @@ void TestRecycleAndBatchRename() {
 void TestOpsThroughShell() {
     std::wstring dir = kSandbox;
     g_ops.Start([] {});
-    Sleep(800); // let the ops worker bring up pulse_shell.exe
+    Sleep(800); // let the ops worker bring up Pulse.Shell.exe
 
     Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
           L"ops: wt.exe command line");

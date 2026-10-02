@@ -276,7 +276,7 @@ list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "lumatext_renderer\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(document_(host_main|reader|filter)|office_ooxml|pdfium_text)\\.cpp$")
 
 # The local-volume engine runs in Pulse.Index.exe. Production keeps only the
-# lightweight query parser and per-user network index inside pulse.exe.
+# lightweight query parser and per-user network index inside Pulse.exe.
 option(PULSE_WITH_SELFTEST "Embed the legacy --selftest suite in Pulse.exe" OFF)
 if(NOT PULSE_WITH_SELFTEST)
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "selftest_1b2\\.cpp$")
@@ -285,6 +285,7 @@ endif()
 list(APPEND PULSE_APP_SOURCES src/index/network_agent_client.cpp)
 if(PULSE_APP_SOURCES)
     add_executable(pulse WIN32 ${PULSE_APP_SOURCES})
+    set_target_properties(pulse PROPERTIES OUTPUT_NAME "Pulse")
     add_custom_command(TARGET pulse POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip" "$<TARGET_FILE_DIR:pulse>/7zip")
@@ -324,7 +325,7 @@ if(PULSE_APP_SOURCES)
     target_link_libraries(pulse PRIVATE secur32)
     target_link_libraries(pulse PRIVATE pulse_localization pulse_user_storage)
     pulse_enable_lumatext(pulse)
-    pulse_add_version_resource(pulse "Pulse file manager" "pulse" "pulse.exe")
+    pulse_add_version_resource(pulse "Pulse file manager" "Pulse" "Pulse.exe")
 endif()
 
 # ---- Pulse.Index.exe: index + query host (session helper or Windows service) ----
@@ -357,7 +358,7 @@ target_link_libraries(pulse_index PRIVATE pulse_user_storage advapi32 shlwapi ol
 pulse_add_version_resource(pulse_index "Pulse index host" "Pulse.Index" "Pulse.Index.exe")
 add_dependencies(pulse_index_host_stress pulse_index)
 
-# ---- Stage 1B-1 ops self test (console; drives pulse_shell.exe over the pipe) ----
+# ---- Stage 1B-1 ops self test (console; drives Pulse.Shell.exe over the pipe) ----
 add_executable(pulse_operation_presentation_test src/bench/operation_presentation_test.cpp)
 add_executable(pulse_column_strip_test src/bench/column_strip_test.cpp src/ui/column_strip_layout.cpp)
 add_executable(pulse_playback_controls_test src/bench/playback_controls_test.cpp src/ui/video_preview.cpp)
@@ -388,8 +389,9 @@ add_executable(pulse_delete_service_test src/bench/delete_service_test.cpp
 file(GLOB_RECURSE PULSE_SHELL_SOURCES CONFIGURE_DEPENDS src/shell_host/*.cpp)
 if(PULSE_SHELL_SOURCES)
     add_executable(pulse_shell WIN32 ${PULSE_SHELL_SOURCES})
-target_link_libraries(pulse_shell PRIVATE ole32 shell32 uuid advapi32 shlwapi version pulse_crash_reporter)
-    pulse_add_version_resource(pulse_shell "Pulse Shell host" "pulse_shell" "pulse_shell.exe")
+    set_target_properties(pulse_shell PROPERTIES OUTPUT_NAME "Pulse.Shell")
+    target_link_libraries(pulse_shell PRIVATE ole32 shell32 uuid advapi32 shlwapi version pulse_crash_reporter)
+    pulse_add_version_resource(pulse_shell "Pulse Shell host" "Pulse.Shell" "Pulse.Shell.exe")
 endif()
 
 # ---- Pulse.Preview.exe: thumbnail decoding / Shell provider isolation ----
@@ -460,7 +462,7 @@ add_executable(pulse_app_controllers_test
 target_link_libraries(pulse_app_controllers_test PRIVATE
     user32 shell32 ole32 uuid advapi32 shlwapi pulse_localization pulse_user_storage)
 
-# Shell-only operations (recycle bin, Explorer verbs) go through pulse_shell.exe.
+# Shell-only operations (recycle bin, Explorer verbs) go through Pulse.Shell.exe.
 # Copy/move use the in-process scheduler plus CopyFile2.
 # Filename search goes through Pulse.Index.exe (never Engine::Start in the UI).
 if(TARGET pulse AND TARGET pulse_shell)

@@ -1,7 +1,7 @@
 // ctx_menu_util.h — Shared context-menu verb filtering / text helpers.
 //
-// Used by pulse_shell.exe (filters QueryContextMenu output before it goes on
-// the wire) and by the pulse.exe self-test (the HMENU walk itself is host-only,
+// Used by Pulse.Shell.exe (filters QueryContextMenu output before it goes on
+// the wire) and by the Pulse.exe self-test (the HMENU walk itself is host-only,
 // but the filtering rules are pure and asserted here). Header-only on purpose.
 #pragma once
 #include <cwctype>

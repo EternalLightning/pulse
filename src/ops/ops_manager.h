@@ -1,7 +1,7 @@
 // ops_manager.h — Operation queue, progress status, undo stack (UI-process side).
 //
 // All file operations are serialized on one worker thread and executed through
-// pulse_shell.exe (ShellClient). The UI thread never touches COM/shell:
+// Pulse.Shell.exe (ShellClient). The UI thread never touches COM/shell:
 // it calls Submit/Cancel/Undo/Status and gets repaints via the notify callback.
 //
 // Undo model (stage 1B-1):

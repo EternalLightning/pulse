@@ -1,8 +1,8 @@
-// protocol.h — Pulse UI process <-> pulse_shell.exe wire protocol (named pipe).
+// protocol.h — Pulse UI process <-> Pulse.Shell.exe wire protocol (named pipe).
 //
 // Transport: named pipe `\\.\pipe\pulse_shell_<ui-pid>`, byte mode, blocking I/O.
 // The UI process (client) creates the pipe name from its own PID and passes the
-// same PID to pulse_shell.exe as argv[1]; the shell host is the pipe server.
+// same PID to Pulse.Shell.exe as argv[1]; the shell host is the pipe server.
 //
 // Framing: fixed 16-byte header + payload.
 //   struct MsgHeader { u32 magic; u32 type; u32 request_id; u32 payload_size; }

@@ -1,6 +1,6 @@
 // ops_test_main.cpp — Stage 1B-1 ops-layer self test (console).
 //
-// Drives the full stack: OpsManager -> ShellClient -> pipe -> pulse_shell.exe
+// Drives the full stack: OpsManager -> ShellClient -> pipe -> Pulse.Shell.exe
 // -> IFileOperation. All file operations are confined to
 // bench_data/opstest (created/cleaned by this test). Prints one PASS/FAIL
 // line per check; exit code 0 iff all checks pass.
@@ -210,7 +210,7 @@ int wmain() {
 
     // --- 1. Ping ------------------------------------------------------------
     {
-        Check(ipc::ShellClient::Instance().Ping(), L"IPC ping pulse_shell.exe");
+        Check(ipc::ShellClient::Instance().Ping(), L"IPC ping Pulse.Shell.exe");
     }
 
     // --- 2. Copy ------------------------------------------------------------

@@ -1,5 +1,5 @@
 #include "../common/windows_compat.h"
-// main.cpp — pulse_shell.exe: windowless STA+COM shell-operation proxy.
+// main.cpp — Pulse.Shell.exe: windowless STA+COM shell-operation proxy.
 //
 // Pipe server on \\.\pipe\pulse_shell_<ui-pid> (ui-pid passed as argv[1],
 // defaults to own pid for standalone runs). Requests are read on a dedicated
@@ -692,44 +692,6 @@ void ExecuteRequest(Request* req) {
         swprintf_s(stage, L"delete diagnostics: setup_failed=%d hr=0x%08X item_hr=0x%08X", setup_failed,
             static_cast<unsigned>(hr), static_cast<unsigned>(sink.item_failure()));
         error = stage;
-        HANDLE token = nullptr;
-        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-            error += IsTokenRestricted(token) ? L"; token restricted" : L"; token unrestricted";
-            for (const auto kind : {TokenUser, TokenIntegrityLevel, TokenRestrictedSids}) {
-                DWORD needed = 0;
-                GetTokenInformation(token, kind, nullptr, 0, &needed);
-                std::vector<BYTE> bytes(needed);
-                if (needed && GetTokenInformation(token, kind, bytes.data(), needed, &needed)) {
-                    auto append_sid = [&](PSID sid) {
-                        PWSTR text = nullptr;
-                        if (ConvertSidToStringSidW(sid, &text)) { error += L" " + std::wstring(text); LocalFree(text); }
-                    };
-                    if (kind == TokenUser) { error += L"; user"; append_sid(reinterpret_cast<TOKEN_USER*>(bytes.data())->User.Sid); }
-                    else if (kind == TokenIntegrityLevel) { error += L"; integrity"; append_sid(reinterpret_cast<TOKEN_MANDATORY_LABEL*>(bytes.data())->Label.Sid); }
-                    else {
-                        error += L"; restrictions";
-                        auto* groups = reinterpret_cast<TOKEN_GROUPS*>(bytes.data());
-                        for (DWORD i = 0; i < groups->GroupCount; ++i) append_sid(groups->Groups[i].Sid);
-                    }
-                }
-            }
-            CloseHandle(token);
-        }
-        if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token)) {
-            error += L"; thread impersonation active"; CloseHandle(token);
-        } else error += L"; thread token error=" + std::to_wstring(GetLastError());
-        for (const auto& source : req->sources) {
-            for (const DWORD access : {DWORD(DELETE), DWORD(FILE_READ_ATTRIBUTES | DELETE), DWORD(GENERIC_READ | DELETE)}) {
-                const HANDLE probe = CreateFileW(source.c_str(), access,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-                const DWORD code = probe == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
-                if (probe != INVALID_HANDLE_VALUE) CloseHandle(probe);
-                wchar_t result[96]{};
-                swprintf_s(result, L"; open access=0x%08X error=%lu", access, code);
-                error += result;
-            }
-        }
     }
     if (FAILED(hr) && !cancelled) {
         LPWSTR msg = nullptr;

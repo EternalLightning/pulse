@@ -21,7 +21,7 @@ try {
     }
     $taskLines = Get-Content (Join-Path $taskBuild 'build.ninja')
     $taskCompile = ($taskLines | Select-String '^build CMakeFiles.pulse.dir.src.app.address_search.cpp.obj:' | Select-Object -First 1).LineNumber
-    $taskLink = ($taskLines | Select-String '^build pulse.exe:' | Select-Object -First 1).LineNumber
+    $taskLink = ($taskLines | Select-String '^build Pulse.exe:' | Select-Object -First 1).LineNumber
     if (!$taskCompile -or !$taskLink) { throw 'Expected the single-configuration Ninja build.' }
     $taskCompileArgs = ($taskLines[$taskCompile..($taskCompile + 5)] | Where-Object { $_ -match '^  (DEFINES|FLAGS|INCLUDES) = ' }) -replace '^  \w+ = ', ''
     $taskCompileArgs += "/c src/bench/${Fixture}_test.cpp /Fo`"$taskBuild/${Fixture}_test.obj`" /Fd`"$taskBuild/${Fixture}_test_compile.pdb`""
@@ -30,7 +30,7 @@ try {
     $taskCompileArgs | Set-Content $taskCompileResponse -Encoding unicode
     & cl.exe /nologo "@$taskCompileResponse"
     if ($LASTEXITCODE) { throw 'Content refresh test compilation failed.' }
-    $taskObjects = ($taskLines[$taskLink - 1] -replace '^build pulse.exe: \S+ ', '') -split ' \|' | Select-Object -First 1
+    $taskObjects = ($taskLines[$taskLink - 1] -replace '^build Pulse.exe: \S+ ', '') -split ' \|' | Select-Object -First 1
     $taskLibraries = ($taskLines[$taskLink..($taskLink + 8)] | Where-Object { $_ -match '^  LINK_LIBRARIES = ' }) -replace '^  LINK_LIBRARIES = ', ''
     $taskDelayLoad = if (($taskLibraries -join ' ') -match '(?i)(?:^|[\\/\s"])lumatext\.lib(?:$|[\s"])') { '/DELAYLOAD:lumatext.dll' } else { '' }
     $taskSecurity = if ($Fixture -eq 'duplicate_settings_ui' -or $Fixture -eq 'delete_integration' -or $Fixture -eq 'delete_backend' -or $Fixture -eq 'sidebar_tray_ui' -or $Fixture -eq 'recycle_backend' -or $Fixture -eq 'settings_value_ui') { '/guard:cf /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT' } else { '' }

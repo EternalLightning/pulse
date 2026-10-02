@@ -6,14 +6,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $expectedVersion = [version](Get-Content -LiteralPath (Join-Path $repo 'version.txt') -Raw).Trim()
-foreach ($binary in @('pulse.exe', 'Pulse.Index.exe', 'Pulse.Document.exe', 'Pulse.Preview.exe', 'pulse_shell.exe')) {
+foreach ($binary in @('Pulse.exe', 'Pulse.Index.exe', 'Pulse.Document.exe', 'Pulse.Preview.exe', 'Pulse.Shell.exe')) {
     $binaryPath = Join-Path $BuildDir $binary
     $info = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path -LiteralPath $binaryPath).Path)
     if ([version]$info.ProductVersion -ne $expectedVersion) {
         throw "Release version mismatch: $binary is $($info.ProductVersion), expected $expectedVersion"
     }
+    if ($info.OriginalFilename -cne $binary) {
+        throw "Release filename mismatch: $binary identifies itself as $($info.OriginalFilename). Rebuild before packaging."
+    }
 }
-$path = Join-Path $BuildDir 'pulse.exe'
+$path = Join-Path $BuildDir 'Pulse.exe'
 # Inspect the binary as well as build settings: /skipbuild can reuse an old EXE.
 $bytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $path).Path)
 $text = [Text.Encoding]::ASCII.GetString($bytes)

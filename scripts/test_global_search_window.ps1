@@ -6,14 +6,14 @@ try {
     $taskBuild = (Resolve-Path -LiteralPath $BuildDir).Path
     $taskLines = Get-Content (Join-Path $taskBuild 'build.ninja')
     $taskCompile = ($taskLines | Select-String '^build CMakeFiles.pulse.dir.src.app.address_search.cpp.obj:' | Select-Object -First 1).LineNumber
-    $taskLink = ($taskLines | Select-String '^build pulse.exe:' | Select-Object -First 1).LineNumber
+    $taskLink = ($taskLines | Select-String '^build Pulse.exe:' | Select-Object -First 1).LineNumber
     $taskCompileArgs = ($taskLines[$taskCompile..($taskCompile + 5)] | Where-Object { $_ -match '^  (DEFINES|FLAGS|INCLUDES) = ' }) -replace '^  \w+ = ', ''
     $taskCompileArgs += "/c src/bench/global_search_window_test.cpp /Fo`"$taskBuild/global_search_window_fixture.obj`" /Fd`"$taskBuild/global_search_window_fixture_compile.pdb`""
     $taskCompileResponse = Join-Path $taskBuild 'global_search_window_fixture_compile.rsp'
     $taskCompileArgs | Set-Content $taskCompileResponse -Encoding utf8
     & cl.exe /nologo "@$taskCompileResponse"
     if ($LASTEXITCODE) { throw 'Window fixture compilation failed.' }
-    $taskObjects = (($taskLines[$taskLink - 1] -replace '^build pulse.exe: \S+ ', '') -split ' \|' | Select-Object -First 1) -replace 'CMakeFiles\\pulse.dir\\src\\app\\global_search_window.cpp.obj ', ''
+    $taskObjects = (($taskLines[$taskLink - 1] -replace '^build Pulse.exe: \S+ ', '') -split ' \|' | Select-Object -First 1) -replace 'CMakeFiles\\pulse.dir\\src\\app\\global_search_window.cpp.obj ', ''
     $taskLibraries = ($taskLines[$taskLink..($taskLink + 8)] | Where-Object { $_ -match '^  LINK_LIBRARIES = ' }) -replace '^  LINK_LIBRARIES = ', ''
     @($taskObjects, $taskLibraries, 'global_search_window_fixture.obj /out:pulse_global_search_window_fixture.exe /pdb:global_search_window_fixture.pdb /subsystem:console /machine:x64 /INCREMENTAL:NO /MANIFEST:NO /DELAYLOAD:lumatext.dll') | Set-Content (Join-Path $taskBuild 'global_search_window_fixture_link.rsp') -Encoding utf8
     Push-Location $taskBuild

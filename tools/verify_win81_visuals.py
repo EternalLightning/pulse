@@ -53,14 +53,14 @@ for name, legacy, args in cases:
     env['PULSE_TEST_INDEX_MIGRATING'] = '1' if name == 'migration-index' else '0'
     env['PULSE_TEST_TOAST'] = '1' if name.startswith('fluent-toast') else '0'
     with (out/(name+'.log')).open('wb') as log:
-        result = subprocess.run([str(root/'build-win81/pulse.exe'), *args], cwd=root, env=env,
+        result = subprocess.run([str(root/'build-win81/Pulse.exe'), *args], cwd=root, env=env,
             startupinfo=startup, stdout=log, stderr=subprocess.STDOUT, timeout=60)
     row = dict(case=name, exit=result.returncode, image_exists=(out/(name+'.png')).exists())
     results.append(row)
     print(json.dumps(row), flush=True)
 fixture = out/'optional-renderer'
 fixture.mkdir(exist_ok=True)
-for name in ['pulse.exe','pulse_shell.exe','Pulse.Preview.exe','Pulse.Index.exe']:
+for name in ['Pulse.exe','Pulse.Shell.exe','Pulse.Preview.exe','Pulse.Index.exe']:
     shutil.copy2(root/'build-win81'/name, fixture/name)
 for name in ['missing-lumatext', 'invalid-lumatext']:
     dll = fixture/'lumatext.dll'
@@ -71,7 +71,7 @@ for name in ['missing-lumatext', 'invalid-lumatext']:
     image_path = out/(name+'.png')
     env = dict(base_env, PULSE_COMPAT_81='0', PULSE_TEST_QUICK_MENU='1')
     with (out/(name+'.log')).open('wb') as log:
-        result = subprocess.run([str(fixture/'pulse.exe'), '--menushot', str(image_path), str(root)],
+        result = subprocess.run([str(fixture/'Pulse.exe'), '--menushot', str(image_path), str(root)],
             cwd=root, env=env, startupinfo=startup, timeout=60, stdout=log, stderr=subprocess.STDOUT)
     row = dict(case=name, exit=result.returncode, image_exists=image_path.exists())
     results.append(row)

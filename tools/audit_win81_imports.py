@@ -51,7 +51,7 @@ class PE:
 
 def main():
     directory = Path(sys.argv[1] if len(sys.argv)>1 else 'build-win81')
-    names = ['pulse.exe','Pulse.Index.exe','Pulse.Preview.exe','pulse_shell.exe','lumatext.dll']
+    names = ['Pulse.exe','Pulse.Index.exe','Pulse.Preview.exe','Pulse.Shell.exe','lumatext.dll']
     forbidden = {
         'GetDpiForWindow','GetSystemMetricsForDpi','SetProcessDpiAwarenessContext',
         'SetThreadDpiAwarenessContext','AdjustWindowRectExForDpi','GetDpiForSystem',
@@ -68,7 +68,7 @@ def main():
         runtimes = [dll for dll in imports if dll.lower().startswith(('msvcp','vcruntime'))]
         runtimes += [dll for dll in imports if dll.lower().startswith('api-ms-win-shcore-')]
         errors = bad + runtimes
-        if name == 'pulse.exe' and 'lumatext.dll' in {dll.lower() for dll in imports}:
+        if name == 'Pulse.exe' and 'lumatext.dll' in {dll.lower() for dll in imports}:
             errors.append('lumatext.dll must be delay-loaded')
         if pe.machine != 0x8664 or pe.subsystem_version > [6,3]: errors.append('PE target exceeds Windows 8.1 x64')
         failed |= bool(errors)

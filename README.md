@@ -43,7 +43,7 @@
 
 ```powershell
 .\build_release.bat
-.\build\pulse.exe
+.\build\Pulse.exe
 ```
 
 生成与正式发布相同的安装包，并运行回归检查：

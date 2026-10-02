@@ -116,8 +116,8 @@ begin
   Count := 0; { Old uninstaller erased all prior preferences. }
   MockRegWriteStringValue(HKCU, DriveKey + '\open\command', '', '"D:\Other\pulse.exe" "%1"');
   RestoreUpgradePrefs;
-  Check(ValueAt(RunKey, 'Pulse') = '"C:\New Pulse\pulse.exe" --background', 'restore startup after old uninstaller; relocate and preserve arguments');
-  Check(ValueAt(DirKey + '\open\command', '') = '"C:\New Pulse\pulse.exe" "%1"', 'restore owned folder association at new path');
+  Check(ValueAt(RunKey, 'Pulse') = '"C:\New Pulse\Pulse.exe" --background', 'restore startup after old uninstaller; relocate and preserve arguments');
+  Check(ValueAt(DirKey + '\open\command', '') = '"C:\New Pulse\Pulse.exe" "%1"', 'restore owned folder association at new path');
   Check((ValueAt(DirKey, '') = 'open') and (ValueAt(DirKey + '\open', 'DelegateExecute') = ''), 'restore folder default verb and delegate override');
   Check(ValueAt(DriveKey + '\open\command', '') = '"D:\Other\pulse.exe" "%1"', 'leave unrelated folder association untouched');
   Reset;
@@ -132,8 +132,8 @@ begin
   RestoreUpgradePrefs;
   Check(ValueAt(RunKey, 'Pulse') = '<missing>', 'absent startup value remains disabled despite installer task');
   Reset;
-  MockRegWriteStringValue(HKCU, RunKey, 'Pulse', '"C:\New Pulse\pulse.exe"');
-  MockRegWriteStringValue(HKCU, DirKey + '\open\command', '', '"C:\New Pulse\pulse.exe" "%1"');
+  MockRegWriteStringValue(HKCU, RunKey, 'Pulse', '"C:\New Pulse\Pulse.exe"');
+  MockRegWriteStringValue(HKCU, DirKey + '\open\command', '', '"C:\New Pulse\Pulse.exe" "%1"');
   MockRegWriteStringValue(HKCU, DirKey, '', 'open');
   CurUninstallStepChanged(usPostUninstall);
   Check((ValueAt(RunKey, 'Pulse') = '<missing>') and
