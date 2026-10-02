@@ -579,6 +579,7 @@ enum class StringId : UINT {
     DeleteIrreversible = IDS_DELETE_IRREVERSIBLE,
     DeleteReasonExplicit = IDS_DELETE_REASON_EXPLICIT,
     DeleteReasonRecycle = IDS_DELETE_REASON_RECYCLE,
+    DeleteReasonNetwork = IDS_DELETE_REASON_NETWORK,
     DeleteCountFormat = IDS_DELETE_COUNT_FORMAT,
     DeleteMoreFormat = IDS_DELETE_MORE_FORMAT,
     DeleteMixedWarning = IDS_DELETE_MIXED_WARNING,

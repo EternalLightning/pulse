@@ -55,6 +55,9 @@ public:
 
     // Admission is consumable exactly once; callers execute only this snapshot.
     std::optional<DeletePlan> TakeAccepted(uint64_t token);
+    // A consumed snapshot may use distinct one-shot backend tokens for its
+    // recycle/permanent groups. This cannot admit or replay another snapshot.
+    uint64_t ReserveExecutionToken(uint64_t token);
     bool WasRejected(uint64_t token) const;
 
     // Cancels unconsumed admission/confirmation; cannot revoke an already taken plan.

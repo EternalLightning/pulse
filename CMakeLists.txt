@@ -375,7 +375,10 @@ add_executable(pulse_rename_ops_test src/bench/rename_ops_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp)
 target_link_libraries(pulse_rename_ops_test PRIVATE ole32 shell32 uuid bcrypt)
 add_executable(pulse_recycle_backend_test src/bench/recycle_backend_test.cpp
-    src/ops/ops_manager.cpp src/ipc/shell_client.cpp src/shell_host/deletion_identity.cpp)
+    src/ops/ops_manager.cpp src/ipc/shell_client.cpp src/shell_host/deletion_identity.cpp
+    src/bench/localization_test.rc)
+set_source_files_properties(src/app/pulse.rc src/bench/localization_test.rc PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h")
 target_link_libraries(pulse_recycle_backend_test PRIVATE ole32 shell32 uuid bcrypt)
 # Standalone OpsManager tests need the deletion service's direct dependencies.
 foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test)
@@ -383,7 +386,7 @@ foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backe
         src/ops/delete_service.cpp src/ops/delete_operation.cpp
         src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
     target_link_libraries(${ops_test_target} PRIVATE
-        pulse_localization advapi32 shlwapi netapi32)
+        pulse_localization advapi32 shlwapi netapi32 mpr)
 endforeach()
 add_executable(pulse_delete_service_test src/bench/delete_service_test.cpp
     src/ops/delete_service.cpp)

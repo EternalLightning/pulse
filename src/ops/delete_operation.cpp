@@ -3,6 +3,8 @@
 #include "../ipc/shell_client.h"
 #include "../ipc/delete_plan_protocol.h"
 #include "../common/localization.h"
+#include "../common/path_utils.h"
+#include <winnetwk.h>
 #include <algorithm>
 #include <chrono>
 #include <set>
@@ -12,6 +14,18 @@ namespace {
 bool SamePath(const std::wstring& left, const std::wstring& right) {
     // Case-distinct files can coexist in a case-sensitive directory.
     return fs::NormalizePath(left) == fs::NormalizePath(right);
+}
+
+bool IsNetworkDeletionPath(std::wstring_view path) {
+    const auto parsed = pulse::path::StripExtendedPathPrefix(path);
+    if (parsed.starts_with(L"\\\\")) return true;
+    if (parsed.size() < 3 || parsed[1] != L':') return false;
+    const wchar_t drive[] = {parsed[0], L':', 0};
+    const wchar_t root[] = {parsed[0], L':', L'\\', 0};
+    if (GetDriveTypeW(root) == DRIVE_REMOTE) return true;
+    wchar_t remote[32768]{};
+    DWORD size = ARRAYSIZE(remote);
+    return WNetGetConnectionW(drive, remote, &size) == NO_ERROR;
 }
 
 bool AddExistingRecyclePair(DeleteTarget& target, std::wstring& error) {
@@ -60,8 +74,9 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
         target.path = item.path;
         target.physical_paths = item.physical_paths;
         if (request.type == OpType::RecycleDelete) {
-            target.disposition = DeleteDisposition::RecycleRequested;
-            target.reason = L"Request recycling; Windows must ask before permanent fallback.";
+            const bool network = std::any_of(target.physical_paths.begin(), target.physical_paths.end(), IsNetworkDeletionPath);
+            target.disposition = network ? DeleteDisposition::Permanent : DeleteDisposition::RecycleRequested;
+            if (network) target.reason = l10n::Get(l10n::StringId::DeleteReasonNetwork);
         } else {
             target.disposition = DeleteDisposition::Permanent;
             if (item.recycle_item && !AddExistingRecyclePair(target, error)) return {};
@@ -242,17 +257,19 @@ void OpsManager::RunDelete(const QueueItem& item) {
             {}, false, false, {}, {}, cancelled);
         return;
     }
-    std::vector<std::wstring> physical;
+    std::vector<std::wstring> physical, permanent_roots, recycle_roots;
     for (const auto& target : accepted->targets) {
         if (target.disposition != DeleteDisposition::Permanent &&
             target.disposition != DeleteDisposition::RecycleRequested) {
             FinishDelete(item, l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
         }
         physical.insert(physical.end(), target.physical_paths.begin(), target.physical_paths.end());
+        auto& group = target.disposition == DeleteDisposition::Permanent ? permanent_roots : recycle_roots;
+        group.insert(group.end(), target.physical_paths.begin(), target.physical_paths.end());
     }
     QueueItem admitted = item;
     admitted.req.sources = physical;
-    const bool recycle = item.req.type == OpType::RecycleDelete;
+    const bool recycle = !recycle_roots.empty();
     admitted.req.type = recycle ? OpType::RecycleDelete : OpType::RealDelete; // Freeze empty-bin roots.
     admitted.req.delete_targets.clear();
     for (const auto& target : accepted->targets)
@@ -270,62 +287,73 @@ void OpsManager::RunDelete(const QueueItem& item) {
         status.phase = OpPhase::Running; status.total_items = accepted->targets.size();
         status.summary = l10n::Get(recycle ? l10n::StringId::Delete : l10n::StringId::PermanentDelete);
     });
-    shell_activity_tick_ = GetTickCount64();
-    {
-        std::lock_guard<std::mutex> lock(done_mutex_);
-        done_ready_ = false; done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
-    }
-    auto& client = ipc::ShellClient::Instance();
-    uint32_t id = 0;
-    {
-        // Linearize Cancel/Stop against the destructive send handoff. No mutex
-        // is held during confirmation, and no backend retry is allowed.
-        std::unique_lock<std::mutex> lock(delete_wait_mutex_);
-        if (delete_cancel_.load() || stopping_.load()) {
-            lock.unlock();
-            FinishDelete(item, L"", {}, false, false, {}, {}, true); return;
-        }
-        id = client.DeleteAuthorized(physical, prepared.token, recycle, ui_hwnd_.load());
-        current_req_id_.store(id);
-    }
-    if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);
-    if (id == 0) { FinishDelete(item, l10n::Get(l10n::StringId::OperationFailedMessage)); return; }
-    uint32_t hr = 0; bool cancelled = false;
-    if (!WaitShellDone(id, hr, cancelled, error)) {
-        // WaitShellDone already bumps the finished-task counter. Preserve an
-        // uncertain active plan: the backend may have mutated before Stop.
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            delete_outcomes_.push_back({item.seq, false, true});
-            if (item.req.undo_revision && item.req.undo_revision == undo_revision_ && !undo_.empty()) {
-                undo_.back().supported = false; ++undo_revision_;
-            }
-            if (active_item_ && active_item_->seq == item.seq) {
-                if (item.recovery_sequence != 0) {
-                    std::erase_if(pending_recovery_, [&](const RecoveryEntry& entry) { return entry.sequence == item.recovery_sequence; });
-                    scheduled_recovery_.erase(item.recovery_sequence);
-                }
-                pending_recovery_.push_back({item.seq, active_item_->req, true});
-                active_item_.reset();
-            }
-        }
-        PersistJournal();
-        delete_active_.store(false);
-        return;
-    }
     std::vector<std::wstring> actual, recycled, recycle_destinations;
-    {
-        std::lock_guard<std::mutex> lock(done_mutex_);
-        for (const auto& path : done_deleted_paths_)
-            if (std::any_of(physical.begin(), physical.end(), [&](const auto& requested) { return SamePath(path, requested); })) actual.push_back(path);
-        for (size_t i = 0; i < done_recycled_paths_.size(); ++i) {
-            const auto& path = done_recycled_paths_[i];
-            if (std::any_of(physical.begin(), physical.end(), [&](const auto& requested) { return SamePath(path, requested); })) {
-                recycled.push_back(path);
-                recycle_destinations.push_back(i < done_recycle_destinations_.size() ? done_recycle_destinations_[i] : L"");
-            }
+    uint32_t hr = 0;
+    bool cancelled = false;
+    uint64_t execution_token = prepared.token;
+    // One confirmed snapshot, separate backend modes. Never permanently delete
+    // the local members of a mixed network/local batch just to suppress Shell UI.
+    for (const auto& group : {std::pair{false, permanent_roots}, std::pair{true, recycle_roots}}) {
+        if (group.second.empty()) continue;
+        if (!execution_token) { hr = static_cast<uint32_t>(E_UNEXPECTED); break; }
+        shell_activity_tick_ = GetTickCount64();
+        {
+            std::lock_guard<std::mutex> lock(done_mutex_);
+            done_ready_ = false; done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
         }
-        done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
+        auto& client = ipc::ShellClient::Instance();
+        uint32_t id = 0;
+        {
+            // Linearize Cancel/Stop against the destructive send handoff. No mutex
+            // is held during confirmation, and no backend retry is allowed.
+            std::unique_lock<std::mutex> lock(delete_wait_mutex_);
+            if (delete_cancel_.load() || stopping_.load()) {
+                lock.unlock();
+                cancelled = true; break;
+            }
+            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load());
+            current_req_id_.store(id);
+        }
+        if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);
+        if (id == 0) { hr = static_cast<uint32_t>(E_FAIL); break; }
+        if (!WaitShellDone(id, hr, cancelled, error)) {
+            // WaitShellDone already bumps the finished-task counter. Preserve an
+            // uncertain active plan: the backend may have mutated before Stop.
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                delete_outcomes_.push_back({item.seq, false, true});
+                if (item.req.undo_revision && item.req.undo_revision == undo_revision_ && !undo_.empty()) {
+                    undo_.back().supported = false; ++undo_revision_;
+                }
+                if (active_item_ && active_item_->seq == item.seq) {
+                    if (item.recovery_sequence != 0) {
+                        std::erase_if(pending_recovery_, [&](const RecoveryEntry& entry) { return entry.sequence == item.recovery_sequence; });
+                        scheduled_recovery_.erase(item.recovery_sequence);
+                    }
+                    pending_recovery_.push_back({item.seq, active_item_->req, true});
+                    active_item_.reset();
+                }
+            }
+            PersistJournal();
+            delete_active_.store(false);
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(done_mutex_);
+            for (const auto& path : done_deleted_paths_)
+                if (std::any_of(group.second.begin(), group.second.end(), [&](const auto& requested) { return SamePath(path, requested); })) actual.push_back(path);
+            for (size_t i = 0; i < done_recycled_paths_.size(); ++i) {
+                const auto& path = done_recycled_paths_[i];
+                if (std::any_of(group.second.begin(), group.second.end(), [&](const auto& requested) { return SamePath(path, requested); })) {
+                    recycled.push_back(path);
+                    recycle_destinations.push_back(i < done_recycle_destinations_.size() ? done_recycle_destinations_[i] : L"");
+                }
+            }
+            done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
+        }
+        if (FAILED(static_cast<HRESULT>(hr)) || cancelled) break;
+        if (!group.first && !recycle_roots.empty())
+            execution_token = delete_service_.ReserveExecutionToken(prepared.token);
     }
     const auto logical = MapDeletedTargets(*accepted, actual);
     const auto logical_recycled = MapDeletedTargets(*accepted, recycled);

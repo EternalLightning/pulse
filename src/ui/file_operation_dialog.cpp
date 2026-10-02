@@ -775,6 +775,11 @@ private:
             painter_.SetScale(scale_);
             SizeToContent();
             return 0;
+#ifdef PULSE_UI_TEST_HOOKS
+        case kConfirmSnapshotMessage:
+            Render();
+            return lparam && compositor_.SaveSnapshot(reinterpret_cast<const wchar_t*>(lparam));
+#endif
         case WM_NCCALCSIZE:
             return 0;
         case WM_NCHITTEST:

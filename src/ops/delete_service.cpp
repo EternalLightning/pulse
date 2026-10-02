@@ -111,6 +111,13 @@ bool DeleteService::WasRejected(uint64_t token) const {
     return token != 0 && token == current_token_ && state_ == State::Rejected;
 }
 
+uint64_t DeleteService::ReserveExecutionToken(uint64_t token) {
+    std::lock_guard lock(mutex_);
+    if (!token || token != current_token_ || state_ != State::Consumed ||
+        last_token_ == std::numeric_limits<uint64_t>::max()) return 0;
+    return ++last_token_;
+}
+
 void DeleteService::Cancel() {
     std::lock_guard lock(mutex_);
     if (state_ == State::AwaitingConfirmation || state_ == State::Accepted) {

@@ -511,7 +511,26 @@ void ConcurrentResolveCancelNeverDoubleAdmits() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--execution-tokens") {
+        try {
+            DeleteService service;
+            const auto prepared = service.Prepare(SinglePlan(DeleteDisposition::Permanent));
+            Check(!service.ReserveExecutionToken(prepared.token), "unconfirmed snapshot must not reserve execution");
+            Check(service.Resolve(prepared.token, true), "accept the exact pending token");
+            Check(!service.ReserveExecutionToken(prepared.token), "untaken admission must not reserve execution");
+            Check(service.TakeAccepted(prepared.token).has_value(), "consume accepted snapshot once");
+            const auto second = service.ReserveExecutionToken(prepared.token);
+            Check(second > prepared.token && !service.TakeAccepted(second), "group token is unique and cannot admit another snapshot");
+            const auto next = service.Prepare(SinglePlan(DeleteDisposition::Permanent));
+            Check(next.token > second && !service.ReserveExecutionToken(prepared.token), "new preparation invalidates old execution snapshot");
+            Check(service.Resolve(next.token, false) && !service.ReserveExecutionToken(next.token), "rejection never reserves backend execution");
+            std::cout << "[PASS] mixed-mode execution tokens require a consumed snapshot and never admit replay\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cout << "[FAIL] execution tokens: " << error.what() << '\n'; return 1;
+        }
+    }
     struct TestCase {
         const char* name;
         void (*run)();

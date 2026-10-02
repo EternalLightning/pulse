@@ -6,6 +6,7 @@
 #include "../ipc/delete_plan_protocol.h"
 #include <iostream>
 #include <stdexcept>
+#include <filesystem>
 
 LRESULT CALLBACK WndProcImpl(HWND, UINT, WPARAM, LPARAM);
 
@@ -58,11 +59,26 @@ struct DeleteIntegrationProbe {
 namespace {
 int dialog_key = VK_ESCAPE;
 bool saw_dialog = false;
+std::wstring network_capture;
+bool network_capture_ok = false;
+bool CaptureConfirmation(HWND window) {
+#ifdef PULSE_UI_TEST_HOOKS
+    return SendMessageW(window, pulse::ui::kConfirmSnapshotMessage, 0,
+        reinterpret_cast<LPARAM>(network_capture.c_str())) != 0;
+#else
+    (void)window;
+    return false;
+#endif
+}
 void CALLBACK RejectDialog(HWND owner, UINT, UINT_PTR id, DWORD) {
     HWND dialog = FindWindowW(L"PulseConfirmWindow", nullptr);
     if (!dialog) return;
     saw_dialog = true;
     KillTimer(owner, id);
+    if (!network_capture.empty()) {
+        RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        network_capture_ok = CaptureConfirmation(dialog);
+    }
     if (dialog_key == WM_CLOSE) PostMessageW(dialog, WM_CLOSE, 0, 0);
     else PostMessageW(dialog, WM_KEYDOWN, dialog_key, 0);
 }
@@ -75,7 +91,7 @@ void Pump() {
 }
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
     compat::EnableDpiAwareness();
     OleInitialize(nullptr);
@@ -88,6 +104,48 @@ int main() {
     const HWND owner = CreateWindowExW(0, L"STATIC", L"Delete fixture", WS_OVERLAPPEDWINDOW,
         0, 0, 1280, 900, nullptr, nullptr, nullptr, nullptr);
     check(owner != nullptr, "isolated owner window exists");
+    if (argc == 2 && std::string_view(argv[1]) == "--network-confirmation") {
+        using Probe = ops::DeleteIntegrationProbe;
+        auto state = std::make_unique<AppState>(); auto& s = *state;
+        s.isolatedTest = true; s.appPrefs.persist = false; s.searchHistory.persist = false;
+        s.hwnd = owner; s.ops.SetUiWindow(owner);
+        s.operationWindow = std::make_unique<ui::FileOperationWindow>();
+        check(s.operationWindow->Create(owner, {}), "create isolated Pulse progress window");
+        std::filesystem::create_directories(L"bench_data/network-confirmation");
+        for (const auto locale : {L"en-US", L"zh-CN"}) {
+            l10n::SetLanguage(locale);
+            s.darkMode = std::wstring_view(locale) == L"zh-CN";
+            s.operationWindow->SetTheme(s.darkMode, s.accentColor);
+            s.operationWindow->Show(false);
+            Probe::Notify(s.ops, [&] {
+                const auto pending = s.ops.PendingDeleteConfirmation();
+                if (!pending) return;
+                const auto spec = BuildDeleteConfirmationSpec(*pending);
+                const auto& reason = l10n::Get(l10n::StringId::DeleteReasonNetwork);
+                check(!reason.empty() && spec.message.find(reason) != std::wstring::npos &&
+                    spec.cancel_is_default && spec.danger,
+                    "Pulse confirmation includes localized network reason and defaults to cancellation");
+                wchar_t count[256]{};
+                swprintf_s(count, l10n::Get(l10n::StringId::DeleteCountFormat).c_str(), 2ull, 1ull, 1ull);
+                check(spec.message.find(count) != std::wstring::npos, "mixed confirmation counts one permanent and one recycle request");
+                network_capture = std::wstring(L"bench_data/network-confirmation/") + locale + L".png";
+                saw_dialog = false; network_capture_ok = false; dialog_key = VK_RETURN;
+                SetTimer(owner, 91, 300, RejectDialog);
+                PresentDeleteConfirmation(s);
+                KillTimer(owner, 91);
+                check(saw_dialog && network_capture_ok && !s.operationWindow->IsVisible(),
+                    "actual Pulse confirmation renders while previous progress window is hidden");
+                network_capture.clear();
+            });
+            ops::OpRequest request; request.type = ops::OpType::RecycleDelete;
+            request.sources = {L"C:\\Pulse-isolated-fixture\\local.txt", L"Z:\\Pulse-read-only-plan-check.txt"};
+            Probe::Request(s.ops, request);
+            check(s.ops.Status().phase == ops::OpPhase::Cancelled && s.ops.DrainCompletions().empty(),
+                "default Enter rejects network deletion before any backend invocation");
+        }
+        Probe::Notify(s.ops, {}); s.operationWindow->Destroy(); s.hwnd = nullptr;
+        DestroyWindow(owner); OleUninitialize(); return failures ? 1 : 0;
+    }
     check(ipc::IsLosslessDeleteShellPath(L"\\\\?\\C:\\Fixture\\normal.txt") &&
         ipc::IsLosslessDeleteShellPath(L"\\\\?\\UNC\\server\\share\\normal.txt") &&
         !ipc::IsLosslessDeleteShellPath(L"\\\\?\\C:\\Fixture\\name.") &&

@@ -3,6 +3,7 @@
 #include "../fs/fs_recycle.h"
 #include "../common/path_utils.h"
 #include "../shell_host/deletion_identity.h"
+#include "../ops/delete_operation.h"
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <commctrl.h>
 #include <shlobj.h>
+#include <winnetwk.h>
 
 namespace pulse::ops {
 struct DeleteIntegrationProbe {
@@ -171,6 +173,128 @@ int RunDeletionIdentity() {
     std::filesystem::remove_all(root);
     return failures ? 1 : 0;
 }
+
+int RunNetworkDeletion() {
+    using namespace pulse;
+    const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
+        (L"network-delete-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    std::filesystem::create_directories(root);
+    const auto local = (root / L"local.txt").wstring();
+    const auto network_file = (root / (L"network-fixture-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()) + L".txt")).wstring();
+    std::ofstream(local) << "recycle this local file";
+    std::ofstream(network_file) << "delete only this isolated network fixture";
+    const auto unc = L"\\\\localhost\\" + network_file.substr(0, 1) + L"$" + network_file.substr(2);
+    int failures = 0;
+    auto check = [&](bool ok, const char* text) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << text << std::endl;
+        failures += !ok;
+    };
+    ops::OpRequest request; request.type = ops::OpType::RecycleDelete;
+    request.sources = {local, unc};
+    std::wstring error;
+    const auto plan = ops::BuildDeletePlan(request, 1, error);
+    check(error.empty() && plan.targets.size() == 2 &&
+        plan.targets[0].disposition == ops::DeleteDisposition::RecycleRequested &&
+        plan.targets[1].disposition == ops::DeleteDisposition::Permanent && !plan.targets[1].reason.empty(),
+        "UNC permanent confirmation retains local recycling intent in a mixed batch");
+    if (!error.empty() || plan.targets.size() != 2 || plan.targets[1].reason.empty())
+        std::cout << "[INFO] preparation error=" << Utf8(error) << " targets=" << plan.targets.size()
+            << " network reason=" << Utf8(l10n::Get(l10n::StringId::DeleteReasonNetwork)) << std::endl;
+    request.sources = {L"Z:\\Pulse-read-only-plan-check.txt"};
+    const auto mapped_plan = ops::BuildDeletePlan(request, 2, error);
+    check(error.empty() && mapped_plan.targets.size() == 1 &&
+        mapped_plan.targets[0].disposition == ops::DeleteDisposition::Permanent,
+        "current mapped Z drive is classified without reading or deleting user files");
+    if (GetFileAttributesW(unc.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::cout << "[SKIP] localhost share unavailable, Win32 error=" << GetLastError() << std::endl;
+        std::filesystem::remove_all(root); return failures ? 1 : 0;
+    }
+    wchar_t drive[] = {0, L':', 0};
+    const DWORD drives = GetLogicalDrives();
+    for (wchar_t letter = L'W'; letter >= L'G'; --letter)
+        if ((drives & (1u << (letter - L'A'))) == 0) { drive[0] = letter; break; }
+    const auto remote = L"\\\\localhost\\" + root.root_name().wstring().substr(0, 1) + L"$";
+    NETRESOURCEW resource{}; resource.dwType = RESOURCETYPE_DISK;
+    resource.lpLocalName = drive; resource.lpRemoteName = const_cast<wchar_t*>(remote.c_str());
+    const DWORD connected = drive[0] ? WNetAddConnection2W(&resource, nullptr, nullptr, CONNECT_TEMPORARY) : ERROR_NO_MORE_ITEMS;
+    if (connected == NO_ERROR) {
+        request.sources = {std::wstring(drive) + network_file.substr(2)};
+        const auto mapped = ops::BuildDeletePlan(request, 3, error);
+        check(error.empty() && mapped.targets[0].disposition == ops::DeleteDisposition::Permanent,
+            "temporary mapped share uses Pulse permanent confirmation");
+    } else std::cout << "[SKIP] temporary drive mapping unavailable, Win32 error=" << connected << std::endl;
+    request.sources = {local, connected == NO_ERROR ? std::wstring(drive) + network_file.substr(2) : unc};
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse network deletion fixture", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    ops::OpsManager manager; manager.SetUiWindow(owner); manager.Start([] {});
+    auto wait = [&](auto ready) {
+        const auto deadline = GetTickCount64() + 15000;
+        while (!ready() && GetTickCount64() < deadline) { Sleep(5); MSG msg{};
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+        }
+        return ready();
+    };
+    std::atomic<bool> stop{false}, native_warning{false};
+    std::thread observer([&] {
+        while (!stop.load()) {
+            struct Context { const std::wstring& leaf; std::atomic<bool>& warned; } context{network_file, native_warning};
+            EnumWindows([](HWND window, LPARAM param) -> BOOL {
+                if (!IsWindowVisible(window)) return TRUE;
+                DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
+                if (pid == GetCurrentProcessId()) return TRUE;
+                std::wstring text;
+                EnumChildWindows(window, [](HWND child, LPARAM result) -> BOOL {
+                    wchar_t label[2048]{}; GetWindowTextW(child, label, ARRAYSIZE(label));
+                    *reinterpret_cast<std::wstring*>(result) += label; return TRUE;
+                }, reinterpret_cast<LPARAM>(&text));
+                auto& value = *reinterpret_cast<Context*>(param);
+                if (text.find(std::filesystem::path(value.leaf).filename().wstring()) != std::wstring::npos &&
+                    (text.find(L"永久") != std::wstring::npos || text.find(L"permanent") != std::wstring::npos)) {
+                    value.warned.store(true);
+                    PostMessageW(window, WM_CLOSE, 0, 0); // Fail closed if native UI regresses.
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&context));
+            Sleep(10);
+        }
+    });
+    auto before = manager.Status().completed_ops; manager.Submit(request);
+    check(wait([&] { return manager.PendingDeleteConfirmation().has_value(); }) &&
+        manager.Status().phase == ops::OpPhase::WaitingForDeleteConfirmation,
+        "Pulse confirmation precedes backend progress or mutation");
+    if (const auto confirmation = manager.PendingDeleteConfirmation()) manager.ResolveDeleteConfirmation(confirmation->token, false);
+    check(wait([&] { return manager.Status().completed_ops > before; }) &&
+        manager.Status().phase == ops::OpPhase::Cancelled && std::filesystem::exists(local) &&
+        std::filesystem::exists(network_file) && manager.DrainCompletions().empty(),
+        "rejecting mixed network confirmation preserves every selected file");
+    before = manager.Status().completed_ops; manager.Submit(request);
+    const bool pending = wait([&] { return manager.PendingDeleteConfirmation().has_value(); });
+    if (const auto confirmation = manager.PendingDeleteConfirmation()) manager.ResolveDeleteConfirmation(confirmation->token, true);
+    const bool done = pending && wait([&] { return manager.Status().completed_ops > before; });
+    check(done && manager.Status().phase == ops::OpPhase::Completed &&
+        !std::filesystem::exists(local) && !std::filesystem::exists(network_file),
+        "acceptance permanently deletes network fixture and recycles local fixture");
+    const auto results = manager.DrainCompletions();
+    check(results.size() == 2 && results[0].type == ops::OpType::RealDelete &&
+        results[0].sources == std::vector<std::wstring>{request.sources[1]} &&
+        results[1].type == ops::OpType::RecycleDelete && results[1].sources == std::vector<std::wstring>{local},
+        "mixed completion preserves separate permanent and recycle outcomes");
+    if (!done || manager.Status().phase != ops::OpPhase::Completed)
+        std::cout << "[INFO] " << Utf8(manager.Status().last_error) << std::endl;
+    if (manager.CanUndo()) {
+        before = manager.Status().completed_ops; manager.Undo();
+        check(wait([&] { return manager.Status().completed_ops > before; }) &&
+            std::filesystem::exists(local) && !std::filesystem::exists(network_file),
+            "Undo restores only local recycle member, never claims network recovery");
+    } else check(false, "local recycle member remains undoable");
+    stop.store(true); observer.join();
+    check(!native_warning.load(), "no Windows permanent-delete dialog appeared during the network operation");
+    manager.Stop(); if (owner) DestroyWindow(owner);
+    if (connected == NO_ERROR) check(WNetCancelConnection2W(drive, 0, FALSE) == NO_ERROR, "remove only the temporary test drive mapping");
+    if (!failures) std::filesystem::remove_all(root);
+    return failures ? 1 : 0;
+}
 }
 
 int main(int argc, char** argv) {
@@ -178,6 +302,7 @@ int main(int argc, char** argv) {
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     if (argc == 2 && std::string_view(argv[1]) == "--permanent-from-bin") return RunPermanentFromBin();
     if (argc == 2 && std::string_view(argv[1]) == "--identity-only") return RunDeletionIdentity();
+    if (argc == 2 && std::string_view(argv[1]) == "--network-delete") return RunNetworkDeletion();
     wchar_t module[32768]{};
     if (!GetModuleFileNameW(nullptr, module, ARRAYSIZE(module))) return 2;
     const auto root = std::filesystem::path(module).parent_path().parent_path() /

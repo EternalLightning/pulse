@@ -11,6 +11,10 @@
 
 namespace pulse::ui {
 
+#ifdef PULSE_UI_TEST_HOOKS
+inline constexpr UINT kConfirmSnapshotMessage = WM_APP + 0x2B1;
+#endif
+
 struct FileOperationCallbacks {
     std::function<void()> cancel;
     std::function<void()> pause;

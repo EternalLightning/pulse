@@ -30,7 +30,8 @@ ui::ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation&
     uint64_t permanent = 0, recyclable = 0;
     for (const auto& target : pending->plan.targets) {
         if (target.disposition == ops::DeleteDisposition::Permanent) ++permanent;
-        else if (target.disposition == ops::DeleteDisposition::Recyclable) ++recyclable;
+        else if (target.disposition == ops::DeleteDisposition::Recyclable ||
+            target.disposition == ops::DeleteDisposition::RecycleRequested) ++recyclable;
     }
     wchar_t count[256]{};
     swprintf_s(count, l10n::Get(I::DeleteCountFormat).c_str(),
@@ -58,6 +59,7 @@ ui::ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation&
 void PresentDeleteConfirmation(AppState& s) {
     const auto pending = s.ops.PendingDeleteConfirmation();
     if (!pending || pending->token == s.deleteUiToken) return;
+    if (s.operationWindow && s.operationWindow->IsVisible()) s.operationWindow->Hide();
     s.deleteUiToken = pending->token; // Set before the modal loop can reenter WM_OPS_NOTIFY.
     auto spec = BuildDeleteConfirmationSpec(*pending);
     const uint64_t token = pending->token;
