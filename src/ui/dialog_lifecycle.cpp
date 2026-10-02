@@ -142,7 +142,7 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
         RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
     const ULONGLONG start = GetTickCount64();
-    const float duration = show ? 90.0f : 50.0f;
+    const float duration = 90.0f;
     for (;;) {
         const float t = std::min(1.0f, static_cast<float>(GetTickCount64() - start) / duration);
         const float eased = t * t * (3.0f - 2.0f * t);
