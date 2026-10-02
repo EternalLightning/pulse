@@ -1073,6 +1073,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             SetCursor(LoadCursorW(nullptr, IDC_HAND));
             return TRUE;
         }
+        if (reinterpret_cast<HWND>(wParam) == hwnd) {
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            return TRUE;
+        }
         break;
     }
 

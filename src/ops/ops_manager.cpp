@@ -1262,7 +1262,7 @@ void OpsManager::OpenThread() {
                 buf.push_back(0);
                 STARTUPINFOW si{ sizeof(si) };
                 PROCESS_INFORMATION pi{};
-                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.dwFlags = STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
                 si.wShowWindow = SW_SHOWNORMAL;
                 const wchar_t* dir = item.open_path.empty() ? nullptr : item.open_path.c_str();
                 if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 0, nullptr, dir,

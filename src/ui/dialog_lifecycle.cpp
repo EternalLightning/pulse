@@ -14,7 +14,7 @@ constexpr wchar_t kVisual[] = L"Pulse.DialogComposition.Visual";
 constexpr wchar_t kFading[] = L"Pulse.DialogFading";
 constexpr wchar_t kOwnerDim[] = L"Pulse.OwnerDimOverlay";
 constexpr wchar_t kDimClass[] = L"PulseOwnerDimOverlay";
-struct DimState { HWND owner = nullptr; unsigned scopes = 1; };
+struct DimState { HWND owner = nullptr; unsigned scopes = 1; HWND dialog = nullptr; };
 
 bool PlaceDimOverlay(HWND overlay, HWND owner) {
     RECT client{};
@@ -71,10 +71,41 @@ void HideWithoutActivation(HWND window) {
         SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
 }
 
+HWND CompanionDimOverlay(HWND window, bool show) {
+    const HWND owner = GetWindow(window, GW_OWNER);
+    const HWND overlay = reinterpret_cast<HWND>(GetPropW(owner, kOwnerDim));
+    if (!IsWindow(overlay) || overlay == window) return nullptr;
+    auto* state = reinterpret_cast<DimState*>(GetWindowLongPtrW(overlay, GWLP_USERDATA));
+    if (!state || state->scopes != 1) return nullptr;
+    if (show && !state->dialog && !IsWindowVisible(overlay)) {
+        state->dialog = window;
+        return overlay;
+    }
+    if (!show && state->dialog == window) {
+        state->dialog = nullptr;
+        return overlay;
+    }
+    return nullptr;
+}
+
+void SetDimOpacity(HWND overlay, float opacity) {
+    if (overlay) SetLayeredWindowAttributes(overlay, 0,
+        static_cast<BYTE>(std::lround(opacity * 64.0f)), LWA_ALPHA);
+}
+
 void Fade(HWND window, bool show, int show_command = SW_SHOW) {
     if (!IsWindow(window) || (!show && !IsWindowVisible(window))) return;
-    if (!AnimationsEnabled()) {
+    const HWND dim = CompanionDimOverlay(window, show);
+    const auto show_immediately = [&] {
+        if (dim) {
+            SetDimOpacity(dim, show ? 1.0f : 0.0f);
+            if (show) ShowWindow(dim, SW_SHOWNOACTIVATE);
+            else HideWithoutActivation(dim);
+        }
         if (show) ShowWindow(window, show_command);
+    };
+    if (!AnimationsEnabled()) {
+        show_immediately();
         return;
     }
     Microsoft::WRL::ComPtr<IDCompositionDevice> device = reinterpret_cast<IDCompositionDevice*>(GetPropW(window, kDevice));
@@ -84,7 +115,7 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
     const LONG_PTR original_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
     if ((composed && FAILED(device->CreateEffectGroup(&effect))) ||
         (!composed && (original_style & WS_EX_NOREDIRECTIONBITMAP))) {
-        if (show) ShowWindow(window, show_command);
+        show_immediately();
         return;
     }
     BYTE original_alpha = 255;
@@ -103,6 +134,10 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
             original_flags | LWA_ALPHA);
     }
     if (show) {
+        if (dim) {
+            SetDimOpacity(dim, 0.0f);
+            ShowWindow(dim, SW_SHOWNOACTIVATE);
+        }
         ShowWindow(window, show_command);
         RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
@@ -117,11 +152,15 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
             device->Commit();
         } else SetLayeredWindowAttributes(window, original_key,
             static_cast<BYTE>(std::lround(opacity * original_alpha)), original_flags | LWA_ALPHA);
+        SetDimOpacity(dim, opacity);
         DwmFlush();
         if (t >= 1.0f) break;
         Sleep(8);
     }
-    if (!show) HideWithoutActivation(window);
+    if (!show) {
+        HideWithoutActivation(window);
+        if (dim) HideWithoutActivation(dim);
+    }
     if (composed) {
         visual->SetEffect(nullptr);
         device->Commit();
@@ -155,9 +194,8 @@ OwnerDimScope::OwnerDimScope(HWND owner) {
         DestroyWindow(overlay_); owner_ = overlay_ = nullptr; return;
     }
     PlaceDimOverlay(overlay_, owner);
-    SetLayeredWindowAttributes(overlay_, 0, 64, LWA_ALPHA);
+    SetLayeredWindowAttributes(overlay_, 0, 0, LWA_ALPHA);
     SetTimer(overlay_, 1, 50, nullptr);
-    Fade(overlay_, true, SW_SHOWNOACTIVATE);
 }
 
 OwnerDimScope::~OwnerDimScope() {

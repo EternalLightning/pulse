@@ -91,7 +91,7 @@ ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool*
     for (const auto& arg : args) command += L" " + Quote(arg);
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
     startup.StartupInfo.wShowWindow = SW_HIDE;
     startup.StartupInfo.hStdInput = input.value;
     startup.StartupInfo.hStdOutput = startup.StartupInfo.hStdError = write.value;

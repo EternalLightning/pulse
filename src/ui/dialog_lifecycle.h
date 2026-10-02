@@ -25,6 +25,7 @@ void HideComposedDialog(HWND dialog, HWND modal_owner = nullptr);
 
 // Dim only an owned window's client area while a modal surface is present.
 // Nested scopes share one overlay; it never activates or steals keyboard focus.
+// The overlay follows its dialog's fade clock rather than animating in this scope.
 class OwnerDimScope {
 public:
     explicit OwnerDimScope(HWND owner);
