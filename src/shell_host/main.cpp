@@ -13,6 +13,7 @@
 #include "../ipc/delete_plan_protocol.h"
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
+#include "deletion_identity.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
 #include "../common/crash_reporter.h"
@@ -635,7 +636,7 @@ void ExecuteRequest(Request* req) {
             if (SUCCEEDED(ihr) && IsAuthorizedDeletion(req->type)) {
                 PWSTR resolved = nullptr;
                 ihr = item->GetDisplayName(SIGDN_FILESYSPATH, &resolved);
-                if (SUCCEEDED(ihr) && (!resolved || pulse::path::StripExtendedPathPrefix(resolved) != ToParsingPath(src))) ihr = E_ACCESSDENIED;
+                if (SUCCEEDED(ihr) && (!resolved || !pulse::shell::IsSameDeletionItem(src, resolved))) ihr = E_ACCESSDENIED;
                 if (resolved) CoTaskMemFree(resolved);
                 if (FAILED(ihr)) { item->Release(); item = nullptr; }
             }

@@ -374,8 +374,11 @@ target_link_libraries(pulse_ops_test PRIVATE ole32 shell32 uuid bcrypt)
 add_executable(pulse_rename_ops_test src/bench/rename_ops_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp)
 target_link_libraries(pulse_rename_ops_test PRIVATE ole32 shell32 uuid bcrypt)
+add_executable(pulse_recycle_backend_test src/bench/recycle_backend_test.cpp
+    src/ops/ops_manager.cpp src/ipc/shell_client.cpp src/shell_host/deletion_identity.cpp)
+target_link_libraries(pulse_recycle_backend_test PRIVATE ole32 shell32 uuid bcrypt)
 # Standalone OpsManager tests need the deletion service's direct dependencies.
-foreach(ops_test_target pulse_ops_test pulse_rename_ops_test)
+foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test)
     target_sources(${ops_test_target} PRIVATE
         src/ops/delete_service.cpp src/ops/delete_operation.cpp
         src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
@@ -477,6 +480,7 @@ endif()
 if(TARGET pulse_ops_test AND TARGET pulse_shell)
     add_dependencies(pulse_ops_test pulse_shell)
     add_dependencies(pulse_rename_ops_test pulse_shell)
+    add_dependencies(pulse_recycle_backend_test pulse_shell)
 endif()
 
 # Headless modal lifecycle checks: no screenshots and no foreground activation.

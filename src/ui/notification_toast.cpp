@@ -4,6 +4,8 @@
 
 namespace pulse::ui {
 namespace {
+constexpr ULONGLONG kAppearDurationMs = 90;
+
 bool Contains(const D2D1_RECT_F& rect, float x, float y) {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
@@ -48,7 +50,7 @@ bool NotificationToast::HandleMessage(HWND owner, UINT message, WPARAM wparam, L
             if (!remaining_) { Dismiss(owner); return true; }
         }
         last_tick_ = now;
-        if (now - born_ >= 180) {
+        if (now - born_ >= kAppearDurationMs) {
             if (persistent_) KillTimer(owner, timer);
             else SetTimer(owner, timer, 200, nullptr);
         }
@@ -117,7 +119,8 @@ void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float s
     }
     const float height = std::min(std::max(72 * scale, body_height + 44 * scale),
         std::max(72 * scale, compositor.Height() - 110 * scale));
-    const float age = std::min(1.0f, static_cast<float>(GetTickCount64() - born_) / 180.0f);
+    const float age = std::min(1.0f, static_cast<float>(GetTickCount64() - born_) /
+        static_cast<float>(kAppearDurationMs));
     const float slide = high_contrast ? 0 : 12 * scale * (1 - age) * (1 - age);
     const float right = top_center_ ? (compositor.Width() + width) * 0.5f : compositor.Width() - margin;
     const float top = top_center_ ? 64 * scale - slide : compositor.Height() - 48 * scale + slide - height;
