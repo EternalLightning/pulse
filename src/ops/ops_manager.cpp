@@ -683,6 +683,7 @@ bool ParseRecoveryEntry(const std::wstring& object, RecoveryEntry& entry) {
     entry.request.type = static_cast<OpType>(type);
     entry.request.collision_policy = static_cast<CollisionPolicy>(policy);
     entry.request.sources = json::ExtractStringArray(object, L"sources");
+    entry.request.recycle_paths = json::ExtractStringArray(object, L"recycle_paths");
     entry.request.dest_dir = json::ExtractString(object, L"dest");
     entry.request.new_name = json::ExtractString(object, L"name");
     entry.request.new_names = json::ExtractStringArray(object, L"names");
@@ -798,7 +799,8 @@ std::wstring OpsManager::JournalJsonLocked() const {
             L",\"sources\":" + StringArrayJson(item.req.sources) +
             L",\"dest\":" + JsonString(item.req.dest_dir) +
             L",\"name\":" + JsonString(item.req.new_name) +
-            L",\"names\":" + StringArrayJson(item.req.new_names);
+            L",\"names\":" + StringArrayJson(item.req.new_names) +
+            L",\"recycle_paths\":" + StringArrayJson(item.req.recycle_paths);
         if (!item.req.delete_targets.empty()) {
             out += L",\"delete_targets\":[";
             for (size_t i = 0; i < item.req.delete_targets.size(); ++i) {
@@ -1103,6 +1105,7 @@ void OpsManager::PushUndo(const OpRequest& req,
     if (req.type == OpType::EmptyRecycle) return;
     std::lock_guard<std::mutex> lock(mutex_);
     undo_.push_back(std::move(e));
+    ++undo_revision_;
 }
 
 std::vector<CompletedOperation> OpsManager::DrainCompletions() {
@@ -1118,20 +1121,22 @@ std::vector<CompletedOperation> OpsManager::DrainCompletions() {
 
 void OpsManager::Undo() {
     UndoEntry e;
+    uint64_t deletion_reservation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (undo_.empty()) return;
         e = undo_.back();
         if (!e.supported) {
             // Leave the entry; report why it cannot be undone.
-            status_.last_error = L"回收站删除暂不支持撤销（1B-2 恢复方案：枚举 $Recycle.Bin 还原）";
+            status_.last_error = L"此撤销的执行结果或回收项身份无法确认，请先检查文件；不会自动重试删除。";
         } else if (e.type != OpType::Copy && e.type != OpType::CreateFolder &&
                    e.type != OpType::CreateTextFile) {
             undo_.pop_back();
-        }
+            ++undo_revision_;
+        } else deletion_reservation = undo_revision_;
     }
-    // Copy/create inverses request recycle deletion. No supported Windows
-    // preflight can prove them recyclable; leave their Undo entry untouched.
+    // Reserve copy/create inverses until actual completion. Rejection must
+    // leave the entry available, and stale reservations must not delete again.
     if (!e.supported) {
         if (notify_) notify_();
         return;
@@ -1168,6 +1173,7 @@ void OpsManager::Undo() {
         inv.type = OpType::RecycleDelete;
         inv.is_undo = true;
         inv.delete_origin = DeleteOrigin::Undo;
+        inv.undo_revision = deletion_reservation;
         if (!e.destinations.empty()) inv.sources = e.destinations;
         else for (const auto& src : e.sources)
             inv.sources.push_back(JoinPath(e.dest_dir, FileName(src)));
@@ -1181,6 +1187,7 @@ void OpsManager::Undo() {
         inv.type = OpType::RecycleDelete;
         inv.is_undo = true;
         inv.delete_origin = DeleteOrigin::Undo;
+        inv.undo_revision = deletion_reservation;
         inv.sources = e.sources;
         Submit(std::move(inv));
         break;
@@ -1190,6 +1197,7 @@ void OpsManager::Undo() {
         inv.type = OpType::RestoreRecycle;
         inv.is_undo = true;
         inv.sources = e.sources;
+        inv.recycle_paths = e.destinations;
         Submit(std::move(inv));
         break;
     }
@@ -1389,18 +1397,22 @@ void OpsManager::WorkerThread() {
             done_cancelled_ = cancelled;
             done_error_ = std::move(error);
             done_deleted_paths_.clear();
+            done_recycled_paths_.clear();
+            done_recycle_destinations_.clear();
             done_ready_ = true;
         }
         done_cv_.notify_one();
     };
     cb.delete_done = [this](uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
-                            std::vector<std::wstring> deleted_paths) {
+                            std::vector<std::wstring> deleted_paths, std::vector<std::wstring> recycled_paths, std::vector<std::wstring> recycle_destinations) {
         shell_activity_tick_ = GetTickCount64();
         {
             std::lock_guard<std::mutex> lock(done_mutex_);
             done_id_ = id; done_hr_ = hr; done_cancelled_ = cancelled;
             done_error_ = std::move(error);
             done_deleted_paths_ = std::move(deleted_paths);
+            done_recycled_paths_ = std::move(recycled_paths);
+            done_recycle_destinations_ = std::move(recycle_destinations);
             done_ready_ = true;
         }
         done_cv_.notify_one();
@@ -2370,7 +2382,7 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id) {
         if (!req.sources.empty()) id = client.CreateNewFile(req.sources.front());
         break;
     case OpType::RestoreRecycle:
-        id = client.RestoreRecycle(req.sources);
+        id = client.RestoreRecycle(req.sources, req.recycle_paths);
         break;
     }
     current_req_id_.store(id);
@@ -2604,6 +2616,7 @@ bool OpsManager::UndoFromJson(const std::wstring& in) {
     }
     std::lock_guard<std::mutex> lock(mutex_);
     undo_ = std::move(parsed);
+    ++undo_revision_;
     return true;
 }
 

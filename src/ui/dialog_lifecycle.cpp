@@ -5,12 +5,51 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <new>
 
 namespace pulse::ui {
 namespace {
 constexpr wchar_t kDevice[] = L"Pulse.DialogComposition.Device";
 constexpr wchar_t kVisual[] = L"Pulse.DialogComposition.Visual";
 constexpr wchar_t kFading[] = L"Pulse.DialogFading";
+constexpr wchar_t kOwnerDim[] = L"Pulse.OwnerDimOverlay";
+constexpr wchar_t kDimClass[] = L"PulseOwnerDimOverlay";
+struct DimState { HWND owner = nullptr; unsigned scopes = 1; };
+
+bool PlaceDimOverlay(HWND overlay, HWND owner) {
+    RECT client{};
+    if (!IsWindow(owner) || !GetClientRect(owner, &client)) return false;
+    POINT origin{client.left, client.top};
+    if (!ClientToScreen(owner, &origin)) return false;
+    SetWindowPos(overlay, nullptr, origin.x, origin.y, client.right - client.left,
+        client.bottom - client.top, SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+    return true;
+}
+
+LRESULT CALLBACK DimProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+    auto* state = reinterpret_cast<DimState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        const HWND owner = static_cast<HWND>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        state = new (std::nothrow) DimState{owner, 1};
+        if (!state) return FALSE;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+    }
+    if (message == WM_NCHITTEST) return HTTRANSPARENT;
+    if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    if (message == WM_ERASEBKGND) {
+        RECT rect{}; GetClientRect(hwnd, &rect);
+        FillRect(reinterpret_cast<HDC>(wp), &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+        return 1;
+    }
+    if (message == WM_TIMER && state) { PlaceDimOverlay(hwnd, state->owner); return 0; }
+    if (message == WM_NCDESTROY && state) {
+        if (IsWindow(state->owner) && GetPropW(state->owner, kOwnerDim) == hwnd)
+            RemovePropW(state->owner, kOwnerDim);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        delete state;
+    }
+    return DefWindowProcW(hwnd, message, wp, lp);
+}
 bool AnimationsEnabled() {
     BOOL enabled = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
@@ -93,6 +132,41 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
         else SetWindowLongPtrW(window, GWL_EXSTYLE, original_style);
     }
 }
+}
+
+OwnerDimScope::OwnerDimScope(HWND owner) {
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
+    if (!IsWindow(owner) || !IsWindowVisible(owner) || (contrast.dwFlags & HCF_HIGHCONTRASTON)) return;
+    owner_ = owner;
+    overlay_ = reinterpret_cast<HWND>(GetPropW(owner, kOwnerDim));
+    if (IsWindow(overlay_)) {
+        if (auto* state = reinterpret_cast<DimState*>(GetWindowLongPtrW(overlay_, GWLP_USERDATA))) ++state->scopes;
+        return;
+    }
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr); wc.lpfnWndProc = DimProc;
+    wc.lpszClassName = kDimClass; wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    if (!GetClassInfoW(wc.hInstance, kDimClass, &wc)) RegisterClassW(&wc);
+    overlay_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+        kDimClass, L"", WS_POPUP, 0, 0, 1, 1, owner, nullptr, wc.hInstance, owner);
+    if (!overlay_) { owner_ = nullptr; return; }
+    if (!SetPropW(owner, kOwnerDim, overlay_)) {
+        DestroyWindow(overlay_); owner_ = overlay_ = nullptr; return;
+    }
+    PlaceDimOverlay(overlay_, owner);
+    SetLayeredWindowAttributes(overlay_, 0, 64, LWA_ALPHA);
+    SetTimer(overlay_, 1, 50, nullptr);
+    Fade(overlay_, true, SW_SHOWNOACTIVATE);
+}
+
+OwnerDimScope::~OwnerDimScope() {
+    if (!IsWindow(overlay_)) return;
+    auto* state = reinterpret_cast<DimState*>(GetWindowLongPtrW(overlay_, GWLP_USERDATA));
+    if (!state || --state->scopes != 0) return;
+    if (IsWindow(owner_) && GetPropW(owner_, kOwnerDim) == overlay_) RemovePropW(owner_, kOwnerDim);
+    Fade(overlay_, false);
+    DestroyWindow(overlay_);
 }
 
 void ShowDialogWithFade(HWND dialog) {

@@ -22,6 +22,7 @@ DeletePreparation DeleteService::Prepare(DeletePlan plan) {
     for (const auto& target : plan.targets) {
         switch (target.disposition) {
         case DeleteDisposition::Recyclable:
+        case DeleteDisposition::RecycleRequested:
             break;
         case DeleteDisposition::Permanent:
             has_permanent = true;

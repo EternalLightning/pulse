@@ -69,6 +69,7 @@ public:
             wc.hInstance, this);
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
+        OwnerDimScope owner_dim(owner_);
         if (owner_) EnableWindow(owner_, FALSE);
         ShowDialogWithFade(hwnd_);
         LayoutEdits();

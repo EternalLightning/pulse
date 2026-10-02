@@ -345,6 +345,7 @@ bool Show(HWND owner, DialogState& s) {
     if (region && !SetWindowRgn(dialog, region, TRUE)) DeleteObject(region);
     const BOOL dark = s.dark ? TRUE : FALSE;
     DwmSetWindowAttribute(dialog, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    ui::OwnerDimScope owner_dim(owner);
     const bool owner_enabled = IsWindowEnabled(owner) != FALSE;
     s.modal_owner = owner_enabled ? owner : nullptr;
     if (owner_enabled) EnableWindow(owner, FALSE);

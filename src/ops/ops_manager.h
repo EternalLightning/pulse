@@ -35,7 +35,7 @@ struct DeleteIntegrationProbe;
 enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder, CreateTextFile, RestoreRecycle, EmptyRecycle, BatchRename };
 enum class CollisionPolicy { System, Replace, KeepBoth };
 enum class OpPhase { Queued, Scanning, WaitingForConflict, Running, Paused,
-                     Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation };
+                     Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation, Cancelled };
 enum class ConflictChoice { Cancel, Replace, Skip, KeepBoth };
 
 struct ConflictItemInfo {
@@ -66,10 +66,12 @@ struct OpRequest {
     std::vector<std::wstring> new_names; // BatchRename, parallel to sources
     CollisionPolicy collision_policy = CollisionPolicy::System; // Copy / Move
     bool is_undo = false;     // undo-originated ops do not re-enter the stack
+    uint64_t undo_revision = 0; // reservation for deletion inverses; never serialized
     DeleteOrigin delete_origin = DeleteOrigin::Selection;
     // Logical rows may own more than one physical root (Recycle Bin $R/$I).
     // These describe targets, never authorization or a recyclability claim.
     std::vector<DeleteRequestTarget> delete_targets;
+    std::vector<std::wstring> recycle_paths; // exact recycle payloads for Undo restore
 };
 
 struct UndoEntry {
@@ -263,7 +265,8 @@ private:
     void RunDelete(const QueueItem& item);
     void FinishDelete(const QueueItem& item, std::wstring error,
                       const std::vector<std::wstring>& deleted_paths = {}, bool executed = false,
-                      bool uncertain = false);
+                      bool uncertain = false, const std::vector<std::wstring>& recycled_paths = {},
+                      const std::vector<std::wstring>& recycle_destinations = {}, bool cancelled = false);
     DeleteService delete_service_;
     std::mutex delete_wait_mutex_;
     std::condition_variable delete_wait_cv_;
@@ -291,6 +294,7 @@ private:
     std::wstring journal_path_;
     OpStatus status_;
     std::deque<UndoEntry> undo_;
+    uint64_t undo_revision_ = 1;
     std::deque<CompletedOperation> completions_;
     std::deque<DeleteOutcome> delete_outcomes_;
     std::set<uint64_t> scheduled_recovery_;
@@ -325,6 +329,8 @@ private:
     bool done_cancelled_ = false;
     std::wstring done_error_;
     std::vector<std::wstring> done_deleted_paths_;
+    std::vector<std::wstring> done_recycled_paths_;
+    std::vector<std::wstring> done_recycle_destinations_;
 
     // Context-menu forwarding thread + token <-> pipe-request-id bookkeeping.
     std::thread menu_thread_;

@@ -211,11 +211,12 @@ uint32_t ShellClient::RealDelete(const std::vector<std::wstring>&) {
     return id;
 }
 
-uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token) {
+uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
+                                     bool recycle, HWND owner) {
     if (!running_.load() || paths.empty() || token == 0) return 0;
     Pending pending;
     pending.id = next_id_.fetch_add(1);
-    pending.type = REQ_AUTHORIZED_DELETE;
+    pending.type = recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE;
     pending.retried = true; // Never replay a destructive request on a new host.
     bool sent = false;
     {
@@ -226,6 +227,7 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
             epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
             PayloadWriter writer;
             writer.PutU64(epoch.QuadPart); writer.PutU64(token); writer.PutStringArray(paths);
+            if (recycle) writer.PutU64(reinterpret_cast<uintptr_t>(owner));
             pending.payload = writer.data();
             std::lock_guard<std::mutex> pending_lock(pending_mutex_);
             pending_.emplace(pending.id, pending);
@@ -238,9 +240,11 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
     return pending.id;
 }
 
-uint32_t ShellClient::RestoreRecycle(const std::vector<std::wstring>& paths) {
+uint32_t ShellClient::RestoreRecycle(const std::vector<std::wstring>& paths,
+                                     const std::vector<std::wstring>& recycle_paths) {
     PayloadWriter w;
     w.PutStringArray(paths);
+    w.PutStringArray(recycle_paths);
     return Submit(REQ_RESTORE_RECYCLE, w.data());
 }
 
@@ -405,17 +409,20 @@ void ShellClient::ReaderThread() {
                         std::lock_guard<std::mutex> lock(pending_mutex_);
                         const auto found = pending_.find(h.request_id);
                         if (found != pending_.end()) {
-                            deletion = found->second.type == REQ_AUTHORIZED_DELETE;
+                            deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
                             pending_.erase(found); pending = true;
                         }
                     }
                     if (pending && deletion) {
-                        std::vector<std::wstring> deleted_paths;
-                        if (!r.TryStringArray(deleted_paths) || r.remaining() != 0) {
-                            hr = static_cast<uint32_t>(E_INVALIDARG); err = L"Malformed deletion result"; deleted_paths.clear();
+                        std::vector<std::wstring> deleted_paths, recycled_paths, recycle_destinations;
+                        if (!r.GetStringArray(deleted_paths) || !r.GetStringArray(recycled_paths) || !r.GetStringArray(recycle_destinations) ||
+                            recycled_paths.size() != recycle_destinations.size() || r.remaining() != 0) {
+                            hr = static_cast<uint32_t>(E_INVALIDARG); err = L"Malformed deletion result";
+                            deleted_paths.clear(); recycled_paths.clear(); recycle_destinations.clear();
                         }
                         if (cb_.delete_done)
-                            cb_.delete_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(deleted_paths));
+                            cb_.delete_done(h.request_id, hr, cancelled != 0, std::move(err),
+                                std::move(deleted_paths), std::move(recycled_paths), std::move(recycle_destinations));
                         else FireDone(h.request_id, hr, cancelled != 0, err);
                     } else if (pending) FireDone(h.request_id, hr, cancelled != 0, err);
                 }
@@ -490,7 +497,7 @@ void ShellClient::HandleDisconnect() {
     }
     for (auto& p : failed)
         FireDone(p.id, HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE), false,
-                 p.type == REQ_AUTHORIZED_DELETE
+                 (p.type == REQ_AUTHORIZED_DELETE || p.type == REQ_AUTHORIZED_RECYCLE)
                      ? L"Deletion outcome is unknown; the destructive request was not replayed."
                      : L"shell host died twice on one request");
     for (auto& p : retry) {

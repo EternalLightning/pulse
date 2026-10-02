@@ -2245,7 +2245,8 @@ D2D1_RECT_F Painter::SidebarItemIconRect(const D2D1_RECT_F& bounds, bool status_
     float left = bounds.left + Px(10.0f);
     if (status_dot) left += Px(10.0f);
     const float slot = Px(16.0f);
-    return D2D1::RectF(left, bounds.top + Px(4.0f), left + slot, bounds.bottom - Px(4.0f));
+    const float top = (bounds.top + bounds.bottom - slot) * 0.5f;
+    return D2D1::RectF(left, top, left + slot, top + slot);
 }
 
 D2D1_RECT_F Painter::DriveSidebarItemIconRect(const D2D1_RECT_F& bounds) const {

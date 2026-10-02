@@ -36,6 +36,15 @@ struct DeleteIntegrationProbe {
         manager.active_item_ = item;
         manager.FinishDelete(item, L"mock lost backend result", {}, true, true);
     }
+    static void FailedResult(OpsManager& manager, OpRequest request) {
+        OpsManager::QueueItem item;
+        item.seq = manager.next_seq_++; item.req = std::move(request);
+        manager.FinishDelete(item, L"fixture access denied");
+    }
+    static void UncertainUndo(OpsManager& manager, OpRequest request) {
+        request.is_undo = true; request.undo_revision = manager.undo_revision_;
+        UncertainResult(manager, std::move(request));
+    }
     static void StopFlag(OpsManager& manager, bool stopped) { manager.stopping_.store(stopped); }
     static uint64_t Request(OpsManager& manager, OpRequest request) {
         OpsManager::QueueItem item;
@@ -152,6 +161,8 @@ int main() {
     tab.SetSnapshot(entries); tab.SelectOnly(1); tab.scroll_y = 30;
     s.ops.SetUiWindow(owner);
     using Probe = ops::DeleteIntegrationProbe;
+    s.operationWindow = std::make_unique<ui::FileOperationWindow>();
+    check(s.operationWindow->Create(owner, {}), "isolated operation window exists for cancellation presentation regression");
     const auto unchanged = [&] {
         return tab.selected_index == 1 && tab.SelectedCount() == 1 && tab.IsSelected(1) && tab.scroll_y == 30;
     };
@@ -162,11 +173,20 @@ int main() {
         check(unchanged() && tab.selection_revision == revision, "refusal WM_OPS_NOTIFY does not refresh or change selection");
         check(s.ops.DrainCompletions().empty(), "refused deletion emits no successful mutation completion");
     };
+    ops::OpRequest ordinary;
+    ordinary.type = ops::OpType::RecycleDelete; ordinary.sources = {L"C:\\Fixture\\first.txt"};
+    std::wstring ordinary_error;
+    const auto ordinary_plan = ops::BuildDeletePlan(ordinary, 1, ordinary_error);
+    ops::DeleteService ordinary_gate;
+    check(ordinary_error.empty() && ordinary_plan.targets.size() == 1 &&
+        ordinary_plan.targets[0].disposition == ops::DeleteDisposition::RecycleRequested &&
+        ordinary_gate.Prepare(ordinary_plan).decision == ops::DeleteDecision::Admitted,
+        "ordinary Delete admits recycling intent to Shell instead of requiring impossible preflight proof");
     DeleteSelected(s, false);
     check(Probe::Queued(s.ops) == 1, "normal Delete routes to operations gate");
     finished();
     check(!s.ops.PendingDeleteConfirmation() && s.ops.Status().deletes_without_mutation == 1,
-        "unknown recycle request stops entire batch without a confirmation");
+        "isolated recycle request with stopped backend finishes without mutation or Pulse confirmation");
     ops::OpRequest permanent;
     permanent.type = ops::OpType::RealDelete;
     permanent.sources = {L"C:\\Fixture\\first.txt", L"\\\\server\\share\\中文.txt"};
@@ -185,6 +205,9 @@ int main() {
     check(s.ops.Status().deletes_without_mutation == 2, "cancelled permanent request is proven zero-mutation");
     WndProcImpl(owner, WM_OPS_NOTIFY, 0, 0);
     check(unchanged() && tab.selection_revision == revision, "permanent cancel preserves selection and scroll");
+    check(s.ops.Status().phase == ops::OpPhase::Cancelled && s.ops.Status().last_error.empty() &&
+        !s.operationWindow->IsVisible() && !s.notification_toast.IsVisible(),
+        "permanent confirmation rejection is silent cancellation, never a failure popup");
     Probe::Notify(s.ops, [&] {
         if (!s.ops.PendingDeleteConfirmation()) return;
         saw_dialog = false; dialog_key = VK_RETURN;
@@ -196,6 +219,38 @@ int main() {
     check(saw_dialog && !s.ops.PendingDeleteConfirmation() && s.ops.DrainCompletions().empty(),
         "actual shared presenter rejects permanent deletion on default Enter");
     WndProcImpl(owner, WM_OPS_NOTIFY, 0, 0);
+    check(!s.operationWindow->IsVisible(), "default Enter cancellation does not show the operation failure window");
+    for (const wchar_t* language : {L"zh-CN", L"en-US"}) {
+        l10n::SetLanguage(language);
+        for (int key : {VK_ESCAPE, WM_CLOSE}) {
+            Probe::Notify(s.ops, [&] {
+                if (!s.ops.PendingDeleteConfirmation()) return;
+                saw_dialog = false; dialog_key = key;
+                SetTimer(owner, 91, 10, RejectDialog);
+                PresentDeleteConfirmation(s);
+                KillTimer(owner, 91);
+            });
+            Probe::Request(s.ops, permanent);
+            WndProcImpl(owner, WM_OPS_NOTIFY, 0, 0);
+            check(saw_dialog && s.ops.Status().phase == ops::OpPhase::Cancelled &&
+                s.ops.Status().last_error.empty() && !s.operationWindow->IsVisible() &&
+                !s.notification_toast.IsVisible(),
+                "Escape and close permanent cancellation stay silent in both display languages");
+        }
+    }
+    l10n::SetLanguage(L"en-US");
+    s.operationWindow->Show(false);
+    s.operationPinnedByUser = true;
+    UpdateOperationWindow(s, false);
+    check(!s.operationWindow->IsVisible(), "cancelled task hides an already visible pinned operation window");
+    s.operationPinnedByUser = false;
+    Probe::FailedResult(s.ops, permanent);
+    UpdateOperationWindow(s, false);
+    check(s.ops.Status().phase == ops::OpPhase::Failed && s.operationWindow->IsVisible(),
+        "genuine permanent deletion failure still shows its error window");
+    s.operationWindow->Hide();
+    WndProcImpl(owner, WM_OPS_NOTIFY, 0, 0);
+    s.operationWindow->Hide();
     Probe::Notify(s.ops, {});
     Probe::Request(s.ops, permanent);
     check(!s.ops.PendingDeleteConfirmation(), "missing presenter is fail closed");
@@ -218,7 +273,7 @@ int main() {
     check(s.ops.UndoToJson() == original_undo && Probe::Queued(s.ops) == 1, "Undo copy peeks rather than pops before deletion gate");
     revision = tab.selection_revision;
     finished();
-    check(s.ops.UndoToJson() == original_undo, "unknown Undo deletion retains the same Undo entry");
+    check(s.ops.UndoToJson() == original_undo, "unexecuted Undo deletion retains the same Undo entry");
     ops::RecoveryEntry recovery;
     recovery.sequence = 77; recovery.request.type = ops::OpType::RecycleDelete;
     recovery.request.sources = {L"C:\\Fixture\\first.txt"};
@@ -324,6 +379,12 @@ int main() {
         s.ops.Status().deletes_without_mutation == zero_mutation_count &&
         !outcomes.empty() && outcomes.back().uncertain,
         "lost attempted backend result preserves exact recovery journal and is never classified as zero mutation");
+    s.ops.UndoFromJson(original_undo);
+    Probe::UncertainUndo(s.ops, ordinary);
+    const size_t queued_before = Probe::Queued(s.ops);
+    s.ops.Undo();
+    check(!s.ops.CanUndo() && Probe::Queued(s.ops) == queued_before,
+        "uncertain Undo deletion disables the entry and never queues a destructive replay");
     s.quickPreview.Close();
     SetWindowLongPtrW(owner, GWLP_USERDATA, 0); s.hwnd = nullptr;
     DestroyWindow(owner); OleUninitialize();

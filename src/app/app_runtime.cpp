@@ -1017,8 +1017,8 @@ float CubicBezier(float x1, float y1, float x2, float y2, float t) {
     return by(u);
 }
 
-constexpr float kTrayThrowOutMs = 220.0f;
-constexpr float kTrayThrowBackMs = 460.0f;
+constexpr float kTrayThrowOutMs = 140.0f;
+constexpr float kTrayThrowBackMs = 220.0f;
 constexpr float kTraySpringMs = 420.0f;
 constexpr float kTrayTumbleMs = 560.0f;
 constexpr float kTrayPuffMs = 620.0f;
@@ -1167,7 +1167,7 @@ void SpawnTrayPuffs(AppState& s) {
 }
 
 // Tell the next tick how the currently visible cards of `paths` should
-// leave: a stationary fade for clear, or a tumble for a single dismissal.
+// leave: a stationary fade for both clear and a single dismissal.
 void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool clearing) {
     if (clearing) {
         s.trayPuffs.clear();
@@ -1184,10 +1184,10 @@ void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool clea
         }
         return;
     }
-    const auto entries = TrayDeckEntries(s.tray, static_cast<size_t>(TrayStackTop(s)), 4);
-    for (const auto& e : entries) {
-        if (std::find(paths.begin(), paths.end(), e.item->path) == paths.end()) continue;
-        s.trayExitHints[e.item->path] = { AppState::TrayExit::Tumble, 0 };
+    for (const auto& path : paths) {
+        s.trayExitHints[path] = { AppState::TrayExit::Fade, 0 };
+        if (const auto it = s.trayCards.find(path); it != s.trayCards.end())
+            it->second.motion = AppState::TrayMotion::None;
     }
 }
 

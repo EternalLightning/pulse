@@ -2,7 +2,7 @@
 //
 // Owns the child process lifetime: pipe connects to \\.\pipe\pulse_shell_<pid>;
 // on send/receive failure the child is restarted (CreateProcess) and the
-// in-flight request is retried exactly once, then reported as failed.
+// non-destructive requests retry once; authorized deletion is never replayed.
 // All callbacks fire on the client's reader thread — never block the UI.
 #pragma once
 #include "protocol.h"
@@ -43,7 +43,9 @@ public:
                            uint32_t items_done, uint32_t total_items)> progress;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> done;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
-                           std::vector<std::wstring> deleted_paths)> delete_done;
+                           std::vector<std::wstring> deleted_paths,
+                           std::vector<std::wstring> recycled_paths,
+                           std::vector<std::wstring> recycle_destinations)> delete_done;
         // RSP_CTX_ITEMS for a REQ_CTX_QUERY; id is the query id (== session id).
         std::function<void(uint32_t id, std::vector<CtxMenuItem> items, bool partial,
                            std::vector<std::wstring> slow_clsids)> ctx_items;
@@ -56,7 +58,8 @@ public:
 
     uint32_t DeleteRecycle(const std::vector<std::wstring>& paths);
     uint32_t RealDelete(const std::vector<std::wstring>& paths);
-    uint32_t RestoreRecycle(const std::vector<std::wstring>& paths);
+    uint32_t RestoreRecycle(const std::vector<std::wstring>& paths,
+                            const std::vector<std::wstring>& recycle_paths = {});
     uint32_t Rename(const std::wstring& path, const std::wstring& new_name);
     uint32_t CreateFolder(const std::wstring& path);
     uint32_t CreateNewFile(const std::wstring& path);
@@ -78,7 +81,8 @@ public:
 
 private:
     friend class pulse::ops::OpsManager;
-    uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token);
+    uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
+                              bool recycle = false, HWND owner = nullptr);
     ShellClient() = default;
     ~ShellClient();
 

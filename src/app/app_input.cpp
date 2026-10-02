@@ -2144,7 +2144,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 std::wstring value = L"#" + (s->appPrefs.accent_rgb.empty()
                     ? vm.settings_accent_hex : s->appPrefs.accent_rgb);
                 while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsThemeColor),
-                        l10n::Get(l10n::StringId::AccentInputHint), value, value)) {
+                        l10n::Get(l10n::StringId::AccentInputHint), value, value, 32, {},
+                        s->darkMode, s->accentColor)) {
                     uint32_t rgb = 0;
                     if (app::ParseAccentInput(value, rgb)) {
                         s->settings.AccentChoice(false, rgb);
@@ -2172,7 +2173,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SettingsWallpaperLook) {
             std::wstring value = std::to_wstring(s->appPrefs.wallpaper_visibility);
             while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsWallpaperLook),
-                    l10n::Get(l10n::StringId::WallpaperPercentHint), value, value)) {
+                    l10n::Get(l10n::StringId::WallpaperPercentHint), value, value, 32, {},
+                    s->darkMode, s->accentColor)) {
                 int percent = 0;
                 if (app::ParseWallpaperVisibility(value, percent)) {
                     s->settings.WallpaperVisibility(percent);
@@ -2309,14 +2311,13 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             s->tray.RemoveBatch((size_t)hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::TrayItemRemove) {
-            // Dismiss: the card tumbles off in a puff of smoke.
+            // Dismiss: fade at the current pose without motion or particles.
             const auto& batches = s->tray.batches();
             if (hit.index >= 0 && hit.index < static_cast<int>(batches.size()) &&
                 hit.sub_index >= 0 &&
                 hit.sub_index < static_cast<int>(batches[(size_t)hit.index].items.size())) {
                 MarkTrayExit(*s, { batches[(size_t)hit.index].items[(size_t)hit.sub_index].path },
                              false);
-                SpawnTrayPuffs(*s);
             }
             s->tray.RemoveItem((size_t)hit.index, (size_t)hit.sub_index);
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2700,6 +2701,11 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
             HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
             s->blankDoublePending = blank_double && s->blankClickTab != nullptr;
             return 0;
+        }
+        // Windows turns the second rapid press into DBLCLK, not BUTTONDOWN.
+        // Pager buttons must count it as another step, without a double-click wait.
+        if (hit.region == ui::HitTestResult::TrayPrev || hit.region == ui::HitTestResult::TrayNext) {
+            return HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
         }
         if (hit.region == ui::HitTestResult::ColumnStripDivider) {
             ResetColumnStripWidth(*s, hit);

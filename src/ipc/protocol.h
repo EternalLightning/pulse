@@ -31,7 +31,7 @@
 // Payload layouts (all strings UTF-16, wchar_count first):
 //   REQ_DELETE_RECYCLE /
 //   REQ_REALDELETE /
-//   REQ_RESTORE_RECYCLE  : count(u32) + paths(string * count)
+//   REQ_RESTORE_RECYCLE  : paths(array) + exact recycle payloads(array, optional)
 //   REQ_RENAME               : path(string) + new_name(string)  (name only, not a path)
 //   REQ_NEW_FOLDER /
 //   REQ_NEW_FILE             : path(string)  (full path of the item to create)
@@ -81,6 +81,8 @@ enum MsgType : uint32_t {
     // Exact permanent roots; legacy deletion frames are fail-closed.
     // Payload: host creation FILETIME(u64), one-shot token(u64), paths(array).
     REQ_AUTHORIZED_DELETE = 15,
+    // Same plan fields followed by owner HWND(u64); Shell owns recycle warnings.
+    REQ_AUTHORIZED_RECYCLE = 16,
     RSP_PROGRESS = 100,
     RSP_DONE = 101,
     RSP_PONG = 102,

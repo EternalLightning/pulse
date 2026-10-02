@@ -60,9 +60,15 @@ struct Request {
     uint32_t id = 0;
     std::wstring new_name;
     std::vector<std::wstring> sources;
+    std::vector<std::wstring> recycle_paths;
     uint64_t delete_epoch = 0;
     uint64_t delete_token = 0;
+    HWND owner = nullptr;
 };
+
+bool IsAuthorizedDeletion(uint32_t type) {
+    return type == REQ_AUTHORIZED_DELETE || type == REQ_AUTHORIZED_RECYCLE;
+}
 
 struct HostState {
     HANDLE pipe = INVALID_HANDLE_VALUE;
@@ -117,10 +123,12 @@ void SendProgress(uint32_t id, float percent, const std::wstring& item,
 }
 
 void SendDeleteDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error,
-                    const std::vector<std::wstring>& deleted_paths) {
+                    const std::vector<std::wstring>& deleted_paths,
+                    const std::vector<std::wstring>& recycled_paths = {},
+                    const std::vector<std::wstring>& recycle_destinations = {}) {
     PayloadWriter writer;
     writer.PutU32(static_cast<uint32_t>(hr)); writer.PutU32(cancelled ? 1 : 0);
-    writer.PutString(error); writer.PutStringArray(deleted_paths);
+    writer.PutString(error); writer.PutStringArray(deleted_paths); writer.PutStringArray(recycled_paths); writer.PutStringArray(recycle_destinations);
     SendMsg(RSP_DONE, id, writer.data());
 }
 
@@ -207,9 +215,15 @@ public:
         // Per-item sinks bind the result to the exact queued root. A Shell item
         // queried after deletion may already resolve only to its parent/root.
         // DONT_PROCESS_CHILDREN is a completed-item success, not a skipped item.
-        if (!authorized_root_.empty() && !destination &&
+        if (!authorized_root_.empty() &&
             (hr == S_OK || hr == COPYENGINE_S_DONT_PROCESS_CHILDREN)) {
-            deleted_paths_.push_back(authorized_root_);
+            if (destination) {
+                recycled_paths_.push_back(authorized_root_);
+                PWSTR path = nullptr;
+                const HRESULT result = destination->GetDisplayName(SIGDN_FILESYSPATH, &path);
+                recycle_destinations_.push_back(SUCCEEDED(result) && path ? path : L"");
+                if (path) CoTaskMemFree(path);
+            } else deleted_paths_.push_back(authorized_root_);
         }
         ++items_done_;
         MaybeReport(items_done_ == total_items_);
@@ -236,6 +250,8 @@ public:
     std::wstring delete_diagnostics_;
     const std::vector<std::wstring>& deleted_paths() const { return deleted_paths_; }
     std::vector<std::wstring> deleted_paths_;
+    std::vector<std::wstring> recycled_paths_;
+    std::vector<std::wstring> recycle_destinations_;
     void NoteSetupFailure(const std::wstring& src) { last_failed_item_ = src; }
 
 private:
@@ -491,12 +507,47 @@ bool RestoreOneFromRecycle(const std::wstring& wanted_canon, std::wstring& error
     return restored;
 }
 
-HRESULT ExecuteRestore(const std::vector<std::wstring>& paths, std::wstring& error) {
+bool RestoreExactRecycle(const std::wstring& original, const std::wstring& recycled, std::wstring& error) {
+    const auto payload = ToParsingPath(recycled);
+    const auto wanted = ToParsingPath(original);
+    const auto sid = pulse::CurrentUserSidString();
+    if (sid.empty() || payload.size() < 3 || wanted.size() < 3 ||
+        payload[1] != L':' || wanted[1] != L':' || towupper(payload[0]) != towupper(wanted[0])) {
+        error = L"Invalid exact recycle restore identity"; return false;
+    }
+    const auto parent = payload.substr(0, payload.find_last_of(L'\\'));
+    const auto expected_parent = payload.substr(0, 2) + L"\\$Recycle.Bin\\" + sid;
+    const auto leaf = payload.substr(payload.find_last_of(L'\\') + 1);
+    if (CanonPath(parent) != CanonPath(expected_parent) || leaf.size() < 3 ||
+        leaf[0] != L'$' || (leaf[1] != L'R' && leaf[1] != L'r')) {
+        error = L"Invalid current-user recycle payload"; return false;
+    }
+    auto index_leaf = leaf; index_leaf[1] = leaf[1] == L'R' ? L'I' : L'i';
+    std::wstring recorded;
+    if (!ReadRecycleOriginal(parent + L"\\" + index_leaf, recorded) ||
+        ToParsingPath(recorded) != wanted) {
+        error = L"Recycle item no longer matches the recorded original path"; return false;
+    }
+    // No fallback search by original name: that could restore an older version.
+    if (GetFileAttributesW(wanted.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        error = L"还原目标已存在"; return false;
+    }
+    if (!MoveFileExW(payload.c_str(), wanted.c_str(), 0)) {
+        error = L"Exact recycle restore failed (" + std::to_wstring(GetLastError()) + L")"; return false;
+    }
+    return true;
+}
+
+HRESULT ExecuteRestore(const std::vector<std::wstring>& paths, const std::vector<std::wstring>& recycle_paths,
+                       std::wstring& error) {
     if (paths.empty()) return E_INVALIDARG;
     size_t ok = 0;
-    for (const auto& src : paths) {
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const auto& src = paths[i];
         std::wstring one_error;
-        if (RestoreOneFromRecycle(CanonPath(src), one_error)) {
+        const bool restored = recycle_paths.empty() ? RestoreOneFromRecycle(CanonPath(src), one_error)
+            : i < recycle_paths.size() && RestoreExactRecycle(src, recycle_paths[i], one_error);
+        if (restored) {
             ++ok;
         } else if (error.empty()) {
             error = one_error;
@@ -514,7 +565,7 @@ void ExecuteRequest(Request* req) {
         delete req;
         return;
     }
-    if (req->type == REQ_AUTHORIZED_DELETE) {
+    if (IsAuthorizedDeletion(req->type)) {
         FILETIME created{}, exited{}, kernel{}, user{};
         ULARGE_INTEGER epoch{};
         const bool have_epoch = GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) != FALSE;
@@ -536,7 +587,7 @@ void ExecuteRequest(Request* req) {
     }
     if (req->type == REQ_RESTORE_RECYCLE) {
         std::wstring error;
-        HRESULT hr = ExecuteRestore(req->sources, error);
+        HRESULT hr = ExecuteRestore(req->sources, req->recycle_paths, error);
         SendDone(req->id, hr, false, FAILED(hr) ? error : L"");
         delete req;
         return;
@@ -560,9 +611,14 @@ void ExecuteRequest(Request* req) {
         DWORD flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | kDontDisplayUi;
         if (req->type != REQ_REALDELETE) flags |= FOF_ALLOWUNDO;
         if (req->type == REQ_DELETE_RECYCLE) flags |= FOFX_RECYCLEONDELETE;
-        if (req->type == REQ_AUTHORIZED_DELETE) {
-            flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
-            hr = op->SetOperationFlags(flags);
+        if (IsAuthorizedDeletion(req->type)) {
+            if (req->type == REQ_AUTHORIZED_RECYCLE) {
+                // Never auto-answer a fallback-to-permanent warning. Shell owns
+                // this decision, including changes in eligibility during execution.
+                flags = FOF_SILENT | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING | FOFX_RECYCLEONDELETE;
+                hr = op->SetOwnerWindow(req->owner);
+            } else flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
+            if (SUCCEEDED(hr)) hr = op->SetOperationFlags(flags);
             if (SUCCEEDED(hr)) hr = op->Advise(&sink, &sink_cookie);
         } else {
             op->SetOperationFlags(flags);
@@ -576,7 +632,7 @@ void ExecuteRequest(Request* req) {
         for (const auto& src : req->sources) {
             IShellItem* item = nullptr;
             HRESULT ihr = MakeItem(src, &item);
-            if (SUCCEEDED(ihr) && req->type == REQ_AUTHORIZED_DELETE) {
+            if (SUCCEEDED(ihr) && IsAuthorizedDeletion(req->type)) {
                 PWSTR resolved = nullptr;
                 ihr = item->GetDisplayName(SIGDN_FILESYSPATH, &resolved);
                 if (SUCCEEDED(ihr) && (!resolved || pulse::path::StripExtendedPathPrefix(resolved) != ToParsingPath(src))) ihr = E_ACCESSDENIED;
@@ -592,6 +648,7 @@ void ExecuteRequest(Request* req) {
             switch (req->type) {
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE: ihr = op->DeleteItem(item, nullptr); break;
+            case REQ_AUTHORIZED_RECYCLE:
             case REQ_AUTHORIZED_DELETE:
                 root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src));
                 ihr = op->DeleteItem(item, root_sinks.back().get());
@@ -609,7 +666,7 @@ void ExecuteRequest(Request* req) {
         hr = op->PerformOperations();
         BOOL aborted = FALSE;
         const HRESULT aborted_hr = op->GetAnyOperationsAborted(&aborted);
-        if (req->type == REQ_AUTHORIZED_DELETE && FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
+        if (IsAuthorizedDeletion(req->type) && FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
         cancelled = (g.cancel_id.load() == req->id) || hr == HRESULT_FROM_WIN32(ERROR_CANCELLED);
         if (SUCCEEDED(hr) && FAILED(sink.item_failure())) hr = sink.item_failure();
         if (aborted && !cancelled && SUCCEEDED(hr)) {
@@ -629,7 +686,7 @@ void ExecuteRequest(Request* req) {
         hr = S_OK;
 
     std::wstring error;
-    if (req->type == REQ_AUTHORIZED_DELETE && FAILED(hr) &&
+    if (IsAuthorizedDeletion(req->type) && FAILED(hr) &&
         GetEnvironmentVariableW(L"PULSE_DELETE_DIAGNOSTICS", nullptr, 0)) {
         wchar_t stage[160]{};
         swprintf_s(stage, L"delete diagnostics: setup_failed=%d hr=0x%08X item_hr=0x%08X", setup_failed,
@@ -693,11 +750,14 @@ void ExecuteRequest(Request* req) {
 
     if (FAILED(hr) && !sink.delete_diagnostics().empty()) error += L"; " + sink.delete_diagnostics();
     if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
-    if (req->type == REQ_AUTHORIZED_DELETE) {
-        std::vector<std::wstring> deleted;
-        for (const auto& root_sink : root_sinks)
+    if (IsAuthorizedDeletion(req->type)) {
+        std::vector<std::wstring> deleted, recycled, destinations;
+        for (const auto& root_sink : root_sinks) {
             deleted.insert(deleted.end(), root_sink->deleted_paths().begin(), root_sink->deleted_paths().end());
-        SendDeleteDone(req->id, hr, cancelled, error, deleted);
+            recycled.insert(recycled.end(), root_sink->recycled_paths_.begin(), root_sink->recycled_paths_.end());
+            destinations.insert(destinations.end(), root_sink->recycle_destinations_.begin(), root_sink->recycle_destinations_.end());
+        }
+        SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations);
     } else SendDone(req->id, hr, cancelled, error);
     delete req;
 }
@@ -792,6 +852,7 @@ DWORD WINAPI ReaderThreadImpl() {
             }
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE:
+            case REQ_AUTHORIZED_RECYCLE:
             case REQ_AUTHORIZED_DELETE:
             case REQ_RENAME:
             case REQ_NEW_FOLDER:
@@ -811,12 +872,24 @@ DWORD WINAPI ReaderThreadImpl() {
                     ok = r.GetString(path);
                     req->sources.push_back(std::move(path));
                 } else {
-                    if (req->type == REQ_AUTHORIZED_DELETE) {
+                    if (IsAuthorizedDeletion(req->type)) {
                         DeleteWirePlan plan;
-                        ok = ReadDeleteWirePlan(r, plan);
+                        const bool recycle = req->type == REQ_AUTHORIZED_RECYCLE;
+                        ok = ReadDeleteWirePlan(r, plan, !recycle);
+                        uint64_t owner = 0;
+                        if (recycle) {
+                            ok = ok && r.GetU64(owner) && r.remaining() == 0;
+                            req->owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(owner));
+                        }
                         req->delete_epoch = plan.host_epoch; req->delete_token = plan.token;
                         req->sources = std::move(plan.paths);
-                    } else ok = r.GetStringArray(req->sources);
+                    } else {
+                        ok = r.GetStringArray(req->sources);
+                        if (req->type == REQ_RESTORE_RECYCLE) {
+                            ok = ok && r.TryStringArray(req->recycle_paths) && r.remaining() == 0 &&
+                                (req->recycle_paths.empty() || req->recycle_paths.size() == req->sources.size());
+                        }
+                    }
                 }
                 if (!ok) {
                     SendDone(req->id, E_INVALIDARG, false, L"malformed request payload");

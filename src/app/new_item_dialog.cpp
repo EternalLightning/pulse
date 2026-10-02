@@ -287,6 +287,7 @@ bool PromptNewItemName(HWND owner, const std::wstring& title, bool dark,
     if (round && !SetWindowRgn(dialog, round, TRUE)) DeleteObject(round);
     const BOOL use_dark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(dialog, DWMWA_USE_IMMERSIVE_DARK_MODE, &use_dark, sizeof(use_dark));
+    ui::OwnerDimScope owner_dim(owner);
     state.modal_owner = IsWindowEnabled(owner) ? owner : nullptr;
     if (state.modal_owner) EnableWindow(owner, FALSE);
     ui::ShowDialogWithFade(dialog);

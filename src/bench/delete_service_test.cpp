@@ -65,6 +65,19 @@ void CheckBlocked(DeleteService& service, DeletePlan plan) {
     Check(!service.WasRejected(0), "zero token must not be a rejection record");
 }
 
+void RecycleIntentIsNotProof() {
+    DeleteService service;
+    const auto plan = SinglePlan(DeleteDisposition::RecycleRequested);
+    const auto prepared = service.Prepare(plan);
+    Check(prepared.decision == DeleteDecision::Admitted && !service.Pending(), "ordinary recycle intent must not be blocked as unknown");
+    const auto accepted = service.TakeAccepted(prepared.token);
+    Check(accepted && SamePlan(*accepted, plan), "Shell-warning intent is retained without claiming positive recycle proof");
+    Check(!service.TakeAccepted(prepared.token), "recycle request remains one-shot");
+    const auto mixed = service.Prepare(MakePlan({MakeTarget(L"C:\\mock\\a", DeleteDisposition::RecycleRequested),
+        MakeTarget(L"C:\\mock\\b", DeleteDisposition::Permanent)}));
+    Check(mixed.decision == DeleteDecision::AwaitingConfirmation, "explicit permanent roots still require Pulse confirmation");
+}
+
 void PermanentRejectsByDefault() {
     DeleteService service;
     const auto plan = MakePlan({
@@ -504,6 +517,7 @@ int main() {
         void (*run)();
     };
     const TestCase tests[] {
+        { "recycle intent admits only to Shell warning policy", RecycleIntentIsNotProof },
         { "all permanent: default rejection", PermanentRejectsByDefault },
         { "all permanent: explicit acceptance", PermanentAcceptsExplicitly },
         { "all unknown: fail closed", UnknownAlwaysBlocks },

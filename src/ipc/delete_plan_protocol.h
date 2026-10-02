@@ -40,7 +40,7 @@ struct DeleteWirePlan {
     std::vector<std::wstring> paths;
 };
 
-inline bool ReadDeleteWirePlan(PayloadReader& reader, DeleteWirePlan& plan) {
+inline bool ReadDeleteWirePlan(PayloadReader& reader, DeleteWirePlan& plan, bool require_end = true) {
     uint32_t count = 0;
     DeleteWirePlan parsed;
     if (!reader.GetU64(parsed.host_epoch) || !reader.GetU64(parsed.token) ||
@@ -50,7 +50,7 @@ inline bool ReadDeleteWirePlan(PayloadReader& reader, DeleteWirePlan& plan) {
         if (!reader.GetString(path) || !IsLosslessDeleteShellPath(path)) return false;
         parsed.paths.push_back(std::move(path));
     }
-    if (reader.remaining() != 0 || parsed.host_epoch == 0 || parsed.token == 0) return false;
+    if ((require_end && reader.remaining() != 0) || parsed.host_epoch == 0 || parsed.token == 0) return false;
     plan = std::move(parsed);
     return true;
 }

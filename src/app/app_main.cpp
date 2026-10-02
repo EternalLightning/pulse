@@ -1796,7 +1796,6 @@ static void ApplyShotTrayAction(AppState& state) {
             ms = 400; // let the card settle into the held pose
         } else if (wcscmp(tray_action, L"dismiss") == 0 && !top.empty()) {
             MarkTrayExit(state, { top.front().item->path }, false);
-            SpawnTrayPuffs(state);
             state.tray.RemoveItem(static_cast<size_t>(top.front().batch),
                                   static_cast<size_t>(top.front().sub));
         } else if (wcscmp(tray_action, L"clear") == 0) {

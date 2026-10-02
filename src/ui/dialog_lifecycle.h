@@ -22,4 +22,17 @@ void DestroyDialogWithFade(HWND dialog, HWND modal_owner);
 // Hide the complete owned-window tree before tearing down composition resources.
 // Pass the disabled owner for a modal dialog; omit it for a modeless window.
 void HideComposedDialog(HWND dialog, HWND modal_owner = nullptr);
+
+// Dim only an owned window's client area while a modal surface is present.
+// Nested scopes share one overlay; it never activates or steals keyboard focus.
+class OwnerDimScope {
+public:
+    explicit OwnerDimScope(HWND owner);
+    ~OwnerDimScope();
+    OwnerDimScope(const OwnerDimScope&) = delete;
+    OwnerDimScope& operator=(const OwnerDimScope&) = delete;
+private:
+    HWND owner_ = nullptr;
+    HWND overlay_ = nullptr;
+};
 }

@@ -5078,27 +5078,31 @@ void TestTrayStack() {
         state->trayDeckOffset = 0;
         TrayStackSettle(*state, 900);
 
-        // Dismiss with the close badge: item removed, tumbling ghost + smoke.
+        // Dismiss with the close badge: item removed, stationary fade without smoke.
         vm = BuildVm(*state, false);
         const std::wstring dismissed = vm.tray_deck.cards[0].path;
         state->hoverRegion = ui::HitTestResult::TrayCard;
         SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(close_pt.x, close_pt.y));
         SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(close_pt.x, close_pt.y));
-        Check(TrayItemTotalCount(state->tray) == 4 && state->trayPuffs.size() == 10,
-              L"tray stack: close badge dismisses the top item with smoke");
-        Sleep(70); // puffs start staggered over the first 60 ms
+        Check(TrayItemTotalCount(state->tray) == 4 && state->trayPuffs.empty(),
+              L"tray stack: close badge dismisses the top item without smoke");
+        Sleep(70);
         TickTrayDeck(*state);
         vm = BuildVm(*state, false);
-        bool tumbling = false;
+        bool dismiss_fading = false;
         for (const auto& c : vm.tray_deck.cards)
-            if (c.ghost && c.path == dismissed) tumbling = true;
+            if (c.ghost && c.path == dismissed) {
+                const auto& anim = state->trayCards.at(dismissed);
+                dismiss_fading = anim.exit == AppState::TrayExit::Fade &&
+                    anim.motion == AppState::TrayMotion::None;
+            }
         {
             int ghost_n = 0;
             for (const auto& c : vm.tray_deck.cards) if (c.ghost) ++ghost_n;
-            Check(tumbling, (L"tray stack: dismissed card leaves as a ghost (ghosts=" +
+            Check(dismiss_fading, (L"tray stack: dismissed card leaves as a fading ghost (ghosts=" +
                   std::to_wstring(ghost_n) + L" cards=" + std::to_wstring(vm.tray_deck.cards.size()) +
                   L" anims=" + std::to_wstring(state->trayCards.size()) + L")").c_str());
-            Check(!vm.tray_deck.puffs.empty(), (L"tray stack: smoke plays (state puffs=" +
+            Check(vm.tray_deck.puffs.empty(), (L"tray stack: dismissal has no smoke (state puffs=" +
                   std::to_wstring(state->trayPuffs.size()) + L")").c_str());
             Check(vm.tray_deck.total_count == 4, L"tray stack: footer count drops to four");
         }

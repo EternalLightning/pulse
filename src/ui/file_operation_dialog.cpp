@@ -255,6 +255,7 @@ public:
             wc.hInstance, this);
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
+        OwnerDimScope owner_dim(owner_);
         EnableWindow(owner_, FALSE);
         ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
@@ -597,6 +598,7 @@ public:
         GetWindowRect(hwnd_, &placed);
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, placed.right - placed.left,
                           placed.bottom - placed.top);
+        OwnerDimScope owner_dim(owner_);
         if (owner_) EnableWindow(owner_, FALSE);
         ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
@@ -1035,6 +1037,7 @@ void FileOperationWindow::Render() {
     const auto labels = MakeTransferLabels(status_, detailed_);
     const auto chrome = MakeTransferChrome(scale_, width, height, painter_, labels);
     const bool failed = status_.phase == ops::OpPhase::Failed;
+    const bool cancelled = status_.phase == ops::OpPhase::Cancelled;
     const bool paused = status_.phase == ops::OpPhase::Paused;
     const bool waiting = status_.phase == ops::OpPhase::WaitingForConflict;
     const bool scanning = status_.phase == ops::OpPhase::Scanning;
@@ -1050,7 +1053,8 @@ void FileOperationWindow::Render() {
         : restoring ? L"\xE777" : (moving ? L"\xE7C2" : L"\xE8C8");
     painter_.DrawGlyph(operation_glyph, Rect(scale_, 14, 10, 16, 16), sky);
     std::wstring title;
-    if (emptying) {
+    if (cancelled) title = status_.summary;
+    else if (emptying) {
         if (failed) title = l10n::Get(l10n::StringId::OpCannotEmpty);
         else if (completed) title = l10n::Get(l10n::StringId::OpEmptied);
         else title = l10n::Get(l10n::StringId::OpEmptying);
@@ -1089,7 +1093,7 @@ void FileOperationWindow::Render() {
     const std::wstring src = status_.source_label.empty() ? l10n::Get(l10n::StringId::OpSourceShort).c_str() : status_.source_label;
     const std::wstring dst = status_.destination_label.empty() ? l10n::Get(l10n::StringId::OpDestination).c_str() : status_.destination_label;
     std::wstring subtitle;
-    if (completed || failed) {
+    if (completed || failed || cancelled) {
         subtitle = emptying ? title : src;
         if (!emptying && !status_.destination_label.empty()) subtitle += L" → " + dst;
     }
@@ -1110,7 +1114,11 @@ void FileOperationWindow::Render() {
     std::wstring file_line;
     std::wstring badge_text;
     fluent::BadgeKind badge_kind = fluent::BadgeKind::Success;
-    if (failed) {
+    if (cancelled) {
+        file_line = status_.summary;
+        badge_text = l10n::Get(l10n::StringId::Cancel);
+        badge_kind = fluent::BadgeKind::Neutral;
+    } else if (failed) {
         file_line = status_.last_error.empty() ? l10n::Get(l10n::StringId::OpFailed).c_str() : status_.last_error;
         badge_text = l10n::Get(l10n::StringId::OpFailedBadge).c_str();
         badge_kind = fluent::BadgeKind::Danger;

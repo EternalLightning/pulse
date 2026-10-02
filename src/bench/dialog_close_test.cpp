@@ -54,6 +54,32 @@ int main() {
         DestroyWindow(dialog);
         dialog = editor = nullptr;
     }
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
+    if (!(contrast.dwFlags & HCF_HIGHCONTRASTON)) {
+        HWND overlay = nullptr;
+        {
+            pulse::ui::OwnerDimScope dim(owner);
+            overlay = reinterpret_cast<HWND>(GetPropW(owner, L"Pulse.OwnerDimOverlay"));
+            BYTE alpha = 0; COLORREF key = 0; DWORD flags = 0;
+            Check(IsWindow(overlay) && IsWindowVisible(overlay) &&
+                GetLayeredWindowAttributes(overlay, &key, &alpha, &flags) && alpha == 64,
+                "dim overlay fades to bounded opacity without altering the owner");
+            Check(SendMessageW(overlay, WM_NCHITTEST, 0, 0) == HTTRANSPARENT &&
+                (GetWindowLongPtrW(overlay, GWL_EXSTYLE) & WS_EX_NOACTIVATE),
+                "dim overlay neither intercepts clicks nor activates");
+            {
+                pulse::ui::OwnerDimScope nested_dim(owner);
+                Check(GetPropW(owner, L"Pulse.OwnerDimOverlay") == overlay,
+                    "nested modal scopes share the same owner dim surface");
+            }
+            Check(IsWindow(overlay) && GetPropW(owner, L"Pulse.OwnerDimOverlay") == overlay,
+                "nested dismissal preserves the outer dim surface");
+        }
+        Check(!IsWindow(overlay) && !GetPropW(owner, L"Pulse.OwnerDimOverlay") &&
+            GetForegroundWindow() == foreground,
+            "last modal dismissal restores brightness with no foreground change");
+    }
     DestroyWindow(unrelated);
     DestroyWindow(owner);
     return failures ? 1 : 0;

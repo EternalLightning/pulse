@@ -228,6 +228,10 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
         return;
     }
 
+    if (status.phase == ops::OpPhase::Cancelled) {
+        s.operationWindow->Hide();
+        return;
+    }
     if (s.operationPinnedByUser) return;
 
     if (status.phase == ops::OpPhase::Completed) {
