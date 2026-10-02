@@ -1,4 +1,5 @@
 #include "dialog_lifecycle.h"
+#include "FluentTokens.h"
 #include <dwmapi.h>
 #include <dcomp.h>
 #include <wrl/client.h>
@@ -93,8 +94,43 @@ void SetDimOpacity(HWND overlay, float opacity) {
         static_cast<BYTE>(std::lround(opacity * 64.0f)), LWA_ALPHA);
 }
 
+class SurfaceFadeScope {
+public:
+    SurfaceFadeScope(HWND window, bool composed) : window_(window) {
+        if (!composed) return;
+        backdrop_ = static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(GetPropW(window, L"Pulse.DialogBackdrop")));
+        if (!backdrop_) return;
+        const DWORD none = DWMSBT_NONE;
+        if (!SetPropW(window, L"Pulse.DialogSurfaceFading", reinterpret_cast<HANDLE>(1))) return;
+        if (FAILED(DwmSetWindowAttribute(window, DWMWA_SYSTEMBACKDROP_TYPE, &none, sizeof(none)))) {
+            RemovePropW(window, L"Pulse.DialogSurfaceFading");
+            return;
+        }
+        active_ = true;
+        const MARGINS margins{};
+        DwmExtendFrameIntoClientArea(window, &margins);
+    }
+    ~SurfaceFadeScope() {
+        if (!active_ || !IsWindow(window_)) return;
+        RemovePropW(window_, L"Pulse.DialogSurfaceFading");
+        DwmSetWindowAttribute(window_, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop_, sizeof(backdrop_));
+        const MARGINS margins{-1};
+        DwmExtendFrameIntoClientArea(window_, &margins);
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
+    SurfaceFadeScope(const SurfaceFadeScope&) = delete;
+    SurfaceFadeScope& operator=(const SurfaceFadeScope&) = delete;
+private:
+    HWND window_ = nullptr;
+    DWORD backdrop_ = 0;
+    bool active_ = false;
+};
+
 void Fade(HWND window, bool show, int show_command = SW_SHOW) {
     if (!IsWindow(window) || (!show && !IsWindowVisible(window))) return;
+    const BOOL disable_transitions = TRUE;
+    DwmSetWindowAttribute(window, DWMWA_TRANSITIONS_FORCEDISABLED,
+        &disable_transitions, sizeof(disable_transitions));
     const HWND dim = CompanionDimOverlay(window, show);
     const auto show_immediately = [&] {
         if (dim) {
@@ -133,16 +169,31 @@ void Fade(HWND window, bool show, int show_command = SW_SHOW) {
         SetLayeredWindowAttributes(window, original_key, show ? 0 : original_alpha,
             original_flags | LWA_ALPHA);
     }
+    // DWM's backdrop is outside the content visual. During a fade, paint the
+    // background into that visual so it follows the same opacity as the text.
+    SurfaceFadeScope surface_fade(window, composed);
     if (show) {
+        const BOOL cloak = TRUE;
+        const bool cloaked = SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CLOAK, &cloak, sizeof(cloak)));
+        ShowWindow(window, show_command);
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        if (composed) device->WaitForCommitCompletion();
+        GdiFlush();
+        DwmFlush();
+        if (cloaked) {
+            const BOOL uncloak = FALSE;
+            DwmSetWindowAttribute(window, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+        }
         if (dim) {
             SetDimOpacity(dim, 0.0f);
             ShowWindow(dim, SW_SHOWNOACTIVATE);
         }
-        ShowWindow(window, show_command);
+    } else {
         RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        if (composed) device->WaitForCommitCompletion();
     }
     const ULONGLONG start = GetTickCount64();
-    const float duration = 90.0f;
+    const float duration = 110.0f;
     for (;;) {
         const float t = std::min(1.0f, static_cast<float>(GetTickCount64() - start) / duration);
         const float eased = t * t * (3.0f - 2.0f * t);

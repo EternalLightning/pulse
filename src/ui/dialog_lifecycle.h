@@ -4,6 +4,9 @@ struct IDCompositionDevice;
 struct IDCompositionVisual;
 
 namespace pulse::ui {
+inline bool IsDialogSurfaceFading(HWND window) {
+    return GetPropW(window, L"Pulse.DialogSurfaceFading") != nullptr;
+}
 // Composition handles are borrowed only while the window's compositor is alive.
 inline void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual) {
     if (!window) return;

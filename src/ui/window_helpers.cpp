@@ -63,6 +63,9 @@ bool ApplyBackdrop(HWND hwnd, bool dark) {
     }
     MARGINS margins{ -1 };
     DwmExtendFrameIntoClientArea(hwnd, &margins);
+    if (SUCCEEDED(result) && !high_contrast)
+        SetPropW(hwnd, L"Pulse.DialogBackdrop", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(backdrop)));
+    else RemovePropW(hwnd, L"Pulse.DialogBackdrop");
     return !high_contrast && SUCCEEDED(result);
 }
 
@@ -97,7 +100,8 @@ void BeginSurface(Compositor& compositor, fluent::Painter& painter,
     dc->Clear(D2D1::ColorF(0, 0.0f));
     painter.BeginFrame(theme, high_contrast);
     D2D1_COLOR_F tint = theme.bg;
-    tint.a = high_contrast || !backdrop_enabled ? 1.0f : (dark ? 0.76f : 0.82f);
+    tint.a = high_contrast || !backdrop_enabled || IsDialogSurfaceFading(compositor.Hwnd())
+        ? 1.0f : (dark ? 0.76f : 0.82f);
     const float width = static_cast<float>(compositor.Width());
     const float height = static_cast<float>(compositor.Height());
     painter.FillRoundedRect(D2D1::RectF(0, 0, width, height), 0, tint);
