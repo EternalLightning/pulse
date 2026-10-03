@@ -1240,7 +1240,8 @@ bool MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
             shown.find(L'\u2026', dot) == std::wstring::npos)
             ext_at = dot;
     }
-    const D2D1_COLOR_F ext_color = WithAlpha(theme.text, (theme.bg.r < 0.5f) ? 0.58f : 0.62f);
+    const D2D1_COLOR_F ext_color = WithAlpha(theme.text,
+        theme.text.a * ((theme.bg.r < 0.5f) ? 0.58f : 0.62f));
     // Shape colored filenames in one layout. Splitting at the extension gives
     // each substring its own clipping/ellipsis and loses glyph positioning
     // across the boundary (including the dot's ink and the stem's last glyph).
@@ -1415,6 +1416,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
         bool selected = vm.IsRowSelected(src);
         bool hover = (src == vm.hover_index);
         bool cut = e.record_only || vm.cut_names.contains(e.name);
+        const bool ghosted = (e.attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
 
         const float inset = 4.0f * scale_;
         if (detailsView && list_zebra_ && (i & 1) && !selected && !hover && !IsHighContrast()) {
@@ -1481,12 +1483,15 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             requestedPixels = std::max(256l, requestedPixels);
         else if (vm.view_mode == ViewMode::MediumIcons)
             requestedPixels = std::max(128l, requestedPixels);
+        if (ghosted) dc->PushLayer(D2D1::LayerParameters(iconRect, nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 0.55f), nullptr);
         const bool drewThumbnail = !e.record_only && UsesThumbnails(vm.view_mode) &&
             thumbnail_cache_.Draw(dc, iconRect, e.path, e.attrs,
                 static_cast<uint32_t>(std::clamp(requestedPixels, 32l, 512l)),
                 vm.view_generation, e.modified_value, e.size_value)
                 == PreviewDrawResult::Bitmap;
         if (!drewThumbnail) DrawEntryIcon(e, iconX, iconY, renderedIconSize, theme);
+        if (ghosted) dc->PopLayer();
 
         float nameX = nameRc.left;
         float textY = nameRc.top;
@@ -1549,7 +1554,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             fieldState.focused = true;
             painter_.DrawTextFieldFrame(fieldRc, fieldState);
         } else {
-            D2D1_COLOR_F nameColor = cut ? WithAlpha(theme.text, 0.55f) : theme.text;
+            D2D1_COLOR_F nameColor = cut || ghosted ? WithAlpha(theme.text, theme.text.a * 0.55f) : theme.text;
             MakeBrush(dc, nameColor, brText_);
             if (iconGrid && tagDotCount == 0) {
                 painted_name_truncation_[painted_name_pane_][e.path] = DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);

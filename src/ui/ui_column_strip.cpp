@@ -222,12 +222,15 @@ void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneVi
         const float iy = std::round(top + (row_height_ - icon) * 0.5f);
         const std::wstring full = JoinDirName(column.path, entry.name);
         const D2D1_RECT_F dest = D2D1::RectF(ix, iy, ix + icon, iy + icon);
+        const bool dim = (entry.attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
+        if (dim) dc->PushLayer(D2D1::LayerParameters(dest, nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 0.55f), nullptr);
         if (!icon_cache_.Draw(dc, dest, full, entry.name, entry.is_dir, entry.attrs)) {
             if (entry.is_dir) DrawFolderIcon(ix, iy, icon, theme);
             else DrawFileIcon(ix, iy, icon, theme);
         }
-        const bool dim = (entry.attrs & FILE_ATTRIBUTE_HIDDEN) != 0;
-        MakeBrush(dc, dim ? WithAlpha(theme.text, 0.55f) : theme.text, brText_);
+        if (dim) dc->PopLayer();
+        MakeBrush(dc, dim ? WithAlpha(theme.text, theme.text.a * 0.55f) : theme.text, brText_);
         const float tx = ix + icon + 8.0f * scale_;
         const float chevron_w = entry.is_dir ? 18.0f * scale_ : 0.0f;
         DrawTextEndEllipsis(dc, factory, compositor_->FileNameFormat(), brText_.get(), entry.name,
