@@ -5,6 +5,9 @@
 #include <cmath>
 #include <memory>
 #include <windows.h>
+#ifdef PULSE_PREVIEW_PAN_TESTING
+#include <functional>
+#endif
 
 namespace pulse::ui {
 
@@ -26,6 +29,9 @@ public:
         host_ = host;
         if (!input_) {
             input_ = std::make_shared<InputState>();
+#ifdef PULSE_PREVIEW_PAN_TESTING
+            input_->test_hooks = test_hooks_;
+#endif
             auto* argument = new std::shared_ptr<InputState>(input_);
             input_->thread = CreateThread(nullptr, 0, InputMain, argument, 0, nullptr);
             if (!input_->thread) {
@@ -92,19 +98,20 @@ private:
     // is the only thread that may receive its callbacks.
     void RequestHook(bool install) {
         if (!input_) return;
+        input_->hook_requested = install;
         const DWORD thread = input_->thread_id.load();
-        if (thread) PostThreadMessageW(thread, kHookCommand, install ? 1 : 0, 0);
+        if (thread) PostThreadMessageW(thread, kHookCommand, 0, 0);
     }
 
-    static void SetHook(HHOOK& hook, bool install) {
-        if (install == (hook != nullptr)) return;
-        if (install) {
-            hook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, GetModuleHandleW(nullptr), 0);
-        } else {
-            UnhookWindowsHookEx(hook);
-            hook = nullptr;
-        }
-    }
+#ifdef PULSE_PREVIEW_PAN_TESTING
+    struct InputTestHooks {
+        std::function<void()> before_start;
+        std::function<HHOOK()> install;
+        std::function<void(HHOOK)> uninstall;
+        std::function<void(bool)> after_sync;
+    };
+    inline static std::shared_ptr<InputTestHooks> test_hooks_;
+#endif
 
     struct InputState {
         ~InputState() { if (thread) CloseHandle(thread); }
@@ -114,6 +121,10 @@ private:
         std::atomic<UINT> generation{0};
         std::atomic<bool> active{false};
         std::atomic<bool> stop{false};
+        std::atomic<bool> hook_requested{false};
+#ifdef PULSE_PREVIEW_PAN_TESTING
+        std::shared_ptr<InputTestHooks> test_hooks;
+#endif
         // Only the input thread touches this, including after host destruction.
         bool suppress_left_up = false;
         bool pending = false;
@@ -123,6 +134,35 @@ private:
         UINT pending_generation = 0;
         std::atomic<HWND> target{nullptr};
     };
+
+    static void SetHook(InputState& input, HHOOK& hook, bool install) {
+        (void)input;
+        if (install == (hook != nullptr)) return;
+        if (install) {
+#ifdef PULSE_PREVIEW_PAN_TESTING
+            if (input.test_hooks) {
+                hook = input.test_hooks->install();
+                return;
+            }
+#endif
+            hook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, GetModuleHandleW(nullptr), 0);
+        } else {
+#ifdef PULSE_PREVIEW_PAN_TESTING
+            if (input.test_hooks) input.test_hooks->uninstall(hook);
+            else
+#endif
+                UnhookWindowsHookEx(hook);
+            hook = nullptr;
+        }
+    }
+
+    static void SyncHook(InputState& input, HHOOK& hook) {
+        SetHook(input, hook, !input.stop && input.hook_requested);
+#ifdef PULSE_PREVIEW_PAN_TESTING
+        if (input.test_hooks && input.test_hooks->after_sync)
+            input.test_hooks->after_sync(hook != nullptr);
+#endif
+    }
 
     struct Axis {
         HWND target = nullptr;
@@ -310,25 +350,30 @@ private:
         std::unique_ptr<std::shared_ptr<InputState>> argument(
             static_cast<std::shared_ptr<InputState>*>(parameter));
         auto input = *argument;
+#ifdef PULSE_PREVIEW_PAN_TESTING
+        if (input->test_hooks && input->test_hooks->before_start)
+            input->test_hooks->before_start();
+#endif
         MSG message{};
         PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
         input->thread_id = GetCurrentThreadId();
         current_input_ = input.get();
         // This thread never calls preview providers. Even a blocked preview STA
         // cannot delay the mouse hook or leak a consumed gesture's release.
-        // The hook starts installed because Enable() may ask for it before this
-        // thread has a message queue to receive the request.
-        HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, GetModuleHandleW(nullptr), 0);
+        // Startup and queued wakeups consume the latest intent, including a
+        // Disable() that arrived before this thread published its message queue.
+        HHOOK hook = nullptr;
+        SyncHook(*input, hook);
         while ((!input->stop || input->suppress_left_up) &&
                GetMessageW(&message, nullptr, 0, 0) > 0) {
             if (message.message == kHookCommand) {
-                SetHook(hook, message.wParam != 0);
+                SyncHook(*input, hook);
                 continue;
             }
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        SetHook(hook, false);
+        SetHook(*input, hook, false);
         current_input_ = nullptr;
         return 0;
     }

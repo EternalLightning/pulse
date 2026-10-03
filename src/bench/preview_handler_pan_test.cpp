@@ -4,6 +4,132 @@
 namespace pulse::ui {
 
 struct PreviewHandlerPanTest {
+    struct HookProbe {
+        HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE start = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE synced = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE resume = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::atomic<unsigned> installs{0}, removals{0}, syncs{0};
+        std::atomic<bool> live{false};
+        bool pause_first = false;
+
+        ~HookProbe() {
+            for (HANDLE event : {entered, start, synced, resume}) if (event) CloseHandle(event);
+        }
+
+        bool WaitForSync(unsigned count) const {
+            const auto deadline = GetTickCount64() + 2000;
+            while (syncs.load() < count) {
+                const auto now = GetTickCount64();
+                if (now >= deadline || WaitForSingleObject(synced,
+                    static_cast<DWORD>(deadline - now)) != WAIT_OBJECT_0) return false;
+            }
+            return true;
+        }
+    };
+
+    static std::shared_ptr<HookProbe> PrepareThread(bool pause_first = false) {
+        auto probe = std::make_shared<HookProbe>();
+        probe->pause_first = pause_first;
+        auto hooks = std::make_shared<PreviewHandlerPan::InputTestHooks>();
+        hooks->before_start = [probe] {
+            SetEvent(probe->entered);
+            WaitForSingleObject(probe->start, 5000);
+        };
+        hooks->install = [probe] {
+            ++probe->installs;
+            return reinterpret_cast<HHOOK>(static_cast<UINT_PTR>(1));
+        };
+        hooks->uninstall = [probe](HHOOK) { ++probe->removals; };
+        hooks->after_sync = [probe](bool live) {
+            probe->live = live;
+            const unsigned count = ++probe->syncs;
+            SetEvent(probe->synced);
+            if (probe->pause_first && count == 1) WaitForSingleObject(probe->resume, 5000);
+        };
+        PreviewHandlerPan::test_hooks_ = std::move(hooks);
+        return probe;
+    }
+
+    template <typename Check>
+    static void RunThreadLifecycle(Check check) {
+        // Off-screen test HWNDs and hook substitutes never receive desktop input.
+        HWND visible = CreateWindowExW(WS_EX_NOACTIVATE, L"PulsePreviewPanTest", L"", WS_POPUP | WS_VISIBLE,
+            -32000, -32000, 100, 100, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        check(visible && IsWindowVisible(visible), "create off-screen visible preview for input-thread lifecycle");
+        if (!visible) return;
+        const auto finish = [&](std::unique_ptr<PreviewHandlerPan>& pan,
+                                const std::shared_ptr<PreviewHandlerPan::InputState>& input,
+                                const std::shared_ptr<HookProbe>& probe) {
+            pan.reset();
+            SetEvent(probe->start);
+            SetEvent(probe->resume);
+            check(input && input->thread && WaitForSingleObject(input->thread, 2000) == WAIT_OBJECT_0,
+                "input thread exits and releases its substitute hook");
+            PreviewHandlerPan::test_hooks_.reset();
+        };
+        {
+            auto probe = PrepareThread();
+            auto pan = std::make_unique<PreviewHandlerPan>();
+            pan->Enable(visible);
+            auto input = pan->input_;
+            const bool starting = input && WaitForSingleObject(probe->entered, 2000) == WAIT_OBJECT_0;
+            check(starting && !input->thread_id, "Enable starts a real thread before publishing its message queue");
+            if (starting) {
+                pan->Disable();
+                ShowWindow(visible, SW_HIDE);
+                SetEvent(probe->start);
+                check(probe->WaitForSync(1) && probe->installs == 0 && !probe->live,
+                    "hiding before input-thread startup never installs a hook");
+                ShowWindow(visible, SW_SHOWNOACTIVATE);
+                pan->Enable(visible);
+                check(probe->WaitForSync(2) && probe->installs == 1 && probe->live,
+                    "showing the preview after startup installs its hook once");
+                pan->Disable();
+                ShowWindow(visible, SW_HIDE);
+                check(probe->WaitForSync(3) && probe->removals == 1 && !probe->live,
+                    "hiding a started preview removes its hook");
+            }
+            finish(pan, input, probe);
+        }
+        {
+            ShowWindow(visible, SW_SHOWNOACTIVATE);
+            auto probe = PrepareThread(true);
+            auto pan = std::make_unique<PreviewHandlerPan>();
+            pan->Enable(visible);
+            auto input = pan->input_;
+            const bool starting = input && WaitForSingleObject(probe->entered, 2000) == WAIT_OBJECT_0;
+            if (starting) {
+                pan->Disable();
+                pan->Enable(visible);
+                SetEvent(probe->start);
+                check(probe->WaitForSync(1) && probe->installs == 1 && probe->live,
+                    "rapid startup hide-show honors the latest visible intent");
+                pan->Disable();
+                pan->Enable(visible);
+                pan->Disable();
+                ShowWindow(visible, SW_HIDE);
+                SetEvent(probe->resume);
+                check(probe->WaitForSync(4) && probe->installs == 1 && probe->removals == 1 && !probe->live,
+                    "queued stale enable commands cannot reinstall a hidden preview hook");
+            } else check(false, "start rapid-switch input thread");
+            finish(pan, input, probe);
+        }
+        {
+            ShowWindow(visible, SW_SHOWNOACTIVATE);
+            auto probe = PrepareThread();
+            auto pan = std::make_unique<PreviewHandlerPan>();
+            pan->Enable(visible);
+            auto input = pan->input_;
+            const bool starting = input && WaitForSingleObject(probe->entered, 2000) == WAIT_OBJECT_0;
+            check(starting, "start destruction-boundary input thread");
+            finish(pan, input, probe);
+            check(probe->installs == 0 && probe->removals == 0 && !probe->live,
+                "destruction before input-thread startup never installs a hook");
+        }
+        DestroyWindow(visible);
+    }
+
     struct NativeCanvas { int clicks = 0, cancellations = 0; bool pressed = false; };
     static LRESULT CALLBACK CanvasProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         auto* canvas = reinterpret_cast<NativeCanvas*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -210,6 +336,7 @@ struct PreviewHandlerPanTest {
               PreviewGrabCursor(false) != PreviewGrabCursor(true),
             "distinct open and closed hand cursors created");
         pan.Disable();
+        RunThreadLifecycle(check);
         DestroyWindow(host);
         return failures;
     }
