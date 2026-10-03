@@ -802,6 +802,7 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
     tab.ClearEntryOrderHold();
+    tab.pending_created_name.clear();
     s.explicit_entry_refreshes.erase(&tab);
     if (tab.archive_cancel) tab.archive_cancel->store(true);
     s.index.CancelSession(tab.search_session_id);
@@ -1072,6 +1073,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                 s.scrollTargetY = tab->scroll_y;
                 s.scrollAnimating = false;
             }
+            RevealPendingCreatedItem(s, *tab);
     });
     if (again) RefreshPath(s, res.path);
     if (!any) return;
@@ -1285,6 +1287,7 @@ static bool ApplyNotifiesToVisible(AppState& s, const std::wstring& path,
         if (!names.empty()) tab->RemapSelection(names, focus);
         else if (tab->snapshot && tab->EntryCount() != 0 && tab->selected_index < 0)
             tab->SelectOnly(0);
+        RevealPendingCreatedItem(s, *tab);
         if (!store_snap) store_snap = tab->snapshot;
         any = true;
     });

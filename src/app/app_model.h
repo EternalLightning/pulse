@@ -88,6 +88,7 @@ struct Tab {
     std::wstring pending_selected_name;
     std::vector<std::wstring> pending_selected_names;
     bool pending_ensure_selection_visible = false;
+    std::wstring pending_created_name;
     bool refresh_keeps_order = false;
     bool order_held = false;
     std::vector<EntryRenameHint> held_renames;

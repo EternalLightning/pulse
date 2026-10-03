@@ -13,6 +13,7 @@
 #include "../common/path_utils.h"
 #include "../common/diagnostics_exporter.h"
 #include "snapshot_patch.h"
+#include "entry_sort.h"
 #include "session.h"
 #include "context_menu.h"
 #include "batch_rename.h"
@@ -38,6 +39,49 @@
 using namespace pulse;
 
 namespace pulse {
+void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
+    if (tab.pending_created_name.empty() || tab.pending_generation != 0 || !tab.snapshot ||
+        tab.snapshot_path != tab.current_path) return;
+    const auto found = std::find_if(tab.snapshot->begin(), tab.snapshot->end(), [&](const auto& entry) {
+        return _wcsicmp(entry.name.c_str(), tab.pending_created_name.c_str()) == 0;
+    });
+    if (found == tab.snapshot->end()) return;
+    const std::wstring name = found->name;
+    auto entries = std::make_shared<std::vector<fs::DirEntry>>(*tab.snapshot);
+    if (tab.sort_column == ui::SortColumn::Mtime) {
+        std::stable_sort(entries->begin(), entries->end(), [&](const auto& left, const auto& right) {
+            return app::EntryLess(left, right, tab.sort_column, tab.sort_direction, tab.current_path);
+        });
+    } else {
+        const auto offset = std::distance(tab.snapshot->begin(), found);
+        std::rotate(entries->begin() + offset, entries->begin() + offset + 1, entries->end());
+    }
+    tab.SetSnapshot(std::move(entries));
+    tab.order_held = true;
+    tab.RemapSelection({name}, name);
+    tab.pending_created_name.clear();
+    if (ActiveTab(s) == &tab) {
+        ui::PaneViewModel pane;
+        app::FillPaneViewModel(pane, *s.pane, &s.places);
+        if (pane.ViewIndex(tab.selected_index) < 0) ClearPaneFilter(s);
+        EnsureRowVisible(s, tab, tab.selected_index);
+        s.scrollTargetY = tab.scroll_y;
+        s.scrollAnimating = false;
+    }
+}
+
+void QueueCreatedItemReveal(AppState& s, const std::wstring& path) {
+    const std::wstring parent = fs::ParentPath(path);
+    const std::wstring name = PathFindFileNameW(path.c_str());
+    if (parent.empty() || name.empty()) return;
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        if (!tab || _wcsicmp(tab->current_path.c_str(), parent.c_str()) != 0) return;
+        tab->pending_created_name = name;
+        RevealPendingCreatedItem(s, *tab);
+    });
+}
+
 bool SubmitWithConflictResolution(AppState& s, ops::OpRequest request) {
     // Copy/move conflict discovery is part of the transfer worker's recursive
     // scan. The UI only consumes immutable conflict snapshots.

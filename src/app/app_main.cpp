@@ -1294,7 +1294,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                         const std::wstring parent = fs::ParentPath(destination);
                         if (!parent.empty()) s->store.MarkDirty(parent);
                     }
-                    if (completed.type == ops::OpType::Copy) {
+                    if (completed.type == ops::OpType::CreateFolder ||
+                        completed.type == ops::OpType::CreateTextFile) {
+                        for (const auto& source : completed.sources)
+                            QueueCreatedItemReveal(*s, source);
+                    } else if (completed.type == ops::OpType::Copy) {
                         for (size_t i = 0; i < completed.sources.size() &&
                                            i < completed.destinations.size(); ++i) {
                             s->places.CloneAssignments(completed.sources[i],
