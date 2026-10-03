@@ -255,6 +255,7 @@ bool PlacesCatalog::Load() {
     tags.clear();
     networks.clear();
     quick_access_paths.clear();
+    quick_access_order.clear();
     starred_items.clear();
     quick_access_badges.clear();
     recent_items.clear();
@@ -355,6 +356,12 @@ bool PlacesCatalog::Load() {
         const auto normalized = Norm(path);
         if (!normalized.empty() && !fs::IsVirtualPath(normalized) &&
             !IsQuickAccessPinned(normalized)) quick_access_paths.push_back(normalized);
+    }
+    std::unordered_set<std::wstring> ordered_paths;
+    for (const auto& path : pulse::json::ExtractStringArray(json, L"quick_access_order")) {
+        const auto normalized = Norm(path);
+        if (!normalized.empty() && ordered_paths.insert(TagKey(normalized)).second)
+            quick_access_order.push_back(normalized);
     }
 
     const bool has_starred_items = pulse::json::ValuePosition(
@@ -466,6 +473,7 @@ PlacesCatalog::SaveSnapshot PlacesCatalog::CaptureSaveSnapshot() const {
     snapshot.tags = tags;
     snapshot.networks = networks;
     snapshot.quick_access_paths = quick_access_paths;
+    snapshot.quick_access_order = quick_access_order;
     snapshot.starred_items = starred_items;
     snapshot.quick_access_badges = quick_access_badges;
     snapshot.recent_items = recent_items;
@@ -619,6 +627,8 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
     writeArr(legacy_starred);
     f << L",\n  \"quick_access_paths\":";
     writeArr(snapshot.quick_access_paths);
+    f << L",\n  \"quick_access_order\":";
+    writeArr(snapshot.quick_access_order);
     f << L",\n  \"starred_items\":[\n";
     for (size_t i = 0; i < snapshot.starred_items.size(); ++i) {
         const auto& item = snapshot.starred_items[i];
@@ -1227,23 +1237,40 @@ bool PlacesCatalog::IsQuickAccessPinned(const std::wstring& path) const {
         [&](const auto& value) { return TagKey(value) == key; });
 }
 
-bool PlacesCatalog::ReorderQuickAccessPinned(const std::wstring& path, size_t position) {
+size_t PlacesCatalog::QuickAccessRank(const std::wstring& path) const {
     const auto key = TagKey(path);
-    const auto found = std::find_if(quick_access_paths.begin(), quick_access_paths.end(),
+    const auto found = std::find_if(quick_access_order.begin(), quick_access_order.end(),
         [&](const std::wstring& candidate) { return TagKey(candidate) == key; });
-    if (found == quick_access_paths.end() || quick_access_paths.empty()) return false;
-    position = std::min(position, quick_access_paths.size());
-    const size_t current = static_cast<size_t>(found - quick_access_paths.begin());
+    return static_cast<size_t>(found - quick_access_order.begin());
+}
+
+bool PlacesCatalog::ReorderQuickAccess(const std::vector<std::wstring>& visible,
+                                      const std::wstring& path, size_t position) {
+    std::vector<std::wstring> rows;
+    std::unordered_set<std::wstring> shown;
+    for (const auto& entry : visible) {
+        if (!entry.empty() && shown.insert(TagKey(entry)).second) rows.push_back(entry);
+    }
+    const auto key = TagKey(path);
+    const auto found = std::find_if(rows.begin(), rows.end(),
+        [&](const auto& candidate) { return TagKey(candidate) == key; });
+    if (found == rows.end()) return false;
+    position = std::min(position, rows.size());
+    const size_t current = static_cast<size_t>(found - rows.begin());
     // The indicator names a gap in the original list, which still includes the
     // dragged row. Removing that row shifts every later gap back by one.
     if (position > current) --position;
     if (current == position) return false;
     std::wstring moved = std::move(*found);
-    quick_access_paths.erase(found);
-    quick_access_paths.insert(
-        quick_access_paths.begin() +
-            static_cast<std::ptrdiff_t>(std::min(position, quick_access_paths.size())),
-        std::move(moved));
+    rows.erase(found);
+    rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(position), std::move(moved));
+    // Keep hidden built-ins and temporarily absent project rows in their saved
+    // slots; replace only visible slots with the user's new visible sequence.
+    size_t next = 0;
+    for (auto& entry : quick_access_order) {
+        if (shown.contains(TagKey(entry))) entry = rows[next++];
+    }
+    quick_access_order.insert(quick_access_order.end(), rows.begin() + static_cast<std::ptrdiff_t>(next), rows.end());
     Save();
     return true;
 }
@@ -1291,6 +1318,15 @@ void PlacesCatalog::RemapPaths(const std::wstring& old_path, const std::wstring&
     }
     std::erase_if(quick_access_paths, [&](const auto& path) {
         return !quick_seen.insert(TagKey(path)).second;
+    });
+    std::unordered_set<std::wstring> order_seen;
+    for (auto& path : quick_access_order) {
+        if (!PathIsOrDescendant(path, old_norm)) continue;
+        path = new_norm + path.substr(old_norm.size());
+        changed = true;
+    }
+    std::erase_if(quick_access_order, [&](const auto& path) {
+        return !order_seen.insert(TagKey(path)).second;
     });
     for (auto& item : starred_items) {
         if (!PathIsOrDescendant(item.path, old_norm)) continue;

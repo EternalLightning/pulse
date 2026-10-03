@@ -528,7 +528,7 @@ void ResetSidebarGroupDrag(AppState& s) {
     s.groupDragPath.clear();
 }
 
-// ---- Quick-access pin drag: reorders the pinned folders ---------------------
+// ---- Quick-access row drag -------------------------------------------------
 
 void ResetSidebarPinDrag(AppState& s) {
     s.pinDragPending = false;
@@ -540,26 +540,19 @@ void ResetSidebarPinDrag(AppState& s) {
     s.pinGapLineY = 0.0f;
 }
 
-// Insertion slot for the dragged pin, measured against the pinned rows only.
+// Insertion slot for any row, measured against all visible quick-access rows.
 void UpdateSidebarPinDrag(AppState& s, int my) {
     if (!s.pinDragActive || s.pinDragPath.empty()) return;
     ui::WindowViewModel vm = BuildVm(s, false);
     const float w = static_cast<float>(s.compositor.Width());
     const float h = static_cast<float>(s.compositor.Height());
     const int section = static_cast<int>(app::SidebarSectionId::QuickAccess);
-    const auto& pins = s.places.quick_access_paths;
 
     std::vector<D2D1_RECT_F> rows;
-    rows.reserve(pins.size());
     const int group = app::SidebarSectionIndex(vm, section);
     if (group >= 0) {
         const auto& items = vm.sidebar[static_cast<size_t>(group)].items;
         for (int i = 0; i < static_cast<int>(items.size()); ++i) {
-            const bool pinned = std::any_of(pins.begin(), pins.end(),
-                [&](const std::wstring& candidate) {
-                    return _wcsicmp(candidate.c_str(), items[static_cast<size_t>(i)].path.c_str()) == 0;
-                });
-            if (!pinned) continue;
             D2D1_RECT_F rc{};
             if (s.renderer.SidebarRowRect(vm, w, h, section, i, &rc)) rows.push_back(rc);
         }
@@ -2615,8 +2608,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 s->starDragTarget = found == folders.end()
                     ? 0 : static_cast<size_t>(found - folders.begin());
                 SetCapture(hwnd);
-            } else if (s->places.IsQuickAccessPinned(hit.path)) {
-                // Pinned rows reorder inside quick access; navigation waits for
+            } else if (hit.sidebar_section == static_cast<int>(app::SidebarSectionId::QuickAccess)) {
+                // Every quick-access row can reorder; navigation waits for
                 // the release so a press can become a drag.
                 s->pinDragPending = true;
                 s->pinDragActive = false;
@@ -2800,9 +2793,16 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             if (s->pinDragPending || s->pinDragActive) {
                 const bool was_active = s->pinDragActive;
                 const std::wstring path = s->pinDragPath;
-                if (was_active && s->pinDragToIndex >= 0)
-                    s->places.ReorderQuickAccessPinned(path,
-                        static_cast<size_t>(s->pinDragToIndex));
+                if (was_active && s->pinDragToIndex >= 0) {
+                    const auto vm = BuildVm(*s, false);
+                    const int group = app::SidebarSectionIndex(vm, static_cast<int>(app::SidebarSectionId::QuickAccess));
+                    std::vector<std::wstring> rows;
+                    if (group >= 0) {
+                        for (const auto& item : vm.sidebar[static_cast<size_t>(group)].items)
+                            rows.push_back(item.path);
+                    }
+                    s->places.ReorderQuickAccess(rows, path, static_cast<size_t>(s->pinDragToIndex));
+                }
                 ResetSidebarPinDrag(*s);
                 if (GetCapture() == hwnd) ReleaseCapture();
                 if (!was_active && !path.empty()) NavigateTo(*s, path);

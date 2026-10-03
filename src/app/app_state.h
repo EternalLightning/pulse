@@ -556,7 +556,7 @@ struct AppState {
     POINT pinDragStartPt{};
     std::wstring pinDragPath;
     int pinDragRun = -1;                 // slot.run of the dragged row (highlight)
-    int pinDragToIndex = -1;             // target position among the pins
+    int pinDragToIndex = -1;             // target gap among all quick-access rows
     float pinGapLineY = 0.0f;
     bool pinGapVisible = false;
 

@@ -90,6 +90,7 @@ public:
     std::vector<ColorTag> tags;
     std::vector<NetworkPlace> networks;
     std::vector<std::wstring> quick_access_paths;
+    std::vector<std::wstring> quick_access_order;
     std::vector<StarredItem> starred_items;
     std::vector<QuickAccessBadge> quick_access_badges;
     std::vector<RecentItem> recent_items;
@@ -144,8 +145,10 @@ public:
 
     bool IsQuickAccessPinned(const std::wstring& path) const;
     bool SetQuickAccessPinned(const std::vector<std::wstring>& paths, bool pinned);
-    // Moves a pinned folder to a gap in the original pin list (0..size, clamped).
-    bool ReorderQuickAccessPinned(const std::wstring& path, size_t position);
+    // Moves any visible quick-access row to a gap in the current display list.
+    bool ReorderQuickAccess(const std::vector<std::wstring>& visible,
+                            const std::wstring& path, size_t position);
+    size_t QuickAccessRank(const std::wstring& path) const;
     const QuickAccessBadge* FindQuickAccessBadge(const std::wstring& path) const;
     // Empty text and the default color restore the sidebar entry's default badge.
     bool SetQuickAccessBadge(const std::wstring& path, const std::wstring& text,
@@ -185,6 +188,7 @@ private:
         std::vector<ColorTag> tags;
         std::vector<NetworkPlace> networks;
         std::vector<std::wstring> quick_access_paths;
+        std::vector<std::wstring> quick_access_order;
         std::vector<StarredItem> starred_items;
         std::vector<QuickAccessBadge> quick_access_badges;
         std::vector<RecentItem> recent_items;

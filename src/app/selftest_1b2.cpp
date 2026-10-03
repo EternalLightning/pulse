@@ -3523,16 +3523,16 @@ void TestQuickAccessPinReorder() {
     pins.persist = false;
     const std::vector<std::wstring> original{ L"C:\\a", L"C:\\b", L"C:\\c" };
     pins.quick_access_paths = original;
-    Check(pins.ReorderQuickAccessPinned(L"C:\\a", 2) &&
-          pins.quick_access_paths == std::vector<std::wstring>{ L"C:\\b", L"C:\\a", L"C:\\c" },
+    Check(pins.ReorderQuickAccess(original, L"C:\\a", 2) &&
+          pins.quick_access_order == std::vector<std::wstring>{ L"C:\\b", L"C:\\a", L"C:\\c" },
           L"quick access: downward drag lands at the indicated gap");
-    pins.quick_access_paths = original;
-    Check(!pins.ReorderQuickAccessPinned(L"C:\\a", 1) && pins.quick_access_paths == original,
+    pins.quick_access_order = original;
+    Check(!pins.ReorderQuickAccess(original, L"C:\\a", 1) && pins.quick_access_order == original,
           L"quick access: dropping immediately after the source preserves order");
-    Check(pins.ReorderQuickAccessPinned(L"C:\\a", 3) &&
-          pins.quick_access_paths == std::vector<std::wstring>{ L"C:\\b", L"C:\\c", L"C:\\a" },
+    Check(pins.ReorderQuickAccess(original, L"C:\\a", 3) &&
+          pins.quick_access_order == std::vector<std::wstring>{ L"C:\\b", L"C:\\c", L"C:\\a" },
           L"quick access: the final insertion gap appends the dragged pin");
-    Check(pins.ReorderQuickAccessPinned(L"C:\\a", 0) && pins.quick_access_paths == original,
+    Check(pins.ReorderQuickAccess(pins.quick_access_order, L"C:\\a", 0) && pins.quick_access_order == original,
           L"quick access: upward drag still reaches the first gap");
 }
 
@@ -3646,13 +3646,13 @@ void TestQuickAccess() {
             PlacesCatalog pins;
             pins.persist = false;
             pins.quick_access_paths = { L"C:\\a", L"C:\\b", L"C:\\c" };
-            Check(pins.ReorderQuickAccessPinned(L"C:\\c", 0) &&
-                  pins.quick_access_paths[0] == L"C:\\c" &&
-                  pins.quick_access_paths[1] == L"C:\\a" &&
-                  pins.quick_access_paths[2] == L"C:\\b",
+            Check(pins.ReorderQuickAccess(pins.quick_access_paths, L"C:\\c", 0) &&
+                  pins.quick_access_order[0] == L"C:\\c" &&
+                  pins.quick_access_order[1] == L"C:\\a" &&
+                  pins.quick_access_order[2] == L"C:\\b",
                   L"quick access: a dragged pin moves to the requested position");
-            Check(!pins.ReorderQuickAccessPinned(L"C:\\missing", 1) &&
-                  !pins.ReorderQuickAccessPinned(L"C:\\c", 0),
+            Check(!pins.ReorderQuickAccess(pins.quick_access_order, L"C:\\missing", 1) &&
+                  !pins.ReorderQuickAccess(pins.quick_access_order, L"C:\\c", 0),
                   L"quick access: reordering ignores unknown paths and keeps no-ops");
         }
 

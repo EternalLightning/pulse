@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 
 namespace {
 
@@ -60,7 +61,7 @@ namespace pulse::app {
 std::wstring GetPulseDataDir() { return data_dir; }
 } // namespace pulse::app
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
     Fixture fixture;
     if (data_dir.empty()) {
@@ -76,6 +77,87 @@ int wmain() {
     const std::wstring pinned = L"C:\\fixture\\pinned";
     const std::wstring cloud = L"\\\\server\\share\\云盘";
     const std::wstring long_path = L"C:\\fixture\\" + std::wstring(280, L'x');
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--order") {
+        app::Pane pane;
+        pane.NewTab(app::MakeHomePath());
+        pane.ActiveTab()->git_root = L"C:\\fixture\\project";
+        app::SidebarModel sidebar;
+        for (const auto& [path, builtin] : std::vector<std::pair<std::wstring, app::BuiltinQuickAccess>>{
+                 {app::MakeRecentPath(), app::BuiltinQuickAccess::Recent},
+                 {desktop, app::BuiltinQuickAccess::Desktop},
+                 {L"C:\\fixture\\downloads", app::BuiltinQuickAccess::Downloads},
+                 {app::MakeRecyclePath(), app::BuiltinQuickAccess::RecycleBin}}) {
+            app::SidebarEntry entry;
+            entry.path = path; entry.label = path; entry.builtin = static_cast<int>(builtin);
+            sidebar.quick_access.push_back(std::move(entry));
+        }
+        const auto rows = [&](const app::PlacesCatalog& places, uint32_t hidden = 0) {
+            const auto vm = app::BuildWindowViewModel(pane, sidebar, true, false, false, &places,
+                0, 0, true, nullptr, hidden);
+            std::vector<std::wstring> paths;
+            for (const auto& group : vm.sidebar) {
+                if (group.id != static_cast<int>(app::SidebarSectionId::QuickAccess)) continue;
+                for (const auto& item : group.items) paths.push_back(fs::NormalizePath(item.path));
+            }
+            return paths;
+        };
+        std::vector<std::wstring> saved;
+        {
+            app::PlacesCatalog places;
+            places.SetQuickAccessPinned({cloud, long_path, desktop}, true);
+            auto visible = rows(places);
+            check(visible.size() == 7 && visible.front() == app::MakeRecentPath(),
+                "legacy defaults retain built-ins, project and pin order without duplicate built-ins");
+            check(places.ReorderQuickAccess(visible, cloud, 0) && rows(places).front() == fs::NormalizePath(cloud),
+                "a pinned UNC folder can move before all built-in entries");
+            for (const auto& entry : sidebar.quick_access) {
+                visible = rows(places);
+                check(places.ReorderQuickAccess(visible, entry.path, visible.size()) && rows(places).back() == fs::NormalizePath(entry.path),
+                    "each built-in including virtual entries can move after pinned folders");
+            }
+            visible = rows(places);
+            check(!places.ReorderQuickAccess(visible, visible.front(), 1) && rows(places) == visible &&
+                !places.ReorderQuickAccess(visible, L"C:\\missing", 0),
+                "same gap and absent rows leave the full order unchanged");
+            check(places.ReorderQuickAccess(visible, visible.back(), 0) && rows(places).front() == visible.back(),
+                "upward moves use the indicated full-list insertion gap");
+            const auto hidden = 1u << static_cast<int>(app::BuiltinQuickAccess::Downloads);
+            const size_t downloads_slot = places.QuickAccessRank(L"C:\\fixture\\downloads");
+            visible = rows(places, hidden);
+            places.ReorderQuickAccess(visible, visible.front(), visible.size());
+            check(rows(places, hidden).size() == 6 &&
+                places.QuickAccessRank(L"C:\\fixture\\downloads") == downloads_slot && rows(places).size() == 7,
+                "sorting visible rows preserves the hidden built-in's saved slot");
+            const auto project_slot = places.QuickAccessRank(pane.ActiveTab()->git_root);
+            pane.ActiveTab()->git_root.clear();
+            visible = rows(places);
+            places.ReorderQuickAccess(visible, visible.front(), visible.size());
+            pane.ActiveTab()->git_root = L"C:\\fixture\\project";
+            check(places.QuickAccessRank(pane.ActiveTab()->git_root) == project_slot && rows(places).size() == 7,
+                "temporarily absent project rows keep their custom position");
+            places.RemapPaths(cloud, L"\\\\server\\share\\renamed");
+            check(places.QuickAccessRank(cloud) == places.quick_access_order.size() &&
+                places.QuickAccessRank(L"\\\\server\\share\\renamed") < places.quick_access_order.size(),
+                "renaming a pinned location also remaps its display order");
+            saved = rows(places);
+        }
+        {
+            app::PlacesCatalog restarted;
+            check(restarted.Load() && rows(restarted) == saved,
+                "restart restores mixed built-in, project, UNC and long-path ordering");
+        }
+        check(WriteUtf8FileAtomic(data_dir + L"\\places.json",
+            LR"({"quick_access_paths":["C:\\fixture\\pinned"],"quick_access_order":["pulse:recent","pulse:recent","","C:\\fixture\\pinned","c:\\fixture\\PINNED"]})"),
+            "write isolated duplicate-order fixture");
+        {
+            app::PlacesCatalog partial;
+            partial.persist = false;
+            check(partial.Load() && partial.quick_access_order.size() == 2 &&
+                partial.QuickAccessRank(L"c:\\fixture\\PINNED") == 1,
+                "loading order keeps virtual paths and rejects empty or case-duplicate paths");
+        }
+        return failures ? 1 : 0;
+    }
     {
         app::PlacesCatalog places;
         places.persist = false;

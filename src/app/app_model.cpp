@@ -1759,7 +1759,10 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
         }
     }
     const std::wstring& gitRoot = tab->git_root;
-    if (!gitRoot.empty() && (!places || !places->IsStarred(gitRoot))) {
+    if (!gitRoot.empty() && (!places || !places->IsStarred(gitRoot)) &&
+        std::none_of(access.items.begin(), access.items.end(), [&](const auto& item) {
+            return _wcsicmp(fs::NormalizePath(item.path).c_str(), fs::NormalizePath(gitRoot).c_str()) == 0;
+        })) {
         ui::SidebarItem project;
         wchar_t project_label[512]{};
         swprintf_s(project_label, l10n::Get(l10n::StringId::ProjectFormat).c_str(),
@@ -1774,6 +1777,9 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
     }
     if (places) {
         for (const auto& path : places->quick_access_paths) {
+            if (std::any_of(access.items.begin(), access.items.end(), [&](const auto& existing) {
+                return _wcsicmp(fs::NormalizePath(existing.path).c_str(), fs::NormalizePath(path).c_str()) == 0;
+            })) continue;
             ui::SidebarItem item;
             item.label = TabTitle(path);
             item.path = path;
@@ -1783,6 +1789,9 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             item.use_path_icon = true;
             access.items.push_back(std::move(item));
         }
+        std::stable_sort(access.items.begin(), access.items.end(), [&](const auto& left, const auto& right) {
+            return places->QuickAccessRank(left.path) < places->QuickAccessRank(right.path);
+        });
     }
     savedSearches = ConvertGroup(l10n::Get(l10n::StringId::SidebarSavedSearches),
                                  sidebar.saved_searches, false);

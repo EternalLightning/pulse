@@ -4,11 +4,120 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <string_view>
+#include <algorithm>
+#include <tuple>
 
-int wmain() {
+namespace pulse { void UpdateSidebarPinDrag(AppState& s, int my); }
+
+int QuickAccessDragTest() {
+    using namespace pulse;
+    auto owned = std::make_unique<AppState>();
+    auto& s = *owned;
+    s.isolatedTest = true;
+    s.appPrefs.persist = s.places.persist = s.ctxMenuPrefs.persist = s.searchHistory.persist = false;
+    s.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"quick access fixture", WS_OVERLAPPEDWINDOW,
+        -30000, -30000, 1100, 780, nullptr, nullptr, nullptr, nullptr);
+    if (!s.hwnd || !s.compositor.Init(s.hwnd)) return 2;
+    s.renderer.SetCompositor(&s.compositor);
+    s.window_tabs.EnsureDefault(); s.pane = s.window_tabs.Active()->FocusedPane();
+    ActiveTab(s)->current_path = L"C:\\quick-access-fixture";
+    ActiveTab(s)->git_root = L"C:\\quick-access-fixture\\project";
+    s.sidebarHiddenMask = ((1u << app::kSidebarSectionCount) - 1u) &
+        ~(1u << static_cast<int>(app::SidebarSectionId::QuickAccess));
+    for (const auto& [name, path, builtin] : std::vector<std::tuple<const wchar_t*, const wchar_t*, app::BuiltinQuickAccess>>{
+             {L"最近使用", L"pulse:recent", app::BuiltinQuickAccess::Recent},
+             {L"桌面", L"C:\\quick-access-fixture\\desktop", app::BuiltinQuickAccess::Desktop},
+             {L"下载", L"C:\\quick-access-fixture\\downloads", app::BuiltinQuickAccess::Downloads},
+             {L"回收站", L"pulse:recycle", app::BuiltinQuickAccess::RecycleBin}}) {
+        app::SidebarEntry entry;
+        entry.label = name; entry.path = path; entry.glyph = L"\xE8B7";
+        entry.builtin = static_cast<int>(builtin);
+        s.sidebar.quick_access.push_back(std::move(entry));
+    }
+    const std::wstring pin = L"C:\\quick-access-fixture\\pinned";
+    s.places.SetQuickAccessPinned({pin}, true);
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", text);
+        if (!ok) ++failures;
+    };
+    const int section = static_cast<int>(app::SidebarSectionId::QuickAccess);
+    const auto drag = [&](const std::wstring& path, bool to_front) {
+        const auto vm = BuildVm(s, false);
+        const int group = app::SidebarSectionIndex(vm, section);
+        if (group < 0) { check(false, "quick access group exists"); return; }
+        const auto& items = vm.sidebar[static_cast<size_t>(group)].items;
+        const auto found = std::find_if(items.begin(), items.end(), [&](const auto& item) {
+            return _wcsicmp(fs::NormalizePath(item.path).c_str(), fs::NormalizePath(path).c_str()) == 0;
+        });
+        D2D1_RECT_F source{}, target{};
+        const float width = static_cast<float>(s.compositor.Width());
+        const float height = static_cast<float>(s.compositor.Height());
+        if (found == items.end() || !s.renderer.SidebarRowRect(vm, width, height, section,
+                static_cast<int>(found - items.begin()), &source) ||
+            !s.renderer.SidebarRowRect(vm, width, height, section,
+                to_front ? 0 : static_cast<int>(items.size() - 1), &target)) {
+            check(false, "real layout exposes drag source and target"); return;
+        }
+        const POINT point{static_cast<LONG>(source.left + 100 * s.scale),
+            static_cast<LONG>((source.top + source.bottom) / 2)};
+        HandleLButtonDown(&s, s.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(point.x, point.y));
+        check(s.pinDragPending && !s.pinDragActive && s.pinDragPath == found->path,
+            "real row press arms drag for built-ins, project and pinned folders");
+        // Enter the drag state directly instead of injecting desktop mouse input.
+        s.pinDragActive = true;
+        const int y = static_cast<int>(to_front ? target.top - 1 : target.bottom + 1);
+        UpdateSidebarPinDrag(s, y);
+        check(s.pinGapVisible && s.pinDragToIndex == (to_front ? 0 : static_cast<int>(items.size())),
+            "insertion line measures the entire quick-access list");
+        HandleLButtonUp(&s, s.hwnd, WM_LBUTTONUP, 0, MAKELPARAM(point.x, y));
+        const auto after = BuildVm(s, false);
+        const auto& moved = after.sidebar[static_cast<size_t>(app::SidebarSectionIndex(after, section))].items;
+        check(_wcsicmp(fs::NormalizePath((to_front ? moved.front() : moved.back()).path).c_str(),
+                fs::NormalizePath(path).c_str()) == 0 && !s.pinDragPending && !s.pinDragActive,
+            "release commits full-list ordering and clears drag state");
+    };
+    for (const float scale : {1.0f, 1.25f, 1.5f}) {
+        s.scale = scale; s.renderer.SetScale(scale); s.compositor.RecreateTextFormats(scale);
+        s.compositor.Resize(static_cast<UINT>(1100 * scale), static_cast<UINT>(780 * scale));
+        s.places.quick_access_order.clear();
+        for (const auto& entry : s.sidebar.quick_access) drag(entry.path, false);
+        drag(ActiveTab(s)->git_root, false);
+        drag(pin, true);
+    }
+    wchar_t executable[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, executable, MAX_PATH);
+    const auto output = std::filesystem::path(executable).parent_path().parent_path() / L"bench_data" / L"quick-access-order";
+    std::error_code error;
+    std::filesystem::create_directories(output, error);
+    for (const bool dark : {false, true}) {
+        s.darkMode = dark;
+        const auto vm = BuildVm(s, false);
+        const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
+        auto* dc = s.compositor.Dc();
+        dc->BeginDraw(); dc->Clear(theme.bg);
+        s.renderer.Render(vm, D2D1::RectF(0, 0, static_cast<float>(s.compositor.Width()),
+            static_cast<float>(s.compositor.Height())), theme);
+        const bool rendered = SUCCEEDED(dc->EndDraw());
+        const auto snapshot = output / (dark ? L"dark-150.png" : L"light-150.png");
+        check(!error && rendered && s.compositor.SaveSnapshot(snapshot.c_str()),
+            "render and save reordered quick-access rows in both themes");
+    }
+    const HWND hwnd = s.hwnd;
+    s.hwnd = nullptr; owned.reset(); DestroyWindow(hwnd);
+    return failures ? 1 : 0;
+}
+
+int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--quick-access") {
+        const int result = QuickAccessDragTest();
+        OleUninitialize();
+        return result;
+    }
     int failures = 0;
     auto check = [&](bool ok, const char* text) {
         printf("[%s] %s\n", ok ? "PASS" : "FAIL", text);
