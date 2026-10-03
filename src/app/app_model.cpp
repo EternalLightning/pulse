@@ -74,6 +74,7 @@ void RestoreHistoryOrigin(Tab& tab, const std::optional<std::wstring>& origin) {
 }
 
 void Tab::NavigateTo(const std::wstring& path) {
+    ClearEntryOrderHold();
     ++view_generation;
     if (!current_path.empty()) {
         AlignHistoryOrigins(back_stack, back_search_origins);
@@ -111,6 +112,54 @@ fs::DirEntry Tab::EntryAt(size_t index) const {
         fs::DirEntry pending; pending.change_record_only=true; return pending;
     }
     return snapshot && index<snapshot->size() ? (*snapshot)[index] : fs::DirEntry{};
+}
+
+void Tab::ClearEntryOrderHold() {
+    refresh_keeps_order = false;
+    order_held = false;
+    held_renames.clear();
+}
+
+void Tab::HoldEntryRename(const std::wstring& old_name, const std::wstring& new_name) {
+    if (current_path.empty() || fs::IsVirtualPath(current_path) || !archive_file.empty() ||
+        old_name.empty() || new_name.empty() ||
+        old_name.find_first_of(L"\\/") != std::wstring::npos ||
+        new_name.find_first_of(L"\\/") != std::wstring::npos) return;
+    held_renames.push_back({ old_name, new_name });
+}
+
+void Tab::PrepareEntryRefresh(bool explicit_refresh) {
+    if (current_path.empty() || fs::IsVirtualPath(current_path) || !archive_file.empty()) {
+        ClearEntryOrderHold();
+        return;
+    }
+    if (explicit_refresh) {
+        refresh_keeps_order = false;
+        if (order_held && SelectedCount() > 0) pending_ensure_selection_visible = true;
+    } else if (pending_generation == 0) {
+        refresh_keeps_order = true;
+    }
+}
+
+fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
+                                         std::vector<std::wstring>& selected_names,
+                                         std::wstring& focus_name) {
+    const bool ordinary = !current_path.empty() && !fs::IsVirtualPath(current_path) &&
+                          archive_file.empty();
+    const bool keep = ordinary && refresh_keeps_order && fresh && snapshot &&
+                      snapshot_path == current_path;
+    if (ordinary && fresh) FollowEntryRenames(held_renames, *fresh, selected_names, focus_name);
+    fs::SnapshotPtr result = fresh;
+    if (keep) {
+        result = std::make_shared<std::vector<fs::DirEntry>>(KeepEntryOrder(
+            *snapshot, *fresh, held_renames, sort_column, sort_direction, current_path));
+        PruneEntryRenames(held_renames, *fresh);
+    } else {
+        held_renames.clear();
+    }
+    refresh_keeps_order = false;
+    order_held = keep;
+    return result;
 }
 
 void Tab::SetSnapshot(fs::SnapshotPtr value) {
@@ -436,6 +485,7 @@ void Tab::RemapSelection(const std::vector<std::wstring>& names, const std::wstr
 
 std::wstring Tab::GoBack() {
     if (back_stack.empty()) return current_path;
+    ClearEntryOrderHold();
     AlignHistoryOrigins(back_stack, back_search_origins);
     AlignHistoryOrigins(forward_stack, forward_search_origins);
     forward_stack.push(current_path);
@@ -456,6 +506,7 @@ std::wstring Tab::GoBack() {
 
 std::wstring Tab::GoForward() {
     if (forward_stack.empty()) return current_path;
+    ClearEntryOrderHold();
     AlignHistoryOrigins(forward_stack, forward_search_origins);
     AlignHistoryOrigins(back_stack, back_search_origins);
     back_stack.push(current_path);
@@ -1738,6 +1789,14 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
     // The title is only used by the section menus: the pane itself shows the
     // account rows without a header (see IsHeaderlessSection).
     cloud = ConvertGroup(L"OneDrive", sidebar.cloud, false);
+    if (places) for (auto* group : {&access, &cloud}) {
+        for (auto& item : group->items) {
+            if (const auto* saved = places->FindQuickAccessBadge(item.path)) {
+                item.badge = saved->badge;
+                item.badge_color = ui::HexColor(saved->badge_rgb);
+            }
+        }
+    }
     drives = ConvertGroup(l10n::Get(l10n::StringId::SidebarDrives),
                           sidebar.drives, false);
     // Section icons: every header section names itself with a glyph, so the wide

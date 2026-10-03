@@ -28,7 +28,7 @@ namespace pulse::app { class PlacesCatalog; }
 namespace pulse::ui {
 enum class PaneHeaderIcon;
 
-inline constexpr unsigned kSettingsContextExpandedMask = 0x1f00u;
+inline constexpr unsigned kSettingsContextExpandedMask = 0x3f00u;
 inline constexpr unsigned kSettingsDefaultExpandedMask = kSettingsContextExpandedMask | 0x3u;
 
 class BloomAccentPicker;
@@ -204,6 +204,7 @@ struct PaneViewModel {
     bool all_selected = false;
     const std::unordered_set<int>* selected_indices = nullptr;
     int hover_index = -1;
+    uint32_t row_action_mask = 7u; // star, open in new tab, more
     int drop_target_index = -1;   // folder row under an OLE drag (accent 2px stroke)
     bool header_drop = false;     // pane title bar is a navigate-to-folder target
     int rename_index = -1;        // name column is in edit mode; do not draw the label
@@ -500,6 +501,8 @@ struct WindowViewModel {
     std::vector<SplitterView> splitters;
     std::vector<SidebarGroup> sidebar;
     float sidebar_scroll = 0.0f;
+    float sidebar_scrollbar_opacity = 0.0f;
+    float sidebar_scrollbar_expand = 0.0f;
     TrayDeckView tray_deck;
     bool details_visible = false;   // right details panel toggle (view menu)
     DetailsPanelView details;
@@ -581,6 +584,8 @@ struct WindowViewModel {
     int settings_page = 0; // 0 general, 1 search/index, 2 context menu, 3 about, 4 duplicates
     float settings_scroll = 0.0f;
     bool settings_launch_on_startup = false;
+    bool settings_start_to_tray = false;
+    bool settings_close_last_tab_window = false;
     bool settings_keep_running = false;
     bool settings_show_hidden_files = false;
     bool settings_show_protected_os_files = false;
@@ -590,6 +595,11 @@ struct WindowViewModel {
     bool settings_list_size_bar = false;
     int settings_folder_sort = 0; // 0 folders first, 1 follow direction, 2 mixed
     bool settings_open_folders = false;
+    bool settings_take_over_win_e = false;
+    bool settings_take_over_this_pc = false;
+    bool settings_explorer_takeover = false;
+    bool settings_system_pending = false;
+    std::wstring settings_system_status;
     bool settings_blank_click_go_back = false;
     bool settings_new_tab_home = false;
     bool settings_change_tracking = false;
@@ -598,7 +608,7 @@ struct WindowViewModel {
     int settings_tray_icon = 48;  // current tray-deck icon pref (DIPs) for size radios
     int settings_language = 0;    // 0 system, 1 zh-CN, 2 en-US
     BloomAccentPicker* settings_bloom = nullptr;
-    bool settings_group_on[5] = { true, true, false, false, true };
+    bool settings_group_on[6] = { true, true, false, false, true, true };
     std::vector<SettingsRowView> settings_items;
     bool settings_index_service = false;
     bool settings_index_installed = false;
@@ -952,6 +962,12 @@ public:
         return pane_index >= 0 && pane_index < static_cast<int>(painted_columns_.size())
             ? painted_columns_[static_cast<size_t>(pane_index)] : 0u;
     }
+    bool NameWasTruncated(const std::wstring& path, int pane_index = 0) const {
+        if (pane_index < 0 || pane_index >= static_cast<int>(painted_name_truncation_.size())) return true;
+        const auto& names = painted_name_truncation_[static_cast<size_t>(pane_index)];
+        const auto found = names.find(path);
+        return found == names.end() || found->second;
+    }
     // Double-click on a divider: drop the manual widths on both sides so the
     // columns return to their fitted widths.
     void AutoFitColumnDivider(const D2D1_RECT_F& pane_bounds,
@@ -1005,6 +1021,7 @@ public:
         D2D1_RECT_F rc{};
         std::wstring text;
         std::wstring path;
+        std::wstring full_text;
     };
     // Shared by DrawToolbar, HitTest and the drop-target logic so the three
     // can never disagree about segment positions.
@@ -1138,9 +1155,9 @@ private:
     bool EnsureFluentSvg(int resource_id, bool colorful = false);
     bool DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, float opacity = 1.0f,
                        const D2D1_COLOR_F* foreground = nullptr, bool colorful = false);
-    void DrawTruncatedName(const std::wstring& name, float x, float y, float w, float h,
+    bool DrawTruncatedName(const std::wstring& name, float x, float y, float w, float h,
                            const Theme& theme, bool selected, const std::vector<NameMatchRange>& matches, bool dim_extension = false);
-    void DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
+    bool DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
                               const D2D1_COLOR_F& color, const Theme& theme,
                               const std::vector<NameMatchRange>& matches);
 
@@ -1172,6 +1189,8 @@ private:
     std::deque<std::wstring> name_layout_order_;
     IDWriteTextFormat* name_layout_format_ = nullptr;
     std::array<uint32_t, 8> painted_columns_{};
+    std::array<std::unordered_map<std::wstring, bool>, 8> painted_name_truncation_;
+    size_t painted_name_pane_ = 0;
     float tray_icon_dip_ = 48.0f;
     // Staging tray card text: 13 px semibold name, 11 px folder line.
     mutable ComPtr<IDWriteTextFormat> tray_name_format_;

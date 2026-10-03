@@ -256,6 +256,7 @@ bool PlacesCatalog::Load() {
     networks.clear();
     quick_access_paths.clear();
     starred_items.clear();
+    quick_access_badges.clear();
     recent_items.clear();
     starred_index_.clear();
     active_workspace = -1;
@@ -378,6 +379,17 @@ bool PlacesCatalog::Load() {
                 starred_items.push_back({ normalized });
         }
     }
+    for (const auto& block : ExtractObjectArray(json, L"quick_access_badges")) {
+        QuickAccessBadge badge;
+        badge.path = Norm(pulse::json::ExtractString(block, L"path"));
+        if (badge.path.empty() || fs::IsVirtualPath(badge.path) ||
+            FindQuickAccessBadge(badge.path)) continue;
+        badge.badge = TrimBadge(pulse::json::ExtractString(block, L"badge"));
+        if (pulse::json::ValuePosition(block, L"rgb") != std::wstring::npos)
+            badge.badge_rgb = ExtractRgb(block) & 0xFFFFFFu;
+        if (!badge.badge.empty() || badge.badge_rgb != kDefaultBadgeRgb)
+            quick_access_badges.push_back(std::move(badge));
+    }
     for (const auto& block : ExtractObjectArray(json, L"recent_items")) {
         RecentItem item;
         item.path = Norm(pulse::json::ExtractString(block, L"path"));
@@ -455,6 +467,7 @@ PlacesCatalog::SaveSnapshot PlacesCatalog::CaptureSaveSnapshot() const {
     snapshot.networks = networks;
     snapshot.quick_access_paths = quick_access_paths;
     snapshot.starred_items = starred_items;
+    snapshot.quick_access_badges = quick_access_badges;
     snapshot.recent_items = recent_items;
     snapshot.active_workspace = active_workspace;
     snapshot.persist = persist;
@@ -527,6 +540,7 @@ void PlacesCatalog::StopPlacesWriter() {
 
 bool PlacesCatalog::Save() const {
     if (!persist) return true;
+    places_save_revision_.fetch_add(1, std::memory_order_acq_rel);
     const SaveSnapshot snapshot = CaptureSaveSnapshot();
     std::lock_guard<std::mutex> lock(places_save_io_mutex_);
     const bool saved = SaveSnapshotFile(snapshot);
@@ -617,6 +631,17 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
           << KindName(item.kind) << L"\",\"badge\":\"" << badge
           << L"\",\"rgb\":" << rgb << L"}";
         if (i + 1 < snapshot.starred_items.size()) f << L",";
+        f << L"\n";
+    }
+    f << L"  ],\n  \"quick_access_badges\":[\n";
+    for (size_t i = 0; i < snapshot.quick_access_badges.size(); ++i) {
+        const QuickAccessBadge& item = snapshot.quick_access_badges[i];
+        std::wstring path, badge;
+        pulse::json::Escape(item.path, path);
+        pulse::json::Escape(item.badge, badge);
+        f << L"    {\"path\":\"" << path << L"\",\"badge\":\"" << badge
+          << L"\",\"rgb\":" << (item.badge_rgb & 0xFFFFFFu) << L"}";
+        if (i + 1 < snapshot.quick_access_badges.size()) f << L",";
         f << L"\n";
     }
     f << L"  ],\n  \"recent_items\":[\n";
@@ -1163,6 +1188,39 @@ size_t PlacesCatalog::DeleteTag(const TagId& id, std::vector<TagAdsUpdate>* defe
     return affected.size();
 }
 
+const QuickAccessBadge* PlacesCatalog::FindQuickAccessBadge(const std::wstring& path) const {
+    if (path.empty()) return nullptr;
+    const std::wstring key = TagKey(path);
+    const auto found = std::find_if(quick_access_badges.begin(), quick_access_badges.end(),
+        [&](const QuickAccessBadge& item) { return TagKey(item.path) == key; });
+    return found == quick_access_badges.end() ? nullptr : &*found;
+}
+
+bool PlacesCatalog::SetQuickAccessBadge(const std::wstring& path, const std::wstring& text,
+                                      uint32_t rgb) {
+    const std::wstring normalized = Norm(path);
+    if (normalized.empty() || fs::IsVirtualPath(normalized)) return false;
+    const std::wstring badge = TrimBadge(text);
+    const std::wstring key = TagKey(normalized);
+    rgb &= 0xFFFFFFu;
+    const auto found = std::find_if(quick_access_badges.begin(), quick_access_badges.end(),
+        [&](const QuickAccessBadge& item) { return TagKey(item.path) == key; });
+    if (badge.empty() && rgb == kDefaultBadgeRgb) {
+        if (found == quick_access_badges.end()) return false;
+        quick_access_badges.erase(found);
+    } else if (found == quick_access_badges.end()) {
+        quick_access_badges.push_back({ normalized, badge, rgb });
+    } else {
+        if (found->badge == badge && found->badge_rgb == rgb) return false;
+        found->badge = badge;
+        found->badge_rgb = rgb;
+    }
+    ++tag_revision_;
+    MarkPlacesDirty();
+    QueuePlacesSave();
+    return true;
+}
+
 bool PlacesCatalog::IsQuickAccessPinned(const std::wstring& path) const {
     const auto key = TagKey(path);
     return std::any_of(quick_access_paths.begin(), quick_access_paths.end(),
@@ -1239,6 +1297,15 @@ void PlacesCatalog::RemapPaths(const std::wstring& old_path, const std::wstring&
         item.path = new_norm + item.path.substr(old_norm.size());
         changed = true;
     }
+    std::unordered_set<std::wstring> badge_seen;
+    for (auto& badge : quick_access_badges) {
+        if (!PathIsOrDescendant(badge.path, old_norm)) continue;
+        badge.path = new_norm + badge.path.substr(old_norm.size());
+        changed = true;
+    }
+    std::erase_if(quick_access_badges, [&](const QuickAccessBadge& badge) {
+        return !badge_seen.insert(TagKey(badge.path)).second;
+    });
     for (auto& item : recent_items) {
         if (!PathIsOrDescendant(item.path, old_norm)) continue;
         item.path = new_norm + item.path.substr(old_norm.size());
@@ -1315,6 +1382,12 @@ void PlacesCatalog::RemoveAssignments(const std::wstring& path, bool include_des
                                    : EqualI(item.path, normalized);
     });
     changed = changed || recent_before != recent_items.size();
+    const size_t badges_before = quick_access_badges.size();
+    std::erase_if(quick_access_badges, [&](const QuickAccessBadge& badge) {
+        return include_descendants ? PathIsOrDescendant(badge.path, normalized)
+                                   : EqualI(badge.path, normalized);
+    });
+    changed = changed || badges_before != quick_access_badges.size();
     if (changed) {
         RebuildTagIndex();
         RebuildStarIndex();
@@ -1414,32 +1487,38 @@ bool WriteTagAdsV2(const std::wstring& path, const std::vector<TagAdsRecord>& ta
     return ok != 0 && written == payload.size() * sizeof(wchar_t);
 }
 
-static std::wstring ReadAdsPayload(const std::wstring& path) {
+static std::wstring ReadAdsPayload(const std::wstring& path, bool* readable) {
+    if (readable) *readable = false;
     const std::wstring n = Norm(path);
     if (n.empty() || fs::IsVirtualPath(n)) return {};
     HANDLE h = CreateFileW((n + kAdsSuffix).c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return {};
+    if (h == INVALID_HANDLE_VALUE) {
+        // A missing ADS is a successful negative lookup; denied/offline reads retry.
+        if (readable && GetLastError() == ERROR_FILE_NOT_FOUND) *readable = true;
+        return {};
+    }
     LARGE_INTEGER size{};
-    if (!GetFileSizeEx(h, &size) || size.QuadPart <= 0 || size.QuadPart > 65536) {
+    if (!GetFileSizeEx(h, &size) || size.QuadPart < 0 || size.QuadPart > 65536 ||
+        size.QuadPart % sizeof(wchar_t) != 0) {
         CloseHandle(h);
         return {};
     }
     std::wstring payload(static_cast<size_t>(size.QuadPart / sizeof(wchar_t)), L'\0');
     DWORD read = 0;
-    if (!ReadFile(h, payload.data(), static_cast<DWORD>(size.QuadPart), &read, nullptr)) {
-        CloseHandle(h);
-        return {};
-    }
+    const bool ok = payload.empty() ||
+        (ReadFile(h, payload.data(), static_cast<DWORD>(size.QuadPart), &read, nullptr) != FALSE &&
+         read == static_cast<DWORD>(size.QuadPart));
     CloseHandle(h);
-    payload.resize(read / sizeof(wchar_t));
+    if (!ok) return {};
+    if (readable) *readable = true;
     return payload;
 }
 
-std::vector<TagAdsRecord> ReadTagAdsV2(const std::wstring& path) {
+std::vector<TagAdsRecord> ReadTagAdsV2(const std::wstring& path, bool* readable) {
     std::vector<TagAdsRecord> out;
-    const std::wstring payload = ReadAdsPayload(path);
+    const std::wstring payload = ReadAdsPayload(path, readable);
     constexpr std::wstring_view header = L"PULSE_TAGS_V2\r\n";
     if (!payload.starts_with(header)) return out;
     size_t pos = header.size();
@@ -1463,14 +1542,15 @@ std::vector<TagAdsRecord> ReadTagAdsV2(const std::wstring& path) {
     return out;
 }
 
-std::vector<std::wstring> ReadTagAds(const std::wstring& path) {
+std::vector<std::wstring> ReadTagAds(const std::wstring& path, bool* readable) {
     std::vector<std::wstring> out;
-    const auto records = ReadTagAdsV2(path);
+    const auto records = ReadTagAdsV2(path, readable);
     if (!records.empty()) {
         for (const auto& record : records) out.push_back(record.name);
         return out;
     }
-    const std::wstring payload = ReadAdsPayload(path);
+    const std::wstring payload = ReadAdsPayload(path, readable);
+    if (payload.starts_with(L"PULSE_TAGS_V2\r\n")) return out;
     std::wstring cur;
     for (wchar_t c : payload) {
         if (c == L',') {

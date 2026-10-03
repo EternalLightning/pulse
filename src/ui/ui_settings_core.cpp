@@ -47,9 +47,20 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             MakeBrush(dc,theme.fill_hover,brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
         }
-        label(r,l10n::Get(title),l10n::Get(desc),icon,0.0f,(hit==15 || hit==3 || hit==20) ? 43.0f : 21.0f);
+        const auto bounds=SettingsToggleBounds(r,l10n::Get(desc),scale_,&painter_);
+        DrawIconText(bounds.icon.left,bounds.icon.top,bounds.icon.right-bounds.icon.left,
+            bounds.icon.bottom-bounds.icon.top,icon,L"",theme.text_secondary,0.85f);
+        const auto& heading=l10n::Get(title);
+        const auto fitted=FitEndEllipsis(heading,bounds.title.right-bounds.title.left,[&](const std::wstring& value) {
+            return MeasureTextWidth(compositor_->DwriteFactory(),compositor_->TextFormat(),value);
+        });
+        painter_.DrawText(fitted,bounds.title,compositor_->TextFormat(),theme.text);
+        painter_.DrawWrappedCaption(l10n::Get(desc),D2D1::Point2F(bounds.description.left,bounds.description.top),
+            bounds.description.right-bounds.description.left,theme.text_secondary);
+        // Busy is enforced in HitTest/controller, not by recoloring every sibling
+        // switch. Its geometry and checked appearance stay stable until result.
         fluent::ControlState state{}; state.checked=on; state.hovered=IsHovered(vm,H::SettingsToggle,hit);
-        painter_.DrawSwitch(D2D1::RectF(r.right-60*scale_,r.top+16*scale_,r.right-16*scale_,r.top+48*scale_),L"",state);
+        painter_.DrawSwitch(bounds.control,L"",state);
     };
     auto button=[&](D2D1_RECT_F r,const std::wstring& value,H::Region region,int index,bool primary=false,bool enabled=true,const wchar_t* glyph=L"") {
         fluent::ControlState st{}; st.enabled=enabled; st.hovered=enabled && IsHovered(vm,region,index);
@@ -164,9 +175,23 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         divider(lay.effect_card);
         dropdown(lay.language_card,lay.language_choice,I::SettingsLanguage,I::SettingsLanguageDesc,l10n::Get(languages[vm.settings_language]),1);
         toggle(lay.startup_row[0],I::SettingsLaunch,I::SettingsLaunchDesc,L"\xE7E8",vm.settings_launch_on_startup,1);divider(lay.startup_row[0]);
+        toggle(lay.startup_tray_row,I::StartToTray,I::StartToTrayDesc,L"\xE73F",vm.settings_start_to_tray,31);divider(lay.startup_tray_row);
         toggle(lay.startup_row[1],I::SettingsKeepRunning,I::SettingsKeepRunningDesc,L"\xE737",vm.settings_keep_running,2);divider(lay.startup_row[1]);
-        toggle(lay.startup_row[2],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);
+        toggle(lay.last_tab_row,I::CloseLastTabWindow,I::CloseLastTabWindowDesc,L"\xE8BB",vm.settings_close_last_tab_window,32);divider(lay.last_tab_row);
+        toggle(lay.startup_row[2],I::SettingsDefaultManager,I::SettingsDefaultManagerDesc,L"\xE8B7",
+            vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc,21);
         divider(lay.startup_row[2]);
+        toggle(lay.default_manager_rows[0],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);divider(lay.default_manager_rows[0]);
+        toggle(lay.default_manager_rows[1],I::SettingsTakeoverWinE,I::SettingsTakeoverWinEDesc,L"\xE765",vm.settings_take_over_win_e,22);divider(lay.default_manager_rows[1]);
+        toggle(lay.default_manager_rows[2],I::ThisPc,I::SettingsTakeoverThisPcDesc,L"\xE770",vm.settings_take_over_this_pc,23);divider(lay.default_manager_rows[2]);
+        toggle(lay.default_manager_rows[3],I::SettingsExplorerTakeover,I::SettingsExplorerTakeoverDesc,L"\xE946",vm.settings_explorer_takeover,24);divider(lay.default_manager_rows[3]);
+        if(lay.system_status.bottom>lay.system_status.top) {
+            const auto r=lay.system_status;
+            DrawIconText(r.left+16*scale_,r.top+12*scale_,24*scale_,24*scale_,L"\xE946",L"",theme.text_secondary,0.85f);
+            painter_.DrawWrappedCaption(vm.settings_system_status,D2D1::Point2F(r.left+54*scale_,r.top+kSettingsRowPaddingDip*scale_),
+                r.right-r.left-70*scale_,theme.text_secondary);
+            divider(r);
+        }
         toggle(lay.new_tab_row,I::SettingsNewTabHome,I::SettingsNewTabHomeDesc,L"\xE80F",vm.settings_new_tab_home,20);
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);

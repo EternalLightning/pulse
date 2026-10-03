@@ -15,6 +15,8 @@ public:
         std::function<void()> layout_changed;
         std::function<void()> will_change_layout;
         std::function<std::wstring()> new_tab_path;
+        std::function<bool()> close_window_with_last_tab;
+        std::function<void()> close_window;
     };
 
     explicit TabController(Callbacks callbacks = {}) : callbacks_(std::move(callbacks)) {}
@@ -24,6 +26,8 @@ public:
     void ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_pt, ui::FluentMenu& menu);
     void ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt, ui::FluentMenu& menu);
 
+    bool CanCloseTab(const WindowTabs& tabs, size_t index) const;
+    void CloseTab(WindowTabs& tabs, size_t index) const;
     static const uint32_t* Palette() noexcept;
     static constexpr size_t PaletteSize() noexcept { return 8; }
 

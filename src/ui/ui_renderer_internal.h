@@ -6,9 +6,12 @@
 #include "../common/localization.h"
 #include "typography.h"
 #include "name_highlight.h"
+#include "dialog_text_fit.h"
 #include "../app/places.h"
+#include "../app/builtin_menu_strings.h"
 #include "../app/search_query.h"
 #include "../common/text_format.h"
+#include "../common/drive_labels.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -128,7 +131,7 @@ void ClearTextWidthCache() {
     constexpr float kTabPinnedNamedW = 112.0f;
     constexpr float kTabCloseAlwaysW = 96.0f;
     constexpr float kTabClosePadDip = 10.0f;
-    constexpr float kTabCloseSizeDip = 16.0f;
+    constexpr float kTabCloseSizeDip = 20.0f;
     constexpr float kCommandIconButtonDip = 32.0f;
     constexpr float kCommandIconStepDip = 34.0f;
     constexpr float kRecentControlsDip = 40.0f;
@@ -218,7 +221,7 @@ void ClearTextWidthCache() {
         ListEntryView entry;
         // Keep the on-disk name, including .lnk. Stripping hid the suffix and
         // made the icon cache treat resolved shortcuts as extensionless files.
-        entry.name = source.name;
+        entry.name = pulse::format::DriveDisplayName(source);
         entry.size_text = penetrated
             ? (source.link_target_is_dir ? L"" : pulse::format::ByteSize(source.link_target_size, true))
             : (source.is_dir ? L"" : pulse::format::ByteSize(source.size, true));
@@ -242,8 +245,9 @@ void ClearTextWidthCache() {
                 entry.is_dir = known_kind == app::PlaceItemKind::Folder;
             entry.type_text = pulse::l10n::Get(pulse::l10n::StringId::Unavailable);
         } else {
-            entry.type_text = FormatListType(
-                penetrated ? fs::StripLnkSuffix(source.name) : source.name, entry.is_dir);
+            entry.type_text = source.drive_type != DRIVE_UNKNOWN
+                ? pulse::format::DriveTypeText(source.drive_type)
+                : FormatListType(penetrated ? fs::StripLnkSuffix(source.name) : source.name, entry.is_dir);
         }
         entry.record_only = source.change_record_only;
         if (!source.change_type_text.empty()) entry.type_text = source.change_type_text;
@@ -384,7 +388,8 @@ void ClearTextWidthCache() {
         bar.content_extent = SidebarContentHeight(vm, m);
         bar.offset = std::clamp(vm.sidebar_scroll, 0.0f,
             std::max(0.0f, bar.content_extent - bar.viewport_extent));
-        bar.expand_progress = 1.0f;
+        bar.expand_progress = vm.sidebar_scrollbar_expand;
+        bar.opacity = vm.sidebar_scrollbar_opacity;
         bar.enabled = !SidebarRailLayout(sb.right - sb.left, scale);
         return bar;
     }
@@ -1082,11 +1087,17 @@ void ClearTextWidthCache() {
 
     // "C:\a\b\c\d\e" -> head "C:\…\d\", last "e" (last segment kept whole when possible).
     template <typename Measure>
+    std::wstring FitEndEllipsis(const std::wstring& text, float width, Measure measure);
+
+    template <typename Measure>
     std::pair<std::wstring, std::wstring> MiddleEllipsisPath(const std::wstring& path, float width,
                                                              Measure measure) {
         if (path.empty() || measure(path) <= width) return {path, L""};
+        const std::wstring normalized = pulse::path::StripExtendedPathPrefix(path);
+        if (normalized.starts_with(L"\\\\") || normalized != path)
+            return {pulse::ui::FitPathMiddle(normalized, width, measure), L""};
         const size_t cut = path.find_last_of(L'\\');
-        if (cut == std::wstring::npos || cut + 1 >= path.size()) return {path, L""};
+        if (cut == std::wstring::npos || cut + 1 >= path.size()) return {FitEndEllipsis(path, width, measure), L""};
         const std::wstring last = path.substr(cut + 1);
         std::vector<std::wstring> parts;
         size_t start = 0;
@@ -1103,20 +1114,18 @@ void ClearTextWidthCache() {
                 head += parts[i] + L"\\";
             if (measure(head + last) <= width) return {head, last};
         }
-        return {L"\u2026\\", last};
+        const std::wstring head = L"\u2026\\";
+        const float remainder = width - measure(head);
+        return remainder > 0 ? std::pair{head, FitEndEllipsis(last, remainder, measure)}
+                             : std::pair{FitEndEllipsis(path, width, measure), std::wstring{}};
     }
 
     // Longest prefix of text that fits with a trailing ellipsis.
     template <typename Measure>
     std::wstring FitEndEllipsis(const std::wstring& text, float width, Measure measure) {
-        if (text.empty() || measure(text) <= width) return text;
-        size_t lo = 0, hi = text.size();
-        while (lo < hi) {
-            const size_t mid = (lo + hi + 1) / 2;
-            if (measure(text.substr(0, mid) + L"\u2026") <= width) lo = mid; else hi = mid - 1;
-        }
-        if (lo > 0 && IS_HIGH_SURROGATE(text[lo - 1])) --lo;
-        return text.substr(0, lo) + L"\u2026";
+        if (width <= 0.0f) return {};
+        if (text.empty() || measure(text) <= width + 0.5f) return text;
+        return FitTextEnd(text, width, measure);
     }
 
     float MeasureLayoutText(Compositor* compositor, IDWriteFactory2* dwrite,
@@ -1491,7 +1500,9 @@ constexpr float kSettingsNavW = 200.0f;
 constexpr int kSettingsNavCount = 5;
 
 struct SettingsLayout {
-    D2D1_RECT_F context_cards[5]{}, context_header[5]{}, context_toggle[5]{}, context_empty[5]{}, context_restore{};
+    static constexpr int kContextCards = 6;
+    D2D1_RECT_F context_cards[kContextCards]{}, context_header[kContextCards]{},
+        context_toggle[kContextCards]{}, context_empty[kContextCards]{}, context_restore{};
     std::vector<D2D1_RECT_F> context_rows;
     D2D1_RECT_F duplicate_options{};
     D2D1_RECT_F section[4]{}, group[3]{}, footer{};
@@ -1525,6 +1536,8 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_blur_card{};
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};
+    D2D1_RECT_F startup_tray_row{}, last_tab_row{};
+    D2D1_RECT_F default_manager_rows[4]{}, system_status{};
     D2D1_RECT_F new_tab_row{};
     D2D1_RECT_F hidden_files_row{};
     D2D1_RECT_F protected_files_row{};
@@ -1632,8 +1645,10 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         y += 30*scale;
         l.section[0] = D2D1::RectF(card_left, y, card_right, y + 28*scale);
         y += 30*scale;
-        l.global_search_row = D2D1::RectF(card_left, y, card_right, y + 88*scale);
-        y += 88*scale;
+        const float global_search_height=SettingsToggleHeight(card_right-card_left,
+            l10n::Get(l10n::StringId::GlobalSearchDesc),scale,painter);
+        l.global_search_row = D2D1::RectF(card_left, y, card_right, y + global_search_height);
+        y += global_search_height;
         const bool hotkey_stacked = card_right-card_left < 560*scale;
         const float hotkey_width = std::min(card_right-card_left-70*scale, std::max(176*scale,
             label_btn_w(vm.settings_global_search_capturing ? l10n::Get(l10n::StringId::GlobalSearchRecording) : vm.settings_global_search_hotkey)));
@@ -1642,8 +1657,10 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float hotkey_top = y+(hotkey_stacked ? 62 : 18)*scale;
         l.global_search_hotkey_button = D2D1::RectF(hotkey_left, hotkey_top, hotkey_left+hotkey_width, hotkey_top+32*scale);
         y = l.global_search_hotkey_row.bottom;
-        l.search_pinyin_row = D2D1::RectF(card_left, y, card_right, y + 68*scale);
-        y += 68*scale;
+        const float pinyin_height=SettingsToggleHeight(card_right-card_left,
+            l10n::Get(l10n::StringId::SearchPinyinDesc),scale,painter);
+        l.search_pinyin_row = D2D1::RectF(card_left, y, card_right, y + pinyin_height);
+        y += pinyin_height;
         l.filename_status = D2D1::RectF(card_left, y, card_right, y + 72*scale);
         y += 72*scale;
         l.disclosure[1] = D2D1::RectF(card_left, y, card_right, y + 64*scale);
@@ -1714,11 +1731,17 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
     } else if (vm.settings_page == 2) {
         y += 30*scale;
         l.context_rows.resize(vm.settings_items.size());
-        for(int g=0;g<5;++g) {
+        for(int g=0;g<SettingsLayout::kContextCards;++g) {
             const float top=y;
-            l.context_header[g]=D2D1::RectF(l.content.left+pad,y,l.content.right-pad,y+76*scale);
-            l.context_toggle[g]=D2D1::RectF(l.content.right-pad-100*scale,y+20*scale,l.content.right-pad-56*scale,y+52*scale);
-            y+=76*scale;
+            const l10n::StringId descriptions[]={l10n::StringId::ContextSoftwareDesc,l10n::StringId::ContextOpenWithDesc,
+                l10n::StringId::ContextShareDesc,l10n::StringId::ContextSystemDesc,l10n::StringId::ContextPrintDesc,
+                app::builtin_text::GroupDescription};
+            const auto& description=l10n::Get(descriptions[g]);
+            const float header_height=SettingsToggleHeight(l.content.right-l.content.left-2*pad,description,scale,painter,112);
+            l.context_header[g]=D2D1::RectF(l.content.left+pad,y,l.content.right-pad,y+header_height);
+            const auto bounds=SettingsToggleBounds(l.context_header[g],description,scale,painter,112);
+            l.context_toggle[g]=bounds.control;
+            y+=header_height;
             if(vm.settings_expanded & (1u<<(g+8))) {
                 for(size_t i=0;i<vm.settings_items.size();++i) if(vm.settings_items[i].group==g) {
                     l.context_rows[i]=D2D1::RectF(l.content.left+pad+12*scale,y,l.content.right-pad-12*scale,y+40*scale);
@@ -1756,10 +1779,13 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         }
 
         const bool compact_diagnostics = card_right - card_left < 650.0f * scale;
-        const float diagnostics_h = (compact_diagnostics ? 288.0f : 208.0f) * scale;
+        const float performance_height=SettingsToggleHeight(card_right-card_left-16*scale,
+            l10n::Get(l10n::StringId::SettingsShowPerformanceDesc),scale,painter);
+        const float performance_extra=performance_height-56*scale;
+        const float diagnostics_h = (compact_diagnostics ? 288.0f : 208.0f) * scale+performance_extra;
         l.diagnostics_card = D2D1::RectF(card_left, y, card_right, y + diagnostics_h);
         l.diagnostics_perf = D2D1::RectF(card_left + 8.0f * scale, y + 86.0f * scale,
-                                         card_right - 8.0f * scale, y + 142.0f * scale);
+                                         card_right - 8.0f * scale, y + 86.0f * scale+performance_height);
         const float gap = 8.0f * scale;
         const float action_left = card_left + 16.0f * scale;
         const float action_right = card_right - 16.0f * scale;
@@ -1773,7 +1799,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             diag_w[i] = label_btn_w(pulse::l10n::Get(kDiagLabels[i]));
         if (compact_diagnostics) {
             for (int i = 0; i < 3; ++i) {
-                const float top = y + (152.0f + i * 40.0f) * scale;
+                const float top = y + (152.0f + i * 40.0f) * scale+performance_extra;
                 l.diagnostics_action[i] = D2D1::RectF(action_left, top, action_right,
                                                       top + 32.0f * scale);
             }
@@ -1784,7 +1810,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             float left = action_left;
             for (int i = 0; i < 3; ++i) {
                 const float width = measured_total > available ? equal : diag_w[i];
-                const float top = y + 160.0f * scale;
+                const float top = y + 160.0f * scale+performance_extra;
                 l.diagnostics_action[i] = D2D1::RectF(left, top, left + width,
                                                       top + 32.0f * scale);
                 left += width + gap;
@@ -1988,7 +2014,11 @@ NameTrail LayoutNameTrail(float name_x, float text_y, float text_h,
                                  bool show_star, bool show_new_tab, bool show_more,
                                  Compositor* compositor, IDWriteFactory2* factory,
                                  IDWriteTextFormat* fmt, bool change_badge = false, int action_slots = 0,
-                                 const std::vector<NameMatchRange>& matches = {}) {
+                                 const std::vector<NameMatchRange>& matches = {},
+                                 uint32_t allowed_actions = 7u) {
+    show_star = show_star && (allowed_actions & 1u);
+    show_new_tab = show_new_tab && (allowed_actions & 2u);
+    show_more = show_more && (allowed_actions & 4u);
     NameTrail t;
     t.name_x = name_x;
     t.show_star = show_star;
@@ -2007,34 +2037,40 @@ NameTrail LayoutNameTrail(float name_x, float text_y, float text_h,
     // Star / new tab / more dock to the right edge of the name column so
     // every row lines up, independent of filename length.
     float dock = col_right - pad;
-    bool reserve_actions = action_slots > 0 || (change_badge && badge_w > 0.0f);
+    const uint32_t reserve_mask = (action_slots > 0 || (change_badge && badge_w > 0.0f))
+        ? allowed_actions & (action_slots == 2 ? 5u : 7u) : 0u;
+    bool reserve_actions = reserve_mask != 0;
+    const int requested_slots = static_cast<int>((reserve_mask & 1u) != 0) +
+        static_cast<int>((reserve_mask & 2u) != 0) + static_cast<int>((reserve_mask & 4u) != 0);
     // Choose the action density from content, never hover state. Keep star and
     // more available; opening in a new tab is also in the more menu.
     const float full_name_width = MeasureLayoutText(compositor, factory, fmt, name) +
         HighlightPaddingWidth(name, name, matches, scale);
     const float content_width = full_name_width +
         badge_w + gap + (t.tag_n ? gap + OverlapTagsWidth(t.tag_n, diameter) : 0.0f);
-    const bool compact_actions = action_slots == 2 || (reserve_actions &&
-        content_width + 3 * (btn + gap) > dock - name_x);
+    const bool compact_actions = action_slots == 2 || ((reserve_mask & 4u) && reserve_actions &&
+        content_width + requested_slots * (btn + gap) > dock - name_x);
     if (compact_actions) show_new_tab = false;
     const float readable_name = std::min(full_name_width, 96.0f * scale);
     const float minimum_tags = t.tag_n ? gap + OverlapTagsWidth(t.tag_n, diameter) : 0.0f;
-    if (dock - name_x < readable_name + minimum_tags + 2 * (btn + gap)) {
+    const int minimum_slots = requested_slots -
+        static_cast<int>(compact_actions && (reserve_mask & 2u));
+    if (dock - name_x < readable_name + minimum_tags + minimum_slots * (btn + gap)) {
         reserve_actions = false;
         show_star = show_new_tab = show_more = false;
     }
     t.show_star = show_star;
     t.show_more = show_more;
     t.show_new_tab = show_new_tab;
-    if (show_more || reserve_actions) {
+    if (show_more || (reserve_actions && (reserve_mask & 4u))) {
         t.more = D2D1::RectF(dock - btn, by, dock, by + btn);
         dock = t.more.left - gap;
     }
-    if (show_star || reserve_actions) {
+    if (show_star || (reserve_actions && (reserve_mask & 1u))) {
         t.star = D2D1::RectF(dock - btn, by, dock, by + btn);
         dock = t.star.left - gap;
     }
-    if (show_new_tab || (reserve_actions && !compact_actions)) {
+    if (show_new_tab || (reserve_actions && !compact_actions && (reserve_mask & 2u))) {
         t.new_tab = D2D1::RectF(dock - btn, by, dock, by + btn);
         dock = t.new_tab.left - gap;
     }

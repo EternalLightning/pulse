@@ -583,6 +583,9 @@ struct LumaTextRenderer::Impl {
             layout = GetLayout(key, font_size, *cascade);
             if (!layout || !*layout) return false;
             if (lt_text_layout_get_metrics(layout->get(), &metrics) != LT_OK) return false;
+            // Some layouts retain overflowing ink after requesting ellipsis.
+            // Let the DirectWrite caller trim them instead of clipping a glyph.
+            if (metrics.line_count != 1 || metrics.width + ink > width + 0.5f) return false;
         }
         const float floor_x = std::floor(bounds.left);
         const float snapped_y = std::round(bounds.top);

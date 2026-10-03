@@ -1,4 +1,5 @@
 #include "edit_host.h"
+#include "FluentTokens.h"
 #include <commctrl.h>
 namespace pulse::ui {
 constexpr UINT_PTR kEditCaretTimer = 71;
@@ -7,16 +8,34 @@ constexpr wchar_t kNativeEdit[] = L"Pulse.NativeEditFallback";
 bool CustomEdit(Compositor& compositor, HWND hwnd) {
     return compositor.LumaTextEnabled() && !GetPropW(hwnd, kNativeEdit);
 }
-void PresentEdit(Compositor& compositor, HWND hwnd, IDWriteTextFormat* format,
+bool PresentEdit(Compositor& compositor, HWND hwnd, IDWriteTextFormat* format,
     D2D1_COLOR_F foreground, D2D1_COLOR_F background) {
-    if (compositor.PresentLumaEdit(hwnd, format, foreground, background)) return;
+    if (compositor.PresentLumaEdit(hwnd, format, foreground, background)) return true;
     // Keep native EDIT input, selection and IME together if presentation fails.
     SetPropW(hwnd, kNativeEdit, reinterpret_cast<HANDLE>(1));
     SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
     KillTimer(hwnd, kEditCaretTimer);
     if (GetFocus() == hwnd) ShowCaret(hwnd);
     InvalidateRect(hwnd, nullptr, TRUE);
+    return false;
 }
+}
+COLORREF ChildEditTextColor(bool dark) {
+    return IsHighContrast() ? GetSysColor(COLOR_WINDOWTEXT)
+                           : dark ? RGB(255, 255, 255) : RGB(26, 26, 26);
+}
+COLORREF ChildEditBackColor(bool dark) {
+    return IsHighContrast() ? GetSysColor(COLOR_WINDOW)
+                           : dark ? RGB(30, 30, 30) : RGB(255, 255, 255);
+}
+HBRUSH ChildEditBackBrush(HBRUSH themed) {
+    return IsHighContrast() ? GetSysColorBrush(COLOR_WINDOW) : themed;
+}
+bool PresentChildEdit(Compositor& compositor, IDWriteTextFormat* format,
+    D2D1_COLOR_F foreground, D2D1_COLOR_F background, HWND hwnd) {
+    if (!hwnd || !CustomEdit(compositor, hwnd)) return false;
+    HideCaret(hwnd);
+    return PresentEdit(compositor, hwnd, format, foreground, background);
 }
 bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
     D2D1_COLOR_F foreground, D2D1_COLOR_F background, HBRUSH background_brush,

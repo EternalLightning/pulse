@@ -878,6 +878,7 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
 void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                                   const D2D1_RECT_F& pane_rect, int pane_index, bool focused, bool target,
                                   const Theme& theme) {
+    painted_name_pane_ = static_cast<size_t>(std::clamp(pane_index, 0, 7));
     if (pane.is_home) { DrawHome(vm, pane, pane_rect, pane_index, theme); return; }
     ID2D1DeviceContext* dc = compositor_->Dc();
     // The header spans the whole pane; in the column view everything below
@@ -1209,13 +1210,13 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
     dc->PopAxisAlignedClip();
 }
 
-void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y, float w, float h,
+bool MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y, float w, float h,
                                      const Theme& theme, bool selected, const std::vector<NameMatchRange>& matches,
                                      bool dim_extension) {
     (void)selected;
     if (!compositor_ || !compositor_->Dc() || !compositor_->DwriteFactory() ||
         !compositor_->FileNameFormat() || name.empty() || w <= 1.0f) {
-        return;
+        return !name.empty();
     }
     ID2D1DeviceContext* dc = compositor_->Dc();
     IDWriteFactory2* factory = compositor_->DwriteFactory();
@@ -1293,11 +1294,12 @@ void MainRenderer::DrawTruncatedName(const std::wstring& name, float x, float y,
 
     fmt->SetWordWrapping(old_wrap);
     fmt->SetTextAlignment(old_align);
+    return shown != name;
 }
 
-void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
+bool MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_RECT_F& bounds,
                                         const D2D1_COLOR_F& color, const Theme& theme, const std::vector<NameMatchRange>& matches) {
-    if (!compositor_ || !compositor_->Dc() || !compositor_->DwriteFactory() || name.empty()) return;
+    if (!compositor_ || !compositor_->Dc() || !compositor_->DwriteFactory() || name.empty()) return !name.empty();
     const D2D1_RECT_F text_bounds = typography::SnapVerticalBounds(bounds);
     const float width = std::max(1.0f, text_bounds.right - text_bounds.left);
     const float height = std::max(1.0f, text_bounds.bottom - text_bounds.top);
@@ -1305,11 +1307,15 @@ void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
     if (FAILED(compositor_->DwriteFactory()->CreateTextLayout(
             name.c_str(), static_cast<UINT32>(name.size()), compositor_->FileNameFormat(),
             width, height, &layout)) || !layout.get()) {
-        return;
+        return true;
     }
     layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    DWRITE_TEXT_METRICS untrimmed{};
+    layout->GetMetrics(&untrimmed);
+    const bool truncated = untrimmed.height > height + 0.5f ||
+                           untrimmed.widthIncludingTrailingWhitespace > width + 0.5f;
     DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
     ComPtr<IDWriteInlineObject> ellipsis;
     compositor_->DwriteFactory()->CreateEllipsisTrimmingSign(layout.get(), &ellipsis);
@@ -1318,6 +1324,7 @@ void MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
     MakeBrush(compositor_->Dc(), color, brText_);
     compositor_->Dc()->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top), layout.get(),
                                       brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    return truncated;
 }
 D2D1_RECT_F MainRenderer::RenameFieldRect(const PaneViewModel& vm, const D2D1_RECT_F& list,
                                           int source_index) {
@@ -1534,7 +1541,8 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             nameX, textY, textH, nameColRight, cell.top, cell.bottom, scale_,
             display_name, tagDotCount, badgeW, showStar, showNewTab, showMore,
             compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), change != nullptr,
-            vm.view_mode == ViewMode::Details ? (e.is_dir ? 3 : 2) : 0, name_matches);
+            vm.view_mode == ViewMode::Details ? (e.is_dir ? 3 : 2) : 0, name_matches,
+            vm.row_action_mask);
         if (src == vm.rename_index) {
             const D2D1_RECT_F fieldRc = RenameFieldRect(vm, viewport, src);
             fluent::ControlState fieldState{};
@@ -1544,11 +1552,11 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             D2D1_COLOR_F nameColor = cut ? WithAlpha(theme.text, 0.55f) : theme.text;
             MakeBrush(dc, nameColor, brText_);
             if (iconGrid && tagDotCount == 0) {
-                DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);
+                painted_name_truncation_[painted_name_pane_][e.path] = DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);
             } else {
                 Theme name_theme = theme;
                 name_theme.text = nameColor;
-                DrawTruncatedName(display_name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
+                painted_name_truncation_[painted_name_pane_][e.path] = DrawTruncatedName(display_name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
                                   detailsView && !e.is_dir);
             }
             if (change && !iconGrid) DrawChangeBadge(compositor_, painter_, *change, trail.badge, theme, scale_);

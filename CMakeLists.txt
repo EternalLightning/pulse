@@ -164,8 +164,9 @@ target_link_libraries(pulse_localization_test PRIVATE pulse_localization)
 
 add_executable(pulse_known_folder_labels_test
     src/bench/known_folder_labels_test.cpp
+    src/app/entry_sort.cpp
     src/bench/localization_test.rc)
-target_link_libraries(pulse_known_folder_labels_test PRIVATE pulse_localization shell32 ole32 uuid)
+target_link_libraries(pulse_known_folder_labels_test PRIVATE pulse_localization shell32 ole32 uuid shlwapi)
 
 add_executable(pulse_crash_test src/bench/crash_reporter_test.cpp)
 target_link_libraries(pulse_crash_test PRIVATE pulse_crash_reporter)
@@ -280,6 +281,7 @@ list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(document_(host_main|reader|filter)
 option(PULSE_WITH_SELFTEST "Embed the legacy --selftest suite in Pulse.exe" OFF)
 if(NOT PULSE_WITH_SELFTEST)
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "selftest_1b2\\.cpp$")
+    list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(change_tracking_(app|ui)|name_highlight_ui|operation_toast|pane_header_icon|rename_editor)_test\\.cpp$")
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "index_(engine|engine_pinyin|visibility|mft|paths|delta|folder_sizes)\\.cpp$")
 endif()
 list(APPEND PULSE_APP_SOURCES src/index/network_agent_client.cpp)
@@ -322,7 +324,7 @@ if(PULSE_APP_SOURCES)
     target_link_options(pulse PRIVATE /MANIFEST:NO)
     target_link_libraries(pulse PRIVATE
         d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid comctl32 advapi32 shlwapi version windowscodecs gdi32 netapi32 mpr bcrypt pulse_crash_reporter)
-    target_link_libraries(pulse PRIVATE secur32)
+    target_link_libraries(pulse PRIVATE secur32 propsys oleaut32)
     target_link_libraries(pulse PRIVATE pulse_localization pulse_user_storage)
     pulse_enable_lumatext(pulse)
     pulse_add_version_resource(pulse "Pulse file manager" "Pulse" "Pulse.exe")
@@ -359,6 +361,22 @@ pulse_add_version_resource(pulse_index "Pulse index host" "Pulse.Index" "Pulse.I
 add_dependencies(pulse_index_host_stress pulse_index)
 
 # ---- Stage 1B-1 ops self test (console; drives Pulse.Shell.exe over the pipe) ----
+add_executable(pulse_network_security_test src/bench/network_security_test.cpp)
+target_link_libraries(pulse_network_security_test PRIVATE advapi32)
+add_dependencies(pulse_network_security_test pulse_index)
+add_executable(pulse_index_security_test src/bench/index_security_test.cpp src/index/change_tracking.cpp)
+target_link_libraries(pulse_index_security_test PRIVATE advapi32)
+add_executable(pulse_worker_lifecycle_test
+    src/bench/worker_lifecycle_test.cpp src/app/app_worker.cpp src/app/entry_sort.cpp
+    src/app/link_resolve.cpp src/fs/fs_enum.cpp src/fs/fs_snapshot.cpp
+    src/fs/fs_recycle.cpp src/fs/fs_net_cache.cpp)
+target_link_libraries(pulse_worker_lifecycle_test PRIVATE pulse_localization ole32 shell32 uuid shlwapi netapi32)
+add_executable(pulse_fs_watch_lifecycle_test
+    src/bench/fs_watch_lifecycle_test.cpp src/fs/fs_watch.cpp src/fs/fs_enum.cpp)
+target_compile_definitions(pulse_fs_watch_lifecycle_test PRIVATE PULSE_FS_WATCH_TESTING=1)
+target_link_libraries(pulse_fs_watch_lifecycle_test PRIVATE shell32 shlwapi netapi32)
+add_executable(pulse_tag_discovery_cache_test src/bench/tag_discovery_cache_test.cpp)
+add_executable(pulse_ipc_payload_test src/bench/ipc_payload_test.cpp)
 add_executable(pulse_operation_presentation_test src/bench/operation_presentation_test.cpp)
 add_executable(pulse_column_strip_test src/bench/column_strip_test.cpp src/ui/column_strip_layout.cpp)
 add_executable(pulse_playback_controls_test src/bench/playback_controls_test.cpp src/ui/video_preview.cpp)
@@ -383,8 +401,8 @@ target_link_libraries(pulse_recycle_backend_test PRIVATE ole32 shell32 uuid bcry
 # Standalone OpsManager tests need the deletion service's direct dependencies.
 foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test)
     target_sources(${ops_test_target} PRIVATE
-        src/ops/delete_service.cpp src/ops/delete_operation.cpp
-        src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
+        src/ops/delete_service.cpp src/ops/delete_operation.cpp src/ops/file_lock_owner.cpp
+        src/ops/recycle_undo_validation.cpp src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
     target_link_libraries(${ops_test_target} PRIVATE
         pulse_localization advapi32 shlwapi netapi32 mpr)
 endforeach()
@@ -420,6 +438,7 @@ target_link_libraries(pulse_preview_test PRIVATE ole32 gdi32 gdiplus)
 add_dependencies(pulse_preview_test pulse_preview)
 
 add_executable(pulse_shell_icons_test src/bench/shell_icons_test.cpp src/ui/shell_icons.cpp)
+target_compile_definitions(pulse_shell_icons_test PRIVATE PULSE_SHELL_ICONS_TESTING=1)
 target_link_libraries(pulse_shell_icons_test PRIVATE ole32 shell32 comctl32 uuid)
 
 add_executable(pulse_preview_handler_probe
@@ -458,9 +477,9 @@ add_executable(pulse_app_controllers_test
     src/app/tab_group_model.cpp
     src/app/single_instance_coordinator.cpp
     src/app/tray_controller.cpp
-    src/app/app_prefs.cpp
+    src/app/app_prefs.cpp src/app/startup_launch.cpp src/app/default_file_manager.cpp
     src/app/folder_view_prefs.cpp
-    src/app/context_menu_prefs.cpp
+    src/app/context_menu_prefs.cpp src/app/builtin_menu_items.cpp
     src/ui/view_layout.cpp
     src/index/index_client.cpp
     src/index/index_config.cpp
@@ -485,6 +504,17 @@ if(TARGET pulse_ops_test AND TARGET pulse_shell)
     add_dependencies(pulse_rename_ops_test pulse_shell)
     add_dependencies(pulse_recycle_backend_test pulse_shell)
 endif()
+
+add_executable(pulse_link_confirmation_ui_test
+    src/bench/link_confirmation_ui_test.cpp src/bench/localization_test.rc
+    src/ui/file_operation_dialog.cpp src/ui/fluent_components.cpp src/ui/window_helpers.cpp
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp src/ui/typography.cpp src/ui/ui_compositor.cpp
+    src/ops/file_lock_owner.cpp)
+target_compile_definitions(pulse_link_confirmation_ui_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_libraries(pulse_link_confirmation_ui_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32)
+pulse_enable_lumatext(pulse_link_confirmation_ui_test)
 
 # Headless modal lifecycle checks: no screenshots and no foreground activation.
 add_executable(pulse_dialog_close_test src/bench/dialog_close_test.cpp src/ui/dialog_lifecycle.cpp)
@@ -514,6 +544,111 @@ target_link_options(pulse_child_edit_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_child_edit_test PRIVATE
     d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 windowscodecs user32 gdi32 comctl32 pulse_localization)
 pulse_enable_lumatext(pulse_child_edit_test)
+
+add_executable(pulse_sidebar_scrollbar_fade_test src/bench/sidebar_scrollbar_fade_test.cpp)
+target_compile_options(pulse_sidebar_scrollbar_fade_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_builtin_menu_items_test
+    src/bench/builtin_menu_items_test.cpp src/bench/localization_test.rc
+    src/app/builtin_menu_items.cpp src/app/context_menu_prefs.cpp)
+target_compile_options(pulse_builtin_menu_items_test PRIVATE /W4 /permissive- /utf-8)
+target_link_options(pulse_builtin_menu_items_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_builtin_menu_items_test PRIVATE pulse_localization)
+
+foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold)
+    add_executable(pulse_${model_fixture}_test
+        src/bench/${model_fixture}_test.cpp src/bench/localization_test.rc
+        src/app/app_model.cpp src/app/places.cpp src/app/entry_sort.cpp
+        src/app/entry_order_hold.cpp src/app/snapshot_patch.cpp
+        src/app/date_groups.cpp src/ui/view_layout.cpp src/app/search_query.cpp
+        src/app/column_view_model.cpp src/index/index_query.cpp src/index/search_kinds.cpp
+        src/fs/fs_enum.cpp src/index/content_result_store.cpp)
+    target_compile_options(pulse_${model_fixture}_test PRIVATE /W4 /permissive- /utf-8)
+    target_link_options(pulse_${model_fixture}_test PRIVATE /MANIFEST:NO)
+    target_link_libraries(pulse_${model_fixture}_test PRIVATE
+        pulse_sqlite pulse_localization pulse_text shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+endforeach()
+
+add_executable(pulse_file_lock_owner_test
+    src/bench/file_lock_owner_test.cpp src/ops/file_lock_owner.cpp)
+target_compile_options(pulse_file_lock_owner_test PRIVATE /W4 /permissive- /utf-8)
+target_link_options(pulse_file_lock_owner_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_file_lock_owner_test PRIVATE rstrtmgr advapi32)
+
+add_executable(pulse_default_file_manager_test
+    src/bench/default_file_manager_test.cpp src/app/default_file_manager.cpp
+    src/app/shell_window_registry.cpp src/app/explorer_window_takeover.cpp)
+target_compile_options(pulse_default_file_manager_test PRIVATE /W4 /permissive- /utf-8)
+target_link_options(pulse_default_file_manager_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_default_file_manager_test PRIVATE
+    advapi32 shell32 ole32 oleaut32 uuid propsys user32 shlwapi)
+
+add_executable(pulse_dialog_text_fit_test src/bench/dialog_text_fit_test.cpp)
+add_executable(pulse_startup_command_test src/bench/startup_command_test.cpp src/app/startup_launch.cpp)
+
+add_executable(pulse_locked_operation_test
+    src/bench/locked_operation_test.cpp src/ops/ops_manager.cpp
+    src/ops/delete_service.cpp src/ops/delete_operation.cpp src/ops/file_lock_owner.cpp
+    src/ops/recycle_undo_validation.cpp src/ipc/shell_client.cpp src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
+target_link_libraries(pulse_locked_operation_test PRIVATE
+    pulse_localization ole32 shell32 uuid bcrypt advapi32 shlwapi netapi32 mpr rstrtmgr)
+
+add_executable(pulse_ops_feedback_test
+    src/bench/ops_feedback_test.cpp src/ops/ops_manager.cpp
+    src/ops/delete_service.cpp src/ops/delete_operation.cpp src/ops/file_lock_owner.cpp
+    src/ops/recycle_undo_validation.cpp src/ipc/shell_client.cpp src/fs/fs_enum.cpp src/fs/fs_recycle.cpp
+    src/shell_host/recycle_fileop.cpp src/shell_host/deletion_identity.cpp)
+target_link_options(pulse_ops_feedback_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_ops_feedback_test PRIVATE
+    pulse_localization ole32 shell32 uuid bcrypt advapi32 shlwapi netapi32 mpr rstrtmgr)
+
+add_executable(pulse_menu_text_test
+    src/bench/menu_text_test.cpp src/bench/localization_test.rc
+    src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/ui_compositor.cpp
+    src/ui/tab_shape.cpp src/ui/typography.cpp src/ui/edit_host.cpp)
+target_link_options(pulse_menu_text_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_menu_text_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32)
+pulse_enable_lumatext(pulse_menu_text_test)
+
+add_executable(pulse_locked_item_prompt_ui_test
+    src/bench/locked_item_prompt_ui_test.cpp src/bench/localization_test.rc
+    src/ui/file_operation_dialog.cpp src/ui/fluent_components.cpp src/ui/window_helpers.cpp
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp)
+target_compile_definitions(pulse_locked_item_prompt_ui_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_locked_item_prompt_ui_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_locked_item_prompt_ui_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
+pulse_enable_lumatext(pulse_locked_item_prompt_ui_test)
+
+add_executable(pulse_rename_locked_prompt_ui_test
+    src/bench/rename_locked_prompt_ui_test.cpp src/bench/localization_test.rc
+    src/ui/file_operation_dialog.cpp src/ui/fluent_components.cpp src/ui/window_helpers.cpp
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp)
+target_compile_definitions(pulse_rename_locked_prompt_ui_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_rename_locked_prompt_ui_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_rename_locked_prompt_ui_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
+pulse_enable_lumatext(pulse_rename_locked_prompt_ui_test)
+
+add_executable(pulse_dialog_edit_integration_test
+    src/bench/dialog_edit_integration_test.cpp src/bench/dialog_edit_test.rc
+    src/ui/advanced_search_dialog.cpp src/ui/batch_rename_dialog.cpp
+    src/app/batch_rename.cpp src/app/search_query.cpp src/index/index_query.cpp src/index/search_kinds.cpp
+    src/fs/fs_enum.cpp src/ui/edit_host.cpp src/ui/fluent_menu.cpp
+    src/ui/fluent_components.cpp src/ui/window_helpers.cpp src/ui/tab_shape.cpp
+    src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp src/ui/typography.cpp src/ui/ui_compositor.cpp)
+target_compile_definitions(pulse_dialog_edit_integration_test PRIVATE PULSE_TEST_LUMATEXT_INIT_FAILURE=1)
+target_link_options(pulse_dialog_edit_integration_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_dialog_edit_integration_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32 shlwapi netapi32)
+pulse_enable_lumatext(pulse_dialog_edit_integration_test)
 
 # Focused folder change tracking regression tests.
 add_executable(pulse_change_tracking_polling_test src/bench/change_tracking_polling_test.cpp)

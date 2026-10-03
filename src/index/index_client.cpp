@@ -98,7 +98,7 @@ bool IndexClient::EnsureConnected() {
         if (pipe_ != INVALID_HANDLE_VALUE) return true;
     }
     auto try_open = [&]() -> HANDLE {
-        HANDLE h = CreateFileW(pipe_name_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+        HANDLE h = CreateFileW(pipe_name_.c_str(), transport::kClientPipeAccess, 0, nullptr,
                                OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
         if (h == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
         DWORD mode = PIPE_READMODE_BYTE;
@@ -211,6 +211,10 @@ void IndexClient::HandleSearch(uint32_t id, const uint8_t* p, size_t n) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         r.GetU64(sr.revision);
+        uint32_t incomplete = 0;
+        if (r.GetU32(sr.error) && r.GetU32(incomplete)) sr.incomplete = incomplete != 0;
+        if (sr.error == ERROR_BUSY) status_ = L"索引查询过载，请减少同时打开的搜索并重试";
+        else if (sr.incomplete) status_ = L"当前结果不完整：部分路径无法授权或授权检查超时，请缩小搜索范围";
         TraceSearch("filename_received", sr.revision);
         results_[id] = std::move(sr);
     }

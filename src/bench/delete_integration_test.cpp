@@ -196,8 +196,9 @@ int main(int argc, char** argv) {
             "shared confirmation explicitly summarizes irreversible reason and mixed logical count");
         for (int i = 0; i < 20; ++i) mixed.plan.targets.push_back({std::wstring(4000, L'x'), {L"C:\\Fixture\\long.txt"}, ops::DeleteDisposition::Permanent, L"explicit permanent"});
         actual_spec = BuildDeleteConfirmationSpec(mixed);
-        check(actual_spec.message.size() < 1600 && actual_spec.message.find(L"more items") != std::wstring::npos,
-            "large/long-path batch summary is bounded without losing total logical count");
+        check(actual_spec.message.size() < 1600 && actual_spec.note.find(L"more items") != std::wstring::npos &&
+            actual_spec.rows.size() == 5 && actual_spec.rows[2].text.size() == 4000,
+            "large batch uses bounded path rows while retaining full long names for width-based fitting");
         saw_dialog = false; dialog_key = VK_RETURN;
         SetTimer(owner, 91, 10, RejectDialog);
         check(!ui::ShowConfirmDialog(owner, actual_spec, true, ui::HexColor(0x0078D4)) && saw_dialog,

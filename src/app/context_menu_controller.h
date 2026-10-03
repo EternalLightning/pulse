@@ -62,6 +62,7 @@ public:
                                      uint64_t completed_at, bool partial = false);
 
     void OpenMenu(std::vector<ui::FluentMenuItem> base_items);
+    bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     void NotePatchedDisplay() { menu_com_items_ = com_items_; }
     void CloseMenu() noexcept { menu_open_ = false; }
     bool menu_open() const noexcept { return menu_open_; }

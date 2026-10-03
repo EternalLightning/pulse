@@ -60,6 +60,14 @@ struct StarredItem {
     uint32_t badge_rgb = 0x0078D4;
 };
 
+inline constexpr uint32_t kDefaultBadgeRgb = 0x0078D4;
+
+struct QuickAccessBadge {
+    std::wstring path;
+    std::wstring badge;
+    uint32_t badge_rgb = kDefaultBadgeRgb;
+};
+
 struct RecentItem {
     std::wstring path;
     PlaceItemKind kind = PlaceItemKind::Unknown;
@@ -83,6 +91,7 @@ public:
     std::vector<NetworkPlace> networks;
     std::vector<std::wstring> quick_access_paths;
     std::vector<StarredItem> starred_items;
+    std::vector<QuickAccessBadge> quick_access_badges;
     std::vector<RecentItem> recent_items;
     int active_workspace = -1;
     bool persist = true; // self-test can disable disk writes
@@ -137,6 +146,10 @@ public:
     bool SetQuickAccessPinned(const std::vector<std::wstring>& paths, bool pinned);
     // Moves a pinned folder to a gap in the original pin list (0..size, clamped).
     bool ReorderQuickAccessPinned(const std::wstring& path, size_t position);
+    const QuickAccessBadge* FindQuickAccessBadge(const std::wstring& path) const;
+    // Empty text and the default color restore the sidebar entry's default badge.
+    bool SetQuickAccessBadge(const std::wstring& path, const std::wstring& text,
+                             uint32_t rgb);
 
     bool IsStarred(const std::wstring& path) const;
     const StarredItem* FindStarred(const std::wstring& path) const;
@@ -173,6 +186,7 @@ private:
         std::vector<NetworkPlace> networks;
         std::vector<std::wstring> quick_access_paths;
         std::vector<StarredItem> starred_items;
+        std::vector<QuickAccessBadge> quick_access_badges;
         std::vector<RecentItem> recent_items;
         int active_workspace = -1;
         bool persist = true;
@@ -223,7 +237,7 @@ inline std::wstring MakeSettingsPath(std::wstring_view page = L"general") {
 bool ParsePulsePath(const std::wstring& path, std::wstring* kind, std::wstring* rest);
 
 bool WriteTagAdsV2(const std::wstring& path, const std::vector<TagAdsRecord>& tags);
-std::vector<std::wstring> ReadTagAds(const std::wstring& path);
-std::vector<TagAdsRecord> ReadTagAdsV2(const std::wstring& path);
+std::vector<std::wstring> ReadTagAds(const std::wstring& path, bool* readable = nullptr);
+std::vector<TagAdsRecord> ReadTagAdsV2(const std::wstring& path, bool* readable = nullptr);
 
 } // namespace pulse::app

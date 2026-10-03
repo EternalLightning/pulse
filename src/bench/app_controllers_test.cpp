@@ -45,6 +45,47 @@ bool Report(const char* name, bool passed) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-runas") {
+        using namespace pulse::app;
+        ContextMenuPrefs prefs;
+        prefs.persist = false;
+        ContextMenuController controller;
+        std::wstring executed_path, executed_verb, executed_command;
+        int verb_calls = 0;
+        int command_calls = 0;
+        ContextMenuController::ShellOperations operations;
+        operations.execute_verb = [&](const std::wstring& path, const std::wstring& verb) {
+            executed_path = path;
+            executed_verb = verb;
+            ++verb_calls;
+        };
+        operations.execute_command = [&](const std::wstring& command, const std::wstring&) {
+            executed_command = command;
+            ++command_calls;
+        };
+        controller.SetShellOperations(std::move(operations));
+        const std::wstring path = L"C:\\Program Files\\Example\\app.exe";
+        StaticVerb runas;
+        runas.verb = L"RuNaS";
+        runas.display = L"Run as administrator";
+        runas.command = L"\"%1\" %*";
+        controller.CompleteStaticVerbs(L".exe", { runas });
+        controller.StartQuery(prefs, nullptr, { path }, false, L".exe", false, {}, {});
+        const bool handled = controller.ExecuteShellCommand(CmdShellStaticBase, {}, {});
+        bool ok = Report("runas preserves elevation despite a cached registry command",
+            handled && verb_calls == 1 && command_calls == 0 &&
+            executed_path == path && executed_verb == L"runas");
+        StaticVerb custom;
+        custom.verb = L"custom";
+        custom.display = L"Custom command";
+        custom.command = L"tool.exe \"%1\"";
+        controller.CompleteStaticVerbs(L".exe", { custom });
+        controller.StartQuery(prefs, nullptr, { path }, false, L".exe", false, {}, {});
+        controller.ExecuteShellCommand(CmdShellStaticBase, {}, {});
+        ok &= Report("ordinary static commands retain their command template",
+            verb_calls == 1 && command_calls == 1 && executed_command == custom.command);
+        return ok ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--new-tab-home") {
         wchar_t temporary[MAX_PATH]{};
         if (!GetTempPathW(MAX_PATH, temporary)) return 1;

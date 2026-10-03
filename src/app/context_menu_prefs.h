@@ -6,6 +6,7 @@
 // applies these prefs so turning 「发送到」 back on actually works.
 #pragma once
 #include "../ipc/ctx_menu_util.h"
+#include "builtin_menu_items.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -47,6 +48,11 @@ struct ContextMenuPrefs {
 
     int explorer_cap = ipc::kDefaultExplorerCap;
     int open_with_mru = 2;
+    uint32_t builtin_hidden = 0;
+    bool BuiltinItemEnabled(BuiltinMenuItem item) const;
+    void SetBuiltinItemEnabled(BuiltinMenuItem item, bool enabled);
+    bool BuiltinGroupEnabled() const;
+    void SetBuiltinGroupEnabled(bool enabled);
 
     std::unordered_map<std::wstring, bool> item_enabled;
     std::vector<SeenMenuItem> seen;

@@ -14,10 +14,12 @@
 #include "../fs/fs_snapshot.h"
 #include "../fs/fs_watch.h"
 #include "app_model.h"
+#include "sidebar_scrollbar_fade.h"
 #include "home_catalog.h"
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
+#include "tag_discovery_cache.h"
 #include "places.h"
 #include "details_meta.h"
 #include "folder_sizes.h"
@@ -25,6 +27,7 @@
 #include "context_menu_controller.h"
 #include "shell_verbs.h"
 #include "app_prefs.h"
+#include "system_integration.h"
 #include "saved_search.h"
 #include "search_history.h"
 #include "settings_controller.h"
@@ -81,6 +84,7 @@ constexpr UINT WM_RECYCLE_INFO = WM_APP + 57;
 constexpr UINT WM_DUP_VOLUMES = WM_APP + 59;
 constexpr UINT WM_SEARCH_HISTORY = WM_APP + 62;
 constexpr UINT WM_CHANGE_TRACKING = WM_APP + 63;
+constexpr UINT WM_EXIT_READY = WM_APP + 67;
 constexpr UINT kTimerUi = 1;
 
 enum class OmnibarMode { Path, Mixed, Command, Project };
@@ -93,6 +97,8 @@ struct TrayDeckEntry {
 
 struct TagAdsDiscovery {
     std::wstring path;
+    uint64_t version = 0;
+    bool readable = false;
     std::vector<app::TagAdsRecord> records;
     std::vector<std::wstring> legacy_names;
 };
@@ -123,6 +129,10 @@ struct Timing {
 };
 
 struct AppState {
+    bool exit_confirming = false;
+    bool exit_requested = false;
+    std::atomic<bool> exit_stop_finished{false};
+    std::thread exit_thread;
     HWND hwnd = nullptr;
     ui::Compositor compositor;
     ui::NotificationToast notification_toast;
@@ -148,6 +158,12 @@ struct AppState {
     app::Pane* targetPane = nullptr;    // Ctrl+D marked destination
 
     fs::SnapshotStore store;
+    struct ExplicitEntryRefresh {
+        std::wstring path;
+        uint64_t generation = 0;
+    };
+    // UI-only request intent; dirty/watch retries may not downgrade F5/sort.
+    std::map<app::Tab*, ExplicitEntryRefresh> explicit_entry_refreshes;
     app::WorkerPool worker;
     fs::DirWatchSet watches;
     struct DirNotifyBatch {
@@ -190,12 +206,14 @@ struct AppState {
     uint32_t sidebarQuickAccessHiddenMask = 0;
     bool starredExpanded = true;
     float sidebarScroll = 0.0f;
+    app::SidebarScrollbarFade sidebarScrollbarFade;
     app::StagingTray tray;
     app::PlacesCatalog places;
     app::ContextMenuPrefs ctxMenuPrefs;
     // Explorer COM/static menu session, caches, and delayed refresh state.
     app::ContextMenuController context_menu;
     app::AppPrefs appPrefs;
+    app::SystemIntegration systemIntegration;
     app::SearchHistory searchHistory;
     app::SearchHistoryWriter searchHistoryWriter;
     app::SettingsController settings;
@@ -207,7 +225,8 @@ struct AppState {
     ui::BloomAccentPicker bloom_accent;
     std::unordered_set<std::wstring> tagFallbackVolumes;
     std::unordered_set<std::wstring> tagAdsDiscoveryQueued;
-    std::unordered_set<std::wstring> tagAdsDiscoveryChecked;
+    app::TagDiscoveryCache tagAdsDiscoveryChecked;
+    ULONGLONG tagAdsLastDiscovery = 0;
     const void* tagAdsLastSnapshot = nullptr;
     std::wstring tagAdsLastViewPath;
     std::wstring tagAdsLastFilter;
@@ -424,6 +443,8 @@ struct AppState {
     uint64_t operationDismissedTaskId = 0;
     uint64_t conflictUiToken = 0;
     uint64_t deleteUiToken = 0;
+    uint64_t lockedOperationPromptedTaskId = 0;
+    bool lockedOperationPromptActive = false;
     uint64_t deletesWithoutMutation = 0;
     bool operationAutoShown = false;
     bool operationPinnedByUser = false;

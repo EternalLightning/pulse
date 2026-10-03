@@ -20,7 +20,7 @@ int main(int argc, char**) {
         };
         while (GetTickCount64() - started < 35000) {
             if (pipe == INVALID_HANDLE_VALUE) {
-                pipe = CreateFileW(kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                pipe = CreateFileW(kPipeName, transport::kClientPipeAccess, 0, nullptr,
                                   OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
                 if (pipe == INVALID_HANDLE_VALUE) {
                     std::printf("connect error=%lu\n", GetLastError()); std::fflush(stdout);

@@ -1,5 +1,7 @@
 #include "archive_navigation.h"
+#include "app_exit.h"
 #include "../ops/archive.h"
+#include "locked_operation_prompt.h"
 #include "../common/windows_compat.h"
 #include "quick_access.h"
 #include "filter_animation.h"
@@ -255,7 +257,22 @@ static void SyncUiTimerRate(HWND hwnd, bool visible) {
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     AppState* s = GetAppState(hwnd);
+    if (s && msg == app::TrayController::TaskbarCreatedMessage()) {
+        if (!s->exit_requested) s->tray_controller.HandleTaskbarCreated();
+        return 0;
+    }
     if (s && s->notification_toast.HandleMessage(hwnd, msg, wParam, lParam)) return 0;
+    if (s && s->exit_requested) {
+        switch (msg) {
+        case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_KEYDOWN:
+        case WM_SYSKEYDOWN: case WM_CHAR: case WM_COMMAND: case WM_HOTKEY:
+        case WM_CONTEXTMENU: case WM_QUICK_PREVIEW_COMMAND:
+            return 0;
+        case WM_COPYDATA: return FALSE;
+        default: break;
+        }
+    }
 
     switch (msg) {
     case WM_NCPAINT:
@@ -286,6 +303,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(s));
         s->hwnd = hwnd;
         s->tray_controller.Attach(hwnd, cs->hInstance);
+        s->tray_controller.SetBeforeRestore([s] {
+            s->tray_controller.SetVisible(s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled);
+        });
 
         s->scale = s->shot_scale_override > 0.0f
             ? s->shot_scale_override : (float)pulse::compat::WindowDpi(hwnd) / 96.0f;
@@ -321,6 +341,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             [s] { BindCurrentLayout(*s); },
             [s] { RememberLayoutFocus(*s); },
             [s] { return NewTabPath(*s); },
+            [s] { return s->appPrefs.close_last_tab_window; },
+            [hwnd] { PostMessageW(hwnd, WM_CLOSE, 0, 0); },
         });
         if (s->isolatedTest) {
             s->places.persist = false;
@@ -385,6 +407,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         };
         settings_callbacks.apply_effects = [s](app::SettingsEffect effects) {
             ApplySettingsEffects(*s, effects);
+        };
+        settings_callbacks.toggle_system_integration = [s](int control) {
+            s->systemIntegration.Toggle(*s, control);
+            InvalidateRect(s->hwnd, nullptr, FALSE);
         };
         settings_callbacks.task_completion = SettingsCompletion(hwnd);
         settings_callbacks.open_path = [hwnd](const std::wstring& path) {
@@ -588,10 +614,15 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 RememberPath(*s, t->current_path);
         } else {
         std::wstring startPath = s->shot.active ? s->shot.path : L"C:\\";
+        ResolvedOpenTarget openTarget;
         if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
-        else if (!s->shot.active && !s->open_path.empty())
-            startPath = ops::IsArchivePath(s->open_path) ? ArchiveViewPath(fs::NormalizePath(s->open_path))
-                : ResolveOpenFolderPath(s->open_path);
+        else if (!s->shot.active && !s->open_path.empty()) {
+            if (ops::IsArchivePath(s->open_path)) startPath = ArchiveViewPath(fs::NormalizePath(s->open_path));
+            else {
+                openTarget = ResolveOpenTarget(s->open_path);
+                startPath = openTarget.folder;
+            }
+        }
         s->pane->NewTab(startPath);
         if (s->shot.active) {
             s->pane->ActiveTab()->view_mode = s->shot.view_mode;
@@ -604,14 +635,16 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             !s->shot.active && !s->session_path.empty()
                 ? PathLoadReason::RestoreSession : PathLoadReason::Navigate);
         RememberPath(*s, startPath);
+        if (!s->shot.active && s->session_path.empty() && !s->open_path.empty())
+            SelectLaunchedFile(*s, openTarget);
         }
 
         if (!s->shot.active && !s->open_path.empty() &&
             (!s->session_layout_tabs.empty() || !s->session_path.empty())) {
-            const std::wstring open_path = ResolveOpenFolderPath(s->open_path);
-            if (!open_path.empty() && !ActivateExistingFolderTab(*s, open_path))
-                NewTab(*s, open_path);
+            OpenFolderInNewTab(*s, s->open_path);
         }
+
+        s->systemIntegration.Start(*s);
 
         s->lastFrameTime = std::chrono::steady_clock::now();
         s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
@@ -740,23 +773,30 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         if (wParam == HTCLOSE) {
-            SuspendContentSearches(*s);
-            s->globalSearchWindow.Hide();
-            if (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled) s->tray_controller.HideWindow();
-            else DestroyWindow(hwnd);
+            if (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled) {
+                SuspendContentSearches(*s);
+                s->globalSearchWindow.Hide();
+                s->tray_controller.HideWindow();
+            } else RequestApplicationExit(*s);
             return 0;
         }
         break;
     }
 
     case WM_CLOSE: {
-        if (s) { SuspendContentSearches(*s); s->globalSearchWindow.Hide(); }
         if (s && (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled)) {
+            SuspendContentSearches(*s);
+            s->globalSearchWindow.Hide();
             s->tray_controller.HideWindow();
             return 0;
         }
+        if (s) { RequestApplicationExit(*s); return 0; }
         break;
     }
+
+    case WM_EXIT_READY:
+        if (s) CompleteApplicationExit(*s);
+        return 0;
 
     case WM_COPYDATA: {
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
@@ -766,11 +806,17 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return TRUE;
     }
 
+    case app::kSystemIntegrationMessage:
+    case app::kShellSelectionMessage:
+    case app::kExplorerTakeoverMessage:
+        if (s && s->systemIntegration.Tick(*s)) InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+
     case app::TrayController::kCallbackMessage: {
         if (!s) return 0;
         const auto result = s->tray_controller.HandleCallback(lParam);
         if (result == app::TrayController::CallbackResult::ExitRequested)
-            DestroyWindow(hwnd);
+            RequestApplicationExit(*s);
         return 0;
     }
 
@@ -891,12 +937,18 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_TIMER: {
         if (s && wParam == kTimerUi) {
+            if (CompleteApplicationExit(*s)) return 0;
+            if (s->exit_requested) return 0;
             SyncUiTimerRate(hwnd, IsWindowVisible(hwnd) && !IsIconic(hwnd));
             bool dirty = false;
+            if (s->systemIntegration.Tick(*s)) dirty = true;
             if (TickChangeTracking(*s)) dirty = true;
             if (s->folderSizes.TakeChanged()) dirty = true;
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
+            if (s->sidebarScrollbarFade.Tick(now, s->sidebarScroll,
+                    s->hoverRegion == static_cast<int>(ui::HitTestResult::Scrollbar) && s->hoverPaneIndex < 0,
+                    s->scrollbarDragging && s->scrollbarSidebar)) dirty = true;
             if (TickSidebarFolds(*s, now)) dirty = true;
             if (s->renderer.TickDetailsPreview(now)) dirty = true;
             if (s->detailsPreviewFoldStart) {
@@ -1205,7 +1257,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_OPS_NOTIFY: {
         if (s) {
-            UpdateOperationWindow(*s, true);
+            UpdateOperationWindow(*s, !s->exit_requested && !s->lockedOperationPromptActive);
             const ops::OpStatus st = s->ops.Status();
             if (s->ops.TakeCtxInvokeDone()) {
                 if (app::Tab* tab = ActiveTab(*s)) s->store.MarkDirty(tab->current_path);
@@ -1254,6 +1306,19 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                                completed.type == ops::OpType::BatchRename) {
                         for (size_t i = 0; i < completed.sources.size() &&
                                            i < completed.destinations.size(); ++i) {
+                            if (completed.type == ops::OpType::Rename ||
+                                completed.type == ops::OpType::BatchRename) {
+                                const auto parent = fs::ParentPath(completed.sources[i]);
+                                if (_wcsicmp(parent.c_str(), fs::ParentPath(completed.destinations[i]).c_str()) == 0) {
+                                    ForEachPane(*s, [&](app::Pane& pane) {
+                                        if (auto* tab = pane.ActiveTab(); tab &&
+                                            _wcsicmp(tab->current_path.c_str(), parent.c_str()) == 0) {
+                                            tab->HoldEntryRename(PathFindFileNameW(completed.sources[i].c_str()),
+                                                                 PathFindFileNameW(completed.destinations[i].c_str()));
+                                        }
+                                    });
+                                }
+                            }
                             s->places.RemapPaths(completed.sources[i],
                                                  completed.destinations[i]);
                             tag_metadata_paths.push_back(completed.destinations[i]);
@@ -1321,6 +1386,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 }
                 if (s->previewDeleteIntent && s->previewDeleteIntent->succeeded) SyncQuickPreview(*s);
             }
+            PumpLockedOperationPrompt(*s);
+            RefreshOpenCtxMenu(*s);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -1579,9 +1646,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             for (const auto& discovery : *discoveries) {
                 const std::wstring key = TagDiscoveryKey(discovery.path);
                 s->tagAdsDiscoveryQueued.erase(key);
-                s->tagAdsDiscoveryChecked.insert(key);
-                s->places.MergeAdsRecords(discovery.path, discovery.records,
-                                          discovery.legacy_names);
+                if (discovery.readable) {
+                    s->tagAdsDiscoveryChecked.Record(key, discovery.version, GetTickCount64());
+                    s->places.MergeAdsRecords(discovery.path, discovery.records,
+                                              discovery.legacy_names);
+                } else s->tagAdsDiscoveryChecked.Erase(key);
             }
             if (s->places.TagRevision() != before)
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1591,6 +1660,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_DESTROY: {
         if (s) {
+            // Destruction paths used by tests also save only after operations settle.
+            if (s->exit_thread.joinable()) s->exit_thread.join();
+            s->systemIntegration.Stop();
+            s->ops.Stop();
             ShutdownGlobalSearch(*s);
             StopShellRegistryWatch();
             s->watches.Stop();
@@ -1681,7 +1754,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
 
             s->tray_controller.Detach();
-            s->ops.Stop();
             s->single_instance.Release();
 
             s->renderer.SetIconNotifyWindow(nullptr);
@@ -1901,6 +1973,13 @@ bool SkipSingletonFromArgv() {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     pulse::crash::Initialize({pulse::crash::ProcessRole::App, false, {}});
+    for (int i = 1; i < __argc; ++i) {
+        if (wcscmp(__wargv[i], L"--restore-file-manager") == 0) {
+            const auto result = app::RestoreDefaultFileManager(app::SystemExecutablePath());
+            // A later third-party association is deliberately preserved on uninstall.
+            return result.error == ERROR_SUCCESS ? 0 : 1;
+        }
+    }
     pulse::compat::EnableDpiAwareness();
     // OLE init (drag & drop + clipboard); implies STA COM init.
     OleInitialize(nullptr);
@@ -1987,9 +2066,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         if (state.darkMode) state.themeOverride = ui::ThemeMode::Dark;
     }
 
+    bool startup_launch = false;
     // Parse command line.
     for (int i = 1; i < __argc; ++i) {
-        if (wcscmp(__wargv[i], L"--shot") == 0 && i + 1 < __argc) {
+        if (wcscmp(__wargv[i], L"--startup") == 0) {
+            startup_launch = true;
+        } else if (wcscmp(__wargv[i], L"--shot") == 0 && i + 1 < __argc) {
             state.shot.active = true;
             state.shot.output = __wargv[++i];
         } else if (wcscmp(__wargv[i], L"--menushot") == 0 && i + 1 < __argc) {
@@ -2084,7 +2166,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     if (!SkipSingletonFromArgv()) {
         const auto result = state.single_instance.Acquire();
         if (result == app::SingleInstanceCoordinator::AcquireResult::Existing) {
-            state.single_instance.ForwardOpenPath(state.open_path);
+            if (!startup_launch || !state.open_path.empty())
+                state.single_instance.ForwardOpenPath(state.open_path);
             OleUninitialize();
             return 0;
         }
@@ -2135,7 +2218,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     const bool test_hidden = (state.shot.active || state.menushot || state.colorpickshot) &&
         GetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", hidden_shot, ARRAYSIZE(hidden_shot)) == 1 &&
         hidden_shot[0] == L'1';
-    ShowWindow(hwnd, test_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL : nCmdShow);
+    const bool startup_hidden = startup_launch && state.appPrefs.start_to_tray &&
+        state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
+    ShowWindow(hwnd, test_hidden || startup_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL : nCmdShow);
     UpdateWindow(hwnd);
 
     if (state.menushot) {

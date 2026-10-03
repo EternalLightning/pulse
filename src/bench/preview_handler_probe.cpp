@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <atomic>
+#include <vector>
 
 namespace pulse::ui {
 void ResetPreviewHandlerOpenAttemptsForTest();
@@ -28,15 +30,125 @@ LRESULT CALLBACK OwnerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+struct OpenBlock {
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::atomic<uint32_t> entered{0};
+    ~OpenBlock() { if (release) CloseHandle(release); }
+};
+
+bool Lifecycle(HWND owner, bool permanent) {
+    using Host = pulse::ui::PreviewHandlerHost;
+    auto block = std::make_shared<OpenBlock>();
+    Host::SetOpenHookForTest([block] {
+        block->entered.fetch_add(1);
+        WaitForSingleObject(block->release, INFINITE);
+    });
+    SetEnvironmentVariableW(L"PULSE_PREVIEW_HANDLER_OPEN_BUDGET_MS", L"20");
+    SetEnvironmentVariableW(L"PULSE_PREVIEW_HANDLER_SLOW_OPEN_BUDGET_MS", L"20");
+    pulse::ui::ResetSlowPreviewProvidersForTest();
+    const auto limit = Host::Resources().limit;
+    const auto bounds = D2D1::RectF(16.0f, 16.0f, 380.0f, 640.0f);
+    const auto bg = D2D1::ColorF(0.1f, 0.1f, 0.1f);
+    const auto fg = D2D1::ColorF(0.9f, 0.9f, 0.9f);
+    bool ok = true;
+    double max_destroy = 0.0;
+    std::vector<std::unique_ptr<Host>> active;
+    for (uint32_t i = 0; i < limit; ++i) {
+        auto host = std::make_unique<Host>();
+        host->Sync(owner, bounds, L"active.pulse-cap-" + std::to_wstring(i), FILE_ATTRIBUTE_NORMAL,
+                   1, 0, 0, true, bg, fg, true, true);
+        active.push_back(std::move(host));
+    }
+    const auto active_deadline = GetTickCount64() + 3000;
+    while (block->entered.load() < limit && GetTickCount64() < active_deadline) Sleep(1);
+    const auto active_usage = Host::Resources();
+    const bool active_cap = active_usage.live == limit && active_usage.retired == 0 &&
+        !Host::CanHost(L"new.unrelated-extension") && !Host{}.CanHostPath(L"new.unrelated-extension") &&
+        active.front()->CanHostPath(L"new.unrelated-extension");
+    wprintf(L"[%s] full active pool sends new hosts to native fallback\n", active_cap ? L"PASS" : L"FAIL");
+    ok &= active_cap;
+    active.clear();
+    SetEvent(block->release);
+    const auto active_cleanup = GetTickCount64() + 5000;
+    while (Host::Resources().live && GetTickCount64() < active_cleanup) Sleep(1);
+    const bool active_reaped = Host::Resources().live == 0;
+    ok &= active_reaped;
+    if (!active_reaped) {
+        Host::SetOpenHookForTest({});
+        return false;
+    }
+    ResetEvent(block->release);
+    block->entered.store(0);
+    for (uint32_t i = 0; i < limit; ++i) {
+        auto host = std::make_unique<Host>();
+        const std::wstring path = L"blocked.pulse-life-" + std::to_wstring(i);
+        host->Sync(owner, bounds, path, FILE_ATTRIBUTE_NORMAL, 1, 0, 0, true, bg, fg, true, true);
+        const auto deadline = GetTickCount64() + 3000;
+        while (block->entered.load() < i + 1 && GetTickCount64() < deadline) Sleep(1);
+        ok &= block->entered.load() == i + 1;
+        Sleep(25);
+        host->Sync(owner, bounds, path, FILE_ATTRIBUTE_NORMAL, 1, 0, 0, true, bg, fg, true, true);
+        ok &= Host::Resources().retired == i + 1;
+        // Even erasing/expiring cooldown cannot retry an unresolved apartment.
+        pulse::ui::ResetSlowPreviewProvidersForTest();
+        ok &= pulse::ui::PreviewProviderCoolingDownForTest(path);
+        host->Sync(owner, bounds, path, FILE_ATTRIBUTE_NORMAL, 2, 0, 0, true, bg, fg, true, true);
+        ok &= block->entered.load() == i + 1;
+        const auto before = std::chrono::steady_clock::now();
+        host.reset();
+        max_destroy = (std::max)(max_destroy, std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - before).count());
+    }
+    for (int i = 0; i < 24; ++i) {
+        Host denied;
+        denied.Sync(owner, bounds, L"denied.pulse-new", FILE_ATTRIBUTE_NORMAL,
+                    3, 0, 0, true, bg, fg, true, true);
+        ok &= denied.state() == Host::State::Failed;
+    }
+    const auto full = Host::Resources();
+    const bool capped = full.live == limit && full.retired == limit && block->entered.load() == limit;
+    wprintf(L"[%s] process-wide apartment cap survives host destruction/cooldown reset "
+            L"(live=%u retired=%u cap=%u)\n", capped ? L"PASS" : L"FAIL", full.live, full.retired, full.limit);
+    wprintf(L"[%s] destructor never waits for provider (max %.2f ms)\n",
+            max_destroy < 100.0 ? L"PASS" : L"FAIL", max_destroy);
+    ok &= capped && max_destroy < 100.0;
+    if (permanent) {
+        wprintf(L"[INFO] %u permanently blocked apartments remain until process exit; not zero leakage\n", full.live);
+    } else {
+        SetEvent(block->release);
+        const auto deadline = GetTickCount64() + 5000;
+        while (Host::Resources().live && GetTickCount64() < deadline) Sleep(1);
+        const bool reaped = Host::Resources().live == 0;
+        wprintf(L"[%s] late-returning apartments are reclaimed after actual thread exit\n", reaped ? L"PASS" : L"FAIL");
+        ok &= reaped;
+        Host::SetOpenHookForTest([] {});
+        Host fresh;
+        fresh.Sync(owner, bounds, L"fresh.pulse-ready", FILE_ATTRIBUTE_NORMAL,
+                   4, 0, 0, true, bg, fg, true, true);
+        const auto ready_deadline = GetTickCount64() + 3000;
+        while (fresh.state() == Host::State::Loading && GetTickCount64() < ready_deadline) Sleep(1);
+        const bool answered = fresh.state() == Host::State::Failed;
+        wprintf(L"[%s] a new apartment answers after recovered capacity\n", answered ? L"PASS" : L"FAIL");
+        ok &= answered;
+    }
+    Host::SetOpenHookForTest({});
+    SetEnvironmentVariableW(L"PULSE_PREVIEW_HANDLER_OPEN_BUDGET_MS", nullptr);
+    SetEnvironmentVariableW(L"PULSE_PREVIEW_HANDLER_SLOW_OPEN_BUDGET_MS", nullptr);
+    return ok;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
     if (argc < 2 || ((wcscmp(argv[1], L"--selftest") == 0 ||
                       wcscmp(argv[1], L"--isolated-test") == 0) && argc < 3)) {
         wprintf(L"usage: pulse_preview_handler_probe.exe "
-                L"[--selftest|--isolated-test] <file> or --cooldown-test\n");
+                L"[--selftest|--isolated-test] <file> or "
+                L"--cooldown-test / --lifecycle-test / --permanent-test\n");
         return 1;
     }
+    const bool lifecycle_test = wcscmp(argv[1], L"--lifecycle-test") == 0;
+    const bool permanent_test = wcscmp(argv[1], L"--permanent-test") == 0;
     const bool cooldown_test = wcscmp(argv[1], L"--cooldown-test") == 0;
     const bool self_test = argc >= 3 && wcscmp(argv[1], L"--selftest") == 0;
     const bool isolated_test = argc >= 3 && wcscmp(argv[1], L"--isolated-test") == 0;
@@ -67,6 +179,12 @@ int wmain(int argc, wchar_t** argv) {
         return 3;
     }
     UpdateWindow(owner);
+    if (lifecycle_test || permanent_test) {
+        const bool ok = Lifecycle(owner, permanent_test);
+        DestroyWindow(owner);
+        CoUninitialize();
+        return ok ? 0 : 7;
+    }
 
     WIN32_FILE_ATTRIBUTE_DATA fad{};
     const BOOL have_fad = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad);

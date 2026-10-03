@@ -9,6 +9,8 @@
 #include "../ipc/shell_client.h"
 #include <windows.h>
 #include <chrono>
+#include <cstring>
+#include <winioctl.h>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -16,6 +18,19 @@
 #include <vector>
 
 using namespace pulse;
+
+namespace pulse::ops {
+struct TransferIntegrationProbe {
+    static uint64_t NextTaskId(OpsManager& manager) {
+        std::lock_guard<std::mutex> lock(manager.mutex_);
+        return manager.next_seq_;
+    }
+    static void GateOpenWorker(OpsManager& manager, std::function<void()> gate) {
+        std::lock_guard<std::mutex> lock(manager.open_mutex_);
+        if (manager.open_mailbox_) manager.open_mailbox_->before_execute = std::move(gate);
+    }
+};
+}
 
 namespace {
 
@@ -159,7 +174,315 @@ ops::OpRequest SimpleOp(ops::OpType type, std::initializer_list<const wchar_t*> 
 
 } // namespace
 
-int wmain() {
+ops::OpStatus RunLinkOp(ops::OpRequest req, bool accept, bool all,
+                       size_t* links = nullptr, size_t* conflicts = nullptr,
+                       const std::function<void()>& before_answer = {}) {
+    const uint64_t previous = g_ops.Status().completed_ops;
+    g_ops.Submit(std::move(req));
+    uint64_t token = 0;
+    size_t link_count = 0, conflict_count = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (std::chrono::steady_clock::now() < deadline && g_ops.Status().completed_ops == previous) {
+        if (const auto pending = g_ops.PendingConflict(); pending && pending->token != token) {
+            token = pending->token;
+            if (pending->link_confirmation) {
+                ++link_count;
+                if (before_answer) before_answer();
+                g_ops.ResolveConflict(token, accept ? ops::ConflictChoice::Continue
+                    : ops::ConflictChoice::Cancel, all);
+            } else {
+                ++conflict_count;
+                g_ops.ResolveConflict(token, ops::ConflictChoice::Replace, false);
+            }
+        }
+        Sleep(1);
+    }
+    if (links) *links = link_count;
+    if (conflicts) *conflicts = conflict_count;
+    if (g_ops.Status().completed_ops == previous) {
+        g_ops.CancelCurrent();
+        Check(WaitOpDone(previous, 5000), L"link regression finishes before timeout");
+    }
+    return g_ops.Status();
+}
+
+bool MakeJunction(const std::wstring& link, const std::wstring& target) {
+    MakeDir(link);
+    HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    struct JunctionData {
+        DWORD tag;
+        WORD data_length;
+        WORD reserved;
+        WORD substitute_offset;
+        WORD substitute_length;
+        WORD print_offset;
+        WORD print_length;
+        wchar_t names[32768];
+    } data{};
+    const std::wstring substitute = L"\\??\\" + target;
+    const size_t substitute_bytes = substitute.size() * sizeof(wchar_t);
+    const size_t print_bytes = target.size() * sizeof(wchar_t);
+    data.tag = IO_REPARSE_TAG_MOUNT_POINT;
+    data.substitute_length = static_cast<WORD>(substitute_bytes);
+    data.print_offset = static_cast<WORD>(substitute_bytes + sizeof(wchar_t));
+    data.print_length = static_cast<WORD>(print_bytes);
+    data.data_length = static_cast<WORD>(8 + substitute_bytes + print_bytes + 2 * sizeof(wchar_t));
+    std::memcpy(data.names, substitute.c_str(), substitute_bytes + sizeof(wchar_t));
+    std::memcpy(reinterpret_cast<BYTE*>(data.names) + data.print_offset,
+                target.c_str(), print_bytes + sizeof(wchar_t));
+    DWORD written = 0;
+    const bool ok = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &data,
+        static_cast<DWORD>(8 + data.data_length), nullptr, 0, &written, nullptr) != FALSE;
+    CloseHandle(handle);
+    if (!ok) RemoveDirectoryW(link.c_str());
+    return ok;
+}
+
+int RunReviewRegressions(const std::wstring& filter) {
+    const std::wstring root = SandboxRoot() + L"-review-" + std::to_wstring(GetCurrentProcessId());
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    Check(!error, L"isolated review fixture created");
+    const auto src = root + L"\\src", dst = root + L"\\dst";
+    MakeDir(src); MakeDir(dst);
+    g_ops.Start([] {});
+    const char old_data[] = "old", new_data[] = "new replacement payload";
+    if (filter == L"links" || filter == L"review") {
+        const auto outside = root + L"\\actual", redirect = root + L"\\redirect";
+        MakeDir(outside); MakeDir(redirect);
+        const auto junction = dst + L"\\folder";
+        MakeDir(src + L"\\folder");
+        MakeFile(src + L"\\folder\\nested.txt", new_data, sizeof(new_data));
+        const bool junction_ok = MakeJunction(junction, outside);
+        Check(junction_ok, L"create directory junction without symbolic-link privilege");
+        if (junction_ok) {
+            size_t links = 0;
+            auto status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+                {(src + L"\\folder").c_str()}, dst.c_str()), false, false, &links);
+            Check(links == 1 && status.last_error == L"已取消" && !Exists(outside + L"\\nested.txt"),
+                  L"junction cancellation writes no descendant");
+            status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+                {(src + L"\\folder").c_str()}, dst.c_str()), true, true, &links);
+            Check(links == 1 && status.last_error.empty() &&
+                  FileHash(outside + L"\\nested.txt") == FileHash(src + L"\\folder\\nested.txt"),
+                  L"directory junction continuation writes actual target");
+            status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+                {(src + L"\\folder").c_str()}, dst.c_str()), true, true, &links, nullptr, [&] {
+                    Check(RemoveDirectoryW(junction.c_str()) && MakeJunction(junction, redirect),
+                          L"retarget junction during confirmation");
+                });
+            Check(links == 1 && status.phase == ops::OpPhase::Failed &&
+                  !Exists(redirect + L"\\nested.txt"), L"changed confirmed junction is refused");
+            RemoveDirectoryW(junction.c_str());
+        }
+
+        MakeFile(src + L"\\hard-a.txt", new_data, sizeof(new_data));
+        MakeFile(src + L"\\hard-b.txt", new_data, sizeof(new_data));
+        MakeFile(dst + L"\\hard-a.txt", old_data, sizeof(old_data));
+        MakeFile(dst + L"\\hard-b.txt", old_data, sizeof(old_data));
+        Check(CreateHardLinkW((dst + L"\\alias-a.txt").c_str(), (dst + L"\\hard-a.txt").c_str(), nullptr) &&
+              CreateHardLinkW((dst + L"\\alias-b.txt").c_str(), (dst + L"\\hard-b.txt").c_str(), nullptr),
+              L"create hard-link fixtures");
+        const uint64_t alias_hash = FileHash(dst + L"\\alias-a.txt");
+        size_t links = 0, conflicts = 0;
+        auto status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+            {(src + L"\\hard-a.txt").c_str(), (src + L"\\hard-b.txt").c_str()}, dst.c_str()),
+            true, true, &links, &conflicts);
+        Check(status.last_error.empty() && links == 1 && conflicts == 2,
+              L"continue-all links does not authorize replace-all collisions");
+        Check(FileHash(dst + L"\\alias-a.txt") == alias_hash &&
+              FileHash(dst + L"\\hard-a.txt") == FileHash(src + L"\\hard-a.txt"),
+              L"hard-link replacement changes current name but preserves alias data");
+        status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+            {(src + L"\\hard-a.txt").c_str()}, (dst + L"\\alias-target").c_str()), true, true, &links);
+        Check(status.last_error.empty() && links == 0, L"ordinary destination creates without link confirmation");
+        MakeFile(src + L"\\normal.lnk", new_data, sizeof(new_data));
+        MakeFile(dst + L"\\normal.lnk", old_data, sizeof(old_data));
+        status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+            {(src + L"\\normal.lnk").c_str()}, dst.c_str()), true, true, &links);
+        Check(status.last_error.empty() && links == 0, L"ordinary .lnk file is not a directory link");
+
+        const auto reparse_source = src + L"\\source-junction";
+        const auto reparse_actual = root + L"\\reparse-actual";
+        MakeDir(reparse_actual);
+        MakeFile(reparse_actual + L"\\must-not-enumerate.txt", old_data, sizeof(old_data));
+        Check(MakeJunction(reparse_source, reparse_actual), L"create source junction fixture");
+        status = RunLinkOp(SimpleOp(ops::OpType::Copy, {reparse_source.c_str()}, dst.c_str()), true, false);
+        Check(status.last_error.empty() && (GetFileAttributesW((dst + L"\\source-junction").c_str()) &
+              FILE_ATTRIBUTE_REPARSE_POINT), L"source junction copy creates owned reparse placeholder");
+        RemoveDirectoryW((dst + L"\\source-junction").c_str());
+        RemoveDirectoryW(reparse_source.c_str());
+
+        MakeFile(src + L"\\temp-owned.txt", new_data, sizeof(new_data));
+        const auto collision_temp = dst + L"\\temp-owned.txt.pulse-copy-" +
+            std::to_wstring(GetCurrentProcessId()) + L"-" +
+            std::to_wstring(ops::TransferIntegrationProbe::NextTaskId(g_ops)) + L"-0";
+        MakeFile(collision_temp, old_data, sizeof(old_data));
+        const auto collision_hash = FileHash(collision_temp);
+        status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+            {(src + L"\\temp-owned.txt").c_str()}, dst.c_str()), true, false);
+        Check(status.last_error.empty() && Exists(dst + L"\\temp-owned.txt") &&
+              FileHash(collision_temp) == collision_hash,
+              L"temporary-name-shaped existing file is not cleaned by transfer");
+
+        const auto metadata_source = src + L"\\metadata-dir";
+        MakeDir(metadata_source);
+        MakeFile(metadata_source + L"\\data.txt", new_data, sizeof(new_data));
+        Check(SetFileAttributesW(metadata_source.c_str(), FILE_ATTRIBUTE_DIRECTORY |
+              FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED),
+              L"set source directory metadata fixture");
+        status = RunLinkOp(SimpleOp(ops::OpType::Copy, {metadata_source.c_str()}, dst.c_str()), true, false);
+        constexpr DWORD copied_directory_flags = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+        Check(status.last_error.empty() && (GetFileAttributesW((dst + L"\\metadata-dir").c_str()) &
+              copied_directory_flags) == copied_directory_flags,
+              L"new directory copy preserves attributes through checked handle");
+        SetFileAttributesW(metadata_source.c_str(), FILE_ATTRIBUTE_DIRECTORY);
+        SetFileAttributesW((dst + L"\\metadata-dir").c_str(), FILE_ATTRIBUTE_DIRECTORY);
+
+        MakeFile(src + L"\\fresh-task.txt", new_data, sizeof(new_data));
+        MakeFile(dst + L"\\fresh-task.txt", old_data, sizeof(old_data));
+        Check(CreateHardLinkW((dst + L"\\fresh-alias.txt").c_str(), (dst + L"\\fresh-task.txt").c_str(), nullptr),
+              L"create next-task hardlink");
+        auto replace = SimpleOp(ops::OpType::Copy, {(src + L"\\fresh-task.txt").c_str()}, dst.c_str());
+        replace.collision_policy = ops::CollisionPolicy::Replace;
+        status = RunLinkOp(std::move(replace), false, true, &links);
+        Check(links == 1 && status.last_error == L"已取消", L"continue-all permission expires at next task");
+    }
+    if (filter == L"undo" || filter == L"review") {
+        g_ops.UndoFromJson(L"[]");
+        const auto original = src + L"\\full.original.name.txt";
+        const auto old_target = dst + L"\\full.original.name.txt";
+        MakeFile(original, new_data, sizeof(new_data));
+        MakeFile(old_target, old_data, sizeof(old_data));
+        auto move = SimpleOp(ops::OpType::Move, {original.c_str()}, dst.c_str());
+        move.collision_policy = ops::CollisionPolicy::KeepBoth;
+        auto status = RunOp(std::move(move));
+        const auto renamed = dst + L"\\full.original.name - 副本.txt";
+        Check(status.last_error.empty() && !Exists(original) && Exists(renamed), L"Move KeepBoth fixture committed");
+        const auto persisted = g_ops.UndoToJson();
+        Check(g_ops.UndoFromJson(persisted), L"Move KeepBoth undo JSON compatible");
+        HANDLE locked = CreateFileW(renamed.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        const uint64_t failed_previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(failed_previous) && g_ops.CanUndo() && !Exists(original),
+              L"failed move inverse retains undo record");
+        if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+        uint64_t previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(previous) && Exists(original) && !Exists(renamed) && !g_ops.CanUndo(),
+              L"Move KeepBoth undo restores full original name after retry");
+
+        MakeFile(src + L"\\partial-a.txt", new_data, sizeof(new_data));
+        MakeFile(src + L"\\partial-b.txt", new_data, sizeof(new_data));
+        status = RunOp(SimpleOp(ops::OpType::Move,
+            {(src + L"\\partial-a.txt").c_str(), (src + L"\\partial-b.txt").c_str()}, dst.c_str()));
+        Check(status.last_error.empty(), L"partial undo fixture moved");
+        locked = CreateFileW((dst + L"\\partial-b.txt").c_str(), GENERIC_READ, FILE_SHARE_READ,
+                             nullptr, OPEN_EXISTING, 0, nullptr);
+        previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(previous) && Exists(src + L"\\partial-a.txt") && g_ops.CanUndo(),
+              L"partial move inverse keeps remaining item");
+        Check(g_ops.UndoToJson().find(L"partial-a.txt") == std::wstring::npos,
+              L"successful inverse removed from remaining undo mapping");
+        if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+        previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(previous) && Exists(src + L"\\partial-b.txt") && !g_ops.CanUndo(),
+              L"partial inverse retry does not repeat successful item");
+        MakeDir(src + L"\\partial-dir");
+        MakeFile(src + L"\\partial-dir\\a.txt", new_data, sizeof(new_data));
+        MakeFile(src + L"\\partial-dir\\b.txt", new_data, sizeof(new_data));
+        MakeDir(dst + L"\\partial-dir");
+        MakeFile(dst + L"\\partial-dir\\old.txt", old_data, sizeof(old_data));
+        auto directory_move = SimpleOp(ops::OpType::Move, {(src + L"\\partial-dir").c_str()}, dst.c_str());
+        directory_move.collision_policy = ops::CollisionPolicy::KeepBoth;
+        // Directory/ordinary-directory merges do not collide; force KeepBoth with a file target.
+        DeleteFileW((dst + L"\\partial-dir\\old.txt").c_str());
+        RemoveDirectoryW((dst + L"\\partial-dir").c_str());
+        MakeFile(dst + L"\\partial-dir", old_data, sizeof(old_data));
+        status = RunOp(std::move(directory_move));
+        const auto moved_directory = dst + L"\\partial-dir - 副本";
+        Check(status.last_error.empty() && Exists(moved_directory), L"directory KeepBoth move fixture");
+        MakeDir(src + L"\\partial-dir"); // Existing original directory forces per-file merge inverse.
+        locked = CreateFileW((moved_directory + L"\\b.txt").c_str(), GENERIC_READ, FILE_SHARE_READ,
+                             nullptr, OPEN_EXISTING, 0, nullptr);
+        previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(previous) && Exists(src + L"\\partial-dir\\a.txt") &&
+              !Exists(moved_directory + L"\\a.txt") && g_ops.CanUndo(),
+              L"partial directory inverse retains only pending content");
+        if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+        previous = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(previous) && Exists(src + L"\\partial-dir\\b.txt") &&
+              !Exists(moved_directory) && !g_ops.CanUndo(),
+              L"partial directory inverse retries pending leaf and cleans empty original root");
+        ops::OpsManager legacy;
+        Check(legacy.UndoFromJson(L"[{\"type\":1,\"sup\":true,\"dest\":\"C:\\\\tmp\",\"name\":\"\",\"src\":[\"C:\\\\original.txt\"]}]") &&
+              legacy.CanUndo(), L"legacy move undo mapping still accepted");
+    }
+    if (filter == L"shutdown" || filter == L"review") {
+        MakeFile(src + L"\\shutdown.bin", new_data, sizeof(new_data));
+        g_pause_when_active.store(true);
+        // Status callbacks may deliberately block the worker's publication gap.
+        g_ops.Stop();
+        std::atomic<bool> worker_entered{false}, release_worker{false};
+        g_ops.Start([&] {
+            if (g_ops.Status().active && !worker_entered.exchange(true)) {
+                while (!release_worker.load()) Sleep(1);
+            }
+        });
+        const uint64_t previous = g_ops.Status().completed_ops;
+        g_ops.Submit(SimpleOp(ops::OpType::Copy, {(src + L"\\shutdown.bin").c_str()}, dst.c_str()));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!worker_entered.load() && std::chrono::steady_clock::now() < deadline) Sleep(1);
+        Check(worker_entered.load() && g_ops.HasPendingFileOperations(), L"pending includes dequeued operation before running FS");
+        g_ops.Submit(SimpleOp(ops::OpType::Copy, {(src + L"\\shutdown.bin").c_str()}, (root + L"\\never-start").c_str()));
+        g_ops.BeginShutdown();
+        Check(g_ops.Submit(SimpleOp(ops::OpType::Copy, {(src + L"\\shutdown.bin").c_str()}, dst.c_str())) == 0,
+              L"shutdown rejects new mutations");
+        release_worker.store(true);
+        g_ops.Stop();
+        Check(!g_ops.HasPendingFileOperations() && !Exists(root + L"\\never-start"),
+              L"shutdown drops queued mutations and joins in-flight cancellation");
+        Check(g_ops.Status().completed_ops == previous + 1, L"shutdown completes only in-flight task");
+        g_ops.Stop();
+
+        auto open_entered = std::make_shared<std::atomic<bool>>(false);
+        auto release_open = std::make_shared<std::atomic<bool>>(false);
+        g_ops.Start([] {});
+        ops::TransferIntegrationProbe::GateOpenWorker(g_ops, [open_entered, release_open] {
+            open_entered->store(true);
+            while (!release_open->load()) Sleep(1);
+        });
+        g_ops.OpenWith(src + L"\\shutdown.bin");
+        const auto open_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!open_entered->load() && std::chrono::steady_clock::now() < open_deadline) Sleep(1);
+        Check(open_entered->load(), L"isolated open worker enters blocked provider gate");
+        const auto stop_started = std::chrono::steady_clock::now();
+        g_ops.BeginShutdown();
+        g_ops.Stop();
+        Check(std::chrono::steady_clock::now() - stop_started < std::chrono::seconds(2),
+              L"blocked open worker retires within bound without retaining manager");
+        release_open->store(true);
+    }
+    g_ops.Stop();
+    // Junction names were removed explicitly above; only this PID fixture is removed.
+    std::filesystem::remove_all(root, error);
+    wprintf(L"\n== review ops: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}
+
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
+        const std::wstring filter = argv[2];
+        if (filter != L"review" && filter != L"links" && filter != L"undo" && filter != L"shutdown") return 2;
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        return RunReviewRegressions(filter);
+    }
     setvbuf(stdout, nullptr, _IONBF, 0);
     fprintf(stderr, "[test] start\n");
 

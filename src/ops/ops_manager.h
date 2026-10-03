@@ -14,6 +14,9 @@
 //   RealDelete    -> never recorded, not undoable.
 #pragma once
 #include "delete_service.h"
+#include "destination_guard.h"
+#include "file_lock_owner.h"
+#include "recycle_undo_validation.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -36,7 +39,7 @@ enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder,
 enum class CollisionPolicy { System, Replace, KeepBoth };
 enum class OpPhase { Queued, Scanning, WaitingForConflict, Running, Paused,
                      Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation, Cancelled };
-enum class ConflictChoice { Cancel, Replace, Skip, KeepBoth };
+enum class ConflictChoice { Cancel, Replace, Skip, KeepBoth, Continue };
 
 struct ConflictItemInfo {
     uint64_t token = 0;
@@ -50,6 +53,9 @@ struct ConflictItemInfo {
     bool source_is_directory = false;
     bool destination_is_directory = false;
     size_t remaining = 0;
+    bool link_confirmation = false;
+    DestinationLinkImpact link_impact;
+    std::function<bool()> still_valid; // status/token only; never filesystem work
 };
 
 struct DeleteRequestTarget {
@@ -63,15 +69,31 @@ struct OpRequest {
     std::vector<std::wstring> sources;
     std::wstring dest_dir;    // Copy / Move
     std::wstring new_name;    // Rename
-    std::vector<std::wstring> new_names; // BatchRename, parallel to sources
+    std::vector<std::wstring> new_names; // BatchRename names / undo Move full original paths
     CollisionPolicy collision_policy = CollisionPolicy::System; // Copy / Move
     bool is_undo = false;     // undo-originated ops do not re-enter the stack
-    uint64_t undo_revision = 0; // reservation for deletion inverses; never serialized
+    uint64_t undo_revision = 0; // reservation for inverses; never serialized
     DeleteOrigin delete_origin = DeleteOrigin::Selection;
     // Logical rows may own more than one physical root (Recycle Bin $R/$I).
     // These describe targets, never authorization or a recyclability claim.
     std::vector<DeleteRequestTarget> delete_targets;
     std::vector<std::wstring> recycle_paths; // exact recycle payloads for Undo restore
+    std::vector<RecycleUndoIdentity> recycle_undo_identities; // in-session worker proof, never persisted
+};
+
+// Worker snapshot used only for an in-session retry; never journaled. Keeping
+// exact descendants and destinations avoids rescanning unrelated new files.
+struct TransferPlanEntry {
+    std::wstring source;
+    std::wstring destination;
+    bool directory = false;
+    bool reparse = false;
+    bool destination_preexisting = false;
+    uint64_t bytes = 0;
+    DWORD attributes = FILE_ATTRIBUTE_NORMAL;
+    FILETIME created{};
+    FILETIME accessed{};
+    FILETIME modified{};
 };
 
 struct UndoEntry {
@@ -81,6 +103,8 @@ struct UndoEntry {
     std::wstring dest_dir;
     std::wstring new_name;
     bool supported = true;    // false = recorded for history, cannot be undone
+    bool recycle_verified = false; // worker-only cache; never trusted from persisted JSON
+    std::vector<RecycleUndoIdentity> recycle_identities;
 };
 
 struct OpStatus {
@@ -103,6 +127,11 @@ struct OpStatus {
     uint64_t eta_seconds = 0;
     uint64_t completed_ops = 0; // bumped on every finished op (UI edge detect)
     uint64_t deletes_without_mutation = 0; // suppress refusal-only model refresh
+    HRESULT failure_hr = S_OK;
+    std::wstring failed_path; // exact failing endpoint, independent of display text
+    bool lock_retry_available = false; // single rename can retry without Restart Manager owners
+    std::wstring locked_path;
+    std::vector<LockOwner> lock_owners;
 };
 
 struct DeleteOutcome {
@@ -151,6 +180,8 @@ public:
     // notify is invoked from worker/IPC threads whenever status changes.
     void Start(std::function<void()> notify);
     void Stop();
+    bool HasPendingFileOperations() const;
+    void BeginShutdown();
 
     void SetJournalPath(std::wstring path);
     RecoverySnapshot PendingRecovery() const;
@@ -162,7 +193,7 @@ public:
     // 属性). Explorer parents those to the folder window; passing our own HWND
     // keeps them tied to Pulse instead of whatever happens to be foreground
     // when the ops thread gets to the request.
-    void SetUiWindow(HWND hwnd) noexcept { ui_hwnd_.store(hwnd); }
+    void SetUiWindow(HWND hwnd) noexcept;
     HWND UiWindow() const noexcept { return ui_hwnd_.load(); }
 
     uint64_t Submit(OpRequest req);
@@ -171,6 +202,8 @@ public:
     void ResumeCurrent();
     std::optional<ConflictItemInfo> PendingConflict() const;
     void ResolveConflict(uint64_t token, ConflictChoice choice, bool apply_to_all);
+    bool IsLockedFailureCurrent(uint64_t task_id) const;
+    bool RetryLockedOperation(uint64_t task_id, bool end_owners);
     std::optional<DeleteConfirmation> PendingDeleteConfirmation() const;
     void ResolveDeleteConfirmation(uint64_t token, bool accepted);
     std::vector<DeleteOutcome> DrainDeleteOutcomes();
@@ -230,6 +263,7 @@ public:
 
 private:
     friend struct DeleteIntegrationProbe;
+    friend struct TransferIntegrationProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -240,6 +274,16 @@ private:
         uint64_t seq = 0;
         ULONGLONG enqueued_at = 0; // diagnostics: queue wait vs shell cost
         uint64_t recovery_sequence = 0; // retained until deletion is admitted
+        bool lock_retry = false;
+        uint64_t retry_generation = 0;
+        HRESULT retry_failure_hr = S_OK;
+        std::wstring retry_failed_path;
+        std::vector<std::wstring> retry_probe_paths; // ambiguous CopyFile2 phase: inspect both endpoints
+        bool retry_rename_identity = false;
+        FILE_ID_INFO rename_source_id{};
+        std::vector<LockOwner> close_first; // deliberately absent from persisted OpRequest
+        std::vector<std::wstring> retry_completed_sources;
+        std::vector<TransferPlanEntry> retry_transfer_plan;
     };
 
     struct MenuJob {
@@ -257,24 +301,49 @@ private:
 
     void WorkerThread();
     void MenuThread();
-    void OpenThread();
+    struct OpenMailbox {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::condition_variable finished_cv;
+        std::deque<QueueItem> queue;
+        std::atomic<HWND> owner{nullptr};
+        bool running = true;
+        bool finished = false;
+        std::function<void()> before_execute; // isolated regression gate, empty in production
+    };
+    static void OpenThread(std::shared_ptr<OpenMailbox> mailbox);
     // front = interactive dialog request (打开方式…, 属性): it jumps ahead of
     // queued opens so the dialog answers the click. Plain opens keep FIFO order.
     void EnqueueOpen(QueueItem item, bool front = false);
-    void RunShellOp(const OpRequest& req, uint64_t task_id);
-    void RunDelete(const QueueItem& item);
+    void RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_ID_INFO* rename_identity = nullptr,
+                    bool lock_retry = false);
+    void RunDelete(const QueueItem& item,
+                   const std::vector<std::wstring>& prior_deleted = {},
+                   const std::vector<std::wstring>& prior_recycled = {},
+                   const std::vector<std::wstring>& prior_recycle_destinations = {});
     void FinishDelete(const QueueItem& item, std::wstring error,
                       const std::vector<std::wstring>& deleted_paths = {}, bool executed = false,
                       bool uncertain = false, const std::vector<std::wstring>& recycled_paths = {},
-                      const std::vector<std::wstring>& recycle_destinations = {}, bool cancelled = false);
+                      const std::vector<std::wstring>& recycle_destinations = {}, bool cancelled = false,
+                      const LockReport& locks = {});
     DeleteService delete_service_;
     std::mutex delete_wait_mutex_;
     std::condition_variable delete_wait_cv_;
     std::atomic<bool> delete_active_{false};
     std::atomic<bool> delete_cancel_{false};
     bool WaitShellDone(uint32_t id, uint32_t& hr, bool& cancelled, std::wstring& error);
-    void RunTransfer(const OpRequest& req, uint64_t task_id);
+    void RunTransfer(const OpRequest& req, uint64_t task_id,
+                     const std::vector<std::wstring>& prior_completed = {},
+                     const std::vector<TransferPlanEntry>& prior_plan = {});
+    void ExecuteFileOperation(QueueItem& item);
+    LockReport CaptureLockedFailure(const QueueItem& retry, HRESULT error,
+                                   const std::wstring& failed_item, const LockCancelled& cancelled);
+    static QueueItem RemainingDeleteRetry(const QueueItem& admitted, const DeletePlan& accepted,
+                                         const std::vector<std::wstring>& actual);
+    bool PrepareLockRetry(QueueItem& item);
     void SetStatus(const std::function<void(OpStatus&)>& fn);
+    void RefreshRecycleUndoValidity();
+    void InvalidateRecycleUndo(const std::vector<std::wstring>& changed, bool uncertain = false);
     void PushUndo(const OpRequest& req,
                   const std::vector<std::wstring>* actual_destinations = nullptr);
     void LoadRecoveryJournal();
@@ -286,10 +355,16 @@ private:
 
     std::function<void()> notify_;
 
+    mutable std::atomic<bool> undo_validation_requested_{false};
+    uint64_t pending_recycle_undo_revision_ = 0; // mutex_; prevents duplicate validation requests
     mutable std::mutex mutex_;            // guards queue_ + status_ + undo_
     std::condition_variable cv_;
     std::deque<QueueItem> queue_;
     std::optional<QueueItem> active_item_;
+    std::optional<QueueItem> lock_retry_;
+    std::atomic<bool> lock_retry_active_{false};
+    std::atomic<bool> lock_retry_cancel_{false};
+    std::atomic<uint64_t> lock_retry_generation_{1};
     std::vector<RecoveryEntry> pending_recovery_;
     std::wstring journal_path_;
     OpStatus status_;
@@ -301,6 +376,9 @@ private:
 
     std::thread thread_;
     bool running_ = false;
+    bool accepting_ = true; // mutex_; shutdown rejects submissions until Start
+    bool file_operation_in_flight_ = false; // covers dequeue before status publication
+    std::set<uint64_t> move_undo_reservations_;
     std::atomic<bool> stopping_{false};
     uint64_t next_seq_ = 1;
 
@@ -351,10 +429,8 @@ private:
     std::thread open_thread_;
     // Owner for the shell dialogs above; written by the UI thread only.
     std::atomic<HWND> ui_hwnd_{nullptr};
-    bool open_running_ = false;
+    std::shared_ptr<OpenMailbox> open_mailbox_;
     mutable std::mutex open_mutex_;
-    std::condition_variable open_cv_;
-    std::deque<QueueItem> open_queue_;
 };
 
 // wt.exe argument string for "open terminal here" (unit-tested; launching is

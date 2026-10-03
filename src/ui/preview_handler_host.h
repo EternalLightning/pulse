@@ -4,8 +4,11 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+#include <functional>
+#endif
 #include <string>
-#include <vector>
+
 
 namespace pulse::ui {
 
@@ -42,11 +45,24 @@ public:
 
     State state() const;
     static bool CanHost(const std::wstring& path);
+    // Reuses this host's existing slot even when the process-wide pool is full.
+    bool CanHostPath(const std::wstring& path) const;
+
+    struct ResourceUsage {
+        uint32_t live = 0;
+        uint32_t retired = 0;
+        uint32_t limit = 0;
+    };
+    // Retired in-process providers cannot be forcibly released. Their slots are
+    // held until the apartment actually exits, including COM cleanup.
+    static ResourceUsage Resources();
 
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
     // The overlay HWND the apartment owns, or null while it has none. Tests use
     // it to measure how quickly the preview follows a moving owner.
     HWND overlay_window_for_test() const;
+    // Snapshot into each apartment; returning bypasses real provider activation.
+    static void SetOpenHookForTest(std::function<void()> hook);
 #endif
 
 private:
@@ -63,13 +79,10 @@ private:
     // request the pane no longer asks for, is given up on early. Returns true
     // when the stalled apartment was retired.
     bool RetireStalledApartment(const std::wstring& requested_identity, bool requested);
-    void ReapRetired();
     static DWORD WINAPI WorkerMain(void* parameter);
 
     std::shared_ptr<WorkerState> worker_;
-    // Apartments that were retired while stuck. They keep themselves alive until
-    // the provider call they are inside returns, then unload and exit.
-    std::vector<std::shared_ptr<WorkerState>> retired_;
+    State unavailable_state_ = State::Idle;
     HWND notify_ = nullptr;
     bool app_active_ = true;
     std::wstring last_identity_;

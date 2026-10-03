@@ -9,6 +9,7 @@
 #include <cwctype>
 #include <algorithm>
 #include <cmath>
+#include <array>
 
 namespace pulse::ui {
 
@@ -19,6 +20,32 @@ namespace {
 // otherwise retains every path seen during the session.
 constexpr size_t kExactIndexLimit = 4096;
 constexpr size_t kBitmapCacheLimit = 128;
+constexpr uint32_t kWorkerLimit = 4;
+struct WorkerSlot {
+    std::shared_ptr<void> owner;
+    HANDLE thread = nullptr;
+    bool retired = false;
+};
+struct WorkerPool {
+    std::mutex mutex;
+    std::array<WorkerSlot, kWorkerLimit> slots;
+    void ReapLocked() {
+        for (auto& slot : slots) {
+            if (slot.retired && slot.thread && WaitForSingleObject(slot.thread, 0) == WAIT_OBJECT_0)
+                slot = {};
+        }
+    }
+};
+WorkerPool& Workers() {
+    // Lifetime includes permanently blocked Shell calls; never destroy their
+    // state while the process is tearing down static objects.
+    static auto* pool = new WorkerPool;
+    return *pool;
+}
+#ifdef PULSE_SHELL_ICONS_TESTING
+std::mutex g_hook_mutex;
+std::function<int(const std::wstring&)> g_query_hook;
+#endif
 
 std::wstring LowerExt(const std::wstring& name) {
     const size_t dot = name.find_last_of(L'.');
@@ -37,6 +64,7 @@ std::wstring ShellPath(const std::wstring& path) {
 ShellIconCache::ShellIconCache() = default;
 
 ShellIconCache::~ShellIconCache() {
+    hwnd_ = nullptr;
     Reset();
 }
 
@@ -53,33 +81,90 @@ void ShellIconCache::SetScale(float scale) {
 
 void ShellIconCache::SetNotifyWindow(HWND hwnd) {
     hwnd_ = hwnd;
+    if (worker_) {
+        std::lock_guard lock(worker_->mutex);
+        worker_->notify = hwnd;
+    }
     if (hwnd) {
         GenericIndex(L"", true, FILE_ATTRIBUTE_DIRECTORY);
         GenericIndex(L"", false, FILE_ATTRIBUTE_NORMAL);
     }
 }
 
-void ShellIconCache::Reset() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        running_ = false;
+ShellIconCache::WorkerState::~WorkerState() {
+    if (thread) CloseHandle(thread);
+}
+
+ShellIconCache::ResourceUsage ShellIconCache::Resources() {
+    auto& pool = Workers();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    ResourceUsage usage{};
+    usage.limit = kWorkerLimit;
+    for (const auto& slot : pool.slots) {
+        if (slot.thread) ++usage.live;
+        if (slot.retired) ++usage.retired;
     }
-    cv_.notify_all();
-    if (worker_.joinable()) worker_.join();
+    return usage;
+}
+
+bool ShellIconCache::EnsureWorker() {
+    if (worker_) return true;
+    auto& pool = Workers();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    for (uint32_t i = 0; i < kWorkerLimit; ++i) {
+        if (pool.slots[i].thread) continue;
+        auto state = std::make_shared<WorkerState>();
+        state->slot = i;
+        state->notify = hwnd_;
+#ifdef PULSE_SHELL_ICONS_TESTING
+        {
+            std::lock_guard hook_lock(g_hook_mutex);
+            state->query_hook = g_query_hook;
+        }
+#endif
+        auto* argument = new std::shared_ptr<WorkerState>(state);
+        state->thread = CreateThread(nullptr, 0, WorkerMain, argument, 0, nullptr);
+        if (!state->thread) {
+            delete argument;
+            return false;
+        }
+        pool.slots[i].owner = state;
+        pool.slots[i].thread = state->thread;
+        worker_ = std::move(state);
+        return true;
+    }
+    return false;
+}
+
+void ShellIconCache::Reset() {
+    if (const auto worker = std::move(worker_)) {
+        {
+            std::lock_guard lock(worker->mutex);
+            worker->stop = true;
+            worker->notify = nullptr;
+        }
+        worker->cv.notify_all();
+        auto& pool = Workers();
+        std::lock_guard lock(pool.mutex);
+        pool.slots[worker->slot].retired = true;
+        pool.ReapLocked();
+    }
     bitmaps_.clear();
-    generic_index_.clear();
     for (auto& [_, list] : image_lists_)
         if (list) list->Release();
     image_lists_.clear();
     wic_.reset();
     dc_ = nullptr;
-    std::lock_guard<std::mutex> lock(mutex_);
-    exact_index_.clear();
-    retry_after_.clear();
-    last_used_.clear();
-    queued_.clear();
-    while (!queue_.empty()) queue_.pop();
 }
+
+#ifdef PULSE_SHELL_ICONS_TESTING
+void ShellIconCache::SetQueryHookForTest(std::function<int(const std::wstring&)> hook) {
+    std::lock_guard lock(g_hook_mutex);
+    g_query_hook = std::move(hook);
+}
+#endif
 
 int ShellIconCache::ImageListId(float desired_pixels) noexcept {
     if (desired_pixels <= 16.0f) return SHIL_SMALL;
@@ -117,10 +202,11 @@ bool ShellIconCache::NeedsExactIcon(const std::wstring& name, bool is_dir,
 int ShellIconCache::GenericIndex(const std::wstring& name, bool is_dir, DWORD attrs) {
     std::wstring key = is_dir ? L"<dir>" : LowerExt(name);
     if (key.empty()) key = L"<file>";
+    if (!EnsureWorker()) return -1;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (const auto cached = generic_index_.find(key); cached != generic_index_.end())
-            return cached->second;
+        std::lock_guard lock(worker_->mutex);
+        if (const auto cached = worker_->generic_index.find(key);
+            cached != worker_->generic_index.end()) return cached->second;
     }
     (void)attrs;
     RequestExact(std::wstring(1, L'\x1f') + L"GEN:" + key);
@@ -128,95 +214,99 @@ int ShellIconCache::GenericIndex(const std::wstring& name, bool is_dir, DWORD at
 }
 
 void ShellIconCache::RequestExact(const std::wstring& path) {
-    if (path.empty()) return;
+    if (path.empty() || !EnsureWorker()) return;
+    const auto state = worker_;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (exact_index_.contains(path)) {
-            last_used_[path] = ++access_clock_;
+        std::lock_guard lock(state->mutex);
+        if (state->exact_index.contains(path)) {
+            state->last_used[path] = ++state->access_clock;
             return;
         }
-        if (queued_.contains(path)) return;
-        if (queue_.size() >= kExactIndexLimit) {
-            queued_.erase(queue_.front());
-            queue_.pop();
+        if (state->queued.contains(path)) return;
+        if (state->queue.size() >= kExactIndexLimit) {
+            state->queued.erase(state->queue.front());
+            state->queue.pop();
         }
-        if (const auto retry = retry_after_.find(path);
-            retry != retry_after_.end() && GetTickCount64() < retry->second) return;
-        queued_.insert(path);
-        queue_.push(path);
-        if (!running_) {
-            running_ = true;
-            if (worker_.joinable()) worker_.join();
-            worker_ = std::thread([this] { WorkerLoop(); });
-        }
+        if (const auto retry = state->retry_after.find(path);
+            retry != state->retry_after.end() && GetTickCount64() < retry->second) return;
+        state->queued.insert(path);
+        state->queue.push(path);
     }
-    cv_.notify_one();
+    state->cv.notify_one();
 }
 
-void ShellIconCache::WorkerLoop() {
+DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
+    std::unique_ptr<std::shared_ptr<WorkerState>> argument(
+        static_cast<std::shared_ptr<WorkerState>*>(parameter));
+    const auto state = *argument;
     const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    const std::wstring prefix = std::wstring(1, L'\x1f') + L"GEN:";
     for (;;) {
         std::wstring path;
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [&] { return !running_ || !queue_.empty(); });
-            if (!running_) break;
-            path = std::move(queue_.front());
-            queue_.pop();
+            std::unique_lock lock(state->mutex);
+            state->cv.wait(lock, [&] { return state->stop || !state->queue.empty(); });
+            if (state->stop) break;
+            path = std::move(state->queue.front());
+            state->queue.pop();
         }
         SHFILEINFOW info{};
         int index = -1;
-        const std::wstring prefix = std::wstring(1, L'\x1f') + L"GEN:";
-        if (path.starts_with(prefix)) {
-            const std::wstring key = path.substr(prefix.size());
+        const bool generic = path.starts_with(prefix);
+        const std::wstring key = generic ? path.substr(prefix.size()) : std::wstring{};
+#ifdef PULSE_SHELL_ICONS_TESTING
+        if (state->query_hook) {
+            index = state->query_hook(path);
+        } else
+#endif
+        if (generic) {
             const bool dir = key == L"<dir>";
             const std::wstring query = dir ? L"dummy" : (key == L"<file>" ? L"dummy" : L"dummy" + key);
-            DWORD useAttrs = dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-            if (SHGetFileInfoW(query.c_str(), useAttrs, &info, sizeof(info),
-                               SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES))
-                index = info.iIcon;
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (index >= 0) {
-                if (generic_index_.size() >= 512) {
-                    const auto victim = std::find_if(generic_index_.begin(), generic_index_.end(),
-                        [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
-                    if (victim != generic_index_.end()) generic_index_.erase(victim);
-                }
-                generic_index_[key] = index;
-            }
+            const DWORD attrs = dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+            if (SHGetFileInfoW(query.c_str(), attrs, &info, sizeof(info),
+                               SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES)) index = info.iIcon;
         } else {
-            const UINT flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON;
             const std::wstring query = ShellPath(path);
-            if (SHGetFileInfoW(query.c_str(), 0, &info, sizeof(info), flags)) {
-                index = info.iIcon;
-                if (info.hIcon) DestroyIcon(info.hIcon);
-            }
+            if (SHGetFileInfoW(query.c_str(), 0, &info, sizeof(info),
+                               SHGFI_SYSICONINDEX | SHGFI_SMALLICON)) index = info.iIcon;
+            if (info.hIcon) DestroyIcon(info.hIcon);
         }
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            queued_.erase(path);
+            std::lock_guard lock(state->mutex);
+            // A late Shell result cannot populate a replacement cache or notify
+            // a destroyed/reused window. Reset takes this same short gate.
+            if (state->stop) break;
+            state->queued.erase(path);
             if (index >= 0) {
-                retry_after_.erase(path);
-                if (!path.starts_with(prefix)) {
-                    if (exact_index_.size() >= kExactIndexLimit) {
-                        const auto oldest = std::min_element(last_used_.begin(), last_used_.end(),
+                state->retry_after.erase(path);
+                if (generic) {
+                    if (state->generic_index.size() >= 512) {
+                        const auto victim = std::find_if(state->generic_index.begin(), state->generic_index.end(),
+                            [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
+                        if (victim != state->generic_index.end()) state->generic_index.erase(victim);
+                    }
+                    state->generic_index[key] = index;
+                } else {
+                    if (state->exact_index.size() >= kExactIndexLimit) {
+                        const auto oldest = std::min_element(state->last_used.begin(), state->last_used.end(),
                             [](const auto& a, const auto& b) { return a.second < b.second; });
-                        if (oldest != last_used_.end()) {
-                            exact_index_.erase(oldest->first);
-                            last_used_.erase(oldest);
+                        if (oldest != state->last_used.end()) {
+                            state->exact_index.erase(oldest->first);
+                            state->last_used.erase(oldest);
                         }
                     }
-                    exact_index_[path] = index;
-                    last_used_[path] = ++access_clock_;
+                    state->exact_index[path] = index;
+                    state->last_used[path] = ++state->access_clock;
                 }
             } else {
-                if (retry_after_.size() >= kExactIndexLimit) retry_after_.erase(retry_after_.begin());
-                retry_after_[path] = GetTickCount64() + 2000;
+                if (state->retry_after.size() >= kExactIndexLimit) state->retry_after.erase(state->retry_after.begin());
+                state->retry_after[path] = GetTickCount64() + 2000;
             }
+            if (state->notify) InvalidateRect(state->notify, nullptr, FALSE);
         }
-        if (const HWND hwnd = hwnd_.load()) InvalidateRect(hwnd, nullptr, FALSE);
     }
     if (SUCCEEDED(com_hr)) CoUninitialize();
+    return 0;
 }
 
 ComPtr<ID2D1Bitmap> ShellIconCache::BitmapFromIcon(HICON icon) {
@@ -286,12 +376,12 @@ ID2D1Bitmap* ShellIconCache::BitmapFor(const std::wstring& path, const std::wstr
                                        bool is_dir, DWORD attrs, float desired_dips) {
     int index = -1;
     const bool exact = NeedsExactIcon(name, is_dir, path) && !path.empty();
-    if (exact) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = exact_index_.find(path);
-        if (it != exact_index_.end()) {
+    if (exact && worker_) {
+        std::lock_guard lock(worker_->mutex);
+        const auto it = worker_->exact_index.find(path);
+        if (it != worker_->exact_index.end()) {
             index = it->second;
-            last_used_[path] = ++access_clock_;
+            worker_->last_used[path] = ++worker_->access_clock;
         }
     }
     if (index < 0 && exact) RequestExact(path);

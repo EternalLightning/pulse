@@ -13,6 +13,16 @@ namespace pulse::ui {
 
 #ifdef PULSE_UI_TEST_HOOKS
 inline constexpr UINT kConfirmSnapshotMessage = WM_APP + 0x2B1;
+inline constexpr UINT kConfirmInspectMessage = WM_APP + 0x2B2;
+struct ConfirmDialogInspection {
+    size_t row_count = 0;
+    float scroll = 0.0f;
+    float max_scroll = 0.0f;
+    D2D1_RECT_F content{};
+    D2D1_RECT_F primary{};
+    D2D1_RECT_F cancel{};
+    D2D1_RECT_F alternate{};
+};
 #endif
 
 struct FileOperationCallbacks {
@@ -72,6 +82,11 @@ ConflictDialogResult ShowFileConflictDialog(HWND owner,
                                             bool dark,
                                             D2D1_COLOR_F accent);
 
+struct ConfirmDialogRow {
+    std::wstring text;
+    bool is_path = true;
+};
+
 struct ConfirmDialogSpec {
     std::wstring title;
     std::wstring message;
@@ -82,7 +97,30 @@ struct ConfirmDialogSpec {
     // Deletion may expire/cancel while the native modal message loop is open.
     std::function<bool()> still_valid;
     bool fit_to_work_area = false;
+    std::wstring checkbox_text;
+    bool* checkbox_checked = nullptr; // optional result; changed only on acceptance
+    std::wstring alternate_text;
+    bool* alternate_selected = nullptr;
+    std::vector<ConfirmDialogRow> rows;
+    std::wstring note;
 };
+
+struct LockedItemDialogText {
+    std::wstring title;
+    std::wstring message; // {name} is replaced with the failed path's leaf
+    std::wstring close_hint;
+    std::wstring end_hint;
+    std::wstring retry;
+    std::wstring end_retry;
+    std::wstring cancel;
+};
+enum class LockedItemChoice { Cancel, Retry, EndAndRetry };
+LockedItemChoice ShowLockedItemDialog(HWND owner, const ops::OpStatus& status,
+    const LockedItemDialogText& text, bool dark, D2D1_COLOR_F accent,
+    std::function<bool()> still_valid);
+
+bool ShowRenameLockedDialog(HWND owner, const ops::OpStatus& status, bool dark,
+    D2D1_COLOR_F accent, std::function<bool()> still_valid);
 
 bool ShowConfirmDialog(HWND owner, const ConfirmDialogSpec& spec, bool dark,
                        D2D1_COLOR_F accent);

@@ -60,22 +60,15 @@ public:
                        bool preserve_order = false,
                        std::vector<uint64_t> display_times = {});
 
-    void EnqueueIo(std::function<void()> task);
+    // Tasks must own their inputs; they cannot retain the pool or UI objects.
+    bool EnqueueIo(std::function<void()> task, std::function<void()> completion = {});
 
 private:
-    void WorkerThread();
-    WorkResult Process(const WorkItem& item);
-
-    ResultCallback callback_;
-    std::vector<std::thread> threads_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::queue<WorkItem> queue_;
-    std::queue<std::function<void()>> io_queue_;
-    std::atomic<bool> running_{false};
-    bool stopped_ = false;
+    struct State;
+    static void WorkerThread(std::shared_ptr<State> state);
+    static WorkResult Process(const std::shared_ptr<State>& state, const WorkItem& item);
+    std::shared_ptr<State> state_;
     uint64_t global_gen_ = 0;
-    std::unordered_map<std::wstring, uint64_t> current_gen_;
 };
 
 } // namespace pulse::app

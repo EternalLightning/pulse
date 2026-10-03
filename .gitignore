@@ -71,6 +71,7 @@ CONERR$
 
 # Local fixtures, screenshots and internal verification notes
 /bench_data/*
+/permission-recovery/
 /docs/index-migration-review.md
 /docs/list-visibility-upgrade-r6.md
 /docs/windows-8.1-candidate.md

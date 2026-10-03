@@ -6,6 +6,7 @@
 #include "../ui/ui_renderer.h"
 #include "places.h"
 #include "column_view_model.h"
+#include "entry_order_hold.h"
 #include "pane_header_animation.h"
 #include "../index/content_result_store.h"
 #include <map>
@@ -87,6 +88,9 @@ struct Tab {
     std::wstring pending_selected_name;
     std::vector<std::wstring> pending_selected_names;
     bool pending_ensure_selection_visible = false;
+    bool refresh_keeps_order = false;
+    bool order_held = false;
+    std::vector<EntryRenameHint> held_renames;
     ColumnStripState column_strip; // listings shown beside the list in column view
     std::wstring git_root;
     std::shared_ptr<std::vector<fs::DirEntry>> search_entries;
@@ -200,6 +204,12 @@ struct Tab {
     std::wstring GoForward();
     std::wstring GoUp();
     void SetSnapshot(fs::SnapshotPtr value);
+    void HoldEntryRename(const std::wstring& old_name, const std::wstring& new_name);
+    void PrepareEntryRefresh(bool explicit_refresh);
+    void ClearEntryOrderHold();
+    fs::SnapshotPtr PrepareEntrySnapshot(fs::SnapshotPtr fresh,
+                                        std::vector<std::wstring>& selected_names,
+                                        std::wstring& focus_name);
 };
 
 bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle);

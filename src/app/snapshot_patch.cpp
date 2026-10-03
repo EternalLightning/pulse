@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cwctype>
+#include <optional>
 #include <unordered_map>
 
 namespace pulse::app {
@@ -25,10 +26,10 @@ int FindName(const std::vector<fs::DirEntry>& entries, const std::wstring& name)
 }
 
 void InsertSorted(std::vector<fs::DirEntry>& entries, fs::DirEntry entry,
-                  ui::SortColumn col, ui::SortDirection sort_dir) {
+                  ui::SortColumn col, ui::SortDirection sort_dir, const std::wstring& folder) {
     auto it = std::lower_bound(entries.begin(), entries.end(), entry,
-        [col, sort_dir](const fs::DirEntry& a, const fs::DirEntry& b) {
-            return EntryLess(a, b, col, sort_dir);
+        [col, sort_dir, &folder](const fs::DirEntry& a, const fs::DirEntry& b) {
+            return EntryLess(a, b, col, sort_dir, folder);
         });
     entries.insert(it, std::move(entry));
 }
@@ -54,7 +55,9 @@ bool FillDirEntry(const std::wstring& dir, const std::wstring& name, fs::DirEntr
 
 NotifyPatch ApplyDirNotify(std::vector<fs::DirEntry>& entries, const std::wstring& folder,
                            const fs::DirNotifyEvent& event,
-                           ui::SortColumn col, ui::SortDirection sort_dir) {
+                           ui::SortColumn col, ui::SortDirection sort_dir, bool keep_order) {
+    if (keep_order)
+        return ApplyDirNotifyBatch(entries, folder, { event }, col, sort_dir, true);
     if (event.name.empty() || event.name.find_first_of(L"\\/") != std::wstring::npos)
         return NotifyPatch::NeedFullEnum;
 
@@ -74,7 +77,7 @@ NotifyPatch ApplyDirNotify(std::vector<fs::DirEntry>& entries, const std::wstrin
         if (at >= 0) entries.erase(entries.begin() + at);
         const int dup = FindName(entries, event.name);
         if (dup >= 0) entries.erase(entries.begin() + dup);
-        InsertSorted(entries, std::move(entry), col, sort_dir);
+        InsertSorted(entries, std::move(entry), col, sort_dir, folder);
         return NotifyPatch::Applied;
     }
 
@@ -87,7 +90,7 @@ NotifyPatch ApplyDirNotify(std::vector<fs::DirEntry>& entries, const std::wstrin
         }
         const int at = FindName(entries, event.name);
         if (at >= 0) entries.erase(entries.begin() + at);
-        InsertSorted(entries, std::move(entry), col, sort_dir);
+        InsertSorted(entries, std::move(entry), col, sort_dir, folder);
         return NotifyPatch::Applied;
     }
 
@@ -117,11 +120,84 @@ struct FoldedNameEqual {
     }
 };
 
+NotifyPatch ApplyHeldNotifies(std::vector<fs::DirEntry>& entries, const std::wstring& folder,
+                             const std::vector<fs::DirNotifyEvent>& events) {
+    if (folder.empty() || fs::IsVirtualPath(folder)) return NotifyPatch::NeedFullEnum;
+    std::vector<std::optional<fs::DirEntry>> renamed_entries(events.size());
+    for (size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        if (event.name.empty() || event.name.find_first_of(L"\\/") != std::wstring::npos ||
+            event.old_name.find_first_of(L"\\/") != std::wstring::npos)
+            return NotifyPatch::NeedFullEnum;
+        if (event.action != FILE_ACTION_ADDED && event.action != FILE_ACTION_REMOVED &&
+            event.action != FILE_ACTION_MODIFIED && event.action != FILE_ACTION_RENAMED_NEW_NAME)
+            return NotifyPatch::NeedFullEnum;
+        if (event.action == FILE_ACTION_RENAMED_NEW_NAME) {
+            fs::DirEntry entry;
+            // Coalesced renames can have an intermediate name already gone.
+            // Keep the shown slots intact so enumeration can follow the hints.
+            if (!FillDirEntry(folder, event.name, entry)) return NotifyPatch::NeedFullEnum;
+            renamed_entries[index] = std::move(entry);
+        }
+    }
+    std::vector<std::optional<fs::DirEntry>> slots;
+    slots.reserve(entries.size() + events.size());
+    std::unordered_map<std::wstring, size_t, FoldedNameHash, FoldedNameEqual> positions;
+    positions.reserve(entries.size() + events.size());
+    for (auto& entry : entries) {
+        positions.emplace(entry.name, slots.size());
+        slots.emplace_back(std::move(entry));
+    }
+    const auto erase = [&](const std::wstring& name) {
+        const auto found = positions.find(name);
+        if (found == positions.end()) return;
+        slots[found->second].reset();
+        positions.erase(found);
+    };
+    for (size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        if (event.action == FILE_ACTION_REMOVED) {
+            erase(event.name);
+            continue;
+        }
+        const std::wstring& previous_name = event.action == FILE_ACTION_RENAMED_NEW_NAME &&
+            !event.old_name.empty() ? event.old_name : event.name;
+        const auto previous = positions.find(previous_name);
+        const size_t slot = previous == positions.end() ? SIZE_MAX : previous->second;
+        fs::DirEntry entry;
+        if (renamed_entries[index]) {
+            entry = std::move(*renamed_entries[index]);
+        } else if (!FillDirEntry(folder, event.name, entry)) {
+            erase(previous_name);
+            continue;
+        }
+        if (slot != SIZE_MAX) {
+            positions.erase(previous_name);
+            const auto duplicate = positions.find(event.name);
+            if (duplicate != positions.end() && duplicate->second != slot) erase(event.name);
+            slots[slot] = std::move(entry);
+            positions[event.name] = slot;
+        } else if (const auto duplicate = positions.find(event.name);
+                   duplicate != positions.end()) {
+            slots[duplicate->second] = std::move(entry);
+        } else {
+            positions[event.name] = slots.size();
+            slots.emplace_back(std::move(entry));
+        }
+    }
+    entries.clear();
+    entries.reserve(slots.size());
+    for (auto& slot : slots)
+        if (slot) entries.push_back(std::move(*slot));
+    return NotifyPatch::Applied;
+}
+
 } // namespace
 
 NotifyPatch ApplyDirNotifyBatch(std::vector<fs::DirEntry>& entries, const std::wstring& folder,
                                 const std::vector<fs::DirNotifyEvent>& events,
-                                ui::SortColumn col, ui::SortDirection sort_dir) {
+                                ui::SortColumn col, ui::SortDirection sort_dir, bool keep_order) {
+    if (keep_order) return ApplyHeldNotifies(entries, folder, events);
     constexpr size_t kSequentialLimit = 4;
     if (events.size() <= kSequentialLimit) {
         for (const auto& event : events) {
@@ -155,8 +231,8 @@ NotifyPatch ApplyDirNotifyBatch(std::vector<fs::DirEntry>& entries, const std::w
         }
     }
 
-    const auto less = [col, sort_dir](const fs::DirEntry& a, const fs::DirEntry& b) {
-        return EntryLess(a, b, col, sort_dir);
+    const auto less = [col, sort_dir, &folder](const fs::DirEntry& a, const fs::DirEntry& b) {
+        return EntryLess(a, b, col, sort_dir, folder);
     };
     std::vector<fs::DirEntry> fresh;
     fresh.reserve(touched.size());

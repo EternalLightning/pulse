@@ -36,7 +36,7 @@ std::wstring SiblingExecutable(const wchar_t* name) {
 HANDLE Connect(const std::wstring& pipe_name, DWORD timeout_ms) {
     const ULONGLONG deadline = GetTickCount64() + timeout_ms;
     for (;;) {
-        HANDLE pipe = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE,
+        HANDLE pipe = CreateFileW(pipe_name.c_str(), transport::kClientPipeAccess,
                                   0, nullptr, OPEN_EXISTING, 0, nullptr);
         if (pipe != INVALID_HANDLE_VALUE) return pipe;
         const DWORD failure = GetLastError();
@@ -327,6 +327,44 @@ int wmain(int argc, wchar_t** argv) {
         return failures ? 1 : 0;
     }
 
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--request-limits-only") {
+        HANDLE client = Connect(pipe_name, 10000);
+        HANDLE peer = Connect(pipe_name, 10000);
+        Check(client != INVALID_HANDLE_VALUE && peer != INVALID_HANDLE_VALUE, L"bounded request fixtures connect");
+        const auto query = [](uint64_t session, bool subscribe) {
+            PayloadWriter w; w.PutU32(subscribe ? 8u : 0u); w.PutU32(0); w.PutU32(1); w.PutU32(0);
+            w.PutString(L"no-matches"); w.PutString(L""); w.PutU64(session); return w.data();
+        };
+        bool reclaimed = client != INVALID_HANDLE_VALUE;
+        for (uint32_t i = 1; i <= 64 && reclaimed; ++i) {
+            reclaimed = SendFrame(client, REQ_IDX_SEARCH, i, query(i, false)) && WaitForSearch(client, i, 3000);
+        }
+        Check(reclaimed, L"completed non-subscribe sessions do not exhaust client session cap");
+        bool subscribed = reclaimed;
+        for (uint32_t i = 1; i <= 32 && subscribed; ++i)
+            subscribed = SendFrame(client, REQ_IDX_SEARCH, 100 + i, query(i, true)) && WaitForSearch(client, 100 + i, 3000);
+        Check(subscribed, L"subscription count is usable up to explicit cap");
+        bool busy = false;
+        if (subscribed && SendFrame(client, REQ_IDX_SEARCH, 200, query(33, true))) {
+            const auto until = GetTickCount64() + 3000;
+            while (GetTickCount64() < until) {
+                MsgHeader header{}; std::vector<uint8_t> payload;
+                if (!ReadFrame(client, header, payload, 1000)) continue;
+                if (header.type != RSP_IDX_SEARCH || header.request_id != 200) continue;
+                PayloadReader r(payload.data(), payload.size()); uint32_t total = 0, count = 0, error = 0, incomplete = 0; uint64_t revision = 0;
+                busy = r.GetU32(total) && r.GetU32(count) && count == 0 && r.GetU64(revision) && r.GetU32(error) &&
+                    r.GetU32(incomplete) && error == ERROR_BUSY && incomplete != 0; break;
+            }
+        }
+        Check(busy, L"session overload returns explicit ERROR_BUSY instead of silent growth");
+        const bool peer_ok = peer != INVALID_HANDLE_VALUE && SendFrame(peer, REQ_IDX_SEARCH, 201, SearchPayload(L"stress-item-1")) &&
+            WaitForSearch(peer, 201, 3000);
+        Check(peer_ok, L"overloaded client cannot starve another client");
+        if (peer != INVALID_HANDLE_VALUE) { SendFrame(peer, REQ_IDX_TEST_SHUTDOWN, 0); CloseHandle(peer); }
+        if (client != INVALID_HANDLE_VALUE) CloseHandle(client);
+        Check(WaitForSingleObject(process.hProcess, 5000) == WAIT_OBJECT_0, L"bounded request fixture shuts down");
+        CloseHandle(process.hProcess); return failures ? 1 : 0;
+    }
     std::vector<HANDLE> clients;
     for (int i = 0; i < 16; ++i) {
         HANDLE pipe = Connect(pipe_name, 10000);

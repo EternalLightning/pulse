@@ -422,6 +422,7 @@ void HideRenameOverlay(AppState& s, bool commit) {
                 req.type = ops::OpType::Rename;
                 req.sources.push_back(full);
                 req.new_name = buf;
+                tab->HoldEntryRename(tab->EntryAt(index).name, buf);
                 tab->pending_selected_name = buf;
                 tab->pending_selected_names = { buf };
                 s.ops.Submit(std::move(req));

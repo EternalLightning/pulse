@@ -4,6 +4,7 @@
 #include "../ipc/protocol.h"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -25,7 +26,11 @@ namespace {
 struct Agent {
     NetworkIndex index;
     std::atomic<bool> running{true};
-    std::mutex write_mu;
+    std::timed_mutex search_mu;
+    std::mutex lease_mu;
+    transport::Identity identity;
+    HANDLE stop = nullptr;
+    bool fixture = false;
     std::atomic<int> clients{0};
     std::atomic<ULONGLONG> last_activity{0};
 } g;
@@ -35,24 +40,13 @@ struct Agent {
 // replaced by an update). Exit instead of lingering as an orphan forever.
 constexpr ULONGLONG kIdleExitMs = 10ull * 60ull * 1000ull;
 
-SECURITY_ATTRIBUTES* PipeSecurity() {
-    static SECURITY_ATTRIBUTES sa{ sizeof(SECURITY_ATTRIBUTES) };
-    static PSECURITY_DESCRIPTOR descriptor = nullptr;
-    if (!descriptor) {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)",
-            SDDL_REVISION_1, &descriptor, nullptr);
-        sa.lpSecurityDescriptor = descriptor;
-    }
-    return descriptor ? &sa : nullptr;
-}
-
 bool WriteFrame(HANDLE pipe, uint32_t type, uint32_t id,
                 const std::vector<uint8_t>& payload) {
-    std::lock_guard<std::mutex> lock(g.write_mu);
-    const MsgHeader header = agent::MakeHeader(type, id, static_cast<uint32_t>(payload.size()));
-    return PipeWrite(pipe, reinterpret_cast<const uint8_t*>(&header), sizeof(header)) &&
-           (payload.empty() || PipeWrite(pipe, payload.data(), static_cast<DWORD>(payload.size())));
+    if (payload.size() > agent::kMaxPayload) return false;
+    MsgHeader header = agent::MakeHeader(type, id, static_cast<uint32_t>(payload.size()));
+    const auto deadline = GetTickCount64() + 2000;
+    return transport::Transfer(pipe, &header, sizeof(header), true, deadline, g.stop) &&
+        (payload.empty() || transport::Transfer(pipe, const_cast<uint8_t*>(payload.data()), static_cast<DWORD>(payload.size()), true, deadline, g.stop));
 }
 
 std::vector<uint8_t> SearchPayload(const SearchResult& result) {
@@ -98,22 +92,31 @@ std::vector<uint8_t> ResultPayload(bool ok, const std::wstring& error) {
 }
 
 void SearchAndReply(HANDLE pipe, uint32_t id, Query query) {
-    g.index.SearchAsync(query, id);
+    // NetworkIndex has a single latest-result slot. Serialize only actual
+    // searches, never the accept loop or idle client reads; use server IDs.
+    std::unique_lock search_lock(g.search_mu, std::defer_lock);
+    if (!search_lock.try_lock_for(std::chrono::milliseconds(500))) {
+        WriteFrame(pipe, agent::RSP_RESULT, id, ResultPayload(false, L"网络索引查询过载，请稍后重试")); return;
+    }
+    static uint32_t next_id = 1;
+    const auto internal_id = ++next_id;
+    g.index.SearchAsync(query, internal_id);
     SearchResult result;
     for (int i = 0; i < 600 && g.running; ++i) {
-        if (g.index.TakeResult(id, result)) {
+        if (g.index.TakeResult(internal_id, result)) {
             WriteFrame(pipe, agent::RSP_SEARCH, id, SearchPayload(result));
             return;
         }
         Sleep(10);
     }
+    WriteFrame(pipe, agent::RSP_RESULT, id, ResultPayload(false, L"网络索引查询超时"));
 }
 
 std::wstring TrackingOwner(HANDLE pipe) {
     if (!ImpersonateNamedPipeClient(pipe)) return {};
     HANDLE token = nullptr;
     const BOOL opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token);
-    RevertToSelf();
+    transport::RevertOrFailFast();
     if (!opened) return {};
     DWORD bytes = 0, session = 0;
     GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
@@ -130,6 +133,7 @@ std::wstring TrackingOwner(HANDLE pipe) {
 }
 
 void SetNetworkTrackingLease(HANDLE pipe, const std::wstring& owner, bool enabled) {
+    std::lock_guard lease_lock(g.lease_mu);
     static std::unordered_map<std::wstring, uint64_t> leases;
     ULONG process = 0;
     if (!GetNamedPipeClientProcessId(pipe, &process)) return;
@@ -197,12 +201,17 @@ bool HandleChanges(HANDLE pipe, const MsgHeader& hdr, const std::vector<uint8_t>
 void ClientLoop(HANDLE pipe) {
     while (g.running) {
         MsgHeader header{};
-        if (!PipeRead(pipe, reinterpret_cast<uint8_t*>(&header), sizeof(header)) ||
-            header.magic != agent::kMagic || header.payload_size > 256 * 1024)
-            break;
+        const auto deadline = GetTickCount64() + 2000;
+        if (!transport::Transfer(pipe, &header, sizeof(header), false, deadline, g.stop) ||
+            header.magic != agent::kMagic || header.payload_size > 256 * 1024) break;
         std::vector<uint8_t> payload(header.payload_size);
-        if (!payload.empty() && !PipeRead(pipe, payload.data(), header.payload_size)) break;
+        if (!payload.empty() && !transport::Transfer(pipe, payload.data(), header.payload_size, false, deadline, g.stop)) break;
+        transport::Handle caller(transport::CaptureCaller(pipe));
+        if (!caller.get() || !g.identity.Matches(transport::Identity::FromToken(caller.get()))) break;
         PayloadReader reader(payload.data(), payload.size());
+        if (g.fixture && header.type == 0x7fff0001 && payload.empty()) {
+            g.running = false; SetEvent(g.stop); break;
+        }
         if (header.type >= agent::REQ_CHANGE_LEASE && header.type <= agent::REQ_CHANGE_DETAILS) {
             if (!HandleChanges(pipe, header, payload)) break;
         } else if (header.type == agent::REQ_ROOTS) {
@@ -221,7 +230,9 @@ void ClientLoop(HANDLE pipe) {
             uint32_t flags = 0, sort = 0, limit = 0, offset = 0;
             if (!reader.GetU32(flags) || !reader.GetU32(sort) || !reader.GetU32(limit) ||
                 !reader.GetU32(offset) || !reader.GetString(query.needle) ||
-                !reader.GetString(query.path_prefix)) continue;
+                !reader.GetString(query.path_prefix) || reader.remaining() || flags > 7 ||
+                sort > static_cast<uint32_t>(ResultSort::Mtime) || query.needle.size() > 4096 ||
+                query.path_prefix.size() > 32768 || offset > 1000000) break;
             query.rank = (flags & 1u) != 0;
             query.folders_only = (flags & 2u) != 0;
             query.sort_desc = (flags & 4u) != 0;
@@ -231,7 +242,7 @@ void ClientLoop(HANDLE pipe) {
             SearchAndReply(pipe, header.request_id, std::move(query));
         } else if (header.type == agent::REQ_ADD_ROOT || header.type == agent::REQ_REMOVE_ROOT) {
             std::wstring root, error;
-            if (!reader.GetString(root)) continue;
+            if (!reader.GetString(root) || reader.remaining() || root.size() > 32768) break;
             const bool ok = header.type == agent::REQ_ADD_ROOT
                 ? g.index.AddRoot(root, &error) : g.index.RemoveRoot(root, &error);
             WriteFrame(pipe, agent::RSP_RESULT, header.request_id, ResultPayload(ok, error));
@@ -245,13 +256,24 @@ void ClientLoop(HANDLE pipe) {
     CloseHandle(pipe);
 }
 
-int RunAgent() {
-    HANDLE singleton = CreateMutexW(nullptr, TRUE, L"Local\\Pulse.Index.NetworkAgent.Singleton");
+int RunAgent(const std::wstring& fixture_tag = {}) {
+    g.fixture = !fixture_tag.empty();
+    g.identity = transport::Identity::Current();
+    transport::LogonSecurity security(g.identity);
+    const auto name = g.fixture ? L"\\\\.\\pipe\\PulseNetworkIndex.Test." + fixture_tag : agent::PipeName();
+    const auto mutex_name = g.fixture ? L"Local\\Pulse.Index.NetworkAgent.Test." + fixture_tag : agent::SingletonName();
+    if (!security.get() || name.empty() || mutex_name.empty()) return ERROR_ACCESS_DENIED;
+    HANDLE singleton = CreateMutexW(security.get(), TRUE, mutex_name.c_str());
     if (!singleton || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (singleton) CloseHandle(singleton);
         return 0;
     }
-    g.index.Start(nullptr, 0, 0);
+    g.stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g.stop) { CloseHandle(singleton); return ERROR_NOT_ENOUGH_MEMORY; }
+    if (!g.fixture) g.index.Start(nullptr, 0, 0);
+    struct Worker { std::thread thread; std::shared_ptr<std::atomic<bool>> done; };
+    std::vector<Worker> workers;
+    bool first = true;
     g.last_activity = GetTickCount64();
     std::thread idle_watch([] {
         while (g.running) {
@@ -259,35 +281,50 @@ int RunAgent() {
             if (!g.running || g.clients.load() != 0 ||
                 GetTickCount64() - g.last_activity.load() < kIdleExitMs) continue;
             g.running = false;
-            // Wake the synchronous ConnectNamedPipe below so the accept loop can exit.
-            HANDLE wake = CreateFileW(agent::kPipeName, GENERIC_READ | GENERIC_WRITE, 0,
-                                      nullptr, OPEN_EXISTING, 0, nullptr);
-            if (wake != INVALID_HANDLE_VALUE) CloseHandle(wake);
+            SetEvent(g.stop);
         }
     });
     int exit_code = 0;
     while (g.running) {
-        HANDLE pipe = CreateNamedPipeW(
-            agent::kPipeName, PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, PipeSecurity());
-        if (pipe == INVALID_HANDLE_VALUE) { exit_code = static_cast<int>(GetLastError()); break; }
-        const BOOL connected = ConnectNamedPipe(pipe, nullptr)
-            ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED ? TRUE : FALSE);
-        if (!g.running) { CloseHandle(pipe); break; }
-        if (connected) {
-            ++g.clients;
-            g.last_activity = GetTickCount64();
-            ClientLoop(pipe);
-            g.last_activity = GetTickCount64();
-            --g.clients;
-        } else {
-            CloseHandle(pipe);
+        for (auto it = workers.begin(); it != workers.end();) {
+            if (!it->done->load()) { ++it; continue; }
+            it->thread.join(); it = workers.erase(it);
         }
+        const DWORD flags = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
+        HANDLE pipe = CreateNamedPipeW(name.c_str(), flags,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            16, 64 * 1024, 64 * 1024, 0, security.get());
+        if (pipe == INVALID_HANDLE_VALUE) {
+            if (first) { exit_code = static_cast<int>(GetLastError()); break; }
+            WaitForSingleObject(g.stop, 50); continue;
+        }
+        first = false;
+        transport::Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        OVERLAPPED operation{}; operation.hEvent = event.get();
+        bool connected = event.get() && ConnectNamedPipe(pipe, &operation);
+        if (!connected && event.get()) {
+            const auto error = GetLastError();
+            if (error == ERROR_PIPE_CONNECTED) connected = true;
+            else if (error == ERROR_IO_PENDING) {
+                HANDLE waits[]{event.get(), g.stop}; DWORD done = 0;
+                if (WaitForMultipleObjects(2, waits, FALSE, 2000) == WAIT_OBJECT_0)
+                    connected = GetOverlappedResult(pipe, &operation, &done, FALSE) != FALSE;
+                else { CancelIoEx(pipe, &operation); GetOverlappedResult(pipe, &operation, &done, TRUE); }
+            }
+        }
+        if (!connected || !g.running || g.clients >= 15) { CloseHandle(pipe); continue; }
+        ++g.clients; g.last_activity = GetTickCount64();
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        workers.push_back({std::thread([pipe, done] {
+            ClientLoop(pipe); g.last_activity = GetTickCount64(); --g.clients; *done = true;
+        }), done});
     }
     g.running = false;
+    SetEvent(g.stop);
     if (idle_watch.joinable()) idle_watch.join();
+    for (auto& worker : workers) if (worker.thread.joinable()) worker.thread.join();
     g.index.Stop();
+    CloseHandle(g.stop); g.stop = nullptr;
     ReleaseMutex(singleton);
     CloseHandle(singleton);
     return exit_code;
@@ -297,4 +334,9 @@ int RunAgent() {
 
 int pulse::index::RunNetworkAgent() {
     return RunAgent();
+}
+int pulse::index::RunNetworkAgentFixture(const std::wstring& tag) {
+    if (tag.empty() || tag.size() > 64 || tag.find_first_not_of(L"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_") != std::wstring::npos)
+        return ERROR_INVALID_PARAMETER;
+    return RunAgent(tag);
 }

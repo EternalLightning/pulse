@@ -1,6 +1,7 @@
 #pragma once
 #include "../ipc/protocol.h"
 #include "change_tracking.h"
+#include "index_transport_security.h"
 #include "folder_size_protocol.h"
 #include <windows.h>
 #include <string>
@@ -35,7 +36,7 @@ public:
             wchar_t override_name[256]{};
             const auto n = GetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", override_name, 256);
             const std::wstring name = n && n < 256 ? override_name : L"\\\\.\\pipe\\PulseIndex";
-            pipe_ = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+            pipe_ = CreateFileW(name.c_str(), transport::kClientPipeAccess, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
             if (pipe_ == INVALID_HANDLE_VALUE) return false;
         }
         ipc::PayloadWriter request;
@@ -64,7 +65,7 @@ public:
             wchar_t override_name[256]{};
             const auto n = GetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE",override_name,256);
             const std::wstring name = n && n < 256 ? override_name : L"\\\\.\\pipe\\PulseIndex";
-            pipe_ = CreateFileW(name.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,nullptr);
+            pipe_ = CreateFileW(name.c_str(),transport::kClientPipeAccess,0,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,nullptr);
             if (pipe_ == INVALID_HANDLE_VALUE) return false;
         }
         ipc::PayloadWriter request;

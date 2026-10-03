@@ -35,6 +35,7 @@ inline std::wstring ByteSize(uint64_t bytes, bool empty_zero = false,
 
 inline std::wstring LocalFileTime(const FILETIME& time,
                                   std::wstring_view fallback = {}) {
+    if (!time.dwLowDateTime && !time.dwHighDateTime) return std::wstring(fallback);
     FILETIME local{};
     SYSTEMTIME system{};
     if (!FileTimeToLocalFileTime(&time, &local) ||

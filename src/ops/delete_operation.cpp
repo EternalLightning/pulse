@@ -1,4 +1,5 @@
 #include "delete_operation.h"
+#include "../shell_host/delete_fileop.h"
 #include "../fs/fs_recycle.h"
 #include "../ipc/shell_client.h"
 #include "../ipc/delete_plan_protocol.h"
@@ -133,7 +134,8 @@ std::vector<DeleteOutcome> OpsManager::DrainDeleteOutcomes() {
 void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
                               const std::vector<std::wstring>& deleted_paths, bool executed, bool uncertain,
                                const std::vector<std::wstring>& recycled_paths,
-                               const std::vector<std::wstring>& recycle_destinations, bool cancelled) {
+                               const std::vector<std::wstring>& recycle_destinations, bool cancelled,
+                               const LockReport& locks) {
     bool was_admitted = false;
     CompletedOperation completed;
     completed.type = OpType::RealDelete;
@@ -182,11 +184,14 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
         }
     }
     if (was_admitted) PersistJournal();
+    InvalidateRecycleUndo(deleted_paths);
+    RefreshRecycleUndoValidity();
     delete_active_.store(false);
     delete_service_.Cancel();
     SetStatus([&](OpStatus& status) {
         status.active = false; status.percent = -1;
         status.task_id = item.seq; status.type = item.req.type;
+        status.locked_path = locks.path; status.lock_owners = locks.owners;
         ++status.completed_ops;
         if (!executed) ++status.deletes_without_mutation;
         status.completed_items = deleted_paths.size() + recycled_paths.size();
@@ -198,11 +203,52 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
     });
 }
 
-void OpsManager::RunDelete(const QueueItem& item) {
-    delete_cancel_.store(false);
+OpsManager::QueueItem OpsManager::RemainingDeleteRetry(const QueueItem& admitted, const DeletePlan& accepted,
+    const std::vector<std::wstring>& actual) {
+    QueueItem retry = admitted;
+    retry.req.sources.clear(); retry.req.delete_targets.clear();
+    retry.close_first.clear();
+    for (const auto& target : accepted.targets) {
+        DeleteRequestTarget remaining{target.path, {}, false};
+        for (const auto& root : target.physical_paths) {
+            if (std::any_of(actual.begin(), actual.end(), [&](const auto& done) { return SamePath(root, done); })) continue;
+            const DWORD attributes = GetFileAttributesW(root.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES) {
+                const DWORD code = GetLastError();
+                if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND) continue;
+                // Access failure is not evidence that a selected root vanished.
+            }
+            remaining.physical_paths.push_back(root);
+            retry.req.sources.push_back(root);
+        }
+        if (!remaining.physical_paths.empty()) retry.req.delete_targets.push_back(std::move(remaining));
+    }
+    return retry;
+}
+
+void OpsManager::RunDelete(const QueueItem& item,
+    const std::vector<std::wstring>& prior_deleted, const std::vector<std::wstring>& prior_recycled,
+    const std::vector<std::wstring>& prior_recycle_destinations) {
+    auto finish = [&](std::wstring error, const std::vector<std::wstring>& deleted = std::vector<std::wstring>{},
+        bool executed = false, bool uncertain = false,
+        const std::vector<std::wstring>& recycled = std::vector<std::wstring>{},
+        const std::vector<std::wstring>& destinations = std::vector<std::wstring>{},
+        bool cancelled = false, const LockReport& locks = LockReport{}) {
+        auto all_deleted = prior_deleted; all_deleted.insert(all_deleted.end(), deleted.begin(), deleted.end());
+        auto all_recycled = prior_recycled; all_recycled.insert(all_recycled.end(), recycled.begin(), recycled.end());
+        auto all_destinations = prior_recycle_destinations;
+        all_destinations.insert(all_destinations.end(), destinations.begin(), destinations.end());
+        FinishDelete(item, std::move(error), all_deleted,
+            executed || !prior_deleted.empty() || !prior_recycled.empty(), uncertain,
+            all_recycled, all_destinations, cancelled, locks);
+    };
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        delete_active_.store(true);
+        delete_cancel_.store(stopping_.load() || lock_retry_cancel_.load());
+    }
     shell_cancel_requested_.store(false);
-    delete_active_.store(true);
-    if (stopping_.load()) { FinishDelete(item, L"", {}, false, false, {}, {}, true); return; }
+    if (stopping_.load()) { finish(L"", {}, false, false, {}, {}, true); return; }
     SetStatus([&](OpStatus& status) {
         status.active = true; status.type = item.req.type; status.task_id = item.seq;
         status.phase = OpPhase::Scanning; status.percent = -1;
@@ -218,14 +264,14 @@ void OpsManager::RunDelete(const QueueItem& item) {
             std::lock_guard<std::mutex> lock(mutex_);
             stale = item.req.undo_revision != undo_revision_ || undo_.empty();
         }
-        if (stale) { FinishDelete(item, L"", {}, false, false, {}, {}, true); return; }
+        if (stale) { finish(L"", {}, false, false, {}, {}, true); return; }
     }
     std::wstring error;
     auto plan = BuildDeletePlan(item.req, item.seq, error);
-    if (!error.empty()) { FinishDelete(item, std::move(error)); return; }
+    if (!error.empty()) { finish(std::move(error)); return; }
     const auto prepared = delete_service_.Prepare(std::move(plan));
     if (prepared.decision == DeleteDecision::Blocked) {
-        FinishDelete(item, l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
+        finish(l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
     }
     if (delete_cancel_.load() || stopping_.load()) delete_service_.Cancel();
     bool no_presenter = false, confirmation_expired = false;
@@ -253,7 +299,7 @@ void OpsManager::RunDelete(const QueueItem& item) {
     if (!accepted || delete_cancel_.load() || stopping_.load()) {
         const bool cancelled = delete_cancel_.load() || stopping_.load() ||
             (!no_presenter && !confirmation_expired && delete_service_.WasRejected(prepared.token));
-        FinishDelete(item, l10n::Get(cancelled ? l10n::StringId::DeleteCancelled : l10n::StringId::OperationFailedMessage),
+        finish(l10n::Get(cancelled ? l10n::StringId::DeleteCancelled : l10n::StringId::OperationFailedMessage),
             {}, false, false, {}, {}, cancelled);
         return;
     }
@@ -261,7 +307,7 @@ void OpsManager::RunDelete(const QueueItem& item) {
     for (const auto& target : accepted->targets) {
         if (target.disposition != DeleteDisposition::Permanent &&
             target.disposition != DeleteDisposition::RecycleRequested) {
-            FinishDelete(item, l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
+            finish(l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
         }
         physical.insert(physical.end(), target.physical_paths.begin(), target.physical_paths.end());
         auto& group = target.disposition == DeleteDisposition::Permanent ? permanent_roots : recycle_roots;
@@ -281,7 +327,7 @@ void OpsManager::RunDelete(const QueueItem& item) {
     }
     PersistJournal();
     if (delete_cancel_.load() || stopping_.load()) {
-        FinishDelete(item, L"", {}, false, false, {}, {}, true); return;
+        finish(L"", {}, false, false, {}, {}, true); return;
     }
     SetStatus([&](OpStatus& status) {
         status.phase = OpPhase::Running; status.total_items = accepted->targets.size();
@@ -375,6 +421,34 @@ void OpsManager::RunDelete(const QueueItem& item) {
         hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_TIMEOUT)) ||
         error == L"Malformed deletion result" ||
         !physical_complete;
-    FinishDelete(item, std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled);
+    if (!cancelled && !delete_cancel_.load() && !stopping_.load() &&
+        shell::NeedsPermanentDeleteConfirmation(static_cast<HRESULT>(hr))) {
+        // The recycle-only host refused fallback before mutation. Admit only
+        // the remaining exact roots again, now visibly as permanent in Pulse.
+        auto fallback = RemainingDeleteRetry(admitted, *accepted, actual);
+        fallback.req.type = OpType::RealDelete;
+        if (!fallback.req.sources.empty()) {
+            auto deleted = prior_deleted; deleted.insert(deleted.end(), logical.begin(), logical.end());
+            auto recycled_done = prior_recycled;
+            recycled_done.insert(recycled_done.end(), logical_recycled.begin(), logical_recycled.end());
+            auto destinations = prior_recycle_destinations;
+            destinations.insert(destinations.end(), logical_destinations.begin(), logical_destinations.end());
+            // Keep the same active task through the new Pulse decision. No
+            // intermediate completion or undo consumption is published.
+            RunDelete(fallback, deleted, recycled_done, destinations);
+            return;
+        }
+    }
+    LockReport locks;
+    const bool backend_lost = hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE)) ||
+        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED)) ||
+        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_TIMEOUT)) || error == L"Malformed deletion result";
+    if (!cancelled && !backend_lost && IsLockFailure(static_cast<HRESULT>(hr)) && !item.req.undo_revision) {
+        QueueItem retry = RemainingDeleteRetry(admitted, *accepted, actual);
+        if (!retry.req.sources.empty()) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), error,
+            [&] { return stopping_.load() || delete_cancel_.load(); });
+    }
+    InvalidateRecycleUndo(actual, backend_lost);
+    finish(std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled, locks);
 }
 }

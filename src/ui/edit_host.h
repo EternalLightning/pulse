@@ -3,6 +3,16 @@
 #include "ui_compositor.h"
 
 namespace pulse::ui {
+COLORREF ChildEditTextColor(bool dark);
+COLORREF ChildEditBackColor(bool dark);
+HBRUSH ChildEditBackBrush(HBRUSH themed);
+inline D2D1_COLOR_F ChildEditColor(COLORREF color) {
+    return D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f,
+                      GetBValue(color) / 255.0f);
+}
+// Initial presentation uses the same native fallback as later text updates.
+bool PresentChildEdit(Compositor& compositor, IDWriteTextFormat* format,
+    D2D1_COLOR_F foreground, D2D1_COLOR_F background, HWND hwnd);
 bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
     D2D1_COLOR_F foreground, D2D1_COLOR_F background, HBRUSH background_brush,
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT& result);

@@ -57,6 +57,8 @@
 #include <windows.h>
 #include <cstdint>
 #include <cstring>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -177,20 +179,57 @@ public:
     bool GetString(std::wstring& s) {
         uint32_t n = 0;
         if (!GetU32(n)) return false;
-        if ((uint64_t)n * sizeof(wchar_t) > size_ - off_) return false;
-        s.assign(reinterpret_cast<const wchar_t*>(data_ + off_), n);
-        off_ += (size_t)n * sizeof(wchar_t);
+        const uint64_t bytes = static_cast<uint64_t>(n) * sizeof(wchar_t);
+        if (bytes > remaining() || bytes > kMaxPayload - allocation_bytes_) return false;
+        try {
+            s.resize(n);
+            if (n) std::memcpy(s.data(), data_ + off_, static_cast<size_t>(bytes));
+        } catch (const std::bad_alloc&) {
+            s.clear();
+            return false;
+        } catch (const std::length_error&) {
+            s.clear();
+            return false;
+        }
+        off_ += static_cast<size_t>(bytes);
+        allocation_bytes_ += static_cast<size_t>(bytes);
         return true;
     }
     bool GetStringArray(std::vector<std::wstring>& v) {
         uint32_t n = 0;
-        if (!GetU32(n)) return false;
         v.clear();
-        v.reserve(n);
+        if (!GetU32(n)) return false;
+        constexpr uint32_t kMaxArrayItems = 65536;
+        if (n > kMaxArrayItems || n > remaining() / sizeof(uint32_t)) return false;
+        size_t scan = off_;
+        uint64_t allocation = static_cast<uint64_t>(n) * sizeof(std::wstring);
+        // Validate the complete array before allocating, including empty-string overhead.
         for (uint32_t i = 0; i < n; ++i) {
-            std::wstring s;
-            if (!GetString(s)) return false;
-            v.push_back(std::move(s));
+            if (size_ - scan < sizeof(uint32_t)) return false;
+            uint32_t chars = 0;
+            std::memcpy(&chars, data_ + scan, sizeof(chars));
+            scan += sizeof(chars);
+            const uint64_t bytes = static_cast<uint64_t>(chars) * sizeof(wchar_t);
+            if (bytes > size_ - scan) return false;
+            allocation += bytes;
+            if (allocation > kMaxPayload - allocation_bytes_) return false;
+            scan += static_cast<size_t>(bytes);
+        }
+        if (allocation > kMaxPayload - allocation_bytes_) return false;
+        try {
+            std::vector<std::wstring> parsed;
+            parsed.reserve(n);
+            allocation_bytes_ += static_cast<size_t>(n) * sizeof(std::wstring);
+            for (uint32_t i = 0; i < n; ++i) {
+                std::wstring s;
+                if (!GetString(s)) return false;
+                parsed.push_back(std::move(s));
+            }
+            v = std::move(parsed);
+        } catch (const std::bad_alloc&) {
+            return false;
+        } catch (const std::length_error&) {
+            return false;
         }
         return true;
     }
@@ -206,7 +245,26 @@ private:
     const uint8_t* data_ = nullptr;
     size_t size_ = 0;
     size_t off_ = 0;
+    size_t allocation_bytes_ = 0;
 };
+
+struct ContextInvokePayload {
+    uint32_t session = 0;
+    uint32_t item = 0;
+    std::wstring verb;
+    std::wstring text;
+};
+
+inline bool ReadContextInvokePayload(PayloadReader& reader, ContextInvokePayload& payload) {
+    payload = {};
+    ContextInvokePayload parsed;
+    if (!reader.GetU32(parsed.session) || !reader.GetU32(parsed.item) ||
+        !reader.GetString(parsed.verb) || !reader.GetString(parsed.text) || reader.remaining() != 0 ||
+        parsed.verb.find(L'\0') != std::wstring::npos || parsed.text.find(L'\0') != std::wstring::npos)
+        return false;
+    payload = std::move(parsed);
+    return true;
+}
 
 inline std::wstring PipeNameFor(uint32_t ui_pid) {
     return L"\\\\.\\pipe\\pulse_shell_" + std::to_wstring(ui_pid);

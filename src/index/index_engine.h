@@ -66,6 +66,8 @@ struct SearchResult {
     uint64_t revision = 0;
     std::vector<Hit> hits;
     size_t total = 0;
+    bool incomplete = false;
+    uint32_t error = 0;
 };
 
 #pragma pack(push, 1)
@@ -137,13 +139,15 @@ public:
     void Stop();
 
     SearchResult Search(const Query& q, const std::atomic<uint32_t>* latest = nullptr,
-                        uint32_t expected = 0) const;
+                        uint32_t expected = 0,
+                        const std::function<bool(const std::wstring&)>& authorize = {}) const;
     size_t Count() const { return indexed_.load(); }
     bool Ready() const { return ready_.load(); }
     bool PinyinReady() const { return pinyin_ready_.load(); }
     uint64_t Revision() const { return revision_.load(); }
     FileFeedPage ReadFeed(bool changes, const std::wstring& root, uint64_t epoch, uint64_t cursor) const;
-    std::vector<IndexedFolderSize> FolderSizes(const std::vector<std::wstring>& paths);
+    std::vector<IndexedFolderSize> FolderSizes(const std::vector<std::wstring>& paths,
+        const std::function<bool(const std::wstring&)>& authorize = {});
     std::wstring Status() const;
     std::vector<VolumeInfo> Volumes() const;
     void RequestRebuild();

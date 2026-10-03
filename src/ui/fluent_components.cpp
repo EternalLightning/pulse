@@ -1792,6 +1792,8 @@ void Painter::DrawScrollbar(const ScrollbarSpec& spec) {
     if (Width(thumb) <= 0.0f || Height(thumb) <= 0.0f) {
         return;
     }
+    const float opacity = high_contrast_ ? 1.0f : Clamp01(spec.opacity);
+    if (opacity <= 0.0f) return;
     const float progress = high_contrast_ ? 1.0f : Clamp01(spec.expand_progress);
     if (progress > 0.0f) {
         const auto background = D2D1::RectF(spec.viewport.right - Px(10.0f),
@@ -1800,12 +1802,13 @@ void Painter::DrawScrollbar(const ScrollbarSpec& spec) {
         D2D1_COLOR_F background_color = high_contrast_ ? theme_->surface_flyout
                                             : dark_ ? Rgba(0x2C2C2C, 245)
                                                     : Rgba(0xFCFCFC, 217);
-        background_color.a *= progress;
+        background_color.a *= progress * opacity;
         FillRoundedRect(background, Px(6.0f), background_color);
     }
-    const D2D1_COLOR_F foreground = high_contrast_ ? theme_->scrollbar_thumb
+    D2D1_COLOR_F foreground = high_contrast_ ? theme_->scrollbar_thumb
                                      : dark_ ? Rgba(0xFFFFFF, 139)
                                              : Rgba(0x000000, 114);
+    foreground.a *= opacity;
     FillRoundedRect(thumb, Width(thumb) * 0.5f, foreground);
 }
 

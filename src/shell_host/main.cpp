@@ -14,6 +14,8 @@
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
 #include "deletion_identity.h"
+#include "delete_fileop.h"
+#include "recycle_fileop.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
 #include "../common/crash_reporter.h"
@@ -73,6 +75,7 @@ bool IsAuthorizedDeletion(uint32_t type) {
 
 struct HostState {
     HANDLE pipe = INVALID_HANDLE_VALUE;
+    DWORD client_pid = 0;
     std::mutex write_mutex;      // reader thread (PONG) vs main thread (progress/done)
     HWND hwnd_msg = nullptr;
     std::atomic<uint32_t> cancel_id{0};
@@ -146,9 +149,9 @@ void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error
 // ---------------------------------------------------------------------------
 class ProgressSink : public IFileOperationProgressSink {
 public:
-    ProgressSink(uint32_t req_id, size_t total_items, std::wstring authorized_root = {})
+    ProgressSink(uint32_t req_id, size_t total_items, std::wstring authorized_root = {}, bool recycle_only = false)
         : authorized_root_(std::move(authorized_root)), req_id_(req_id),
-          total_items_(total_items ? total_items : 1) {}
+          total_items_(total_items ? total_items : 1), recycle_only_(recycle_only) {}
 
     // IUnknown — stack-allocated, no real refcounting.
     IFACEMETHODIMP QueryInterface(REFIID riid, void** out) override {
@@ -224,7 +227,8 @@ public:
                 const HRESULT result = destination->GetDisplayName(SIGDN_FILESYSPATH, &path);
                 recycle_destinations_.push_back(SUCCEEDED(result) && path ? path : L"");
                 if (path) CoTaskMemFree(path);
-            } else deleted_paths_.push_back(authorized_root_);
+            } else if (!recycle_only_) deleted_paths_.push_back(authorized_root_);
+            else NoteItemResult(E_UNEXPECTED); // no recycle payload evidence: never report a restorable delete
         }
         ++items_done_;
         MaybeReport(items_done_ == total_items_);
@@ -263,6 +267,12 @@ private:
     }
     void RememberItem(IShellItem* psi) {
         if (!psi) return;
+        current_path_.clear();
+        PWSTR path = nullptr;
+        if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+            current_path_ = path;
+            CoTaskMemFree(path);
+        }
         PWSTR name = nullptr;
         if (SUCCEEDED(psi->GetDisplayName(SIGDN_PARENTRELATIVEPARSING, &name)) && name) {
             current_item_ = name;
@@ -273,7 +283,8 @@ private:
     void NoteItemResult(HRESULT hr) {
         if (FAILED(hr) && hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
             if (SUCCEEDED(item_failure_)) item_failure_ = hr;
-            last_failed_item_ = current_item_;
+            last_failed_item_ = !authorized_root_.empty() ? authorized_root_
+                : current_path_.empty() ? current_item_ : current_path_;
         }
     }
     void MaybeReport(bool force = false) {
@@ -293,10 +304,12 @@ private:
     std::wstring authorized_root_;
     uint32_t req_id_ = 0;
     size_t total_items_ = 1;
+    bool recycle_only_ = false;
     size_t items_done_ = 0;
     float byte_percent_ = 0.0f;
     bool has_byte_progress_ = false;
     std::wstring current_item_;
+    std::wstring current_path_;
     std::wstring last_failed_item_;
     HRESULT item_failure_ = S_OK;
     ULONGLONG last_send_ = 0;
@@ -579,6 +592,20 @@ void ExecuteRequest(Request* req) {
             return;
         }
     }
+    if (req->type == REQ_AUTHORIZED_RECYCLE) {
+        const auto result = pulse::shell::RecycleAuthorized(req->sources,
+            [id = req->id] { return g.cancel_id.load() == id; },
+            [id = req->id](size_t done, size_t total, const std::wstring& path) {
+                SendProgress(id, total ? static_cast<float>(done * 100.0 / total) : 0.0f, path, done, total);
+            });
+        const auto error = FAILED(result.error) && !result.cancelled
+            ? L"回收失败（错误 " + std::to_wstring(static_cast<unsigned long>(result.error)) + L"） | " + result.failed_path
+            : std::wstring{};
+        if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
+        SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations);
+        delete req;
+        return;
+    }
     if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
         HRESULT hr = req->sources.empty() ? E_INVALIDARG
                                           : ExecuteCreate(req->type, req->sources.front());
@@ -601,24 +628,15 @@ void ExecuteRequest(Request* req) {
                               IID_PPV_ARGS(&op));
     }
 
-    ProgressSink sink(req->id, req->sources.size());
+    ProgressSink sink(req->id, req->sources.size(), {}, req->type == REQ_AUTHORIZED_RECYCLE);
     DWORD sink_cookie = 0;
     if (SUCCEEDED(hr)) {
-#ifndef FOFX_DONTDISPLAYUI
-        constexpr DWORD kDontDisplayUi = 0x00004000;
-#else
-        constexpr DWORD kDontDisplayUi = FOFX_DONTDISPLAYUI;
-#endif
-        DWORD flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | kDontDisplayUi;
-        if (req->type != REQ_REALDELETE) flags |= FOF_ALLOWUNDO;
-        if (req->type == REQ_DELETE_RECYCLE) flags |= FOFX_RECYCLEONDELETE;
+        DWORD flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
         if (IsAuthorizedDeletion(req->type)) {
-            if (req->type == REQ_AUTHORIZED_RECYCLE) {
-                // Never auto-answer a fallback-to-permanent warning. Shell owns
-                // this decision, including changes in eligibility during execution.
-                flags = FOF_SILENT | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING | FOFX_RECYCLEONDELETE;
-                hr = op->SetOwnerWindow(req->owner);
-            } else flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
+            // 0x4000 is WANTNUKEWARNING, not a nonexistent DONTDISPLAYUI flag.
+            // Recycle-only failures are returned to the Pulse deletion service
+            // for a new permanent-delete confirmation, never answered in Shell.
+            flags = pulse::shell::AuthorizedDeleteFlags(req->type == REQ_AUTHORIZED_RECYCLE);
             if (SUCCEEDED(hr)) hr = op->SetOperationFlags(flags);
             if (SUCCEEDED(hr)) hr = op->Advise(&sink, &sink_cookie);
         } else {
@@ -650,8 +668,11 @@ void ExecuteRequest(Request* req) {
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE: ihr = op->DeleteItem(item, nullptr); break;
             case REQ_AUTHORIZED_RECYCLE:
+                // Handled above by explicit RecycleItem; never allow DeleteItem fallback.
+                ihr = E_UNEXPECTED;
+                break;
             case REQ_AUTHORIZED_DELETE:
-                root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src));
+                root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src, req->type == REQ_AUTHORIZED_RECYCLE));
                 ihr = op->DeleteItem(item, root_sinks.back().get());
                 break;
             case REQ_RENAME: ihr = op->RenameItem(item, req->new_name.c_str(), nullptr); break;
@@ -668,6 +689,14 @@ void ExecuteRequest(Request* req) {
         BOOL aborted = FALSE;
         const HRESULT aborted_hr = op->GetAnyOperationsAborted(&aborted);
         if (IsAuthorizedDeletion(req->type) && FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
+        if (req->type == REQ_AUTHORIZED_RECYCLE) {
+            HRESULT recycle_failure = sink.item_failure();
+            for (const auto& root_sink : root_sinks)
+                if (pulse::shell::NeedsPermanentDeleteConfirmation(root_sink->item_failure()))
+                    recycle_failure = root_sink->item_failure();
+            if (g.cancel_id.load() != req->id && pulse::shell::NeedsPermanentDeleteConfirmation(recycle_failure))
+                hr = recycle_failure; // retain explicit failure instead of a provider's cancellation wrapper
+        }
         cancelled = (g.cancel_id.load() == req->id) || hr == HRESULT_FROM_WIN32(ERROR_CANCELLED);
         if (SUCCEEDED(hr) && FAILED(sink.item_failure())) hr = sink.item_failure();
         if (aborted && !cancelled && SUCCEEDED(hr)) {
@@ -765,6 +794,11 @@ DWORD WINAPI ReaderThreadImpl() {
             Sleep(200);
             continue;
         }
+        ULONG client_pid = 0;
+        if (!GetNamedPipeClientProcessId(g.pipe, &client_pid) || client_pid != g.client_pid) {
+            DisconnectNamedPipe(g.pipe);
+            continue;
+        }
         // Frame loop.
         for (;;) {
             MsgHeader h{};
@@ -792,14 +826,11 @@ DWORD WINAPI ReaderThreadImpl() {
             }
             case REQ_CTX_INVOKE: {
                 PayloadReader r(payload.data(), payload.size());
-                uint32_t session = 0, item = 0;
-                std::wstring verb, text;
-                if (r.GetU32(session) && r.GetU32(item)) {
-                    r.GetString(verb);
-                    r.GetString(text);
-                    auto* inv = new CtxInvokeMsg{ h.request_id, item, std::move(verb),
-                                                  std::move(text) };
-                    PostCtxMessage(session, WM_CTX_INVOKE, 0,
+                ContextInvokePayload invocation;
+                if (ReadContextInvokePayload(r, invocation)) {
+                    auto* inv = new CtxInvokeMsg{ h.request_id, invocation.item, std::move(invocation.verb),
+                                                  std::move(invocation.text) };
+                    PostCtxMessage(invocation.session, WM_CTX_INVOKE, 0,
                                    reinterpret_cast<LPARAM>(inv));
                 } else {
                     SendDone(h.request_id, E_INVALIDARG, false, L"malformed ctx invoke");
@@ -854,7 +885,7 @@ DWORD WINAPI ReaderThreadImpl() {
                         }
                     }
                 }
-                if (!ok) {
+                if (!ok || r.remaining() != 0) {
                     SendDone(req->id, E_INVALIDARG, false, L"malformed request payload");
                     delete req;
                     break;
@@ -1414,7 +1445,10 @@ void StartCtxSession(uint32_t session_id, const uint8_t* payload, size_t size) {
         SendCtxItems(session_id, {});
         return;
     }
-    r.TryStringArray(data->disabled_clsids);
+    if (!r.TryStringArray(data->disabled_clsids) || r.remaining() != 0) {
+        SendCtxItems(session_id, {});
+        return;
+    }
     data->owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(owner));
     data->extended = (flags & CTXF_EXTENDED) != 0;
     data->background = (flags & CTXF_BACKGROUND) != 0;
@@ -1513,6 +1547,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
         if (ui_pid == 0) ui_pid = GetCurrentProcessId();
     }
 
+    g.client_pid = ui_pid;
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hr)) return 1;
 

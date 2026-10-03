@@ -1,11 +1,19 @@
 #pragma once
 
 #include "../ipc/protocol.h"
+#include "index_transport_security.h"
 
 namespace pulse::index::agent {
 
 inline constexpr uint32_t kMagic = 0x544E5050; // 'PPNT'
-inline constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\PulseNetworkIndex";
+inline std::wstring PipeName() {
+    const auto suffix = transport::Identity::Current().Suffix();
+    return suffix.empty() ? std::wstring{} : L"\\\\.\\pipe\\PulseNetworkIndex." + suffix;
+}
+inline std::wstring SingletonName() {
+    const auto suffix = transport::Identity::Current().Suffix();
+    return suffix.empty() ? std::wstring{} : L"Local\\Pulse.Index.NetworkAgent." + suffix;
+}
 inline constexpr size_t kMaxPayload = 16 * 1024 * 1024;
 
 enum Message : uint32_t {

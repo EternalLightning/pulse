@@ -1,4 +1,5 @@
 #include "archive_navigation.h"
+#include "shell_selection.h"
 #include "../ops/archive.h"
 // app_runtime.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
@@ -15,6 +16,8 @@
 #include "../ui/color_picker.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
+#include "../common/drive_labels.h"
+#include "../common/known_folder_labels.h"
 #include "../common/path_utils.h"
 #include "../common/display_path.h"
 #include "../common/diagnostics_exporter.h"
@@ -196,6 +199,7 @@ std::vector<std::wstring> VisibleFolderPaths(const AppState& s) {
 }
 
 void SyncVisibleWatches(AppState& s) {
+    s.systemIntegration.Publish(s);
     s.watches.Sync(VisibleFolderPaths(s), [&s](const std::wstring& path, bool overflow,
                                               std::vector<fs::DirNotifyEvent> events) {
         std::lock_guard<std::mutex> lock(s.notify_mu);
@@ -231,26 +235,66 @@ void BindCurrentLayout(AppState& s) {
     }
     SyncVisibleWatches(s);
 }
-std::wstring ResolveOpenFolderPath(std::wstring path) {
+ResolvedOpenTarget ResolveOpenTarget(std::wstring path) {
+    if (app::IsThisPcArgument(path)) return {};
     while (!path.empty() && (path.front() == L'"' || path.back() == L'"')) {
         if (path.front() == L'"') path.erase(path.begin());
         if (!path.empty() && path.back() == L'"') path.pop_back();
     }
     if (path.empty()) return {};
+    ResolvedOpenTarget target;
+    // This is the pre-existing open-target attribute query; retain its metadata
+    // so file selection never performs a second, potentially remote query.
     const DWORD attrs = GetFileAttributesW(path.c_str());
-    if (attrs != INVALID_FILE_ATTRIBUTES &&
-        (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-        if (ops::IsArchivePath(path)) return ArchiveViewPath(fs::NormalizePath(path));
-        path = fs::ParentPath(path);
+    if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (ops::IsArchivePath(path)) {
+            target.folder = ArchiveViewPath(fs::NormalizePath(path));
+            return target;
+        }
+        target.file_path = fs::NormalizePath(path);
+        const size_t slash = target.file_path.find_last_of(L"\\/");
+        target.file_leaf = slash == std::wstring::npos ? target.file_path : target.file_path.substr(slash + 1);
+        target.folder = fs::ParentPath(target.file_path);
+    } else {
+        target.folder = fs::NormalizePath(path);
     }
-    return fs::NormalizePath(path);
+    return target;
+}
+
+void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target) {
+    app::Tab* tab = ActiveTab(s);
+    if (!tab || target.file_leaf.empty() || target.file_path.empty() ||
+        !app::SameShellPath(tab->current_path, target.folder)) return;
+    // Resolve through the same visible snapshot/filter checks as Shell delivery.
+    // Loading or stale snapshots retain only the deferred selection intent.
+    std::vector<int> rows;
+    const bool delivered = app::ApplyShellSelection(*tab, s.places, {target.file_path},
+        SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE, rows);
+    if (delivered && !rows.empty()) EnsureRowVisible(s, *tab, rows.back());
+    // A filter that currently excludes (or cannot resolve) the requested row
+    // must not gain an invisible selection through later listing restoration.
+    if (!delivered && !tab->filter_text.empty()) return;
+    tab->pending_selected_name = target.file_leaf;
+    tab->pending_selected_names = {target.file_leaf};
+    tab->pending_ensure_selection_visible = true;
 }
 
 void OpenFolderInNewTab(AppState& s, const std::wstring& raw) {
     s.tray_controller.RestoreWindow();
-    const std::wstring path = ResolveOpenFolderPath(raw);
-    if (!path.empty() && !ActivateExistingFolderTab(s, path)) NewTab(s, path);
+    if (app::IsThisPcArgument(raw)) {
+        for (size_t i = 0; i < s.window_tabs.items.size(); ++i) {
+            if (!s.window_tabs.items[i]) continue;
+            for (auto& pane : s.window_tabs.items[i]->panes) {
+                if (!pane || !pane->ActiveTab() || !pane->ActiveTab()->current_path.empty()) continue;
+                SwitchTab(s, i); FocusPane(s, pane.get()); return;
+            }
+        }
+        OpenTabAt(s, L""); return;
+    }
+    const auto target = ResolveOpenTarget(raw);
+    if (!target.folder.empty() && !ActivateExistingFolderTab(s, target.folder)) NewTab(s, target.folder);
     else InvalidateRect(s.hwnd, nullptr, FALSE);
+    if (!target.folder.empty()) SelectLaunchedFile(s, target);
 }
 
 void PostWorkerResult(AppState& s, app::WorkResult res) {
@@ -354,6 +398,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_page = app::SettingsController::PageFromName(rest);
             vm.settings_scroll = s.settings.scroll();
             vm.settings_launch_on_startup = s.appPrefs.launch_on_startup;
+            vm.settings_start_to_tray = s.appPrefs.start_to_tray;
+            vm.settings_close_last_tab_window = s.appPrefs.close_last_tab_window;
             vm.settings_keep_running = s.appPrefs.keep_running_on_close;
             vm.settings_show_hidden_files = s.appPrefs.show_hidden_files;
             vm.settings_show_protected_os_files = s.appPrefs.show_protected_os_files;
@@ -392,6 +438,12 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 vm.settings_content_folders.push_back(std::move(folder));
             }
             vm.settings_open_folders = s.appPrefs.open_folders_in_pulse;
+            vm.settings_take_over_win_e = s.appPrefs.take_over_win_e;
+            vm.settings_take_over_this_pc = s.appPrefs.take_over_this_pc;
+            vm.settings_explorer_takeover = s.appPrefs.experimental_explorer_takeover;
+            vm.settings_system_pending = s.systemIntegration.pending();
+            vm.settings_system_status = vm.settings_system_pending
+                ? l10n::Get(l10n::StringId::SettingsSystemApplying) : s.systemIntegration.error();
             vm.settings_blank_click_go_back = s.appPrefs.blank_click_go_back;
             vm.settings_new_tab_home = s.appPrefs.new_tab_home;
             vm.settings_change_tracking = s.appPrefs.change_tracking_enabled;
@@ -500,14 +552,24 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             };
             for (int g = 0; g < 5; ++g)
                 vm.settings_group_on[g] = s.ctxMenuPrefs.GroupEnabled(kGroups[g]);
+            vm.settings_group_on[5] = s.ctxMenuPrefs.BuiltinGroupEnabled();
             vm.settings_items.clear();
-            vm.settings_items.reserve(s.ctxMenuPrefs.seen.size());
+            vm.settings_items.reserve(s.ctxMenuPrefs.seen.size() + app::kBuiltinMenuItemCount);
             for (const auto& seen : s.ctxMenuPrefs.seen) {
                 ui::SettingsRowView row;
                 row.key = seen.key;
                 row.text = seen.text;
                 row.group = static_cast<int>(ipc::GroupOf(seen.category));
                 row.on = s.ctxMenuPrefs.ItemEnabled(seen.key, seen.category, seen.from_com);
+                vm.settings_items.push_back(std::move(row));
+            }
+            for (int index = 0; index < app::kBuiltinMenuItemCount; ++index) {
+                const auto item = static_cast<app::BuiltinMenuItem>(index);
+                ui::SettingsRowView row;
+                row.key = app::BuiltinMenuKey(item);
+                row.text = app::BuiltinMenuLabel(item);
+                row.group = 5;
+                row.on = s.ctxMenuPrefs.BuiltinItemEnabled(item);
                 vm.settings_items.push_back(std::move(row));
             }
             if (vm.status.status_text.empty())
@@ -643,6 +705,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             // it instead of rebuilding all snapshot-derived data twice.
             if (slot.focused) slot.pane = vm.pane;
             else app::FillPaneViewModel(slot.pane, *p, &s.places);
+            slot.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
             if (app::Tab* tab = p->ActiveTab()) {
                 FillChangePane(s, *tab, slot.pane, slot.rect);
                 for (const auto& cutPath : s.cutPaths) {
@@ -798,12 +861,11 @@ void ApplyRecycleOccupancy(AppState& s) {
 
 void RequestRecycleOccupancy(AppState& s) {
     const HWND hwnd = s.hwnd;
-    s.worker.EnqueueIo([hwnd] {
-        auto* info = new fs::RecycleBinInfo{};
-        fs::QueryRecycleBinInfo(*info);
-        if (hwnd && PostMessageW(hwnd, WM_RECYCLE_INFO, 0, reinterpret_cast<LPARAM>(info)))
-            return;
-        delete info;
+    auto info = std::make_shared<fs::RecycleBinInfo>();
+    s.worker.EnqueueIo([info] { fs::QueryRecycleBinInfo(*info); }, [info, hwnd] {
+        auto payload = std::make_unique<fs::RecycleBinInfo>(*info);
+        if (hwnd && PostMessageW(hwnd, WM_RECYCLE_INFO, 0, reinterpret_cast<LPARAM>(payload.get())))
+            payload.release();
     });
 }
 
@@ -1406,6 +1468,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
         s.sidebarQuickAccessHiddenMask);
+    vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
     const ULONGLONG fold_now = GetTickCount64();
     for (auto& group : vm.sidebar) {
         group.expansion = group.collapsed ? 0.0f : 1.0f;
@@ -1422,6 +1485,8 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.settings_list_size_bar = s.appPrefs.list_size_bar;
     vm.settings_folder_sort = s.appPrefs.folder_sort_mode;
     vm.sidebar_scroll = s.sidebarScroll;
+    vm.sidebar_scrollbar_opacity = s.sidebarScrollbarFade.opacity;
+    vm.sidebar_scrollbar_expand = s.sidebarScrollbarFade.expand;
     if (s.groupDragActive) {
         vm.sidebar_group_drag_id = s.groupDragId;
         if (s.groupGapVisible) vm.sidebar_group_gap_line_y = s.groupGapLineY;
@@ -1970,6 +2035,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::NavForward: return text(I::Forward);
     case R::NavUp: return text(I::Up);
     case R::NavRefresh: return text(I::Refresh);
+    case R::BreadcrumbSegment: return s.hoverLabel;
     case R::NewButton: return text(I::New);
     case R::Cut: return text(I::CutShortcut);
     case R::Copy: return text(I::CopyShortcut);
@@ -2025,6 +2091,7 @@ std::wstring TooltipForHover(AppState& s) {
             starred && !starred->badge.empty()) {
             return starred->badge;
         }
+        if (const auto* badge = s.places.FindQuickAccessBadge(s.hoverPath)) return badge->badge;
         return L"";
     }
     case R::Row: {
@@ -2033,7 +2100,7 @@ std::wstring TooltipForHover(AppState& s) {
         if (tab && tab->snapshot && s.hoverControlIndex >= 0 &&
             s.hoverControlIndex < static_cast<int>(tab->EntryCount())) {
             const auto& entry = tab->EntryAt(s.hoverControlIndex);
-            std::wstring tooltip = entry.name;
+            std::wstring tooltip = pulse::format::DriveDisplayName(entry);
             if (!entry.change_type_text.empty()) {
                 tooltip += L" · " + entry.change_type_text + L" · " + entry.full_path;
                 if (!entry.change_old_path.empty() && entry.change_old_path != entry.full_path)
@@ -2046,6 +2113,9 @@ std::wstring TooltipForHover(AppState& s) {
                 if (!full.empty() && !full.ends_with(L"\\")) full += L"\\";
                 full += entry.name;
             }
+            if (entry.is_dir && !entry.change_record_only)
+                tooltip = pulse::path::KnownFolderDisplayName(full, tooltip);
+            const std::wstring name_only = tooltip;
             // Narrow panes drop columns; keep their facts reachable on hover.
             if (tab->view_mode == ui::ViewMode::Details) {
                 using K = ui::MainRenderer::ColumnKind;
@@ -2059,9 +2129,11 @@ std::wstring TooltipForHover(AppState& s) {
                     if (slash != std::wstring::npos && slash > 0)
                         tooltip += L" · " + full.substr(0, slash);
                 }
-                if (hidden(K::Date))
+                if (hidden(K::Date) && (entry.mtime.dwHighDateTime || entry.mtime.dwLowDateTime))
                     tooltip += L" · " + pulse::l10n::Get(pulse::l10n::StringId::ColumnModified) + L" " +
                                pulse::format::LocalFileTime(entry.mtime);
+                if (entry.drive_type != DRIVE_UNKNOWN)
+                    tooltip += L" · " + pulse::format::DriveTypeText(entry.drive_type);
             }
             if (const auto* indices = s.places.TagIndicesForPath(full); indices && !indices->empty()) {
                 tooltip += pulse::l10n::Get(pulse::l10n::StringId::TooltipTags).c_str();
@@ -2077,7 +2149,7 @@ std::wstring TooltipForHover(AppState& s) {
                 starred && !starred->badge.empty()) {
                 tooltip += pulse::l10n::Get(pulse::l10n::StringId::TooltipBadge).c_str() + starred->badge;
             }
-            return tooltip;
+            return tooltip == name_only && !s.renderer.NameWasTruncated(full, std::max(0, s.hoverPaneIndex)) ? L"" : tooltip;
         }
         return L"";
     }
@@ -2142,12 +2214,15 @@ void QueueVisibleTagDiscovery(AppState& s) {
     const int first = std::max(0, static_cast<int>(std::floor(tab->scroll_y / row_height)) - 1);
     const int visible_count = static_cast<int>(std::ceil((list.bottom - list.top) / row_height)) + 2;
     const int last = first + visible_count;
+    const ULONGLONG now = GetTickCount64();
     if (s.tagAdsLastSnapshot == tab->snapshot.get() &&
         s.tagAdsLastViewPath == tab->current_path &&
         s.tagAdsLastFilter == tab->filter_text &&
-        s.tagAdsLastFirstRow == first && s.tagAdsLastLastRow == last) {
+        s.tagAdsLastFirstRow == first && s.tagAdsLastLastRow == last &&
+        now - s.tagAdsLastDiscovery < 1000) {
         return;
     }
+    s.tagAdsLastDiscovery = now;
     s.tagAdsLastSnapshot = tab->snapshot.get();
     s.tagAdsLastViewPath = tab->current_path;
     s.tagAdsLastFilter = tab->filter_text;
@@ -2156,37 +2231,48 @@ void QueueVisibleTagDiscovery(AppState& s) {
 
     ui::PaneViewModel pane;
     app::FillPaneViewModel(pane, *s.pane, &s.places);
-    std::vector<std::wstring> paths;
-    const int end = std::min(last, static_cast<int>(pane.EntryCount()) - 1);
-    for (int view_row = first; view_row <= end; ++view_row) {
+    std::vector<std::pair<std::wstring, uint64_t>> paths;
+    constexpr size_t kPendingPathLimit = 256;
+    for (int view_row = first; view_row < std::min(last, static_cast<int>(pane.EntryCount())); ++view_row) {
+        if (s.tagAdsDiscoveryQueued.size() >= kPendingPathLimit) break;
         const int source = pane.SourceIndex(view_row);
+        if (source < 0 || static_cast<size_t>(source) >= tab->EntryCount()) continue;
         const std::wstring full = EntryFullPath(*tab, source);
         if (full.empty() || fs::IsVirtualPath(full) || s.places.TagIndicesForPath(full)) continue;
+        const auto& entry = tab->EntryAt(static_cast<size_t>(source));
+        const uint64_t version = ((static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) |
+            entry.mtime.dwLowDateTime) ^ entry.size ^ entry.attrs;
         const std::wstring key = TagDiscoveryKey(full);
-        if (key.empty() || s.tagAdsDiscoveryChecked.contains(key) ||
-            !s.tagAdsDiscoveryQueued.insert(key).second) {
-            continue;
-        }
-        paths.push_back(full);
+        if (key.empty() || s.tagAdsDiscoveryChecked.Contains(key, version, now) ||
+            !s.tagAdsDiscoveryQueued.insert(key).second) continue;
+        paths.emplace_back(full, version);
     }
     if (paths.empty()) return;
 
     const HWND notify = s.hwnd;
-    s.worker.EnqueueIo([paths = std::move(paths), notify] {
-        auto discoveries = std::make_unique<std::vector<TagAdsDiscovery>>();
+    const auto queued_paths = paths;
+    auto discoveries = std::make_shared<std::vector<TagAdsDiscovery>>();
+    if (!s.worker.EnqueueIo([paths = std::move(paths), discoveries] {
         discoveries->reserve(paths.size());
-        for (const auto& path : paths) {
+        for (const auto& [path, version] : paths) {
             TagAdsDiscovery discovery;
             discovery.path = path;
-            discovery.records = app::ReadTagAdsV2(path);
-            if (discovery.records.empty()) discovery.legacy_names = app::ReadTagAds(path);
+            discovery.version = version;
+            discovery.records = app::ReadTagAdsV2(path, &discovery.readable);
+            if (discovery.readable && discovery.records.empty())
+                discovery.legacy_names = app::ReadTagAds(path, &discovery.readable);
             discoveries->push_back(std::move(discovery));
         }
+    }, [notify, discoveries] {
+        auto payload = std::make_unique<std::vector<TagAdsDiscovery>>(std::move(*discoveries));
         if (notify && PostMessageW(notify, WM_TAG_ADS_DISCOVERED, 0,
-                                   reinterpret_cast<LPARAM>(discoveries.get()))) {
-            discoveries.release();
+                                   reinterpret_cast<LPARAM>(payload.get()))) payload.release();
+    })) {
+        for (const auto& [path, version] : queued_paths) {
+            (void)version;
+            s.tagAdsDiscoveryQueued.erase(TagDiscoveryKey(path));
         }
-    });
+    }
 }
 
 // Full path of the focused selected entry (normalized, empty when nothing selected).

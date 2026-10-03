@@ -77,7 +77,7 @@ void FillAddressSearchView(AppState& s, ui::WindowViewModel& vm) {
         current = tab->search_input_current;
     } else if (tab && !fs::IsVirtualPath(tab->current_path)) {
         root = tab->current_path;
-        current = s.appPrefs.address_search_current;
+        current = true;
     }
     const auto scope = current && !root.empty() ? app::TabTitle(root) : l10n::Get(l10n::StringId::SearchScopeAll);
     vm.address_search_placeholder = l10n::Get(l10n::StringId::Search) +
@@ -120,7 +120,7 @@ void ShowAddressSearch(AppState& s) {
         s.addressSearchContent = tab->search_input_content;
     } else {
         s.addressSearchRoot = fs::IsVirtualPath(tab->current_path) ? L"" : tab->current_path;
-        s.addressSearchCurrent = s.appPrefs.address_search_current && !s.addressSearchRoot.empty();
+        s.addressSearchCurrent = !s.addressSearchRoot.empty();
         s.addressSearchContent = s.appPrefs.address_search_content;
     }
     ShowAddressEditor(s);

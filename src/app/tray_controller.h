@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <functional>
 
 namespace pulse::app {
 
@@ -20,6 +21,10 @@ public:
     bool SetVisible(bool visible);
     void HideWindow();
     void RestoreWindow();
+    bool StartHidden(bool maximized);
+    static UINT TaskbarCreatedMessage();
+    void HandleTaskbarCreated();
+    void SetBeforeRestore(std::function<void()> hook) { before_restore_ = std::move(hook); }
     CallbackResult HandleCallback(LPARAM event);
 
     bool IsVisible() const noexcept { return icon_added_; }
@@ -30,6 +35,9 @@ private:
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
     bool icon_added_ = false;
+    bool wanted_visible_ = false;
+    bool restore_maximized_ = false;
+    std::function<void()> before_restore_;
 };
 
 } // namespace pulse::app

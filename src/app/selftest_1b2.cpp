@@ -30,6 +30,7 @@
 #include "snapshot_patch.h"
 #include "session.h"
 #include "app_prefs.h"
+#include "default_file_manager.h"
 #include "context_menu.h"
 #include "context_menu_controller.h"
 #include "context_menu_prefs.h"
@@ -2447,8 +2448,7 @@ void TestAppPrefsAndSettingsPath() {
           L"appprefs: parse json");
     Check(prefs.ApplyLaunchOnStartup(false) && !prefs.launch_on_startup,
           L"appprefs: persist=false toggle does not write Run key");
-    Check(prefs.ApplyFolderOpen(true) && prefs.open_folders_in_pulse,
-          L"appprefs: persist=false folder-open toggle does not write HKCU");
+    prefs.open_folders_in_pulse = true;
     const std::wstring json = prefs.ToJson();
     AppPrefs loaded;
     loaded.persist = false;
@@ -2465,13 +2465,10 @@ void TestAppPrefsAndSettingsPath() {
     Check(prefs.FromJson(L"{\"show_status_performance\":true}") &&
           prefs.show_status_performance,
           L"appprefs: parse show_status_performance");
-    Check(FolderOpenCommandLine(L"C:\\Pulse\\Pulse.exe") ==
-              L"\"C:\\Pulse\\Pulse.exe\" \"%1\"",
-          L"appprefs: folder-open command quotes exe and %1");
-    Check(FolderOpenCommandIsOurs(L"\"C:\\Pulse\\Pulse.exe\" \"%1\"",
+    Check(app::DefaultManagerCommandIsOurs(L"\"C:\\Pulse\\Pulse.exe\" \"%1\"",
                                   L"C:\\Pulse\\Pulse.exe"),
           L"appprefs: folder-open command matches our exe");
-    Check(!FolderOpenCommandIsOurs(L"\"C:\\Windows\\explorer.exe\" \"%1\"",
+    Check(!app::DefaultManagerCommandIsOurs(L"\"C:\\Windows\\explorer.exe\" \"%1\"",
                                    L"C:\\Pulse\\Pulse.exe"),
           L"appprefs: folder-open command ignores explorer");
     AppPrefs density;

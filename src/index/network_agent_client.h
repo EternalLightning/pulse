@@ -68,8 +68,7 @@ private:
     HANDLE agent_process_ = nullptr;
     ULONGLONG last_spawn_tick_ = 0;  // guarded by request_mu_
     static constexpr ULONGLONG kRespawnBackoffMs = 5000;
-    // Must match the mutex created by RunAgent() in network_agent_main.cpp.
-    static constexpr const wchar_t* kAgentSingletonName = L"Local\\Pulse.Index.NetworkAgent.Singleton";
+    HANDLE cancel_ = nullptr;
 };
 
 } // namespace pulse::index

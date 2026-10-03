@@ -73,6 +73,7 @@ ComPtr<IDWriteTextFormat> MakeFormat(IDWriteFactory2* dwrite, float size) {
 // ---------------------------------------------------------------------------
 void FluentMenuModel::SetItems(std::vector<FluentMenuItem> items) {
     items_ = std::move(items);
+    label_truncated_.clear();
 }
 
 namespace {
@@ -112,6 +113,23 @@ bool FluentMenuModel::PatchCommands(const std::vector<FluentMenuItem>& src) {
     for (size_t i = 0; i < items_.size(); ++i)
         PatchItemCommands(items_[i], src[i]);
     return true;
+}
+
+bool FluentMenuModel::UpdateCommandState(int command, const std::wstring& text, bool enabled) {
+    bool changed = false;
+    const auto update = [&](auto&& self, std::vector<FluentMenuItem>& items) -> void {
+        for (auto& item : items) {
+            if (item.command == command && (item.text != text || item.enabled != enabled)) {
+                item.text = text;
+                item.enabled = enabled;
+                changed = true;
+            }
+            self(self, item.children);
+        }
+    };
+    update(update, items_);
+    if (changed) label_truncated_.clear();
+    return changed;
 }
 
 void FluentMenuModel::Layout(IDWriteFactory2* dwrite, float scale, float min_width_px) {
@@ -163,6 +181,33 @@ void FluentMenuModel::Layout(IDWriteFactory2* dwrite, float scale, float min_wid
         left_chrome - right_chrome - shortcut_gap);
     inline_label_width_ = std::min({inline_label_width_, 240.0f * scale_, inline_space * 0.4f});
 
+    label_truncated_.assign(items_.size(), false);
+    for (size_t i = 0; i < items_.size(); ++i) {
+        const auto& it = items_[i];
+        if (!it.quick_swatches.empty()) continue;
+        // Mirror DrawMenuItem's label rectangle, including its inline column.
+        float available = width_ - left_chrome - right_chrome;
+        if (it.radio_group) available -= 6.0f * scale_;
+        if (it.trailing_command) available -= 32.0f * scale_;
+        if (it.toggle) available -= 52.0f * scale_;
+        if (!it.children.empty()) {
+            available -= 26.0f * scale_;
+        } else if (!it.badge_text.empty()) {
+            available -= std::max(28.0f * scale_,
+                std::ceil(MeasureWidth(dwrite, caption.get(), it.badge_text)) + 14.0f * scale_) + 8.0f * scale_;
+        } else if (!it.shortcut.empty()) {
+            if (it.shortcut_inline) {
+                const float gap = std::min(24.0f * scale_, std::max(0.0f, available) * 0.25f);
+                available = std::min(inline_label_width_, std::max(0.0f, available - gap));
+            } else {
+                const float max_shortcut = std::max(24.0f * scale_, available - 88.0f * scale_);
+                available -= std::clamp(MeasureWidth(dwrite, caption.get(), it.shortcut) + 4.0f * scale_,
+                    24.0f * scale_, max_shortcut) + 8.0f * scale_;
+            }
+        }
+        label_truncated_[i] = MeasureWidth(dwrite, body.get(), it.text) > std::max(0.0f, available) + 0.5f;
+    }
+
     float h = pad_v_ * 2.0f;
     for (const auto& it : items_) {
         h += row_h_;
@@ -173,6 +218,17 @@ void FluentMenuModel::Layout(IDWriteFactory2* dwrite, float scale, float min_wid
 
 const FluentMenuItem* FluentMenuModel::At(int i) const {
     return (i >= 0 && i < (int)items_.size()) ? &items_[i] : nullptr;
+}
+
+bool FluentMenuModel::LabelTruncated(int i) const {
+    return i >= 0 && static_cast<size_t>(i) < label_truncated_.size() && label_truncated_[i];
+}
+
+std::wstring FluentMenuModel::TooltipText(int i) const {
+    const auto* item = At(i);
+    if (!item) return {};
+    if (!item->tooltip.empty()) return item->tooltip;
+    return LabelTruncated(i) ? item->text : std::wstring{};
 }
 
 float FluentMenuModel::RowTopPx(int i) const {
@@ -292,6 +348,7 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     }
     case WM_MOUSELEAVE:
         if (is_sub) {
+            self->UpdateTooltip(-1);
             if (self->sub_hover_ != -1) {
                 self->sub_hover_ = -1;
                 self->sub_hover_swatch_ = -1;
@@ -741,6 +798,7 @@ void FluentMenu::OnSubMouse(POINT client_pt, bool button_up) {
         sub_hover_swatch_ = swatch;
         if (RenderSub()) PresentSub(255);
     }
+    UpdateTooltip(row, true);
 }
 
 void FluentMenu::OnMouse(POINT client_pt, bool button_up) {
@@ -780,9 +838,8 @@ void FluentMenu::OnMouse(POINT client_pt, bool button_up) {
     }
 }
 
-void FluentMenu::UpdateTooltip(int row) {
-    const auto* item = model_.At(row);
-    const std::wstring text = item ? item->tooltip : std::wstring{};
+void FluentMenu::UpdateTooltip(int row, bool submenu) {
+    const std::wstring text = (submenu ? sub_model_ : model_).TooltipText(row);
     if (text == tooltip_text_) return;
     if (!tooltip_ && !text.empty() && hwnd_) {
         tooltip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, TOOLTIPS_CLASSW,
@@ -1510,6 +1567,27 @@ void FluentMenu::RequestFilterRefresh() {
 bool FluentMenu::ReplaceItems(std::vector<FluentMenuItem> items) {
     if (!open_ || animating_out_ || filter_fn_ || !compositor_ || items.empty()) return false;
     if (!model_.PatchCommands(items)) return false;
+    return true;
+}
+
+bool FluentMenu::UpdateCommandState(int command, const std::wstring& text, bool enabled) {
+    if (!open_ || animating_out_ || !compositor_) return false;
+    const float fixed_width = static_cast<float>(model_.WidthPx());
+    const bool changed = model_.UpdateCommandState(command, text, enabled);
+    const bool changed_sub = sub_model_.UpdateCommandState(command, text, enabled);
+    if (!changed && !changed_sub) return false;
+    UpdateTooltip(-1);
+    if (changed) {
+        model_.Layout(compositor_->DwriteFactory(), scale_, fixed_width);
+        if (const auto* item = model_.At(hover_row_); item && !item->enabled) hover_row_ = -1;
+        if (Render()) Present(255, present_offset_);
+    }
+    if (changed_sub && sub_parent_row_ >= 0) {
+        const float sub_width = static_cast<float>(sub_model_.WidthPx());
+        sub_model_.Layout(compositor_->DwriteFactory(), scale_, sub_width);
+        if (const auto* item = sub_model_.At(sub_hover_); item && !item->enabled) sub_hover_ = -1;
+        if (RenderSub()) PresentSub(255);
+    }
     return true;
 }
 

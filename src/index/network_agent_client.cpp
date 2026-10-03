@@ -28,12 +28,13 @@ std::vector<uint8_t> QueryPayload(const Query& query) {
     return writer.data();
 }
 
-bool ReadFrame(HANDLE pipe, uint32_t& type, uint32_t& id, std::vector<uint8_t>& payload) {
+bool ReadFrame(HANDLE pipe, uint32_t& type, uint32_t& id, std::vector<uint8_t>& payload,
+               ULONGLONG deadline, HANDLE cancel) {
     MsgHeader header{};
-    if (!PipeRead(pipe, reinterpret_cast<uint8_t*>(&header), sizeof(header)) ||
+    if (!transport::Transfer(pipe, &header, sizeof(header), false, deadline, cancel) ||
         header.magic != agent::kMagic || header.payload_size > agent::kMaxPayload) return false;
     payload.resize(header.payload_size);
-    if (!payload.empty() && !PipeRead(pipe, payload.data(), header.payload_size)) return false;
+    if (!payload.empty() && !transport::Transfer(pipe, payload.data(), header.payload_size, false, deadline, cancel)) return false;
     type = header.type;
     id = header.request_id;
     return true;
@@ -59,11 +60,13 @@ bool NetworkAgentClient::EnsureAgent() {
     // owned by another Pulse window or outlive the Pulse instance that started it. Spawning a
     // duplicate would exit immediately and cause a respawn loop on every request (and a
     // flickering AppStarting cursor), so reuse whichever agent currently holds the singleton.
-    if (HANDLE existing = OpenMutexW(SYNCHRONIZE, FALSE, kAgentSingletonName)) {
+    const auto singleton = agent::SingletonName();
+    if (singleton.empty()) return false;
+    if (HANDLE existing = OpenMutexW(SYNCHRONIZE, FALSE, singleton.c_str())) {
         CloseHandle(existing);
         return true;
     }
-    if (GetLastError() == ERROR_ACCESS_DENIED) return true; // exists, owned by an elevated agent
+    if (GetLastError() == ERROR_ACCESS_DENIED) return false; // fail closed on a squatted endpoint
     // A crashing agent must not be relaunched on every 1 s status poll.
     const ULONGLONG now = GetTickCount64();
     if (last_spawn_tick_ && now - last_spawn_tick_ < kRespawnBackoffMs) return false;
@@ -82,13 +85,20 @@ bool NetworkAgentClient::EnsureAgent() {
 }
 
 bool NetworkAgentClient::OpenPipe(HANDLE& pipe) {
-    pipe = CreateFileW(agent::kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                       OPEN_EXISTING, 0, nullptr);
-    if (pipe != INVALID_HANDLE_VALUE) return true;
-    if (GetLastError() == ERROR_PIPE_BUSY) WaitNamedPipeW(agent::kPipeName, 1000);
-    pipe = CreateFileW(agent::kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                       OPEN_EXISTING, 0, nullptr);
-    return pipe != INVALID_HANDLE_VALUE;
+    const auto name = agent::PipeName();
+    if (name.empty()) return false;
+    const auto deadline = GetTickCount64() + 2000;
+    do {
+        pipe = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IMPERSONATION, nullptr);
+        if (pipe != INVALID_HANDLE_VALUE) {
+            if (transport::VerifyServer(pipe, ExePath(), transport::Identity::Current())) return true;
+            CloseHandle(pipe); pipe = INVALID_HANDLE_VALUE; return false;
+        }
+        if (GetLastError() == ERROR_PIPE_BUSY) WaitNamedPipeW(name.c_str(), 100);
+        else Sleep(20);
+    } while (running_ && GetTickCount64() < deadline);
+    return false;
 }
 
 bool NetworkAgentClient::Request(uint32_t type, uint32_t id,
@@ -114,14 +124,15 @@ bool NetworkAgentClient::Request(uint32_t type, uint32_t id,
         CloseHandle(pipe);
     };
     const MsgHeader header = agent::MakeHeader(type, id, static_cast<uint32_t>(payload.size()));
-    const bool sent = PipeWrite(pipe, reinterpret_cast<const uint8_t*>(&header), sizeof(header)) &&
-                      (payload.empty() || PipeWrite(pipe, payload.data(), static_cast<DWORD>(payload.size())));
+    const auto deadline = GetTickCount64() + 10000;
+    const bool sent = transport::Transfer(pipe, const_cast<MsgHeader*>(&header), sizeof(header), true, deadline, cancel_) &&
+        (payload.empty() || transport::Transfer(pipe, const_cast<uint8_t*>(payload.data()), static_cast<DWORD>(payload.size()), true, deadline, cancel_));
     if (!sent) {
         close_pipe();
         return false;
     }
     uint32_t response_id = 0;
-    const bool received = ReadFrame(pipe, response_type, response_id, response) && response_id == id;
+    const bool received = ReadFrame(pipe, response_type, response_id, response, deadline, cancel_) && response_id == id;
     close_pipe();
     return received;
 }
@@ -131,6 +142,8 @@ void NetworkAgentClient::Start(HWND notify, UINT status_msg, UINT search_msg) {
     notify_ = notify;
     status_msg_ = status_msg;
     search_msg_ = search_msg;
+    cancel_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!cancel_) return;
     running_ = true;
     status_thread_ = std::thread([this] {
         std::unique_lock<std::mutex> lock(status_mu_);
@@ -149,18 +162,15 @@ void NetworkAgentClient::Stop() {
     running_ = false;
     status_cv_.notify_all();
     search_cv_.notify_all();
+    if (cancel_) SetEvent(cancel_);
     {
         std::lock_guard<std::mutex> lock(pipe_mu_);
-        if (active_pipe_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(active_pipe_);
-            active_pipe_ = INVALID_HANDLE_VALUE;
-        }
+        if (active_pipe_ != INVALID_HANDLE_VALUE) CancelIoEx(active_pipe_, nullptr);
     }
-    if (status_thread_.joinable()) CancelSynchronousIo(status_thread_.native_handle());
-    if (search_thread_.joinable()) CancelSynchronousIo(search_thread_.native_handle());
     if (status_thread_.joinable()) status_thread_.join();
     if (search_thread_.joinable()) search_thread_.join();
     std::lock_guard<std::mutex> lock(request_mu_);
+    if (cancel_) { CloseHandle(cancel_); cancel_ = nullptr; }
     if (agent_process_) {
         CloseHandle(agent_process_);
         agent_process_ = nullptr;

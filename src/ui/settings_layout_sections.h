@@ -1,4 +1,45 @@
 // Included inside ui_renderer_internal.h's anonymous namespace.
+constexpr float kSettingsRowMinDip = 64.0f;
+constexpr float kSettingsRowPaddingDip = 10.0f;
+constexpr float kSettingsTextGapDip = 2.0f;
+
+struct SettingsToggleGeometry {
+    D2D1_RECT_F title{}, description{}, control{}, icon{};
+};
+float SettingsTitleHeight(float scale, const fluent::Painter* painter) {
+    return std::max(24.0f * scale, painter ? painter->MeasureButtonHeight() - 8.0f * scale : 0.0f);
+}
+float SettingsCaptionHeight(std::wstring_view description, float width, float scale,
+                           const fluent::Painter* painter) {
+    return description.empty() ? 0.0f : std::max(18.0f * scale,
+        painter ? painter->MeasureWrappedCaptionHeight(description, std::max(1.0f, width)) : 18.0f * scale);
+}
+float SettingsToggleHeight(float width, std::wstring_view description, float scale,
+                           const fluent::Painter* painter, float control_reserve_dip = 72.0f) {
+    const float caption = SettingsCaptionHeight(description, width - (54.0f + control_reserve_dip) * scale, scale, painter);
+    const float text = SettingsTitleHeight(scale, painter) + (caption > 0 ? kSettingsTextGapDip * scale + caption : 0);
+    return std::max(kSettingsRowMinDip * scale, text + 2.0f * kSettingsRowPaddingDip * scale);
+}
+SettingsToggleGeometry SettingsToggleBounds(const D2D1_RECT_F& row, std::wstring_view description,
+                                           float scale, const fluent::Painter* painter,
+                                           float control_reserve_dip = 72.0f) {
+    SettingsToggleGeometry result;
+    const float left = row.left + 54.0f * scale, right = row.right - control_reserve_dip * scale;
+    const float title = SettingsTitleHeight(scale, painter);
+    const float caption = SettingsCaptionHeight(description, right - left, scale, painter);
+    const float text = title + (caption > 0 ? kSettingsTextGapDip * scale + caption : 0);
+    const float top = row.top + std::max(kSettingsRowPaddingDip * scale, (row.bottom - row.top - text) * 0.5f);
+    result.title = D2D1::RectF(left, top, right, top + title);
+    result.description = D2D1::RectF(left, result.title.bottom + kSettingsTextGapDip * scale,
+        right, result.title.bottom + kSettingsTextGapDip * scale + caption);
+    const float center = (row.top + row.bottom) * 0.5f;
+    const float switch_right = row.right - (control_reserve_dip - 56.0f) * scale;
+    result.control = D2D1::RectF(switch_right - 44.0f * scale, center - 16.0f * scale,
+        switch_right, center + 16.0f * scale);
+    result.icon = D2D1::RectF(row.left + 16.0f * scale, center - 12.0f * scale,
+        row.left + 40.0f * scale, center + 12.0f * scale);
+    return result;
+}
 float LayoutSettingsActions(float left, float right, float top, float scale,
                             const std::wstring_view* labels, int count, D2D1_RECT_F* output,
                             const fluent::Painter* painter, bool wrap_text = false) {
@@ -187,6 +228,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     const float left = l.content.left + 20*scale, right = l.content.right - 20*scale;
     const bool narrow = right - left < 560*scale;
     auto row = [&](float h) { auto r = D2D1::RectF(left, y, right, y+h*scale); y=r.bottom; return r; };
+    auto toggle_row = [&](l10n::StringId description) {
+        return row(SettingsToggleHeight(right - left, l10n::Get(description), scale, painter) / scale);
+    };
     auto section = [&](int i) { y+=24*scale; l.section[i]=row(28); };
     auto choice = [&](D2D1_RECT_F r, float width) {
         return D2D1::RectF(narrow ? r.left+16*scale : r.right-(width+16)*scale,
@@ -223,13 +267,24 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     l.language_card=row(narrow ? 98.0f : 64.0f); l.language_choice=choice(l.language_card,176);
     l.group[0]=D2D1::RectF(left,l.theme_row.top,right,y);
     section(1);
-    l.startup_row[0]=row(64); l.startup_row[1]=row(64); l.startup_row[2]=row(88);
-    l.new_tab_row=row(88);
+    using I = l10n::StringId;
+    l.startup_row[0]=toggle_row(I::SettingsLaunchDesc); l.startup_tray_row=toggle_row(I::StartToTrayDesc);
+    l.startup_row[1]=toggle_row(I::SettingsKeepRunningDesc); l.last_tab_row=toggle_row(I::CloseLastTabWindowDesc);
+    l.startup_row[2]=toggle_row(I::SettingsDefaultManagerDesc);
+    const I manager_descriptions[] = {I::SettingsOpenFoldersDesc, I::SettingsTakeoverWinEDesc,
+        I::SettingsTakeoverThisPcDesc, I::SettingsExplorerTakeoverDesc};
+    for(size_t i=0;i<std::size(l.default_manager_rows);++i)
+        l.default_manager_rows[i]=toggle_row(manager_descriptions[i]);
+    if(!vm.settings_system_pending && !vm.settings_system_status.empty())
+        l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
+            scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
+    l.new_tab_row=toggle_row(I::SettingsNewTabHomeDesc);
     l.group[1]=D2D1::RectF(left,l.startup_row[0].top,right,y);
     section(2);
     l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);
-    l.performance_row=row(64);
-    for(auto& list_row : l.list_style_row) list_row=row(64);
+    l.performance_row=toggle_row(I::SettingsShowPerformanceDesc);
+    const I list_descriptions[] = {I::ListSmartDateDesc, I::ListZebraRowsDesc, I::ListSizeBarDesc};
+    for(size_t i=0;i<std::size(l.list_style_row);++i) l.list_style_row[i]=toggle_row(list_descriptions[i]);
     l.folder_sort_card=row(narrow ? 98.0f : 64.0f); segments(l.folder_sort_card,l.folder_sort_row,3,282);
     l.group[2]=D2D1::RectF(left,l.density_card.top,right,y);
     y+=18*scale;
@@ -245,11 +300,11 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         y+=8*scale; l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); l.wallpaper_look_value=choice(l.wallpaper_look_card,112);
         y+=8*scale; l.wallpaper_blur_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_blur_card,l.wallpaper_blur_row,3,282);
         y+=8*scale; l.tray_icon_card=row(narrow ? 98.0f : 64.0f); segments(l.tray_icon_card,l.tray_icon_row,3,282);
-        y+=8*scale; l.hidden_files_row=row(64);
-        y+=8*scale; l.protected_files_row=row(64);
-        y+=8*scale; l.pinned_names_row=row(64);
-        y+=8*scale; l.blank_click_row=row(64);
-        y+=8*scale; l.change_tracking_row=row(64);
+        y+=8*scale; l.hidden_files_row=toggle_row(I::SettingsShowHiddenDesc);
+        y+=8*scale; l.protected_files_row=toggle_row(I::SettingsShowProtectedDesc);
+        y+=8*scale; l.pinned_names_row=toggle_row(I::PinnedNamesDesc);
+        y+=8*scale; l.blank_click_row=toggle_row(I::SettingsBlankClickBackDesc);
+        y+=8*scale; l.change_tracking_row=toggle_row(I::SettingsChangeTrackingDesc);
         l.change_days_row=row(narrow ? 98.0f : 64.0f); segments(l.change_days_row,l.change_days,3,282);
     }
     y+=18*scale; l.configuration_path=row(152);

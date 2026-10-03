@@ -48,6 +48,7 @@ void ContextMenuPrefs::ResetToDefaults() {
     print = true;
     explorer_cap = ipc::kDefaultExplorerCap;
     open_with_mru = 2;
+    builtin_hidden = 0;
     item_enabled.clear();
     seen.clear();
     slow_ext.clear();
@@ -64,6 +65,23 @@ bool ContextMenuPrefs::CategoryEnabled(ipc::CtxMenuCategory c) const {
     case ipc::CtxMenuCategory::Print: return print;
     default: return software;
     }
+}
+
+bool ContextMenuPrefs::BuiltinItemEnabled(BuiltinMenuItem item) const {
+    return !(builtin_hidden & BuiltinMenuBit(item));
+}
+
+void ContextMenuPrefs::SetBuiltinItemEnabled(BuiltinMenuItem item, bool enabled) {
+    if (enabled) builtin_hidden &= ~BuiltinMenuBit(item);
+    else builtin_hidden |= BuiltinMenuBit(item);
+}
+
+bool ContextMenuPrefs::BuiltinGroupEnabled() const {
+    return (builtin_hidden & kBuiltinMenuMask) != kBuiltinMenuMask;
+}
+
+void ContextMenuPrefs::SetBuiltinGroupEnabled(bool enabled) {
+    builtin_hidden = enabled ? 0u : kBuiltinMenuMask;
 }
 
 bool ContextMenuPrefs::GroupEnabled(ipc::CtxMenuGroup g) const {
@@ -208,6 +226,14 @@ std::wstring ContextMenuPrefs::ToJson() const {
     cat(L"open_with_com", open_with_com, false);
     cat(L"system_extra", system_extra, false);
     cat(L"print", print, true);
+    out += L"  },\n  \"pulse_items\":{\n";
+    for (int index = 0; index < kBuiltinMenuItemCount; ++index) {
+        const auto item = static_cast<BuiltinMenuItem>(index);
+        out += L"    \"";
+        out += BuiltinMenuKey(item);
+        out += BuiltinItemEnabled(item) ? L"\":true" : L"\":false";
+        out += index + 1 == kBuiltinMenuItemCount ? L"\n" : L",\n";
+    }
     out += L"  },\n  \"items\":{\n";
     size_t n = 0;
     for (const auto& kv : item_enabled) {
@@ -267,6 +293,13 @@ std::wstring ContextMenuPrefs::ToJson() const {
 
 bool ContextMenuPrefs::FromJson(const std::wstring& json) {
     if (json.empty()) return false;
+    builtin_hidden = 0;
+    const auto builtin = ExtractObject(json, L"pulse_items");
+    for (int index = 0; index < kBuiltinMenuItemCount; ++index) {
+        const auto item = static_cast<BuiltinMenuItem>(index);
+        SetBuiltinItemEnabled(item, pulse::json::ExtractBool(
+            builtin, std::wstring(BuiltinMenuKey(item)), true));
+    }
     explorer_cap = ClampCap(pulse::json::ExtractInt(json, L"explorer_cap", ipc::kDefaultExplorerCap),
                             1, 48, ipc::kDefaultExplorerCap);
     open_with_mru = ClampCap(pulse::json::ExtractInt(json, L"open_with_mru", 2), 0, 8, 2);

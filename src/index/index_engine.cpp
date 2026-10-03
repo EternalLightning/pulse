@@ -1336,7 +1336,8 @@ void Engine::PartialSortPage(std::vector<int32_t>& ids, size_t offset, size_t li
 }
 
 SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
-                            uint32_t expected) const {
+                            uint32_t expected,
+                            const std::function<bool(const std::wstring&)>& authorize) const {
     SearchResult out;
     std::lock_guard<std::mutex> query_guard(query_mu_);
     if (latest && latest->load() != expected) return out;
@@ -1369,27 +1370,38 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
         CollectMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, matches, latest, expected);
     }
     if (latest && latest->load() != expected) return out;
+    if (authorize) {
+        MatchSet visible; visible.Begin(LiveCount());
+        matches.ForEach([&](int32_t id) {
+            if ((!latest || latest->load() == expected) && authorize(BuildQueryPathLocked(id))) visible.Add(id);
+        });
+        matches = std::move(visible);
+    }
     out.total = matches.total;
     if (cap == 0 || matches.total == 0) {
+        if (!authorize) {
+            cache_raw_ = q.needle;
+            cache_path_prefix_ = prefix;
+            cache_folders_only_ = q.folders_only;
+            cache_ranked_ = q.rank;
+            cache_sort_ = q.sort;
+            cache_sort_desc_ = q.sort_desc;
+            cache_set_ = matches;
+            cache_epoch_ = filter_epoch_;
+        }
+        return out;
+    }
+
+    if (!authorize) {
         cache_raw_ = q.needle;
         cache_path_prefix_ = prefix;
         cache_folders_only_ = q.folders_only;
         cache_ranked_ = q.rank;
-        cache_sort_ = q.sort;
-        cache_sort_desc_ = q.sort_desc;
+        cache_sort_ = q.rank ? ResultSort::Index : q.sort;
+        cache_sort_desc_ = q.rank ? false : q.sort_desc;
         cache_set_ = matches;
         cache_epoch_ = filter_epoch_;
-        return out;
     }
-
-    cache_raw_ = q.needle;
-    cache_path_prefix_ = prefix;
-    cache_folders_only_ = q.folders_only;
-    cache_ranked_ = q.rank;
-    cache_sort_ = q.rank ? ResultSort::Index : q.sort;
-    cache_sort_desc_ = q.rank ? false : q.sort_desc;
-    cache_set_ = matches;
-    cache_epoch_ = filter_epoch_;
 
     const size_t start = (std::min)(q.offset, matches.total);
     const size_t want = cap;
@@ -2580,6 +2592,12 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
                                               USN_REASON_RENAME_NEW_NAME)) != 0;
     const bool attr_reason = (reason & (USN_REASON_DATA_EXTEND | USN_REASON_DATA_TRUNCATION |
                                         USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) != 0;
+    if (reason & USN_REASON_SECURITY_CHANGE) {
+        // No allow decision survives a response, and notify subscriptions even
+        // when the filename/attributes did not change.
+        InvalidateFilterLocked();
+        return UsnApply::Attr;
+    }
     if (!structural_reason && !attr_reason) return UsnApply::None;
 
     const uint64_t frn = rec->FileReferenceNumber;
@@ -3659,7 +3677,7 @@ void Engine::StartWalkWatches(const std::vector<std::wstring>& roots) {
         const BOOL subtree = TRUE;
         ReadDirectoryChangesW(w.dir, w.buf.data(), static_cast<DWORD>(w.buf.size()), subtree,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SECURITY,
             nullptr, &w.ov, nullptr);
     }
 }
@@ -3689,7 +3707,7 @@ void Engine::PollWalkWatches() {
         const BOOL subtree = TRUE;
         ReadDirectoryChangesW(w.dir, w.buf.data(), static_cast<DWORD>(w.buf.size()), subtree,
             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SECURITY,
             nullptr, &w.ov, nullptr);
     }
 }

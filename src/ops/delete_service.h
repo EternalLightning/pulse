@@ -11,8 +11,8 @@ namespace pulse::ops {
 // Recyclable is a caller-supplied proof, not a promise established by this class.
 // Production builders without positive proof must use Unknown; tests may mock it.
 enum class DeleteDisposition { Recyclable, Permanent, Unknown, RecycleRequested };
-// RecycleRequested is intent, not proof: the Shell must warn before any
-// non-recyclable item is permanently deleted. Earlier items are not rolled back.
+// RecycleRequested permits explicit recycling only, never an automatic permanent
+// fallback. That requires a newly confirmed Pulse plan; earlier results are not rolled back.
 enum class DeleteOrigin { Selection, Preview, Duplicates, Undo, Recovery, EmptyRecycle };
 
 struct DeleteTarget {

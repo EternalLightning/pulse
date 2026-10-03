@@ -66,6 +66,8 @@ void GoBack(AppState& s);
 void GoForward(AppState& s);
 bool IsSettingsTab(const app::Tab* tab);
 std::wstring NewTabPath(const AppState& s);
+// Explicit location opener: preserves empty as This PC, unlike ordinary NewTab.
+void OpenTabAt(AppState& s, const std::wstring& path);
 void NewTab(AppState& s, const std::wstring& path);
 void OpenSettingsTab(AppState& s, int page);
 void CloseLayoutTab(AppState& s, size_t idx);

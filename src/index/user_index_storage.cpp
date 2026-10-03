@@ -1,6 +1,7 @@
 #include "../common/user_storage.h"
 #include "index_migration.h"
 #include "index_protocol.h"
+#include "index_transport_security.h"
 #include "user_index_storage.h"
 #include "../common/current_user_security.h"
 #include <windows.h>
@@ -41,7 +42,7 @@ bool ApplyUserIndexWithHost(const std::wstring& pipe_name, const std::wstring& m
     }
     DWORD wait = WaitForSingleObject(mutex, 0);
     if (wait == WAIT_TIMEOUT) {
-        HANDLE pipe = CreateFileW(pipe_name.c_str(), GENERIC_WRITE, 0, nullptr,
+        HANDLE pipe = CreateFileW(pipe_name.c_str(), (FILE_GENERIC_WRITE & ~FILE_APPEND_DATA), 0, nullptr,
             OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
         if (pipe != INVALID_HANDLE_VALUE) {
             const auto request = index::MakeIndexHdr(index::REQ_IDX_STORAGE_SHUTDOWN, 0, 0);

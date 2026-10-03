@@ -50,7 +50,14 @@ void RememberLayoutFocus(AppState& s);
 std::vector<std::wstring> VisibleFolderPaths(const AppState& s);
 void SyncVisibleWatches(AppState& s);
 void BindCurrentLayout(AppState& s);
-std::wstring ResolveOpenFolderPath(std::wstring path);
+struct ResolvedOpenTarget {
+    std::wstring folder;
+    std::wstring file_path;
+    std::wstring file_leaf;
+};
+ResolvedOpenTarget ResolveOpenTarget(std::wstring path);
+// Consumes already-resolved metadata; selection performs no filesystem queries.
+void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target);
 void OpenFolderInNewTab(AppState& s, const std::wstring& raw);
 void PostWorkerResult(AppState& s, app::WorkResult res);
 D2D1_RECT_F FocusedPaneRect(const AppState& s);

@@ -201,6 +201,15 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             for(int i=0;i<3;++i) if(ContainsPt(actions[i],x,y)) {r.region=HitTestResult::SettingsContentAction;r.index=i+1;return r;}
 
             if (vm.settings_page == 0) {
+                if(ContainsPt(lay.startup_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=31;return r;}
+                if(ContainsPt(lay.last_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=32;return r;}
+                if(!vm.settings_system_pending) {
+                    if(ContainsPt(lay.startup_row[2],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=21;return r;}
+                    const int system_ids[]={3,22,23,24};
+                    for(int i=0;i<4;++i) if(ContainsPt(lay.default_manager_rows[i],x,y)) {
+                        r.region=HitTestResult::SettingsToggle;r.index=system_ids[i];return r;
+                    }
+                }
                 if (ContainsPt(lay.accent_picker,x,y) || ContainsPt(lay.accent_system,x,y)) {
                     r.region = HitTestResult::SettingsAccent;
                     r.index = ContainsPt(lay.accent_picker,x,y) ? 0 : 1;
@@ -287,7 +296,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 for (int i = 0; i < 3; ++i) if (ContainsPt(lay.change_days[i], x, y)) {
                     r.region = HitTestResult::SettingsChangeDays; r.index = i; return r;
                 }
-                for (int i = 0; i < 3; ++i) {
+                for (int i = 0; i < 2; ++i) {
                     if (ContainsPt(lay.startup_row[i], x, y)) {
                         r.region = HitTestResult::SettingsToggle;
                         r.index = i + 1;
@@ -351,8 +360,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                     }
                 }
             } else if (vm.settings_page == 2) {
-                for(int g=0;g<5;++g) {
-                    if(ContainsPt(lay.context_toggle[g],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=10+g;return r;}
+                for(int g=0;g<SettingsLayout::kContextCards;++g) {
+                    if(ContainsPt(lay.context_toggle[g],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=g==5 ? 30 : 10+g;return r;}
                     if(ContainsPt(lay.context_header[g],x,y)) {r.region=HitTestResult::SettingsDisclosure;r.index=8+g;return r;}
                 }
                 for(size_t i=0;i<lay.context_rows.size();++i) if(ContainsPt(lay.context_rows[i],x,y)) {
@@ -477,7 +486,9 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 std::vector<BreadcrumbPlaced> placed;
                 BreadcrumbLayout(vm.pane,rect.right,placed);
                 for (size_t i=0;i<placed.size();++i) if (RectContains(placed[i].rc,x,y)) {
-                    r.region=HitTestResult::BreadcrumbSegment; r.index=(int)i; r.path=placed[i].path; break;
+                    r.region=HitTestResult::BreadcrumbSegment; r.index=(int)i; r.path=placed[i].path;
+                    if (placed[i].text != placed[i].full_text) r.label=placed[i].full_text;
+                    break;
                 }
             }
             return r;
@@ -945,7 +956,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                             compositor_, compositor_->DwriteFactory(), compositor_->FileNameFormat(), change != nullptr,
                             paneVm.view_mode == ViewMode::Details ? (entry.is_dir ? 3 : 2) : 0,
                             NameMatchRanges(display_name, NameHighlightTerms(paneVm.filter_text,
-                                paneVm.is_search ? paneVm.search_query : L"")));
+                                paneVm.is_search ? paneVm.search_query : L"")), paneVm.row_action_mask);
                         if (change && !grid && ContainsPt(trail.badge, x, y)) {
                             out.region = HitTestResult::ChangeBadge; out.index = idx; return out;
                         }

@@ -1,6 +1,8 @@
 #include "index_path_service.h"
 #include "index_config.h"
 #include "index_migration.h"
+#include "index_raw_storage_security.h"
+#include <filesystem>
 #include <windows.h>
 #include <winsvc.h>
 
@@ -66,6 +68,14 @@ int ConfigureServiceIndexPath(const std::wstring& path) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     IndexConfig previous;
     if (!LoadMachineConfig(previous, nullptr)) return ERROR_INVALID_DATA;
+    const auto target = ResolveIndexMigrationTarget(path);
+    if (target.empty()) return ERROR_INVALID_PARAMETER;
+    std::error_code create_error;
+    std::filesystem::create_directories(target, create_error);
+    // Secure before the first temporary migration copy is created, not only
+    // after restarting the service; rollback originals stay privileged too.
+    if (create_error || !ProtectIndexRawTree(previous.index_path) || !ProtectIndexRawTree(target))
+        return ERROR_ACCESS_DENIED;
     if (SameIndexLocation(previous.index_path, path)) return ERROR_SUCCESS;
     ServiceHandle manager{OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT)};
     if (!manager.value) return static_cast<int>(GetLastError());

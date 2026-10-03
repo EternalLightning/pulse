@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -44,9 +45,11 @@ public:
     void Seed(const std::wstring& owner, std::vector<ChangeRecord> records);
     void Gap();
     void Flush(bool force = true, IndexMemoryProbe* memory = nullptr);
-    ChangeResponse Summaries(const std::wstring& owner, const std::vector<std::wstring>& paths, uint64_t since = 0);
+    ChangeResponse Summaries(const std::wstring& owner, const std::vector<std::wstring>& paths, uint64_t since = 0,
+        const std::function<bool(const ChangeRecord&)>& authorize = {});
     ChangeResponse Details(const std::wstring& owner, const std::wstring& path,
-                           uint64_t since, uint64_t before, uint32_t limit, uint32_t kind_filter = UINT32_MAX);
+                           uint64_t since, uint64_t before, uint32_t limit, uint32_t kind_filter = UINT32_MAX,
+                            const std::function<bool(const ChangeRecord&)>& authorize = {});
 private:
     friend struct ChangeTrackerTestAccess;
     struct Journal {

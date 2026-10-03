@@ -8,6 +8,7 @@
 #include <propsys.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -58,8 +59,58 @@ struct SlowProvider {
     ULONGLONG until = 0;
     uint32_t strikes = 0;
 };
-std::mutex g_slow_provider_mutex;
-std::unordered_map<std::wstring, SlowProvider> g_slow_providers;
+std::mutex& g_slow_provider_mutex = *new std::mutex;
+std::unordered_map<std::wstring, SlowProvider>& g_slow_providers =
+    *new std::unordered_map<std::wstring, SlowProvider>;
+
+constexpr uint32_t kApartmentLimit = 4;
+struct ApartmentSlot {
+    std::shared_ptr<void> owner;
+    HANDLE thread = nullptr;
+    bool reserved = false;
+    bool retired = false;
+    std::wstring blocked_extension;
+};
+struct ApartmentPool {
+    std::mutex mutex;
+    std::array<ApartmentSlot, kApartmentLimit> slots;
+
+    void ReapLocked() {
+        for (auto& slot : slots) {
+            if (slot.retired && slot.thread && WaitForSingleObject(slot.thread, 0) == WAIT_OBJECT_0)
+                slot = {};
+        }
+    }
+};
+
+ApartmentPool& Apartments() {
+    // Process-lifetime registry: an unreturning provider may still use DLL/COM
+    // state during static teardown. Never destroy that state underneath it.
+    static auto* pool = new ApartmentPool;
+    return *pool;
+}
+
+uint32_t ReserveApartment() {
+    auto& pool = Apartments();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    for (uint32_t i = 0; i < kApartmentLimit; ++i) {
+        if (!pool.slots[i].reserved) {
+            pool.slots[i].reserved = true;
+            return i;
+        }
+    }
+    return kApartmentLimit;
+}
+
+bool ProviderHasRetiredApartment(const std::wstring& extension) {
+    auto& pool = Apartments();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    return std::any_of(pool.slots.begin(), pool.slots.end(), [&](const auto& slot) {
+        return slot.retired && slot.blocked_extension == extension;
+    });
+}
 
 ULONGLONG CommandBudgetMs() {
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
@@ -91,13 +142,19 @@ void NoteStalledProvider(const std::wstring& extension) {
     if (extension.empty()) return;
     const ULONGLONG now = GetTickCount64();
     std::lock_guard<std::mutex> lock(g_slow_provider_mutex);
+    constexpr size_t kSlowProviderLimit = 128;
+    if (!g_slow_providers.contains(extension) && g_slow_providers.size() >= kSlowProviderLimit)
+        g_slow_providers.erase(g_slow_providers.begin());
     SlowProvider& provider = g_slow_providers[extension];
-    provider.strikes = provider.until > now ? provider.strikes + 1 : 1;
+    provider.strikes = provider.until > now ? std::min(provider.strikes + 1, 16u) : 1;
     provider.until = now + kSlowProviderCooldownMs * provider.strikes;
 }
 
 bool ProviderCoolingDown(const std::wstring& extension) {
     if (extension.empty()) return false;
+    // Cooldown expiry alone must not spawn another copy of a permanently stuck
+    // provider. Only observed thread termination frees this quarantine.
+    if (ProviderHasRetiredApartment(extension)) return true;
     const ULONGLONG now = GetTickCount64();
     std::lock_guard<std::mutex> lock(g_slow_provider_mutex);
     const auto it = g_slow_providers.find(extension);
@@ -149,10 +206,12 @@ struct ClsidEq {
 };
 
 thread_local std::unordered_map<CLSID, ComPtr<IClassFactory>, ClsidHash, ClsidEq> g_factories;
-std::mutex g_association_mutex;
+std::mutex& g_association_mutex = *new std::mutex;
 std::once_flag g_register_class_once;
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
 std::atomic<uint32_t> g_test_open_attempts{0};
+std::mutex g_test_hook_mutex;
+std::function<void()> g_test_open_hook;
 // PlaceOverlay entries and returns. They differ only while the window manager
 // is inside the provider's window, which is what makes a preview trail its
 // owner during a drag.
@@ -187,13 +246,13 @@ bool IsOfflinePlaceholder(DWORD attrs) {
 }
 
 bool FindPreviewHandlerClsid(const std::wstring& extension, CLSID& clsid) {
-    static std::unordered_map<std::wstring, CLSID> cache;
+    static auto& cache = *new std::unordered_map<std::wstring, CLSID>;
     // A lookup that found nothing is remembered, but only for a while: the shell
     // can fail this query while it is busy with something else, and carrying
     // that answer for the whole session leaves the type unpreviewable until the
     // application restarts.
     constexpr ULONGLONG kNegativeTtlMs = 30 * 1000;
-    static std::unordered_map<std::wstring, ULONGLONG> negative;
+    static auto& negative = *new std::unordered_map<std::wstring, ULONGLONG>;
     {
         std::lock_guard<std::mutex> lock(g_association_mutex);
         if (auto it = cache.find(extension); it != cache.end()) {
@@ -359,9 +418,30 @@ void RegisterClassOnce() {
 bool PreviewHandlerHost::CanHost(const std::wstring& path) {
     const std::wstring extension = ExtensionOf(path);
     if (extension.empty() || IsNativePreviewExtension(extension)) return false;
-    // A provider that just stalled is left alone until it has warmed up: the
-    // caller then takes the thumbnail path, which answers on its own process.
     if (ProviderCoolingDown(extension)) return false;
+    const auto resources = Resources();
+    if (resources.live >= resources.limit) return false;
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+    {
+        std::lock_guard lock(g_test_hook_mutex);
+        if (g_test_open_hook) return true;
+    }
+#endif
+    CLSID clsid{};
+    return FindPreviewHandlerClsid(extension, clsid);
+}
+
+bool PreviewHandlerHost::CanHostPath(const std::wstring& path) const {
+    if (!worker_) return CanHost(path);
+    const std::wstring extension = ExtensionOf(path);
+    if (extension.empty() || IsNativePreviewExtension(extension) || ProviderCoolingDown(extension))
+        return false;
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+    {
+        std::lock_guard lock(g_test_hook_mutex);
+        if (g_test_open_hook) return true;
+    }
+#endif
     CLSID clsid{};
     return FindPreviewHandlerClsid(extension, clsid);
 }
@@ -384,7 +464,13 @@ struct PreviewHandlerHost::WorkerState {
         if (wake) CloseHandle(wake);
     }
 
+    bool Stopped() {
+        std::lock_guard lock(mutex);
+        return stop;
+    }
+
     bool EnsureWindow() {
+        if (Stopped()) return false;
         if (hwnd && IsWindow(hwnd)) return true;
         hwnd = nullptr;
         overlay.store(nullptr, std::memory_order_release);
@@ -423,7 +509,7 @@ struct PreviewHandlerHost::WorkerState {
     }
 
     void PlaceOverlay() {
-        if (!hwnd || !owner) return;
+        if (Stopped() || !hwnd || !owner) return;
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
         g_test_place_calls.fetch_add(1, std::memory_order_relaxed);
         struct PlaceDone {
@@ -496,6 +582,10 @@ struct PreviewHandlerHost::WorkerState {
         }
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
         g_test_open_attempts.fetch_add(1, std::memory_order_relaxed);
+        if (open_hook) {
+            open_hook();
+            return false;
+        }
         wchar_t delay_text[16]{};
         if (GetEnvironmentVariableW(L"PULSE_PREVIEW_HANDLER_TEST_DELAY_MS",
                                     delay_text, ARRAYSIZE(delay_text)) > 0) {
@@ -507,20 +597,21 @@ struct PreviewHandlerHost::WorkerState {
         CLSID clsid{};
         if (!FindPreviewHandlerClsid(ExtensionOf(path), clsid)) return false;
         ComPtr<IUnknown> unknown = CreateHandler(clsid);
-        if (!unknown) return false;
+        if (!unknown || Stopped()) return false;
 
         site = new PreviewFrame(hwnd);
         ComPtr<IObjectWithSite> object_with_site;
         if (SUCCEEDED(unknown.As(&object_with_site)) && object_with_site)
             object_with_site->SetSite(site);
 
+        if (Stopped()) return false;
         const std::wstring open_path = ShellPath(path);
         const bool file_ok = InitWithFile(unknown.Get(), open_path);
-        const bool item_ok = !file_ok && InitWithItem(unknown.Get(), open_path);
-        const bool stream_ok = !file_ok && !item_ok &&
+        const bool item_ok = !file_ok && !Stopped() && InitWithItem(unknown.Get(), open_path);
+        const bool stream_ok = !file_ok && !item_ok && !Stopped() &&
             InitWithStream(unknown.Get(), open_path, &stream);
         ComPtr<IPreviewHandler> preview;
-        if (!(file_ok || item_ok || stream_ok) || FAILED(unknown.As(&preview)) || !preview) {
+        if (Stopped() || !(file_ok || item_ok || stream_ok) || FAILED(unknown.As(&preview)) || !preview) {
             Unload();
             return false;
         }
@@ -536,13 +627,15 @@ struct PreviewHandlerHost::WorkerState {
             HideWindow();
             return false;
         }
+        if (Stopped()) return false;
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        if (FAILED(preview->DoPreview())) {
+        if (FAILED(preview->DoPreview()) || Stopped()) {
             Unload();
             HideWindow();
             return false;
         }
         preview->SetRect(&client);
+        if (Stopped()) return false;
         // Office handlers may paint directly into the host. Wake their child
         // windows without erasing the pixels DoPreview has already produced.
         RedrawWindow(hwnd, nullptr, nullptr,
@@ -565,6 +658,10 @@ struct PreviewHandlerHost::WorkerState {
     bool stop = false;
     HANDLE wake = nullptr;
     HANDLE thread = nullptr;
+    uint32_t slot = kApartmentLimit;
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+    std::function<void()> open_hook;
+#endif
     std::atomic<State> state{State::Idle};
     // Read by the owner while this thread is inside a provider call.
     std::atomic<uint64_t> applied_version{0};
@@ -603,41 +700,68 @@ struct PreviewHandlerHost::WorkerState {
 PreviewHandlerHost::PreviewHandlerHost() = default;
 
 PreviewHandlerHost::~PreviewHandlerHost() {
-    auto worker = worker_;
-    worker_.reset();
-    if (worker) {
-        DetachOverlay(worker->overlay.load(std::memory_order_acquire));
-        {
-            std::lock_guard<std::mutex> lock(worker->mutex);
-            worker->stop = true;
-        }
-        SetEvent(worker->wake);
-        if (worker->thread) WaitForSingleObject(worker->thread, 100);
+    const auto worker = std::move(worker_);
+    if (!worker) return;
+    std::wstring extension;
+    {
+        std::lock_guard lock(worker->mutex);
+        worker->stop = true;
+        worker->command.notify = nullptr;
+        extension = ExtensionOf(worker->provider_path);
     }
-    // Retired apartments stop themselves as soon as the provider call they are
-    // inside returns; the references they hold keep them alive until then.
-    for (const auto& retired : retired_) {
-        DetachOverlay(retired->overlay.load(std::memory_order_acquire));
+    {
+        auto& pool = Apartments();
+        std::lock_guard lock(pool.mutex);
+        auto& slot = pool.slots[worker->slot];
+        slot.retired = true;
+        slot.blocked_extension = std::move(extension);
     }
-    retired_.clear();
+    DetachOverlay(worker->overlay.load(std::memory_order_acquire));
+    SetEvent(worker->wake);
+    // Do not wait on arbitrary COM cleanup on the UI thread. The registry owns
+    // this state and handle until it has observed real thread termination.
+    (void)Resources();
 }
 
 void PreviewHandlerHost::EnsureWorker() {
     if (worker_) return;
+    const uint32_t slot_index = ReserveApartment();
+    if (slot_index == kApartmentLimit) {
+        unavailable_state_ = State::Failed;
+        return;
+    }
     auto worker = std::make_shared<WorkerState>();
+    worker->slot = slot_index;
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+    {
+        std::lock_guard lock(g_test_hook_mutex);
+        worker->open_hook = g_test_open_hook;
+    }
+#endif
     worker->wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!worker->wake) return;
+    auto& pool = Apartments();
+    std::lock_guard lock(pool.mutex);
+    if (!worker->wake) {
+        pool.slots[slot_index] = {};
+        unavailable_state_ = State::Failed;
+        return;
+    }
     auto* argument = new std::shared_ptr<WorkerState>(worker);
     worker->thread = CreateThread(nullptr, 0, WorkerMain, argument, 0, nullptr);
     if (!worker->thread) {
         delete argument;
+        pool.slots[slot_index] = {};
+        unavailable_state_ = State::Failed;
         return;
     }
+    pool.slots[slot_index].owner = worker;
+    pool.slots[slot_index].thread = worker->thread;
     worker_ = std::move(worker);
+    unavailable_state_ = State::Idle;
 }
 
 PreviewHandlerHost::State PreviewHandlerHost::state() const {
-    return worker_ ? worker_->state.load(std::memory_order_acquire) : State::Idle;
+    return worker_ ? worker_->state.load(std::memory_order_acquire) : unavailable_state_;
 }
 
 void PreviewHandlerHost::SetNotifyWindow(HWND hwnd) {
@@ -740,7 +864,8 @@ void PreviewHandlerHost::Sync(HWND owner, const D2D1_RECT_F& bounds, const std::
     target.right = static_cast<LONG>(std::lround(bounds.right));
     target.bottom = static_cast<LONG>(std::lround(bounds.bottom));
 
-    const bool usable = enabled && owner && IsWindow(owner) && !IsIconic(owner) &&
+    const bool usable = enabled && !ProviderCoolingDown(ExtensionOf(path)) &&
+        owner && IsWindow(owner) && !IsIconic(owner) &&
         IsWindowVisible(owner) && !IsOfflinePlaceholder(attrs) &&
         target.right > target.left + 8 && target.bottom > target.top + 8;
     if (!usable) {
@@ -753,7 +878,12 @@ void PreviewHandlerHost::Sync(HWND owner, const D2D1_RECT_F& bounds, const std::
         return;
     const bool new_content = !last_enabled_ || identity != last_identity_;
     EnsureWorker();
-    if (!worker_) return;
+    if (!worker_) {
+        // Another host can claim the last slot between eligibility and Sync.
+        // Repaint once so the caller re-evaluates CanHostPath and takes fallback.
+        InvalidateRect(owner, nullptr, FALSE);
+        return;
+    }
     last_enabled_ = true;
     last_owner_ = owner;
     last_bounds_ = target;
@@ -763,17 +893,22 @@ void PreviewHandlerHost::Sync(HWND owner, const D2D1_RECT_F& bounds, const std::
     Publish(true, owner, target, path, identity, attrs, immediate);
 }
 
-void PreviewHandlerHost::ReapRetired() {
-    for (auto it = retired_.begin(); it != retired_.end();) {
-        const HANDLE thread = (*it)->thread;
-        if (!thread || WaitForSingleObject(thread, 0) == WAIT_OBJECT_0) it = retired_.erase(it);
-        else ++it;
+PreviewHandlerHost::ResourceUsage PreviewHandlerHost::Resources() {
+    auto& pool = Apartments();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    ResourceUsage usage{};
+    usage.limit = kApartmentLimit;
+    for (const auto& slot : pool.slots) {
+        if (slot.reserved) ++usage.live;
+        if (slot.retired) ++usage.retired;
     }
+    return usage;
 }
 
 bool PreviewHandlerHost::RetireStalledApartment(const std::wstring& requested_identity,
                                                bool requested) {
-    ReapRetired();
+    (void)Resources();
     const auto worker = worker_;
     if (!worker) return false;
     const ULONGLONG now = GetTickCount64();
@@ -810,7 +945,15 @@ bool PreviewHandlerHost::RetireStalledApartment(const std::wstring& requested_id
 
     // Remember the provider, so the pane asks the thumbnail path instead of
     // queueing behind the same provider on a fresh apartment.
-    NoteStalledProvider(ExtensionOf(stalled_path));
+    const std::wstring extension = ExtensionOf(stalled_path);
+    NoteStalledProvider(extension);
+    {
+        auto& pool = Apartments();
+        std::lock_guard lock(pool.mutex);
+        auto& slot = pool.slots[worker->slot];
+        slot.retired = true;
+        slot.blocked_extension = extension;
+    }
     DetachOverlay(worker->overlay.load(std::memory_order_acquire));
     {
         std::lock_guard<std::mutex> lock(worker->mutex);
@@ -827,7 +970,7 @@ bool PreviewHandlerHost::RetireStalledApartment(const std::wstring& requested_id
     last_enabled_ = false;
     last_identity_.clear();
     last_owner_ = nullptr;
-    retired_.push_back(std::move(worker));
+    unavailable_state_ = State::Failed;
     return true;
 }
 
@@ -958,7 +1101,7 @@ DWORD WINAPI PreviewHandlerHost::WorkerMain(void* parameter) {
 
             const bool opened = self->OpenCurrent();
             self->opens_finished.fetch_add(1, std::memory_order_release);
-            if (opened) ClearSlowProvider(ExtensionOf(self->path));
+            ClearSlowProvider(ExtensionOf(self->path));
             bool current = false;
             {
                 std::lock_guard<std::mutex> lock(self->mutex);
@@ -972,7 +1115,11 @@ DWORD WINAPI PreviewHandlerHost::WorkerMain(void* parameter) {
                 self->state.store(opened ? State::Shown : State::Failed,
                                   std::memory_order_release);
                 if (!opened) self->HideWindow();
-                if (self->notify) InvalidateRect(self->notify, nullptr, FALSE);
+                {
+                    std::lock_guard lock(self->mutex);
+                    if (!self->stop && self->command.notify)
+                        InvalidateRect(self->command.notify, nullptr, FALSE);
+                }
             } else {
                 self->Unload();
                 self->HideWindow();
@@ -1008,6 +1155,11 @@ DWORD WINAPI PreviewHandlerHost::WorkerMain(void* parameter) {
 }
 
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
+void PreviewHandlerHost::SetOpenHookForTest(std::function<void()> hook) {
+    std::lock_guard lock(g_test_hook_mutex);
+    g_test_open_hook = std::move(hook);
+}
+
 void ResetPreviewHandlerOpenAttemptsForTest() {
     g_test_open_attempts.store(0, std::memory_order_relaxed);
 }

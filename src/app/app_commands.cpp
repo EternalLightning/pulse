@@ -121,8 +121,8 @@ void QueueTagAds(AppState& s, std::vector<app::TagAdsUpdate> updates) {
     const HWND notify = s.hwnd;
     const auto network_location = l10n::Get(l10n::StringId::TagNetworkLocation);
     const auto this_location = l10n::Get(l10n::StringId::TagThisLocation);
-    s.worker.EnqueueIo([updates = std::move(updates), notify, network_location, this_location] {
-        auto failed = std::make_unique<std::vector<std::wstring>>();
+    auto failed = std::make_shared<std::vector<std::wstring>>();
+    s.worker.EnqueueIo([updates = std::move(updates), failed, network_location, this_location] {
         for (const auto& update : updates) {
             if (app::WriteTagAdsV2(update.path, update.tags)) continue;
             wchar_t volume[MAX_PATH]{};
@@ -133,9 +133,11 @@ void QueueTagAds(AppState& s, std::vector<app::TagAdsUpdate> updates) {
             else
                 failed->push_back(this_location);
         }
-        if (!failed->empty() && notify)
-            PostMessageW(notify, WM_TAG_ADS_WARNING, 0,
-                         reinterpret_cast<LPARAM>(failed.release()));
+    }, [notify, failed] {
+        if (failed->empty() || !notify) return;
+        auto payload = std::make_unique<std::vector<std::wstring>>(std::move(*failed));
+        if (PostMessageW(notify, WM_TAG_ADS_WARNING, 0, reinterpret_cast<LPARAM>(payload.get())))
+            payload.release();
     });
 }
 
@@ -705,7 +707,8 @@ void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s)
 std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         AppState& s, bool can_undo, const std::wstring& undo_label) {
     if (IsRecycleTab(ActiveTab(s)))
-        return app::BuildRecycleItemMenu(can_undo, undo_label);
+        return app::FilterBuiltinMenuItems(app::BuildRecycleItemMenu(can_undo, undo_label),
+                                            s.ctxMenuPrefs.builtin_hidden);
     bool folder = false;
     if (const app::Tab* tab = ActiveTab(s); tab && tab->snapshot) {
         for (int index : tab->SelectedIndices()) {
@@ -761,7 +764,7 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         batch.shortcut = L"Ctrl+Shift+R";
         items.insert(items.begin() + 1, std::move(batch));
     }
-    return items;
+    return app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
 }
 
 // Lowercased common extension of the selection; "" for folders / mixed types.
@@ -975,11 +978,15 @@ std::vector<ui::FluentMenuItem> ExplorerMenu(
     bool changed = false;
     auto display = s.context_menu.BuildDisplay(s.ctxMenuPrefs, base, changed);
     if (changed) s.ctxMenuPrefs.Save();
-    return display;
+    return app::FilterBuiltinMenuItems(std::move(display), s.ctxMenuPrefs.builtin_hidden);
 }
 
 void RefreshOpenCtxMenu(AppState& s) {
     if (!s.context_menu.menu_open() || !s.menu || !s.menu->IsOpen()) return;
+    const bool can_undo = s.ops.CanUndo();
+    const auto label = can_undo ? s.ops.UndoLabel() : l10n::Get(l10n::StringId::Undo);
+    s.context_menu.UpdateCommandState(app::CmdUndo, label, can_undo);
+    s.menu->UpdateCommandState(app::CmdUndo, label, can_undo);
     if (s.menu->ReplaceItems(ExplorerMenu(s, s.context_menu.base_items())))
         s.context_menu.NotePatchedDisplay();
 }
@@ -1040,6 +1047,7 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
         const std::wstring undoLabel = s.ops.UndoLabel();
         auto items = app::BuildRecycleBackgroundMenu(s.ops.CanUndo(), undoLabel, can_empty);
         app::AppendBackgroundViewCommands(items, view_options);
+        items = app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
         s.context_menu.OpenMenu(std::move(items));
         const int cmd = s.menu->TrackPopup(screen_pt, s.context_menu.base_items());
         s.context_menu.CloseMenu();
@@ -1059,6 +1067,7 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     ApplyWorkspacePinLabel(base_items, s);
     const auto quick_paths = QuickAccessTargets(tab, true);
     AppendQuickAccessCommand(s, base_items, quick_paths);
+    base_items = app::FilterBuiltinMenuItems(std::move(base_items), s.ctxMenuPrefs.builtin_hidden);
     s.context_menu.OpenMenu(std::move(base_items));
     auto display = ExplorerMenu(s, s.context_menu.base_items());
 
@@ -1116,10 +1125,11 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
     app::SidebarEntry* quick_access = QuickAccessEntryForPath(s, path);
     if ((!initial && !quick_access) || !EnsureMenu(s)) return;
     constexpr int kCustomColor = 30100;
-    uint32_t color = initial ? initial->badge_rgb : quick_access->badge_rgb;
-    std::wstring current_text = initial ? initial->badge : quick_access->badge;
+    const auto* saved_badge = s.places.FindQuickAccessBadge(path);
+    uint32_t color = initial ? initial->badge_rgb : saved_badge ? saved_badge->badge_rgb : quick_access->badge_rgb;
+    std::wstring current_text = initial ? initial->badge : saved_badge ? saved_badge->badge : quick_access->badge;
     s.menu->SetFilterPlaceholder(l10n::Get(l10n::StringId::BadgeTextHint));
-    s.menu->SetInitialFilterText(initial ? initial->badge : quick_access->badge);
+    s.menu->SetInitialFilterText(current_text);
     s.menu->SetFilterMinWidth(260.0f);
     auto build = [&](const std::wstring& query) {
         current_text = query.substr(0, 12);
@@ -1127,6 +1137,7 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
         else {
             quick_access->badge = query.substr(0, 12);
             quick_access->badge_rgb = color;
+            s.places.SetQuickAccessBadge(path, current_text, color);
         }
         InvalidateRect(s.hwnd, nullptr, FALSE);
         std::vector<ui::FluentMenuItem> items;
@@ -1155,11 +1166,12 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
         else {
             quick_access->badge = current_text;
             quick_access->badge_rgb = color;
+            s.places.SetQuickAccessBadge(path, current_text, color);
         }
     };
     for (;;) {
         const int cmd = s.menu->TrackPopup(screen_pt,
-            build(initial ? initial->badge : quick_access->badge),
+            build(current_text),
             [&](const std::wstring& query) { return build(query); });
         const auto& palette = TagColorPalette(s);
         if (cmd >= app::CmdTabColorBase &&
@@ -1207,8 +1219,9 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
         items.push_back(std::move(badge));
         const app::StarredItem* starred = s.places.FindStarred(path);
         const app::SidebarEntry* quick_access = QuickAccessEntryForPath(s, path);
+        const auto* saved_badge = s.places.FindQuickAccessBadge(path);
         const uint32_t badge_rgb = starred ? starred->badge_rgb
-            : quick_access ? quick_access->badge_rgb : 0x0078D4;
+            : saved_badge ? saved_badge->badge_rgb : quick_access ? quick_access->badge_rgb : 0x0078D4;
         const auto& palette = TagColorPalette(s);
         ui::FluentMenuItem colors;
         colors.command = app::CmdNone;
@@ -1243,6 +1256,7 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
         (recent_item && recent_item->kind == app::PlaceItemKind::Folder) ||
         (!fs::IsVirtualPath(path) && QuickAccessEntryForPath(s, path));
     if (known_folder) AppendQuickAccessCommand(s, items, {path});
+    items = app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
     const int cmd = s.menu->TrackPopup(screen_pt, std::move(items));
     if (HandleQuickAccessCommand(s, cmd, known_folder ? std::vector<std::wstring>{path}
                                                                    : std::vector<std::wstring>{})) return;
@@ -1265,13 +1279,16 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
             s.places.SetStarredBadge(path, starred->badge, color);
             RefreshStarredViews(s);
         } else if (auto* quick_access = QuickAccessEntryForPath(s, path)) {
+            const auto* saved_badge = s.places.FindQuickAccessBadge(path);
+            s.places.SetQuickAccessBadge(path, saved_badge ? saved_badge->badge : quick_access->badge, color);
             quick_access->badge_rgb = color;
         }
     } else if (cmd == kCustomColor) {
         const app::StarredItem* starred = s.places.FindStarred(path);
         const app::SidebarEntry* quick_access = QuickAccessEntryForPath(s, path);
+        const auto* saved_badge = s.places.FindQuickAccessBadge(path);
         uint32_t picked = starred ? starred->badge_rgb
-            : quick_access ? quick_access->badge_rgb : 0x0078D4;
+            : saved_badge ? saved_badge->badge_rgb : quick_access ? quick_access->badge_rgb : 0x0078D4;
         if (ui::ColorPickerPopup::Pick(s.hwnd, &s.compositor, s.menu.get(),
                                        s.scale, screen_pt, picked, s.darkMode, picked)) {
             AppendCustomTagColor(s, picked);
@@ -1279,6 +1296,8 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
                 s.places.SetStarredBadge(path, starred->badge, picked);
                 RefreshStarredViews(s);
             } else if (auto* quick = QuickAccessEntryForPath(s, path)) {
+                const auto* saved = s.places.FindQuickAccessBadge(path);
+                s.places.SetQuickAccessBadge(path, saved ? saved->badge : quick->badge, picked);
                 quick->badge_rgb = picked;
             }
         }

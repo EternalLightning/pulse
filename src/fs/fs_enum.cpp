@@ -340,8 +340,9 @@ static void EnumerateThisPc(std::vector<DirEntry>& out) {
         wchar_t volName[MAX_PATH + 1] = {};
         GetVolumeInformationW(root, volName, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
         DirEntry e;
-        e.name = std::wstring(volName[0] ? volName : L"本地磁盘") +
-                 L" (" + root[0] + L":)"; // 本地磁盘
+        e.drive_type = GetDriveTypeW(root);
+        e.name = volName[0] ? std::wstring(volName) + L" (" + root[0] + L":)"
+                           : std::wstring(root, 2);
         e.full_path = NormalizePath(root);
         e.is_dir = true;
         e.attrs = FILE_ATTRIBUTE_DIRECTORY;

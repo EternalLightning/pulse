@@ -11,7 +11,6 @@ std::wstring SummarizeDeletePath(std::wstring path) {
     std::replace(path.begin(), path.end(), L'\n', L' ');
     std::replace(path.begin(), path.end(), L'\r', L' ');
     std::replace(path.begin(), path.end(), L'\t', L' ');
-    if (path.size() > 88) path = path.substr(0, 40) + L"…" + path.substr(path.size() - 44);
     return path;
 }
 }
@@ -46,12 +45,13 @@ ui::ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation&
     for (const auto& reason : reasons) spec.message += L"\n" + reason;
     spec.message += L"\n\n" + l10n::Get(I::DeletePathHeading);
     const size_t shown = std::min<size_t>(5, pending->plan.targets.size());
-    for (size_t i = 0; i < shown; ++i) spec.message += L"\n" + SummarizeDeletePath(pending->plan.targets[i].path);
+    for (size_t i = 0; i < shown; ++i)
+        spec.rows.push_back({SummarizeDeletePath(pending->plan.targets[i].path), true});
     if (shown < pending->plan.targets.size()) {
         wchar_t more[128]{};
         swprintf_s(more, l10n::Get(I::DeleteMoreFormat).c_str(),
             static_cast<unsigned long long>(pending->plan.targets.size() - shown));
-        spec.message += L"\n" + std::wstring(more);
+        spec.note = more;
     }
     return spec;
 }

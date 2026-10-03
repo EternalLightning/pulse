@@ -16,6 +16,7 @@
 #include "../common/path_utils.h"
 #include "../common/diagnostics_exporter.h"
 #include "snapshot_patch.h"
+#include "entry_order_hold.h"
 #include "session.h"
 #include "../fs/fs_net_cache.h"
 #include "context_menu.h"
@@ -800,6 +801,8 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
 }
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    tab.ClearEntryOrderHold();
+    s.explicit_entry_refreshes.erase(&tab);
     if (tab.archive_cancel) tab.archive_cancel->store(true);
     s.index.CancelSession(tab.search_session_id);
     std::erase_if(s.pendingIndexSearches,[&](const auto& item){return item.second.query.session_id==tab.search_session_id;});
@@ -954,6 +957,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                 tab->pending_generation != res.generation) return;
             tab->loading = false;
             tab->pending_generation = 0;
+            s.explicit_entry_refreshes.erase(tab);
             tab->net_readonly = fs::IsUncPath(res.path);
             tab->banner_title = l10n::Get(tab->net_readonly
                 ? l10n::StringId::Offline : l10n::StringId::CannotOpen);
@@ -976,6 +980,14 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
         if (!tab || tab->current_path != res.path) return;
         if (tab->pending_generation != 0 && tab->pending_generation != res.generation) return;
         if (tab->applied_generation != 0 && res.generation < tab->applied_generation) return;
+        const auto explicit_request = s.explicit_entry_refreshes.find(tab);
+        const bool explicit_result = explicit_request != s.explicit_entry_refreshes.end() &&
+            explicit_request->second.path == res.path && explicit_request->second.generation == res.generation;
+        if (explicit_result) {
+            tab->refresh_keeps_order = false;
+            if (!again) s.explicit_entry_refreshes.erase(explicit_request);
+        }
+        const auto retry_renames = explicit_result && again ? tab->held_renames : std::vector<app::EntryRenameHint>{};
         any = true;
 
         const bool focusedTab = (&pane == s.pane);
@@ -1007,7 +1019,8 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                         s.places.SetRecentKind(entry.full_path, item_kind);
                 }
             }
-            tab->SetSnapshot(res.snapshot);
+            tab->SetSnapshot(tab->PrepareEntrySnapshot(res.snapshot, pendingNames, pendingFocus));
+            if (!retry_renames.empty()) tab->held_renames = retry_renames;
             tab->git_root = res.git_root;
             tab->loading = false;
             tab->pending_generation = 0;
@@ -1140,8 +1153,20 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
     }
+    for (auto it = s.explicit_entry_refreshes.begin(); it != s.explicit_entry_refreshes.end();) {
+        bool alive = false;
+        ForEachPane(s, [&](app::Pane& pane) {
+            const auto* tab = pane.ActiveTab();
+            if (tab == it->first && tab->current_path == it->second.path) alive = true;
+        });
+        if (!alive) it = s.explicit_entry_refreshes.erase(it);
+        else ++it;
+    }
     for (app::Tab* tab : tabs) {
+        const bool explicit_refresh = reason == RefreshReason::Explicit || s.explicit_entry_refreshes.contains(tab);
+        if (explicit_refresh) s.explicit_entry_refreshes[tab] = {normalized, 0};
         CaptureListingSelection(*tab);
+        tab->PrepareEntryRefresh(explicit_refresh);
         tab->loading = !tab->snapshot;
         tab->pending_generation = 0;
     }
@@ -1159,6 +1184,8 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
             tab->pending_generation = s.worker.Refresh(
                 normalized, tab->sort_column, tab->sort_direction);
         }
+        if (const auto found = s.explicit_entry_refreshes.find(tab); found != s.explicit_entry_refreshes.end())
+            found->second.generation = tab->pending_generation;
     }
 }
 
@@ -1207,6 +1234,19 @@ static bool ApplyNotifiesToVisible(AppState& s, const std::wstring& path,
     // touched file is stat'ed on this thread, so huge bursts go async instead.
     constexpr size_t kMaxIncrementalEvents = 512;
     if (events.size() > kMaxIncrementalEvents) return false;
+    bool explicit_pending = false;
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        const auto found = s.explicit_entry_refreshes.find(tab);
+        if (tab && tab->current_path == path && found != s.explicit_entry_refreshes.end() &&
+            found->second.path == path) explicit_pending = true;
+    });
+    if (explicit_pending) {
+        // Do not patch/prune rename hints while a sorted full enumeration is
+        // pending. Its dirty retry must also retain the explicit ordering intent.
+        s.store.MarkDirty(path);
+        return false;
+    }
     bool any = false;
     bool need_full = false;
     fs::SnapshotPtr store_snap;
@@ -1215,7 +1255,7 @@ static bool ApplyNotifiesToVisible(AppState& s, const std::wstring& path,
         app::Tab* tab = pane.ActiveTab();
         if (!tab || tab->current_path != path || !tab->snapshot) return;
         auto copy = std::make_shared<std::vector<fs::DirEntry>>(*tab->snapshot);
-        if (app::ApplyDirNotifyBatch(*copy, path, events, tab->sort_column, tab->sort_direction) ==
+        if (app::ApplyDirNotifyBatch(*copy, path, events, tab->sort_column, tab->sort_direction, true) ==
             app::NotifyPatch::NeedFullEnum) {
             need_full = true;
             return;
@@ -1239,6 +1279,8 @@ static bool ApplyNotifiesToVisible(AppState& s, const std::wstring& path,
             }
             if (_wcsicmp(focus.c_str(), event.old_name.c_str()) == 0) focus = event.name;
         }
+        tab->order_held = true;
+        app::PruneEntryRenames(tab->held_renames, *copy);
         tab->SetSnapshot(std::move(copy));
         if (!names.empty()) tab->RemapSelection(names, focus);
         else if (tab->snapshot && tab->EntryCount() != 0 && tab->selected_index < 0)
@@ -1328,6 +1370,10 @@ void DrainDirNotifies(AppState& s) {
     }
     bool changed = false;
     const ULONGLONG now = GetTickCount64();
+    if (!batch.empty()) {
+        s.tagAdsDiscoveryChecked.Clear();
+        s.tagAdsLastSnapshot = nullptr;
+    }
     // The watcher queues one batch per notification buffer; during a slow bulk
     // copy that is one or two events each, so thousands can pile up behind a
     // single tick. Group the whole drain per folder and patch each folder once.
@@ -1346,6 +1392,14 @@ void DrainDirNotifies(AppState& s) {
             continue;
         }
         if (PathHasPendingRefresh(s, path)) {
+            ForEachPane(s, [&](app::Pane& pane) {
+                auto* tab = pane.ActiveTab();
+                if (!tab || tab->current_path != path) return;
+                for (const auto& event : item.events) {
+                    if (event.action == FILE_ACTION_RENAMED_NEW_NAME && !event.old_name.empty())
+                        tab->HoldEntryRename(event.old_name, event.name);
+                }
+            });
             s.store.MarkDirty(path);
             continue;
         }
@@ -1360,6 +1414,14 @@ void DrainDirNotifies(AppState& s) {
         QueueSizePatches(s, folder, names, now + 100);
     for (const auto& [folder, events] : structural_by_path) {
         if (events.empty()) continue;
+        ForEachPane(s, [&](app::Pane& pane) {
+            auto* tab = pane.ActiveTab();
+            if (!tab || tab->current_path != folder) return;
+            for (const auto& event : events) {
+                if (event.action == FILE_ACTION_RENAMED_NEW_NAME && !event.old_name.empty())
+                    tab->HoldEntryRename(event.old_name, event.name);
+            }
+        });
         if (!ApplyNotifiesToVisible(s, folder, events)) {
             DropSizePatches(s, folder);
             s.store.MarkDirty(folder);
@@ -1692,15 +1754,22 @@ std::wstring NewTabPath(const AppState& s) {
     return tab->current_path;
 }
 
-void NewTab(AppState& s, const std::wstring& path) {
+void OpenTabAt(AppState& s, const std::wstring& path) {
     RememberLayoutFocus(s);
-    s.window_tabs.NewTab(path.empty() ? L"C:\\" : path);
+    auto& layout = s.window_tabs.NewTab(path);
+    // The model's ordinary NewTab factory also defaults empty to C:. Override
+    // only this explicit opener before binding watches or starting enumeration.
+    if (path.empty()) layout.FocusedPane()->NewTab(L"");
     BindCurrentLayout(s);
     if (app::Tab* tab = ActiveTab(s)) {
         StartLoadingPath(s, *tab, tab->current_path);
         RecordRecentOpen(s, tab->current_path, app::PlaceItemKind::Folder);
     }
     InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+
+void NewTab(AppState& s, const std::wstring& path) {
+    OpenTabAt(s, path.empty() ? L"C:\\" : path);
 }
 
 void OpenSettingsTab(AppState& s, int page) {
@@ -1734,6 +1803,11 @@ void OpenSettingsTab(AppState& s, int page) {
 }
 void CloseLayoutTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
+    if (s.window_tabs.items[idx]->pinned) return;
+    if (s.window_tabs.items.size() == 1 && s.appPrefs.close_last_tab_window) {
+        PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
+        return;
+    }
     RememberLayoutFocus(s);
     s.window_tabs.CloseTab(idx);
     BindCurrentLayout(s);

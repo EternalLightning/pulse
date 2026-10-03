@@ -1124,7 +1124,7 @@ void QuickPreviewWindow::Render() {
     const D2D1_RECT_F full_content = D2D1::RectF(0, header, width, height);
     const bool offline = OfflinePlaceholder();
     const bool use_handler = !offline && !safe_mode_ && !video_.active() &&
-        PreviewHandlerHost::CanHost(item_.path);
+        handler_.CanHostPath(item_.path);
     handler_.Sync(hwnd_, full_content, item_.path, item_.attrs, generation_, item_.modified,
                   item_.size, dark_, background, foreground, use_handler,
                   handler_immediate_);

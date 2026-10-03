@@ -301,8 +301,12 @@ void MainRenderer::BreadcrumbLayout(const PaneViewModel& vm, float w,
     for (size_t i = first; i < segments.size(); ++i) {
         if (i > first) x += chevronW;
         BreadcrumbPlaced p;
-        p.rc = D2D1::RectF(x, addr.top + 2 * scale_, x + widths[i], addr.bottom - 2 * scale_);
-        p.text = segments[i].text;
+        const float segment_width = std::max(0.0f, std::min(widths[i], addr.right - margin_ - x));
+        if (segment_width <= 0.0f) break;
+        p.rc = D2D1::RectF(x, addr.top + 2 * scale_, x + segment_width, addr.bottom - 2 * scale_);
+        p.full_text = segments[i].text;
+        p.text = FitEndEllipsis(p.full_text, std::max(0.0f, segment_width - 2 * segPad),
+            [&](const std::wstring& value) { return MeasureTextWidth(dwrite, fmt, value); });
         p.path = segments[i].path;
         out.push_back(p);
         x += widths[i];
@@ -402,6 +406,7 @@ void MainRenderer::DrawButton(const D2D1_RECT_F& rc, const Theme& theme, const D
 void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           const Theme& theme) {
     if (!compositor_ || !compositor_->Dc()) return;
+    for (auto& names : painted_name_truncation_) names.clear();
     ID2D1DeviceContext* dc = compositor_->Dc();
     icon_cache_.SetDeviceContext(compositor_->Dc());
     UpdateBrushes(theme);
@@ -652,7 +657,7 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
                 FillRoundedRect(dc, brFillPressed_.get(), closeX, closeY, closeSz, closeSz, r);
             }
             DrawIconText(closeX, closeY, closeSz, closeSz,
-                kIconCloseSmall, L"x", theme.text_secondary, 0.62f);
+                kIconCloseSmall, L"x", theme.text_secondary, 0.85f);
         }
     };
     const int dragI = vm.tab_drag_index;
@@ -756,8 +761,22 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     const float new_tab_x = strip.end_x;
     // New tab button follows the final rest slot (not the sliding tabs).
     D2D1_RECT_F newRc = D2D1::RectF(new_tab_x, tabY, new_tab_x + 32 * scale_, tabY + tabH);
-    DrawButton(newRc, theme, IsHovered(vm, HitTestResult::TabNew) ? theme.fill_hover : kTransparent,
-        kIconAdd, L"+", theme.text_secondary, true, true);
+    if (IsHovered(vm, HitTestResult::TabNew)) {
+        MakeBrush(dc, theme.fill_hover, brFillHover_);
+        FillRoundedRect(dc, brFillHover_.get(), newRc.left, newRc.top,
+            newRc.right - newRc.left, newRc.bottom - newRc.top, theme.radius_control * scale_);
+    }
+    // Snap the straight strokes to physical pixels instead of scaling a thin outline.
+    const float addStroke = std::max(2.0f, std::round(1.5f * scale_));
+    const float addOffset = std::fmod(addStroke, 2.0f) * 0.5f;
+    const float addX = std::floor((newRc.left + newRc.right) * 0.5f) + addOffset;
+    const float addY = std::floor((newRc.top + newRc.bottom) * 0.5f) + addOffset;
+    const float addHalf = std::round(6.0f * scale_);
+    MakeBrush(dc, theme.text, brText_);
+    dc->DrawLine(D2D1::Point2F(addX - addHalf, addY), D2D1::Point2F(addX + addHalf, addY),
+        brText_.get(), addStroke);
+    dc->DrawLine(D2D1::Point2F(addX, addY - addHalf), D2D1::Point2F(addX, addY + addHalf),
+        brText_.get(), addStroke);
 
     // Window controls, right-aligned in Win11 order: min, max/restore, close.
     const float ctrlY = y;
@@ -770,7 +789,7 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         FillRect(dc, brDanger_.get(), closeRc.left, closeRc.top, ctrlW, ctrlH);
     }
     DrawIconText(closeRc.left, closeRc.top, ctrlW, ctrlH, kIconClose, L"x",
-        IsHovered(vm, HitTestResult::Close) ? HexColor(0xFFFFFF) : theme.text, 0.66f);
+        IsHovered(vm, HitTestResult::Close) ? HexColor(0xFFFFFF) : theme.text, 0.85f);
     cx -= ctrlW;
     D2D1_RECT_F maxRc = D2D1::RectF(cx, ctrlY, cx + ctrlW, ctrlY + ctrlH);
     if (IsHovered(vm, HitTestResult::Maximize)) {
@@ -779,14 +798,14 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     }
     DrawIconText(maxRc.left, maxRc.top, ctrlW, ctrlH,
         vm.maximized ? kIconRestore : kIconMaximize, vm.maximized ? L"[]" : L"\u25A1",
-        theme.text, 0.66f);
+        theme.text, 0.85f);
     cx -= ctrlW;
     D2D1_RECT_F minRc = D2D1::RectF(cx, ctrlY, cx + ctrlW, ctrlY + ctrlH);
     if (IsHovered(vm, HitTestResult::Minimize)) {
         MakeBrush(dc, theme.fill_hover, brFillHover_);
         FillRect(dc, brFillHover_.get(), minRc.left, minRc.top, ctrlW, ctrlH);
     }
-    DrawIconText(minRc.left, minRc.top, ctrlW, ctrlH, kIconMinimize, L"_", theme.text, 0.66f);
+    DrawIconText(minRc.left, minRc.top, ctrlW, ctrlH, kIconMinimize, L"_", theme.text, 0.85f);
 }
 
 void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {

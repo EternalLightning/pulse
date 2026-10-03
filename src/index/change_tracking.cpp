@@ -314,7 +314,8 @@ void ChangeTracker::Gap() {
     }
 }
 ChangeResponse ChangeTracker::Details(const std::wstring& owner, const std::wstring& path,
-                                     uint64_t since, uint64_t before, uint32_t limit, uint32_t kind_filter) {
+                                     uint64_t since, uint64_t before, uint32_t limit, uint32_t kind_filter,
+                                      const std::function<bool(const ChangeRecord&)>& authorize) {
     std::lock_guard lock(mutex_); ChangeResponse out;
     if (path.empty()) return out;
     auto& j = journals_[owner]; Load(owner, j); const auto now = Now();
@@ -336,13 +337,34 @@ ChangeResponse ChangeTracker::Details(const std::wstring& owner, const std::wstr
     std::vector<ChangeRecord> records;
     for (auto& [key, e] : collapsed) {
         if ((before && e.id >= before) || (kind_filter != UINT32_MAX && static_cast<uint32_t>(e.kind) != kind_filter)) continue;
+        if (authorize && !authorize(e)) { if (out.state == ChangeState::Available) out.state = ChangeState::Gap; continue; }
         records.push_back(std::move(e));
     }
     std::sort(records.begin(), records.end(), [](const auto& a, const auto& b) { return a.id > b.id; });
     if (records.size() > limit) { records.resize(limit); out.next_cursor = records.back().id; }
     out.records = std::move(records); return out;
 }
-ChangeResponse ChangeTracker::Summaries(const std::wstring& owner, const std::vector<std::wstring>& paths, uint64_t since) {
+ChangeResponse ChangeTracker::Summaries(const std::wstring& owner, const std::vector<std::wstring>& paths, uint64_t since,
+                                       const std::function<bool(const ChangeRecord&)>& authorize) {
+    if (authorize) {
+        ChangeResponse visible; visible.state = ChangeState::Available;
+        for (const auto& path : paths) {
+            // Details applies authorization before its own page limit. Bound
+            // summary recomputation rather than exposing the shared raw cache.
+            auto details = Details(owner, path, since, 0, 200, UINT32_MAX, authorize);
+            ChangeSummary summary; summary.path = path; summary.state = details.state;
+            summary.incomplete = details.state != ChangeState::Available || details.next_cursor != 0;
+            for (const auto& record : details.records) {
+                ++summary.count; summary.last_change = (std::max)(summary.last_change, record.time);
+                if (record.source == ChangeSource::InitialMtime) ++summary.initial_count;
+                else ++summary.counts[static_cast<uint32_t>(record.kind)];
+                summary.has_deleted |= record.kind == ChangeKind::Deleted;
+            }
+            if (summary.incomplete && visible.state == ChangeState::Available) visible.state = ChangeState::Gap;
+            visible.summaries.push_back(std::move(summary));
+        }
+        return visible;
+    }
     std::lock_guard lock(mutex_); ChangeResponse out;
     auto& j = journals_[owner]; Load(owner, j); const auto now = Now();
     since = (std::max)(since, j.tracking_since);

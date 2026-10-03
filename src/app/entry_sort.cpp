@@ -1,4 +1,5 @@
 #include "entry_sort.h"
+#include "../common/known_folder_labels.h"
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
 #include <algorithm>
@@ -35,6 +36,26 @@ int NameCompare(const std::wstring& a, const std::wstring& b) {
     return cmp;
 }
 
+const std::wstring& DisplaySortName(const fs::DirEntry& entry, std::wstring_view parent) {
+    if (!entry.is_dir || entry.change_record_only) return entry.name;
+    std::wstring full = entry.full_path;
+    if (full.empty() && !parent.empty() && !parent.starts_with(L"pulse:")) {
+        full = parent;
+        if (full.back() != L'\\' && full.back() != L'/') full += L'\\';
+        full += entry.name;
+    }
+    if (const auto* folder = pulse::path::FindKnownFolderLabel(full, pulse::path::KnownFolderLabels())) {
+        const auto& label = l10n::Get(folder->label);
+        if (!label.empty()) return label;
+    }
+    return entry.name;
+}
+
+int EntryNameCompare(const fs::DirEntry& a, const fs::DirEntry& b, std::wstring_view parent) {
+    const int cmp = NameCompare(DisplaySortName(a, parent), DisplaySortName(b, parent));
+    return cmp != 0 ? cmp : NameCompare(a.name, b.name);
+}
+
 std::atomic<FolderSortMode> g_folder_sort_mode{FolderSortMode::FoldersFirst};
 
 } // namespace
@@ -48,12 +69,13 @@ FolderSortMode CurrentFolderSortMode() noexcept {
 }
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir) {
-    return EntryLess(a, b, col, dir, CurrentFolderSortMode());
+               ui::SortColumn col, ui::SortDirection dir, std::wstring_view parent) {
+    return EntryLess(a, b, col, dir, CurrentFolderSortMode(), parent);
 }
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders) {
+               ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders,
+               std::wstring_view parent) {
     const bool a_folder = a.is_dir || (!a.link_target.empty() && a.link_target_is_dir);
     const bool b_folder = b.is_dir || (!b.link_target.empty() && b.link_target_is_dir);
     // FoldersFirst pins folders above the direction flip below; FollowDirection
@@ -66,25 +88,25 @@ bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
     int cmp = 0;
     switch (col) {
     case ui::SortColumn::Name:
-        cmp = NameCompare(a.name, b.name);
+        cmp = EntryNameCompare(a, b, parent);
         break;
     case ui::SortColumn::Size:
         if (a.size < b.size) cmp = -1;
         else if (a.size > b.size) cmp = 1;
-        else cmp = NameCompare(a.name, b.name);
+        else cmp = EntryNameCompare(a, b, parent);
         break;
     case ui::SortColumn::Mtime:
         cmp = CompareFileTime(&a.mtime, &b.mtime);
-        if (cmp == 0) cmp = NameCompare(a.name, b.name);
+        if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
     case ui::SortColumn::Type: {
         cmp = ExtensionCompare(a.name, b.name);
-        if (cmp == 0) cmp = NameCompare(a.name, b.name);
+        if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
     }
     case ui::SortColumn::Path:
         cmp = _wcsicmp(a.full_path.c_str(), b.full_path.c_str());
-        if (cmp == 0) cmp = NameCompare(a.name, b.name);
+        if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
     }
     if (dir == ui::SortDirection::Desc) cmp = -cmp;

@@ -394,18 +394,33 @@ std::wstring SettingsController::GlobalSearchHotkeyText() const {
 
 void SettingsController::ToggleUi(int index) {
     if (!prefs_ || !context_) return;
-    if (index == 1) {
-        prefs_->ApplyLaunchOnStartup(!prefs_->launch_on_startup);
-        SaveAndApply(SettingsEffect::None);
+    if (index == 31) {
+        const bool previous = prefs_->start_to_tray;
+        if (prefs_->launch_on_startup && !prefs_->ApplyLaunchOnStartup(true)) {
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+            return;
+        }
+        prefs_->start_to_tray = !previous;
+        if (!prefs_->Save()) {
+            prefs_->start_to_tray = previous;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else error_.clear();
+    } else if (index == 32) {
+        const bool previous = prefs_->close_last_tab_window;
+        prefs_->close_last_tab_window = !previous;
+        if (!prefs_->Save()) {
+            prefs_->close_last_tab_window = previous;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else error_.clear();
+    } else if (index == 1) {
+        if (!prefs_->ApplyLaunchOnStartup(!prefs_->launch_on_startup) || !prefs_->Save())
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        else error_.clear();
     } else if (index == 2) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
-    } else if (index == 3) {
-        if (!prefs_->ApplyFolderOpen(!prefs_->open_folders_in_pulse)) {
-            error_ = l10n::Get(l10n::StringId::DefaultFileManagerError);
-            return;
-        }
-        SaveAndApply(SettingsEffect::None);
+    } else if (index == 3 || (index >= 21 && index <= 24)) {
+        if (ui_.toggle_system_integration) ui_.toggle_system_integration(index);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;
         SaveAndApply(SettingsEffect::StatusBarPerformance);
@@ -448,6 +463,10 @@ void SettingsController::ToggleUi(int index) {
         }
         global_search_error_.clear();
         Apply(SettingsEffect::GlobalSearch);
+    } else if (index == kBuiltinGroupToggle) {
+        context_->SetBuiltinGroupEnabled(!context_->BuiltinGroupEnabled());
+        context_->Save();
+        Apply(SettingsEffect::ListStyle);
     } else if (index >= 10 && index < 15) {
         static constexpr ipc::CtxMenuGroup groups[] = {
             ipc::CtxMenuGroup::Software, ipc::CtxMenuGroup::OpenWith,
@@ -458,7 +477,15 @@ void SettingsController::ToggleUi(int index) {
         context_->Save();
     } else if (index >= 100) {
         const size_t item = static_cast<size_t>(index - 100);
-        if (item >= context_->seen.size()) return;
+        if (item >= context_->seen.size()) {
+            const size_t builtin = item - context_->seen.size();
+            if (builtin >= static_cast<size_t>(kBuiltinMenuItemCount)) return;
+            const auto which = static_cast<BuiltinMenuItem>(builtin);
+            context_->SetBuiltinItemEnabled(which, !context_->BuiltinItemEnabled(which));
+            context_->Save();
+            Apply(SettingsEffect::ListStyle);
+            return;
+        }
         const auto& seen = context_->seen[item];
         const bool enabled = context_->ItemEnabled(seen.key, seen.category, seen.from_com);
         context_->SetItemEnabled(seen.key, !enabled);
@@ -506,9 +533,8 @@ void SettingsController::RefreshStorage() {
     configuration_storage_error_ = storage::LastError(storage::Kind::Configuration);
     index_storage_path_ = storage::UserIndexRoot();
     if (index_ && (index_->ServiceMode() || index_->ServiceInstalled())) {
-        index::IndexConfig config;
-        index::LoadMachineConfig(config);
-        index_storage_path_ = config.index_path.empty() ? index::MachineIndexRoot() : config.index_path;
+        const std::wstring reported = index_->IndexPath();
+        index_storage_path_ = reported.empty() ? index::MachineIndexRoot() : reported;
     }
     index_pending_path_ = storage::Pending(storage::Kind::Index);
     index_storage_error_ = storage::LastError(storage::Kind::Index);

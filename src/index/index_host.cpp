@@ -12,6 +12,9 @@
 #include "search_trace.h"
 #include "index_service_start.h"
 #include "index_config.h"
+#include "index_caller_visibility.h"
+#include "index_request_limits.h"
+#include "index_raw_storage_security.h"
 #include "../common/crash_reporter.h"
 #include "../common/diagnostics_exporter.h"
 #include "index_paths.h"
@@ -59,14 +62,23 @@ constexpr DWORD kMaxClients = 16;
 struct Client {
     std::atomic<HANDLE> pipe{INVALID_HANDLE_VALUE};
     std::mutex write_mu;
+    struct Frame { uint32_t type = 0, id = 0; std::vector<uint8_t> payload; };
+    std::mutex output_mu;
+    std::condition_variable output_cv;
+    std::deque<Frame> output;
+    size_t output_bytes = 0;
+    std::shared_ptr<transport::Handle> caller;
     std::atomic<bool> alive{true};
     std::atomic<uint32_t> latest_search{0};
-    struct Subscription { uint32_t id = 0; Query query; std::shared_ptr<std::atomic<uint32_t>> latest = std::make_shared<std::atomic<uint32_t>>(0); uint32_t sent_id = 0; uint64_t sent_hash = 0; };
+    struct Subscription { uint32_t id = 0; Query query; std::shared_ptr<std::atomic<uint32_t>> latest = std::make_shared<std::atomic<uint32_t>>(0); uint32_t sent_id = 0; uint64_t sent_hash = 0; std::shared_ptr<transport::Handle> caller; };
     std::mutex subscriptions_mu;
     std::map<uint64_t, Subscription> subscriptions;
     std::atomic<bool> thread_done{false};
     std::wstring tracking_owner;
     bool tracking_lease = false;
+    struct FeedCursor { uint64_t wire = 0, raw = 0, epoch = 0; bool changes = false; std::wstring root; };
+    std::deque<FeedCursor> feed_cursors;
+    uint64_t next_feed_cursor = 1;
 };
 
 struct SearchTask {
@@ -74,11 +86,14 @@ struct SearchTask {
     uint32_t id = 0;
     Query query;
     std::shared_ptr<std::atomic<uint32_t>> latest;
+    std::shared_ptr<transport::Handle> caller;
+    size_t charge = 0;
 };
 
 struct ClientWorker {
     std::shared_ptr<Client> client;
     std::thread thread;
+    std::thread writer;
 };
 
 struct Host {
@@ -161,7 +176,7 @@ SECURITY_ATTRIBUTES* PipeSa() {
     if (!sd) {
         // SYSTEM + Administrators full; Authenticated Users read/write the pipe.
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)",
+            L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;AU)",
             SDDL_REVISION_1, &sd, nullptr);
         sa.lpSecurityDescriptor = sd;
         sa.bInheritHandle = FALSE;
@@ -169,9 +184,10 @@ SECURITY_ATTRIBUTES* PipeSa() {
     return sd ? &sa : nullptr;
 }
 
-bool ClientIo(Client& client, HANDLE pipe, uint8_t* bytes, DWORD size, bool write) {
+bool ClientIo(Client& client, HANDLE pipe, uint8_t* bytes, DWORD size, bool write, ULONGLONG deadline = 0) {
+    if (!deadline) deadline = GetTickCount64() + (write ? 2000 : 30000);
     while (size) {
-        if (!g.running || !client.alive || (g.stop && WaitForSingleObject(g.stop, 0) == WAIT_OBJECT_0)) return false;
+        if (!g.running || !client.alive || GetTickCount64() >= deadline || (g.stop && WaitForSingleObject(g.stop, 0) == WAIT_OBJECT_0)) return false;
         OVERLAPPED operation{};
         operation.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!operation.hEvent) return false;
@@ -181,8 +197,9 @@ bool ClientIo(Client& client, HANDLE pipe, uint8_t* bytes, DWORD size, bool writ
         if (!ok && GetLastError() == ERROR_IO_PENDING) {
             HANDLE waits[] = {operation.hEvent, g.stop};
             DWORD wait = WAIT_TIMEOUT;
-            while (wait == WAIT_TIMEOUT && g.running && client.alive)
-                wait = WaitForMultipleObjects(g.stop ? 2u : 1u, waits, FALSE, 1000);
+            while (wait == WAIT_TIMEOUT && g.running && client.alive && GetTickCount64() < deadline)
+                wait = WaitForMultipleObjects(g.stop ? 2u : 1u, waits, FALSE,
+                    static_cast<DWORD>((std::min)(deadline - GetTickCount64(), 1000ull)));
             if (wait != WAIT_OBJECT_0) {
                 CancelIoEx(pipe, &operation);
                 GetOverlappedResult(pipe, &operation, &transferred, TRUE);
@@ -198,24 +215,60 @@ bool ClientIo(Client& client, HANDLE pipe, uint8_t* bytes, DWORD size, bool writ
     return true;
 }
 
-bool WriteFrame(Client& c, uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
+bool SendFrame(Client& c, uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
     std::lock_guard<std::mutex> lock(c.write_mu);
     const HANDLE pipe = c.pipe.load();
     if (pipe == INVALID_HANDLE_VALUE || !g.running || !c.alive) return false;
+    const auto deadline = GetTickCount64() + 2000;
     auto hdr = MakeIndexHdr(type, id, static_cast<uint32_t>(payload.size()));
-    if (!ClientIo(c, pipe, reinterpret_cast<uint8_t*>(&hdr), sizeof(hdr), true))
+    if (!ClientIo(c, pipe, reinterpret_cast<uint8_t*>(&hdr), sizeof(hdr), true, deadline))
         return false;
     if (!payload.empty() &&
-        !ClientIo(c, pipe, const_cast<uint8_t*>(payload.data()), static_cast<DWORD>(payload.size()), true))
+        !ClientIo(c, pipe, const_cast<uint8_t*>(payload.data()), static_cast<DWORD>(payload.size()), true, deadline))
         return false;
     return true;
 }
 
+bool WriteFrame(Client& c, uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
+    std::lock_guard lock(c.output_mu);
+    if (!c.alive || payload.size() > kIndexMaxPayload) return false;
+    // Status broadcasts are replaceable; do not let them crowd out replies.
+    if (type == RSP_IDX_STATUS && id == 0) {
+        for (auto& frame : c.output) if (frame.type == type && frame.id == 0) {
+            c.output_bytes -= frame.payload.size(); frame.payload = payload; c.output_bytes += payload.size();
+            return true;
+        }
+    }
+    if (c.output.size() >= IndexRequestLimits::response_items ||
+        payload.size() > IndexRequestLimits::response_bytes - c.output_bytes) {
+        c.alive = false;
+        const auto pipe = c.pipe.load(); if (pipe != INVALID_HANDLE_VALUE) CancelIoEx(pipe, nullptr);
+        c.output_cv.notify_all(); return false;
+    }
+    c.output.push_back({type, id, payload}); c.output_bytes += payload.size();
+    c.output_cv.notify_one(); return true;
+}
+void ClientWriter(std::shared_ptr<Client> c) {
+    for (;;) {
+        Client::Frame frame;
+        {
+            std::unique_lock lock(c->output_mu);
+            c->output_cv.wait(lock, [&] { return !c->alive || !g.running || !c->output.empty(); });
+            if (!c->alive || !g.running) return;
+            frame = std::move(c->output.front()); c->output.pop_front(); c->output_bytes -= frame.payload.size();
+        }
+        if (!SendFrame(*c, frame.type, frame.id, frame.payload)) {
+            c->alive = false;
+            const auto pipe = c->pipe.load(); if (pipe != INVALID_HANDLE_VALUE) CancelIoEx(pipe, nullptr);
+            return;
+        }
+    }
+}
 std::vector<uint8_t> StatusPayload() {
     PayloadWriter w;
     w.PutU32(g.engine.Ready() ? 1u : 0u);
-    w.PutU32(static_cast<uint32_t>((std::min)(g.engine.Count(), static_cast<size_t>(0xffffffffu))));
-    w.PutString(g.engine.Status());
+    w.PutU32(g.as_service ? 0u : static_cast<uint32_t>((std::min)(g.engine.Count(), static_cast<size_t>(0xffffffffu))));
+    w.PutString(g.as_service ? L"服务端索引：仅显示当前调用令牌可见的本地元数据；超时、离线、重解析点和历史删除项可能不完整" : g.engine.Status());
     w.PutU32(g.engine.PinyinReady() ? 1u : 0u);
     w.PutU64(g.engine.Revision()); w.PutU32(1);
     return w.data();
@@ -253,13 +306,19 @@ std::vector<uint8_t> SearchPayload(const SearchResult& sr) {
         w.PutU32(static_cast<uint32_t>(h.mtime >> 32));
     }
     w.PutU64(sr.revision);
+    w.PutU32(sr.error); w.PutU32(sr.incomplete ? 1u : 0u);
     return w.data();
 }
 
-std::vector<uint8_t> VolumesPayload() {
+std::vector<uint8_t> VolumesPayload(Client& client) {
     PayloadWriter w;
     IndexConfig config;
-    if (g.as_service) LoadMachineConfig(config, nullptr);
+    if (g.as_service) {
+        LoadMachineConfig(config, nullptr);
+        CallerVisibility visibility(client.caller ? client.caller->get() : nullptr, 2000, true);
+        std::erase_if(config.excluded_paths, [&](const auto& path) { return !visibility.Visible(path); });
+        if (!visibility.ValidateDirectories()) config.excluded_paths.clear();
+    }
     const auto volumes = g.engine.Volumes();
     w.PutU32(g.as_service ? 1u : 0u);
     w.PutString(DataDir());
@@ -277,8 +336,8 @@ std::vector<uint8_t> VolumesPayload() {
         w.PutU32(flags);
         w.PutU32(static_cast<uint32_t>(volume.kind));
         w.PutU32(volume.progress);
-        w.PutU32(static_cast<uint32_t>(volume.indexed_items));
-        w.PutU32(static_cast<uint32_t>(volume.indexed_items >> 32));
+        w.PutU32(g.as_service ? 0u : static_cast<uint32_t>(volume.indexed_items));
+        w.PutU32(g.as_service ? 0u : static_cast<uint32_t>(volume.indexed_items >> 32));
     }
     if (g.as_service) {
         // Sent after the volume rows so newer clients receive the exclusion list.
@@ -306,27 +365,46 @@ bool ParseQuery(const uint8_t* p, size_t n, Query& q) {
     if (r.remaining() && !r.GetU64(q.session_id)) return false;
     q.sort = static_cast<ResultSort>(sort);
     q.limit = limit;
+    if (r.remaining() || flags > 15 || offset > 1000000) return false;
     q.offset = offset;
     if (q.limit > kSearchPageCap) q.limit = kSearchPageCap;
     return true;
 }
 
 void QueueSearch(std::shared_ptr<Client> c, uint32_t id, Query query, bool refresh) {
-    std::shared_ptr<std::atomic<uint32_t>> latest;
+    bool overloaded = false;
     {
-        std::lock_guard lock(c->subscriptions_mu);
-        auto& subscription = c->subscriptions[query.session_id];
-        if (refresh && subscription.id != id) return;
-        subscription.id = id; subscription.query = query; latest = subscription.latest; *latest = id;
+        // One lock order everywhere: session state then queue. Requests replace
+        // queued work for their session, but cannot create unbounded session IDs.
+        std::lock_guard sessions_lock(c->subscriptions_mu);
+        std::lock_guard queue_lock(g.search_mu);
+        auto found = c->subscriptions.find(query.session_id);
+        if (refresh && (found == c->subscriptions.end() || found->second.id != id)) return;
+        std::erase_if(g.search_queue, [&](const auto& task) { return task.client == c && task.query.session_id == query.session_id; });
+        size_t items = 0, bytes = 0, all_bytes = 0;
+        for (const auto& task : g.search_queue) {
+            all_bytes += task.charge;
+            if (task.client == c) { ++items; bytes += task.charge; }
+        }
+        const size_t charge = sizeof(SearchTask) + 2 * (query.needle.size() + query.path_prefix.size());
+        overloaded = !IndexRequestLimits::Admit(c->subscriptions.size(), found != c->subscriptions.end(),
+            items, bytes, g.search_queue.size(), all_bytes, charge);
+        if (overloaded && found != c->subscriptions.end() && !refresh) {
+            ++*found->second.latest; c->subscriptions.erase(found);
+        }
+        if (!overloaded) {
+            auto& subscription = c->subscriptions[query.session_id];
+            subscription.id = id; subscription.query = query; *subscription.latest = id;
+            if (!refresh) subscription.caller = c->caller;
+            g.search_queue.push_back({c, id, std::move(query), subscription.latest, subscription.caller, charge});
+            g.search_cv.notify_one();
+        }
     }
-    std::lock_guard<std::mutex> lock(g.search_mu);
-    g.search_queue.erase(
-        std::remove_if(g.search_queue.begin(), g.search_queue.end(),
-            [&](const SearchTask& task) { return task.client == c && task.query.session_id == query.session_id; }),
-        g.search_queue.end());
-    g.search_queue.push_back(SearchTask{std::move(c), id, std::move(query), std::move(latest)});
+    if (overloaded && !refresh) {
+        SearchResult rejected; rejected.error = ERROR_BUSY; rejected.incomplete = true;
+        WriteFrame(*c, RSP_IDX_SEARCH, id, SearchPayload(rejected));
+    }
     TraceSearch("filename_query_queued", g.engine.Revision());
-    g.search_cv.notify_one();
 }
 
 void SearchThread() {
@@ -339,19 +417,31 @@ void SearchThread() {
                 g.search_queue.clear();
                 return;
             }
-            task = std::move(g.search_queue.front());
-            g.search_queue.pop_front();
+            task = PopFair(g.search_queue);
         }
         auto& c = task.client;
         if (!c || !c->alive || task.latest->load() != task.id) continue;
         TraceSearch("filename_query_begin", g.engine.Revision());
-        SearchResult sr = g.engine.Search(task.query, task.latest.get(), task.id);
+        CallerVisibility visibility(task.caller ? task.caller->get() : nullptr, 2000, true);
+        const auto authorize = g.as_service ? std::function<bool(const std::wstring&)>([&](const auto& path) { return visibility.Visible(path); })
+            : std::function<bool(const std::wstring&)>{};
+        SearchResult sr = g.engine.Search(task.query, task.latest.get(), task.id, authorize);
+        sr.incomplete = g.as_service && visibility.Incomplete();
+        if (g.as_service && !visibility.ValidateDirectories()) {
+            sr.hits.clear(); sr.total = 0; sr.incomplete = true;
+        }
+        // Recheck rows with fresh descriptors immediately before enqueueing.
+        if (g.as_service) {
+            CallerVisibility final_visibility(task.caller ? task.caller->get() : nullptr);
+            const auto removed = std::erase_if(sr.hits, [&](const auto& hit) { return !final_visibility.Visible(hit.path); });
+            if (removed) { sr.total = sr.hits.size(); sr.incomplete = true; }
+        }
         sr.revision = g.engine.Revision();
         TraceSearch("filename_query_done", sr.revision);
         if (!c->alive || task.latest->load() != task.id) continue;
         auto out = SearchPayload(sr);
         if (out.size() > kIndexMaxPayload) {
-            sr.hits.clear();
+            sr.hits.clear(); sr.total = 0; sr.incomplete = true; sr.error = ERROR_BUFFER_OVERFLOW;
             out = SearchPayload(sr);
         }
         if (task.query.subscribe) {
@@ -359,7 +449,7 @@ void SearchThread() {
             // to the last page sent for this request are not pushed again (the
             // trailing revision is excluded from the comparison).
             uint64_t hash = 1469598103934665603ull;
-            const size_t hashed = out.size() >= 8 ? out.size() - 8 : out.size();
+            const size_t hashed = out.size() >= 16 ? out.size() - 16 : out.size();
             for (size_t i = 0; i < hashed; ++i) { hash ^= out[i]; hash *= 1099511628211ull; }
             std::lock_guard lock(c->subscriptions_mu);
             auto found = c->subscriptions.find(task.query.session_id);
@@ -370,6 +460,12 @@ void SearchThread() {
             }
         }
         WriteFrame(*c, RSP_IDX_SEARCH, task.id, out);
+        if (!task.query.subscribe) {
+            std::lock_guard lock(c->subscriptions_mu);
+            const auto found = c->subscriptions.find(task.query.session_id);
+            if (found != c->subscriptions.end() && found->second.latest == task.latest && found->second.id == task.id)
+                c->subscriptions.erase(found);
+        }
     }
 }
 
@@ -386,6 +482,14 @@ void DropClient(const std::shared_ptr<Client>& c) {
     if (!c) return;
     if (!c->tracking_owner.empty()) SetTrackingLease(*c, c->tracking_owner, false);
     c->alive = false;
+    c->output_cv.notify_all();
+    {
+        std::lock_guard sessions_lock(c->subscriptions_mu);
+        for (const auto& [session, subscription] : c->subscriptions) ++*subscription.latest;
+        c->subscriptions.clear();
+        std::lock_guard queue_lock(g.search_mu);
+        std::erase_if(g.search_queue, [&](const auto& task) { return task.client == c; });
+    }
     ++c->latest_search;
     // A writer holds write_mu while awaiting overlapped IO. Cancel it before
     // acquiring that mutex so a disconnected reader cannot strand the host.
@@ -409,7 +513,7 @@ std::wstring TrackingOwner(HANDLE pipe) {
     if (!ImpersonateNamedPipeClient(pipe)) return {};
     HANDLE token = nullptr;
     const BOOL opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token);
-    RevertToSelf();
+    transport::RevertOrFailFast();
     if (!opened) return {};
     DWORD bytes = 0, session = 0;
     GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
@@ -446,11 +550,18 @@ bool HandleChanges(Client& client, const MsgHeader& hdr, const std::vector<uint8
             paths.push_back(std::move(path));
         }
         if (r.remaining()) return false;
-        response = g.engine.Changes().Summaries(owner, paths, since);
+        CallerVisibility visibility(client.caller ? client.caller->get() : nullptr, 2000, true);
+        const auto authorize = g.as_service ? std::function<bool(const ChangeRecord&)>([&](const auto& record) { return visibility.RecordVisible(record); })
+            : std::function<bool(const ChangeRecord&)>{};
+        if (g.as_service) std::erase_if(paths, [&](const auto& path) { return !visibility.Visible(path); });
+        response = g.engine.Changes().Summaries(owner, paths, since, authorize);
+        if (g.as_service && !visibility.ValidateDirectories()) {
+            response.summaries.clear(); response.state = ChangeState::Gap;
+        }
         w.PutU32(static_cast<uint32_t>(response.state)); w.PutU32(static_cast<uint32_t>(response.summaries.size()));
         for (auto& summary : response.summaries) {
             const auto coverage = g.engine.ChangeCoverage(summary.path);
-            if (coverage != ChangeState::Gap && !(coverage == ChangeState::NotCovered && summary.count)) summary.state = coverage;
+            if (summary.state != ChangeState::Gap && coverage != ChangeState::Gap && !(coverage == ChangeState::NotCovered && summary.count)) summary.state = coverage;
             w.PutString(summary.path); w.PutU64(summary.last_change); w.PutU32(summary.count);
             w.PutU32(static_cast<uint32_t>(summary.state));
             for (auto count_kind : summary.counts) w.PutU32(count_kind);
@@ -463,9 +574,16 @@ bool HandleChanges(Client& client, const MsgHeader& hdr, const std::vector<uint8
     if (!r.GetString(path) || path.empty() || path.size() > 32767 || !r.GetU64(since) ||
         !r.GetU64(before) || !r.GetU32(limit) || !r.GetU32(filter) || limit == 0 || limit > 200 ||
         (filter != UINT32_MAX && filter > 5) || r.remaining()) return false;
-    response = g.engine.Changes().Details(owner, path, since, before, limit, filter);
+    CallerVisibility visibility(client.caller ? client.caller->get() : nullptr, 2000, true);
+    const auto authorize = g.as_service ? std::function<bool(const ChangeRecord&)>([&](const auto& record) { return visibility.RecordVisible(record); })
+        : std::function<bool(const ChangeRecord&)>{};
+    if (!g.as_service || visibility.Visible(path))
+        response = g.engine.Changes().Details(owner, path, since, before, limit, filter, authorize);
+    if (g.as_service && !visibility.ValidateDirectories()) {
+        response.records.clear(); response.next_cursor = 0; response.state = ChangeState::Gap;
+    }
     const auto coverage = g.engine.ChangeCoverage(path);
-    if (coverage != ChangeState::Gap && !(coverage == ChangeState::NotCovered && !response.records.empty())) response.state = coverage;
+    if (response.state != ChangeState::Gap && response.state != ChangeState::Unavailable && coverage != ChangeState::Gap && !(coverage == ChangeState::NotCovered && !response.records.empty())) response.state = coverage;
     w.PutU32(static_cast<uint32_t>(response.state)); w.PutU64(response.next_cursor);
     w.PutU32(static_cast<uint32_t>(response.records.size()));
     for (const auto& record : response.records) {
@@ -477,18 +595,27 @@ bool HandleChanges(Client& client, const MsgHeader& hdr, const std::vector<uint8
 }
 
 void ClientThread(std::shared_ptr<Client> c) {
+    bool first_frame = true;
     while (g.running && c->alive) {
+        const auto frame_deadline = GetTickCount64() + (first_frame ? 2000 : 30000);
         MsgHeader hdr{};
         std::vector<uint8_t> payload;
         const HANDLE pipe = c->pipe.load();
         if (pipe == INVALID_HANDLE_VALUE ||
-            !ClientIo(*c, pipe, reinterpret_cast<uint8_t*>(&hdr), sizeof(hdr), false))
+            !ClientIo(*c, pipe, reinterpret_cast<uint8_t*>(&hdr), sizeof(hdr), false, frame_deadline))
             break;
         if (hdr.magic != kIndexMagic || hdr.payload_size > kIndexMaxRequestPayload) break;
         payload.resize(hdr.payload_size);
         if (hdr.payload_size &&
-            !ClientIo(*c, pipe, payload.data(), hdr.payload_size, false))
+            !ClientIo(*c, pipe, payload.data(), hdr.payload_size, false, frame_deadline))
             break;
+        first_frame = false;
+        auto caller = std::make_shared<transport::Handle>(transport::CaptureCaller(pipe));
+        if (!caller->get()) break;
+        {
+            std::lock_guard lock(c->subscriptions_mu);
+            c->caller = std::move(caller);
+        }
         if(hdr.type==8) {
             PayloadReader reader(payload.data(),payload.size());uint64_t session=0;
             if(!reader.GetU64(session)) break;
@@ -506,19 +633,60 @@ void ClientThread(std::shared_ptr<Client> c) {
                 paths.push_back(std::move(path));
             }
             if (!valid || reader.remaining()) break;
-            PayloadWriter writer; PutFolderSizes(writer, g.engine.FolderSizes(paths));
+            CallerVisibility visibility(c->caller ? c->caller->get() : nullptr, 2000, true);
+            const auto authorize = g.as_service ? std::function<bool(const std::wstring&)>([&](const auto& path) { return visibility.Visible(path); })
+                : std::function<bool(const std::wstring&)>{};
+            auto sizes = g.engine.FolderSizes(paths, authorize);
+            if (g.as_service && (!visibility.ValidateDirectories() || visibility.Incomplete()))
+                for (auto& size : sizes) size = {};
+            PayloadWriter writer; PutFolderSizes(writer, sizes);
             if (!WriteFrame(*c, kFolderSizeResponse, hdr.request_id, writer.data())) break;
         } else if (hdr.type == kFeedRequest) {
             PayloadReader reader(payload.data(),payload.size()); uint32_t version=0,changes=0;
             std::wstring root; uint64_t epoch=0,cursor=0;
             if(!reader.GetU32(version)||version!=1||!reader.GetU32(changes)||changes>1||!reader.GetString(root)||root.size()>32768||!reader.GetU64(epoch)||!reader.GetU64(cursor)) break;
-            auto page=g.engine.ReadFeed(changes!=0,root,epoch,cursor);
+            const auto wire_cursor = cursor;
+            bool valid_cursor = true;
+            if (g.as_service && cursor) {
+                const auto found = std::find_if(c->feed_cursors.begin(), c->feed_cursors.end(), [&](const auto& stored) {
+                    return stored.wire == cursor && stored.root == root && stored.changes == (changes != 0) && stored.epoch == epoch;
+                });
+                valid_cursor = found != c->feed_cursors.end();
+                if (valid_cursor) cursor = found->raw;
+            }
+            auto page = valid_cursor ? g.engine.ReadFeed(changes != 0, root, epoch, cursor) : FileFeedPage{};
+            if (!valid_cursor) { page.gap = true; page.epoch = epoch; page.next = wire_cursor; }
             if(changes && page.ready && !page.gap && page.records.empty() && epoch) {
                 for(unsigned i=0;i<10 && g.running && c->alive;++i) {
                     if(WaitForSingleObject(g.stop,10)==WAIT_OBJECT_0) break;
                     page=g.engine.ReadFeed(true,root,epoch,cursor);
                     if(page.gap || !page.records.empty()) break;
                 }
+            }
+            if (g.as_service) {
+                CallerVisibility visibility(c->caller ? c->caller->get() : nullptr, 2000, true);
+                const auto scope = NormalizeChangePath(root);
+                const auto removed = std::erase_if(page.records, [&](const auto& record) {
+                    const auto path = NormalizeChangePath(record.path);
+                    const bool under = scope.empty() || path == scope || path.starts_with(scope + (scope.back() == L'\\' ? L"" : L"\\"));
+                    return !visibility.RecordVisible(record) || !under;
+                });
+                // Keep snapshot cursors advancing past denied records, without
+                // disclosing their names. A change-feed gap triggers resync.
+                if (changes && removed) page.gap = true;
+                if (!visibility.ValidateDirectories()) { page.records.clear(); page.gap = true; }
+                if (visibility.Incomplete()) page.gap = true;
+                if (valid_cursor) {
+                    const auto raw_next = page.next;
+                    const auto next = c->next_feed_cursor++;
+                    if (c->feed_cursors.size() >= 64) c->feed_cursors.pop_front();
+                    c->feed_cursors.push_back({next, raw_next, page.epoch, changes != 0, root});
+                    page.next = next;
+                }
+                // Opaque connection-scoped cursors avoid leaking raw MFT index
+                // offsets, volume item totals or global unauthorized event IDs.
+                page.sequence = 0;
+                for (auto& record : page.records) { record.id = 0; record.file_id = 0; }
             }
             PayloadWriter writer;PutFeedPage(writer,page);
             if(!WriteFrame(*c,kFeedResponse,hdr.request_id,writer.data())) break;
@@ -527,7 +695,7 @@ void ClientThread(std::shared_ptr<Client> c) {
         } else if (hdr.type == REQ_IDX_STATUS) {
             WriteFrame(*c, RSP_IDX_STATUS, hdr.request_id, StatusPayload());
         } else if (hdr.type == REQ_IDX_VOLUMES) {
-            WriteFrame(*c, RSP_IDX_VOLUMES, hdr.request_id, VolumesPayload());
+            WriteFrame(*c, RSP_IDX_VOLUMES, hdr.request_id, VolumesPayload(*c));
         } else if (hdr.type == REQ_IDX_SEARCH) {
             const uint32_t id = hdr.request_id;
             c->latest_search.store(id);
@@ -554,6 +722,7 @@ void ReapClientWorkers() {
             continue;
         }
         if (it->thread.joinable()) it->thread.join();
+        if (it->writer.joinable()) it->writer.join();
         it = g.client_workers.erase(it);
     }
 }
@@ -630,7 +799,7 @@ void AcceptLoop() {
             c->pipe = INVALID_HANDLE_VALUE;
             continue;
         }
-        g.client_workers.push_back(ClientWorker{c, std::thread(ClientThread, c)});
+        g.client_workers.push_back(ClientWorker{c, std::thread(ClientThread, c), std::thread(ClientWriter, c)});
         WriteFrame(*c, RSP_IDX_STATUS, 0, StatusPayload());
     }
 }
@@ -690,6 +859,12 @@ int RunHost(bool as_service, bool test_mode = false,
             const DWORD failure = GetLastError();
             SetSvc(SERVICE_STOPPED, failure);
             return static_cast<int>(failure);
+        }
+        // Before loading MFT/aggregate/per-volume shards, repair all prior raw
+        // snapshots, deltas, pinyin sidecars, retired copies, journals and logs.
+        if (!ProtectIndexRawTree(MachineDataRoot()) || !ProtectIndexRawTree(config.index_path)) {
+            SetSvc(SERVICE_STOPPED, ERROR_ACCESS_DENIED);
+            return ERROR_ACCESS_DENIED;
         }
         SetActiveIndexDirectory(config.index_path);
         const std::wstring probe = config.index_path + L"\\.pulse-write-check-" +
@@ -767,6 +942,7 @@ int RunHost(bool as_service, bool test_mode = false,
         for (auto& c : g.clients) {
             if (!c) continue;
             c->alive = false;
+            c->output_cv.notify_all();
             ++c->latest_search;
             const HANDLE pipe = c->pipe.load();
             if (pipe != INVALID_HANDLE_VALUE) CancelIoEx(pipe, nullptr);
@@ -775,8 +951,10 @@ int RunHost(bool as_service, bool test_mode = false,
     g.search_cv.notify_all();
     ServiceTrace(L"waiting for pipe workers to stop");
     if (g.accept_thread.joinable()) g.accept_thread.join();
-    for (auto& worker : g.client_workers)
+    for (auto& worker : g.client_workers) {
         if (worker.thread.joinable()) worker.thread.join();
+        if (worker.writer.joinable()) worker.writer.join();
+    }
     g.client_workers.clear();
     if (g.search_thread.joinable()) g.search_thread.join();
     TraceSearch("filename_shutdown_clients_done");
@@ -823,8 +1001,7 @@ std::wstring SelfPath() {
 
 int InstallService() {
     SetMachineIndexScope(true);
-    // Repair ProgramData ACLs on every install so older SY/BA-only trees become
-    // readable again for interactive admins and Authenticated Users.
+    // Repair privileged ProgramData roots; raw metadata is never AU-readable.
     (void)MachineDataRoot();
     (void)MachineIndexRoot();
     IndexConfig config;
@@ -1012,7 +1189,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         : a1 == L"--network-agent" ? pulse::crash::ProcessRole::NetworkAgent
         : a1 == L"--content-agent" ? pulse::crash::ProcessRole::ContentAgent
         : pulse::crash::ProcessRole::IndexHelper;
-    pulse::crash::Initialize({role, service_mode, {}});
+    if (a1 != L"--test-network-agent") pulse::crash::Initialize({role, service_mode, {}});
 
     if (a1 == L"--install") return InstallService();
     if (a1 == L"--uninstall") return UninstallService();
@@ -1029,6 +1206,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 0;
     }
     if (a1 == L"--network-agent") return RunNetworkAgent();
+    if (a1 == L"--test-network-agent" && args.size() == 3) return RunNetworkAgentFixture(args[2]);
     if (a1 == L"--content-instant-agent" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10), ContentAgentMode::Instant);
     if (a1 == L"--content-index-agent" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10));
     if (a1 == L"--content-index-observer" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10), true);

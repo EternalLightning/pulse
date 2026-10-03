@@ -169,6 +169,10 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
         WillChangeLayout();
         for (int i = static_cast<int>(tabs.items.size()) - 1; i >= 0; --i) {
             if (tabs.items[static_cast<size_t>(i)]->tab_group == id) {
+                if (tabs.items.size() == 1 && CanCloseTab(tabs, static_cast<size_t>(i))) {
+                    callbacks_.close_window();
+                    break;
+                }
                 tabs.CloseTab(static_cast<size_t>(i));
             }
         }
@@ -197,10 +201,25 @@ void TabController::PruneEmptyGroups(WindowTabs& tabs) const {
         }), tabs.tab_groups.end());
 }
 
+bool TabController::CanCloseTab(const WindowTabs& tabs, size_t index) const {
+    if (index >= tabs.items.size() || tabs.items[index]->pinned) return false;
+    return tabs.items.size() > 1 || (callbacks_.close_window &&
+        callbacks_.close_window_with_last_tab && callbacks_.close_window_with_last_tab());
+}
+
+void TabController::CloseTab(WindowTabs& tabs, size_t index) const {
+    if (CanCloseTab(tabs, index)) CloseTabs(tabs, static_cast<int>(index), static_cast<int>(index));
+}
+
 void TabController::CloseTabs(WindowTabs& tabs, int first, int last, int except) const {
     WillChangeLayout();
-    for (int i = last; i >= first; --i) {
-        if (i != except) tabs.CloseTab(static_cast<size_t>(i));
+    for (int i = std::min(last, static_cast<int>(tabs.items.size()) - 1); i >= std::max(0, first); --i) {
+        if (i == except || tabs.items[static_cast<size_t>(i)]->pinned) continue;
+        if (tabs.items.size() == 1 && CanCloseTab(tabs, static_cast<size_t>(i))) {
+            callbacks_.close_window();
+            break;
+        }
+        tabs.CloseTab(static_cast<size_t>(i));
     }
     PruneEmptyGroups(tabs);
     LayoutChanged();
@@ -271,7 +290,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         items.back().separator_after = true;
     }
     items.push_back(MenuItem(CmdTabClose, TabText(Text::TabClose), L"\xE711"));
-    items.back().enabled = !tab.pinned && tabs.items.size() > 1;
+    items.back().enabled = CanCloseTab(tabs, static_cast<size_t>(tab_index));
     items.push_back(MenuItem(CmdTabCloseOthers, TabText(Text::TabCloseOthers)));
     items.push_back(MenuItem(CmdTabCloseRight, TabText(Text::TabCloseRight)));
 
@@ -325,7 +344,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         NormalizeGroupRuns(tabs);
         PruneEmptyGroups(tabs);
     } else if (command == CmdTabClose) {
-        CloseTabs(tabs, tab_index, tab_index);
+        CloseTab(tabs, static_cast<size_t>(tab_index));
     } else if (command == CmdTabCloseOthers) {
         CloseTabs(tabs, 0, static_cast<int>(tabs.items.size()) - 1, tab_index);
     } else if (command == CmdTabCloseRight) {

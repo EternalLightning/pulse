@@ -89,6 +89,7 @@ public:
         std::function<bool(std::wstring&)> pick_image;
         std::function<bool(std::wstring&, std::wstring_view)> pick_folder;
         std::function<void(SettingsEffect)> apply_effects;
+        std::function<void(int)> toggle_system_integration;
         SettingsTaskCompletion task_completion;
         std::function<void(const std::wstring&)> open_path;
         std::function<void()> open_diagnostics;

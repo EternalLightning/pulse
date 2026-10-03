@@ -76,8 +76,12 @@ public:
     float RowHeightPx() const { return row_h_; }
     int Count() const { return (int)items_.size(); }
     const FluentMenuItem* At(int i) const;
+    bool LabelTruncated(int i) const;
+    std::wstring TooltipText(int i) const;
     // Copy command ids from src when display text/structure matches. No layout.
     bool PatchCommands(const std::vector<FluentMenuItem>& src);
+    // Refresh one live command without moving rows or resizing an open popup.
+    bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     // Content y (px) of row i's top edge.
     float RowTopPx(int i) const;
     int HitTestRow(float y_px) const;                 // -1 = not on a row
@@ -86,6 +90,7 @@ public:
 
 private:
     std::vector<FluentMenuItem> items_;
+    std::vector<bool> label_truncated_;
     float scale_ = 1.0f;
     float row_h_ = 32.0f;
     float pad_v_ = 4.0f;      // surface inner padding (DIP*scale)
@@ -129,6 +134,7 @@ public:
     // Never grows or shrinks an open menu (Explorer COM arriving late must not
     // restyle the popup). Returns true when ids were patched.
     bool ReplaceItems(std::vector<FluentMenuItem> items);
+    bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     void SetFilterPlaceholder(std::wstring text) { filter_placeholder_ = std::move(text); }
     const std::wstring& LastFilterQuery() const { return filter_query_; }
     // True when the last TrackPopup closed because Enter was pressed with no
@@ -194,7 +200,7 @@ private:
     void OnMouse(POINT client_pt, bool button_up);
     void UpdateHover(int row, int swatch = -1);
     float BodyHeightPx() const;
-    void UpdateTooltip(int row);
+    void UpdateTooltip(int row, bool submenu = false);
     int HitTestSwatch(int row, float client_x) const;
     int HitTestSwatch(const FluentMenuModel& model, int row, float client_x) const;
     int InvokeRow(int row);        // returns command or 0

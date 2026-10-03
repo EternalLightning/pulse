@@ -74,8 +74,6 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     dc->PushAxisAlignedClip(lay.content, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     const float pad = 20.0f * scale_;
     const float origin = lay.content_origin;
-    const float switch_w = 42.0f * scale_;
-    const float switch_h = 32.0f * scale_;
 
     const auto page_title_id = vm.settings_page == 0
         ? pulse::l10n::StringId::SettingsGeneral
@@ -423,29 +421,29 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                      42.0f * scale_);
         {
             const D2D1_RECT_F& row = lay.diagnostics_perf;
+            const auto& description=l10n::Get(l10n::StringId::SettingsShowPerformanceDesc);
+            const auto bounds=SettingsToggleBounds(row,description,scale_,&painter_);
             if (IsHovered(vm, HitTestResult::SettingsToggle, 4)) {
                 MakeBrush(dc, theme.fill_hover, brFillHover_);
                 FillRoundedRect(dc, brFillHover_.get(), row.left + 4.0f * scale_, row.top,
                                 row.right - row.left - 8.0f * scale_, row.bottom - row.top,
                                 4.0f * scale_);
             }
-            MakeBrush(dc, theme.text, brText_);
-            DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
-                         pulse::l10n::Get(pulse::l10n::StringId::SettingsShowPerformance),
-                         row.left + 16.0f * scale_, row.top + 8.0f * scale_,
-                         row.right - row.left - 80.0f * scale_, 22.0f * scale_);
-            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-            DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(),
-                         pulse::l10n::Get(pulse::l10n::StringId::SettingsShowPerformanceDesc),
-                         row.left + 16.0f * scale_, row.top + 30.0f * scale_,
-                         row.right - row.left - 80.0f * scale_, 18.0f * scale_);
+            DrawIconText(bounds.icon.left,bounds.icon.top,24*scale_,24*scale_,L"\xE946",L"",theme.text_secondary,0.85f);
+            const auto performance_title=FitEndEllipsis(l10n::Get(l10n::StringId::SettingsShowPerformance),
+                bounds.title.right-bounds.title.left,[&](const std::wstring& value) {
+                    return MeasureTextWidth(compositor_->DwriteFactory(),compositor_->TextFormat(),value);
+                });
+            painter_.DrawText(performance_title,bounds.title,compositor_->TextFormat(),theme.text);
+            painter_.DrawWrappedCaption(description,D2D1::Point2F(bounds.description.left,bounds.description.top),
+                bounds.description.right-bounds.description.left,theme.text_secondary);
             fluent::ControlState st{};
             st.checked = vm.settings_show_performance;
             st.hovered = IsHovered(vm, HitTestResult::SettingsToggle, 4);
-            painter_.DrawSwitch(D2D1::RectF(row.right - 16.0f * scale_ - switch_w,
-                                            row.top + (56.0f * scale_ - switch_h) * 0.5f,
+            painter_.DrawSwitch(D2D1::RectF(row.right - 60.0f * scale_,
+                                            (row.top + row.bottom - 32.0f * scale_) * 0.5f,
                                             row.right - 16.0f * scale_,
-                                            row.top + (56.0f * scale_ + switch_h) * 0.5f),
+                                            (row.top + row.bottom + 32.0f * scale_) * 0.5f),
                                 L"", st);
         }
         static constexpr pulse::l10n::StringId kDiagnosticsActions[] = {
@@ -704,7 +702,13 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SettingsLanguage: target=l.language_card;break;
     case I::SettingsLaunch: target=l.startup_row[0];break;
     case I::SettingsKeepRunning: target=l.startup_row[1];break;
-    case I::SettingsOpenFolders: target=l.startup_row[2];break;
+    case I::SettingsDefaultManager: target=l.startup_row[2];break;
+    case I::SettingsOpenFolders: target=l.default_manager_rows[0];break;
+    case I::SettingsTakeoverWinE: target=l.default_manager_rows[1];break;
+    case I::ThisPc: target=l.default_manager_rows[2];break;
+    case I::SettingsExplorerTakeover: target=l.default_manager_rows[3];break;
+    case I::StartToTray: target=l.startup_tray_row;break;
+    case I::CloseLastTabWindow: target=l.last_tab_row;break;
     case I::SettingsRowHeight: target=l.density_card;break;
     case I::SettingsShowPerformance: target=l.performance_row;break;
     case I::ListSmartDate: target=l.list_style_row[0];break;

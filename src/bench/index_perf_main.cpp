@@ -1,4 +1,5 @@
 #include "../index/index_protocol.h"
+#include "../index/index_transport_security.h"
 #include "../ipc/protocol.h"
 #include <algorithm>
 #include <chrono>
@@ -31,11 +32,11 @@ bool ReadFrame(HANDLE pipe, MsgHeader& header, std::vector<uint8_t>& payload) {
 }
 
 HANDLE Connect() {
-    HANDLE pipe = CreateFileW(kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+    HANDLE pipe = CreateFileW(kPipeName, transport::kClientPipeAccess, 0, nullptr,
                               OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY) {
         WaitNamedPipeW(kPipeName, 2000);
-        pipe = CreateFileW(kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+        pipe = CreateFileW(kPipeName, transport::kClientPipeAccess, 0, nullptr,
                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     }
     return pipe;

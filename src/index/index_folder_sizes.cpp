@@ -7,9 +7,25 @@ FolderSizeIndex::Item Engine::FolderSizeItem(int32_t id) const {
     const auto n = NodeAt(id);
     return {n.parent, AttrAt(id).size, (n.flags & kFlagDir) != 0, true};
 }
-std::vector<IndexedFolderSize> Engine::FolderSizes(const std::vector<std::wstring>& paths) {
+std::vector<IndexedFolderSize> Engine::FolderSizes(const std::vector<std::wstring>& paths,
+    const std::function<bool(const std::wstring&)>& authorize) {
     if (paths.size() > kFolderSizeBatch) return {};
     std::vector<IndexedFolderSize> result(paths.size());
+    if (authorize) {
+        const auto covered = FolderSizes(paths);
+        for (size_t i = 0; i < paths.size(); ++i) {
+            if (!covered[i].available || !authorize(paths[i])) continue;
+            Query query; query.path_prefix = paths[i]; query.rank = false;
+            query.limit = 4096;
+            auto page = Search(query, nullptr, 0, authorize);
+            uint64_t bytes = 0;
+            for (const auto& hit : page.hits) if (!hit.is_dir) bytes += hit.size;
+            // ready means an exact aggregate, not a lower bound. Any caller-
+            // hidden descendants are intentionally excluded; pagination stays bounded.
+            if (page.total <= query.limit) result[i] = {true, bytes};
+        }
+        return result;
+    }
     std::unique_lock lock(mutex_);
     if (!ready_ || building_ || folder_size_gap_) return result;
     std::vector<int32_t> ids(paths.size(), -1);

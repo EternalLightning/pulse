@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 namespace pulse::index {
 
@@ -6,5 +7,6 @@ namespace pulse::index {
 // separate process from the SYSTEM service so SMB uses the interactive user's
 // credentials, but it shares the same executable and release artifact.
 int RunNetworkAgent();
+int RunNetworkAgentFixture(const std::wstring& tag);
 
 } // namespace pulse::index

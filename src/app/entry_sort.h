@@ -2,6 +2,7 @@
 #include "../fs/fs_enum.h"
 #include "../ui/ui_renderer.h"
 #include <cstdint>
+#include <string_view>
 
 namespace pulse::app {
 
@@ -24,9 +25,10 @@ void SetFolderSortMode(FolderSortMode mode) noexcept;
 FolderSortMode CurrentFolderSortMode() noexcept;
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir);
+               ui::SortColumn col, ui::SortDirection dir, std::wstring_view parent = {});
 // Explicit mode for tests and callers that must not read the global pref.
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders);
+               ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders,
+               std::wstring_view parent = {});
 
 } // namespace pulse::app

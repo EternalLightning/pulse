@@ -1,4 +1,5 @@
 #include "network_index.h"
+#include "index_transport_security.h"
 #include "index_config.h"
 #include "../common/user_storage.h"
 #include "index_query.h"
@@ -174,7 +175,12 @@ std::wstring Hex64(uint64_t value) {
 std::wstring NetworkDataDir() {
     const std::wstring base = UserIndexRoot();
     if (base.empty()) return {};
-    const std::wstring dir = base + L"\\NetworkIndex";
+    const auto identity = transport::Identity::Current();
+    const auto suffix = identity.Suffix();
+    if (suffix.empty()) return {};
+    const std::wstring parent = base + L"\\NetworkIndex";
+    if (!CreateDirectoryW(parent.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return {};
+    const std::wstring dir = parent + L"\\" + suffix;
     if (!CreateDirectoryW(dir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
         return {};
     return dir;

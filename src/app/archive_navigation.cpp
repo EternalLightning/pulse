@@ -44,7 +44,7 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
         std::unique_ptr<Result> result = std::make_unique<Result>();
     };
     auto task = std::make_shared<Task>();
-    s.worker.EnqueueIo([task, file, destination, selected, password, member] {
+    if (!s.worker.EnqueueIo([task, file, destination, selected, password, member] {
         task->result->extraction = true;
         try {
             if (ops::ExtractArchive(file, destination, selected, password, task->result->error, &task->cancel)
@@ -52,7 +52,10 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
                 task->result->open_path = (std::filesystem::path(destination) / member).wstring();
         } catch (...) { task->result->error = L"Unable to extract archive."; }
         task->done.store(true, std::memory_order_release);
-    });
+    })) {
+        task->result->error = Label(L"后台任务已停止或队列已满。", L"Background worker stopped or queue is full.");
+        task->done.store(true, std::memory_order_release);
+    }
     if (app::ShowArchiveProgressDialog(s.hwnd, s.darkMode, Accent(s), task->done, task->cancel))
         HandleArchiveResult(s, reinterpret_cast<LPARAM>(task->result.release()));
 }
@@ -99,8 +102,8 @@ void LoadArchiveView(AppState& s, app::Tab& tab) {
     const auto generation = tab.pending_generation;
     const auto view = tab.current_path, password = tab.archive_password;
     const HWND hwnd = s.hwnd;
-    s.worker.EnqueueIo([hwnd, file, prefix, view, password, generation, cancel] {
-        auto result = std::make_unique<Result>();
+    auto result = std::make_shared<Result>();
+    if (!s.worker.EnqueueIo([result, file, prefix, view, password, generation, cancel] {
         result->file = file; result->prefix = prefix; result->view = view;
         result->password = password; result->generation = generation;
         try {
@@ -109,8 +112,10 @@ void LoadArchiveView(AppState& s, app::Tab& tab) {
             result->error = std::move(listing.error);
             result->password_required = listing.password_required;
         } catch (...) { result->error = L"Unable to read archive."; }
-        Post(hwnd, std::move(result));
-    });
+    }, [hwnd, result] { Post(hwnd, std::make_unique<Result>(std::move(*result))); })) {
+        tab.loading = false;
+        tab.banner_message = Label(L"后台任务已停止或队列已满。", L"Background worker stopped or queue is full.");
+    }
 }
 bool OpenArchiveSelection(AppState& s) {
     auto* tab = ActiveTab(s);

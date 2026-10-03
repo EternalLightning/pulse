@@ -334,8 +334,8 @@ BEGIN
     IDS_SETTINGS_LAUNCH_DESC        "登录 Windows 后自动打开 Pulse"
     IDS_SETTINGS_KEEP_RUNNING       "关闭后继续运行"
     IDS_SETTINGS_KEEP_RUNNING_DESC  "点关闭时缩到托盘，复制等任务继续"
-    IDS_SETTINGS_OPEN_FOLDERS       "设为默认文件资源管理器"
-    IDS_SETTINGS_OPEN_FOLDERS_DESC  "接管文件夹和磁盘的打开；关闭后移除接管。Win+E 仍打开系统资源管理器"
+    IDS_SETTINGS_OPEN_FOLDERS       "打开文件夹和磁盘"
+    IDS_SETTINGS_OPEN_FOLDERS_DESC  "在 Pulse 中打开文件夹、磁盘及文件所在位置；与下面两项独立设置"
     IDS_QUICK_PREVIEW               "快速预览"
     IDS_PREVIEW_CLOUD_ONLY          "此文件仅在云端可用。快速预览不会自动下载。"
     IDS_PREVIEW_LOADING             "正在加载预览..."
@@ -524,7 +524,7 @@ BEGIN
     IDS_EXPAND_COLLAPSE             "展开/折叠"
     IDS_SYSTEM_ATTRIBUTES           "系统属性"
     IDS_STAR                        "星标"
-    IDS_UNPIN                       "取消钉住"
+    IDS_UNPIN                       "取消固定"
     IDS_UNDO                        "撤销"
     IDS_CUT                         "剪切"
     IDS_COPY                        "复制"
@@ -532,8 +532,8 @@ BEGIN
     IDS_DELETE                      "删除"
     IDS_PROPERTIES                  "属性"
     IDS_OPEN_TERMINAL_HERE          "在此处打开终端"
-    IDS_PIN_WORKSPACE               "钉为工作区"
-    IDS_PIN_NETWORK                 "钉为网络位置"
+    IDS_PIN_WORKSPACE               "固定到工作区"
+    IDS_PIN_NETWORK                 "固定到网络位置"
     IDS_TAGS_ELLIPSIS               "标签..."
     IDS_NEW_TEXT_DOCUMENT           "新建文本文档"
     IDS_FOLDER                      "文件夹"
@@ -660,9 +660,9 @@ BEGIN
     IDS_DELETE_FINISHED              "删除完成"
     IDS_DELETE_CONFIRM_TITLE         "确认永久删除"
     IDS_DELETE_IRREVERSIBLE          "永久删除无法撤销，也无法从回收站还原。"
-    IDS_DELETE_REASON_EXPLICIT       "原因：此请求明确要求永久删除。"
+    IDS_DELETE_REASON_EXPLICIT       "原因：用户要求永久删除。"
     IDS_DELETE_REASON_RECYCLE        "原因：项目已在回收站内，删除后无法还原。"
-    IDS_DELETE_REASON_NETWORK        "原因：网络位置不支持本地回收站，这些项目将永久删除。"
+    IDS_DELETE_REASON_NETWORK        "原因：网络位置不支持进入回收站。"
     IDS_DELETE_COUNT_FORMAT          "此批次共 %llu 个项目（永久删除 %llu 个，回收 %llu 个）。"
     IDS_DELETE_MORE_FORMAT           "另有 %llu 个项目。"
     IDS_DELETE_MIXED_WARNING         "这是混合批次：上列数量中的永久删除项目不可恢复。"
@@ -850,8 +850,8 @@ BEGIN
     IDS_OFFLINE_SNAPSHOT "只读浏览上次快照"
     IDS_TAGS_SAVED_LOCALLY "标签已保存在本机"
     IDS_TAG_METADATA_UNSUPPORTED "{path} 不支持文件标签元数据；换电脑后可能不可见。"
-    IDS_PERMANENT_DELETE_PATH "永久删除（不进回收站）：\n{path}\n\n确定吗？"
-    IDS_PERMANENT_DELETE_COUNT_FORMAT "永久删除（不进回收站）%zu 项？\n\n确定吗？"
+    IDS_PERMANENT_DELETE_PATH "永久删除：\n{path}\n\n确定吗？"
+    IDS_PERMANENT_DELETE_COUNT_FORMAT "永久删除 %zu 项？\n\n确定吗？"
     IDS_CANNOT_CREATE_FOLDER "无法新建文件夹"
     IDS_CANNOT_CREATE_TEXT_FILE "无法新建文本文档"
     IDS_CANNOT_RENAME "无法重命名"
@@ -921,8 +921,8 @@ BEGIN
     IDS_SETTINGS_LAUNCH_DESC        "Open Pulse automatically after signing in to Windows"
     IDS_SETTINGS_KEEP_RUNNING       "Keep running after close"
     IDS_SETTINGS_KEEP_RUNNING_DESC  "Close to the tray so file operations can continue"
-    IDS_SETTINGS_OPEN_FOLDERS       "Set as default file manager"
-    IDS_SETTINGS_OPEN_FOLDERS_DESC  "Opens folders and drives in Pulse; turn off to remove the override. Win+E still opens Explorer"
+    IDS_SETTINGS_OPEN_FOLDERS       "Open folders and drives"
+    IDS_SETTINGS_OPEN_FOLDERS_DESC  "Open folders, drives and file locations in Pulse; independent of the two options below"
     IDS_QUICK_PREVIEW               "Quick Look"
     IDS_PREVIEW_CLOUD_ONLY          "This file is online-only. Quick Look will not download it."
     IDS_PREVIEW_LOADING             "Loading preview..."
@@ -2219,4 +2219,95 @@ BEGIN
  IDS_HOME_LOADING "Loading locations…"
  IDS_HOME_CAPACITY_UNAVAILABLE "Capacity unavailable"
  IDS_HOME_DRIVE_SPACE_FORMAT "%s free of %s"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+ IDS_TYPE_LOCAL_DRIVE "本地磁盘"
+ IDS_TYPE_REMOVABLE_DRIVE "移动磁盘"
+ IDS_TYPE_NETWORK_DRIVE "网络驱动器"
+ IDS_TYPE_CD_DRIVE "CD 驱动器"
+ IDS_TYPE_RAM_DRIVE "RAM 磁盘"
+END
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+ IDS_TYPE_LOCAL_DRIVE "Local disk"
+ IDS_TYPE_REMOVABLE_DRIVE "Removable disk"
+ IDS_TYPE_NETWORK_DRIVE "Network drive"
+ IDS_TYPE_CD_DRIVE "CD drive"
+ IDS_TYPE_RAM_DRIVE "RAM disk"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+ IDS_START_TO_TRAY "登录时启动到托盘"
+ IDS_START_TO_TRAY_DESC "登录启动 Pulse 时隐藏窗口，可从托盘打开。"
+ IDS_CLOSE_LAST_TAB_WINDOW "关闭最后一个标签页时关闭窗口"
+ IDS_CLOSE_LAST_TAB_WINDOW_DESC "遵循关闭到托盘设置；有任务运行时仍显示退出确认。"
+ IDS_SETTINGS_DEFAULT_MANAGER "默认文件管理器"
+ IDS_SETTINGS_DEFAULT_MANAGER_DESC "统一开关下面三项；也可分别调整。实验性接管不包含在内"
+ IDS_SETTINGS_TAKEOVER_WIN_E "接管 Win+E"
+ IDS_SETTINGS_TAKEOVER_WIN_E_DESC "使用 Pulse 打开 Win+E"
+ IDS_SETTINGS_TAKEOVER_THIS_PC_DESC "使用 Pulse 打开“此电脑”"
+ IDS_SETTINGS_EXPLORER_TAKEOVER "接管新 Explorer 窗口（实验性）"
+ IDS_SETTINGS_EXPLORER_TAKEOVER_DESC "成功打开后接管新窗口；按住 Shift 可放行"
+ IDS_SETTINGS_SYSTEM_APPLYING "正在更新系统集成…"
+ IDS_SETTINGS_SYSTEM_EXTERNAL_CHANGE "检测到其他应用的文件关联更改，已保留其设置"
+ IDS_SETTINGS_SYSTEM_APPLY_SAVE_ERROR "系统设置已更新，但无法保存偏好设置"
+ IDS_CONTEXT_BUILTIN "Pulse 自带项"
+ IDS_CONTEXT_BUILTIN_DESC "控制 Pulse 附加命令与文件行按钮的显示，不影响快捷键。"
+ IDS_CONTEXT_BUILTIN_TAGS "标签与颜色"
+ IDS_CONTEXT_BUILTIN_SELECT "选择命令"
+ IDS_CONTEXT_ROW_NEW_TAB "文件行：在新标签页打开"
+ IDS_CONTEXT_ROW_STAR "文件行：收藏按钮"
+ IDS_CONTEXT_ROW_MORE "文件行：更多操作"
+END
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+ IDS_START_TO_TRAY "Start to tray at sign-in"
+ IDS_START_TO_TRAY_DESC "Hide the window when Pulse starts at sign-in; open it from the tray."
+ IDS_CLOSE_LAST_TAB_WINDOW "Close window with the last tab"
+ IDS_CLOSE_LAST_TAB_WINDOW_DESC "Follows close-to-tray settings and confirms exit when tasks are running."
+ IDS_SETTINGS_DEFAULT_MANAGER "Default file manager"
+ IDS_SETTINGS_DEFAULT_MANAGER_DESC "Turn the three options below on or off together; each can be adjusted separately. Excludes experimental takeover"
+ IDS_SETTINGS_TAKEOVER_WIN_E "Handle Win+E"
+ IDS_SETTINGS_TAKEOVER_WIN_E_DESC "Use Pulse when pressing Win+E"
+ IDS_SETTINGS_TAKEOVER_THIS_PC_DESC "Open This PC in Pulse"
+ IDS_SETTINGS_EXPLORER_TAKEOVER "Take over new Explorer windows (experimental)"
+ IDS_SETTINGS_EXPLORER_TAKEOVER_DESC "Take over new windows after opening succeeds; hold Shift to bypass"
+ IDS_SETTINGS_SYSTEM_APPLYING "Updating system integration…"
+ IDS_SETTINGS_SYSTEM_EXTERNAL_CHANGE "Another app changed file associations; its settings were preserved"
+ IDS_SETTINGS_SYSTEM_APPLY_SAVE_ERROR "System settings were updated, but preferences could not be saved"
+ IDS_CONTEXT_BUILTIN "Pulse menu items"
+ IDS_CONTEXT_BUILTIN_DESC "Choose which Pulse commands and file row buttons appear. Keyboard shortcuts remain available."
+ IDS_CONTEXT_BUILTIN_TAGS "Tags and colors"
+ IDS_CONTEXT_BUILTIN_SELECT "Selection commands"
+ IDS_CONTEXT_ROW_NEW_TAB "File row: open in new tab"
+ IDS_CONTEXT_ROW_STAR "File row: star button"
+ IDS_CONTEXT_ROW_MORE "File row: more actions"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+ IDS_LOCKED_ITEM_TITLE "文件正在使用"
+ IDS_LOCKED_ITEM_MESSAGE "“{name}”正被以下进程占用："
+ IDS_LOCKED_ITEM_CLOSE_HINT "关闭相关应用后可以重试。"
+ IDS_LOCKED_ITEM_END_HINT "结束进程可能丢失未保存的数据。受保护或无法确认身份的进程不会被结束。"
+ IDS_LOCKED_ITEM_RETRY "重试"
+ IDS_LOCKED_ITEM_END_RETRY "结束进程并重试"
+END
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+ IDS_LOCKED_ITEM_TITLE "File in use"
+ IDS_LOCKED_ITEM_MESSAGE "“{name}” is in use by these processes:"
+ IDS_LOCKED_ITEM_CLOSE_HINT "Close the related apps, then retry."
+ IDS_LOCKED_ITEM_END_HINT "Ending processes may lose unsaved work. Protected processes and unverified identities will remain running."
+ IDS_LOCKED_ITEM_RETRY "Retry"
+ IDS_LOCKED_ITEM_END_RETRY "End processes and retry"
 END

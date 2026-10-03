@@ -125,6 +125,7 @@ struct ScrollbarSpec {
     float viewport_extent = 0.0f;
     float content_extent = 0.0f;
     float expand_progress = 0.0f;
+    float opacity = 1.0f;
     bool enabled = true;
 };
 

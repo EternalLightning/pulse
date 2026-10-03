@@ -42,8 +42,15 @@ struct EngineTestAccess {
             volume.frn_new.push_back({pair.first, e.ResolvePathLocked(pair.second), 0});
         e.vols_.push_back(std::move(volume)); e.running_ = true; e.ready_ = true;
         auto size = [&](const std::filesystem::path& path) { return e.FolderSizes({path.wstring()})[0]; };
+        auto visible_size = [&](const std::filesystem::path& path) {
+            return e.FolderSizes({path.wstring()}, [](const auto&) { return true; })[0];
+        };
         check(size(a).available && size(a).bytes == 100 && size(b).available && size(b).bytes == 0,
             "MFT metadata aggregates nested folders and known empty zero");
+        check(visible_size(a).available && visible_size(a).bytes == 100 && visible_size(b).available && visible_size(b).bytes == 0,
+            "caller-filtered covered folders distinguish exact size and known empty zero");
+        const auto hidden_size = e.FolderSizes({a.wstring()}, [](const auto& path) { return !path.ends_with(L"one.bin"); })[0];
+        check(hidden_size.available && hidden_size.bytes == 0, "caller-filtered folder size excludes denied descendant bytes");
         const auto builds = e.folder_sizes_.Builds();
         VolumeInfo active; active.id = e.vols_[0].volume_id;
         e.UpdateVolumeVisibilityLocked({active});
@@ -78,7 +85,10 @@ struct EngineTestAccess {
         usn(5, 3, L"one.bin", USN_REASON_FILE_DELETE);
         check(size(b).bytes == 75 && e.folder_sizes_.Builds() == builds,
             "duplicate deletion is harmless and all USN edits avoid aggregate rebuilds");
-        e.building_ = true; check(!size(b).available, "unfinished index never returns a complete size"); e.building_ = false;
+        e.building_ = true;
+        check(!size(b).available, "unfinished index never returns a complete size");
+        check(!visible_size(b).available, "caller filtering cannot turn an unfinished index into false zero");
+        e.building_ = false;
         e.vols_[0].folder_size_current = false; check(!size(b).available, "startup cache waits for journal catch-up"); e.vols_[0].folder_size_current = true;
         e.inactive_volume_roots_.push_back(e.vols_[0].root_idx);
         check(!size(b).available, "offline volume declines cached totals"); e.inactive_volume_roots_.clear();
@@ -87,6 +97,8 @@ struct EngineTestAccess {
         check(size(b).available && size(b).bytes == 75 && e.folder_sizes_.Builds() == builds + 1,
             "replacement snapshot rebuilds aggregation from current metadata");
         check(!size(L"\\\\server\\share").available && !size(fixture / L"absent").available, "uncovered UNC and missing paths never return false zero");
+        check(!visible_size(L"\\\\server\\share").available && !visible_size(fixture / L"absent").available,
+            "caller filtering preserves unavailable for uncovered and missing folders");
         e.excluded_paths_.push_back(b.wstring()); check(!size(b).available, "excluded root falls back to filesystem statistics");
         check(!size(L"\\\\?\\" + b.wstring()).available, "extended-length client path cannot bypass index exclusion");
         std::error_code ec; std::filesystem::remove_all(fixture, ec); check(!ec, "isolated folder-index fixture cleanup");
@@ -712,6 +724,27 @@ int wmain(int argc, wchar_t** argv) {
     const bool quiet = argc > 1 && std::wstring_view(argv[1]) == L"--quiet-maintenance-only";
     if (!SetEnvironmentVariableW(L"PULSE_INDEX_DIAGNOSTICS", quiet ? nullptr : L"1")) return 2;
     if (quiet) return EngineTestAccess::QuietDiagnosticsFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--authorization-only") {
+        Engine fixture;
+        Check(EngineTestAccess::Build(fixture), "build MFT metadata authorization fixture");
+        Query query; query.needle = L".codex"; query.limit = 1; query.rank = false;
+        const auto denied = fixture.Search(query, nullptr, 0, [](const auto&) { return false; });
+        Check(denied.total == 0 && denied.hits.empty(), "authorization applies to total as well as page");
+        const auto allow = [](const std::wstring& path) { return path == L"C:\\Users\\TestUser\\.codex"; };
+        const auto first = fixture.Search(query, nullptr, 0, allow);
+        Check(first.total == 1 && first.hits.size() == 1 && first.hits[0].path == L"C:\\Users\\TestUser\\.codex",
+            "MFT search filters before ranking and page selection");
+        query.offset = 1;
+        const auto next = fixture.Search(query, nullptr, 0, allow);
+        Check(next.total == 1 && next.hits.empty(), "second page cannot expose raw unfiltered matches");
+        query.offset = 0;
+        const auto revoked = fixture.Search(query, nullptr, 0, [](const auto&) { return false; });
+        Check(revoked.total == 0 && revoked.hits.empty(), "caller-specific results never enter shared match cache");
+        query.limit = 0;
+        const auto count = fixture.Search(query, nullptr, 0, allow);
+        Check(count.total == 1 && count.hits.empty(), "count-only query is caller-filtered");
+        return failures ? 1 : 0;
+    }
     if (argc > 1 && std::wstring_view(argv[1]) == L"--name-pool-only") return EngineTestAccess::NamePoolFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--folder-sizes-only") return EngineTestAccess::FolderSizesFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--usn-only") return EngineTestAccess::UsnQueueFixture() ? 0 : 1;

@@ -448,7 +448,8 @@ void ShellClient::ReaderThread() {
                     if (ok) items.push_back(std::move(it));
                 }
                 std::vector<std::wstring> slow_clsids;
-                if (ok) r.TryStringArray(slow_clsids);
+                if (ok) ok = r.TryStringArray(slow_clsids) && r.remaining() == 0;
+                if (!ok) break;
                 if (ok) {
                     bool pending = false;
                     {

@@ -25,7 +25,6 @@ namespace {
 constexpr wchar_t kClass[] = L"PulseAdvancedSearchWindow";
 constexpr float kDlgW = 560.0f;
 constexpr float kDlgH = 500.0f;
-constexpr UINT_PTR kEditCaretTimer = 72;
 
 D2D1_RECT_F Rect(float scale, float x, float y, float width, float height) {
     return pulse::ui::DipRect(scale, x, y, width, height);
@@ -147,7 +146,7 @@ public:
 
         MSG message{};
         while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
-            if (IsDialogMessageW(hwnd_, &message)) continue;
+            if (EditId(message.hwnd) == 0 && IsDialogMessageW(hwnd_, &message)) continue;
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -210,22 +209,9 @@ private:
         return 0;
     }
 
-    D2D1_COLOR_F EditForeground() const {
-        return dark_ ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                     : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
-    }
+    D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
 
-    D2D1_COLOR_F EditBackground() const {
-        return dark_ ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                     : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-    }
-
-    bool PaintLumaEdit(HWND hwnd) {
-        if (!compositor_.LumaTextEnabled()) return false;
-        HideCaret(hwnd);
-        return compositor_.PresentLumaEdit(hwnd, compositor_.TextFormat(),
-                                           EditForeground(), EditBackground());
-    }
+    D2D1_COLOR_F EditBackground() const { return ChildEditColor(ChildEditBackColor(dark_)); }
 
     HWND CreateField(int id, const std::wstring& text) {
         HWND edit = CreateChildEdit(hwnd_, text.c_str());
@@ -263,7 +249,7 @@ private:
         pt.y += std::max(0, (cell_h - line_h) / 2);
         SetWindowPos(hwnd, HWND_TOP, pt.x, pt.y, w, line_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         // Layered children need an initial bitmap before they can receive clicks.
-        if (compositor_.LumaTextEnabled()) PaintLumaEdit(hwnd);
+        PresentChildEdit(compositor_, compositor_.TextFormat(), EditForeground(), EditBackground(), hwnd);
     }
 
     void LayoutEdits() {
@@ -300,53 +286,6 @@ private:
         auto* self = reinterpret_cast<AdvancedSearchWindow*>(ref);
         if (!self) return DefSubclassProc(hwnd, msg, wparam, lparam);
         switch (msg) {
-        case WM_LBUTTONDOWN:
-        case WM_LBUTTONDBLCLK:
-        case WM_LBUTTONUP:
-        case WM_MOUSEMOVE:
-        case WM_CAPTURECHANGED:
-            if (self->compositor_.LumaTextEnabled()) {
-                const LRESULT result = self->compositor_.CallLumaEditMouse(
-                    hwnd, msg, wparam, lparam, self->compositor_.TextFormat());
-                if (msg != WM_MOUSEMOVE || GetCapture() == hwnd)
-                    self->PaintLumaEdit(hwnd);
-                if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
-                    InvalidateRect(self->hwnd_, nullptr, FALSE);
-                return result;
-            }
-            break;
-        case WM_PAINT: {
-            if (!self->compositor_.LumaTextEnabled()) break;
-            HideCaret(hwnd);
-            if (!self->PaintLumaEdit(hwnd)) {
-                PAINTSTRUCT paint{};
-                HDC hdc = BeginPaint(hwnd, &paint);
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                if (self->edit_brush_) FillRect(hdc, &rc, self->edit_brush_);
-                EndPaint(hwnd, &paint);
-            }
-            return 0;
-        }
-        case WM_SETFOCUS: {
-            LRESULT result = DefSubclassProc(hwnd, msg, wparam, lparam);
-            HideCaret(hwnd);
-            SetTimer(hwnd, kEditCaretTimer, GetCaretBlinkTime(), nullptr);
-            if (self->compositor_.LumaTextEnabled()) self->PaintLumaEdit(hwnd);
-            else InvalidateRect(hwnd, nullptr, FALSE);
-            InvalidateRect(self->hwnd_, nullptr, FALSE);
-            return result;
-        }
-        case WM_KILLFOCUS:
-            KillTimer(hwnd, kEditCaretTimer);
-            InvalidateRect(self->hwnd_, nullptr, FALSE);
-            break;
-        case WM_TIMER:
-            if (wparam == kEditCaretTimer) {
-                if (GetCapture() != hwnd) self->PaintLumaEdit(hwnd);
-                return 0;
-            }
-            break;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) {
                 self->Complete(false);
@@ -368,11 +307,18 @@ private:
         case WM_CHAR:
             if (wparam == VK_RETURN || wparam == VK_ESCAPE || wparam == VK_TAB) return 0;
             break;
-        case WM_ERASEBKGND:
-            if (self->compositor_.LumaTextEnabled()) return 1;
-            break;
         }
-        return DefSubclassProc(hwnd, msg, wparam, lparam);
+        LRESULT result = 0;
+        if (!HandleChildEditMessage(self->compositor_, self->compositor_.TextFormat(),
+                self->EditForeground(), self->EditBackground(), ChildEditBackBrush(self->edit_brush_),
+                hwnd, msg, wparam, lparam, result)) {
+            result = DefPresentedChildEditProc(self->compositor_, self->compositor_.TextFormat(),
+                self->EditForeground(), self->EditBackground(), hwnd, msg, wparam, lparam);
+        }
+        if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS ||
+            msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
+            InvalidateRect(self->hwnd_, nullptr, FALSE);
+        return result;
     }
 
     void DestroyEdits() {
@@ -646,9 +592,9 @@ private:
             return 0;
         case WM_CTLCOLOREDIT: {
             const HDC hdc = reinterpret_cast<HDC>(wparam);
-            SetTextColor(hdc, dark_ ? RGB(255, 255, 255) : RGB(26, 26, 26));
-            SetBkColor(hdc, dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
-            return reinterpret_cast<LRESULT>(edit_brush_);
+            SetTextColor(hdc, ChildEditTextColor(dark_));
+            SetBkColor(hdc, ChildEditBackColor(dark_));
+            return reinterpret_cast<LRESULT>(ChildEditBackBrush(edit_brush_));
         }
         case WM_COMMAND:
             if (LOWORD(wparam) == IDOK) {

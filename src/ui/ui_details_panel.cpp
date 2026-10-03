@@ -189,7 +189,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         // this selection, which is the whole point of the switch.
         const bool preview_on = d.preview_enabled;
         const bool handlerPreview = preview_on && !vm.safe_mode && !placeholderOnly &&
-            PreviewHandlerHost::CanHost(d.path);
+            preview_handler_.CanHostPath(d.path);
         if (!placeholderOnly) {
             MakeBrush(dc, theme.fill_hover, brFillInput_);
             FillRoundedRect(dc, brFillInput_.get(), previewRc.left, previewRc.top,

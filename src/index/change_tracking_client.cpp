@@ -165,14 +165,17 @@ bool IsNetworkPath(const std::wstring& path) {
            (path.starts_with(L"\\\\") && !path.starts_with(L"\\\\?\\") && !path.starts_with(L"\\\\.\\"));
 }
 bool NetworkExchange(uint32_t type, const std::vector<uint8_t>& payload, std::vector<uint8_t>& reply, HANDLE cancel = nullptr, DWORD timeout_ms = 1500) {
-    HANDLE pipe = CreateFileW(agent::kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                               OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-    if (pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY &&
-        WaitNamedPipeW(agent::kPipeName, 200)) {
-        pipe = CreateFileW(agent::kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                           OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-    }
+    const auto name = agent::PipeName();
+    if (name.empty()) return false;
+    HANDLE pipe = CreateFileW(name.c_str(), transport::kClientPipeAccess, 0, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IMPERSONATION, nullptr);
+    if (pipe == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PIPE_BUSY && WaitNamedPipeW(name.c_str(), 200))
+        pipe = CreateFileW(name.c_str(), transport::kClientPipeAccess, 0, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IMPERSONATION, nullptr);
     if (pipe == INVALID_HANDLE_VALUE) return false;
+    if (!transport::VerifyServer(pipe, transport::SiblingIndexImage(), transport::Identity::Current())) {
+        CloseHandle(pipe); return false;
+    }
     const bool ok = Exchange(pipe, type, payload, reply, agent::kMagic, nullptr, timeout_ms, cancel);
     CloseHandle(pipe);
     return ok;
@@ -229,7 +232,7 @@ void ChangeTrackingClient::Worker() {
             network_renew_at = GetTickCount64() + 10000;
         }
         if (pipe == INVALID_HANDLE_VALUE && (request.pending || changed || GetTickCount64() >= renew_at)) {
-            pipe = CreateFileW(kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+            pipe = CreateFileW(kPipeName, transport::kClientPipeAccess, 0, nullptr,
                                OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
             renew_at = GetTickCount64() + 10000;
         }

@@ -13,6 +13,7 @@ struct DirEntry {
     uint64_t size = 0;
     FILETIME mtime{};
     DWORD attrs = 0;
+    UINT drive_type = DRIVE_UNKNOWN; // This PC roots only; ordinary folders keep UNKNOWN.
     bool is_dir = false;
     bool is_reparse = false;
     bool cloud_recall = false;

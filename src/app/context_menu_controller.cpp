@@ -270,7 +270,12 @@ bool ContextMenuController::ExecuteShellCommand(
             constexpr size_t kMaxTargets = 16;
             if (verb) {
                 for (size_t i = 0; i < paths_.size() && i < kMaxTargets; ++i) {
-                    if (!verb->app_path.empty()) {
+                    if (_wcsicmp(verb->verb.c_str(), L"runas") == 0) {
+                        // The registry command alone does not request elevation.
+                        // Keep the verb so ShellExecuteEx performs the UAC handoff.
+                        if (operations_.execute_verb)
+                            operations_.execute_verb(paths_[i], L"runas");
+                    } else if (!verb->app_path.empty()) {
                         if (operations_.open_with_app)
                             operations_.open_with_app(verb->app_path, paths_[i]);
                     } else if (!verb->command.empty()) {
@@ -476,6 +481,17 @@ void ContextMenuController::OpenMenu(std::vector<ui::FluentMenuItem> base_items)
     base_items_ = std::move(base_items);
     menu_com_items_ = com_items_;
     menu_open_ = true;
+}
+
+bool ContextMenuController::UpdateCommandState(int command, const std::wstring& text, bool enabled) {
+    bool changed = false;
+    for (auto& item : base_items_) {
+        if (item.command != command || (item.text == text && item.enabled == enabled)) continue;
+        item.text = text;
+        item.enabled = enabled;
+        changed = true;
+    }
+    return changed;
 }
 
 void ContextMenuController::ScheduleFolderRefresh(uint64_t now) noexcept {

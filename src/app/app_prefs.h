@@ -11,8 +11,13 @@ namespace pulse::app {
 struct AppPrefs {
     bool persist = true;
     bool launch_on_startup = false;
+    bool start_to_tray = false;
+    bool close_last_tab_window = false;
     bool keep_running_on_close = false;
     bool open_folders_in_pulse = false;
+    bool take_over_win_e = false;
+    bool take_over_this_pc = false;
+    bool experimental_explorer_takeover = false;
     bool verify_copies = false;
     bool show_status_performance = false;
     bool show_pinned_tab_names = true;
@@ -69,16 +74,13 @@ struct AppPrefs {
     bool ReadLaunchOnStartup() const;
     bool ApplyLaunchOnStartup(bool on);
 
-    // HKCU Directory/Drive open verbs; call after Load() and on toggle.
+    // Detect the legacy Directory/Drive registration for migration.
     bool ReadFolderOpen() const;
-    bool ApplyFolderOpen(bool on);
 
     bool StoreBackgroundImage(const std::wstring& source_path);
     void ClearBackgroundImage();
 };
 
-std::wstring FolderOpenCommandLine(const std::wstring& exe);
-bool FolderOpenCommandIsOurs(const std::wstring& command, const std::wstring& exe);
 bool ParseAccentRgb(const std::wstring& text, uint32_t& rgb) noexcept;
 bool ParseAccentInput(const std::wstring& text, uint32_t& rgb) noexcept;
 bool ParseWallpaperVisibility(std::wstring_view text, int& percent) noexcept;

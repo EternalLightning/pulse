@@ -1881,6 +1881,10 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         ui::WindowViewModel vm = BuildVm(*s, false);
         D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult hit = s->renderer.HitTest(vm, rect, (float)mx, (float)my);
+        if (s->addressEditing && !s->addressSearching &&
+            hit.region != ui::HitTestResult::AddressBar) {
+            HideAddressEditor(*s, false);
+        }
         if (s->addressSearching && hit.region != ui::HitTestResult::AddressSearchInput &&
             hit.region != ui::HitTestResult::AddressSearchScope &&
             hit.region != ui::HitTestResult::AddressSearchMode &&
@@ -2510,7 +2514,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::AddressSearchClose) {
             ExitAddressSearch(*s);
         } else if (hit.region == ui::HitTestResult::AddressSearchInput) {
-            SetFocus(s->hwndAddressEdit);
+            if (!s->addressSearching) ShowAddressSearch(*s);
+            else SetFocus(s->hwndAddressEdit);
         } else if (hit.region == ui::HitTestResult::AddressBar) {
             if (s->addressSearching) {
                 SetForegroundWindow(GetAncestor(s->hwndAddressEdit, GA_ROOT));
@@ -2675,10 +2680,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
-        if (ColumnStripSwallowDoubleClick(*s)) {
-            s->stripClickTick = 0;
-            return 0;
-        }
         app::Tab* double_tab = ActiveTab(*s);
         const bool blank_double = s->blankDoubleTab && double_tab == s->blankDoubleTab &&
             s->pane == s->blankDoublePane && double_tab->view_generation == s->blankDoubleGeneration &&
@@ -2695,17 +2696,23 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
         ui::WindowViewModel vm = BuildVm(*s, false);
         D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult hit = s->renderer.HitTest(vm, rect, (float)mx, (float)my);
+        // A rapid second press is delivered as DBLCLK rather than BUTTONDOWN.
+        if (hit.region == ui::HitTestResult::TrayPrev || hit.region == ui::HitTestResult::TrayNext ||
+            hit.region == ui::HitTestResult::NavBack || hit.region == ui::HitTestResult::NavForward ||
+            hit.region == ui::HitTestResult::NavUp || hit.region == ui::HitTestResult::NavRefresh ||
+            hit.region == ui::HitTestResult::TabClose) {
+            return HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
+        }
+        if (ColumnStripSwallowDoubleClick(*s)) {
+            s->stripClickTick = 0;
+            return 0;
+        }
         if ((hit.region == ui::HitTestResult::Pane || hit.region == ui::HitTestResult::None) &&
             PointInList(*s, mx, my) &&
             (hit.pane_index < 0 || PaneAtSlot(*s, hit.pane_index) == s->pane)) {
             HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
             s->blankDoublePending = blank_double && s->blankClickTab != nullptr;
             return 0;
-        }
-        // Windows turns the second rapid press into DBLCLK, not BUTTONDOWN.
-        // Pager buttons must count it as another step, without a double-click wait.
-        if (hit.region == ui::HitTestResult::TrayPrev || hit.region == ui::HitTestResult::TrayNext) {
-            return HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
         }
         if (hit.region == ui::HitTestResult::ColumnStripDivider) {
             ResetColumnStripWidth(*s, hit);

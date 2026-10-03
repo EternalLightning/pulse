@@ -1,4 +1,5 @@
 #include "index_config.h"
+#include "index_raw_storage_security.h"
 #include "../common/user_storage.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
@@ -25,10 +26,10 @@ bool EnsureDirectory(const std::wstring& path) {
 
 bool EnsureMachineDirectory(const std::wstring& path) {
     PSECURITY_DESCRIPTOR descriptor = nullptr;
-    // SYSTEM + Administrators full; Authenticated Users can list/read (logs,
-    // diagnostics). Protected DACL still blocks unintended ProgramData inherit.
+    // Machine raw metadata and diagnostics are privileged. Interactive clients
+    // use the authenticated, caller-filtered service protocol, never raw files.
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;AU)",
+            L"O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
             SDDL_REVISION_1, &descriptor, nullptr))
         return false;
 
@@ -83,10 +84,9 @@ bool EnsureMachineDirectory(const std::wstring& path) {
     const DWORD access_error = GetLastError();
     CloseHandle(directory);
     LocalFree(descriptor);
-    // A normal user can validate an existing service-owned directory but
-    // cannot rewrite its owner/DACL. The service/installer will repair drift.
-    return valid_directory &&
-        (security_error == ERROR_SUCCESS || access_error == ERROR_ACCESS_DENIED);
+    // Ordinary callers cannot turn a failed repair into a security success.
+    (void)access_error;
+    return valid_directory && security_error == ERROR_SUCCESS;
 }
 
 std::wstring KnownFolder(int csidl) {
@@ -342,8 +342,8 @@ bool ConfigureIndexPath(const std::wstring& path, std::wstring* error) {
         SetError(error, L"索引路径不能为空");
         return false;
     }
-    if (!EnsureDirectory(path)) {
-        SetError(error, Win32Error(L"无法创建索引目录"));
+    if (!EnsureDirectory(path) || !ProtectIndexRawTree(path)) {
+        SetError(error, Win32Error(L"无法保护索引目录"));
         return false;
     }
     IndexConfig config;

@@ -26,6 +26,26 @@ std::wstring WorkKey(const std::wstring& path, ui::SortColumn col,
 
 } // namespace
 
+namespace {
+std::atomic<unsigned> g_live_workers{0};
+constexpr unsigned kMaxLiveWorkers = 8;
+}
+
+struct WorkerPool::State {
+    ResultCallback callback;
+    std::mutex callback_mutex;
+    std::vector<std::thread> threads;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::condition_variable finished;
+    std::queue<WorkItem> queue;
+    struct IoTask { std::function<void()> run; std::function<void()> complete; };
+    std::queue<IoTask> io_queue;
+    std::atomic<bool> running{false};
+    unsigned live = 0;
+    std::unordered_map<std::wstring, uint64_t> current_gen;
+};
+
 WorkerPool::WorkerPool() = default;
 
 WorkerPool::~WorkerPool() {
@@ -34,43 +54,75 @@ WorkerPool::~WorkerPool() {
 
 void WorkerPool::Start(ResultCallback cb) {
     Stop();
-    callback_ = std::move(cb);
-    running_ = true;
-    stopped_ = false;
-    const unsigned hw = std::max(2u, std::thread::hardware_concurrency());
-    const unsigned count = std::min(4u, hw);
-    threads_.reserve(count);
-    for (unsigned i = 0; i < count; ++i)
-        threads_.emplace_back(&WorkerPool::WorkerThread, this);
+    auto state = std::make_shared<State>();
+    state->callback = std::move(cb);
+    state->running = true;
+    const unsigned count = std::min(4u, std::max(2u, std::thread::hardware_concurrency()));
+    state->threads.reserve(count);
+    for (unsigned i = 0; i < count; ++i) {
+        unsigned live = g_live_workers.load();
+        while (live < kMaxLiveWorkers && !g_live_workers.compare_exchange_weak(live, live + 1)) {}
+        if (live >= kMaxLiveWorkers) break;
+        {
+            std::lock_guard lock(state->mutex);
+            ++state->live;
+        }
+        try { state->threads.emplace_back(&WorkerPool::WorkerThread, state); }
+        catch (...) {
+            std::lock_guard lock(state->mutex);
+            --state->live;
+            --g_live_workers;
+            break;
+        }
+    }
+    if (state->threads.empty()) state->running = false;
+    state_ = std::move(state);
 }
 
 void WorkerPool::Stop() {
+    auto state = std::move(state_);
+    if (!state) return;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        running_ = false;
-        stopped_ = true;
+        std::lock_guard lock(state->callback_mutex);
+        state->running = false;
+        state->callback = {};
     }
-    cv_.notify_all();
-    for (auto& thread : threads_) if (thread.joinable()) thread.join();
-    threads_.clear();
+    {
+        std::lock_guard lock(state->mutex);
+        state->queue = {};
+        state->io_queue = {};
+        state->current_gen.clear();
+    }
+    state->cv.notify_all();
+    for (auto& thread : state->threads)
+        if (thread.joinable()) CancelSynchronousIo(thread.native_handle());
+    {
+        std::unique_lock lock(state->mutex);
+        state->finished.wait_for(lock, std::chrono::milliseconds(100), [&] { return state->live == 0; });
+    }
+    // Blocked provider calls retain only the mailbox, never the destroyed pool/UI.
+    for (auto& thread : state->threads) if (thread.joinable()) thread.detach();
+    state->threads.clear();
 }
 
 uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
                              ui::SortDirection dir) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const auto state = state_;
+    if (!state || !state->running) return 0;
+    std::lock_guard<std::mutex> lock(state->mutex);
     uint64_t gen = ++global_gen_;
     const std::wstring key = WorkKey(path, col, dir);
-    current_gen_[key] = gen;
+    state->current_gen[key] = gen;
     // Only supersede the same path+sort request. Separate panes may show the
     // same directory with different sort orders.
     std::queue<WorkItem> filtered;
-    while (!queue_.empty()) {
-        if (queue_.front().request_key != key) filtered.push(std::move(queue_.front()));
-        queue_.pop();
+    while (!state->queue.empty()) {
+        if (state->queue.front().request_key != key) filtered.push(std::move(state->queue.front()));
+        state->queue.pop();
     }
-    queue_ = std::move(filtered);
-    queue_.push(WorkItem{ path, key, gen, col, dir });
-    cv_.notify_one();
+    state->queue = std::move(filtered);
+    state->queue.push(WorkItem{ path, key, gen, col, dir });
+    state->cv.notify_one();
     return gen;
 }
 
@@ -79,35 +131,39 @@ uint64_t WorkerPool::LoadPaths(const std::wstring& view_path,
                                ui::SortColumn col, ui::SortDirection dir,
                                bool preserve_order,
                                std::vector<uint64_t> display_times) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const auto state = state_;
+    if (!state || !state->running) return 0;
+    std::lock_guard<std::mutex> lock(state->mutex);
     const uint64_t gen = ++global_gen_;
     const std::wstring key = WorkKey(view_path, col, dir);
-    current_gen_[key] = gen;
+    state->current_gen[key] = gen;
     std::queue<WorkItem> filtered;
-    while (!queue_.empty()) {
-        if (queue_.front().request_key != key) filtered.push(std::move(queue_.front()));
-        queue_.pop();
+    while (!state->queue.empty()) {
+        if (state->queue.front().request_key != key) filtered.push(std::move(state->queue.front()));
+        state->queue.pop();
     }
-    queue_ = std::move(filtered);
+    state->queue = std::move(filtered);
     WorkItem item{ view_path, key, gen, col, dir };
     item.load_paths = true;
     item.preserve_order = preserve_order;
     item.paths = std::move(paths);
     item.display_times = std::move(display_times);
-    queue_.push(std::move(item));
-    cv_.notify_one();
+    state->queue.push(std::move(item));
+    state->cv.notify_one();
     return gen;
 }
 
-void WorkerPool::EnqueueIo(std::function<void()> task) {
-    if (!task) return;
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!running_ || stopped_) return;
-    io_queue_.push(std::move(task));
-    cv_.notify_one();
+bool WorkerPool::EnqueueIo(std::function<void()> task, std::function<void()> completion) {
+    const auto state = state_;
+    if (!task || !state) return false;
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->running || state->io_queue.size() >= 128) return false;
+    state->io_queue.push({std::move(task), std::move(completion)});
+    state->cv.notify_one();
+    return true;
 }
 
-WorkResult WorkerPool::Process(const WorkItem& item) {
+WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkItem& item) {
     WorkResult res;
     res.path = item.path;
     res.generation = item.generation;
@@ -120,9 +176,9 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
         entries->reserve(item.paths.size());
         for (size_t i = 0; i < item.paths.size(); ++i) {
             if ((i & 127u) == 0) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                const auto it = current_gen_.find(item.request_key);
-                if (!running_ || it == current_gen_.end() || it->second != item.generation) {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                const auto it = state->current_gen.find(item.request_key);
+                if (!state->running || it == state->current_gen.end() || it->second != item.generation) {
                     res.cancelled = true;
                     return res;
                 }
@@ -179,9 +235,9 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
 
     // Check cancellation before sort.
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = current_gen_.find(item.request_key);
-        if (it == current_gen_.end() || it->second != item.generation) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        auto it = state->current_gen.find(item.request_key);
+        if (it == state->current_gen.end() || it->second != item.generation) {
             res.cancelled = true;
             return res;
         }
@@ -190,9 +246,9 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
     // Resolve .lnk targets (Recent folder, desktop shortcuts) before display.
     if (!fs::IsRecycleViewPath(item.path)) {
         ResolveLinksInPlace(item.path, *entries, [&] {
-            std::lock_guard<std::mutex> lock(mutex_);
-            const auto it = current_gen_.find(item.request_key);
-            return !running_ || it == current_gen_.end() || it->second != item.generation;
+            std::lock_guard<std::mutex> lock(state->mutex);
+            const auto it = state->current_gen.find(item.request_key);
+            return !state->running || it == state->current_gen.end() || it->second != item.generation;
         });
     }
 
@@ -206,12 +262,12 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
             std::sort(entries->begin(), entries->end(),
                 [&](const fs::DirEntry& a, const fs::DirEntry& b) {
                     if ((++comparisons & 8191u) == 0) {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        const auto it = current_gen_.find(item.request_key);
-                        if (!running_ || it == current_gen_.end() || it->second != item.generation)
+                        std::lock_guard<std::mutex> lock(state->mutex);
+                        const auto it = state->current_gen.find(item.request_key);
+                        if (!state->running || it == state->current_gen.end() || it->second != item.generation)
                             throw SortCancelled{};
                     }
-                    return EntryLess(a, b, item.sort_column, item.sort_direction);
+                    return EntryLess(a, b, item.sort_column, item.sort_direction, item.path);
                 });
         } catch (const SortCancelled&) {
             res.cancelled = true;
@@ -222,9 +278,9 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
     res.sort_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
 
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = current_gen_.find(item.request_key);
-        if (it == current_gen_.end() || it->second != item.generation) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        auto it = state->current_gen.find(item.request_key);
+        if (it == state->current_gen.end() || it->second != item.generation) {
             res.cancelled = true;
             return res;
         }
@@ -244,50 +300,67 @@ WorkResult WorkerPool::Process(const WorkItem& item) {
     return res;
 }
 
-void WorkerPool::WorkerThread() {
-    while (running_) {
+void WorkerPool::WorkerThread(std::shared_ptr<State> state) {
+    struct Finish {
+        std::shared_ptr<State> state;
+        ~Finish() {
+            { std::lock_guard lock(state->mutex); --state->live; }
+            --g_live_workers;
+            state->finished.notify_all();
+        }
+    } finish{state};
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    struct ComDone { HRESULT hr; ~ComDone() { if (SUCCEEDED(hr)) CoUninitialize(); } } com_done{com};
+    while (state->running) {
         WorkItem item;
-        std::function<void()> io_task;
+        State::IoTask io_task;
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [&] {
-                return stopped_ || !queue_.empty() || !io_queue_.empty() || !running_;
+            std::unique_lock<std::mutex> lock(state->mutex);
+            state->cv.wait(lock, [&] {
+                return !state->queue.empty() || !state->io_queue.empty() || !state->running;
             });
-            if (!running_ || stopped_) return;
-            if (!queue_.empty()) {
-                item = std::move(queue_.front());
-                queue_.pop();
-            } else if (!io_queue_.empty()) {
-                io_task = std::move(io_queue_.front());
-                io_queue_.pop();
+            if (!state->running) return;
+            if (!state->queue.empty()) {
+                item = std::move(state->queue.front());
+                state->queue.pop();
+            } else if (!state->io_queue.empty()) {
+                io_task = std::move(state->io_queue.front());
+                state->io_queue.pop();
             } else {
                 continue;
             }
         }
-        if (io_task) {
-            try { io_task(); } catch (...) {}
+        if (io_task.run) {
+            try { io_task.run(); } catch (...) {}
+            std::lock_guard lock(state->callback_mutex);
+            if (state->running && io_task.complete) {
+                try { io_task.complete(); } catch (...) {}
+            }
             continue;
         }
-        WorkResult res = Process(item);
-        if (!res.cancelled && callback_) {
+        WorkResult res;
+        try { res = Process(state, item); }
+        catch (...) { res.path = item.path; res.generation = item.generation; res.error = true; }
+        if (!res.cancelled) {
             const std::wstring cache_path = res.path;
             fs::SnapshotPtr cache_snapshot = res.snapshot;
-            try {
-                callback_(std::move(res));
-            } catch (...) {
-                // Ignore.
+            {
+                std::lock_guard lock(state->callback_mutex);
+                if (state->running && state->callback) {
+                    try { state->callback(std::move(res)); } catch (...) {}
+                }
             }
-            if (cache_snapshot && fs::IsUncPath(cache_path))
+            if (state->running && cache_snapshot && fs::IsUncPath(cache_path))
                 fs::SaveNetSnapshot(cache_path, cache_snapshot);
         }
         // Completed generations no longer participate in cancellation checks.
         // Remove only when no newer request replaced this key while we were
         // processing, so a concurrent refresh remains authoritative.
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            const auto it = current_gen_.find(item.request_key);
-            if (it != current_gen_.end() && it->second == item.generation)
-                current_gen_.erase(it);
+            std::lock_guard<std::mutex> lock(state->mutex);
+            const auto it = state->current_gen.find(item.request_key);
+            if (it != state->current_gen.end() && it->second == item.generation)
+                state->current_gen.erase(it);
         }
     }
 }

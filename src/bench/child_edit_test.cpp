@@ -130,6 +130,51 @@ int wmain() {
             Check(!IsWindowVisible(edit), "parent hide automatically hides the editor");
             DestroyWindow(edit);
         }
+        for (const auto scale : {1.0f, 1.25f, 1.5f}) {
+            compositor.RecreateTextFormats(scale);
+            for (const bool fail_initial : {false, true}) {
+                HWND field = pulse::ui::CreateChildEdit(parent, L"initial 中文");
+                Check(field != nullptr, "create fresh dialog field");
+                if (!field) continue;
+                SetWindowSubclass(field, EditProc, 1, reinterpret_cast<DWORD_PTR>(&compositor));
+                SetWindowPos(field, nullptr, 20, 30, static_cast<int>(320 * scale),
+                    static_cast<int>(30 * scale), SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                ShowWindow(parent, SW_SHOWNOACTIVATE);
+                const bool presented = pulse::ui::PresentChildEdit(compositor,
+                    fail_initial ? nullptr : compositor.TextFormat(), D2D1::ColorF(1, 1, 1),
+                    D2D1::ColorF(0, 0, 0), field);
+                BYTE alpha = 0;
+                DWORD flags = 0;
+                const bool native_surface = GetLayeredWindowAttributes(field, nullptr, &alpha, &flags) &&
+                    (flags & LWA_ALPHA) && alpha == 255;
+                Check(presented == !fail_initial && native_surface == fail_initial,
+                    "initial bitmap failure selects an opaque native surface");
+                LRESULT result = 0;
+                Check(pulse::ui::HandleChildEditMessage(compositor, compositor.TextFormat(),
+                    D2D1::ColorF(1, 1, 1), D2D1::ColorF(0, 0, 0), nullptr, field,
+                    WM_PAINT, 0, 0, result) == !fail_initial,
+                    "initial failure releases native paint handling");
+                SetFocus(field);
+                SendMessageW(field, EM_SETSEL, 0, -1);
+                SendMessageW(field, WM_CHAR, L'文', 0);
+                SetFocus(parent);
+                SendMessageW(field, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(8, 8));
+                SendMessageW(field, WM_LBUTTONUP, 0, MAKELPARAM(8, 8));
+                Check(GetFocus() == field, "clicking a previously blurred field restores focus");
+                SendMessageW(field, EM_SETSEL, 1, 1);
+                SendMessageW(field, WM_CHAR, L'x', 0);
+                wchar_t typed[32]{};
+                GetWindowTextW(field, typed, ARRAYSIZE(typed));
+                Check(std::wstring(typed) == L"文x", "refocused field accepts Unicode and keyboard input");
+                if (fail_initial)
+                    Check(!pulse::ui::PresentChildEdit(compositor, compositor.TextFormat(),
+                        D2D1::ColorF(1, 1, 1), D2D1::ColorF(0, 0, 0), field),
+                        "later layout preserves the native fallback");
+                SetFocus(nullptr);
+                DestroyWindow(field);
+                ShowWindow(parent, SW_HIDE);
+            }
+        }
         HWND edit = pulse::ui::CreateChildEdit(parent);
         DestroyWindow(parent);
         Check(!IsWindow(edit), "destroying parent automatically destroys its editor");
