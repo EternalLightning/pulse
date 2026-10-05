@@ -36,6 +36,21 @@ std::wstring FileName(const std::wstring& path) {
     return std::wstring(v);
 }
 
+bool HasBlockedDriveSource(const OpRequest& req) {
+    const bool deletion = req.type == OpType::RecycleDelete || req.type == OpType::RealDelete;
+    const bool restricted = deletion || req.type == OpType::Copy || req.type == OpType::Move ||
+        req.type == OpType::BatchRename || (req.type == OpType::Rename && req.sources.size() != 1);
+    if (!restricted) return false;
+    if (std::any_of(req.sources.begin(), req.sources.end(), pulse::path::IsDriveRootPath)) return true;
+    if (deletion) {
+        for (const auto& target : req.delete_targets) {
+            if (pulse::path::IsDriveRootPath(target.path) ||
+                std::any_of(target.physical_paths.begin(), target.physical_paths.end(), pulse::path::IsDriveRootPath)) return true;
+        }
+    }
+    return false;
+}
+
 std::atomic<unsigned> open_workers{0};
 constexpr unsigned kOpenWorkerLimit = 2;
 
@@ -977,6 +992,7 @@ void OpsManager::Stop() {
 }
 
 uint64_t OpsManager::Submit(OpRequest req) {
+    if (HasBlockedDriveSource(req)) return 0;
     QueueItem item;
     item.req = std::move(req);
     uint64_t seq = 0;
@@ -1263,6 +1279,16 @@ void OpsManager::ExecuteFileOperation(QueueItem& item) {
         status_.locked_path.clear(); status_.lock_owners.clear();
         status_.failure_hr = S_OK; status_.failed_path.clear();
     }
+    if (HasBlockedDriveSource(item.req)) {
+        SetStatus([&](OpStatus& status) {
+            status.active = false; status.type = item.req.type; status.task_id = item.seq;
+            status.phase = OpPhase::Failed; status.percent = -1.0f;
+            status.summary = status.last_error = L"不能复制、移动、删除或批量重命名驱动器";
+            status.failure_hr = E_ACCESSDENIED;
+            ++status.completed_ops;
+        });
+        return;
+    }
     if (!PrepareLockRetry(item)) return;
     if (IsDeleteOperation(item.req.type)) RunDelete(item);
     else if (item.req.type == OpType::Copy || item.req.type == OpType::Move)
@@ -1361,6 +1387,8 @@ void OpsManager::PushUndo(const OpRequest& req,
     CompletedOperation completed;
     completed.type = req.type;
     completed.sources = req.sources;
+    if (req.type == OpType::Rename && req.sources.size() == 1 &&
+        pulse::path::IsDriveRootPath(req.sources.front())) completed.volume_label = req.new_name;
     if (actual_destinations) {
         completed.destinations = *actual_destinations;
     } else if (req.type == OpType::Rename && !req.sources.empty()) {
@@ -1378,6 +1406,8 @@ void OpsManager::PushUndo(const OpRequest& req,
         std::lock_guard<std::mutex> lock(mutex_);
         completions_.push_back(std::move(completed));
     }
+    if (req.type == OpType::Rename && req.sources.size() == 1 &&
+        pulse::path::IsDriveRootPath(req.sources.front())) return;
     if (req.is_undo) {
         if (req.type == OpType::Move && req.undo_revision && actual_destinations) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1759,6 +1789,7 @@ void OpsManager::WorkerThread() {
             done_hr_ = hr;
             done_cancelled_ = cancelled;
             done_error_ = std::move(error);
+            done_failed_path_.clear();
             done_deleted_paths_.clear();
             done_recycled_paths_.clear();
             done_recycle_destinations_.clear();
@@ -1767,12 +1798,14 @@ void OpsManager::WorkerThread() {
         done_cv_.notify_one();
     };
     cb.delete_done = [this](uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
-                            std::vector<std::wstring> deleted_paths, std::vector<std::wstring> recycled_paths, std::vector<std::wstring> recycle_destinations) {
+                            std::vector<std::wstring> deleted_paths, std::vector<std::wstring> recycled_paths,
+                            std::vector<std::wstring> recycle_destinations, std::wstring failed_path) {
         shell_activity_tick_ = GetTickCount64();
         {
             std::lock_guard<std::mutex> lock(done_mutex_);
             done_id_ = id; done_hr_ = hr; done_cancelled_ = cancelled;
             done_error_ = std::move(error);
+            done_failed_path_ = std::move(failed_path);
             done_deleted_paths_ = std::move(deleted_paths);
             done_recycled_paths_ = std::move(recycled_paths);
             done_recycle_destinations_ = std::move(recycle_destinations);
@@ -1782,22 +1815,7 @@ void OpsManager::WorkerThread() {
     };
     cb.ctx_items = [this](uint32_t id, std::vector<ipc::CtxMenuItem> items, bool partial,
                           std::vector<std::wstring> slow_clsids) {
-        std::vector<ShellMenuItem> out;
-        out.reserve(items.size());
-        for (auto& it : items) {
-            ShellMenuItem m;
-            m.id = it.id;
-            m.enabled = it.enabled;
-            m.separator_after = it.separator_after;
-            m.has_children = it.has_children;
-            m.child = it.child;
-            m.verb = std::move(it.verb);
-            m.text = std::move(it.text);
-            m.clsid = std::move(it.clsid);
-            m.handler = std::move(it.handler);
-            out.push_back(std::move(m));
-        }
-        OnCtxItems(id, std::move(out), partial, std::move(slow_clsids));
+        OnCtxItems(id, std::move(items), partial, std::move(slow_clsids));
     };
     ipc::ShellClient::Instance().Start(cb);
 
@@ -2973,8 +2991,8 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         st.bytes_per_second = 0.0;
         st.eta_seconds = 0;
         if (cancelled || transfer_cancel_.load()) {
-            st.phase = OpPhase::Failed;
-            st.last_error = L"已取消";
+            st.phase = OpPhase::Cancelled;
+            st.last_error.clear(); st.failure_hr = S_OK; st.failed_path.clear();
             st.summary = std::wstring(OpVerb(req.type)) + L"已取消";
         } else if (!failure.empty()) {
             st.phase = OpPhase::Failed;
@@ -2992,6 +3010,50 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     transfer_active_.store(false);
 }
 
+void OpsManager::RunDriveLabelRename(const OpRequest& req, uint64_t task_id,
+    decltype(&SetVolumeLabelW) set_label) {
+    SetStatus([&](OpStatus& status) {
+        status.active = true; status.type = req.type; status.task_id = task_id;
+        status.phase = OpPhase::Running; status.percent = -1.0f;
+        status.summary = Describe(req); status.last_error.clear();
+        status.source_label = status.current_item = req.sources.front();
+        status.destination_label.clear();
+        status.total_items = 1; status.completed_items = 0;
+        status.total_bytes = status.transferred_bytes = 0;
+        status.bytes_per_second = status.peak_bytes_per_second = 0; status.eta_seconds = 0;
+    });
+    const bool cancelled = stopping_.load() || shell_cancel_requested_.load() || lock_retry_cancel_.load();
+    DWORD code = ERROR_SUCCESS;
+    if (!cancelled) {
+        const auto source = pulse::path::StripExtendedPathPrefix(req.sources.front());
+        const wchar_t root[] = {source.front(), L':', L'\\', 0};
+        if (req.new_name.find(L'\0') != std::wstring::npos) code = ERROR_INVALID_NAME;
+        else if (!set_label(root, req.new_name.c_str())) {
+            code = GetLastError();
+            if (code == ERROR_SUCCESS) code = ERROR_GEN_FAILURE;
+        }
+        if (code == ERROR_SUCCESS) {
+            const std::vector<std::wstring> destinations;
+            PushUndo(req, &destinations);
+        }
+    }
+    SetStatus([&](OpStatus& status) {
+        status.active = false;
+        ++status.completed_ops;
+        status.failure_hr = code == ERROR_SUCCESS ? S_OK : HRESULT_FROM_WIN32(code);
+        status.failed_path = code == ERROR_SUCCESS ? L"" : req.sources.front();
+        if (cancelled) {
+            status.phase = OpPhase::Cancelled; status.summary = L"已取消";
+        } else if (code != ERROR_SUCCESS) {
+            status.phase = OpPhase::Failed; status.last_error = Win32Message(code);
+            status.summary = std::wstring(OpVerb(req.type)) + L"失败";
+        } else {
+            status.phase = OpPhase::Completed; status.percent = 100.0f;
+            status.completed_items = status.total_items; status.summary = Describe(req) + L" 完成";
+        }
+    });
+}
+
 void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_ID_INFO* rename_identity, bool lock_retry) {
     if (IsDeleteOperation(req.type)) {
         QueueItem rejected;
@@ -3003,6 +3065,11 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
         std::lock_guard<std::mutex> lock(mutex_);
         if (!lock_retry) shell_cancel_requested_.store(stopping_.load());
     }
+    if (req.type == OpType::Rename && req.sources.size() == 1 &&
+        pulse::path::IsDriveRootPath(req.sources.front())) {
+        RunDriveLabelRename(req, task_id);
+        return;
+    }
     shell_activity_tick_ = GetTickCount64();
     // Status: active.
     SetStatus([&](OpStatus& st) {
@@ -3013,6 +3080,7 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
         st.percent = 0.0f;
         st.summary = Describe(req);
         st.last_error.clear();
+        st.failure_hr = S_OK; st.failed_path.clear();
         st.source_label = req.sources.empty() ? L"" : FileName(req.sources.front());
         st.destination_label.clear();
         st.current_item = req.type == OpType::EmptyRecycle
@@ -3035,9 +3103,13 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
             valid = valid && !req.sources[i].empty() && IsRenameComponent(name);
         }
         if (!valid || shell_cancel_requested_.load() || stopping_.load() || (lock_retry && lock_retry_cancel_.load())) {
+            const bool cancelled = shell_cancel_requested_.load() || stopping_.load() || (lock_retry && lock_retry_cancel_.load());
             SetStatus([&](OpStatus& st) {
-                st.active = false; st.phase = OpPhase::Failed; st.percent = -1.0f;
-                ++st.completed_ops; st.last_error = valid ? L"已取消" : L"名称无效";
+                st.active = false; st.phase = cancelled ? OpPhase::Cancelled : OpPhase::Failed; st.percent = -1.0f;
+                ++st.completed_ops; st.last_error = cancelled ? L"" : L"名称无效";
+                st.summary = cancelled ? L"已取消" : st.last_error;
+                st.failure_hr = cancelled ? S_OK : HRESULT_FROM_WIN32(ERROR_INVALID_NAME);
+                st.failed_path = cancelled || req.sources.empty() ? L"" : req.sources.front();
             });
             return;
         }
@@ -3048,6 +3120,8 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
         std::vector<std::wstring> ok_names;
         std::vector<std::wstring> ok_destinations;
         std::wstring last_error;
+        HRESULT failure_hr = S_OK;
+        std::wstring failed_path;
         bool cancelled = false;
         for (size_t i = 0; i < req.sources.size(); ++i) {
             if (stopping_.load() || shell_cancel_requested_.load()) { cancelled = true; break; }
@@ -3061,8 +3135,14 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
             if (stopping_.load() || shell_cancel_requested_.load()) { cancelled = true; break; }
             // Each item uses the same no-overwrite filesystem rename.
             std::wstring local_error;
-            const auto local = RenameInProcess(req.sources[i], name, &local_error);
-            if (local == RenameResult::Rejected) { last_error = local_error; continue; }
+            DWORD code = ERROR_SUCCESS;
+            const auto local = RenameInProcess(req.sources[i], name, &local_error, &code);
+            if (local == RenameResult::Rejected) {
+                last_error = local_error;
+                failure_hr = HRESULT_FROM_WIN32(code == ERROR_SUCCESS ? ERROR_GEN_FAILURE : code);
+                failed_path = req.sources[i];
+                continue;
+            }
             if (local == RenameResult::Completed) {
                 ok_sources.push_back(req.sources[i]);
                 ok_names.push_back(name);
@@ -3084,9 +3164,11 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
             st.percent = -1.0f;
             st.completed_ops++;
             st.completed_items = ok_sources.size();
+            st.failure_hr = cancelled ? S_OK : failure_hr;
+            st.failed_path = cancelled ? L"" : failed_path;
             if (cancelled) {
-                st.phase = OpPhase::Failed;
-                st.last_error = L"已取消";
+                st.phase = OpPhase::Cancelled;
+                st.last_error.clear(); st.summary = L"已取消";
             } else if (ok_sources.empty()) {
                 st.phase = OpPhase::Failed;
                 st.last_error = last_error.empty() ? L"操作失败" : last_error;
@@ -3136,8 +3218,9 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
             }
             SetStatus([&](OpStatus& st) {
                 st.active = false; st.phase = cancelled() ? OpPhase::Cancelled : OpPhase::Failed; st.percent = -1.0f;
-                ++st.completed_ops; st.last_error = local_error;
-                st.failure_hr = HRESULT_FROM_WIN32(code); st.failed_path = req.sources.front();
+                ++st.completed_ops; st.last_error = cancelled() ? L"" : local_error;
+                st.failure_hr = cancelled() ? S_OK : HRESULT_FROM_WIN32(code);
+                st.failed_path = cancelled() ? L"" : req.sources.front();
                 st.lock_retry_available = sharing && identified && !cancelled();
                 st.locked_path = sharing ? req.sources.front() : L""; st.lock_owners = locks.owners;
             });
@@ -3233,6 +3316,7 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
             st.phase = OpPhase::Failed;
             st.percent = -1.0f;
             st.last_error = L"操作层未启动";
+            st.failure_hr = E_FAIL;
             st.completed_ops++;
         });
         return;
@@ -3250,9 +3334,11 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_I
         st.active = false;
         st.percent = -1.0f;
         st.completed_ops++;
+        st.failure_hr = cancelled ? S_OK : static_cast<HRESULT>(hr);
+        st.failed_path = !cancelled && FAILED(static_cast<HRESULT>(hr)) && !req.sources.empty() ? req.sources.front() : L"";
         if (cancelled) {
-            st.phase = OpPhase::Failed;
-            st.last_error = L"已取消";
+            st.phase = OpPhase::Cancelled;
+            st.last_error.clear(); st.summary = L"已取消";
         } else if (FAILED((HRESULT)hr)) {
             st.phase = OpPhase::Failed;
             st.last_error = error.empty() ? L"操作失败" : error;
@@ -3282,8 +3368,8 @@ bool OpsManager::WaitShellDone(uint32_t id, uint32_t& hr, bool& cancelled, std::
             shell_cancel_requested_ = false;
             SetStatus([](OpStatus& st) {
                 st.active = false;
-                st.phase = OpPhase::Failed;
-                st.last_error = L"操作已停止";
+                st.phase = OpPhase::Cancelled;
+                st.last_error.clear(); st.failure_hr = S_OK; st.failed_path.clear();
                 st.summary = L"操作已停止";
                 st.completed_ops++;
             });

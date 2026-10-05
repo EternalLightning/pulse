@@ -24,6 +24,7 @@ void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstr
     status_msg_ = status_msg;
     search_msg_ = search_msg;
     running_ = true;
+    helper_missing_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
         status_ = L"索引未连接";
@@ -62,6 +63,7 @@ void IndexClient::Stop() {
 }
 
 bool IndexClient::SpawnHelper() {
+    helper_missing_ = false;
     if (pipe_name_ != kPipeName) return false;
     if (ServiceInstalled()) {
         {
@@ -73,6 +75,7 @@ bool IndexClient::SpawnHelper() {
     }
     const std::wstring exe = ExePath();
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        helper_missing_ = true;
         std::lock_guard<std::mutex> lock(mu_);
         status_ = L"找不到 Pulse.Index.exe";
         return false;
@@ -130,6 +133,7 @@ bool IndexClient::EnsureConnected() {
     }
     { std::lock_guard<std::mutex> lock(mu_); scope_ready_ = false; pending_searches_=subscribed_searches_; have_pending_=!pending_searches_.empty(); }
     connected_ = true;
+    helper_missing_ = false;
     pending_cv_.notify_one();
     return true;
 }
@@ -239,6 +243,7 @@ void IndexClient::HandleVolumes(const uint8_t* p, size_t n) {
         volume.online = (flags & 1u) != 0;
         volume.supported = (flags & 2u) != 0;
         volume.enabled = (flags & 4u) != 0;
+        volume.failed = (flags & 8u) != 0;
         volume.kind = static_cast<VolumeKind>(kind);
         volume.progress = progress;
         volume.indexed_items = (static_cast<uint64_t>(hi) << 32) | lo;
@@ -328,7 +333,7 @@ void IndexClient::Worker() {
         if (!EnsureConnected()) {
             {
                 std::lock_guard<std::mutex> lock(mu_);
-                if (status_ != L"找不到 Pulse.Index.exe")
+                if (!helper_missing_)
                     status_ = L"索引未连接";
             }
             for (int i = 0; i < 10 && running_; ++i) Sleep(100);

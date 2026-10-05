@@ -1565,43 +1565,35 @@ ConflictDialogResult ShowFileConflictDialog(HWND owner,
                                             bool dark,
                                             D2D1_COLOR_F accent) {
     if (conflict.link_confirmation) {
-        const bool english = l10n::effective_language() == l10n::Language::EnUS;
         ConfirmDialogSpec spec;
-        spec.title = english ? L"The destination is a link" : L"目标是链接";
-        spec.confirm_text = english ? L"Continue" : L"继续";
+        spec.title = l10n::Get(l10n::StringId::LinkDestinationTitle);
+        spec.confirm_text = l10n::Get(l10n::StringId::LinkContinue);
         spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
         spec.cancel_is_default = true;
         spec.fit_to_work_area = true;
         spec.still_valid = conflict.still_valid;
-        spec.checkbox_text = english ? L"Continue all" : L"全部继续";
+        spec.checkbox_text = l10n::Get(l10n::StringId::LinkContinueAll);
         ConflictDialogResult result;
         spec.checkbox_checked = &result.apply_to_all;
         const auto& impact = conflict.link_impact;
         switch (impact.kind) {
         case ops::DestinationLinkKind::DirectorySymbolicLink:
         case ops::DestinationLinkKind::Junction:
-            spec.message = english
-                ? L"The operation will write to the location this directory link points to."
-                : L"操作将写入目录链接指向的位置。";
+            spec.message = l10n::Get(l10n::StringId::LinkDirectoryMessage);
             break;
         case ops::DestinationLinkKind::FileSymbolicLink:
-            spec.message = english
-                ? L"Replace will remove this file link; the file it points to stays unchanged."
-                : L"替换将移除此文件链接；链接指向的文件不变。";
+            spec.message = l10n::Get(l10n::StringId::LinkFileMessage);
             break;
         case ops::DestinationLinkKind::HardLink:
-            spec.message = english
-                ? L"Replace affects only this file name; other hard links keep their existing data."
-                : L"替换仅影响当前文件名，其他硬链接的内容不变。";
-            spec.message += L"\n" + std::to_wstring(impact.link_count) + (english ? L" hard-link names" : L" 个硬链接名称");
+            spec.message = l10n::Get(l10n::StringId::LinkHardMessage);
+            spec.message += L"\n" + std::to_wstring(impact.link_count) +
+                l10n::Get(l10n::StringId::LinkNameCountSuffix);
             break;
         }
         spec.rows.push_back({path::FriendlyPathText(impact.path), true});
         if (!impact.resolved_path.empty())
             spec.rows.push_back({path::FriendlyPathText(impact.resolved_path), true});
-        spec.note = english
-            ? L"Continue all applies only to this task. It does not mean Replace all."
-            : L"全部继续仅适用于本次任务，不代表覆盖全部。";
+        spec.note = l10n::Get(l10n::StringId::LinkContinueAllNote);
         ConfirmWindow window;
         if (window.Show(owner, spec, dark, accent)) result.choice = ops::ConflictChoice::Continue;
         return result;
@@ -1619,10 +1611,9 @@ bool ShowConfirmDialog(HWND owner, const ConfirmDialogSpec& spec, bool dark,
 bool ShowRenameLockedDialog(HWND owner, const ops::OpStatus& status, bool dark,
     D2D1_COLOR_F accent, std::function<bool()> still_valid) {
     if (still_valid && !still_valid()) return false;
-    const bool english = l10n::effective_language() == l10n::Language::EnUS;
     ConfirmDialogSpec spec;
     spec.title = l10n::Get(l10n::StringId::LockedItemTitle);
-    spec.message = english ? L"This file is in use." : L"该文件正在被占用。";
+    spec.message = l10n::Get(l10n::StringId::LockedItemGenericMessage);
     const auto& file = status.failed_path.empty() ? status.locked_path : status.failed_path;
     if (!file.empty()) spec.rows.push_back({path::FriendlyPathText(file), true});
     spec.confirm_text = l10n::Get(l10n::StringId::LockedItemRetry);

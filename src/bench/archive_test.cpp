@@ -28,10 +28,14 @@ bool Pack(const fs::path& archive, const fs::path& source, const std::wstring& o
     std::wstring command = L"\"" + exe.wstring() + L"\" a -y -bd " + options + L" \"" + archive.wstring() + L"\" .\\*";
     STARTUPINFOW startup{}; startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, source.c_str(), &startup, &process)) return false;
+    if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, source.c_str(), &startup, &process)) {
+        std::cerr << "[DIAG] archive fixture process creation failed: " << GetLastError() << '\n';
+        return false;
+    }
     WaitForSingleObject(process.hProcess, INFINITE);
     DWORD code = 2; GetExitCodeProcess(process.hProcess, &code);
     CloseHandle(process.hProcess); CloseHandle(process.hThread);
+    if (code != 0) std::cerr << "[DIAG] archive fixture process exit: " << code << '\n';
     return code == 0;
 }
 void Word(std::ofstream& stream, uint32_t value, unsigned bytes) {
@@ -78,6 +82,50 @@ bool Junction(const fs::path& link, const fs::path& target) {
     CloseHandle(handle);
     return result;
 }
+
+int PasswordTests() {
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, temp);
+    const fs::path root = fs::path(temp) / (L"PulseArchivePassword-" +
+        std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    fs::create_directories(root / L"source");
+    std::ofstream(root / L"source/password encrypted.txt") << "password encrypted";
+    for (const auto name : {L"password-missing.7z", L"Password-missing.zip", L"encrypted-missing.7z"}) {
+        const auto result = ListArchive((root / name).wstring());
+        Check(!result.error.empty() && !result.password_required,
+            "missing archive with password keywords does not request a password");
+    }
+    const auto corrupt = root / L"encrypted password broken.7z";
+    std::ofstream(corrupt) << "not an archive";
+    const auto broken = ListArchive(corrupt.wstring());
+    Check(!broken.error.empty() && !broken.password_required,
+        "corrupt archive with password keywords stays a generic failure");
+    for (const auto extension : {L"7z", L"zip"}) {
+        const auto archive = root / (std::wstring(L"加密 password archive.") + extension);
+        Check(Pack(archive, root / L"source", std::wstring(L"-psecret ") +
+            (std::wstring(extension) == L"7z" ? L"-mhe=on" : L"-mem=AES256")),
+            "create password diagnostic fixture");
+        const auto locked = ListArchive(archive.wstring());
+        Check(locked.password_required, "encrypted archive reports missing password");
+        const auto wrong = ListArchive(archive.wstring(), L"wrong");
+        if (std::wstring(extension) == L"7z")
+            Check(!wrong.error.empty() && wrong.password_required,
+                "encrypted headers report wrong password through the diagnostic");
+        else
+            Check(wrong.error.empty() && !wrong.password_required,
+                "zip metadata listing does not verify a supplied password");
+        const auto opened = ListArchive(archive.wstring(), L"secret");
+        Check(opened.error.empty() && !opened.password_required && opened.entries.size() == 1,
+            "correct password opens archive with keyword member names");
+        std::atomic_bool cancel{true};
+        const auto cancelled = ListArchive(archive.wstring(), L"", &cancel);
+        Check(!cancelled.error.empty() && !cancelled.password_required,
+            "cancelled listing does not request a password");
+    }
+    if (failures) std::wcout << L"Fixtures retained at " << root.wstring() << L'\n';
+    else { std::error_code error; fs::remove_all(root, error); }
+    return failures ? 1 : 0;
+}
 }
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
 void ProcessTests() {
@@ -116,6 +164,7 @@ void ProcessTests() {
 }
 #endif
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--password-only") return PasswordTests();
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
     if (argc == 2 && std::wstring(argv[1]) == L"--process-only") {
         ProcessTests();

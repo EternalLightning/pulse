@@ -129,10 +129,12 @@ void SendProgress(uint32_t id, float percent, const std::wstring& item,
 void SendDeleteDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error,
                     const std::vector<std::wstring>& deleted_paths,
                     const std::vector<std::wstring>& recycled_paths = {},
-                    const std::vector<std::wstring>& recycle_destinations = {}) {
+                    const std::vector<std::wstring>& recycle_destinations = {},
+                    const std::wstring& failed_path = {}) {
     PayloadWriter writer;
     writer.PutU32(static_cast<uint32_t>(hr)); writer.PutU32(cancelled ? 1 : 0);
     writer.PutString(error); writer.PutStringArray(deleted_paths); writer.PutStringArray(recycled_paths); writer.PutStringArray(recycle_destinations);
+    writer.PutString(failed_path);
     SendMsg(RSP_DONE, id, writer.data());
 }
 
@@ -282,9 +284,11 @@ private:
     void RememberName(LPCWSTR name) { current_item_ = name ? name : L""; }
     void NoteItemResult(HRESULT hr) {
         if (FAILED(hr) && hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-            if (SUCCEEDED(item_failure_)) item_failure_ = hr;
-            last_failed_item_ = !authorized_root_.empty() ? authorized_root_
-                : current_path_.empty() ? current_item_ : current_path_;
+            if (SUCCEEDED(item_failure_)) {
+                item_failure_ = hr;
+                last_failed_item_ = !authorized_root_.empty() ? authorized_root_
+                    : current_path_.empty() ? current_item_ : current_path_;
+            }
         }
     }
     void MaybeReport(bool force = false) {
@@ -602,7 +606,7 @@ void ExecuteRequest(Request* req) {
             ? L"回收失败（错误 " + std::to_wstring(static_cast<unsigned long>(result.error)) + L"） | " + result.failed_path
             : std::wstring{};
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
-        SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations);
+        SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations, result.failed_path);
         delete req;
         return;
     }
@@ -679,7 +683,7 @@ void ExecuteRequest(Request* req) {
             default: ihr = E_INVALIDARG; break;
             }
             item->Release();
-            if (FAILED(ihr)) { hr = ihr; setup_failed = true; break; }
+            if (FAILED(ihr)) { hr = ihr; setup_failed = true; sink.NoteSetupFailure(src); break; }
         }
     }
 
@@ -708,6 +712,13 @@ void ExecuteRequest(Request* req) {
         if (sink_cookie) op->Unadvise(sink_cookie);
         op->Release();
     }
+    std::wstring failed_path = sink.last_failed_item();
+    for (const auto& root_sink : root_sinks) {
+        if (FAILED(root_sink->item_failure())) {
+            if (SUCCEEDED(hr)) hr = root_sink->item_failure();
+            if (failed_path.empty()) failed_path = root_sink->last_failed_item();
+        }
+    }
     // Some shell providers finish the filesystem mutation and then return a
     // failure from final bookkeeping. The filesystem state is authoritative;
     // never tell the UI that a completed delete/rename failed. Setup failures
@@ -715,6 +726,7 @@ void ExecuteRequest(Request* req) {
     if (FAILED(hr) && !cancelled && !setup_failed && OperationPostconditionSatisfied(*req))
         hr = S_OK;
 
+    if (SUCCEEDED(hr) || cancelled) failed_path.clear();
     std::wstring error;
     if (IsAuthorizedDeletion(req->type) && FAILED(hr) &&
         GetEnvironmentVariableW(L"PULSE_DELETE_DIAGNOSTICS", nullptr, 0)) {
@@ -734,9 +746,9 @@ void ExecuteRequest(Request* req) {
             while (!error.empty() && (error.back() == L'\r' || error.back() == L'\n'))
                 error.pop_back();
         }
-        if (!sink.last_failed_item().empty()) {
+        if (!failed_path.empty()) {
             if (!error.empty()) error += L" | ";
-            error += sink.last_failed_item();
+            error += failed_path;
         }
     }
 
@@ -749,7 +761,7 @@ void ExecuteRequest(Request* req) {
             recycled.insert(recycled.end(), root_sink->recycled_paths_.begin(), root_sink->recycled_paths_.end());
             destinations.insert(destinations.end(), root_sink->recycle_destinations_.begin(), root_sink->recycle_destinations_.end());
         }
-        SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations);
+        SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations, failed_path);
     } else SendDone(req->id, hr, cancelled, error);
     delete req;
 }

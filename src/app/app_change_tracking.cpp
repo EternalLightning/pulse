@@ -171,7 +171,7 @@ void LoadChangeView(AppState& s, app::Tab& tab, const std::wstring& root, bool a
     const auto slash = root.find_last_of(L"\\/");
     tab.virtual_title = Text(I::ChangeTitle) + L" · " + root.substr(slash == std::wstring::npos ? 0 : slash + 1);
     tab.view_mode = ui::ViewMode::Details;
-    tab.banner_title = Text(I::ChangeTitle);
+    tab.SetBannerTitle(app::BannerType::Other, Text(I::ChangeTitle));
     tab.banner_message = Text(I::ChangeScope);
     if (!refresh) tab.change_empty_text = Text(s.appPrefs.change_tracking_enabled ? I::ChangeScanning : I::ChangeDisabled);
     if (!append && !refresh) tab.change_status_text.clear();
@@ -213,7 +213,7 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
         if (!tab || tab != wanted.tab || tab->current_path != wanted.path ||
             tab->view_generation != wanted.generation || tab->change_request != request) return;
         tab->loading = false;
-        tab->banner_title = Text(I::ChangeTitle);
+        tab->SetBannerTitle(app::BannerType::Other, Text(I::ChangeTitle));
         tab->banner_message = Text(I::ChangeScope);
         if (!HasResponse(result.state)) {
             const bool has_entries = tab->snapshot && tab->EntryCount() != 0;
@@ -239,6 +239,7 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
             entry.change_type_text = record.source == index::ChangeSource::InitialMtime
                 ? Text(I::ChangeInitialMtime) : KindText(static_cast<uint32_t>(record.kind));
             entry.change_record_only = record.kind == K::Deleted || record.kind == K::MovedOut;
+            entry.change_deleted = record.kind == K::Deleted;
             entries->push_back(std::move(entry));
         }
         tab->SetSnapshot(entries);

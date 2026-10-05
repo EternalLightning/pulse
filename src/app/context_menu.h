@@ -127,6 +127,7 @@ struct ShellMenuEntry {
 // AppendShellSection (they grow the menu downward so open rows never move).
 std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring& undo_label,
                                               bool folder = false);
+void RestrictDriveItemMenu(std::vector<ui::FluentMenuItem>& items, bool single_drive);
 
 struct Tab;
 // Uses snapshot metadata only; never probes the filesystem on the UI thread.
@@ -175,7 +176,7 @@ std::vector<ui::FluentMenuItem> BuildRecyclePlaceMenu(bool can_empty);
 // Toolbar "新建▾" dropdown (reuses the same FluentMenu component).
 std::vector<ui::FluentMenuItem> BuildNewMenu();
 
-std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem);
+std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive = false);
 
 // Split-button layout presets.
 std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset);

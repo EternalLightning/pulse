@@ -19,6 +19,7 @@
 #include "entry_order_hold.h"
 #include "session.h"
 #include "../fs/fs_net_cache.h"
+#include "../index/search_result_merge.h"
 #include "context_menu.h"
 #include "batch_rename.h"
 #include "search_query.h"
@@ -237,7 +238,7 @@ void RequestSearchPage(AppState& s, app::Tab& tab, const std::wstring& rest,
     if (split.content.present() && (!reset || tab.search_content_empty)) {
         tab.loading = false;
         if (tab.search_content_empty) {
-            tab.banner_title = l10n::Get(l10n::StringId::ContentIndexNoQuery);
+            tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentIndexNoQuery));
             tab.banner_message.clear();
         }
         return;
@@ -269,8 +270,7 @@ void RequestSearchPage(AppState& s, app::Tab& tab, const std::wstring& rest,
         tab.search_content_active = false;
         if (!tab.snapshot || tab.snapshot->empty()) tab.SetSnapshot(tab.search_entries);
         tab.loading = !tab.snapshot || tab.snapshot->empty();
-        tab.banner_title.clear();
-        tab.banner_message.clear();
+        tab.ClearBanner();
     } else {
         tab.search_loading_more = true;
     }
@@ -279,7 +279,7 @@ void RequestSearchPage(AppState& s, app::Tab& tab, const std::wstring& rest,
     tab.filename_live_generation = id;
     tab.pending_search_offset = 0;
     if (s.appPrefs.search_pinyin && !s.index.PinyinReady() && index::QueryHasPinyin(index::ParseQuery(rest))) {
-        tab.banner_title = l10n::Get(l10n::StringId::SearchPinyin);
+        tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::SearchPinyin));
         tab.banner_message = l10n::Get(l10n::StringId::PinyinPreparing);
     }
     auto query = MakeSearchPageQuery(tab, rest, 0);
@@ -381,7 +381,7 @@ void RequestSavedSearch(AppState& s, app::Tab& tab, size_t saved_index) {
     const auto& saved = s.savedSearches.items();
     if (saved_index >= saved.size()) {
         tab.virtual_title = l10n::Get(l10n::StringId::SavedSearchUnavailable);
-        tab.banner_title = l10n::Get(l10n::StringId::CannotOpenSavedSearch);
+        tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::CannotOpenSavedSearch));
         tab.banner_message = l10n::Get(l10n::StringId::SavedSearchRemoved);
         tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
         return;
@@ -487,7 +487,7 @@ void ApplyContentSearchUpdate(AppState& s, index::ContentSearchUpdate update) {
         target->search_content_active = false;
         target->loading = false;
         const auto scan_message = target->content_scan_error ? target->banner_title + L" · " + target->banner_message : std::wstring{};
-        target->banner_title = l10n::Get(l10n::StringId::ContentUpdatesPaused);
+        target->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentUpdatesPaused));
         target->banner_message = l10n::Get(l10n::StringId::ContentUpdatesPausedDesc);
         if (!scan_message.empty()) target->banner_message += L" · " + scan_message;
         InvalidateRect(s.hwnd, nullptr, FALSE);
@@ -565,18 +565,18 @@ void ApplyContentSearchUpdate(AppState& s, index::ContentSearchUpdate update) {
         target->search_retaining_results = false;
         target->search_content_active = false;
         target->pending_generation = 0;
-        if(!update.progress.delta && !update.progress.error && target->banner_title==l10n::Get(l10n::StringId::SearchIncomplete)) {
-            target->banner_title.clear();target->banner_message.clear();
+        if(!update.progress.delta && !update.progress.error && target->banner_type == app::BannerType::SearchIncomplete) {
+            target->ClearBanner();
         }
-        if (target->banner_title == l10n::Get(l10n::StringId::ContentIndexScanRunning)) {
-            target->banner_title.clear(); target->banner_message.clear();
+        if (target->banner_type == app::BannerType::ContentScanRunning) {
+            target->ClearBanner();
         }
         if (update.progress.truncated) {
-            target->banner_title = l10n::Get(l10n::StringId::ResultLimitTitle);
+            target->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ResultLimitTitle));
             target->banner_message = l10n::Get(l10n::StringId::ResultLimitMessage);
         } else if (update.progress.error != ERROR_SUCCESS &&
                    update.progress.error != ERROR_CANCELLED) {
-            target->banner_title = l10n::Get(l10n::StringId::SearchIncomplete);
+            target->SetBannerTitle(app::BannerType::SearchIncomplete, l10n::Get(l10n::StringId::SearchIncomplete));
             wchar_t error[64]{};
             swprintf_s(error, l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(),
                        update.progress.error);
@@ -782,7 +782,7 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
         tab.loading = true;
         tab.view_mode = ui::ViewMode::Details;
         tab.SetSnapshot(nullptr);
-        tab.banner_title = l10n::Get(l10n::StringId::RecycleBin);
+        tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::RecycleBin));
         tab.banner_message = RecycleOccupancyText(s.recycle_info);
         tab.pending_generation = s.worker.Refresh(
             path, tab.sort_column, tab.sort_direction);
@@ -870,8 +870,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         return;
     }
     tab.virtual_title.clear();
-    tab.banner_title.clear();
-    tab.banner_message.clear();
+    tab.ClearBanner();
     if (!s.shot.active) {
         const auto saved = s.appPrefs.folder_views.Find(normalized);
         const auto mode = saved.value_or(reason == PathLoadReason::RestoreSession
@@ -932,7 +931,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         if (tab.snapshot && tab.EntryCount() != 0) tab.SelectOnly(0);
         if (from_net) {
             tab.cache_unix = disk_ts;
-            tab.banner_title = l10n::Get(l10n::StringId::Cache);
+            tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::Cache));
             tab.banner_message = disk_ts
                 ? fs::FormatCacheAge(disk_ts) + L" · " +
                     l10n::Get(l10n::StringId::Refreshing)
@@ -960,8 +959,8 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             tab->pending_generation = 0;
             s.explicit_entry_refreshes.erase(tab);
             tab->net_readonly = fs::IsUncPath(res.path);
-            tab->banner_title = l10n::Get(tab->net_readonly
-                ? l10n::StringId::Offline : l10n::StringId::CannotOpen);
+            tab->SetBannerTitle(tab->net_readonly ? app::BannerType::Offline : app::BannerType::Other, l10n::Get(tab->net_readonly
+                ? l10n::StringId::Offline : l10n::StringId::CannotOpen));
             tab->banner_message = tab->snapshot
                 ? l10n::Get(l10n::StringId::CachedReadOnly)
                 : l10n::Get(l10n::StringId::DirectoryUnavailable);
@@ -1027,8 +1026,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             tab->pending_generation = 0;
             tab->applied_generation = res.generation;
             tab->net_readonly = false;
-            tab->banner_title.clear();
-            tab->banner_message.clear();
+            tab->ClearBanner();
             tab->cache_unix = 0;
             if (virtual_kind == L"recycle" || fs::IsRecycleViewPath(res.path)) {
                 ApplyQueriedRecycleInfo(s, res.recycle_info);
@@ -1588,7 +1586,7 @@ void TransferToTarget(AppState& s, bool move) {
     app::Tab* dst = s.targetPane->ActiveTab();
     if (!dst || dst->current_path.empty() || fs::IsVirtualPath(dst->current_path) || dst->net_readonly) return;
     std::vector<std::wstring> paths = SelectedFullPaths(*src);
-    if (paths.empty()) return;
+    if (paths.empty() || std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     ops::OpRequest req;
     req.type = move ? ops::OpType::Move : ops::OpType::Copy;
     req.dest_dir = dst->current_path;

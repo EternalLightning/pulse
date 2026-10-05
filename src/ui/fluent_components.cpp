@@ -2288,7 +2288,7 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
     DrawTextNative(spec.text,
              D2D1::RectF(text_left, spec.bounds.top,
                         spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.bottom),
-             SectionFormat(), foreground);
+             NavFormat(), foreground);
     DrawGlyphWithFormat(spec.expanded ? kChevronDown : kChevronRight,
                         D2D1::RectF(spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.top,
                                     spec.bounds.right - Px(8.0f), spec.bounds.bottom),

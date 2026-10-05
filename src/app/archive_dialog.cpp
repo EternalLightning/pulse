@@ -16,10 +16,6 @@ namespace {
 constexpr wchar_t kClass[] = L"PulseArchiveDialog";
 constexpr int kDestination = 100, kPassword = 101, kBrowse = 102, kCreateFolder = 103;
 
-const wchar_t* Label(const wchar_t* chinese, const wchar_t* english) {
-    return l10n::effective_language() == l10n::Language::ZhCN ? chinese : english;
-}
-
 struct DialogState {
     bool dark = false, password_only = false, progress = false, all = false, accepted = false;
     COLORREF accent = RGB(80, 180, 220);
@@ -85,8 +81,8 @@ void Paint(HWND hwnd, const DialogState& s) {
     SetTextColor(dc, Text(s));
     HGDIOBJ old_font = SelectObject(dc, s.title_font);
     RECT title{Px(s, 24), Px(s, 20), Px(s, Width(s) - 24), Px(s, 54)};
-    DrawTextW(dc, s.password_only ? Label(L"压缩包密码", L"Archive password")
-        : Label(L"解压压缩包", L"Extract archive"), -1, &title, DT_SINGLELINE | DT_VCENTER);
+    DrawTextW(dc, s.password_only ? l10n::Get(l10n::StringId::ArchivePassword).c_str()
+        : l10n::Get(l10n::StringId::ArchiveExtractTitle).c_str(), -1, &title, DT_SINGLELINE | DT_VCENTER);
     SelectObject(dc, s.font);
     const auto draw_input = [&](int y, int right, const wchar_t* label) {
         RECT prompt{Px(s, 24), Px(s, y - 32), Px(s, Width(s) - 24), Px(s, y - 8)};
@@ -98,13 +94,15 @@ void Paint(HWND hwnd, const DialogState& s) {
     if (s.progress) {
         RECT status{Px(s, 24), Px(s, 70), Px(s, Width(s) - 24), Px(s, 106)};
         DrawTextW(dc, s.cancel->load(std::memory_order_acquire)
-            ? Label(L"正在取消…", L"Cancelling…") : Label(L"正在解压…", L"Extracting…"),
+            ? l10n::Get(l10n::StringId::ArchiveCancelling).c_str()
+            : l10n::Get(l10n::StringId::ArchiveExtracting).c_str(),
             -1, &status, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else {
-        if (!s.password_only) draw_input(100, Width(s) - 124, Label(L"解压到", L"Destination"));
+        if (!s.password_only)
+            draw_input(100, Width(s) - 124, l10n::Get(l10n::StringId::ArchiveDestination).c_str());
         draw_input(s.password_only ? 100 : 192, Width(s) - 24,
-            s.password_only ? Label(L"请输入密码", L"Enter password")
-                            : Label(L"密码（如需要）", L"Password (if required)"));
+            s.password_only ? l10n::Get(l10n::StringId::ArchiveEnterPassword).c_str()
+                            : l10n::Get(l10n::StringId::ArchiveOptionalPassword).c_str());
     }
     HPEN border = CreatePen(PS_SOLID, 1, s.dark ? RGB(62, 75, 84) : RGB(188, 196, 202));
     HGDIOBJ old_pen = SelectObject(dc, border);
@@ -166,7 +164,7 @@ void Browse(HWND owner, DialogState& s) {
     DWORD flags = 0;
     dialog->GetOptions(&flags);
     dialog->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    dialog->SetTitle(Label(L"选择解压目标文件夹", L"Choose extraction folder"));
+    dialog->SetTitle(l10n::Get(l10n::StringId::ArchivePickDestination).c_str());
     const std::wstring path = ReadEdit(s.destination);
     IShellItem* initial = nullptr;
     if (SUCCEEDED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&initial)))) {
@@ -246,18 +244,19 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (!s->password_only) {
             s->destination = edit(kDestination, 100, Width(*s) - 124, s->options.destination, false);
-            button(kBrowse, Label(L"浏览…", L"Browse…"), Width(*s) - 112, 101, 88);
+            const std::wstring browse_label = l10n::Get(l10n::StringId::DupBrowse) + L"…";
+            button(kBrowse, browse_label.c_str(), Width(*s) - 112, 101, 88);
         }
         s->password = edit(kPassword, s->password_only ? 100 : 192, Width(*s) - 24,
                            s->options.password, true);
         if (!s->password_only && s->all) {
-            std::wstring label = Label(L"创建文件夹：", L"Create folder: ");
+            std::wstring label = l10n::Get(l10n::StringId::ArchiveCreateFolderPrefix);
             label += s->folder_name;
             button(kCreateFolder, label.c_str(), 24, 240, Width(*s) - 48);
         }
         const int button_width = (Width(*s) - 58) / 2;
-        s->confirm = button(IDOK, s->password_only ? Label(L"确定", L"OK")
-            : Label(L"解压", L"Extract"), 24, FooterTop(*s) + 24, button_width);
+        s->confirm = button(IDOK, s->password_only ? l10n::Get(l10n::StringId::ConfirmDefault).c_str()
+            : l10n::Get(l10n::StringId::ArchiveExtract).c_str(), 24, FooterTop(*s) + 24, button_width);
         button(IDCANCEL, l10n::Get(l10n::StringId::Cancel).c_str(),
             34 + button_width, FooterTop(*s) + 24, button_width);
         EnableWindow(s->confirm, s->password_only || !s->options.destination.empty());
@@ -338,7 +337,8 @@ bool Show(HWND owner, DialogState& s) {
     const int y = std::clamp(parent.top + (parent.bottom - parent.top - height) / 2,
         monitor.rcWork.top, std::max(monitor.rcWork.top, monitor.rcWork.bottom - height));
     HWND dialog = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT, kClass,
-        s.password_only ? Label(L"压缩包密码", L"Archive password") : Label(L"解压压缩包", L"Extract archive"),
+        s.password_only ? l10n::Get(l10n::StringId::ArchivePassword).c_str()
+                        : l10n::Get(l10n::StringId::ArchiveExtractTitle).c_str(),
         WS_POPUP | WS_CLIPCHILDREN, x, y, width, height, owner, nullptr, wc.hInstance, &s);
     if (!dialog) return false;
     HRGN region = CreateRoundRectRgn(0, 0, width + 1, height + 1, Px(s, 10), Px(s, 10));

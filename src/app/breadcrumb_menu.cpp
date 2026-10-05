@@ -2,6 +2,7 @@
 #include "context_menu.h"
 #include "../fs/fs_enum.h"
 #include "../ops/clipboard.h"
+#include "../common/path_utils.h"
 
 namespace pulse {
 
@@ -9,9 +10,10 @@ void ShowBreadcrumbMenu(AppState& s, std::wstring path, POINT screen_pt) {
     if (path.empty() || !EnsureMenu(s)) return;
     s.context_menu.Close();
     const bool filesystem = !fs::IsVirtualPath(path);
+    const bool drive = path::IsDriveRootPath(path);
     // Keep the clicked path across TrackPopup's nested message loop. Selection
     // commands target file rows and must not be used for breadcrumb ancestors.
-    const int command = s.menu->TrackPopup(screen_pt, app::BuildBreadcrumbMenu(filesystem));
+    const int command = s.menu->TrackPopup(screen_pt, app::BuildBreadcrumbMenu(filesystem, drive));
     const std::wstring shell_path = ClipboardPath(path);
     switch (command) {
     case app::CmdOpenInNewTab:
@@ -24,7 +26,7 @@ void ShowBreadcrumbMenu(AppState& s, std::wstring path, POINT screen_pt) {
         ops::WriteClipboardText(shell_path);
         break;
     case app::CmdCopy:
-        if (filesystem) ops::WriteClipboard({shell_path}, false);
+        if (filesystem && !drive) ops::WriteClipboard({shell_path}, false);
         break;
     case app::CmdOpenTerminal:
         if (filesystem) s.ops.OpenTerminal(shell_path);

@@ -1,6 +1,7 @@
 #include "../index/index_config.h"
 #include "../index/index_query.h"
 #include "../index/network_index.h"
+#include "../index/search_result_merge.h"
 #include "../index/index_shard.h"
 #include <algorithm>
 #include <cstring>

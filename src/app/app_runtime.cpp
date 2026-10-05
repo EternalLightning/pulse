@@ -5,6 +5,7 @@
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "folder_sizes_ui.h"
+#include "index_volume_badge.h"
 #include "about_info.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -522,6 +523,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                     row.detail += count;
                 }
                 row.state = volume.state;
+                row.badge_kind = app::IndexVolumeBadgeKind(volume);
                 row.checked = volume.enabled;
                 row.enabled = vm.settings_index_service && volume.supported;
                 row.pending = s.settings.VolumePending(volume.id);
@@ -854,7 +856,7 @@ void ApplyRecycleOccupancy(AppState& s) {
     ForEachPane(s, [&](app::Pane& pane) {
         app::Tab* tab = pane.ActiveTab();
         if (!IsRecycleTab(tab)) return;
-        tab->banner_title = l10n::Get(l10n::StringId::RecycleBin);
+        tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::RecycleBin));
         tab->banner_message = detail;
     });
 }
@@ -1053,7 +1055,7 @@ std::wstring DetailsAttributeText(DWORD attrs) {
     std::wstring result;
     for (const auto& value : values) {
         if (!(attrs & value.bit)) continue;
-        if (!result.empty()) result += pulse::l10n::effective_language() == pulse::l10n::Language::ZhCN ? L"、" : L", ";
+        if (!result.empty()) result += pulse::l10n::Get(pulse::l10n::StringId::ListSeparator);
         result += value.name;
     }
     return result.empty() ? pulse::l10n::Get(pulse::l10n::StringId::AttrNormal).c_str() : result;
@@ -1451,9 +1453,41 @@ static std::wstring ContextStatusHint(const app::Tab* tab) {
     return l10n::Get(l10n::StringId::StatusHintIdle);
 }
 
-// View-model wrapper: builds the base VM and layers ops-layer status on top.
-// probe_details=false: hit-test / input paths must not kick off selection
-// probes (or mutate detailsSelPath); paint owns those side effects.
+bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
+    std::vector<std::wstring> tray_paths;
+    const bool tray_present = !s.tray.batches().empty();
+    if (tray_present) {
+        for (const auto& item : s.tray.batches().back().items)
+            if (item.exists) tray_paths.push_back(item.path);
+    }
+    auto& availability = s.clipboard_availability;
+    bool changed = availability.Update(GetClipboardSequenceNumber(),
+        IsClipboardFormatAvailable(CF_HDROP) != 0, tray_present, std::move(tray_paths));
+    changed = availability.Consume() || changed;
+    if (auto request = availability.BeginRefresh(now)) {
+        const auto mailbox = availability.mailbox();
+        const uint64_t generation = request->generation;
+        if (!s.worker.EnqueueIo([request = std::move(*request), mailbox] {
+            const auto cancelled = [&] { return mailbox->generation.load() != request.generation; };
+            auto result = app::ProbeClipboardAvailability(request, ops::ReadClipboard,
+                [](const std::wstring& source) {
+                    return !path::IsDriveRootPath(source) &&
+                        GetFileAttributesW(source.c_str()) != INVALID_FILE_ATTRIBUTES;
+                }, cancelled);
+            mailbox->Publish(std::move(result));
+        })) availability.RetryRefresh(generation);
+    }
+    return changed;
+}
+
+bool CanPasteIntoCurrent(AppState& s) {
+    if (PumpClipboardAvailability(s, GetTickCount64())) InvalidateRect(s.hwnd, nullptr, FALSE);
+    const auto* tab = ActiveTab(s);
+    return tab && !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path) &&
+        !tab->net_readonly && s.clipboard_availability.Available();
+}
+
+// probe_details=false keeps hit-test/input calls from starting detail probes.
 ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     if (!s.pane) return {};
     s.changes.visible_paths.clear();
@@ -1469,6 +1503,11 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
         s.sidebarQuickAccessHiddenMask);
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
+    vm.can_paste = CanPasteIntoCurrent(s);
+    if (const auto* tab = ActiveTab(s)) {
+        const auto selected_paths = SelectedFullPaths(*tab);
+        vm.selection_has_drive_root = std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath);
+    }
     const ULONGLONG fold_now = GetTickCount64();
     for (auto& group : vm.sidebar) {
         group.expansion = group.collapsed ? 0.0f : 1.0f;

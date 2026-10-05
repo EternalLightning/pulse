@@ -98,7 +98,4 @@ private:
     HANDLE watch_wake_event_ = nullptr;
 };
 
-SearchResult MergeSearchResults(const Query& query, SearchResult local,
-                                SearchResult network);
-
 } // namespace pulse::index

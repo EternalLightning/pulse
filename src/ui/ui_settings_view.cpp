@@ -213,7 +213,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 const float badge_y = row.top + ((row.bottom - row.top) - badge_h) * 0.5f;
                 painter_.DrawBadge({ D2D1::RectF(badge_x, badge_y,
                                                  badge_x + badge_w, badge_y + badge_h),
-                                     volume.state, IndexVolumeBadgeKind(volume.state) });
+                                     volume.state, volume.badge_kind });
             }
             MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
             FillRect(dc, brStrokeDivider_.get(), row.left + 12.0f * scale_, row.bottom - 1.0f,

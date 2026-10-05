@@ -127,15 +127,6 @@ std::vector<RM_PROCESS_INFO> Owners(const std::vector<std::wstring>& files, std:
     }
     return {};
 }
-std::wstring FailedName(const std::wstring& error) {
-    const auto separator = error.rfind(L" | ");
-    auto tail = separator == std::wstring::npos ? error : error.substr(separator + 3);
-    const auto diagnostics = tail.find(L"; delete diagnostics:");
-    if (diagnostics != std::wstring::npos) tail.resize(diagnostics);
-    while (!tail.empty() && iswspace(tail.back())) tail.pop_back();
-    const auto first = tail.find_first_not_of(L" \r\n\t");
-    return first == std::wstring::npos ? std::wstring{} : tail.substr(first);
-}
 }
 
 bool IsLockFailure(HRESULT error) noexcept {
@@ -152,15 +143,20 @@ LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
     if (diagnostics) diagnostics->clear();
     LockReport report;
     if (!IsLockFailure(error) || Cancelled(cancelled)) return report;
-    const auto failed = FailedName(failed_item);
+    const auto& failed = failed_item;
+    if (failed.empty() || failed.find(L'\0') != std::wstring::npos) return report;
     std::vector<std::wstring> roots;
     const bool absolute = std::filesystem::path(failed).is_absolute();
     if (absolute) roots.push_back(failed);
-    else for (const auto& candidate : candidates)
-        if (Equal(Leaf(candidate), failed)) roots.push_back(candidate);
+    else {
+        if (failed == L"." || failed == L".." || failed.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos ||
+            std::any_of(failed.begin(), failed.end(), [](wchar_t ch) { return ch < L' '; })) return report;
+        for (const auto& candidate : candidates)
+            if (Equal(Leaf(candidate), failed)) roots.push_back(candidate);
+        if (roots.empty()) roots = candidates; // An explicit leaf may identify a descendant.
+    }
     bool complete = true;
     std::vector<std::wstring> files;
-    if (roots.empty()) roots = candidates;
     size_t visited = 0;
     const auto deadline = GetTickCount64() + 1000;
     for (const auto& root : roots) {
@@ -176,7 +172,7 @@ LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
     if (!absolute && !failed.empty()) {
         std::vector<std::wstring> matching;
         for (const auto& file : files) if (Equal(Leaf(file), failed)) matching.push_back(file);
-        if (!matching.empty()) files = std::move(matching);
+        files = std::move(matching);
     }
     if (files.empty() || Cancelled(cancelled)) return {};
     std::set<DWORD> services;

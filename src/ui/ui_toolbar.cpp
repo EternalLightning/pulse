@@ -1,5 +1,6 @@
 #include "ui_renderer_internal.h"
 #include "toolbar_layout.h"
+#include "toolbar_command_state.h"
 #include "pane_header_icons.h"
 #include "../app/resource.h"
 
@@ -118,9 +119,11 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
         HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
         HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
+    const ToolbarCommandState command_state{vm.archive_view, vm.pane.selected_count,
+        vm.selection_has_drive_root, vm.can_paste};
     for(int i=0;i<9;++i) {
         if (layout.commands[i].right <= layout.commands[i].left) continue;
-        const bool enabled=vm.archive_view ? i>=5 : i==2 || i>=6 || vm.pane.selected_count>0;
+        const bool enabled=command_state.Enabled(i);
         const bool selected=(i==6 && vm.pane_slots.size()>1) || (i==7 && vm.details_visible) ||
             (i==8 && vm.pane.column_strip.enabled);
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :
@@ -152,9 +155,8 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             button.state.enabled=enabled;
             painter_.DrawButton(button);
         };
-        const bool english=l10n::effective_language()==l10n::Language::EnUS;
-        extract_button(layout.extract,HitTestResult::Extract,english ? L"Extract" : L"解压",vm.pane.selected_count>0);
-        extract_button(layout.extract_all,HitTestResult::ExtractAll,english ? L"Extract all" : L"解压全部项目",!vm.pane.loading);
+        extract_button(layout.extract,HitTestResult::Extract,l10n::Get(l10n::StringId::ArchiveExtract).c_str(),vm.pane.selected_count>0);
+        extract_button(layout.extract_all,HitTestResult::ExtractAll,l10n::Get(l10n::StringId::ArchiveExtractAll).c_str(),!vm.pane.loading);
     }
     if (layout.overflow.right > layout.overflow.left) {
         DrawButton(layout.overflow,theme,IsHovered(vm,HitTestResult::ToolbarMore) ? theme.fill_hover : kTransparent,

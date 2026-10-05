@@ -473,6 +473,7 @@ std::vector<VolumeInfo> Engine::Volumes() const {
         } else if (volume.enabled && building_) {
             volume.state = L"正在建立索引";
         } else if (volume.enabled && ready_) {
+            volume.failed = true;
             volume.state = L"索引失败";
             volume.error = L"无法读取该磁盘的文件变更记录";
         }

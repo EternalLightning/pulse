@@ -77,14 +77,14 @@ void StartIndexedContentSearch(AppState& s, app::Tab& tab, const std::wstring& r
     }
     if (!scan && !overlaps) {
         tab.loading = false;
-        tab.banner_title = l10n::Get(scope.empty() ? I::ContentIndexEmpty : I::ContentIndexNotCovered);
+        tab.SetBannerTitle(app::BannerType::Other, l10n::Get(scope.empty() ? I::ContentIndexEmpty : I::ContentIndexNotCovered));
         tab.banner_message = l10n::Get(scope.empty() ? I::ContentIndexEmptyDesc : I::ContentIndexNotCoveredDesc);
         tab.virtual_title = l10n::Get(I::SearchModeContent);
         return;
     }
     if (!split.content.present()) {
         tab.loading = false;
-        tab.banner_title = l10n::Get(I::ContentIndexNoQuery);
+        tab.SetBannerTitle(app::BannerType::Other, l10n::Get(I::ContentIndexNoQuery));
         return;
     }
     index::ContentSearchRequest request;
@@ -114,7 +114,7 @@ void StartIndexedContentSearch(AppState& s, app::Tab& tab, const std::wstring& r
     wchar_t title[512]{};
     swprintf_s(title, l10n::Get(I::ContentFoundFormat).c_str(), app::SearchDisplayNeedle(rest).c_str(), size_t{0});
     if (!request.previous_results) tab.virtual_title = title;
-    tab.banner_title = request.task_scan ? std::wstring{} : l10n::Get(I::ContentIndexScanRunning);
+    tab.SetBannerTitle(request.task_scan ? app::BannerType::None : app::BannerType::ContentScanRunning, request.task_scan ? std::wstring{} : l10n::Get(I::ContentIndexScanRunning));
     tab.banner_message.clear();
     request.session_id = tab.search_session_id;
     request.subscribe = request.indexed && request.paged_results;

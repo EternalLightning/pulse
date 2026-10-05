@@ -23,6 +23,7 @@ struct VolumeInfo {
     bool online = false;
     bool supported = false;
     bool enabled = false;
+    bool failed = false;
     uint64_t indexed_items = 0;
     uint32_t progress = 0;
     std::wstring state;

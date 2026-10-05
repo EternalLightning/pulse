@@ -29,4 +29,12 @@ inline std::wstring StripExtendedPathPrefix(std::wstring_view p) {
     return std::wstring(p);
 }
 
+inline bool IsDriveRootPath(std::wstring_view p) {
+    if (p.starts_with(L"\\\\?\\")) p.remove_prefix(4);
+    if (p.size() != 2 && p.size() != 3) return false;
+    const bool letter = (p[0] >= L'A' && p[0] <= L'Z') || (p[0] >= L'a' && p[0] <= L'z');
+    return letter && p[1] == L':' &&
+        (p.size() == 2 || p[2] == L'\\' || p[2] == L'/');
+}
+
 } // namespace pulse::path

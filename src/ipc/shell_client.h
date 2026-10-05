@@ -6,6 +6,7 @@
 // All callbacks fire on the client's reader thread — never block the UI.
 #pragma once
 #include "protocol.h"
+#include "../common/shell_menu_item.h"
 #include <windows.h>
 #include <atomic>
 #include <cstdio>
@@ -21,20 +22,7 @@ namespace pulse::ops { class OpsManager; }
 
 namespace pulse::ipc {
 
-// One Explorer verb from a host-side IContextMenu session (already filtered
-// by pulse_shell; see ctx_menu_util.h). Software-owned submenus arrive as a
-// has_children header followed by its child rows (one level).
-struct CtxMenuItem {
-    uint32_t id = 0;              // host menu command id; pass back to Invoke
-    bool enabled = true;
-    bool separator_after = false;
-    bool has_children = false;    // submenu header; id is not invokable
-    bool child = false;           // row inside the preceding header's flyout
-    std::wstring verb;            // canonical verb (may be empty)
-    std::wstring text;
-    std::wstring clsid;
-    std::wstring handler;
-};
+using CtxMenuItem = pulse::ShellMenuItem;
 
 class ShellClient {
 public:
@@ -45,7 +33,8 @@ public:
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
                            std::vector<std::wstring> deleted_paths,
                            std::vector<std::wstring> recycled_paths,
-                           std::vector<std::wstring> recycle_destinations)> delete_done;
+                           std::vector<std::wstring> recycle_destinations,
+                           std::wstring failed_path)> delete_done;
         // RSP_CTX_ITEMS for a REQ_CTX_QUERY; id is the query id (== session id).
         std::function<void(uint32_t id, std::vector<CtxMenuItem> items, bool partial,
                            std::vector<std::wstring> slow_clsids)> ctx_items;

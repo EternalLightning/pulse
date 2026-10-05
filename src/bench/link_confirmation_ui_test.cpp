@@ -10,12 +10,16 @@
 int wmain(int argc, wchar_t** argv) {
     pulse::compat::EnableDpiAwareness();
     const HRESULT com = OleInitialize(nullptr);
-    pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const bool dark = argc < 2 || wcscmp(argv[1], L"--light") != 0;
-    const bool exit_dialog = argc > 2 && wcscmp(argv[2], L"--exit") == 0;
-    const auto output = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
-        (exit_dialog ? (dark ? L"exit_confirmation_dark.png" : L"exit_confirmation_light.png")
-                     : (dark ? L"link_confirmation_dark.png" : L"link_confirmation_light.png"))).wstring();
+    bool dark = true, exit_dialog = false, english = false;
+    for (int i = 1; i < argc; ++i) {
+        if (wcscmp(argv[i], L"--light") == 0) dark = false;
+        else if (wcscmp(argv[i], L"--exit") == 0) exit_dialog = true;
+        else if (wcscmp(argv[i], L"--english") == 0) english = true;
+    }
+    pulse::l10n::Initialize(GetModuleHandleW(nullptr), english ? L"en-US" : L"zh-CN");
+    const std::wstring image_name = std::wstring(exit_dialog ? L"exit_confirmation_" : L"link_confirmation_") +
+        (dark ? L"dark" : L"light") + (english ? L"_en" : L"") + L".png";
+    const auto output = std::filesystem::absolute(std::filesystem::path(L"bench_data") / image_name).wstring();
     std::filesystem::create_directories(std::filesystem::path(output).parent_path());
     std::atomic<bool> captured{false};
     std::thread automate([&] {

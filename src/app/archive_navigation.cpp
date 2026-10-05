@@ -33,9 +33,6 @@ void Post(HWND hwnd, std::unique_ptr<Result> result) {
     auto* payload = result.release();
     if (!PostMessageW(hwnd, WM_ARCHIVE_RESULT, 0, reinterpret_cast<LPARAM>(payload))) delete payload;
 }
-const wchar_t* Label(const wchar_t* zh, const wchar_t* en) {
-    return l10n::effective_language() == l10n::Language::EnUS ? en : zh;
-}
 void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& destination,
                    const std::vector<std::wstring>& selected, const std::wstring& password,
                    const std::wstring& member = {}) {
@@ -50,10 +47,10 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
             if (ops::ExtractArchive(file, destination, selected, password, task->result->error, &task->cancel)
                     && !member.empty())
                 task->result->open_path = (std::filesystem::path(destination) / member).wstring();
-        } catch (...) { task->result->error = L"Unable to extract archive."; }
+        } catch (...) { task->result->error = l10n::Get(l10n::StringId::ArchiveExtractFailed); }
         task->done.store(true, std::memory_order_release);
     })) {
-        task->result->error = Label(L"后台任务已停止或队列已满。", L"Background worker stopped or queue is full.");
+        task->result->error = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
         task->done.store(true, std::memory_order_release);
     }
     if (app::ShowArchiveProgressDialog(s.hwnd, s.darkMode, Accent(s), task->done, task->cancel))
@@ -92,8 +89,7 @@ void LoadArchiveView(AppState& s, app::Tab& tab) {
     tab.archive_prefix = prefix;
     tab.net_readonly = true;
     tab.virtual_title = std::filesystem::path(file).filename().wstring() + (prefix.empty() ? L"" : L" / " + prefix);
-    tab.banner_title.clear();
-    tab.banner_message.clear();
+    tab.ClearBanner();
     tab.SetSnapshot(nullptr);
     tab.loading = true;
     tab.pending_generation = next_request++;
@@ -111,10 +107,10 @@ void LoadArchiveView(AppState& s, app::Tab& tab) {
             result->entries = std::move(listing.entries);
             result->error = std::move(listing.error);
             result->password_required = listing.password_required;
-        } catch (...) { result->error = L"Unable to read archive."; }
+        } catch (...) { result->error = l10n::Get(l10n::StringId::ArchiveReadFailed); }
     }, [hwnd, result] { Post(hwnd, std::make_unique<Result>(std::move(*result))); })) {
         tab.loading = false;
-        tab.banner_message = Label(L"后台任务已停止或队列已满。", L"Background worker stopped or queue is full.");
+        tab.banner_message = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
     }
 }
 bool OpenArchiveSelection(AppState& s) {
@@ -167,7 +163,7 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
         else if (!result->open_path.empty()) {
             if (ops::IsArchivePath(result->open_path)) NavigateTo(s, ArchiveViewPath(result->open_path));
             else s.ops.OpenWith(result->open_path);
-        } else MessageBoxW(s.hwnd, Label(L"解压完成。已有同名文件已保留。", L"Extraction complete. Existing files were kept."), L"Pulse", MB_OK);
+        } else MessageBoxW(s.hwnd, l10n::Get(l10n::StringId::ArchiveExtractComplete).c_str(), L"Pulse", MB_OK);
         return;
     }
     ForEachPane(s, [&](app::Pane& pane) {
@@ -214,7 +210,7 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
             tab.applied_generation = result->generation;
             tab.pending_generation = 0;
             tab.banner_message = result->error;
-            tab.banner_title = result->error.empty() ? L"" : Label(L"无法打开压缩包", L"Unable to open archive");
+            tab.SetBannerTitle(result->error.empty() ? app::BannerType::None : app::BannerType::Other, result->error.empty() ? L"" : l10n::Get(l10n::StringId::ArchiveOpenFailed));
         }
     });
     InvalidateRect(s.hwnd, nullptr, FALSE);

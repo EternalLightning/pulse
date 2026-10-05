@@ -351,7 +351,7 @@ void StartDragOut(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot) return;
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
-    if (paths.empty()) return;
+    if (paths.empty() || std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     for (auto& path : paths) path = ClipboardPath(path);
 
     s.clickCollapseIndex = -1;
@@ -3254,6 +3254,10 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             shown = true;
         } else if (hit.region == ui::HitTestResult::BreadcrumbSegment && !hit.path.empty()) {
             ShowBreadcrumbMenu(*s, hit.path, sp);
+            shown = true;
+        } else if (hit.region == ui::HitTestResult::HomeCard && !hit.path.empty()) {
+            if (hit.path == app::MakeRecyclePath()) ShowRecyclePlaceMenu(*s, sp);
+            else ShowBreadcrumbMenu(*s, hit.path, sp);
             shown = true;
         } else if (hit.region == ui::HitTestResult::Row && hit.index >= 0) {
             app::Tab* tab = ActiveTab(*s);

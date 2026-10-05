@@ -2,6 +2,7 @@
 // app_hosted_edit.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "tab_shortcuts.h"
+#include "drive_labels.h"
 #include "../ui/address_search_layout.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -389,7 +390,10 @@ void ShowRenameOverlay(AppState& s) {
         }
     }
 
-    const std::wstring& name = tab->EntryAt(s.renameIndex).name;
+    const auto entry = tab->EntryAt(s.renameIndex);
+    const auto full = EntryFullPath(*tab, s.renameIndex);
+    const std::wstring name = path::IsDriveRootPath(full)
+        ? app::DriveLabelFromDisplayName(full, entry.name) : entry.name;
     SetWindowTextW(s.hwndRenameEdit, name.c_str());
     LayoutRenameOverlay(s);
     ShowWindow(s.hwndRenameEdit, SW_SHOW);
@@ -415,16 +419,19 @@ void HideRenameOverlay(AppState& s, bool commit) {
         app::Tab* tab = ActiveTab(s);
         wchar_t buf[512];
         GetWindowTextW(s.hwndRenameEdit, buf, ARRAYSIZE(buf));
-        if (tab && buf[0] && index < (int)(tab->snapshot ? tab->EntryCount() : 0)) {
+        if (tab && index < (int)(tab->snapshot ? tab->EntryCount() : 0)) {
             std::wstring full = EntryFullPath(*tab, index);
-            if (!full.empty() && buf != tab->EntryAt(index).name) {
+            const bool drive = path::IsDriveRootPath(full);
+            const auto entry = tab->EntryAt(index);
+            const auto old_name = drive ? app::DriveLabelFromDisplayName(full, entry.name) : entry.name;
+            if (!full.empty() && (drive || buf[0]) && buf != old_name) {
                 ops::OpRequest req;
                 req.type = ops::OpType::Rename;
                 req.sources.push_back(full);
                 req.new_name = buf;
-                tab->HoldEntryRename(tab->EntryAt(index).name, buf);
-                tab->pending_selected_name = buf;
-                tab->pending_selected_names = { buf };
+                if (!drive) tab->HoldEntryRename(entry.name, buf);
+                tab->pending_selected_name = drive ? app::DriveDisplayName(full, buf) : buf;
+                tab->pending_selected_names = { tab->pending_selected_name };
                 s.ops.Submit(std::move(req));
             }
         }

@@ -204,7 +204,7 @@ void SubmitAddressSearch(AppState& s, bool live) {
             tab->search_snippets = std::make_shared<std::vector<std::wstring>>();
             tab->search_total = 0;
             tab->SetSnapshot(tab->search_entries);
-            tab->banner_title = l10n::Get(l10n::StringId::ContentIndexNoQuery);
+            tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentIndexNoQuery));
             tab->banner_message.clear();
             InvalidateRect(s.hwnd, nullptr, FALSE);
         }
@@ -360,21 +360,17 @@ bool TickAddressSearch(AppState& s, ULONGLONG now) {
             std::wstring kind, rest;
             if (!tab || !app::ParsePulsePath(tab->current_path, &kind, &rest) ||
                 kind != L"search" || !app::SplitSearchQueryText(rest).content.present()) return;
-            if (tab->banner_title == l10n::Get(l10n::StringId::ContentIndexPartial) ||
-                tab->banner_title == l10n::Get(l10n::StringId::ContentCoverageHint) ||
-                tab->banner_title == l10n::Get(l10n::StringId::ContentIndexBuilding) ||
-                tab->banner_title == l10n::Get(l10n::StringId::ContentIndexPaused)) {
+            if (tab->banner_type == app::BannerType::ContentIndex) {
                 if (tab->search_content_active && !tab->search_allow_scan) {
                     // The query title and status bar already show live scan progress.
-                    tab->banner_title.clear();
-                    tab->banner_message.clear();
+                    tab->ClearBanner();
                     searched = true;
                 } else {
                     const auto title = l10n::Get(progress.paused ? l10n::StringId::ContentIndexPaused :
                         progress.indexing ? l10n::StringId::ContentIndexBuilding :
                         progress.error || progress.skipped_files ? l10n::StringId::ContentIndexPartial : l10n::StringId::ContentCoverageHint);
                     searched |= tab->banner_title != title || tab->banner_message != status;
-                    tab->banner_title = title;
+                    tab->SetBannerTitle(app::BannerType::ContentIndex, title);
                     tab->banner_message = status;
                 }
             }

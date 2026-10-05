@@ -31,6 +31,8 @@ namespace pulse::app {
 std::wstring NavigationReturnChildName(const std::wstring& from_path,
                                        const std::wstring& destination_path);
 
+enum class BannerType { None, Other, ContentIndex, SearchIncomplete, ContentScanRunning, Offline };
+
 struct Tab {
     std::wstring current_path;
     std::wstring archive_file, archive_prefix, archive_password;
@@ -68,6 +70,16 @@ struct Tab {
     std::wstring virtual_title; // tag/search views; empty for real folders
     std::wstring banner_title;
     std::wstring banner_message;
+    BannerType banner_type = BannerType::None;
+    void SetBannerTitle(BannerType type, std::wstring title) {
+        banner_type = type;
+        banner_title = std::move(title);
+    }
+    void ClearBanner() {
+        banner_type = BannerType::None;
+        banner_title.clear();
+        banner_message.clear();
+    }
     bool net_readonly = false;
     uint64_t cache_unix = 0;
     int recent_filter = 0; // RecentFilter; transient per tab.

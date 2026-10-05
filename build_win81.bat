@@ -13,11 +13,12 @@ set "PATH=%PULSE_VC_ROOT%\bin\Hostx64\x64;%PATH%"
 set "INCLUDE=%PULSE_VC_ROOT%\include;%WindowsSdkDir%Include\%WindowsSDKVersion%ucrt;%WindowsSdkDir%Include\%WindowsSDKVersion%shared;%WindowsSdkDir%Include\%WindowsSDKVersion%um;%WindowsSdkDir%Include\%WindowsSDKVersion%winrt"
 set "LIB=%PULSE_VC_ROOT%\lib\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%ucrt\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%um\x64"
 set "VSLANG=1033"
-if not defined CMAKE_BUILD_PARALLEL_LEVEL set "CMAKE_BUILD_PARALLEL_LEVEL=4"
+call "%~dp0scripts\prepare_nmake.bat" build-win81
+if errorlevel 1 exit /b 1
 if not defined LUMATEXT_SOURCE_DIR if exist "%~dp0..\lumatext\CMakeLists.txt" set "LUMATEXT_SOURCE_DIR=%~dp0..\lumatext"
 set "PULSE_DEPS="
 if exist "%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\harfbuzz-src\src\harfbuzz.cc" set PULSE_DEPS=-DFETCHCONTENT_SOURCE_DIR_HARFBUZZ="%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\harfbuzz-src" -DFETCHCONTENT_SOURCE_DIR_FREETYPE="%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\freetype-src"
-cmake -S . -B build-win81 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="%PULSE_VC_ROOT%\bin\Hostx64\x64\cl.exe" -DCMAKE_CXX_COMPILER="%PULSE_VC_ROOT%\bin\Hostx64\x64\cl.exe" -DCMAKE_LINKER="%PULSE_VC_ROOT%\bin\Hostx64\x64\link.exe" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WITH_SELFTEST=ON -DPULSE_WIN81_CANDIDATE=ON -DLUMATEXT_SOURCE_DIR="%LUMATEXT_SOURCE_DIR%" -DPULSE_WITH_LUMATEXT=ON %PULSE_DEPS%
+cmake %PULSE_CMAKE_FRESH% -S . -B build-win81 -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="%PULSE_VC_ROOT%\bin\Hostx64\x64\cl.exe" -DCMAKE_CXX_COMPILER="%PULSE_VC_ROOT%\bin\Hostx64\x64\cl.exe" -DCMAKE_LINKER="%PULSE_VC_ROOT%\bin\Hostx64\x64\link.exe" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WITH_SELFTEST=ON -DPULSE_WIN81_CANDIDATE=ON -DLUMATEXT_SOURCE_DIR="%LUMATEXT_SOURCE_DIR%" -DPULSE_WITH_LUMATEXT=ON %PULSE_DEPS%
 if errorlevel 1 exit /b 1
 cmake --build build-win81
 exit /b %errorlevel%

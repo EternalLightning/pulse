@@ -1670,7 +1670,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 }
                 case ColumnKind::Type: {
                     const bool deleted_change = vm.is_changes &&
-                        e.type_text == pulse::l10n::Get(pulse::l10n::StringId::ChangeDeleted);
+                        e.change_deleted;
                     float typeLeft = left;
                     const std::wstring chip = vm.is_changes ? std::wstring() : TypeChipLabel(e.name, e.is_dir);
                     const float chipW = TypeChipWidthDip(chip) * scale_;
@@ -1753,6 +1753,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 }
             }
         } else if (vm.view_mode == ViewMode::Tiles || vm.view_mode == ViewMode::Content) {
+            bool manual_size = false;
             std::wstring meta = !e.snippet.empty() ? e.snippet : e.type_text;
             if (e.snippet.empty() && !e.size_text.empty())
                 meta += (meta.empty() ? L"" : L" \u00B7 ") + e.size_text;
@@ -1760,10 +1761,11 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 meta += (meta.empty() ? L"" : L" \u00B7 ") + e.date_text;
             if (e.is_dir) {
                 const auto size = vm.folder_size_labels.find(src);
-                if (size != vm.folder_size_labels.end()) meta = size->second;
+                if (size != vm.folder_size_labels.end()) {
+                    meta = size->second.text;
+                    manual_size = size->second.manual;
+                }
             }
-            const bool manual_size = e.is_dir &&
-                meta == pulse::l10n::Get(pulse::l10n::StringId::FolderSizeCalculate);
             if (manual_size) MakeBrush(dc, theme.accent, brAccent_);
             DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                 manual_size ? brAccent_.get() : brTextSecondary_.get(), meta,
@@ -1778,10 +1780,10 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 auto* format = compositor_->SmallFormat();
                 const auto alignment = format->GetTextAlignment();
                 format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                const bool manual = size->second == pulse::l10n::Get(pulse::l10n::StringId::FolderSizeCalculate);
+                const bool manual = size->second.manual;
                 if (manual) MakeBrush(dc, theme.accent, brAccent_);
                 DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), format,
-                    manual ? brAccent_.get() : brTextSecondary_.get(), size->second,
+                    manual ? brAccent_.get() : brTextSecondary_.get(), size->second.text,
                     bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
                 format->SetTextAlignment(alignment);
             }

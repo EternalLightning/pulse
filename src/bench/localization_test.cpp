@@ -17,6 +17,28 @@ int main(int argc, char** argv) {
     using namespace pulse::l10n;
     bool passed = true;
     Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::string_view(argv[1]) == "--centralized") {
+        for (const auto language : {L"zh-CN", L"en-US"}) {
+            SetLanguage(language);
+            const bool chinese = std::wstring_view(language) == L"zh-CN";
+            bool complete = true;
+            for (UINT id = IDS_ARCHIVE_EXTRACT; id <= IDS_LIST_SEPARATOR; ++id)
+                complete &= !Get(static_cast<StringId>(id)).empty();
+            passed &= Report("centralized UI resources are present in both languages", complete);
+            passed &= Report("archive exit playback and link text follow display language",
+                Get(StringId::ArchiveExtractAll) == (chinese ? L"解压全部项目" : L"Extract all") &&
+                Get(StringId::ExitStopTasks) == (chinese ? L"停止任务并退出" : L"Stop tasks and exit") &&
+                Get(StringId::PlaybackNextFrame) == (chinese ? L"下一帧" : L"Next frame") &&
+                Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue") &&
+                Get(StringId::HelpOpenKeys) == (chinese ? L"Enter / 双击" : L"Enter / Double-click"));
+            passed &= Report("localized prefixes suffixes and separators preserve significant spaces",
+                Get(StringId::ArchiveCreateFolderPrefix) == (chinese ? L"创建文件夹：" : L"Create folder: ") &&
+                Get(StringId::PlaybackFramePrefix) == (chinese ? L"帧 " : L"Frame ") &&
+                Get(StringId::LinkNameCountSuffix) == (chinese ? L" 个硬链接名称" : L" hard-link names") &&
+                Get(StringId::ListSeparator) == (chinese ? L"、" : L", "));
+        }
+        return passed ? 0 : 1;
+    }
     for (const auto language : {L"zh-CN", L"en-US"}) {
         SetLanguage(language);
         const bool chinese = std::wstring_view(language) == L"zh-CN";

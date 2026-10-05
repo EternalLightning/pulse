@@ -51,6 +51,19 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
     plan.task_id = task_id;
     plan.origin = request.is_undo ? DeleteOrigin::Undo : request.delete_origin;
     if (!IsDeleteOperation(request.type)) { error = L"Not a deletion request"; return plan; }
+    for (const auto& source : request.sources) {
+        if (pulse::path::IsDriveRootPath(source)) {
+            error = L"Drive roots cannot be deleted; nothing was deleted.";
+            return {};
+        }
+    }
+    for (const auto& target : request.delete_targets) {
+        if (pulse::path::IsDriveRootPath(target.path) ||
+            std::any_of(target.physical_paths.begin(), target.physical_paths.end(), pulse::path::IsDriveRootPath)) {
+            error = L"Drive roots cannot be deleted; nothing was deleted.";
+            return {};
+        }
+    }
     std::vector<DeleteRequestTarget> requested = request.delete_targets;
     if (request.type == OpType::EmptyRecycle) {
         plan.origin = DeleteOrigin::EmptyRecycle;
@@ -131,11 +144,17 @@ std::vector<DeleteOutcome> OpsManager::DrainDeleteOutcomes() {
     return results;
 }
 
+bool IsDeleteBackendLost(HRESULT error) noexcept {
+    return error == HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE) ||
+        error == HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED) ||
+        error == HRESULT_FROM_WIN32(ERROR_TIMEOUT) || error == ipc::kMalformedDeleteResult;
+}
+
 void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
                               const std::vector<std::wstring>& deleted_paths, bool executed, bool uncertain,
                                const std::vector<std::wstring>& recycled_paths,
                                const std::vector<std::wstring>& recycle_destinations, bool cancelled,
-                               const LockReport& locks) {
+                               const LockReport& locks, HRESULT failure_hr, const std::wstring& failed_path) {
     bool was_admitted = false;
     CompletedOperation completed;
     completed.type = OpType::RealDelete;
@@ -196,8 +215,11 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
         if (!executed) ++status.deletes_without_mutation;
         status.completed_items = deleted_paths.size() + recycled_paths.size();
         status.phase = cancelled ? OpPhase::Cancelled :
-            !uncertain && error.empty() && status.completed_items != 0 ? OpPhase::Completed : OpPhase::Failed;
+            !uncertain && SUCCEEDED(failure_hr) && error.empty() && status.completed_items != 0 ? OpPhase::Completed : OpPhase::Failed;
         status.last_error = cancelled ? L"" : std::move(error);
+        status.failure_hr = cancelled || status.phase == OpPhase::Completed ? S_OK :
+            FAILED(failure_hr) ? failure_hr : E_FAIL;
+        status.failed_path = cancelled || status.phase == OpPhase::Completed ? L"" : failed_path;
         status.summary = cancelled ? l10n::Get(executed ? l10n::StringId::Cancel : l10n::StringId::DeleteCancelled) :
             status.phase == OpPhase::Completed ? l10n::Get(l10n::StringId::DeleteFinished) : status.last_error;
     });
@@ -233,14 +255,15 @@ void OpsManager::RunDelete(const QueueItem& item,
         bool executed = false, bool uncertain = false,
         const std::vector<std::wstring>& recycled = std::vector<std::wstring>{},
         const std::vector<std::wstring>& destinations = std::vector<std::wstring>{},
-        bool cancelled = false, const LockReport& locks = LockReport{}) {
+        bool cancelled = false, const LockReport& locks = LockReport{}, HRESULT failure_hr = S_OK,
+        const std::wstring& failed_path = std::wstring{}) {
         auto all_deleted = prior_deleted; all_deleted.insert(all_deleted.end(), deleted.begin(), deleted.end());
         auto all_recycled = prior_recycled; all_recycled.insert(all_recycled.end(), recycled.begin(), recycled.end());
         auto all_destinations = prior_recycle_destinations;
         all_destinations.insert(all_destinations.end(), destinations.begin(), destinations.end());
         FinishDelete(item, std::move(error), all_deleted,
             executed || !prior_deleted.empty() || !prior_recycled.empty(), uncertain,
-            all_recycled, all_destinations, cancelled, locks);
+            all_recycled, all_destinations, cancelled, locks, failure_hr, failed_path);
     };
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -254,6 +277,7 @@ void OpsManager::RunDelete(const QueueItem& item,
         status.phase = OpPhase::Scanning; status.percent = -1;
         status.summary = l10n::Get(l10n::StringId::DeletePreparing);
         status.last_error.clear(); status.current_item.clear();
+        status.failure_hr = S_OK; status.failed_path.clear();
         status.source_label.clear(); status.destination_label.clear();
         status.total_items = status.completed_items = status.total_bytes = status.transferred_bytes = 0;
         status.bytes_per_second = status.peak_bytes_per_second = 0; status.eta_seconds = 0;
@@ -334,6 +358,7 @@ void OpsManager::RunDelete(const QueueItem& item,
         status.summary = l10n::Get(recycle ? l10n::StringId::Delete : l10n::StringId::PermanentDelete);
     });
     std::vector<std::wstring> actual, recycled, recycle_destinations;
+    std::wstring failed_path;
     uint32_t hr = 0;
     bool cancelled = false;
     uint64_t execution_token = prepared.token;
@@ -346,6 +371,7 @@ void OpsManager::RunDelete(const QueueItem& item,
         {
             std::lock_guard<std::mutex> lock(done_mutex_);
             done_ready_ = false; done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
+            done_failed_path_.clear();
         }
         auto& client = ipc::ShellClient::Instance();
         uint32_t id = 0;
@@ -396,6 +422,7 @@ void OpsManager::RunDelete(const QueueItem& item,
                 }
             }
             done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
+            failed_path = std::move(done_failed_path_);
         }
         if (FAILED(static_cast<HRESULT>(hr)) || cancelled) break;
         if (!group.first && !recycle_roots.empty())
@@ -416,11 +443,8 @@ void OpsManager::RunDelete(const QueueItem& item,
     if (cancelled) error = l10n::Get(l10n::StringId::Cancel);
     else if (FAILED(static_cast<HRESULT>(hr)) && error.empty()) error = l10n::Get(l10n::StringId::OperationFailedMessage);
     else if (!physical_complete && error.empty()) error = L"Deletion was not confirmed for every authorized physical root.";
-    const bool uncertain = hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE)) ||
-        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED)) ||
-        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_TIMEOUT)) ||
-        error == L"Malformed deletion result" ||
-        !physical_complete;
+    const bool backend_lost = IsDeleteBackendLost(static_cast<HRESULT>(hr));
+    const bool uncertain = backend_lost || !physical_complete;
     if (!cancelled && !delete_cancel_.load() && !stopping_.load() &&
         shell::NeedsPermanentDeleteConfirmation(static_cast<HRESULT>(hr))) {
         // The recycle-only host refused fallback before mutation. Admit only
@@ -440,15 +464,13 @@ void OpsManager::RunDelete(const QueueItem& item,
         }
     }
     LockReport locks;
-    const bool backend_lost = hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE)) ||
-        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED)) ||
-        hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_TIMEOUT)) || error == L"Malformed deletion result";
     if (!cancelled && !backend_lost && IsLockFailure(static_cast<HRESULT>(hr)) && !item.req.undo_revision) {
         QueueItem retry = RemainingDeleteRetry(admitted, *accepted, actual);
-        if (!retry.req.sources.empty()) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), error,
+        if (!retry.req.sources.empty()) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), failed_path,
             [&] { return stopping_.load() || delete_cancel_.load(); });
     }
     InvalidateRecycleUndo(actual, backend_lost);
-    finish(std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled, locks);
+    finish(std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled, locks,
+        static_cast<HRESULT>(hr), failed_path);
 }
 }

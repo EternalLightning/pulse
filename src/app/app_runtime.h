@@ -4,6 +4,9 @@
 
 namespace pulse {
 
+bool PumpClipboardAvailability(AppState& s, ULONGLONG now);
+bool CanPasteIntoCurrent(AppState& s);
+
 inline app::LayoutTab& LiveLayout(AppState& s) {
     s.window_tabs.EnsureDefault();
     return *s.window_tabs.Active();

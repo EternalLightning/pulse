@@ -95,4 +95,4 @@
 | report | 53.49 | 满足 100 ms |
 | pdf | 2.34 | 满足 100 ms |
 
-本轮只是功能和“日志不再生成”的收口检查，不是受控性能对照实验，也不据此声称解决了短查询超预算、长期内存增长或历史快照峰值。此前名字池修复与 30 分钟观察结论继续以 docs/mcp-index-name-pool-compaction.md、docs/mcp-index-memory4-postinstall.md 为准。
+本轮只是功能和“日志不再生成”的收口检查，不是受控性能对照实验，也不据此声称解决了短查询超预算、长期内存增长或历史快照峰值。此前名字池修复说明见 docs/mcp-index-name-pool-compaction.md；旧部署观察快照已在 1.0.5.6 清理。

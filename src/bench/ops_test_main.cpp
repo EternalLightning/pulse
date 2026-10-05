@@ -5,7 +5,9 @@
 // bench_data/opstest (created/cleaned by this test). Prints one PASS/FAIL
 // line per check; exit code 0 iff all checks pass.
 #include "../ops/ops_manager.h"
+#include "../ops/delete_operation.h"
 #include "../ops/clipboard.h"
+#include "../common/path_utils.h"
 #include "../ipc/shell_client.h"
 #include <windows.h>
 #include <chrono>
@@ -21,6 +23,16 @@ using namespace pulse;
 
 namespace pulse::ops {
 struct TransferIntegrationProbe {
+    static void ExecuteDriveRequest(OpsManager& manager, OpRequest request) {
+        OpsManager::QueueItem item;
+        item.req = std::move(request); item.seq = 1;
+        manager.ExecuteFileOperation(item);
+    }
+    static void RenameDriveLabel(OpsManager& manager, const OpRequest& request,
+                                decltype(&SetVolumeLabelW) set_label, bool cancelled = false) {
+        manager.shell_cancel_requested_.store(cancelled);
+        manager.RunDriveLabelRename(request, 1, set_label);
+    }
     static uint64_t NextTaskId(OpsManager& manager) {
         std::lock_guard<std::mutex> lock(manager.mutex_);
         return manager.next_seq_;
@@ -28,6 +40,20 @@ struct TransferIntegrationProbe {
     static void GateOpenWorker(OpsManager& manager, std::function<void()> gate) {
         std::lock_guard<std::mutex> lock(manager.open_mutex_);
         if (manager.open_mailbox_) manager.open_mailbox_->before_execute = std::move(gate);
+    }
+    static void ShellOperation(OpsManager& manager, const OpRequest& request, bool stopped = false) {
+        manager.stopping_.store(stopped);
+        manager.RunShellOp(request, 1);
+    }
+    static void TransferCancelled(OpsManager& manager, const OpRequest& request) {
+        manager.stopping_.store(true);
+        manager.RunTransfer(request, 1);
+    }
+    static void DeleteResult(OpsManager& manager, HRESULT failure, const std::wstring& message,
+                             const std::wstring& failed_path, const std::vector<std::wstring>& deleted = {}) {
+        OpsManager::QueueItem item;
+        item.seq = 1; item.req.type = OpType::RealDelete;
+        manager.FinishDelete(item, message, deleted, true, IsDeleteBackendLost(failure), {}, {}, false, {}, failure, failed_path);
     }
 };
 }
@@ -174,6 +200,202 @@ ops::OpRequest SimpleOp(ops::OpType type, std::initializer_list<const wchar_t*> 
 
 } // namespace
 
+namespace {
+std::wstring label_root;
+std::wstring label_value;
+DWORD label_error = ERROR_SUCCESS;
+size_t label_calls = 0;
+
+BOOL WINAPI FakeSetVolumeLabel(LPCWSTR root, LPCWSTR label) {
+    ++label_calls;
+    label_root = root; label_value = label;
+    SetLastError(label_error);
+    return label_error == ERROR_SUCCESS;
+}
+
+int RunDriveRegressions() {
+    const std::vector<std::wstring> roots = {L"C:", L"C:\\", L"c:/", L"\\\\?\\C:\\", L"\\\\?\\c:"};
+    for (const auto& root : roots) {
+        Check(path::IsDriveRootPath(root), L"drive root spelling is recognized");
+        for (const auto type : {ops::OpType::Copy, ops::OpType::Move, ops::OpType::RecycleDelete,
+                               ops::OpType::RealDelete, ops::OpType::BatchRename}) {
+            ops::OpsManager manager;
+            auto request = SimpleOp(type, {root.c_str()}, L"C:\\unused", L"label");
+            Check(manager.Submit(request) == 0, L"drive operation rejected at admission without backend work");
+            ops::TransferIntegrationProbe::ExecuteDriveRequest(manager, request);
+            const auto status = manager.Status();
+            Check(status.phase == ops::OpPhase::Failed && status.failure_hr == E_ACCESSDENIED &&
+                  status.completed_ops == 1, L"queued drive operation rejected before backend work");
+        }
+        ops::OpsManager manager;
+        auto request = SimpleOp(ops::OpType::Rename, {root.c_str()}, nullptr, L"CON");
+        Check(manager.Submit(request) != 0, L"single drive label rename is admitted");
+        const auto previous_calls = label_calls;
+        ops::TransferIntegrationProbe::RenameDriveLabel(manager, request, FakeSetVolumeLabel);
+        Check(label_calls == previous_calls + 1 && label_value == L"CON" &&
+              path::EqualInsensitive(label_root, L"C:\\") && manager.Status().phase == ops::OpPhase::Completed,
+              L"drive rename writes label to canonical root with volume name rules");
+        const auto completed = manager.DrainCompletions();
+        Check(completed.size() == 1 && completed.front().sources == request.sources &&
+              completed.front().destinations.empty() && completed.front().volume_label == request.new_name && !manager.CanUndo(),
+              L"volume label completion refreshes source without filesystem rename undo");
+    }
+    for (const auto* path : {L"C:\\folder", L"C:relative", L"\\\\server\\share\\", L"\\\\?\\C:\\folder"})
+        Check(!pulse::path::IsDriveRootPath(path), L"ordinary and UNC paths are not drive roots");
+    {
+        ops::OpsManager manager;
+        auto request = SimpleOp(ops::OpType::Copy, {L"C:\\unused.txt", L"C:\\"}, L"C:\\unused");
+        Check(manager.Submit(request) == 0, L"mixed file and drive selection is rejected as a whole");
+        request.type = ops::OpType::Rename;
+        Check(manager.Submit(request) == 0, L"multi-source drive rename cannot reach ordinary rename");
+    }
+    for (const auto type : {ops::OpType::RecycleDelete, ops::OpType::RealDelete}) {
+        for (const bool physical : {false, true}) {
+            ops::OpsManager manager;
+            auto request = SimpleOp(type, {L"C:\\unused.txt"});
+            request.delete_targets.push_back(physical
+                ? ops::DeleteRequestTarget{L"C:\\unused.txt", {L"\\\\?\\C:\\"}, false}
+                : ops::DeleteRequestTarget{L"C:\\", {L"C:\\unused.txt"}, false});
+            Check(manager.Submit(request) == 0, L"logical and physical drive delete targets rejected at admission");
+            std::wstring error;
+            const auto plan = ops::BuildDeletePlan(request, 1, error);
+            Check(plan.targets.empty() && !error.empty(), L"drive delete target rejected before deletion planning");
+        }
+    }
+    {
+        ops::OpsManager manager;
+        const auto request = SimpleOp(ops::OpType::Rename, {L"C:\\"});
+        ops::TransferIntegrationProbe::RenameDriveLabel(manager, request, FakeSetVolumeLabel);
+        const auto completed = manager.DrainCompletions();
+        Check(label_value.empty() && manager.Status().phase == ops::OpPhase::Completed &&
+              completed.size() == 1 && completed.front().volume_label && completed.front().volume_label->empty(),
+              L"empty drive label clears label");
+    }
+    {
+        ops::OpsManager manager;
+        const auto request = SimpleOp(ops::OpType::Rename, {L"C:\\"}, nullptr, L"new label");
+        label_error = ERROR_ACCESS_DENIED;
+        ops::TransferIntegrationProbe::RenameDriveLabel(manager, request, FakeSetVolumeLabel);
+        const auto status = manager.Status();
+        Check(status.phase == ops::OpPhase::Failed && status.failure_hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) &&
+              !status.last_error.empty() && manager.DrainCompletions().empty() && !manager.CanUndo(),
+              L"volume label failure surfaces error without completion or undo");
+        label_error = ERROR_SUCCESS;
+    }
+    {
+        ops::OpsManager manager;
+        auto request = SimpleOp(ops::OpType::Rename, {L"C:\\"});
+        request.new_name = std::wstring(L"a\0b", 3);
+        const auto previous_calls = label_calls;
+        ops::TransferIntegrationProbe::RenameDriveLabel(manager, request, FakeSetVolumeLabel);
+        Check(label_calls == previous_calls && manager.Status().phase == ops::OpPhase::Failed,
+              L"embedded null drive label cannot silently truncate");
+        ops::TransferIntegrationProbe::RenameDriveLabel(manager, request, FakeSetVolumeLabel, true);
+        Check(label_calls == previous_calls && manager.Status().phase == ops::OpPhase::Cancelled,
+              L"cancelled drive label request does not call volume API");
+    }
+    wprintf(L"\n== drive ops: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}
+
+int RunOperationResourceRegressions() {
+    const std::wstring root = SandboxRoot() + L"-resources-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64());
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    Check(!error, L"isolated operation resource fixture created");
+    if (error) return 1;
+    const auto source = root + L"\\source.txt", target = root + L"\\target.txt";
+    const char data[] = "resource regression";
+    MakeFile(source, data, sizeof(data)); MakeFile(target, data, sizeof(data));
+    {
+        ops::OpsManager manager;
+        auto request = SimpleOp(ops::OpType::BatchRename, {source.c_str()}, nullptr, L"target.txt");
+        ops::TransferIntegrationProbe::ShellOperation(manager, request);
+        const auto status = manager.Status();
+        Check(status.phase == ops::OpPhase::Failed &&
+            status.failure_hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) && status.failed_path == source &&
+            Exists(source) && Exists(target), L"batch conflict preserves source and reports HRESULT plus failure path");
+        request.new_name = L"invalid|name";
+        ops::TransferIntegrationProbe::ShellOperation(manager, request);
+        Check(manager.Status().phase == ops::OpPhase::Failed &&
+            manager.Status().failure_hr == HRESULT_FROM_WIN32(ERROR_INVALID_NAME),
+            L"batch invalid name reports machine error before filesystem mutation");
+        request.new_name = L"renamed.txt";
+        ops::TransferIntegrationProbe::ShellOperation(manager, request, true);
+        Check(manager.Status().phase == ops::OpPhase::Cancelled && manager.Status().last_error.empty() &&
+            manager.Status().failure_hr == S_OK && Exists(source), L"batch cancellation has explicit phase without error wording");
+    }
+    {
+        ops::OpsManager manager;
+        ops::TransferIntegrationProbe::TransferCancelled(manager,
+            SimpleOp(ops::OpType::Copy, {source.c_str()}, (root + L"\\copy").c_str()));
+        Check(manager.Status().phase == ops::OpPhase::Cancelled && manager.Status().last_error.empty(),
+            L"transfer cancellation uses explicit terminal phase");
+    }
+    for (const auto* message : {L"Malformed deletion result", L"任意翻译", L"拒绝访问 | unrelated.txt"}) {
+        ops::OpsManager manager;
+        ops::TransferIntegrationProbe::DeleteResult(manager, ipc::kMalformedDeleteResult, message, source);
+        auto outcomes = manager.DrainDeleteOutcomes();
+        Check(outcomes.size() == 1 && outcomes.front().uncertain &&
+            manager.Status().failure_hr == ipc::kMalformedDeleteResult && manager.Status().failed_path == source,
+            L"delete trust classification and failure path are independent of error translation");
+        ops::TransferIntegrationProbe::DeleteResult(manager, E_INVALIDARG, message, source);
+        outcomes = manager.DrainDeleteOutcomes();
+        Check(outcomes.size() == 1 && !outcomes.front().uncertain,
+            L"ordinary invalid argument stays certain even with malformed-result display wording");
+    }
+    {
+        ops::OpsManager manager;
+        ops::TransferIntegrationProbe::DeleteResult(manager, E_ACCESSDENIED, L"", source, {target});
+        Check(manager.Status().phase == ops::OpPhase::Failed && manager.Status().failure_hr == E_ACCESSDENIED,
+            L"empty display error cannot turn failed deletion HRESULT into completion");
+    }
+    {
+        std::wstring diagnostics;
+        auto locks = ops::ProbeFileLocks(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION), L"", {source}, L"", {}, &diagnostics);
+        Check(locks.owners.empty() && diagnostics.empty(), L"missing failure object never scans candidate files");
+        locks = ops::ProbeFileLocks(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION),
+            L"translated | source.txt; delete diagnostics: text", {source}, L"", {}, &diagnostics);
+        Check(locks.owners.empty() && diagnostics.empty(), L"lock probe never extracts path from display text");
+        locks = ops::ProbeFileLocks(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION),
+            L"missing.txt", {source}, L"", {}, &diagnostics);
+        Check(locks.owners.empty() && diagnostics.find(L"RmStartSession") == std::wstring::npos,
+            L"unmatched explicit name never probes unrelated files");
+        locks = ops::ProbeFileLocks(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION),
+            L"source.txt", {source}, L"", {}, &diagnostics);
+        Check(diagnostics.find(L"RmStartSession") != std::wstring::npos,
+            L"explicit matching file name retains Restart Manager probe");
+    }
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Operation resource fixture", 0,
+        0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
+    Check(owner != nullptr, L"isolated delete confirmation owner created");
+    g_ops.SetUiWindow(owner);
+    g_ops.Start([] {
+        if (const auto confirmation = g_ops.PendingDeleteConfirmation())
+            g_ops.ResolveDeleteConfirmation(confirmation->token, true);
+    });
+    const auto missing_parent = root + L"\\missing\\child";
+    auto status = RunOp(SimpleOp(ops::OpType::CreateFolder, {missing_parent.c_str()}));
+    Check(status.phase == ops::OpPhase::Failed && status.failure_hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) &&
+        status.failed_path == missing_parent, L"create response preserves non-permission machine failure");
+    HANDLE locked = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, L"delete failure fixture locked without delete sharing");
+    if (owner && locked != INVALID_HANDLE_VALUE) {
+        status = RunOp(SimpleOp(ops::OpType::RealDelete, {source.c_str()}));
+        Check(status.phase == ops::OpPhase::Failed && FAILED(status.failure_hr) &&
+            status.failed_path == source && Exists(source), L"Shell delete failure transports exact object through OpsManager");
+    }
+    if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+    g_ops.Stop();
+    if (owner) DestroyWindow(owner);
+    std::filesystem::remove_all(root, error);
+    Check(!error, L"isolated operation resource fixture cleaned");
+    wprintf(L"\n== operation resources: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}
+} // namespace
+
 ops::OpStatus RunLinkOp(ops::OpRequest req, bool accept, bool all,
                        size_t* links = nullptr, size_t* conflicts = nullptr,
                        const std::function<void()>& before_answer = {}) {
@@ -261,7 +483,7 @@ int RunReviewRegressions(const std::wstring& filter) {
             size_t links = 0;
             auto status = RunLinkOp(SimpleOp(ops::OpType::Copy,
                 {(src + L"\\folder").c_str()}, dst.c_str()), false, false, &links);
-            Check(links == 1 && status.last_error == L"已取消" && !Exists(outside + L"\\nested.txt"),
+            Check(links == 1 && status.phase == ops::OpPhase::Cancelled && !Exists(outside + L"\\nested.txt"),
                   L"junction cancellation writes no descendant");
             status = RunLinkOp(SimpleOp(ops::OpType::Copy,
                 {(src + L"\\folder").c_str()}, dst.c_str()), true, true, &links);
@@ -348,7 +570,7 @@ int RunReviewRegressions(const std::wstring& filter) {
         auto replace = SimpleOp(ops::OpType::Copy, {(src + L"\\fresh-task.txt").c_str()}, dst.c_str());
         replace.collision_policy = ops::CollisionPolicy::Replace;
         status = RunLinkOp(std::move(replace), false, true, &links);
-        Check(links == 1 && status.last_error == L"已取消", L"continue-all permission expires at next task");
+        Check(links == 1 && status.phase == ops::OpPhase::Cancelled, L"continue-all permission expires at next task");
     }
     if (filter == L"undo" || filter == L"review") {
         g_ops.UndoFromJson(L"[]");
@@ -479,6 +701,14 @@ int RunReviewRegressions(const std::wstring& filter) {
 int wmain(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
+        if (filter == L"operation-resources") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return RunOperationResourceRegressions();
+        }
+        if (filter == L"drives") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return RunDriveRegressions();
+        }
         if (filter != L"review" && filter != L"links" && filter != L"undo" && filter != L"shutdown") return 2;
         setvbuf(stdout, nullptr, _IONBF, 0);
         return RunReviewRegressions(filter);
@@ -740,7 +970,7 @@ int wmain(int argc, wchar_t** argv) {
         wprintf(L"[INFO] cancel test: finished=%d last_error=%s bulk_at_dst=%d\n",
                 finished ? 1 : 0, st.last_error.c_str(), Exists(dstDir + L"\\bulk") ? 1 : 0);
         Check(finished, L"cancel: op finished after cancel");
-        Check(st.last_error == L"已取消" || !Exists(dstDir + L"\\bulk"),
+        Check(st.phase == ops::OpPhase::Cancelled || !Exists(dstDir + L"\\bulk"),
               L"cancel: op cancelled or partial copy cleaned");
     }
 

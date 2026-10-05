@@ -1,11 +1,12 @@
 #include "../app/app_internal.h"
 #include "../app/app_input.h"
 #include "../ui/ui_renderer_internal.h"
+#include "presentation_state_cases.h"
 #include <filesystem>
 #include <iostream>
 #include <cmath>
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
     CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     l10n::Initialize(GetModuleHandleW(nullptr),L"zh-CN");
@@ -16,12 +17,19 @@ int main() {
     };
     auto state=std::make_unique<AppState>(); auto& s=*state;
     s.isolatedTest=true; s.appPrefs.persist=false; s.searchHistory.persist=false;
+    s.places.persist=false;
     WNDCLASSW wc{}; wc.hInstance=GetModuleHandleW(nullptr); wc.lpfnWndProc=DefWindowProcW;
     wc.lpszClassName=L"PulseContentProgressFixture"; RegisterClassW(&wc);
     s.hwnd=CreateWindowExW(0,wc.lpszClassName,L"",WS_OVERLAPPEDWINDOW,0,0,1100,720,nullptr,nullptr,wc.hInstance,nullptr);
     if(!s.hwnd || !s.compositor.Init(s.hwnd)) return 2;
     s.renderer.SetCompositor(&s.compositor);
     s.window_tabs.EnsureDefault(); s.pane=s.window_tabs.Active()->FocusedPane();
+    if (argc == 2 && std::string_view(argv[1]) == "--presentation-state") {
+        const int result = RunPresentationStateCases(s);
+        DestroyWindow(s.hwnd);
+        CoUninitialize();
+        return result;
+    }
     auto* tab=ActiveTab(s);
     tab->current_path=app::MakeSearchPath(L"content:季度预算");
     tab->view_mode=ui::ViewMode::Details;

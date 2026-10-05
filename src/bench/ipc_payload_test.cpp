@@ -76,5 +76,44 @@ int main() {
     embedded_nul.PutU32(17); embedded_nul.PutU32(29);
     embedded_nul.PutString(std::wstring(L"runas\0open", 10)); embedded_nul.PutString(L"Run");
     check(!invocation(embedded_nul, parsed), "context invoke rejects embedded terminators before COM execution");
+    const auto deletion = [&](const PayloadWriter& wire, DeleteResultPayload& result) {
+        PayloadReader reader(wire.data().data(), wire.data().size());
+        return ReadDeleteResultPayload(reader, result);
+    };
+    const auto delete_wire = [](const std::wstring& message, const std::wstring& failed_path) {
+        PayloadWriter wire;
+        wire.PutU32(static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION)));
+        wire.PutU32(0); wire.PutString(message);
+        wire.PutStringArray({L"C:\\completed.txt"}); wire.PutStringArray({}); wire.PutStringArray({});
+        wire.PutString(failed_path);
+        return wire;
+    };
+    DeleteResultPayload result;
+    const std::wstring failed_path = L"\\\\server\\share\\目录\\item; delete diagnostics: literal.txt";
+    for (const auto* message : {L"Access is denied | unrelated.txt", L"拒绝访问", L"任意翻译"}) {
+        auto wire = delete_wire(message, failed_path);
+        check(deletion(wire, result) && result.failed_path == failed_path && result.error == message &&
+            result.hr == static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION)) &&
+            result.deleted_paths == std::vector<std::wstring>{L"C:\\completed.txt"},
+            "deletion preserves exact failure path and HRESULT independently of display message");
+    }
+    auto bad_tail = delete_wire(L"arbitrary", failed_path);
+    bad_tail.PutU32(9);
+    check(!deletion(bad_tail, result) && result.failed_path.empty() && result.deleted_paths.empty(),
+        "malformed deletion tail discards all mutation and failure-path evidence");
+    PayloadWriter legacy_delete;
+    legacy_delete.PutU32(0); legacy_delete.PutU32(0); legacy_delete.PutString(L"");
+    legacy_delete.PutStringArray({}); legacy_delete.PutStringArray({}); legacy_delete.PutStringArray({});
+    check(!deletion(legacy_delete, result), "deletion requires independent failure-path field even when empty");
+    PayloadWriter mismatched_delete;
+    mismatched_delete.PutU32(0); mismatched_delete.PutU32(0); mismatched_delete.PutString(L"");
+    mismatched_delete.PutStringArray({}); mismatched_delete.PutStringArray({L"C:\\recycled.txt"});
+    mismatched_delete.PutStringArray({}); mismatched_delete.PutString(L"");
+    check(!deletion(mismatched_delete, result), "deletion rejects unmatched recycle destination evidence");
+    auto nul_delete = delete_wire(L"translated", std::wstring(L"C:\\one\0two", 10));
+    check(!deletion(nul_delete, result), "deletion rejects embedded null failure path");
+    PayloadWriter malformed_header;
+    malformed_header.PutU32(0);
+    check(!deletion(malformed_header, result), "deletion rejects malformed completion header");
     return failures ? 1 : 0;
 }

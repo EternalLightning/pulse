@@ -28,7 +28,7 @@ int wmain() {
     check(!tab.content_results && tab.content_sort_override && tab.search_content_active &&
         tab.pending_generation==700 && tab.search_live_generation==700,
         "sorting before the first batch preserves the active query and defers ordering");
-    tab.banner_title=l10n::Get(l10n::StringId::ContentIndexBuilding);
+    tab.SetBannerTitle(app::BannerType::ContentIndex, l10n::Get(l10n::StringId::ContentIndexBuilding));
     tab.banner_message=L"background indexing";
     TickAddressSearch(s,GetTickCount64()+750);
     check(tab.banner_title.empty() && tab.banner_message.empty() && tab.pending_generation==700,
@@ -82,8 +82,7 @@ int wmain() {
         check(s.compositor.Init(s.hwnd),"initialize isolated visual fixture");
         if(s.compositor.Dc()) {
             s.renderer.SetCompositor(&s.compositor);
-            tab.banner_title.clear();
-            tab.banner_message.clear();
+            tab.ClearBanner();
             for(float scale : {1.0f,1.5f,2.0f}) for(int width : {1100,720}) {
                 s.compositor.RecreateTextFormats(scale);
                 s.renderer.SetScale(scale); s.scale=scale;

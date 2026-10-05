@@ -53,6 +53,7 @@ public:
     static std::wstring ExePath();
 
 private:
+    friend struct IndexClientTestAccess;
     void Worker();
     void Writer();
     bool EnsureConnected();
@@ -82,6 +83,7 @@ private:
     std::atomic<uint32_t> latest_search_id_{0};
     mutable std::mutex mu_;
     std::wstring status_ = L"索引未连接";
+    bool helper_missing_ = false;
     std::wstring index_path_;
     bool service_mode_ = false;
     std::vector<VolumeInfo> volumes_;

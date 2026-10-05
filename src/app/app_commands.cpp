@@ -4,6 +4,7 @@
 #include "quick_access.h"
 #include "app_column_view.h"
 #include "../ui/toolbar_layout.h"
+#include "../ui/toolbar_command_state.h"
 #include "app_internal.h"
 #include "global_search_controller.h"
 #include "../ui/lumatext_renderer.h"
@@ -688,10 +689,6 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 
-bool ClipboardHasFiles() {
-    return IsClipboardFormatAvailable(CF_HDROP) != 0;
-}
-
 void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s) {
     const std::wstring root = PinCandidate(s);
     const bool pinned = !root.empty() && !fs::IsVirtualPath(root) &&
@@ -764,6 +761,8 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         batch.shortcut = L"Ctrl+Shift+R";
         items.insert(items.begin() + 1, std::move(batch));
     }
+    if (std::any_of(paths.begin(), paths.end(), pulse::path::IsDriveRootPath))
+        app::RestrictDriveItemMenu(items, paths.size() == 1);
     return app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
 }
 
@@ -786,15 +785,6 @@ std::wstring CommonExtension(const app::Tab& tab,
     return ext;
 }
 
-bool IsDriveRootPath(std::wstring path) {
-    path = pulse::path::StripExtendedPathPrefix(path);
-    if (path.size() >= 2 && path[1] == L':') {
-        if (path.size() == 2) return true;
-        if (path.size() == 3 && (path[2] == L'\\' || path[2] == L'/')) return true;
-    }
-    return false;
-}
-
 std::wstring StaticVerbKey(const app::Tab& tab, const std::vector<int>& indices) {
     const std::wstring ext = CommonExtension(tab, indices);
     if (!ext.empty()) return ext;
@@ -809,7 +799,7 @@ std::wstring StaticVerbKey(const app::Tab& tab, const std::vector<int>& indices)
             all_drives = false;
             break;
         }
-        if (!IsDriveRootPath(EntryFullPath(tab, index))) all_drives = false;
+        if (!pulse::path::IsDriveRootPath(EntryFullPath(tab, index))) all_drives = false;
     }
     if (!all_dirs) return L"";
     return all_drives ? std::wstring(ipc::kDriveVerbKey) : std::wstring(ipc::kFolderVerbKey);
@@ -1059,7 +1049,7 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     s.context_menu.SeedComItemsFromCache();
 
     std::wstring undoLabel = s.ops.UndoLabel();
-    bool canPaste = !s.tray.batches().empty() || ClipboardHasFiles();
+    bool canPaste = CanPasteIntoCurrent(s);
     const auto recent_changes_path = app::RecentChangesMenuPath(*tab, true);
     auto base_items = app::BuildBackgroundMenu(canPaste, s.ops.CanUndo(), undoLabel);
     app::AppendRecentChangesCommand(base_items, recent_changes_path);
@@ -1385,19 +1375,22 @@ void ShowToolbarMore(AppState& s) {
     const wchar_t* shortcuts[]={L"Ctrl+X",L"Ctrl+C",L"Ctrl+V",L"F2",L"Delete",L"Alt+Enter"};
     const float width=static_cast<float>(s.compositor.Width());
     const float left=s.renderer.EffectiveSidebarWidth(width);
+    const auto selected_paths = SelectedFullPaths(*tab);
+    const ui::ToolbarCommandState command_state{IsArchiveView(tab->current_path), tab->SelectedCount(),
+        std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath), CanPasteIntoCurrent(s)};
     if (width-left < 540*s.scale) for (int i=0;i<6;++i) {
         ui::FluentMenuItem item;
         item.command=commands[i]; item.text=l10n::Get(labels[i]); item.glyph=glyphs[i];
         item.shortcut=shortcuts[i];
-        item.enabled=IsArchiveView(tab->current_path) ? i==5 : i==2 || tab->SelectedCount()>0;
+        item.enabled=command_state.Enabled(i);
         items.push_back(std::move(item));
     }
     if (!items.empty() && width-left < 540*s.scale) items.back().separator_after=true;
     if (IsArchiveView(tab->current_path)) {
         ui::FluentMenuItem extract;
-        extract.command=app::CmdExtract; extract.text=l10n::effective_language()==l10n::Language::EnUS ? L"Extract" : L"解压"; extract.enabled=tab->SelectedCount()>0;
+        extract.command=app::CmdExtract; extract.text=l10n::Get(l10n::StringId::ArchiveExtract); extract.enabled=tab->SelectedCount()>0;
         items.push_back(extract);
-        extract.command=app::CmdExtractAll; extract.text=l10n::effective_language()==l10n::Language::EnUS ? L"Extract all" : L"解压全部项目"; extract.enabled=!tab->loading;
+        extract.command=app::CmdExtractAll; extract.text=l10n::Get(l10n::StringId::ArchiveExtractAll); extract.enabled=!tab->loading;
         items.push_back(extract);
     }
     ui::FluentMenuItem split;

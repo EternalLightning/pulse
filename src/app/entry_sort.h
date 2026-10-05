@@ -1,6 +1,6 @@
 #pragma once
 #include "../fs/fs_enum.h"
-#include "../ui/ui_renderer.h"
+#include "../ui/sort_types.h"
 #include <cstdint>
 #include <string_view>
 

@@ -97,7 +97,7 @@ bool RefreshContentResults(AppState& s) {
             tab->view_row_cache.reset(); tab->view_filter_map.reset();
 
             if(store.Error()) {
-                tab->banner_title=l10n::Get(l10n::StringId::SearchIncomplete);
+                tab->SetBannerTitle(app::BannerType::SearchIncomplete, l10n::Get(l10n::StringId::SearchIncomplete));
                 tab->banner_message=l10n::Get(l10n::StringId::ErrorCodeFormat);
                 wchar_t error[128]{}; swprintf_s(error,tab->banner_message.c_str(),store.Error()); tab->banner_message=error;
             }
@@ -205,7 +205,7 @@ void CompleteContentSelection(AppState& s) {
     if(!tab || !store || tab->content_results!=store || tab->selection_revision!=job->selection || (!job->focused_only && tab->all_selected!=job->all) ||
         (!job->focused_only && !job->all && tab->SelectedIndices()!=job->indices) || tab->selected_index!=job->focus) return;
     if(result->error) {
-        tab->banner_title=l10n::Get(l10n::StringId::SearchIncomplete);
+        tab->SetBannerTitle(app::BannerType::SearchIncomplete, l10n::Get(l10n::StringId::SearchIncomplete));
         wchar_t error[128]{}; swprintf_s(error,l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(),result->error);
         tab->banner_message=error; InvalidateRect(s.hwnd,nullptr,FALSE); return;
     }

@@ -19,6 +19,7 @@
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
+#include "clipboard_availability.h"
 #include "tag_discovery_cache.h"
 #include "places.h"
 #include "details_meta.h"
@@ -165,6 +166,7 @@ struct AppState {
     // UI-only request intent; dirty/watch retries may not downgrade F5/sort.
     std::map<app::Tab*, ExplicitEntryRefresh> explicit_entry_refreshes;
     app::WorkerPool worker;
+    app::ClipboardAvailability clipboard_availability;
     fs::DirWatchSet watches;
     struct DirNotifyBatch {
         std::wstring path;

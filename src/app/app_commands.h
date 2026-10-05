@@ -18,7 +18,6 @@ void ShowTagPicker(AppState& s, POINT screen_pt);
 void ShowCreateTagPicker(AppState& s, POINT screen_pt);
 void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt);
 void DispatchMenuCommand(AppState& s, int cmd);
-bool ClipboardHasFiles();
 void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s);
 std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         AppState& s, bool can_undo, const std::wstring& undo_label);

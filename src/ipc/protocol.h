@@ -45,6 +45,8 @@
 //   RSP_PROGRESS             : percent(f32) + current_item(string) +
 //                              items_done(u32) + total_items(u32)
 //   RSP_DONE                 : result_hresult(u32) + cancelled(u32) + error_text(string)
+//     authorized deletion    : above + deleted_paths(array) + recycled_paths(array) +
+//                              recycle_destinations(array) + failed_path(string)
 //   RSP_PONG                 : empty
 //   RSP_CTX_ITEMS            : session_id(u32) + flags(u32, CTX_ITEMS_*) +
 //                              count(u32) + per item:
@@ -66,6 +68,7 @@ namespace pulse::ipc {
 
 constexpr uint32_t kMagic = 0x53504C50; // 'PLPS'
 constexpr size_t kMaxPayload = 16 * 1024 * 1024;
+constexpr HRESULT kMalformedDeleteResult = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0201);
 
 enum MsgType : uint32_t {
     REQ_DELETE_RECYCLE = 3,
@@ -247,6 +250,34 @@ private:
     size_t off_ = 0;
     size_t allocation_bytes_ = 0;
 };
+
+struct DeleteResultPayload {
+    uint32_t hr = 0;
+    bool cancelled = false;
+    std::wstring error;
+    std::vector<std::wstring> deleted_paths;
+    std::vector<std::wstring> recycled_paths;
+    std::vector<std::wstring> recycle_destinations;
+    std::wstring failed_path;
+};
+
+inline bool ReadDeleteResultPayload(PayloadReader& reader, DeleteResultPayload& payload) {
+    payload = {};
+    DeleteResultPayload parsed;
+    uint32_t cancelled = 0;
+    if (!reader.GetU32(parsed.hr) || !reader.GetU32(cancelled) || cancelled > 1 ||
+        !reader.GetString(parsed.error) || !reader.GetStringArray(parsed.deleted_paths) ||
+        !reader.GetStringArray(parsed.recycled_paths) || !reader.GetStringArray(parsed.recycle_destinations) ||
+        !reader.GetString(parsed.failed_path) || reader.remaining() != 0 ||
+        parsed.recycled_paths.size() != parsed.recycle_destinations.size()) return false;
+    const auto valid_path = [](const std::wstring& path) { return path.find(L'\0') == std::wstring::npos; };
+    if (!valid_path(parsed.failed_path)) return false;
+    for (const auto& paths : {&parsed.deleted_paths, &parsed.recycled_paths, &parsed.recycle_destinations})
+        for (const auto& path : *paths) if (!valid_path(path)) return false;
+    parsed.cancelled = cancelled != 0;
+    payload = std::move(parsed);
+    return true;
+}
 
 struct ContextInvokePayload {
     uint32_t session = 0;

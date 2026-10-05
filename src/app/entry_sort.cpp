@@ -1,5 +1,6 @@
 #include "entry_sort.h"
 #include "../common/known_folder_labels.h"
+#include "../common/path_utils.h"
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
 #include <algorithm>
@@ -52,6 +53,11 @@ const std::wstring& DisplaySortName(const fs::DirEntry& entry, std::wstring_view
 }
 
 int EntryNameCompare(const fs::DirEntry& a, const fs::DirEntry& b, std::wstring_view parent) {
+    if (parent.empty() && pulse::path::IsDriveRootPath(a.full_path) &&
+        pulse::path::IsDriveRootPath(b.full_path)) {
+        return NameCompare(pulse::path::StripExtendedPathPrefix(a.full_path),
+                           pulse::path::StripExtendedPathPrefix(b.full_path));
+    }
     const int cmp = NameCompare(DisplaySortName(a, parent), DisplaySortName(b, parent));
     return cmp != 0 ? cmp : NameCompare(a.name, b.name);
 }

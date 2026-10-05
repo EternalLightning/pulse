@@ -96,8 +96,7 @@ void Tab::NavigateTo(const std::wstring& path) {
     scroll_x = 0.0f;
     filter_text.clear();
     virtual_title.clear();
-    banner_title.clear();
-    banner_message.clear();
+    ClearBanner();
     net_readonly = false;
     git_root.clear();
     cache_unix = 0;
@@ -1614,6 +1613,8 @@ void FillWindowTabStrip(ui::WindowViewModel& vm, const WindowTabs& tabs) {
         tv.title = LayoutTabTitle(*tabs.items[i]);
         const Tab* active_folder = tabs.items[i]->ActiveFolder();
         tv.is_home = active_folder && active_folder->current_path == MakeHomePath();
+        std::wstring kind;
+        tv.is_settings = active_folder && ParsePulsePath(active_folder->current_path, &kind, nullptr) && kind == L"settings";
         tv.active = i == tabs.active;
         tv.pinned = tabs.items[i]->pinned;
         tv.marker_rgb = tabs.items[i]->marker_rgb;

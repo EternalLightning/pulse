@@ -250,6 +250,7 @@ void ClearTextWidthCache() {
                 : FormatListType(penetrated ? fs::StripLnkSuffix(source.name) : source.name, entry.is_dir);
         }
         entry.record_only = source.change_record_only;
+        entry.change_deleted = source.change_deleted;
         if (!source.change_type_text.empty()) entry.type_text = source.change_type_text;
         entry.starred = vm.tag_catalog && !entry.path.empty() &&
             vm.tag_catalog->IsStarred(entry.path);
@@ -1357,17 +1358,6 @@ StatusBarMetrics MakeStatusBarMetrics(const WindowViewModel& vm, const D2D1_RECT
                 left + width, m.bar.bottom - 2.0f * scale);
     }
     return m;
-}
-
-fluent::BadgeKind IndexVolumeBadgeKind(const std::wstring& state) {
-    if (state.find(L"失败") != std::wstring::npos) return fluent::BadgeKind::Danger;
-    if (state.find(L"非 NTFS") != std::wstring::npos ||
-        state.find(L"不支持") != std::wstring::npos) return fluent::BadgeKind::Warning;
-    if (state.find(L"正在") != std::wstring::npos ||
-        state.find(L"等待") != std::wstring::npos) return fluent::BadgeKind::Accent;
-    if (state.find(L"就绪") != std::wstring::npos ||
-        state.find(L"实时") != std::wstring::npos) return fluent::BadgeKind::Success;
-    return fluent::BadgeKind::Neutral;
 }
 
 // Containing folder of a full item path, for the search-results path column.

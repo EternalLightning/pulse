@@ -63,8 +63,7 @@ void DrawShortcutHelp(Compositor& compositor, bool dark, D2D1_COLOR_F accent,
         fill(r, D2D1::ColorF(0,0,0,0.012f), 22);
     }
     fill(l.card, surface, 20);
-    const bool zh = l10n::effective_language() != l10n::Language::EnUS;
-    text(L"A LITTLE HELP", rect(l.body.left,l.card.top+30*scale,260,20),12,
+    text(l10n::Get(l10n::StringId::HelpEyebrow), rect(l.body.left,l.card.top+30*scale,260,20),12,
          dark ? HexColor(0xA5AEFF) : HexColor(0x6269CD),true);
     text(l10n::Get(l10n::StringId::HelpTitle),
          D2D1::RectF(l.body.left,l.card.top+62*scale,l.close.left,l.card.top+104*scale),
@@ -81,7 +80,7 @@ void DrawShortcutHelp(Compositor& compositor, bool dark, D2D1_COLOR_F accent,
     y+=(l.narrow?126:96)*scale;
     using Id=l10n::StringId;
     const std::array<std::pair<Id,std::wstring>,8> rows{{
-        {Id::Search,L"Ctrl K"}, {Id::HelpOpen,zh?L"Enter / 双击":L"Enter / Double-click"},
+        {Id::Search,L"Ctrl K"}, {Id::HelpOpen,l10n::Get(Id::HelpOpenKeys)},
         {Id::QuickPreview,L"Space"}, {Id::HelpClipboard,L"Ctrl C / X / V"},
         {Id::Rename,L"F2"}, {Id::Delete,L"Delete"}, {Id::SelectAll,L"Ctrl A"},
         {Id::SelectionHint,l10n::Get(Id::SelectionKeys)}

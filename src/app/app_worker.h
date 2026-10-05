@@ -3,11 +3,12 @@
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_snapshot.h"
-#include "../ui/ui_renderer.h"
+#include "../ui/sort_types.h"
 #include <windows.h>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>

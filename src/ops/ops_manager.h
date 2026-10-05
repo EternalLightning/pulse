@@ -17,6 +17,7 @@
 #include "destination_guard.h"
 #include "file_lock_owner.h"
 #include "recycle_undo_validation.h"
+#include "../common/shell_menu_item.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -145,6 +146,7 @@ struct CompletedOperation {
     uint64_t task_id = 0;
     std::vector<std::wstring> sources;
     std::vector<std::wstring> destinations;
+    std::optional<std::wstring> volume_label;
 };
 
 struct RecoveryEntry {
@@ -158,19 +160,7 @@ struct RecoverySnapshot {
     bool has_uncertain_destructive = false;
 };
 
-// One Explorer verb coming back from a pulse_shell context-menu session.
-// Software submenus keep one level: header row (has_children) + child rows.
-struct ShellMenuItem {
-    uint32_t id = 0;             // host menu id; pass to InvokeShellMenu
-    bool enabled = true;
-    bool separator_after = false;
-    bool has_children = false;
-    bool child = false;
-    std::wstring verb;           // canonical verb (may be empty)
-    std::wstring text;
-    std::wstring clsid;
-    std::wstring handler;
-};
+using ShellMenuItem = pulse::ShellMenuItem;
 
 class OpsManager {
 public:
@@ -317,6 +307,8 @@ private:
     void EnqueueOpen(QueueItem item, bool front = false);
     void RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_ID_INFO* rename_identity = nullptr,
                     bool lock_retry = false);
+    void RunDriveLabelRename(const OpRequest& req, uint64_t task_id,
+                            decltype(&SetVolumeLabelW) set_label = &SetVolumeLabelW);
     void RunDelete(const QueueItem& item,
                    const std::vector<std::wstring>& prior_deleted = {},
                    const std::vector<std::wstring>& prior_recycled = {},
@@ -325,7 +317,8 @@ private:
                       const std::vector<std::wstring>& deleted_paths = {}, bool executed = false,
                       bool uncertain = false, const std::vector<std::wstring>& recycled_paths = {},
                       const std::vector<std::wstring>& recycle_destinations = {}, bool cancelled = false,
-                      const LockReport& locks = {});
+                      const LockReport& locks = {}, HRESULT failure_hr = S_OK,
+                      const std::wstring& failed_path = {});
     DeleteService delete_service_;
     std::mutex delete_wait_mutex_;
     std::condition_variable delete_wait_cv_;
@@ -406,6 +399,7 @@ private:
     uint32_t done_hr_ = 0;
     bool done_cancelled_ = false;
     std::wstring done_error_;
+    std::wstring done_failed_path_;
     std::vector<std::wstring> done_deleted_paths_;
     std::vector<std::wstring> done_recycled_paths_;
     std::vector<std::wstring> done_recycle_destinations_;

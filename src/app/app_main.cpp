@@ -1,5 +1,6 @@
 #include "archive_navigation.h"
 #include "app_exit.h"
+#include "drive_labels.h"
 #include "../ops/archive.h"
 #include "locked_operation_prompt.h"
 #include "../common/windows_compat.h"
@@ -55,7 +56,6 @@
 #endif
 #include "resource.h"
 #include "../index/index_client.h"
-#include "../index/network_index.h"
 #include "../index/network_agent_client.h"
 #include "../index/content_search_client.h"
 #include "../ops/ops_manager.h"
@@ -946,6 +946,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->folderSizes.TakeChanged()) dirty = true;
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
+            if (PumpClipboardAvailability(*s, now)) dirty = true;
             if (s->sidebarScrollbarFade.Tick(now, s->sidebarScroll,
                     s->hoverRegion == static_cast<int>(ui::HitTestResult::Scrollbar) && s->hoverPaneIndex < 0,
                     s->scrollbarDragging && s->scrollbarSidebar)) dirty = true;
@@ -1279,6 +1280,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 }
                 std::vector<std::wstring> tag_metadata_paths;
                 for (const auto& completed : completions) {
+                    if (completed.volume_label && !completed.sources.empty()) {
+                        continue;
+                    }
                     // Ask for confirmed index changes on the next tick. Keep any
                     // in-flight request and never invent a deletion before capture.
                     s->changes.last_query = 0;
@@ -1387,6 +1391,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 if (tab && refresh_view) {
                     s->store.MarkDirty(tab->current_path);
                     RefreshActiveTab(*s, RefreshReason::OperationCompleted);
+                }
+                for (const auto& completed : completions) {
+                    if (completed.volume_label && !completed.sources.empty())
+                        ApplyDriveLabelRename(*s, completed.sources.front(), *completed.volume_label);
                 }
                 if (s->previewDeleteIntent && s->previewDeleteIntent->succeeded) SyncQuickPreview(*s);
             }
@@ -1600,7 +1608,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     if (!tab || tab->current_path != result->unc) return;
                     if (tab->snapshot) {
                         tab->net_readonly = true;
-                        tab->banner_title = l10n::Get(l10n::StringId::Offline);
+                        tab->SetBannerTitle(app::BannerType::Offline, l10n::Get(l10n::StringId::Offline));
                         tab->banner_message = l10n::Get(l10n::StringId::OfflineSnapshot);
                     }
                 });
@@ -1609,9 +1617,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     app::Tab* tab = pane.ActiveTab();
                     if (!tab || tab->current_path != result->unc) return;
                     tab->net_readonly = false;
-                    if (tab->banner_title == l10n::Get(l10n::StringId::Offline)) {
-                        tab->banner_title.clear();
-                        tab->banner_message.clear();
+                    if (tab->banner_type == app::BannerType::Offline) {
+                        tab->ClearBanner();
                     }
                 });
             }
@@ -1630,7 +1637,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 const std::wstring shown = ClipboardPath(volume);
                 if (!s->tagFallbackVolumes.insert(shown).second) continue;
                 if (app::Tab* tab = ActiveTab(*s)) {
-                    tab->banner_title = l10n::Get(l10n::StringId::TagsSavedLocally);
+                    tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::TagsSavedLocally));
                     tab->banner_message = l10n::Get(l10n::StringId::TagMetadataUnsupported);
                     const size_t path_marker = tab->banner_message.find(L"{path}");
                     if (path_marker != std::wstring::npos)

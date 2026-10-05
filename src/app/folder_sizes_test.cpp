@@ -42,7 +42,7 @@ struct FolderSizesUiTest {
                 for (int i = 0; i < 9; ++i) {
                     ListEntryView e;
                     e.name = names[i]; e.is_dir = true; e.path = pane.path + L"\\" + names[i];
-                    pane.entries.push_back(std::move(e)); pane.folder_size_labels[i] = sizes[i];
+                    pane.entries.push_back(std::move(e)); pane.folder_size_labels[i] = {sizes[i], i == 6};
                 }
                 pane.folder_size_actions.insert(6);
                 pane.folder_size_actions.insert(0);
@@ -190,12 +190,12 @@ bool RunFolderSizesTest() {
         slot.pane.entries.push_back(e);
         vm.pane_slots.push_back(slot);
         FillFolderSizes(*state, vm);
-        check(wait([&] { FillFolderSizes(*state, vm); return vm.pane_slots[0].pane.folder_size_labels[0] == L"0 B"; }),
+        check(wait([&] { FillFolderSizes(*state, vm); return vm.pane_slots[0].pane.folder_size_labels[0].text == L"0 B"; }),
               "real view-model wiring requests and displays the last visible row, including a single-item folder");
         for (auto mode : {ui::ViewMode::MediumIcons, ui::ViewMode::LargeIcons, ui::ViewMode::ExtraLargeIcons, ui::ViewMode::Content}) {
             vm.pane_slots[0].pane.view_mode = mode;
             FillFolderSizes(*state, vm);
-            check(vm.pane_slots[0].pane.folder_size_labels[0] == L"0 B", "grid/content view receives actual folder total");
+            check(vm.pane_slots[0].pane.folder_size_labels[0].text == L"0 B", "grid/content view receives actual folder total");
         }
         vm.pane_slots[0].pane.view_mode = ui::ViewMode::Details;
         FillFolderSizes(*state, vm);

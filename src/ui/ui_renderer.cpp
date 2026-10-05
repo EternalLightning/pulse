@@ -615,9 +615,7 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
                 !DrawFluentSvg(IDR_FLUENT_HOME_SVG, home_icon, 1.0f, nullptr, true)) {
                 DrawIconText(left, tabY, tabW, tabH,
                     vm.tabs[i].is_home ? kIconHome :
-                    vm.tabs[i].title.empty() ? kIconFolder
-                        : vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
-                            ? kIconSettings : kIconFolder, L"[]",
+                    vm.tabs[i].is_settings ? kIconSettings : kIconFolder, L"[]",
                     active ? theme.icon_folder : theme.text_secondary, 0.85f);
             }
             return;
@@ -635,8 +633,7 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             !DrawFluentSvg(IDR_FLUENT_HOME_SVG, home_icon, 1.0f, nullptr, true)) {
             DrawIconText(icon_left, tabY, 16.0f * scale_, tabH,
                 vm.tabs[i].is_home ? kIconHome :
-                vm.tabs[i].title == pulse::l10n::Get(pulse::l10n::StringId::Settings)
-                    ? kIconSettings : kIconFolder, L"[]",
+                vm.tabs[i].is_settings ? kIconSettings : kIconFolder, L"[]",
                 active ? theme.icon_folder : theme.text_secondary, 0.85f);
         }
         MakeBrush(dc, theme.text, brText_);

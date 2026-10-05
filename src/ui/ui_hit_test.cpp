@@ -1,4 +1,5 @@
 #include "toolbar_layout.h"
+#include "toolbar_command_state.h"
 // ui_hit_test.cpp — Hit testing and tab-strip queries.
 #include "ui_renderer.h"
 #include "home_layout.h"
@@ -510,7 +511,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         const HitTestResult::Region commands[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
             HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
             HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
-        for(int i=0;i<9;++i) if(RectContains(toolbar.commands[i],x,y)) {r.region=commands[i]; return r;}
+        const ToolbarCommandState command_state{vm.archive_view, vm.pane.selected_count,
+            vm.selection_has_drive_root, vm.can_paste};
+        for(int i=0;i<9;++i) if(RectContains(toolbar.commands[i],x,y)) {
+            if (command_state.Enabled(i)) r.region=commands[i];
+            return r;
+        }
         return r;
     }
     // Status bar. Only the transfer summary (center-right) is a control;

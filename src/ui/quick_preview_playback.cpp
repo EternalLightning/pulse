@@ -12,9 +12,6 @@ constexpr UINT_PTR kVideoTimer = 8;
 constexpr UINT_PTR kScrubTimer = 9;
 constexpr ULONGLONG kSeekIntervalMs = 80;
 constexpr float kPlaybackHeight = 76.0f;
-const wchar_t* Label(const wchar_t* chinese, const wchar_t* english) {
-    return l10n::effective_language() == l10n::Language::ZhCN ? chinese : english;
-}
 bool Contains(const D2D1_RECT_F& rect, POINT point) {
     return point.x >= rect.left && point.x < rect.right &&
         point.y >= rect.top && point.y < rect.bottom;
@@ -231,8 +228,9 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
     format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     for (int i = 0; i < (video ? 2 : 3); ++i) {
         const bool is_play = i == (video ? 0 : 1);
-        const wchar_t* text = is_play ? (playing ? Label(L"暂停", L"Pause") : Label(L"播放", L"Play"))
-            : i == 0 ? Label(L"上一帧", L"Prev frame") : Label(L"下一帧", L"Next frame");
+        const auto& text = l10n::Get(is_play
+            ? (playing ? l10n::StringId::OpPause : l10n::StringId::PlaybackPlay)
+            : (i == 0 ? l10n::StringId::PlaybackPrevFrame : l10n::StringId::PlaybackNextFrame));
         const bool available = enabled && (is_play || !video || !state.ended);
         const auto rect = PlaybackButtonRect(i);
         color = original; color.a = available ? 0.09f : 0.03f;
@@ -240,7 +238,7 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
         dc->FillRoundedRectangle(D2D1::RoundedRect(rect, 4 * scale_, 4 * scale_), brush);
         color = original; color.a = available ? 1.0f : 0.4f;
         brush->SetColor(color);
-        dc->DrawTextW(text, static_cast<UINT32>(wcslen(text)), format, rect, brush,
+        dc->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format, rect, brush,
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
     const auto track = PlaybackTrackRect();
@@ -270,21 +268,21 @@ std::wstring QuickPreviewWindow::PlaybackInfo(const VideoPreview::State& state) 
         if (state.width && state.height)
             info += L" · " + std::to_wstring(state.width) + L"×" + std::to_wstring(state.height);
         if (state.stepped_frames)
-            info += Label(L" · 逐帧 +", L" · Stepped +") + std::to_wstring(state.stepped_frames);
-        if (FAILED(state.error)) info += Label(L" · 无法播放，请用默认应用打开", L" · Cannot play; open externally");
-        else if (FAILED(state.control_error)) info += Label(L" · 此媒体不支持该操作", L" · Control unavailable for this media");
-        else if (!state.ready) info += Label(L" · 正在加载", L" · Loading");
-        else if (playback_drag_) info += Label(L" · 拖动定位", L" · Scrubbing");
-        else if (state.busy) info += Label(L" · 正在定位", L" · Seeking/stepping");
-        else if (state.ended) info += Label(L" · 已结束", L" · Ended");
+            info += l10n::Get(l10n::StringId::PlaybackSteppedPrefix) + std::to_wstring(state.stepped_frames);
+        if (FAILED(state.error)) info += l10n::Get(l10n::StringId::PlaybackError);
+        else if (FAILED(state.control_error)) info += l10n::Get(l10n::StringId::PlaybackControlUnavailable);
+        else if (!state.ready) info += l10n::Get(l10n::StringId::PlaybackLoading);
+        else if (playback_drag_) info += l10n::Get(l10n::StringId::PlaybackScrubbing);
+        else if (state.busy) info += l10n::Get(l10n::StringId::PlaybackSeeking);
+        else if (state.ended) info += l10n::Get(l10n::StringId::PlaybackEnded);
     } else {
-        info = Label(L"帧 ", L"Frame ") + std::to_wstring(frame_index_ + 1) + L" / " +
+        info = l10n::Get(l10n::StringId::PlaybackFramePrefix) + std::to_wstring(frame_index_ + 1) + L" / " +
             std::to_wstring(frame_count_) + L" · " + std::to_wstring(frame_delay_ms_) + L" ms";
         // Waiting is normal between every pair of GIF frames. Never insert a
         // transient "Seeking" label here: it shifts/flashes the entire suffix.
-        if (playback_drag_) info += Label(L" · 拖动定位", L" · Scrubbing");
+        if (playback_drag_) info += l10n::Get(l10n::StringId::PlaybackScrubbing);
     }
-    if (enabled) info += playing ? Label(L" · 播放中", L" · Playing") : Label(L" · 已暂停", L" · Paused");
+    if (enabled) info += playing ? l10n::Get(l10n::StringId::PlaybackPlaying) : l10n::Get(l10n::StringId::PlaybackPaused);
     return info;
 }
 } // namespace pulse::ui

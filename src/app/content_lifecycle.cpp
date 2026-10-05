@@ -7,7 +7,7 @@ void MarkContentSearchStopped(app::Tab& tab) {
     tab.pending_generation = tab.search_live_generation = 0;
     tab.search_content_active = tab.search_awaiting_content = tab.search_loading_more = false;
     tab.loading = false;
-    tab.banner_title = l10n::Get(l10n::StringId::ContentSearchStopped);
+    tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentSearchStopped));
     tab.banner_message.clear();
 }
 

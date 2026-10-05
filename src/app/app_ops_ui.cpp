@@ -85,8 +85,7 @@ void QueueCreatedItemReveal(AppState& s, const std::wstring& path) {
 bool SubmitWithConflictResolution(AppState& s, ops::OpRequest request) {
     // Copy/move conflict discovery is part of the transfer worker's recursive
     // scan. The UI only consumes immutable conflict snapshots.
-    s.ops.Submit(std::move(request));
-    return true;
+    return s.ops.Submit(std::move(request)) != 0;
 }
 
 // Release one tray batch into the current folder through the ops layer.
@@ -112,6 +111,7 @@ void ReleaseTrayBatch(AppState& s, size_t idx) {
 void PasteIntoCurrent(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
+    if (!CanPasteIntoCurrent(s)) return;
     if (!s.tray.batches().empty()) {
         size_t idx = s.tray.batches().size() - 1;
         if (s.tray.batches()[idx].move_intent) s.cutPaths.clear();
@@ -155,7 +155,7 @@ void DeleteSelected(AppState& s, bool permanent) {
         return;
     }
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
-    if (paths.empty()) return;
+    if (paths.empty() || std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     ops::OpRequest req;
     req.type = permanent ? ops::OpType::RealDelete : ops::OpType::RecycleDelete;
     req.sources = std::move(paths);
@@ -186,6 +186,7 @@ void CollectToTray(AppState& s, bool move_intent) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || IsRecycleTab(tab)) return;
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
+    if (std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     if (!paths.empty()) {
         s.tray.Collect(paths, move_intent);
         // Mirror the cut state onto the list rows (ui.md §5.2 rule 6).
@@ -214,7 +215,7 @@ void ShowBatchRename(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || IsRecycleTab(tab) || tab->net_readonly) return;
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
-    if (paths.size() < 2) return;
+    if (paths.size() < 2 || std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     const auto result = ui::ShowBatchRenameDialog(s.hwnd, paths, s.darkMode, s.accentColor);
     if (!result.accepted) return;
     ops::OpRequest req;
@@ -286,10 +287,6 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
                 s.operationWindow->Hide();
         }
     } else if (status.phase == ops::OpPhase::Failed) {
-        if (status.last_error == L"已取消") {
-            s.operationWindow->Hide();
-            return;
-        }
         const bool simple = status.type == ops::OpType::CreateFolder
                          || status.type == ops::OpType::CreateTextFile
                          || status.type == ops::OpType::Rename
@@ -308,17 +305,17 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
                 : file ? l10n::StringId::CannotCreateTextFile : l10n::StringId::CannotRename);
             std::wstring message;
             const std::wstring& err = status.last_error;
-            const bool no_access = err.find(L"没有权限") != std::wstring::npos
-                || err.find(L"拒绝访问") != std::wstring::npos
-                || err.find(L"Access is denied") != std::wstring::npos
-                || err == L"create failed";
+            const HRESULT failure = status.failure_hr;
+            const bool no_access = failure == E_ACCESSDENIED ||
+                failure == HRESULT_FROM_WIN32(ERROR_PRIVILEGE_NOT_HELD);
             if (no_access) {
                 message = l10n::Get(folder || file
                     ? l10n::StringId::FolderNoWritePermission
                     : l10n::StringId::RenameNoPermission);
-            } else if (err == L"目标名称已存在") {
+            } else if (failure == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) ||
+                       failure == HRESULT_FROM_WIN32(ERROR_FILE_EXISTS)) {
                 message = l10n::Get(l10n::StringId::RenameTargetExists);
-            } else if (err == L"名称无效") {
+            } else if (failure == HRESULT_FROM_WIN32(ERROR_INVALID_NAME)) {
                 message = l10n::Get(l10n::StringId::InvalidName);
             } else if (!err.empty()) {
                 message = err;

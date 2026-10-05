@@ -6,6 +6,7 @@
 #include "fluent_components.h"
 #include "shell_icons.h"
 #include "view_layout.h"
+#include "sort_types.h"
 #include "column_strip_layout.h"
 #include "panel_metrics.h"
 #include "thumbnail_cache.h"
@@ -36,9 +37,6 @@ class BloomAccentPicker;
 // Embedded Fluent Color SVG for a Segoe sidebar/toolbar glyph, or 0.
 int FluentSvgIdForGlyph(std::wstring_view glyph);
 
-enum class SortColumn { Name, Mtime, Type, Size, Path };
-enum class SortDirection { Asc, Desc };
-
 struct TabView {
     std::wstring title;
     bool active = false;
@@ -49,6 +47,7 @@ struct TabView {
     bool hidden = false;    // member of a collapsed group: zero width, not drawn
     bool pinned = false;    // narrow icon-only slot, left cluster, no close
     bool is_home = false;
+    bool is_settings = false;
 };
 
 // A named, colored tab group shown as a chip at the start of its run.
@@ -73,6 +72,7 @@ struct ListEntryView {
     bool is_reparse = false;
     bool cloud_recall = false;
     bool record_only = false;
+    bool change_deleted = false;
     bool cut = false;
     bool starred = false;
     std::wstring badge;
@@ -142,6 +142,11 @@ struct HomeCardView {
     int system_icon_index = -1;
 };
 
+struct FolderSizeLabel {
+    std::wstring text;
+    bool manual = false;
+};
+
 struct PaneViewModel {
     using FilterMap = std::vector<int>;
     using TagDots = std::unordered_map<int, std::vector<D2D1_COLOR_F>>;
@@ -153,7 +158,7 @@ struct PaneViewModel {
     std::vector<HomeCardView> home_cards;
     std::wstring header_text;
     std::unordered_map<int, ChangeBadge> change_badges;
-    std::unordered_map<int, std::wstring> folder_size_labels;
+    std::unordered_map<int, FolderSizeLabel> folder_size_labels;
     std::unordered_set<int> folder_size_actions;
     ChangeBadge title_change_badge;
     bool is_changes = false;
@@ -454,6 +459,7 @@ struct IndexVolumeRowView {
     std::wstring title;
     std::wstring detail;
     std::wstring state;
+    fluent::BadgeKind badge_kind = fluent::BadgeKind::Neutral;
     bool checked = false;
     bool enabled = false;
     bool pending = false;
@@ -487,6 +493,8 @@ struct DuplicateDriveView {
 };
 
 struct WindowViewModel {
+    bool can_paste = false;
+    bool selection_has_drive_root = false;
     bool archive_view = false;
     std::wstring window_title;
     std::vector<TabView> tabs;

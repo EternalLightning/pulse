@@ -64,7 +64,7 @@ void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
         case S::Cached: suffix(I::FolderSizeCached); break;
         default: break;
         }
-        row.pane->folder_size_labels.emplace(row.index, std::move(text));
+        row.pane->folder_size_labels.emplace(row.index, ui::FolderSizeLabel{std::move(text), value.state == S::Manual});
         if (value.state == S::Manual || value.state == S::Unavailable ||
             value.state == S::Cached || value.state == S::Partial || value.state == S::Indexed)
             row.pane->folder_size_actions.insert(row.index);

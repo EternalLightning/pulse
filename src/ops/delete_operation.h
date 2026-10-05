@@ -6,6 +6,8 @@ inline bool IsDeleteOperation(OpType type) noexcept {
     return type == OpType::RecycleDelete || type == OpType::RealDelete || type == OpType::EmptyRecycle;
 }
 
+bool IsDeleteBackendLost(HRESULT error) noexcept;
+
 // Worker-only read-only preparation. No capability execution probes.
 DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstring& error);
 bool IsDeleteSnapshotComplete(const DeletePlan& plan, const std::vector<std::wstring>& confirmed_paths);

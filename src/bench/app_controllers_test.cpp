@@ -42,9 +42,95 @@ bool Report(const char* name, bool passed) {
     return passed;
 }
 
+bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
+    using namespace pulse::app;
+    bool passed = true;
+    ContextMenuController context_menu;
+    uint32_t queried_token = 0;
+    uint32_t invoked_command = 0;
+    std::wstring invoked_verb;
+    std::wstring invoked_text;
+    int closed_sessions = 0;
+    int folder_refreshes = 0;
+    context_menu.SetShellOperations({
+        [&](std::vector<std::wstring> paths, HWND, bool background, bool extended,
+            std::vector<std::wstring>) {
+            queried_token = paths == std::vector<std::wstring>{L"C:\\one.txt"} &&
+                !background && !extended ? 17u : 0u;
+            return queried_token;
+        },
+        [&](uint32_t) { ++closed_sessions; },
+        [&](uint32_t, uint32_t command, std::wstring verb, std::wstring text) {
+            invoked_command = command;
+            invoked_verb = std::move(verb);
+            invoked_text = std::move(text);
+        },
+        {}, {},
+    });
+    passed &= Report("context menu deduplicates static prefetch requests",
+        context_menu.RequestStaticPrefetch(L".txt") &&
+        !context_menu.RequestStaticPrefetch(L".txt"));
+    context_menu.CompleteStaticVerbs(
+        L".txt", { { L"edit", L"Edit text", L"" } });
+    context_menu.StartQuery(context, nullptr, { L"C:\\one.txt" }, false, L".txt",
+        false, [](const std::wstring& path) { return path; }, {});
+    passed &= Report("context menu begins a typed shell session",
+        queried_token == 17);
+    std::vector<pulse::ops::ShellMenuItem> com_items;
+    pulse::ops::ShellMenuItem com_item;
+    com_item.id = 23;
+    com_item.verb = L"customverb";
+    com_item.text = L"Custom action";
+    com_items.push_back(com_item);
+    const auto partial = context_menu.CompleteComQuery(
+        17, com_items, GetTickCount64(), true);
+    passed &= Report("context menu partial COM snapshot keeps the session open",
+        partial.accepted && partial.partial);
+    passed &= Report("context menu accepts only the active COM response",
+        !context_menu.CompleteComQuery(99, {}, 1200).accepted);
+    const auto completion = context_menu.CompleteComQuery(
+        17, com_items, GetTickCount64());
+    passed &= Report("context menu final COM snapshot finishes the session",
+        completion.accepted && !completion.partial && completion.cache_key == L".txt");
+    pulse::ui::FluentMenuItem base_item;
+    base_item.command = 1;
+    base_item.text = L"Base";
+    bool prefs_changed = false;
+    const auto display = context_menu.BuildDisplay(context, { base_item }, prefs_changed);
+    passed &= Report("context menu composes cached static and live COM rows",
+        display.size() >= 4 && prefs_changed);
+    context_menu.InvalidateCaches();
+    context_menu.OpenMenu({ std::move(base_item) });
+    passed &= Report("context menu owns popup baseline state",
+        context_menu.menu_open() && !context_menu.base_items().empty());
+    pulse::ops::ShellMenuItem live_item = com_item;
+    live_item.id = 42;
+    passed &= Report("context menu remaps snapshot ids onto the live session",
+        context_menu.CompleteComQuery(17, { live_item }, GetTickCount64()).accepted);
+    context_menu.CloseMenu();
+    context_menu.ScheduleFolderRefresh(2000);
+    passed &= Report("context menu owns two-stage refresh deadlines",
+        context_menu.ConsumeDueRefreshes(2399) == 0 &&
+        context_menu.ConsumeDueRefreshes(2400) == 1 &&
+        context_menu.ConsumeDueRefreshes(3600) == 1);
+    const bool handled_shell = context_menu.ExecuteShellCommand(
+        pulse::app::CmdShellComBase + 23, {}, [&] { ++folder_refreshes; });
+    passed &= Report("context menu invokes by verb when live ids differ",
+        handled_shell && invoked_command == 42 &&
+        invoked_verb == L"customverb" && invoked_text == L"Custom action" &&
+        closed_sessions == 0 && folder_refreshes == 1);
+    return passed;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-com") {
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        pulse::app::ContextMenuPrefs context;
+        context.persist = false;
+        return RunContextMenuComTests(context) ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-runas") {
         using namespace pulse::app;
         ContextMenuPrefs prefs;
@@ -498,80 +584,7 @@ int wmain(int argc, wchar_t** argv) {
         restored_tabs.next_tab_group_id == 5 && restored_tabs.items.size() == 1 &&
         restored_tabs.items[0]->tab_group == 4);
 
-    ContextMenuController context_menu;
-    uint32_t queried_token = 0;
-    uint32_t invoked_command = 0;
-    std::wstring invoked_verb;
-    std::wstring invoked_text;
-    int closed_sessions = 0;
-    int folder_refreshes = 0;
-    context_menu.SetShellOperations({
-        [&](std::vector<std::wstring> paths, HWND, bool background, bool extended,
-            std::vector<std::wstring>) {
-            queried_token = paths == std::vector<std::wstring>{L"C:\\one.txt"} &&
-                !background && !extended ? 17u : 0u;
-            return queried_token;
-        },
-        [&](uint32_t) { ++closed_sessions; },
-        [&](uint32_t, uint32_t command, std::wstring verb, std::wstring text) {
-            invoked_command = command;
-            invoked_verb = std::move(verb);
-            invoked_text = std::move(text);
-        },
-        {}, {},
-    });
-    passed &= Report("context menu deduplicates static prefetch requests",
-        context_menu.RequestStaticPrefetch(L".txt") &&
-        !context_menu.RequestStaticPrefetch(L".txt"));
-    context_menu.CompleteStaticVerbs(
-        L".txt", { { L"edit", L"Edit text", L"" } });
-    context_menu.StartQuery(context, nullptr, { L"C:\\one.txt" }, false, L".txt",
-        false, [](const std::wstring& path) { return path; }, {});
-    passed &= Report("context menu begins a typed shell session",
-        queried_token == 17);
-    std::vector<pulse::ops::ShellMenuItem> com_items;
-    pulse::ops::ShellMenuItem com_item;
-    com_item.id = 23;
-    com_item.verb = L"customverb";
-    com_item.text = L"Custom action";
-    com_items.push_back(com_item);
-    const auto partial = context_menu.CompleteComQuery(
-        17, com_items, GetTickCount64(), true);
-    passed &= Report("context menu partial COM snapshot keeps the session open",
-        partial.accepted && partial.partial);
-    passed &= Report("context menu accepts only the active COM response",
-        !context_menu.CompleteComQuery(99, {}, 1200).accepted);
-    const auto completion = context_menu.CompleteComQuery(
-        17, com_items, GetTickCount64());
-    passed &= Report("context menu final COM snapshot finishes the session",
-        completion.accepted && !completion.partial && completion.cache_key == L".txt");
-    pulse::ui::FluentMenuItem base_item;
-    base_item.command = 1;
-    base_item.text = L"Base";
-    bool prefs_changed = false;
-    const auto display = context_menu.BuildDisplay(context, { base_item }, prefs_changed);
-    passed &= Report("context menu composes cached static and live COM rows",
-        display.size() >= 4 && prefs_changed);
-    context_menu.InvalidateCaches();
-    context_menu.OpenMenu({ std::move(base_item) });
-    passed &= Report("context menu owns popup baseline state",
-        context_menu.menu_open() && !context_menu.base_items().empty());
-    pulse::ops::ShellMenuItem live_item = com_item;
-    live_item.id = 42;
-    passed &= Report("context menu remaps snapshot ids onto the live session",
-        context_menu.CompleteComQuery(17, { live_item }, GetTickCount64()).accepted);
-    context_menu.CloseMenu();
-    context_menu.ScheduleFolderRefresh(2000);
-    passed &= Report("context menu owns two-stage refresh deadlines",
-        context_menu.ConsumeDueRefreshes(2399) == 0 &&
-        context_menu.ConsumeDueRefreshes(2400) == 1 &&
-        context_menu.ConsumeDueRefreshes(3600) == 1);
-    const bool handled_shell = context_menu.ExecuteShellCommand(
-        pulse::app::CmdShellComBase + 23, {}, [&] { ++folder_refreshes; });
-    passed &= Report("context menu invokes by verb when live ids differ",
-        handled_shell && invoked_command == 42 &&
-        invoked_verb == L"customverb" && invoked_text == L"Custom action" &&
-        closed_sessions == 0 && folder_refreshes == 1);
+    passed &= RunContextMenuComTests(context);
 
     std::mutex task_mutex;
     std::condition_variable task_cv;

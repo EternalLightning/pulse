@@ -1,5 +1,6 @@
 #include "home_catalog.h"
 #include "places.h"
+#include "drive_labels.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
 #include <shlobj.h>
@@ -94,25 +95,41 @@ void HomeCatalog::Refresh() {
             cards.push_back(std::move(card));
         }
         // Publish local content before contacting network providers, which may be slow or offline.
-        {
+        const auto publish = [&](bool complete) {
             std::lock_guard lock(state->mutex);
             state->cards = cards;
+            for (auto& card : state->cards) {
+                for (const auto& [root, label] : state->label_updates) {
+                    if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), root))
+                        card.label = DriveDisplayName(root, label);
+                }
+            }
+            if (complete) {
+                state->loading = false;
+                state->label_updates.clear();
+            }
             state->updated = true;
-        }
+        };
+        publish(false);
         for (auto& card : cards) {
             if (card.group != 2) continue;
             ReadDriveMetadata(card);
-            std::lock_guard lock(state->mutex);
-            state->cards = cards;
-            state->updated = true;
+            publish(false);
         }
         if (SUCCEEDED(com)) CoUninitialize();
         if (error_mode_changed) SetThreadErrorMode(previous_error_mode, nullptr);
-        std::lock_guard lock(state->mutex);
-        state->cards = std::move(cards);
-        state->loading = false;
-        state->updated = true;
+        publish(true);
     }).detach();
+}
+void HomeCatalog::UpdateDriveLabel(const std::wstring& root, const std::wstring& label) {
+    const auto plain = path::StripExtendedPathPrefix(root).substr(0, 2) + L"\\";
+    std::lock_guard lock(state_->mutex);
+    if (state_->loading) state_->label_updates[plain] = label;
+    for (auto& card : state_->cards) {
+        if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), plain))
+            card.label = DriveDisplayName(root, label);
+    }
+    state_->updated = true;
 }
 bool HomeCatalog::ConsumeUpdate() {
     std::lock_guard lock(state_->mutex);

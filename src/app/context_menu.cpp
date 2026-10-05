@@ -96,6 +96,18 @@ std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring&
     return items;
 }
 
+void RestrictDriveItemMenu(std::vector<ui::FluentMenuItem>& items, bool single_drive) {
+    const auto blocked = [single_drive](int command) {
+        return command == CmdCut || command == CmdCopy || command == CmdDelete ||
+            command == CmdBatchRename || (command == CmdRename && !single_drive);
+    };
+    std::erase_if(items, [&](ui::FluentMenuItem& item) {
+        const bool had_swatches = !item.quick_swatches.empty();
+        std::erase_if(item.quick_swatches, [&](const auto& swatch) { return blocked(swatch.command); });
+        return blocked(item.command) || (had_swatches && item.quick_swatches.empty() && item.text.empty());
+    });
+}
+
 std::wstring RecentChangesMenuPath(const Tab& tab, bool background) {
     auto filesystem = [](const std::wstring& path) { return !path.empty() && !fs::IsVirtualPath(path); };
     if (background) return filesystem(tab.current_path) ? tab.current_path : std::wstring{};
@@ -177,15 +189,17 @@ std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_und
     return items;
 }
 
-std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem) {
+std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive) {
     std::vector<ui::FluentMenuItem> items;
     items.push_back(Item(CmdOpenInNewTab, l10n::Get(l10n::StringId::OpenNewTab).c_str(), kGlyphOpenInNewTab));
     items.push_back(Item(CmdOpen, l10n::Get(l10n::StringId::Open).c_str(), kGlyphOpen));
     items.back().separator_after = true;
     items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink));
     if (filesystem) {
-        items.push_back(Item(CmdCopy, l10n::Get(l10n::StringId::Copy).c_str(), kGlyphCopy));
-        items.back().separator_after = true;
+        if (!drive) {
+            items.push_back(Item(CmdCopy, l10n::Get(l10n::StringId::Copy).c_str(), kGlyphCopy));
+            items.back().separator_after = true;
+        }
         items.push_back(Item(CmdOpenTerminal, l10n::Get(l10n::StringId::OpenTerminalHere).c_str(), kGlyphTerminal));
         items.push_back(Item(CmdProperties, l10n::Get(l10n::StringId::Properties).c_str(), kGlyphProperties));
     }

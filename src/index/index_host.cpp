@@ -333,6 +333,7 @@ std::vector<uint8_t> VolumesPayload(Client& client) {
         uint32_t flags = volume.online ? 1u : 0u;
         if (volume.supported) flags |= 2u;
         if (volume.enabled) flags |= 4u;
+        if (volume.failed) flags |= 8u;
         w.PutU32(flags);
         w.PutU32(static_cast<uint32_t>(volume.kind));
         w.PutU32(volume.progress);

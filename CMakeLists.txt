@@ -184,8 +184,15 @@ add_executable(pulse_index_test
     src/index/search_kinds.cpp
     src/index/index_shard.cpp
     src/index/network_index.cpp
+    src/index/search_result_merge.cpp
     src/index/change_tracking.cpp)
 target_link_libraries(pulse_index_test PRIVATE shell32 mpr advapi32 pulse_user_storage)
+
+add_executable(pulse_search_merge_test
+    src/bench/search_merge_test.cpp
+    src/index/search_result_merge.cpp
+    src/index/index_query.cpp
+    src/index/search_kinds.cpp)
 
 add_executable(pulse_index_migration_test
     src/bench/index_migration_test.cpp
@@ -277,12 +284,13 @@ list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "lumatext_renderer\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(document_(host_main|reader|filter)|office_ooxml|pdfium_text)\\.cpp$")
 
 # The local-volume engine runs in Pulse.Index.exe. Production keeps only the
-# lightweight query parser and per-user network index inside Pulse.exe.
+# lightweight query parser and network agent client inside Pulse.exe.
 option(PULSE_WITH_SELFTEST "Embed the legacy --selftest suite in Pulse.exe" OFF)
 if(NOT PULSE_WITH_SELFTEST)
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "selftest_1b2\\.cpp$")
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(change_tracking_(app|ui)|name_highlight_ui|operation_toast|pane_header_icon|rename_editor)_test\\.cpp$")
     list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "index_(engine|engine_pinyin|visibility|mft|paths|delta|folder_sizes)\\.cpp$")
+    list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "network_index\\.cpp$")
 endif()
 list(APPEND PULSE_APP_SOURCES src/index/network_agent_client.cpp)
 if(PULSE_APP_SOURCES)
@@ -556,7 +564,7 @@ target_compile_options(pulse_builtin_menu_items_test PRIVATE /W4 /permissive- /u
 target_link_options(pulse_builtin_menu_items_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_builtin_menu_items_test PRIVATE pulse_localization)
 
-foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold)
+foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold drive_view)
     add_executable(pulse_${model_fixture}_test
         src/bench/${model_fixture}_test.cpp src/bench/localization_test.rc
         src/app/app_model.cpp src/app/places.cpp src/app/entry_sort.cpp
@@ -569,6 +577,7 @@ foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold)
     target_link_libraries(pulse_${model_fixture}_test PRIVATE
         pulse_sqlite pulse_localization pulse_text shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
 endforeach()
+target_sources(pulse_drive_view_test PRIVATE src/app/context_menu.cpp)
 
 add_executable(pulse_file_lock_owner_test
     src/bench/file_lock_owner_test.cpp src/ops/file_lock_owner.cpp)
@@ -585,6 +594,8 @@ target_link_libraries(pulse_default_file_manager_test PRIVATE
     advapi32 shell32 ole32 oleaut32 uuid propsys user32 shlwapi)
 
 add_executable(pulse_dialog_text_fit_test src/bench/dialog_text_fit_test.cpp)
+add_executable(pulse_clipboard_availability_test src/bench/clipboard_availability_test.cpp)
+target_compile_options(pulse_clipboard_availability_test PRIVATE /W4 /permissive- /utf-8)
 add_executable(pulse_startup_command_test src/bench/startup_command_test.cpp src/app/startup_launch.cpp)
 
 add_executable(pulse_locked_operation_test

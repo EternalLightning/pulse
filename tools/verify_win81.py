@@ -14,7 +14,7 @@ profile.mkdir(exist_ok=True)
 names = ['pulse_index_migration_test', 'pulse_preview_test', 'pulse_ops_test', 'pulse_localization_test', 'pulse_crash_test',
          'pulse_index_test', 'pulse_index_engine_test', 'pulse_content_search_test',
          'pulse_duplicate_scan_test', 'pulse_saved_search_test', 'pulse_search_query_test',
-         'pulse_update_test', 'pulse_shell_icons_test',
+         'pulse_shell_icons_test',
          'pulse_material_test', 'pulse_app_controllers_test', 'pulse_index_host_stress', 'pulse']
 env = dict(os.environ, PULSE_TEST_DATA_DIR=str(profile), PULSE_TEST_HIDDEN_SHOT='1')
 results = []

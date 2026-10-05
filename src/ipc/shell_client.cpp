@@ -401,30 +401,34 @@ void ShellClient::ReaderThread() {
                     r.GetU32(items_done) && r.GetU32(total_items) && cb_.progress)
                     cb_.progress(h.request_id, pct, item, items_done, total_items);
             } else if (h.type == RSP_DONE) {
-                uint32_t hr = 0, cancelled = 0;
-                std::wstring err;
-                if (r.GetU32(hr) && r.GetU32(cancelled) && r.GetString(err)) {
-                    bool pending = false, deletion = false;
-                    {
-                        std::lock_guard<std::mutex> lock(pending_mutex_);
-                        const auto found = pending_.find(h.request_id);
-                        if (found != pending_.end()) {
-                            deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
-                            pending_.erase(found); pending = true;
-                        }
+                bool pending = false, deletion = false;
+                {
+                    std::lock_guard<std::mutex> lock(pending_mutex_);
+                    const auto found = pending_.find(h.request_id);
+                    if (found != pending_.end()) {
+                        deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
+                        if (deletion) pending_.erase(found);
+                        pending = true;
                     }
-                    if (pending && deletion) {
-                        std::vector<std::wstring> deleted_paths, recycled_paths, recycle_destinations;
-                        if (!r.GetStringArray(deleted_paths) || !r.GetStringArray(recycled_paths) || !r.GetStringArray(recycle_destinations) ||
-                            recycled_paths.size() != recycle_destinations.size() || r.remaining() != 0) {
-                            hr = static_cast<uint32_t>(E_INVALIDARG); err = L"Malformed deletion result";
-                            deleted_paths.clear(); recycled_paths.clear(); recycle_destinations.clear();
-                        }
-                        if (cb_.delete_done)
-                            cb_.delete_done(h.request_id, hr, cancelled != 0, std::move(err),
-                                std::move(deleted_paths), std::move(recycled_paths), std::move(recycle_destinations));
-                        else FireDone(h.request_id, hr, cancelled != 0, err);
-                    } else if (pending) FireDone(h.request_id, hr, cancelled != 0, err);
+                }
+                if (pending && deletion) {
+                    DeleteResultPayload result;
+                    if (!ReadDeleteResultPayload(r, result)) {
+                        result.hr = static_cast<uint32_t>(kMalformedDeleteResult);
+                        result.error = L"Malformed deletion result";
+                    }
+                    if (cb_.delete_done)
+                        cb_.delete_done(h.request_id, result.hr, result.cancelled, std::move(result.error),
+                            std::move(result.deleted_paths), std::move(result.recycled_paths),
+                            std::move(result.recycle_destinations), std::move(result.failed_path));
+                    else FireDone(h.request_id, result.hr, result.cancelled, result.error);
+                } else if (pending) {
+                    uint32_t hr = 0, cancelled = 0;
+                    std::wstring err;
+                    if (r.GetU32(hr) && r.GetU32(cancelled) && r.GetString(err)) {
+                        { std::lock_guard<std::mutex> lock(pending_mutex_); pending_.erase(h.request_id); }
+                        FireDone(h.request_id, hr, cancelled != 0, err);
+                    }
                 }
             } else if (h.type == RSP_CTX_ITEMS) {
                 uint32_t session = 0, msg_flags = 0, count = 0;

@@ -140,8 +140,12 @@ bool ReadClipboard(ClipboardData& out) {
             GlobalUnlock(h);
         }
     }
-    CloseClipboard();
     if (ok) out.sequence = GetClipboardSequenceNumber();
+    CloseClipboard();
+    if (ok && out.sequence != GetClipboardSequenceNumber()) {
+        out = {};
+        return false;
+    }
     return ok;
 }
 

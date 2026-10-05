@@ -157,8 +157,17 @@ bool NoReparse(const fs::path& path) {
     }
     return true;
 }
-bool PasswordError(const std::wstring& output) {
-    return output.find(L"password") != std::wstring::npos || output.find(L"Password") != std::wstring::npos || output.find(L"encrypted") != std::wstring::npos;
+bool PasswordError(const std::wstring& output, const std::wstring& archive_path) {
+    // 7z shares exit code 2 across failures. Only its encrypted-header
+    // diagnostic identifies a listing that needs a password; paths do not.
+    const auto expected = L"ERROR: " + archive_path + L" : Cannot open encrypted archive. Wrong password?";
+    std::wistringstream lines(output);
+    std::wstring line;
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == L'\r') line.pop_back();
+        if (line == expected) return true;
+    }
+    return false;
 }
 struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } };
 }
@@ -185,7 +194,7 @@ bool IsSafeArchiveMember(const std::wstring& path) {
 ArchiveResult ListArchive(const std::wstring& path, const std::wstring& password, const std::atomic_bool* cancel) {
     ArchiveResult result;
     auto run = Run({L"l", L"-slt", L"-ba", L"-sccUTF-8", L"-bd", L"-p" + password, L"--", path}, cancel);
-    if (run.code != 0) { result.error = run.output; result.password_required = PasswordError(run.output); return result; }
+    if (run.code != 0) { result.error = run.output; result.password_required = PasswordError(run.output, path); return result; }
     std::wistringstream lines(run.output); std::wstring line;
     ArchiveEntry entry; bool has_path = false, unsafe = false;
     auto flush = [&]() {
