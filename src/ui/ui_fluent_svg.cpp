@@ -2,7 +2,7 @@
 #include "ui_renderer.h"
 #include "command_icons.h"
 #include "../common/windows_compat.h"
-#include "../app/resource.h"
+#include "../common/resource_ids.h"
 #include <d2d1svg.h>
 #include <shlwapi.h>
 #include <algorithm>

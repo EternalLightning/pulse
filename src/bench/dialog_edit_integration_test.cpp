@@ -80,7 +80,7 @@ int wmain() {
                 dpi = resolution;
                 dialog_class = L"PulseAdvancedSearchWindow";
                 timer_id = SetTimer(nullptr, 0, 200, DriveDialog);
-                app::AdvancedSearchSpec spec;
+                model::AdvancedSearchSpec spec;
                 spec.kind = index::SearchKind::Custom;
                 spec.custom_exts = L"txt";
                 const auto search = ui::ShowAdvancedSearchDialog(nullptr, spec, dark, D2D1::ColorF(0x0078D4));

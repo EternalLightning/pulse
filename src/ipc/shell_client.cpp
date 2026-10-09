@@ -1,5 +1,7 @@
 // shell_client.cpp — See shell_client.h for the contract.
 #include "shell_client.h"
+#include "file_identity_protocol.h"
+#include <algorithm>
 
 namespace pulse::ipc {
 
@@ -162,13 +164,15 @@ bool ShellClient::SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_
     return true;
 }
 
-uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload) {
+uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
+                             const std::function<void(uint32_t)>& before_send) {
     if (!running_.load()) return 0;
 
     Pending p;
     p.type = type;
     p.payload = payload;
     p.id = next_id_.fetch_add(1);
+    if (before_send) before_send(p.id);
 
     bool sent = false;
     {
@@ -197,23 +201,11 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload)
     return p.id;
 }
 
-uint32_t ShellClient::DeleteRecycle(const std::vector<std::wstring>&) {
-    if (!running_.load()) return 0;
-    const uint32_t id = next_id_.fetch_add(1);
-    FireDone(id, static_cast<uint32_t>(E_ACCESSDENIED), false, L"Recycle deletion requires a proven deletion plan.");
-    return id;
-}
-
-uint32_t ShellClient::RealDelete(const std::vector<std::wstring>&) {
-    if (!running_.load()) return 0;
-    const uint32_t id = next_id_.fetch_add(1);
-    FireDone(id, static_cast<uint32_t>(E_ACCESSDENIED), false, L"Permanent deletion requires deletion-service authorization.");
-    return id;
-}
-
 uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
-                                     bool recycle, HWND owner) {
+                                      bool recycle, HWND owner, const std::vector<FileIdentity>& expected_identities) {
     if (!running_.load() || paths.empty() || token == 0) return 0;
+    if (!expected_identities.empty() && (expected_identities.size() != paths.size() ||
+        std::any_of(expected_identities.begin(), expected_identities.end(), [](const auto& id) { return !id.Valid(); }))) return 0;
     Pending pending;
     pending.id = next_id_.fetch_add(1);
     pending.type = recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE;
@@ -227,6 +219,7 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
             epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
             PayloadWriter writer;
             writer.PutU64(epoch.QuadPart); writer.PutU64(token); writer.PutStringArray(paths);
+            if (!expected_identities.empty()) WriteFileIdentities(writer, expected_identities);
             if (recycle) writer.PutU64(reinterpret_cast<uintptr_t>(owner));
             pending.payload = writer.data();
             std::lock_guard<std::mutex> pending_lock(pending_mutex_);
@@ -296,7 +289,8 @@ void ShellClient::Abort(uint32_t id) {
 
 uint32_t ShellClient::QueryContextMenu(const std::vector<std::wstring>& paths,
                                        uint32_t owner_hwnd, bool background, bool extended,
-                                       const std::vector<std::wstring>& disabled_clsids) {
+                                        const std::vector<std::wstring>& disabled_clsids,
+                                        const std::function<void(uint32_t)>& before_send) {
     PayloadWriter w;
     w.PutU32(owner_hwnd);
     uint32_t flags = 0;
@@ -305,17 +299,18 @@ uint32_t ShellClient::QueryContextMenu(const std::vector<std::wstring>& paths,
     w.PutU32(flags);
     w.PutStringArray(paths);
     w.PutStringArray(disabled_clsids);
-    return Submit(REQ_CTX_QUERY, w.data());
+    return Submit(REQ_CTX_QUERY, w.data(), before_send);
 }
 
 uint32_t ShellClient::InvokeContextMenu(uint32_t session_id, uint32_t item_id,
-                                        const std::wstring& verb, const std::wstring& text) {
+                                         const std::wstring& verb, const std::wstring& text,
+                                         const std::function<void(uint32_t)>& before_send) {
     PayloadWriter w;
     w.PutU32(session_id);
     w.PutU32(item_id);
     w.PutString(verb);
     w.PutString(text);
-    return Submit(REQ_CTX_INVOKE, w.data());
+    return Submit(REQ_CTX_INVOKE, w.data(), before_send);
 }
 
 // Fire-and-forget like Cancel: no pending entry, no retry-on-restart (a fresh
@@ -324,6 +319,10 @@ void ShellClient::CloseContextMenu(uint32_t session_id) {
     PayloadWriter w;
     w.PutU32(session_id);
     std::lock_guard<std::mutex> lock(send_mutex_);
+    {
+        std::lock_guard pending_lock(pending_mutex_);
+        pending_.erase(session_id);
+    }
     if (pipe_ == INVALID_HANDLE_VALUE) return;
     SendFrame(REQ_CTX_CLOSE, 0, w.data());
 }
@@ -426,8 +425,16 @@ void ShellClient::ReaderThread() {
                     uint32_t hr = 0, cancelled = 0;
                     std::wstring err;
                     if (r.GetU32(hr) && r.GetU32(cancelled) && r.GetString(err)) {
+                        std::vector<FileIdentity> produced;
+                        if (r.remaining() && (!ReadFileIdentities(r, produced) || r.remaining())) {
+                            hr = static_cast<uint32_t>(E_INVALIDARG);
+                            err = L"Malformed produced-item identity result";
+                            produced.clear();
+                        }
                         { std::lock_guard<std::mutex> lock(pending_mutex_); pending_.erase(h.request_id); }
-                        FireDone(h.request_id, hr, cancelled != 0, err);
+                        if (cb_.produced_done && !produced.empty())
+                            cb_.produced_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(produced));
+                        else FireDone(h.request_id, hr, cancelled != 0, err);
                     }
                 }
             } else if (h.type == RSP_CTX_ITEMS) {

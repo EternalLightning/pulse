@@ -1,5 +1,5 @@
 #pragma once
-#include "../fs/fs_enum.h"
+#include "entry_sort.h"
 #include "../ui/ui_renderer.h"
 #include <string>
 #include <vector>
@@ -16,7 +16,8 @@ std::vector<fs::DirEntry> KeepEntryOrder(const std::vector<fs::DirEntry>& shown,
                                        const std::vector<fs::DirEntry>& fresh,
                                        const std::vector<EntryRenameHint>& renames,
                                        ui::SortColumn column, ui::SortDirection direction,
-                                       const std::wstring& parent);
+                                       const std::wstring& parent,
+                                       FolderSortMode folders = FolderSortMode::FoldersFirst);
 
 void FollowEntryRenames(const std::vector<EntryRenameHint>& renames,
                        const std::vector<fs::DirEntry>& fresh,

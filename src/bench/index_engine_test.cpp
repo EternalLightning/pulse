@@ -4,6 +4,7 @@
 #include "../index/index_shard.h"
 #include "../index/index_paths.h"
 #include "../index/index_delta.h"
+#include "../index/index_mft.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -20,7 +21,7 @@ struct UsnStreamTestAccess {
 };
 
 struct EngineTestAccess {
-    static bool FolderSizesFixture() {
+    static bool FolderSizesFixture(bool mixed_security = false) {
         bool ok = true;
         auto check = [&](bool value, const char* name) {
             std::cout << (value ? "[PASS] " : "[FAIL] ") << name << '\n'; ok &= value;
@@ -62,7 +63,8 @@ struct EngineTestAccess {
             auto* record = reinterpret_cast<USN_RECORD_V2*>(bytes.data());
             record->RecordLength = static_cast<DWORD>(bytes.size()); record->MajorVersion = 2;
             record->FileReferenceNumber = id; record->ParentFileReferenceNumber = parent;
-            record->Reason = reason; record->FileAttributes = directory ? FILE_ATTRIBUTE_DIRECTORY : 0;
+            record->Reason = reason | (mixed_security ? USN_REASON_SECURITY_CHANGE : 0);
+            record->FileAttributes = directory ? FILE_ATTRIBUTE_DIRECTORY : 0;
             record->FileNameOffset = static_cast<WORD>(offsetof(USN_RECORD_V2, FileName)); record->FileNameLength = length;
             memcpy(bytes.data() + record->FileNameOffset, name, length);
             e.ApplyUsnLocked(e.vols_.front(), record);
@@ -82,6 +84,12 @@ struct EngineTestAccess {
             "USN subtree move transfers its cached total");
         std::filesystem::remove(b / L"A" / L"one.bin"); usn(5, 3, L"one.bin", USN_REASON_FILE_DELETE);
         check(size(b / L"A").bytes == 0 && size(b).bytes == 75, "USN deletion subtracts previous file metadata");
+        if (mixed_security) {
+            check(e.folder_sizes_.Builds() == builds, "mixed security edits preserve incremental size aggregation");
+            std::error_code error; std::filesystem::remove_all(fixture, error);
+            check(!error, "isolated mixed security fixture cleanup");
+            return ok;
+        }
         usn(5, 3, L"one.bin", USN_REASON_FILE_DELETE);
         check(size(b).bytes == 75 && e.folder_sizes_.Builds() == builds,
             "duplicate deletion is harmless and all USN edits avoid aggregate rebuilds");
@@ -130,7 +138,7 @@ struct EngineTestAccess {
     }
     static bool NamePoolFixture();
     static bool QuietDiagnosticsFixture();
-    static bool UsnQueueFixture() {
+    static bool UsnQueueFixture(bool mixed_security = false) {
         bool ok = true;
         auto check = [&](bool valid, const char* label) {
             std::cout << (valid ? "[PASS] " : "[FAIL] ") << label << '\n'; ok &= valid;
@@ -157,13 +165,22 @@ struct EngineTestAccess {
                 auto* record = reinterpret_cast<USN_RECORD_V2*>(packet.data() + sizeof(next));
                 record->RecordLength = static_cast<DWORD>(record_bytes); record->MajorVersion = 2;
                 record->FileReferenceNumber = 1000; record->ParentFileReferenceNumber = 20;
-                record->Usn = next - 1; record->Reason = reason;
+                record->Usn = next - 1;
+                record->Reason = reason | (mixed_security ? USN_REASON_SECURITY_CHANGE : 0);
                 record->FileNameOffset = static_cast<WORD>(offsetof(USN_RECORD_V2, FileName)); record->FileNameLength = length;
                 FILETIME now{}; GetSystemTimeAsFileTime(&now);
                 record->TimeStamp.QuadPart = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
                 std::memcpy(reinterpret_cast<BYTE*>(record) + record->FileNameOffset, name, length);
                 return UsnStreamTestAccess::Push(*collector, packet);
             };
+            if (mixed_security) {
+                const auto revision = engine.Revision();
+                bool changed = false, structural = false;
+                check(push(50, USN_REASON_SECURITY_CHANGE, L"usn-permission.txt") &&
+                      engine.CatchUpVolume(volume, &changed, &structural) && changed && !structural &&
+                      volume.next_usn == 50 && engine.Revision() > revision,
+                      "pure security change commits cursor and notifies subscriptions");
+            }
             check(push(100, USN_REASON_FILE_CREATE, L"usn-queued.txt") &&
                   push(200, USN_REASON_RENAME_OLD_NAME, L"usn-queued.txt") &&
                   push(300, USN_REASON_RENAME_NEW_NAME, L"usn-renamed.txt") &&
@@ -720,10 +737,74 @@ void CheckSearch(Engine& e) {
 #include "index_name_pool_fixture.h"
 #include "index_quiet_diagnostics_fixture.h"
 
+bool MftReadFixture() {
+    bool ok = true;
+    auto check = [&](bool valid, const char* label) {
+        std::cout << (valid ? "[PASS] " : "[FAIL] ") << label << '\n'; ok &= valid;
+    };
+    constexpr DWORD chunk_bytes = 8u * 1024u * 1024u;
+    std::vector<BYTE> disk(chunk_bytes + 512);
+    auto put = [&](size_t offset, auto value) { std::memcpy(disk.data() + offset, &value, sizeof(value)); };
+    put(0, uint32_t{0x454c4946}); put(4, uint16_t{48}); put(6, uint16_t{2});
+    put(16, uint16_t{1}); put(20, uint16_t{56}); put(22, uint16_t{1});
+    put(24, uint32_t{156}); put(28, uint32_t{512});
+    put(48, uint16_t{0xabcd}); put(510, uint16_t{0xabcd});
+    put(56, uint32_t{0x30}); put(60, uint32_t{96});
+    put(72, uint32_t{68}); put(76, uint16_t{24});
+    put(80, uint64_t{5}); disk[144] = 1; disk[145] = 1; put(146, wchar_t{L'x'});
+    put(152, uint32_t{0xffffffff});
+    const auto path = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
+        (L"mft-read-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L".bin"));
+    std::filesystem::create_directories(path.parent_path());
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
+        check(file.good(), "write isolated MFT chunks with one live record");
+    }
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(file != INVALID_HANDLE_VALUE, "open isolated MFT stream without a volume or elevation");
+    if (file == INVALID_HANDLE_VALUE) return false;
+    MftReadIo io;
+    io.query = [&](NTFS_VOLUME_DATA_BUFFER& geometry) {
+        geometry.BytesPerFileRecordSegment = 512; geometry.BytesPerCluster = 512;
+        geometry.BytesPerSector = 512; geometry.MftValidDataLength.QuadPart = static_cast<LONGLONG>(disk.size());
+        return true;
+    };
+    std::atomic<bool> running{true}; size_t emitted = 0;
+    auto emit = [&](MftFile&& record) { ++emitted; return record.name == L"x"; };
+    check(EnumerateMft(file, &running, {}, emit, &io) == MftReadStatus::Complete && emitted == 1,
+          "all chunks read successfully yields complete baseline");
+    LARGE_INTEGER length{}; length.QuadPart = chunk_bytes + 256;
+    check(SetFilePointerEx(file, length, nullptr, FILE_BEGIN) && SetEndOfFile(file), "truncate only second MFT chunk");
+    emitted = 0;
+    check(EnumerateMft(file, &running, {}, emit, &io) == MftReadStatus::Failed && emitted == 1,
+          "native short second read rejects nonempty partial MFT baseline");
+    io.read = [&](uint64_t offset, void* buffer, DWORD bytes) {
+        if (offset >= chunk_bytes) { SetLastError(ERROR_READ_FAULT); return false; }
+        std::memcpy(buffer, disk.data() + offset, bytes); return true;
+    };
+    emitted = 0;
+    check(EnumerateMft(file, &running, {}, emit, &io) == MftReadStatus::Failed && emitted == 1,
+          "failed second chunk never reports complete after prior records");
+    emitted = 0;
+    check(EnumerateMft(file, &running, {}, [&](MftFile&&) { ++emitted; return false; }, &io) == MftReadStatus::Capped && emitted == 1,
+          "consumer cap is distinct from complete baseline");
+    emitted = 0;
+    check(EnumerateMft(file, &running, {}, [&](MftFile&&) { ++emitted; running = false; return true; }, &io) == MftReadStatus::Cancelled && emitted == 1,
+          "cancellation after first record is distinct from complete baseline");
+    CloseHandle(file);
+    std::error_code error; std::filesystem::remove(path, error);
+    check(!error, "isolated MFT fixture cleaned up");
+    return ok;
+}
+
 int wmain(int argc, wchar_t** argv) {
     const bool quiet = argc > 1 && std::wstring_view(argv[1]) == L"--quiet-maintenance-only";
     if (!SetEnvironmentVariableW(L"PULSE_INDEX_DIAGNOSTICS", quiet ? nullptr : L"1")) return 2;
     if (quiet) return EngineTestAccess::QuietDiagnosticsFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--mft-read-only") return MftReadFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--mixed-usn-only")
+        return EngineTestAccess::UsnQueueFixture(true) && EngineTestAccess::FolderSizesFixture(true) ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--authorization-only") {
         Engine fixture;
         Check(EngineTestAccess::Build(fixture), "build MFT metadata authorization fixture");

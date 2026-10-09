@@ -11,6 +11,7 @@
 #include "../ui/panel_metrics.h"
 #include "../index/index_client.h"
 #include "../index/network_agent_client.h"
+#include "../shell_host/ctx_handlers.h"
 
 #include <cstdio>
 #include <cmath>
@@ -19,6 +20,7 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <atomic>
 
 namespace pulse::app {
 
@@ -115,16 +117,290 @@ bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
         context_menu.ConsumeDueRefreshes(3600) == 1);
     const bool handled_shell = context_menu.ExecuteShellCommand(
         pulse::app::CmdShellComBase + 23, {}, [&] { ++folder_refreshes; });
-    passed &= Report("context menu invokes by verb when live ids differ",
-        handled_shell && invoked_command == 42 &&
+    passed &= Report("context menu rejects a snapshot whose live ids differ",
+        handled_shell && invoked_command == 0 && closed_sessions == 1 && folder_refreshes == 1);
+    context_menu.StartQuery(context, nullptr, { L"C:\\one.txt" }, false, L".txt",
+        false, {}, {});
+    context_menu.CompleteComQuery(17, {live_item}, GetTickCount64());
+    context_menu.OpenMenu({});
+    context_menu.CloseMenu();
+    context_menu.ExecuteShellCommand(pulse::app::CmdShellComBase + 42, {}, [&] { ++folder_refreshes; });
+    passed &= Report("context menu invokes the exact command in the displayed session",
+        invoked_command == 42 &&
         invoked_verb == L"customverb" && invoked_text == L"Custom action" &&
-        closed_sessions == 0 && folder_refreshes == 1);
+        closed_sessions == 1 && folder_refreshes == 2);
+    return passed;
+}
+
+int worker_event_calls = 0;
+int worker_thread_calls = 0;
+int worker_fail_event = 0;
+bool worker_fail_thread = false;
+
+HANDLE WINAPI CreateWorkerTestEvent(LPSECURITY_ATTRIBUTES attributes, BOOL manual,
+                                    BOOL initial, LPCWSTR name) {
+    ++worker_event_calls;
+    if (worker_event_calls == worker_fail_event) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return nullptr;
+    }
+    return CreateEventW(attributes, manual, initial, name);
+}
+
+HANDLE WINAPI CreateWorkerTestThread(LPSECURITY_ATTRIBUTES attributes, SIZE_T size,
+                                     LPTHREAD_START_ROUTINE entry, LPVOID context,
+                                     DWORD flags, LPDWORD id) {
+    ++worker_thread_calls;
+    if (worker_fail_thread) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return nullptr;
+    }
+    return CreateThread(attributes, size, entry, context, flags, id);
+}
+
+struct WorkerExitProbe {
+    pulse::shell::CtxWorkerHandles* handles = nullptr;
+    std::atomic<bool> stopped{false};
+};
+
+DWORD WINAPI WaitWorkerExit(void* context) {
+    auto& probe = *static_cast<WorkerExitProbe*>(context);
+    if (WaitForSingleObject(probe.handles->exit_event, INFINITE) == WAIT_OBJECT_0)
+        probe.stopped.store(true);
+    return 0;
+}
+
+bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
+    using namespace pulse::app;
+    bool passed = true;
+    for (int failure = 1; failure <= 3; ++failure) {
+        worker_event_calls = worker_thread_calls = 0;
+        worker_fail_event = failure <= 2 ? failure : 0;
+        worker_fail_thread = failure == 3;
+        pulse::shell::CtxWorkerHandles handles;
+        WorkerExitProbe probe;
+        probe.handles = &handles;
+        DWORD handles_before = 0;
+        const bool counted_before = GetProcessHandleCount(GetCurrentProcess(), &handles_before) != FALSE;
+        const bool started = handles.Start(WaitWorkerExit, &probe, CreateWorkerTestEvent, CreateWorkerTestThread);
+        const DWORD failure_code = GetLastError();
+        DWORD handles_after = 0;
+        const bool closed = counted_before && GetProcessHandleCount(GetCurrentProcess(), &handles_after) &&
+            handles_before == handles_after;
+        passed &= Report(failure == 1 ? "first event failure never starts a worker" :
+            failure == 2 ? "second event failure closes the first event without starting a worker" :
+            "thread failure closes both events",
+            !started && !handles.done_event && !handles.exit_event && !handles.thread && closed &&
+            failure_code == ERROR_NOT_ENOUGH_MEMORY && worker_thread_calls == (failure == 3 ? 1 : 0));
+    }
+    worker_fail_event = 0;
+    worker_fail_thread = false;
+    worker_event_calls = worker_thread_calls = 0;
+    pulse::shell::CtxWorkerHandles handles;
+    WorkerExitProbe probe;
+    probe.handles = &handles;
+    const bool started = handles.Start(WaitWorkerExit, &probe, CreateWorkerTestEvent, CreateWorkerTestThread);
+    handles.Stop();
+    passed &= Report("worker cleanup waits for its context use to finish",
+        started && probe.stopped.load() && !handles.done_event && !handles.exit_event && !handles.thread);
+
+    pulse::shell::CtxItemOut host_item;
+    host_item.id = 2;
+    host_item.verb = L"custom";
+    host_item.text = L"Action";
+    const auto find_host = [&](std::vector<pulse::shell::CtxItemOut> items, uint32_t id,
+                               const std::wstring& verb = L"custom", const std::wstring& text = L"Action") {
+        return pulse::shell::FindItemId(items, id, verb, text);
+    };
+    passed &= Report("host accepts an exact current enabled leaf command", find_host({host_item}, 2) == 2);
+    passed &= Report("host never rebinds an old handler id or a caption-only request",
+        find_host({host_item}, 258) == 0 && find_host({host_item}, 0) == 0);
+    auto other_handler = host_item;
+    other_handler.id = 258;
+    other_handler.clsid = L"handler-b";
+    passed &= Report("identical captions in different handlers still select the exact id",
+        find_host({host_item, other_handler}, 258) == 258);
+    passed &= Report("host refuses an id reused for different command text or verb",
+        find_host({host_item}, 2, L"other") == 0 && find_host({host_item}, 2, L"custom", L"Other") == 0);
+    auto unavailable = host_item;
+    unavailable.enabled = false;
+    auto header = host_item;
+    header.has_children = true;
+    passed &= Report("host refuses disabled headers and duplicate command ids",
+        find_host({unavailable}, 2) == 0 && find_host({header}, 2) == 0 &&
+        find_host({host_item, host_item}, 2) == 0);
+    passed &= Report("host refuses commands outside the selected handler range",
+        pulse::shell::FindItemId({host_item}, 2, host_item.verb, host_item.text, 257, 512) == 0);
+
+    pulse::ops::ShellMenuItem item;
+    item.id = 23;
+    item.verb = L"custom";
+    item.text = L"Action";
+    item.clsid = L"handler-a";
+    const auto test_click = [&](const char* name, std::vector<pulse::ops::ShellMenuItem> current,
+                                bool expected) {
+        ContextMenuController controller;
+        int invoked = 0;
+        ContextMenuController::ShellOperations operations;
+        operations.query = [](auto, HWND, bool, bool, auto) { return 1u; };
+        operations.invoke = [&](uint32_t token, uint32_t id, auto, auto) {
+            if (token == 1 && id == item.id) ++invoked;
+        };
+        controller.SetShellOperations(std::move(operations));
+        controller.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
+        controller.CompleteComQuery(1, {item}, GetTickCount64());
+        controller.OpenMenu({});
+        controller.CompleteComQuery(1, std::move(current), GetTickCount64());
+        controller.CloseMenu();
+        controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id), {}, {});
+        return Report(name, invoked == (expected ? 1 : 0));
+    };
+    passed &= test_click("controller executes a current snapshot", {item}, true);
+    auto changed = item;
+    changed.clsid = L"handler-b";
+    passed &= test_click("controller refuses a numeric id reused by a different handler", {changed}, false);
+    changed = item;
+    changed.verb = L"other";
+    passed &= test_click("controller refuses a numeric id reused by a different verb", {changed}, false);
+    changed = item;
+    changed.id = 258;
+    auto same_caption = changed;
+    same_caption.id = 2;
+    passed &= test_click("controller does not choose among duplicate verbs and captions", {changed, same_caption}, false);
+    changed = item;
+    changed.enabled = false;
+    passed &= test_click("controller refuses a command disabled since display", {changed}, false);
+    changed = item;
+    changed.has_children = true;
+    passed &= test_click("controller refuses a command turned into a header", {changed}, false);
+    passed &= test_click("controller refuses duplicate live ids", {item, item}, false);
+
+    ContextMenuController cache_controller;
+    uint32_t queries = 0;
+    uint32_t invokes = 0;
+    ContextMenuController::ShellOperations cache_operations;
+    cache_operations.query = [&](auto, HWND, bool, bool, auto) { return ++queries; };
+    cache_operations.invoke = [&](uint32_t, uint32_t, auto, auto) { ++invokes; };
+    cache_controller.SetShellOperations(std::move(cache_operations));
+    cache_controller.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
+    cache_controller.CompleteComQuery(1, {item}, GetTickCount64());
+    cache_controller.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", true, {}, {});
+    passed &= Report("extended mode starts a new same-path session with its own display cache",
+        queries == 2 && !cache_controller.SeedComItemsFromCache());
+    const auto extended_result = cache_controller.CompleteComQuery(2, {item}, GetTickCount64());
+    passed &= Report("extended timing and cache keys remain distinct", extended_result.cache_key == L".txt:extended");
+    cache_controller.Close();
+    cache_controller.StartQuery(context, nullptr, {L"C:\\two.txt"}, false, L".txt", false, {}, {});
+    const bool seeded = cache_controller.SeedComItemsFromCache();
+    cache_controller.OpenMenu({});
+    cache_controller.CompleteComQuery(3, {item}, GetTickCount64());
+    cache_controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id), {}, {});
+    passed &= Report("cached rows cannot authorize a command in a new session", seeded && invokes == 0);
+    cache_controller.StartQuery(context, nullptr, {L"C:\\two.txt"}, false, L".txt", false, {}, {});
+    cache_controller.SeedComItemsFromCache();
+    cache_controller.OpenMenu({});
+    cache_controller.CompleteComQuery(4, {item}, GetTickCount64());
+    cache_controller.NotePatchedDisplay();
+    cache_controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id), {}, {});
+    passed &= Report("a patched current-session display can replace cached presentation safely", invokes == 1);
+
+    for (int mode = 0; mode != 4; ++mode) {
+        ContextMenuController controller;
+        std::vector<std::wstring> selected, executed;
+        for (int i = 0; i != 19; ++i) selected.push_back(L"C:\\selected-" + std::to_wstring(i) + L".txt");
+        StaticVerb verb;
+        verb.verb = mode == 0 ? L"runas" : L"custom";
+        verb.display = L"Action";
+        if (mode == 1) verb.app_path = L"tool.exe";
+        if (mode == 2) verb.command = L"tool.exe \"%1\"";
+        ContextMenuController::ShellOperations operations;
+        operations.query = [](auto, HWND, bool, bool, auto) { return 1u; };
+        operations.execute_verb = [&](const auto& path, const auto&) { executed.push_back(path); };
+        operations.open_with_app = [&](const auto&, const auto& path) { executed.push_back(path); };
+        operations.execute_command = [&](const auto&, const auto& path) { executed.push_back(path); };
+        controller.SetShellOperations(std::move(operations));
+        controller.CompleteStaticVerbs(L".txt", {verb});
+        controller.StartQuery(context, nullptr, selected, false, L".txt", false, {}, {});
+        controller.ExecuteShellCommand(CmdShellStaticBase, {}, {});
+        passed &= Report("static shell command delivers every selected target beyond sixteen", executed == selected);
+    }
     return passed;
 }
 
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-quick-access") {
+        using namespace pulse::app;
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        bool passed = true;
+        pulse::ui::FluentMenuItem pin;
+        pin.command = CmdPinQuickAccess;
+        pin.text = L"固定到快速访问";
+        ShellMenuEntry native;
+        native.command = CmdShellComBase + 71;
+        native.verb = L"PiNtOhOmE";
+        native.text = L"Pin to Quick access (&H)";
+        ShellMenuEntry vendor;
+        vendor.command = CmdShellComBase + 72;
+        vendor.verb = L"vendor.pin";
+        vendor.text = pin.text;
+        ShellMenuEntry unknown = vendor;
+        unknown.command = CmdShellComBase + 73;
+        unknown.verb.clear();
+        unknown.clsid = L"{fixture-vendor}";
+        std::vector<pulse::ui::FluentMenuItem> display{pin};
+        AppendShellSection(display, {native, vendor, unknown, vendor});
+        passed &= Report("quick access merge removes native pin by canonical identity across localized captions",
+            display.size() == 3 && display.front().command == CmdPinQuickAccess);
+        passed &= Report("quick access merge retains distinct and unknown third-party commands with the same caption",
+            display.size() == 3 && display[1].command == vendor.command && display[2].command == unknown.command);
+        passed &= Report("shell merge removes a repeated command identity rather than a matching caption",
+            std::count_if(display.begin(), display.end(), [&](const auto& row) { return row.command == vendor.command; }) == 1);
+        pin.command = CmdUnpinQuickAccess;
+        pin.text = L"从快速访问取消固定";
+        native.verb = L"unpinfromhome";
+        native.text = L"Unpin from Quick access";
+        display = {pin};
+        AppendShellSection(display, {native});
+        passed &= Report("all-pinned selections retain Pulse unpin and suppress only the equivalent native command",
+            display.size() == 1 && display.front().command == CmdUnpinQuickAccess);
+        display.clear();
+        AppendShellSection(display, {native});
+        passed &= Report("merge does not disable a native pin command when Pulse has no equivalent entry",
+            display.size() == 1 && display.front().command == native.command);
+        ShellMenuEntry group;
+        group.text = L"Vendor tools";
+        group.children = {native, unknown};
+        display = {pin};
+        AppendShellSection(display, {group});
+        passed &= Report("submenu dedup keeps unknown vendor commands and removes only the known native equivalent",
+            display.size() == 2 && display.back().children.size() == 1 && display.back().children.front().command == unknown.command);
+        ContextMenuPrefs prefs;
+        prefs.persist = false;
+        ContextMenuController controller;
+        ContextMenuController::ShellOperations operations;
+        operations.query = [](auto, HWND, bool, bool, auto) { return 19u; };
+        controller.SetShellOperations(std::move(operations));
+        controller.MergeStaticCache({{L":folder", {{L"pintohome", L"Pin to Quick access (&H)", L""}}}});
+        controller.StartQuery(prefs, nullptr, {L"C:\\fixture"}, false, L":folder", false, {}, {});
+        bool changed = false;
+        pin.command = CmdPinQuickAccess;
+        display = controller.BuildDisplay(prefs, {pin}, changed);
+        passed &= Report("old registry cache pin entries do not duplicate the Pulse command in the displayed menu",
+            std::none_of(display.begin(), display.end(), [](const auto& row) {
+                return row.command >= CmdShellStaticBase && row.command < CmdShellComBase;
+            }));
+        return passed ? 0 : 1;
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-safety") {
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        pulse::app::ContextMenuPrefs context;
+        context.persist = false;
+        return RunContextMenuSafetyTests(context) ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-com") {
         pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
         pulse::app::ContextMenuPrefs context;

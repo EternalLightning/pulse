@@ -39,6 +39,7 @@ void ToggleGlobalSearch(AppState& s) {
         return;
     }
     std::wstring folder;
+    s.globalSearchWindow.BindFilenameClients(s.index, s.networkIndex, s.nextIndexReq);
     s.globalSearchWindow.SetAppearance(s.darkMode, ui::WindowEffectFromId(s.appPrefs.window_effect),
         s.appPrefs.background_image, s.accentColor);
     if (const auto* tab = ActiveTab(s); tab && !fs::IsVirtualPath(tab->current_path)) folder = tab->current_path;

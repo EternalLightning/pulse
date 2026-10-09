@@ -50,15 +50,8 @@ std::wstring SelectedFolder(const app::Tab& tab) {
 void RequestColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col) {
     col.requested = true;
     col.error = false;
-    uint64_t gen = 0;
-    if (fs::SnapshotPtr fresh = s.store.GetOrStart(col.path, gen)) {
-        col.snapshot = std::move(fresh);
-        col.generation = 0;
-        return;
-    }
-    if (!col.snapshot) col.snapshot = s.store.Peek(col.path);
-    // A pane already loading this folder owns the refresh; issuing another
-    // would cancel its generation.
+    // A pane already loading this folder owns the refresh. Do not consume the
+    // store's dirty marker: its completion still needs to see a watch retry.
     uint64_t shared = 0;
     ForEachPane(s, [&](app::Pane& pane) {
         const app::Tab* other = pane.ActiveTab();
@@ -67,17 +60,35 @@ void RequestColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col
             shared = other->pending_generation;
         }
     });
-    col.generation = shared != 0 ? shared
-                                 : s.worker.Refresh(col.path, tab.sort_column, tab.sort_direction);
+    if (shared != 0) {
+        if (!col.snapshot) col.snapshot = s.store.Peek(col.path);
+        col.generation = shared;
+        return;
+    }
+    uint64_t gen = 0;
+    if (fs::SnapshotPtr fresh = s.store.GetOrStart(col.path, gen)) {
+        col.snapshot = std::move(fresh);
+        col.generation = 0;
+        col.applied_generation = (std::max)(col.applied_generation, gen);
+        return;
+    }
+    if (!col.snapshot) col.snapshot = s.store.Peek(col.path);
+    col.generation = s.worker.Refresh(col.path, tab.sort_column, tab.sort_direction,
+                                     app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
 }
 
-void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab) {
+void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab, app::FolderSortMode folders) {
     if (col.rows && col.rows_snapshot == col.snapshot &&
         col.rows_show_hidden == tab.show_hidden_files &&
-        col.rows_show_protected == tab.show_protected_os_files) return;
+        col.rows_show_protected == tab.show_protected_os_files &&
+        col.rows_sort_column == tab.sort_column && col.rows_sort_direction == tab.sort_direction &&
+        col.rows_folder_sort == folders) return;
     col.rows_snapshot = col.snapshot;
     col.rows_show_hidden = tab.show_hidden_files;
     col.rows_show_protected = tab.show_protected_os_files;
+    col.rows_sort_column = tab.sort_column;
+    col.rows_sort_direction = tab.sort_direction;
+    col.rows_folder_sort = folders;
     col.highlight_row = -1;
     if (!col.snapshot) {
         col.rows.reset();
@@ -90,19 +101,25 @@ void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab) {
         const fs::DirEntry& e = entries[i];
         if (e.change_record_only) continue;
         if (!tab.AllowsAttributes(e.attrs)) continue;
-        if (!col.highlight_name.empty() && col.highlight_row < 0 &&
-            SamePath(e.name, col.highlight_name)) {
-            col.highlight_row = static_cast<int>(rows->size());
-        }
         rows->push_back(static_cast<int>(i));
     }
+    std::sort(rows->begin(), rows->end(), [&](int a, int b) {
+        return app::EntryLess(entries[static_cast<size_t>(a)], entries[static_cast<size_t>(b)],
+            tab.sort_column, tab.sort_direction, folders, col.path);
+    });
+    for (size_t i = 0; i < rows->size(); ++i)
+        if (!col.highlight_name.empty() && SamePath(entries[static_cast<size_t>((*rows)[i])].name,
+                                                   col.highlight_name)) {
+            col.highlight_row = static_cast<int>(i);
+            break;
+        }
     col.rows = std::move(rows);
 }
 
 void SyncColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col) {
     if (col.path.empty()) return;
     if (!col.requested) RequestColumn(s, tab, col);
-    RebuildRows(col, tab);
+    RebuildRows(col, tab, app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
 }
 
 // Drive roots show their sidebar label ("Data (D:)") instead of "D:".
@@ -259,14 +276,41 @@ void SyncColumnStrips(AppState& s) {
     });
 }
 
+void InvalidateColumnStripPath(AppState& s, const std::wstring& path, fs::SnapshotPtr fresh) {
+    const auto update = [&](app::ColumnStripColumn& col) {
+        if (!SamePath(col.path, path)) return;
+        col.rows.reset();
+        if (fresh) {
+            col.notify_watermark = (std::max)({col.notify_watermark, col.applied_generation,
+                col.generation, s.worker.ResultWatermark()});
+            col.snapshot = fresh;
+            col.generation = 0;
+            col.requested = true;
+            col.error = false;
+        } else {
+            col.requested = false;
+        }
+    };
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        if (!tab) return;
+        auto& strip = tab->column_strip;
+        for (auto& col : strip.ancestors) update(col);
+        update(strip.child);
+    });
+}
+
 void NoteColumnStripResult(AppState& s, const app::WorkResult& res) {
     if (res.cancelled || fs::IsVirtualPath(res.path)) return;
     bool changed = false;
     auto apply = [&](app::ColumnStripColumn& col) {
         if (col.path.empty() || !SamePath(col.path, res.path)) return;
+        if (res.generation <= col.notify_watermark ||
+            res.generation < col.applied_generation) return;
         if (res.error) {
             if (col.generation == 0 || res.generation < col.generation) return;
             col.generation = 0;
+            col.applied_generation = res.generation;
             col.error = true;
             changed = true;
             return;
@@ -274,6 +318,7 @@ void NoteColumnStripResult(AppState& s, const app::WorkResult& res) {
         if (!res.snapshot) return;
         if (col.generation != 0 && res.generation < col.generation) return;
         col.generation = 0;
+        col.applied_generation = res.generation;
         col.error = false;
         col.snapshot = res.snapshot;
         changed = true;

@@ -7,6 +7,8 @@
 #include <aclapi.h>
 #include <sddl.h>
 #include <vector>
+#include <winternl.h>
+#include <atomic>
 
 namespace pulse::app {
 namespace {
@@ -27,10 +29,10 @@ std::wstring LookupSid(PSID sid) {
     return name;
 }
 
-void FetchOwner(const std::wstring& shell_path, DetailsMeta& out) {
+void FetchOwner(HANDLE file, DetailsMeta& out) {
     PSID sid = nullptr;
     PSECURITY_DESCRIPTOR sd = nullptr;
-    if (GetNamedSecurityInfoW(shell_path.c_str(), SE_FILE_OBJECT,
+    if (GetSecurityInfo(file, SE_FILE_OBJECT,
                               OWNER_SECURITY_INFORMATION, &sid, nullptr, nullptr,
                               nullptr, &sd) == ERROR_SUCCESS) {
         out.owner = LookupSid(sid);
@@ -38,34 +40,18 @@ void FetchOwner(const std::wstring& shell_path, DetailsMeta& out) {
     }
 }
 
-void FetchPermissions(const std::wstring& shell_path, bool is_dir, DetailsMeta& out) {
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return;
-    DWORD needed = 0;
-    GetTokenInformation(token, TokenUser, nullptr, 0, &needed);
-    std::vector<BYTE> buffer(needed);
-    TOKEN_USER* user = needed && GetTokenInformation(token, TokenUser, buffer.data(),
-                                                     needed, &needed)
-        ? reinterpret_cast<TOKEN_USER*>(buffer.data()) : nullptr;
-    PACL dacl = nullptr;
-    PSECURITY_DESCRIPTOR sd = nullptr;
-    if (user && GetNamedSecurityInfoW(shell_path.c_str(), SE_FILE_OBJECT,
-                                      DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                                      &dacl, nullptr, &sd) == ERROR_SUCCESS) {
-        if (!dacl) {
-            out.permissions = pulse::l10n::Get(pulse::l10n::StringId::PermFull).c_str(); // NULL DACL grants everyone full access
-        } else {
-            TRUSTEE_W trustee{};
-            trustee.TrusteeForm = TRUSTEE_IS_SID;
-            trustee.TrusteeType = TRUSTEE_IS_USER;
-            trustee.ptstrName = static_cast<LPWSTR>(user->User.Sid);
-            ACCESS_MASK mask = 0;
-            if (GetEffectiveRightsFromAclW(dacl, &trustee, &mask) == ERROR_SUCCESS)
-                out.permissions = FormatAccessMask(mask, is_dir);
-        }
-        if (sd) LocalFree(sd);
-    }
-    CloseHandle(token);
+void FetchPermissions(const std::wstring& path, bool is_dir, DetailsMeta& out) {
+    HANDLE file = CreateFileW(path.c_str(), MAXIMUM_ALLOWED,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    const auto module = GetModuleHandleW(L"ntdll.dll");
+    const auto query = module ? reinterpret_cast<decltype(&NtQueryObject)>(
+        GetProcAddress(module, "NtQueryObject")) : nullptr;
+    PUBLIC_OBJECT_BASIC_INFORMATION basic{};
+    if (query && query(file, ObjectBasicInformation, &basic, sizeof(basic), nullptr) >= 0)
+        out.permissions = FormatAccessMask(basic.GrantedAccess, is_dir);
+    CloseHandle(file);
 }
 
 void FetchVolume(const std::wstring& shell_path, DetailsMeta& out) {
@@ -104,26 +90,52 @@ std::wstring FormatAccessMask(unsigned int mask, bool is_dir) {
         if (!out.empty()) out += pulse::l10n::Get(pulse::l10n::StringId::ListSeparator);
         out += part;
     };
-    if (read && write) add(pulse::l10n::Get(pulse::l10n::StringId::PermModify).c_str());
-    if ((mask & FILE_GENERIC_EXECUTE) == FILE_GENERIC_EXECUTE) add(pulse::l10n::Get(pulse::l10n::StringId::PermReadExecute).c_str());
+    const bool execute = (mask & FILE_GENERIC_EXECUTE) == FILE_GENERIC_EXECUTE;
+    const bool modify = read && write && execute && (mask & DELETE);
+    if (modify) add(pulse::l10n::Get(pulse::l10n::StringId::PermModify).c_str());
+    if (read && execute) add(pulse::l10n::Get(pulse::l10n::StringId::PermReadExecute).c_str());
     if (is_dir && (mask & FILE_LIST_DIRECTORY) == FILE_LIST_DIRECTORY)
         add(pulse::l10n::Get(pulse::l10n::StringId::PermList).c_str());
-    if (read && !write) add(pulse::l10n::Get(pulse::l10n::StringId::PermRead).c_str());
-    if (write && !read) add(pulse::l10n::Get(pulse::l10n::StringId::PermWrite).c_str());
+    if (read && !modify) add(pulse::l10n::Get(pulse::l10n::StringId::PermRead).c_str());
+    if (write && !modify) add(pulse::l10n::Get(pulse::l10n::StringId::PermWrite).c_str());
     if (mask & DELETE) add(pulse::l10n::Get(pulse::l10n::StringId::Delete).c_str());
     if (out.empty()) add(pulse::l10n::Get(pulse::l10n::StringId::PermSpecial).c_str());
     return out;
 }
 
+HANDLE OpenDetailsMetadataFile(const std::wstring& path) {
+    HANDLE file = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        file = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL, nullptr);
+    return file;
+}
+
 DetailsMeta FetchDetailsMeta(const std::wstring& path) {
+    HANDLE file = OpenDetailsMetadataFile(path);
+    if (file == INVALID_HANDLE_VALUE) return {};
+    BY_HANDLE_FILE_INFORMATION info{};
+    const auto out = GetFileInformationByHandle(file, &info)
+        ? FetchDetailsMeta(file, path, (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) : DetailsMeta{};
+    CloseHandle(file);
+    return out;
+}
+
+DetailsMeta FetchDetailsMeta(HANDLE file, const std::wstring& path, bool is_dir) {
     DetailsMeta out;
     const std::wstring shell_path = ShellPath(path);
-    const DWORD attrs = GetFileAttributesW(shell_path.c_str());
-    if (attrs == INVALID_FILE_ATTRIBUTES) return out;
-    FetchOwner(shell_path, out);
-    FetchPermissions(shell_path, (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0, out);
+    FetchOwner(file, out);
+    FetchPermissions(path, is_dir, out);
     FetchVolume(shell_path, out);
     return out;
+}
+
+uint64_t NextDetailsWindowEpoch() {
+    static std::atomic<uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace pulse::app

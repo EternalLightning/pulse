@@ -25,7 +25,7 @@ struct TransferIntegrationProbe {
         manager.ExecuteFileOperation(item);
         return true;
     }
-    static uint32_t BackendResult(const OpsManager& manager) { return manager.done_hr_; }
+    static uint32_t BackendResult(const OpsManager& manager) { return static_cast<uint32_t>(manager.Status().failure_hr); }
     static void RefreshUndo(OpsManager& manager) { manager.RefreshRecycleUndoValidity(); }
     static void SeedCachedRecycleUndo(OpsManager& manager, const std::wstring& original, const std::wstring& payload) {
         UndoEntry entry;

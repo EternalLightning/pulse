@@ -48,7 +48,8 @@ inline app::Tab* ActiveTab(AppState& s) {
     return s.pane ? s.pane->ActiveTab() : nullptr;
 }
 
-void PrefetchDetailsMeta(HWND hwnd, const std::wstring& path);
+bool ApplyDetailsMetaResult(AppState& s, DetailsMetaResult& result);
+bool ShouldRequestDetailsMeta(const AppState& s, const app::Tab& tab, const std::wstring& path);
 void RememberLayoutFocus(AppState& s);
 std::vector<std::wstring> VisibleFolderPaths(const AppState& s);
 void SyncVisibleWatches(AppState& s);
@@ -105,9 +106,6 @@ void BumpRecycleOccupancy(AppState& s, int64_t delta);
 void ClearRecycleOccupancy(AppState& s);
 bool ToggleStarred(AppState& s, const std::wstring& target,
                           app::PlaceItemKind kind = app::PlaceItemKind::Unknown);
-void StopDetailsSizeWalk(AppState& s);
-void StartDetailsSizeWalk(AppState& s, const std::wstring& path);
-void ShutdownDetailsSizeWalk(AppState& s);
 std::wstring DetailsAttributeText(DWORD attrs);
 double TrayAnimationNow();
 bool TickTrayDeck(AppState& s, double now = TrayAnimationNow());

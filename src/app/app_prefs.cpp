@@ -224,65 +224,66 @@ std::wstring AppPrefs::ToJson() const {
 }
 
 bool AppPrefs::FromJson(const std::wstring& json) {
-    if (json.empty()) return false;
+    const pulse::json::Document doc(json);
+    if (!doc.Is(pulse::json::Kind::Object)) return false;
     folder_views.ReadJson(json);
-    launch_on_startup = pulse::json::ExtractBool(json, L"launch_on_startup", false);
-    start_to_tray = pulse::json::ExtractBool(json, L"start_to_tray", false);
-    close_last_tab_window = pulse::json::ExtractBool(json, L"close_last_tab_window", false);
-    keep_running_on_close = pulse::json::ExtractBool(json, L"keep_running_on_close", false);
-    open_folders_in_pulse = pulse::json::ExtractBool(json, L"open_folders_in_pulse", false);
-    take_over_win_e = pulse::json::ExtractBool(json, L"take_over_win_e", false);
-    take_over_this_pc = pulse::json::ExtractBool(json, L"take_over_this_pc", false);
-    experimental_explorer_takeover = pulse::json::ExtractBool(json, L"experimental_explorer_takeover", false);
-    verify_copies = pulse::json::ExtractBool(json, L"verify_copies", false);
-    show_status_performance = pulse::json::ExtractBool(json, L"show_status_performance", false);
-    show_pinned_tab_names = pulse::json::ExtractBool(json, L"show_pinned_tab_names", true);
-    new_tab_home = pulse::json::ExtractBool(json, L"new_tab_home", false);
-    list_smart_date = pulse::json::ExtractBool(json, L"list_smart_date", true);
-    list_zebra_rows = pulse::json::ExtractBool(json, L"list_zebra_rows", true);
-    list_size_bar = pulse::json::ExtractBool(json, L"list_size_bar", false);
-    folder_sort_mode = pulse::json::ExtractInt(json, L"folder_sort_mode", 0);
+    launch_on_startup = pulse::json::ExtractBool(doc, L"launch_on_startup", false);
+    start_to_tray = pulse::json::ExtractBool(doc, L"start_to_tray", false);
+    close_last_tab_window = pulse::json::ExtractBool(doc, L"close_last_tab_window", false);
+    keep_running_on_close = pulse::json::ExtractBool(doc, L"keep_running_on_close", false);
+    open_folders_in_pulse = pulse::json::ExtractBool(doc, L"open_folders_in_pulse", false);
+    take_over_win_e = pulse::json::ExtractBool(doc, L"take_over_win_e", false);
+    take_over_this_pc = pulse::json::ExtractBool(doc, L"take_over_this_pc", false);
+    experimental_explorer_takeover = pulse::json::ExtractBool(doc, L"experimental_explorer_takeover", false);
+    verify_copies = pulse::json::ExtractBool(doc, L"verify_copies", false);
+    show_status_performance = pulse::json::ExtractBool(doc, L"show_status_performance", false);
+    show_pinned_tab_names = pulse::json::ExtractBool(doc, L"show_pinned_tab_names", true);
+    new_tab_home = pulse::json::ExtractBool(doc, L"new_tab_home", false);
+    list_smart_date = pulse::json::ExtractBool(doc, L"list_smart_date", true);
+    list_zebra_rows = pulse::json::ExtractBool(doc, L"list_zebra_rows", true);
+    list_size_bar = pulse::json::ExtractBool(doc, L"list_size_bar", false);
+    folder_sort_mode = pulse::json::ExtractInt(doc, L"folder_sort_mode", 0);
     if (folder_sort_mode < 0 || folder_sort_mode > 2) folder_sort_mode = 0;
-    search_pinyin = pulse::json::ExtractBool(json, L"search_pinyin", true);
-    global_search_enabled = pulse::json::ExtractBool(json, L"global_search_enabled", false);
-    const int modifiers = pulse::json::ExtractInt(json, L"global_search_modifiers", 1);
-    const int key = pulse::json::ExtractInt(json, L"global_search_key", 32);
+    search_pinyin = pulse::json::ExtractBool(doc, L"search_pinyin", true);
+    global_search_enabled = pulse::json::ExtractBool(doc, L"global_search_enabled", false);
+    const int modifiers = pulse::json::ExtractInt(doc, L"global_search_modifiers", 1);
+    const int key = pulse::json::ExtractInt(doc, L"global_search_key", 32);
     global_search_modifiers = modifiers > 0 && modifiers <= 15 ? static_cast<uint32_t>(modifiers) : 1;
     global_search_key = key > 0 && key <= 254 ? static_cast<uint32_t>(key) : 32;
-    show_hidden_files = pulse::json::ExtractBool(json, L"show_hidden_files", false);
-    show_protected_os_files = pulse::json::ExtractBool(json, L"show_protected_os_files", false);
-    blank_click_go_back = pulse::json::ExtractBool(json, L"blank_click_go_back", false);
-    change_tracking_enabled = pulse::json::ExtractBool(json, L"change_tracking_enabled", false);
-    change_tracking_days = pulse::json::ExtractInt(json, L"change_tracking_days", 7);
+    show_hidden_files = pulse::json::ExtractBool(doc, L"show_hidden_files", false);
+    show_protected_os_files = pulse::json::ExtractBool(doc, L"show_protected_os_files", false);
+    blank_click_go_back = pulse::json::ExtractBool(doc, L"blank_click_go_back", false);
+    change_tracking_enabled = pulse::json::ExtractBool(doc, L"change_tracking_enabled", false);
+    change_tracking_days = pulse::json::ExtractInt(doc, L"change_tracking_days", 7);
     if (change_tracking_days != 1 && change_tracking_days != 3 && change_tracking_days != 7)
         change_tracking_days = 7;
-    theme_mode = pulse::json::ExtractInt(json, L"theme_mode", -1);
+    theme_mode = pulse::json::ExtractInt(doc, L"theme_mode", -1);
     if (theme_mode < -1 || theme_mode > 2) theme_mode = -1;
-    language = pulse::json::ExtractString(json, L"language", L"system");
+    language = pulse::json::ExtractString(doc, L"language", L"system");
     if (language != L"system" && language != L"zh-CN" && language != L"en-US")
         language = L"system";
-    window_effect = pulse::json::ExtractString(json, L"window_effect", L"mica-alt");
+    window_effect = pulse::json::ExtractString(doc, L"window_effect", L"mica-alt");
     if (window_effect == L"dwm-blur") window_effect = L"acrylic-material";
     else if (window_effect.empty()) window_effect = L"mica-alt";
-    background_image = pulse::json::ExtractString(json, L"background_image");
-    row_height = pulse::json::ExtractInt(json, L"row_height", 34);
-    sidebar_width = pulse::json::ExtractInt(json, L"sidebar_width", 224);
+    background_image = pulse::json::ExtractString(doc, L"background_image");
+    row_height = pulse::json::ExtractInt(doc, L"row_height", 34);
+    sidebar_width = pulse::json::ExtractInt(doc, L"sidebar_width", 224);
     // The stored value is the user's intent; the window caps it while drawing.
     if (sidebar_width < static_cast<int>(ui::kSidebarMinWidthDip) ||
         sidebar_width > static_cast<int>(ui::kPanelWidthMaxDip)) sidebar_width = 224;
-    address_search_current = pulse::json::ExtractInt(json, L"address_search_current", 0) != 0;
-    address_search_content = pulse::json::ExtractInt(json, L"address_search_content", 0) != 0;
+    address_search_current = pulse::json::ExtractInt(doc, L"address_search_current", 0) != 0;
+    address_search_content = pulse::json::ExtractInt(doc, L"address_search_content", 0) != 0;
     if (row_height < 24 || row_height > 48) row_height = 34;
-    tray_icon_size = pulse::json::ExtractInt(json, L"tray_icon_size", 48);
+    tray_icon_size = pulse::json::ExtractInt(doc, L"tray_icon_size", 48);
     if (tray_icon_size < 32 || tray_icon_size > 64) tray_icon_size = 48;
-    const int legacy_look = pulse::json::ExtractInt(json, L"wallpaper_look", 1);
+    const int legacy_look = pulse::json::ExtractInt(doc, L"wallpaper_look", 1);
     const int migrated = legacy_look == 0 ? 35 : legacy_look == 2 ? 65 : 50;
-    wallpaper_visibility = pulse::json::ExtractInt(json, L"wallpaper_visibility", migrated);
+    wallpaper_visibility = pulse::json::ExtractInt(doc, L"wallpaper_visibility", migrated);
     wallpaper_visibility = std::clamp(wallpaper_visibility, 0, 100);
-    wallpaper_blur = pulse::json::ExtractInt(json, L"wallpaper_blur", 1);
+    wallpaper_blur = pulse::json::ExtractInt(doc, L"wallpaper_blur", 1);
     if (wallpaper_blur < 0 || wallpaper_blur > 2) wallpaper_blur = 1;
-    accent_rgb = pulse::json::ExtractString(json, L"accent_rgb");
-    accent_follow_system = pulse::json::ExtractInt(json, L"accent_follow_system", 0) != 0;
+    accent_rgb = pulse::json::ExtractString(doc, L"accent_rgb");
+    accent_follow_system = pulse::json::ExtractInt(doc, L"accent_follow_system", 0) != 0;
     uint32_t accent_parsed = 0;
     if (!accent_rgb.empty() && ParseAccentRgb(accent_rgb, accent_parsed)) {
         wchar_t hex[8]{};
@@ -293,7 +294,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     }
     custom_tag_colors.clear();
     for (const std::wstring& entry :
-         pulse::json::ExtractStringArray(json, L"custom_tag_colors")) {
+         pulse::json::ExtractStringArray(doc, L"custom_tag_colors")) {
         const wchar_t* text = entry.c_str();
         if (*text == L'#') ++text;
         wchar_t* end = nullptr;
@@ -301,10 +302,10 @@ bool AppPrefs::FromJson(const std::wstring& json) {
         if (end && *end == L'\0' && v <= 0xFFFFFFul && wcslen(text) == 6)
             custom_tag_colors.push_back(static_cast<uint32_t>(v));
     }
-    duplicate_scan_scope = pulse::json::ExtractInt(json, L"duplicate_scan_scope", 0);
+    duplicate_scan_scope = pulse::json::ExtractInt(doc, L"duplicate_scan_scope", 0);
     if (duplicate_scan_scope < 0 || duplicate_scan_scope > 2) duplicate_scan_scope = 0;
-    duplicate_scan_folder = pulse::json::ExtractString(json, L"duplicate_scan_folder");
-    duplicate_scan_drive = pulse::json::ExtractString(json, L"duplicate_scan_drive");
+    duplicate_scan_folder = pulse::json::ExtractString(doc, L"duplicate_scan_folder");
+    duplicate_scan_drive = pulse::json::ExtractString(doc, L"duplicate_scan_drive");
     return true;
 }
 

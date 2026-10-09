@@ -39,7 +39,7 @@ struct LayoutTabSnapshot {
 struct SessionSnapshot {
     RECT window_rect = {};
     bool maximized = false;
-    bool dark = false;
+    bool dark = false; // legacy serialization/migration, projected from window appearance
     std::wstring active_path;
     StagingTray tray;
     std::wstring undo_json; // ops::OpsManager undo stack (serialized array)

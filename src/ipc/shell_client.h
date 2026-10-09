@@ -6,6 +6,7 @@
 // All callbacks fire on the client's reader thread — never block the UI.
 #pragma once
 #include "protocol.h"
+#include "../common/file_identity.h"
 #include "../common/shell_menu_item.h"
 #include <windows.h>
 #include <atomic>
@@ -18,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-namespace pulse::ops { class OpsManager; }
+namespace pulse::ops { class OpsManager; struct ShellCompletionTestProbe; }
 
 namespace pulse::ipc {
 
@@ -30,6 +31,8 @@ public:
         std::function<void(uint32_t id, float percent, std::wstring item,
                            uint32_t items_done, uint32_t total_items)> progress;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> done;
+        std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
+                           std::vector<FileIdentity> produced_identities)> produced_done;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
                            std::vector<std::wstring> deleted_paths,
                            std::vector<std::wstring> recycled_paths,
@@ -45,8 +48,6 @@ public:
     void Start(Callbacks cb);
     void Stop();
 
-    uint32_t DeleteRecycle(const std::vector<std::wstring>& paths);
-    uint32_t RealDelete(const std::vector<std::wstring>& paths);
     uint32_t RestoreRecycle(const std::vector<std::wstring>& paths,
                             const std::vector<std::wstring>& recycle_paths = {});
     uint32_t Rename(const std::wstring& path, const std::wstring& new_name);
@@ -62,16 +63,20 @@ public:
     // sessions dismissed without invoking.
     uint32_t QueryContextMenu(const std::vector<std::wstring>& paths,
                               uint32_t owner_hwnd, bool background, bool extended,
-                              const std::vector<std::wstring>& disabled_clsids = {});
+                              const std::vector<std::wstring>& disabled_clsids = {},
+                              const std::function<void(uint32_t)>& before_send = {});
     uint32_t InvokeContextMenu(uint32_t session_id, uint32_t item_id,
                                const std::wstring& verb = {},
-                               const std::wstring& text = {});
+                               const std::wstring& text = {},
+                               const std::function<void(uint32_t)>& before_send = {});
     void CloseContextMenu(uint32_t session_id);
 
 private:
     friend class pulse::ops::OpsManager;
+    friend struct pulse::ops::ShellCompletionTestProbe;
     uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
-                              bool recycle = false, HWND owner = nullptr);
+                              bool recycle = false, HWND owner = nullptr,
+                              const std::vector<FileIdentity>& expected_identities = {});
     ShellClient() = default;
     ~ShellClient();
 
@@ -82,7 +87,8 @@ private:
         bool retried = false;
     };
 
-    uint32_t Submit(uint32_t type, const std::vector<uint8_t>& payload);
+    uint32_t Submit(uint32_t type, const std::vector<uint8_t>& payload,
+                    const std::function<void(uint32_t)>& before_send = {});
     bool EnsureConnected();
     bool SpawnChild();
     void KillChild();

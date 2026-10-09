@@ -595,6 +595,14 @@ void SettingsController::NetworkAction(int action, bool pin_after_add) {
     StartUiTask(std::move(task));
 }
 
+void SettingsController::AddNetworkPath(std::wstring path) {
+    if (!network_ || !ui_.task_completion || path.empty()) return;
+    ClearError();
+    SettingsTask task{SettingsTaskKind::NetworkAdd};
+    task.path = std::move(path);
+    StartUiTask(std::move(task));
+}
+
 void SettingsController::RemoveNetwork(int position) {
     if (!network_ || !ui_.task_completion) return;
     const auto roots = network_->Roots();

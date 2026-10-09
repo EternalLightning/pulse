@@ -8,6 +8,7 @@
 #include <functional>
 #include <string>
 #include <windows.h>
+#include <winioctl.h>
 
 namespace pulse::index {
 
@@ -21,11 +22,20 @@ struct MftFile {
     uint8_t name_type = 0; // NTFS FILE_NAME.NameType
 };
 
+enum class MftReadStatus { Complete, Failed, Cancelled, Capped };
+
+struct MftReadIo {
+    // Optional IO overrides permit read-failure fixtures without a live volume.
+    std::function<bool(NTFS_VOLUME_DATA_BUFFER&)> query;
+    std::function<bool(uint64_t, void*, DWORD)> read;
+};
+
 // Walk $MFT on an already-opened volume handle (FILE_READ_DATA).
 // `emit` returns false to stop. `progress` is invoked roughly every 50k records.
-bool EnumerateMft(HANDLE volume,
+MftReadStatus EnumerateMft(HANDLE volume,
                   std::atomic<bool>* running,
                   const std::function<void(size_t)>& progress,
-                  const std::function<bool(MftFile&&)>& emit);
+                  const std::function<bool(MftFile&&)>& emit,
+                  const MftReadIo* io = nullptr);
 
 } // namespace pulse::index

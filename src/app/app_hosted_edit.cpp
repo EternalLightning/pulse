@@ -2,7 +2,7 @@
 // app_hosted_edit.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "tab_shortcuts.h"
-#include "drive_labels.h"
+#include "drive_label_rename.h"
 #include "../ui/address_search_layout.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"

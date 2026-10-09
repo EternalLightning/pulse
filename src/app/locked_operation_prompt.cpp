@@ -8,7 +8,9 @@ void PumpLockedOperationPrompt(AppState& state) {
     if (state.exit_requested || state.lockedOperationPromptActive || !IsWindow(state.hwnd)) return;
     const auto status = state.ops.Status();
     const bool rename = status.type == ops::OpType::Rename && status.lock_retry_available;
-    if (status.active || status.phase != ops::OpPhase::Failed || (!rename && status.lock_owners.empty()) ||
+    const bool plain_transfer_retry = status.lock_retry_available &&
+        (status.type == ops::OpType::Copy || status.type == ops::OpType::Move);
+    if (status.active || status.phase != ops::OpPhase::Failed || (!rename && !plain_transfer_retry && status.lock_owners.empty()) ||
         !status.task_id || status.task_id == state.lockedOperationPromptedTaskId ||
         !state.ops.IsLockedFailureCurrent(status.task_id)) return;
     state.lockedOperationPromptedTaskId = status.task_id;

@@ -87,6 +87,7 @@ D2D1_COLOR_F TextFieldFillColor(const Theme& theme, const ControlState& state,
 }
 
 struct TextLayoutKey {
+    IDWriteFactory2* factory = nullptr;
     IDWriteTextFormat* format = nullptr;
     std::wstring text;
     int width_64 = 0;
@@ -103,6 +104,7 @@ struct TextLayoutKeyHash {
         const auto combine = [&value](size_t next) {
             value ^= next + 0x9e3779b9u + (value << 6) + (value >> 2);
         };
+        combine(std::hash<void*>{}(key.factory));
         combine(std::hash<std::wstring>{}(key.text));
         combine(std::hash<int>{}(key.width_64));
         combine(std::hash<int>{}(key.height_64));
@@ -119,16 +121,26 @@ thread_local std::unordered_map<TextLayoutKey, ComPtr<IDWriteTextLayout>, TextLa
     g_wrapped_layout_cache;
 constexpr size_t kWrappedLayoutCacheLimit = 256;
 
+thread_local std::uint64_t g_text_layout_generation = 0;
+
 void ClearTextLayoutCache() {
     g_text_layout_cache.clear();
     g_wrapped_layout_cache.clear();
+    g_text_layout_generation = typography::Generation();
+    typography::ClearMeasurementCache();
+}
+
+void EnsureTextLayoutGeneration() {
+    if (g_text_layout_generation != typography::Generation()) ClearTextLayoutCache();
 }
 
 IDWriteTextLayout* GetTextLayout(Compositor* compositor, IDWriteTextFormat* format,
                                  std::wstring_view text, float width, float height,
                                  DWRITE_TEXT_ALIGNMENT alignment) {
     if (!compositor || !compositor->DwriteFactory() || !format || text.empty()) return nullptr;
+    EnsureTextLayoutGeneration();
     TextLayoutKey key{
+        compositor->DwriteFactory(),
         format,
         std::wstring(text),
         static_cast<int>(std::lround(width * 64.0f)),
@@ -158,7 +170,9 @@ IDWriteTextLayout* GetWrappedTextLayout(Compositor* compositor, IDWriteTextForma
                                         DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
     if (!compositor || !compositor->DwriteFactory() || !format || text.empty() || width <= 0.0f)
         return nullptr;
+    EnsureTextLayoutGeneration();
     TextLayoutKey key{
+        compositor->DwriteFactory(),
         format,
         std::wstring(text),
         static_cast<int>(std::lround(width * 64.0f)),
@@ -2412,9 +2426,9 @@ void Painter::DrawColumnHeader(const ColumnHeaderSpec& spec) {
     auto content = Inset(spec.bounds, Px(10.0f));
     const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text_secondary
                                                         : theme_->text_disabled;
-    if (spec.sort != SortDirection::None) {
+    if (spec.sort != SortIndicator::None) {
         const float icon_width = Px(16.0f);
-        DrawGlyphWithFormat(spec.sort == SortDirection::Ascending ? kChevronUp : kChevronDown,
+        DrawGlyphWithFormat(spec.sort == SortIndicator::Ascending ? kChevronUp : kChevronDown,
                             D2D1::RectF(content.right - icon_width, content.top,
                                        content.right, content.bottom),
                             theme_->accent, SmallIconFormat());

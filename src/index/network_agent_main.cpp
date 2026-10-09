@@ -62,6 +62,9 @@ std::vector<uint8_t> SearchPayload(const SearchResult& result) {
         writer.PutU32(static_cast<uint32_t>(hit.mtime));
         writer.PutU32(static_cast<uint32_t>(hit.mtime >> 32));
     }
+    writer.PutU64(result.revision);
+    writer.PutU32(result.error);
+    writer.PutU32(result.incomplete ? 1u : 0u);
     return writer.data();
 }
 
@@ -96,7 +99,9 @@ void SearchAndReply(HANDLE pipe, uint32_t id, Query query) {
     // searches, never the accept loop or idle client reads; use server IDs.
     std::unique_lock search_lock(g.search_mu, std::defer_lock);
     if (!search_lock.try_lock_for(std::chrono::milliseconds(500))) {
-        WriteFrame(pipe, agent::RSP_RESULT, id, ResultPayload(false, L"网络索引查询过载，请稍后重试")); return;
+        SearchResult failed;
+        failed.error = ERROR_BUSY; failed.incomplete = true;
+        WriteFrame(pipe, agent::RSP_SEARCH, id, SearchPayload(failed)); return;
     }
     static uint32_t next_id = 1;
     const auto internal_id = ++next_id;
@@ -109,7 +114,10 @@ void SearchAndReply(HANDLE pipe, uint32_t id, Query query) {
         }
         Sleep(10);
     }
-    WriteFrame(pipe, agent::RSP_RESULT, id, ResultPayload(false, L"网络索引查询超时"));
+    SearchResult failed;
+    failed.error = g.running ? ERROR_TIMEOUT : ERROR_OPERATION_ABORTED;
+    failed.incomplete = true;
+    WriteFrame(pipe, agent::RSP_SEARCH, id, SearchPayload(failed));
 }
 
 std::wstring TrackingOwner(HANDLE pipe) {

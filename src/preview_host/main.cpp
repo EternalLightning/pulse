@@ -35,6 +35,7 @@ bool IsOfflinePlaceholder(DWORD attrs) {
     return (attrs & (kRecallOnOpen | kRecallOnData)) && !(attrs & kPinned);
 }
 
+#ifndef PULSE_GIF_DECODER_TESTING
 std::wstring ExtensionOf(const std::wstring& path) {
     const size_t slash = path.find_last_of(L"\\/");
     const size_t dot = path.find_last_of(L'.');
@@ -102,16 +103,18 @@ bool LooksBinary(const std::vector<uint8_t>& bytes) {
     return !bytes.empty() && controls * 20 > bytes.size();
 }
 
-bool DecodeText(const std::vector<uint8_t>& bytes, std::wstring& text) {
+bool DecodeText(const std::vector<uint8_t>& bytes, std::wstring& text, bool& truncated) {
     if (bytes.empty()) { text.clear(); return true; }
     size_t offset = 0;
     if (bytes.size() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
         offset = 2;
+        truncated |= (bytes.size() - offset) % 2 != 0;
         text.reserve((bytes.size() - offset) / 2);
         for (size_t i = offset; i + 1 < bytes.size(); i += 2)
             text.push_back(static_cast<wchar_t>(bytes[i] | (bytes[i + 1] << 8)));
     } else if (bytes.size() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
         offset = 2;
+        truncated |= (bytes.size() - offset) % 2 != 0;
         text.reserve((bytes.size() - offset) / 2);
         for (size_t i = offset; i + 1 < bytes.size(); i += 2)
             text.push_back(static_cast<wchar_t>((bytes[i] << 8) | bytes[i + 1]));
@@ -119,9 +122,32 @@ bool DecodeText(const std::vector<uint8_t>& bytes, std::wstring& text) {
         if (bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             offset = 3;
         const char* raw = reinterpret_cast<const char*>(bytes.data() + offset);
-        const int raw_size = static_cast<int>(bytes.size() - offset);
+        int raw_size = static_cast<int>(bytes.size() - offset);
         int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, raw, raw_size,
                                         nullptr, 0);
+        if (chars <= 0 && truncated && raw_size > 0) {
+            int start = raw_size - 1;
+            while (start > 0 && raw_size - start < 4 &&
+                   (static_cast<uint8_t>(raw[start]) & 0xC0) == 0x80) --start;
+            const uint8_t lead = static_cast<uint8_t>(raw[start]);
+            const int expected = lead >= 0xC2 && lead <= 0xDF ? 2 :
+                lead >= 0xE0 && lead <= 0xEF ? 3 : lead >= 0xF0 && lead <= 0xF4 ? 4 : 0;
+            bool tail = expected > raw_size - start;
+            for (int i = start + 1; tail && i < raw_size; ++i)
+                tail = (static_cast<uint8_t>(raw[i]) & 0xC0) == 0x80;
+            if (tail && raw_size - start > 1) {
+                const uint8_t second = static_cast<uint8_t>(raw[start + 1]);
+                tail = (lead != 0xE0 || second >= 0xA0) &&
+                    (lead != 0xED || second <= 0x9F) &&
+                    (lead != 0xF0 || second >= 0x90) && (lead != 0xF4 || second <= 0x8F);
+            }
+            // Validate the complete prefix before discarding an incomplete UTF-8 tail.
+            if (tail && start > 0) {
+                const int prefix_chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                    raw, start, nullptr, 0);
+                if (prefix_chars > 0) { raw_size = start; chars = prefix_chars; }
+            } else if (tail && start == 0) { text.clear(); return true; }
+        }
         UINT code_page = CP_UTF8;
         DWORD flags = MB_ERR_INVALID_CHARS;
         if (chars <= 0) {
@@ -137,7 +163,14 @@ bool DecodeText(const std::vector<uint8_t>& bytes, std::wstring& text) {
         if (c < 0x20 && c != L'\r' && c != L'\n' && c != L'\t') c = L'\xFFFD';
     }
     constexpr size_t kMaxChars = 12000;
-    if (text.size() > kMaxChars) text.resize(kMaxChars);
+    if (text.size() > kMaxChars) {
+        ipc::TruncatePreviewString(text, kMaxChars);
+        truncated = true;
+    }
+    if (!text.empty() && text.back() >= 0xD800 && text.back() <= 0xDBFF) {
+        text.pop_back();
+        truncated = true;
+    }
     return true;
 }
 
@@ -182,10 +215,10 @@ bool MakeTextOrHex(const std::wstring& path, DWORD attrs, ipc::PreviewContentKin
     if (!known_text && file_size > bytes.size()) {
         if (!ReadPrefix(path, 32u * 1024u, bytes, file_size)) return false;
     }
-    if (LooksBinary(bytes) || !DecodeText(bytes, text)) return false;
+    truncated = file_size > bytes.size();
+    if (LooksBinary(bytes) || !DecodeText(bytes, text, truncated)) return false;
     kind = ipc::PreviewContentKind::Text;
     bytes_read = static_cast<uint32_t>(bytes.size());
-    truncated = file_size > bytes.size();
     return true;
 }
 
@@ -193,14 +226,14 @@ struct PreviewPropertyValue { std::wstring label, value; };
 
 void AddProperty(IPropertyStore* store, REFPROPERTYKEY key, const wchar_t* label,
                  std::vector<PreviewPropertyValue>& out) {
-    if (!store || out.size() >= 6) return;
+    if (!store || out.size() >= ipc::kPreviewMaxPropertyCount) return;
     PROPVARIANT value{};
     PropVariantInit(&value);
     if (SUCCEEDED(store->GetValue(key, &value)) && value.vt != VT_EMPTY && value.vt != VT_NULL) {
         PWSTR formatted = nullptr;
         if (SUCCEEDED(PSFormatForDisplayAlloc(key, value, PDFF_DEFAULT, &formatted)) &&
             formatted && *formatted) {
-            const std::wstring display = IsEqualPropertyKey(key, PKEY_Video_Compression)
+            std::wstring display = IsEqualPropertyKey(key, PKEY_Video_Compression)
                 ? preview::VideoCodecDisplayName(formatted) : std::wstring(formatted);
             if (!display.empty()) out.push_back({ label, display });
         }
@@ -236,7 +269,7 @@ std::vector<PreviewPropertyValue> ReadProperties(const std::wstring& path) {
     } else if (IsOneOf(extension, {L".mp4", L".mkv", L".mov", L".avi", L".webm", L".wmv", L".m4v"})) {
         AddProperty(store.Get(), PKEY_Media_Duration, L"时长", out);
         uint32_t width = 0, height = 0;
-        if (out.size() < 6 && ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
+        if (out.size() < ipc::kPreviewMaxPropertyCount && ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
             ReadUintProperty(store.Get(), PKEY_Video_FrameHeight, height) &&
             width > 0 && height > 0) {
             wchar_t dims[64];
@@ -262,9 +295,11 @@ bool WriteString(HANDLE pipe, const std::wstring& value) {
     return ipc::WriteAll(pipe, &chars, sizeof(chars)) &&
         (chars == 0 || ipc::WriteAll(pipe, value.data(), chars * sizeof(wchar_t)));
 }
+#endif
 
 } // namespace
 
+#ifndef PULSE_GIF_DECODER_TESTING
 static bool DecodeImage(const std::wstring& path, DWORD attrs, UINT pixels,
                         std::vector<uint8_t>& out, UINT& width, UINT& height, UINT& stride,
                         UINT& source_width, UINT& source_height) {
@@ -311,6 +346,7 @@ static bool DecodeImage(const std::wstring& path, DWORD attrs, UINT pixels,
     }
     return true;
 }
+#endif
 
 static bool MetadataUInt(IWICMetadataQueryReader* reader, const wchar_t* name,
                          uint32_t& value) {
@@ -359,20 +395,78 @@ static void AlphaBlendPbgra(uint8_t* dst, const uint8_t* src) {
     dst[3] = static_cast<uint8_t>(sa + (dst[3] * inv + 127u) / 255u);
 }
 
-static bool DecodeGifFrame(const std::wstring& path, DWORD attrs, UINT pixels,
-                           uint32_t frame_index, std::vector<uint8_t>& out,
-                           UINT& width, UINT& height, UINT& stride,
-                           uint32_t& frame_count, uint32_t& delay_ms,
-                           uint32_t& loop_count, UINT& source_width, UINT& source_height) {
-    if (IsOfflinePlaceholder(attrs)) return false;
-    ComPtr<IWICImagingFactory> factory; ComPtr<IWICBitmapDecoder> decoder;
+struct GifDecodeState {
+    static constexpr size_t max_canvas_bytes = 32u * 1024u * 1024u;
+    static constexpr size_t max_encoded_bytes = 32u * 1024u * 1024u;
+    ComPtr<IWICImagingFactory> factory;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICStream> stream;
+    HANDLE file = INVALID_HANDLE_VALUE;
+    BY_HANDLE_FILE_INFORMATION version{};
+    std::wstring path;
+    UINT cap = 0, canvas_w = 0, canvas_h = 0, count = 0;
+    uint32_t loop_count = 0, delay_ms = 0, next_frame = 0;
+    uint32_t prev_left = 0, prev_top = 0, prev_w = 0, prev_h = 0, prev_disposal = 0;
+    std::vector<uint8_t> encoded, canvas, saved;
+#ifdef PULSE_GIF_DECODER_TESTING
+    uint64_t composed_frames = 0, opened_decoders = 0;
+#endif
+    ~GifDecodeState() { Clear(); }
+    void Clear() {
+        decoder.Reset(); stream.Reset(); factory.Reset();
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+        file = INVALID_HANDLE_VALUE;
+        path.clear(); cap = canvas_w = canvas_h = count = next_frame = 0;
+        loop_count = delay_ms = prev_disposal = 0;
+        std::vector<uint8_t>().swap(encoded);
+        std::vector<uint8_t>().swap(canvas);
+        std::vector<uint8_t>().swap(saved);
+    }
+    bool Matches(const std::wstring& requested_path, UINT requested_cap,
+                 const BY_HANDLE_FILE_INFORMATION& actual) const {
+        return decoder && path == requested_path && cap == requested_cap &&
+            version.dwVolumeSerialNumber == actual.dwVolumeSerialNumber &&
+            version.nFileIndexHigh == actual.nFileIndexHigh && version.nFileIndexLow == actual.nFileIndexLow &&
+            version.nFileSizeHigh == actual.nFileSizeHigh && version.nFileSizeLow == actual.nFileSizeLow &&
+            CompareFileTime(&version.ftLastWriteTime, &actual.ftLastWriteTime) == 0 &&
+            CompareFileTime(&version.ftCreationTime, &actual.ftCreationTime) == 0;
+    }
+};
+
+static bool OpenGifState(GifDecodeState& state, const std::wstring& path, UINT pixels) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE) { state.Clear(); return false; }
+    BY_HANDLE_FILE_INFORMATION version{};
+    if (!GetFileInformationByHandle(file, &version)) { CloseHandle(file); state.Clear(); return false; }
+    if (state.Matches(path, pixels, version)) { CloseHandle(file); return true; }
+    state.Clear();
+    state.file = file; state.version = version; state.path = path; state.cap = pixels;
+    if (version.nFileSizeHigh || !version.nFileSizeLow ||
+        version.nFileSizeLow > GifDecodeState::max_encoded_bytes) return false;
+    state.encoded.resize(version.nFileSizeLow);
+    DWORD read = 0;
+    BY_HANDLE_FILE_INFORMATION after{};
+    if (!ReadFile(file, state.encoded.data(), version.nFileSizeLow, &read, nullptr) ||
+        read != version.nFileSizeLow || !GetFileInformationByHandle(file, &after) ||
+        after.nFileSizeHigh != version.nFileSizeHigh || after.nFileSizeLow != version.nFileSizeLow ||
+        CompareFileTime(&after.ftLastWriteTime, &version.ftLastWriteTime) != 0) return false;
+    // WIC can retain a file mapping that prevents replacement. Keep only the
+    // bounded encoded snapshot so an idle cached decoder never locks the file.
+    CloseHandle(state.file); state.file = INVALID_HANDLE_VALUE;
+    auto& factory = state.factory;
+    auto& decoder = state.decoder;
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                 IID_PPV_ARGS(&factory))) ||
-        FAILED(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                   WICDecodeMetadataCacheOnLoad, &decoder))) return false;
-    UINT count = 0; if (FAILED(decoder->GetFrameCount(&count)) || !count) return false;
-    frame_count = count; frame_index = (std::min)(frame_index, count - 1);
-    loop_count = 0;
+        FAILED(factory->CreateStream(&state.stream)) ||
+        FAILED(state.stream->InitializeFromMemory(state.encoded.data(),
+                                                  static_cast<DWORD>(state.encoded.size()))) ||
+        FAILED(factory->CreateDecoderFromStream(state.stream.Get(), nullptr,
+                                                WICDecodeMetadataCacheOnDemand, &decoder))) return false;
+    if (FAILED(decoder->GetFrameCount(&state.count)) || !state.count) return false;
+#ifdef PULSE_GIF_DECODER_TESTING
+    ++state.opened_decoders;
+#endif
     ComPtr<IWICMetadataQueryReader> decoder_reader;
     if (SUCCEEDED(decoder->GetMetadataQueryReader(&decoder_reader)) && decoder_reader) {
         PROPVARIANT pv{}; PropVariantInit(&pv);
@@ -385,7 +479,7 @@ static bool DecodeGifFrame(const std::wstring& path, DWORD attrs, UINT pixels,
                     b[i + 3] == 'S' && b[i + 4] == 'C') {
                     for (ULONG j = i; j + 15 < pv.caub.cElems; ++j)
                         if (b[j] == 0x03 && b[j + 1] == 0x01) {
-                            loop_count = b[j + 2] | (static_cast<uint32_t>(b[j + 3]) << 8); break;
+                            state.loop_count = b[j + 2] | (static_cast<uint32_t>(b[j + 3]) << 8); break;
                         }
                     break;
                 }
@@ -400,61 +494,96 @@ static bool DecodeGifFrame(const std::wstring& path, DWORD attrs, UINT pixels,
         if (MetadataUInt(first_reader.Get(), L"/logscrdesc/Width", v) && v) canvas_w = v;
         if (MetadataUInt(first_reader.Get(), L"/logscrdesc/Height", v) && v) canvas_h = v;
     }
-    if (!canvas_w || !canvas_h || canvas_w > 16384 || canvas_h > 16384) return false;
-    source_width = canvas_w;
-    source_height = canvas_h;
-    std::vector<uint8_t> canvas(static_cast<size_t>(canvas_w) * canvas_h * 4, 0);
-    std::vector<uint8_t> saved;
-    uint32_t prev_left = 0, prev_top = 0, prev_w = 0, prev_h = 0, prev_disposal = 0;
-    for (uint32_t i = 0; i <= frame_index; ++i) {
-        if (i > 0) {
-            if (prev_disposal == 2) {
-                const uint32_t x0 = (std::min)(prev_left, canvas_w);
-                const uint32_t x1 = (std::min)(canvas_w, prev_left + prev_w);
-                for (uint32_t y = (std::min)(prev_top, canvas_h);
-                     y < (std::min)(canvas_h, prev_top + prev_h); ++y)
-                    std::fill(canvas.begin() + (static_cast<size_t>(y) * canvas_w + x0) * 4,
-                              canvas.begin() + (static_cast<size_t>(y) * canvas_w + x1) * 4, uint8_t{0});
-            } else if (prev_disposal == 3 && saved.size() == canvas.size()) canvas = saved;
-        }
-        ComPtr<IWICBitmapFrameDecode> frame; if (FAILED(decoder->GetFrame(i, &frame))) return false;
-        uint32_t left, top, fw, fh, disposal, current_delay;
-        GifFrameMetadata(frame.Get(), left, top, fw, fh, disposal, current_delay);
-        if (i == frame_index) delay_ms = current_delay;
-        if (disposal == 3) saved = canvas;
-        ComPtr<IWICFormatConverter> converter;
-        if (FAILED(factory->CreateFormatConverter(&converter)) ||
-            FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
-                                         WICBitmapDitherTypeNone, nullptr, 0.0,
-                                         WICBitmapPaletteTypeCustom))) return false;
-        UINT rw = 0, rh = 0; converter->GetSize(&rw, &rh);
-        const UINT copy_w = (std::min)(fw, rw), copy_h = (std::min)(fh, rh);
-        std::vector<uint8_t> pixels_data(static_cast<size_t>(rw) * rh * 4);
-        if (FAILED(converter->CopyPixels(nullptr, rw * 4, static_cast<UINT>(pixels_data.size()), pixels_data.data()))) return false;
-        for (UINT y = 0; y < copy_h && top + y < canvas_h; ++y)
-            for (UINT x = 0; x < copy_w && left + x < canvas_w; ++x)
-                AlphaBlendPbgra(&canvas[(static_cast<size_t>(top + y) * canvas_w + left + x) * 4],
-                                &pixels_data[(static_cast<size_t>(y) * rw + x) * 4]);
-        prev_left = left; prev_top = top; prev_w = fw; prev_h = fh; prev_disposal = disposal;
-    }
-    width = canvas_w; height = canvas_h; stride = canvas_w * 4;
-    const UINT longest = (std::max)(canvas_w, canvas_h);
-    if (longest > pixels) {
-        const double ratio = static_cast<double>(pixels) / longest;
-        width = (std::max)(1u, static_cast<UINT>(canvas_w * ratio + 0.5));
-        height = (std::max)(1u, static_cast<UINT>(canvas_h * ratio + 0.5));
-        ComPtr<IWICBitmap> bitmap;
-        if (FAILED(factory->CreateBitmapFromMemory(canvas_w, canvas_h, GUID_WICPixelFormat32bppPBGRA,
-                                                   canvas_w * 4, static_cast<UINT>(canvas.size()), canvas.data(), &bitmap))) return false;
-        ComPtr<IWICBitmapScaler> scaler;
-        if (FAILED(factory->CreateBitmapScaler(&scaler)) ||
-            FAILED(scaler->Initialize(bitmap.Get(), width, height, WICBitmapInterpolationModeFant))) return false;
-        out.resize(static_cast<size_t>(width) * height * 4); stride = width * 4;
-        return SUCCEEDED(scaler->CopyPixels(nullptr, stride, static_cast<UINT>(out.size()), out.data()));
-    }
-    out = std::move(canvas); return true;
+    if (!canvas_w || !canvas_h || canvas_w > 16384 || canvas_h > 16384 ||
+        static_cast<uint64_t>(canvas_w) * canvas_h * 4 > GifDecodeState::max_canvas_bytes) return false;
+    state.canvas_w = canvas_w; state.canvas_h = canvas_h;
+    state.canvas.assign(static_cast<size_t>(canvas_w) * canvas_h * 4, 0);
+    return true;
 }
 
+static bool DecodeGifFrame(GifDecodeState& state, const std::wstring& path, DWORD attrs, UINT pixels,
+                           uint32_t frame_index, std::vector<uint8_t>& out,
+                           UINT& width, UINT& height, UINT& stride,
+                           uint32_t& frame_count, uint32_t& delay_ms,
+                           uint32_t& loop_count, UINT& source_width, UINT& source_height) {
+    if (IsOfflinePlaceholder(attrs)) return false;
+    if (!OpenGifState(state, path, pixels)) { state.Clear(); return false; }
+    const auto decode = [&]() -> bool {
+        auto& factory = state.factory; auto& decoder = state.decoder;
+        const UINT canvas_w = state.canvas_w, canvas_h = state.canvas_h;
+        auto& canvas = state.canvas; auto& saved = state.saved;
+        auto& prev_left = state.prev_left; auto& prev_top = state.prev_top;
+        auto& prev_w = state.prev_w; auto& prev_h = state.prev_h;
+        auto& prev_disposal = state.prev_disposal;
+        frame_count = state.count; frame_index = (std::min)(frame_index, state.count - 1);
+        loop_count = state.loop_count;
+        source_width = canvas_w; source_height = canvas_h;
+        // A backward seek (including a playback loop) starts from the transparent
+        // canvas. Forward skips still apply every intervening disposal operation.
+        if (state.next_frame && frame_index + 1 < state.next_frame) {
+            std::fill(canvas.begin(), canvas.end(), uint8_t{0});
+            saved.clear(); state.next_frame = 0; prev_disposal = 0;
+        }
+        for (uint32_t i = state.next_frame; i <= frame_index; ++i) {
+            if (i > 0) {
+                if (prev_disposal == 2) {
+                    const uint32_t x0 = (std::min)(prev_left, canvas_w);
+                    const uint32_t x1 = (std::min)(canvas_w, prev_left + prev_w);
+                    for (uint32_t y = (std::min)(prev_top, canvas_h);
+                         y < (std::min)(canvas_h, prev_top + prev_h); ++y)
+                        std::fill(canvas.begin() + (static_cast<size_t>(y) * canvas_w + x0) * 4,
+                                  canvas.begin() + (static_cast<size_t>(y) * canvas_w + x1) * 4, uint8_t{0});
+                } else if (prev_disposal == 3 && saved.size() == canvas.size()) canvas = saved;
+            }
+            ComPtr<IWICBitmapFrameDecode> frame; if (FAILED(decoder->GetFrame(i, &frame))) return false;
+            uint32_t left, top, fw, fh, disposal, current_delay;
+            GifFrameMetadata(frame.Get(), left, top, fw, fh, disposal, current_delay);
+            state.delay_ms = current_delay;
+            if (disposal == 3) saved = canvas;
+            ComPtr<IWICFormatConverter> converter;
+            if (FAILED(factory->CreateFormatConverter(&converter)) ||
+                FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                                             WICBitmapDitherTypeNone, nullptr, 0.0,
+                                             WICBitmapPaletteTypeCustom))) return false;
+            UINT rw = 0, rh = 0;
+            if (FAILED(converter->GetSize(&rw, &rh)) || !rw || !rh ||
+                static_cast<uint64_t>(rw) * rh * 4 > GifDecodeState::max_canvas_bytes) return false;
+            const UINT copy_w = (std::min)(fw, rw), copy_h = (std::min)(fh, rh);
+            std::vector<uint8_t> pixels_data(static_cast<size_t>(rw) * rh * 4);
+            if (FAILED(converter->CopyPixels(nullptr, rw * 4, static_cast<UINT>(pixels_data.size()), pixels_data.data()))) return false;
+            for (UINT y = 0; y < copy_h && top + y < canvas_h; ++y)
+                for (UINT x = 0; x < copy_w && left + x < canvas_w; ++x)
+                    AlphaBlendPbgra(&canvas[(static_cast<size_t>(top + y) * canvas_w + left + x) * 4],
+                                    &pixels_data[(static_cast<size_t>(y) * rw + x) * 4]);
+            prev_left = left; prev_top = top; prev_w = fw; prev_h = fh; prev_disposal = disposal;
+            state.next_frame = i + 1;
+#ifdef PULSE_GIF_DECODER_TESTING
+            ++state.composed_frames;
+#endif
+        }
+        delay_ms = state.delay_ms;
+        width = canvas_w; height = canvas_h; stride = canvas_w * 4;
+        const UINT longest = (std::max)(canvas_w, canvas_h);
+        if (longest > pixels) {
+            const double ratio = static_cast<double>(pixels) / longest;
+            width = (std::max)(1u, static_cast<UINT>(canvas_w * ratio + 0.5));
+            height = (std::max)(1u, static_cast<UINT>(canvas_h * ratio + 0.5));
+            ComPtr<IWICBitmap> bitmap;
+            if (FAILED(factory->CreateBitmapFromMemory(canvas_w, canvas_h, GUID_WICPixelFormat32bppPBGRA,
+                                                       canvas_w * 4, static_cast<UINT>(canvas.size()), canvas.data(), &bitmap))) return false;
+            ComPtr<IWICBitmapScaler> scaler;
+            if (FAILED(factory->CreateBitmapScaler(&scaler)) ||
+                FAILED(scaler->Initialize(bitmap.Get(), width, height, WICBitmapInterpolationModeFant))) return false;
+            out.resize(static_cast<size_t>(width) * height * 4); stride = width * 4;
+            return SUCCEEDED(scaler->CopyPixels(nullptr, stride, static_cast<UINT>(out.size()), out.data()));
+        }
+        out = canvas; return true;
+    };
+    if (decode()) return true;
+    state.Clear(); out.clear(); return false;
+}
+
+#ifndef PULSE_GIF_DECODER_TESTING
 static bool HbitmapToBgra(HBITMAP bitmap, bool own, std::vector<uint8_t>& out,
                           UINT& width, UINT& height, UINT& stride) {
     ComPtr<IWICImagingFactory> wicFactory;
@@ -571,6 +700,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     if (pipe == INVALID_HANDLE_VALUE) return 3;
     if (!ConnectNamedPipe(pipe, nullptr) && GetLastError()!=ERROR_PIPE_CONNECTED) { CloseHandle(pipe); return 4; }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    GifDecodeState gif_state;
     for (;;) {
         ipc::PreviewRequest req;
         if (!ipc::ReadAll(pipe, &req, sizeof(req)) || req.magic!=ipc::kPreviewMagic ||
@@ -590,6 +720,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         bool made = false;
         if (req.kind == ipc::PreviewRequestKind::Properties) {
             if (!IsOfflinePlaceholder(req.attrs)) properties = ReadProperties(path);
+            if (properties.size() > ipc::kPreviewMaxPropertyCount)
+                properties.resize(ipc::kPreviewMaxPropertyCount);
+            for (auto& property : properties) {
+                ipc::TruncatePreviewString(property.label, ipc::kPreviewMaxPropertyLabelChars, true);
+                ipc::TruncatePreviewString(property.value, ipc::kPreviewMaxPropertyValueChars, true);
+            }
             response.property_count = static_cast<uint32_t>(properties.size());
             response.status = 0;
             made = true;
@@ -603,7 +739,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);
                 if (gif) {
-                    made = DecodeGifFrame(path, req.attrs, cap, req.frame_index,
+                    made = DecodeGifFrame(gif_state, path, req.attrs, cap, req.frame_index,
                         pixels, w, h, stride, frame_count, frame_delay, loop_count,
                         source_w, source_h);
                 } else {
@@ -715,5 +851,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         if (view) UnmapViewOfFile(view); if (mapping) CloseHandle(mapping);
         if (!ok) break;
     }
+    gif_state.Clear();
     CoUninitialize(); DisconnectNamedPipe(pipe); CloseHandle(pipe); return 0;
 }
+#endif

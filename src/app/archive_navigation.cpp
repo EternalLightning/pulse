@@ -11,14 +11,22 @@
 #include <map>
 
 namespace pulse {
+namespace app {
+struct ArchiveListing {
+    std::wstring file, password;
+    std::vector<ops::ArchiveEntry> entries;
+    std::unordered_set<std::wstring> encrypted;
+};
+}
 namespace {
 constexpr std::wstring_view kPrefix = L"pulse:archive:";
 std::atomic<uint64_t> next_request{1};
-struct Result {
-    std::wstring view, file, prefix, password, error, open_path;
+struct Result : ops::ArchiveOperationResult {
+    std::wstring view, file, prefix, password, open_path;
     uint64_t generation = 0;
-    bool password_required = false, extraction = false;
-    std::vector<ops::ArchiveEntry> entries;
+    bool extraction = false;
+    std::shared_ptr<const app::ArchiveListing> listing;
+    fs::SnapshotPtr snapshot;
 };
 void Split(const std::wstring& view, std::wstring& file, std::wstring& prefix) {
     const auto separator = view.find(L'|', kPrefix.size());
@@ -33,6 +41,34 @@ void Post(HWND hwnd, std::unique_ptr<Result> result) {
     auto* payload = result.release();
     if (!PostMessageW(hwnd, WM_ARCHIVE_RESULT, 0, reinterpret_cast<LPARAM>(payload))) delete payload;
 }
+fs::SnapshotPtr BuildArchiveSnapshot(const app::ArchiveListing& listing, const std::wstring& prefix,
+                                    ui::SortColumn column, ui::SortDirection direction,
+                                    app::FolderSortMode folders, const std::atomic_bool& cancel) {
+    auto entries = std::make_shared<std::vector<fs::DirEntry>>();
+    std::map<std::wstring, fs::DirEntry> children;
+    for (const auto& item : listing.entries) {
+        if (cancel.load()) return {};
+        if (!item.path.starts_with(prefix)) continue;
+        const auto tail = item.path.substr(prefix.size());
+        if (tail.empty()) continue;
+        const auto slash = tail.find(L'/');
+        const auto name = tail.substr(0, slash);
+        if (name.empty()) continue;
+        auto& entry = children[name];
+        entry.name = name;
+        entry.is_dir = item.is_dir || slash != std::wstring::npos;
+        entry.attrs = entry.is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_READONLY;
+        entry.size = entry.is_dir ? 0 : item.size;
+        // Implicit directories inherit a child's timestamp until an explicit record arrives.
+        if (slash == std::wstring::npos || slash + 1 == tail.size() ||
+            (entry.mtime.dwLowDateTime == 0 && entry.mtime.dwHighDateTime == 0)) entry.mtime = item.mtime;
+    }
+    for (auto& [name, entry] : children) entries->push_back(std::move(entry));
+    std::sort(entries->begin(), entries->end(), [&](const auto& a, const auto& b) {
+        return app::EntryLess(a, b, column, direction, folders);
+    });
+    return entries;
+}
 void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& destination,
                    const std::vector<std::wstring>& selected, const std::wstring& password,
                    const std::wstring& member = {}) {
@@ -41,13 +77,17 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
         std::unique_ptr<Result> result = std::make_unique<Result>();
     };
     auto task = std::make_shared<Task>();
+    task->result->extraction = true;
     if (!s.worker.EnqueueIo([task, file, destination, selected, password, member] {
-        task->result->extraction = true;
         try {
-            if (ops::ExtractArchive(file, destination, selected, password, task->result->error, &task->cancel)
-                    && !member.empty())
+            static_cast<ops::ArchiveOperationResult&>(*task->result) =
+                ops::ExtractArchive(file, destination, selected, password, &task->cancel);
+            if (task->result->outcome == ops::ArchiveOutcome::Success && !member.empty())
                 task->result->open_path = (std::filesystem::path(destination) / member).wstring();
-        } catch (...) { task->result->error = l10n::Get(l10n::StringId::ArchiveExtractFailed); }
+        } catch (...) {
+            task->result->outcome = ops::ArchiveOutcome::Failed;
+            task->result->error = l10n::Get(l10n::StringId::ArchiveExtractFailed);
+        }
         task->done.store(true, std::memory_order_release);
     })) {
         task->result->error = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
@@ -78,13 +118,19 @@ void CleanupArchiveFiles() {
     if ((GetFileAttributesW(owned.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return;
     std::filesystem::remove_all(owned, error);
 }
-void LoadArchiveView(AppState& s, app::Tab& tab) {
+void LoadArchiveView(AppState& s, app::Tab& tab, bool refresh) {
     if (tab.archive_cancel) tab.archive_cancel->store(true);
     if (tab.snapshot_path == tab.current_path) CaptureListingSelection(tab);
     tab.ClearSelection();
     std::wstring file, prefix;
     Split(tab.current_path, file, prefix);
-    if (tab.archive_file != file) tab.archive_password.clear();
+    if (tab.archive_file != file) {
+        tab.archive_password.clear();
+        tab.archive_encrypted.clear();
+    }
+    if (refresh || (tab.archive_listing &&
+        (tab.archive_listing->file != file || tab.archive_listing->password != tab.archive_password)))
+        tab.archive_listing.reset();
     tab.archive_file = file;
     tab.archive_prefix = prefix;
     tab.net_readonly = true;
@@ -97,17 +143,45 @@ void LoadArchiveView(AppState& s, app::Tab& tab) {
     const auto cancel = tab.archive_cancel;
     const auto generation = tab.pending_generation;
     const auto view = tab.current_path, password = tab.archive_password;
+    const auto cached_listing = tab.archive_listing;
+    const auto column = tab.sort_column;
+    const auto direction = tab.sort_direction;
+    const auto folders = app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode);
     const HWND hwnd = s.hwnd;
     auto result = std::make_shared<Result>();
-    if (!s.worker.EnqueueIo([result, file, prefix, view, password, generation, cancel] {
+    if (!s.worker.EnqueueIo([result, file, prefix, view, password, generation, cancel,
+                            cached_listing, column, direction, folders] {
         result->file = file; result->prefix = prefix; result->view = view;
         result->password = password; result->generation = generation;
         try {
-            auto listing = ops::ListArchive(file, password, cancel.get());
-            result->entries = std::move(listing.entries);
-            result->error = std::move(listing.error);
-            result->password_required = listing.password_required;
-        } catch (...) { result->error = l10n::Get(l10n::StringId::ArchiveReadFailed); }
+            result->listing = cached_listing;
+            if (result->listing) result->outcome = ops::ArchiveOutcome::Success;
+            if (!result->listing) {
+                auto listing = ops::ListArchive(file, password, cancel.get());
+                static_cast<ops::ArchiveOperationResult&>(*result) =
+                    std::move(static_cast<ops::ArchiveOperationResult&>(listing));
+                if (result->outcome == ops::ArchiveOutcome::Success && !cancel->load()) {
+                    auto cache = std::make_shared<app::ArchiveListing>();
+                    cache->file = file;
+                    cache->password = password;
+                    for (auto& item : listing.entries) {
+                        if (cancel->load()) return;
+                        if (!ops::IsSafeArchiveMember(item.path)) continue;
+                        std::replace(item.path.begin(), item.path.end(), L'\\', L'/');
+                        if (item.encrypted) cache->encrypted.insert(item.path);
+                        cache->entries.push_back(std::move(item));
+                    }
+                    result->listing = std::move(cache);
+                }
+            }
+            if (result->listing)
+                result->snapshot = BuildArchiveSnapshot(*result->listing, prefix, column, direction, folders, *cancel);
+            else
+                result->snapshot = std::make_shared<std::vector<fs::DirEntry>>();
+        } catch (...) {
+            result->outcome = ops::ArchiveOutcome::Failed;
+            result->error = l10n::Get(l10n::StringId::ArchiveReadFailed);
+        }
     }, [hwnd, result] { Post(hwnd, std::make_unique<Result>(std::move(*result))); })) {
         tab.loading = false;
         tab.banner_message = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
@@ -159,11 +233,15 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
     std::unique_ptr<Result> result(reinterpret_cast<Result*>(payload));
     if (!result) return;
     if (result->extraction) {
-        if (!result->error.empty()) MessageBoxW(s.hwnd, result->error.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
+        if (result->outcome == ops::ArchiveOutcome::Cancelled) return;
+        if (result->outcome != ops::ArchiveOutcome::Success) {
+            const auto error = result->error.empty() ? l10n::Get(l10n::StringId::ArchiveExtractFailed) : result->error;
+            MessageBoxW(s.hwnd, error.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
+        }
         else if (!result->open_path.empty()) {
             if (ops::IsArchivePath(result->open_path)) NavigateTo(s, ArchiveViewPath(result->open_path));
             else s.ops.OpenWith(result->open_path);
-        } else MessageBoxW(s.hwnd, l10n::Get(l10n::StringId::ArchiveExtractComplete).c_str(), L"Pulse", MB_OK);
+        }
         return;
     }
     ForEachPane(s, [&](app::Pane& pane) {
@@ -171,38 +249,29 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
         {
             if (tab.current_path != result->view || tab.pending_generation != result->generation) return;
             tab.loading = false;
-            if (result->password_required && !result->error.empty() && ActiveTab(s) == &tab) {
+            bool retry_with_password = result->password_state == ops::ArchivePasswordState::Required;
+            if (result->outcome == ops::ArchiveOutcome::Failed &&
+                result->password_state == ops::ArchivePasswordState::Unknown && ActiveTab(s) == &tab) {
+                const auto message = result->error + L"\n\n" + l10n::Get(l10n::StringId::ArchivePasswordUnknownRetry);
+                retry_with_password = MessageBoxW(s.hwnd, message.c_str(), L"Pulse",
+                    MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+            }
+            if (result->outcome != ops::ArchiveOutcome::Success && retry_with_password && ActiveTab(s) == &tab) {
                 if (app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), tab.archive_password)) {
                     LoadArchiveView(s, tab);
                     return;
                 }
             }
-            auto entries = std::make_shared<std::vector<fs::DirEntry>>();
-            std::map<std::wstring, fs::DirEntry> children;
-            tab.archive_encrypted.clear();
-            for (auto item : result->entries) {
-                if (!ops::IsSafeArchiveMember(item.path)) continue;
-                std::replace(item.path.begin(), item.path.end(), L'\\', L'/');
-                if (item.encrypted) tab.archive_encrypted.insert(item.path);
-                if (!item.path.starts_with(result->prefix)) continue;
-                const auto tail = item.path.substr(result->prefix.size());
-                if (tail.empty()) continue;
-                const auto slash = tail.find(L'/');
-                const auto name = tail.substr(0, slash);
-                if (name.empty()) continue;
-                auto& entry = children[name];
-                entry.name = name; entry.is_dir = item.is_dir || slash != std::wstring::npos;
-                entry.attrs = entry.is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_READONLY;
-                entry.size = entry.is_dir ? 0 : item.size;
-                // Implicit directories inherit a child's timestamp until an explicit directory record arrives.
-                if (slash == std::wstring::npos || slash + 1 == tail.size() ||
-                    (entry.mtime.dwLowDateTime == 0 && entry.mtime.dwHighDateTime == 0)) entry.mtime = item.mtime;
+            if (result->outcome == ops::ArchiveOutcome::Success && result->listing) {
+                if (tab.archive_listing != result->listing) {
+                    tab.archive_listing = result->listing;
+                    tab.archive_encrypted = result->listing->encrypted;
+                }
+            } else {
+                tab.archive_listing.reset();
+                tab.archive_encrypted.clear();
             }
-            for (auto& [name, entry] : children) entries->push_back(std::move(entry));
-            std::sort(entries->begin(), entries->end(), [&](const auto& a, const auto& b) {
-                return app::EntryLess(a, b, tab.sort_column, tab.sort_direction);
-            });
-            tab.SetSnapshot(entries);
+            tab.SetSnapshot(result->snapshot);
             tab.RemapSelection(tab.pending_selected_names, tab.pending_selected_name);
             tab.pending_selected_names.clear();
             tab.pending_selected_name.clear();
@@ -210,7 +279,8 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
             tab.applied_generation = result->generation;
             tab.pending_generation = 0;
             tab.banner_message = result->error;
-            tab.SetBannerTitle(result->error.empty() ? app::BannerType::None : app::BannerType::Other, result->error.empty() ? L"" : l10n::Get(l10n::StringId::ArchiveOpenFailed));
+            tab.SetBannerTitle(result->outcome == ops::ArchiveOutcome::Success ? app::BannerType::None : app::BannerType::Other,
+                result->outcome == ops::ArchiveOutcome::Success ? L"" : l10n::Get(l10n::StringId::ArchiveOpenFailed));
         }
     });
     InvalidateRect(s.hwnd, nullptr, FALSE);

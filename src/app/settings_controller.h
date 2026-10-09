@@ -162,6 +162,7 @@ public:
     const std::wstring& index_pending_path() const noexcept { return index_pending_path_; }
     const std::wstring& index_storage_error() const noexcept { return index_storage_error_; }
     void NetworkAction(int action, bool pin_after_add = false);
+    void AddNetworkPath(std::wstring path);
     void RemoveNetwork(int index);
     void DiagnosticsAction(int action);
 

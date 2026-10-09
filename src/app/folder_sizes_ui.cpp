@@ -5,6 +5,29 @@
 #include "../common/localization.h"
 
 namespace pulse {
+void FillDetailsFolderSize(ui::DetailsPanelView& details, const app::FolderSizeValue& value) {
+    using S = app::FolderSizeState;
+    using I = l10n::StringId;
+    details.size_pending = value.state == S::Calculating || value.state == S::Updating;
+    details.size_text = value.has_value ? format::ByteSize(value.bytes, true) : L"";
+    if (value.state == S::Partial || value.state == S::Cached || value.state == S::Unavailable) {
+        if (!details.size_text.empty()) details.size_text += L" · ";
+        details.size_text += l10n::Get(value.state == S::Partial ? I::FolderSizePartial :
+            value.state == S::Cached ? I::FolderSizeCached : I::FolderSizeUnavailable);
+    }
+    details.contains_text.clear();
+    if (value.counts_valid) {
+        wchar_t contains[96];
+        swprintf_s(contains, l10n::Get(I::ContainsFormat).c_str(), value.files, value.dirs);
+        details.contains_text = contains;
+        if (value.incomplete || value.state == S::Partial || value.state == S::Cached || value.state == S::Updating) {
+            details.contains_text += L" · ";
+            details.contains_text += l10n::Get(value.incomplete || value.state == S::Partial ?
+                I::FolderSizePartial : value.state == S::Updating ? I::FolderSizeUpdating : I::FolderSizeCached);
+        }
+    }
+}
+
 void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
     struct Row { ui::PaneViewModel* pane; int index; std::wstring path; };
     std::vector<Row> rows;
@@ -38,6 +61,12 @@ void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
         }
         if (!pane.path.empty() && !fs::IsVirtualPath(pane.path)) roots.push_back(pane.path);
     }
+    const auto details_path = vm.details.is_dir && !fs::IsVirtualPath(vm.details.path)
+        ? vm.details.path : std::wstring();
+    if (!details_path.empty()) {
+        requests.push_back({details_path, true, true});
+        roots.push_back(details_path);
+    }
     if (!s.isolatedTest && !s.shot.active)
         s.folderSizes.SetCachePath([] {
             const auto dir = app::GetPulseDataDir();
@@ -47,6 +76,9 @@ void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
     s.folderSizes.Sync(std::move(requests), std::move(roots));
     using S = app::FolderSizeState;
     using I = l10n::StringId;
+    if (!details_path.empty()) {
+        FillDetailsFolderSize(vm.details, s.folderSizes.Get(details_path));
+    }
     for (const auto& row : rows) {
         const auto value = s.folderSizes.Get(row.path);
         std::wstring text = value.has_value ? format::ByteSize(value.bytes) : L"";

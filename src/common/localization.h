@@ -15,6 +15,10 @@ enum class Language {
 };
 
 enum class StringId : UINT {
+    NetworkSearchAdd = IDS_NETWORK_SEARCH_ADD,
+    NetworkSearchRunning = IDS_NETWORK_SEARCH_RUNNING,
+    NetworkSearchComplete = IDS_NETWORK_SEARCH_COMPLETE,
+    NetworkSearchHint = IDS_NETWORK_SEARCH_HINT,
     AppDescription = IDS_APP_DESCRIPTION,
     ToolbarSort = IDS_TOOLBAR_SORT,
     ToolbarFilter = IDS_TOOLBAR_FILTER,
@@ -955,6 +959,7 @@ enum class StringId : UINT {
     ArchiveCreateFolderPrefix = IDS_ARCHIVE_CREATE_FOLDER_PREFIX,
     ArchiveExtractFailed = IDS_ARCHIVE_EXTRACT_FAILED,
     ArchiveReadFailed = IDS_ARCHIVE_READ_FAILED,
+    ArchivePasswordUnknownRetry = IDS_ARCHIVE_PASSWORD_UNKNOWN_RETRY,
     ExitPendingTitle = IDS_EXIT_PENDING_TITLE,
     ExitPendingMessage = IDS_EXIT_PENDING_MESSAGE,
     ExitStopTasks = IDS_EXIT_STOP_TASKS,

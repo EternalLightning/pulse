@@ -261,26 +261,30 @@ bool ParseMftRecord0Runs(BYTE* rec, uint32_t rec_size, uint32_t sector,
 
 } // namespace
 
-bool EnumerateMft(HANDLE volume,
+MftReadStatus EnumerateMft(HANDLE volume,
                   std::atomic<bool>* running,
                   const std::function<void(size_t)>& progress,
-                  const std::function<bool(MftFile&&)>& emit) {
+                  const std::function<bool(MftFile&&)>& emit,
+                  const MftReadIo* io) {
     NTFS_VOLUME_DATA_BUFFER vd{};
     DWORD br = 0;
-    if (!DeviceIoControl(volume, FSCTL_GET_NTFS_VOLUME_DATA, nullptr, 0,
-                         &vd, sizeof(vd), &br, nullptr))
-        return false;
+    const bool queried = io && io->query ? io->query(vd) :
+        DeviceIoControl(volume, FSCTL_GET_NTFS_VOLUME_DATA, nullptr, 0, &vd, sizeof(vd), &br, nullptr) != FALSE;
+    if (!queried) return MftReadStatus::Failed;
+    const auto read = [&](uint64_t offset, void* buffer, DWORD bytes) {
+        return io && io->read ? io->read(offset, buffer, bytes) : ReadAt(volume, offset, buffer, bytes);
+    };
     const uint32_t rec_size = vd.BytesPerFileRecordSegment;
     const uint32_t cluster = vd.BytesPerCluster;
     const uint32_t sector = vd.BytesPerSector;
-    if (rec_size < 512 || rec_size > 4096 || cluster == 0 || sector == 0) return false;
-    if (vd.MftStartLcn.QuadPart < 0 || vd.MftValidDataLength.QuadPart < 0) return false;
+    if (rec_size < 512 || rec_size > 4096 || cluster == 0 || sector == 0) return MftReadStatus::Failed;
+    if (vd.MftStartLcn.QuadPart < 0 || vd.MftValidDataLength.QuadPart < 0) return MftReadStatus::Failed;
 
     std::vector<BYTE> rec0(rec_size);
     uint64_t mft_off = 0;
     if (!CheckedMultiply(static_cast<uint64_t>(vd.MftStartLcn.QuadPart), cluster, mft_off))
-        return false;
-    if (!ReadAt(volume, mft_off, rec0.data(), rec_size)) return false;
+        return MftReadStatus::Failed;
+    if (!read(mft_off, rec0.data(), rec_size)) return MftReadStatus::Failed;
 
     std::vector<Run> runs;
     if (!ParseMftRecord0Runs(rec0.data(), rec_size, sector, runs) || runs.empty()) {
@@ -301,43 +305,46 @@ bool EnumerateMft(HANDLE volume,
     size_t count = 0;
     uint64_t file_off = 0;
     for (const Run& run : runs) {
-        if (running && !running->load()) return count > 0;
+        if (running && !running->load()) return MftReadStatus::Cancelled;
         if (run.sparse) {
             uint64_t run_bytes = 0;
             if (!CheckedMultiply(run.clusters, cluster, run_bytes) ||
                 !CheckedAdd(file_off, run_bytes, file_off))
-                return false;
+                return MftReadStatus::Failed;
             continue;
         }
         uint64_t disk = 0;
         uint64_t left = 0;
         if (!CheckedMultiply(run.lcn, cluster, disk) ||
             !CheckedMultiply(run.clusters, cluster, left))
-            return false;
+            return MftReadStatus::Failed;
         while (left >= rec_size) {
-            if (running && !running->load()) return count > 0;
+            if (running && !running->load()) return MftReadStatus::Cancelled;
             const uint64_t wanted = (std::min)(left, static_cast<uint64_t>(chunk_bytes));
             const DWORD bytes = static_cast<DWORD>(wanted - (wanted % rec_size));
-            if (bytes < rec_size || !ReadAt(volume, disk, chunk.data(), bytes)) break;
+            if (bytes < rec_size || !read(disk, chunk.data(), bytes))
+                return running && !running->load() ? MftReadStatus::Cancelled : MftReadStatus::Failed;
             for (DWORD offset = 0; offset < bytes; offset += rec_size) {
+                if (running && !running->load()) return MftReadStatus::Cancelled;
                 uint64_t record_off = 0;
-                if (!CheckedAdd(file_off, offset, record_off)) return false;
+                if (!CheckedAdd(file_off, offset, record_off)) return MftReadStatus::Failed;
                 const uint64_t index = record_off / rec_size;
                 if (!ParseRecord(chunk.data() + offset, rec_size, sector, index,
                                  [&](MftFile&& f) {
                     ++count;
                     if (progress && (count % 50000) == 0) progress(count);
                     return emit(std::move(f));
-                })) return count > 0;
+                })) return running && !running->load() ? MftReadStatus::Cancelled : MftReadStatus::Capped;
             }
             if (!CheckedAdd(disk, bytes, disk) ||
                 !CheckedAdd(file_off, bytes, file_off))
-                return false;
+                return MftReadStatus::Failed;
             left -= bytes;
         }
-        if (left && !CheckedAdd(file_off, left, file_off)) return false;
+        if (left && !CheckedAdd(file_off, left, file_off)) return MftReadStatus::Failed;
     }
-    return count > 0;
+    if (running && !running->load()) return MftReadStatus::Cancelled;
+    return count > 0 ? MftReadStatus::Complete : MftReadStatus::Failed;
 }
 
 } // namespace pulse::index

@@ -18,6 +18,9 @@
 #include "recycle_fileop.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
+#include "../common/file_create.h"
+#include "../common/file_identity.h"
+#include "../ipc/file_identity_protocol.h"
 #include "../common/crash_reporter.h"
 #include <windows.h>
 #include <shellapi.h>
@@ -66,6 +69,7 @@ struct Request {
     std::vector<std::wstring> recycle_paths;
     uint64_t delete_epoch = 0;
     uint64_t delete_token = 0;
+    std::vector<pulse::FileIdentity> expected_identities;
     HWND owner = nullptr;
 };
 
@@ -138,11 +142,13 @@ void SendDeleteDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring&
     SendMsg(RSP_DONE, id, writer.data());
 }
 
-void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error) {
+void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error,
+              const std::vector<pulse::FileIdentity>& produced_identities = {}) {
     PayloadWriter w;
     w.PutU32((uint32_t)hr);
     w.PutU32(cancelled ? 1 : 0);
     w.PutString(error);
+    if (!produced_identities.empty()) WriteFileIdentities(w, produced_identities);
     SendMsg(RSP_DONE, id, w.data());
 }
 
@@ -399,19 +405,26 @@ std::wstring DescribeCreateError(HRESULT hr) {
 
 // REQ_NEW_FOLDER / REQ_NEW_FILE: plain Win32 creation (no conflict UI, the UI
 // side already picked a unique name). Runs on the STA thread like other ops.
-HRESULT ExecuteCreate(const uint32_t type, const std::wstring& path) {
+HRESULT ExecuteCreate(const uint32_t type, const std::wstring& path,
+                      std::vector<pulse::FileIdentity>& produced_identities) {
     if (path.empty()) return E_INVALIDARG;
     const std::wstring parsed = ToParsingPath(path);
     const wchar_t* create_path = parsed.empty() ? path.c_str() : parsed.c_str();
     if (GetFileAttributesW(create_path) != INVALID_FILE_ATTRIBUTES)
         return HRESULT_FROM_WIN32(ERROR_FILE_EXISTS);
     if (type == REQ_NEW_FOLDER) {
-        return CreateDirectoryW(create_path, nullptr)
-            ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+        const HANDLE folder = pulse::CreateDirectoryHandle(create_path);
+        if (!folder) return HRESULT_FROM_WIN32(GetLastError());
+        pulse::FileIdentity identity;
+        if (pulse::ReadFileIdentity(folder, identity) && identity.Valid()) produced_identities.push_back(identity);
+        CloseHandle(folder);
+        return S_OK;
     }
     HANDLE f = CreateFileW(create_path, GENERIC_WRITE, 0, nullptr,
                            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+    pulse::FileIdentity identity;
+    if (pulse::ReadFileIdentity(f, identity) && identity.Valid()) produced_identities.push_back(identity);
     CloseHandle(f);
     return S_OK;
 }
@@ -589,7 +602,7 @@ void ExecuteRequest(Request* req) {
         const bool have_epoch = GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) != FALSE;
         epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
         static DeleteHostAdmission admission;
-        const DeleteWirePlan authorized{req->delete_epoch, req->delete_token, req->sources};
+        const DeleteWirePlan authorized{req->delete_epoch, req->delete_token, req->sources, req->expected_identities};
         if (!have_epoch || !admission.Consume(authorized, epoch.QuadPart)) {
             SendDeleteDone(req->id, E_ACCESSDENIED, false, L"Expired or repeated deletion authorization.", {});
             delete req;
@@ -601,19 +614,22 @@ void ExecuteRequest(Request* req) {
             [id = req->id] { return g.cancel_id.load() == id; },
             [id = req->id](size_t done, size_t total, const std::wstring& path) {
                 SendProgress(id, total ? static_cast<float>(done * 100.0 / total) : 0.0f, path, done, total);
-            });
-        const auto error = FAILED(result.error) && !result.cancelled
-            ? L"回收失败（错误 " + std::to_wstring(static_cast<unsigned long>(result.error)) + L"） | " + result.failed_path
-            : std::wstring{};
+            }, req->expected_identities);
+        const auto error = result.identity_mismatch
+            ? L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + result.failed_path
+            : FAILED(result.error) && !result.cancelled
+                ? L"回收失败（错误 " + std::to_wstring(static_cast<unsigned long>(result.error)) + L"） | " + result.failed_path
+                : std::wstring{};
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
         SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations, result.failed_path);
         delete req;
         return;
     }
     if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
+        std::vector<pulse::FileIdentity> produced_identities;
         HRESULT hr = req->sources.empty() ? E_INVALIDARG
-                                          : ExecuteCreate(req->type, req->sources.front());
-        SendDone(req->id, hr, false, FAILED(hr) ? DescribeCreateError(hr) : L"");
+                                          : ExecuteCreate(req->type, req->sources.front(), produced_identities);
+        SendDone(req->id, hr, false, FAILED(hr) ? DescribeCreateError(hr) : L"", produced_identities);
         delete req;
         return;
     }
@@ -651,8 +667,20 @@ void ExecuteRequest(Request* req) {
 
     std::vector<std::unique_ptr<ProgressSink>> root_sinks;
     bool setup_failed = false;
+    bool produced_identity_mismatch = false;
     if (SUCCEEDED(hr)) {
         for (const auto& src : req->sources) {
+            if (!req->expected_identities.empty()) {
+                const size_t index = static_cast<size_t>(&src - req->sources.data());
+                pulse::FileIdentity current;
+                if (!pulse::ReadPathFileIdentity(src, current) || current != req->expected_identities[index]) {
+                    hr = E_ACCESSDENIED;
+                    produced_identity_mismatch = true;
+                    setup_failed = true;
+                    sink.NoteSetupFailure(src);
+                    break;
+                }
+            }
             IShellItem* item = nullptr;
             HRESULT ihr = MakeItem(src, &item);
             if (SUCCEEDED(ihr) && IsAuthorizedDeletion(req->type)) {
@@ -688,6 +716,18 @@ void ExecuteRequest(Request* req) {
     }
 
     bool cancelled = false;
+    if (SUCCEEDED(hr)) {
+        for (size_t index = 0; index < req->expected_identities.size(); ++index) {
+            pulse::FileIdentity current;
+            if (!pulse::ReadPathFileIdentity(req->sources[index], current) || current != req->expected_identities[index]) {
+                hr = E_ACCESSDENIED;
+                produced_identity_mismatch = true;
+                setup_failed = true;
+                sink.NoteSetupFailure(req->sources[index]);
+                break;
+            }
+        }
+    }
     if (SUCCEEDED(hr)) {
         hr = op->PerformOperations();
         BOOL aborted = FALSE;
@@ -753,6 +793,8 @@ void ExecuteRequest(Request* req) {
     }
 
     if (FAILED(hr) && !sink.delete_diagnostics().empty()) error += L"; " + sink.delete_diagnostics();
+    if (produced_identity_mismatch)
+        error = L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + failed_path;
     if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
     if (IsAuthorizedDeletion(req->type)) {
         std::vector<std::wstring> deleted, recycled, destinations;
@@ -889,6 +931,7 @@ DWORD WINAPI ReaderThreadImpl() {
                         }
                         req->delete_epoch = plan.host_epoch; req->delete_token = plan.token;
                         req->sources = std::move(plan.paths);
+                        req->expected_identities = std::move(plan.expected_identities);
                     } else {
                         ok = r.GetStringArray(req->sources);
                         if (req->type == REQ_RESTORE_RECYCLE) {
@@ -1094,7 +1137,8 @@ bool SessionCloseRequested(uint32_t sid) {
     return it == g_ctx_sessions.end() || it->second.close_requested;
 }
 
-struct HandlerWorker {
+struct HandlerWorker : pulse::shell::CtxWorkerHandles {
+    ~HandlerWorker() { Stop(); }
     pulse::shell::CtxHandlerDesc desc;
     std::vector<std::wstring> paths;
     bool background = false;
@@ -1104,9 +1148,6 @@ struct HandlerWorker {
     UINT qcm_flags = 0;
     pulse::shell::CtxHandlerSlot slot;
     std::vector<CtxItemOut> items;
-    HANDLE done_event = nullptr;
-    HANDLE exit_event = nullptr;
-    HANDLE thread = nullptr;
     DWORD thread_id = 0;
     uint32_t elapsed_ms = 0;
 };
@@ -1149,7 +1190,8 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
                 d.owner = w->owner;
                 d.paths = w->paths;
                 d.background = w->background;
-                if (w->slot.menu && inv->item_id >= w->id_first)
+                if (w->slot.menu && pulse::shell::FindItemId(w->items, inv->item_id,
+                        inv->verb, inv->text, w->id_first, w->id_last))
                     CtxInvoke(d, w->slot.menu, w->id_first, inv->invoke_req_id, inv->item_id);
                 else
                     SendDone(inv->invoke_req_id, E_INVALIDARG, false,
@@ -1182,14 +1224,9 @@ DWORD WINAPI HandlerWorkerThread(LPVOID param) {
 void JoinHandlerWorkers(std::vector<std::unique_ptr<HandlerWorker>>& workers) {
     for (auto& w : workers)
         if (w && w->exit_event) SetEvent(w->exit_event);
-    for (auto& w : workers)
-        if (w && w->thread) WaitForSingleObject(w->thread, INFINITE);
     for (auto& w : workers) {
         if (!w) continue;
-        if (w->done_event) CloseHandle(w->done_event);
-        if (w->exit_event) CloseHandle(w->exit_event);
-        if (w->thread) CloseHandle(w->thread);
-        w->done_event = w->exit_event = w->thread = nullptr;
+        w->Stop();
     }
     workers.clear();
 }
@@ -1259,14 +1296,8 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
         worker->id_first = next_id;
         worker->id_last = next_id + kIdsPerHandler - 1;
         worker->qcm_flags = qcm_flags;
-        worker->done_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        worker->exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         next_id += kIdsPerHandler;
-        worker->thread = CreateThread(nullptr, 0, HandlerWorkerThread, worker.get(), 0, nullptr);
-        if (!worker->thread || !worker->done_event || !worker->exit_event) {
-            if (worker->done_event) SetEvent(worker->done_event);
-            continue;
-        }
+        if (!worker->Start(HandlerWorkerThread, worker.get())) continue;
         workers.push_back(std::move(worker));
     }
 
@@ -1353,6 +1384,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
                 }
             }
             if (target && target->thread_id && live != 0) {
+                inv->item_id = live;
                 CtxInvokeMsg* raw = inv.release();
                 if (!PostThreadMessageW(target->thread_id, WM_CTX_INVOKE, 0,
                                         reinterpret_cast<LPARAM>(raw))) {

@@ -48,15 +48,15 @@ bool PickFolderPath(HWND owner, std::wstring& path) {
     return !path.empty();
 }
 
-std::wstring NameHowLabel(app::NameMatchHow how) {
+std::wstring NameHowLabel(model::NameMatchHow how) {
     switch (how) {
-    case app::NameMatchHow::StartsWith: return l10n::Get(l10n::StringId::AdvSearchStarts);
-    case app::NameMatchHow::Exact: return l10n::Get(l10n::StringId::AdvSearchExact);
+    case model::NameMatchHow::StartsWith: return l10n::Get(l10n::StringId::AdvSearchStarts);
+    case model::NameMatchHow::Exact: return l10n::Get(l10n::StringId::AdvSearchExact);
     default: return l10n::Get(l10n::StringId::AdvSearchContains);
     }
 }
 
-std::wstring KindLabel(const app::AdvancedSearchSpec& spec) {
+std::wstring KindLabel(const model::AdvancedSearchSpec& spec) {
     switch (spec.kind) {
     case index::SearchKind::Folder: return l10n::Get(l10n::StringId::KindFolder);
     case index::SearchKind::Document: return l10n::Get(l10n::StringId::KindDocument);
@@ -72,31 +72,31 @@ std::wstring KindLabel(const app::AdvancedSearchSpec& spec) {
     }
 }
 
-std::wstring LocationLabel(app::LocationScope scope) {
+std::wstring LocationLabel(model::LocationScope scope) {
     switch (scope) {
-    case app::LocationScope::CurrentFolder: return l10n::Get(l10n::StringId::LocationCurrent);
-    case app::LocationScope::CustomFolder: return l10n::Get(l10n::StringId::LocationCustom);
+    case model::LocationScope::CurrentFolder: return l10n::Get(l10n::StringId::LocationCurrent);
+    case model::LocationScope::CustomFolder: return l10n::Get(l10n::StringId::LocationCustom);
     default: return l10n::Get(l10n::StringId::LocationIndexed);
     }
 }
 
-std::wstring DateLabel(app::DatePreset preset) {
+std::wstring DateLabel(model::DatePreset preset) {
     switch (preset) {
-    case app::DatePreset::Today: return l10n::Get(l10n::StringId::DateToday);
-    case app::DatePreset::Yesterday: return l10n::Get(l10n::StringId::DateYesterday);
-    case app::DatePreset::ThisWeek: return l10n::Get(l10n::StringId::DateThisWeek);
-    case app::DatePreset::ThisMonth: return l10n::Get(l10n::StringId::DateThisMonth);
-    case app::DatePreset::ThisYear: return l10n::Get(l10n::StringId::DateThisYear);
+    case model::DatePreset::Today: return l10n::Get(l10n::StringId::DateToday);
+    case model::DatePreset::Yesterday: return l10n::Get(l10n::StringId::DateYesterday);
+    case model::DatePreset::ThisWeek: return l10n::Get(l10n::StringId::DateThisWeek);
+    case model::DatePreset::ThisMonth: return l10n::Get(l10n::StringId::DateThisMonth);
+    case model::DatePreset::ThisYear: return l10n::Get(l10n::StringId::DateThisYear);
     default: return l10n::Get(l10n::StringId::DateAny);
     }
 }
 
-std::wstring SizeLabel(app::SizePreset preset) {
+std::wstring SizeLabel(model::SizePreset preset) {
     switch (preset) {
-    case app::SizePreset::Empty: return l10n::Get(l10n::StringId::SizeEmpty);
-    case app::SizePreset::Lt1MB: return l10n::Get(l10n::StringId::SizeLt1MB);
-    case app::SizePreset::From1To10MB: return l10n::Get(l10n::StringId::Size1To10MB);
-    case app::SizePreset::Gt10MB: return l10n::Get(l10n::StringId::SizeGt10MB);
+    case model::SizePreset::Empty: return l10n::Get(l10n::StringId::SizeEmpty);
+    case model::SizePreset::Lt1MB: return l10n::Get(l10n::StringId::SizeLt1MB);
+    case model::SizePreset::From1To10MB: return l10n::Get(l10n::StringId::Size1To10MB);
+    case model::SizePreset::Gt10MB: return l10n::Get(l10n::StringId::SizeGt10MB);
     default: return l10n::Get(l10n::StringId::SizeAny);
     }
 }
@@ -111,7 +111,7 @@ std::wstring ModeLabel(index::ContentMatchMode mode) {
 
 class AdvancedSearchWindow {
 public:
-    AdvancedSearchDialogResult Show(HWND owner, app::AdvancedSearchSpec spec,
+    AdvancedSearchDialogResult Show(HWND owner, model::AdvancedSearchSpec spec,
                                     bool dark, D2D1_COLOR_F accent) {
         owner_ = owner;
         spec_ = std::move(spec);
@@ -272,13 +272,13 @@ private:
         spec_.name = EditText(edit_name_);
         spec_.content = EditText(edit_content_);
         spec_.content_exclude = EditText(edit_exclude_);
-        spec_.custom_exts = app::NormalizeExtensionList(EditText(edit_exts_));
+        spec_.custom_exts = model::NormalizeExtensionList(EditText(edit_exts_));
         if (!spec_.custom_exts.empty()) spec_.kind = index::SearchKind::Custom;
         else if (spec_.kind == index::SearchKind::Custom) spec_.kind = index::SearchKind::Any;
-        preview_ = app::CompileSearchQuery(spec_);
-        const auto split = app::SplitSearchQueryText(preview_);
-        scope_error_ = split.content.present() && app::ContentSearchNeedsScope(split) &&
-                       spec_.location == app::LocationScope::Indexed;
+        preview_ = model::CompileSearchQuery(spec_);
+        const auto split = model::SplitSearchQueryText(preview_);
+        scope_error_ = split.content.present() && model::ContentSearchNeedsScope(split) &&
+                       spec_.location == model::LocationScope::Indexed;
     }
 
     static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
@@ -388,12 +388,12 @@ private:
                 auto choice = spec_;
                 choice.kind = static_cast<index::SearchKind>(i);
                 choice.custom_exts.clear();
-                item.text = id == 4 ? NameHowLabel(static_cast<app::NameMatchHow>(i))
-                    : id == 5 ? KindLabel(choice) : id == 6 ? LocationLabel(static_cast<app::LocationScope>(i))
-                    : id == 8 ? DateLabel(static_cast<app::DatePreset>(i))
-                    : id == 9 ? SizeLabel(static_cast<app::SizePreset>(i))
+                item.text = id == 4 ? NameHowLabel(static_cast<model::NameMatchHow>(i))
+                    : id == 5 ? KindLabel(choice) : id == 6 ? LocationLabel(static_cast<model::LocationScope>(i))
+                    : id == 8 ? DateLabel(static_cast<model::DatePreset>(i))
+                    : id == 9 ? SizeLabel(static_cast<model::SizePreset>(i))
                     : ModeLabel(static_cast<index::ContentMatchMode>(i));
-                if (id == 6 && i == static_cast<int>(app::LocationScope::CurrentFolder))
+                if (id == 6 && i == static_cast<int>(model::LocationScope::CurrentFolder))
                     item.enabled = !spec_.current_folder.empty();
                 items.push_back(std::move(item));
             }
@@ -409,26 +409,26 @@ private:
             const int command = menu.TrackPopup(anchor, std::move(items));
             if (!command) return;
             const int value = command - 1;
-            if (id == 4) spec_.name_how = static_cast<app::NameMatchHow>(value);
+            if (id == 4) spec_.name_how = static_cast<model::NameMatchHow>(value);
             else if (id == 5) {
                 spec_.kind = static_cast<index::SearchKind>(value);
                 if (spec_.kind != index::SearchKind::Custom) SetWindowTextW(edit_exts_, L"");
                 else SetFocus(edit_exts_);
             } else if (id == 6) {
-                if (value == static_cast<int>(app::LocationScope::CustomFolder)) {
+                if (value == static_cast<int>(model::LocationScope::CustomFolder)) {
                     std::wstring folder;
                     if (!PickFolderPath(hwnd_, folder)) return;
                     spec_.custom_folder = folder;
                 }
-                spec_.location = static_cast<app::LocationScope>(value);
-            } else if (id == 8) spec_.date = static_cast<app::DatePreset>(value);
-            else if (id == 9) spec_.size = static_cast<app::SizePreset>(value);
+                spec_.location = static_cast<model::LocationScope>(value);
+            } else if (id == 8) spec_.date = static_cast<model::DatePreset>(value);
+            else if (id == 9) spec_.size = static_cast<model::SizePreset>(value);
             else spec_.content_mode = static_cast<index::ContentMatchMode>(value);
         }
-        preview_ = app::CompileSearchQuery(spec_);
-        const auto split = app::SplitSearchQueryText(preview_);
-        scope_error_ = split.content.present() && app::ContentSearchNeedsScope(split) &&
-                       spec_.location == app::LocationScope::Indexed;
+        preview_ = model::CompileSearchQuery(spec_);
+        const auto split = model::SplitSearchQueryText(preview_);
+        scope_error_ = split.content.present() && model::ContentSearchNeedsScope(split) &&
+                       spec_.location == model::LocationScope::Indexed;
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
@@ -487,12 +487,12 @@ private:
         DrawButton(KindRect(), KindLabel(spec_), hover_ == 5,
                    spec_.kind != index::SearchKind::Any);
         DrawButton(LocationRect(), LocationLabel(spec_.location), hover_ == 6,
-                   spec_.location != app::LocationScope::Indexed);
+                   spec_.location != model::LocationScope::Indexed);
         DrawButton(BrowseRect(), l10n::Get(l10n::StringId::AdvSearchBrowse), hover_ == 7);
         DrawButton(DateRect(), DateLabel(spec_.date), hover_ == 8,
-                   spec_.date != app::DatePreset::Any);
+                   spec_.date != model::DatePreset::Any);
         DrawButton(SizeRect(), SizeLabel(spec_.size), hover_ == 9,
-                   spec_.size != app::SizePreset::Any);
+                   spec_.size != model::SizePreset::Any);
         DrawButton(ModeRect(), ModeLabel(spec_.content_mode), hover_ == 10);
         fluent::ControlState whole_word;
         whole_word.checked = spec_.whole_word;
@@ -502,8 +502,8 @@ private:
         match_case.checked = spec_.case_sensitive;
         match_case.hovered = hover_ == 12;
         painter_.DrawCheckBox(MatchCaseRect(), l10n::Get(l10n::StringId::AdvSearchMatchCase), match_case);
-        const auto location = spec_.location == app::LocationScope::CustomFolder ? spec_.custom_folder
-            : spec_.location == app::LocationScope::CurrentFolder ? spec_.current_folder : L"";
+        const auto location = spec_.location == model::LocationScope::CustomFolder ? spec_.custom_folder
+            : spec_.location == model::LocationScope::CurrentFolder ? spec_.current_folder : L"";
         painter_.DrawText(location, PreviewRect(), compositor_.SmallFormat(), theme.text_secondary);
         fluent::ButtonSpec reset;
         reset.bounds = ResetRect();
@@ -559,7 +559,7 @@ private:
             edit_content_ = CreateField(2, spec_.content);
             edit_exclude_ = CreateField(3, spec_.content_exclude);
             edit_exts_ = CreateField(4, spec_.custom_exts);
-            preview_ = app::CompileSearchQuery(spec_);
+            preview_ = model::CompileSearchQuery(spec_);
             return 0;
         }
         case WM_DESTROY:
@@ -677,8 +677,8 @@ private:
                 std::wstring folder;
                 if (PickFolderPath(hwnd_, folder)) {
                     spec_.custom_folder = folder;
-                    spec_.location = app::LocationScope::CustomFolder;
-                    preview_ = app::CompileSearchQuery(spec_);
+                    spec_.location = model::LocationScope::CustomFolder;
+                    preview_ = model::CompileSearchQuery(spec_);
                     InvalidateRect(hwnd_, nullptr, FALSE);
                 }
             } else if (id >= 4) {
@@ -707,7 +707,7 @@ private:
     HBRUSH edit_brush_ = nullptr;
     Compositor compositor_;
     fluent::Painter painter_;
-    app::AdvancedSearchSpec spec_;
+    model::AdvancedSearchSpec spec_;
     AdvancedSearchDialogResult result_;
     std::wstring preview_;
     bool dark_ = true;
@@ -722,7 +722,7 @@ private:
 
 } // namespace
 
-AdvancedSearchDialogResult ShowAdvancedSearchDialog(HWND owner, app::AdvancedSearchSpec spec,
+AdvancedSearchDialogResult ShowAdvancedSearchDialog(HWND owner, model::AdvancedSearchSpec spec,
                                                     bool dark, D2D1_COLOR_F accent) {
     AdvancedSearchWindow window;
     return window.Show(owner, std::move(spec), dark, accent);

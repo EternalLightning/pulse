@@ -49,6 +49,21 @@ struct CtxBind {
     CtxBind& operator=(const CtxBind&) = delete;
 };
 
+struct CtxWorkerHandles {
+    HANDLE done_event = nullptr;
+    HANDLE exit_event = nullptr;
+    HANDLE thread = nullptr;
+
+    CtxWorkerHandles() = default;
+    ~CtxWorkerHandles() { Stop(); }
+    CtxWorkerHandles(const CtxWorkerHandles&) = delete;
+    CtxWorkerHandles& operator=(const CtxWorkerHandles&) = delete;
+    bool Start(LPTHREAD_START_ROUTINE entry, void* context,
+               decltype(&CreateEventW) create_event = CreateEventW,
+               decltype(&CreateThread) create_thread = CreateThread);
+    void Stop() noexcept;
+};
+
 void ReleaseHandlerSlot(CtxHandlerSlot& slot) noexcept;
 
 std::vector<CtxHandlerDesc> EnumerateCtxHandlers(
@@ -66,6 +81,7 @@ void CollectHandlerItems(const CtxHandlerSlot& slot, bool background,
                          std::vector<CtxItemOut>& out);
 
 uint32_t FindItemId(const std::vector<CtxItemOut>& items, uint32_t id,
-                    const std::wstring& verb, const std::wstring& text);
+                    const std::wstring& verb, const std::wstring& text,
+                    uint32_t id_first = 1, uint32_t id_last = 0x7FFF);
 
 } // namespace pulse::shell

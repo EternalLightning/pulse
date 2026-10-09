@@ -1,5 +1,9 @@
 #ifndef PULSE_STRING_IDS_H
 #define PULSE_STRING_IDS_H
+#define IDS_NETWORK_SEARCH_ADD                   2230
+#define IDS_NETWORK_SEARCH_RUNNING               2231
+#define IDS_NETWORK_SEARCH_COMPLETE              2232
+#define IDS_NETWORK_SEARCH_HINT                  2233
 
 #define IDS_SETTINGS                    1000
 #define IDS_SETTINGS_GENERAL            1001
@@ -1004,3 +1008,4 @@
 #define IDS_HELP_OPEN_KEYS                       2222
 #define IDS_HELP_EYEBROW                         2223
 #define IDS_LIST_SEPARATOR                       2224
+#define IDS_ARCHIVE_PASSWORD_UNKNOWN_RETRY       2225

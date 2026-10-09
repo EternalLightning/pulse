@@ -1,5 +1,6 @@
 #pragma once
 #include "protocol.h"
+#include "file_identity_protocol.h"
 #include "../common/path_utils.h"
 #include <set>
 #include <utility>
@@ -38,6 +39,7 @@ struct DeleteWirePlan {
     uint64_t host_epoch = 0;
     uint64_t token = 0;
     std::vector<std::wstring> paths;
+    std::vector<FileIdentity> expected_identities;
 };
 
 inline bool ReadDeleteWirePlan(PayloadReader& reader, DeleteWirePlan& plan, bool require_end = true) {
@@ -50,6 +52,10 @@ inline bool ReadDeleteWirePlan(PayloadReader& reader, DeleteWirePlan& plan, bool
         if (!reader.GetString(path) || !IsLosslessDeleteShellPath(path)) return false;
         parsed.paths.push_back(std::move(path));
     }
+    // Older recycle frames end in an owner HWND only. Historical proof is an optional extension.
+    if (reader.remaining() > (require_end ? 0u : 8u) &&
+        (!ReadFileIdentities(reader, parsed.expected_identities) ||
+         (!parsed.expected_identities.empty() && parsed.expected_identities.size() != parsed.paths.size()))) return false;
     if ((require_end && reader.remaining() != 0) || parsed.host_epoch == 0 || parsed.token == 0) return false;
     plan = std::move(parsed);
     return true;
@@ -60,6 +66,7 @@ class DeleteHostAdmission {
 public:
     bool Consume(const DeleteWirePlan& plan, uint64_t current_epoch) {
         if (plan.host_epoch != current_epoch || plan.token == 0 || plan.paths.empty()) return false;
+        if (!plan.expected_identities.empty() && plan.expected_identities.size() != plan.paths.size()) return false;
         for (const auto& path : plan.paths) if (!IsLosslessDeleteShellPath(path)) return false;
         return consumed_.insert(plan.token).second;
     }

@@ -20,6 +20,8 @@ namespace pulse::app {
 namespace {
 constexpr size_t kCacheLimit = 4096;
 constexpr ULONGLONG kFreshMs = 60000;
+constexpr unsigned kWorkerLimit = 4;
+std::atomic<unsigned> live_workers{0};
 std::wstring Key(std::wstring path) {
     path = fs::NormalizePath(std::move(path));
     while (path.size() > 7 && path.back() == L'\\') path.pop_back();
@@ -38,9 +40,9 @@ bool AddBytes(uint64_t& total, uint64_t bytes) {
 struct Scan {
     struct Frame {
         std::wstring path;
-        HANDLE find = INVALID_HANDLE_VALUE;
-        WIN32_FIND_DATAW data{};
+        std::unique_ptr<fs::DirectoryEnumerator> cursor;
         uint64_t bytes = 0;
+        uint64_t files = 0, dirs = 0;
         bool started = false, partial = false, read_any = false;
     };
     std::wstring path;
@@ -51,21 +53,24 @@ struct Scan {
     explicit Scan(std::wstring p, uint64_t e) : path(std::move(p)), epoch(e) {
         stack.push_back(Frame{path});
     }
-    ~Scan() { for (auto& f : stack) if (f.find != INVALID_HANDLE_VALUE) FindClose(f.find); }
     void FinishFrame() {
         auto f = std::move(stack.back());
         stack.pop_back();
-        if (f.find != INVALID_HANDLE_VALUE) FindClose(f.find);
         if (stack.empty()) {
             done = true;
             result.bytes = f.bytes;
             result.has_value = f.read_any;
+            result.files = f.files;
+            result.dirs = f.dirs;
+            result.counts_valid = f.read_any;
+            result.incomplete = f.partial;
             result.state = !f.read_any ? FolderSizeState::Unavailable :
                 (f.partial ? FolderSizeState::Partial : FolderSizeState::Ready);
         } else {
             auto& parent = stack.back();
             const bool added = AddBytes(parent.bytes, f.bytes);
             parent.partial |= f.partial || !added;
+            parent.partial |= !AddBytes(parent.files, f.files) || !AddBytes(parent.dirs, f.dirs);
         }
     }
     // Round-robin slices keep a large first folder from starving its siblings.
@@ -74,7 +79,6 @@ struct Scan {
         unsigned processed = 0;
         while (!done && !stopping && GetTickCount64() < deadline && processed++ < 256) {
             auto& f = stack.back();
-            bool available = false;
             if (!f.started) {
                 f.started = true;
                 const DWORD attrs = GetFileAttributesW(f.path.c_str());
@@ -85,34 +89,31 @@ struct Scan {
                 if (attrs & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_OFFLINE)) {
                     f.partial = true; FinishFrame(); continue;
                 }
-                f.find = FindFirstFileExW((f.path + L"\\*").c_str(), FindExInfoBasic,
-                    &f.data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
-                available = f.find != INVALID_HANDLE_VALUE;
-                if (!available) {
-                    const DWORD error = GetLastError();
-                    f.read_any = error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES;
-                    f.partial = !f.read_any;
-                    FinishFrame(); continue;
-                }
-                f.read_any = true;
-            } else {
-                available = FindNextFileW(f.find, &f.data) != FALSE;
-                if (!available) {
-                    f.partial |= GetLastError() != ERROR_NO_MORE_FILES;
-                    FinishFrame(); continue;
-                }
+                f.cursor = std::make_unique<fs::DirectoryEnumerator>(f.path);
             }
-            const auto& d = f.data;
-            if (wcscmp(d.cFileName, L".") == 0 || wcscmp(d.cFileName, L"..") == 0) continue;
-            if (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                if ((d.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_OFFLINE)) ||
+            fs::DirEntry d;
+            fs::DirectoryRead read;
+            try {
+                read = f.cursor->Next(d, [&] { return stopping.load(); });
+            } catch (const fs::EnumerationError& error) {
+                OutputDebugStringA((std::string("Pulse folder size: ") + error.what() + "\n").c_str());
+                f.read_any |= f.cursor->ReadAny();
+                f.partial = true;
+                FinishFrame(); continue;
+            }
+            if (read == fs::DirectoryRead::Cancelled) return;
+            f.read_any = true; // Successful empty enumeration is a known zero.
+            if (read == fs::DirectoryRead::End) { FinishFrame(); continue; }
+            if (d.is_dir) {
+                f.partial |= !AddBytes(f.dirs, 1);
+                if ((d.attrs & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_OFFLINE)) ||
                     stack.size() >= 128) { f.partial = true; continue; }
-                const auto child = f.path + L"\\" + d.cFileName;
+                const auto child = f.path + L"\\" + d.name;
                 stack.push_back(Frame{child});
             } else {
+                f.partial |= !AddBytes(f.files, 1);
                 // Logical size includes cloud placeholders without opening content.
-                const uint64_t bytes = (static_cast<uint64_t>(d.nFileSizeHigh) << 32) | d.nFileSizeLow;
-                f.partial |= !AddBytes(f.bytes, bytes);
+                f.partial |= !AddBytes(f.bytes, d.size);
             }
         }
     }
@@ -127,9 +128,12 @@ struct FolderSizes::Impl {
     };
     mutable std::mutex mutex;
     std::condition_variable wake;
+    std::condition_variable finished;
+    bool worker_finished = false;
     std::map<std::wstring, Entry> cache;
     std::map<std::wstring, bool> wanted;
     std::set<std::wstring> manual, blocked_auto;
+    std::set<std::wstring> require_counts;
     std::vector<std::wstring> roots;
     std::function<std::wstring()> cache_path;
     std::thread worker;
@@ -137,6 +141,9 @@ struct FolderSizes::Impl {
     bool dirty = false;
     bool index_enabled = true;
     HANDLE index_cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+#ifdef PULSE_FOLDER_SIZES_TESTING
+    std::function<void(const std::wstring&)> scan_hook;
+#endif
     ~Impl() { if (index_cancel) CloseHandle(index_cancel); }
 
     void Invalidate(const std::wstring& path) {
@@ -157,13 +164,14 @@ struct FolderSizes::Impl {
         for (const auto& record : json::ExtractStringArray(text, L"folders")) {
             const auto tab = record.find(L'\t');
             if (tab == std::wstring::npos || tab + 3 >= record.size() || record[tab + 2] != L'\t') continue;
-            wchar_t* end = nullptr;
-            const auto bytes = wcstoull(record.c_str(), &end, 10);
-            if (end != record.c_str() + tab) continue;
+            uint64_t bytes = 0;
+            if (!json::ParseUnsigned(std::wstring_view(record).substr(0, tab), bytes) ||
+                (record[tab + 1] != L'0' && record[tab + 1] != L'1')) continue;
             const auto path = Key(record.substr(tab + 3));
             if (path.empty() || fs::IsVirtualPath(path)) continue;
             auto& e = cache[path];
             e.value = {FolderSizeState::Updating, bytes, true};
+            e.value.incomplete = record[tab + 1] == L'1';
             if (cache.size() >= kCacheLimit) break;
         }
         changed = true;
@@ -181,7 +189,7 @@ struct FolderSizes::Impl {
                 first = false;
                 text += L"\"";
                 json::Escape(std::to_wstring(e.value.bytes) + L"\t" +
-                    (e.value.state == FolderSizeState::Partial ? L"1\t" : L"0\t") + p, text);
+                    (e.value.incomplete ? L"1\t" : L"0\t") + p, text);
                 text += L"\"";
             }
             dirty = false;
@@ -216,7 +224,7 @@ struct FolderSizes::Impl {
             {
                 std::lock_guard lock(mutex);
                 for (const auto& [p, automatic] : wanted) {
-                    if (automatic && !manual.contains(p)) classify.push_back(p);
+                    if (automatic && !manual.contains(p) && !require_counts.contains(p)) classify.push_back(p);
                 }
             }
             for (const auto& p : classify) {
@@ -235,7 +243,7 @@ struct FolderSizes::Impl {
                     std::lock_guard lock(mutex);
                     if (!stopping) ResetEvent(index_cancel);
                     for (const auto& [p, automatic] : wanted) {
-                        if (!automatic || manual.contains(p) || fs::IsUncPath(p)) continue;
+                        if (!automatic || manual.contains(p) || require_counts.contains(p) || fs::IsUncPath(p)) continue;
                         paths.push_back(p); epochs.push_back(cache[p].epoch);
                     }
                     std::erase_if(indexed_paths, [&](const auto& p) { return !wanted.contains(p); });
@@ -258,7 +266,8 @@ struct FolderSizes::Impl {
                 for (size_t i = 0; i < paths.size(); ++i) {
                     auto found = cache.find(paths[i]);
                     if (found == cache.end() || !wanted.contains(paths[i]) ||
-                        found->second.epoch != epochs[i] || manual.contains(paths[i])) continue;
+                        found->second.epoch != epochs[i] || manual.contains(paths[i]) ||
+                        require_counts.contains(paths[i])) continue;
                     auto& e = found->second;
                     if (received && values[i].available) {
                         if (e.value.state != FolderSizeState::Indexed || e.value.bytes != values[i].bytes) changed = true;
@@ -284,12 +293,15 @@ struct FolderSizes::Impl {
                 for (const auto& [p, automatic] : wanted) {
                     if (!automatic) continue;
                     auto& e = cache[p];
-                    if (indexed_paths.contains(p) && !manual.contains(p)) continue;
+                    if (indexed_paths.contains(p) && !manual.contains(p) && !require_counts.contains(p)) continue;
                     if (now < e.not_before) continue;
                     const bool watched = std::any_of(watches.begin(), watches.end(), [&](const auto& w) {
                         return w.second->Armed() && Within(p, w.first);
                     });
-                    if (e.completed && (watched || now - e.completed < kFreshMs)) continue;
+                    const bool needs_counts = require_counts.contains(p) && !e.value.counts_valid &&
+                        e.value.state == FolderSizeState::Indexed;
+                    if (e.completed && !needs_counts &&
+                        (watched || now - e.completed < kFreshMs)) continue;
                     if (std::any_of(jobs.begin(), jobs.end(), [&](const auto& j) { return j->path == p; })) continue;
                     e.value.state = e.value.has_value ? FolderSizeState::Updating : FolderSizeState::Calculating;
                     if (jobs.size() >= 32) break;
@@ -322,6 +334,9 @@ struct FolderSizes::Impl {
             }
             if (!jobs.empty() && !stopping) {
                 auto job = std::move(jobs.front()); jobs.pop_front();
+#ifdef PULSE_FOLDER_SIZES_TESTING
+                if (scan_hook) scan_hook(job->path);
+#endif
                 job->Step(stopping);
                 if (job->done) {
                     std::lock_guard lock(mutex);
@@ -347,7 +362,7 @@ struct FolderSizes::Impl {
     }
 };
 
-FolderSizes::FolderSizes() : impl_(std::make_unique<Impl>()) {}
+FolderSizes::FolderSizes() : impl_(std::make_shared<Impl>()) {}
 FolderSizes::~FolderSizes() { Stop(); }
 void FolderSizes::SetCachePath(std::function<std::wstring()> path) {
     std::lock_guard lock(impl_->mutex);
@@ -362,9 +377,11 @@ void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::
     std::lock_guard lock(s.mutex);
     if (s.stopping) return;
     std::map<std::wstring, bool> wanted;
+    std::set<std::wstring> require_counts;
     for (const auto& request : visible) {
         const auto key = Key(request.path);
-        wanted[key] = (request.automatic && !s.blocked_auto.contains(key)) || s.manual.contains(key);
+        wanted[key] |= (request.automatic && (!s.blocked_auto.contains(key) || request.require_counts)) || s.manual.contains(key);
+        if (request.require_counts) require_counts.insert(key);
         s.cache[key].used = GetTickCount64();
     }
     bool cancelled = false;
@@ -374,6 +391,7 @@ void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::
         cancelled |= automatic;
     }
     s.wanted = std::move(wanted);
+    s.require_counts = std::move(require_counts);
     for (auto& root : roots) root = Key(root);
     std::sort(roots.begin(), roots.end()); roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
     s.roots = std::move(roots);
@@ -384,7 +402,36 @@ void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::
         if (oldest == s.cache.end()) break;
         s.cache.erase(oldest);
     }
-    if (!s.worker.joinable() && !s.wanted.empty()) s.worker = std::thread([&s] { s.Run(); });
+    if (!s.worker.joinable() && !s.wanted.empty()) {
+        unsigned live = live_workers.load();
+        while (live < kWorkerLimit && !live_workers.compare_exchange_weak(live, live + 1)) {}
+        if (live < kWorkerLimit) {
+            const auto state = impl_;
+            try {
+                s.worker = std::thread([state] {
+                    try { state->Run(); } catch (...) {
+                        std::lock_guard lock(state->mutex);
+                        for (const auto& [p, automatic] : state->wanted)
+                            if (automatic) state->cache[p].value.state = state->cache[p].value.has_value
+                                ? FolderSizeState::Cached : FolderSizeState::Unavailable;
+                        state->changed = true;
+                    }
+                    {
+                        std::lock_guard lock(state->mutex);
+                        state->worker_finished = true;
+                    }
+                    --live_workers;
+                    state->finished.notify_all();
+                });
+            } catch (...) { --live_workers; }
+        }
+        if (!s.worker.joinable()) {
+            for (const auto& [p, automatic] : s.wanted)
+                if (automatic) s.cache[p].value.state = s.cache[p].value.has_value
+                    ? FolderSizeState::Cached : FolderSizeState::Unavailable;
+            s.changed = true;
+        }
+    }
     if (cancelled && s.worker.joinable()) CancelSynchronousIo(s.worker.native_handle());
     if (cancelled && s.index_cancel) SetEvent(s.index_cancel);
     s.wake.notify_one();
@@ -423,6 +470,20 @@ bool FolderSizes::TakeChanged() { return impl_->changed.exchange(false); }
 void FolderSizes::Stop() {
     auto& s = *impl_; s.stopping = true; s.wake.notify_all();
     if (s.index_cancel) SetEvent(s.index_cancel);
-    if (s.worker.joinable()) { CancelSynchronousIo(s.worker.native_handle()); s.worker.join(); }
+    if (s.worker.joinable()) {
+        CancelSynchronousIo(s.worker.native_handle());
+        std::unique_lock lock(s.mutex);
+        const bool finished = s.finished.wait_for(lock, std::chrono::milliseconds(100), [&] { return s.worker_finished; });
+        lock.unlock();
+        if (finished) s.worker.join();
+        else s.worker.detach();
+    }
 }
+#ifdef PULSE_FOLDER_SIZES_TESTING
+void FolderSizes::SetScanHookForTest(std::function<void(const std::wstring&)> hook) {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->worker.joinable()) impl_->scan_hook = std::move(hook);
+}
+unsigned FolderSizes::LiveWorkersForTest() { return live_workers.load(); }
+#endif
 }

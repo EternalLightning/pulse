@@ -1,7 +1,8 @@
 #include "archive_navigation.h"
 #include "app_exit.h"
-#include "drive_labels.h"
+#include "drive_label_rename.h"
 #include "../ops/archive.h"
+#include "../ops/drop_staging.h"
 #include "locked_operation_prompt.h"
 #include "../common/windows_compat.h"
 #include "quick_access.h"
@@ -310,7 +311,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->scale = s->shot_scale_override > 0.0f
             ? s->shot_scale_override : (float)pulse::compat::WindowDpi(hwnd) / 96.0f;
         s->accentColor = ui::GetAccentColor();
-        s->darkMode = ui::ShouldUseDarkMode(s->themeOverride);
+        s->darkMode = ui::ShouldUseDarkMode(s->EffectiveThemeMode());
         s->backdropActive = ui::ApplyWindowEffect(hwnd, ui::WindowEffect::MicaAlt, s->darkMode);
 
         if (!s->compositor.Init(hwnd)) {
@@ -331,7 +332,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->renderer.SetScale(s->scale);
         s->renderer.SetIconNotifyWindow(hwnd);
         s->quickPreview.Initialize(hwnd, WM_QUICK_PREVIEW_NAVIGATE,
-                                   WM_QUICK_PREVIEW_OPEN, WM_QUICK_PREVIEW_COMMAND);
+                                   WM_QUICK_PREVIEW_OPEN, WM_QUICK_PREVIEW_COMMAND,
+                                   s->renderer.SharedThumbnailCache());
 
         s->window_tabs.EnsureDefault();
         BindCurrentLayout(*s);
@@ -354,11 +356,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         ProbePinnedNetworks(*s);
         s->ctxMenuPrefs.Load();
         s->appPrefs.Load();
-        if (!s->shot.active && s->appPrefs.theme_mode >= 0) {
-            s->themeOverride = s->appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
-                s->appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
-            s->darkMode = ui::ShouldUseDarkMode(s->themeOverride);
-        }
+        s->darkMode = ui::ShouldUseDarkMode(s->EffectiveThemeMode());
         s->searchHistory.persist = !s->shot.active && !s->menushot && !s->isolatedTest;
         if (s->searchHistory.persist) s->searchHistory.Load();
         s->showFps = s->forceStatusPerformance || s->appPrefs.show_status_performance;
@@ -386,7 +384,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->renderer.SetRowHeightDip(static_cast<float>(s->appPrefs.row_height));
         s->renderer.SetListStyle(s->appPrefs.list_smart_date, s->appPrefs.list_zebra_rows,
                                  s->appPrefs.list_size_bar);
-        app::SetFolderSortMode(app::FolderSortModeFromInt(s->appPrefs.folder_sort_mode));
         s->renderer.SetSidebarWidthDip(static_cast<float>(s->appPrefs.sidebar_width));
         s->renderer.SetTrayIconDip(static_cast<float>(s->appPrefs.tray_icon_size));
         ApplyAccentFromPrefs(*s, true);
@@ -489,6 +486,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         ApplyGlobalSearchSettings(*s);
 
         s->worker.Start([s](app::WorkResult res) { PostWorkerResult(*s, std::move(res)); });
+        if (!s->isolatedTest && !s->shot.active && !s->menushot) {
+            s->worker.EnqueueIo([] { ops::SweepDropStages(ops::DropStageRoot(), false); });
+        }
         RequestRecycleOccupancy(*s);
 
         // Ops layer: queue worker + shell host IPC; notify repaints the status bar.
@@ -572,17 +572,17 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         {
             ui::DropTargetCallbacks dcb;
             dcb.drag_over = [hwnd](const std::vector<std::wstring>& srcs, POINT pt,
-                                   DWORD keys, DWORD allowed) -> DWORD {
+                                   DWORD keys, DWORD allowed, DWORD preferred) -> DWORD {
                 AppState* st = GetAppState(hwnd);
-                return st ? ResolveDropTarget(*st, srcs, pt, keys, allowed) : DROPEFFECT_NONE;
+                return st ? ResolveDropTarget(*st, srcs, pt, keys, allowed, preferred) : DROPEFFECT_NONE;
             };
             dcb.drag_leave = [hwnd] {
                 if (AppState* st = GetAppState(hwnd)) ClearDropFeedback(*st);
             };
             dcb.drop = [hwnd](const std::vector<std::wstring>& srcs, POINT pt,
-                              DWORD keys, DWORD preferred) -> DWORD {
+                              DWORD keys, DWORD allowed, DWORD preferred) -> DWORD {
                 AppState* st = GetAppState(hwnd);
-                return st ? DropExecute(*st, srcs, pt, keys, preferred) : DROPEFFECT_NONE;
+                return st ? DropExecute(*st, srcs, pt, keys, allowed, preferred) : DROPEFFECT_NONE;
             };
             s->dropTarget = new ui::WindowDropTarget(hwnd, std::move(dcb));
             RegisterDragDrop(hwnd, s->dropTarget);
@@ -846,8 +846,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s && (lParam == 0 ||
                   wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet") == 0 ||
                   wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"HighContrast") == 0)) {
-            if (s->themeOverride == ui::ThemeMode::Auto)
-                s->darkMode = ui::ShouldUseDarkMode(s->themeOverride);
+            if (s->EffectiveThemeMode() == ui::ThemeMode::Auto)
+                s->darkMode = ui::ShouldUseDarkMode(s->EffectiveThemeMode());
             if (s->appPrefs.accent_rgb.empty())
                 ApplyAccentFromPrefs(*s, true);
             ApplyAppWindowChrome(*s);
@@ -947,6 +947,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
             if (PumpClipboardAvailability(*s, now)) dirty = true;
+            if (app::PumpTrayMetadata(s->tray, s->worker, s->tray_metadata)) dirty = true;
             if (s->sidebarScrollbarFade.Tick(now, s->sidebarScroll,
                     s->hoverRegion == static_cast<int>(ui::HitTestResult::Scrollbar) && s->hoverPaneIndex < 0,
                     s->scrollbarDragging && s->scrollbarSidebar)) dirty = true;
@@ -1456,20 +1457,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_DETAILS_META: {
         auto* result = reinterpret_cast<DetailsMetaResult*>(lParam);
-        if (s && result && result->path == s->detailsSelPath) {
-            s->detailsSelValid = result->attrs_valid;
-            if (result->attrs_valid) {
-                s->detailsCreated = result->created;
-                s->detailsModified = result->modified;
-                s->detailsAccessed = result->accessed;
-            }
-            s->detailsTypeName = std::move(result->type_name);
-            s->detailsMetaPath = result->path;
-            s->detailsOwner = std::move(result->meta.owner);
-            s->detailsPermissions = std::move(result->meta.permissions);
-            s->detailsDrive = std::move(result->meta.drive);
-            s->detailsFileSystem = std::move(result->meta.file_system);
-            s->detailsFreeSpace = std::move(result->meta.free_space);
+        if (s && result && ApplyDetailsMetaResult(*s, *result)) {
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         delete result;
@@ -1693,9 +1681,12 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             MSG archive_message{};
             while (PeekMessageW(&archive_message, hwnd, WM_ARCHIVE_RESULT, WM_ARCHIVE_RESULT, PM_REMOVE))
                 DiscardArchiveResult(archive_message.lParam);
-            std::thread archive_cleanup(CleanupArchiveFiles);
+            const bool sweep_drops = !s->isolatedTest && !s->shot.active && !s->menushot;
+            std::thread archive_cleanup([sweep_drops] {
+                CleanupArchiveFiles();
+                if (sweep_drops) ops::SweepDropStages(ops::DropStageRoot(), true);
+            });
             archive_cleanup.join();
-            ShutdownDetailsSizeWalk(*s);
 
             if (s->dropTarget) {
                 RevokeDragDrop(hwnd);

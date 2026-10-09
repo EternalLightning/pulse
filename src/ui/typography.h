@@ -38,6 +38,8 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
 // Invalidate language-dependent fallback and measurement caches.
 void InvalidateCaches();
 std::uint64_t Generation() noexcept;
+// Drop only the calling thread's widths before its formats/device are replaced.
+void ClearMeasurementCache() noexcept;
 
 // Pulse lays out in physical pixels on a 96-DPI D2D target. Keep vertical
 // text boxes stable while preserving DirectWrite's natural horizontal spacing.
@@ -47,7 +49,8 @@ D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept;
 // DWrite's cluster width.
 float InkPad(IDWriteTextFormat* format) noexcept;
 
-// DWrite advance plus right overhang. Empty text is 0.
+// DWrite advance plus right overhang. Empty text is 0. Shares the per-thread
+// width cache with MeasureLine; replacing a format/fallback requires invalidation.
 float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
                      std::wstring_view text);
 

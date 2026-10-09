@@ -310,11 +310,11 @@ bool DrawCompositeGallery(Compositor& compositor, bool dark, bool high_contrast,
                             {}, State(), State()});
     painter.FillRoundedRect(Rect(236, 135, 764, 1), 0, theme.stroke_divider);
     painter.DrawColumnHeader({Rect(248, 136, 354, 32), L"Name", State(),
-                              SortDirection::Ascending});
+                              SortIndicator::Ascending});
     painter.DrawColumnHeader({Rect(602, 136, 150, 32), L"Modified", State()});
     painter.DrawColumnHeader({Rect(752, 136, 132, 32), L"Status", State()});
     painter.DrawColumnHeader({Rect(884, 136, 106, 32), L"Size", State(),
-                              SortDirection::None, HorizontalAlignment::Right});
+                              SortIndicator::None, HorizontalAlignment::Right});
 
     FileRowContentSpec file{};
     file.bounds = Rect(244, 172, 746, 36);

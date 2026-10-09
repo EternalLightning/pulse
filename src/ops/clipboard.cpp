@@ -7,6 +7,10 @@
 
 namespace pulse::ops {
 
+bool PreferredEffectIsCut(uint32_t preferred_effect) {
+    return preferred_effect == DROPEFFECT_MOVE;
+}
+
 namespace {
 
 HWND ClipboardOwner() {
@@ -136,7 +140,7 @@ bool ReadClipboard(ClipboardData& out) {
     UINT fmtEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
     if (HANDLE h = GetClipboardData(fmtEffect)) {
         if (DWORD* effect = static_cast<DWORD*>(GlobalLock(h))) {
-            out.cut = (*effect & DROPEFFECT_MOVE) != 0;
+            out.cut = GlobalSize(h) >= sizeof(DWORD) && PreferredEffectIsCut(*effect);
             GlobalUnlock(h);
         }
     }

@@ -175,11 +175,41 @@ bool Normal() {
     return ok;
 }
 
+bool UnsupportedRead() {
+    Fixture fixture;
+    if (!Check(fixture.valid, "create isolated unsupported-notify fixture")) return false;
+    auto reads = std::make_shared<std::atomic<uint32_t>>(0);
+    auto callbacks = std::make_shared<std::atomic<uint32_t>>(0);
+    Watch::SetIoHookForTest([reads](Watch::TestPoint point) {
+        if (point == Watch::TestPoint::ReadChanges) ++*reads;
+    });
+    Watch::SetReadErrorForTest(ERROR_NOT_SUPPORTED);
+    Watch watch;
+    bool ok = Check(watch.Start(fixture.path, [callbacks](bool overflow, auto) {
+        if (overflow) ++*callbacks;
+    }), "directory opens while injected provider rejects notifications");
+    ok &= Check(Await([&] { return reads->load() >= 2 && !watch.Armed(); }, 4000),
+                "unsupported provider receives a delayed second attempt");
+    ok &= Check(reads->load() == 2 && callbacks->load() == 1 && !watch.Armed(),
+                "read failure backs off and emits only one overflow per failure period");
+    const auto before = std::chrono::steady_clock::now();
+    watch.Stop();
+    ok &= Check(Await([] { return Watch::Resources().live == 0; }, 500),
+                "Stop wakes retry backoff and physically releases worker");
+    const double elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - before).count();
+    ok &= Check(elapsed < 500 && reads->load() == 2,
+                "stop during backoff issues no further provider reads");
+    Watch::SetIoHookForTest({});
+    Watch::SetReadErrorForTest(ERROR_SUCCESS);
+    return ok;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) {
-        std::printf("usage: pulse_fs_watch_lifecycle_test --open|--probe|--cancel|--cap|--permanent|--normal\n");
+        std::printf("usage: pulse_fs_watch_lifecycle_test --open|--probe|--cancel|--cap|--permanent|--normal|--unsupported\n");
         return 2;
     }
     bool ok = false;
@@ -189,6 +219,7 @@ int wmain(int argc, wchar_t** argv) {
     else if (wcscmp(argv[1], L"--cap") == 0) ok = GlobalCap(false);
     else if (wcscmp(argv[1], L"--permanent") == 0) ok = GlobalCap(true);
     else if (wcscmp(argv[1], L"--normal") == 0) ok = Normal();
+    else if (wcscmp(argv[1], L"--unsupported") == 0) ok = UnsupportedRead();
     else return 2;
     return ok ? 0 : 1;
 }

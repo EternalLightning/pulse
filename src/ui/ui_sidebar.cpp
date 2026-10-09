@@ -6,8 +6,8 @@
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
-#include "../app/resource.h"
-#include "../app/places.h"
+#include "../common/resource_ids.h"
+#include "../model/places.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
 #include <d2d1effects.h>
@@ -595,13 +595,14 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         }
         FillRoundedRect(dc, color(rgba(tint, vm.dark ? 0.16f : 0.12f)), thumb.left, thumb.top,
                         g.thumb, g.thumb, tr);
-        const bool drewThumbnail = !card.missing && !card.is_dir &&
+        const bool has_metadata = !card.metadata_pending && !card.metadata_unavailable;
+        const bool drewThumbnail = has_metadata && !card.missing && !card.is_dir &&
             thumbnail_cache_.Draw(dc, thumb, card.path, card.attrs,
                 static_cast<uint32_t>(std::clamp(std::lround(g.thumb), 32l, 256l)),
                 0, 0, 0, 1.0f) == PreviewDrawResult::Bitmap;
         if (!drewThumbnail) {
             const float icon = std::round(g.thumb * 0.72f);
-            if (ID2D1Bitmap* bitmap = icon_cache_.BitmapFor(card.missing ? L"" : card.path,
+            if (ID2D1Bitmap* bitmap = icon_cache_.BitmapFor(card.missing || !has_metadata ? L"" : card.path,
                     card.name, card.is_dir, card.attrs, icon)) {
                 const float ix = (thumb.left + thumb.right - icon) * 0.5f;
                 const float iy = (thumb.top + thumb.bottom - icon) * 0.5f;
@@ -646,9 +647,13 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         }
         ty += lineName;
         std::wstring sub;
-        if (!card.is_dir && card.size > 0)
-            sub = pulse::format::ByteSize(card.size, true) + L" \xB7 ";
-        sub += FormatListType(card.name, card.is_dir);
+        if (card.metadata_pending) sub = l10n::Get(l10n::StringId::LoadingEllipsis);
+        else if (card.metadata_unavailable) sub = l10n::Get(l10n::StringId::Unavailable);
+        else {
+            if (!card.is_dir && card.size > 0)
+                sub = pulse::format::ByteSize(card.size, true) + L" \xB7 ";
+            sub += FormatListType(card.name, card.is_dir);
+        }
         DrawTextEndEllipsis(dc, factory, subFmt, color(subColor), sub, tx, ty, tw, lineSub);
         ty += lineSub;
         if (!card.folder.empty() && factory) {

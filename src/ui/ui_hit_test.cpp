@@ -1,3 +1,4 @@
+#include "search_banner_layout.h"
 #include "toolbar_layout.h"
 #include "toolbar_command_state.h"
 // ui_hit_test.cpp — Hit testing and tab-strip queries.
@@ -10,8 +11,8 @@
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
-#include "../app/resource.h"
-#include "../app/places.h"
+#include "../common/resource_ids.h"
+#include "../model/places.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
 #include <d2d1effects.h>
@@ -784,11 +785,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             paneRc = PaneBodyBounds(paneVm, paneRect);
         }
         const float banner = PaneBannerHeight(paneVm, paneRc.right - paneRc.left, scale_, compositor_);
-        if (paneVm.is_content_search && banner > 0) {
-            const float action_width = std::min(144.0f * scale_, (paneRc.right - paneRc.left - 16 * scale_) * 0.4f);
+        if ((paneVm.is_content_search || !paneVm.network_search_root.empty()) && banner > 0) {
+            const float action_width = SearchBannerActionWidth(paneRc.right - paneRc.left - 16 * scale_, scale_, !paneVm.network_search_root.empty());
             if (x >= paneRc.right - 8 * scale_ - action_width && x < paneRc.right - 8 * scale_ &&
                 y >= paneRc.top + pane_header_height_ && y < paneRc.top + pane_header_height_ + banner - 4 * scale_) {
-                out.region = HitTestResult::ContentIndexManage;
+                out.region = paneVm.network_search_root.empty() ? HitTestResult::ContentIndexManage : HitTestResult::NetworkSearchAdd;
+                out.path = paneVm.network_search_root;
                 return out;
             }
         }

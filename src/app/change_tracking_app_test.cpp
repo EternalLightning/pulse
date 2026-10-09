@@ -39,7 +39,6 @@ bool RunChangeTrackingAppTest() {
     state->places.persist = false;
     state->appPrefs.persist = false;
     state->appPrefs.change_tracking_enabled = true;
-    state->changes.enabled = true;
     state->window_tabs.NewTab(L"pulse:changes:C:\\fixture");
     state->pane = state->window_tabs.Active()->panes.front().get();
     auto& tab = *state->pane->ActiveTab();
@@ -127,13 +126,13 @@ bool RunChangeTrackingAppTest() {
     check(state->changes.summaries[summary_key].count == 1, "stale summary generation cannot erase records");
     ApplyChangeSummaries(*state, 17, summaries);
     check(state->changes.summaries[summary_key].count == 0, "successful empty result clears old time marker");
-    state->appPrefs.change_tracking_days = 3; state->changes.days = 3;
+    state->appPrefs.change_tracking_days = 3; state->changes.summary_days = 3;
     fresh.last_change = now; summaries.summaries = {fresh};
     ApplyChangeSummaries(*state, 17, summaries);
     check(state->changes.summaries[summary_key].count == 0 &&
         state->changes.summaries[fs::NormalizePath(L"c:\\fixture") + L"\n3"].count == 1,
         "summary cache separates display time ranges");
-    state->appPrefs.change_tracking_days = 7; state->changes.days = 7;
+    state->appPrefs.change_tracking_days = 7; state->changes.summary_days = 7;
     const auto before_failure = tab.snapshot;
     pending(4); ApplyChangeDetails(*state, 4, {});
     check(tab.snapshot == before_failure && !tab.change_status_text.empty() &&
@@ -150,7 +149,14 @@ bool RunChangeTrackingAppTest() {
     check(tab.change_empty_text == l10n::Get(l10n::StringId::ChangeNotCovered), "unsupported location explained only in details");
     pending(3);
     const auto old = tab.snapshot;
-    state->changes.enabled = false;
+    state->appPrefs.change_tracking_enabled = false;
+    state->changes.summary_request = 19;
+    state->changes.summary_pending = true;
+    state->changes.popover.visible = true;
+    ApplySettingsEffects(*state, SettingsEffect::ChangeTracking);
+    check(state->changes.details.empty() && !state->changes.summary_pending &&
+        !state->changes.popover.visible && state->changes.summaries.empty() && !tab.loading,
+        "setting change immediately invalidates all pending UI requests without a tick");
     ApplyChangeDetails(*state, 3, {});
     check(tab.snapshot == old, "disabled tracking ignores in-flight detail response");
     auto polling = std::make_unique<AppState>();

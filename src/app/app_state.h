@@ -19,6 +19,8 @@
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
+#include "app_notify_patch.h"
+#include "tray_metadata.h"
 #include "clipboard_availability.h"
 #include "tag_discovery_cache.h"
 #include "places.h"
@@ -175,6 +177,7 @@ struct AppState {
     };
     std::mutex notify_mu;
     std::vector<DirNotifyBatch> notify_queue;
+    app::NotifyPatchState notify_patches;
     struct CoalescedSizePatch {
         std::wstring path;
         std::wstring name;
@@ -210,6 +213,7 @@ struct AppState {
     float sidebarScroll = 0.0f;
     app::SidebarScrollbarFade sidebarScrollbarFade;
     app::StagingTray tray;
+    app::TrayMetadataWorkerState tray_metadata;
     app::PlacesCatalog places;
     app::ContextMenuPrefs ctxMenuPrefs;
     // Explorer COM/static menu session, caches, and delayed refresh state.
@@ -222,7 +226,6 @@ struct AppState {
     app::TabController tabs;
     app::TrayController tray_controller;
     GlobalSearchHotkey globalSearchHotkey;
-    GlobalSearchWindow globalSearchWindow;
     app::SingleInstanceCoordinator single_instance;
     ui::BloomAccentPicker bloom_accent;
     std::unordered_set<std::wstring> tagFallbackVolumes;
@@ -266,13 +269,23 @@ struct AppState {
     uint32_t paletteSearchId = 0;
     uint32_t nextIndexReq = 1;
     bool paletteSearching = false;
+    // Borrows clients and the request counter; destroy this window before them.
+    GlobalSearchWindow globalSearchWindow;
     app::UncProbeScheduler probe_scheduler;
     std::wstring probeUnc;
     std::vector<std::wstring> probeQueue;
 
+    // Resolved window appearance (system theme / shot override), not a saved preference.
     bool darkMode = false;
     unsigned settingsExpanded = ui::kSettingsDefaultExpandedMask;
+    // Startup/shot fallback only. Explicit persisted selections are projected
+    // directly from AppPrefs instead of copied into another preference slot.
     ui::ThemeMode themeOverride = ui::ThemeMode::Auto;
+    ui::ThemeMode EffectiveThemeMode() const noexcept {
+        if (shot.active || appPrefs.theme_mode < 0) return themeOverride;
+        return appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
+               appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
+    }
     bool safeMode = false;
     bool isolatedTest = false;
     bool contentIndexObserver = false;
@@ -574,6 +587,8 @@ struct AppState {
         DWORD attrs = 0;
         bool is_dir = false;
         bool missing = false;
+        bool metadata_pending = false;
+        bool metadata_unavailable = false;
         bool cut = false;
         uint64_t size = 0;
         bool ghost = false;     // left the stack window, playing its exit
@@ -646,6 +661,12 @@ struct AppState {
     uint32_t detailsCollapsedMask = (1u << 1) | (1u << 3) | (1u << 4);
     // Per-selection probe cache (file times + star state), keyed by path.
     std::wstring detailsSelPath;
+    uint64_t detailsWindowEpoch = app::NextDetailsWindowEpoch();
+    uint64_t detailsRequestId = 0;
+    uint64_t detailsProbeGeneration = 0;
+    uint64_t detailsProbeViewGeneration = 0;
+    ULONGLONG detailsProbeTick = 0;
+    std::weak_ptr<const std::vector<fs::DirEntry>> detailsProbeSnapshot;
     bool detailsSelValid = false;
     FILETIME detailsCreated{}, detailsModified{}, detailsAccessed{};
     bool detailsStarred = false;
@@ -654,19 +675,6 @@ struct AppState {
     std::wstring detailsMetaPath;
     std::wstring detailsOwner, detailsPermissions;
     std::wstring detailsDrive, detailsFileSystem, detailsFreeSpace;
-    // Folder size walk (background; cancelled and restarted on selection change).
-    std::mutex detailsSizeMutex;
-    std::condition_variable detailsSizeCv;
-    std::thread detailsSizeThread;
-    std::atomic<uint64_t> detailsSizeGeneration{0};
-    bool detailsSizeStop = false;
-    std::wstring detailsSizeRequested; // path being walked ("" = idle)
-    struct DetailsSizeResult {
-        std::wstring path;
-        uint64_t size = 0, files = 0, dirs = 0;
-        bool done = false;
-    } detailsSize;
-
     // Rubber-band (marquee) selection in the file list.
     bool marqueePending = false;
     bool marqueeActive = false;
@@ -713,6 +721,7 @@ struct ShellCtxItemsPayload {
 // BuildVm / DBLCLK hit-test used to block on SHGetFileInfo before OpenWith.
 struct DetailsMetaResult {
     std::wstring path;
+    uint64_t window_epoch = 0, request_id = 0;
     bool attrs_valid = false;
     FILETIME created{};
     FILETIME modified{};

@@ -7,11 +7,11 @@
 #include "typography.h"
 #include "name_highlight.h"
 #include "dialog_text_fit.h"
-#include "../app/places.h"
-#include "../app/builtin_menu_strings.h"
-#include "../app/search_query.h"
+#include "../model/places.h"
+#include "../model/builtin_menu_strings.h"
+#include "../model/search_query.h"
 #include "../common/text_format.h"
-#include "../common/drive_labels.h"
+#include "../model/drive_labels.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -24,63 +24,8 @@ namespace pulse::ui {
 
 namespace {
 
-struct TextWidthKey {
-    IDWriteTextFormat* format = nullptr;
-    std::wstring text;
-    std::uint64_t generation = 0;
-
-    bool operator==(const TextWidthKey&) const = default;
-};
-
-struct TextWidthLookup {
-    IDWriteTextFormat* format = nullptr;
-    std::wstring_view text;
-    std::uint64_t generation = 0;
-};
-
-struct TextWidthKeyHash {
-    using is_transparent = void;
-
-    static size_t Hash(IDWriteTextFormat* format, std::wstring_view value,
-                       std::uint64_t generation) noexcept {
-        const size_t pointer = std::hash<void*>{}(format);
-        const size_t text = std::hash<std::wstring_view>{}(value);
-        const size_t version = std::hash<std::uint64_t>{}(generation);
-        return pointer ^ (text + 0x9e3779b9u + (pointer << 6) + (pointer >> 2)) ^
-               (version + (text << 6) + (text >> 2));
-    }
-
-    size_t operator()(const TextWidthKey& key) const noexcept {
-        return Hash(key.format, key.text, key.generation);
-    }
-
-    size_t operator()(const TextWidthLookup& key) const noexcept {
-        return Hash(key.format, key.text, key.generation);
-    }
-};
-
-struct TextWidthKeyEqual {
-    using is_transparent = void;
-
-    bool operator()(const TextWidthKey& a, const TextWidthKey& b) const noexcept {
-        return a == b;
-    }
-
-    bool operator()(const TextWidthKey& a, const TextWidthLookup& b) const noexcept {
-        return a.format == b.format && a.text == b.text && a.generation == b.generation;
-    }
-
-    bool operator()(const TextWidthLookup& a, const TextWidthKey& b) const noexcept {
-        return a.format == b.format && a.text == b.text && a.generation == b.generation;
-    }
-};
-
-thread_local std::unordered_map<TextWidthKey, float, TextWidthKeyHash, TextWidthKeyEqual>
-    g_text_width_cache;
-constexpr size_t kTextWidthCacheLimit = 4096;
-
 void ClearTextWidthCache() {
-    g_text_width_cache.clear();
+    typography::ClearMeasurementCache();
 }
 
     // Transparent fill: button resting state (hover fill drawn on interaction).
@@ -236,13 +181,13 @@ void ClearTextWidthCache() {
         entry.is_reparse = source.is_reparse;
         entry.cloud_recall = source.cloud_recall;
         if (vm.tag_catalog && source.attrs == 0 && !entry.path.empty()) {
-            app::PlaceItemKind known_kind = app::PlaceItemKind::Unknown;
-            if (const app::StarredItem* starred = vm.tag_catalog->FindStarred(entry.path))
+            model::PlaceItemKind known_kind = model::PlaceItemKind::Unknown;
+            if (const model::StarredItem* starred = vm.tag_catalog->FindStarred(entry.path))
                 known_kind = starred->kind;
-            else if (const app::RecentItem* recent = vm.tag_catalog->FindRecent(entry.path))
+            else if (const model::RecentItem* recent = vm.tag_catalog->FindRecent(entry.path))
                 known_kind = recent->kind;
-            if (known_kind != app::PlaceItemKind::Unknown)
-                entry.is_dir = known_kind == app::PlaceItemKind::Folder;
+            if (known_kind != model::PlaceItemKind::Unknown)
+                entry.is_dir = known_kind == model::PlaceItemKind::Folder;
             entry.type_text = pulse::l10n::Get(pulse::l10n::StringId::Unavailable);
         } else {
             entry.type_text = source.drive_type != DRIVE_UNKNOWN
@@ -258,7 +203,7 @@ void ClearTextWidthCache() {
         else if (vm.search_snippets && index < vm.search_snippets->size())
             entry.snippet = (*vm.search_snippets)[index];
         if (entry.starred) {
-            if (const app::StarredItem* starred = vm.tag_catalog->FindStarred(entry.path)) {
+            if (const model::StarredItem* starred = vm.tag_catalog->FindStarred(entry.path)) {
                 entry.badge = starred->badge;
                 entry.badge_color = HexColor(starred->badge_rgb);
             }
@@ -628,7 +573,7 @@ void ClearTextWidthCache() {
     }
 
     void FillSearchFilterChipLabels(const std::wstring& query, std::wstring labels[5]) {
-        const app::AdvancedSearchSpec spec = app::ParseSearchQuery(query);
+        const model::AdvancedSearchSpec spec = model::ParseSearchQuery(query);
         auto kind_label = [&] {
             switch (spec.kind) {
             case pulse::index::SearchKind::Folder:
@@ -655,15 +600,15 @@ void ClearTextWidthCache() {
         };
         auto date_label = [&] {
             switch (spec.date) {
-            case app::DatePreset::Today:
+            case model::DatePreset::Today:
                 return pulse::l10n::Get(pulse::l10n::StringId::DateToday);
-            case app::DatePreset::Yesterday:
+            case model::DatePreset::Yesterday:
                 return pulse::l10n::Get(pulse::l10n::StringId::DateYesterday);
-            case app::DatePreset::ThisWeek:
+            case model::DatePreset::ThisWeek:
                 return pulse::l10n::Get(pulse::l10n::StringId::DateThisWeek);
-            case app::DatePreset::ThisMonth:
+            case model::DatePreset::ThisMonth:
                 return pulse::l10n::Get(pulse::l10n::StringId::DateThisMonth);
-            case app::DatePreset::ThisYear:
+            case model::DatePreset::ThisYear:
                 return pulse::l10n::Get(pulse::l10n::StringId::DateThisYear);
             default:
                 return pulse::l10n::Get(pulse::l10n::StringId::SearchChipDate);
@@ -671,13 +616,13 @@ void ClearTextWidthCache() {
         };
         auto size_label = [&] {
             switch (spec.size) {
-            case app::SizePreset::Empty:
+            case model::SizePreset::Empty:
                 return pulse::l10n::Get(pulse::l10n::StringId::SizeEmpty);
-            case app::SizePreset::Lt1MB:
+            case model::SizePreset::Lt1MB:
                 return pulse::l10n::Get(pulse::l10n::StringId::SizeLt1MB);
-            case app::SizePreset::From1To10MB:
+            case model::SizePreset::From1To10MB:
                 return pulse::l10n::Get(pulse::l10n::StringId::Size1To10MB);
-            case app::SizePreset::Gt10MB:
+            case model::SizePreset::Gt10MB:
                 return pulse::l10n::Get(pulse::l10n::StringId::SizeGt10MB);
             default:
                 return pulse::l10n::Get(pulse::l10n::StringId::SearchChipSize);
@@ -1284,24 +1229,7 @@ void FillRoundedRect(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br,
     dc->FillRoundedRectangle(&rr, br);
 }
 float MeasureTextWidth(IDWriteFactory2* factory, IDWriteTextFormat* fmt, const std::wstring& text) {
-    if (!factory || !fmt || text.empty()) return 0.0f;
-    const std::uint64_t generation = typography::Generation();
-    if (const auto cached = g_text_width_cache.find(TextWidthLookup{fmt, text, generation});
-        cached != g_text_width_cache.end())
-        return cached->second;
-    const float fallback = fmt->GetFontSize() * static_cast<float>(text.size());
-    ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt,
-        10000.0f, 100.0f, &layout)) || !layout.get()) return fallback;
-    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    DWRITE_TEXT_METRICS m{};
-    if (FAILED(layout->GetMetrics(&m))) return fallback;
-    DWRITE_OVERHANG_METRICS om{};
-    layout->GetOverhangMetrics(&om);
-    const float width = m.widthIncludingTrailingWhitespace + std::max(0.0f, om.right) + 1.0f;
-    if (g_text_width_cache.size() >= kTextWidthCacheLimit) g_text_width_cache.clear();
-    g_text_width_cache.emplace(TextWidthKey{fmt, text, generation}, width);
-    return width;
+    return typography::MeasureAdvance(factory, fmt, text);
 }
 
 // Status-bar columns shared by DrawStatusBar and HitTest. Independent of the
@@ -1725,7 +1653,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             const float top=y;
             const l10n::StringId descriptions[]={l10n::StringId::ContextSoftwareDesc,l10n::StringId::ContextOpenWithDesc,
                 l10n::StringId::ContextShareDesc,l10n::StringId::ContextSystemDesc,l10n::StringId::ContextPrintDesc,
-                app::builtin_text::GroupDescription};
+                model::builtin_text::GroupDescription};
             const auto& description=l10n::Get(descriptions[g]);
             const float header_height=SettingsToggleHeight(l.content.right-l.content.left-2*pad,description,scale,painter,112);
             l.context_header[g]=D2D1::RectF(l.content.left+pad,y,l.content.right-pad,y+header_height);

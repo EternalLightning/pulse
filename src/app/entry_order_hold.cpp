@@ -51,7 +51,7 @@ std::vector<fs::DirEntry> KeepEntryOrder(const std::vector<fs::DirEntry>& shown,
                                        const std::vector<fs::DirEntry>& fresh,
                                        const std::vector<EntryRenameHint>& renames,
                                        ui::SortColumn column, ui::SortDirection direction,
-                                       const std::wstring& parent) {
+                                       const std::wstring& parent, FolderSortMode folders) {
     if (parent.empty() || fs::IsVirtualPath(parent)) return fresh;
     const auto entries = IndexNames(fresh);
     const auto renamed = IndexRenames(renames);
@@ -70,7 +70,7 @@ std::vector<fs::DirEntry> KeepEntryOrder(const std::vector<fs::DirEntry>& shown,
         if (!used[index]) added.push_back(fresh[index]);
     std::stable_sort(added.begin(), added.end(), [&](const fs::DirEntry& left,
                                                   const fs::DirEntry& right) {
-        return EntryLess(left, right, column, direction, parent);
+        return EntryLess(left, right, column, direction, folders, parent);
     });
     result.insert(result.end(), std::make_move_iterator(added.begin()),
                   std::make_move_iterator(added.end()));

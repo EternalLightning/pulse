@@ -1,6 +1,7 @@
 #include "content_search_client.h"
 #include "content_search_protocol.h"
 #include "content_config_storage.h"
+#include "../ipc/protocol.h"
 
 #include <objbase.h>
 #include <algorithm>
@@ -24,33 +25,14 @@ std::wstring NewToken() {
     return token;
 }
 
-bool Transfer(HANDLE pipe, void* buffer, DWORD size, bool writing, HANDLE cancel) {
-    auto* bytes = static_cast<uint8_t*>(buffer);
-    HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!event) return false;
-    bool ok = true;
-    while (size && ok) {
-        OVERLAPPED ov{}; ov.hEvent = event; ResetEvent(event);
-        DWORD done = 0;
-        const BOOL immediate = writing ? WriteFile(pipe, bytes, size, &done, &ov) : ReadFile(pipe, bytes, size, &done, &ov);
-        if (!immediate) {
-            if (GetLastError() != ERROR_IO_PENDING) { ok = false; break; }
-            HANDLE events[]{event, cancel};
-            const DWORD wait = WaitForMultipleObjects(cancel ? 2 : 1, events, FALSE, cancel ? INFINITE : 5000);
-            if (wait != WAIT_OBJECT_0) {
-                CancelIoEx(pipe, &ov);
-                GetOverlappedResult(pipe, &ov, &done, TRUE);
-                ok = false; break;
-            }
-            if (!GetOverlappedResult(pipe, &ov, &done, FALSE)) { ok = false; break; }
-        }
-        if (!done) { ok = false; break; }
-        bytes += done; size -= done;
-    }
-    CloseHandle(event); return ok;
+bool ReadAll(HANDLE pipe, void* data, DWORD size, HANDLE cancel = nullptr) {
+    return ipc::PipeRead(pipe, data, size,
+        {.pending_timeout_ms = cancel ? INFINITE : 5000, .cancel_event = cancel});
 }
-bool ReadAll(HANDLE pipe, void* data, DWORD size, HANDLE cancel = nullptr) { return Transfer(pipe, data, size, false, cancel); }
-bool WriteAll(HANDLE pipe, const void* data, DWORD size, HANDLE cancel = nullptr) { return Transfer(pipe, const_cast<void*>(data), size, true, cancel); }
+bool WriteAll(HANDLE pipe, const void* data, DWORD size, HANDLE cancel = nullptr) {
+    return ipc::PipeWrite(pipe, data, size,
+        {.pending_timeout_ms = cancel ? INFINITE : 5000, .cancel_event = cancel});
+}
 HANDLE Connect(const std::wstring& token, HANDLE process, HANDLE cancel) {
     const auto name = content::PipeName(token);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

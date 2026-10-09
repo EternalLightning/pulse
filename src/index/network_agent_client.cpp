@@ -1,7 +1,10 @@
 #include "network_agent_client.h"
+#include "index_search_response.h"
+#include "live_filename_search.h"
 #include "../ipc/protocol.h"
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <shellapi.h>
 
 namespace pulse::index {
@@ -117,23 +120,25 @@ bool NetworkAgentClient::Request(uint32_t type, uint32_t id,
         }
         active_pipe_ = pipe;
     }
-    const auto close_pipe = [this, pipe] {
+    const auto close_pipe = [this, pipe](void*) {
+        const DWORD error = GetLastError();
         std::lock_guard<std::mutex> lock(pipe_mu_);
         if (active_pipe_ != pipe) return;
         active_pipe_ = INVALID_HANDLE_VALUE;
         CloseHandle(pipe);
+        SetLastError(error);
     };
+    const std::unique_ptr<void, decltype(close_pipe)> pipe_owner(pipe, close_pipe);
     const MsgHeader header = agent::MakeHeader(type, id, static_cast<uint32_t>(payload.size()));
     const auto deadline = GetTickCount64() + 10000;
     const bool sent = transport::Transfer(pipe, const_cast<MsgHeader*>(&header), sizeof(header), true, deadline, cancel_) &&
         (payload.empty() || transport::Transfer(pipe, const_cast<uint8_t*>(payload.data()), static_cast<DWORD>(payload.size()), true, deadline, cancel_));
     if (!sent) {
-        close_pipe();
         return false;
     }
     uint32_t response_id = 0;
     const bool received = ReadFrame(pipe, response_type, response_id, response, deadline, cancel_) && response_id == id;
-    close_pipe();
+    if (!received && GetLastError() == ERROR_SUCCESS) SetLastError(ERROR_INVALID_DATA);
     return received;
 }
 
@@ -160,6 +165,13 @@ void NetworkAgentClient::Start(HWND notify, UINT status_msg, UINT search_msg) {
 
 void NetworkAgentClient::Stop() {
     running_ = false;
+    {
+        std::lock_guard lock(search_mu_);
+        for (const auto& live : live_searches_) {
+            live->cancelled = true;
+            if (live->worker.joinable()) CancelSynchronousIo(live->worker.native_handle());
+        }
+    }
     status_cv_.notify_all();
     search_cv_.notify_all();
     if (cancel_) SetEvent(cancel_);
@@ -169,6 +181,8 @@ void NetworkAgentClient::Stop() {
     }
     if (status_thread_.joinable()) status_thread_.join();
     if (search_thread_.joinable()) search_thread_.join();
+    for (const auto& live : live_searches_) if (live->worker.joinable()) live->worker.join();
+    live_searches_.clear();
     std::lock_guard<std::mutex> lock(request_mu_);
     if (cancel_) { CloseHandle(cancel_); cancel_ = nullptr; }
     if (agent_process_) {
@@ -177,14 +191,53 @@ void NetworkAgentClient::Stop() {
     }
 }
 
-void NetworkAgentClient::SearchAsync(const Query& query, uint32_t id) {
+void NetworkAgentClient::SearchAsync(const Query& query, uint32_t id, HWND reply, UINT reply_message) {
     if (!running_) return;
+    const bool live_search = UsesLiveSearch(query.path_prefix);
     latest_search_id_.store(id);
     {
         std::lock_guard<std::mutex> lock(search_mu_);
+        for (auto it = live_searches_.begin(); it != live_searches_.end();) {
+            if ((*it)->session == query.session_id) {
+                (*it)->cancelled = true;
+                CancelSynchronousIo((*it)->worker.native_handle());
+            }
+            if ((*it)->done) {
+                (*it)->worker.join();
+                it = live_searches_.erase(it);
+            } else ++it;
+        }
         pending_query_ = query;
         pending_search_id_ = id;
-        pending_searches_[query.session_id]={id,query};session_requests_[query.session_id]=id;
+        std::lock_guard result_lock(mu_);
+        if (auto previous = session_requests_.find(query.session_id); previous != session_requests_.end()) {
+            results_.erase(previous->second);
+            replies_.erase(previous->second);
+        }
+        replies_[id] = {reply ? reply : notify_, reply ? reply_message : search_msg_};
+        session_requests_[query.session_id]=id;
+        if (live_search) {
+            pending_searches_.erase(query.session_id);
+            auto live = std::make_unique<LiveSearch>();
+            live->session = query.session_id;
+            live_searches_.reserve(live_searches_.size() + 1);
+            auto* state = live.get();
+            live->worker = std::thread([this, state, query, id] {
+                const auto publish = [this, state, query, id](SearchResult result) {
+                    std::lock_guard lock(search_mu_);
+                    const auto current = session_requests_.find(query.session_id);
+                    if (!state->cancelled && current != session_requests_.end() && current->second == id)
+                        PublishResult(id, std::move(result));
+                };
+                try { ScanLiveFilenames(query, FilenameSearchRoot(query.path_prefix), state->cancelled, publish); }
+                catch (...) { publish(SearchFailure(ERROR_NOT_ENOUGH_MEMORY)); }
+                state->done = true;
+            });
+            live_searches_.push_back(std::move(live));
+            have_pending_search_ = !pending_searches_.empty();
+            return;
+        }
+        pending_searches_[query.session_id]={id,query};
         have_pending_search_ = true;
     }
     search_cv_.notify_one();
@@ -209,35 +262,69 @@ void NetworkAgentClient::SearchLoop() {
 void NetworkAgentClient::SearchRequest(Query query, uint32_t id) {
     uint32_t response_type = 0;
     std::vector<uint8_t> payload;
-    if (!Request(agent::REQ_SEARCH, id, QueryPayload(query), response_type, payload) ||
-        response_type != agent::RSP_SEARCH) return;
-    {std::lock_guard lock(search_mu_);auto current=session_requests_.find(query.session_id);if(current==session_requests_.end()||current->second!=id) return;}
-    PayloadReader reader(payload.data(), payload.size());
-    uint32_t total = 0, count = 0;
-    if (!reader.GetU32(total) || !reader.GetU32(count)) return;
-    SearchResult result;
-    result.total = total;
-    result.hits.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-        Hit hit;
-        uint32_t flags = 0, size_lo = 0, size_hi = 0, time_lo = 0, time_hi = 0;
-        if (!reader.GetString(hit.path) || !reader.GetString(hit.name) || !reader.GetU32(flags) ||
-            !reader.GetU32(size_lo) || !reader.GetU32(size_hi) ||
-            !reader.GetU32(time_lo) || !reader.GetU32(time_hi)) return;
-        hit.is_dir = (flags & 1u) != 0;
-        hit.size = (static_cast<uint64_t>(size_hi) << 32) | size_lo;
-        hit.mtime = (static_cast<uint64_t>(time_hi) << 32) | time_lo;
-        result.hits.push_back(std::move(hit));
+    try {
+        SetLastError(ERROR_SUCCESS);
+        const bool received = Request(agent::REQ_SEARCH, id, QueryPayload(query), response_type, payload);
+        const DWORD error = received ? ERROR_SUCCESS : GetLastError();
+        HandleSearchResponse(query, id, received, response_type, payload, error);
+    } catch (const std::bad_alloc&) {
+        HandleSearchResponse(query, id, false, 0, {}, ERROR_NOT_ENOUGH_MEMORY);
+    } catch (const std::length_error&) {
+        HandleSearchResponse(query, id, false, 0, {}, ERROR_INVALID_DATA);
     }
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        results_[id] = std::move(result);
-    }
-    if (notify_ && search_msg_) PostMessageW(notify_, search_msg_, id, 0);
 }
 
-bool NetworkAgentClient::TakeResult(uint32_t id, SearchResult& result) {
+void NetworkAgentClient::HandleSearchResponse(const Query& query, uint32_t id, bool received,
+                                             uint32_t response_type, const std::vector<uint8_t>& payload,
+                                             DWORD error) {
+    SearchResult result;
+    if (!received) result = SearchFailure(error);
+    else if (response_type == agent::RSP_SEARCH) {
+        if (!DecodeSearchResponse(payload.data(), payload.size(), result))
+            result = SearchFailure(result.error ? result.error : ERROR_INVALID_DATA);
+    } else if (response_type == agent::RSP_RESULT) {
+        // Compatibility with older network helpers, which returned only text.
+        PayloadReader reader(payload.data(), payload.size());
+        uint32_t ok = 0;
+        std::wstring text;
+        const bool valid = reader.GetU32(ok) && ok == 0 && reader.GetString(text) && !reader.remaining();
+        result = SearchFailure(valid ? ERROR_GEN_FAILURE : ERROR_INVALID_DATA);
+    } else result = SearchFailure(ERROR_INVALID_DATA);
+    std::lock_guard lock(search_mu_);
+    const auto current = session_requests_.find(query.session_id);
+    if (current == session_requests_.end() || current->second != id) return;
+    PublishResult(id, std::move(result));
+}
+
+void NetworkAgentClient::PublishResult(uint32_t id, SearchResult result) {
     std::lock_guard<std::mutex> lock(mu_);
+    const auto reply = replies_.find(id);
+    if (reply == replies_.end()) return;
+    results_[id] = std::move(result);
+    if (reply->second.window && reply->second.message)
+        PostMessageW(reply->second.window, reply->second.message, id, 0);
+}
+
+void NetworkAgentClient::CancelSession(uint64_t session_id) {
+    std::lock_guard search_lock(search_mu_);
+    for (const auto& live : live_searches_) if (live->session == session_id) {
+        live->cancelled = true;
+        CancelSynchronousIo(live->worker.native_handle());
+    }
+    std::lock_guard result_lock(mu_);
+    if (auto current = session_requests_.find(session_id); current != session_requests_.end()) {
+        results_.erase(current->second);
+        replies_.erase(current->second);
+        session_requests_.erase(current);
+    }
+    pending_searches_.erase(session_id);
+    have_pending_search_ = !pending_searches_.empty();
+}
+
+bool NetworkAgentClient::TakeResult(uint32_t id, SearchResult& result, HWND reply) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto route = replies_.find(id);
+    if (route == replies_.end() || route->second.window != (reply ? reply : notify_)) return false;
     auto found=results_.find(id);if(found==results_.end()) return false;
     result=std::move(found->second);results_.erase(found);
     return true;
@@ -250,7 +337,7 @@ void NetworkAgentClient::RefreshRoots() {
         return;
     PayloadReader reader(payload.data(), payload.size());
     uint32_t count = 0;
-    if (!reader.GetU32(count)) return;
+    if (!reader.GetU32(count) || count > 1024 || count > reader.remaining() / (3 * sizeof(uint32_t) + 4 * sizeof(uint32_t))) return;
     std::vector<NetworkRootInfo> roots;
     roots.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
@@ -276,6 +363,17 @@ void NetworkAgentClient::RefreshRoots() {
 std::vector<NetworkRootInfo> NetworkAgentClient::Roots() const {
     std::lock_guard<std::mutex> lock(mu_);
     return roots_;
+}
+
+bool NetworkAgentClient::UsesLiveSearch(const std::wstring& path) const {
+    const auto root = FilenameSearchRoot(path);
+    if (root.empty()) return false;
+    std::lock_guard lock(mu_);
+    for (const auto& configured : roots_) {
+        const auto indexed = FilenameSearchRoot(configured.path);
+        if (!indexed.empty() && FilenameSearchCovered(root, indexed)) return false;
+    }
+    return true;
 }
 
 bool NetworkAgentClient::AddRoot(const std::wstring& path, std::wstring* error) {

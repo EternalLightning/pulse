@@ -15,6 +15,7 @@ public:
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
     HANDLE get() const { return value_; }
+    HANDLE release() { const auto value = value_; value_ = nullptr; return value; }
 private:
     HANDLE value_;
 };

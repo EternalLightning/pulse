@@ -32,7 +32,8 @@ public:
         std::wstring cache_key;
     };
 
-    static std::wstring CacheKey(bool background, const std::wstring& extension);
+    static std::wstring CacheKey(bool background, const std::wstring& extension,
+                                 bool extended = false);
 
     void SetShellOperations(ShellOperations operations) { operations_ = std::move(operations); }
     void StartQuery(ContextMenuPrefs& prefs, HWND hwnd,
@@ -63,7 +64,10 @@ public:
 
     void OpenMenu(std::vector<ui::FluentMenuItem> base_items);
     bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
-    void NotePatchedDisplay() { menu_com_items_ = com_items_; }
+    void NotePatchedDisplay() {
+        menu_com_items_ = com_items_;
+        menu_com_token_ = com_items_current_ ? token_ : 0;
+    }
     void CloseMenu() noexcept { menu_open_ = false; }
     bool menu_open() const noexcept { return menu_open_; }
     const std::vector<ui::FluentMenuItem>& base_items() const noexcept {
@@ -79,16 +83,18 @@ private:
     const ops::ShellMenuItem* FindComItem(uint32_t id) const;
     const ops::ShellMenuItem* FindComItemIn(const std::vector<ops::ShellMenuItem>& items,
                                             uint32_t id) const;
-    uint32_t FindLiveComId(const std::wstring& text) const;
-    uint32_t FindLiveComId(const std::wstring& verb, const std::wstring& text) const;
+    const ops::ShellMenuItem* FindInvokableComItem(uint32_t id) const;
 
     uint32_t token_ = 0;
     std::vector<std::wstring> paths_;
     bool background_ = false;
+    bool extended_ = false;
     bool menu_open_ = false;
     bool com_ready_ = false;
+    bool com_items_current_ = false;
     std::vector<ops::ShellMenuItem> com_items_;
     std::vector<ops::ShellMenuItem> menu_com_items_;
+    uint32_t menu_com_token_ = 0;
     std::vector<StaticVerb> static_verbs_;
     std::wstring extension_;
     std::vector<ui::FluentMenuItem> base_items_;

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <functional>
 #include <limits>
+#include <atomic>
 
 using pulse::ui::VideoPreview;
 static int failures = 0;
@@ -29,7 +30,70 @@ bool Until(const std::function<bool()>& condition, unsigned ms = 10000) {
     do { Pump(20); if (condition()) return true; } while (GetTickCount64() < end);
     return false;
 }
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+int AdmissionCases() {
+    struct Gate {
+        HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::atomic<uint32_t> entered{0};
+        ~Gate() { if (release) CloseHandle(release); }
+    };
+    HWND window = CreateWindowExW(0, L"STATIC", L"Video admission fixture", 0,
+        0, 0, 1, 1, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    auto gate = std::make_shared<Gate>();
+    Check(window && gate->release, "create isolated video worker gates and owner");
+    if (!window || !gate->release) { if (window) DestroyWindow(window); return 1; }
+    VideoPreview::SetWorkerHookForTest([gate] {
+        ++gate->entered;
+        WaitForSingleObject(gate->release, INFINITE);
+    });
+    VideoPreview video;
+    const uint32_t limit = VideoPreview::ResourcesForTest().limit;
+    for (uint32_t i = 0; i < limit; ++i) {
+        video.Open(window, L"blocked-provider-fixture.mp4");
+        Check(Until([&] { return gate->entered.load() == i + 1; }, 3000),
+              "native video worker enters blocked provider gate");
+        video.Reset();
+    }
+    auto usage = VideoPreview::ResourcesForTest();
+    Check(usage.live == limit && usage.retired == limit,
+          "Reset retains all four blocked native workers and retired owners");
+    bool rejected = true;
+    for (int i = 0; i < 32; ++i) {
+        video.Open(window, L"overflow-provider-fixture.mp4");
+        rejected &= video.Snapshot().error == HRESULT_FROM_WIN32(ERROR_BUSY);
+        video.Reset();
+    }
+    int children = 0;
+    EnumChildWindows(window, [](HWND, LPARAM data) -> BOOL {
+        ++*reinterpret_cast<int*>(data); return TRUE;
+    }, reinterpret_cast<LPARAM>(&children));
+    Check(rejected && gate->entered.load() == limit && children == static_cast<int>(limit) &&
+          VideoPreview::ResourcesForTest().live == limit,
+          "rapid Open cannot add threads or hidden render targets beyond physical admission");
+    SetEvent(gate->release);
+    Check(Until([] { return VideoPreview::ResourcesForTest().live == 0; }, 3000),
+          "slots release only after blocked native worker threads actually exit");
+    children = 0;
+    EnumChildWindows(window, [](HWND, LPARAM data) -> BOOL {
+        ++*reinterpret_cast<int*>(data); return TRUE;
+    }, reinterpret_cast<LPARAM>(&children));
+    Check(children == 0, "retirement messages clean up completed render targets");
+    VideoPreview::SetWorkerHookForTest([] {});
+    video.Open(window, L"reusable-provider-fixture.mp4");
+    Check(SUCCEEDED(video.Snapshot().error) &&
+          Until([] { return VideoPreview::ResourcesForTest().live == 0; }, 3000),
+          "completed physical workers permit the next open");
+    video.Reset();
+    Pump(20);
+    VideoPreview::SetWorkerHookForTest({});
+    DestroyWindow(window);
+    return failures ? 1 : 0;
+}
+#endif
 int wmain(int argc, wchar_t** argv) {
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+    if (argc == 2 && wcscmp(argv[1], L"--admission-only") == 0) return AdmissionCases();
+#endif
     const bool open_only = argc == 3 && wcscmp(argv[2], L"--open-only") == 0;
     const bool end_seek_only = argc == 3 && wcscmp(argv[2], L"--end-seek-only") == 0;
     using namespace pulse::ui::playback;

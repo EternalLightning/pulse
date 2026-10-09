@@ -47,23 +47,8 @@ struct Reader {
         return true;
     }
     bool String(std::wstring& out) {
-        if (!Token(L"\"")) return false;
-        while (pos < text.size()) {
-            wchar_t c = text[pos++];
-            if (c == L'"') return true;
-            if (c < L' ') return false;
-            if (c == L'\\') {
-                if (pos == text.size()) return false;
-                c = text[pos++];
-                if (c == L'n') c = L'\n';
-                else if (c == L'r') c = L'\r';
-                else if (c == L't') c = L'\t';
-                else if (c != L'"' && c != L'\\' && c != L'/') return false;
-            }
-            out += c;
-            if (out.size() > kMaxPath) return false;
-        }
-        return false;
+        json::SkipWhitespace(text, pos);
+        return json::ParseString(text, pos, out) && out.size() <= kMaxPath;
     }
 };
 } // namespace

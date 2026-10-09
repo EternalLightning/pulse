@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../model/view_mode.h"
 #include <d2d1.h>
 #include <cstddef>
 #include <string>
@@ -8,16 +9,7 @@
 
 namespace pulse::ui {
 
-enum class ViewMode : unsigned char {
-    ExtraLargeIcons,
-    LargeIcons,
-    MediumIcons,
-    SmallIcons,
-    List,
-    Details,
-    Tiles,
-    Content,
-};
+using model::ViewMode;
 
 const wchar_t* ViewModeName(ViewMode mode) noexcept;
 ViewMode ParseViewMode(const std::wstring& value) noexcept;

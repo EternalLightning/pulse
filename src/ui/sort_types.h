@@ -1,8 +1,7 @@
 #pragma once
+#include "../model/sort_types.h"
 
 namespace pulse::ui {
-
-enum class SortColumn { Name, Mtime, Type, Size, Path };
-enum class SortDirection { Asc, Desc };
-
+using model::SortColumn;
+using model::SortDirection;
 } // namespace pulse::ui

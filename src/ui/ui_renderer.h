@@ -24,7 +24,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace pulse::app { class PlacesCatalog; }
+namespace pulse::model { class PlacesCatalog; }
 
 namespace pulse::ui {
 enum class PaneHeaderIcon;
@@ -170,6 +170,7 @@ struct PaneViewModel {
     float header_controls_opacity = 1.0f;
     std::wstring banner_title;
     std::wstring banner_message;
+    std::wstring network_search_root;
     int banner_kind = 0; // 0 info, 1 success, 2 warning, 3 error
     // Derived data is shared with the tab cache. Search views can contain
     // 100k rows, so copying these containers for every animation frame is not
@@ -182,7 +183,7 @@ struct PaneViewModel {
     fs::SnapshotPtr snapshot;
     std::shared_ptr<index::ContentResultStore> content_results;
     mutable std::shared_ptr<RowPresentationCache> row_cache;
-    const app::PlacesCatalog* tag_catalog = nullptr;
+    const model::PlacesCatalog* tag_catalog = nullptr;
     std::unordered_set<std::wstring> cut_names;
     std::shared_ptr<const TagDots> tag_dots;
     bool loading = false;
@@ -334,6 +335,8 @@ struct TrayCardView {
     DWORD attrs = 0;
     bool is_dir = false;
     bool missing = false;
+    bool metadata_pending = false;
+    bool metadata_unavailable = false;
     bool cut = false;          // staged with Ctrl+X (move intent)
     int batch = -1;            // staging-tray batch index (live cards only)
     int sub = -1;              // item index inside the batch (live cards only)
@@ -698,6 +701,7 @@ struct HitTestResult {
         AddressSearchContent,
         AddressSearchOptions,
         ContentIndexManage,
+        NetworkSearchAdd,
         SettingsContentIndex,
         SettingsFind, SettingsDisclosure, SettingsTheme, SettingsDropdown,
         SettingsContentAction,
@@ -819,6 +823,8 @@ class MainRenderer {
     friend struct ColumnResizeUiTest;
 public:
     MainRenderer();
+    ~MainRenderer();
+    std::shared_ptr<ThumbnailCache> SharedThumbnailCache() const { return thumbnail_cache_owner_; }
 
     void SetScale(float scale);
     void SetCompositor(Compositor* comp);
@@ -1174,7 +1180,8 @@ private:
     fluent::Painter painter_;
     ShellIconCache icon_cache_;
     std::unordered_map<ID2D1Bitmap*, ComPtr<ID2D1Effect>> tray_shadows_;
-    ThumbnailCache thumbnail_cache_;
+    std::shared_ptr<ThumbnailCache> thumbnail_cache_owner_ = std::make_shared<ThumbnailCache>();
+    ThumbnailCache& thumbnail_cache_ = *thumbnail_cache_owner_;
     PreviewHandlerHost preview_handler_;
     HWND notify_hwnd_ = nullptr;
     float scale_ = 1.0f;

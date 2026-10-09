@@ -4,6 +4,8 @@
 #include <mutex>
 #include <unordered_map>
 
+namespace pulse::model { class PlacesCatalog; }
+
 namespace pulse::app {
 class HomeCatalog {
 public:
@@ -11,7 +13,7 @@ public:
     void UpdateDriveLabel(const std::wstring& root, const std::wstring& label);
     bool ConsumeUpdate();
     bool Loading() const;
-    void Fill(ui::PaneViewModel& pane, const PlacesCatalog* places = nullptr) const;
+    void Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* places = nullptr) const;
 private:
     struct State {
         std::mutex mutex;

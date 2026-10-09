@@ -48,16 +48,13 @@ void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
     if (found == tab.snapshot->end()) return;
     const std::wstring name = found->name;
     auto entries = std::make_shared<std::vector<fs::DirEntry>>(*tab.snapshot);
-    if (tab.sort_column == ui::SortColumn::Mtime) {
-        std::stable_sort(entries->begin(), entries->end(), [&](const auto& left, const auto& right) {
-            return app::EntryLess(left, right, tab.sort_column, tab.sort_direction, tab.current_path);
-        });
-    } else {
-        const auto offset = std::distance(tab.snapshot->begin(), found);
-        std::rotate(entries->begin() + offset, entries->begin() + offset + 1, entries->end());
-    }
+    std::stable_sort(entries->begin(), entries->end(), [&](const auto& left, const auto& right) {
+        return app::EntryLess(left, right, tab.sort_column, tab.sort_direction,
+                              app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), tab.current_path);
+    });
     tab.SetSnapshot(std::move(entries));
-    tab.order_held = true;
+    tab.refresh_keeps_order = false;
+    tab.order_held = false;
     tab.RemapSelection({name}, name);
     tab.pending_created_name.clear();
     if (ActiveTab(s) == &tab) {

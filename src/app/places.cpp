@@ -1,6 +1,7 @@
 // places.cpp — Persist workspaces / tags / network pins + NTFS ADS.
 #include "places.h"
 #include "session.h"
+#include "../ui/view_layout.h"
 #include "../fs/fs_enum.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
@@ -11,7 +12,7 @@
 #include <objbase.h>
 #include <cwctype>
 
-namespace pulse::app {
+namespace pulse::model {
 
 namespace {
 
@@ -26,30 +27,15 @@ static std::wstring FolderTitle(std::wstring path) {
     return path.empty() ? L"Workspace" : path;
 }
 
-static uint32_t ExtractRgb(const std::wstring& json) {
-    std::wstring quoted = L"\"rgb\"";
-    size_t pos = json.find(quoted);
-    if (pos == std::wstring::npos) return 0xEF4444;
-    pos = json.find(L':', pos);
-    if (pos == std::wstring::npos) return 0xEF4444;
-    ++pos;
-    while (pos < json.size() && json[pos] == L' ') ++pos;
-    if (pos + 2 < json.size() && json[pos] == L'0' && (json[pos + 1] == L'x' || json[pos + 1] == L'X')) {
-        pos += 2;
-        uint32_t v = 0;
-        while (pos < json.size()) {
-            wchar_t c = json[pos];
-            int d = -1;
-            if (c >= L'0' && c <= L'9') d = c - L'0';
-            else if (c >= L'a' && c <= L'f') d = 10 + c - L'a';
-            else if (c >= L'A' && c <= L'F') d = 10 + c - L'A';
-            if (d < 0) break;
-            v = (v << 4) | static_cast<uint32_t>(d);
-            ++pos;
-        }
-        return v;
-    }
-    return static_cast<uint32_t>(pulse::json::ExtractInt(json, L"rgb"));
+static uint32_t ExtractRgb(const pulse::json::Document& doc) {
+    const auto* rgb = doc.Find(L"rgb");
+    if (!rgb || rgb->kind != pulse::json::Kind::Number) return 0xEF4444;
+    std::wstring_view text = rgb->text;
+    unsigned base = 10;
+    if (text.starts_with(L"0x") || text.starts_with(L"0X")) { text.remove_prefix(2); base = 16; }
+    uint64_t value = 0;
+    return pulse::json::ParseUnsigned(text, value, base) && value <= UINT32_MAX
+        ? static_cast<uint32_t>(value) : 0xEF4444;
 }
 
 static std::wstring Norm(const std::wstring& p) {
@@ -93,36 +79,9 @@ static bool PathIsOrDescendant(const std::wstring& path, const std::wstring& roo
     return root.ends_with(L"\\") || path[root.size()] == L'\\' || path[root.size()] == L'/';
 }
 
-static std::vector<std::wstring> ExtractObjectArray(const std::wstring& json,
-                                                     const wchar_t* key) {
-    std::vector<std::wstring> out;
-    size_t pos = pulse::json::ValuePosition(json, key);
-    if (pos == std::wstring::npos || pos >= json.size() || json[pos] != L'[') return out;
-    int array_depth = 0;
-    int object_depth = 0;
-    bool in_string = false;
-    size_t object_start = std::wstring::npos;
-    for (size_t i = pos; i < json.size(); ++i) {
-        const wchar_t c = json[i];
-        if (in_string) {
-            if (c == L'\\') ++i;
-            else if (c == L'"') in_string = false;
-            continue;
-        }
-        if (c == L'"') in_string = true;
-        else if (c == L'[') ++array_depth;
-        else if (c == L']') {
-            if (--array_depth == 0) break;
-        } else if (c == L'{') {
-            if (object_depth++ == 0) object_start = i;
-        } else if (c == L'}' && object_depth > 0) {
-            if (--object_depth == 0 && object_start != std::wstring::npos) {
-                out.push_back(json.substr(object_start, i - object_start + 1));
-                object_start = std::wstring::npos;
-            }
-        }
-    }
-    return out;
+static std::vector<std::wstring> ExtractObjectArray(const pulse::json::Document& doc,
+                                                   const wchar_t* key) {
+    return pulse::json::ExtractObjectArray(doc, key);
 }
 
 static const wchar_t* KindName(PlaceItemKind kind) {
@@ -158,7 +117,7 @@ PlacesCatalog::~PlacesCatalog() {
 }
 
 bool PlacesCatalog::SaveTagFile(const std::vector<ColorTag>& snapshot) {
-    const std::wstring dir = GetPulseDataDir();
+    const std::wstring dir = app::GetPulseDataDir();
     if (dir.empty()) return false;
     std::wostringstream file;
     auto write_array = [&](const std::vector<std::wstring>& values) {
@@ -176,10 +135,9 @@ bool PlacesCatalog::SaveTagFile(const std::vector<ColorTag>& snapshot) {
         std::wstring id, name;
         pulse::json::Escape(snapshot[i].id, id);
         pulse::json::Escape(snapshot[i].name, name);
-        wchar_t rgb[16]{};
-        swprintf_s(rgb, L"0x%06X", snapshot[i].rgb & 0xFFFFFFu);
+
         file << L"    {\"id\":\"" << id << L"\",\"name\":\"" << name
-             << L"\",\"rgb\":" << rgb << L",\"paths\":";
+             << L"\",\"rgb\":" << (snapshot[i].rgb & 0xFFFFFFu) << L",\"paths\":";
         write_array(snapshot[i].paths);
         file << L"}" << (i + 1 < snapshot.size() ? L"," : L"") << L"\n";
     }
@@ -261,117 +219,83 @@ bool PlacesCatalog::Load() {
     recent_items.clear();
     starred_index_.clear();
     active_workspace = -1;
-    std::wstring dir = GetPulseDataDir();
+    std::wstring dir = app::GetPulseDataDir();
     if (dir.empty()) { EnsureDefaults(); return false; }
     std::wstring json;
     ReadUtf8File(dir + L"\\places.json", json);
-    const bool places_loaded = !json.empty();
+    const pulse::json::Document doc(json, true);
+    const bool places_loaded = doc.Is(pulse::json::Kind::Object);
 
-    active_workspace = pulse::json::ExtractInt(json, L"active_workspace");
-    if (json.find(L"\"active_workspace\"") == std::wstring::npos) active_workspace = -1;
+    active_workspace = pulse::json::ExtractInt(doc, L"active_workspace", -1);
 
-    size_t pos = json.find(L"\"workspaces\"");
-    if (pos != std::wstring::npos) {
-        pos = json.find(L'[', pos);
-        if (pos != std::wstring::npos) {
-            ++pos;
-            while (pos < json.size() && json[pos] != L']') {
-                size_t obj = json.find(L'{', pos);
-                if (obj == std::wstring::npos || obj > json.find(L']', pos)) break;
-                size_t end = json.find(L'}', obj);
-                if (end == std::wstring::npos) break;
-                std::wstring block = json.substr(obj, end - obj + 1);
-                Workspace w;
-                w.name = pulse::json::ExtractString(block, L"name");
-                w.root = pulse::json::ExtractString(block, L"root");
-                w.layout = pulse::json::ExtractInt(block, L"layout");
-                w.pane_paths = pulse::json::ExtractStringArray(block, L"panes");
-                for (const auto& value : pulse::json::ExtractStringArray(block, L"views"))
-                    w.pane_views.push_back(ui::ParseViewMode(value));
-                while (w.pane_views.size() < w.pane_paths.size())
-                    w.pane_views.push_back(ui::ViewMode::Details);
-                auto freq = pulse::json::ExtractStringArray(block, L"freq");
-                for (const auto& row : freq) {
-                    auto tab = row.find(L'\t');
-                    std::pair<std::wstring, int> hit;
-                    if (tab == std::wstring::npos) {
-                        hit.first = row;
-                        hit.second = 1;
-                    } else {
-                        hit.first = row.substr(0, tab);
-                        hit.second = _wtoi(row.c_str() + tab + 1);
-                    }
-                    if (!hit.first.empty()) w.frequent.push_back(std::move(hit));
-                }
-                if (!w.root.empty()) workspaces.push_back(std::move(w));
-                pos = end + 1;
+    for (const auto& block : ExtractObjectArray(doc, L"workspaces")) {
+        const pulse::json::Document block_doc(block, true);
+        Workspace w;
+        w.name = pulse::json::ExtractString(block_doc, L"name");
+        w.root = pulse::json::ExtractString(block_doc, L"root");
+        w.layout = pulse::json::ExtractInt(block_doc, L"layout");
+        w.pane_paths = pulse::json::ExtractStringArray(block_doc, L"panes");
+        for (const auto& value : pulse::json::ExtractStringArray(block_doc, L"views"))
+            w.pane_views.push_back(ui::ParseViewMode(value));
+        while (w.pane_views.size() < w.pane_paths.size())
+            w.pane_views.push_back(ui::ViewMode::Details);
+        auto freq = pulse::json::ExtractStringArray(block_doc, L"freq");
+        for (const auto& row : freq) {
+            auto tab = row.find(L'\t');
+            std::pair<std::wstring, int> hit;
+            if (tab == std::wstring::npos) {
+                hit.first = row;
+                hit.second = 1;
+            } else {
+                hit.first = row.substr(0, tab);
+                hit.second = 0;
+                pulse::json::ParseInteger(std::wstring_view(row).substr(tab + 1), hit.second);
             }
+            if (!hit.first.empty()) w.frequent.push_back(std::move(hit));
         }
+        if (!w.root.empty()) workspaces.push_back(std::move(w));
     }
 
-    pos = json.find(L"\"tags\"");
-    if (pos != std::wstring::npos) {
-        pos = json.find(L'[', pos);
-        if (pos != std::wstring::npos) {
-            ++pos;
-            while (pos < json.size() && json[pos] != L']') {
-                size_t obj = json.find(L'{', pos);
-                if (obj == std::wstring::npos || obj > json.find(L']', pos)) break;
-                size_t end = json.find(L'}', obj);
-                if (end == std::wstring::npos) break;
-                std::wstring block = json.substr(obj, end - obj + 1);
-                ColorTag t;
-                t.id = pulse::json::ExtractString(block, L"id");
-                if (t.id.empty()) t.id = NewTagId();
-                t.name = pulse::json::ExtractString(block, L"name");
-                t.rgb = ExtractRgb(block);
-                t.paths = pulse::json::ExtractStringArray(block, L"paths");
-                if (!t.name.empty()) tags.push_back(std::move(t));
-                pos = end + 1;
-            }
-        }
+    for (const auto& block : ExtractObjectArray(doc, L"tags")) {
+        const pulse::json::Document block_doc(block, true);
+        ColorTag t;
+        t.id = pulse::json::ExtractString(block_doc, L"id");
+        if (t.id.empty()) t.id = NewTagId();
+        t.name = pulse::json::ExtractString(block_doc, L"name");
+        t.rgb = ExtractRgb(block_doc);
+        t.paths = pulse::json::ExtractStringArray(block_doc, L"paths");
+        if (!t.name.empty()) tags.push_back(std::move(t));
     }
 
-    pos = json.find(L"\"networks\"");
-    if (pos != std::wstring::npos) {
-        pos = json.find(L'[', pos);
-        if (pos != std::wstring::npos) {
-            ++pos;
-            while (pos < json.size() && json[pos] != L']') {
-                size_t obj = json.find(L'{', pos);
-                if (obj == std::wstring::npos || obj > json.find(L']', pos)) break;
-                size_t end = json.find(L'}', obj);
-                if (end == std::wstring::npos) break;
-                std::wstring block = json.substr(obj, end - obj + 1);
-                NetworkPlace n;
-                n.name = pulse::json::ExtractString(block, L"name");
-                n.unc = pulse::json::ExtractString(block, L"unc");
-                if (!n.unc.empty()) networks.push_back(std::move(n));
-                pos = end + 1;
-            }
-        }
+    for (const auto& block : ExtractObjectArray(doc, L"networks")) {
+        const pulse::json::Document block_doc(block, true);
+        NetworkPlace n;
+        n.name = pulse::json::ExtractString(block_doc, L"name");
+        n.unc = pulse::json::ExtractString(block_doc, L"unc");
+        if (!n.unc.empty()) networks.push_back(std::move(n));
     }
 
-    for (const auto& path : pulse::json::ExtractStringArray(json, L"quick_access_paths")) {
+    for (const auto& path : pulse::json::ExtractStringArray(doc, L"quick_access_paths")) {
         const auto normalized = Norm(path);
         if (!normalized.empty() && !fs::IsVirtualPath(normalized) &&
             !IsQuickAccessPinned(normalized)) quick_access_paths.push_back(normalized);
     }
     std::unordered_set<std::wstring> ordered_paths;
-    for (const auto& path : pulse::json::ExtractStringArray(json, L"quick_access_order")) {
+    for (const auto& path : pulse::json::ExtractStringArray(doc, L"quick_access_order")) {
         const auto normalized = Norm(path);
         if (!normalized.empty() && ordered_paths.insert(TagKey(normalized)).second)
             quick_access_order.push_back(normalized);
     }
 
     const bool has_starred_items = pulse::json::ValuePosition(
-        json, L"starred_items") != std::wstring::npos;
-    for (const auto& block : ExtractObjectArray(json, L"starred_items")) {
+        doc, L"starred_items") != std::wstring::npos;
+    for (const auto& block : ExtractObjectArray(doc, L"starred_items")) {
+        const pulse::json::Document block_doc(block, true);
         StarredItem item;
-        item.path = Norm(pulse::json::ExtractString(block, L"path"));
-        item.kind = ParseKind(pulse::json::ExtractString(block, L"kind"));
-        item.badge = TrimBadge(pulse::json::ExtractString(block, L"badge"));
-        item.badge_rgb = ExtractRgb(block);
+        item.path = Norm(pulse::json::ExtractString(block_doc, L"path"));
+        item.kind = ParseKind(pulse::json::ExtractString(block_doc, L"kind"));
+        item.badge = TrimBadge(pulse::json::ExtractString(block_doc, L"badge"));
+        item.badge_rgb = ExtractRgb(block_doc);
         if (!item.path.empty() && !fs::IsVirtualPath(item.path) &&
             std::none_of(starred_items.begin(), starred_items.end(), [&](const StarredItem& old) {
                 return EqualI(old.path, item.path);
@@ -380,29 +304,31 @@ bool PlacesCatalog::Load() {
         }
     }
     if (!has_starred_items) {
-        for (const auto& path : pulse::json::ExtractStringArray(json, L"starred")) {
+        for (const auto& path : pulse::json::ExtractStringArray(doc, L"starred")) {
             const std::wstring normalized = Norm(path);
             if (!normalized.empty() && !fs::IsVirtualPath(normalized))
                 starred_items.push_back({ normalized });
         }
     }
-    for (const auto& block : ExtractObjectArray(json, L"quick_access_badges")) {
+    for (const auto& block : ExtractObjectArray(doc, L"quick_access_badges")) {
+        const pulse::json::Document block_doc(block, true);
         QuickAccessBadge badge;
-        badge.path = Norm(pulse::json::ExtractString(block, L"path"));
+        badge.path = Norm(pulse::json::ExtractString(block_doc, L"path"));
         if (badge.path.empty() || fs::IsVirtualPath(badge.path) ||
             FindQuickAccessBadge(badge.path)) continue;
-        badge.badge = TrimBadge(pulse::json::ExtractString(block, L"badge"));
-        if (pulse::json::ValuePosition(block, L"rgb") != std::wstring::npos)
-            badge.badge_rgb = ExtractRgb(block) & 0xFFFFFFu;
+        badge.badge = TrimBadge(pulse::json::ExtractString(block_doc, L"badge"));
+        if (pulse::json::ValuePosition(block_doc, L"rgb") != std::wstring::npos)
+            badge.badge_rgb = ExtractRgb(block_doc) & 0xFFFFFFu;
         if (!badge.badge.empty() || badge.badge_rgb != kDefaultBadgeRgb)
             quick_access_badges.push_back(std::move(badge));
     }
-    for (const auto& block : ExtractObjectArray(json, L"recent_items")) {
+    for (const auto& block : ExtractObjectArray(doc, L"recent_items")) {
+        const pulse::json::Document block_doc(block, true);
         RecentItem item;
-        item.path = Norm(pulse::json::ExtractString(block, L"path"));
-        item.kind = ParseKind(pulse::json::ExtractString(block, L"kind"));
-        const std::wstring opened = pulse::json::ExtractString(block, L"opened_at");
-        item.opened_at = opened.empty() ? 0 : _wcstoui64(opened.c_str(), nullptr, 10);
+        item.path = Norm(pulse::json::ExtractString(block_doc, L"path"));
+        item.kind = ParseKind(pulse::json::ExtractString(block_doc, L"kind"));
+        const std::wstring opened = pulse::json::ExtractString(block_doc, L"opened_at");
+        pulse::json::ParseUnsigned(opened, item.opened_at);
         if (!item.path.empty() && !fs::IsVirtualPath(item.path) &&
             std::none_of(recent_items.begin(), recent_items.end(), [&](const RecentItem& old) {
                 return EqualI(old.path, item.path);
@@ -420,24 +346,15 @@ bool PlacesCatalog::Load() {
     std::wstring tag_json;
     if (ReadUtf8File(dir + L"\\tags.json", tag_json) && !tag_json.empty()) {
         std::vector<ColorTag> loaded;
-        size_t tag_pos = tag_json.find(L"\"tags\"");
-        if (tag_pos != std::wstring::npos) tag_pos = tag_json.find(L'[', tag_pos);
-        if (tag_pos != std::wstring::npos) {
-            ++tag_pos;
-            while (tag_pos < tag_json.size() && tag_json[tag_pos] != L']') {
-                const size_t object = tag_json.find(L'{', tag_pos);
-                if (object == std::wstring::npos || object > tag_json.find(L']', tag_pos)) break;
-                const size_t end = tag_json.find(L'}', object);
-                if (end == std::wstring::npos) break;
-                const std::wstring block = tag_json.substr(object, end - object + 1);
-                ColorTag tag;
-                tag.id = pulse::json::ExtractString(block, L"id");
-                tag.name = pulse::json::ExtractString(block, L"name");
-                tag.rgb = ExtractRgb(block);
-                tag.paths = pulse::json::ExtractStringArray(block, L"paths");
-                if (!tag.id.empty() && !tag.name.empty()) loaded.push_back(std::move(tag));
-                tag_pos = end + 1;
-            }
+        const pulse::json::Document tags_doc(tag_json, true);
+        for (const auto& block : ExtractObjectArray(tags_doc, L"tags")) {
+            const pulse::json::Document block_doc(block, true);
+            ColorTag tag;
+            tag.id = pulse::json::ExtractString(block_doc, L"id");
+            tag.name = pulse::json::ExtractString(block_doc, L"name");
+            tag.rgb = ExtractRgb(block_doc);
+            tag.paths = pulse::json::ExtractStringArray(block_doc, L"paths");
+            if (!tag.id.empty() && !tag.name.empty()) loaded.push_back(std::move(tag));
         }
         if (!loaded.empty()) {
             tags = std::move(loaded);
@@ -557,7 +474,7 @@ bool PlacesCatalog::Save() const {
 }
 
 bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
-    std::wstring dir = GetPulseDataDir();
+    std::wstring dir = app::GetPulseDataDir();
     if (dir.empty()) return false;
     std::wostringstream f;
     auto writeArr = [&](const std::vector<std::wstring>& arr) {
@@ -601,10 +518,9 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
         std::wstring id, name;
         pulse::json::Escape(t.id, id);
         pulse::json::Escape(t.name, name);
-        wchar_t rgb[16];
-        swprintf_s(rgb, L"0x%06X", t.rgb & 0xFFFFFFu);
+
         f << L"    {\"id\":\"" << id << L"\",\"name\":\"" << name
-          << L"\",\"rgb\":" << rgb << L",\"paths\":";
+          << L"\",\"rgb\":" << (t.rgb & 0xFFFFFFu) << L",\"paths\":";
         writeArr(t.paths);
         f << L"}";
         if (i + 1 < snapshot.tags.size()) f << L",";
@@ -635,11 +551,10 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
         std::wstring path, badge;
         pulse::json::Escape(item.path, path);
         pulse::json::Escape(item.badge, badge);
-        wchar_t rgb[16]{};
-        swprintf_s(rgb, L"0x%06X", item.badge_rgb & 0xFFFFFFu);
+
         f << L"    {\"path\":\"" << path << L"\",\"kind\":\""
           << KindName(item.kind) << L"\",\"badge\":\"" << badge
-          << L"\",\"rgb\":" << rgb << L"}";
+          << L"\",\"rgb\":" << (item.badge_rgb & 0xFFFFFFu) << L"}";
         if (i + 1 < snapshot.starred_items.size()) f << L",";
         f << L"\n";
     }
@@ -1600,4 +1515,4 @@ std::vector<std::wstring> ReadTagAds(const std::wstring& path, bool* readable) {
     return out;
 }
 
-} // namespace pulse::app
+} // namespace pulse::model

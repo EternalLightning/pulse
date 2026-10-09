@@ -40,9 +40,10 @@ public:
         uint32_t limit = 0;
     };
     static ResourceUsage Resources();
-    enum class TestPoint { OpenDirectory, ProbePath, CancelCompletion };
+    enum class TestPoint { OpenDirectory, ProbePath, CancelCompletion, ReadChanges };
     // Snapshotted into worker-owned state. No test requires a UNC server.
     static void SetIoHookForTest(std::function<void(TestPoint)> hook);
+    static void SetReadErrorForTest(DWORD error);
 #endif
 
 private:

@@ -60,11 +60,15 @@ struct ProcessAttributes {
         }
     }
 };
-struct ProcessResult { DWORD code = 2; std::wstring output; };
+struct ProcessResult {
+    ArchiveOutcome outcome = ArchiveOutcome::Failed;
+    std::optional<DWORD> exit_code;
+    std::wstring output;
+};
 ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool* cancel,
     const fs::path& exe = Runtime(), size_t max_output_bytes = 64 * 1024 * 1024) {
     ProcessResult result;
-    if (cancel && cancel->load()) { result.output = L"已取消解压。"; return result; }
+    if (cancel && cancel->load()) { result.outcome = ArchiveOutcome::Cancelled; result.output = L"已取消解压。"; return result; }
     if (!fs::exists(exe)) { result.output = L"找不到压缩包运行库 7zip/7z.exe。"; return result; }
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
     Handle read, write, input;
@@ -122,12 +126,16 @@ ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool*
         }
     }
     WaitForSingleObject(process.hProcess, INFINITE);
-    GetExitCodeProcess(process.hProcess, &result.code);
+    DWORD code = 0;
+    if (GetExitCodeProcess(process.hProcess, &code)) result.exit_code = code;
     if (cancelled || output_limit) {
-        result.code = 2;
+        result.outcome = cancelled ? ArchiveOutcome::Cancelled : ArchiveOutcome::OutputLimit;
         result.output = cancelled ? L"已取消解压。" : L"压缩包输出超过安全大小限制。";
-    } else result.output = Decode(output);
-    if (result.code != 0 && result.output.empty()) result.output = L"压缩包处理失败。";
+    } else {
+        result.outcome = result.exit_code == 0u ? ArchiveOutcome::Success : ArchiveOutcome::Failed;
+        result.output = Decode(output);
+    }
+    if (result.outcome != ArchiveOutcome::Success && result.output.empty()) result.output = L"压缩包处理失败。";
     return result;
 }
 std::wstring Normalize(std::wstring path) {
@@ -157,25 +165,17 @@ bool NoReparse(const fs::path& path) {
     }
     return true;
 }
-bool PasswordError(const std::wstring& output, const std::wstring& archive_path) {
-    // 7z shares exit code 2 across failures. Only its encrypted-header
-    // diagnostic identifies a listing that needs a password; paths do not.
-    const auto expected = L"ERROR: " + archive_path + L" : Cannot open encrypted archive. Wrong password?";
-    std::wistringstream lines(output);
-    std::wstring line;
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line.back() == L'\r') line.pop_back();
-        if (line == expected) return true;
-    }
-    return false;
-}
 struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } };
+ArchiveResult ParseListing(ProcessResult run);
 }
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
 ArchiveProcessTestResult RunArchiveProcessForTest(const std::wstring& executable,
     const std::vector<std::wstring>& args, size_t output_limit, const std::atomic_bool* cancel) {
     auto result = Run(args, cancel, fs::path(executable), output_limit);
-    return {result.code, std::move(result.output)};
+    return {result.outcome, result.exit_code, std::move(result.output)};
+}
+ArchiveResult ParseArchiveListingForTest(const std::wstring& output, DWORD exit_code) {
+    return ParseListing({exit_code == 0u ? ArchiveOutcome::Success : ArchiveOutcome::Failed, exit_code, output});
 }
 #endif
 bool IsArchivePath(const std::wstring& path) {
@@ -192,9 +192,21 @@ bool IsSafeArchiveMember(const std::wstring& path) {
     return SafeName(normalized);
 }
 ArchiveResult ListArchive(const std::wstring& path, const std::wstring& password, const std::atomic_bool* cancel) {
+    auto result = ParseListing(Run({L"l", L"-slt", L"-ba", L"-sccUTF-8", L"-bd", L"-p" + password, L"--", path}, cancel));
+    if (cancel && cancel->load()) {
+        result.outcome = ArchiveOutcome::Cancelled;
+        result.password_state = ArchivePasswordState::Unknown;
+        result.entries.clear(); result.error = L"已取消解压。";
+    }
+    return result;
+}
+namespace {
+ArchiveResult ParseListing(ProcessResult run) {
     ArchiveResult result;
-    auto run = Run({L"l", L"-slt", L"-ba", L"-sccUTF-8", L"-bd", L"-p" + password, L"--", path}, cancel);
-    if (run.code != 0) { result.error = run.output; result.password_required = PasswordError(run.output, path); return result; }
+    result.outcome = run.outcome;
+    result.exit_code = run.exit_code;
+    if (run.outcome != ArchiveOutcome::Success) { result.error = std::move(run.output); return result; }
+    result.password_state = ArchivePasswordState::NotRequired;
     std::wistringstream lines(run.output); std::wstring line;
     ArchiveEntry entry; bool has_path = false, unsafe = false;
     auto flush = [&]() {
@@ -227,24 +239,37 @@ ArchiveResult ListArchive(const std::wstring& path, const std::wstring& password
         } else if ((line.starts_with(L"Symbolic Link = ") && line.size() > 16) ||
             (line.starts_with(L"Hard Link = ") && line.size() > 12) ||
             (line.starts_with(L"Copy Link = ") && line.size() > 12)) unsafe = true;
-        else if (line == L"Encrypted = +") { entry.encrypted = true; if (password.empty()) result.password_required = true; }
+        else if (has_path && line == L"Encrypted = +") {
+            entry.encrypted = true;
+            result.password_state = ArchivePasswordState::Required;
+        }
     }
     flush();
-    if (unsafe) { result.entries.clear(); result.error = L"压缩包包含不安全路径或链接，已拒绝处理。"; }
+    if (unsafe) {
+        result.outcome = ArchiveOutcome::Failed;
+        result.entries.clear(); result.error = L"压缩包包含不安全路径或链接，已拒绝处理。";
+    }
     return result;
 }
-bool ExtractArchive(const std::wstring& path, const std::wstring& destination,
-    const std::vector<std::wstring>& selected_paths, const std::wstring& password, std::wstring& error,
+}
+ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstring& destination,
+    const std::vector<std::wstring>& selected_paths, const std::wstring& password,
     const std::atomic_bool* cancel) {
-    error.clear();
+    ArchiveOperationResult result;
+    auto& error = result.error;
+    if (cancel && cancel->load()) {
+        result.outcome = ArchiveOutcome::Cancelled; error = L"已取消解压。"; return result;
+    }
     // Keep the checked archive immutable until extraction finishes.
     Handle archive_lock{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
-    if (archive_lock.value == INVALID_HANDLE_VALUE) { error = L"无法读取压缩包，文件可能正在被修改。"; return false; }
+    if (archive_lock.value == INVALID_HANDLE_VALUE) { error = L"无法读取压缩包，文件可能正在被修改。"; return result; }
     auto listing = ListArchive(path, password, cancel);
-    if (!listing.error.empty()) { error = listing.error; return false; }
+    result = static_cast<ArchiveOperationResult&>(listing);
+    if (listing.outcome != ArchiveOutcome::Success) return result;
+    result.outcome = ArchiveOutcome::Failed;
     try {
         fs::path target = fs::absolute(destination).lexically_normal();
-        if (!NoReparse(target)) { error = L"目标路径包含链接，无法安全解压。"; return false; }
+        if (!NoReparse(target)) { error = L"目标路径包含链接，无法安全解压。"; return result; }
         std::vector<ArchiveEntry> selected;
         for (const auto& entry : listing.entries) {
             bool include = selected_paths.empty();
@@ -254,17 +279,17 @@ bool ExtractArchive(const std::wstring& path, const std::wstring& destination,
             }
             if (include) selected.push_back(entry);
         }
-        if (selected.empty() && !selected_paths.empty()) { error = L"压缩包中找不到所选项目。"; return false; }
+        if (selected.empty() && !selected_paths.empty()) { error = L"压缩包中找不到所选项目。"; return result; }
         wchar_t temp[MAX_PATH]{};
         DWORD temp_length = GetTempPathW(MAX_PATH, temp);
-        if (!temp_length || temp_length >= MAX_PATH) { error = L"无法访问临时目录。"; return false; }
+        if (!temp_length || temp_length >= MAX_PATH) { error = L"无法访问临时目录。"; return result; }
         fs::path stage;
         for (unsigned attempt = 0; attempt < 100; ++attempt) {
             stage = fs::path(temp) / (L"PulseArchive-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(attempt));
             if (fs::create_directory(stage)) break;
             stage.clear();
         }
-        if (stage.empty()) { error = L"无法创建临时解压目录。"; return false; }
+        if (stage.empty()) { error = L"无法创建临时解压目录。"; return result; }
         Cleanup cleanup{stage};
         fs::path contents = stage / L"contents";
         fs::path selection = stage / L"selection.txt";
@@ -273,22 +298,33 @@ bool ExtractArchive(const std::wstring& path, const std::wstring& destination,
         if (files) {
             auto run = Run({L"x", L"-y", L"-aos", L"-spd", L"-bd", L"-sccUTF-8", L"-scsUTF-8", L"-p" + password,
                 L"-o" + contents.wstring(), L"-i@" + selection.wstring(), L"--", path}, cancel);
-            if (run.code != 0) { error = run.output; return false; }
+            result.exit_code = run.exit_code;
+            if (run.outcome != ArchiveOutcome::Success) {
+                result.outcome = run.outcome; error = std::move(run.output); return result;
+            }
         }
         for (const auto& entry : selected) {
-            if (cancel && cancel->load()) { error = L"已取消解压。"; return false; }
+            if (cancel && cancel->load()) { result.outcome = ArchiveOutcome::Cancelled; error = L"已取消解压。"; return result; }
             fs::path output = target / fs::path(entry.path);
-            if (!NoReparse(output)) { error = L"目标路径包含链接，无法安全解压。"; return false; }
+            if (!NoReparse(output)) { error = L"目标路径包含链接，无法安全解压。"; return result; }
             if (entry.is_dir) { fs::create_directories(output); continue; }
             fs::path source = contents / fs::path(entry.path);
-            if (!NoReparse(source) || !fs::is_regular_file(source)) { error = L"解压输出不是安全的普通文件。"; return false; }
+            if (!NoReparse(source) || !fs::is_regular_file(source)) { error = L"解压输出不是安全的普通文件。"; return result; }
             fs::create_directories(output.parent_path());
             if (!MoveFileExW(source.c_str(), output.c_str(), MOVEFILE_COPY_ALLOWED)) {
                 DWORD code = GetLastError();
-                if (code != ERROR_ALREADY_EXISTS && code != ERROR_FILE_EXISTS) { error = L"无法写入解压文件 (" + std::to_wstring(code) + L")。"; return false; }
+                if (code != ERROR_ALREADY_EXISTS && code != ERROR_FILE_EXISTS) { error = L"无法写入解压文件 (" + std::to_wstring(code) + L")。"; return result; }
             }
         }
-        return true;
-    } catch (const fs::filesystem_error& exception) { error = L"解压文件系统错误：" + Decode(exception.what()); return false; }
+        result.outcome = ArchiveOutcome::Success;
+        return result;
+    } catch (const fs::filesystem_error& exception) { error = L"解压文件系统错误：" + Decode(exception.what()); return result; }
+}
+bool ExtractArchive(const std::wstring& path, const std::wstring& destination,
+    const std::vector<std::wstring>& selected_paths, const std::wstring& password, std::wstring& error,
+    const std::atomic_bool* cancel) {
+    auto result = ExtractArchive(path, destination, selected_paths, password, cancel);
+    error = std::move(result.error);
+    return result.outcome == ArchiveOutcome::Success;
 }
 }

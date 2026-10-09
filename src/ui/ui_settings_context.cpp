@@ -1,7 +1,7 @@
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
-#include "../app/builtin_menu_strings.h"
-#include "../app/builtin_menu_items.h"
+#include "../model/builtin_menu_strings.h"
+#include "../model/builtin_menu_items.h"
 
 namespace pulse::ui {
 void MainRenderer::DrawSettingsContext(const WindowViewModel& vm,const D2D1_RECT_F& rect,const Theme& theme) {
@@ -9,8 +9,8 @@ void MainRenderer::DrawSettingsContext(const WindowViewModel& vm,const D2D1_RECT
     auto* dc=compositor_->Dc();
     const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
     painter_.DrawText(l10n::Get(I::ContextMenuDesc),D2D1::RectF(l.content.left+20*scale_,l.content_origin+64*scale_,l.content.right-20*scale_,l.content_origin+86*scale_),compositor_->SmallFormat(),theme.text_secondary);
-    const I titles[]={I::ContextSoftware,I::ContextOpenWith,I::ContextShare,I::ContextSystem,I::ContextPrint,app::builtin_text::GroupTitle};
-    const I descriptions[]={I::ContextSoftwareDesc,I::ContextOpenWithDesc,I::ContextShareDesc,I::ContextSystemDesc,I::ContextPrintDesc,app::builtin_text::GroupDescription};
+    const I titles[]={I::ContextSoftware,I::ContextOpenWith,I::ContextShare,I::ContextSystem,I::ContextPrint,model::builtin_text::GroupTitle};
+    const I descriptions[]={I::ContextSoftwareDesc,I::ContextOpenWithDesc,I::ContextShareDesc,I::ContextSystemDesc,I::ContextPrintDesc,model::builtin_text::GroupDescription};
     const wchar_t* icons[]={L"\xE74C",L"\xE8A7",L"\xE72D",L"\xE713",L"\xE749",L"\xE713"};
     for(int g=0;g<SettingsLayout::kContextCards;++g) {
         const auto r=l.context_cards[g],header=l.context_header[g];
@@ -29,7 +29,7 @@ void MainRenderer::DrawSettingsContext(const WindowViewModel& vm,const D2D1_RECT
         painter_.DrawText(title,bounds.title,compositor_->TextFormat(),theme.text);
         painter_.DrawWrappedCaption(l10n::Get(descriptions[g]),D2D1::Point2F(bounds.description.left,bounds.description.top),
             bounds.description.right-bounds.description.left,theme.text_secondary);
-        const int toggle = g == 5 ? app::kBuiltinGroupToggle : 10 + g;
+        const int toggle = g == 5 ? model::kBuiltinGroupToggle : 10 + g;
         fluent::ControlState state{};state.checked=vm.settings_group_on[g];state.hovered=IsHovered(vm,HitTestResult::SettingsToggle,toggle);
         painter_.DrawSwitch(l.context_toggle[g],L"",state);
         DrawIconText(r.right-36*scale_,(header.top+header.bottom)*0.5f-9*scale_,18*scale_,18*scale_,(vm.settings_expanded&(1u<<(8+g))) ? L"\xE70D" : L"\xE76C",L"",theme.text_secondary,0.75f);

@@ -33,10 +33,13 @@ std::wstring NavigationReturnChildName(const std::wstring& from_path,
 
 enum class BannerType { None, Other, ContentIndex, SearchIncomplete, ContentScanRunning, Offline };
 
+struct ArchiveListing;
+
 struct Tab {
     std::wstring current_path;
     std::wstring archive_file, archive_prefix, archive_password;
     std::shared_ptr<std::atomic_bool> archive_cancel;
+    std::shared_ptr<const ArchiveListing> archive_listing;
     std::unordered_set<std::wstring> archive_encrypted;
     std::stack<std::wstring> back_stack;
     std::stack<std::wstring> forward_stack;
@@ -70,6 +73,7 @@ struct Tab {
     std::wstring virtual_title; // tag/search views; empty for real folders
     std::wstring banner_title;
     std::wstring banner_message;
+    std::wstring network_search_root;
     BannerType banner_type = BannerType::None;
     void SetBannerTitle(BannerType type, std::wstring title) {
         banner_type = type;
@@ -93,6 +97,8 @@ struct Tab {
     bool loading = false;
     uint64_t pending_generation = 0;
     uint64_t applied_generation = 0;
+    // A replaced Tab resets this watermark even when its address is reused.
+    uint64_t notify_patch_generation = 0;
     fs::SnapshotPtr snapshot;
     std::wstring snapshot_path;
     size_t directory_count = 0;
@@ -222,7 +228,8 @@ struct Tab {
     void ClearEntryOrderHold();
     fs::SnapshotPtr PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                         std::vector<std::wstring>& selected_names,
-                                        std::wstring& focus_name);
+                                        std::wstring& focus_name,
+                                        FolderSortMode folders = FolderSortMode::FoldersFirst);
 };
 
 bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle);
@@ -386,12 +393,30 @@ void NormalizeGroupRuns(WindowTabs& tabs);
 // ---------------------------------------------------------------------------
 // Staging tray: collect file paths into batches.
 // ---------------------------------------------------------------------------
+enum class TrayMetadataState { Pending, Resolving, Ready, Missing, Unavailable };
+struct TrayMetadataTicket {};
+
+struct TrayMetadataRequest {
+    std::wstring path;
+    std::weak_ptr<const TrayMetadataTicket> ticket;
+};
+
+struct TrayMetadataResult {
+    TrayMetadataRequest request;
+    TrayMetadataState state = TrayMetadataState::Unavailable;
+    DWORD attrs = 0;
+    uint64_t size = 0;
+};
+
 struct TrayItem {
     std::wstring path;
+    // Pending/unavailable facts keep the intent eligible for ops validation.
     bool exists = true;
     bool is_dir = false;
     DWORD attrs = 0;
     uint64_t size = 0;
+    TrayMetadataState metadata_state = TrayMetadataState::Pending;
+    std::shared_ptr<const TrayMetadataTicket> metadata_ticket = std::make_shared<TrayMetadataTicket>();
 };
 
 struct TrayBatch {
@@ -402,6 +427,11 @@ struct TrayBatch {
 
 class StagingTray {
 public:
+    StagingTray() = default;
+    StagingTray(const StagingTray& other);
+    StagingTray& operator=(const StagingTray& other);
+    StagingTray(StagingTray&& other);
+    StagingTray& operator=(StagingTray&& other);
     const std::vector<TrayBatch>& batches() const { return batches_; }
 
     // Collect selected full paths. move_intent = true for Ctrl+X.
@@ -411,11 +441,16 @@ public:
     void RemoveDeleted(const std::vector<std::wstring>& paths);
     void Clear();
 
+    std::vector<TrayMetadataRequest> BeginMetadataQueries(size_t limit = 256);
+    void RetryMetadataQueries(const std::vector<TrayMetadataRequest>& requests);
+    bool ApplyMetadataResults(const std::vector<TrayMetadataResult>& results);
+
     // For serialization.
     void ToJson(std::wstring& out) const;
     bool FromJson(const std::wstring& in);
 
 private:
+    void ResetMetadataTickets();
     std::vector<TrayBatch> batches_;
 };
 

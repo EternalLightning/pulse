@@ -50,4 +50,7 @@ struct Completion {
     uint32_t flags = 0, reserved = 0; // Bit 0: private known; bit 1: retire.
     uint64_t private_bytes = 0;
 };
+static_assert(sizeof(Request) == 72);
+static_assert(sizeof(Begin) == 64);
+static_assert(sizeof(Completion) == 24);
 }

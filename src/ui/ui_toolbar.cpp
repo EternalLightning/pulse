@@ -2,7 +2,7 @@
 #include "toolbar_layout.h"
 #include "toolbar_command_state.h"
 #include "pane_header_icons.h"
-#include "../app/resource.h"
+#include "../common/resource_ids.h"
 
 namespace pulse::ui {
 void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {

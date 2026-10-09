@@ -2,6 +2,7 @@
 #include "../index/index_raw_storage_security.h"
 #include "../index/index_request_limits.h"
 #include "../index/network_agent_protocol.h"
+#include "../index/index_server_auth.h"
 #include "../index/change_tracking.h"
 #include <filesystem>
 #include <iostream>
@@ -32,6 +33,30 @@ void Touch(const std::wstring& path) {
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::index;
     std::cout << std::unitbuf;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--server-auth-only") {
+        const auto identity = transport::Identity::Current();
+        std::wstring image(32768, L'\0'); DWORD image_size = static_cast<DWORD>(image.size());
+        Check(QueryFullProcessImageNameW(GetCurrentProcess(), 0, image.data(), &image_size) != FALSE, "read actual helper fixture image");
+        image.resize(image_size);
+        const auto name = L"\\\\.\\pipe\\PulseAuthFixture." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
+        transport::LogonSecurity security(identity);
+        transport::Handle server(CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 512, 512, 0, security.get()));
+        Check(server.get() != INVALID_HANDLE_VALUE && security.get(), "create isolated authenticated endpoint fixture");
+        if (server.get() == INVALID_HANDLE_VALUE || !security.get()) return 1;
+        transport::Handle client(CreateFileW(name.c_str(), transport::kClientPipeAccess, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+        Check(client.get() != INVALID_HANDLE_VALUE, "connect to actual local fixture pipe");
+        if (client.get() == INVALID_HANDLE_VALUE) return 1;
+        Check(transport::VerifyIndexServer(client.get(), image, identity), "current caller helper accepts exact image and token");
+        Check(!transport::VerifyIndexServer(client.get(), image + L".wrong", identity), "fake endpoint with wrong image is rejected");
+        auto different = identity; ++different.session;
+        Check(!transport::VerifyIndexServer(client.get(), image, different), "helper in a different caller session is rejected");
+        different = identity; different.grants += L"restricted";
+        Check(!transport::VerifyIndexServer(client.get(), image, different), "different effective caller grants are rejected");
+        Check(!transport::VerifyIndexServer(INVALID_HANDLE_VALUE, image, identity) &&
+              !transport::VerifyIndexServer(client.get(), image, {}), "missing endpoint or caller identity fails closed");
+        return failures ? 1 : 0;
+    }
     if (argc > 1 && (std::wstring_view(argv[1]) == L"--metadata-budget-only" || std::wstring_view(argv[1]) == L"--visibility-bench")) {
         const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
             (L"index_security_perf_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64())));

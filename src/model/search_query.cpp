@@ -3,7 +3,7 @@
 
 #include <cwctype>
 
-namespace pulse::app {
+namespace pulse::model {
 namespace {
 
 void Trim(std::wstring& s) {
@@ -372,4 +372,4 @@ std::wstring NormalizeExtensionList(std::wstring_view raw) {
     return out;
 }
 
-} // namespace pulse::app
+} // namespace pulse::model

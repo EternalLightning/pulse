@@ -42,33 +42,8 @@ bool Normalize(SavedSearch& search) {
     return true;
 }
 
-std::vector<std::wstring> ExtractObjects(const std::wstring& json) {
-    std::vector<std::wstring> output;
-    size_t pos = pulse::json::ValuePosition(json, L"searches");
-    if (pos == std::wstring::npos || pos >= json.size() || json[pos] != L'[') return output;
-    bool in_string = false;
-    int depth = 0;
-    size_t start = std::wstring::npos;
-    for (size_t i = pos + 1; i < json.size(); ++i) {
-        const wchar_t value = json[i];
-        if (in_string) {
-            if (value == L'\\') ++i;
-            else if (value == L'"') in_string = false;
-            continue;
-        }
-        if (value == L'"') in_string = true;
-        else if (value == L'{') {
-            if (depth++ == 0) start = i;
-        } else if (value == L'}' && depth > 0) {
-            if (--depth == 0 && start != std::wstring::npos) {
-                output.push_back(json.substr(start, i - start + 1));
-                start = std::wstring::npos;
-            }
-        } else if (value == L']' && depth == 0) {
-            break;
-        }
-    }
-    return output;
+std::vector<std::wstring> ExtractObjects(const pulse::json::Document& doc) {
+    return pulse::json::ExtractObjectArray(doc, L"searches");
 }
 
 } // namespace
@@ -97,9 +72,10 @@ bool SavedSearchStore::LoadFrom(const std::wstring& path) {
         items_.clear();
         return GetLastError() == ERROR_FILE_NOT_FOUND;
     }
-    if (pulse::json::ExtractInt(document, L"schema", 0) != 1) return false;
+    const pulse::json::Document doc(document);
+    if (!doc.Is(pulse::json::Kind::Object) || pulse::json::ExtractInt(doc, L"schema", 0) != 1) return false;
     std::vector<SavedSearch> loaded;
-    for (const std::wstring& object : ExtractObjects(document)) {
+    for (const std::wstring& object : ExtractObjects(doc)) {
         SavedSearch search;
         search.name = pulse::json::ExtractString(object, L"name");
         search.root = pulse::json::ExtractString(object, L"root");

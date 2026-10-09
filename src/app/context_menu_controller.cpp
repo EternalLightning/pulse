@@ -30,21 +30,23 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
                         const std::vector<ShellMenuEntry>& entries) {
     if (entries.empty()) return;
     constexpr size_t kSectionCap = 48;
-    auto lower = [](std::wstring s) {
-        for (auto& c : s) c = static_cast<wchar_t>(std::towlower(c));
-        return s;
+    const bool has_quick_access = std::any_of(items.begin(), items.end(), [](const auto& item) {
+        return item.command == CmdPinQuickAccess || item.command == CmdUnpinQuickAccess;
+    });
+    const auto native_quick_access = [&](const ShellMenuEntry& entry) {
+        const auto verb = ipc::ToLowerVerb(entry.verb);
+        return has_quick_access && (verb == L"pintohome" || verb == L"unpinfromhome");
     };
-    std::unordered_set<std::wstring> seen;
-    for (const auto& it : items)
-        if (!it.text.empty()) seen.insert(lower(it.text));
+    std::unordered_set<int> seen_commands;
+    for (const auto& item : items)
+        if (item.command != 0) seen_commands.insert(item.command);
 
     size_t added = 0;
     for (const auto& e : entries) {
         if (added >= kSectionCap) break;
         const bool header = !e.children.empty();
         if (e.text.empty() || (e.command == 0 && !header)) continue;
-        const std::wstring key = lower(e.text);
-        if (!seen.insert(key).second) continue;
+        if (native_quick_access(e) || (e.command != 0 && !seen_commands.insert(e.command).second)) continue;
         if (added == 0 && !items.empty()) items.back().separator_after = true;
         ui::FluentMenuItem row;
         row.command = e.command;
@@ -52,7 +54,8 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
         row.enabled = e.enabled;
         // Software-owned submenu: keep the hierarchy as a one-level flyout.
         for (const auto& c : e.children) {
-            if (c.text.empty() || c.command == 0) continue;
+            if (c.text.empty() || c.command == 0 || native_quick_access(c) ||
+                !seen_commands.insert(c.command).second) continue;
             ui::FluentMenuItem child;
             child.command = c.command;
             child.text = c.text;
@@ -150,9 +153,10 @@ std::vector<ShellMenuEntry> ApplyExplorerPrefs(const ContextMenuPrefs& prefs,
 }
 
 std::wstring ContextMenuController::CacheKey(bool background,
-                                             const std::wstring& extension) {
-    if (background) return L":bg";
-    return extension.empty() ? L":file" : extension;
+                                             const std::wstring& extension,
+                                             bool extended) {
+    const std::wstring key = background ? L":bg" : extension.empty() ? L":file" : extension;
+    return extended ? key + L":extended" : key;
 }
 
 void ContextMenuController::StartQuery(
@@ -165,7 +169,7 @@ void ContextMenuController::StartQuery(
     if (normalize_path) {
         for (auto& path : paths) path = normalize_path(path);
     }
-    if (token_ != 0 && background_ == background && paths_ == paths) {
+    if (token_ != 0 && background_ == background && extended_ == extended && paths_ == paths) {
         if (prefetch_static) prefetch_static(extension);
         return;
     }
@@ -176,6 +180,7 @@ void ContextMenuController::StartQuery(
                                   prefs.DisabledHandlerClsids());
     paths_ = std::move(paths);
     background_ = background;
+    extended_ = extended;
     extension_ = std::move(extension);
     if (background && extension_.empty()) extension_ = ipc::kBackgroundVerbKey;
     token_ = token;
@@ -193,8 +198,12 @@ void ContextMenuController::Close() {
     token_ = 0;
     paths_.clear();
     background_ = false;
+    extended_ = false;
     com_ready_ = false;
+    com_items_current_ = false;
     com_items_.clear();
+    menu_com_items_.clear();
+    menu_com_token_ = 0;
     static_verbs_.clear();
     extension_.clear();
     query_started_at_ = 0;
@@ -237,19 +246,9 @@ bool ContextMenuController::ExecuteShellCommand(
     const std::function<void()>& refresh_folder) {
     if (command >= CmdShellComBase) {
         const uint32_t clicked = static_cast<uint32_t>(command - CmdShellComBase);
-        std::wstring text, verb;
-        if (const auto* snapshot = FindComItemIn(menu_com_items_, clicked)) {
-            text = snapshot->text;
-            verb = snapshot->verb;
-        } else if (const auto* live_item = FindComItem(clicked)) {
-            text = live_item->text;
-            verb = live_item->verb;
-        }
         if (!com_ready_ && wait_until_ready) wait_until_ready();
-        uint32_t live = FindLiveComId(verb, text);
-        if (live == 0 && com_ready_) live = clicked;
-        if (token_ && (live != 0 || !text.empty() || !verb.empty())) {
-            if (operations_.invoke) operations_.invoke(token_, live, verb, text);
+        if (const auto* item = FindInvokableComItem(clicked)) {
+            if (operations_.invoke) operations_.invoke(token_, item->id, item->verb, item->text);
             token_ = 0;
         }
         Close();
@@ -267,9 +266,8 @@ bool ContextMenuController::ExecuteShellCommand(
                 if (ci < verb->children.size()) verb = &verb->children[ci];
                 else verb = nullptr;
             }
-            constexpr size_t kMaxTargets = 16;
             if (verb) {
-                for (size_t i = 0; i < paths_.size() && i < kMaxTargets; ++i) {
+                for (size_t i = 0; i < paths_.size(); ++i) {
                     if (_wcsicmp(verb->verb.c_str(), L"runas") == 0) {
                         // The registry command alone does not request elevation.
                         // Keep the verb so ShellExecuteEx performs the UAC handoff.
@@ -340,9 +338,10 @@ void ContextMenuController::InvalidateCaches() {
 
 bool ContextMenuController::SeedComItemsFromCache() {
     if (com_ready_ || !com_items_.empty()) return false;
-    const auto found = com_cache_.find(CacheKey(background_, extension_));
+    const auto found = com_cache_.find(CacheKey(background_, extension_, extended_));
     if (found == com_cache_.end() || found->second.empty()) return false;
     com_items_ = found->second;
+    com_items_current_ = false;
     return true;
 }
 
@@ -352,9 +351,10 @@ ContextMenuController::QueryCompletion ContextMenuController::CompleteComQuery(
     QueryCompletion result;
     if (token == 0 || token != token_) return result;
     com_items_ = std::move(items);
+    com_items_current_ = true;
     result.accepted = true;
     result.partial = partial;
-    result.cache_key = CacheKey(background_, extension_);
+    result.cache_key = CacheKey(background_, extension_, extended_);
     com_cache_[result.cache_key] = com_items_;
     if (!partial) {
         com_ready_ = true;
@@ -453,33 +453,31 @@ const ops::ShellMenuItem* ContextMenuController::FindComItem(uint32_t id) const 
 
 const ops::ShellMenuItem* ContextMenuController::FindComItemIn(
     const std::vector<ops::ShellMenuItem>& items, uint32_t id) const {
+    const ops::ShellMenuItem* match = nullptr;
     for (const auto& item : items) {
-        if (item.id == id) return &item;
+        if (item.id != id) continue;
+        if (match) return nullptr;
+        match = &item;
     }
-    return nullptr;
+    return match;
 }
 
-uint32_t ContextMenuController::FindLiveComId(const std::wstring& text) const {
-    return FindLiveComId({}, text);
-}
-
-uint32_t ContextMenuController::FindLiveComId(const std::wstring& verb,
-                                              const std::wstring& text) const {
-    if (!verb.empty()) {
-        for (const auto& item : com_items_) {
-            if (!item.has_children && item.id != 0 && item.verb == verb) return item.id;
-        }
-    }
-    if (text.empty()) return 0;
-    for (const auto& item : com_items_) {
-        if (!item.has_children && item.id != 0 && item.text == text) return item.id;
-    }
-    return 0;
+const ops::ShellMenuItem* ContextMenuController::FindInvokableComItem(uint32_t id) const {
+    // Cached rows describe presentation; only a displayed snapshot of this session authorizes execution.
+    if (!token_ || menu_com_token_ != token_ || !com_ready_ || !com_items_current_ ||
+        id == 0 || id > 0x7FFF) return nullptr;
+    const auto* snapshot = FindComItemIn(menu_com_items_, id);
+    const auto* live = FindComItem(id);
+    if (!snapshot || !live || !snapshot->enabled || snapshot->has_children ||
+        !live->enabled || live->has_children || snapshot->clsid != live->clsid ||
+        snapshot->handler != live->handler || snapshot->verb != live->verb ||
+        snapshot->text != live->text) return nullptr;
+    return live;
 }
 
 void ContextMenuController::OpenMenu(std::vector<ui::FluentMenuItem> base_items) {
     base_items_ = std::move(base_items);
-    menu_com_items_ = com_items_;
+    NotePatchedDisplay();
     menu_open_ = true;
 }
 

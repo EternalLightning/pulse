@@ -34,6 +34,7 @@ WatchPool& Watches() {
 #ifdef PULSE_FS_WATCH_TESTING
 std::mutex g_hook_mutex;
 std::function<void(DirWatch::TestPoint)> g_io_hook;
+DWORD g_read_error = ERROR_SUCCESS;
 #endif
 
 class UniqueHandle {
@@ -112,6 +113,7 @@ struct DirWatch::WorkerState {
     std::array<DWORD, 64 * 1024 / sizeof(DWORD)> buffer{};
 #ifdef PULSE_FS_WATCH_TESTING
     std::function<void(TestPoint)> io_hook;
+    DWORD read_error = ERROR_SUCCESS;
 #endif
 
     ~WorkerState() {
@@ -199,14 +201,32 @@ struct DirWatch::WorkerState {
         }
     }
 
+    bool BackoffReadFailure(uint32_t& failures) {
+        assert(!pending_io);
+        armed.store(false, std::memory_order_release);
+        pending_rename_old.clear();
+        if (failures == 0) Notify(true, {});
+        const DWORD delay = (std::min)(30000u, 1000u << (std::min)(failures, 5u));
+        failures = (std::min)(failures + 1, 6u);
+        return WaitForSingleObject(stop_event.Get(), delay) == WAIT_TIMEOUT &&
+            !stop.load(std::memory_order_acquire);
+    }
+
     void Run() {
         if (!ReopenDirectory()) return;
         bool newly_armed = true;
+        uint32_t read_failures = 0;
         while (!stop.load(std::memory_order_acquire)) {
             ResetEvent(completion.Get());
             overlapped = {};
             overlapped.hEvent = completion.Get();
-            const BOOL ok = ReadDirectoryChangesW(directory.Get(), buffer.data(),
+            BOOL ok = FALSE;
+#ifdef PULSE_FS_WATCH_TESTING
+            if (io_hook) io_hook(TestPoint::ReadChanges);
+            if (read_error != ERROR_SUCCESS) SetLastError(read_error);
+            else
+#endif
+            ok = ReadDirectoryChangesW(directory.Get(), buffer.data(),
                 static_cast<DWORD>(sizeof(buffer)), subtree ? TRUE : FALSE,
                 FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
                     FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
@@ -214,8 +234,7 @@ struct DirWatch::WorkerState {
                     FILE_NOTIFY_CHANGE_SECURITY, nullptr, &overlapped, nullptr);
             if (!ok && GetLastError() != ERROR_IO_PENDING) {
                 if (stop.load(std::memory_order_acquire)) break;
-                pending_rename_old.clear();
-                Notify(true, {});
+                if (!BackoffReadFailure(read_failures)) break;
                 if (!ReopenDirectory()) break;
                 newly_armed = true;
                 continue;
@@ -252,13 +271,16 @@ struct DirWatch::WorkerState {
                 continue;
             }
             if (!got) {
-                if (error == ERROR_OPERATION_ABORTED) continue;
-                pending_rename_old.clear();
-                Notify(true, {});
-                if (error != ERROR_NOTIFY_ENUM_DIR && !ReopenDirectory()) break;
+                if (error == ERROR_NOTIFY_ENUM_DIR) {
+                    pending_rename_old.clear();
+                    Notify(true, {});
+                } else {
+                    if (!BackoffReadFailure(read_failures) || !ReopenDirectory()) break;
+                }
                 newly_armed = true;
                 continue;
             }
+            read_failures = 0;
             if (transferred == 0) {
                 pending_rename_old.clear();
                 Notify(true, {});
@@ -310,6 +332,7 @@ bool DirWatch::Start(const std::wstring& path, ChangeCallback callback, bool sub
         {
             std::lock_guard hook_lock(g_hook_mutex);
             state->io_hook = g_io_hook;
+            state->read_error = g_read_error;
         }
 #endif
         auto* argument = new std::shared_ptr<WorkerState>(state);
@@ -361,6 +384,10 @@ DWORD WINAPI DirWatch::WorkerMain(void* parameter) {
 void DirWatch::SetIoHookForTest(std::function<void(TestPoint)> hook) {
     std::lock_guard lock(g_hook_mutex);
     g_io_hook = std::move(hook);
+}
+void DirWatch::SetReadErrorForTest(DWORD error) {
+    std::lock_guard lock(g_hook_mutex);
+    g_read_error = error;
 }
 #endif
 

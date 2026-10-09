@@ -26,9 +26,11 @@ namespace pulse::ui {
 // "C:\" for drive paths, "\\server\share" for UNC, "" when undetermined.
 std::wstring VolumeRoot(const std::wstring& path);
 
-// Explorer modifier semantics. allowed is the DoDragDrop dwOKEffects mask.
+// Modifiers win; an unambiguous source preference overrides the volume default.
+// COPY|MOVE means either is fine, as published by Pulse's own drags.
 DWORD ComputeDropEffect(DWORD key_state, const std::wstring& source_sample,
-                        const std::wstring& dest_dir, DWORD allowed);
+                        const std::wstring& dest_dir, DWORD allowed,
+                        DWORD preferred_effect = 0);
 
 // First source that is a real directory (not a file or broken path).
 // Used when dropping onto a pane header to navigate instead of copy/move.
@@ -114,11 +116,11 @@ struct DropTargetCallbacks {
     // pt in client coordinates; sources already extracted from CF_HDROP.
     // Return the DROPEFFECT_* to show (badge + cursor follow it).
     std::function<DWORD(const std::vector<std::wstring>& sources, POINT pt,
-                        DWORD key_state, DWORD allowed)> drag_over;
+                        DWORD key_state, DWORD allowed, DWORD preferred)> drag_over;
     std::function<void()> drag_leave;
     // Returns the performed effect.
     std::function<DWORD(const std::vector<std::wstring>& sources, POINT pt,
-                        DWORD key_state, DWORD preferred)> drop;
+                        DWORD key_state, DWORD allowed, DWORD preferred)> drop;
 };
 
 class WindowDropTarget final : public IDropTarget {

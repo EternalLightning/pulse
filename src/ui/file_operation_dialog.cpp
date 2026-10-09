@@ -1627,14 +1627,20 @@ bool ShowRenameLockedDialog(HWND owner, const ops::OpStatus& status, bool dark,
 LockedItemChoice ShowLockedItemDialog(HWND owner, const ops::OpStatus& status,
     const LockedItemDialogText& text, bool dark, D2D1_COLOR_F accent,
     std::function<bool()> still_valid) {
-    if (status.lock_owners.empty() || (still_valid && !still_valid())) return LockedItemChoice::Cancel;
-    const bool can_end = std::all_of(status.lock_owners.begin(), status.lock_owners.end(),
+    const bool plain_transfer_retry = status.lock_retry_available && !status.active &&
+        status.phase == ops::OpPhase::Failed && status.task_id && still_valid &&
+        (status.type == ops::OpType::Copy || status.type == ops::OpType::Move);
+    if ((status.lock_owners.empty() && !plain_transfer_retry) || (still_valid && !still_valid()))
+        return LockedItemChoice::Cancel;
+    const bool can_end = !status.lock_owners.empty() &&
+        std::all_of(status.lock_owners.begin(), status.lock_owners.end(),
         [](const auto& process) { return process.can_terminate; });
     const auto separator = status.locked_path.find_last_of(L"\\/");
     const auto name = status.locked_path.substr(separator == std::wstring::npos ? 0 : separator + 1);
     ConfirmDialogSpec spec;
     spec.title = text.title;
-    spec.message = text.message;
+    spec.message = status.lock_owners.empty()
+        ? l10n::Get(l10n::StringId::LockedItemGenericMessage) : text.message;
     const auto marker = spec.message.find(L"{name}");
     if (marker != std::wstring::npos) spec.message.replace(marker, 6, name);
     for (const auto& process : status.lock_owners) {
@@ -1642,7 +1648,10 @@ LockedItemChoice ShowLockedItemDialog(HWND owner, const ops::OpStatus& status,
         if (!process.image_path.empty()) description += L"\n" + path::FriendlyPathText(process.image_path);
         spec.rows.push_back({std::move(description), false});
     }
-    spec.note = can_end ? text.end_hint : text.close_hint;
+    if (status.lock_owners.empty()) {
+        const auto& file = status.failed_path.empty() ? status.locked_path : status.failed_path;
+        if (!file.empty()) spec.rows.push_back({path::FriendlyPathText(file), true});
+    } else spec.note = can_end ? text.end_hint : text.close_hint;
     spec.confirm_text = can_end ? text.end_retry : text.retry;
     spec.cancel_text = text.cancel;
     spec.cancel_is_default = true;

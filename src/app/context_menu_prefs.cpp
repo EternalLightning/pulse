@@ -10,21 +10,8 @@
 namespace pulse::app {
 namespace {
 
-std::wstring ExtractObject(const std::wstring& json, const std::wstring& key) {
-    const std::wstring quoted = L"\"" + key + L"\"";
-    size_t pos = json.find(quoted);
-    if (pos == std::wstring::npos) return L"";
-    pos = json.find(L'{', pos + quoted.size());
-    if (pos == std::wstring::npos) return L"";
-    int depth = 0;
-    for (size_t i = pos; i < json.size(); ++i) {
-        if (json[i] == L'{') ++depth;
-        else if (json[i] == L'}') {
-            --depth;
-            if (depth == 0) return json.substr(pos, i - pos + 1);
-        }
-    }
-    return L"";
+std::wstring ExtractObject(const pulse::json::Document& doc, const std::wstring& key) {
+    return pulse::json::ExtractRaw(doc, key, pulse::json::Kind::Object);
 }
 
 int ClampCap(int v, int lo, int hi, int fallback) {
@@ -292,101 +279,71 @@ std::wstring ContextMenuPrefs::ToJson() const {
 }
 
 bool ContextMenuPrefs::FromJson(const std::wstring& json) {
-    if (json.empty()) return false;
+    const pulse::json::Document doc(json);
+    if (!doc.Is(pulse::json::Kind::Object)) return false;
     builtin_hidden = 0;
-    const auto builtin = ExtractObject(json, L"pulse_items");
+    const auto builtin = ExtractObject(doc, L"pulse_items");
+    const pulse::json::Document builtin_doc(builtin);
     for (int index = 0; index < kBuiltinMenuItemCount; ++index) {
         const auto item = static_cast<BuiltinMenuItem>(index);
         SetBuiltinItemEnabled(item, pulse::json::ExtractBool(
-            builtin, std::wstring(BuiltinMenuKey(item)), true));
+            builtin_doc, std::wstring(BuiltinMenuKey(item)), true));
     }
-    explorer_cap = ClampCap(pulse::json::ExtractInt(json, L"explorer_cap", ipc::kDefaultExplorerCap),
+    explorer_cap = ClampCap(pulse::json::ExtractInt(doc, L"explorer_cap", ipc::kDefaultExplorerCap),
                             1, 48, ipc::kDefaultExplorerCap);
-    open_with_mru = ClampCap(pulse::json::ExtractInt(json, L"open_with_mru", 2), 0, 8, 2);
+    open_with_mru = ClampCap(pulse::json::ExtractInt(doc, L"open_with_mru", 2), 0, 8, 2);
 
-    const std::wstring cats = ExtractObject(json, L"categories");
+    const std::wstring cats = ExtractObject(doc, L"categories");
     const std::wstring& src = cats.empty() ? json : cats;
-    software = pulse::json::ExtractBool(src, L"software", true);
-    share = pulse::json::ExtractBool(src, L"share", false);
-    wallpaper = pulse::json::ExtractBool(src, L"wallpaper", false);
-    rotate = pulse::json::ExtractBool(src, L"rotate", false);
-    shortcut = pulse::json::ExtractBool(src, L"shortcut", false);
-    open_with = pulse::json::ExtractBool(src, L"open_with", true);
-    open_with_com = pulse::json::ExtractBool(src, L"open_with_com", false);
-    system_extra = pulse::json::ExtractBool(src, L"system_extra", false);
-    print = pulse::json::ExtractBool(src, L"print", true);
+    const pulse::json::Document category_doc(src);
+    software = pulse::json::ExtractBool(category_doc, L"software", true);
+    share = pulse::json::ExtractBool(category_doc, L"share", false);
+    wallpaper = pulse::json::ExtractBool(category_doc, L"wallpaper", false);
+    rotate = pulse::json::ExtractBool(category_doc, L"rotate", false);
+    shortcut = pulse::json::ExtractBool(category_doc, L"shortcut", false);
+    open_with = pulse::json::ExtractBool(category_doc, L"open_with", true);
+    open_with_com = pulse::json::ExtractBool(category_doc, L"open_with_com", false);
+    system_extra = pulse::json::ExtractBool(category_doc, L"system_extra", false);
+    print = pulse::json::ExtractBool(category_doc, L"print", true);
 
     item_enabled.clear();
-    const std::wstring items = ExtractObject(json, L"items");
-    if (!items.empty()) {
-        size_t pos = 1;
-        while (pos < items.size()) {
-            while (pos < items.size() && items[pos] != L'"' && items[pos] != L'}') ++pos;
-            if (pos >= items.size() || items[pos] == L'}') break;
-            ++pos;
-            const std::wstring key = pulse::json::UnescapeString(items, pos);
-            size_t obj = items.find(L'{', pos);
-            if (obj == std::wstring::npos) break;
-            size_t end = items.find(L'}', obj);
-            if (end == std::wstring::npos) break;
-            const std::wstring block = items.substr(obj, end - obj + 1);
-            item_enabled[key] = pulse::json::ExtractBool(block, L"enabled", true);
-            pos = end + 1;
+    if (const auto* items = doc.Find(L"items"); items && items->kind == pulse::json::Kind::Object) {
+        for (const auto& item : items->children) {
+            if (item.kind == pulse::json::Kind::Object)
+                item_enabled[item.name] = pulse::json::Bool(item.Find(L"enabled"), true);
         }
     }
 
     seen.clear();
-    size_t pos = json.find(L"\"seen\"");
-    if (pos != std::wstring::npos) pos = json.find(L'[', pos);
-    if (pos != std::wstring::npos) {
-        ++pos;
-        while (pos < json.size() && json[pos] != L']') {
-            const size_t obj = json.find(L'{', pos);
-            if (obj == std::wstring::npos) break;
-            const size_t close_arr = json.find(L']', pos);
-            if (close_arr != std::wstring::npos && obj > close_arr) break;
-            const size_t end = json.find(L'}', obj);
-            if (end == std::wstring::npos) break;
-            const std::wstring block = json.substr(obj, end - obj + 1);
-            SeenMenuItem item;
-            item.key = pulse::json::ExtractString(block, L"key");
-            item.text = pulse::json::ExtractString(block, L"text");
-            item.flyout = pulse::json::ExtractString(block, L"kind") == L"flyout";
-            item.from_com = pulse::json::ExtractString(block, L"source") == L"com";
-            item.category = ipc::ParseCtxMenuCategory(pulse::json::ExtractString(block, L"category"));
-            if (!item.key.empty() && !item.text.empty()) seen.push_back(std::move(item));
-            pos = end + 1;
-        }
+    for (const auto& block : pulse::json::ExtractObjectArray(doc, L"seen")) {
+        const pulse::json::Document item_doc(block);
+        SeenMenuItem item;
+        item.key = pulse::json::ExtractString(item_doc, L"key");
+        item.text = pulse::json::ExtractString(item_doc, L"text");
+        item.flyout = pulse::json::ExtractString(item_doc, L"kind") == L"flyout";
+        item.from_com = pulse::json::ExtractString(item_doc, L"source") == L"com";
+        item.category = ipc::ParseCtxMenuCategory(pulse::json::ExtractString(item_doc, L"category"));
+        if (!item.key.empty() && !item.text.empty()) seen.push_back(std::move(item));
     }
 
     MigrateSeenKeys();
     CoalesceCompressCatalog();
 
     slow_ext.clear();
-    const std::wstring slow = ExtractObject(json, L"slow_ext");
-    if (!slow.empty()) {
-        size_t p = 1;
-        while (p < slow.size()) {
-            while (p < slow.size() && slow[p] != L'"' && slow[p] != L'}') ++p;
-            if (p >= slow.size() || slow[p] == L'}') break;
-            ++p;
-            const std::wstring key = pulse::json::UnescapeString(slow, p);
-            size_t obj = slow.find(L'{', p);
-            if (obj == std::wstring::npos) break;
-            size_t end = slow.find(L'}', obj);
-            if (end == std::wstring::npos) break;
-            const std::wstring block = slow.substr(obj, end - obj + 1);
+    if (const auto* slow = doc.Find(L"slow_ext"); slow && slow->kind == pulse::json::Kind::Object) {
+        for (const auto& item : slow->children) {
+            if (item.kind != pulse::json::Kind::Object || item.name.empty()) continue;
             SlowComExt st;
-            st.last_ms = static_cast<uint32_t>(
-                std::max(0, pulse::json::ExtractInt(block, L"ms", 0)));
-            st.slow_hits = static_cast<uint32_t>(
-                std::max(0, pulse::json::ExtractInt(block, L"slow", 0)));
-            st.timeout_hits = static_cast<uint32_t>(
-                std::max(0, pulse::json::ExtractInt(block, L"timeout", 0)));
-            st.deferred = pulse::json::ExtractBool(block, L"deferred", false);
-            st.disabled = pulse::json::ExtractBool(block, L"disabled", false);
-            if (!key.empty()) slow_ext[key] = st;
-            p = end + 1;
+            const auto counter = [&](const wchar_t* key) {
+                const uint64_t value = pulse::json::Unsigned(item.Find(key));
+                return value <= UINT32_MAX ? static_cast<uint32_t>(value) : 0;
+            };
+            st.last_ms = counter(L"ms");
+            st.slow_hits = counter(L"slow");
+            st.timeout_hits = counter(L"timeout");
+            st.deferred = pulse::json::Bool(item.Find(L"deferred"));
+            st.disabled = pulse::json::Bool(item.Find(L"disabled"));
+            slow_ext[item.name] = st;
         }
     }
     return true;

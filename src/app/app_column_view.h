@@ -7,6 +7,9 @@ namespace pulse {
 // Keeps every visible pane's column listings in step with its folder and
 // selection. Cheap when nothing changed; starts async loads otherwise.
 void SyncColumnStrips(AppState& s);
+// A directory mutation updates or invalidates every visible column projection.
+void InvalidateColumnStripPath(AppState& s, const std::wstring& path,
+                               fs::SnapshotPtr fresh = {});
 // Called for every worker result before pane handling.
 void NoteColumnStripResult(AppState& s, const app::WorkResult& res);
 

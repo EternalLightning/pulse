@@ -88,7 +88,7 @@ void ApplySnapshot(app::Tab& tab, std::vector<fs::DirEntry> entries) {
 
 } // namespace
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
     Fixture fixture;
     if (!fixture.valid) {
@@ -101,6 +101,75 @@ int wmain() {
         if (!passed) ++failures;
     };
     const std::wstring parent = fixture.path.wstring();
+    if (argc == 2 && wcscmp(argv[1], L"--directory-contracts-only") == 0) {
+        const std::vector<fs::DirEntry> facts{Entry(L"z.txt", 1), Entry(L"a.txt", 10),
+                                            Entry(L"m-folder", 0, true)};
+        const auto shared = std::make_shared<std::vector<fs::DirEntry>>(facts);
+        app::Tab name_tab, size_tab;
+        name_tab.current_path = parent; size_tab.current_path = parent;
+        size_tab.sort_column = ui::SortColumn::Size;
+        size_tab.sort_direction = ui::SortDirection::Desc;
+        std::vector<std::wstring> names;
+        std::wstring focus;
+        name_tab.SetSnapshot(name_tab.PrepareEntrySnapshot(shared, names, focus));
+        size_tab.SetSnapshot(size_tab.PrepareEntrySnapshot(shared, names, focus));
+        check(NamesAre(*name_tab.snapshot, {L"m-folder", L"a.txt", L"z.txt"}) &&
+              NamesAre(*size_tab.snapshot, {L"m-folder", L"a.txt", L"z.txt"}) &&
+              NamesAre(*shared, {L"z.txt", L"a.txt", L"m-folder"}),
+              "shared facts are projected by each pane without mutating the shared listing");
+        size_tab.sort_direction = ui::SortDirection::Asc;
+        size_tab.PrepareEntryRefresh(true);
+        ApplySnapshot(size_tab, facts);
+        check(NamesAre(*size_tab.snapshot, {L"m-folder", L"z.txt", L"a.txt"}),
+              "opposite size order does not inherit another pane's name order");
+        name_tab.SelectOnly(1);
+        name_tab.PrepareEntryRefresh(false);
+        ApplySnapshot(name_tab, {Entry(L"z.txt", 20), Entry(L"a.txt", 1),
+                                Entry(L"m-folder", 0, true), Entry(L"0-new.txt", 7)});
+        check(name_tab.order_held && NamesAre(*name_tab.snapshot,
+              {L"m-folder", L"a.txt", L"z.txt", L"0-new.txt"}) &&
+              name_tab.EntryAt(name_tab.selected_index).name == L"a.txt",
+              "background projection retains physical rows and selection across foreign ordering");
+        name_tab.PrepareEntryRefresh(true);
+        ApplySnapshot(name_tab, *name_tab.snapshot);
+        check(!name_tab.order_held && NamesAre(*name_tab.snapshot,
+              {L"m-folder", L"0-new.txt", L"a.txt", L"z.txt"}) &&
+              name_tab.EntryAt(name_tab.selected_index).name == L"a.txt",
+              "explicit projection restores sorting while retaining selection");
+        for (const auto folders : {app::FolderSortMode::FoldersFirst, app::FolderSortMode::Mixed}) {
+            app::Tab tab;
+            tab.current_path = parent;
+            tab.SetSnapshot(tab.PrepareEntrySnapshot(shared, names, focus, folders));
+            check(tab.EntryAt(0).name == (folders == app::FolderSortMode::Mixed ? L"a.txt" : L"m-folder"),
+                  "folder mode is part of each pane's projection identity");
+        }
+        const std::vector<fs::DirEntry> shown{Entry(L"unavailable.txt", 42), Entry(L"keep.txt", 7)};
+        for (const bool held : {false, true}) {
+            auto rows = shown;
+            check(app::ApplyDirNotify(rows, parent,
+                  {FILE_ACTION_MODIFIED, L"unavailable.txt", {}}, ui::SortColumn::Name,
+                  ui::SortDirection::Asc, held) == app::NotifyPatch::NeedFullEnum &&
+                  NamesAre(rows, {L"unavailable.txt", L"keep.txt"}) && rows[0].size == 42,
+                  "failed stat preserves old row and requests full enumeration");
+            rows = shown;
+            check(app::ApplyDirNotify(rows, parent,
+                  {FILE_ACTION_ADDED, L"new-unavailable.txt", {}}, ui::SortColumn::Name,
+                  ui::SortDirection::Asc, held) == app::NotifyPatch::NeedFullEnum &&
+                  NamesAre(rows, {L"unavailable.txt", L"keep.txt"}),
+                  "unavailable added entry defers without changing existing rows");
+            std::vector<fs::DirNotifyEvent> burst(5, {FILE_ACTION_MODIFIED, L"unavailable.txt", {}});
+            rows = shown;
+            check(app::ApplyDirNotifyBatch(rows, parent, burst, ui::SortColumn::Name,
+                  ui::SortDirection::Asc, held) == app::NotifyPatch::NeedFullEnum &&
+                  NamesAre(rows, {L"unavailable.txt", L"keep.txt"}),
+                  "failed batch stat leaves the original listing intact");
+            check(app::ApplyDirNotify(rows, parent,
+                  {FILE_ACTION_REMOVED, L"unavailable.txt", {}}, ui::SortColumn::Name,
+                  ui::SortDirection::Asc, held) == app::NotifyPatch::Applied &&
+                  NamesAre(rows, {L"keep.txt"}), "explicit removal still deletes the row");
+        }
+        return failures ? 1 : 0;
+    }
     const std::vector<fs::DirEntry> shown{ Entry(L"b.txt", 1), Entry(L"m.txt", 2),
                                            Entry(L"z.txt", 3) };
     const std::vector<app::EntryRenameHint> renames{{L"m.txt", L"temporary.txt"},
@@ -113,6 +182,16 @@ int wmain() {
     check(NamesAre(held, {L"b.txt", L"a.txt", L"z.txt", L"new-folder", L"0-new.txt"}) &&
           held[0].size == 10 && held[1].size == 20,
           "rename chains retain physical rows, update metadata and append sorted newcomers");
+    const std::vector<fs::DirEntry> newcomers{Entry(L"z-folder", 0, true), Entry(L"a.txt")};
+    check(NamesAre(app::KeepEntryOrder({}, newcomers, {}, ui::SortColumn::Name,
+              ui::SortDirection::Asc, parent, app::FolderSortMode::Mixed), {L"a.txt", L"z-folder"}),
+          "held refresh uses captured mixed-folder preference for new rows");
+    check(NamesAre(app::KeepEntryOrder({}, newcomers, {}, ui::SortColumn::Name,
+              ui::SortDirection::Desc, parent, app::FolderSortMode::FollowDirection), {L"a.txt", L"z-folder"}),
+          "held refresh uses captured direction-following folder preference");
+    check(NamesAre(app::KeepEntryOrder({}, newcomers, {}, ui::SortColumn::Name,
+              ui::SortDirection::Desc, parent, app::FolderSortMode::FoldersFirst), {L"z-folder", L"a.txt"}),
+          "folder preference is an explicit immutable sort input rather than global state");
     const auto without_removed = app::KeepEntryOrder(shown,
         {Entry(L"b.txt"), Entry(L"new.txt")}, {}, ui::SortColumn::Size,
         ui::SortDirection::Desc, parent);
@@ -252,15 +331,24 @@ int wmain() {
           "fallback enumeration restores the final rename in its physical source slot and selection");
     auto missing = before;
     check(app::ApplyDirNotify(missing, parent, {FILE_ACTION_MODIFIED, L"b.txt", {}},
-          ui::SortColumn::Name, ui::SortDirection::Asc, true) == app::NotifyPatch::Applied &&
-          NamesAre(missing, {L"d.txt", L"c.txt", L"folder"}),
-          "a vanished touched file cleans up its held row");
+          ui::SortColumn::Name, ui::SortDirection::Asc, true) == app::NotifyPatch::NeedFullEnum &&
+          NamesAre(missing, {L"d.txt", L"b.txt", L"c.txt", L"folder"}),
+          "a failed touched-file stat retains its held row pending full enumeration");
     auto invalid = before;
     check(app::ApplyDirNotifyBatch(invalid, parent,
           {{FILE_ACTION_ADDED, L"child\\invalid.txt", {}}}, ui::SortColumn::Name,
           ui::SortDirection::Asc, true) == app::NotifyPatch::NeedFullEnum &&
           NamesAre(invalid, {L"d.txt", L"b.txt", L"c.txt", L"folder"}),
           "invalid notification paths defer to full enumeration without corrupting rows");
+
+    check(fixture.File(L"resolved.txt", L"facts"), "create fact-only notification fixture");
+    const auto resolved = app::ResolveDirNotifies(parent, {{FILE_ACTION_ADDED, L"resolved.txt", {}}});
+    const bool removed_after_resolve = DeleteFileW((fixture.path / L"resolved.txt").c_str()) != FALSE;
+    auto fact_rows = before;
+    check(removed_after_resolve && resolved.status == app::NotifyPatch::Applied &&
+          app::ApplyResolvedDirNotifies(fact_rows, resolved) == app::NotifyPatch::Applied &&
+          fact_rows.back().name == L"resolved.txt" && fact_rows.back().size == 5,
+          "applying resolved facts performs no new stat after the source file disappears");
 
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const auto saved_labels = path::KnownFolderLabels();

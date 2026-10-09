@@ -1,4 +1,5 @@
 #include "global_search_window.h"
+#include "../index/live_filename_search.h"
 #include "resource.h"
 #include "../ui/empty_state_layout.h"
 #include "../ui/fluent_components.h"
@@ -78,8 +79,11 @@ struct GlobalSearchWindow::Impl {
     int selected = 0, first = 0;
     uint32_t generation = 1;
     size_t total = 0;
-    index::IndexClient filenames;
-    index::NetworkAgentClient network;
+    std::unique_ptr<index::IndexClient> owned_filenames;
+    std::unique_ptr<index::NetworkAgentClient> owned_network;
+    index::IndexClient* filenames = nullptr;
+    index::NetworkAgentClient* network = nullptr;
+    uint32_t* next_request = nullptr;
     index::SearchResult local_result, network_result;
     bool local_ready = false, network_ready = false;
     index::ContentSearchClient contents;
@@ -136,8 +140,10 @@ struct GlobalSearchWindow::Impl {
         first = std::clamp(first, 0, std::max(0, static_cast<int>(rows.size()) - PageSize()));
     }
     void Cancel() {
-        ++generation;
-        filenames.CancelSession(kSession);
+        generation = next_request ? ++*next_request : generation + 1;
+        if (filenames) filenames->CancelSession(kSession);
+        if (network) network->CancelSession(kSession);
+        // Content has its own Instant agent: suspension must never stop main-window queries.
         contents.Suspend();
         busy = false;
         if (hwnd) { KillTimer(hwnd, kDebounce); KillTimer(hwnd, kConnectTimeout); }
@@ -177,8 +183,9 @@ struct GlobalSearchWindow::Impl {
             request.session_id = kSession; request.needle = query; request.limit = kMaximumResults;
             if (!search_pinyin) request.needle = L"nopinyin: " + request.needle;
             if (current_only) request.path_prefix = current_folder;
-            filenames.SearchAsync(request, generation);
-            network.SearchAsync(request, generation);
+            local_ready = !index::FilenameSearchRoot(request.path_prefix).empty();
+            if (!local_ready) filenames->SearchAsync(request, generation, hwnd, kIndexResult);
+            network->SearchAsync(request, generation, hwnd, kNetworkResult);
             SetTimer(hwnd, kConnectTimeout, 10000, nullptr);
         }
     }
@@ -194,7 +201,7 @@ struct GlobalSearchWindow::Impl {
         }
         total = local_result.total + network_result.total;
         total -= std::min(total, duplicates);
-        truncated = total > rows.size(); busy = !(local_ready && network_ready);
+        truncated = total > rows.size(); busy = !(local_ready && network_ready) || network_result.scanning;
         if (!busy) KillTimer(hwnd, kConnectTimeout);
         ClampSelection(false); Invalidate();
     }
@@ -578,15 +585,17 @@ struct GlobalSearchWindow::Impl {
         case kIndexStatus: Invalidate(); return 0;
         case kIndexResult: {
             index::SearchResult result;
-            if (filenames.TakeResult(static_cast<uint32_t>(wp), result) && wp == generation && !content_mode && IsWindowVisible(hwnd)) {
+            if (filenames->TakeResult(static_cast<uint32_t>(wp), result, hwnd) && wp == generation && !content_mode && IsWindowVisible(hwnd)) {
                 error.clear(); local_result = std::move(result); local_ready = true; MergeFilenames();
             }
             return 0;
         }
         case kNetworkResult: {
             index::SearchResult result;
-            if (network.TakeResult(static_cast<uint32_t>(wp), result) && wp == generation && !content_mode && IsWindowVisible(hwnd)) {
-                error.clear(); network_result = std::move(result); network_ready = true; MergeFilenames();
+            if (network->TakeResult(static_cast<uint32_t>(wp), result, hwnd) && wp == generation && !content_mode && IsWindowVisible(hwnd)) {
+                error = result.error ? Text(StringId::GlobalSearchFailed) : std::wstring{};
+                if (result.scanning) KillTimer(hwnd, kConnectTimeout);
+                network_result = std::move(result); network_ready = true; MergeFilenames();
             }
             return 0;
         }
@@ -654,8 +663,16 @@ struct GlobalSearchWindow::Impl {
             ShowWindow(edit, SW_SHOW);
             SetWindowSubclass(edit, EditProc, 1, reinterpret_cast<DWORD_PTR>(this));
             SendMessageW(edit, EM_SETLIMITTEXT, 2048, 0);
-            filenames.Start(hwnd, kIndexStatus, kIndexResult);
-            network.Start(hwnd, kIndexStatus, kNetworkResult);
+            if (!filenames) {
+                owned_filenames = std::make_unique<index::IndexClient>();
+                filenames = owned_filenames.get();
+                filenames->Start(hwnd, kIndexStatus, kIndexResult);
+            }
+            if (!network) {
+                owned_network = std::make_unique<index::NetworkAgentClient>();
+                network = owned_network.get();
+                network->Start(hwnd, kIndexStatus, kNetworkResult);
+            }
             contents.Start(hwnd, kContentResult, index::ContentAgentMode::Instant);
         }
         ApplyAppearance();
@@ -672,7 +689,15 @@ struct GlobalSearchWindow::Impl {
         Changed(); return true;
     }
     ~Impl() {
-        Cancel(); filenames.Stop(); network.Stop(); contents.Stop();
+        Cancel();
+        // Borrowed filename clients remain live for the main window.
+        if (owned_filenames) owned_filenames->Stop();
+        if (owned_network) owned_network->Stop();
+        contents.Stop();
+        if (hwnd) {
+            MSG pending{};
+            while (PeekMessageW(&pending, hwnd, kIndexStatus, kNetworkResult, PM_REMOVE)) {}
+        }
         if (edit) RemoveWindowSubclass(edit, EditProc, 1);
         if (hwnd) DestroyWindow(hwnd);
         if (edit_font) DeleteObject(edit_font);
@@ -684,6 +709,16 @@ GlobalSearchWindow::~GlobalSearchWindow() = default;
 bool GlobalSearchWindow::Show(HWND owner, bool dark, float scale, const std::wstring& current_folder, bool search_pinyin) {
     if (!impl_) impl_ = std::make_unique<Impl>();
     return impl_->Show(owner, dark, scale, current_folder, search_pinyin);
+}
+void GlobalSearchWindow::BindFilenameClients(index::IndexClient& filenames, index::NetworkAgentClient& network, uint32_t& next_request) {
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    if (impl_->filenames == &filenames && impl_->network == &network) return;
+    impl_->Cancel();
+    impl_->owned_filenames.reset();
+    impl_->owned_network.reset();
+    impl_->filenames = &filenames;
+    impl_->network = &network;
+    impl_->next_request = &next_request;
 }
 void GlobalSearchWindow::SetAppearance(bool dark, ui::WindowEffect effect, const std::wstring& background_image, D2D1_COLOR_F accent) {
     if (!impl_) impl_ = std::make_unique<Impl>();

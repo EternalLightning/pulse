@@ -16,7 +16,7 @@
 
 namespace pulse::ops {
 struct DeleteIntegrationProbe {
-    static uint32_t LastBackendResult(const OpsManager& manager) { return manager.done_hr_; }
+    static uint32_t LastBackendResult(const OpsManager& manager) { return static_cast<uint32_t>(manager.Status().failure_hr); }
 };
 }
 

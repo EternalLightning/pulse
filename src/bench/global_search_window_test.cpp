@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <memory>
 #include <string>
+#include <string_view>
 #include "../app/global_search_window.h"
 #include "../app/global_search_window.cpp"
 #include <wincodec.h>
@@ -104,7 +105,10 @@ int wmain(int argc, wchar_t** argv) {
     if (set_awareness) set_awareness(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    std::filesystem::path output = argc > 1 ? argv[1] : L"bench_data/global-search-window";
+    const bool routing_only = (argc > 1 && std::wstring_view(argv[1]) == L"--routing-only") ||
+        (argc > 2 && std::wstring_view(argv[2]) == L"--routing-only");
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only"
+        ? argv[1] : L"bench_data/global-search-window";
     std::filesystem::create_directories(output);
     const auto profile = output / L"profile";
     std::filesystem::create_directories(profile);
@@ -112,6 +116,35 @@ int wmain(int argc, wchar_t** argv) {
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
     pulse::GlobalSearchWindow window;
+    const auto shared_lifecycle = [&] {
+        pulse::index::IndexClient shared_filenames;
+        pulse::index::NetworkAgentClient shared_network;
+        uint32_t next_request = 100;
+        window.BindFilenameClients(shared_filenames, shared_network, next_request);
+        check(window.Show(nullptr, true, 1, output.wstring()), "Show supports borrowed filename clients");
+        auto& shared_state = pulse::GlobalSearchWindowTestPeer::Get(window);
+        check(shared_state.filenames == &shared_filenames && shared_state.network == &shared_network &&
+            !shared_state.owned_filenames && !shared_state.owned_network,
+            "Bound popup does not construct or Start duplicate filename clients");
+        check(shared_state.generation == next_request && next_request > 100,
+            "Popup consumes the owner's unique request id counter");
+        const uint32_t previous = next_request;
+        window.Hide();
+        check(next_request > previous && shared_state.generation == next_request,
+            "Hide invalidates the popup without resetting the owner's counter");
+        const HWND popup = shared_state.hwnd;
+        PostMessageW(popup, pulse::kIndexResult, previous, 0);
+        PostMessageW(popup, pulse::kNetworkResult, previous, 0);
+        window.Shutdown();
+        MSG pending{};
+        check(!PeekMessageW(&pending, popup, pulse::kIndexStatus, pulse::kNetworkResult, PM_REMOVE),
+            "Shutdown drains queued search notifications before releasing the popup HWND");
+    };
+    if (routing_only) {
+        shared_lifecycle();
+        CoUninitialize();
+        return failed ? 1 : 0;
+    }
     check(window.Show(nullptr, true, 1, output.wstring()), "Show creates independent visible window");
     auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
     check(window.Visible() && GetFocus() == state.edit, "Show focuses native IME edit");
@@ -253,6 +286,7 @@ int wmain(int argc, wchar_t** argv) {
     check(window.Show(nullptr, true, 1, output.wstring()), "Show resumes after cancellation");
     state.Cancel(); window.Shutdown();
     check(!window.Visible(), "Shutdown releases window");
+    shared_lifecycle();
     CoUninitialize();
     return failed ? 1 : 0;
 }

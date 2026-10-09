@@ -1,4 +1,5 @@
 #include "delete_operation.h"
+#include "produced_undo.h"
 #include "../shell_host/delete_fileop.h"
 #include "../fs/fs_recycle.h"
 #include "../ipc/shell_client.h"
@@ -291,8 +292,29 @@ void OpsManager::RunDelete(const QueueItem& item,
         if (stale) { finish(L"", {}, false, false, {}, {}, true); return; }
     }
     std::wstring error;
+    std::wstring identity_failed_path;
+    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+        !ValidateProducedUndo(item.req.sources, item.req.undo_produced_identities, error, identity_failed_path)) {
+        {
+            std::lock_guard lock(mutex_);
+            if (item.req.undo_revision == undo_revision_ && !undo_.empty()) {
+                undo_.back().supported = false;
+                ++undo_revision_;
+            }
+        }
+        finish(std::move(error), {}, false, false, {}, {}, false, {}, E_ACCESSDENIED, identity_failed_path);
+        return;
+    }
     auto plan = BuildDeletePlan(item.req, item.seq, error);
     if (!error.empty()) { finish(std::move(error)); return; }
+    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+        std::any_of(plan.targets.begin(), plan.targets.end(), [](const auto& target) {
+            return target.disposition == DeleteDisposition::Permanent;
+        })) {
+        finish(L"此位置不支持安全的原生回收撤销；不会将撤销改为永久删除。", {}, false,
+            false, {}, {}, false, {}, E_ACCESSDENIED);
+        return;
+    }
     const auto prepared = delete_service_.Prepare(std::move(plan));
     if (prepared.decision == DeleteDecision::Blocked) {
         finish(l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
@@ -367,12 +389,21 @@ void OpsManager::RunDelete(const QueueItem& item,
     for (const auto& group : {std::pair{false, permanent_roots}, std::pair{true, recycle_roots}}) {
         if (group.second.empty()) continue;
         if (!execution_token) { hr = static_cast<uint32_t>(E_UNEXPECTED); break; }
-        shell_activity_tick_ = GetTickCount64();
-        {
-            std::lock_guard<std::mutex> lock(done_mutex_);
-            done_ready_ = false; done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
-            done_failed_path_.clear();
+        std::vector<FileIdentity> expected_identities;
+        if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
+            for (const auto& path : group.second) {
+                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), path);
+                if (source == item.req.sources.end()) break;
+                const size_t index = static_cast<size_t>(source - item.req.sources.begin());
+                if (index >= item.req.undo_produced_identities.size()) break;
+                expected_identities.push_back(item.req.undo_produced_identities[index]);
+            }
+            if (!ValidateProducedUndo(group.second, expected_identities, error, failed_path)) {
+                hr = static_cast<uint32_t>(E_ACCESSDENIED);
+                break;
+            }
         }
+        shell_activity_tick_ = GetTickCount64();
         auto& client = ipc::ShellClient::Instance();
         uint32_t id = 0;
         {
@@ -383,12 +414,13 @@ void OpsManager::RunDelete(const QueueItem& item,
                 lock.unlock();
                 cancelled = true; break;
             }
-            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load());
+            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load(), expected_identities);
             current_req_id_.store(id);
         }
         if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);
         if (id == 0) { hr = static_cast<uint32_t>(E_FAIL); break; }
-        if (!WaitShellDone(id, hr, cancelled, error)) {
+        ShellCompletion completion;
+        if (!WaitShellDone(id, completion)) {
             // WaitShellDone already bumps the finished-task counter. Preserve an
             // uncertain active plan: the backend may have mutated before Stop.
             {
@@ -410,19 +442,20 @@ void OpsManager::RunDelete(const QueueItem& item,
             delete_active_.store(false);
             return;
         }
+        hr = completion.hr;
+        cancelled = completion.cancelled;
+        error = std::move(completion.error);
         {
-            std::lock_guard<std::mutex> lock(done_mutex_);
-            for (const auto& path : done_deleted_paths_)
+            for (const auto& path : completion.deleted_paths)
                 if (std::any_of(group.second.begin(), group.second.end(), [&](const auto& requested) { return SamePath(path, requested); })) actual.push_back(path);
-            for (size_t i = 0; i < done_recycled_paths_.size(); ++i) {
-                const auto& path = done_recycled_paths_[i];
+            for (size_t i = 0; i < completion.recycled_paths.size(); ++i) {
+                const auto& path = completion.recycled_paths[i];
                 if (std::any_of(group.second.begin(), group.second.end(), [&](const auto& requested) { return SamePath(path, requested); })) {
                     recycled.push_back(path);
-                    recycle_destinations.push_back(i < done_recycle_destinations_.size() ? done_recycle_destinations_[i] : L"");
+                    recycle_destinations.push_back(i < completion.recycle_destinations.size() ? completion.recycle_destinations[i] : L"");
                 }
             }
-            done_deleted_paths_.clear(); done_recycled_paths_.clear(); done_recycle_destinations_.clear();
-            failed_path = std::move(done_failed_path_);
+            failed_path = std::move(completion.failed_path);
         }
         if (FAILED(static_cast<HRESULT>(hr)) || cancelled) break;
         if (!group.first && !recycle_roots.empty())
@@ -445,7 +478,7 @@ void OpsManager::RunDelete(const QueueItem& item,
     else if (!physical_complete && error.empty()) error = L"Deletion was not confirmed for every authorized physical root.";
     const bool backend_lost = IsDeleteBackendLost(static_cast<HRESULT>(hr));
     const bool uncertain = backend_lost || !physical_complete;
-    if (!cancelled && !delete_cancel_.load() && !stopping_.load() &&
+    if (!item.req.is_undo && !cancelled && !delete_cancel_.load() && !stopping_.load() &&
         shell::NeedsPermanentDeleteConfirmation(static_cast<HRESULT>(hr))) {
         // The recycle-only host refused fallback before mutation. Admit only
         // the remaining exact roots again, now visibly as permanent in Pulse.

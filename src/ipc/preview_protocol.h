@@ -1,5 +1,5 @@
 #pragma once
-#include <windows.h>
+#include "protocol.h"
 #include <cstdint>
 #include <string>
 
@@ -17,6 +17,17 @@ enum class PreviewRequestKind : uint32_t {
     Properties = 1,
 };
 constexpr uint32_t kPreviewFlagTruncated = 1u << 0;
+constexpr uint32_t kPreviewMaxPropertyCount = 6;
+constexpr uint32_t kPreviewMaxPropertyLabelChars = 128;
+constexpr uint32_t kPreviewMaxPropertyValueChars = 1024;
+
+inline void TruncatePreviewString(std::wstring& value, size_t limit, bool ellipsis = false) {
+    if (value.size() <= limit) return;
+    size_t end = limit - (ellipsis && limit ? 1u : 0u);
+    if (end && value[end - 1] >= 0xD800 && value[end - 1] <= 0xDBFF) --end;
+    value.resize(end);
+    if (ellipsis && limit) value.push_back(L'\x2026');
+}
 constexpr uint32_t kPreviewMinPixelSize = 32;
 constexpr uint32_t kPreviewDefaultPixelSize = 512;
 constexpr uint32_t kPreviewMaxPixelSize = 1024;
@@ -70,14 +81,12 @@ struct PreviewResponse {
 inline std::wstring PreviewPipeName(DWORD pid) {
     return L"\\\\.\\pipe\\PulsePreview-" + std::to_wstring(pid);
 }
+static_assert(sizeof(PreviewRequest) == 40);
+static_assert(sizeof(PreviewResponse) == 80);
 inline bool ReadAll(HANDLE h, void* data, DWORD bytes) {
-    auto* p = static_cast<unsigned char*>(data);
-    while (bytes) { DWORD n = 0; if (!ReadFile(h, p, bytes, &n, nullptr) || !n) return false; p += n; bytes -= n; }
-    return true;
+    return PipeRead(h, data, bytes, {.overlapped = false});
 }
 inline bool WriteAll(HANDLE h, const void* data, DWORD bytes) {
-    auto* p = static_cast<const unsigned char*>(data);
-    while (bytes) { DWORD n = 0; if (!WriteFile(h, p, bytes, &n, nullptr) || !n) return false; p += n; bytes -= n; }
-    return true;
+    return PipeWrite(h, data, bytes, {.overlapped = false});
 }
 } // namespace pulse::ipc

@@ -81,11 +81,34 @@ std::wstring HitPath(AppState& s, const ui::HitTestResult& hit) {
 }
 
 void StartChangeTracking(AppState& s) {
-    s.changes.enabled = s.appPrefs.change_tracking_enabled;
-    s.changes.days = s.appPrefs.change_tracking_days;
     if (s.isolatedTest || s.shot.active) return;
     s.changes.client.Start(s.hwnd, WM_CHANGE_TRACKING);
-    s.changes.client.SetEnabled(s.changes.enabled);
+    s.changes.client.SetEnabled(s.appPrefs.change_tracking_enabled);
+}
+
+void ApplyChangeTrackingSettings(AppState& s) {
+    auto& state = s.changes;
+    state.client.SetEnabled(s.appPrefs.change_tracking_enabled);
+    state.summaries.clear();
+    state.requested_paths.clear();
+    state.popover.visible = false;
+    state.summary_request = 0;
+    state.summary_pending = false;
+    state.details.clear();
+    state.last_query = 0;
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        if (!tab || RootOf(*tab).empty()) return;
+        tab->loading = false;
+        tab->change_request = 0;
+        tab->change_days = s.appPrefs.change_tracking_days;
+        if (s.appPrefs.change_tracking_enabled) LoadChangeView(s, *tab, RootOf(*tab));
+        else {
+            tab->banner_message = Text(I::ChangeScope);
+            tab->change_empty_text = Text(I::ChangeDisabled);
+            tab->change_status_text = tab->snapshot && tab->EntryCount() != 0 ? Text(I::ChangeDisabled) : L"";
+        }
+    });
 }
 
 bool TickChangeTracking(AppState& s) {
@@ -98,38 +121,12 @@ bool TickChangeTracking(AppState& s) {
         changed = true;
     }
     if (state.popover.visible) {
-        const auto found = state.summaries.find(SummaryKey(state.hover_path, state.days));
-        const auto badge = found == state.summaries.end() ? ui::ChangeBadge{} : Badge(found->second, state.days);
+        const auto found = state.summaries.find(SummaryKey(state.hover_path, s.appPrefs.change_tracking_days));
+        const auto badge = found == state.summaries.end() ? ui::ChangeBadge{} : Badge(found->second, s.appPrefs.change_tracking_days);
         if (badge.label.empty()) { state.popover.visible = false; changed = true; }
         else if (state.popover.summary != badge.tooltip) { state.popover.summary = badge.tooltip; changed = true; }
     }
-    if (state.enabled != s.appPrefs.change_tracking_enabled || state.days != s.appPrefs.change_tracking_days) {
-        state.enabled = s.appPrefs.change_tracking_enabled;
-        state.days = s.appPrefs.change_tracking_days;
-        state.client.SetEnabled(state.enabled);
-        if (!state.enabled) state.summaries.clear();
-        state.requested_paths.clear();
-        state.popover.visible = false;
-        state.summary_request = 0;
-        state.summary_pending = false;
-        state.details.clear();
-        state.last_query = 0;
-        ForEachPane(s, [&](app::Pane& pane) {
-            auto* tab = pane.ActiveTab();
-            if (!tab || RootOf(*tab).empty()) return;
-            tab->loading = false;
-            tab->change_request = 0;
-            tab->change_days = state.days;
-            if (state.enabled) LoadChangeView(s, *tab, RootOf(*tab));
-            else {
-                tab->banner_message = Text(I::ChangeScope);
-                tab->change_empty_text = Text(I::ChangeDisabled);
-                tab->change_status_text = tab->snapshot && tab->EntryCount() != 0 ? Text(I::ChangeDisabled) : L"";
-            }
-        });
-        changed = true;
-    }
-    if (!state.enabled || s.isolatedTest || s.shot.active) return changed;
+    if (!s.appPrefs.change_tracking_enabled || s.isolatedTest || s.shot.active) return changed;
     // Closing to the tray keeps the UI timer alive. Keep event collection and
     // its lease active, but do not aggregate history for an invisible view.
     if (!app::ShouldPollChangeTracking(s.hwnd)) {
@@ -160,7 +157,8 @@ bool TickChangeTracking(AppState& s) {
         if (!paths.empty()) {
             state.summary_request = ++state.next_request;
             state.summary_pending = true;
-            state.client.QuerySummaryAsync(paths, app::ChangeSince(state.days, app::ChangeNow()),
+            state.summary_days = s.appPrefs.change_tracking_days;
+            state.client.QuerySummaryAsync(paths, app::ChangeSince(state.summary_days, app::ChangeNow()),
                 state.summary_request);
         }
     }
@@ -207,7 +205,7 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
     if (pending == state.details.end()) return;
     const auto wanted = pending->second;
     state.details.erase(pending);
-    if (!state.enabled || !s.appPrefs.change_tracking_enabled) return;
+    if (!s.appPrefs.change_tracking_enabled) return;
     ForEachPane(s, [&](app::Pane& pane) {
         auto* tab = pane.ActiveTab();
         if (!tab || tab != wanted.tab || tab->current_path != wanted.path ||
@@ -252,13 +250,13 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
 
 void ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result) {
     auto& state = s.changes;
-    if (request != state.summary_request || !state.enabled || !s.appPrefs.change_tracking_enabled ||
-        state.days != s.appPrefs.change_tracking_days) return;
+    if (request != state.summary_request || !s.appPrefs.change_tracking_enabled ||
+        state.summary_days != s.appPrefs.change_tracking_days) return;
     state.summary_pending = false;
     std::unordered_set<std::wstring> requested;
-    for (const auto& path : state.requested_paths) requested.insert(SummaryKey(path, state.days));
+    for (const auto& path : state.requested_paths) requested.insert(SummaryKey(path, state.summary_days));
     for (const auto& summary : result.summaries) {
-        const auto key = SummaryKey(summary.path, state.days);
+        const auto key = SummaryKey(summary.path, state.summary_days);
         if (!requested.contains(key)) continue;
         // A failed/missing reply is not an authoritative empty result.
         if (HasResponse(summary.state) || summary.state == S::NotCovered || summary.count)

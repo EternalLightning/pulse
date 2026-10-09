@@ -9,6 +9,7 @@
 #include <propvarutil.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cwctype>
@@ -92,7 +93,65 @@ struct VideoPreview::Shared {
     bool seek_pending = false;
     double seek_fraction = 0;
     unsigned steps = 0;
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+    std::function<void()> worker_hook;
+#endif
 };
+
+struct VideoPreview::Workers {
+    static constexpr uint32_t limit = 4;
+    struct Slot {
+        std::shared_ptr<Shared> owner;
+        HANDLE thread = nullptr;
+    };
+    std::mutex mutex;
+    std::array<Slot, limit> slots;
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+    std::function<void()> hook;
+#endif
+    void Reap() {
+        for (auto& slot : slots) {
+            if (slot.thread && WaitForSingleObject(slot.thread, 0) == WAIT_OBJECT_0) {
+                CloseHandle(slot.thread);
+                slot = {};
+            }
+        }
+    }
+};
+
+VideoPreview::Workers& VideoPreview::WorkerPool() {
+    // A blocked provider must retain its mailbox/render target until actual exit.
+    static auto* pool = new Workers();
+    return *pool;
+}
+
+DWORD WINAPI VideoPreview::ThreadProc(void* argument) {
+    using Work = std::pair<std::shared_ptr<Shared>, std::wstring>;
+    std::unique_ptr<Work> work(static_cast<Work*>(argument));
+    Run(work->first, std::move(work->second));
+    return 0;
+}
+
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+VideoPreview::ResourceUsage VideoPreview::ResourcesForTest() {
+    auto& pool = WorkerPool();
+    std::lock_guard lock(pool.mutex);
+    pool.Reap();
+    ResourceUsage usage{0, 0, Workers::limit};
+    for (const auto& slot : pool.slots) {
+        if (slot.owner) {
+            ++usage.live;
+            if (slot.owner->stop.load()) ++usage.retired;
+        }
+    }
+    return usage;
+}
+void VideoPreview::SetWorkerHookForTest(std::function<void()> hook) {
+    auto& pool = WorkerPool();
+    std::lock_guard lock(pool.mutex);
+    pool.hook = std::move(hook);
+}
+#endif
 
 VideoPreview::~VideoPreview() { Reset(); }
 
@@ -141,6 +200,17 @@ LRESULT CALLBACK VideoPreview::VideoProc(HWND hwnd, UINT message, WPARAM wparam,
 
 void VideoPreview::Open(HWND owner, const std::wstring& path) {
     Reset();
+    state_ = std::make_shared<Shared>();
+    auto& pool = WorkerPool();
+    std::lock_guard admission(pool.mutex);
+    pool.Reap();
+    auto slot = std::find_if(pool.slots.begin(), pool.slots.end(),
+        [](const auto& value) { return !value.owner; });
+    if (slot == pool.slots.end()) {
+        state_->snapshot.error = HRESULT_FROM_WIN32(ERROR_BUSY);
+        state_->finished.store(true);
+        return;
+    }
     static std::once_flag registered;
     std::call_once(registered, [] {
         WNDCLASSW wc{};
@@ -153,13 +223,24 @@ void VideoPreview::Open(HWND owner, const std::wstring& path) {
     });
     child_ = CreateWindowExW(0, kVideoClass, L"", WS_CHILD | WS_CLIPSIBLINGS,
         0, 0, 1, 1, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
-    state_ = std::make_shared<Shared>();
     state_->child = child_;
     if (!child_) { state_->snapshot.error = HRESULT_FROM_WIN32(GetLastError()); return; }
-    SetWindowLongPtrW(child_, GWLP_USERDATA,
-        reinterpret_cast<LONG_PTR>(new std::shared_ptr<Shared>(state_)));
     try {
-        std::thread(Run, state_, path).detach();
+        SetWindowLongPtrW(child_, GWLP_USERDATA,
+            reinterpret_cast<LONG_PTR>(new std::shared_ptr<Shared>(state_)));
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+        state_->worker_hook = pool.hook;
+#endif
+        using Work = std::pair<std::shared_ptr<Shared>, std::wstring>;
+        auto work = std::make_unique<Work>(state_, path);
+        slot->owner = state_;
+        slot->thread = CreateThread(nullptr, 0, ThreadProc, work.get(), 0, nullptr);
+        if (slot->thread) work.release();
+        else {
+            slot->owner.reset();
+            state_->snapshot.error = HRESULT_FROM_WIN32(GetLastError());
+            state_->finished.store(true);
+        }
     } catch (...) {
         state_->snapshot.error = E_OUTOFMEMORY;
         state_->finished.store(true);
@@ -230,6 +311,9 @@ void VideoPreview::Run(std::shared_ptr<Shared> state, std::wstring path) {
                 PostMessageW(state->child, kRetireVideo, 0, reinterpret_cast<LPARAM>(state.get()));
         }
     } finish{state};
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+    if (state->worker_hook) { state->worker_hook(); return; }
+#endif
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     HMODULE library = nullptr;
     ComPtr<IMFPMediaPlayer> player;

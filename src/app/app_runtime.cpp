@@ -17,9 +17,10 @@
 #include "../ui/color_picker.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
-#include "../common/drive_labels.h"
+#include "../model/drive_labels.h"
 #include "../common/known_folder_labels.h"
 #include "../common/path_utils.h"
+#include "../common/file_identity.h"
 #include "../common/display_path.h"
 #include "../common/diagnostics_exporter.h"
 #include "snapshot_patch.h"
@@ -57,15 +58,16 @@ namespace {
 struct DetailsMetaRequest {
     HWND hwnd = nullptr;
     std::wstring path;
+    uint64_t window_epoch = 0, request_id = 0;
 };
 
 class DetailsMetaWorker {
 public:
-    void Submit(HWND hwnd, std::wstring path) {
+    void Submit(HWND hwnd, std::wstring path, uint64_t window_epoch, uint64_t request_id) {
         if (!hwnd || path.empty()) return;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            pending_ = DetailsMetaRequest{hwnd, std::move(path)};
+            pending_ = DetailsMetaRequest{hwnd, std::move(path), window_epoch, request_id};
             if (!thread_.joinable()) thread_ = std::thread([this] { Run(); });
         }
         cv_.notify_one();
@@ -73,6 +75,8 @@ public:
 
 private:
     void Run() {
+        const auto com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        struct Apartment { HRESULT result; ~Apartment() { if (SUCCEEDED(result)) CoUninitialize(); } } apartment{com};
         for (;;) {
             DetailsMetaRequest request;
             {
@@ -81,10 +85,18 @@ private:
                 request = std::move(*pending_);
                 pending_.reset();
             }
-            auto* result = new DetailsMetaResult{};
+            auto result = std::make_unique<DetailsMetaResult>();
             result->path = request.path;
-            WIN32_FILE_ATTRIBUTE_DATA fad{};
-            if (GetFileAttributesExW(request.path.c_str(), GetFileExInfoStandard, &fad)) {
+            result->window_epoch = request.window_epoch;
+            result->request_id = request.request_id;
+            struct File {
+                HANDLE value;
+                ~File() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+            } file{app::OpenDetailsMetadataFile(request.path)};
+            BY_HANDLE_FILE_INFORMATION fad{};
+            FileIdentity original;
+            if (file.value != INVALID_HANDLE_VALUE && ReadFileIdentity(file.value, original) &&
+                GetFileInformationByHandle(file.value, &fad)) {
                 result->attrs_valid = true;
                 result->created = fad.ftCreationTime;
                 result->modified = fad.ftLastWriteTime;
@@ -92,13 +104,26 @@ private:
             }
             SHFILEINFOW sfi{};
             const std::wstring shell_path = path::StripExtendedPathPrefix(request.path);
-            if (SHGetFileInfoW(shell_path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_TYPENAME) &&
+            if (SUCCEEDED(com) && SHGetFileInfoW(shell_path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_TYPENAME) &&
                 sfi.szTypeName[0]) {
                 result->type_name = sfi.szTypeName;
             }
-            result->meta = app::FetchDetailsMeta(request.path);
-            if (!PostMessageW(request.hwnd, WM_DETAILS_META, 0, reinterpret_cast<LPARAM>(result)))
-                delete result;
+            if (result->attrs_valid) {
+                result->meta = app::FetchDetailsMeta(file.value, request.path,
+                    (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+                FileIdentity current;
+                BY_HANDLE_FILE_INFORMATION after{};
+                if (!ReadPathFileIdentity(request.path, current) || !(current == original) ||
+                    !GetFileInformationByHandle(file.value, &after) ||
+                    CompareFileTime(&fad.ftLastWriteTime, &after.ftLastWriteTime) != 0 ||
+                    fad.nFileSizeHigh != after.nFileSizeHigh || fad.nFileSizeLow != after.nFileSizeLow) {
+                    result->attrs_valid = false;
+                    result->type_name.clear();
+                    result->meta = {};
+                }
+            }
+            if (PostMessageW(request.hwnd, WM_DETAILS_META, 0, reinterpret_cast<LPARAM>(result.get())))
+                result.release();
         }
     }
 
@@ -152,8 +177,29 @@ void RefreshDuplicateGroupViews(AppState& s) {
 
 namespace pulse {
 
-void PrefetchDetailsMeta(HWND hwnd, const std::wstring& path) {
-    GetDetailsMetaWorker().Submit(hwnd, path);
+bool ShouldRequestDetailsMeta(const AppState& s, const app::Tab& tab, const std::wstring& path) {
+    return s.detailsSelPath != path || s.detailsProbeGeneration != tab.applied_generation ||
+        s.detailsProbeViewGeneration != tab.view_generation || s.detailsProbeSnapshot.lock() != tab.snapshot ||
+        GetTickCount64() - s.detailsProbeTick >= 30000;
+}
+
+bool ApplyDetailsMetaResult(AppState& s, DetailsMetaResult& result) {
+    if (result.path != s.detailsSelPath || result.window_epoch != s.detailsWindowEpoch ||
+        result.request_id != s.detailsRequestId) return false;
+    s.detailsSelValid = result.attrs_valid;
+    if (result.attrs_valid) {
+        s.detailsCreated = result.created;
+        s.detailsModified = result.modified;
+        s.detailsAccessed = result.accessed;
+    }
+    s.detailsTypeName = std::move(result.type_name);
+    s.detailsMetaPath = result.path;
+    s.detailsOwner = std::move(result.meta.owner);
+    s.detailsPermissions = std::move(result.meta.permissions);
+    s.detailsDrive = std::move(result.meta.drive);
+    s.detailsFileSystem = std::move(result.meta.file_system);
+    s.detailsFreeSpace = std::move(result.meta.free_space);
+    return true;
 }
 void RememberLayoutFocus(AppState& s) {
     for (auto& owned : s.window_tabs.items) {
@@ -411,7 +457,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_global_search_error = s.settings.global_search_error();
             vm.settings_content_status = ContentIndexStatusText(s);
             vm.settings_expanded = s.settingsExpanded;
-            vm.settings_theme = s.themeOverride == ui::ThemeMode::Light ? 1 : s.themeOverride == ui::ThemeMode::Dark ? 2 : 0;
+            vm.settings_theme = s.EffectiveThemeMode() == ui::ThemeMode::Light ? 1 : s.EffectiveThemeMode() == ui::ThemeMode::Dark ? 2 : 0;
             const auto content_config = s.contentSearch.GetConfig();
             const auto content_status = s.contentSearch.GetStatus();
             vm.settings_content_paused = content_status.paused;
@@ -946,102 +992,6 @@ bool ToggleStarred(AppState& s, const std::wstring& target,
     return on;
 }
 
-void StopDetailsSizeWalk(AppState& s) {
-    s.detailsSizeGeneration.fetch_add(1, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(s.detailsSizeMutex);
-        s.detailsSizeRequested.clear();
-        s.detailsSize = AppState::DetailsSizeResult{};
-    }
-    s.detailsSizeCv.notify_one();
-}
-
-void StartDetailsSizeWalk(AppState& s, const std::wstring& path) {
-    const uint64_t generation =
-        s.detailsSizeGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
-    {
-        std::lock_guard<std::mutex> lock(s.detailsSizeMutex);
-        s.detailsSize = AppState::DetailsSizeResult{};
-        s.detailsSize.path = path;
-        s.detailsSizeRequested = path;
-    }
-    if (!s.detailsSizeThread.joinable()) {
-        AppState* sp = &s;
-        s.detailsSizeThread = std::thread([sp] {
-            uint64_t processed = 0;
-            for (;;) {
-                std::wstring request;
-                uint64_t requestGeneration = 0;
-                {
-                    std::unique_lock<std::mutex> lock(sp->detailsSizeMutex);
-                    sp->detailsSizeCv.wait(lock, [&] {
-                        return sp->detailsSizeStop ||
-                            (!sp->detailsSizeRequested.empty() &&
-                             sp->detailsSizeGeneration.load(std::memory_order_relaxed) != processed);
-                    });
-                    if (sp->detailsSizeStop) return;
-                    request = sp->detailsSizeRequested;
-                    requestGeneration =
-                        sp->detailsSizeGeneration.load(std::memory_order_relaxed);
-                    processed = requestGeneration;
-                }
-                uint64_t size = 0, files = 0, dirs = 0;
-                std::vector<std::wstring> stack{request};
-                while (!stack.empty() &&
-                       sp->detailsSizeGeneration.load(std::memory_order_relaxed) ==
-                           requestGeneration) {
-                    std::wstring dir = std::move(stack.back());
-                    stack.pop_back();
-                    WIN32_FIND_DATAW fd{};
-                    HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd,
-                                                FindExSearchNameMatch, nullptr,
-                                                FIND_FIRST_EX_LARGE_FETCH);
-                    if (h == INVALID_HANDLE_VALUE) continue;
-                    do {
-                        if (sp->detailsSizeGeneration.load(std::memory_order_relaxed) !=
-                            requestGeneration) break;
-                        if (fd.cFileName[0] == L'.' &&
-                            (fd.cFileName[1] == L'\0' ||
-                             (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
-                            continue;
-                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                            ++dirs;
-                            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0)
-                                stack.push_back(dir + L"\\" + fd.cFileName);
-                        } else {
-                            ++files;
-                            size += (static_cast<uint64_t>(fd.nFileSizeHigh) << 32) |
-                                    fd.nFileSizeLow;
-                        }
-                    } while (FindNextFileW(h, &fd));
-                    FindClose(h);
-                }
-                if (sp->detailsSizeGeneration.load(std::memory_order_relaxed) !=
-                    requestGeneration) continue;
-                {
-                    std::lock_guard<std::mutex> lock(sp->detailsSizeMutex);
-                    if (sp->detailsSizeRequested != request) continue;
-                    sp->detailsSize = {request, size, files, dirs, true};
-                }
-                if (sp->hwnd) InvalidateRect(sp->hwnd, nullptr, FALSE);
-            }
-        });
-    }
-    (void)generation;
-    s.detailsSizeCv.notify_one();
-}
-
-void ShutdownDetailsSizeWalk(AppState& s) {
-    s.detailsSizeGeneration.fetch_add(1, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(s.detailsSizeMutex);
-        s.detailsSizeStop = true;
-        s.detailsSizeRequested.clear();
-    }
-    s.detailsSizeCv.notify_one();
-    if (s.detailsSizeThread.joinable()) s.detailsSizeThread.join();
-}
-
 std::wstring DetailsAttributeText(DWORD attrs) {
     struct AttributeName { DWORD bit; const wchar_t* name; };
     const AttributeName values[] = {
@@ -1324,6 +1274,9 @@ bool TickTrayDeck(AppState& s, double now) {
         a.attrs = item.attrs;
         a.is_dir = item.is_dir;
         a.missing = !item.exists;
+        a.metadata_pending = item.metadata_state == app::TrayMetadataState::Pending ||
+            item.metadata_state == app::TrayMetadataState::Resolving;
+        a.metadata_unavailable = item.metadata_state == app::TrayMetadataState::Unavailable;
         a.size = item.size;
         a.cut = entry.batch >= 0 && entry.batch < static_cast<int>(s.tray.batches().size()) &&
                 s.tray.batches()[static_cast<size_t>(entry.batch)].move_intent;
@@ -1742,6 +1695,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             card.is_dir = item.is_dir;
             card.attrs = item.attrs;
             card.missing = !item.exists;
+            card.metadata_pending = item.metadata_state == app::TrayMetadataState::Pending ||
+                item.metadata_state == app::TrayMetadataState::Resolving;
+            card.metadata_unavailable = item.metadata_state == app::TrayMetadataState::Unavailable;
             card.cut = entry.batch >= 0 &&
                 entry.batch < static_cast<int>(s.tray.batches().size()) &&
                 s.tray.batches()[static_cast<size_t>(entry.batch)].move_intent;
@@ -1763,6 +1719,8 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             card.is_dir = anim.is_dir;
             card.attrs = anim.attrs;
             card.missing = anim.missing;
+            card.metadata_pending = anim.metadata_pending;
+            card.metadata_unavailable = anim.metadata_unavailable;
             card.cut = anim.cut;
             card.size = anim.size;
             card.ghost = true;
@@ -1788,7 +1746,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.sidebar_scroll = s.sidebarScroll;
     // Right details panel: selection info + size walk + tag chips.
     vm.details_visible = s.showDetailsPanel;
-    std::wstring sizeTarget; // folder that should be walking ("" = none)
     if (s.showDetailsPanel) {
         ui::DetailsPanelView& dv = vm.details;
         dv.scroll_y = s.detailsScroll;
@@ -1854,10 +1811,15 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
                 : TrayDisplayPath(tab->current_path);
         }
         if (dv.has_selection && dv.multi_count == 1 && !dv.path.empty()) {
-            if (probe_details && s.detailsSelPath != dv.path) {
+            if (probe_details && ShouldRequestDetailsMeta(s, *tab, dv.path)) {
+                const bool different_path = s.detailsSelPath != dv.path;
                 s.detailsSelPath = dv.path;
-                s.detailsScroll = 0.0f;
-                dv.scroll_y = 0.0f;
+                ++s.detailsRequestId;
+                s.detailsProbeGeneration = tab->applied_generation;
+                s.detailsProbeViewGeneration = tab->view_generation;
+                s.detailsProbeSnapshot = tab->snapshot;
+                s.detailsProbeTick = GetTickCount64();
+                if (different_path) { s.detailsScroll = 0.0f; dv.scroll_y = 0.0f; }
                 // Clear stale facts immediately; GetFileAttributesEx /
                 // SHGetFileInfo / security APIs run off-thread (WM_DETAILS_META).
                 s.detailsSelValid = false;
@@ -1869,7 +1831,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
                 s.detailsFileSystem.clear();
                 s.detailsFreeSpace.clear();
                 if (!fs::IsVirtualPath(dv.path))
-                    PrefetchDetailsMeta(s.hwnd, dv.path);
+                    GetDetailsMetaWorker().Submit(s.hwnd, dv.path, s.detailsWindowEpoch, s.detailsRequestId);
             }
             s.detailsStarred = s.places.IsStarred(dv.path);
             dv.starred = s.detailsStarred;
@@ -1907,28 +1869,15 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
                 chip.assigned = s.places.PathHasTag(dv.path, idx);
                 dv.preset_tags.push_back(std::move(chip));
             }
-            if (dv.is_dir) sizeTarget = dv.path;
+
         }
     }
-    std::wstring requestedSizePath;
-    {
-        std::lock_guard<std::mutex> lock(s.detailsSizeMutex);
-        requestedSizePath = s.detailsSizeRequested;
-    }
-    if (!sizeTarget.empty()) {
-        if (requestedSizePath != sizeTarget) StartDetailsSizeWalk(s, sizeTarget);
-        std::lock_guard<std::mutex> lock(s.detailsSizeMutex);
-        if (s.detailsSize.done && s.detailsSize.path == sizeTarget) {
-            vm.details.size_text = pulse::format::ByteSize(s.detailsSize.size, true);
-            wchar_t contains[96];
-            swprintf_s(contains, l10n::Get(l10n::StringId::ContainsFormat).c_str(),
-                       s.detailsSize.files, s.detailsSize.dirs);
-            vm.details.contains_text = contains;
-        } else {
-            vm.details.size_pending = true;
-        }
-    } else if (!requestedSizePath.empty()) {
-        StopDetailsSizeWalk(s);
+    if (probe_details && (!vm.details.has_selection || vm.details.multi_count != 1) &&
+        !s.detailsSelPath.empty()) {
+        s.detailsSelPath.clear();
+        ++s.detailsRequestId;
+        s.detailsSelValid = false;
+        s.detailsMetaPath.clear();
     }
     vm.tray_drop = s.dropTray;
     vm.drag_badge = s.dropBadge;

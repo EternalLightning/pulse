@@ -4,6 +4,7 @@
 #include "pdfium_text.h"
 #include "document_memory_trace.h"
 #include "document_file_version.h"
+#include "../ipc/protocol.h"
 #include <windows.h>
 #include <objbase.h>
 #include <filterr.h>
@@ -15,23 +16,11 @@
 
 namespace {
 bool ReadAll(HANDLE pipe, void* output, DWORD size) {
-    auto* bytes = static_cast<uint8_t*>(output);
-    while (size) {
-        DWORD n = 0;
-        if (!ReadFile(pipe, bytes, size, &n, nullptr) || !n) return false;
-        bytes += n; size -= n;
-    }
-    return true;
+    return pulse::ipc::PipeRead(pipe, output, size, {.overlapped = false});
 }
 bool WriteAll(HANDLE pipe, HANDLE ready, const void* input, DWORD size) {
-    const auto* bytes = static_cast<const uint8_t*>(input);
-    while (size) {
-        DWORD n = 0;
-        if (!WriteFile(pipe, bytes, (std::min)(size, DWORD{64 * 1024}), &n, nullptr) || !n) return false;
-        SetEvent(ready);
-        bytes += n; size -= n;
-    }
-    return true;
+    return pulse::ipc::PipeWrite(pipe, input, size,
+        {.overlapped = false, .chunk_size = 64 * 1024, .progress_event = ready});
 }
 DWORD Extract(const std::wstring& path, uint64_t maximum_bytes, std::wstring& body, uint64_t& size,
               std::wstring_view stop_needle, bool case_sensitive, pulse::index::DocumentReadMetrics& metrics,

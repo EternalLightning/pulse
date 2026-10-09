@@ -1,8 +1,9 @@
 // ops_manager.h — Operation queue, progress status, undo stack (UI-process side).
 //
-// All file operations are serialized on one worker thread and executed through
-// Pulse.Shell.exe (ShellClient). The UI thread never touches COM/shell:
-// it calls Submit/Cancel/Undo/Status and gets repaints via the notify callback.
+// Queued operations are serialized on the operation worker. Copy/move/rename
+// execute in-process with Win32 APIs; authorized delete/recycle, restore and
+// creation use Pulse.Shell.exe (ShellClient). Context menus have a separate
+// client worker. Submit/Cancel/Undo/Status never run blocking operations on the UI.
 //
 // Undo model (stage 1B-1):
 //   Move          -> undo = move the copies at dest back to their original parent
@@ -17,6 +18,7 @@
 #include "destination_guard.h"
 #include "file_lock_owner.h"
 #include "recycle_undo_validation.h"
+#include "file_object_reference.h"
 #include "../common/shell_menu_item.h"
 #include <windows.h>
 #include <condition_variable>
@@ -80,6 +82,7 @@ struct OpRequest {
     std::vector<DeleteRequestTarget> delete_targets;
     std::vector<std::wstring> recycle_paths; // exact recycle payloads for Undo restore
     std::vector<RecycleUndoIdentity> recycle_undo_identities; // in-session worker proof, never persisted
+    std::vector<FileIdentity> undo_produced_identities; // historical identity of Copy/Create products
 };
 
 // Worker snapshot used only for an in-session retry; never journaled. Keeping
@@ -90,11 +93,13 @@ struct TransferPlanEntry {
     bool directory = false;
     bool reparse = false;
     bool destination_preexisting = false;
+    bool directory_rename_only = false; // same-volume root admitted without retaining child handles
     uint64_t bytes = 0;
     DWORD attributes = FILE_ATTRIBUTE_NORMAL;
     FILETIME created{};
     FILETIME accessed{};
     FILETIME modified{};
+    FileObjectReference source_identity;
 };
 
 struct UndoEntry {
@@ -106,6 +111,7 @@ struct UndoEntry {
     bool supported = true;    // false = recorded for history, cannot be undone
     bool recycle_verified = false; // worker-only cache; never trusted from persisted JSON
     std::vector<RecycleUndoIdentity> recycle_identities;
+    std::vector<FileIdentity> produced_identities;
 };
 
 struct OpStatus {
@@ -254,6 +260,8 @@ public:
 private:
     friend struct DeleteIntegrationProbe;
     friend struct TransferIntegrationProbe;
+    friend struct ShellCompletionTestProbe;
+    friend struct UndoIdentityTestProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -324,7 +332,18 @@ private:
     std::condition_variable delete_wait_cv_;
     std::atomic<bool> delete_active_{false};
     std::atomic<bool> delete_cancel_{false};
-    bool WaitShellDone(uint32_t id, uint32_t& hr, bool& cancelled, std::wstring& error);
+    struct ShellCompletion {
+        uint32_t hr = 0;
+        bool cancelled = false;
+        std::wstring error;
+        std::wstring failed_path;
+        std::vector<std::wstring> deleted_paths;
+        std::vector<std::wstring> recycled_paths;
+        std::vector<std::wstring> recycle_destinations;
+        std::vector<FileIdentity> produced_identities;
+    };
+    void OnShellDone(uint32_t id, ShellCompletion result);
+    bool WaitShellDone(uint32_t id, ShellCompletion& result);
     void RunTransfer(const OpRequest& req, uint64_t task_id,
                      const std::vector<std::wstring>& prior_completed = {},
                      const std::vector<TransferPlanEntry>& prior_plan = {});
@@ -338,11 +357,14 @@ private:
     void RefreshRecycleUndoValidity();
     void InvalidateRecycleUndo(const std::vector<std::wstring>& changed, bool uncertain = false);
     void PushUndo(const OpRequest& req,
-                  const std::vector<std::wstring>* actual_destinations = nullptr);
+                  const std::vector<std::wstring>* actual_destinations = nullptr,
+                  const std::vector<FileIdentity>* produced_identities = nullptr);
     void LoadRecoveryJournal();
     void PersistJournal();
     std::wstring JournalJsonLocked() const;
     bool ConsumeCtxInvokeDone(uint32_t id);   // true = RSP_DONE was a menu invoke
+    void RegisterShellMenuQuery(uint32_t token, uint32_t request_id);
+    void RegisterShellMenuInvoke(uint32_t request_id);
     void OnCtxItems(uint32_t client_id, std::vector<ShellMenuItem> items, bool partial,
                     std::vector<std::wstring> slow_clsids);
 
@@ -382,6 +404,9 @@ private:
     std::atomic<bool> transfer_cancel_{false};
     std::atomic<bool> transfer_pause_{false};
     std::atomic<bool> verify_copies_{false};
+    decltype(&GetFileInformationByHandleEx) transfer_identity_query_ = GetFileInformationByHandleEx;
+    std::function<void(const std::wstring&)> before_source_cleanup_; // regression gate, empty in production
+    bool force_copy_move_ = false; // isolated cross-volume regression without a second user volume
 
     mutable std::mutex transfer_control_mutex_;
     std::condition_variable transfer_control_cv_;
@@ -391,18 +416,10 @@ private:
     ConflictChoice resolved_conflict_choice_ = ConflictChoice::Cancel;
     bool resolved_conflict_apply_all_ = false;
 
-    // Completion sync for the op currently in flight.
+    // Each request owns its terminal result, including deletion evidence.
     std::mutex done_mutex_;
     std::condition_variable done_cv_;
-    bool done_ready_ = false;
-    uint32_t done_id_ = 0;
-    uint32_t done_hr_ = 0;
-    bool done_cancelled_ = false;
-    std::wstring done_error_;
-    std::wstring done_failed_path_;
-    std::vector<std::wstring> done_deleted_paths_;
-    std::vector<std::wstring> done_recycled_paths_;
-    std::vector<std::wstring> done_recycle_destinations_;
+    std::map<uint32_t, ShellCompletion> done_results_;
 
     // Context-menu forwarding thread + token <-> pipe-request-id bookkeeping.
     std::thread menu_thread_;

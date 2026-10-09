@@ -2,6 +2,7 @@
 #include "../common/json_utils.h"
 #include "../common/path_utils.h"
 #include <algorithm>
+#include <iterator>
 
 namespace pulse::app {
 namespace {
@@ -19,6 +20,17 @@ std::wstring FolderKey(const std::wstring& path) {
 
 std::wstring JsonKey(ui::ViewMode mode) {
     return std::wstring(L"folder_view_") + ui::ViewModeName(mode);
+}
+
+constexpr model::SortColumn kSortColumns[] = {
+    model::SortColumn::Name, model::SortColumn::Mtime, model::SortColumn::Type,
+    model::SortColumn::Size, model::SortColumn::Path
+};
+
+std::wstring SortJsonKey(model::SortColumn column, model::SortDirection direction) {
+    constexpr const wchar_t* names[] = {L"name", L"mtime", L"type", L"size", L"path"};
+    return std::wstring(L"folder_sort_") + names[static_cast<unsigned>(column)] +
+        (direction == model::SortDirection::Desc ? L"_desc" : L"_asc");
 }
 
 } // namespace
@@ -42,6 +54,23 @@ bool FolderViewPrefs::Set(const std::wstring& path, ui::ViewMode mode) {
     return true;
 }
 
+std::optional<FolderSortPrefs> FolderViewPrefs::FindSort(const std::wstring& path) const {
+    const auto it = sorts_.find(FolderKey(path));
+    return it == sorts_.end() ? std::nullopt : std::optional(it->second);
+}
+
+bool FolderViewPrefs::SetSort(const std::wstring& path, model::SortColumn column,
+                             model::SortDirection direction) {
+    const auto key = FolderKey(path);
+    if (key.empty() || static_cast<unsigned>(column) >= std::size(kSortColumns) ||
+        (direction != model::SortDirection::Asc && direction != model::SortDirection::Desc)) return false;
+    const FolderSortPrefs sort{column, direction};
+    const auto [it, inserted] = sorts_.try_emplace(key, sort);
+    if (!inserted && it->second == sort) return false;
+    it->second = sort;
+    return true;
+}
+
 void FolderViewPrefs::AppendJson(std::wstring& out) const {
     // Group paths by stable view names, using the existing string-array codec.
     for (int i = 0; i < 8; ++i) {
@@ -58,14 +87,36 @@ void FolderViewPrefs::AppendJson(std::wstring& out) const {
         }
         out += L"]";
     }
+    for (const auto column : kSortColumns) {
+        for (const auto direction : {model::SortDirection::Asc, model::SortDirection::Desc}) {
+            out += L",\n  \"" + SortJsonKey(column, direction) + L"\":[";
+            bool first = true;
+            for (const auto& [path, sort] : sorts_) {
+                if (sort != FolderSortPrefs{column, direction}) continue;
+                if (!first) out += L",";
+                first = false;
+                out += L"\"";
+                json::Escape(path, out);
+                out += L"\"";
+            }
+            out += L"]";
+        }
+    }
 }
 
 void FolderViewPrefs::ReadJson(const std::wstring& input) {
+    const json::Document doc(input);
     Clear();
     for (int i = 0; i < 8; ++i) {
         const auto mode = ui::ViewModeFromIndex(i);
-        for (const auto& path : json::ExtractStringArray(input, JsonKey(mode)))
+        for (const auto& path : json::ExtractStringArray(doc, JsonKey(mode)))
             Set(path, mode);
+    }
+    for (const auto column : kSortColumns) {
+        for (const auto direction : {model::SortDirection::Asc, model::SortDirection::Desc}) {
+            for (const auto& path : json::ExtractStringArray(doc, SortJsonKey(column, direction)))
+                SetSort(path, column, direction);
+        }
     }
 }
 

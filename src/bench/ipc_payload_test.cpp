@@ -1,14 +1,168 @@
 #include "../ipc/protocol.h"
+#include "../ipc/preview_protocol.h"
+#include "../index/document_protocol.h"
+#include <algorithm>
 #include <cstdio>
 #include <limits>
+#include <thread>
 
-int main() {
+namespace {
+struct Handle {
+    HANDLE value = nullptr;
+    ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+};
+struct PipePair {
+    Handle server, client;
+    bool Open() {
+        const auto name = L"\\\\.\\pipe\\pulse_io_test_" + std::to_wstring(GetCurrentProcessId());
+        server.value = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1, 4096, 4096, 0, nullptr);
+        if (server.value == INVALID_HANDLE_VALUE) return false;
+        client.value = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+        return client.value != INVALID_HANDLE_VALUE &&
+            (ConnectNamedPipe(server.value, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED);
+    }
+};
+
+template<typename Check>
+void TestPipeIo(Check check) {
+    using namespace pulse::ipc;
+    check(kMagic == 0x53504C50 && kPreviewMagic == 0x57565250 &&
+        pulse::index::document::kMagic == 0x39444350 && sizeof(MsgHeader) == 16 &&
+        sizeof(PreviewRequest) == 40 && sizeof(PreviewResponse) == 80 &&
+        sizeof(pulse::index::document::Request) == 72 &&
+        sizeof(pulse::index::document::Begin) == 64 &&
+        sizeof(pulse::index::document::Completion) == 24, "preserve protocol magic and native wire layouts");
+    check(PipeRead(INVALID_HANDLE_VALUE, nullptr, 0) &&
+        PipeWrite(INVALID_HANDLE_VALUE, nullptr, 0), "empty exact transfer needs no handle or buffer");
+    uint8_t byte = 0;
+    check(!PipeRead(INVALID_HANDLE_VALUE, &byte, 1,
+        {.overlapped = false, .pending_timeout_ms = 10}) && GetLastError() == ERROR_INVALID_PARAMETER,
+        "reject false timeout promises on synchronous handles");
+    {
+        Handle input, output, ready;
+        ready.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        const bool opened = CreatePipe(&input.value, &output.value, nullptr, 128 * 1024) && ready.value;
+        check(opened, "open isolated anonymous document pipe");
+        if (opened) {
+            std::vector<uint8_t> expected(3 * 64 * 1024 + 17, 0x4d), actual(expected.size());
+            bool written = false;
+            std::thread writer([&] {
+                written = PipeWrite(output.value, expected.data(), static_cast<DWORD>(expected.size()),
+                    {.overlapped = false, .chunk_size = 64 * 1024, .progress_event = ready.value});
+            });
+            const bool notified = WaitForSingleObject(ready.value, 1000) == WAIT_OBJECT_0;
+            const bool read = ReadAll(input.value, actual.data(), static_cast<DWORD>(actual.size()));
+            writer.join();
+            check(notified && written && read && actual == expected,
+                "synchronous document chunk notifications and preview exact reads retain all bytes");
+        }
+    }
+    PipePair pair;
+    const bool connected = pair.Open();
+    check(connected, "open isolated overlapped byte-mode pipe");
+    if (!connected) return;
+    {
+        uint8_t received = 0, request = 0;
+        bool read = false;
+        std::thread reader([&] {
+            read = PipeRead(pair.client.value, &received, 1, {.pending_timeout_ms = 1000});
+        });
+        const uint8_t expected = 0x63;
+        const bool roundtrip = PipeWrite(pair.client.value, &expected, 1, {.pending_timeout_ms = 1000}) &&
+            ReadAll(pair.server.value, &request, 1) && WriteAll(pair.server.value, &request, 1);
+        reader.join();
+        check(roundtrip && read && received == expected,
+            "concurrent overlapped read does not starve writing on the same handle");
+    }
+    {
+        const std::vector<uint8_t> expected{1, 2, 3, 4, 5, 6, 7, 8};
+        std::vector<uint8_t> actual(expected.size());
+        bool written = false;
+        std::thread writer([&] {
+            written = WriteAll(pair.server.value, expected.data(), 3);
+            Sleep(20);
+            written = written && WriteAll(pair.server.value, expected.data() + 3, 5);
+        });
+        const bool read = PipeRead(pair.client.value, actual.data(), static_cast<DWORD>(actual.size()),
+            {.pending_timeout_ms = 1000});
+        writer.join();
+        check(read && written && actual == expected, "overlapped exact read joins partial chunks");
+    }
+    Handle cancel;
+    cancel.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    check(cancel.value != nullptr, "create cancellation event");
+    if (!cancel.value) return;
+    {
+        SetEvent(cancel.value);
+        byte = 0xab;
+        const bool cancelled = !PipeRead(pair.client.value, &byte, 1, {.cancel_event = cancel.value}) &&
+            GetLastError() == ERROR_CANCELLED;
+        ResetEvent(cancel.value);
+        check(cancelled && byte == 0xab, "pre-signalled cancellation never starts I/O");
+    }
+    for (bool timeout : {false, true}) {
+        byte = 0xab;
+        std::thread canceller;
+        if (!timeout) canceller = std::thread([&] { Sleep(20); SetEvent(cancel.value); });
+        const bool read = PipeRead(pair.client.value, &byte, 1,
+            {.pending_timeout_ms = timeout ? 20u : INFINITE, .cancel_event = timeout ? nullptr : cancel.value});
+        const DWORD error = GetLastError();
+        if (canceller.joinable()) canceller.join();
+        ResetEvent(cancel.value);
+        const uint8_t expected = 0x37;
+        uint8_t received = 0;
+        const bool reused = WriteAll(pair.server.value, &expected, 1) &&
+            PipeRead(pair.client.value, &received, 1, {.pending_timeout_ms = 1000});
+        check(!read && error == static_cast<DWORD>(timeout ? ERROR_TIMEOUT : ERROR_CANCELLED) &&
+            reused && byte == 0xab && received == expected,
+            timeout ? "timed-out read is reaped before buffer reuse; connection survives" :
+                "cancelled read is reaped before buffer reuse; connection survives");
+    }
+    for (bool timeout : {false, true}) {
+        std::vector<uint8_t> blocked(1024 * 1024, 0x58);
+        std::thread canceller;
+        if (!timeout) canceller = std::thread([&] { Sleep(20); SetEvent(cancel.value); });
+        const bool written = PipeWrite(pair.client.value, blocked.data(), static_cast<DWORD>(blocked.size()),
+            {.pending_timeout_ms = timeout ? 20u : INFINITE, .cancel_event = timeout ? nullptr : cancel.value});
+        const DWORD error = GetLastError();
+        if (canceller.joinable()) canceller.join();
+        ResetEvent(cancel.value);
+        // A cancelled write may have delivered a prefix; cancellation never
+        // implies rollback and must not trigger a replay of the request.
+        std::fill(blocked.begin(), blocked.end(), uint8_t{0xcc});
+        DWORD available = 0;
+        bool drained = PeekNamedPipe(pair.server.value, nullptr, 0, nullptr, &available, nullptr) != FALSE;
+        std::vector<uint8_t> prefix(available);
+        if (available) drained = drained && ReadAll(pair.server.value, prefix.data(), available);
+        const uint8_t expected = 0x49;
+        uint8_t received = 0;
+        const bool reused = PipeWrite(pair.client.value, &expected, 1, {.pending_timeout_ms = 1000}) &&
+            ReadAll(pair.server.value, &received, 1);
+        check(!written && error == static_cast<DWORD>(timeout ? ERROR_TIMEOUT : ERROR_CANCELLED) && drained &&
+            std::all_of(prefix.begin(), prefix.end(), [](uint8_t value) { return value == 0x58; }) &&
+            reused && received == expected,
+            timeout ? "timed-out blocked write is reaped without replay; connection survives" :
+                "cancelled blocked write is reaped without replay; connection survives");
+    }
+    check(DisconnectNamedPipe(pair.server.value) != FALSE &&
+        !PipeRead(pair.client.value, &byte, 1, {.pending_timeout_ms = 1000}) &&
+        (GetLastError() == ERROR_BROKEN_PIPE || GetLastError() == ERROR_PIPE_NOT_CONNECTED),
+        "disconnected pipe fails without reconnect or replay");
+}
+} // namespace
+
+int main(int argc, char** argv) {
     using namespace pulse::ipc;
     int failures = 0;
     auto check = [&](bool ok, const char* name) {
         std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
         if (!ok) ++failures;
     };
+    TestPipeIo(check);
+    if (argc == 2 && std::strcmp(argv[1], "--io-only") == 0) return failures ? 1 : 0;
     auto array = [&](const PayloadWriter& wire, std::vector<std::wstring>& out) {
         PayloadReader reader(wire.data().data(), wire.data().size());
         return reader.GetStringArray(out);

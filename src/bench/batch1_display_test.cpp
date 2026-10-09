@@ -1,6 +1,6 @@
 #include "../app/app_internal.h"
 #include "../ui/ui_renderer_internal.h"
-#include "../common/drive_labels.h"
+#include "../model/drive_labels.h"
 #include "../app/builtin_menu_items.h"
 #include "../app/context_menu.h"
 #include <filesystem>

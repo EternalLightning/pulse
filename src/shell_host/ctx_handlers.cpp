@@ -458,20 +458,41 @@ void CollectHandlerItems(const CtxHandlerSlot& slot, bool background,
 }
 
 uint32_t FindItemId(const std::vector<CtxItemOut>& items, uint32_t id,
-                    const std::wstring& verb, const std::wstring& text) {
-    if (id != 0) {
-        for (const auto& item : items)
-            if (item.id == id) return item.id;
+                    const std::wstring& verb, const std::wstring& text,
+                    uint32_t id_first, uint32_t id_last) {
+    if (!id || id < id_first || id > id_last) return 0;
+    const CtxItemOut* match = nullptr;
+    for (const auto& item : items) {
+        if (item.id != id) continue;
+        if (match || !item.enabled || item.has_children || item.verb != verb || item.text != text)
+            return 0;
+        match = &item;
     }
-    if (!verb.empty()) {
-        for (const auto& item : items)
-            if (!item.has_children && item.id != 0 && item.verb == verb) return item.id;
-    }
-    if (!text.empty()) {
-        for (const auto& item : items)
-            if (!item.has_children && item.id != 0 && item.text == text) return item.id;
-    }
-    return 0;
+    return match ? match->id : 0;
+}
+
+bool CtxWorkerHandles::Start(LPTHREAD_START_ROUTINE entry, void* context,
+                            decltype(&CreateEventW) create_event,
+                            decltype(&CreateThread) create_thread) {
+    if (done_event || exit_event || thread) return false;
+    done_event = create_event(nullptr, TRUE, FALSE, nullptr);
+    if (done_event) exit_event = create_event(nullptr, TRUE, FALSE, nullptr);
+    if (done_event && exit_event)
+        thread = create_thread(nullptr, 0, entry, context, 0, nullptr);
+    if (thread) return true;
+    const DWORD error = GetLastError();
+    Stop();
+    SetLastError(error);
+    return false;
+}
+
+void CtxWorkerHandles::Stop() noexcept {
+    if (exit_event) SetEvent(exit_event);
+    if (thread) WaitForSingleObject(thread, INFINITE);
+    if (thread) CloseHandle(thread);
+    if (exit_event) CloseHandle(exit_event);
+    if (done_event) CloseHandle(done_event);
+    thread = exit_event = done_event = nullptr;
 }
 
 } // namespace pulse::shell

@@ -1,6 +1,11 @@
 #include "../app/app_internal.h"
+#include "../app/app_column_view.h"
 #include "../common/localization.h"
+#include "../app/entry_sort.h"
+#include "unc_search_banner_fixture.h"
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string_view>
 
 // Application-level request/result race fixture; worker/watch/services never
@@ -51,15 +56,27 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
         return item.top >= list.top - 0.01f && item.bottom <= list.bottom + 0.01f;
     };
     for (const auto column : {ui::SortColumn::Name, ui::SortColumn::Size, ui::SortColumn::Type}) {
-        tab.sort_column = column;
-        tab.SetSnapshot(listing(true));
-        tab.scroll_y = 0;
-        s.scrollAnimating = true;
-        QueueCreatedItemReveal(s, path + L"\\created");
-        Check(tab.selected_index == 96 && tab.EntryAt(96).name == L"created" &&
-            tab.pending_created_name.empty(), "non-time creation moves to the end and is selected");
-        Check(tab.scroll_y > 0 && visible() && !s.scrollAnimating && s.scrollTargetY == tab.scroll_y,
-            "non-time creation reveals the last row and cancels the old scroll target");
+        for (const bool folder : {false, true}) {
+            for (const auto direction : {ui::SortDirection::Asc, ui::SortDirection::Desc}) {
+                tab.sort_column = column;
+                tab.sort_direction = direction;
+                tab.SetSnapshot(listing(true, folder));
+                tab.order_held = tab.refresh_keeps_order = true;
+                tab.scroll_y = folder ? MaxScrollForActivePane(s) : 0;
+                s.scrollAnimating = true;
+                QueueCreatedItemReveal(s, path + L"\\created");
+                const auto less = [&](const auto& left, const auto& right) {
+                    return app::EntryLess(left, right, column, direction,
+                        app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), path);
+                };
+                Check(tab.selected_index >= 0 && tab.EntryAt(tab.selected_index).name == L"created" &&
+                    tab.pending_created_name.empty() && !tab.order_held && !tab.refresh_keeps_order &&
+                    std::is_sorted(tab.snapshot->begin(), tab.snapshot->end(), less),
+                    "creation sorts files and folders by the current column and direction and selects the item");
+                Check(visible() && !s.scrollAnimating && s.scrollTargetY == tab.scroll_y,
+                    "creation reveals its sorted row and cancels the old scroll target");
+            }
+        }
     }
     tab.sort_column = ui::SortColumn::Mtime;
     for (const bool folder : {false, true}) {
@@ -76,6 +93,7 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
         }
     }
     tab.sort_column = ui::SortColumn::Name;
+    tab.sort_direction = ui::SortDirection::Asc;
     tab.SetSnapshot(listing(false)); tab.SelectOnly(10); tab.scroll_y = 0;
     QueueCreatedItemReveal(s, path + L"\\created");
     Check(tab.pending_created_name == L"created" && tab.selected_index == 10,
@@ -90,7 +108,7 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     result.generation = 40;
     ApplyWorkerResult(s, result);
     Check(tab.pending_created_name.empty() && tab.selected_index == 96 && visible(),
-        "matching enumeration selects and reveals the created last row");
+        "matching enumeration selects and reveals the created sorted row");
     tab.sort_column = ui::SortColumn::Mtime; tab.sort_direction = ui::SortDirection::Desc;
     tab.SetSnapshot(listing(false)); tab.pending_generation = 0;
     QueueCreatedItemReveal(s, path + L"\\created");
@@ -117,48 +135,43 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     Check(tab.pending_created_name.empty() && tab.selected_index == 8,
         "creation in another folder does not move selection in the current folder");
     RefreshPath(s, path, RefreshReason::OperationCompleted);
-    tab.pending_generation = 42; result.generation = 42;
+    tab.pending_generation = 44; result.generation = 44;
     ApplyWorkerResult(s, result);
     Check(tab.EntryAt(tab.selected_index).name == L"8.txt",
         "ordinary additions without a local creation intent do not steal selection");
+    const auto output = std::filesystem::absolute(L"bench_data/created-item-reveal");
+    std::filesystem::create_directories(output);
+    for (const float scale : {1.0f, 1.5f}) {
+        s.scale = scale;
+        s.renderer.SetScale(scale);
+        s.compositor.RecreateTextFormats(scale);
+        s.compositor.Resize(static_cast<int>(760 * scale), static_cast<int>(540 * scale));
+        for (const bool dark : {false, true}) {
+            s.darkMode = dark;
+            tab.sort_column = ui::SortColumn::Name;
+            tab.sort_direction = ui::SortDirection::Desc;
+            tab.SetSnapshot(listing(true, true));
+            tab.scroll_y = MaxScrollForActivePane(s);
+            QueueCreatedItemReveal(s, path + L"\\created");
+            Check(tab.selected_index == 0 && visible(),
+                "new folder is sorted above files and revealed in a narrow pane at both DPI scales");
+            s.compositor.Dc()->BeginDraw();
+            s.renderer.Render(BuildVm(s, false), D2D1::RectF(0, 0, 760 * scale, 540 * scale),
+                ui::MakeTheme(dark, ui::HexColor(0x0078D4)));
+            Check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "sorted creation frame renders");
+            const auto image = output / (std::to_wstring(static_cast<int>(scale * 100)) +
+                (dark ? L"-dark.png" : L"-light.png"));
+            Check(s.compositor.SaveSnapshot(image.c_str()), "sorted creation visual evidence saved");
+        }
+    }
+    s.scale = 1;
+    s.renderer.SetScale(1);
+    s.compositor.RecreateTextFormats(1);
+    s.compositor.Resize(1000, 700);
 }
-}
-int main(int argc, char** argv) {
+
+void ListingRaceCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
     using namespace pulse;
-    OleInitialize(nullptr);
-    l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
-    auto owned = std::make_unique<AppState>();
-    auto& s = *owned;
-    s.isolatedTest = true;
-    s.appPrefs.persist = s.places.persist = s.searchHistory.persist = false;
-    const bool created = argc == 2 && std::string_view(argv[1]) == "--created";
-    s.hwnd = created
-        ? CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"creation fixture", WS_OVERLAPPEDWINDOW,
-            -30000, -30000, 1100, 720, nullptr, nullptr, nullptr, nullptr)
-        : CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
-    if (!s.hwnd) { owned.reset(); OleUninitialize(); return 2; }
-    if (created) {
-        if (!s.compositor.Init(s.hwnd)) { DestroyWindow(s.hwnd); owned.reset(); OleUninitialize(); return 2; }
-        s.renderer.SetCompositor(&s.compositor);
-    }
-    s.window_tabs.EnsureDefault(); s.pane = s.window_tabs.Active()->FocusedPane();
-    auto& tab = *ActiveTab(s);
-    const std::wstring path = L"\\\\?\\C:\\pulse-entry-order-memory-fixture";
-    tab.current_path = path;
-    tab.loading = false;
-    tab.SetSnapshot(Listing({L"z.txt", L"a.txt"}));
-    tab.order_held = true;
-    tab.SelectOnly(0);
-    s.store.Put(path, tab.snapshot);
-
-    if (created) {
-        CreatedItemCases(s, tab, path);
-        s.watches.Stop();
-        DestroyWindow(s.hwnd); s.hwnd = nullptr;
-        owned.reset(); OleUninitialize();
-        return failures ? 1 : 0;
-    }
-
     RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 10;
     s.explicit_entry_refreshes[&tab].generation = 10;
@@ -261,7 +274,151 @@ int main(int argc, char** argv) {
     ApplyWorkerResult(s, sorted);
     Check(!tab.order_held && tab.EntryAt(0).name == L"z.txt" && !s.explicit_entry_refreshes.contains(&tab),
         "matching sort completion retains sorted order and clears intent");
+}
 
+void ArchitectureCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
+    using namespace pulse;
+    s.themeOverride = ui::ThemeMode::Dark;
+    s.appPrefs.theme_mode = 1;
+    Check(s.EffectiveThemeMode() == ui::ThemeMode::Light,
+        "explicit theme projects from preferences instead of stale startup override");
+    s.appPrefs.theme_mode = 0;
+    Check(s.EffectiveThemeMode() == ui::ThemeMode::Auto,
+        "system theme preference projects without rewriting window fallback");
+    s.appPrefs.theme_mode = -1;
+    Check(s.EffectiveThemeMode() == ui::ThemeMode::Dark,
+        "legacy session theme remains a startup fallback");
+    s.shot.active = true; s.appPrefs.theme_mode = 1;
+    Check(s.EffectiveThemeMode() == ui::ThemeMode::Dark,
+        "shot appearance override remains independent of persisted preference");
+    s.shot.active = false;
+
+    auto second = std::make_unique<app::Pane>();
+    second->view.current_path = path;
+    auto& other = second->view;
+    s.window_tabs.Active()->panes.push_back(std::move(second));
+    app::RebuildLayoutRoot(*s.window_tabs.Active());
+    tab.pending_generation = other.pending_generation = 0;
+    tab.pending_created_name.clear();
+    tab.SetSnapshot(Listing({L"a.txt", L"b.txt", L"c.txt"}));
+    other.SetSnapshot(tab.snapshot);
+    const auto shared_before = tab.snapshot;
+    tab.SelectOnly(2); other.SelectOnly(0);
+    s.store.Put(path, shared_before);
+    tab.column_strip.child.path = path;
+    tab.column_strip.child.snapshot = shared_before;
+    tab.column_strip.child.requested = true;
+    tab.column_strip.child.rows = std::make_shared<std::vector<int>>(std::initializer_list<int>{0, 1, 2});
+    Check(ApplyNotifyToVisible(s, path, {FILE_ACTION_REMOVED, L"b.txt", {}}) &&
+        tab.snapshot == other.snapshot && tab.snapshot == s.store.Peek(path) &&
+        tab.snapshot != shared_before && tab.EntryCount() == 2 && shared_before->size() == 3,
+        "watch patch shares one new immutable listing across identical panes and store");
+    Check(tab.column_strip.child.snapshot == tab.snapshot && !tab.column_strip.child.rows &&
+        tab.column_strip.child.requested && tab.column_strip.child.generation == 0,
+        "watch publication updates column projection and invalidates its source-index rows");
+    Check(tab.EntryAt(tab.selected_index).name == L"c.txt" &&
+        other.EntryAt(other.selected_index).name == L"a.txt",
+        "shared watch data preserves independent pane selection");
+    other.SetSnapshot(Listing({L"c.txt", L"a.txt"}));
+    s.store.Put(path, tab.snapshot);
+    Check(ApplyNotifyToVisible(s, path, {FILE_ACTION_REMOVED, L"absent.txt", {}}) &&
+        tab.EntryAt(0).name == L"a.txt" && other.EntryAt(0).name == L"c.txt" &&
+        tab.snapshot != other.snapshot,
+        "distinct held pane orders are not forcibly unified by shared storage");
+    const auto first_before_failure = tab.snapshot;
+    const auto other_before_failure = other.snapshot;
+    const auto store_before_failure = s.store.Peek(path);
+    Check(!ApplyNotifyToVisible(s, path, {FILE_ACTION_RENAMED_OLD_NAME, L"a.txt", {}}) &&
+        tab.snapshot == first_before_failure && other.snapshot == other_before_failure &&
+        s.store.Peek(path) == store_before_failure && s.store.IsDirty(path),
+        "unsupported watch patch publishes no pane or cache and marks shared cache dirty");
+    Check(!tab.column_strip.child.requested && !tab.column_strip.child.rows,
+        "failed watch patch also invalidates the column listing for revalidation");
+    tab.column_layout = true;
+    tab.column_strip.for_path = path;
+    app::ColumnStripColumn pending_column;
+    pending_column.path = path;
+    pending_column.snapshot = tab.snapshot;
+    tab.column_strip.ancestors.push_back(std::move(pending_column));
+    tab.pending_generation = 91;
+    SyncColumnStrips(s);
+    Check(s.store.IsDirty(path) && tab.column_strip.ancestors.back().generation == 91,
+        "column refresh shares pending generation without consuming its watch dirty marker");
+    tab.pending_generation = 0;
+    tab.column_layout = false;
+
+    tab.current_path = L"pulse:changes:C:\\fixture";
+    other.current_path = path;
+    tab.loading = true; tab.change_request = 77;
+    s.changes.details[77] = {&tab, tab.current_path, tab.view_generation, false};
+    s.changes.summary_request = 88; s.changes.summary_pending = true;
+    s.changes.popover.visible = true;
+    s.changes.requested_paths = {L"C:\\fixture"};
+    s.changes.summaries[L"fixture"] = {};
+    s.appPrefs.change_tracking_enabled = false;
+    ApplySettingsEffects(s, app::SettingsEffect::ChangeTracking);
+    Check(s.changes.details.empty() && !s.changes.summary_pending &&
+        s.changes.summary_request == 0 && s.changes.summaries.empty() &&
+        s.changes.requested_paths.empty() && !s.changes.popover.visible && !tab.loading &&
+        tab.change_request == 0,
+        "disable setting invalidates detail and summary requests immediately without a UI tick");
+    const auto disabled_listing = tab.snapshot;
+    index::ChangeResponse response;
+    response.state = index::ChangeState::Available;
+    ApplyChangeDetails(s, 77, response);
+    ApplyChangeSummaries(s, 88, response);
+    Check(tab.snapshot == disabled_listing && s.changes.summaries.empty(),
+        "disabled tracking ignores late detail and summary responses");
+    s.appPrefs.change_tracking_enabled = true;
+    s.appPrefs.change_tracking_days = 3;
+    ApplySettingsEffects(s, app::SettingsEffect::ChangeTracking);
+    Check(tab.change_days == 3 && tab.change_request != 0 &&
+        s.changes.details.contains(tab.change_request),
+        "enabled range setting starts a new detail request from the sole preference source");
+    s.changes.summary_request = 90; s.changes.summary_days = 7;
+    s.changes.requested_paths = {L"C:\\fixture"};
+    index::ChangeSummary summary;
+    summary.path = L"C:\\fixture";
+    summary.state = index::ChangeState::Available;
+    summary.count = 1;
+    response.summaries.push_back(summary);
+    ApplyChangeSummaries(s, 90, response);
+    Check(s.changes.summaries.empty(), "summary response retains its own captured range validation");
+
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    using namespace pulse;
+    OleInitialize(nullptr);
+    l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    auto owned = std::make_unique<AppState>();
+    auto& s = *owned;
+    s.isolatedTest = true;
+    s.appPrefs.persist = s.places.persist = false;
+    s.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Created item fixture",
+        WS_OVERLAPPEDWINDOW, -20000, -20000, 1000, 700, nullptr, nullptr,
+        GetModuleHandleW(nullptr), nullptr);
+    if (!s.hwnd || !s.compositor.Init(s.hwnd)) {
+        std::puts("[FAIL] initialize isolated created-item compositor");
+        if (s.hwnd) DestroyWindow(s.hwnd);
+        s.hwnd = nullptr;
+        owned.reset(); OleUninitialize();
+        return 2;
+    }
+    s.renderer.SetCompositor(&s.compositor);
+    s.window_tabs.EnsureDefault();
+    s.pane = s.window_tabs.Active()->FocusedPane();
+    const std::wstring path = fs::NormalizePath(L"C:\\pulse-created-item-memory");
+    auto& tab = *ActiveTab(s);
+    tab.current_path = path;
+    const bool banner_only = argc == 2 && std::string_view(argv[1]) == "--unc-banner-only";
+    if (banner_only) failures += bench::RunUncSearchBannerCases(s, tab);
+    else CreatedItemCases(s, tab, path);
+    if (!banner_only && (argc != 2 || std::string_view(argv[1]) != "--created-only")) {
+        ListingRaceCases(s, tab, path);
+        ArchitectureCases(s, tab, path);
+    }
     s.watches.Stop();
     DestroyWindow(s.hwnd); s.hwnd = nullptr;
     owned.reset(); OleUninitialize();

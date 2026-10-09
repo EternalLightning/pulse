@@ -1,5 +1,8 @@
 #pragma once
 
+#include "file_identity.h"
+#include "../common/file_create.h"
+
 #include <windows.h>
 #include <winioctl.h>
 #include <winternl.h>
@@ -28,6 +31,9 @@ struct DestinationLinkImpact {
 // leases deny both deletion and reparse writes, including the resolved directory.
 class DestinationGuard {
 public:
+    explicit DestinationGuard(decltype(&GetFileInformationByHandleEx) identity_query = GetFileInformationByHandleEx)
+        : identity_query_(identity_query) {}
+
     struct HandleCloser {
         void operator()(void* handle) const {
             if (handle && handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
@@ -38,10 +44,12 @@ public:
         bool exists = false;
         bool directory = false;
         DWORD error_code = ERROR_INVALID_DATA; // Read failure survives handle cleanup
-        FILE_ID_INFO id{};
+        FileIdentity id{};
+        std::shared_ptr<void> reference;
         DWORD links = 0;
         std::vector<BYTE> reparse;
-        FILE_ID_INFO resolved_id{};
+        FileIdentity resolved_id{};
+        std::shared_ptr<void> resolved_reference;
         std::wstring resolved_path;
     };
 
@@ -73,6 +81,15 @@ public:
     }
 
     const std::vector<DestinationLinkImpact>& Impacts() const { return impacts_; }
+
+    bool CapturedIdentity(const std::wstring& path, FileIdentity& identity) const {
+        const auto parts = Components(path);
+        if (parts.empty()) return false;
+        const auto found = snapshots_.find(parts.back());
+        if (found == snapshots_.end() || !found->second.exists) return false;
+        identity = found->second.id;
+        return true;
+    }
 
     bool PinDirectories(const std::wstring& path, std::wstring& error) {
         for (const auto& part : Components(path)) {
@@ -180,14 +197,14 @@ public:
         return true;
     }
 
-    bool AdoptCopyLeaf(const std::wstring& path, const FILE_ID_INFO& owned_id,
-                       bool owned, std::wstring& error) {
+    bool AdoptCopyLeaf(const std::wstring& path, HANDLE owned, std::wstring& error) {
         const auto parts = Components(path);
         if (!owned || parts.empty()) return Fail(path, error);
-        Snapshot snapshot;
-        if (!Read(parts.back(), snapshot) || !snapshot.exists || snapshot.directory ||
-            !snapshot.reparse.empty() || !SameId(snapshot.id, owned_id)) return Fail(path, error);
-        snapshots_[parts.back()] = std::move(snapshot);
+        Snapshot snapshot, current;
+        if (!Read(parts.back(), snapshot, owned) || !Read(parts.back(), current) ||
+            !snapshot.exists || snapshot.directory || !snapshot.reparse.empty() || !Same(snapshot, current))
+            return Fail(path, error);
+        snapshots_[parts.back()] = std::move(current);
         return true;
     }
 
@@ -198,7 +215,7 @@ public:
         if (!Read(parts.back(), snapshot, handle)) return Fail(path, error);
         Snapshot current;
         if (!Read(parts.back(), current) || !Same(snapshot, current)) return Fail(path, error);
-        snapshots_[parts.back()] = std::move(snapshot);
+        snapshots_[parts.back()] = std::move(current);
         return true;
     }
 
@@ -214,35 +231,10 @@ public:
 
     static Handle CreateDirectoryLeaf(const std::wstring& path, bool reparse,
                                       std::wstring& error) {
-        using Create = NTSTATUS (NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
-            PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
-        static const Create create = reinterpret_cast<Create>(
-            GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateFile"));
         const auto parts = Components(path);
-        if (!create || parts.empty()) { Fail(path, error); return {}; }
-        std::wstring native = parts.back();
-        if (native.starts_with(L"\\\\?\\")) native = L"\\??\\" + native.substr(4);
-        else if (native.starts_with(L"\\\\")) native = L"\\??\\UNC\\" + native.substr(2);
-        else native = L"\\??\\" + native;
-        if (native.size() * sizeof(wchar_t) > USHRT_MAX) { Fail(path, error); return {}; }
-        UNICODE_STRING name{};
-        name.Buffer = native.data();
-        name.Length = static_cast<USHORT>(native.size() * sizeof(wchar_t));
-        name.MaximumLength = name.Length;
-        OBJECT_ATTRIBUTES attributes{};
-        attributes.Length = sizeof(attributes);
-        attributes.ObjectName = &name; // preserve case-sensitive directory semantics
-        IO_STATUS_BLOCK status{};
-        HANDLE handle = nullptr;
-        constexpr ULONG create_new = 2;
-        constexpr ULONG directory_file = 0x00000001;
-        constexpr ULONG synchronous = 0x00000020;
-        constexpr ULONG open_reparse = 0x00200000;
-        const ACCESS_MASK access = FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE |
-            (reparse ? GENERIC_WRITE | DELETE : 0);
-        if (create(&handle, access, &attributes, &status, nullptr, FILE_ATTRIBUTE_DIRECTORY,
-                FILE_SHARE_READ, create_new, directory_file | synchronous | open_reparse,
-                nullptr, 0) < 0 || !handle) { Fail(path, error); return {}; }
+        if (parts.empty()) { Fail(path, error); return {}; }
+        HANDLE handle = pulse::CreateDirectoryHandle(parts.back(), reparse);
+        if (!handle) { Fail(path, error); return {}; }
         return Handle(handle);
     }
 
@@ -273,18 +265,25 @@ private:
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         return handle == INVALID_HANDLE_VALUE ? nullptr : handle;
     }
-    static bool SameId(const FILE_ID_INFO& left, const FILE_ID_INFO& right) {
-        return left.VolumeSerialNumber == right.VolumeSerialNumber &&
-            std::memcmp(&left.FileId, &right.FileId, sizeof(left.FileId)) == 0;
+    static bool SameId(const FileIdentity& left, const FileIdentity& right) {
+        return left == right;
     }
-    static bool Same(const Snapshot& left, const Snapshot& right) {
+    bool Same(const Snapshot& left, const Snapshot& right) const {
+        auto left_id = left.id, right_id = right.id;
+        auto left_resolved = left.resolved_id, right_resolved = right.resolved_id;
+        // Some virtual filesystems expose an index tied to the open object.
+        // Retain that object and compare live identities, including after rename.
+        if ((left.reference && !ReadFileIdentity(left.reference.get(), left_id, identity_query_)) ||
+            (right.reference && !ReadFileIdentity(right.reference.get(), right_id, identity_query_)) ||
+            (left.resolved_reference && !ReadFileIdentity(left.resolved_reference.get(), left_resolved, identity_query_)) ||
+            (right.resolved_reference && !ReadFileIdentity(right.resolved_reference.get(), right_resolved, identity_query_))) return false;
         return left.exists == right.exists && (!left.exists ||
-            (left.directory == right.directory && SameId(left.id, right.id) &&
+            (left.directory == right.directory && SameId(left_id, right_id) &&
              left.links == right.links && left.reparse == right.reparse &&
-             (left.reparse.empty() || (SameId(left.resolved_id, right.resolved_id) &&
+             (left.reparse.empty() || (SameId(left_resolved, right_resolved) &&
                                       left.resolved_path == right.resolved_path))));
     }
-    static bool Read(const std::wstring& path, Snapshot& result, HANDLE pinned = nullptr) {
+    bool Read(const std::wstring& path, Snapshot& result, HANDLE pinned = nullptr) const {
         Handle owned;
         HANDLE handle = pinned;
         if (!handle) {
@@ -299,7 +298,7 @@ private:
         }
         FILE_ATTRIBUTE_TAG_INFO attributes{};
         FILE_STANDARD_INFO standard{};
-        if (!GetFileInformationByHandleEx(handle, FileIdInfo, &result.id, sizeof(result.id)) ||
+        if (!ReadFileIdentity(handle, result.id, identity_query_) ||
             !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
             !GetFileInformationByHandleEx(handle, FileStandardInfo, &standard, sizeof(standard))) {
             result.error_code = GetLastError();
@@ -308,6 +307,8 @@ private:
         result.exists = true;
         result.directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         result.links = result.directory ? 0 : standard.NumberOfLinks;
+        if (!result.id.extended && owned)
+            result.reference = std::shared_ptr<void>(owned.release(), HandleCloser{});
         if (!(attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
         result.reparse.resize(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
         DWORD bytes = 0;
@@ -325,8 +326,7 @@ private:
             resolved.release();
             return false;
         }
-        if (!resolved || !GetFileInformationByHandleEx(resolved.get(), FileIdInfo,
-                &result.resolved_id, sizeof(result.resolved_id))) {
+        if (!resolved || !ReadFileIdentity(resolved.get(), result.resolved_id, identity_query_)) {
             result.error_code = GetLastError();
             return false;
         }
@@ -338,6 +338,8 @@ private:
             return false;
         }
         result.resolved_path.assign(name.data(), length);
+        if (!result.resolved_id.extended)
+            result.resolved_reference = std::shared_ptr<void>(resolved.release(), HandleCloser{});
         return true;
     }
     static std::vector<std::wstring> Components(const std::wstring& path) {
@@ -371,6 +373,7 @@ private:
         return result;
     }
 
+    decltype(&GetFileInformationByHandleEx) identity_query_;
     std::map<std::wstring, Snapshot> snapshots_;
     std::map<std::wstring, Handle> leases_;
     std::set<std::wstring> created_directories_;

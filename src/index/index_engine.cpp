@@ -2593,13 +2593,14 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
                                               USN_REASON_RENAME_NEW_NAME)) != 0;
     const bool attr_reason = (reason & (USN_REASON_DATA_EXTEND | USN_REASON_DATA_TRUNCATION |
                                         USN_REASON_DATA_OVERWRITE | USN_REASON_BASIC_INFO_CHANGE)) != 0;
-    if (reason & USN_REASON_SECURITY_CHANGE) {
+    const bool security_reason = (reason & USN_REASON_SECURITY_CHANGE) != 0;
+    UsnApply effect = security_reason ? UsnApply::Attr : UsnApply::None;
+    if (security_reason) {
         // No allow decision survives a response, and notify subscriptions even
         // when the filename/attributes did not change.
-        InvalidateFilterLocked();
-        return UsnApply::Attr;
+        ++filter_epoch_; // Permission changes do not invalidate unfiltered size aggregates.
     }
-    if (!structural_reason && !attr_reason) return UsnApply::None;
+    if (!structural_reason && !attr_reason) return effect;
 
     const uint64_t frn = rec->FileReferenceNumber;
     const bool is_dir = (rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
@@ -2615,7 +2616,7 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
             [this](int32_t id) { return FolderSizeItem(id); });
     }};
     // NTFS reports the volume root with its own FRN as parent.
-    if (idx == v.root_idx) return UsnApply::None;
+    if (idx == v.root_idx) return effect;
     const auto tracked_path = v.tracking_paths.find(frn);
     const bool had_tracking_path = tracked_path != v.tracking_paths.end();
     const std::wstring previous_path = had_tracking_path ? tracked_path->second :
@@ -2668,7 +2669,6 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
         RecordFeed(event); changes_.Record(std::move(event));
     };
     DeltaLog* delta = DeltaFor(v.letter);
-    UsnApply effect = UsnApply::None;
 
     auto refresh = [&](int32_t i) {
         std::wstring path = BuildPathLocked(i);
@@ -2710,7 +2710,7 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
             if (delta) delta->QueueTomb(idx);
             return UsnApply::Structure;
         }
-        return UsnApply::None;
+        return effect;
     }
     if (idx >= 0 && idx < LiveCount() && attr_reason) refresh(idx);
     if (!structural_reason) { if (effect != UsnApply::None) track(ChangeKind::Modified, idx); return effect; }
@@ -2938,7 +2938,7 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
         SetStatus(StatusDriveProgress(letter, n));
         PingNotify();
     };
-    bool from_mft = EnumerateMft(h, &running_, progress, [&](MftFile&& f) {
+    const auto mft_status = EnumerateMft(h, &running_, progress, [&](MftFile&& f) {
         if (frn_nodes.size() >= kIndexCap) return false;
         FrnNode node;
         node.frn = f.frn;
@@ -2952,7 +2952,13 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
         return true;
     });
 
-    if (!from_mft) {
+    if (mft_status == MftReadStatus::Cancelled || mft_status == MftReadStatus::Capped) {
+        CloseHandle(h);
+        SetLastError(mft_status == MftReadStatus::Cancelled ? ERROR_OPERATION_ABORTED : ERROR_MORE_DATA);
+        return false;
+    }
+    if (mft_status == MftReadStatus::Failed) {
+        frn_nodes.clear();
         MFT_ENUM_DATA_V0 med{};
         med.StartFileReferenceNumber = 0;
         med.LowUsn = 0;
@@ -2974,6 +2980,11 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
             auto* rec = reinterpret_cast<PUSN_RECORD_V2>(buffer.data() + sizeof(USN));
             BYTE* end = buffer.data() + br;
             while (reinterpret_cast<BYTE*>(rec) + sizeof(USN_RECORD_V2) <= end) {
+                if (frn_nodes.size() >= kIndexCap) {
+                    CloseHandle(h);
+                    SetLastError(ERROR_MORE_DATA);
+                    return false;
+                }
                 FrnNode n;
                 n.frn = rec->FileReferenceNumber;
                 n.parent = rec->ParentFileReferenceNumber;
@@ -2983,13 +2994,15 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
                 if (rec->RecordLength == 0) break;
                 rec = reinterpret_cast<PUSN_RECORD_V2>(reinterpret_cast<BYTE*>(rec) + rec->RecordLength);
             }
-            if (frn_nodes.size() >= kIndexCap) break;
             SetStatus(StatusDriveProgress(letter, frn_nodes.size()));
             PingNotify();
         }
     }
     CloseHandle(h);
-    if (!running_ || frn_nodes.empty()) return !frn_nodes.empty();
+    if (!running_ || frn_nodes.empty()) {
+        SetLastError(!running_ ? ERROR_OPERATION_ABORTED : ERROR_NO_MORE_FILES);
+        return false;
+    }
 
     return BuildMftTree(std::move(vol), RootFrn(letter), std::move(frn_nodes));
 }
@@ -3276,6 +3289,7 @@ void Engine::WalkTree(int32_t parent, const std::wstring& dir, int depth) {
 void Engine::FullRebuild(const char* reason) {
     const auto timing = FilenameTiming::Begin();
     DWORD build_error = ERROR_SUCCESS;
+    const auto previous_count = indexed_.load();
     const auto configured_volumes = ConfiguredVolumes();
     IndexConfig config;
     if (MachineIndexScope()) LoadMachineConfig(config, nullptr);
@@ -3298,6 +3312,22 @@ void Engine::FullRebuild(const char* reason) {
         for (const auto& volume : configured_volumes) {
             if (!running_) break;
             if (IndexVolumeMft(volume)) used_mft = true;
+            else if (MachineIndexScope() && running_) {
+                build_error = GetLastError() ? GetLastError() : ERROR_READ_FAULT;
+                {
+                    std::unique_lock<std::shared_mutex> lock(mutex_);
+                    build_.Clear();
+                    build_.Shrink();
+                    build_vols_.clear();
+                    building_ = false;
+                    indexed_.store(previous_count);
+                    SetStatus(L"索引重建失败，已保留原有索引，请重试");
+                }
+                PingNotify(true);
+                filename_timing_.End(FilenameStage::Rebuild, timing, previous_count, build_error, "volume_read_failed");
+                filename_timing_.Flush();
+                return;
+            }
         }
     }
     if (!used_mft && running_ && !MachineIndexScope()) {

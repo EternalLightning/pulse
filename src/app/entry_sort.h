@@ -19,14 +19,9 @@ constexpr FolderSortMode FolderSortModeFromInt(int value) noexcept {
                       : FolderSortMode::FoldersFirst;
 }
 
-// The worker sorts on its own thread; keep the current pref in one atomic slot
-// instead of threading it through every WorkItem and snapshot patch.
-void SetFolderSortMode(FolderSortMode mode) noexcept;
-FolderSortMode CurrentFolderSortMode() noexcept;
-
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
                ui::SortColumn col, ui::SortDirection dir, std::wstring_view parent = {});
-// Explicit mode for tests and callers that must not read the global pref.
+// Capture the preference once per sort; comparators must not read mutable state.
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
                ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders,
                std::wstring_view parent = {});

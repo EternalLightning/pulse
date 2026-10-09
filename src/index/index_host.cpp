@@ -8,6 +8,7 @@
 //   Pulse.Index.exe --install    UAC once; creates AUTO_START service
 //   Pulse.Index.exe --uninstall  removes the service
 #include "index_protocol.h"
+#include "index_search_response.h"
 #include "index_engine.h"
 #include "search_trace.h"
 #include "index_service_start.h"
@@ -447,11 +448,9 @@ void SearchThread() {
         }
         if (task.query.subscribe) {
             // Live refreshes rerun on every engine notification. Rows identical
-            // to the last page sent for this request are not pushed again (the
-            // trailing revision is excluded from the comparison).
-            uint64_t hash = 1469598103934665603ull;
-            const size_t hashed = out.size() >= 16 ? out.size() - 16 : out.size();
-            for (size_t i = 0; i < hashed; ++i) { hash ^= out[i]; hash *= 1099511628211ull; }
+            // to the last page and quality sent for this request are not pushed
+            // again; only the revision is excluded from the comparison.
+            const uint64_t hash = SearchResponseHash(out);
             std::lock_guard lock(c->subscriptions_mu);
             auto found = c->subscriptions.find(task.query.session_id);
             if (found != c->subscriptions.end() && found->second.id == task.id) {

@@ -3,6 +3,24 @@
 LANGUAGE 0x04, 0x02
 STRINGTABLE
 BEGIN
+    IDS_NETWORK_SEARCH_ADD               "加入网络索引"
+    IDS_NETWORK_SEARCH_RUNNING           "正在搜索网络文件夹"
+    IDS_NETWORK_SEARCH_COMPLETE          "网络文件夹搜索完成"
+    IDS_NETWORK_SEARCH_HINT              "加入索引可加快后续搜索。"
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_NETWORK_SEARCH_ADD               "Add to network index"
+    IDS_NETWORK_SEARCH_RUNNING           "Searching network folder"
+    IDS_NETWORK_SEARCH_COMPLETE          "Network folder search complete"
+    IDS_NETWORK_SEARCH_HINT              "Index for faster searches."
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
     IDS_APP_DESCRIPTION                   "文件管理器"
     IDS_TOOLBAR_SORT                      "排序"
     IDS_TOOLBAR_FILTER                    "筛选"
@@ -2013,6 +2031,7 @@ BEGIN
     IDS_ARCHIVE_CREATE_FOLDER_PREFIX      "创建文件夹："
     IDS_ARCHIVE_EXTRACT_FAILED            "无法解压压缩包。"
     IDS_ARCHIVE_READ_FAILED               "无法读取压缩包。"
+    IDS_ARCHIVE_PASSWORD_UNKNOWN_RETRY    "无法确定是否需要密码。是否提供密码后重试？"
     IDS_EXIT_PENDING_TITLE                "文件操作尚未完成"
     IDS_EXIT_PENDING_MESSAGE              "退出将停止当前及排队任务。已完成的部分会保留。"
     IDS_EXIT_STOP_TASKS                   "停止任务并退出"
@@ -2067,6 +2086,7 @@ BEGIN
     IDS_ARCHIVE_CREATE_FOLDER_PREFIX      "Create folder: "
     IDS_ARCHIVE_EXTRACT_FAILED            "Unable to extract archive."
     IDS_ARCHIVE_READ_FAILED               "Unable to read archive."
+    IDS_ARCHIVE_PASSWORD_UNKNOWN_RETRY    "It is unclear whether a password is required. Retry with a password?"
     IDS_EXIT_PENDING_TITLE                "File operations are still in progress"
     IDS_EXIT_PENDING_MESSAGE              "Exiting stops current and queued tasks. Completed work will be kept."
     IDS_EXIT_STOP_TASKS                   "Stop tasks and exit"

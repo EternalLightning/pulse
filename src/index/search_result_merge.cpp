@@ -33,6 +33,10 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
                                 const SearchResult& network) {
     SearchResult result;
     result.total = local.total + network.total;
+    result.revision = (std::max)(local.revision, network.revision);
+    result.error = local.error ? local.error : network.error;
+    result.incomplete = local.incomplete || network.incomplete || result.error != ERROR_SUCCESS;
+    result.scanning = local.scanning || network.scanning;
     std::vector<const Hit*> candidates;
     candidates.reserve(local.hits.size() + network.hits.size());
     for (const auto& hit : local.hits) candidates.push_back(&hit);

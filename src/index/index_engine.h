@@ -67,6 +67,7 @@ struct SearchResult {
     std::vector<Hit> hits;
     size_t total = 0;
     bool incomplete = false;
+    bool scanning = false; // UI-side recursive enumeration is still running.
     uint32_t error = 0;
 };
 

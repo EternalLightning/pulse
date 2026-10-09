@@ -6,8 +6,8 @@
 #include "tab_shape.h"
 #include "bloom_accent_picker.h"
 #include "typography.h"
-#include "../app/resource.h"
-#include "../app/places.h"
+#include "../common/resource_ids.h"
+#include "../model/places.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
 #include <d2d1effects.h>

@@ -26,7 +26,7 @@ enum class ButtonKind { Standard, Primary, Danger, Transparent, Toggle, Transpar
 enum class TitleBarButtonRole { Custom, Minimize, Maximize, Restore, Close };
 enum class BadgeKind { Neutral, Accent, Success, Warning, Danger, Keycap };
 enum class SegmentPosition { Single, First, Middle, Last };
-enum class SortDirection { None, Ascending, Descending };
+enum class SortIndicator { None, Ascending, Descending };
 enum class InfoBarKind { Informational, Success, Warning, Error };
 enum class EasingCurve { Linear, OutQuad, OutCubic, InOutQuad, InOutSine, OutSine };
 // Small pane-layout diagrams for the split menu (not Segoe glyphs).
@@ -277,7 +277,7 @@ struct ColumnHeaderSpec {
     D2D1_RECT_F bounds{};
     std::wstring_view text;
     ControlState state{};
-    SortDirection sort = SortDirection::None;
+    SortIndicator sort = SortIndicator::None;
     HorizontalAlignment alignment = HorizontalAlignment::Left;
 };
 

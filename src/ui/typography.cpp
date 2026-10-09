@@ -212,8 +212,11 @@ float InkPad(IDWriteTextFormat* format) noexcept {
     return std::max(4.0f, size * 0.25f);
 }
 
-float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
-                     std::wstring_view text) {
+namespace {
+
+float MeasureAdvanceUncached(IDWriteFactory2* factory, IDWriteTextFormat* format,
+                             std::wstring_view text, bool* measured = nullptr) {
+    if (measured) *measured = false;
     if (!factory || !format || text.empty()) return 0.0f;
     const float fallback = format->GetFontSize() * static_cast<float>(text.size());
     IDWriteTextLayout* layout = nullptr;
@@ -228,10 +231,9 @@ float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
     layout->GetOverhangMetrics(&overhang);
     layout->Release();
     if (FAILED(metrics_hr)) return fallback;
+    if (measured) *measured = true;
     return metrics.widthIncludingTrailingWhitespace + std::max(0.0f, overhang.right) + 1.0f;
 }
-
-namespace {
 
 float MeasureLineUncached(Compositor* compositor, IDWriteTextFormat* format,
                           std::wstring_view text) {
@@ -245,15 +247,21 @@ float MeasureLineUncached(Compositor* compositor, IDWriteTextFormat* format,
 }
 
 struct MeasureKey {
+    const void* factory = nullptr;
     const void* compositor = nullptr;
     const void* format = nullptr;
     float size = 0.0f;
     std::uint32_t style = 0; // weight | style << 16 | stretch << 20 | luma << 24
+    float tab_stop = 0.0f;
+    DWRITE_READING_DIRECTION reading = DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+    DWRITE_FLOW_DIRECTION flow = DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM;
+    DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING;
+    DWRITE_PARAGRAPH_ALIGNMENT paragraph = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
+    DWRITE_LINE_SPACING_METHOD spacing_method = DWRITE_LINE_SPACING_METHOD_DEFAULT;
+    float spacing = 0.0f;
+    float baseline = 0.0f;
     std::wstring text;
-    bool operator==(const MeasureKey& other) const noexcept {
-        return compositor == other.compositor && format == other.format &&
-               size == other.size && style == other.style && text == other.text;
-    }
+    bool operator==(const MeasureKey&) const = default;
 };
 
 struct MeasureKeyHash {
@@ -262,10 +270,19 @@ struct MeasureKeyHash {
         const auto mix = [&h](size_t v) {
             h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
         };
+        mix(std::hash<const void*>{}(key.factory));
         mix(std::hash<const void*>{}(key.compositor));
         mix(std::hash<const void*>{}(key.format));
         mix(std::hash<float>{}(key.size));
         mix(key.style);
+        mix(std::hash<float>{}(key.tab_stop));
+        mix(static_cast<size_t>(key.reading));
+        mix(static_cast<size_t>(key.flow));
+        mix(static_cast<size_t>(key.alignment));
+        mix(static_cast<size_t>(key.paragraph));
+        mix(static_cast<size_t>(key.spacing_method));
+        mix(std::hash<float>{}(key.spacing));
+        mix(std::hash<float>{}(key.baseline));
         return h;
     }
 };
@@ -277,21 +294,20 @@ struct MeasureCache {
 
 constexpr size_t kMeasureCacheLimit = 16384;
 
-} // namespace
-
-float MeasureLine(Compositor* compositor, IDWriteTextFormat* format,
-                  std::wstring_view text) {
-    if (!format || text.empty() || text.size() > 1024)
-        return MeasureLineUncached(compositor, format, text);
-    // Text measurement runs for every visible row on every paint and on each
-    // hit test; the inputs rarely change, so remember the widths per thread.
+MeasureCache& CurrentMeasureCache() {
     thread_local MeasureCache cache;
     const std::uint64_t generation = Generation();
     if (cache.generation != generation) {
         cache.widths.clear();
         cache.generation = generation;
     }
+    return cache;
+}
+
+MeasureKey MakeMeasureKey(IDWriteFactory2* factory, Compositor* compositor,
+                          IDWriteTextFormat* format, std::wstring_view text) {
     MeasureKey key;
+    key.factory = factory;
     key.compositor = compositor;
     key.format = format;
     key.size = format->GetFontSize();
@@ -299,12 +315,56 @@ float MeasureLine(Compositor* compositor, IDWriteTextFormat* format,
     key.style |= (static_cast<std::uint32_t>(format->GetFontStyle()) & 0xFu) << 16;
     key.style |= (static_cast<std::uint32_t>(format->GetFontStretch()) & 0xFu) << 20;
     if (compositor && compositor->LumaTextEnabled()) key.style |= 1u << 24;
+    key.tab_stop = format->GetIncrementalTabStop();
+    key.reading = format->GetReadingDirection();
+    key.flow = format->GetFlowDirection();
+    key.alignment = format->GetTextAlignment();
+    key.paragraph = format->GetParagraphAlignment();
+    format->GetLineSpacing(&key.spacing_method, &key.spacing, &key.baseline);
     key.text.assign(text.data(), text.size());
+    return key;
+}
+
+void RememberWidth(MeasureCache& cache, MeasureKey key, float width) {
+    if (cache.widths.size() >= kMeasureCacheLimit) cache.widths.clear();
+    cache.widths.emplace(std::move(key), width);
+}
+
+} // namespace
+
+void ClearMeasurementCache() noexcept {
+    CurrentMeasureCache().widths.clear();
+}
+
+float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
+                      std::wstring_view text) {
+    if (!factory || !format || text.empty() || text.size() > 1024)
+        return MeasureAdvanceUncached(factory, format, text);
+    auto& cache = CurrentMeasureCache();
+    auto key = MakeMeasureKey(factory, nullptr, format, text);
+    if (const auto found = cache.widths.find(key); found != cache.widths.end())
+        return found->second;
+    bool measured = false;
+    const float width = MeasureAdvanceUncached(factory, format, text, &measured);
+    // Failed DWrite measurements must remain retryable, as in the renderer cache.
+    if (measured) RememberWidth(cache, std::move(key), width);
+    return width;
+}
+
+float MeasureLine(Compositor* compositor, IDWriteTextFormat* format,
+                   std::wstring_view text) {
+    if (!format || text.empty() || text.size() > 1024)
+        return MeasureLineUncached(compositor, format, text);
+    IDWriteFactory2* factory = compositor ? compositor->DwriteFactory() : nullptr;
+    // Without Luma this is the same measurement, so share the advance entry.
+    if (!compositor || !compositor->LumaTextEnabled())
+        return MeasureAdvance(factory, format, text);
+    auto& cache = CurrentMeasureCache();
+    auto key = MakeMeasureKey(factory, compositor, format, text);
     if (const auto found = cache.widths.find(key); found != cache.widths.end())
         return found->second;
     const float width = MeasureLineUncached(compositor, format, text);
-    if (cache.widths.size() >= kMeasureCacheLimit) cache.widths.clear();
-    cache.widths.emplace(std::move(key), width);
+    RememberWidth(cache, std::move(key), width);
     return width;
 }
 

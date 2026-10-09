@@ -148,15 +148,27 @@ public:
                                std::to_wstring(owner);
         STARTUPINFOW si{sizeof(si)};
         if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-                            nullptr, nullptr, &si, &process_)) return false;
+                            nullptr, nullptr, &si, &process_)) {
+            std::wprintf(L"[DIAG] preview helper launch error=%lu command=%ls\n", GetLastError(), command.c_str());
+            return false;
+        }
         const std::wstring pipeName = ipc::PreviewPipeName(owner);
         const ULONGLONG deadline = GetTickCount64() + 3000;
         do {
             pipe_ = CreateFileW(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                 OPEN_EXISTING, 0, nullptr);
             if (pipe_ != INVALID_HANDLE_VALUE) return true;
+            const DWORD pipe_error = GetLastError();
+            if (WaitForSingleObject(process_.hProcess, 0) == WAIT_OBJECT_0) {
+                DWORD exit_code = 0;
+                GetExitCodeProcess(process_.hProcess, &exit_code);
+                std::wprintf(L"[DIAG] preview helper exited code=%08lx pipe_error=%lu\n", exit_code, pipe_error);
+                Stop();
+                return false;
+            }
             Sleep(10);
         } while (GetTickCount64() < deadline);
+        std::wprintf(L"[DIAG] preview helper pipe connection timed out\n");
         Stop();
         return false;
     }
@@ -199,16 +211,17 @@ public:
         if (!result.error.empty() && !ipc::ReadAll(pipe_, result.error.data(),
             result.response.error_chars * sizeof(wchar_t))) return false;
         result.properties.clear();
-        if (result.response.property_count > 6) return false;
-        auto read_string = [&](std::wstring& value) {
+        if (result.response.property_count > ipc::kPreviewMaxPropertyCount) return false;
+        auto read_string = [&](std::wstring& value, uint32_t limit) {
             uint32_t count = 0;
-            if (!ipc::ReadAll(pipe_, &count, sizeof(count)) || count > 32768) return false;
+            if (!ipc::ReadAll(pipe_, &count, sizeof(count)) || count > limit) return false;
             value.assign(count, L'\0');
             return count == 0 || ipc::ReadAll(pipe_, value.data(), count * sizeof(wchar_t));
         };
         for (uint32_t i = 0; i < result.response.property_count; ++i) {
             std::wstring label, value;
-            if (!read_string(label) || !read_string(value)) return false;
+            if (!read_string(label, ipc::kPreviewMaxPropertyLabelChars) ||
+                !read_string(value, ipc::kPreviewMaxPropertyValueChars)) return false;
             result.properties.emplace_back(std::move(label), std::move(value));
         }
         if (!mapping.empty()) {
@@ -238,8 +251,80 @@ private:
 }
 
 bool RunThumbnailCacheTests();
+bool RunThumbnailFailureTests();
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--thumbnail-failures-only") == 0)
+        return RunThumbnailFailureTests() ? 0 : 1;
+    if (argc == 2 && wcscmp(argv[1], L"--text-boundaries-only") == 0) {
+        wchar_t temp[MAX_PATH]{};
+        if (!GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", temp, ARRAYSIZE(temp)))
+            GetTempPathW(ARRAYSIZE(temp), temp);
+        std::wstring base = temp;
+        if (!base.empty() && base.back() != L'\\' && base.back() != L'/') base.push_back(L'\\');
+        const std::wstring root = base + L"PulseTextBoundaryTest-" +
+            std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+        const bool created = CreateDirectoryW(root.c_str(), nullptr) != 0;
+        if (!created) std::wprintf(L"[DIAG] fixture creation error=%lu path=%ls\n", GetLastError(), root.c_str());
+        Check(created, L"create isolated text fixture directory");
+        if (!created) return 1;
+        Host host;
+        const bool started = host.Start();
+        Check(started, L"start preview host for text boundaries");
+        if (!started) { RemoveDirectoryW(root.c_str()); return 1; }
+        auto text_case = [&](const std::vector<unsigned char>& bytes, size_t expected_chars,
+                             bool truncated, const wchar_t* label,
+                             const std::wstring& expected_prefix = L"") {
+            const std::wstring path = root + L"\\case.txt";
+            Check(WriteBytes(path, bytes), L"write text boundary fixture");
+            Result result;
+            Check(host.Request(path, result) && result.response.status == 0 &&
+                  result.response.kind == ipc::PreviewContentKind::Text &&
+                  result.text.size() == expected_chars &&
+                  ((result.response.flags & ipc::kPreviewFlagTruncated) != 0) == truncated &&
+                  result.text.starts_with(expected_prefix) &&
+                  (result.text.empty() || result.text.back() < 0xD800 || result.text.back() > 0xDBFF), label);
+            DeleteFileW(path.c_str());
+        };
+        for (size_t length : {11999u, 12000u, 12001u, 20000u})
+            text_case(std::vector<unsigned char>(length, 'x'), (std::min)(length, size_t{12000}),
+                length > 12000, L"ASCII character limit reports complete versus truncated");
+        for (const auto& tail : std::vector<std::vector<unsigned char>>{
+                 {0xC2, 0xA2}, {0xE4, 0xB8, 0xAD}, {0xF0, 0x9F, 0x98, 0x80}}) {
+            for (size_t kept = 1; kept < tail.size(); ++kept) {
+                std::vector<unsigned char> bytes = {0xE4, 0xB8, 0xAD};
+                bytes.resize(32768 - kept, 'x');
+                bytes.insert(bytes.end(), tail.begin(), tail.end());
+                text_case(bytes, 12000, true, L"incomplete UTF-8 tail preserves UTF-8 prefix", L"\x4E2D");
+            }
+        }
+        std::vector<unsigned char> utf16 = {0xFF, 0xFE};
+        for (size_t i = 0; i < 11999; ++i) { utf16.push_back('x'); utf16.push_back(0); }
+        utf16.insert(utf16.end(), {0x3D, 0xD8, 0x00, 0xDE});
+        text_case(utf16, 11999, true, L"character limit keeps UTF-16 surrogate pair intact");
+        text_case({0xFF, 0xFE, 'A', 0, 0x3D, 0xD8}, 1, true,
+            L"UTF-16 incomplete surrogate is marked truncated", L"A");
+        text_case({0xFE, 0xFF, 0, 'A', 0xD8, 0x3D}, 1, true,
+            L"UTF-16 BE incomplete surrogate is marked truncated", L"A");
+        text_case({0xFF, 0xFE, 'A', 0, 'B'}, 1, true,
+            L"UTF-16 incomplete code unit is marked truncated", L"A");
+        for (size_t length : {size_t{1024}, size_t{1025}}) {
+            std::wstring value(length, L'x');
+            ipc::TruncatePreviewString(value, ipc::kPreviewMaxPropertyValueChars, true);
+            Check(value.size() == 1024 && (value.back() == L'\x2026') == (length > 1024),
+                  L"property value limit preserves exact limit and marks truncation");
+        }
+        std::wstring surrogate_value(1022, L'x');
+        surrogate_value += L"\xD83D\xDE00xx";
+        ipc::TruncatePreviewString(surrogate_value, ipc::kPreviewMaxPropertyValueChars, true);
+        Check(surrogate_value.size() == 1023 && surrogate_value.back() == L'\x2026' &&
+              surrogate_value[1021] == L'x', L"property truncation preserves surrogate boundary");
+        host.Stop();
+        Check(RemoveDirectoryW(root.c_str()) != 0, L"remove isolated text fixture directory");
+        return failed ? 1 : 0;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--thumbnail-cache-only") == 0)
+        return RunThumbnailCacheTests() ? 0 : 1;
     const bool vector_only = argc == 2 && wcscmp(argv[1], L"--vector-only") == 0;
     // GDI+ writes the EMF+ fixture, and the host renders metafiles through it.
     Gdiplus::GdiplusStartupInput gdiplus_input;

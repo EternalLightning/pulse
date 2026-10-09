@@ -302,55 +302,84 @@ inline std::wstring PipeNameFor(uint32_t ui_pid) {
 }
 
 // ---------------------------------------------------------------------------
-// Blocking-style pipe I/O over an OVERLAPPED handle.
-//
-// Both ends read and write the same pipe handle from different threads
-// concurrently. On a synchronous handle that serializes (a blocked ReadFile
-// starves WriteFile), so the handle must be created with FILE_FLAG_OVERLAPPED
-// and every call driven through an explicit OVERLAPPED + GetOverlappedResult.
+// Exact byte-mode pipe I/O. The mode must match how the handle was opened.
+// Concurrent reads/writes on one handle require FILE_FLAG_OVERLAPPED; anonymous
+// pipes and the preview transport retain their synchronous mode.
 // ---------------------------------------------------------------------------
-inline bool PipeRead(HANDLE pipe, uint8_t* out, DWORD size) {
-    DWORD left = size;
-    while (left > 0) {
-        OVERLAPPED ol{};
-        ol.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!ol.hEvent) return false;
-        DWORD got = 0;
-        BOOL ok = ReadFile(pipe, out, left, &got, &ol);
-        if (!ok && GetLastError() == ERROR_IO_PENDING)
-            ok = GetOverlappedResult(pipe, &ol, &got, TRUE);
-        DWORD err = GetLastError();
-        CloseHandle(ol.hEvent);
-        if (!ok || got == 0) {
-            SetLastError(err);
-            return false;
-        }
-        out += got;
-        left -= got;
+struct PipeIoOptions {
+    bool overlapped = true;
+    // Timeout for each pending chunk, NOT a whole-frame deadline. Callers with
+    // request-level budgets must enforce those separately (e.g. cancel event).
+    DWORD pending_timeout_ms = INFINITE;
+    HANDLE cancel_event = nullptr;
+    DWORD chunk_size = MAXDWORD;
+    HANDLE progress_event = nullptr; // Signalled after every successful chunk.
+};
+
+namespace detail {
+template<bool Writing, typename Byte>
+inline bool PipeTransfer(HANDLE pipe, Byte* data, DWORD size, const PipeIoOptions& options) {
+    if (!size) return true;
+    // A synchronous ReadFile/WriteFile cannot be interrupted by these options.
+    if (!options.chunk_size || (!options.overlapped &&
+        (options.cancel_event || options.pending_timeout_ms != INFINITE))) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
     }
-    return true;
+    HANDLE event = options.overlapped ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
+    if (options.overlapped && !event) return false;
+    const auto finish = [&](DWORD error) {
+        if (event) CloseHandle(event);
+        if (error) SetLastError(error);
+        return error == ERROR_SUCCESS;
+    };
+    while (size) {
+        if (options.cancel_event) {
+            const DWORD wait = WaitForSingleObject(options.cancel_event, 0);
+            if (wait == WAIT_OBJECT_0) return finish(ERROR_CANCELLED);
+            if (wait == WAIT_FAILED) return finish(GetLastError());
+        }
+        const DWORD chunk = size < options.chunk_size ? size : options.chunk_size;
+        OVERLAPPED ov{};
+        ov.hEvent = event;
+        if (event) ResetEvent(event);
+        DWORD done = 0;
+        BOOL ok;
+        if constexpr (Writing) ok = WriteFile(pipe, data, chunk, &done, event ? &ov : nullptr);
+        else ok = ReadFile(pipe, data, chunk, &done, event ? &ov : nullptr);
+        if (!ok && event && GetLastError() == ERROR_IO_PENDING) {
+            HANDLE waits[]{event, options.cancel_event};
+            const DWORD wait = WaitForMultipleObjects(options.cancel_event ? 2 : 1, waits,
+                FALSE, options.pending_timeout_ms);
+            if (wait != WAIT_OBJECT_0) {
+                const DWORD error = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT :
+                    wait == WAIT_OBJECT_0 + 1 ? ERROR_CANCELLED :
+                    wait == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+                // Cancellation is only a request. Reap completion before the
+                // OVERLAPPED, event or caller's buffer can leave this scope,
+                // including when cancellation loses a race with completion.
+                CancelIoEx(pipe, &ov);
+                GetOverlappedResult(pipe, &ov, &done, TRUE);
+                return finish(error);
+            }
+            ok = GetOverlappedResult(pipe, &ov, &done, FALSE);
+        }
+        if (!ok) return finish(GetLastError());
+        if (!done) return finish(ERROR_BROKEN_PIPE);
+        if (options.progress_event) SetEvent(options.progress_event);
+        data += done;
+        size -= done;
+    }
+    return finish(ERROR_SUCCESS);
+}
+} // namespace detail
+
+inline bool PipeRead(HANDLE pipe, void* out, DWORD size, const PipeIoOptions& options = {}) {
+    return detail::PipeTransfer<false>(pipe, static_cast<uint8_t*>(out), size, options);
 }
 
-inline bool PipeWrite(HANDLE pipe, const uint8_t* data, DWORD size) {
-    DWORD left = size;
-    while (left > 0) {
-        OVERLAPPED ol{};
-        ol.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!ol.hEvent) return false;
-        DWORD written = 0;
-        BOOL ok = WriteFile(pipe, data, left, &written, &ol);
-        if (!ok && GetLastError() == ERROR_IO_PENDING)
-            ok = GetOverlappedResult(pipe, &ol, &written, TRUE);
-        DWORD err = GetLastError();
-        CloseHandle(ol.hEvent);
-        if (!ok || written == 0) {
-            SetLastError(err);
-            return false;
-        }
-        data += written;
-        left -= written;
-    }
-    return true;
+inline bool PipeWrite(HANDLE pipe, const void* data, DWORD size, const PipeIoOptions& options = {}) {
+    return detail::PipeTransfer<true>(pipe, static_cast<const uint8_t*>(data), size, options);
 }
 
 } // namespace pulse::ipc

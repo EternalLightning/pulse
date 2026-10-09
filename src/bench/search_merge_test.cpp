@@ -11,6 +11,9 @@ namespace {
 SearchResult PreviousMerge(const Query& query, SearchResult local, SearchResult network) {
     SearchResult result;
     result.total = local.total + network.total;
+    result.revision = (std::max)(local.revision, network.revision);
+    result.error = local.error ? local.error : network.error;
+    result.incomplete = local.incomplete || network.incomplete || result.error != ERROR_SUCCESS;
     result.hits.reserve(local.hits.size() + network.hits.size());
     for (auto& hit : local.hits) result.hits.push_back(std::move(hit));
     for (auto& hit : network.hits) result.hits.push_back(std::move(hit));
@@ -79,7 +82,24 @@ SearchResult Fixture(size_t count, uint32_t seed) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--quality-only") {
+        Query query; query.limit = 10;
+        SearchResult local;
+        local.total = 1; local.revision = 7;
+        local.hits.push_back({L"C:\\fixture\\local.txt", L"local.txt", false, 0, 0});
+        SearchResult network; network.error = ERROR_TIMEOUT; network.incomplete = true;
+        const auto failed = MergeSearchResults(query, local, network);
+        const bool failed_ok = failed.hits.size() == 1 && failed.total == 1 && failed.revision == 7 &&
+            failed.error == ERROR_TIMEOUT && failed.incomplete;
+        network = {}; network.revision = 8;
+        const auto recovered = MergeSearchResults(query, local, network);
+        const bool recovered_ok = recovered.hits.size() == 1 && recovered.revision == 8 &&
+            !recovered.error && !recovered.incomplete;
+        std::printf("[%s] failed network retains local rows and quality; recovery clears quality\n",
+            failed_ok && recovered_ok ? "PASS" : "FAIL");
+        return failed_ok && recovered_ok ? 0 : 1;
+    }
     int failures = 0;
     size_t cases = 0;
     auto check = [&](bool passed, const char* name) {

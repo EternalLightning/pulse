@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -146,21 +147,18 @@ std::wstring NormalizePath(std::wstring path) {
     if (IsVirtualPath(path)) return path;
     // Replace forward slashes with backslashes.
     std::replace(path.begin(), path.end(), L'/', L'\\');
-    if (path.starts_with(L"\\\\?\\")) {
+    if (path.starts_with(L"\\\\?\\") || path.starts_with(L"\\\\.\\")) {
         // Drive roots must keep a trailing slash: \\?\E: is not a valid directory.
-        if (path.size() == 6 && path[5] == L':') path += L'\\';
+        if (path.starts_with(L"\\\\?\\") && path.size() == 6 && path[5] == L':') path += L'\\';
         return path;
     }
-    if (path.starts_with(L"\\\\")) {
-        return L"\\\\?\\UNC\\" + path.substr(2);
-    }
-    // Relative path: \\?\ requires a fully-qualified path, resolve it first.
-    if (path.size() < 2 || path[1] != L':') {
-        wchar_t full[32768];
-        DWORD n = GetFullPathNameW(path.c_str(), (DWORD)_countof(full), full, nullptr);
-        if (n > 0 && n < _countof(full)) path.assign(full, n);
-    }
-    if (path.size() == 2 && path[1] == L':') path += L'\\';
+    // Resolve ordinary Win32 dot segments and drive-relative paths before
+    // opting into the extended namespace, which gives those segments literal meaning.
+    wchar_t full[32768];
+    const DWORD n = GetFullPathNameW(path.c_str(), (DWORD)_countof(full), full, nullptr);
+    if (n == 0 || n >= _countof(full)) return path;
+    path.assign(full, n);
+    if (path.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + path.substr(2);
     // Remove trailing backslash except for drive root.
     if (path.size() > 1 && path.back() == L'\\' && path[path.size() - 2] != L':')
         path.pop_back();
@@ -193,44 +191,109 @@ std::wstring StripLnkSuffix(const std::wstring& name) {
     return name.substr(0, name.size() - 4);
 }
 
-static void EnumerateFindFirstFileEx(const std::wstring& path, std::vector<DirEntry>& out) {
-    std::wstring pattern = path;
-    if (!pattern.ends_with(L"\\")) pattern += L"\\";
-    pattern += L"*";
-
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(
-        pattern.c_str(),
-        FindExInfoBasic,
-        &fd,
-        FindExSearchNameMatch,
-        nullptr,
-        FIND_FIRST_EX_LARGE_FETCH);
-    if (h == INVALID_HANDLE_VALUE) {
-        DWORD err = GetLastError();
-        if (err == ERROR_FILE_NOT_FOUND) return;
-        std::ostringstream oss;
-        oss << "FindFirstFileExW failed, error=" << err;
-        throw std::runtime_error(oss.str());
-    }
-    const FindHandleOwner find_owner(h);
-    do {
-        if (fd.cFileName[0] == L'.' &&
-            (fd.cFileName[1] == L'\0' || (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
-            continue;
-        DirEntry e;
-        e.name = fd.cFileName;
-        e.size = (static_cast<uint64_t>(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow;
-        e.mtime = fd.ftLastWriteTime;
-        e.attrs = fd.dwFileAttributes;
-        e.is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        e.is_reparse = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-        e.cloud_recall = (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-        out.push_back(std::move(e));
-    } while (FindNextFileW(h, &fd));
+static std::string PathDiagnostic(const std::wstring& path) {
+    const int count = WideCharToMultiByte(CP_UTF8, 0, path.data(), static_cast<int>(path.size()),
+        nullptr, 0, nullptr, nullptr);
+    std::string text(static_cast<size_t>(count), '\0');
+    if (count) WideCharToMultiByte(CP_UTF8, 0, path.data(), static_cast<int>(path.size()),
+        text.data(), count, nullptr, nullptr);
+    return text;
 }
 
-static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& out) {
+struct DirectoryEnumerator::Impl {
+    std::wstring path;
+    FindHandleOwner find;
+    bool started = false, ended = false, read_any = false;
+    bool pending = false;
+    WIN32_FIND_DATAW pending_data{};
+    explicit Impl(const std::wstring& p) : path(NormalizePath(p)) {
+        if (p.empty() || IsVirtualPath(p))
+            throw EnumerationError("DirectoryEnumerator requires a filesystem directory", ERROR_INVALID_NAME);
+    }
+};
+
+DirectoryEnumerator::DirectoryEnumerator(const std::wstring& path) : impl_(std::make_unique<Impl>(path)) {}
+DirectoryEnumerator::~DirectoryEnumerator() = default;
+DirectoryEnumerator::DirectoryEnumerator(DirectoryEnumerator&&) noexcept = default;
+DirectoryEnumerator& DirectoryEnumerator::operator=(DirectoryEnumerator&&) noexcept = default;
+
+DirectoryRead DirectoryEnumerator::Next(DirEntry& entry, const std::function<bool()>& cancelled) {
+    auto& state = *impl_;
+    for (;;) {
+        if (cancelled && cancelled()) return DirectoryRead::Cancelled;
+        if (state.ended) return DirectoryRead::End;
+        WIN32_FIND_DATAW data{};
+        const char* api = "FindNextFileW";
+        bool available = false;
+        if (state.pending) {
+            data = state.pending_data;
+            state.pending = false;
+            available = true;
+        } else if (!state.started) {
+            state.started = true;
+            api = "FindFirstFileExW";
+            std::wstring pattern = state.path;
+            if (!pattern.ends_with(L"\\")) pattern += L"\\";
+            pattern += L"*";
+            const HANDLE handle = FindFirstFileExW(pattern.c_str(), FindExInfoBasic,
+                &data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+            available = handle != INVALID_HANDLE_VALUE;
+            if (available) {
+                state.find.reset(handle);
+                state.read_any = true;
+            }
+        } else {
+            available = FindNextFileW(state.find.get(), &data) != FALSE;
+        }
+        if (!available) {
+            const DWORD error = GetLastError();
+            state.ended = true;
+            state.find.reset();
+            if (cancelled && cancelled()) return DirectoryRead::Cancelled;
+            if (error == ERROR_NO_MORE_FILES ||
+                (error == ERROR_FILE_NOT_FOUND && std::string_view(api) == "FindFirstFileExW"))
+                return DirectoryRead::End;
+            std::ostringstream message;
+            message << api << " failed, error=" << error << " | " << PathDiagnostic(state.path);
+            throw EnumerationError(message.str(), error);
+        }
+        if (cancelled && cancelled()) {
+            state.pending_data = data;
+            state.pending = true;
+            return DirectoryRead::Cancelled;
+        }
+        if (data.cFileName[0] == L'.' &&
+            (data.cFileName[1] == L'\0' || (data.cFileName[1] == L'.' && data.cFileName[2] == L'\0')))
+            continue;
+        entry = {};
+        entry.name = data.cFileName;
+        entry.size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+        entry.mtime = data.ftLastWriteTime;
+        entry.attrs = data.dwFileAttributes;
+        entry.is_dir = (entry.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        entry.is_reparse = (entry.attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        entry.cloud_recall = (entry.attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+        return DirectoryRead::Entry;
+    }
+}
+
+bool DirectoryEnumerator::ReadAny() const noexcept { return impl_->read_any; }
+
+static bool EnumerateFindFirstFileEx(const std::wstring& path, std::vector<DirEntry>& out,
+                                    const std::function<bool()>& cancelled) {
+    DirectoryEnumerator cursor(path);
+    DirEntry entry;
+    for (;;) {
+        const auto read = cursor.Next(entry, cancelled);
+        if (read == DirectoryRead::Cancelled || (cancelled && cancelled())) return false;
+        if (read == DirectoryRead::End) return true;
+        out.push_back(std::move(entry));
+    }
+}
+
+static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& out,
+                             const std::function<bool()>& cancelled) {
+    if (cancelled && cancelled()) return false;
     const auto& api = InitNtApi();
 
     std::wstring target = path;
@@ -238,7 +301,7 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
     if (target.starts_with(L"\\\\?\\")) {
         target = L"\\??\\" + target.substr(4);
     }
-    if (target.ends_with(L"\\")) target.pop_back();
+    if (target.ends_with(L"\\") && !(target.size() == 7 && target[5] == L':')) target.pop_back();
 
     NtUnicodeString us{};
     us.Buffer = const_cast<PWSTR>(target.c_str());
@@ -270,14 +333,20 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
     }
 
     const WinHandleOwner directory_owner(h);
+    if (cancelled && cancelled()) return false;
     constexpr SIZE_T kBufSize = 64 * 1024;
     std::vector<BYTE> buffer(kBufSize);
     bool restart = true;
     HANDLE hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!hEvent) throw std::runtime_error("CreateEvent failed");
+    if (!hEvent) {
+        std::ostringstream message;
+        message << "CreateEventW failed, error=" << GetLastError();
+        throw std::runtime_error(message.str());
+    }
     const WinHandleOwner event_owner(hEvent);
 
     for (;;) {
+        if (cancelled && cancelled()) return false;
         iosb = {};
         status = api.query_directory(
             h,
@@ -295,10 +364,20 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
         restart = false;
 
         if (status == STATUS_PENDING) {
-            WaitForSingleObject(hEvent, INFINITE);
+            while (WaitForSingleObject(hEvent, 50) == WAIT_TIMEOUT) {
+                if (cancelled && cancelled()) {
+                    CancelIoEx(h, nullptr);
+                    // A provider can ignore cancellation. Keep IOSB/buffer and
+                    // owners alive until it physically completes the request.
+                    WaitForSingleObject(hEvent, INFINITE);
+                    break;
+                }
+            }
             status = iosb.Status;
         }
 
+        // The native request must finish before releasing its buffer/IOSB.
+        if (cancelled && cancelled()) return false;
         if (status == STATUS_NO_MORE_FILES) break;
         if (status != STATUS_SUCCESS) {
             std::ostringstream oss;
@@ -308,6 +387,7 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
 
         auto* info = reinterpret_cast<NtFileFullDirInformation*>(buffer.data());
         for (;;) {
+            if (cancelled && cancelled()) return false;
             DirEntry e;
             e.name.assign(info->FileName, info->FileNameLength / sizeof(WCHAR));
             if (!(e.name.size() == 1 && e.name[0] == L'.') &&
@@ -327,14 +407,16 @@ static void EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
                 reinterpret_cast<BYTE*>(info) + info->NextEntryOffset);
         }
     }
+    return true;
 }
 
 // "This PC" view (empty path): one entry per logical drive, label matches
 // the sidebar ("Label (C:)" or a localized fallback). full_path is set so
 // the app layer can navigate/open without joining parent+name.
-static void EnumerateThisPc(std::vector<DirEntry>& out) {
+static bool EnumerateThisPc(std::vector<DirEntry>& out, const std::function<bool()>& cancelled) {
     DWORD drives = GetLogicalDrives();
     for (int i = 0; i < 26; ++i) {
+        if (cancelled && cancelled()) return false;
         if (!(drives & (1 << i))) continue;
         wchar_t root[4] = { wchar_t(L'A' + i), L':', L'\\', L'\0' };
         wchar_t volName[MAX_PATH + 1] = {};
@@ -346,15 +428,18 @@ static void EnumerateThisPc(std::vector<DirEntry>& out) {
         e.full_path = NormalizePath(root);
         e.is_dir = true;
         e.attrs = FILE_ATTRIBUTE_DIRECTORY;
+        if (cancelled && cancelled()) return false;
         out.push_back(std::move(e));
     }
+    return true;
 }
 
 // Server-root view (\\server, normalized as \\?\UNC\server with no further
 // separator): one entry per disk share, enumerated via NetShareEnum. Hidden
 // admin shares (name ends in '$') are skipped. full_path is set so the app
 // layer can navigate into a share without joining parent+name.
-static void EnumerateServerShares(const std::wstring& server, std::vector<DirEntry>& out) {
+static bool EnumerateServerShares(const std::wstring& server, std::vector<DirEntry>& out,
+                                  const std::function<bool()>& cancelled) {
     std::wstring host = L"\\\\" + server;
     BYTE* buf = nullptr;
     DWORD read = 0, total = 0;
@@ -362,6 +447,7 @@ static void EnumerateServerShares(const std::wstring& server, std::vector<DirEnt
         const_cast<LPWSTR>(host.c_str()), 1, &buf, MAX_PREFERRED_LENGTH,
         &read, &total, nullptr);
     const NetBufferOwner buffer_owner(buf);
+    if (cancelled && cancelled()) return false;
     if (status != NERR_Success) {
         std::ostringstream oss;
         oss << "NetShareEnum failed, error=" << status;
@@ -369,6 +455,7 @@ static void EnumerateServerShares(const std::wstring& server, std::vector<DirEnt
     }
     const auto* infos = reinterpret_cast<const SHARE_INFO_1*>(buf);
     for (DWORD i = 0; i < read; ++i) {
+        if (cancelled && cancelled()) return false;
         const DWORD type = infos[i].shi1_type & ~(STYPE_SPECIAL | STYPE_TEMPORARY);
         if (type != STYPE_DISKTREE) continue;
         std::wstring name = infos[i].shi1_netname;
@@ -380,31 +467,44 @@ static void EnumerateServerShares(const std::wstring& server, std::vector<DirEnt
         e.attrs = FILE_ATTRIBUTE_DIRECTORY;
         out.push_back(std::move(e));
     }
+    return true;
 }
 
-void EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out) {
+bool EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out,
+                        const std::function<bool()>& cancelled) {
     out.clear();
+    const auto finish = [&](bool complete) {
+        if (!complete || (cancelled && cancelled())) { out.clear(); return false; }
+        return true;
+    };
+    if (cancelled && cancelled()) return false;
     if (path.empty()) {
-        EnumerateThisPc(out);
-        return;
+        return finish(EnumerateThisPc(out, cancelled));
     }
     std::wstring normalized = NormalizePath(path);
     if (normalized.starts_with(L"\\\\?\\UNC\\")) {
         std::wstring rest = normalized.substr(8);
         while (!rest.empty() && rest.back() == L'\\') rest.pop_back();
         if (!rest.empty() && rest.find(L'\\') == std::wstring::npos) {
-            EnumerateServerShares(rest, out);
-            return;
+            return finish(EnumerateServerShares(rest, out, cancelled));
         }
     }
     try {
-        EnumerateNtQuery(normalized, out);
-        return;
-    } catch (...) {
-        // Fall back to FindFirstFileExW.
+        return finish(EnumerateNtQuery(normalized, out, cancelled));
+    } catch (const std::runtime_error& primary) {
+        if (cancelled && cancelled()) return finish(false);
+        // This intentional compatibility fallback remains until benchmarks
+        // justify removing a backend. Never hide either API's failure reason.
+        const std::string context = std::string(primary.what()) + " | " + PathDiagnostic(normalized);
+        OutputDebugStringA(("Pulse fs: NT enumeration fallback: " + context + "\n").c_str());
+        out.clear();
+        try {
+            return finish(EnumerateFindFirstFileEx(normalized, out, cancelled));
+        } catch (const EnumerationError& fallback) {
+            if (cancelled && cancelled()) return finish(false);
+            throw EnumerationError("NT primary: " + context + "; Win32 fallback: " + fallback.what(), fallback.Code());
+        }
     }
-    out.clear();
-    EnumerateFindFirstFileEx(normalized, out);
 }
 
 } // namespace pulse::fs

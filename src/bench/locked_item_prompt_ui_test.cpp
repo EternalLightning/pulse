@@ -48,6 +48,16 @@ void CALLBACK DriveDialog(HWND, UINT, UINT_PTR, DWORD) {
         if (!at_end) ++failures;
         SendMessageW(dialog, WM_APP + 0x2B1, 0, reinterpret_cast<LPARAM>(output.c_str()));
         SendMessageW(dialog, cancel_message ? cancel_message : WM_CLOSE, cancel_message ? VK_ESCAPE : 0, 0);
+    } else if (action == 5) {
+        pulse::ui::ConfirmDialogInspection info;
+        SendMessageW(dialog, pulse::ui::kConfirmInspectMessage, 0, reinterpret_cast<LPARAM>(&info));
+        const bool layout_ok = info.row_count == 1 && info.alternate.right <= info.alternate.left &&
+            info.content.bottom <= std::min(info.primary.top, info.cancel.top);
+        std::printf("[%s] ownerless transfer has one path, no end-process choice and bounded content\n",
+            layout_ok ? "PASS" : "FAIL");
+        if (!layout_ok) ++failures;
+        SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
+        SendMessageW(dialog, WM_KEYDOWN, VK_RETURN, 0);
     } else if (action == 3) {
         valid = false;
         SendMessageW(dialog, WM_TIMER, 1, 0);
@@ -65,7 +75,9 @@ int wmain(int argc, wchar_t** argv) {
     compat::EnableDpiAwareness();
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const auto directory = argc == 2 ? std::filesystem::path(argv[1]) : std::filesystem::path(L"bench_data");
+    const bool transfer_only = argc >= 2 && std::wstring(argv[1]) == L"--transfer-no-owners";
+    const auto directory = transfer_only && argc == 3 ? std::filesystem::path(argv[2])
+        : argc == 2 && !transfer_only ? std::filesystem::path(argv[1]) : std::filesystem::path(L"bench_data");
     std::filesystem::create_directories(directory);
     ui::LockedItemDialogText text;
     using I = l10n::StringId;
@@ -73,6 +85,41 @@ int wmain(int argc, wchar_t** argv) {
     text.close_hint = l10n::Get(I::LockedItemCloseHint); text.end_hint = l10n::Get(I::LockedItemEndHint);
     text.retry = l10n::Get(I::LockedItemRetry); text.end_retry = l10n::Get(I::LockedItemEndRetry);
     text.cancel = l10n::Get(I::Cancel);
+    if (transfer_only) {
+        for (const auto type : {ops::OpType::Copy, ops::OpType::Move}) {
+            for (const bool dark : {false, true}) {
+                ops::OpStatus retry;
+                retry.type = type; retry.phase = ops::OpPhase::Failed; retry.task_id = 1;
+                retry.lock_retry_available = true;
+                retry.failed_path = L"C:\\fixture\\长名称的正在占用的项目文件.txt";
+                action = 5; test_dpi = dark ? 144 : 96; narrow = dark; valid = true; capture_ok = false;
+                output = (directory / (std::wstring(type == ops::OpType::Copy ? L"copy" : L"move") +
+                    (dark ? L"_no_owner_dark.png" : L"_no_owner_light.png"))).wstring();
+                timer = SetTimer(nullptr, 0, 250, DriveDialog);
+                const auto result = ui::ShowLockedItemDialog(nullptr, retry, text, dark,
+                    D2D1::ColorF(0x0078D4), [] { return valid; });
+                KillTimer(nullptr, timer);
+                const bool ok = capture_ok && result == ui::LockedItemChoice::Retry;
+                std::printf("[%s] current ownerless %s opens plain Retry in %s theme\n", ok ? "PASS" : "FAIL",
+                    type == ops::OpType::Copy ? "Copy" : "Move", dark ? "dark" : "light");
+                if (!ok) ++failures;
+                retry.lock_retry_available = false;
+                const bool unavailable = ui::ShowLockedItemDialog(nullptr, retry, text, dark,
+                    D2D1::ColorF(0x0078D4), [] { return true; }) == ui::LockedItemChoice::Cancel;
+                retry.lock_retry_available = true;
+                const bool stale = ui::ShowLockedItemDialog(nullptr, retry, text, dark,
+                    D2D1::ColorF(0x0078D4), [] { return false; }) == ui::LockedItemChoice::Cancel;
+                retry.type = ops::OpType::RealDelete;
+                const bool other = ui::ShowLockedItemDialog(nullptr, retry, text, dark,
+                    D2D1::ColorF(0x0078D4), [] { return true; }) == ui::LockedItemChoice::Cancel;
+                std::printf("[%s] unavailable, stale and non-transfer ownerless requests remain refused\n",
+                    unavailable && stale && other ? "PASS" : "FAIL");
+                if (!unavailable || !stale || !other) ++failures;
+            }
+        }
+        OleUninitialize();
+        return failures ? 1 : 0;
+    }
     ops::OpStatus status;
     status.locked_path = L"C:\\fixture\\长名称的正在占用的项目文件.txt";
     ops::LockOwner owner;

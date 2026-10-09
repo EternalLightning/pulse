@@ -45,7 +45,8 @@ public:
     QuickPreviewWindow& operator=(const QuickPreviewWindow&) = delete;
 
     bool Initialize(HWND owner, UINT navigate_message, UINT open_message,
-                    UINT command_message = 0);
+                    UINT command_message = 0,
+                    std::shared_ptr<ThumbnailCache> thumbnails = {});
     void Show(const QuickPreviewItem& item, bool dark, WindowEffect effect, bool safe_mode);
     void Update(const QuickPreviewItem& item);
     void SetStarred(bool starred);
@@ -139,7 +140,7 @@ private:
     UINT open_message_ = 0;
     UINT command_message_ = 0;
     Compositor compositor_;
-    ThumbnailCache thumbnails_;
+    std::shared_ptr<ThumbnailCache> thumbnails_;
     PreviewHandlerHost handler_;
     VideoPreview video_;
     bool playback_drag_ = false;

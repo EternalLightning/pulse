@@ -189,7 +189,6 @@ inline int RunPresentationStateCases(AppState& s) {
         tab->search_content_active = false;
         tab->pending_generation = 0;
         s.appPrefs.change_tracking_enabled = true;
-        s.changes.enabled = true;
         tab->change_request = 9300;
         s.changes.details[9300] = {tab, tab->current_path, tab->view_generation, false};
         index::ChangeResponse response;

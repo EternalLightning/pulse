@@ -26,6 +26,9 @@ std::vector<std::wstring> QuickAccessTargets(const app::Tab* tab, bool backgroun
 void AppendQuickAccessCommand(AppState& s, std::vector<ui::FluentMenuItem>& items,
                               const std::vector<std::wstring>& paths) {
     if (paths.empty()) return;
+    std::erase_if(items, [](const auto& item) {
+        return item.command == app::CmdPinQuickAccess || item.command == app::CmdUnpinQuickAccess;
+    });
     const bool all_pinned = std::all_of(paths.begin(), paths.end(),
         [&](const auto& path) { return s.places.IsQuickAccessPinned(path); });
     const std::wstring key = L"pulse:quick-access";

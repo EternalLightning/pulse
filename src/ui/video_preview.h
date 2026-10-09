@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+#include <functional>
+#endif
 
 namespace pulse::ui {
 
@@ -38,8 +41,16 @@ public:
     void Step();
     State Snapshot() const;
     bool active() const noexcept { return state_ != nullptr; }
+#ifdef PULSE_VIDEO_PREVIEW_TESTING
+    struct ResourceUsage { uint32_t live = 0, retired = 0, limit = 0; };
+    static ResourceUsage ResourcesForTest();
+    static void SetWorkerHookForTest(std::function<void()> hook);
+#endif
 private:
     struct Shared;
+    struct Workers;
+    static Workers& WorkerPool();
+    static DWORD WINAPI ThreadProc(void* argument);
     static void Run(std::shared_ptr<Shared> state, std::wstring path);
     static LRESULT CALLBACK VideoProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     std::shared_ptr<Shared> state_;

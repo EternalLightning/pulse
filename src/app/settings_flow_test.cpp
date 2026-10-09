@@ -598,7 +598,7 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
     };
     click(layout().theme_tile[0]);check(!s.darkMode && s.appPrefs.theme_mode==1,"mouse click applies and saves light theme");
     click(layout().theme_tile[1]);check(s.darkMode && s.appPrefs.theme_mode==2,"mouse click applies and saves dark theme");
-    click(layout().theme_tile[2]);check(s.themeOverride==ui::ThemeMode::Auto && s.appPrefs.theme_mode==0,"system theme is a persistent explicit selection");
+    click(layout().theme_tile[2]);check(s.EffectiveThemeMode()==ui::ThemeMode::Auto && s.appPrefs.theme_mode==0,"system theme is a persistent explicit selection");
     s.settings.SetScroll(layout().density_card.top-layout().content.top,
         s.renderer.SettingsMaxScroll(BuildVm(s,false),window.right,window.bottom));
     click(layout().density_row[0]);check(s.appPrefs.row_height==28,"mouse click changes density through existing controller");

@@ -1,0 +1,219 @@
+#include "../app/app_internal.h"
+#include "../app/app_column_view.h"
+#include "../common/localization.h"
+#include <condition_variable>
+#include <cstdio>
+#include <mutex>
+
+int main() {
+    using namespace pulse;
+    OleInitialize(nullptr);
+    l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    int failures = 0;
+    const auto check = [&](bool passed, const char* label) {
+        std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+        failures += !passed;
+    };
+    auto owned = std::make_unique<AppState>();
+    auto& s = *owned;
+    s.isolatedTest = true;
+    s.appPrefs.persist = s.places.persist = false;
+    s.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Notify patch fixture",
+        WS_OVERLAPPEDWINDOW, -20000, -20000, 1000, 700, nullptr, nullptr,
+        GetModuleHandleW(nullptr), nullptr);
+    if (!s.hwnd || !s.compositor.Init(s.hwnd)) {
+        std::puts("[FAIL] initialize isolated notification compositor");
+        if (s.hwnd) DestroyWindow(s.hwnd);
+        s.hwnd = nullptr;
+        owned.reset(); OleUninitialize();
+        return 2;
+    }
+    s.renderer.SetCompositor(&s.compositor);
+    s.window_tabs.EnsureDefault();
+    s.pane = s.window_tabs.Active()->FocusedPane();
+    auto& first = *ActiveTab(s);
+    auto pane = std::make_unique<app::Pane>();
+    auto& second = pane->view;
+    s.window_tabs.Active()->panes.push_back(std::move(pane));
+    app::RebuildLayoutRoot(*s.window_tabs.Active());
+    wchar_t cwd[MAX_PATH]{};
+    GetCurrentDirectoryW(MAX_PATH, cwd);
+    const auto path = fs::NormalizePath(std::wstring(cwd) + L"\\bench_data\\notify-patch-" +
+        std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    const auto added = path + L"\\b.txt";
+    const bool created = CreateDirectoryW(path.c_str(), nullptr) != FALSE;
+    HANDLE file = created ? CreateFileW(added.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL, nullptr) : INVALID_HANDLE_VALUE;
+    check(file != INVALID_HANDLE_VALUE, "create isolated notification fixture");
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    const auto listing = [] {
+        auto rows = std::make_shared<std::vector<fs::DirEntry>>(1);
+        rows->front().name = L"a.txt";
+        rows->front().attrs = FILE_ATTRIBUTE_NORMAL;
+        return rows;
+    };
+    const auto reset = [&] {
+        s.worker.Stop();
+        s.notify_patches.pending.clear();
+        {
+            std::lock_guard lock(s.notify_patches.mailbox->mutex);
+            s.notify_patches.mailbox->completed.clear();
+        }
+        s.explicit_entry_refreshes.clear();
+        first.current_path = second.current_path = path;
+        first.pending_generation = second.pending_generation = 0;
+        first.applied_generation = second.applied_generation = 0;
+        first.loading = second.loading = false;
+        first.SetSnapshot(listing()); second.SetSnapshot(first.snapshot);
+        first.SelectOnly(0); second.SelectOnly(0);
+        s.store.Put(path, first.snapshot);
+        s.worker.Start([](app::WorkResult) {});
+    };
+    const auto wait_result = [&] {
+        const auto deadline = GetTickCount64() + 5000;
+        do {
+            {
+                std::lock_guard lock(s.notify_patches.mailbox->mutex);
+                if (!s.notify_patches.mailbox->completed.empty()) return true;
+            }
+            Sleep(5);
+        } while (GetTickCount64() < deadline);
+        return false;
+    };
+    if (file != INVALID_HANDLE_VALUE) {
+        reset();
+        std::mutex gate_mutex;
+        std::condition_variable gate_changed;
+        bool release = false;
+        unsigned entered = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            s.worker.EnqueueIo([&] {
+                std::unique_lock lock(gate_mutex);
+                ++entered; gate_changed.notify_all();
+                gate_changed.wait(lock, [&] { return release; });
+            });
+        }
+        {
+            std::unique_lock lock(gate_mutex);
+            check(gate_changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered >= 2; }),
+                "existing I/O workers reach the gate");
+        }
+        const auto initial = first.snapshot;
+        first.column_strip.child.path = path;
+        first.column_strip.child.snapshot = initial;
+        first.column_strip.child.requested = true;
+        const auto old_column_generation = s.worker.Refresh(path, ui::SortColumn::Name, ui::SortDirection::Asc);
+        const auto other_old_generation = s.worker.Refresh(path, ui::SortColumn::Size, ui::SortDirection::Asc);
+        first.column_strip.child.generation = old_column_generation;
+        first.column_strip.child.rows = std::make_shared<std::vector<int>>(1, 0);
+        const bool queued = QueueNotifiesToVisible(s, path, {{FILE_ACTION_ADDED, L"b.txt", {}}});
+        const auto pending = s.notify_patches.pending.find(path);
+        check(queued && pending != s.notify_patches.pending.end() && first.snapshot == initial &&
+              second.snapshot == initial && pending->second.request->resolved.events.empty(),
+              "blocked worker leaves notification queries and pane publication pending without blocking UI");
+        check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_REMOVED, L"a.txt", {}}}) &&
+              s.notify_patches.pending.at(path).queued.size() == 1,
+              "a consecutive batch queues behind the same directory request");
+        {
+            std::lock_guard lock(gate_mutex);
+            release = true;
+        }
+        gate_changed.notify_all();
+        const bool completed = wait_result();
+        DrainNotifyPatches(s);
+        check(completed && first.EntryCount() == 1 && first.EntryAt(0).name == L"b.txt" &&
+              first.snapshot == second.snapshot && first.snapshot == s.store.Peek(path) &&
+              initial->front().name == L"a.txt" && s.notify_patches.pending.empty(),
+              "successive add and remove publish in order with one shared immutable pane listing");
+        check(first.column_strip.child.snapshot == first.snapshot &&
+              !first.column_strip.child.rows && first.column_strip.child.requested,
+              "notification publication refreshes column facts and invalidates old source-index rows");
+        const auto fresh_column = first.column_strip.child.snapshot;
+        app::WorkResult stale_column{};
+        stale_column.path = path;
+        stale_column.generation = old_column_generation;
+        stale_column.snapshot = initial;
+        NoteColumnStripResult(s, stale_column);
+        check(first.column_strip.child.snapshot == fresh_column &&
+              first.column_strip.child.notify_watermark >= other_old_generation,
+              "enumeration issued before notification publication cannot restore old column facts");
+        stale_column.error = true;
+        stale_column.generation = other_old_generation;
+        const auto new_column_generation = s.worker.Refresh(path, ui::SortColumn::Name, ui::SortDirection::Asc);
+        first.column_strip.child.generation = new_column_generation;
+        NoteColumnStripResult(s, stale_column);
+        check(!first.column_strip.child.error && first.column_strip.child.generation == new_column_generation,
+              "old column error cannot invalidate a notification patch or consume a newer request");
+        stale_column.generation = new_column_generation;
+        stale_column.error = false;
+        auto later_column = std::make_shared<std::vector<fs::DirEntry>>(*fresh_column);
+        stale_column.snapshot = later_column;
+        NoteColumnStripResult(s, stale_column);
+        check(first.column_strip.child.snapshot == later_column &&
+              first.column_strip.child.applied_generation == new_column_generation,
+              "a column enumeration issued after notification publication can update its facts");
+
+        reset();
+        second.SetSnapshot(listing());
+        auto other_rows = std::make_shared<std::vector<fs::DirEntry>>(*second.snapshot);
+        fs::DirEntry extra; extra.name = L"z.txt"; extra.attrs = FILE_ATTRIBUTE_NORMAL;
+        other_rows->insert(other_rows->begin(), extra); second.SetSnapshot(other_rows);
+        second.SelectOnly(1);
+        check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_RENAMED_NEW_NAME, L"b.txt", L"a.txt"}}) &&
+              wait_result(), "worker resolves a shared rename fact once for distinct pane orders");
+        DrainNotifyPatches(s);
+        check(first.EntryAt(0).name == L"b.txt" && second.EntryAt(0).name == L"z.txt" &&
+              second.EntryAt(1).name == L"b.txt" && first.snapshot != second.snapshot &&
+              first.EntryAt(first.selected_index).name == L"b.txt" &&
+              second.EntryAt(second.selected_index).name == L"b.txt",
+              "resolved rename retains each pane order and remaps independent selection");
+
+        for (unsigned stale = 0; stale < 5; ++stale) {
+            reset();
+            const auto original = first.snapshot;
+            check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_ADDED, L"b.txt", {}}}) && wait_result(),
+                  "stage a completed background patch for stale-result verification");
+            if (stale == 0) {
+                first.NavigateTo(path + L"\\elsewhere");
+                first.NavigateTo(path);
+                first.SetSnapshot(original);
+            } else if (stale == 1) {
+                first.SetSnapshot(listing());
+            } else if (stale == 2) {
+                RefreshPath(s, path, RefreshReason::Explicit);
+            } else if (stale == 3) {
+                first = app::Tab{};
+                first.current_path = path;
+                first.SetSnapshot(original);
+            } else {
+                ++first.applied_generation;
+            }
+            const auto current = first.snapshot;
+            DrainNotifyPatches(s);
+            check(first.snapshot == current && second.snapshot == original &&
+                  first.EntryCount() == 1 && s.notify_patches.pending.empty(),
+                  stale == 0 ? "return to same path and snapshot rejects the old view generation" :
+                  stale == 1 ? "snapshot replacement rejects the old resolved facts for every pane" :
+                  stale == 2 ? "explicit refresh invalidates the pending patch generation" :
+                  stale == 3 ? "replacing a tab at the same address and snapshot rejects the old request" :
+                               "a newer applied enumeration generation rejects the old resolved facts");
+        }
+
+        reset();
+        const auto retained = first.snapshot;
+        check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_MODIFIED, L"a.txt", {}}}) &&
+              QueueNotifiesToVisible(s, path, {{FILE_ACTION_REMOVED, L"a.txt", {}}}) && wait_result(),
+              "stage an inconclusive stat followed by a removal");
+        DrainNotifyPatches(s);
+        check(first.snapshot == retained && second.snapshot == retained && first.EntryCount() == 1 &&
+              first.pending_generation != 0 && s.notify_patches.pending.empty(),
+              "failed stat keeps all old rows until fallback enumeration rather than applying later removals");
+        s.worker.Stop();
+    }
+    check(file == INVALID_HANDLE_VALUE || DeleteFileW(added.c_str()), "remove isolated fixture file");
+    check(!created || RemoveDirectoryW(path.c_str()), "remove isolated fixture directory");
+    s.watches.Stop(); s.worker.Stop();
+    DestroyWindow(s.hwnd); s.hwnd = nullptr;
+    owned.reset(); OleUninitialize();
+    return failures ? 1 : 0;
+}

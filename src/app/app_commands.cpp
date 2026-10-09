@@ -1934,6 +1934,8 @@ void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
         s.scrollTargetY = 0.0f;
         s.tagAdsLastSnapshot = nullptr;
     }
+    if (app::HasEffect(effects, app::SettingsEffect::ChangeTracking))
+        ApplyChangeTrackingSettings(s);
     if (app::HasEffect(effects, app::SettingsEffect::Accent))
         ApplyAccentFromPrefs(s, false);
     if (app::HasEffect(effects, app::SettingsEffect::WindowMaterial)) {
@@ -1946,7 +1948,6 @@ void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
         s.renderer.SetListStyle(s.appPrefs.list_smart_date, s.appPrefs.list_zebra_rows,
                                 s.appPrefs.list_size_bar);
     if (app::HasEffect(effects, app::SettingsEffect::FolderSort)) {
-        app::SetFolderSortMode(app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
         // Cached snapshots hold the previous order; drop and re-sort what is visible.
         for (const auto& path : VisibleFolderPaths(s)) {
             s.store.MarkDirty(path);
@@ -2002,8 +2003,10 @@ void ToggleTheme(AppState& s) {
 void SetThemeMode(AppState& s, int mode) {
     s.appPrefs.theme_mode = std::clamp(mode, 0, 2);
     s.appPrefs.Save();
-    s.themeOverride = mode == 1 ? ui::ThemeMode::Light : mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
-    s.darkMode = ui::ShouldUseDarkMode(s.themeOverride);
+    if (s.shot.active)
+        s.themeOverride = s.appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
+            s.appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
+    s.darkMode = ui::ShouldUseDarkMode(s.EffectiveThemeMode());
     ApplyAccentFromPrefs(s, true);
     ApplyAppWindowChrome(s);
     if (s.editBrush) {

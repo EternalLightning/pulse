@@ -358,6 +358,11 @@ bool TickAddressSearch(AppState& s, ULONGLONG now) {
         ForEachPane(s, [&](app::Pane& pane) {
             auto* tab = pane.ActiveTab();
             std::wstring kind, rest;
+            if (tab && !tab->network_search_root.empty() && !s.networkIndex.UsesLiveSearch(tab->network_search_root)) {
+                tab->network_search_root.clear();
+                if (tab->banner_type == app::BannerType::Other) tab->ClearBanner();
+                searched = true;
+            }
             if (!tab || !app::ParsePulsePath(tab->current_path, &kind, &rest) ||
                 kind != L"search" || !app::SplitSearchQueryText(rest).content.present()) return;
             if (tab->banner_type == app::BannerType::ContentIndex) {

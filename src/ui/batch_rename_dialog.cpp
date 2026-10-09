@@ -29,13 +29,13 @@ D2D1_RECT_F Rect(float scale, float x, float y, float width, float height) {
     return pulse::ui::DipRect(scale, x, y, width, height);
 }
 
-std::wstring StatusLabel(app::BatchRenameStatus status) {
+std::wstring StatusLabel(model::BatchRenameStatus status) {
     switch (status) {
-    case app::BatchRenameStatus::Ok: return l10n::Get(l10n::StringId::BatchRenameWillRename);
-    case app::BatchRenameStatus::Unchanged: return l10n::Get(l10n::StringId::Unchanged);
-    case app::BatchRenameStatus::Empty:
-    case app::BatchRenameStatus::Invalid: return l10n::Get(l10n::StringId::InvalidName);
-    case app::BatchRenameStatus::Collision: return l10n::Get(l10n::StringId::NameCollision);
+    case model::BatchRenameStatus::Ok: return l10n::Get(l10n::StringId::BatchRenameWillRename);
+    case model::BatchRenameStatus::Unchanged: return l10n::Get(l10n::StringId::Unchanged);
+    case model::BatchRenameStatus::Empty:
+    case model::BatchRenameStatus::Invalid: return l10n::Get(l10n::StringId::InvalidName);
+    case model::BatchRenameStatus::Collision: return l10n::Get(l10n::StringId::NameCollision);
     }
     return {};
 }
@@ -110,7 +110,7 @@ private:
     D2D1_RECT_F FindField() const { return Rect(scale_, 20, 68, 280, 32); }
     D2D1_RECT_F ReplaceField() const { return Rect(scale_, 320, 68, 280, 32); }
     D2D1_RECT_F IncludeExtRect() const { return Rect(scale_, 430, 40, 170, 24); }
-    bool UsesIndex() const { return app::BatchRenamePatternUsesIndex(rule_.pattern); }
+    bool UsesIndex() const { return model::BatchRenamePatternUsesIndex(rule_.pattern); }
     D2D1_RECT_F PatternField() const {
         return UsesIndex() ? Rect(scale_, 20, 128, 424, 32)
                            : Rect(scale_, 20, 128, 580, 32);
@@ -277,14 +277,14 @@ private:
         const std::wstring number = EditText(edit_number_);
         rule_.start = number.empty() ? 1 : _wtoi(number.c_str());
         if (rule_.start < 0) rule_.start = 0;
-        items_ = app::PreviewBatchRename(paths_, rule_);
+        items_ = model::PreviewBatchRename(paths_, rule_);
         rename_count_ = 0;
         unchanged_count_ = 0;
         collision_count_ = 0;
         for (const auto& item : items_) {
-            if (item.status == app::BatchRenameStatus::Ok) ++rename_count_;
-            else if (item.status == app::BatchRenameStatus::Unchanged) ++unchanged_count_;
-            else if (item.status == app::BatchRenameStatus::Collision) ++collision_count_;
+            if (item.status == model::BatchRenameStatus::Ok) ++rename_count_;
+            else if (item.status == model::BatchRenameStatus::Unchanged) ++unchanged_count_;
+            else if (item.status == model::BatchRenameStatus::Collision) ++collision_count_;
         }
         can_apply_ = rename_count_ > 0;
     }
@@ -423,10 +423,10 @@ private:
             const auto& item = items_[static_cast<size_t>(index)];
             const float y = inner_top + static_cast<float>(i) * row_h;
             D2D1_COLOR_F color = theme.text;
-            if (item.status != app::BatchRenameStatus::Ok &&
-                item.status != app::BatchRenameStatus::Unchanged)
+            if (item.status != model::BatchRenameStatus::Ok &&
+                item.status != model::BatchRenameStatus::Unchanged)
                 color = theme.danger;
-            else if (item.status == app::BatchRenameStatus::Unchanged)
+            else if (item.status == model::BatchRenameStatus::Unchanged)
                 color = theme.text_secondary;
             painter_.DrawText(item.original_name,
                               D2D1::RectF(preview.left + pad, y, old_right, y + row_h),
@@ -623,8 +623,8 @@ private:
     Compositor compositor_;
     fluent::Painter painter_;
     std::vector<std::wstring> paths_;
-    app::BatchRenameRule rule_;
-    std::vector<app::BatchRenameItem> items_;
+    model::BatchRenameRule rule_;
+    std::vector<model::BatchRenameItem> items_;
     BatchRenameDialogResult result_;
     bool dark_ = false;
     bool backdrop_enabled_ = false;

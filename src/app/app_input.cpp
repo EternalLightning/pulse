@@ -25,6 +25,7 @@
 #include "settings_value_dialog.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
+#include "../ops/drop_staging.h"
 #include "../ipc/ctx_menu_util.h"
 #include <windows.h>
 #include <windowsx.h>
@@ -44,6 +45,23 @@
 using namespace pulse;
 
 namespace pulse {
+namespace {
+bool internal_file_drag = false;
+
+DWORD FileDropEffect(const AppState& s, const std::vector<std::wstring>& sources,
+                     const std::wstring& destination, DWORD keys, DWORD allowed, DWORD preferred) {
+    if (sources.empty()) return DROPEFFECT_NONE;
+    DWORD effect = ui::ComputeDropEffect(keys, sources.front(), destination, allowed, preferred);
+    if (effect != DROPEFFECT_MOVE || internal_file_drag || s.trayDrag.active ||
+        !(allowed & DROPEFFECT_COPY) || (keys & MK_SHIFT) || preferred == DROPEFFECT_MOVE) return effect;
+    const auto temp = ops::TempDirectory();
+    const auto stage = ops::DropStageRoot();
+    if (!temp.empty() && std::all_of(sources.begin(), sources.end(), [&](const auto& source) {
+            return ops::IsTemporaryDropSource(source, temp, stage);
+        })) effect = DROPEFFECT_COPY;
+    return effect;
+}
+}
 bool HandleBrowserNavigation(AppState& s, LPARAM command) {
     switch (GET_APPCOMMAND_LPARAM(command)) {
     case APPCOMMAND_BROWSER_BACKWARD:
@@ -139,7 +157,7 @@ std::wstring ResolveHeaderDropFolder(const std::vector<std::wstring>& sources) {
 // and returns the DROPEFFECT_* to report back. Also drives the 800ms
 // spring-loaded folder enter and Esc-back.
 DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
-                               POINT pt, DWORD key_state, DWORD allowed) {
+                               POINT pt, DWORD key_state, DWORD allowed, DWORD preferred) {
     s.dropRow = -1;
     s.dropPaneIndex = -1;
     s.dropHeader = false;
@@ -276,7 +294,7 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
         return DROPEFFECT_NONE;
     }
 
-    DWORD effect = ui::ComputeDropEffect(key_state, sources.front(), s.dropDestDir, allowed);
+    DWORD effect = FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
     s.dropBadge = (effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() : l10n::Get(l10n::StringId::DropCopy).c_str()) + destName;
     s.dropBadgeX = (float)pt.x;
     s.dropBadgeY = (float)pt.y;
@@ -285,9 +303,9 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
 }
 
 DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
-                         POINT pt, DWORD key_state, DWORD preferred) {
+                         POINT pt, DWORD key_state, DWORD allowed, DWORD preferred) {
     // Resolve once more for the final position.
-    DWORD effect = ResolveDropTarget(s, sources, pt, key_state, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    DWORD effect = ResolveDropTarget(s, sources, pt, key_state, allowed, preferred);
     std::wstring dest = s.dropDestDir;
     bool tray = s.dropTray;
     const bool header = s.dropHeader;
@@ -314,15 +332,15 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
             if (app::Tab* tab = pane->ActiveTab()) dest = tab->current_path;
         }
         if (dest.empty() || fs::IsVirtualPath(dest)) return DROPEFFECT_NONE;
-        effect = ui::ComputeDropEffect(key_state, sources.front(), dest,
-                                       DROPEFFECT_COPY | DROPEFFECT_MOVE);
+        effect = FileDropEffect(s, sources, dest, key_state, allowed, preferred);
     }
 
     if (tray) {
         std::vector<std::wstring> paths;
         for (auto& p : sources) paths.push_back(fs::NormalizePath(p));
-        s.tray.Collect(paths, (preferred & DROPEFFECT_MOVE) != 0);
-        ops::WriteClipboard(sources, (preferred & DROPEFFECT_MOVE) != 0);
+        const bool move = ops::PreferredEffectIsCut(preferred);
+        s.tray.Collect(paths, move);
+        ops::WriteClipboard(sources, move);
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_COPY;
     }
@@ -336,13 +354,31 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_COPY;
     }
-    if (dest.empty() || effect == DROPEFFECT_NONE || fs::IsVirtualPath(dest)) return DROPEFFECT_NONE;
+    if (dest.empty() || fs::IsVirtualPath(dest) || !(effect & allowed) ||
+        (effect != DROPEFFECT_COPY && effect != DROPEFFECT_MOVE)) return DROPEFFECT_NONE;
 
-    ops::OpRequest req;
-    req.type = (effect == DROPEFFECT_MOVE) ? ops::OpType::Move : ops::OpType::Copy;
-    req.dest_dir = fs::NormalizePath(dest);
-    for (auto& p : sources) req.sources.push_back(fs::NormalizePath(p));
-    return SubmitWithConflictResolution(s, std::move(req)) ? effect : DROPEFFECT_NONE;
+    const std::wstring temp_dir = internal_file_drag || s.trayDrag.active
+        ? std::wstring() : ops::TempDirectory();
+    const std::wstring stage_root = ops::DropStageRoot();
+    bool submitted = false;
+    const auto submit = [&](const std::vector<std::wstring>& prepared) {
+        ops::OpRequest req;
+        req.type = effect == DROPEFFECT_MOVE ? ops::OpType::Move : ops::OpType::Copy;
+        req.dest_dir = fs::NormalizePath(dest);
+        for (const auto& source : prepared) req.sources.push_back(fs::NormalizePath(source));
+        submitted = SubmitWithConflictResolution(s, std::move(req));
+    };
+    if (!temp_dir.empty() && effect == DROPEFFECT_COPY) {
+        const auto result = ops::SubmitStagedDrop(sources, temp_dir, stage_root, submit, s.hwnd);
+        if (result.error) {
+            wchar_t error[128]{};
+            swprintf_s(error, l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(), result.error);
+            s.notification_toast.Show(s.hwnd, l10n::Get(l10n::StringId::OpCopyFailed),
+                result.source + L"\n" + error, false);
+            return DROPEFFECT_NONE;
+        }
+    } else submit(sources);
+    return submitted ? effect : DROPEFFECT_NONE;
 }
 
 // Starts the modal OLE drag-out for the selected entries.
@@ -356,8 +392,10 @@ void StartDragOut(AppState& s) {
 
     s.clickCollapseIndex = -1;
     CancelScrollAnimation(s); // DoDragDrop's modal loop coexists with on-demand render
+    internal_file_drag = true;
     DWORD effect = ui::DoFileDragDrop(paths, DROPEFFECT_COPY | DROPEFFECT_MOVE,
         [&s] { return s.springEntered; }); // Esc = 退回 when spring-entered
+    internal_file_drag = false;
     s.springEntered = false;
     ClearDropFeedback(s);
     if (effect == DROPEFFECT_MOVE) {
@@ -1884,6 +1922,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             hit.region != ui::HitTestResult::AddressSearchContent &&
             hit.region != ui::HitTestResult::AddressSearchOptions &&
             hit.region != ui::HitTestResult::ContentIndexManage &&
+            hit.region != ui::HitTestResult::NetworkSearchAdd &&
             hit.region != ui::HitTestResult::AddressSearchClear &&
             hit.region != ui::HitTestResult::AddressSearchClose) {
             HideAddressEditor(*s, false);
@@ -2397,7 +2436,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                     if (!p.empty() && !vm.details.is_dir) p = fs::ParentPath(p);
                     if (!p.empty()) s->ops.OpenTerminal(ClipboardPath(p));
                 } else if (cmd == app::CmdDetailsComputeSize) {
-                    if (!vm.details.path.empty()) StartDetailsSizeWalk(*s, vm.details.path);
+                    if (!vm.details.path.empty()) s->folderSizes.Calculate(vm.details.path);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else if (cmd == app::CmdProperties) {
                     DispatchMenuCommand(*s, app::CmdProperties);
@@ -2496,6 +2535,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ShowSearchOptions(*s);
         } else if (hit.region == ui::HitTestResult::ContentIndexManage) {
             ShowSearchOptions(*s, true);
+        } else if (hit.region == ui::HitTestResult::NetworkSearchAdd) {
+            s->settings.AddNetworkPath(hit.path);
         } else if (hit.region == ui::HitTestResult::SettingsContentIndex) {
             ShowSearchOptions(*s);
         } else if (hit.region == ui::HitTestResult::AddressSearchClear) {

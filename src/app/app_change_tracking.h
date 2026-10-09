@@ -20,13 +20,13 @@ struct ChangeTrackingUi {
     uint32_t next_request = 1, summary_request = 0;
     bool summary_pending = false;
     uint64_t last_query = 0, last_detail_refresh = 0;
-    bool enabled = false;
-    int days = 7;
+    int summary_days = 7; // input captured for the in-flight summary request
     ui::ChangePopover popover;
     std::wstring hover_path;
     uint64_t hover_deadline = 0;
 };
 void StartChangeTracking(AppState& s);
+void ApplyChangeTrackingSettings(AppState& s);
 bool TickChangeTracking(AppState& s);
 void ReceiveChangeTracking(AppState& s, uint32_t request, bool details);
 void ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result);

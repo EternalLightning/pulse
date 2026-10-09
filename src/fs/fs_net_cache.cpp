@@ -4,9 +4,21 @@
 #include <chrono>
 #include <fstream>
 #include <string>
-#include <thread>
+#include <array>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <new>
+#include <unordered_map>
 
 namespace pulse::fs {
+
+struct NetSnapshotWriteState {
+    uint64_t key = 0;
+    std::atomic<uint64_t> next_sequence{1};
+    std::mutex commit_mutex;
+    uint64_t committed_sequence = 0;
+};
 
 #ifdef PULSE_NET_CACHE_TESTING
 std::wstring NetCacheTestDirectory();
@@ -52,11 +64,38 @@ uint64_t NowUnix() {
 
 } // namespace
 
-bool SaveNetSnapshot(const std::wstring& path, const SnapshotPtr& snapshot) {
+NetSnapshotWriteTicket ReserveNetSnapshotWrite(const std::wstring& path) {
+    NetSnapshotWriteTicket ticket;
+    if (!IsUncPath(path)) return ticket;
+    static std::mutex registry_mutex;
+    static std::unordered_map<uint64_t, std::weak_ptr<NetSnapshotWriteState>> writers;
+    const auto key = HashPath(NormalizePath(path));
+    {
+        std::lock_guard lock(registry_mutex);
+        if (writers.size() > 128)
+            std::erase_if(writers, [](const auto& entry) { return entry.second.expired(); });
+        ticket.state_ = writers[key].lock();
+        if (!ticket.state_) {
+            ticket.state_ = std::make_shared<NetSnapshotWriteState>();
+            ticket.state_->key = key;
+            writers[key] = ticket.state_;
+        }
+    }
+    ticket.sequence_ = ticket.state_->next_sequence.fetch_add(1, std::memory_order_relaxed);
+    return ticket;
+}
+
+bool SaveNetSnapshot(const std::wstring& path, const SnapshotPtr& snapshot,
+                     const std::function<bool()>& cancelled, const NetSnapshotWriteTicket& requested_ticket) {
     if (!snapshot || !IsUncPath(path)) return false;
+    if (cancelled && cancelled()) return false;
+    const auto ticket = requested_ticket.state_ ? requested_ticket : ReserveNetSnapshotWrite(path);
+    if (!ticket.state_ || ticket.state_->key != HashPath(NormalizePath(path))) return false;
     const std::wstring file = CacheFile(path);
     if (file.empty()) return false;
-    const std::wstring tmp = file + L".tmp";
+    static std::atomic<uint64_t> write_sequence{1};
+    const std::wstring tmp = file + L".tmp-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(write_sequence.fetch_add(1, std::memory_order_relaxed));
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
     if (!f) return false;
     f.write("PNCH", 4);
@@ -67,6 +106,11 @@ bool SaveNetSnapshot(const std::wstring& path, const SnapshotPtr& snapshot) {
     f.write(reinterpret_cast<const char*>(&ts), 8);
     f.write(reinterpret_cast<const char*>(&count), 4);
     for (const auto& e : *snapshot) {
+        if (cancelled && cancelled()) {
+            f.close();
+            DeleteFileW(tmp.c_str());
+            return false;
+        }
         uint8_t flags = (e.is_dir ? 1 : 0) | (e.is_reparse ? 2 : 0);
         uint64_t mtime = (static_cast<uint64_t>(e.mtime.dwHighDateTime) << 32) | e.mtime.dwLowDateTime;
         uint32_t nlen = static_cast<uint32_t>(e.name.size());
@@ -79,8 +123,16 @@ bool SaveNetSnapshot(const std::wstring& path, const SnapshotPtr& snapshot) {
     }
     f.close();
     if (!f) { DeleteFileW(tmp.c_str()); return false; }
-    return MoveFileExW(tmp.c_str(), file.c_str(),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    std::lock_guard commit_lock(ticket.state_->commit_mutex);
+    if (ticket.sequence_ <= ticket.state_->committed_sequence) { DeleteFileW(tmp.c_str()); return false; }
+    if (cancelled && cancelled()) { DeleteFileW(tmp.c_str()); return false; }
+    if (MoveFileExW(tmp.c_str(), file.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        ticket.state_->committed_sequence = ticket.sequence_;
+        return true;
+    }
+    DeleteFileW(tmp.c_str());
+    return false;
 }
 
 SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec) {
@@ -154,15 +206,90 @@ struct ProbeJob {
     HANDLE done = nullptr;
     BOOL ok = FALSE;
     DWORD rtt_ms = 0;
+    HANDLE thread = nullptr;
+    uint32_t slot = 0;
+    bool waiter_started = true;
+    std::atomic<bool> timed_out{false};
+    DWORD timeout_ms = 1500;
+#ifdef PULSE_NET_CACHE_TESTING
+    std::function<bool(const std::wstring&)> hook;
+#endif
+    ~ProbeJob() {
+        if (thread) CloseHandle(thread);
+        if (done) CloseHandle(done);
+    }
 };
+
+constexpr uint32_t kProbeLimit = 4;
+struct ProbePool {
+    std::mutex mutex;
+    std::array<std::shared_ptr<ProbeJob>, kProbeLimit> slots;
+#ifdef PULSE_NET_CACHE_TESTING
+    std::function<bool(const std::wstring&)> hook;
+    DWORD timeout_ms = 1500;
+#endif
+    void ReapLocked() {
+        for (auto& slot : slots)
+            if (slot && !slot->waiter_started && slot->thread &&
+                WaitForSingleObject(slot->thread, 0) == WAIT_OBJECT_0) slot.reset();
+    }
+};
+
+ProbePool& Probes() {
+    // Never destroy IO-owned jobs when an unresponsive provider outlives shutdown.
+    static auto* pool = new ProbePool;
+    return *pool;
+}
 
 DWORD WINAPI ProbeInner(LPVOID param) {
     auto* j = static_cast<ProbeJob*>(param);
     const ULONGLONG t0 = GetTickCount64();
-    WIN32_FILE_ATTRIBUTE_DATA fad{};
-    j->ok = GetFileAttributesExW(j->unc.c_str(), GetFileExInfoStandard, &fad);
+    try {
+#ifdef PULSE_NET_CACHE_TESTING
+        if (j->hook) j->ok = j->hook(j->unc) ? TRUE : FALSE;
+        else
+#endif
+        {
+            WIN32_FILE_ATTRIBUTE_DATA fad{};
+            j->ok = GetFileAttributesExW(j->unc.c_str(), GetFileExInfoStandard, &fad);
+        }
+    } catch (...) { j->ok = FALSE; }
     j->rtt_ms = static_cast<DWORD>(GetTickCount64() - t0);
     SetEvent(j->done);
+    return 0;
+}
+
+void PostProbeResult(const std::shared_ptr<ProbeJob>& job, bool timeout) {
+    try {
+        auto result = std::make_unique<UncProbeResult>();
+        result->probe_id = job->probe_id;
+        result->unc = job->unc;
+        result->rtt_ms = timeout ? 0 : job->rtt_ms;
+        result->status = timeout || !job->ok ? NetStatus::Offline :
+            job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online;
+        if (PostMessageW(job->hwnd, job->msg, 0, reinterpret_cast<LPARAM>(result.get())))
+            result.release();
+    } catch (...) {}
+}
+
+DWORD WINAPI ProbeWaiter(void* parameter) {
+    std::unique_ptr<std::shared_ptr<ProbeJob>> argument(
+        static_cast<std::shared_ptr<ProbeJob>*>(parameter));
+    const auto job = *argument;
+    const bool timeout = WaitForSingleObject(job->done, job->timeout_ms) != WAIT_OBJECT_0;
+    job->timed_out.store(timeout, std::memory_order_release);
+    PostProbeResult(job, timeout);
+    // A logical deadline never releases the physical admission slot or owner.
+    if (WaitForSingleObject(job->thread, INFINITE) != WAIT_OBJECT_0) {
+        auto& pool = Probes();
+        std::lock_guard lock(pool.mutex);
+        job->waiter_started = false;
+        return 0;
+    }
+    if (timeout) PostProbeResult(job, false);
+    auto& pool = Probes();
+    std::lock_guard lock(pool.mutex);
+    if (pool.slots[job->slot] == job) pool.slots[job->slot].reset();
     return 0;
 }
 
@@ -170,50 +297,62 @@ DWORD WINAPI ProbeInner(LPVOID param) {
 
 bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id) {
     if (!hwnd || unc.empty() || probe_id == 0) return false;
-    auto* job = new ProbeJob{};
+    auto& pool = Probes();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    uint32_t slot = 0;
+    while (slot < kProbeLimit && pool.slots[slot]) ++slot;
+    if (slot == kProbeLimit) return false;
+    std::shared_ptr<ProbeJob> job;
+    try {
+        job = std::make_shared<ProbeJob>();
+#ifdef PULSE_NET_CACHE_TESTING
+        job->hook = pool.hook;
+        job->timeout_ms = pool.timeout_ms;
+#endif
+    } catch (...) { return false; }
+    job->slot = slot;
     job->unc = std::move(unc);
     job->probe_id = probe_id;
     job->hwnd = hwnd;
     job->msg = msg;
     job->done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!job->done) {
-        delete job;
+    if (!job->done) return false;
+    pool.slots[slot] = job;
+    job->thread = CreateThread(nullptr, 0, ProbeInner, job.get(), 0, nullptr);
+    if (!job->thread) { pool.slots[slot].reset(); return false; }
+    auto* argument = new (std::nothrow) std::shared_ptr<ProbeJob>(job);
+    HANDLE waiter = argument ? CreateThread(nullptr, 0, ProbeWaiter, argument, 0, nullptr) : nullptr;
+    if (!waiter) {
+        delete argument;
+        job->waiter_started = false;
+        pool.ReapLocked();
         return false;
     }
-    HANDLE thread = CreateThread(nullptr, 0, ProbeInner, job, 0, nullptr);
-    if (!thread) {
-        CloseHandle(job->done);
-        delete job;
-        return false;
-    }
-    std::thread([job, thread]() {
-        const DWORD wait = WaitForSingleObject(job->done, 1500);
-        auto* result = new UncProbeResult{};
-        result->probe_id = job->probe_id;
-        result->unc = job->unc;
-        result->rtt_ms = wait == WAIT_OBJECT_0 ? job->rtt_ms : 0;
-        if (wait != WAIT_OBJECT_0) result->status = NetStatus::Offline;
-        else if (!job->ok) result->status = NetStatus::Offline;
-        else result->status = job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online;
-        const bool timed_out = wait != WAIT_OBJECT_0;
-        if (!PostMessageW(job->hwnd, job->msg, 0, reinterpret_cast<LPARAM>(result)))
-            delete result;
-        WaitForSingleObject(thread, INFINITE);
-        if (timed_out) {
-            auto* final_result = new UncProbeResult{};
-            final_result->probe_id = job->probe_id;
-            final_result->unc = job->unc;
-            final_result->rtt_ms = job->rtt_ms;
-            final_result->status = job->ok ?
-                (job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online) : NetStatus::Offline;
-            if (!PostMessageW(job->hwnd, job->msg, 0, reinterpret_cast<LPARAM>(final_result)))
-                delete final_result;
-        }
-        CloseHandle(thread);
-        CloseHandle(job->done);
-        delete job;
-    }).detach();
+    CloseHandle(waiter);
     return true;
 }
+
+#ifdef PULSE_NET_CACHE_TESTING
+UncProbeResourceUsage UncProbeResourcesForTest() {
+    auto& pool = Probes();
+    std::lock_guard lock(pool.mutex);
+    pool.ReapLocked();
+    UncProbeResourceUsage usage{};
+    usage.limit = kProbeLimit;
+    for (const auto& slot : pool.slots) if (slot) {
+        ++usage.live;
+        if (slot->timed_out.load(std::memory_order_acquire)) ++usage.retired;
+    }
+    return usage;
+}
+
+void SetUncProbeHookForTest(std::function<bool(const std::wstring&)> hook, DWORD timeout_ms) {
+    auto& pool = Probes();
+    std::lock_guard lock(pool.mutex);
+    pool.hook = std::move(hook);
+    pool.timeout_ms = timeout_ms ? timeout_ms : 1;
+}
+#endif
 
 } // namespace pulse::fs

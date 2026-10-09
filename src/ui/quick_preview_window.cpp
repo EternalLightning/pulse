@@ -108,8 +108,9 @@ QuickPreviewWindow::~QuickPreviewWindow() {
 }
 
 bool QuickPreviewWindow::Initialize(HWND owner, UINT navigate_message, UINT open_message,
-                                    UINT command_message) {
+                                    UINT command_message, std::shared_ptr<ThumbnailCache> thumbnails) {
     if (hwnd_) return true;
+    thumbnails_ = thumbnails ? std::move(thumbnails) : std::make_shared<ThumbnailCache>();
     owner_ = owner;
     navigate_message_ = navigate_message;
     open_message_ = open_message;
@@ -202,6 +203,8 @@ void QuickPreviewWindow::RecreateFormats() {
 void QuickPreviewWindow::Show(const QuickPreviewItem& item, bool dark, WindowEffect effect,
                               bool safe_mode) {
     if (!hwnd_ || item.path.empty()) return;
+    thumbnails_->Evict(ThumbnailCache::Consumer::QuickPreview);
+    thumbnails_->SetNotifyWindow(hwnd_, ThumbnailCache::Consumer::QuickPreview);
     item_ = item;
     dark_ = dark;
     effect_ = effect;
@@ -234,6 +237,7 @@ void QuickPreviewWindow::Show(const QuickPreviewItem& item, bool dark, WindowEff
 
 void QuickPreviewWindow::Update(const QuickPreviewItem& item) {
     if (!visible() || item.path.empty()) return;
+    thumbnails_->Evict(ThumbnailCache::Consumer::QuickPreview);
     item_ = item;
     ++generation_;
     handler_immediate_ = false;
@@ -256,7 +260,8 @@ void QuickPreviewWindow::Close() {
     handler_.Hide();
     ResetAnimation();
     ResetView();
-    thumbnails_.Evict();
+    thumbnails_->SetNotifyWindow(nullptr, ThumbnailCache::Consumer::QuickPreview);
+    thumbnails_->Evict(ThumbnailCache::Consumer::QuickPreview);
     preview_pixels_ = 0;
     close_hover_ = false;
     chrome_hover_ = ChromeButton::None;
@@ -1071,10 +1076,11 @@ void QuickPreviewWindow::Render() {
         if (!compositor_.Recover()) return;
         compositor_.RecreateTextFormats(scale_);
         RecreateFormats();
-        thumbnails_.SetDeviceContext(compositor_.Dc());
+        thumbnails_->SetDeviceContext(compositor_.Dc(), ThumbnailCache::Consumer::QuickPreview);
     }
     Resize();
     auto* dc = compositor_.Dc();
+    ThumbnailCache::FrameScope thumbnail_frame(*thumbnails_, ThumbnailCache::Consumer::QuickPreview);
     dc->BeginDraw();
     const bool high_contrast = [] {
         HIGHCONTRASTW value{sizeof(value)};
@@ -1164,11 +1170,12 @@ void QuickPreviewWindow::Render() {
         dc->PushAxisAlignedClip(content, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         const uint32_t requested = waiting_for_frame_ ? requested_frame_ : frame_index_;
         auto draw_at = [&](uint32_t pixels, uint32_t frame) {
-            return thumbnails_.Draw(dc, draw, item_.path, item_.attrs, pixels,
+            return thumbnails_->Draw(dc, draw, item_.path, item_.attrs, pixels,
                 generation_, item_.modified, item_.size, 1.0f, &text, &truncated,
                 &bytes_read, true, &error, nullptr, nullptr, nullptr, nullptr,
                 frame, &reported_frame_count, &reported_delay_ms, &reported_loop_count,
-                &decoded_w_, &decoded_h_, &source_w_, &source_h_);
+                &decoded_w_, &decoded_h_, &source_w_, &source_h_,
+                nullptr, ThumbnailCache::Consumer::QuickPreview);
         };
         PreviewDrawResult result = draw_at(want, requested);
         if (result == PreviewDrawResult::Pending && preview_pixels_ != 0 &&
@@ -1201,12 +1208,13 @@ void QuickPreviewWindow::Render() {
             bool ignored_truncated = false;
             uint32_t ignored_bytes = 0;
             uint32_t ignored_count = 1, ignored_delay = 0, ignored_loop = 0;
-            const auto fallback = thumbnails_.Draw(dc, draw, item_.path, item_.attrs,
+            const auto fallback = thumbnails_->Draw(dc, draw, item_.path, item_.attrs,
                 preview_pixels_ ? preview_pixels_ : want, generation_,
                 item_.modified, item_.size, 1.0f, &ignored_text, &ignored_truncated,
                 &ignored_bytes, true, &ignored_error, nullptr, nullptr, nullptr, nullptr,
                 frame_index_, &ignored_count, &ignored_delay, &ignored_loop,
-                &decoded_w_, &decoded_h_, &source_w_, &source_h_);
+                &decoded_w_, &decoded_h_, &source_w_, &source_h_,
+                nullptr, ThumbnailCache::Consumer::QuickPreview);
             // Keep the displayed frame's HUD while the next frame is decoding.
             if (fallback == PreviewDrawResult::Bitmap) result = fallback;
             status.clear();
@@ -1329,8 +1337,8 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         if (!compositor_.Init(hwnd_)) return -1;
         compositor_.RecreateTextFormats(scale_);
         RecreateFormats();
-        thumbnails_.SetDeviceContext(compositor_.Dc());
-        thumbnails_.SetNotifyWindow(hwnd_);
+        thumbnails_->SetDeviceContext(compositor_.Dc(), ThumbnailCache::Consumer::QuickPreview);
+        thumbnails_->SetNotifyWindow(nullptr, ThumbnailCache::Consumer::QuickPreview);
         handler_.SetNotifyWindow(hwnd_);
         return 0;
     case WM_SIZE:
@@ -1736,7 +1744,9 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         ResetPlayback();
         ResetAnimation();
         handler_.Reset();
-        thumbnails_.Reset();
+        thumbnails_->SetNotifyWindow(nullptr, ThumbnailCache::Consumer::QuickPreview);
+        thumbnails_->Evict(ThumbnailCache::Consumer::QuickPreview);
+        thumbnails_->SetDeviceContext(nullptr, ThumbnailCache::Consumer::QuickPreview);
         DestroyFindEdit();
         close_format_.reset();
         preview_text_format_.reset();

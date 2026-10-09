@@ -1,3 +1,4 @@
+#include "search_banner_layout.h"
 // ui_pane_list.cpp — Pane, list, empty states, columns, and icons.
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
@@ -11,9 +12,9 @@
 #include "pane_header_icons.h"
 #include <bit>
 #include "toolbar_layout.h"
-#include "../app/resource.h"
-#include "../app/places.h"
-#include "../app/search_query.h"
+#include "../common/resource_ids.h"
+#include "../model/places.h"
+#include "../model/search_query.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
 #include <d2d1effects.h>
@@ -980,16 +981,16 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
             bar.message = pane.banner_message;
             bar.kind = static_cast<fluent::InfoBarKind>(std::clamp(pane.banner_kind, 0, 3));
             bar.show_close = false;
-            if (pane.is_content_search) {
+            if (pane.is_content_search || !pane.network_search_root.empty()) {
                 const auto action_bounds = bar.bounds;
-                const float action_width = std::min(144.0f * scale_, (action_bounds.right - action_bounds.left) * 0.4f);
+                const float action_width = SearchBannerActionWidth(action_bounds.right - action_bounds.left, scale_, !pane.network_search_root.empty());
                 bar.trailing_width = action_width / scale_;
                 painter_.DrawInfoBar(bar);
                 fluent::ButtonSpec action;
                 action.bounds = D2D1::RectF(action_bounds.right - action_width, action_bounds.top, action_bounds.right, action_bounds.bottom);
-                action.text = l10n::Get(l10n::StringId::ContentManageShort);
+                action.text = l10n::Get(pane.network_search_root.empty() ? l10n::StringId::ContentManageShort : l10n::StringId::NetworkSearchAdd);
                 action.kind = fluent::ButtonKind::Transparent;
-                action.state.hovered = IsHovered(vm, HitTestResult::ContentIndexManage);
+                action.state.hovered = IsHovered(vm, pane.network_search_root.empty() ? HitTestResult::ContentIndexManage : HitTestResult::NetworkSearchAdd);
                 painter_.DrawButton(action);
             } else painter_.DrawInfoBar(bar);
         }
@@ -1030,7 +1031,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
     }
 
     if (pane.is_query_search) {
-        const app::AdvancedSearchSpec spec = app::ParseSearchQuery(pane.search_query);
+        const model::AdvancedSearchSpec spec = model::ParseSearchQuery(pane.search_query);
         std::wstring labels[5];
         FillSearchFilterChipLabels(pane.search_query, labels);
         float widths[5]{};
@@ -1044,8 +1045,8 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
             chip.state.hovered = IsHovered(vm, HitTestResult::SearchFilter, i) &&
                                  vm.hover_pane_index == pane_index;
             const bool active = (i == 0 && spec.kind != pulse::index::SearchKind::Any) ||
-                                (i == 1 && spec.date != app::DatePreset::Any) ||
-                                (i == 2 && spec.size != app::SizePreset::Any) ||
+                                (i == 1 && spec.date != model::DatePreset::Any) ||
+                                (i == 2 && spec.size != model::SizePreset::Any) ||
                                 (i == 3 && !spec.content.empty());
             chip.state.selected = active;
             chip.state.checked = active;
@@ -1439,7 +1440,7 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 std::max(0.0f, sel.right - sel.left),
                 std::max(0.0f, sel.bottom - sel.top),
                 theme.radius_control * scale_);
-            if (pane_focused) {
+            if (pane_focused && (detailsView || vm.view_mode == ViewMode::List)) {
                 MakeBrush(dc, theme.accent, brAccent_);
                 const float indicator_h = std::min(18*scale_, std::max(0.0f, sel.bottom-sel.top-8*scale_));
                 FillRoundedRect(dc, brAccent_.get(), sel.left + scale_,

@@ -43,9 +43,10 @@ public:
     static bool ExportDiagnosticsElevated(const std::wstring& empty_directory);
 
     // Fire-and-forget. Reply arrives as search_msg (wParam = request id).
-    void SearchAsync(const Query& q, uint32_t id);
+    // Request ids must be unique across consumers sharing this connection.
+    void SearchAsync(const Query& q, uint32_t id, HWND reply = nullptr, UINT reply_message = 0);
     void CancelSession(uint64_t session_id);
-    bool TakeResult(uint32_t id, SearchResult& out);
+    bool TakeResult(uint32_t id, SearchResult& out, HWND reply = nullptr);
 
     bool ServiceInstalled() const;
     bool RequestInstallService(); // one UAC via runas --install
@@ -57,6 +58,7 @@ private:
     void Worker();
     void Writer();
     bool EnsureConnected();
+    void Disconnect();
     bool SpawnHelper();
     bool WriteMsg(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload);
     bool ReadMsg(ipc::MsgHeader& hdr, std::vector<uint8_t>& payload);
@@ -83,6 +85,7 @@ private:
     std::atomic<uint32_t> latest_search_id_{0};
     mutable std::mutex mu_;
     std::wstring status_ = L"索引未连接";
+    std::wstring query_status_;
     bool helper_missing_ = false;
     std::wstring index_path_;
     bool service_mode_ = false;
@@ -100,6 +103,8 @@ private:
     std::map<uint64_t, std::pair<uint32_t, Query>> subscribed_searches_;
     std::vector<uint64_t> cancelled_sessions_;
     std::map<uint64_t, uint32_t> session_requests_;
+    struct Reply { HWND window; UINT message; };
+    std::map<uint32_t, Reply> replies_;
     std::map<uint32_t, SearchResult> results_;
     bool volume_refresh_requested_ = true;
     std::condition_variable pending_cv_;

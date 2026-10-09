@@ -12,10 +12,14 @@ struct FolderSizeValue {
     FolderSizeState state = FolderSizeState::Manual;
     uint64_t bytes = 0;
     bool has_value = false;
+    uint64_t files = 0, dirs = 0;
+    bool counts_valid = false;
+    bool incomplete = false;
 };
 struct FolderSizeRequest {
     std::wstring path;
     bool automatic = true;
+    bool require_counts = false;
 };
 
 // Window-thread methods only exchange in-memory state. Enumeration, watches and
@@ -34,8 +38,12 @@ public:
     void Invalidate(const std::wstring& path);
     bool TakeChanged();
     void Stop();
+#ifdef PULSE_FOLDER_SIZES_TESTING
+    void SetScanHookForTest(std::function<void(const std::wstring&)> hook);
+    static unsigned LiveWorkersForTest();
+#endif
 private:
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
 };
 }

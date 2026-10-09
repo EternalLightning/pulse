@@ -15,12 +15,16 @@ namespace pulse::app {
 namespace {
 
 std::wstring WorkKey(const std::wstring& path, ui::SortColumn col,
-                     ui::SortDirection dir) {
+                     ui::SortDirection dir, FolderSortMode folders, bool preserve_order = false) {
     std::wstring key = path;
     key.push_back(L'\x1f');
     key += std::to_wstring(static_cast<int>(col));
     key.push_back(L':');
     key += std::to_wstring(static_cast<int>(dir));
+    key.push_back(L':');
+    key += std::to_wstring(static_cast<int>(folders));
+    key.push_back(L':');
+    key += preserve_order ? L"1" : L"0";
     return key;
 }
 
@@ -44,6 +48,10 @@ struct WorkerPool::State {
     std::atomic<bool> running{false};
     unsigned live = 0;
     std::unordered_map<std::wstring, uint64_t> current_gen;
+#ifdef PULSE_WORKER_TESTING
+    std::function<void()> cancellation_checkpoint;
+    std::function<void()> cache_write;
+#endif
 };
 
 WorkerPool::WorkerPool() = default;
@@ -106,12 +114,14 @@ void WorkerPool::Stop() {
 }
 
 uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
-                             ui::SortDirection dir) {
+                             ui::SortDirection dir, FolderSortMode folders) {
     const auto state = state_;
     if (!state || !state->running) return 0;
+    const auto cache_write_ticket = fs::ReserveNetSnapshotWrite(path);
     std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->running) return 0;
     uint64_t gen = ++global_gen_;
-    const std::wstring key = WorkKey(path, col, dir);
+    const std::wstring key = WorkKey(path, col, dir, folders);
     state->current_gen[key] = gen;
     // Only supersede the same path+sort request. Separate panes may show the
     // same directory with different sort orders.
@@ -121,21 +131,48 @@ uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
         state->queue.pop();
     }
     state->queue = std::move(filtered);
-    state->queue.push(WorkItem{ path, key, gen, col, dir });
+    WorkItem item{ path, key, gen, col, dir };
+    item.folder_sort = folders;
+    item.cache_write_ticket = cache_write_ticket;
+    state->queue.push(std::move(item));
     state->cv.notify_one();
     return gen;
+}
+
+void WorkerPool::Cancel(const std::wstring& path, uint64_t generation) {
+    const auto state = state_;
+    if (!state || !generation) return;
+    std::lock_guard lock(state->mutex);
+    for (auto it = state->current_gen.begin(); it != state->current_gen.end();) {
+        // WorkKey's final separator always precedes its generated sort suffix;
+        // matching the complete path also handles empty/virtual paths literally.
+        const auto separator = it->first.find_last_of(L'\x1f');
+        if (it->second == generation && separator != std::wstring::npos &&
+            it->first.compare(0, separator, path) == 0)
+            it = state->current_gen.erase(it);
+        else ++it;
+    }
+    std::queue<WorkItem> pending;
+    while (!state->queue.empty()) {
+        auto& item = state->queue.front();
+        if (item.path != path || item.generation != generation) pending.push(std::move(item));
+        state->queue.pop();
+    }
+    state->queue = std::move(pending);
 }
 
 uint64_t WorkerPool::LoadPaths(const std::wstring& view_path,
                                std::vector<std::wstring> paths,
                                ui::SortColumn col, ui::SortDirection dir,
                                bool preserve_order,
-                               std::vector<uint64_t> display_times) {
+                               std::vector<uint64_t> display_times, FolderSortMode folders) {
     const auto state = state_;
     if (!state || !state->running) return 0;
+    const auto cache_write_ticket = fs::ReserveNetSnapshotWrite(view_path);
     std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->running) return 0;
     const uint64_t gen = ++global_gen_;
-    const std::wstring key = WorkKey(view_path, col, dir);
+    const std::wstring key = WorkKey(view_path, col, dir, folders, preserve_order);
     state->current_gen[key] = gen;
     std::queue<WorkItem> filtered;
     while (!state->queue.empty()) {
@@ -144,6 +181,8 @@ uint64_t WorkerPool::LoadPaths(const std::wstring& view_path,
     }
     state->queue = std::move(filtered);
     WorkItem item{ view_path, key, gen, col, dir };
+    item.folder_sort = folders;
+    item.cache_write_ticket = cache_write_ticket;
     item.load_paths = true;
     item.preserve_order = preserve_order;
     item.paths = std::move(paths);
@@ -163,26 +202,36 @@ bool WorkerPool::EnqueueIo(std::function<void()> task, std::function<void()> com
     return true;
 }
 
+bool WorkerPool::IsCancelled(const std::shared_ptr<State>& state, const WorkItem& item) {
+#ifdef PULSE_WORKER_TESTING
+    if (state->cancellation_checkpoint) state->cancellation_checkpoint();
+#endif
+    if (!state->running) return true;
+    std::lock_guard lock(state->mutex);
+    const auto it = state->current_gen.find(item.request_key);
+    return !state->running || it == state->current_gen.end() || it->second != item.generation;
+}
+
 WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkItem& item) {
     WorkResult res;
+    res.sort_column = item.sort_column;
+    res.sort_direction = item.sort_direction;
+    res.folder_sort = item.folder_sort;
+    res.preserve_order = item.preserve_order;
     res.path = item.path;
     res.generation = item.generation;
+    const auto cancelled = [&] { return IsCancelled(state, item); };
+    if (cancelled()) { res.cancelled = true; return res; }
     if (!fs::IsVirtualPath(item.path) && !fs::IsUncPath(item.path))
         res.git_root = FindGitRoot(item.path);
+    if (cancelled()) { res.cancelled = true; return res; }
 
     auto t0 = std::chrono::steady_clock::now();
     auto entries = std::make_shared<std::vector<fs::DirEntry>>();
     if (item.load_paths) {
         entries->reserve(item.paths.size());
         for (size_t i = 0; i < item.paths.size(); ++i) {
-            if ((i & 127u) == 0) {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                const auto it = state->current_gen.find(item.request_key);
-                if (!state->running || it == state->current_gen.end() || it->second != item.generation) {
-                    res.cancelled = true;
-                    return res;
-                }
-            }
+            if (cancelled()) { res.cancelled = true; return res; }
             const std::wstring& full = item.paths[i];
             if (full.empty() || fs::IsVirtualPath(full)) continue;
             fs::DirEntry entry;
@@ -195,8 +244,10 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             entry.name = slash == std::wstring::npos ? leaf : leaf.substr(slash + 1);
             WIN32_FILE_ATTRIBUTE_DATA data{};
             bool ok = GetFileAttributesExW(full.c_str(), GetFileExInfoStandard, &data) != 0;
+            if (cancelled()) { res.cancelled = true; return res; }
             if (!ok && leaf != full)
                 ok = GetFileAttributesExW(leaf.c_str(), GetFileExInfoStandard, &data) != 0;
+            if (cancelled()) { res.cancelled = true; return res; }
             if (ok) {
                 entry.attrs = data.dwFileAttributes;
                 entry.is_dir = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
@@ -217,14 +268,19 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
         try {
             fs::EnumerateRecycleBin(*entries, &res.recycle_info);
         } catch (...) {
+            res.cancelled = cancelled();
             res.error = true;
             res.snapshot = nullptr;
             return res;
         }
     } else {
         try {
-            fs::EnumerateDirectory(item.path, *entries);
+            if (!fs::EnumerateDirectory(item.path, *entries, cancelled)) {
+                res.cancelled = true;
+                return res;
+            }
         } catch (...) {
+            res.cancelled = cancelled();
             res.error = true;
             res.snapshot = nullptr;
             return res;
@@ -234,23 +290,13 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
     res.enum_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     // Check cancellation before sort.
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        auto it = state->current_gen.find(item.request_key);
-        if (it == state->current_gen.end() || it->second != item.generation) {
-            res.cancelled = true;
-            return res;
-        }
-    }
+    if (cancelled()) { res.cancelled = true; return res; }
 
     // Resolve .lnk targets (Recent folder, desktop shortcuts) before display.
     if (!fs::IsRecycleViewPath(item.path)) {
-        ResolveLinksInPlace(item.path, *entries, [&] {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            const auto it = state->current_gen.find(item.request_key);
-            return !state->running || it == state->current_gen.end() || it->second != item.generation;
-        });
+        ResolveLinksInPlace(item.path, *entries, cancelled);
     }
+    if (cancelled()) { res.cancelled = true; return res; }
 
     auto t2 = std::chrono::steady_clock::now();
     // Interruptible sort: check every 8192 comparisons roughly via chunking.
@@ -262,12 +308,9 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             std::sort(entries->begin(), entries->end(),
                 [&](const fs::DirEntry& a, const fs::DirEntry& b) {
                     if ((++comparisons & 8191u) == 0) {
-                        std::lock_guard<std::mutex> lock(state->mutex);
-                        const auto it = state->current_gen.find(item.request_key);
-                        if (!state->running || it == state->current_gen.end() || it->second != item.generation)
-                            throw SortCancelled{};
+                        if (cancelled()) throw SortCancelled{};
                     }
-                    return EntryLess(a, b, item.sort_column, item.sort_direction, item.path);
+                    return EntryLess(a, b, item.sort_column, item.sort_direction, item.folder_sort, item.path);
                 });
         } catch (const SortCancelled&) {
             res.cancelled = true;
@@ -277,17 +320,11 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
     auto t3 = std::chrono::steady_clock::now();
     res.sort_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
 
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        auto it = state->current_gen.find(item.request_key);
-        if (it == state->current_gen.end() || it->second != item.generation) {
-            res.cancelled = true;
-            return res;
-        }
-    }
+    if (cancelled()) { res.cancelled = true; return res; }
 
-    res.snapshot = std::move(entries);
     fs::QueryDirectoryIdentity(item.path, res.identity);
+    if (cancelled()) { res.cancelled = true; return res; }
+    res.snapshot = std::move(entries);
 
     // Timing output for large directories (visible in a debugger or ETW).
     if (res.snapshot && res.snapshot->size() >= 10000) {
@@ -298,6 +335,23 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
     }
 
     return res;
+}
+
+void WorkerPool::Publish(const std::shared_ptr<State>& state, const WorkItem& item, WorkResult res) {
+    if (res.cancelled || IsCancelled(state, item)) return;
+    const std::wstring cache_path = res.path;
+    const fs::SnapshotPtr cache_snapshot = res.snapshot;
+    {
+        std::lock_guard lock(state->callback_mutex);
+        if (!IsCancelled(state, item) && state->callback) {
+            try { state->callback(std::move(res)); } catch (...) {}
+        }
+    }
+    if (!cache_snapshot || !fs::IsUncPath(cache_path) || IsCancelled(state, item)) return;
+#ifdef PULSE_WORKER_TESTING
+    if (state->cache_write) { state->cache_write(); return; }
+#endif
+    fs::SaveNetSnapshot(cache_path, cache_snapshot, [&] { return IsCancelled(state, item); }, item.cache_write_ticket);
 }
 
 void WorkerPool::WorkerThread(std::shared_ptr<State> state) {
@@ -341,18 +395,7 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state) {
         WorkResult res;
         try { res = Process(state, item); }
         catch (...) { res.path = item.path; res.generation = item.generation; res.error = true; }
-        if (!res.cancelled) {
-            const std::wstring cache_path = res.path;
-            fs::SnapshotPtr cache_snapshot = res.snapshot;
-            {
-                std::lock_guard lock(state->callback_mutex);
-                if (state->running && state->callback) {
-                    try { state->callback(std::move(res)); } catch (...) {}
-                }
-            }
-            if (state->running && cache_snapshot && fs::IsUncPath(cache_path))
-                fs::SaveNetSnapshot(cache_path, cache_snapshot);
-        }
+        Publish(state, item, std::move(res));
         // Completed generations no longer participate in cancellation checks.
         // Remove only when no newer request replaced this key while we were
         // processing, so a concurrent refresh remains authoritative.
@@ -364,5 +407,95 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state) {
         }
     }
 }
+
+#ifdef PULSE_WORKER_TESTING
+WorkResult WorkerCancellationTestProbe::Process(WorkItem item, size_t cancel_check, size_t* checks) {
+    item.request_key = WorkKey(item.path, item.sort_column, item.sort_direction,
+                               item.folder_sort, item.preserve_order);
+    auto state = std::make_shared<WorkerPool::State>();
+    state->running = true;
+    state->current_gen[item.request_key] = item.generation;
+    size_t count = 0;
+    std::mutex gate;
+    std::condition_variable changed;
+    bool reached = false, release = false, finished = false;
+    state->cancellation_checkpoint = [&] {
+        ++count;
+        if (cancel_check && count == cancel_check) {
+            std::unique_lock lock(gate);
+            reached = true;
+            changed.notify_all();
+            changed.wait(lock, [&] { return release; });
+        }
+    };
+    WorkResult result;
+    if (!cancel_check) result = WorkerPool::Process(state, item);
+    else {
+        WorkerPool pool;
+        pool.state_ = state;
+        std::thread worker([&] {
+            try { result = WorkerPool::Process(state, item); }
+            catch (...) { result.error = true; }
+            { std::lock_guard lock(gate); finished = true; }
+            changed.notify_all();
+        });
+        {
+            std::unique_lock lock(gate);
+            changed.wait_for(lock, std::chrono::seconds(5), [&] { return reached || finished; });
+        }
+        const std::wstring other_path = L"pulse:another-pane";
+        const auto other_key = WorkKey(other_path, item.sort_column, item.sort_direction, item.folder_sort);
+        { std::lock_guard lock(state->mutex); state->current_gen[other_key] = item.generation + 1; }
+        pool.Cancel(item.path, item.generation);
+        { std::lock_guard lock(gate); release = true; }
+        changed.notify_all();
+        worker.join();
+        if (state->current_gen.find(other_key) == state->current_gen.end())
+            throw std::runtime_error("Cancel removed the other pane's generation");
+    }
+    *checks = count;
+    return result;
+}
+
+bool WorkerCancellationTestProbe::CancelPreservesOtherRequests() {
+    WorkerPool pool;
+    auto state = std::make_shared<WorkerPool::State>();
+    state->running = true;
+    pool.state_ = state;
+    const std::wstring path = L"pulse:literal\npath\x1f";
+    WorkItem old{path, WorkKey(path, ui::SortColumn::Name, ui::SortDirection::Asc,
+                             FolderSortMode::FoldersFirst), 1, ui::SortColumn::Name, ui::SortDirection::Asc};
+    WorkItem other{L"", WorkKey(L"", ui::SortColumn::Name, ui::SortDirection::Asc,
+                               FolderSortMode::FoldersFirst), 1, ui::SortColumn::Name, ui::SortDirection::Asc};
+    WorkItem newer{path, WorkKey(path, ui::SortColumn::Size, ui::SortDirection::Asc,
+                               FolderSortMode::FoldersFirst), 2, ui::SortColumn::Size, ui::SortDirection::Asc};
+    state->current_gen[old.request_key] = old.generation;
+    state->current_gen[other.request_key] = other.generation;
+    state->current_gen[newer.request_key] = newer.generation;
+    state->queue.push(old); state->queue.push(other); state->queue.push(newer);
+    pool.Cancel(path, old.generation);
+    return !state->current_gen.contains(old.request_key) &&
+        state->current_gen.contains(other.request_key) && state->current_gen.contains(newer.request_key) &&
+        state->queue.size() == 2 && state->queue.front().path.empty() && state->queue.back().generation == 2;
+}
+
+void WorkerCancellationTestProbe::Publish(WorkResult result, bool stale, bool replace_in_callback,
+                                         size_t* callbacks, size_t* cache_writes) {
+    auto state = std::make_shared<WorkerPool::State>();
+    state->running = true;
+    const WorkItem item{result.path, L"publication", result.generation,
+                        result.sort_column, result.sort_direction};
+    state->current_gen[item.request_key] = item.generation + (stale ? 1 : 0);
+    state->callback = [&, raw = state.get()](WorkResult) {
+        ++*callbacks;
+        if (replace_in_callback) {
+            std::lock_guard lock(raw->mutex);
+            raw->current_gen[item.request_key] = item.generation + 1;
+        }
+    };
+    state->cache_write = [&] { ++*cache_writes; };
+    WorkerPool::Publish(state, item, std::move(result));
+}
+#endif
 
 } // namespace pulse::app

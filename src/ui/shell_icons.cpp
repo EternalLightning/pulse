@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <array>
+#include <vector>
 
 namespace pulse::ui {
 
@@ -57,6 +58,51 @@ std::wstring LowerExt(const std::wstring& name) {
 
 std::wstring ShellPath(const std::wstring& path) {
     return pulse::path::StripExtendedPathPrefix(path);
+}
+
+bool PaddedIconRect(IWICBitmapSource* source, WICRect& rect) {
+    UINT width = 0;
+    UINT height = 0;
+    if (FAILED(source->GetSize(&width, &height)) || width <= 64 || height <= 64 ||
+        width > 1024 || height > 1024) return false;
+    const UINT stride = width * 4;
+    std::vector<BYTE> pixels(static_cast<size_t>(stride) * height);
+    if (FAILED(source->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()), pixels.data())))
+        return false;
+    UINT left = width;
+    UINT top = height;
+    UINT right = 0;
+    UINT bottom = 0;
+    for (UINT y = 0; y < height; ++y) {
+        for (UINT x = 0; x < width; ++x) {
+            if (pixels[static_cast<size_t>(y) * stride + x * 4 + 3] <= 8) continue;
+            left = std::min(left, x);
+            top = std::min(top, y);
+            right = std::max(right, x + 1);
+            bottom = std::max(bottom, y + 1);
+        }
+    }
+    if (right <= left || bottom <= top ||
+        right - left > width / 2 || bottom - top > height / 2) return false;
+
+    // Legacy handlers may put a 16/32px icon into the 256px jumbo canvas.
+    // Restore its native square frame so scaling does not shrink the artwork.
+    const UINT extent = std::max(right - left, bottom - top);
+    UINT frame = extent;
+    for (const UINT size : {16u, 32u, 48u, 64u, 96u, 128u, 256u, 512u}) {
+        if (size >= extent) {
+            frame = size;
+            break;
+        }
+    }
+    frame = std::min(frame, std::min(width, height));
+    rect.X = std::clamp((static_cast<int>(left + right) - static_cast<int>(frame)) / 2,
+                        0, static_cast<int>(width - frame));
+    rect.Y = std::clamp((static_cast<int>(top + bottom) - static_cast<int>(frame)) / 2,
+                        0, static_cast<int>(height - frame));
+    rect.Width = static_cast<int>(frame);
+    rect.Height = static_cast<int>(frame);
+    return true;
 }
 
 } // namespace
@@ -325,7 +371,15 @@ ComPtr<ID2D1Bitmap> ShellIconCache::BitmapFromIcon(HICON icon) {
                                      WICBitmapPaletteTypeMedianCut))) {
         return bitmap;
     }
-    dc_->CreateBitmapFromWicBitmap(converter.get(), nullptr, &bitmap);
+    WICRect source_rect{};
+    ComPtr<IWICBitmap> cropped;
+    if (PaddedIconRect(converter.get(), source_rect) &&
+        SUCCEEDED(wic_->CreateBitmapFromSourceRect(converter.get(), source_rect.X, source_rect.Y,
+                    source_rect.Width, source_rect.Height, &cropped))) {
+        dc_->CreateBitmapFromWicBitmap(cropped.get(), nullptr, &bitmap);
+    } else {
+        dc_->CreateBitmapFromWicBitmap(converter.get(), nullptr, &bitmap);
+    }
     return bitmap;
 }
 

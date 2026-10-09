@@ -3,7 +3,11 @@
 #pragma once
 #include <windows.h>
 #include <cstdint>
+#include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulse::fs {
@@ -44,7 +48,39 @@ std::wstring ParentPath(const std::wstring& path);
 // "计算图形.dwg.lnk" -> "计算图形.dwg" for display.
 std::wstring StripLnkSuffix(const std::wstring& name);
 
-// Enumerate a directory into out. Throws std::runtime_error on failure.
-void EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out);
+// A filesystem-only, single-directory cursor. Recursion/reparse policy belongs
+// to the caller; empty paths and UNC server roots are not virtual views here.
+// Streaming scans use FindFirst to preserve per-entry scheduling/cancellation;
+// snapshot enumeration retains the NT primary + FindFirst fallback below.
+enum class DirectoryRead { Entry, End, Cancelled };
+class EnumerationError : public std::runtime_error {
+public:
+    EnumerationError(std::string message, DWORD code) : std::runtime_error(std::move(message)), code_(code) {}
+    DWORD Code() const noexcept { return code_; }
+private:
+    DWORD code_;
+};
+class DirectoryEnumerator {
+public:
+    explicit DirectoryEnumerator(const std::wstring& path);
+    ~DirectoryEnumerator();
+    DirectoryEnumerator(DirectoryEnumerator&&) noexcept;
+    DirectoryEnumerator& operator=(DirectoryEnumerator&&) noexcept;
+    DirectoryEnumerator(const DirectoryEnumerator&) = delete;
+    DirectoryEnumerator& operator=(const DirectoryEnumerator&) = delete;
+    // Lazy open; cancellation is checked before open and between entries.
+    // Errors retain API, path and numeric Win32 error.
+    DirectoryRead Next(DirEntry& entry, const std::function<bool()>& cancelled = {});
+    // A successful open may only have yielded dot entries before a read error.
+    bool ReadAny() const noexcept;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Returns false on cooperative cancellation and clears out; failures throw.
+// Cancellation cannot force a blocking filesystem/provider call to return.
+bool EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out,
+                        const std::function<bool()>& cancelled = {});
 
 } // namespace pulse::fs

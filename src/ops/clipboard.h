@@ -6,6 +6,9 @@
 
 namespace pulse::ops {
 
+// An ambiguous COPY|MOVE preference is a copy, never authorization to cut.
+bool PreferredEffectIsCut(uint32_t preferred_effect);
+
 struct ClipboardData {
     std::vector<std::wstring> paths;
     bool cut = false; // CFSTR_PREFERREDDROPEFFECT == DROPEFFECT_MOVE

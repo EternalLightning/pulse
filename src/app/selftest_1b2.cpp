@@ -23,11 +23,13 @@
 #include "../ui/address_search_layout.h"
 #include "search_query.h"
 #include "../common/localization.h"
+#include "../common/user_storage.h"
 #include "app_model.h"
 #include "app_commands.h"
 #include "app_worker.h"
 #include "entry_sort.h"
 #include "snapshot_patch.h"
+#include "tray_metadata.h"
 #include "session.h"
 #include "app_prefs.h"
 #include "default_file_manager.h"
@@ -2716,6 +2718,18 @@ void TestFolderViews() {
           !prefs.folder_views.Set(L"", ViewMode::List) &&
           !prefs.folder_views.Set(L"relative", ViewMode::List),
           L"folder views: virtual and nonabsolute paths are not persisted");
+    const app::FolderSortPrefs size_desc{ui::SortColumn::Size, ui::SortDirection::Desc};
+    prefs.folder_views.SetSort(unc, size_desc.column, size_desc.direction);
+    prefs.folder_views.SetSort(long_path, ui::SortColumn::Type, ui::SortDirection::Asc);
+    Check(prefs.folder_views.FindSort(L"\\\\?\\UNC\\SERVER\\share\\图片\\") == size_desc &&
+          !prefs.folder_views.FindSort(unc + L"\\child"),
+          L"folder sort: path aliases agree and children do not inherit");
+    Check(!prefs.folder_views.SetSort(unc, size_desc.column, size_desc.direction) &&
+          !prefs.folder_views.SetSort(L"pulse:search:test", size_desc.column, size_desc.direction) &&
+          !prefs.folder_views.SetSort(L"relative", size_desc.column, size_desc.direction) &&
+          !prefs.folder_views.SetSort(unc, static_cast<ui::SortColumn>(99), size_desc.direction) &&
+          !prefs.folder_views.SetSort(unc, size_desc.column, static_cast<ui::SortDirection>(99)),
+          L"folder sort: unchanged, virtual and invalid choices are rejected");
     AppPrefs reloaded;
     reloaded.persist = false;
     reloaded.FromJson(prefs.ToJson());
@@ -2723,6 +2737,19 @@ void TestFolderViews() {
           reloaded.folder_views.Find(long_path) == ViewMode::Content &&
           reloaded.folder_views.Find(L"C:\\Pictures\\Work") == ViewMode::Details,
           L"folder views: preferences round trip including UNC, Unicode and long paths");
+    Check(reloaded.folder_views.FindSort(unc) == size_desc &&
+          reloaded.folder_views.FindSort(long_path) ==
+              app::FolderSortPrefs{ui::SortColumn::Type, ui::SortDirection::Asc},
+          L"folder sort: preferences round trip including UNC, Unicode and long paths");
+    for (const auto column : {ui::SortColumn::Name, ui::SortColumn::Mtime, ui::SortColumn::Type,
+                              ui::SortColumn::Size, ui::SortColumn::Path}) {
+        for (const auto direction : {ui::SortDirection::Asc, ui::SortDirection::Desc}) {
+            prefs.folder_views.SetSort(L"C:\\AllSorts", column, direction);
+            reloaded.FromJson(prefs.ToJson());
+            Check(reloaded.folder_views.FindSort(L"C:\\AllSorts") == app::FolderSortPrefs{column, direction},
+                  L"folder sort: every column and direction survives reload");
+        }
+    }
     for (int i = 0; i < 8; ++i) {
         const auto mode = ui::ViewModeFromIndex(i);
         prefs.folder_views.Set(L"C:\\AllModes", mode);
@@ -2732,8 +2759,10 @@ void TestFolderViews() {
     }
     reloaded.FromJson(L"{}");
     Check(!reloaded.folder_views.Find(unc), L"folder views: old preferences load without stale choices");
+    Check(!reloaded.folder_views.FindSort(unc), L"folder sort: old preferences load without stale choices");
     prefs.ResetToDefaults();
     Check(!prefs.folder_views.Find(long_path), L"folder views: reset clears saved choices");
+    Check(!prefs.folder_views.FindSort(long_path), L"folder sort: reset clears saved choices");
 
     auto state = std::make_unique<AppState>();
     state->places.persist = false;
@@ -2756,9 +2785,16 @@ void TestFolderViews() {
         auto* tab = state->pane->ActiveTab();
         StartLoadingPath(*state, *tab, parent);
         SetViewMode(*state, ViewMode::LargeIcons);
+        SetSort(*state, size_desc.column, size_desc.direction);
         tab->NavigateTo(child);
         StartLoadingPath(*state, *tab, child);
         Check(tab->view_mode == ViewMode::Details, L"folder views: navigating into child resets inherited large icons");
+        Check(tab->sort_column == ui::SortColumn::Name && tab->sort_direction == ui::SortDirection::Asc,
+              L"folder sort: child starts with its own default order");
+        SetSort(*state, ui::SortColumn::Name, ui::SortDirection::Asc);
+        Check(state->appPrefs.folder_views.FindSort(child) == app::FolderSortPrefs{},
+              L"folder sort: explicitly choosing the current order also saves it");
+        SetSort(*state, ui::SortColumn::Mtime, ui::SortDirection::Desc);
         SetViewMode(*state, ViewMode::List);
         tab->NavigateTo(grandchild);
         StartLoadingPath(*state, *tab, grandchild);
@@ -2768,14 +2804,41 @@ void TestFolderViews() {
               L"folder views: explicitly choosing the current mode also saves it");
         StartLoadingPath(*state, *tab, tab->GoBack());
         Check(tab->view_mode == ViewMode::List, L"folder views: back restores child mode");
+        Check(tab->sort_column == ui::SortColumn::Mtime && tab->sort_direction == ui::SortDirection::Desc,
+              L"folder sort: back restores child order");
         StartLoadingPath(*state, *tab, tab->GoBack());
         Check(tab->view_mode == ViewMode::LargeIcons, L"folder views: back restores parent mode");
+        Check(tab->sort_column == size_desc.column && tab->sort_direction == size_desc.direction,
+              L"folder sort: back restores parent order");
         StartLoadingPath(*state, *tab, tab->GoForward());
         Check(tab->view_mode == ViewMode::List, L"folder views: forward restores child mode");
-        state->appPrefs.FromJson(state->appPrefs.ToJson());
+        const auto previous_root = storage::DefaultRoot();
+        const auto prefs_root = parent + L"\\prefs-" + std::to_wstring(GetCurrentProcessId());
+        std::error_code prefs_error;
+        std::filesystem::create_directories(prefs_root, prefs_error);
+        storage::OverrideDefaultRootForTesting(prefs_root);
+        state->appPrefs.persist = true;
+        // Exercise the same immediate writes as the display and sort menus.
+        SetViewMode(*state, ViewMode::MediumIcons);
+        SetViewMode(*state, ViewMode::List);
+        SetSort(*state, ui::SortColumn::Type, ui::SortDirection::Asc);
+        SetSort(*state, ui::SortColumn::Mtime, ui::SortDirection::Desc);
+        Check(!prefs_error && GetFileAttributesW((prefs_root + L"\\app.json").c_str()) != INVALID_FILE_ATTRIBUTES,
+              L"folder preferences: menus immediately write isolated app.json");
+        state->appPrefs.folder_views.Clear();
+        state->appPrefs.persist = false;
+        Check(state->appPrefs.Load() && state->appPrefs.folder_views.Find(parent) == ViewMode::LargeIcons &&
+              state->appPrefs.folder_views.FindSort(parent) == size_desc &&
+              state->appPrefs.folder_views.Find(child) == ViewMode::List &&
+              state->appPrefs.folder_views.FindSort(child) ==
+                  app::FolderSortPrefs{ui::SortColumn::Mtime, ui::SortDirection::Desc},
+              L"folder preferences: disk reload restores independent display and sort choices");
+        storage::OverrideDefaultRootForTesting(previous_root);
         tab->view_mode = ViewMode::SmallIcons;
         StartLoadingPath(*state, *tab, parent, PathLoadReason::RestoreSession);
         Check(tab->view_mode == ViewMode::LargeIcons, L"folder views: saved folder choice wins over session mode");
+        Check(tab->sort_column == size_desc.column && tab->sort_direction == size_desc.direction,
+              L"folder sort: reopening after preference reload restores saved order");
         tab->view_mode = ViewMode::Tiles;
         StartLoadingPath(*state, *tab, parent + L"\\legacy", PathLoadReason::RestoreSession);
         Check(tab->view_mode == ViewMode::Tiles, L"folder views: legacy session without folder preference keeps its mode");
@@ -2784,12 +2847,74 @@ void TestFolderViews() {
         Check(tab->view_mode == ViewMode::Tiles, L"folder views: returning to migrated legacy folder preserves its mode");
         state->shot.active = true;
         tab->view_mode = ViewMode::Content;
+        tab->sort_column = ui::SortColumn::Path;
+        tab->sort_direction = ui::SortDirection::Asc;
         StartLoadingPath(*state, *tab, parent);
         Check(tab->view_mode == ViewMode::Content, L"folder views: explicit screenshot mode is respected");
+        Check(tab->sort_column == ui::SortColumn::Path && tab->sort_direction == ui::SortDirection::Asc,
+              L"folder sort: explicit screenshot order is respected");
         state->shot.active = false;
         NewTab(*state, parent);
         Check(ActiveTab(*state)->view_mode == ViewMode::LargeIcons,
               L"folder views: opening a new tab restores saved mode");
+        tab = ActiveTab(*state);
+        Check(tab->sort_column == size_desc.column && tab->sort_direction == size_desc.direction,
+              L"folder sort: opening a new tab restores saved order");
+        app::SidebarEntry downloads;
+        downloads.path = fs::NormalizePath(child);
+        downloads.builtin = static_cast<int>(app::BuiltinQuickAccess::Downloads);
+        state->sidebar.quick_access.push_back(downloads);
+        state->appPrefs.folder_views.SetSort(child, ui::SortColumn::Name, ui::SortDirection::Asc);
+        StartLoadingPath(*state, *tab, child);
+        Check(tab->sort_column == ui::SortColumn::Name && tab->sort_direction == ui::SortDirection::Asc,
+              L"folder sort: saved Downloads choice overrides automatic date sorting");
+        state->appPrefs.folder_views.Clear();
+        StartLoadingPath(*state, *tab, child);
+        Check(tab->sort_column == ui::SortColumn::Mtime && tab->sort_direction == ui::SortDirection::Desc,
+              L"folder sort: Downloads without saved choice retains date default");
+        if (!g_skip_visual) {
+            auto entries = std::make_shared<std::vector<fs::DirEntry>>();
+            for (const auto* name : {L"sample.zip", L"sample.7z", L"notes.txt"}) {
+                fs::DirEntry entry;
+                entry.name = name;
+                entry.full_path = prefs_root + L"\\" + name;
+                entry.attrs = FILE_ATTRIBUTE_NORMAL;
+                WriteUtf8FileAtomic(entry.full_path, L"isolated icon fixture");
+                entries->push_back(std::move(entry));
+            }
+            fs::DirEntry image;
+            image.name = L"image.png";
+            image.full_path = WorkspacePath(L"assets/global-search-logo.png");
+            image.attrs = FILE_ATTRIBUTE_NORMAL;
+            entries->insert(entries->begin(), std::move(image));
+            tab->current_path = parent;
+            tab->loading = false;
+            tab->SetSnapshot(entries);
+            state->renderer.SetIconNotifyWindow(hwnd);
+            for (const bool dark : {true, false}) {
+                state->darkMode = dark;
+                state->scale = dark ? 1.0f : 1.5f;
+                state->compositor.Resize(static_cast<int>(1000 * state->scale), static_cast<int>(700 * state->scale));
+                state->compositor.RecreateTextFormats(state->scale);
+                state->renderer.SetScale(state->scale);
+                tab->view_mode = dark ? ViewMode::LargeIcons : ViewMode::ExtraLargeIcons;
+                ++tab->view_generation;
+                const auto theme = ui::MakeTheme(dark, state->accentColor);
+                auto* dc = state->compositor.Dc();
+                HRESULT draw_result = S_OK;
+                for (int frame = 0; frame < 80 && SUCCEEDED(draw_result); ++frame) {
+                    dc->BeginDraw();
+                    dc->Clear(theme.bg);
+                    state->renderer.Render(BuildVm(*state, false),
+                        D2D1::RectF(0, 0, 1000 * state->scale, 700 * state->scale), theme);
+                    draw_result = dc->EndDraw();
+                    Sleep(25);
+                }
+                const auto shot = parent + (dark ? L"\\icons-large-dark.png" : L"\\icons-extra-large-light-dpi150.png");
+                Check(SUCCEEDED(draw_result) && state->compositor.SaveSnapshot(shot.c_str()),
+                      L"folder icons: settled archive and image view captured for theme and DPI verification");
+            }
+        }
     }
     state->watches.Stop();
     DestroyWindow(hwnd);
@@ -3581,13 +3706,15 @@ void TestQuickAccess() {
         AppendQuickAccessCommand(state, menu, {L"C:\\one", L"C:\\two"});
         Check(menu.size() == 1 && menu[0].command == CmdPinQuickAccess &&
               menu[0].text == L"固定到快速访问", L"quick access: menu label and pin command");
+        AppendQuickAccessCommand(state, menu, {L"C:\\one", L"C:\\two"});
+        Check(menu.size() == 1 && menu[0].command == CmdPinQuickAccess,
+              L"quick access: rebuilding the Pulse command does not append a duplicate");
         state.places.SetQuickAccessPinned({L"C:\\one"}, true);
         menu.clear();
         AppendQuickAccessCommand(state, menu, {L"C:\\one", L"C:\\two"});
         Check(menu.size() == 1 && menu[0].command == CmdPinQuickAccess,
               L"quick access: mixed pin state offers idempotent pin");
         state.places.SetQuickAccessPinned({L"C:\\two"}, true);
-        menu.clear();
         AppendQuickAccessCommand(state, menu, {L"C:\\one", L"C:\\two"});
         Check(menu.size() == 1 && menu[0].command == CmdUnpinQuickAccess &&
               menu[0].text == L"从快速访问取消固定", L"quick access: all pinned offers unpin");
@@ -4903,6 +5030,10 @@ void TestTrayStack() {
         StagingTray folders;
         folders.Collect({dir, dir + L"\\"}, false);
         folders.Collect({dir}, true);
+        std::vector<TrayMetadataResult> folder_facts;
+        for (const auto& request : folders.BeginMetadataQueries()) folder_facts.push_back({request});
+        ResolveTrayMetadata(folder_facts);
+        folders.ApplyMetadataResults(folder_facts);
         Check(folders.batches().size() == 1 && folders.batches()[0].items.size() == 1 &&
               folders.batches()[0].items[0].is_dir && !folders.batches()[0].move_intent,
               L"tray stack: repeated folder keeps one card and its original intent");
@@ -5298,8 +5429,8 @@ void TestDetailsMeta() {
           L"meta: grouped int large");
     Check(FormatAccessMask(FILE_ALL_ACCESS, false) == L"完全控制",
           L"meta: mask full control");
-    Check(FormatAccessMask(FILE_GENERIC_READ | FILE_GENERIC_WRITE, false) == L"修改",
-          L"meta: mask modify");
+    Check(FormatAccessMask(FILE_GENERIC_READ | FILE_GENERIC_WRITE, false) == L"读取、写入",
+          L"meta: read-write without delete is not modify");
     Check(FormatAccessMask(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, true) ==
           L"读取和执行、列出文件夹内容、读取", L"meta: mask read-execute dir");
     Check(FormatAccessMask(FILE_GENERIC_WRITE, false) == L"写入", L"meta: mask write only");
@@ -5613,6 +5744,10 @@ void TestStagingTrayDeletion() {
         Check(tray.batches().empty(), L"tray: deleting final ancestor clears tray");
         const auto source = WorkspacePath(L"src\\app\\app_model.cpp");
         tray.Collect({ source, source, WorkspacePath(L"src\\app\\app_model.h") }, false);
+        std::vector<TrayMetadataResult> tray_facts;
+        for (const auto& request : tray.BeginMetadataQueries()) tray_facts.push_back({request});
+        ResolveTrayMetadata(tray_facts);
+        tray.ApplyMetadataResults(tray_facts);
         const auto size = tray.batches()[0].items[0].size;
         Check(tray.batches()[0].items.size() == 2, L"tray: duplicates within a batch are skipped");
         tray.RemoveItem(0, 1);
@@ -5621,8 +5756,13 @@ void TestStagingTrayDeletion() {
         std::wstring saved;
         tray.ToJson(saved);
         StagingTray restored;
-        Check(restored.FromJson(saved) && restored.batches()[0].total_size == size,
-              L"tray: restored batch retains size accounting");
+        const bool parsed = restored.FromJson(saved);
+        tray_facts.clear();
+        for (const auto& request : restored.BeginMetadataQueries()) tray_facts.push_back({request});
+        ResolveTrayMetadata(tray_facts);
+        restored.ApplyMetadataResults(tray_facts);
+        Check(parsed && restored.batches()[0].total_size == size,
+              L"tray: restored batch resolves size accounting");
         restored.RemoveDeleted({ source });
         Check(restored.batches().empty(), L"tray: deletion also clears restored entries");
         Check(restored.FromJson(L"[{\"move\":false,\"items\":[\"C:\\\\tray-test\\\\folder\\\\\","

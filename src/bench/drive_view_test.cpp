@@ -1,6 +1,6 @@
 #include "../app/app_model.h"
 #include "../app/context_menu.h"
-#include "../app/drive_labels.h"
+#include "../app/drive_label_rename.h"
 #include "../app/entry_sort.h"
 #include "../common/localization.h"
 #include <algorithm>

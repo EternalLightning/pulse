@@ -99,13 +99,25 @@ bool ValidDestination(const std::wstring& original, const std::wstring& payload,
 }
 
 RecycleResult RecycleAuthorized(const std::vector<std::wstring>& paths,
-    const RecycleCancelled& cancelled, const RecycleProgress& progress) {
+    const RecycleCancelled& cancelled, const RecycleProgress& progress,
+    const std::vector<FileIdentity>& expected_identities) {
     RecycleResult result;
     if (paths.empty()) { result.error = E_INVALIDARG; return result; }
+    if (!expected_identities.empty() && expected_identities.size() != paths.size()) {
+        result.error = E_INVALIDARG; return result;
+    }
     for (const auto& requested : paths) {
         if (cancelled && cancelled()) { result.cancelled = true; result.error = HRESULT_FROM_WIN32(ERROR_CANCELLED); break; }
         result.failed_path = requested;
         const auto source_path = path::StripExtendedPathPrefix(requested);
+        const size_t index = static_cast<size_t>(&requested - paths.data());
+        const auto matches_history = [&] {
+            if (expected_identities.empty()) return true;
+            FileIdentity current;
+            return expected_identities[index].Valid() && ReadPathFileIdentity(requested, current) &&
+                current == expected_identities[index];
+        };
+        if (!matches_history()) { result.error = E_ACCESSDENIED; result.identity_mismatch = true; break; }
         FILE_ID_INFO source_id{};
         if (!ReadIdentity(source_path, source_id)) { result.error = E_ACCESSDENIED; break; }
         auto source = Item(source_path, result.error);
@@ -134,6 +146,11 @@ RecycleResult RecycleAuthorized(const std::vector<std::wstring>& paths,
         DWORD cookie = 0;
         result.error = transfer->Advise(&sink, &cookie);
         if (FAILED(result.error)) break; // no unguarded provider/UI fallback
+        if (!matches_history()) {
+            transfer->Unadvise(cookie);
+            result.error = E_ACCESSDENIED; result.identity_mismatch = true;
+            break;
+        }
         IShellItem* destination_raw = nullptr;
         result.error = transfer->RecycleItem(source.get(), bin.get(), TSF_NORMAL, &destination_raw);
         transfer->Unadvise(cookie);

@@ -43,7 +43,12 @@ DWORD ReadDwordFormat(IDataObject* obj, CLIPFORMAT format) {
     if (!obj) return 0;
     FORMATETC fmt{ format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM medium{};
-    if (FAILED(obj->GetData(&fmt, &medium)) || !medium.hGlobal) return 0;
+    if (FAILED(obj->GetData(&fmt, &medium))) return 0;
+    if (medium.tymed != TYMED_HGLOBAL || !medium.hGlobal ||
+        GlobalSize(medium.hGlobal) < sizeof(DWORD)) {
+        ReleaseStgMedium(&medium);
+        return 0;
+    }
     DWORD value = 0;
     if (DWORD* p = static_cast<DWORD*>(GlobalLock(medium.hGlobal))) {
         value = *p;
@@ -100,7 +105,8 @@ std::wstring VolumeRoot(const std::wstring& path) {
 }
 
 DWORD ComputeDropEffect(DWORD key_state, const std::wstring& source_sample,
-                        const std::wstring& dest_dir, DWORD allowed) {
+                        const std::wstring& dest_dir, DWORD allowed,
+                        DWORD preferred_effect) {
     const bool ctrl = (key_state & MK_CONTROL) != 0;
     const bool shift = (key_state & MK_SHIFT) != 0;
     DWORD want;
@@ -111,9 +117,14 @@ DWORD ComputeDropEffect(DWORD key_state, const std::wstring& source_sample,
     } else if (ctrl && shift) {
         want = DROPEFFECT_LINK;
     } else {
-        std::wstring sv = VolumeRoot(source_sample);
-        std::wstring dv = VolumeRoot(dest_dir);
-        want = (!sv.empty() && sv == dv) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+        const DWORD preferred = preferred_effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE);
+        if (preferred == DROPEFFECT_COPY || preferred == DROPEFFECT_MOVE) {
+            want = preferred;
+        } else {
+            std::wstring sv = VolumeRoot(source_sample);
+            std::wstring dv = VolumeRoot(dest_dir);
+            want = (!sv.empty() && sv == dv) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+        }
     }
     if (want & allowed) return want;
     // Fall back to whatever the source allows.
@@ -162,17 +173,7 @@ bool ExtractHDropPaths(IDataObject* obj, std::vector<std::wstring>& out) {
 }
 
 DWORD PreferredDropEffect(IDataObject* obj) {
-    if (!obj) return 0;
-    FORMATETC fmt{ (CLIPFORMAT)PreferredEffectFormat(), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-    STGMEDIUM medium{};
-    if (FAILED(obj->GetData(&fmt, &medium)) || !medium.hGlobal) return 0;
-    DWORD effect = 0;
-    if (DWORD* p = static_cast<DWORD*>(GlobalLock(medium.hGlobal))) {
-        effect = *p;
-        GlobalUnlock(medium.hGlobal);
-    }
-    ReleaseStgMedium(&medium);
-    return effect;
+    return ReadDwordFormat(obj, static_cast<CLIPFORMAT>(PreferredEffectFormat()));
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +561,7 @@ POINT WindowDropTarget::ClientPoint(POINTL pt) const {
 
 HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt,
                                     DWORD* effect) {
+    if (!effect) return E_POINTER;
     sources_.clear();
     preferred_ = 0;
     if (!ExtractHDropPaths(obj, sources_)) {
@@ -567,19 +569,20 @@ HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt
         return S_OK;
     }
     preferred_ = PreferredDropEffect(obj);
-    DWORD allowed = *effect;
-    *effect = cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed)
+    const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
+    *effect = allowed && cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed, preferred_) & allowed
                             : DROPEFFECT_NONE;
     return S_OK;
 }
 
 HRESULT WindowDropTarget::DragOver(DWORD key_state, POINTL pt, DWORD* effect) {
+    if (!effect) return E_POINTER;
     if (sources_.empty()) {
         *effect = DROPEFFECT_NONE;
         return S_OK;
     }
-    DWORD allowed = *effect;
-    *effect = cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed)
+    const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
+    *effect = allowed && cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed, preferred_) & allowed
                             : DROPEFFECT_NONE;
     return S_OK;
 }
@@ -592,12 +595,17 @@ HRESULT WindowDropTarget::DragLeave() {
 }
 
 HRESULT WindowDropTarget::Drop(IDataObject* obj, DWORD key_state, POINTL pt, DWORD* effect) {
+    if (!effect) return E_POINTER;
+    const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
     std::vector<std::wstring> sources;
-    if (!ExtractHDropPaths(obj, sources)) {
+    if (!allowed || !ExtractHDropPaths(obj, sources)) {
         *effect = DROPEFFECT_NONE;
+        DragLeave();
         return S_OK;
     }
-    DWORD performed = cb_.drop ? cb_.drop(sources, ClientPoint(pt), key_state, preferred_)
+    // The dropped object may differ from the object passed to DragEnter.
+    const DWORD preferred = PreferredDropEffect(obj);
+    DWORD performed = cb_.drop ? cb_.drop(sources, ClientPoint(pt), key_state, allowed, preferred) & allowed
                                : DROPEFFECT_NONE;
     *effect = performed;
     // Tell the source what we did (Explorer uses this for move semantics).
@@ -606,9 +614,11 @@ HRESULT WindowDropTarget::Drop(IDataObject* obj, DWORD key_state, POINTL pt, DWO
     medium.tymed = TYMED_HGLOBAL;
     medium.hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
     if (medium.hGlobal) {
-        *static_cast<DWORD*>(GlobalLock(medium.hGlobal)) = performed;
-        GlobalUnlock(medium.hGlobal);
-        if (FAILED(obj->SetData(&fmt, &medium, TRUE))) ReleaseStgMedium(&medium);
+        if (DWORD* value = static_cast<DWORD*>(GlobalLock(medium.hGlobal))) {
+            *value = performed;
+            GlobalUnlock(medium.hGlobal);
+            if (FAILED(obj->SetData(&fmt, &medium, TRUE))) ReleaseStgMedium(&medium);
+        } else ReleaseStgMedium(&medium);
     }
     sources_.clear();
     preferred_ = 0;

@@ -1,6 +1,6 @@
 // advanced_search_dialog.h — Structured search form (no regex).
 #pragma once
-#include "../app/search_query.h"
+#include "../model/search_query.h"
 #include <windows.h>
 #include <d2d1.h>
 #include <string>
@@ -13,7 +13,7 @@ struct AdvancedSearchDialogResult {
 };
 
 AdvancedSearchDialogResult ShowAdvancedSearchDialog(HWND owner,
-                                                    app::AdvancedSearchSpec spec,
+                                                    model::AdvancedSearchSpec spec,
                                                     bool dark,
                                                     D2D1_COLOR_F accent);
 

@@ -1,6 +1,6 @@
 #include "home_catalog.h"
 #include "places.h"
-#include "drive_labels.h"
+#include "../model/drive_labels.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
 #include <shlobj.h>
@@ -101,7 +101,7 @@ void HomeCatalog::Refresh() {
             for (auto& card : state->cards) {
                 for (const auto& [root, label] : state->label_updates) {
                     if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), root))
-                        card.label = DriveDisplayName(root, label);
+                        card.label = model::DriveDisplayName(root, label);
                 }
             }
             if (complete) {
@@ -127,7 +127,7 @@ void HomeCatalog::UpdateDriveLabel(const std::wstring& root, const std::wstring&
     if (state_->loading) state_->label_updates[plain] = label;
     for (auto& card : state_->cards) {
         if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), plain))
-            card.label = DriveDisplayName(root, label);
+            card.label = model::DriveDisplayName(root, label);
     }
     state_->updated = true;
 }
@@ -139,7 +139,7 @@ bool HomeCatalog::Loading() const {
     std::lock_guard lock(state_->mutex);
     return state_->loading;
 }
-void HomeCatalog::Fill(ui::PaneViewModel& pane, const PlacesCatalog* places) const {
+void HomeCatalog::Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* places) const {
     if (!pane.is_home) return;
     std::lock_guard lock(state_->mutex);
     pane.home_cards = state_->cards;

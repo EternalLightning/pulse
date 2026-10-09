@@ -4,7 +4,6 @@
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
 #include <algorithm>
-#include <atomic>
 #include <cwctype>
 #include <string_view>
 
@@ -62,21 +61,11 @@ int EntryNameCompare(const fs::DirEntry& a, const fs::DirEntry& b, std::wstring_
     return cmp != 0 ? cmp : NameCompare(a.name, b.name);
 }
 
-std::atomic<FolderSortMode> g_folder_sort_mode{FolderSortMode::FoldersFirst};
-
 } // namespace
-
-void SetFolderSortMode(FolderSortMode mode) noexcept {
-    g_folder_sort_mode.store(mode, std::memory_order_relaxed);
-}
-
-FolderSortMode CurrentFolderSortMode() noexcept {
-    return g_folder_sort_mode.load(std::memory_order_relaxed);
-}
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
                ui::SortColumn col, ui::SortDirection dir, std::wstring_view parent) {
-    return EntryLess(a, b, col, dir, CurrentFolderSortMode(), parent);
+    return EntryLess(a, b, col, dir, FolderSortMode::FoldersFirst, parent);
 }
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,

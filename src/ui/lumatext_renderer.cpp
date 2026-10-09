@@ -109,6 +109,7 @@ struct LumaTextRenderer::Impl {
         std::uint32_t foreground = 0;
         std::uint32_t background = 0;
         bool dark = false;
+        DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING;
 
         bool operator==(const SurfaceKey&) const = default;
     };
@@ -127,6 +128,7 @@ struct LumaTextRenderer::Impl {
                 (key.dark ? 1u : 0u)));
             combine(std::hash<std::uint32_t>{}(key.foreground));
             combine(std::hash<std::uint32_t>{}(key.background));
+            combine(std::hash<int>{}(static_cast<int>(key.alignment)));
             return value;
         }
     };
@@ -622,6 +624,7 @@ struct LumaTextRenderer::Impl {
             packed_foreground,
             packed_background,
             dark,
+            alignment,
         };
         if (auto cached = surfaces.find(surface_key); cached != surfaces.end()) {
                 TouchSurface(cached);

@@ -19,6 +19,7 @@
 #include <cwctype>
 #include <utility>
 #include <set>
+#include <unordered_map>
 
 namespace pulse::app {
 
@@ -142,7 +143,7 @@ void Tab::PrepareEntryRefresh(bool explicit_refresh) {
 
 fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                          std::vector<std::wstring>& selected_names,
-                                         std::wstring& focus_name) {
+                                         std::wstring& focus_name, FolderSortMode folders) {
     const bool ordinary = !current_path.empty() && !fs::IsVirtualPath(current_path) &&
                           archive_file.empty();
     const bool keep = ordinary && refresh_keeps_order && fresh && snapshot &&
@@ -151,10 +152,20 @@ fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
     fs::SnapshotPtr result = fresh;
     if (keep) {
         result = std::make_shared<std::vector<fs::DirEntry>>(KeepEntryOrder(
-            *snapshot, *fresh, held_renames, sort_column, sort_direction, current_path));
+            *snapshot, *fresh, held_renames, sort_column, sort_direction, current_path, folders));
         PruneEntryRenames(held_renames, *fresh);
     } else {
         held_renames.clear();
+        if (ordinary && fresh) {
+            const auto less = [&](const auto& a, const auto& b) {
+                return EntryLess(a, b, sort_column, sort_direction, folders, current_path);
+            };
+            if (!std::is_sorted(fresh->begin(), fresh->end(), less)) {
+                auto sorted = std::make_shared<std::vector<fs::DirEntry>>(*fresh);
+                std::sort(sorted->begin(), sorted->end(), less);
+                result = std::move(sorted);
+            }
+        }
     }
     refresh_keeps_order = false;
     order_held = keep;
@@ -883,6 +894,44 @@ std::wstring NormalizeTrayPath(const std::wstring& path) {
     return normalized;
 }
 }
+StagingTray::StagingTray(const StagingTray& other) : batches_(other.batches_) {
+    ResetMetadataTickets();
+}
+
+StagingTray& StagingTray::operator=(const StagingTray& other) {
+    if (this != &other) {
+        batches_ = other.batches_;
+        ResetMetadataTickets();
+    }
+    return *this;
+}
+
+StagingTray::StagingTray(StagingTray&& other) : batches_(std::move(other.batches_)) {
+    ResetMetadataTickets();
+}
+
+StagingTray& StagingTray::operator=(StagingTray&& other) {
+    if (this != &other) {
+        batches_ = std::move(other.batches_);
+        ResetMetadataTickets();
+    }
+    return *this;
+}
+
+void StagingTray::ResetMetadataTickets() {
+    for (auto& batch : batches_) {
+        batch.total_size = 0;
+        for (auto& item : batch.items) {
+            item.metadata_ticket = std::make_shared<TrayMetadataTicket>();
+            item.metadata_state = TrayMetadataState::Pending;
+            item.exists = true;
+            item.is_dir = false;
+            item.attrs = 0;
+            item.size = 0;
+        }
+    }
+}
+
 void StagingTray::Collect(const std::vector<std::wstring>& paths, bool move_intent) {
     if (paths.empty()) return;
     std::set<std::wstring, TrayPathLess> seen;
@@ -896,22 +945,6 @@ void StagingTray::Collect(const std::vector<std::wstring>& paths, bool move_inte
         if (p.empty()) continue;
         it.path = NormalizeTrayPath(p);
         if (!seen.insert(it.path).second) continue;
-        // One probe covers existence, icon attrs and the rough size sum.
-        WIN32_FILE_ATTRIBUTE_DATA fad{};
-        if (GetFileAttributesExW(it.path.c_str(), GetFileExInfoStandard, &fad)) {
-            it.exists = true;
-            it.attrs = fad.dwFileAttributes;
-            it.is_dir = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            if (!it.is_dir) {
-                ULARGE_INTEGER sz;
-                sz.LowPart = fad.nFileSizeLow;
-                sz.HighPart = fad.nFileSizeHigh;
-                it.size = sz.QuadPart;
-                batch.total_size += it.size;
-            }
-        } else {
-            it.exists = false;
-        }
         batch.items.push_back(std::move(it));
     }
     if (!batch.items.empty()) batches_.push_back(std::move(batch));
@@ -932,6 +965,55 @@ void StagingTray::RemoveItem(size_t batch_idx, size_t item_idx) {
 }
 
 void StagingTray::Clear() { batches_.clear(); }
+
+std::vector<TrayMetadataRequest> StagingTray::BeginMetadataQueries(size_t limit) {
+    std::vector<TrayMetadataRequest> requests;
+    for (auto& batch : batches_) {
+        for (auto& item : batch.items) {
+            if (requests.size() >= limit) return requests;
+            if (item.metadata_state != TrayMetadataState::Pending) continue;
+            requests.push_back({item.path, item.metadata_ticket});
+            item.metadata_state = TrayMetadataState::Resolving;
+        }
+    }
+    return requests;
+}
+
+void StagingTray::RetryMetadataQueries(const std::vector<TrayMetadataRequest>& requests) {
+    std::unordered_set<const TrayMetadataTicket*> tickets;
+    for (const auto& request : requests)
+        if (const auto ticket = request.ticket.lock()) tickets.insert(ticket.get());
+    for (auto& batch : batches_)
+        for (auto& item : batch.items)
+            if (item.metadata_state == TrayMetadataState::Resolving &&
+                tickets.contains(item.metadata_ticket.get())) item.metadata_state = TrayMetadataState::Pending;
+}
+
+bool StagingTray::ApplyMetadataResults(const std::vector<TrayMetadataResult>& results) {
+    std::unordered_map<const TrayMetadataTicket*, const TrayMetadataResult*> facts;
+    for (const auto& result : results)
+        if (const auto ticket = result.request.ticket.lock()) facts.emplace(ticket.get(), &result);
+    bool changed = false;
+    for (auto& batch : batches_) {
+        for (auto& item : batch.items) {
+            const auto found = facts.find(item.metadata_ticket.get());
+            if (found == facts.end() || item.metadata_state != TrayMetadataState::Resolving ||
+                found->second->request.path != item.path) continue;
+            const auto& result = *found->second;
+            if (result.state != TrayMetadataState::Ready && result.state != TrayMetadataState::Missing &&
+                result.state != TrayMetadataState::Unavailable) continue;
+            batch.total_size -= std::min(batch.total_size, item.size);
+            item.metadata_state = result.state;
+            item.exists = result.state != TrayMetadataState::Missing;
+            item.attrs = result.state == TrayMetadataState::Ready ? result.attrs : 0;
+            item.is_dir = (item.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            item.size = result.state == TrayMetadataState::Ready && !item.is_dir ? result.size : 0;
+            batch.total_size += item.size;
+            changed = true;
+        }
+    }
+    return changed;
+}
 
 void StagingTray::RemoveDeleted(const std::vector<std::wstring>& paths) {
     for (const auto& path : paths) {
@@ -971,77 +1053,28 @@ void StagingTray::ToJson(std::wstring& out) const {
 }
 
 bool StagingTray::FromJson(const std::wstring& in) {
-    batches_.clear();
+    const json::Document doc(in);
+    if (!doc.Is(json::Kind::Array)) return false;
+    std::vector<TrayBatch> parsed;
     std::set<std::wstring, TrayPathLess> seen;
-    // Minimal parser: enough for our own serialization.
-    size_t i = in.find(L'[');
-    if (i == std::wstring::npos) return false;
-    ++i;
-    while (i < in.size()) {
-        while (i < in.size() && (in[i] == L' ' || in[i] == L'\n' || in[i] == L'\r' || in[i] == L'\t' || in[i] == L',')) ++i;
-        if (i >= in.size() || in[i] == L']') break;
-        if (in[i] != L'{') return false;
-        ++i;
+    for (const auto& object : doc.Root().children) {
+        if (object.kind != json::Kind::Object) return false;
         TrayBatch batch;
-        while (i < in.size() && in[i] != L'}') {
-            while (i < in.size() && (in[i] == L' ' || in[i] == L'\n' || in[i] == L'\r' || in[i] == L'\t' || in[i] == L',')) ++i;
-            size_t keyEnd = in.find(L'"', i + 1);
-            if (keyEnd == std::wstring::npos) return false;
-            std::wstring key = in.substr(i + 1, keyEnd - i - 1);
-            i = keyEnd + 1;
-            while (i < in.size() && in[i] != L':') ++i;
-            if (i >= in.size()) return false;
-            ++i;
-            while (i < in.size() && (in[i] == L' ' || in[i] == L'\n' || in[i] == L'\r' || in[i] == L'\t')) ++i;
-            if (key == L"move") {
-                batch.move_intent = (i + 4 <= in.size() && in.compare(i, 4, L"true") == 0);
-                if (batch.move_intent) i += 4; else i += 5;
-            } else if (key == L"items") {
-                while (i < in.size() && in[i] != L'[') ++i;
-                if (i >= in.size()) return false;
-                ++i;
-                while (i < in.size() && in[i] != L']') {
-                    while (i < in.size() && (in[i] == L' ' || in[i] == L'\n' || in[i] == L'\r' || in[i] == L'\t' || in[i] == L',')) ++i;
-                    if (in[i] != L'"') { ++i; continue; }
-                    ++i;
-                    std::wstring path;
-                    while (i < in.size() && in[i] != L'"') {
-                        if (in[i] == L'\\' && i + 1 < in.size()) {
-                            ++i;
-                            if (in[i] == L'n') path += L'\n';
-                            else if (in[i] == L'r') path += L'\r';
-                            else if (in[i] == L't') path += L'\t';
-                            else path += in[i];
-                        } else {
-                            path += in[i];
-                        }
-                        ++i;
-                    }
-                    if (i < in.size()) ++i;
-                    TrayItem it;
-                    if (path.empty()) continue;
-                    it.path = NormalizeTrayPath(path);
-                    if (!seen.insert(it.path).second) continue;
-                    WIN32_FILE_ATTRIBUTE_DATA data{};
-                    it.exists = GetFileAttributesExW(it.path.c_str(),
-                        GetFileExInfoStandard, &data) != FALSE;
-                    it.attrs = it.exists ? data.dwFileAttributes : 0;
-                    it.is_dir = it.exists && (it.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                    if (it.exists && !it.is_dir) {
-                        it.size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) |
-                            data.nFileSizeLow;
-                        batch.total_size += it.size;
-                    }
-                    batch.items.push_back(std::move(it));
-                }
-                if (i < in.size()) ++i;
-            } else {
-                while (i < in.size() && in[i] != L',' && in[i] != L'}') ++i;
-            }
+        batch.move_intent = json::Bool(object.Find(L"move"));
+        const auto* items = object.Find(L"items");
+        if (!items || items->kind != json::Kind::Array) return false;
+        for (const auto& value : items->children) {
+            if (value.kind != json::Kind::String) return false;
+            const auto& path = value.text;
+            TrayItem it;
+            if (path.empty()) continue;
+            it.path = NormalizeTrayPath(path);
+            if (!seen.insert(it.path).second) continue;
+            batch.items.push_back(std::move(it));
         }
-        if (i < in.size()) ++i;
-        if (!batch.items.empty()) batches_.push_back(std::move(batch));
+        if (!batch.items.empty()) parsed.push_back(std::move(batch));
     }
+    batches_ = std::move(parsed);
     return true;
 }
 
@@ -1474,6 +1507,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.header_controls_opacity = pane.header_animation.opacity;
     out.banner_title = tab->banner_title;
     out.banner_message = tab->banner_message;
+    out.network_search_root = tab->network_search_root;
     out.banner_kind = tab->net_readonly ? 2 : 0;
     out.filter_map.reset();
     out.date_groups.reset();
@@ -1484,6 +1518,9 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.can_go_forward = tab->CanGoForward();
     std::wstring virtual_kind;
     ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
+    // Archive titles are labels, not filesystem paths. Breadcrumb clicks need
+    // the full virtual address instead of resolving the title against the CWD.
+    if (virtual_kind == L"archive") out.path = tab->current_path;
     out.is_home = virtual_kind == L"home";
     out.home_collapsed_mask = tab->home_collapsed_mask;
     out.can_go_up = (virtual_kind == L"recycle" || virtual_kind == L"archive")
