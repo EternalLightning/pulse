@@ -79,7 +79,7 @@ void FluentMenuModel::SetItems(std::vector<FluentMenuItem> items) {
 namespace {
 
 bool DisplayEqualItem(const FluentMenuItem& a, const FluentMenuItem& b) {
-    if (a.text != b.text || a.enabled != b.enabled ||
+    if (a.text != b.text ||
         a.toggle != b.toggle || a.secondary != b.secondary || a.checked != b.checked ||
         a.shortcut_inline != b.shortcut_inline || a.shortcut != b.shortcut ||
         a.separator_after != b.separator_after || a.tooltip != b.tooltip ||
@@ -95,6 +95,7 @@ bool DisplayEqualItem(const FluentMenuItem& a, const FluentMenuItem& b) {
 
 void PatchItemCommands(FluentMenuItem& dest, const FluentMenuItem& src) {
     dest.command = src.command;
+    dest.enabled = src.enabled;
     dest.trailing_command = src.trailing_command;
     const size_t n = (std::min)(dest.children.size(), src.children.size());
     for (size_t i = 0; i < n; ++i)
@@ -1567,6 +1568,16 @@ void FluentMenu::RequestFilterRefresh() {
 bool FluentMenu::ReplaceItems(std::vector<FluentMenuItem> items) {
     if (!open_ || animating_out_ || filter_fn_ || !compositor_ || items.empty()) return false;
     if (!model_.PatchCommands(items)) return false;
+    if (const auto* hovered = model_.At(hover_row_); hovered && !hovered->enabled) hover_row_ = -1;
+    if (sub_parent_row_ >= 0) {
+        const auto* parent = model_.At(sub_parent_row_);
+        if (!parent || !parent->enabled || !sub_model_.PatchCommands(parent->children)) CloseSubmenu();
+        else {
+            if (const auto* hovered = sub_model_.At(sub_hover_); hovered && !hovered->enabled) sub_hover_ = -1;
+            if (RenderSub()) PresentSub(255);
+        }
+    }
+    if (Render()) Present(255, present_offset_);
     return true;
 }
 

@@ -203,6 +203,7 @@ void ContextMenuController::Close() {
     com_items_current_ = false;
     com_items_.clear();
     menu_com_items_.clear();
+    menu_layout_com_items_.clear();
     menu_com_token_ = 0;
     static_verbs_.clear();
     extension_.clear();
@@ -246,7 +247,7 @@ bool ContextMenuController::ExecuteShellCommand(
     const std::function<void()>& refresh_folder) {
     if (command >= CmdShellComBase) {
         const uint32_t clicked = static_cast<uint32_t>(command - CmdShellComBase);
-        if (!com_ready_ && wait_until_ready) wait_until_ready();
+        if (!com_items_current_ && wait_until_ready) wait_until_ready();
         if (const auto* item = FindInvokableComItem(clicked)) {
             if (operations_.invoke) operations_.invoke(token_, item->id, item->verb, item->text);
             token_ = 0;
@@ -369,6 +370,7 @@ ContextMenuController::QueryCompletion ContextMenuController::CompleteComQuery(
 std::vector<ShellMenuEntry> ContextMenuController::ComposeEntries(
     ContextMenuPrefs& prefs, bool& prefs_changed) const {
     std::vector<ShellMenuEntry> entries;
+    const auto displayed_com = DisplayedComItems();
     entries.reserve(static_verbs_.size() + com_items_.size());
     for (size_t i = 0; i < static_verbs_.size() && i < static_cast<size_t>(ipc::kMaxStaticVerbParents);
          ++i) {
@@ -394,21 +396,24 @@ std::vector<ShellMenuEntry> ContextMenuController::ComposeEntries(
         }
         entries.push_back(std::move(entry));
     }
-    for (size_t i = 0; i < com_items_.size(); ++i) {
-        const auto& item = com_items_[i];
+    for (size_t i = 0; i < displayed_com.size(); ++i) {
+        const auto& item = displayed_com[i];
         if (item.child) continue;
         if (item.has_children) {
             ShellMenuEntry parent = ComEntry(item);
-            for (size_t j = i + 1; j < com_items_.size() && com_items_[j].child; ++j) {
-                if (com_items_[j].id > 0x7FFF) continue;
-                parent.children.push_back(ComEntry(com_items_[j],
-                    CmdShellComBase + static_cast<int>(com_items_[j].id)));
+            parent.enabled = parent.enabled && com_items_current_;
+            for (size_t j = i + 1; j < displayed_com.size() && displayed_com[j].child; ++j) {
+                if (displayed_com[j].id > 0x7FFF) continue;
+                parent.children.push_back(ComEntry(displayed_com[j],
+                    CmdShellComBase + static_cast<int>(displayed_com[j].id)));
+                parent.children.back().enabled = parent.children.back().enabled && com_items_current_;
             }
             if (!parent.children.empty()) entries.push_back(std::move(parent));
             continue;
         }
         if (item.id > 0x7FFF) continue;
         entries.push_back(ComEntry(item, CmdShellComBase + static_cast<int>(item.id)));
+        entries.back().enabled = entries.back().enabled && com_items_current_;
     }
 
     prefs_changed = false;
@@ -464,7 +469,7 @@ const ops::ShellMenuItem* ContextMenuController::FindComItemIn(
 
 const ops::ShellMenuItem* ContextMenuController::FindInvokableComItem(uint32_t id) const {
     // Cached rows describe presentation; only a displayed snapshot of this session authorizes execution.
-    if (!token_ || menu_com_token_ != token_ || !com_ready_ || !com_items_current_ ||
+    if (!token_ || menu_com_token_ != token_ || !com_items_current_ ||
         id == 0 || id > 0x7FFF) return nullptr;
     const auto* snapshot = FindComItemIn(menu_com_items_, id);
     const auto* live = FindComItem(id);
@@ -477,8 +482,48 @@ const ops::ShellMenuItem* ContextMenuController::FindInvokableComItem(uint32_t i
 
 void ContextMenuController::OpenMenu(std::vector<ui::FluentMenuItem> base_items) {
     base_items_ = std::move(base_items);
-    NotePatchedDisplay();
+    menu_layout_com_items_ = com_items_;
     menu_open_ = true;
+    NotePatchedDisplay();
+}
+
+std::vector<ops::ShellMenuItem> ContextMenuController::DisplayedComItems() const {
+    if (!menu_open_) return com_items_;
+    auto displayed = menu_layout_com_items_;
+    std::unordered_set<uint32_t> used_ids;
+    for (const auto& item : com_items_) if (item.id) used_ids.insert(item.id);
+    uint32_t placeholder = 0x7FFF;
+    for (auto& row : displayed) {
+        const ops::ShellMenuItem* match = nullptr;
+        bool ambiguous = false;
+        if (com_items_current_) {
+            for (const auto& live : com_items_) {
+                if (row.clsid != live.clsid || row.handler != live.handler || row.verb != live.verb ||
+                    row.text != live.text || row.child != live.child || row.has_children != live.has_children) continue;
+                if (match) { ambiguous = true; break; }
+                match = &live;
+            }
+        }
+        if (match && !ambiguous) {
+            const bool separator = row.separator_after;
+            row = *match;
+            row.separator_after = separator;
+        } else {
+            row.enabled = false;
+            // Disabled cached rows still need unique presentation commands when
+            // a current handler has reused their old numeric range.
+            if (row.id && !row.has_children) {
+                while (placeholder && used_ids.contains(placeholder)) --placeholder;
+                if (placeholder) { row.id = placeholder; used_ids.insert(placeholder--); }
+            }
+        }
+    }
+    return displayed;
+}
+
+void ContextMenuController::NotePatchedDisplay() {
+    menu_com_items_ = DisplayedComItems();
+    menu_com_token_ = com_items_current_ ? token_ : 0;
 }
 
 bool ContextMenuController::UpdateCommandState(int command, const std::wstring& text, bool enabled) {

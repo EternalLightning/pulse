@@ -24,6 +24,38 @@ struct IndexClientTestAccess {
     static void Volumes(IndexClient& client, const std::vector<uint8_t>& payload) {
         client.HandleVolumes(payload.data(), payload.size());
     }
+    static void StartWriter(IndexClient& client, int mode) {
+        client.volume_refresh_requested_ = mode == 0 || mode == 4;
+        if (mode == 2) {
+            Query query; query.session_id = 1;
+            client.pending_searches_[1] = {17, query};
+            client.have_pending_ = true;
+        }
+        if (mode == 3) client.cancelled_sessions_.push_back(1);
+        client.connected_ = mode == 4;
+        client.running_ = true;
+        client.writer_ = std::thread([&client] { client.Writer(); });
+    }
+    static uint64_t WriterCpu(IndexClient& client) {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (!GetThreadTimes(client.writer_.native_handle(), &created, &exited, &kernel, &user)) return UINT64_MAX;
+        return (static_cast<uint64_t>(kernel.dwHighDateTime) << 32) + kernel.dwLowDateTime +
+            (static_cast<uint64_t>(user.dwHighDateTime) << 32) + user.dwLowDateTime;
+    }
+    static bool Pending(IndexClient& client, int mode) {
+        std::lock_guard lock(client.mu_);
+        if (mode == 2) return client.have_pending_ && client.pending_searches_.contains(1);
+        if (mode == 3) return client.cancelled_sessions_.size() == 1;
+        return mode == 1 || client.volume_refresh_requested_;
+    }
+    static void ConnectWriter(IndexClient& client, HANDLE pipe) {
+        { std::lock_guard lock(client.pipe_mu_); client.pipe_ = pipe; }
+        {
+            std::lock_guard lock(client.mu_);
+            client.connected_ = true;
+        }
+        client.pending_cv_.notify_one();
+    }
 };
 struct SearchClientRoutingTestPeer {
     static void SetRoots(NetworkAgentClient& client, const std::vector<NetworkRootInfo>& roots) {
@@ -53,6 +85,57 @@ void Check(bool ok, const char* label) {
 bool Posted(HWND window, UINT message, uint32_t id) {
     MSG msg{};
     return PeekMessageW(&msg, window, message, message, PM_REMOVE) && msg.wParam == id;
+}
+
+void WriterIdle() {
+    using pulse::index::IndexClient;
+    using Access = pulse::index::IndexClientTestAccess;
+    const char* labels[]{"disconnected volume request", "disconnected no-work control",
+        "disconnected pending search", "disconnected pending cancellation", "connected failed write"};
+    for (int mode = 0; mode < 5; ++mode) {
+        IndexClient client;
+        Access::StartWriter(client, mode);
+        const auto before = Access::WriterCpu(client);
+        const auto started = GetTickCount64();
+        Sleep(500);
+        const auto after = Access::WriterCpu(client);
+        const auto elapsed = GetTickCount64() - started;
+        const double percent = before != UINT64_MAX && after != UINT64_MAX && after >= before
+            ? static_cast<double>(after - before) / (elapsed * 100.0) : 100.0;
+        std::printf("[INFO] %s single_core_cpu_percent=%.3f\n", labels[mode], percent);
+        Check(percent < 10.0, labels[mode]);
+        const auto stopping = GetTickCount64();
+        client.Stop();
+        Check(GetTickCount64() - stopping < 500, "writer stop wakes the idle or retry wait");
+        Check(Access::Pending(client, mode), "waiting or failed transport retains pending work");
+    }
+    const auto pipe_name = L"\\\\.\\pipe\\pulse-writer-fixture-" + std::to_wstring(GetCurrentProcessId());
+    HANDLE server = CreateNamedPipeW(pipe_name.c_str(), PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE, 1, 4096, 4096, 0, nullptr);
+    HANDLE sender = server == INVALID_HANDLE_VALUE ? INVALID_HANDLE_VALUE :
+        CreateFileW(pipe_name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    Check(server != INVALID_HANDLE_VALUE && sender != INVALID_HANDLE_VALUE, "isolated reconnect transport created");
+    if (sender != INVALID_HANDLE_VALUE) {
+        IndexClient client;
+        Access::StartWriter(client, 0);
+        pulse::index::Query query; query.session_id = 1; query.needle = L"fixture";
+        client.SearchAsync(query, 17);
+        client.CancelSession(2);
+        Access::ConnectWriter(client, sender);
+        pulse::ipc::PipeIoOptions options; options.pending_timeout_ms = 1500;
+        for (const auto expected : {8u, static_cast<unsigned>(pulse::index::REQ_IDX_VOLUMES),
+                                   static_cast<unsigned>(pulse::index::REQ_IDX_SEARCH)}) {
+            pulse::ipc::MsgHeader header{};
+            bool received = pulse::ipc::PipeRead(server, &header, sizeof(header), options);
+            std::vector<uint8_t> payload(received && header.payload_size <= 4096 ? header.payload_size : 0);
+            received = received && header.payload_size <= 4096 &&
+                pulse::ipc::PipeRead(server, payload.data(), static_cast<DWORD>(payload.size()), options);
+            Check(received && header.magic == pulse::index::kIndexMagic && header.type == expected,
+                "reconnection wakes writer and delivers retained cancellation, scope and search");
+        }
+        client.Stop();
+    }
+    if (server != INVALID_HANDLE_VALUE) CloseHandle(server);
 }
 
 std::vector<uint8_t> Response(uint64_t revision, DWORD error, bool incomplete) {
@@ -248,6 +331,10 @@ void Exercise(const char* name, HWND main, HWND popup) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--writer-idle-only") {
+        WriterIdle();
+        return failures ? 1 : 0;
+    }
     const HWND main = CreateWindowExW(0, L"STATIC", L"main", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
     const HWND popup = CreateWindowExW(0, L"STATIC", L"popup", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
     Check(main && popup, "isolated message-only windows created without user data or agents");

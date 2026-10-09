@@ -276,6 +276,24 @@ void SyncColumnStrips(AppState& s) {
     });
 }
 
+uint64_t SharedColumnStripGeneration(AppState& s, const std::wstring& path,
+                                    const app::Tab* excluding, uint64_t generation) {
+    uint64_t shared = 0;
+    const auto consider = [&](const app::ColumnStripColumn& col) {
+        if (col.requested && col.generation && SamePath(col.path, path) &&
+            (!generation || col.generation == generation))
+            shared = (std::max)(shared, col.generation);
+    };
+    ForEachPane(s, [&](app::Pane& pane) {
+        const auto* tab = pane.ActiveTab();
+        if (!tab || tab == excluding || !Eligible(*tab) ||
+            tab->column_strip.for_path != tab->current_path) return;
+        for (const auto& col : tab->column_strip.ancestors) consider(col);
+        consider(tab->column_strip.child);
+    });
+    return shared;
+}
+
 void InvalidateColumnStripPath(AppState& s, const std::wstring& path, fs::SnapshotPtr fresh) {
     const auto update = [&](app::ColumnStripColumn& col) {
         if (!SamePath(col.path, path)) return;

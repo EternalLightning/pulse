@@ -3214,7 +3214,8 @@ void TestDataObject() {
     Check(obj->QueryGetData(&fnamew) == S_OK, L"dnd: FileNameW advertised");
     FORMATETC idl{ (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_SHELLIDLIST), nullptr,
                    DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-    Check(obj->QueryGetData(&idl) == S_OK, L"dnd: Shell IDList advertised");
+    Check(obj->QueryGetData(&idl) == DV_E_FORMATETC,
+          L"dnd: nonexistent paths do not advertise unprepared Shell IDList");
     STGMEDIUM med{};
     bool names_ok = false;
     if (SUCCEEDED(obj->GetData(&fmt, &med)) && med.hGlobal) {

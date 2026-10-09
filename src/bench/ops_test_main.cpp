@@ -1154,6 +1154,69 @@ int wmain(int argc, wchar_t** argv) {
             Check(!error && !Exists(root), L"isolated source reparse fixture cleaned");
             return g_fail ? 1 : 0;
         }
+        if (filter == L"move-undo-source-identity") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            const auto root = SandboxRoot() + L"-move-undo-source-identity-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+            const auto source = root + L"\\src", target = root + L"\\dst";
+            const auto original_folder = source + L"\\folder", moved_folder = target + L"\\folder";
+            const auto held_folder = target + L"\\original-held";
+            std::error_code error;
+            std::filesystem::create_directories(original_folder, error);
+            std::filesystem::create_directories(target, error);
+            if (error) return 2;
+            const char payload[] = "original payload";
+            Check(MakeFile(original_folder + L"\\payload.txt", payload, sizeof(payload)),
+                L"create partial move inverse identity fixture");
+            g_ops.Start([] {});
+            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
+            auto status = RunOp(SimpleOp(ops::OpType::Move, {original_folder.c_str()}, target.c_str()));
+            Check(status.phase == ops::OpPhase::Completed && g_ops.CanUndo(),
+                L"directory move records its inverse");
+            MakeDir(original_folder); // Existing original forces a per-file merge inverse.
+            bool replaced = false;
+            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
+                if (path == moved_folder && !replaced)
+                    replaced = MoveFileW(path.c_str(), held_folder.c_str()) &&
+                        CreateDirectoryW(path.c_str(), nullptr);
+            });
+            const auto previous = g_ops.Status().completed_ops;
+            g_ops.Undo();
+            Check(WaitOpDone(previous), L"partial move inverse finishes after source replacement");
+            status = g_ops.Status();
+            Check(replaced && status.phase == ops::OpPhase::Failed &&
+                status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
+                status.failed_path == moved_folder,
+                L"partial move inverse rejects the replaced source directory identity");
+            Check(Exists(moved_folder) && Exists(held_folder) &&
+                FileSize(original_folder + L"\\payload.txt") == sizeof(payload),
+                L"failed inverse recovery preserves the replacement empty directory and restored file");
+            const auto unresolved = g_ops.UndoToJson();
+            Check(!g_ops.CanUndo() && unresolved.find(L"folder") != std::wstring::npos &&
+                unresolved.find(L"\"sup\":false") != std::wstring::npos,
+                L"identity rejection retains the unresolved inverse without authorizing a replacement retry");
+            const auto rejected_previous = g_ops.Status().completed_ops;
+            g_ops.Undo();
+            Check(g_ops.Status().completed_ops == rejected_previous && Exists(moved_folder),
+                L"repeating rejected Undo does not admit the replacement directory as a new source");
+            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
+            const auto ordinary_folder = source + L"\\ordinary", ordinary_moved = target + L"\\ordinary";
+            MakeDir(ordinary_folder);
+            Check(MakeFile(ordinary_folder + L"\\payload.txt", payload, sizeof(payload)),
+                L"create authenticated directory inverse control");
+            status = RunOp(SimpleOp(ops::OpType::Move, {ordinary_folder.c_str()}, target.c_str()));
+            MakeDir(ordinary_folder);
+            const auto ordinary_previous = g_ops.Status().completed_ops;
+            g_ops.Undo();
+            Check(status.phase == ops::OpPhase::Completed && WaitOpDone(ordinary_previous) &&
+                g_ops.Status().phase == ops::OpPhase::Completed && !Exists(ordinary_moved) &&
+                FileSize(ordinary_folder + L"\\payload.txt") == sizeof(payload),
+                L"authenticated directory inverse still restores files and removes its own empty source");
+            g_ops.Stop();
+            std::filesystem::remove_all(root, error);
+            Check(!error && !Exists(root), L"partial move inverse identity fixture cleaned");
+            return g_fail ? 1 : 0;
+        }
         if (filter == L"source-identity") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             const auto root = SandboxRoot() + L"-source-identity-" + std::to_wstring(GetCurrentProcessId()) +

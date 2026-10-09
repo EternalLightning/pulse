@@ -1,7 +1,7 @@
 // drag_drop.h — OLE drag & drop for the file list.
 //
-// Drag-out: a Shell IDataObject (CF_HDROP + CFSTR_SHELLIDLIST + FileNameW)
-// with FileDataObject as fallback, plus ListDropSource, so drags land in
+// Drag-out: FileDataObject (CF_HDROP + FileNameW + asynchronously prepared
+// CFSTR_SHELLIDLIST), plus ListDropSource, so drags land in
 // Explorer, AutoCAD, and other OLE targets.
 // Drop-in: WindowDropTarget registered on the main window; all hit
 // decisions (folder row / breadcrumb segment / sidebar item / tray) are
@@ -14,10 +14,13 @@
 #include <windows.h>
 #include <objidl.h>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace pulse::ui {
+
+struct ShellIdListState;
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-testable, no OLE).
@@ -75,6 +78,7 @@ public:
 
 private:
     explicit FileDataObject(const std::vector<std::wstring>& paths);
+    ~FileDataObject();
 
     HGLOBAL RenderHDrop() const;
     HGLOBAL RenderDword(DWORD v) const;
@@ -85,7 +89,11 @@ private:
 
     LONG ref_ = 1;
     std::vector<std::wstring> paths_;
+    std::shared_ptr<ShellIdListState> shell_id_list_;
+    DWORD preferred_effect_ = DROPEFFECT_COPY | DROPEFFECT_MOVE;
     DWORD performed_effect_ = 0;
+    struct StoredFormat { CLIPFORMAT format; HGLOBAL data; };
+    std::vector<StoredFormat> stored_formats_;
 };
 
 class ListDropSource final : public IDropSource {
@@ -108,6 +116,17 @@ private:
 // Runs the modal DoDragDrop loop. Returns the performed DROPEFFECT_*.
 DWORD DoFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
                      std::function<bool()> esc_consumed);
+
+#ifdef PULSE_DRAG_DROP_TESTING
+namespace testing {
+using ShellIdListRenderer = HGLOBAL (*)(const std::vector<std::wstring>&);
+void SetShellIdListRenderer(ShellIdListRenderer renderer);
+bool WaitForShellIdListWorker(DWORD timeout_ms);
+using DragLoop = HRESULT (WINAPI *)(IDataObject*, IDropSource*, DWORD, DWORD*);
+DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed,
+                      DragLoop loop);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Drop-in target.

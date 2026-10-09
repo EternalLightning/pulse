@@ -2945,10 +2945,17 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             if (!had_success) continue;
             // Empty ordinary directories can remain after per-file move success.
             // Add them deepest-first as merge inverses, without replaying moved files.
+            bool source_identity_changed = false;
             for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
                 if (!entry->directory || entry->reparse || already_renamed(entry->source) ||
                     !StartsWithPath(entry->source, root->source)) continue;
-                if (!RemoveDirectoryW(entry->source.c_str())) {
+                DWORD cleanup_error = ERROR_SUCCESS;
+                if (!entry->source_identity.Delete(entry->source, cleanup_error, transfer_identity_query_)) {
+                    if (cleanup_error == ERROR_FILE_INVALID) {
+                        fail_win32(cleanup_error, entry->source);
+                        source_identity_changed = true;
+                        break;
+                    }
                     WIN32_FIND_DATAW data{};
                     HANDLE find = FindFirstFileW(JoinPath(entry->source, L"*").c_str(), &data);
                     bool empty = find != INVALID_HANDLE_VALUE;
@@ -2963,6 +2970,13 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                         remaining_original.push_back(entry->destination);
                     }
                 }
+            }
+            if (source_identity_changed) {
+                // Retain the unresolved history, but a retry must not admit the
+                // replacement path as a fresh source for this inverse.
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (req.undo_revision == undo_revision_ && !undo_.empty()) undo_.back().supported = false;
+                continue;
             }
             if (remaining_actual.empty()) {
                 completed_sources.push_back(root->source);

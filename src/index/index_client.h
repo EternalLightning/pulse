@@ -65,7 +65,7 @@ private:
     void HandleStatus(const uint8_t* p, size_t n);
     void HandleSearch(uint32_t id, const uint8_t* p, size_t n);
     void HandleVolumes(const uint8_t* p, size_t n);
-    void FlushPendingSearch();
+    bool FlushPendingSearch();
 
     HWND notify_ = nullptr;
     UINT status_msg_ = 0;

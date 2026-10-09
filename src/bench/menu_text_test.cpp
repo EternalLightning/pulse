@@ -20,6 +20,30 @@ pulse::ui::FluentMenuItem Item(int command, const wchar_t* text) {
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
+    if (argc == 2 && wcscmp(argv[1], L"--command-state") == 0) {
+        FluentMenuModel model;
+        auto pending = Item(8001, L"Shell action");
+        pending.enabled = false;
+        auto parent = Item(0, L"Shell submenu");
+        parent.enabled = false;
+        parent.children.push_back(pending);
+        model.SetItems({pending, parent});
+        model.Layout(nullptr, 1.0f);
+        const auto width = model.WidthPx(), height = model.HeightPx();
+        auto live = pending;
+        live.command = 8257; live.enabled = true;
+        parent.enabled = true; parent.children = {live};
+        Check(model.PatchCommands({live, parent}) && model.At(0)->command == live.command &&
+            model.At(0)->enabled && model.At(1)->enabled && model.At(1)->children.front().enabled &&
+            model.At(1)->children.front().command == live.command,
+            "pending Shell rows and submenu commands enable when the current session arrives");
+        Check(model.WidthPx() == width && model.HeightPx() == height,
+            "enabling current commands preserves popup geometry");
+        live.text = L"Different action";
+        Check(!model.PatchCommands({live, parent}) && model.At(0)->text == pending.text,
+            "command patch still refuses changed captions and preserves the displayed identity");
+        return failures ? 1 : 0;
+    }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const HWND foreground = GetForegroundWindow();

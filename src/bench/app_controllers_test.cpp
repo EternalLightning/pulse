@@ -293,7 +293,26 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
     cache_controller.StartQuery(context, nullptr, {L"C:\\two.txt"}, false, L".txt", false, {}, {});
     const bool seeded = cache_controller.SeedComItemsFromCache();
     cache_controller.OpenMenu({});
+    bool cache_prefs_changed = false;
+    auto pending_display = cache_controller.BuildDisplay(context, {}, cache_prefs_changed);
+    const auto pending_com_enabled = [&](const auto& rows) {
+        for (const auto& row : rows) {
+            if (row.command >= CmdShellComBase && row.enabled) return true;
+            for (const auto& child : row.children)
+                if (child.command >= CmdShellComBase && child.enabled) return true;
+        }
+        return false;
+    };
+    passed &= Report("cached COM presentation is disabled until this session completes",
+        seeded && !pending_com_enabled(pending_display));
+    cache_controller.CompleteComQuery(3, {item}, GetTickCount64(), true);
+    pending_display = cache_controller.BuildDisplay(context, {}, cache_prefs_changed);
+    passed &= Report("current partial COM presentation enables its already queried commands",
+        pending_com_enabled(pending_display));
     cache_controller.CompleteComQuery(3, {item}, GetTickCount64());
+    pending_display = cache_controller.BuildDisplay(context, {}, cache_prefs_changed);
+    passed &= Report("completed current COM presentation enables its command",
+        pending_com_enabled(pending_display));
     cache_controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id), {}, {});
     passed &= Report("cached rows cannot authorize a command in a new session", seeded && invokes == 0);
     cache_controller.StartQuery(context, nullptr, {L"C:\\two.txt"}, false, L".txt", false, {}, {});
@@ -303,6 +322,57 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
     cache_controller.NotePatchedDisplay();
     cache_controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id), {}, {});
     passed &= Report("a patched current-session display can replace cached presentation safely", invokes == 1);
+
+    ContextMenuController partial_controller;
+    uint32_t partial_invokes = 0, partial_waits = 0;
+    ContextMenuController::ShellOperations partial_operations;
+    partial_operations.query = [](auto, HWND, bool, bool, auto) { return 1u; };
+    partial_operations.invoke = [&](uint32_t, uint32_t id, auto, auto) {
+        if (id == item.id) ++partial_invokes;
+    };
+    partial_controller.SetShellOperations(std::move(partial_operations));
+    partial_controller.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
+    partial_controller.CompleteComQuery(1, {item}, GetTickCount64(), true);
+    partial_controller.OpenMenu({});
+    partial_controller.CloseMenu();
+    partial_controller.ExecuteShellCommand(CmdShellComBase + static_cast<int>(item.id),
+        [&] { ++partial_waits; }, {});
+    passed &= Report("displayed current partial command invokes without waiting for unrelated handlers",
+        partial_invokes == 1 && partial_waits == 0);
+
+    ContextMenuController subset_controller;
+    uint32_t subset_queries = 0, subset_invoked = 0, subset_waits = 0;
+    auto missing = item;
+    missing.id = 258; missing.clsid = L"handler-pending"; missing.text = L"Pending action";
+    auto ready = item;
+    ready.id = missing.id;
+    ContextMenuController::ShellOperations subset_operations;
+    subset_operations.query = [&](auto, HWND, bool, bool, auto) { return ++subset_queries; };
+    subset_operations.invoke = [&](uint32_t token, uint32_t id, auto, auto) {
+        if (token == 2) subset_invoked = id;
+    };
+    subset_controller.SetShellOperations(std::move(subset_operations));
+    subset_controller.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
+    subset_controller.CompleteComQuery(1, {item, missing}, GetTickCount64());
+    subset_controller.Close();
+    subset_controller.StartQuery(context, nullptr, {L"C:\\two.txt"}, false, L".txt", false, {}, {});
+    subset_controller.SeedComItemsFromCache();
+    subset_controller.OpenMenu({});
+    bool subset_prefs_changed = false;
+    const auto cached_layout = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    subset_controller.CompleteComQuery(2, {ready}, GetTickCount64(), true);
+    const auto ready_layout = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    passed &= Report("ready partial subset enables its matching cached row while preserving pending rows and geometry",
+        cached_layout.size() == ready_layout.size() && ready_layout.size() >= 3 &&
+        cached_layout[0].text == ready_layout[0].text && cached_layout[1].text == ready_layout[1].text &&
+        !cached_layout[0].enabled && !cached_layout[1].enabled && ready_layout[0].enabled &&
+        !ready_layout[1].enabled && ready_layout[0].command == CmdShellComBase + static_cast<int>(ready.id) &&
+        ready_layout[0].command != ready_layout[1].command);
+    subset_controller.NotePatchedDisplay();
+    subset_controller.CloseMenu();
+    subset_controller.ExecuteShellCommand(ready_layout.front().command, [&] { ++subset_waits; }, {});
+    passed &= Report("partial subset executes only its current exact handler id without waiting for the missing handler",
+        subset_invoked == ready.id && subset_waits == 0);
 
     for (int mode = 0; mode != 4; ++mode) {
         ContextMenuController controller;

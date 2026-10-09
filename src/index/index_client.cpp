@@ -38,7 +38,7 @@ void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstr
 }
 
 void IndexClient::Stop() {
-    running_ = false;
+    { std::lock_guard lock(mu_); running_ = false; }
     pinyin_ready_ = false;
     pending_cv_.notify_all();
     HANDLE pipe = INVALID_HANDLE_VALUE;
@@ -140,8 +140,14 @@ bool IndexClient::EnsureConnected() {
         }
         pipe_ = h;
     }
-    { std::lock_guard<std::mutex> lock(mu_); scope_ready_ = false; pending_searches_=subscribed_searches_; have_pending_=!pending_searches_.empty(); }
-    connected_ = true;
+    {
+        std::lock_guard lock(mu_);
+        scope_ready_ = false;
+        volume_refresh_requested_ = true;
+        pending_searches_ = subscribed_searches_;
+        have_pending_ = !pending_searches_.empty();
+        connected_ = true;
+    }
     helper_missing_ = false;
     pending_cv_.notify_one();
     return true;
@@ -269,12 +275,12 @@ void IndexClient::HandleVolumes(const uint8_t* p, size_t n) {
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
 }
 
-void IndexClient::FlushPendingSearch() {
+bool IndexClient::FlushPendingSearch() {
     Query q;
     uint32_t id = 0;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (pending_searches_.empty()) return;
+        if (pending_searches_.empty()) return true;
         id = pending_searches_.begin()->second.first;
         q = pending_searches_.begin()->second.second;
     }
@@ -296,24 +302,37 @@ void IndexClient::FlushPendingSearch() {
         auto found = pending_searches_.find(q.session_id);
         if (found != pending_searches_.end() && found->second.first == id) pending_searches_.erase(found);
         have_pending_ = !pending_searches_.empty();
+        return true;
     }
+    return false;
 }
 
 void IndexClient::Writer() {
     while (running_) {
         {
             std::unique_lock<std::mutex> lock(mu_);
-            pending_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                [this] { return !running_ || have_pending_ || !cancelled_sessions_.empty() || volume_refresh_requested_; });
+            pending_cv_.wait(lock, [this] {
+                return !running_ || (connected_ &&
+                    (have_pending_ || !cancelled_sessions_.empty() || volume_refresh_requested_));
+            });
             if (!running_) return;
-            if (!have_pending_ && cancelled_sessions_.empty() && !volume_refresh_requested_) continue;
         }
-        if (connected_) {
+        bool failed = false;
+        {
             std::vector<uint64_t> cancelled;
             {std::lock_guard lock(mu_);cancelled.swap(cancelled_sessions_);}
-            for(auto session:cancelled) {ipc::PayloadWriter payload;payload.PutU64(session);WriteMsg(8,0,payload.data());}
+            for (size_t i = 0; i < cancelled.size(); ++i) {
+                ipc::PayloadWriter payload;
+                payload.PutU64(cancelled[i]);
+                if (!WriteMsg(8, 0, payload.data())) {
+                    std::lock_guard lock(mu_);
+                    cancelled_sessions_.insert(cancelled_sessions_.begin(), cancelled.begin() + i, cancelled.end());
+                    failed = true;
+                    break;
+                }
+            }
             bool refresh = false;
-            {
+            if (!failed) {
                 std::lock_guard<std::mutex> lock(mu_);
                 refresh = volume_refresh_requested_;
                 volume_refresh_requested_ = false;
@@ -321,8 +340,16 @@ void IndexClient::Writer() {
             if (refresh && !WriteMsg(REQ_IDX_VOLUMES, 0, {})) {
                 std::lock_guard<std::mutex> lock(mu_);
                 volume_refresh_requested_ = true;
+                failed = true;
             }
-            FlushPendingSearch();
+            if (!failed) failed = !FlushPendingSearch();
+        }
+        if (failed) {
+            // The reader may not have observed a failed transport yet. Pending
+            // work must survive, but must not turn retries into a busy loop.
+            std::unique_lock lock(mu_);
+            pending_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                [this] { return !running_ || !connected_; });
         }
     }
 }
@@ -334,13 +361,14 @@ void IndexClient::Disconnect() {
         CloseHandle(pipe_);
         pipe_ = INVALID_HANDLE_VALUE;
     }
-    connected_ = false;
     pinyin_ready_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
+        connected_ = false;
         query_status_.clear();
         status_ = L"索引连接已断开，正在重新连接…";
     }
+    pending_cv_.notify_all();
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
 }
 

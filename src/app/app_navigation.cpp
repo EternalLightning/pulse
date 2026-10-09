@@ -837,6 +837,8 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
             other->pending_generation == tab.pending_generation)
             shared_request = true;
     });
+    if (!shared_request && tab.pending_generation)
+        shared_request = SharedColumnStripGeneration(s, tab.current_path, &tab, tab.pending_generation) != 0;
     if (!shared_request) s.worker.Cancel(tab.current_path, tab.pending_generation);
     tab.ClearEntryOrderHold();
     tab.pending_created_name.clear();
@@ -955,6 +957,8 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         shared_generation = other->pending_generation;
         shared_snapshot = other->snapshot;
     });
+    if (!shared_generation)
+        shared_generation = SharedColumnStripGeneration(s, normalized, &tab);
 
     uint64_t gen = 0;
     fs::SnapshotPtr snap;

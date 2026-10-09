@@ -2,12 +2,20 @@
 #include "../app/app_column_view.h"
 #include "../app/folder_sizes_ui.h"
 #include "../common/localization.h"
+#include <algorithm>
 #include <cstdio>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <string_view>
 
-int main() {
+int main(int argc, char** argv) {
+    const bool shared_column_only = argc == 2 && std::string_view(argv[1]) == "--shared-column-cancel-only";
+    const bool shared_requests_only = argc == 2 && std::string_view(argv[1]) == "--shared-requests-only";
+    if (argc != 1 && !shared_column_only && !shared_requests_only) {
+        std::fputs("Unknown directory-contract test selector\n", stderr);
+        return 2;
+    }
     using namespace pulse;
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -38,59 +46,6 @@ int main() {
     auto& size_tab = second->view;
     s.window_tabs.Active()->panes.push_back(std::move(second));
     app::RebuildLayoutRoot(*s.window_tabs.Active());
-    const std::wstring path = fs::NormalizePath(L"C:\\pulse-directory-contract-memory");
-    name_tab.current_path = size_tab.current_path = path;
-    size_tab.sort_column = ui::SortColumn::Size;
-    auto facts = std::make_shared<std::vector<fs::DirEntry>>(2);
-    (*facts)[0].name = L"b.txt"; (*facts)[0].size = 1;
-    (*facts)[1].name = L"a.txt"; (*facts)[1].size = 10;
-    for (auto& entry : *facts) entry.attrs = FILE_ATTRIBUTE_NORMAL;
-    name_tab.pending_generation = 1; size_tab.pending_generation = 2;
-    app::WorkResult result{};
-    result.path = path; result.generation = 1; result.snapshot = facts;
-    ApplyWorkerResult(s, result);
-    name_tab.SelectOnly(1);
-    result.generation = 2; result.sort_column = ui::SortColumn::Size;
-    ApplyWorkerResult(s, result);
-    check(name_tab.EntryAt(0).name == L"a.txt" && size_tab.EntryAt(0).name == L"b.txt" &&
-          name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" && facts->at(0).name == L"b.txt",
-          "shared worker completion preserves each pane's order and existing selection");
-    const auto before_sort_generation = name_tab.pending_generation;
-    SetSort(s, ui::SortColumn::Size, ui::SortDirection::Asc);
-    check(name_tab.EntryAt(0).name == L"b.txt" && !name_tab.order_held &&
-          name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" &&
-          name_tab.pending_generation == before_sort_generation && !name_tab.loading,
-          "sort command projects current facts without enumeration or selection loss");
-    name_tab.sort_column = ui::SortColumn::Name;
-    for (auto* tab : {&name_tab, &size_tab}) {
-        tab->column_layout = true;
-        tab->column_strip.for_path = path;
-        app::ColumnStripColumn column;
-        column.path = path; column.snapshot = facts; column.requested = true;
-        tab->column_strip.ancestors.push_back(std::move(column));
-    }
-    SyncColumnStrips(s);
-    auto& name_column = name_tab.column_strip.ancestors.front();
-    auto& size_column = size_tab.column_strip.ancestors.front();
-    check(name_column.snapshot->at(static_cast<size_t>(name_column.rows->at(0))).name == L"a.txt" &&
-          size_column.snapshot->at(static_cast<size_t>(size_column.rows->at(0))).name == L"b.txt",
-          "column source indices use the owning pane's sort projection");
-    result.generation = 10;
-    NoteColumnStripResult(s, result);
-    const auto accepted = name_column.snapshot;
-    result.generation = 9;
-    result.snapshot = std::make_shared<std::vector<fs::DirEntry>>();
-    NoteColumnStripResult(s, result);
-    check(name_column.applied_generation == 10 && name_column.generation == 0 &&
-          name_column.snapshot == accepted && size_column.snapshot == accepted,
-          "older column completion cannot overwrite a newer applied generation");
-    result.generation = 11; result.error = true;
-    name_column.generation = size_column.generation = 11;
-    NoteColumnStripResult(s, result);
-    result.generation = 10; result.error = false; result.snapshot = facts;
-    NoteColumnStripResult(s, result);
-    check(name_column.error && name_column.applied_generation == 11,
-          "newer column error also rejects stale successful completion");
     const auto sharing_case = [&](bool reload) {
         wchar_t cwd[MAX_PATH]{};
         GetCurrentDirectoryW(MAX_PATH, cwd);
@@ -155,8 +110,152 @@ int main() {
         check(DeleteFileW(file_path.c_str()) && RemoveDirectoryW(fixture.c_str()),
               "shared enumeration fixture cleaned");
     };
+    const auto column_sharing_case = [&](bool reload) {
+        wchar_t cwd[MAX_PATH]{};
+        GetCurrentDirectoryW(MAX_PATH, cwd);
+        const auto fixture = std::wstring(cwd) + L"\\bench_data\\column-shared-enumeration-" +
+            std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+        const auto child = fixture + L"\\child";
+        if (!CreateDirectoryW(fixture.c_str(), nullptr) || !CreateDirectoryW(child.c_str(), nullptr)) {
+            check(false, "create isolated column shared enumeration fixture");
+            RemoveDirectoryW(fixture.c_str());
+            return;
+        }
+        std::mutex mutex;
+        std::condition_variable changed;
+        bool release = false;
+        unsigned entered = 0;
+        std::vector<app::WorkResult> results;
+        s.worker.Start([&](app::WorkResult result) {
+            std::lock_guard lock(mutex);
+            results.push_back(std::move(result)); changed.notify_all();
+        });
+        const auto count = (std::min)(4u, (std::max)(2u, std::thread::hardware_concurrency()));
+        for (unsigned i = 0; i < count; ++i) s.worker.EnqueueIo([&] {
+            std::unique_lock lock(mutex);
+            ++entered; changed.notify_all();
+            changed.wait(lock, [&] { return release; });
+        });
+        bool blocked = false;
+        {
+            std::unique_lock lock(mutex);
+            blocked = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered == count; });
+        }
+        s.shot.active = true;
+        name_tab.column_layout = false;
+        name_tab.pending_generation = size_tab.pending_generation = 0;
+        size_tab.current_path = fs::NormalizePath(child);
+        size_tab.column_layout = true;
+        size_tab.column_strip = {};
+        size_tab.column_strip.for_path = size_tab.current_path;
+        size_tab.SetSnapshot(nullptr);
+        app::ColumnStripColumn column;
+        column.path = fs::NormalizePath(fixture);
+        size_tab.column_strip.ancestors.push_back(std::move(column));
+        StartLoadingPath(s, name_tab, fixture);
+        const auto shared = name_tab.pending_generation;
+        SyncColumnStrips(s);
+        const bool borrowed = shared && size_tab.column_strip.ancestors.front().generation == shared;
+        check(blocked && borrowed, "column listing borrows the pane's physically gated pending enumeration");
+        StartLoadingPath(s, name_tab, reload ? fixture : L"pulse:fixture-empty");
+        const bool reload_shared = !reload || name_tab.pending_generation == shared;
+        {
+            std::lock_guard lock(mutex); release = true;
+        }
+        changed.notify_all();
+        {
+            std::unique_lock lock(mutex);
+            changed.wait_for(lock, std::chrono::seconds(5), [&] {
+                return std::any_of(results.begin(), results.end(), [&](const auto& result) {
+                    return result.generation == shared;
+                });
+            });
+        }
+        s.worker.Stop();
+        for (auto& result : results) ApplyWorkerResult(s, result);
+        const auto& completed = size_tab.column_strip.ancestors.front();
+        check(blocked && borrowed && reload_shared && completed.generation == 0 &&
+              completed.snapshot && completed.snapshot->size() == 1 &&
+              completed.snapshot->front().name == L"child" &&
+              completed.applied_generation == shared,
+              reload ? "same-path reload retains an enumeration borrowed by another pane's column" :
+                       "pane navigation retains an enumeration borrowed by another pane's column");
+        s.shot.active = false;
+        size_tab.column_layout = false;
+        size_tab.column_strip = {};
+        s.watches.Stop();
+        check(RemoveDirectoryW(child.c_str()) && RemoveDirectoryW(fixture.c_str()),
+              "column shared enumeration fixture cleaned");
+    };
+    if (shared_column_only || shared_requests_only) {
+        if (shared_requests_only) {
+            sharing_case(false);
+            sharing_case(true);
+        }
+        column_sharing_case(false);
+        column_sharing_case(true);
+        s.watches.Stop();
+        DestroyWindow(s.hwnd); s.hwnd = nullptr;
+        owned.reset(); OleUninitialize();
+        return failures ? 1 : 0;
+    }
+    const std::wstring path = fs::NormalizePath(L"C:\\pulse-directory-contract-memory");
+    name_tab.current_path = size_tab.current_path = path;
+    size_tab.sort_column = ui::SortColumn::Size;
+    auto facts = std::make_shared<std::vector<fs::DirEntry>>(2);
+    (*facts)[0].name = L"b.txt"; (*facts)[0].size = 1;
+    (*facts)[1].name = L"a.txt"; (*facts)[1].size = 10;
+    for (auto& entry : *facts) entry.attrs = FILE_ATTRIBUTE_NORMAL;
+    name_tab.pending_generation = 1; size_tab.pending_generation = 2;
+    app::WorkResult result{};
+    result.path = path; result.generation = 1; result.snapshot = facts;
+    ApplyWorkerResult(s, result);
+    name_tab.SelectOnly(1);
+    result.generation = 2; result.sort_column = ui::SortColumn::Size;
+    ApplyWorkerResult(s, result);
+    check(name_tab.EntryAt(0).name == L"a.txt" && size_tab.EntryAt(0).name == L"b.txt" &&
+          name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" && facts->at(0).name == L"b.txt",
+          "shared worker completion preserves each pane's order and existing selection");
+    const auto before_sort_generation = name_tab.pending_generation;
+    SetSort(s, ui::SortColumn::Size, ui::SortDirection::Asc);
+    check(name_tab.EntryAt(0).name == L"b.txt" && !name_tab.order_held &&
+          name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" &&
+          name_tab.pending_generation == before_sort_generation && !name_tab.loading,
+          "sort command projects current facts without enumeration or selection loss");
+    name_tab.sort_column = ui::SortColumn::Name;
+    for (auto* tab : {&name_tab, &size_tab}) {
+        tab->column_layout = true;
+        tab->column_strip.for_path = path;
+        app::ColumnStripColumn column;
+        column.path = path; column.snapshot = facts; column.requested = true;
+        tab->column_strip.ancestors.push_back(std::move(column));
+    }
+    SyncColumnStrips(s);
+    auto& name_column = name_tab.column_strip.ancestors.front();
+    auto& size_column = size_tab.column_strip.ancestors.front();
+    check(name_column.snapshot->at(static_cast<size_t>(name_column.rows->at(0))).name == L"a.txt" &&
+          size_column.snapshot->at(static_cast<size_t>(size_column.rows->at(0))).name == L"b.txt",
+          "column source indices use the owning pane's sort projection");
+    result.generation = 10;
+    NoteColumnStripResult(s, result);
+    const auto accepted = name_column.snapshot;
+    result.generation = 9;
+    result.snapshot = std::make_shared<std::vector<fs::DirEntry>>();
+    NoteColumnStripResult(s, result);
+    check(name_column.applied_generation == 10 && name_column.generation == 0 &&
+          name_column.snapshot == accepted && size_column.snapshot == accepted,
+          "older column completion cannot overwrite a newer applied generation");
+    result.generation = 11; result.error = true;
+    name_column.generation = size_column.generation = 11;
+    NoteColumnStripResult(s, result);
+    result.generation = 10; result.error = false; result.snapshot = facts;
+    NoteColumnStripResult(s, result);
+    check(name_column.error && name_column.applied_generation == 11,
+          "newer column error also rejects stale successful completion");
     sharing_case(false);
     sharing_case(true);
+    column_sharing_case(false);
+    column_sharing_case(true);
     name_tab.current_path = L"pulse:search:fixture";
     name_tab.pending_generation = 900;
     index::SearchResult partial;

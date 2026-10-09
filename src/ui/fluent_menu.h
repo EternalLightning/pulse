@@ -78,7 +78,7 @@ public:
     const FluentMenuItem* At(int i) const;
     bool LabelTruncated(int i) const;
     std::wstring TooltipText(int i) const;
-    // Copy command ids from src when display text/structure matches. No layout.
+    // Copy command ids and enabled states when text/structure matches. No layout.
     bool PatchCommands(const std::vector<FluentMenuItem>& src);
     // Refresh one live command without moving rows or resizing an open popup.
     bool UpdateCommandState(int command, const std::wstring& text, bool enabled);

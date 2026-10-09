@@ -13,6 +13,7 @@
 #include "../ipc/delete_plan_protocol.h"
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
+#include "ctx_session_process.h"
 #include "deletion_identity.h"
 #include "delete_fileop.h"
 #include "recycle_fileop.h"
@@ -86,6 +87,9 @@ struct HostState {
     std::atomic<bool> running{true};
 } g;
 
+bool g_context_worker = false;
+std::unique_ptr<pulse::shell::ContextSessionProcesses> g_context_processes;
+
 // Crash-only diagnostics (plan §11: crashes are a normal design case).
 // Log under %LOCALAPPDATA%\Pulse: an installed copy lives in Program Files,
 // where the exe directory is not writable for a non-admin user.
@@ -104,7 +108,8 @@ void HostLog(const wchar_t* msg) {
     }
 }
 
-bool SendMsg(uint32_t type, uint32_t request_id, const std::vector<uint8_t>& payload) {
+bool SendMsg(uint32_t type, uint32_t request_id, const std::vector<uint8_t>& payload,
+             const PipeIoOptions& options = {}) {
     MsgHeader h;
     h.type = type;
     h.request_id = request_id;
@@ -112,9 +117,10 @@ bool SendMsg(uint32_t type, uint32_t request_id, const std::vector<uint8_t>& pay
     // Header + payload under one lock: ctx session threads write concurrently
     // with the main STA, an interleaved frame would desync the whole pipe.
     std::lock_guard<std::mutex> lock(g.write_mutex);
-    if (!PipeWrite(g.pipe, reinterpret_cast<const uint8_t*>(&h), sizeof(h))) return false;
+    if (!g.running.load()) return false;
+    if (!PipeWrite(g.pipe, reinterpret_cast<const uint8_t*>(&h), sizeof(h), options)) return false;
     if (!payload.empty())
-        return PipeWrite(g.pipe, payload.data(), (DWORD)payload.size());
+        return PipeWrite(g.pipe, payload.data(), (DWORD)payload.size(), options);
     return true;
 }
 
@@ -875,13 +881,18 @@ DWORD WINAPI ReaderThreadImpl() {
                 break;
             }
             case REQ_CTX_QUERY: {
-                StartCtxSession(h.request_id, payload.data(), payload.size());
+                if (g_context_processes) g_context_processes->Query(h.request_id, std::move(payload));
+                else StartCtxSession(h.request_id, payload.data(), payload.size());
                 break;
             }
             case REQ_CTX_INVOKE: {
                 PayloadReader r(payload.data(), payload.size());
                 ContextInvokePayload invocation;
                 if (ReadContextInvokePayload(r, invocation)) {
+                    if (g_context_processes) {
+                        g_context_processes->Invoke(invocation.session, h.request_id, std::move(payload));
+                        break;
+                    }
                     auto* inv = new CtxInvokeMsg{ h.request_id, invocation.item, std::move(invocation.verb),
                                                   std::move(invocation.text) };
                     PostCtxMessage(invocation.session, WM_CTX_INVOKE, 0,
@@ -894,8 +905,10 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_CTX_CLOSE: {
                 PayloadReader r(payload.data(), payload.size());
                 uint32_t session = 0;
-                if (r.GetU32(session))
-                    PostCtxMessage(session, WM_CTX_CLOSE, 0, 0);
+                if (r.GetU32(session)) {
+                    if (g_context_processes) g_context_processes->Close(session);
+                    else PostCtxMessage(session, WM_CTX_CLOSE, 0, 0);
+                }
                 break;
             }
             case REQ_DELETE_RECYCLE:
@@ -906,6 +919,10 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_NEW_FOLDER:
             case REQ_NEW_FILE:
             case REQ_RESTORE_RECYCLE: {
+                if (g_context_worker) {
+                    SendDone(h.request_id, E_ACCESSDENIED, false, L"Context workers cannot perform file operations");
+                    break;
+                }
                 auto* req = new Request();
                 req->type = h.type;
                 req->id = h.request_id;
@@ -1164,6 +1181,23 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
 
     const ULONGLONG t0 = GetTickCount64();
     pulse::shell::CtxBind bind;
+#ifdef PULSE_CONTEXT_PROCESS_TESTING
+    const bool fixture = w->paths.size() == 1 && w->paths.front() == L":pulse-context-process-test:";
+    if (fixture && w->desc.name == L"fixture-hang") Sleep(INFINITE);
+    if (fixture && w->desc.name == L"fixture-slow") Sleep(400);
+    if (fixture) {
+        CtxItemOut item;
+        item.id = w->id_first; item.verb = L"fixture-ready";
+        item.text = std::to_wstring(GetCurrentProcessId());
+        w->items.push_back(item);
+        item.id++; item.verb = L"fixture-invoke-hang";
+        w->items.push_back(item);
+        item.id++; item.verb = L"fixture-modeless";
+        w->items.push_back(item);
+        item.id++; item.verb = L"fixture-launch-child";
+        w->items.push_back(item);
+    } else
+#endif
     if (pulse::shell::BindCtxSelection(w->paths, w->background, bind)) {
         const HRESULT hr = pulse::shell::QueryOneHandler(
             w->desc, bind, w->owner, w->id_first, w->id_last, w->qcm_flags, w->slot);
@@ -1175,10 +1209,13 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
     w->elapsed_ms = static_cast<uint32_t>(GetTickCount64() - t0);
     if (w->done_event) SetEvent(w->done_event);
 
+    bool invocation_finished = false;
+    ULONGLONG invoke_finished_at = 0;
     for (;;) {
         HANDLE waits[1] = { w->exit_event };
-        const DWORD n = w->exit_event ? 1 : 0;
-        MsgWaitForMultipleObjects(n, n ? waits : nullptr, FALSE, INFINITE, QS_ALLINPUT);
+        const DWORD n = w->exit_event && !invocation_finished ? 1 : 0;
+        MsgWaitForMultipleObjects(n, n ? waits : nullptr, FALSE,
+            invocation_finished ? 100 : INFINITE, QS_ALLINPUT);
         const bool exiting = w->exit_event &&
             WaitForSingleObject(w->exit_event, 0) == WAIT_OBJECT_0;
         bool invoked = false;
@@ -1190,6 +1227,37 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
                 d.owner = w->owner;
                 d.paths = w->paths;
                 d.background = w->background;
+#ifdef PULSE_CONTEXT_PROCESS_TESTING
+                if (fixture && pulse::shell::FindItemId(w->items, inv->item_id,
+                        inv->verb, inv->text, w->id_first, w->id_last)) {
+                    std::wstring result;
+                    HRESULT fixture_result = S_OK;
+                    if (inv->verb == L"fixture-invoke-hang") {
+                        const auto name = L"Local\\Pulse.ContextInvokeEntered." + std::to_wstring(GetCurrentProcessId());
+                        HANDLE entered = OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str());
+                        if (entered) { SetEvent(entered); CloseHandle(entered); }
+                        Sleep(INFINITE);
+                    }
+                    if (inv->verb == L"fixture-modeless") {
+                        const auto title = L"Pulse Context Modeless " + std::to_wstring(GetCurrentProcessId());
+                        CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", title.c_str(), WS_POPUP | WS_VISIBLE,
+                            -30000, -30000, 100, 100, w->owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+                    }
+                    if (inv->verb == L"fixture-launch-child") {
+                        wchar_t executable[32768]{};
+                        GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable)));
+                        auto command = L"\"" + std::wstring(executable) + L"\" --context-test-child";
+                        STARTUPINFOW startup{sizeof(startup)};
+                        PROCESS_INFORMATION child{};
+                        if (CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE,
+                                CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child)) {
+                            result = std::to_wstring(child.dwProcessId);
+                            CloseHandle(child.hThread); CloseHandle(child.hProcess);
+                        } else fixture_result = HRESULT_FROM_WIN32(GetLastError());
+                    }
+                    SendDone(inv->invoke_req_id, fixture_result, false, result);
+                } else
+#endif
                 if (w->slot.menu && pulse::shell::FindItemId(w->items, inv->item_id,
                         inv->verb, inv->text, w->id_first, w->id_last))
                     CtxInvoke(d, w->slot.menu, w->id_first, inv->invoke_req_id, inv->item_id);
@@ -1204,7 +1272,14 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
                 DispatchMessageW(&msg);
             }
         }
-        if (invoked || exiting) break;
+        if (invoked) {
+            invocation_finished = true;
+            invoke_finished_at = GetTickCount64();
+        }
+        if (invocation_finished) {
+            if (GetTickCount64() - invoke_finished_at >= 750 &&
+                !pulse::shell::ContextProcessHasVisibleWindows(GetCurrentProcessId())) break;
+        } else if (exiting) break;
     }
     pulse::shell::ReleaseHandlerSlot(w->slot);
     CoUninitialize();
@@ -1282,6 +1357,13 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
 
     auto handlers = pulse::shell::EnumerateCtxHandlers(
         data->background, data->paths.front(), data->disabled_clsids);
+#ifdef PULSE_CONTEXT_PROCESS_TESTING
+    if (data->paths.size() == 1 && data->paths.front() == L":pulse-context-process-test:") {
+        handlers = {{ {}, L"fixture-ready", L"fixture-ready" },
+                    { {}, L"fixture-hang", L"fixture-hang" },
+                    { {}, L"fixture-slow", L"fixture-slow" }};
+    }
+#endif
     if (handlers.size() > MAXIMUM_WAIT_OBJECTS)
         handlers.resize(MAXIMUM_WAIT_OBJECTS);
 
@@ -1329,14 +1411,18 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
 
     if (!workers.empty()) {
         bool sent_partial = false;
+        size_t published_workers = 0;
         while (!all_workers_done() && !SessionCloseRequested(sid)) {
             pump_session_messages();
-            if (SessionCloseRequested(sid)) break;
+            if (SessionCloseRequested(sid) || pending_invoke) break;
             const ULONGLONG elapsed = GetTickCount64() - started;
-            if (!sent_partial && elapsed >= kFastBudgetMs) {
+            const size_t completed_workers = static_cast<size_t>(std::count_if(workers.begin(), workers.end(),
+                [&](const auto& worker) { return worker && worker_done(*worker); }));
+            if (elapsed >= kFastBudgetMs && (!sent_partial || completed_workers != published_workers)) {
                 items = collect_items();
                 SendCtxItems(sid, items, CTX_ITEMS_PARTIAL);
                 sent_partial = true;
+                published_workers = completed_workers;
             }
             std::vector<HANDLE> waits;
             waits.reserve(workers.size());
@@ -1579,6 +1665,12 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
+#ifdef PULSE_CONTEXT_PROCESS_TESTING
+    if (__argc == 2 && wcscmp(__wargv[1], L"--context-test-child") == 0) {
+        Sleep(INFINITE);
+        return 0;
+    }
+#endif
     pulse::crash::Initialize({pulse::crash::ProcessRole::Shell, false, {}});
     // IFileOperation creates its conflict/confirmation UI in this process.
     // Declare PMv2 before COM or any HWND exists so Windows does not bitmap-scale
@@ -1586,7 +1678,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     pulse::compat::EnableDpiAwareness();
 
     DWORD ui_pid = GetCurrentProcessId();
-    if (__argc > 1) {
+    uint32_t worker_session = 0;
+    if (__argc == 4 && wcscmp(__wargv[1], L"--context-worker") == 0) {
+        g_context_worker = true;
+        ui_pid = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
+        worker_session = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));
+        if (!ui_pid || !worker_session) return 1;
+    } else if (__argc > 1) {
         ui_pid = (DWORD)_wtoi(__wargv[1]);
         if (ui_pid == 0) ui_pid = GetCurrentProcessId();
     }
@@ -1595,7 +1693,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hr)) return 1;
 
-    std::wstring pipe_name = PipeNameFor(ui_pid);
+    std::wstring pipe_name = g_context_worker
+        ? pulse::shell::ContextWorkerPipeName(ui_pid, worker_session) : PipeNameFor(ui_pid);
     pulse::CurrentUserSecurityAttributes pipe_security;
     if (!pipe_security) {
         HostLog(L"Cannot create pipe security descriptor");
@@ -1626,6 +1725,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
         return 3;
     }
 
+    if (!g_context_worker) {
+        wchar_t executable[32768]{};
+        if (!GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable)))) return 4;
+        g_context_processes = std::make_unique<pulse::shell::ContextSessionProcesses>(executable,
+            [](uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
+                PipeIoOptions options;
+                options.pending_timeout_ms = 2000;
+                if (g.running.load()) SendMsg(type, id, payload, options);
+            });
+    }
     HANDLE reader = CreateThread(nullptr, 0, ReaderThread, nullptr, 0, nullptr);
     if (ui_pid != GetCurrentProcessId()) {
         HANDLE wd = CreateThread(nullptr, 0, ParentWatchdog,
@@ -1641,6 +1750,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
 
     g.running.store(false);
     CancelIoEx(g.pipe, nullptr); // unblock reader thread's pending I/O
+    if (g_context_processes) g_context_processes->Stop();
     if (reader) {
         WaitForSingleObject(reader, 2000);
         CloseHandle(reader);

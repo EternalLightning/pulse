@@ -5,14 +5,59 @@
 #include <shobjidl.h>
 #include <shlguid.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cwctype>
+#include <thread>
 #include <vector>
 
 namespace pulse::ui {
 
+struct ShellIdListState {
+    std::atomic<HGLOBAL> data = nullptr;
+    ~ShellIdListState() {
+        if (HGLOBAL value = data.load()) GlobalFree(value);
+    }
+};
+
 namespace {
+
+HGLOBAL BuildShellIdList(const std::vector<std::wstring>& paths);
+std::atomic_bool shell_worker_busy = false;
+using ShellIdListRenderer = HGLOBAL (*)(const std::vector<std::wstring>&);
+#ifdef PULSE_DRAG_DROP_TESTING
+ShellIdListRenderer shell_renderer = BuildShellIdList;
+#endif
+
+std::shared_ptr<ShellIdListState> PrepareShellIdList(const std::vector<std::wstring>& paths) {
+    auto state = std::make_shared<ShellIdListState>();
+    // A stuck provider occupies this single slot. Later drags still have HDROP;
+    // they do not queue more work or wait for the provider during shutdown.
+    if (paths.empty() || shell_worker_busy.exchange(true)) return state;
+#ifdef PULSE_DRAG_DROP_TESTING
+    const auto renderer = shell_renderer;
+#else
+    const auto renderer = BuildShellIdList;
+#endif
+    try {
+        std::thread([state, paths, renderer] {
+            const HRESULT initialized = OleInitialize(nullptr);
+            if (SUCCEEDED(initialized)) {
+                try {
+                    state->data.store(renderer(paths));
+                } catch (...) {
+                    // Shell formats are optional; the paths remain available.
+                }
+                OleUninitialize();
+            }
+            shell_worker_busy.store(false);
+        }).detach();
+    } catch (...) {
+        shell_worker_busy.store(false);
+    }
+    return state;
+}
 
 UINT PreferredEffectFormat() {
     static UINT fmt = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
@@ -56,33 +101,6 @@ DWORD ReadDwordFormat(IDataObject* obj, CLIPFORMAT format) {
     }
     ReleaseStgMedium(&medium);
     return value;
-}
-
-HRESULT CreateShellFilesDataObject(const std::vector<std::wstring>& paths,
-                                   IDataObject** out) {
-    if (!out) return E_POINTER;
-    *out = nullptr;
-    if (paths.empty()) return E_INVALIDARG;
-    std::vector<PIDLIST_ABSOLUTE> pidls;
-    pidls.reserve(paths.size());
-    for (const auto& path : paths) {
-        PIDLIST_ABSOLUTE pidl = nullptr;
-        if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, nullptr)) || !pidl) {
-            for (auto* p : pidls) CoTaskMemFree(p);
-            return E_FAIL;
-        }
-        pidls.push_back(pidl);
-    }
-    IShellItemArray* array = nullptr;
-    HRESULT hr = SHCreateShellItemArrayFromIDLists(
-        static_cast<UINT>(pidls.size()),
-        const_cast<PCIDLIST_ABSOLUTE_ARRAY>(pidls.data()),
-        &array);
-    for (auto* p : pidls) CoTaskMemFree(p);
-    if (FAILED(hr) || !array) return FAILED(hr) ? hr : E_FAIL;
-    hr = array->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(out));
-    array->Release();
-    return hr;
 }
 
 } // namespace
@@ -181,10 +199,9 @@ DWORD PreferredDropEffect(IDataObject* obj) {
 // ---------------------------------------------------------------------------
 namespace {
 
-constexpr ULONG kFormatCount = 6;
-
 class FormatEnumerator final : public IEnumFORMATETC {
 public:
+    explicit FormatEnumerator(bool shell_id_list) : count_(shell_id_list ? 6 : 5) {}
     IFACEMETHODIMP QueryInterface(REFIID riid, void** out) override {
         if (!out) return E_POINTER;
         if (riid == IID_IUnknown || riid == IID_IEnumFORMATETC) {
@@ -203,7 +220,7 @@ public:
     }
     IFACEMETHODIMP Next(ULONG count, FORMATETC* out, ULONG* fetched) override {
         ULONG n = 0;
-        while (n < count && pos_ < kFormatCount) {
+        while (n < count && pos_ < count_) {
             out[n] = Format(pos_);
             ++pos_;
             ++n;
@@ -212,7 +229,7 @@ public:
         return n == count ? S_OK : S_FALSE;
     }
     IFACEMETHODIMP Skip(ULONG count) override {
-        const ULONG remaining = pos_ < kFormatCount ? kFormatCount - pos_ : 0;
+        const ULONG remaining = pos_ < count_ ? count_ - pos_ : 0;
         ULONG skipped = (std::min)(count, remaining);
         pos_ += skipped;
         return skipped == count ? S_OK : S_FALSE;
@@ -220,7 +237,7 @@ public:
     IFACEMETHODIMP Reset() override { pos_ = 0; return S_OK; }
     IFACEMETHODIMP Clone(IEnumFORMATETC** out) override {
         if (!out) return E_POINTER;
-        auto* clone = new FormatEnumerator();
+        auto* clone = new FormatEnumerator(count_ == 6);
         clone->pos_ = pos_;
         *out = clone;
         return S_OK;
@@ -244,6 +261,7 @@ private:
     }
     LONG ref_ = 1;
     ULONG pos_ = 0;
+    ULONG count_ = 0;
 };
 
 } // namespace
@@ -251,7 +269,12 @@ private:
 // ---------------------------------------------------------------------------
 // FileDataObject
 // ---------------------------------------------------------------------------
-FileDataObject::FileDataObject(const std::vector<std::wstring>& paths) : paths_(paths) {}
+FileDataObject::FileDataObject(const std::vector<std::wstring>& paths)
+    : paths_(paths), shell_id_list_(PrepareShellIdList(paths)) {}
+
+FileDataObject::~FileDataObject() {
+    for (const auto& format : stored_formats_) GlobalFree(format.data);
+}
 
 FileDataObject* FileDataObject::Create(const std::vector<std::wstring>& paths) {
     return new FileDataObject(paths);
@@ -328,10 +351,17 @@ HGLOBAL FileDataObject::RenderFileNameA() const {
 }
 
 HGLOBAL FileDataObject::RenderShellIdList() const {
-    if (paths_.empty()) return nullptr;
+    const HGLOBAL prepared = shell_id_list_->data.load();
+    return prepared ? OleDuplicateData(prepared, static_cast<CLIPFORMAT>(ShellIdListFormat()), 0) : nullptr;
+}
+
+namespace {
+
+HGLOBAL BuildShellIdList(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) return nullptr;
     std::vector<PIDLIST_ABSOLUTE> pidls;
-    pidls.reserve(paths_.size());
-    for (const auto& path : paths_) {
+    pidls.reserve(paths.size());
+    for (const auto& path : paths) {
         PIDLIST_ABSOLUTE pidl = nullptr;
         if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, nullptr)) || !pidl) {
             for (auto* p : pidls) CoTaskMemFree(p);
@@ -400,6 +430,8 @@ HGLOBAL FileDataObject::RenderShellIdList() const {
     return h;
 }
 
+} // namespace
+
 bool FileDataObject::IsSupportedFormat(const FORMATETC* fmt) const {
     if (!fmt || fmt->dwAspect != DVASPECT_CONTENT) return false;
     if ((fmt->tymed & TYMED_HGLOBAL) == 0) return false;
@@ -408,7 +440,10 @@ bool FileDataObject::IsSupportedFormat(const FORMATETC* fmt) const {
            fmt->cfFormat == (CLIPFORMAT)PerformedEffectFormat() ||
            fmt->cfFormat == (CLIPFORMAT)FileNameWFormat() ||
            fmt->cfFormat == (CLIPFORMAT)FileNameFormat() ||
-           fmt->cfFormat == (CLIPFORMAT)ShellIdListFormat();
+           (fmt->cfFormat == (CLIPFORMAT)ShellIdListFormat() && shell_id_list_->data.load()) ||
+           std::any_of(stored_formats_.begin(), stored_formats_.end(), [&](const auto& stored) {
+               return stored.format == fmt->cfFormat;
+           });
 }
 
 HRESULT FileDataObject::QueryGetData(FORMATETC* fmt) {
@@ -423,16 +458,23 @@ HRESULT FileDataObject::GetData(FORMATETC* fmt, STGMEDIUM* out) {
     if (fmt->cfFormat == CF_HDROP) {
         h = RenderHDrop();
     } else if (fmt->cfFormat == (CLIPFORMAT)PreferredEffectFormat()) {
-        h = RenderDword(DROPEFFECT_COPY | DROPEFFECT_MOVE);
+        h = RenderDword(preferred_effect_);
     } else if (fmt->cfFormat == (CLIPFORMAT)PerformedEffectFormat()) {
         h = RenderDword(performed_effect_);
     } else if (fmt->cfFormat == (CLIPFORMAT)FileNameWFormat()) {
         h = RenderFileNameW();
     } else if (fmt->cfFormat == (CLIPFORMAT)FileNameFormat()) {
         h = RenderFileNameA();
-    } else {
+    } else if (fmt->cfFormat == (CLIPFORMAT)ShellIdListFormat()) {
         h = RenderShellIdList();
         if (!h) return E_FAIL;
+    } else {
+        for (const auto& stored : stored_formats_) {
+            if (stored.format == fmt->cfFormat) {
+                h = OleDuplicateData(stored.data, stored.format, 0);
+                break;
+            }
+        }
     }
     if (!h) return E_OUTOFMEMORY;
     out->tymed = TYMED_HGLOBAL;
@@ -442,13 +484,27 @@ HRESULT FileDataObject::GetData(FORMATETC* fmt, STGMEDIUM* out) {
 
 HRESULT FileDataObject::SetData(FORMATETC* fmt, STGMEDIUM* medium, BOOL release) {
     if (!fmt || !medium) return E_INVALIDARG;
-    if (fmt->cfFormat != (CLIPFORMAT)PerformedEffectFormat() &&
-        fmt->cfFormat != (CLIPFORMAT)PreferredEffectFormat())
-        return DV_E_FORMATETC;
     if (medium->tymed != TYMED_HGLOBAL || !medium->hGlobal) return DV_E_TYMED;
-    if (DWORD* p = static_cast<DWORD*>(GlobalLock(medium->hGlobal))) {
-        performed_effect_ = *p;
+    if (fmt->cfFormat == (CLIPFORMAT)PerformedEffectFormat() ||
+        fmt->cfFormat == (CLIPFORMAT)PreferredEffectFormat()) {
+        if (GlobalSize(medium->hGlobal) < sizeof(DWORD)) return DV_E_FORMATETC;
+        auto* p = static_cast<DWORD*>(GlobalLock(medium->hGlobal));
+        if (!p) return E_FAIL;
+        if (fmt->cfFormat == (CLIPFORMAT)PerformedEffectFormat()) performed_effect_ = *p;
+        else preferred_effect_ = *p;
         GlobalUnlock(medium->hGlobal);
+    } else {
+        // Explorer and the drag-image helper write private feedback formats.
+        HGLOBAL copy = OleDuplicateData(medium->hGlobal, fmt->cfFormat, 0);
+        if (!copy) return E_OUTOFMEMORY;
+        auto found = std::find_if(stored_formats_.begin(), stored_formats_.end(), [&](const auto& stored) {
+            return stored.format == fmt->cfFormat;
+        });
+        if (found == stored_formats_.end()) stored_formats_.push_back({fmt->cfFormat, copy});
+        else {
+            GlobalFree(found->data);
+            found->data = copy;
+        }
     }
     if (release) ReleaseStgMedium(medium);
     return S_OK;
@@ -457,7 +513,7 @@ HRESULT FileDataObject::SetData(FORMATETC* fmt, STGMEDIUM* medium, BOOL release)
 HRESULT FileDataObject::EnumFormatEtc(DWORD dir, IEnumFORMATETC** out) {
     if (!out) return E_POINTER;
     if (dir != DATADIR_GET) return E_NOTIMPL;
-    *out = new FormatEnumerator();
+    *out = new FormatEnumerator(shell_id_list_->data.load() != nullptr);
     return S_OK;
 }
 
@@ -490,45 +546,67 @@ HRESULT ListDropSource::QueryContinueDrag(BOOL escape_pressed, DWORD key_state) 
     return S_OK;
 }
 
-DWORD DoFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
-                     std::function<bool()> esc_consumed) {
+namespace {
+
+DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
+                      std::function<bool()> esc_consumed,
+                      HRESULT (WINAPI *loop)(IDataObject*, IDropSource*, DWORD, DWORD*)) {
     if (paths.empty()) return DROPEFFECT_NONE;
 
-    IDataObject* data = nullptr;
-    FileDataObject* fallback = nullptr;
-    if (FAILED(CreateShellFilesDataObject(paths, &data)) || !data) {
-        fallback = FileDataObject::Create(paths);
-        data = fallback;
-    } else {
-        FORMATETC fmt{ (CLIPFORMAT)PreferredEffectFormat(), nullptr, DVASPECT_CONTENT, -1,
-                       TYMED_HGLOBAL };
-        STGMEDIUM medium{};
-        medium.tymed = TYMED_HGLOBAL;
-        medium.hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
-        if (medium.hGlobal) {
-            *static_cast<DWORD*>(GlobalLock(medium.hGlobal)) = allowed_effects;
+    auto* data = FileDataObject::Create(paths);
+    FORMATETC fmt{ (CLIPFORMAT)PreferredEffectFormat(), nullptr, DVASPECT_CONTENT, -1,
+                   TYMED_HGLOBAL };
+    STGMEDIUM medium{};
+    medium.tymed = TYMED_HGLOBAL;
+    medium.hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+    if (medium.hGlobal) {
+        if (auto* value = static_cast<DWORD*>(GlobalLock(medium.hGlobal))) {
+            *value = allowed_effects;
             GlobalUnlock(medium.hGlobal);
             if (FAILED(data->SetData(&fmt, &medium, TRUE))) ReleaseStgMedium(&medium);
-        }
+        } else ReleaseStgMedium(&medium);
     }
 
     auto* source = new ListDropSource();
     source->SetEscHook(std::move(esc_consumed));
     DWORD effect = DROPEFFECT_NONE;
-    ::DoDragDrop(data, source, allowed_effects, &effect);
-    if (effect == DROPEFFECT_NONE) {
-        if (fallback && fallback->PerformedEffect() != 0) {
-            effect = fallback->PerformedEffect();
-        } else if (!fallback) {
-            const DWORD performed =
-                ReadDwordFormat(data, (CLIPFORMAT)PerformedEffectFormat());
-            if (performed != 0) effect = performed;
-        }
-    }
+    const HRESULT result = loop(data, source, allowed_effects, &effect);
+    if (result != DRAGDROP_S_DROP) effect = DROPEFFECT_NONE;
+    else if (effect == DROPEFFECT_NONE) effect = data->PerformedEffect() & allowed_effects;
     source->Release();
     data->Release();
     return effect;
 }
+
+} // namespace
+
+DWORD DoFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
+                     std::function<bool()> esc_consumed) {
+    return RunFileDragDrop(paths, allowed_effects, std::move(esc_consumed), ::DoDragDrop);
+}
+
+#ifdef PULSE_DRAG_DROP_TESTING
+namespace testing {
+
+void SetShellIdListRenderer(ShellIdListRenderer renderer) {
+    shell_renderer = renderer ? renderer : BuildShellIdList;
+}
+
+bool WaitForShellIdListWorker(DWORD timeout_ms) {
+    const ULONGLONG start = GetTickCount64();
+    while (shell_worker_busy.load()) {
+        if (GetTickCount64() - start >= timeout_ms) return false;
+        Sleep(1);
+    }
+    return true;
+}
+
+DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed, DragLoop loop) {
+    return pulse::ui::RunFileDragDrop(paths, allowed, {}, loop);
+}
+
+} // namespace testing
+#endif
 
 // ---------------------------------------------------------------------------
 // WindowDropTarget

@@ -436,7 +436,8 @@ target_link_libraries(pulse_ops_test PRIVATE ole32 shell32 uuid bcrypt)
 
 add_executable(pulse_drag_drop_test src/bench/drag_drop_test_main.cpp
     src/ui/drag_drop.cpp src/ops/clipboard.cpp)
-target_link_libraries(pulse_drag_drop_test PRIVATE ole32 shell32 uuid)
+target_compile_definitions(pulse_drag_drop_test PRIVATE PULSE_DRAG_DROP_TESTING=1)
+target_link_libraries(pulse_drag_drop_test PRIVATE ole32 shell32 uuid advapi32)
 add_executable(pulse_drop_staging_test src/bench/drop_staging_test_main.cpp
     src/ops/drop_staging.cpp)
 target_link_libraries(pulse_drop_staging_test PRIVATE user32)
@@ -468,6 +469,12 @@ if(PULSE_SHELL_SOURCES)
     set_target_properties(pulse_shell PROPERTIES OUTPUT_NAME "Pulse.Shell")
     target_link_libraries(pulse_shell PRIVATE ole32 shell32 uuid advapi32 shlwapi version pulse_crash_reporter)
     pulse_add_version_resource(pulse_shell "Pulse Shell host" "Pulse.Shell" "Pulse.Shell.exe")
+    add_executable(pulse_context_worker_fixture WIN32 ${PULSE_SHELL_SOURCES})
+    target_compile_definitions(pulse_context_worker_fixture PRIVATE PULSE_CONTEXT_PROCESS_TESTING=1)
+    target_link_libraries(pulse_context_worker_fixture PRIVATE
+        ole32 shell32 uuid advapi32 shlwapi version pulse_crash_reporter)
+    add_executable(pulse_context_session_test src/bench/context_session_process_test.cpp)
+    add_dependencies(pulse_context_session_test pulse_context_worker_fixture)
 endif()
 
 # ---- Pulse.Preview.exe: thumbnail decoding / Shell provider isolation ----
@@ -541,7 +548,8 @@ add_executable(pulse_app_controllers_test
     src/ui/view_layout.cpp
     src/index/index_client.cpp
     src/index/index_config.cpp
-    src/index/network_agent_client.cpp)
+    src/index/network_agent_client.cpp
+    src/index/index_query.cpp src/index/search_result_merge.cpp src/index/search_kinds.cpp)
 target_link_libraries(pulse_app_controllers_test PRIVATE
     user32 shell32 ole32 uuid advapi32 shlwapi pulse_localization pulse_user_storage)
 
