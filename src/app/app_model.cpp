@@ -2,6 +2,7 @@
 #include "app_model.h"
 #include "search_query.h"
 #include "date_groups.h"
+#include "shell_path.h"
 #include "../common/json_utils.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
@@ -74,7 +75,13 @@ void RestoreHistoryOrigin(Tab& tab, const std::optional<std::wstring>& origin) {
 }
 }
 
-void Tab::NavigateTo(const std::wstring& path) {
+bool Tab::NavigateTo(const std::wstring& path) {
+    if (fs::IsVirtualPath(path) || fs::IsVirtualPath(current_path)) {
+        // Archive member names and search queries retain their case-sensitive identity.
+        if (path == current_path) return false;
+    } else if (SameShellPath(fs::NormalizePath(path), fs::NormalizePath(current_path))) {
+        return false;
+    }
     ClearEntryOrderHold();
     ++view_generation;
     if (!current_path.empty()) {
@@ -102,6 +109,7 @@ void Tab::NavigateTo(const std::wstring& path) {
     git_root.clear();
     cache_unix = 0;
     loading = true;
+    return true;
 }
 
 fs::DirEntry Tab::EntryAt(size_t index) const {
@@ -135,10 +143,9 @@ void Tab::PrepareEntryRefresh(bool explicit_refresh) {
     }
     if (explicit_refresh) {
         refresh_keeps_order = false;
-        if (order_held && SelectedCount() > 0) pending_ensure_selection_visible = true;
-    } else if (pending_generation == 0) {
-        refresh_keeps_order = true;
+        if (SelectedCount() > 0) pending_ensure_selection_visible = true;
     }
+    refresh_keeps_order = false;
 }
 
 fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
@@ -146,29 +153,23 @@ fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                          std::wstring& focus_name, FolderSortMode folders) {
     const bool ordinary = !current_path.empty() && !fs::IsVirtualPath(current_path) &&
                           archive_file.empty();
-    const bool keep = ordinary && refresh_keeps_order && fresh && snapshot &&
-                      snapshot_path == current_path;
     if (ordinary && fresh) FollowEntryRenames(held_renames, *fresh, selected_names, focus_name);
     fs::SnapshotPtr result = fresh;
-    if (keep) {
-        result = std::make_shared<std::vector<fs::DirEntry>>(KeepEntryOrder(
-            *snapshot, *fresh, held_renames, sort_column, sort_direction, current_path, folders));
+    if (ordinary && fresh) {
         PruneEntryRenames(held_renames, *fresh);
+        const auto less = [&](const auto& a, const auto& b) {
+            return EntryLess(a, b, sort_column, sort_direction, folders, current_path);
+        };
+        if (!std::is_sorted(fresh->begin(), fresh->end(), less)) {
+            auto sorted = std::make_shared<std::vector<fs::DirEntry>>(*fresh);
+            std::sort(sorted->begin(), sorted->end(), less);
+            result = std::move(sorted);
+        }
     } else {
         held_renames.clear();
-        if (ordinary && fresh) {
-            const auto less = [&](const auto& a, const auto& b) {
-                return EntryLess(a, b, sort_column, sort_direction, folders, current_path);
-            };
-            if (!std::is_sorted(fresh->begin(), fresh->end(), less)) {
-                auto sorted = std::make_shared<std::vector<fs::DirEntry>>(*fresh);
-                std::sort(sorted->begin(), sorted->end(), less);
-                result = std::move(sorted);
-            }
-        }
     }
     refresh_keeps_order = false;
-    order_held = keep;
+    order_held = false;
     return result;
 }
 

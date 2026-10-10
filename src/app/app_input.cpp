@@ -22,6 +22,7 @@
 #include "batch_rename.h"
 #include "blank_pane_click.h"
 #include "link_resolve.h"
+#include "header_drop_effect.h"
 #include "settings_value_dialog.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
@@ -140,17 +141,107 @@ std::wstring HeaderDropHint(const std::vector<std::wstring>& sources) {
     return {};
 }
 
-std::wstring ResolveHeaderDropFolder(const std::vector<std::wstring>& sources) {
-    std::wstring folder = ui::FirstDroppableFolder(sources);
-    if (!folder.empty()) return fs::NormalizePath(folder);
-    for (const auto& source : sources) {
-        if (!ui::LooksLikeFolderShortcut(source)) continue;
-        fs::DirEntry entry;
-        if (app::ResolveLink(source, entry) && entry.link_target_is_dir &&
-            !entry.link_target.empty())
-            return fs::NormalizePath(entry.link_target);
+void HandleHeaderDropResult(AppState& s) {
+    std::optional<HeaderDropResult> result;
+    {
+        std::lock_guard lock(s.header_drop_query->mutex);
+        result = std::move(s.header_drop_query->result);
+        s.header_drop_query->result.reset();
     }
-    return {};
+    if (!result || s.exit_requested) return;
+    const auto lifetime = result->pane_lifetime.lock();
+    if (!lifetime) return;
+    app::Pane* pane = PaneAtSlot(s, result->pane_slot);
+    if (!pane || pane != result->pane || pane->lifetime_token != lifetime ||
+        pane->ActiveTab()->view_generation != result->view_generation ||
+        pane->ActiveTab()->current_path != result->pane_path) return;
+    if (!result->folder.empty()) {
+        if (pane != s.pane) FocusPane(s, pane);
+        if (_wcsicmp(pane->ActiveTab()->current_path.c_str(), result->folder.c_str()) != 0)
+            NavigateTo(s, result->folder);
+        else InvalidateRect(s.hwnd, nullptr, FALSE);
+        return;
+    }
+    if (app::RunHeaderDropFallback(result->accepted_effect, result->fallback_effect, [&] {
+        ops::OpRequest request;
+        request.type = ops::OpType::Copy;
+        request.dest_dir = fs::NormalizePath(result->pane_path);
+        for (const auto& source : result->sources) request.sources.push_back(fs::NormalizePath(source));
+        SubmitWithConflictResolution(s, std::move(request));
+    })) return;
+    wchar_t error[128]{};
+    swprintf_s(error, l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(), ERROR_NOT_SUPPORTED);
+    s.notification_toast.Show(s.hwnd, l10n::Get(l10n::StringId::OpCopyFailed),
+        (result->sources.empty() ? std::wstring() : result->sources.front() + L"\n") + error, false);
+}
+
+namespace {
+bool QueueHeaderShortcutDrop(AppState& s, const std::vector<std::wstring>& sources,
+                             app::Pane& pane, int pane_slot, DWORD accepted, DWORD keys, DWORD allowed, DWORD preferred) {
+    HeaderDropResult intent;
+    intent.pane = &pane;
+    intent.pane_slot = pane_slot;
+    intent.pane_lifetime = pane.lifetime_token;
+    intent.view_generation = pane.ActiveTab()->view_generation;
+    intent.pane_path = pane.ActiveTab()->current_path;
+    intent.sources = sources;
+    intent.accepted_effect = accepted;
+    if (!intent.pane_path.empty() && !fs::IsVirtualPath(intent.pane_path))
+        intent.fallback_effect = FileDropEffect(s, sources, intent.pane_path, keys, allowed, preferred);
+
+    // External archive managers can remove their temporary shortcut on Drop return.
+    if (!internal_file_drag && !s.trayDrag.active) {
+        const auto temp = ops::TempDirectory();
+        if (!temp.empty()) {
+            std::vector<std::wstring> prepared;
+            const auto staged = ops::StageDropSourcesOnWorker(s.hwnd, sources, temp, ops::DropStageRoot(), prepared);
+            if (staged.error) {
+                wchar_t error[128]{};
+                swprintf_s(error, l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(), staged.error);
+                s.notification_toast.Show(s.hwnd, l10n::Get(l10n::StringId::OpCopyFailed),
+                    staged.source + L"\n" + error, false);
+                return false;
+            }
+            intent.sources = std::move(prepared);
+        }
+    }
+    const HWND hwnd = s.hwnd;
+    const std::weak_ptr<HeaderDropQueryState> weak = s.header_drop_query;
+    uint64_t generation = 0;
+    {
+        std::lock_guard lock(s.header_drop_query->mutex);
+        generation = s.header_drop_query->generation;
+    }
+    try {
+        std::thread([weak, hwnd, generation, intent = std::move(intent)]() mutable {
+            const auto cancelled = [weak, generation, lifetime = intent.pane_lifetime] {
+                const auto state = weak.lock();
+                if (!state || lifetime.expired()) return true;
+                std::lock_guard lock(state->mutex);
+                return state->generation != generation;
+            };
+            for (const auto& source : intent.sources) {
+                if (cancelled()) return;
+                if (!ui::LooksLikeFolderShortcut(source)) continue;
+                fs::DirEntry entry;
+                if (app::ResolveLink(source, entry, cancelled) && entry.link_target_is_dir) {
+                    intent.folder = std::move(entry.link_target);
+                    break;
+                }
+            }
+            if (cancelled()) return;
+            if (const auto state = weak.lock()) {
+                std::lock_guard lock(state->mutex);
+                if (state->generation != generation) return;
+                state->result = std::move(intent);
+                PostMessageW(hwnd, WM_HEADER_DROP_RESULT, 0, 0);
+            }
+        }).detach();
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
 }
 
 // Resolves the drop target under pt (client coords), updates feedback state,
@@ -253,9 +344,7 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
             s.dropBadgeX = (float)pt.x;
             s.dropBadgeY = (float)pt.y;
             InvalidateRect(s.hwnd, nullptr, FALSE);
-            if (allowed & DROPEFFECT_COPY) return DROPEFFECT_COPY;
-            if (allowed & DROPEFFECT_LINK) return DROPEFFECT_LINK;
-            return DROPEFFECT_NONE;
+            return app::HeaderDropNavigationEffect(allowed);
         }
         s.dropDestDir = tab->current_path;
         s.dropPaneIndex = hit.pane_index;
@@ -304,6 +393,11 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
 
 DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
                          POINT pt, DWORD key_state, DWORD allowed, DWORD preferred) {
+    {
+        std::lock_guard lock(s.header_drop_query->mutex);
+        ++s.header_drop_query->generation;
+        s.header_drop_query->result.reset();
+    }
     // Resolve once more for the final position.
     DWORD effect = ResolveDropTarget(s, sources, pt, key_state, allowed, preferred);
     std::wstring dest = s.dropDestDir;
@@ -314,9 +408,14 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
     s.springEntered = false;
 
     if (header) {
-        const std::wstring folder = ResolveHeaderDropFolder(sources);
+        const std::wstring folder = fs::NormalizePath(ui::FirstDroppableFolder(sources));
         if (folder.empty()) {
-            // Shortcut resolved to a file: fall through to copy/move into the pane.
+            if (app::Pane* pane = PaneAtSlot(s, header_pane)) {
+                if (effect == DROPEFFECT_NONE) return DROPEFFECT_NONE;
+                return QueueHeaderShortcutDrop(s, sources, *pane, header_pane, effect, key_state, allowed, preferred)
+                    ? effect : DROPEFFECT_NONE;
+            }
+            return DROPEFFECT_NONE;
         } else {
             if (app::Pane* pane = PaneAtSlot(s, header_pane)) {
                 if (pane != s.pane) FocusPane(s, pane);
@@ -328,11 +427,6 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
             }
             return DROPEFFECT_COPY;
         }
-        if (app::Pane* pane = PaneAtSlot(s, header_pane)) {
-            if (app::Tab* tab = pane->ActiveTab()) dest = tab->current_path;
-        }
-        if (dest.empty() || fs::IsVirtualPath(dest)) return DROPEFFECT_NONE;
-        effect = FileDropEffect(s, sources, dest, key_state, allowed, preferred);
     }
 
     if (tray) {
@@ -2310,6 +2404,10 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                                   static_cast<size_t>(hit.sub_index));
         } else if (hit.region == ui::HitTestResult::SettingsDupGroupDelete) {
             RecycleDuplicateGroup(*s, static_cast<size_t>(hit.index));
+        } else if (hit.region == ui::HitTestResult::SettingsDupGroupIgnore) {
+            if (!s->duplicateScan.scanning)
+                s->duplicateScan.IgnoreGroup(static_cast<size_t>(hit.index));
+            InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsDupDeleteAll) {
             RecycleAllDuplicateExtras(*s);
         } else if (hit.region == ui::HitTestResult::NavBack) {

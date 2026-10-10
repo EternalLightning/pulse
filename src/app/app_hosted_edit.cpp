@@ -604,7 +604,9 @@ LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         break;
     case WM_CHAR:
-        if (s->addressSearching && (wParam == VK_RETURN || wParam == VK_ESCAPE || wParam == VK_TAB))
+        // The queued character still arrives after WM_KEYDOWN closes the editor.
+        if (wParam == VK_RETURN || wParam == VK_ESCAPE ||
+            (s->addressSearching && wParam == VK_TAB))
             return 0;
         break;
     case WM_KILLFOCUS:
@@ -662,6 +664,10 @@ LRESULT CALLBACK RenameEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             HideRenameOverlay(*s, false);
             return 0;
         }
+        break;
+    case WM_CHAR:
+        // TranslateMessage queues this before WM_KEYDOWN hides the editor.
+        if (wParam == VK_RETURN || wParam == VK_ESCAPE) return 0;
         break;
     case WM_KILLFOCUS:
         if (!s->renameIgnoreKillFocus) HideRenameOverlay(*s, true);

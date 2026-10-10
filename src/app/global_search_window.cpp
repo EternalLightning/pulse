@@ -16,15 +16,12 @@
 #include <dwrite.h>
 #include <dwmapi.h>
 #include <commctrl.h>
-#include <shellapi.h>
-#include <shlobj.h>
 #include <windowsx.h>
 #include <wrl/client.h>
 #include <wincodec.h>
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
-#include <thread>
 
 namespace pulse {
 namespace {
@@ -45,28 +42,10 @@ std::wstring ParentPath(const std::wstring& path) {
     const auto slash = path.find_last_of(L"\\/");
     return slash == std::wstring::npos ? path : path.substr(0, slash == 2 ? 3 : slash);
 }
-// Shell providers may block. This worker owns all its data and outlives the popup safely.
-void OpenResult(std::wstring path, bool location) {
-    std::thread([path = std::move(path), location] {
-        const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        if (location) {
-            PIDLIST_ABSOLUTE item = nullptr;
-            if (SUCCEEDED(SHParseDisplayName(path.c_str(), nullptr, &item, 0, nullptr))) {
-                SHOpenFolderAndSelectItems(item, 0, nullptr, 0);
-                CoTaskMemFree(item);
-            }
-        } else {
-            SHELLEXECUTEINFOW info{sizeof(info)};
-            info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
-            info.lpFile = path.c_str(); info.nShow = SW_SHOWNORMAL;
-            ShellExecuteExW(&info);
-        }
-        if (SUCCEEDED(initialized)) CoUninitialize();
-    }).detach();
-}
 }
 
 struct GlobalSearchWindow::Impl {
+    std::function<void(const std::wstring&, bool)> open_callback;
     HWND hwnd = nullptr, edit = nullptr;
     HFONT edit_font = nullptr;
     ComPtr<IDWriteTextFormat> edit_format;
@@ -206,9 +185,9 @@ struct GlobalSearchWindow::Impl {
         ClampSelection(false); Invalidate();
     }
     void Open(bool location) {
-        if (rows.empty() || selected < 0 || selected >= static_cast<int>(rows.size())) return;
+        if (!open_callback || rows.empty() || selected < 0 || selected >= static_cast<int>(rows.size())) return;
         auto path = rows[static_cast<size_t>(selected)].path;
-        Hide(); OpenResult(std::move(path), location);
+        Hide(); open_callback(path, location);
     }
     void HideScopeTooltip() {
         if (hwnd) KillTimer(hwnd, kScopeTooltipTimer);
@@ -724,6 +703,10 @@ void GlobalSearchWindow::SetAppearance(bool dark, ui::WindowEffect effect, const
     if (!impl_) impl_ = std::make_unique<Impl>();
     impl_->dark = dark; impl_->effect = effect; impl_->background_image = background_image; impl_->accent_color = accent;
     impl_->ApplyAppearance();
+}
+void GlobalSearchWindow::SetOpenCallback(std::function<void(const std::wstring&, bool)> callback) {
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    impl_->open_callback = std::move(callback);
 }
 void GlobalSearchWindow::Hide() { if (impl_) impl_->Hide(); }
 void GlobalSearchWindow::Shutdown() { impl_.reset(); }

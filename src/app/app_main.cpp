@@ -51,7 +51,6 @@
 #include "tab_controller.h"
 #include "link_resolve.h"
 #include "../ui/color_picker.h"
-#include "../ui/bloom_accent_picker.h"
 #ifdef PULSE_WITH_SELFTEST
 #include "selftest_1b2.h"
 #endif
@@ -386,7 +385,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                                  s->appPrefs.list_size_bar);
         s->renderer.SetSidebarWidthDip(static_cast<float>(s->appPrefs.sidebar_width));
         s->renderer.SetTrayIconDip(static_cast<float>(s->appPrefs.tray_icon_size));
-        ApplyAccentFromPrefs(*s, true);
+        ApplyAccentFromPrefs(*s);
         ApplyAppWindowChrome(*s);
         s->index.Start(hwnd, WM_INDEX_NOTIFY, WM_INDEX_SEARCH);
         StartChangeTracking(*s);
@@ -410,14 +409,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             InvalidateRect(s->hwnd, nullptr, FALSE);
         };
         settings_callbacks.task_completion = SettingsCompletion(hwnd);
-        settings_callbacks.open_path = [hwnd](const std::wstring& path) {
-            ShellExecuteW(hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        settings_callbacks.open_path = [s](const std::wstring& path) {
+            s->ops.OpenWith(path);
         };
-        settings_callbacks.open_diagnostics = [hwnd] {
+        settings_callbacks.open_diagnostics = [s] {
             const std::wstring path = app::GetPulseDataDir() + L"\\Diagnostics\\Crashes";
             CreateDirectoryW((app::GetPulseDataDir() + L"\\Diagnostics").c_str(), nullptr);
             CreateDirectoryW(path.c_str(), nullptr);
-            ShellExecuteW(hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            s->ops.OpenWith(path);
         };
         settings_callbacks.clear_diagnostics = [hwnd](std::wstring& error) {
             if (MessageBoxW(hwnd,
@@ -499,6 +498,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         // Shell dialogs (打开方式…/属性) must be owned by the Pulse window.
         s->ops.SetUiWindow(hwnd);
         s->ops.Start([hwnd] { PostMessageW(hwnd, WM_OPS_NOTIFY, 0, 0); });
+        s->globalSearchWindow.SetOpenCallback([s](const std::wstring& path, bool location) {
+            if (location) s->ops.RevealInExplorer(path);
+            else s->ops.OpenWith(path);
+        });
         const ops::RecoverySnapshot recovery = s->isolatedTest
             ? ops::RecoverySnapshot{} : s->ops.PendingRecovery();
         if (!recovery.entries.empty()) {
@@ -849,7 +852,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->EffectiveThemeMode() == ui::ThemeMode::Auto)
                 s->darkMode = ui::ShouldUseDarkMode(s->EffectiveThemeMode());
             if (s->appPrefs.accent_rgb.empty())
-                ApplyAccentFromPrefs(*s, true);
+                ApplyAccentFromPrefs(*s);
             ApplyAppWindowChrome(*s);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -1105,7 +1108,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             hit.region == ui::HitTestResult::AddressSearch ||
             hit.region == ui::HitTestResult::AddressSearchScope ||
             hit.region == ui::HitTestResult::AddressSearchClear ||
-            hit.region == ui::HitTestResult::AddressSearchClose) {
+            hit.region == ui::HitTestResult::AddressSearchClose ||
+            hit.region == ui::HitTestResult::SettingsDupOpen) {
             SetCursor(LoadCursorW(nullptr, IDC_HAND));
             return TRUE;
         }
@@ -1259,6 +1263,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_OPS_NOTIFY: {
         if (s) {
+            for (const auto& error : s->ops.DrainShellLaunchErrors())
+                s->notification_toast.ShowError(hwnd, l10n::Get(l10n::StringId::Open), error);
             UpdateOperationWindow(*s, !s->exit_requested && !s->lockedOperationPromptActive);
             const ops::OpStatus st = s->ops.Status();
             if (s->ops.TakeCtxInvokeDone()) {
@@ -1382,6 +1388,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                             BumpRecycleOccupancy(*s, -n);
                         RefreshRecycleViews(*s, false);
                     }
+                    if (completed.type == ops::OpType::Copy || completed.type == ops::OpType::Move)
+                        QueueTransferredItemsReveal(*s, completed.destinations);
                     RefreshStarredViews(*s);
                     RefreshRecentViews(*s);
                 }
@@ -1455,6 +1463,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_HEADER_DROP_RESULT:
+        if (s) HandleHeaderDropResult(*s);
+        return 0;
     case WM_DETAILS_META: {
         auto* result = reinterpret_cast<DetailsMetaResult*>(lParam);
         if (s && result && ApplyDetailsMetaResult(*s, *result)) {
@@ -1511,8 +1522,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 RequestUncProbe(*s, effect.pin_network);
             }
             if (!effect.open_path.empty()) {
-                ShellExecuteW(hwnd, L"open", effect.open_path.c_str(),
-                              nullptr, nullptr, SW_SHOWNORMAL);
+                s->ops.OpenWith(effect.open_path);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
         }

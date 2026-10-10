@@ -2,7 +2,6 @@
 #include "ops_manager.h"
 #include "operation_presentation.h"
 #include "delete_operation.h"
-#include "image_open.h"
 #include "produced_undo.h"
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_enum.h"
@@ -12,9 +11,6 @@
 #include "../common/utf8_file.h"
 #include <objbase.h>
 #include <bcrypt.h>
-#include <shellapi.h>
-#include <shlobj.h>
-#include <shobjidl.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -61,75 +57,6 @@ bool ReserveOpenWorker() {
         if (open_workers.compare_exchange_weak(current, current + 1)) return true;
     }
     return false;
-}
-
-// Merged Explorer properties sheet for several items. Runs on its own STA
-// thread: the sheet may call back into the data object through COM, so the
-// owning apartment must keep pumping messages while the sheet holds it.
-void ShowMultiFilePropertiesAsync(std::vector<std::wstring> paths) {
-    if (!ReserveOpenWorker()) return;
-    try {
-    std::thread([paths = std::move(paths)]() {
-        struct ReleaseSlot { ~ReleaseSlot() { open_workers.fetch_sub(1); } } release;
-        if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) return;
-        std::vector<PIDLIST_ABSOLUTE> pidls;
-        pidls.reserve(paths.size());
-        for (const auto& path : paths) {
-            const std::wstring shell_path = pulse::path::StripExtendedPathPrefix(path);
-            PIDLIST_ABSOLUTE pidl = nullptr;
-            if (SUCCEEDED(SHParseDisplayName(shell_path.c_str(), nullptr, &pidl, 0, nullptr)) && pidl)
-                pidls.push_back(pidl);
-        }
-        IDataObject* data = nullptr;
-        if (pidls.size() > 1) {
-            IShellItemArray* array = nullptr;
-            if (SUCCEEDED(SHCreateShellItemArrayFromIDLists(static_cast<UINT>(pidls.size()),
-                    const_cast<PCIDLIST_ABSOLUTE_ARRAY>(pidls.data()), &array)) && array) {
-                array->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(&data));
-                array->Release();
-            }
-        }
-        for (auto* pidl : pidls) CoTaskMemFree(pidl);
-        bool shown = data && SUCCEEDED(SHMultiFileProperties(data, 0));
-        if (!shown) {
-            wchar_t message[160]{};
-            swprintf_s(message, L"Pulse: SHMultiFileProperties failed for %zu items\n", paths.size());
-            OutputDebugStringW(message);
-            const std::wstring first = pulse::path::StripExtendedPathPrefix(paths.front());
-            SHObjectProperties(nullptr, SHOP_FILEPATH, first.c_str(), nullptr);
-        }
-        // The sheet may live on this thread (a thread's windows die with it)
-        // or on a shell thread that calls back into `data` through COM. Pump
-        // while either holds on; a short grace covers asynchronous creation.
-        const ULONGLONG started = GetTickCount64();
-        while (shown) {
-            MsgWaitForMultipleObjectsEx(0, nullptr, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-            MSG msg;
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                if (!IsDialogMessageW(GetActiveWindow(), &msg)) {
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-            bool owns_window = false;
-            EnumThreadWindows(GetCurrentThreadId(), [](HWND hwnd, LPARAM found) -> BOOL {
-                if (!IsWindowVisible(hwnd)) return TRUE;
-                *reinterpret_cast<bool*>(found) = true;
-                return FALSE;
-            }, reinterpret_cast<LPARAM>(&owns_window));
-            ULONG refs = 1;
-            if (data) {
-                data->AddRef();
-                refs = data->Release();
-            }
-            if (!owns_window && refs <= 1 && GetTickCount64() - started > 3000) break;
-        }
-        if (data) data->Release();
-        CoUninitialize();
-    }).detach();
-    } catch (...) {
-        open_workers.fetch_sub(1);
-    }
 }
 
 std::wstring ParentOf(const std::wstring& path) {
@@ -894,8 +821,6 @@ void OpsManager::Start(std::function<void()> notify) {
         std::lock_guard<std::mutex> lock(menu_mutex_);
         menu_running_ = true;
     }
-    thread_ = std::thread([this] { WorkerThread(); });
-    menu_thread_ = std::thread([this] { MenuThread(); });
     if (ReserveOpenWorker()) {
         auto mailbox = std::make_shared<OpenMailbox>();
         mailbox->owner.store(ui_hwnd_.load());
@@ -903,8 +828,13 @@ void OpsManager::Start(std::function<void()> notify) {
             std::lock_guard<std::mutex> lock(open_mutex_);
             open_mailbox_ = mailbox;
         }
+    }
+    StartShellClient();
+    thread_ = std::thread([this] { WorkerThread(); });
+    menu_thread_ = std::thread([this] { MenuThread(); });
+    if (const auto mailbox = open_mailbox_) {
         try {
-            open_thread_ = std::thread([mailbox = std::move(mailbox)] { OpenThread(mailbox); });
+            open_thread_ = std::thread([mailbox] { OpenThread(mailbox); });
         } catch (...) {
             std::lock_guard<std::mutex> lock(open_mutex_);
             open_mailbox_.reset();
@@ -1020,6 +950,28 @@ void OpsManager::OpenWith(const std::wstring& path) {
     item.open_path = path;
     item.open_verb = L"open";
     EnqueueOpen(std::move(item));
+}
+
+void OpsManager::RevealInExplorer(const std::wstring& path) {
+    QueueItem item;
+    item.open_path = path;
+    item.open_verb = L"__reveal";
+    EnqueueOpen(std::move(item));
+}
+
+std::vector<std::wstring> OpsManager::DrainShellLaunchErrors() {
+    std::shared_ptr<OpenMailbox> mailbox;
+    {
+        std::lock_guard lock(open_mutex_);
+        mailbox = open_mailbox_;
+    }
+    std::vector<std::wstring> errors;
+    if (mailbox) {
+        std::lock_guard lock(mailbox->mutex);
+        errors.assign(std::make_move_iterator(mailbox->errors.begin()), std::make_move_iterator(mailbox->errors.end()));
+        mailbox->errors.clear();
+    }
+    return errors;
 }
 
 void OpsManager::ShowProperties(const std::wstring& path) {
@@ -1631,153 +1583,62 @@ void OpsManager::EnqueueOpen(QueueItem item, bool front) {
 
 void OpsManager::OpenThread(std::shared_ptr<OpenMailbox> mailbox) {
     struct ReleaseSlot { ~ReleaseSlot() { open_workers.fetch_sub(1); } } release;
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     for (;;) {
         QueueItem item;
         {
-            std::unique_lock<std::mutex> lock(mailbox->mutex);
+            std::unique_lock lock(mailbox->mutex);
             mailbox->cv.wait(lock, [&] { return !mailbox->queue.empty() || !mailbox->running; });
             if (!mailbox->running) break;
-            if (mailbox->queue.empty()) continue;
             item = std::move(mailbox->queue.front());
             mailbox->queue.pop_front();
         }
-
         if (mailbox->before_execute) mailbox->before_execute();
-        // Dialogs and association errors belong to the Pulse window, the way
-        // Explorer parents them to the folder window. The fallback covers a UI
-        // thread that has not registered its HWND yet.
-        HWND dialog_owner = mailbox->owner.load();
-        if (dialog_owner && !IsWindow(dialog_owner)) dialog_owner = nullptr;
         {
-            std::lock_guard<std::mutex> lock(mailbox->mutex);
+            std::lock_guard lock(mailbox->mutex);
             if (!mailbox->running) break;
         }
-
-        if (_wcsicmp(item.open_verb.c_str(), L"__cmdline") == 0) {
-            std::wstring cmd = item.open_file;
-            if (!cmd.empty()) {
-                std::vector<wchar_t> buf(cmd.begin(), cmd.end());
-                buf.push_back(0);
-                STARTUPINFOW si{ sizeof(si) };
-                PROCESS_INFORMATION pi{};
-                si.dwFlags = STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
-                si.wShowWindow = SW_SHOWNORMAL;
-                const wchar_t* dir = item.open_path.empty() ? nullptr : item.open_path.c_str();
-                if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 0, nullptr, dir,
-                                   &si, &pi)) {
-                    CloseHandle(pi.hThread);
-                    CloseHandle(pi.hProcess);
-                }
-            }
-            continue;
+        ipc::ShellLaunchRequest request;
+        request.owner_hwnd = reinterpret_cast<uintptr_t>(mailbox->owner.load());
+        request.verb = item.open_verb;
+        request.parameters = std::move(item.open_args);
+        if (item.open_verb == L"__cmdline") {
+            request.kind = ipc::ShellLaunchKind::Command;
+            request.executable = std::move(item.open_file);
+            request.directory = std::move(item.open_path);
+        } else if (item.open_verb == L"__reveal") {
+            request.kind = ipc::ShellLaunchKind::Reveal;
+            request.paths.push_back(std::move(item.open_path));
+        } else if (!item.open_file.empty()) {
+            request.executable = std::move(item.open_file);
+            request.directory = std::move(item.open_path);
+        } else {
+            request.paths = item.open_paths.empty()
+                ? std::vector<std::wstring>{std::move(item.open_path)} : std::move(item.open_paths);
         }
-
-        if (_wcsicmp(item.open_verb.c_str(), L"openas") == 0 ||
-            _wcsicmp(item.open_verb.c_str(), L"openwith") == 0) {
-            const std::wstring shell_path =
-                pulse::path::StripExtendedPathPrefix(item.open_path);
-            OPENASINFO info{};
-            info.pcszFile = shell_path.c_str();
-            info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT | OAIF_EXEC;
-            const ULONGLONG dialog_started = GetTickCount64();
-            const HRESULT hr = SHOpenWithDialog(dialog_owner, &info);
-            if (item.enqueued_at != 0) {
-                // Queue wait and dialog cost need different fixes, so report both
-                // (DebugView) instead of guessing which one the user feels.
-                wchar_t timing[192]{};
-                swprintf_s(timing, L"Pulse: open-with queued %llu ms, dialog %llu ms\n",
-                           dialog_started - item.enqueued_at,
-                           GetTickCount64() - dialog_started);
-                OutputDebugStringW(timing);
-            }
-            bool active = false;
-            {
-                std::lock_guard<std::mutex> lock(mailbox->mutex);
-                active = mailbox->running;
-            }
-            if (active && FAILED(hr) && hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-                SHELLEXECUTEINFOW fallback{sizeof(fallback)};
-                fallback.hwnd = dialog_owner;
-                fallback.lpVerb = L"openas";
-                fallback.lpFile = shell_path.c_str();
-                fallback.nShow = SW_SHOWNORMAL;
-                fallback.fMask = SEE_MASK_INVOKEIDLIST;
-                const BOOL opened = ShellExecuteExW(&fallback);
-                if (!opened) {
-                    // Used to fail silently, which read as a dead menu row.
-                    wchar_t message[320]{};
-                    swprintf_s(message,
-                        L"Pulse: open-with failed for %ls (SHOpenWithDialog 0x%08lX, "
-                        L"shell error %lu)\n",
-                        shell_path.c_str(), static_cast<unsigned long>(hr), GetLastError());
-                    OutputDebugStringW(message);
-                }
-            }
-            continue;
-        }
-
-        if (_wcsicmp(item.open_verb.c_str(), L"properties") == 0 && item.open_paths.size() > 1) {
-            ShowMultiFilePropertiesAsync(std::move(item.open_paths));
-            continue;
-        }
-
-        if (_wcsicmp(item.open_verb.c_str(), L"properties") == 0) {
-            const std::wstring shell_path = pulse::path::StripExtendedPathPrefix(item.open_path);
-            bool shown = SHObjectProperties(dialog_owner, SHOP_FILEPATH,
-                                            shell_path.c_str(), nullptr) != FALSE;
-            bool active = false;
-            {
-                std::lock_guard<std::mutex> lock(mailbox->mutex);
-                active = mailbox->running;
-            }
-            if (active && !shown) {
-                SHELLEXECUTEINFOW fallback{sizeof(fallback)};
-                fallback.lpVerb = L"properties";
-                fallback.lpFile = shell_path.c_str();
-                fallback.nShow = SW_SHOWNORMAL;
-                fallback.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_NOASYNC;
-                shown = ShellExecuteExW(&fallback) != FALSE;
-            }
-            if (!shown) {
-                const DWORD error = GetLastError();
-                wchar_t message[256]{};
-                swprintf_s(message, L"Pulse: SHObjectProperties failed for %ls (error %lu)\n",
-                           shell_path.c_str(), error);
-                OutputDebugStringW(message);
-            }
-            continue;
-        }
-
-        if (item.open_file.empty() && item.open_args.empty() &&
-            _wcsicmp(item.open_verb.c_str(), L"open") == 0 &&
-            TryOpenImageWithNeighbors(dialog_owner, item.open_path)) continue;
-
-        // Dedicated open thread: never wait behind transfers. Omit
-        // SEE_MASK_NOASYNC so association handoff does not block this worker.
-        SHELLEXECUTEINFOW sei{ sizeof(sei) };
-        sei.hwnd = dialog_owner;
-        sei.lpVerb = item.open_verb.empty() ? L"open" : item.open_verb.c_str();
-        sei.lpFile = item.open_file.empty() ? item.open_path.c_str()
-                                            : item.open_file.c_str();
-        sei.lpParameters = item.open_args.empty() ? nullptr : item.open_args.c_str();
-        sei.lpDirectory = item.open_file.empty() ? nullptr : item.open_path.c_str();
-        sei.nShow = SW_SHOWNORMAL;
-        sei.fMask = SEE_MASK_FLAG_NO_UI;
-        ShellExecuteExW(&sei); // best effort; errors surface via the OS association UI
+        // Forward only; extension code and interactive dialogs run in a child.
+        ipc::ShellClient::Instance().Launch(request);
     }
-    CoUninitialize();
     {
-        std::lock_guard<std::mutex> lock(mailbox->mutex);
+        std::lock_guard lock(mailbox->mutex);
         mailbox->finished = true;
     }
     mailbox->finished_cv.notify_all();
 }
 
-void OpsManager::WorkerThread() {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-
+void OpsManager::StartShellClient() {
+    const auto mailbox = open_mailbox_;
+    const auto notify = notify_;
     ipc::ShellClient::Callbacks cb;
+    cb.launch_done = [mailbox, notify](uint32_t, uint32_t hr, bool cancelled, std::wstring error) {
+        if (!mailbox || cancelled || SUCCEEDED(static_cast<HRESULT>(hr))) return;
+        {
+            std::lock_guard lock(mailbox->mutex);
+            if (!mailbox->running) return;
+            if (mailbox->errors.size() >= 32) mailbox->errors.pop_front();
+            mailbox->errors.push_back(error.empty() ? L"Shell 操作失败。" : std::move(error));
+        }
+        if (notify) notify();
+    };
     cb.progress = [this](uint32_t, float pct, std::wstring item,
                          uint32_t items_done, uint32_t total_items) {
         shell_activity_tick_ = GetTickCount64();
@@ -1824,6 +1685,12 @@ void OpsManager::WorkerThread() {
         OnCtxItems(id, std::move(items), partial, std::move(slow_clsids));
     };
     ipc::ShellClient::Instance().Start(cb);
+}
+
+void OpsManager::WorkerThread() {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+
 
     for (;;) {
         QueueItem item;

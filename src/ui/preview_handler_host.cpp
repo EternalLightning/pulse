@@ -2,6 +2,7 @@
 #include "preview_handler_pan.h"
 #include "../common/preview_extensions.h"
 #include "../common/path_utils.h"
+#include "../ipc/shell_query_client.h"
 #include <shobjidl.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -383,15 +384,38 @@ bool InitWithStream(IUnknown* handler, const std::wstring& path, IUnknown** kept
     return true;
 }
 
-bool InitWithItem(IUnknown* handler, const std::wstring& path) {
-    ComPtr<IInitializeWithItem> init;
-    HRESULT hr = handler->QueryInterface(IID_PPV_ARGS(&init));
-    if (FAILED(hr)) return false;
-    ComPtr<IShellItem> item;
-    hr = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&item));
-    if (FAILED(hr)) return false;
-    hr = init->Initialize(item.Get(), STGM_READ);
-    return hr != E_NOTIMPL && SUCCEEDED(hr);
+bool InitWithItem(IUnknown* handler, const std::wstring& path, const std::function<bool()>& cancelled,
+                  bool& transport_failed) {
+    transport_failed = false;
+    // CreateHandler only supplies LOCAL_SERVER proxies. Marshal that existing
+    // proxy; parsing the Shell item and provider initialization run in Shell.
+    ComPtr<IStream> stream;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) return false;
+    if (FAILED(CoMarshalInterface(stream.Get(), IID_IUnknown, handler, MSHCTX_LOCAL, nullptr,
+        MSHLFLAGS_TABLESTRONG))) return false;
+    struct MarshalTable {
+        IStream* stream;
+        ~MarshalTable() {
+            if (SUCCEEDED(stream->Seek({}, STREAM_SEEK_SET, nullptr))) CoReleaseMarshalData(stream);
+        }
+    } marshal_table{stream.Get()};
+    STATSTG stat{};
+    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || !stat.cbSize.QuadPart ||
+        stat.cbSize.QuadPart > pulse::ipc::kShellQueryMarshalLimit ||
+        FAILED(stream->Seek({}, STREAM_SEEK_SET, nullptr))) return false;
+    pulse::ipc::ShellQueryRequest request;
+    request.kind = pulse::ipc::ShellQueryKind::InitializePreviewItem;
+    request.path = path;
+    request.marshal_blob.resize(static_cast<size_t>(stat.cbSize.QuadPart));
+    ULONG read = 0;
+    if (FAILED(stream->Read(request.marshal_blob.data(), static_cast<ULONG>(request.marshal_blob.size()), &read)) ||
+        read != request.marshal_blob.size()) return false;
+    pulse::ipc::ShellQueryResult result;
+    if (!pulse::ipc::QueryShell(request, result, cancelled)) {
+        transport_failed = true;
+        return false;
+    }
+    return SUCCEEDED(result.error);
 }
 
 bool InitWithFile(IUnknown* handler, const std::wstring& path) {
@@ -607,8 +631,12 @@ struct PreviewHandlerHost::WorkerState {
         if (Stopped()) return false;
         const std::wstring open_path = ShellPath(path);
         const bool file_ok = InitWithFile(unknown.Get(), open_path);
-        const bool item_ok = !file_ok && !Stopped() && InitWithItem(unknown.Get(), open_path);
-        const bool stream_ok = !file_ok && !item_ok && !Stopped() &&
+        bool item_transport_failed = false;
+        const bool item_ok = !file_ok && !Stopped() && InitWithItem(unknown.Get(), open_path,
+            [this] { return Stopped(); }, item_transport_failed);
+        // A lost reply leaves initialization outcome unknown. Retire this
+        // preview instead of initializing the same handler through a fallback.
+        const bool stream_ok = !file_ok && !item_ok && !item_transport_failed && !Stopped() &&
             InitWithStream(unknown.Get(), open_path, &stream);
         ComPtr<IPreviewHandler> preview;
         if (Stopped() || !(file_ok || item_ok || stream_ok) || FAILED(unknown.As(&preview)) || !preview) {

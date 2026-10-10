@@ -494,7 +494,6 @@ private:
     IDWriteTextFormat* BodyFormat() const noexcept;
     IDWriteTextFormat* CaptionFormat() const noexcept;
     IDWriteTextFormat* NavFormat() const noexcept;     // sidebar rows: 13px
-    IDWriteTextFormat* SectionFormat() const noexcept; // sidebar group headers: 13px semibold
     IDWriteTextFormat* SmallIconFormat() const noexcept;
     IDWriteTextFormat* MicroIconFormat() const noexcept;
     float Px(float dips) const noexcept;
@@ -511,7 +510,6 @@ private:
     ComPtr<ID2D1StrokeStyle> round_stroke_;
     ComPtr<IDWriteTextFormat> body_format_;
     ComPtr<IDWriteTextFormat> nav_format_;
-    ComPtr<IDWriteTextFormat> section_format_;
     ComPtr<IDWriteTextFormat> caption_format_;
     ComPtr<IDWriteTextFormat> small_icon_format_;
     ComPtr<IDWriteTextFormat> micro_icon_format_;

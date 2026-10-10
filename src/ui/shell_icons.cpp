@@ -1,11 +1,13 @@
 // shell_icons.cpp
 #include "shell_icons.h"
 #include "../common/path_utils.h"
+#include "../ipc/shell_query_client.h"
 
-#include <commoncontrols.h>
 #include <shellapi.h>
-#include <commctrl.h>
+#ifdef PULSE_SHELL_ICONS_TESTING
 #include <wincodec.h>
+#include "../shell_host/shell_query_icons.h"
+#endif
 #include <cwctype>
 #include <algorithm>
 #include <cmath>
@@ -21,6 +23,7 @@ namespace {
 // otherwise retains every path seen during the session.
 constexpr size_t kExactIndexLimit = 4096;
 constexpr size_t kBitmapCacheLimit = 128;
+constexpr size_t kPixelCacheLimit = 32 * 1024 * 1024;
 constexpr uint32_t kWorkerLimit = 4;
 struct WorkerSlot {
     std::shared_ptr<void> owner;
@@ -58,51 +61,6 @@ std::wstring LowerExt(const std::wstring& name) {
 
 std::wstring ShellPath(const std::wstring& path) {
     return pulse::path::StripExtendedPathPrefix(path);
-}
-
-bool PaddedIconRect(IWICBitmapSource* source, WICRect& rect) {
-    UINT width = 0;
-    UINT height = 0;
-    if (FAILED(source->GetSize(&width, &height)) || width <= 64 || height <= 64 ||
-        width > 1024 || height > 1024) return false;
-    const UINT stride = width * 4;
-    std::vector<BYTE> pixels(static_cast<size_t>(stride) * height);
-    if (FAILED(source->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()), pixels.data())))
-        return false;
-    UINT left = width;
-    UINT top = height;
-    UINT right = 0;
-    UINT bottom = 0;
-    for (UINT y = 0; y < height; ++y) {
-        for (UINT x = 0; x < width; ++x) {
-            if (pixels[static_cast<size_t>(y) * stride + x * 4 + 3] <= 8) continue;
-            left = std::min(left, x);
-            top = std::min(top, y);
-            right = std::max(right, x + 1);
-            bottom = std::max(bottom, y + 1);
-        }
-    }
-    if (right <= left || bottom <= top ||
-        right - left > width / 2 || bottom - top > height / 2) return false;
-
-    // Legacy handlers may put a 16/32px icon into the 256px jumbo canvas.
-    // Restore its native square frame so scaling does not shrink the artwork.
-    const UINT extent = std::max(right - left, bottom - top);
-    UINT frame = extent;
-    for (const UINT size : {16u, 32u, 48u, 64u, 96u, 128u, 256u, 512u}) {
-        if (size >= extent) {
-            frame = size;
-            break;
-        }
-    }
-    frame = std::min(frame, std::min(width, height));
-    rect.X = std::clamp((static_cast<int>(left + right) - static_cast<int>(frame)) / 2,
-                        0, static_cast<int>(width - frame));
-    rect.Y = std::clamp((static_cast<int>(top + bottom) - static_cast<int>(frame)) / 2,
-                        0, static_cast<int>(height - frame));
-    rect.Width = static_cast<int>(frame);
-    rect.Height = static_cast<int>(frame);
-    return true;
 }
 
 } // namespace
@@ -198,10 +156,9 @@ void ShellIconCache::Reset() {
         pool.ReapLocked();
     }
     bitmaps_.clear();
-    for (auto& [_, list] : image_lists_)
-        if (list) list->Release();
-    image_lists_.clear();
+#ifdef PULSE_SHELL_ICONS_TESTING
     wic_.reset();
+#endif
     dc_ = nullptr;
 }
 
@@ -219,23 +176,13 @@ int ShellIconCache::ImageListId(float desired_pixels) noexcept {
     return SHIL_JUMBO;
 }
 
-IImageList* ShellIconCache::EnsureImageList(int id) {
-    if (const auto cached = image_lists_.find(id); cached != image_lists_.end())
-        return cached->second;
-    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_WIN95_CLASSES };
-    InitCommonControlsEx(&icc);
-    IImageList* list = nullptr;
-    if (FAILED(SHGetImageList(id, IID_IImageList, reinterpret_cast<void**>(&list))) || !list)
-        return nullptr;
-    image_lists_.emplace(id, list);
-    return list;
-}
-
+#ifdef PULSE_SHELL_ICONS_TESTING
 bool ShellIconCache::EnsureWic() {
     if (wic_.get()) return true;
     return SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                       IID_PPV_ARGS(&wic_))) && wic_.get();
 }
+#endif
 
 bool ShellIconCache::NeedsExactIcon(const std::wstring& name, bool is_dir,
                                     const std::wstring& path) {
@@ -285,7 +232,6 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
     std::unique_ptr<std::shared_ptr<WorkerState>> argument(
         static_cast<std::shared_ptr<WorkerState>*>(parameter));
     const auto state = *argument;
-    const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     const std::wstring prefix = std::wstring(1, L'\x1f') + L"GEN:";
     for (;;) {
         std::wstring path;
@@ -296,26 +242,32 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
             path = std::move(state->queue.front());
             state->queue.pop();
         }
-        SHFILEINFOW info{};
-        int index = -1;
+        ipc::ShellQueryRequest request;
+        request.kind = ipc::ShellQueryKind::Icon;
+        ipc::ShellQueryResult result;
         const bool generic = path.starts_with(prefix);
         const std::wstring key = generic ? path.substr(prefix.size()) : std::wstring{};
 #ifdef PULSE_SHELL_ICONS_TESTING
         if (state->query_hook) {
-            index = state->query_hook(path);
+            if (state->query_hook(path) >= 0) {
+                result.error = S_OK;
+                result.icons.push_back({1, 1, 1, 4, {0x33, 0x66, 0x99, 0xff}});
+            }
         } else
 #endif
-        if (generic) {
-            const bool dir = key == L"<dir>";
-            const std::wstring query = dir ? L"dummy" : (key == L"<file>" ? L"dummy" : L"dummy" + key);
-            const DWORD attrs = dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-            if (SHGetFileInfoW(query.c_str(), attrs, &info, sizeof(info),
-                               SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES)) index = info.iIcon;
-        } else {
-            const std::wstring query = ShellPath(path);
-            if (SHGetFileInfoW(query.c_str(), 0, &info, sizeof(info),
-                               SHGFI_SYSICONINDEX | SHGFI_SMALLICON)) index = info.iIcon;
-            if (info.hIcon) DestroyIcon(info.hIcon);
+        {
+            if (generic) {
+                const bool dir = key == L"<dir>";
+                request.path = key == L"<dir>" || key == L"<file>" ? L"dummy" : L"dummy" + key;
+                request.attributes = dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+                request.use_attributes = true;
+            } else {
+                request.path = ShellPath(path);
+            }
+            ipc::QueryShell(request, result, [state] {
+                std::lock_guard lock(state->mutex);
+                return state->stop;
+            });
         }
         {
             std::lock_guard lock(state->mutex);
@@ -323,23 +275,52 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
             // a destroyed/reused window. Reset takes this same short gate.
             if (state->stop) break;
             state->queued.erase(path);
-            if (index >= 0) {
+            if (SUCCEEDED(result.error) && !result.icons.empty()) {
+                const auto remove_pixels = [&](int id) {
+                    const auto found = state->pixels.find(id);
+                    if (found == state->pixels.end()) return;
+                    for (const auto& icon : *found->second) state->pixel_bytes -= icon.pixels.size();
+                    state->pixels.erase(found);
+                };
+                const auto evict_exact = [&] {
+                    const auto oldest = std::min_element(state->last_used.begin(), state->last_used.end(),
+                        [](const auto& a, const auto& b) { return a.second < b.second; });
+                    if (oldest == state->last_used.end()) return false;
+                    const auto found = state->exact_index.find(oldest->first);
+                    if (found != state->exact_index.end()) {
+                        remove_pixels(found->second);
+                        state->exact_index.erase(found);
+                    }
+                    state->last_used.erase(oldest);
+                    return true;
+                };
+                size_t bytes = 0;
+                for (const auto& icon : result.icons) bytes += icon.pixels.size();
+                while (state->pixel_bytes + bytes > kPixelCacheLimit) {
+                    if (evict_exact()) continue;
+                    const auto victim = std::find_if(state->generic_index.begin(), state->generic_index.end(),
+                        [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
+                    if (victim == state->generic_index.end()) break;
+                    remove_pixels(victim->second);
+                    state->generic_index.erase(victim);
+                }
+                const int index = state->next_index++;
+                state->pixels[index] = std::make_shared<const std::vector<ipc::ShellIconPixels>>(std::move(result.icons));
+                state->pixel_bytes += bytes;
                 state->retry_after.erase(path);
                 if (generic) {
                     if (state->generic_index.size() >= 512) {
                         const auto victim = std::find_if(state->generic_index.begin(), state->generic_index.end(),
                             [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
-                        if (victim != state->generic_index.end()) state->generic_index.erase(victim);
+                        if (victim != state->generic_index.end()) {
+                            remove_pixels(victim->second);
+                            state->generic_index.erase(victim);
+                        }
                     }
                     state->generic_index[key] = index;
                 } else {
                     if (state->exact_index.size() >= kExactIndexLimit) {
-                        const auto oldest = std::min_element(state->last_used.begin(), state->last_used.end(),
-                            [](const auto& a, const auto& b) { return a.second < b.second; });
-                        if (oldest != state->last_used.end()) {
-                            state->exact_index.erase(oldest->first);
-                            state->last_used.erase(oldest);
-                        }
+                        evict_exact();
                     }
                     state->exact_index[path] = index;
                     state->last_used[path] = ++state->access_clock;
@@ -351,66 +332,50 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
             if (state->notify) InvalidateRect(state->notify, nullptr, FALSE);
         }
     }
-    if (SUCCEEDED(com_hr)) CoUninitialize();
     return 0;
 }
 
+#ifdef PULSE_SHELL_ICONS_TESTING
 ComPtr<ID2D1Bitmap> ShellIconCache::BitmapFromIcon(HICON icon) {
     ComPtr<ID2D1Bitmap> bitmap;
-    if (!icon || !dc_ || !EnsureWic()) return bitmap;
-    ComPtr<IWICBitmap> wicBitmap;
-    if (FAILED(wic_->CreateBitmapFromHICON(icon, &wicBitmap)) || !wicBitmap.get()) {
-        return bitmap;
-    }
-    ComPtr<IWICFormatConverter> converter;
-    if (FAILED(wic_->CreateFormatConverter(&converter)) || !converter.get()) {
-        return bitmap;
-    }
-    if (FAILED(converter->Initialize(wicBitmap.get(), GUID_WICPixelFormat32bppPBGRA,
-                                     WICBitmapDitherTypeNone, nullptr, 0.0,
-                                     WICBitmapPaletteTypeMedianCut))) {
-        return bitmap;
-    }
-    WICRect source_rect{};
-    ComPtr<IWICBitmap> cropped;
-    if (PaddedIconRect(converter.get(), source_rect) &&
-        SUCCEEDED(wic_->CreateBitmapFromSourceRect(converter.get(), source_rect.X, source_rect.Y,
-                    source_rect.Width, source_rect.Height, &cropped))) {
-        dc_->CreateBitmapFromWicBitmap(cropped.get(), nullptr, &bitmap);
-    } else {
-        dc_->CreateBitmapFromWicBitmap(converter.get(), nullptr, &bitmap);
-    }
+    ipc::ShellIconPixels pixels;
+    if (!dc_ || !EnsureWic() || !shell::ConvertShellIconPixels(icon, 4, pixels)) return bitmap;
+    const auto properties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    dc_->CreateBitmap(D2D1::SizeU(pixels.width, pixels.height), pixels.pixels.data(),
+                       pixels.stride, &properties, &bitmap);
     return bitmap;
 }
+#endif
 
 ID2D1Bitmap* ShellIconCache::BitmapForIndex(int index, int list_id) {
     if (index < 0 || !dc_) return nullptr;
-    IImageList* image_list = EnsureImageList(list_id);
-    if (!image_list) return nullptr;
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(list_id)) << 32) |
         static_cast<uint32_t>(index);
     auto it = bitmaps_.find(key);
     if (it != bitmaps_.end()) return it->second.get();
-    HICON icon = nullptr;
-    if (FAILED(image_list->GetIcon(index, ILD_TRANSPARENT, &icon)) || !icon) {
-        return nullptr;
+    if (!worker_) return nullptr;
+    std::shared_ptr<const std::vector<ipc::ShellIconPixels>> pixels;
+    {
+        std::lock_guard lock(worker_->mutex);
+        const auto found = worker_->pixels.find(index);
+        if (found == worker_->pixels.end()) return nullptr;
+        pixels = found->second;
     }
-    ComPtr<ID2D1Bitmap> bitmap = BitmapFromIcon(icon);
-    DestroyIcon(icon);
+    const auto icon = std::find_if(pixels->begin(), pixels->end(), [list_id](const auto& item) {
+        return item.list_id == static_cast<uint32_t>(list_id);
+    });
+    if (icon == pixels->end()) return nullptr;
+    ComPtr<ID2D1Bitmap> bitmap;
+    const auto properties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    dc_->CreateBitmap(D2D1::SizeU(icon->width, icon->height), icon->pixels.data(),
+                       icon->stride, &properties, &bitmap);
     if (!bitmap.get()) return nullptr;
     ID2D1Bitmap* raw = bitmap.get();
     if (bitmaps_.size() >= kBitmapCacheLimit) bitmaps_.erase(bitmaps_.begin());
     bitmaps_[key] = std::move(bitmap);
     return raw;
-}
-
-bool ShellIconCache::DrawSystemIcon(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest, int index) {
-    if (!dc || index < 0) return false;
-    const float desired = std::max(dest.right - dest.left, dest.bottom - dest.top);
-    auto* bitmap = BitmapForIndex(index, ImageListId(desired));
-    if (!bitmap) return false;
-    dc->DrawBitmap(bitmap, &dest, 1.0f, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, nullptr, nullptr);
-    return true;
 }
 
 bool ShellIconCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,

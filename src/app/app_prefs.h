@@ -29,7 +29,7 @@ struct AppPrefs {
     // 0 folders first, 1 follow the sort direction, 2 mixed with files
     int folder_sort_mode = 0;
     FolderViewPrefs folder_views;
-    bool search_pinyin = true;
+    bool search_pinyin = false;
     bool global_search_enabled = false;
     uint32_t global_search_modifiers = 1; // MOD_ALT
     uint32_t global_search_key = 32; // VK_SPACE

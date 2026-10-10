@@ -2,7 +2,6 @@
 #pragma once
 #include "ui_renderer.h"
 #include "empty_state_layout.h"
-#include "bloom_accent_picker.h"
 #include "../common/localization.h"
 #include "typography.h"
 #include "name_highlight.h"
@@ -49,13 +48,15 @@ void ClearTextWidthCache() {
                 const float pane_cover = (std::max)(0.0f, 1.0f - 2.0f * visibility);
                 return {1.0f - 0.9f * visibility, pane_cover, pane_cover};
             }
-            a.title = 1.0f - visibility;
-            a.sheet = 1.0f - 0.9f * visibility;
-            a.card = 1.0f - 0.2f * visibility;
-            // Sidebar text sits directly on the sheet; unblurred detail needs more cover.
+            // Light wallpaper uses a separate title strip and one reading
+            // scrim below it. Cards add only enough white to separate panes.
+            a.title = 1.0f - 0.28f * visibility;
+            a.sheet = 1.0f - 0.34f * visibility;
+            a.card = 0.24f - 0.16f * visibility;
+            // Sidebar text sits directly on the sheet; sharp detail needs more cover.
             if (wallpaper_blur <= 0) {
-                a.title = (std::min)(1.0f, a.title + 0.10f);
-                a.sheet = (std::min)(1.0f, a.sheet + 0.12f);
+                a.title = (std::min)(1.0f, a.title + 0.04f);
+                a.sheet = (std::min)(1.0f, a.sheet + 0.04f);
             }
             return a;
         }
@@ -1480,10 +1481,12 @@ struct SettingsLayout {
     std::vector<D2D1_RECT_F> network_rows;
     std::vector<D2D1_RECT_F> network_remove;
     D2D1_RECT_F about_card{};
+    D2D1_RECT_F about_distribution_card{};
+    D2D1_RECT_F about_distribution_notice{};
     D2D1_RECT_F diagnostics_card{};
     D2D1_RECT_F diagnostics_perf{};
     D2D1_RECT_F diagnostics_action[3]{};
-    D2D1_RECT_F about_action[2]{};
+    D2D1_RECT_F about_action[3]{};
     D2D1_RECT_F dup_scope_row{}, dup_scope_label{}, dup_hint{};
     D2D1_RECT_F dup_target_row{}, dup_target_label{}, dup_target_summary{};
     D2D1_RECT_F dup_min_row{}, dup_min_label{}, dup_min_description{};
@@ -1505,6 +1508,7 @@ struct SettingsLayout {
     std::vector<int> dup_open_group;
     std::vector<int> dup_open_file;
     std::vector<D2D1_RECT_F> dup_group_delete;
+    std::vector<D2D1_RECT_F> dup_group_ignore;
     float content_origin = 0.0f;
     float content_h = 0.0f;
 };
@@ -1681,20 +1685,42 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float card_right = l.content.right - pad;
         {
             const float lines = static_cast<float>(AboutRowLines(vm, card_right - card_left, scale));
-            const float actions_y = y + 66.0f * scale + lines * kAboutRowDip * scale + 10.0f * scale;
+            float actions_y = y + 66.0f * scale + lines * kAboutRowDip * scale + 10.0f * scale;
             static constexpr pulse::l10n::StringId kAboutLabels[] = {
                 pulse::l10n::StringId::AboutCopyInfo,
                 pulse::l10n::StringId::AboutHomepage,
             };
             float ax = card_left + 16.0f * scale;
+            const float action_right = card_right - 16.0f * scale;
             for (int i = 0; i < 2; ++i) {
-                const float w = label_btn_w(pulse::l10n::Get(kAboutLabels[i]));
+                const float w = std::min(action_right - card_left - 16.0f * scale,
+                    label_btn_w(pulse::l10n::Get(kAboutLabels[i])));
+                if (i > 0 && ax + w > action_right) {
+                    ax = card_left + 16.0f * scale;
+                    actions_y += 40.0f * scale;
+                }
                 l.about_action[i] = D2D1::RectF(ax, actions_y, ax + w, actions_y + 32.0f * scale);
                 ax += w + 8.0f * scale;
             }
             l.about_card = D2D1::RectF(card_left, y, card_right, actions_y + 48.0f * scale);
             y = l.about_card.bottom + 12.0f * scale;
         }
+
+        const float notice_left = card_left + 16.0f * scale;
+        const float notice_width = card_right - card_left - 32.0f * scale;
+        const float notice_top = y + 44.0f * scale;
+        const float notice_height = SettingsCaptionHeight(
+            l10n::Get(l10n::StringId::AboutDistributionNotice), notice_width, scale, painter);
+        l.about_distribution_notice = D2D1::RectF(notice_left, notice_top,
+            notice_left + notice_width, notice_top + notice_height);
+        const float upstream_top = l.about_distribution_notice.bottom + 16.0f * scale;
+        const float upstream_width = std::min(notice_width,
+            label_btn_w(l10n::Get(l10n::StringId::AboutUpstream)));
+        l.about_action[2] = D2D1::RectF(notice_left, upstream_top,
+            notice_left + upstream_width, upstream_top + 32.0f * scale);
+        l.about_distribution_card = D2D1::RectF(card_left, y, card_right,
+            l.about_action[2].bottom + 16.0f * scale);
+        y = l.about_distribution_card.bottom + 12.0f * scale;
 
         const bool compact_diagnostics = card_right - card_left < 650.0f * scale;
         const float performance_height=SettingsToggleHeight(card_right-card_left-16*scale,

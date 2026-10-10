@@ -8,6 +8,7 @@
 #include "ui_compositor.h"
 #include "window_helpers.h"
 #include "../common/localization.h"
+#include "../ipc/shell_interaction_client.h"
 
 #include <commctrl.h>
 #include <windowsx.h>
@@ -31,21 +32,7 @@ D2D1_RECT_F Rect(float scale, float x, float y, float width, float height) {
 }
 
 bool PickFolderPath(HWND owner, std::wstring& path) {
-    ComPtr<IFileOpenDialog> dialog;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&dialog)))) return false;
-    dialog->SetTitle(l10n::Get(l10n::StringId::AdvSearchBrowse).c_str());
-    FILEOPENDIALOGOPTIONS options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    if (FAILED(dialog->Show(owner))) return false;
-    ComPtr<IShellItem> item;
-    if (FAILED(dialog->GetResult(&item))) return false;
-    PWSTR folder = nullptr;
-    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &folder)) || !folder) return false;
-    path.assign(folder);
-    CoTaskMemFree(folder);
-    return !path.empty();
+    return ipc::PickShellPath(owner, true, l10n::Get(l10n::StringId::AdvSearchBrowse), path);
 }
 
 std::wstring NameHowLabel(model::NameMatchHow how) {

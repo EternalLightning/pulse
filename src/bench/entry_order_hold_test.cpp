@@ -126,10 +126,10 @@ int wmain(int argc, wchar_t** argv) {
         name_tab.PrepareEntryRefresh(false);
         ApplySnapshot(name_tab, {Entry(L"z.txt", 20), Entry(L"a.txt", 1),
                                 Entry(L"m-folder", 0, true), Entry(L"0-new.txt", 7)});
-        check(name_tab.order_held && NamesAre(*name_tab.snapshot,
-              {L"m-folder", L"a.txt", L"z.txt", L"0-new.txt"}) &&
+        check(!name_tab.order_held && NamesAre(*name_tab.snapshot,
+              {L"m-folder", L"0-new.txt", L"a.txt", L"z.txt"}) &&
               name_tab.EntryAt(name_tab.selected_index).name == L"a.txt",
-              "background projection retains physical rows and selection across foreign ordering");
+              "background projection sorts newcomers and retains selection across foreign ordering");
         name_tab.PrepareEntryRefresh(true);
         ApplySnapshot(name_tab, *name_tab.snapshot);
         check(!name_tab.order_held && NamesAre(*name_tab.snapshot,
@@ -229,14 +229,14 @@ int wmain(int argc, wchar_t** argv) {
     tab.PrepareEntryRefresh(false);
     ApplySnapshot(tab, Sorted({Entry(L"a.txt"), Entry(L"b.txt"), Entry(L"z.txt")},
         ui::SortColumn::Name, ui::SortDirection::Asc, parent));
-    check(tab.order_held && NamesAre(*tab.snapshot, {L"b.txt", L"a.txt", L"z.txt"}) &&
-          tab.selected_index == 1 && tab.EntryAt(1).name == L"a.txt" && tab.held_renames.empty(),
-          "a refresh arriving before directory notification holds the renamed selected row");
+    check(!tab.order_held && NamesAre(*tab.snapshot, {L"a.txt", L"b.txt", L"z.txt"}) &&
+          tab.selected_index == 0 && tab.EntryAt(0).name == L"a.txt" && tab.held_renames.empty(),
+          "a refresh arriving before directory notification sorts and follows the renamed selection");
     tab.PrepareEntryRefresh(false);
     ApplySnapshot(tab, fresh);
-    check(NamesAre(*tab.snapshot, {L"b.txt", L"a.txt", L"z.txt", L"new-folder", L"0-new.txt"}) &&
+    check(NamesAre(*tab.snapshot, {L"new-folder", L"0-new.txt", L"a.txt", L"b.txt", L"z.txt"}) &&
           tab.EntryAt(tab.selected_index).name == L"a.txt",
-          "background full enumeration preserves held rows and appends new file and folder");
+          "background full enumeration sorts new files and folders and preserves selection");
     tab.PrepareEntryRefresh(true);
     check(!tab.refresh_keeps_order && tab.pending_ensure_selection_visible,
           "explicit refresh requests sorted rows and reveals the retained physical selection");

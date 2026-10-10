@@ -107,6 +107,7 @@ struct Tab {
     std::vector<std::wstring> pending_selected_names;
     bool pending_ensure_selection_visible = false;
     std::wstring pending_created_name;
+    std::vector<std::wstring> pending_created_names;
     bool refresh_keeps_order = false;
     bool order_held = false;
     std::vector<EntryRenameHint> held_renames;
@@ -216,7 +217,8 @@ struct Tab {
     void RemapSelection(const std::vector<std::wstring>& names, const std::wstring& focus_name);
 
     // Navigation helpers.
-    void NavigateTo(const std::wstring& path);
+    // Returns false when already at the destination, preserving the view and history.
+    bool NavigateTo(const std::wstring& path);
     bool CanGoBack() const { return !back_stack.empty(); }
     bool CanGoForward() const { return !forward_stack.empty(); }
     std::wstring GoBack();
@@ -278,6 +280,7 @@ bool MoveTabGroupAcrossFreeTab(std::vector<int>& order,
                                int member_pos, int dir);
 
 struct Pane {
+    std::shared_ptr<void> lifetime_token = std::make_shared<int>(0);
     Tab view;
     bool focused = false;
     bool target = false;

@@ -75,6 +75,8 @@ Name: "startup"; Description: "开机自动启动 Pulse / Launch Pulse at sign-i
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "其他 / Other:"; Flags: unchecked
 
 [Files]
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Flags: ignoreversion recursesubdirs createallsubdirs
 #ifdef AppLocalRuntime
 ; Local MD builds bundle the matching CRT; the static Win81 CI path is unchanged.

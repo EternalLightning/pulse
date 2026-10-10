@@ -4,7 +4,6 @@
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
 #include "tab_shape.h"
-#include "bloom_accent_picker.h"
 #include "typography.h"
 #include "../common/resource_ids.h"
 #include "../model/places.h"

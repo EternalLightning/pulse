@@ -33,6 +33,7 @@
 #include "pulse_version.h"
 #include "../ops/clipboard.h"
 #include "../ipc/ctx_menu_util.h"
+#include "../ipc/shell_query_client.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
@@ -75,8 +76,6 @@ public:
 
 private:
     void Run() {
-        const auto com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        struct Apartment { HRESULT result; ~Apartment() { if (SUCCEEDED(result)) CoUninitialize(); } } apartment{com};
         for (;;) {
             DetailsMetaRequest request;
             {
@@ -102,12 +101,18 @@ private:
                 result->modified = fad.ftLastWriteTime;
                 result->accessed = fad.ftLastAccessTime;
             }
-            SHFILEINFOW sfi{};
-            const std::wstring shell_path = path::StripExtendedPathPrefix(request.path);
-            if (SUCCEEDED(com) && SHGetFileInfoW(shell_path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_TYPENAME) &&
-                sfi.szTypeName[0]) {
-                result->type_name = sfi.szTypeName;
-            }
+            ipc::ShellQueryRequest shell_request;
+            shell_request.kind = ipc::ShellQueryKind::TypeName;
+            shell_request.path = path::StripExtendedPathPrefix(request.path);
+            ipc::ShellQueryResult shell_result;
+            const auto cancelled = [this, &request] {
+                std::lock_guard<std::mutex> lock(mutex_);
+                return pending_.has_value() &&
+                    (pending_->window_epoch != request.window_epoch || pending_->request_id != request.request_id);
+            };
+            if (ipc::QueryShell(shell_request, shell_result, cancelled) &&
+                SUCCEEDED(shell_result.error) && !shell_result.text.empty())
+                result->type_name = std::move(shell_result.text);
             if (result->attrs_valid) {
                 result->meta = app::FetchDetailsMeta(file.value, request.path,
                     (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
@@ -134,8 +139,7 @@ private:
 };
 
 DetailsMetaWorker& GetDetailsMetaWorker() {
-    // The worker is intentionally process-lifetime: Windows may leave a Shell
-    // metadata call blocked on an offline provider during window teardown.
+    // Native security/volume probes can still wait on an offline provider.
     static auto* worker = new DetailsMetaWorker();
     return *worker;
 }
@@ -509,7 +513,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_build_id = build_text;
             vm.settings_diagnostics_exporting = s.settings.diagnostics_pending();
             vm.settings_show_performance = s.appPrefs.show_status_performance;
-            vm.settings_bloom = &s.bloom_accent;
             vm.settings_index_service = s.index.Connected() && s.index.ServiceMode();
             vm.settings_index_installed = s.settings.service_installed();
             vm.settings_index_status = s.index.Status();
@@ -1442,6 +1445,16 @@ bool CanPasteIntoCurrent(AppState& s) {
 
 // probe_details=false keeps hit-test/input calls from starting detail probes.
 ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
+    if (s.hwnd) {
+        const auto* active = s.window_tabs.Active();
+        auto title = active ? app::LayoutTabTitle(*active) : std::wstring{};
+        title = title.empty() ? L"Pulse" : title + L" - Pulse";
+        const int length = GetWindowTextLengthW(s.hwnd);
+        std::wstring current(static_cast<size_t>(length) + 1, L'\0');
+        GetWindowTextW(s.hwnd, current.data(), length + 1);
+        current.resize(static_cast<size_t>(length));
+        if (current != title) SetWindowTextW(s.hwnd, title.c_str());
+    }
     if (!s.pane) return {};
     s.changes.visible_paths.clear();
     ForEachPane(s, [&](app::Pane& pane) {
@@ -1821,7 +1834,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
                 s.detailsProbeTick = GetTickCount64();
                 if (different_path) { s.detailsScroll = 0.0f; dv.scroll_y = 0.0f; }
                 // Clear stale facts immediately; GetFileAttributesEx /
-                // SHGetFileInfo / security APIs run off-thread (WM_DETAILS_META).
+                // Shell queries / security APIs run off-thread (WM_DETAILS_META).
                 s.detailsSelValid = false;
                 s.detailsTypeName.clear();
                 s.detailsMetaPath.clear();

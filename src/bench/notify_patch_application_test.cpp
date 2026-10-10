@@ -64,6 +64,7 @@ int main() {
         first.pending_generation = second.pending_generation = 0;
         first.applied_generation = second.applied_generation = 0;
         first.loading = second.loading = false;
+        first.sort_direction = second.sort_direction = ui::SortDirection::Asc;
         first.SetSnapshot(listing()); second.SetSnapshot(first.snapshot);
         first.SelectOnly(0); second.SelectOnly(0);
         s.store.Put(path, first.snapshot);
@@ -81,6 +82,17 @@ int main() {
         return false;
     };
     if (file != INVALID_HANDLE_VALUE) {
+        reset();
+        const auto before_sort = first.snapshot;
+        second.sort_direction = ui::SortDirection::Desc;
+        check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_ADDED, L"b.txt", {}}}) && wait_result(),
+            "resolve addition for panes sharing facts with opposite sort directions");
+        DrainNotifyPatches(s);
+        check(first.EntryAt(0).name == L"a.txt" && second.EntryAt(0).name == L"b.txt" &&
+            first.snapshot != second.snapshot && before_sort->size() == 1 &&
+            first.EntryAt(first.selected_index).name == L"a.txt" &&
+            second.EntryAt(second.selected_index).name == L"a.txt",
+            "watch addition immediately sorts each pane and preserves existing selections");
         reset();
         std::mutex gate_mutex;
         std::condition_variable gate_changed;
@@ -159,6 +171,7 @@ int main() {
         fs::DirEntry extra; extra.name = L"z.txt"; extra.attrs = FILE_ATTRIBUTE_NORMAL;
         other_rows->insert(other_rows->begin(), extra); second.SetSnapshot(other_rows);
         second.SelectOnly(1);
+        second.sort_direction = ui::SortDirection::Desc;
         check(QueueNotifiesToVisible(s, path, {{FILE_ACTION_RENAMED_NEW_NAME, L"b.txt", L"a.txt"}}) &&
               wait_result(), "worker resolves a shared rename fact once for distinct pane orders");
         DrainNotifyPatches(s);
@@ -166,7 +179,7 @@ int main() {
               second.EntryAt(1).name == L"b.txt" && first.snapshot != second.snapshot &&
               first.EntryAt(first.selected_index).name == L"b.txt" &&
               second.EntryAt(second.selected_index).name == L"b.txt",
-              "resolved rename retains each pane order and remaps independent selection");
+              "resolved rename sorts each pane by its direction and remaps independent selection");
 
         for (unsigned stale = 0; stale < 5; ++stale) {
             reset();

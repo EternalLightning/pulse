@@ -204,18 +204,18 @@ public:
     void ResolveDeleteConfirmation(uint64_t token, bool accepted);
     std::vector<DeleteOutcome> DrainDeleteOutcomes();
 
-    // Double-click open: ShellExecuteEx on a dedicated open thread (plan §6.2).
+    // Queued Shell launch; execution lives in an isolated Pulse.Shell session.
     void OpenWith(const std::wstring& path);
+    void RevealInExplorer(const std::wstring& path);
+    std::vector<std::wstring> DrainShellLaunchErrors();
 
-    // Shell "properties" verb on the ops worker thread. Compile-verified only
-    // in 1B-2; wired to the context menu but exercised manually.
+    // Shell properties in an isolated session with its own window lifetime.
     void ShowProperties(const std::wstring& path);
     // Several items: one merged Explorer sheet (SHMultiFileProperties) on a
-    // short-lived STA thread that pumps messages while the sheet is open.
+    // session process that pumps messages while the sheet is open.
     void ShowProperties(const std::vector<std::wstring>& paths);
 
-    // Any registry shell verb ("print", "edit", …) via ShellExecuteEx on the
-    // ops worker thread. "openas" / "打开方式…" uses SHOpenWithDialog.
+    // Any registry shell verb ("print", "edit", …) in the Shell session.
     void ExecuteVerb(const std::wstring& path, const std::wstring& verb);
 
     // Open `file` with a specific application (open-with MRU entry).
@@ -224,7 +224,7 @@ public:
     // Expand a registry command template (%1/%L) and launch it on the open thread.
     void ExecuteCommand(const std::wstring& command, const std::wstring& path);
 
-    // `wt.exe -d <dir>` on the ops worker thread. Compile-verified only.
+    // `wt.exe -d <dir>` in the Shell session.
     void OpenTerminal(const std::wstring& dir);
 
     // --- Explorer context-menu sessions (pulse_shell IContextMenu) ---------
@@ -298,12 +298,14 @@ private:
     };
 
     void WorkerThread();
+    void StartShellClient();
     void MenuThread();
     struct OpenMailbox {
         std::mutex mutex;
         std::condition_variable cv;
         std::condition_variable finished_cv;
         std::deque<QueueItem> queue;
+        std::deque<std::wstring> errors;
         std::atomic<HWND> owner{nullptr};
         bool running = true;
         bool finished = false;
@@ -434,9 +436,7 @@ private:
     std::set<uint32_t> ctx_invoke_ids_;                   // in-flight invoke req ids
     std::atomic<uint32_t> ctx_invoke_done_{0};
 
-    // ShellExecute / properties: dedicated STA thread so opens never
-    // serialize behind transfers (SEE_MASK_NOASYNC on the transfer
-    // worker made double-click open wait for in-flight copies).
+    // Dedicated IPC forwarding thread; Shell code runs outside this process.
     std::thread open_thread_;
     // Owner for the shell dialogs above; written by the UI thread only.
     std::atomic<HWND> ui_hwnd_{nullptr};

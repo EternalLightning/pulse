@@ -4,6 +4,7 @@
 #include "index_server_auth.h"
 #include "index_search_response.h"
 #include "search_trace.h"
+#include "../ipc/shell_interaction_client.h"
 #include <chrono>
 #include <algorithm>
 #include <shellapi.h>
@@ -509,21 +510,18 @@ std::wstring QuoteCommandArg(const std::wstring& value) {
 
 bool RunElevatedIndexCommand(const std::wstring& exe, const std::wstring& parameters,
                             DWORD* result = nullptr) {
-    SHELLEXECUTEINFOW sei{ sizeof(sei) };
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas";
-    sei.lpFile = exe.c_str();
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&sei)) {
-        if (result) *result = GetLastError();
-        return false;
-    }
-    DWORD code = ERROR_GEN_FAILURE;
-    if (sei.hProcess) {
-        if (WaitForSingleObject(sei.hProcess, INFINITE) == WAIT_OBJECT_0)
-            GetExitCodeProcess(sei.hProcess, &code);
-        CloseHandle(sei.hProcess);
+    ipc::ShellLaunchRequest request;
+    request.kind = ipc::ShellLaunchKind::ElevatedWait;
+    request.flags = 0;
+    request.owner_hwnd = reinterpret_cast<uintptr_t>(GetActiveWindow());
+    request.executable = exe;
+    request.parameters = parameters;
+    const auto reply = ipc::RunShellInteraction(request);
+    DWORD code = HRESULT_FACILITY(reply.error) == FACILITY_WIN32 ? HRESULT_CODE(reply.error) : ERROR_GEN_FAILURE;
+    if (SUCCEEDED(reply.error) && !reply.value.empty()) {
+        wchar_t* end = nullptr;
+        const auto parsed = wcstoul(reply.value.c_str(), &end, 10);
+        if (end && !*end) code = parsed;
     }
     if (result) *result = code;
     return code == 0;

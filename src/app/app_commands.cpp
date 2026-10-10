@@ -32,6 +32,7 @@
 #include "resource.h"
 #include "../ops/clipboard.h"
 #include "../ipc/ctx_menu_util.h"
+#include "../ipc/shell_interaction_client.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
@@ -1672,46 +1673,13 @@ void ApplyAppWindowChrome(AppState& s) {
 }
 
 bool PickImageFile(HWND owner, std::wstring& path) {
-    ui::ComPtr<IFileOpenDialog> dialog;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&dialog)))) {
-        return false;
-    }
-    COMDLG_FILTERSPEC filters[] = {
-        { l10n::Get(l10n::StringId::Images).c_str(), L"*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.jfif" },
-        { l10n::Get(l10n::StringId::AllFiles).c_str(), L"*.*" },
-    };
-    dialog->SetFileTypes(ARRAYSIZE(filters), filters);
-    dialog->SetTitle(l10n::Get(l10n::StringId::TooltipChooseBackground).c_str());
-    FILEOPENDIALOGOPTIONS options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM);
-    if (FAILED(dialog->Show(owner))) return false;
-    ui::ComPtr<IShellItem> item;
-    if (FAILED(dialog->GetResult(&item))) return false;
-    PWSTR file = nullptr;
-    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &file)) || !file) return false;
-    path.assign(file);
-    CoTaskMemFree(file);
-    return !path.empty();
+    return ipc::PickShellPath(owner, false, l10n::Get(l10n::StringId::TooltipChooseBackground), path,
+        {l10n::Get(l10n::StringId::Images), L"*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.jfif",
+         l10n::Get(l10n::StringId::AllFiles), L"*.*"});
 }
 
 bool PickFolder(HWND owner, std::wstring& path, const wchar_t* title) {
-    ui::ComPtr<IFileOpenDialog> dialog;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&dialog)))) return false;
-    dialog->SetTitle(title);
-    FILEOPENDIALOGOPTIONS options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    if (FAILED(dialog->Show(owner))) return false;
-    ui::ComPtr<IShellItem> item;
-    if (FAILED(dialog->GetResult(&item))) return false;
-    PWSTR folder = nullptr;
-    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &folder)) || !folder) return false;
-    path.assign(folder);
-    CoTaskMemFree(folder);
-    return !path.empty();
+    return ipc::PickShellPath(owner, true, title ? title : L"", path);
 }
 
 D2D1_COLOR_F ResolveAccentColor(const app::AppPrefs& prefs, bool dark) {
@@ -1721,15 +1689,10 @@ D2D1_COLOR_F ResolveAccentColor(const app::AppPrefs& prefs, bool dark) {
     return dark || prefs.accent_follow_system ? ui::GetAccentColor() : ui::HexColor(0x527D70);
 }
 
-void ApplyAccentFromPrefs(AppState& s, bool snap_picker) {
-    uint32_t rgb = 0;
-    const bool custom = app::ParseAccentRgb(s.appPrefs.accent_rgb, rgb);
-    const bool follow = !custom && (s.darkMode || s.appPrefs.accent_follow_system);
-    if (!custom && !follow) rgb = 0x527D70;
+void ApplyAccentFromPrefs(AppState& s) {
     s.accentColor = ResolveAccentColor(s.appPrefs, s.darkMode);
     s.globalSearchWindow.SetAppearance(s.darkMode, ui::WindowEffectFromId(s.appPrefs.window_effect),
         s.appPrefs.background_image, s.accentColor);
-    s.bloom_accent.SetSelection(follow, rgb, snap_picker);
     if (s.menu) s.menu->SetTheme(s.darkMode, s.accentColor);
     if (s.operationWindow) s.operationWindow->SetTheme(s.darkMode, s.accentColor);
 }
@@ -1937,7 +1900,7 @@ void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
     if (app::HasEffect(effects, app::SettingsEffect::ChangeTracking))
         ApplyChangeTrackingSettings(s);
     if (app::HasEffect(effects, app::SettingsEffect::Accent))
-        ApplyAccentFromPrefs(s, false);
+        ApplyAccentFromPrefs(s);
     if (app::HasEffect(effects, app::SettingsEffect::WindowMaterial)) {
         s.renderer.InvalidateWallpaper();
         ApplyAppWindowChrome(s);
@@ -2007,7 +1970,7 @@ void SetThemeMode(AppState& s, int mode) {
         s.themeOverride = s.appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
             s.appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
     s.darkMode = ui::ShouldUseDarkMode(s.EffectiveThemeMode());
-    ApplyAccentFromPrefs(s, true);
+    ApplyAccentFromPrefs(s);
     ApplyAppWindowChrome(s);
     if (s.editBrush) {
         DeleteObject(s.editBrush);

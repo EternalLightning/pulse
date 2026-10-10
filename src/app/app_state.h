@@ -8,7 +8,6 @@
 #include "../ui/drag_drop.h"
 #include "../ui/file_operation_dialog.h"
 #include "../ui/quick_preview_window.h"
-#include "../ui/bloom_accent_picker.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_snapshot.h"
@@ -53,6 +52,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <string>
 #include <thread>
@@ -88,6 +88,7 @@ constexpr UINT WM_DUP_VOLUMES = WM_APP + 59;
 constexpr UINT WM_SEARCH_HISTORY = WM_APP + 62;
 constexpr UINT WM_CHANGE_TRACKING = WM_APP + 63;
 constexpr UINT WM_EXIT_READY = WM_APP + 67;
+constexpr UINT WM_HEADER_DROP_RESULT = WM_APP + 71;
 constexpr UINT kTimerUi = 1;
 
 enum class OmnibarMode { Path, Mixed, Command, Project };
@@ -131,6 +132,24 @@ struct Timing {
     bool first_frame_recorded = false;
 };
 
+struct HeaderDropResult {
+    app::Pane* pane = nullptr;
+    int pane_slot = -1;
+    std::weak_ptr<void> pane_lifetime;
+    uint64_t view_generation = 0;
+    std::wstring pane_path;
+    std::wstring folder;
+    std::vector<std::wstring> sources;
+    DWORD accepted_effect = DROPEFFECT_NONE;
+    DWORD fallback_effect = DROPEFFECT_NONE;
+};
+
+struct HeaderDropQueryState {
+    std::mutex mutex;
+    uint64_t generation = 0;
+    std::optional<HeaderDropResult> result;
+};
+
 struct AppState {
     bool exit_confirming = false;
     bool exit_requested = false;
@@ -159,6 +178,7 @@ struct AppState {
     app::WindowTabs window_tabs;
     app::Pane* pane = nullptr;          // focused leaf of the current layout tab
     app::Pane* targetPane = nullptr;    // Ctrl+D marked destination
+    std::shared_ptr<HeaderDropQueryState> header_drop_query = std::make_shared<HeaderDropQueryState>();
 
     fs::SnapshotStore store;
     struct ExplicitEntryRefresh {
@@ -227,7 +247,6 @@ struct AppState {
     app::TrayController tray_controller;
     GlobalSearchHotkey globalSearchHotkey;
     app::SingleInstanceCoordinator single_instance;
-    ui::BloomAccentPicker bloom_accent;
     std::unordered_set<std::wstring> tagFallbackVolumes;
     std::unordered_set<std::wstring> tagAdsDiscoveryQueued;
     app::TagDiscoveryCache tagAdsDiscoveryChecked;

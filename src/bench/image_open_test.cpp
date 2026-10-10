@@ -1,7 +1,8 @@
 #include "../ops/image_open.cpp"
 #include <cstdio>
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--viewer-launcher") == 0) return 0;
     const HRESULT initialized = OleInitialize(nullptr);
     if (FAILED(initialized)) return 1;
     int failures = 0;
@@ -61,6 +62,74 @@ int wmain() {
                 invalid_count == 0 && columns->GetColumns(CM_ENUM_VISIBLE, &key, 0) == E_INVALIDARG &&
                 identity->GetIDList(nullptr) == E_POINTER, "Reject malformed Shell serialization requests");
         }
+    }
+    {
+        using namespace pulse::ops;
+        auto lifetime = std::make_shared<int>(0);
+        std::weak_ptr<void> observed = lifetime;
+        auto contents = std::make_shared<FolderContents>();
+        contents->lifetime = lifetime;
+        auto site = Make<ImageOpenSite>(nullptr, contents);
+        ComPtr<IFolderView2> view;
+        const HRESULT result = site ? site->QueryService(SID_SFolderView, IID_PPV_ARGS(&view)) : E_OUTOFMEMORY;
+        lifetime.reset();
+        contents.reset();
+        site.Reset();
+        check(SUCCEEDED(result) && !observed.expired(), "Shell view retains the launch lifetime after handoff");
+        view.Reset();
+        check(observed.expired(), "Releasing the final Shell view releases the launch lifetime");
+    }
+    {
+        using namespace pulse::ops;
+        ImageOpenSession empty;
+        check(!empty.ViewerRunning(), "An unused image session does not retain a launch worker");
+        const std::wstring name = L"Pulse-image-lifetime-" + std::to_wstring(GetCurrentProcessId()) + L".jpg";
+        ViewerWindowTracker tracker(name);
+        check(tracker.CaptureBeforeLaunch(), "Capture windows before image activation");
+        wchar_t executable[32768]{};
+        GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable));
+        std::wstring command = L"\"" + std::wstring(executable) + L"\" --viewer-launcher";
+        STARTUPINFOW startup{sizeof(startup)};
+        PROCESS_INFORMATION child{};
+        const bool launched = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child) != FALSE;
+        bool exited = false;
+        if (launched) {
+            CloseHandle(child.hThread);
+            exited = WaitForSingleObject(child.hProcess, 5000) == WAIT_OBJECT_0;
+            if (!exited) { TerminateProcess(child.hProcess, ERROR_CANCELLED); WaitForSingleObject(child.hProcess, 5000); }
+            tracker.SetLauncher(child.hProcess);
+        }
+        check(launched && exited && tracker.Active(), "A finished activation launcher does not retire the media session");
+        HWND viewer = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"STATIC", name.c_str(),
+            WS_POPUP | WS_VISIBLE, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        check(viewer && tracker.Active(), "Track the actual viewer window after the launcher exits");
+        if (viewer) {
+            SetWindowTextW(viewer, L"Neighbor-video.mp4");
+            check(tracker.Active(), "Switching from an image to a video preserves the viewer session");
+            SetWindowTextW(viewer, L"Another-image.jpg");
+            ShowWindow(viewer, SW_HIDE);
+            check(tracker.Active(), "Changing images and hiding the viewer do not retire its context");
+            DestroyWindow(viewer);
+            check(!tracker.Active(), "Closing the viewer releases its image session");
+        }
+    }
+    {
+        using namespace pulse::ops;
+        const std::wstring name = L"Pulse-existing-viewer-" + std::to_wstring(GetCurrentProcessId()) + L".jpg";
+        HWND previous = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"STATIC", name.c_str(),
+            WS_POPUP | WS_VISIBLE, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ViewerWindowTracker tracker(name);
+        const bool captured = previous && tracker.CaptureBeforeLaunch();
+        tracker.SetLauncher(OpenProcess(SYNCHRONIZE, FALSE, GetCurrentProcessId()));
+        tracker.Active();
+        if (previous) DestroyWindow(previous);
+        check(captured && tracker.Active(), "An unchanged background window with the same filename cannot own a new session");
+        HWND current = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"STATIC", name.c_str(),
+            WS_POPUP | WS_VISIBLE, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        check(current && tracker.Active(), "A new matching viewer can own the pending session");
+        if (current) DestroyWindow(current);
+        check(!tracker.Active(), "The replacement viewer is reclaimed independently of the old window");
     }
     OleUninitialize();
     return failures ? 1 : 0;

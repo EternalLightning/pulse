@@ -741,6 +741,9 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
             return;
         }
     } else if (kind == L"search") {
+        // A folder or a different query cannot supply rows for this search.
+        // Same-query refreshes may retain their published results.
+        if (tab.snapshot_path != path) tab.SetSnapshot(nullptr);
         wchar_t title[512]{};
         swprintf_s(title, l10n::Get(l10n::StringId::SearchLoadingFormat).c_str(),
                    rest.c_str());
@@ -842,6 +845,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     if (!shared_request) s.worker.Cancel(tab.current_path, tab.pending_generation);
     tab.ClearEntryOrderHold();
     tab.pending_created_name.clear();
+    tab.pending_created_names.clear();
     s.explicit_entry_refreshes.erase(&tab);
     if (tab.archive_cancel) tab.archive_cancel->store(true);
     s.index.CancelSession(tab.search_session_id);
@@ -1500,7 +1504,7 @@ void NavigateTo(AppState& s, const std::wstring& path) {
     std::wstring normalized = fs::NormalizePath(path);
     const std::wstring returnedChild =
         app::NavigationReturnChildName(tab->current_path, normalized);
-    tab->NavigateTo(normalized);
+    if (!tab->NavigateTo(normalized)) return;
     RecordSearchHistory(s, normalized);
     StartLoadingPath(s, *tab, normalized);
     RestoreNavigationReturnSelection(s, *tab, returnedChild);

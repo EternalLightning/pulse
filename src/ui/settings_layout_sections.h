@@ -189,16 +189,19 @@ float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, flo
     const float file_height = (files_below ? 72.0f : 40.0f) * scale;
     const float keep_width = std::min(available,
         std::max(88 * scale, button_width(l10n::Get(I::DupKeep)) + 16 * scale));
-    const auto& delete_text = l10n::Get(I::DupDeleteExtras);
-    const float delete_width = std::min(available, std::max(96 * scale, button_width(delete_text)));
+    const std::wstring_view group_actions[] = {
+        l10n::Get(I::DupIgnoreGroup), l10n::Get(I::DupDeleteExtras)
+    };
     for (size_t g = 0; g < vm.dup_groups.size(); ++g) {
         const float files_top = y + 48 * scale;
         const float delete_top = files_top + static_cast<float>(vm.dup_groups[g].files.size()) * file_height + 8 * scale;
-        const auto delete_rect = D2D1::RectF(right - delete_width, delete_top, right,
-            delete_top + button_height(delete_text, delete_width));
-        const auto card = D2D1::RectF(card_left, y, card_right, delete_rect.bottom + 12 * scale);
+        D2D1_RECT_F group_buttons[2]{};
+        const float actions_bottom = LayoutSettingsActions(left, right, delete_top, scale,
+            group_actions, 2, group_buttons, painter, true) - 8 * scale;
+        const auto card = D2D1::RectF(card_left, y, card_right, actions_bottom + 12 * scale);
         l.dup_group_cards.push_back(card);
-        l.dup_group_delete.push_back(delete_rect);
+        l.dup_group_ignore.push_back(group_buttons[0]);
+        l.dup_group_delete.push_back(group_buttons[1]);
         if (VisibleInContent(card, l.content, 64 * scale)) {
             for (size_t f = 0; f < vm.dup_groups[g].files.size(); ++f) {
                 const float top = files_top + static_cast<float>(f) * file_height;

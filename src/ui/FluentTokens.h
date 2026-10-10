@@ -254,8 +254,28 @@ inline void UpdateWindowTheme(HWND hwnd, bool dark) noexcept {
 
 inline Theme MakeTheme(bool dark, D2D1_COLOR_F accent) noexcept {
     Theme t{};
-    // Keep the stored accent hue in both themes.
+    // Keep the stored hue; light chrome needs darker accent ink over wallpaper.
     t.accent = accent;
+    if (!dark) {
+        const auto luminance = [](D2D1_COLOR_F color) {
+            const auto linear = [](float value) {
+                return value <= 0.04045f ? value / 12.92f
+                    : std::pow((value + 0.055f) / 1.055f, 2.4f);
+            };
+            return 0.2126f * linear(color.r) + 0.7152f * linear(color.g)
+                + 0.0722f * linear(color.b);
+        };
+        if (luminance(accent) > 0.04f) {
+            float low = 0.0f, high = 1.0f;
+            for (int i = 0; i < 12; ++i) {
+                const float factor = (low + high) * 0.5f;
+                const D2D1_COLOR_F ink{accent.r * factor, accent.g * factor, accent.b * factor, accent.a};
+                if (luminance(ink) > 0.04f) high = factor;
+                else low = factor;
+            }
+            t.accent = {accent.r * low, accent.g * low, accent.b * low, accent.a};
+        }
+    }
     AccentShades shades = DeriveAccentShades(t.accent);
     t.accent_hover = shades.light1;
     t.accent_pressed = shades.dark1;
@@ -302,35 +322,35 @@ inline Theme MakeTheme(bool dark, D2D1_COLOR_F accent) noexcept {
         t.fps_bg = WithAlpha(HexColor(0x000000), 0.60f);
         t.fps_text = HexColor(0xFFFFFF);
     } else {
-        t.bg = HexColor(0xF3F5F1);
-        t.text = HexColor(0x303B50);
-        t.text_secondary = HexColor(0x66748A);
-        t.text_disabled = HexColor(0x929CAE);
+        t.bg = HexColor(0xF3F5F8);
+        t.text = HexColor(0x202A39);
+        t.text_secondary = HexColor(0x3D4A5C);
+        t.text_disabled = HexColor(0x8893A3);
 
-        t.fill_hover = WithAlpha(HexColor(0x527D70), 0.055f);
-        t.fill_pressed = WithAlpha(HexColor(0x527D70), 0.09f);
-        t.fill_selected = WithAlpha(accent, 0.095f);
-        t.fill_selected_inactive = WithAlpha(HexColor(0x71877B), 0.075f);
+        t.fill_hover = WithAlpha(HexColor(0x34465E), 0.075f);
+        t.fill_pressed = WithAlpha(HexColor(0x34465E), 0.11f);
+        t.fill_selected = WithAlpha(accent, 0.20f);
+        t.fill_selected_inactive = WithAlpha(HexColor(0x53657D), 0.10f);
         t.fill_input = WithAlpha(HexColor(0xFFFFFF), 0.90f);
         t.fill_input_hover = HexColor(0xFFFFFF);
         t.fill_input_focus = HexColor(0xFFFFFF);
-        t.fill_input_disabled = WithAlpha(HexColor(0xF2F5F0), 0.65f);
+        t.fill_input_disabled = WithAlpha(HexColor(0xEDF0F5), 0.65f);
 
-        t.stroke_card = HexColor(0xDCE3D9);
-        t.stroke_divider = HexColor(0xE5EAE3);
-        t.stroke_input_bottom = WithAlpha(HexColor(0xA6B5A9), 0.65f);
+        t.stroke_card = HexColor(0xD5DCE6);
+        t.stroke_divider = HexColor(0xDFE5ED);
+        t.stroke_input_bottom = WithAlpha(HexColor(0x64748B), 0.65f);
 
         t.surface_flyout = HexColor(0xFFFFFF);
         t.surface_pane_inactive = WithAlpha(HexColor(0x000000), 0.61f);
-        t.surface_title = HexColor(0xF1F3EE);
-        t.surface_sheet = HexColor(0xF7F8F4);
+        t.surface_title = HexColor(0xE9EDF3);
+        t.surface_sheet = HexColor(0xF3F5F8);
         t.surface_card = HexColor(0xFFFFFF);
 
-        t.header_bg = HexColor(0xF7F8F4);
+        t.header_bg = t.surface_sheet;
         t.header_sep = t.stroke_divider;
         t.hover_bg = t.fill_hover;
         t.selection_bg = t.fill_selected;
-        t.scrollbar_thumb = WithAlpha(HexColor(0x9BAF9E), 0.48f);
+        t.scrollbar_thumb = WithAlpha(HexColor(0x53657D), 0.48f);
         t.tab_bg = t.surface_title;
         t.tab_active_bg = t.surface_sheet;
         t.address_bg = HexColor(0xFFFFFF);

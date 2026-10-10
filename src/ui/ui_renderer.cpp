@@ -8,7 +8,6 @@
 #include "../common/display_path.h"
 #include "../common/known_folder_labels.h"
 #include "tab_shape.h"
-#include "bloom_accent_picker.h"
 #include "typography.h"
 #include "../model/places.h"
 #include "../common/resource_ids.h"
@@ -343,7 +342,11 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         dc->FillRectangle(bounds, brBg_.get());
     };
     if (layers.title > 0.0f) {
-        tint_background(rect, theme.surface_title, layers.title);
+        D2D1_RECT_F title_bounds = rect;
+        if (image_mode && !vm.dark) {
+            title_bounds.bottom = (std::min)(rect.bottom, std::round(title_bar_height_));
+        }
+        tint_background(title_bounds, theme.surface_title, layers.title);
     }
     // One sheet below the title strip carries the toolbar, sidebar and status
     // bar; the active tab uses the same fill and meets it on a whole pixel so

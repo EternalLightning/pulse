@@ -48,7 +48,8 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         const float icon_top = card.group == 0 ? (r.top + r.bottom - 28 * scale_) * 0.5f : r.top + 8 * scale_;
         const auto icon = D2D1::RectF(r.left + 14 * scale_, icon_top, r.left + 42 * scale_, icon_top + 28 * scale_);
         const int svg = FluentSvgIdForGlyph(card.glyph);
-        const bool native = card.group == 0 && icon_cache_.DrawSystemIcon(dc, icon, card.system_icon_index);
+        const bool native = card.group == 0 && !card.shell_icon_path.empty() &&
+            icon_cache_.Draw(dc, icon, card.shell_icon_path, card.label, true, FILE_ATTRIBUTE_DIRECTORY);
         if (!native && (IsHighContrast() || !svg || !DrawFluentSvg(svg, icon, 1.0f, nullptr, true)))
             DrawIconText(icon.left, icon.top, 28 * scale_, 28 * scale_, card.glyph.c_str(), L"", theme.accent, 1.0f);
         painter_.DrawText(card.label, D2D1::RectF(r.left + 52 * scale_, icon_top - 4 * scale_, r.right - 12 * scale_, icon_top + 32 * scale_),

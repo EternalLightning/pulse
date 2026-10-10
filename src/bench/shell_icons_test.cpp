@@ -1,4 +1,8 @@
 #include "../ui/shell_icons.h"
+#include "../shell_host/shell_query_icons.h"
+#include "../common/windows_compat.h"
+#include <wincodec.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <commoncontrols.h>
 #include <cstdio>
@@ -9,6 +13,7 @@
 #include <memory>
 #include <vector>
 #include <algorithm>
+#include <array>
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
@@ -123,6 +128,41 @@ struct ShellIconCacheTestAccess {
             std::printf("[%s] %s (source %ux%u)\n", result ? "PASS" : "FAIL", name, size.width, size.height);
             ok &= result;
         };
+        const std::array<BYTE, 8> alpha_values{0, 1, 8, 223, 238, 239, 254, 255};
+        for (const bool premultiplied : {false, true}) {
+            std::vector<BYTE> input(alpha_values.size() * 4);
+            std::vector<BYTE> expected(input.size());
+            for (size_t i = 0; i < alpha_values.size(); ++i) {
+                const BYTE alpha = alpha_values[i];
+                input[i * 4] = static_cast<BYTE>(premultiplied ? alpha / 2 : 153);
+                input[i * 4 + 1] = static_cast<BYTE>(premultiplied ? alpha / 3 : 84);
+                input[i * 4 + 2] = static_cast<BYTE>(premultiplied ? alpha / 5 : 17);
+                input[i * 4 + 3] = alpha;
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    const UINT color = input[i * 4 + channel];
+                    expected[i * 4 + channel] = premultiplied ? static_cast<BYTE>(color) :
+                        static_cast<BYTE>((color * alpha + 127) / 255);
+                }
+                expected[i * 4 + 3] = alpha;
+            }
+            const auto& format = premultiplied ? GUID_WICPixelFormat32bppPBGRA : GUID_WICPixelFormat32bppBGRA;
+            ComPtr<IWICBitmap> source;
+            ipc::ShellIconPixels pixels;
+            const bool converted = cache.EnsureWic() &&
+                SUCCEEDED(cache.wic_->CreateBitmapFromMemory(static_cast<UINT>(alpha_values.size()), 1,
+                    format, static_cast<UINT>(input.size()), static_cast<UINT>(input.size()),
+                    input.data(), &source)) && shell::ConvertShellBitmapPixels(source.get(), 1, pixels) &&
+                pixels.width == alpha_values.size() && pixels.height == 1 && pixels.stride == input.size() &&
+                pixels.pixels.size() == expected.size();
+            for (size_t i = 0; i < alpha_values.size(); ++i) {
+                const bool exact = converted && std::equal(expected.begin() + i * 4,
+                    expected.begin() + i * 4 + 4, pixels.pixels.begin() + i * 4);
+                std::printf("[%s] WIC %s alpha=%u: %s\n", exact ? "PASS" : "FAIL",
+                    premultiplied ? "PBGRA" : "BGRA", static_cast<UINT>(alpha_values[i]),
+                    premultiplied ? "preserves exact premultiplied bytes" : "matches exact integer premultiplication");
+                ok &= exact;
+            }
+        }
         check(256, RECT{0, 0, 32, 32}, 32, false,
               "32px legacy archive icon fills large destination rather than 256px padding");
         check(256, RECT{112, 112, 144, 144}, 32, true,
@@ -144,7 +184,8 @@ struct ShellIconCacheTestAccess {
                 SHFILEINFOW info{};
                 const bool queried = SHGetFileInfoW(name.c_str(), FILE_ATTRIBUTE_NORMAL, &info,
                     sizeof(info), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES) != 0;
-                IImageList* list = queried ? cache.EnsureImageList(SHIL_JUMBO) : nullptr;
+                IImageList* list = nullptr;
+                if (queried) SHGetImageList(SHIL_JUMBO, IID_IImageList, reinterpret_cast<void**>(&list));
                 HICON icon = nullptr;
                 ComPtr<IWICBitmap> original;
                 ComPtr<IWICFormatConverter> converted;
@@ -153,15 +194,18 @@ struct ShellIconCacheTestAccess {
                     SUCCEEDED(cache.wic_->CreateFormatConverter(&converted)) &&
                     SUCCEEDED(converted->Initialize(original.get(), GUID_WICPixelFormat32bppPBGRA,
                         WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut));
-                auto bitmap = source ? cache.BitmapFromIcon(icon) : ComPtr<ID2D1Bitmap>{};
+                cache.GenericIndex(name, false, FILE_ATTRIBUTE_NORMAL);
+                const bool loaded = Wait(cache);
+                auto* bitmap = loaded ? cache.BitmapFor(L"", name, false, FILE_ATTRIBUTE_NORMAL, 256) : nullptr;
                 if (icon) DestroyIcon(icon);
-                const auto size = bitmap.get() ? bitmap->GetPixelSize() : D2D1::SizeU();
+                if (list) list->Release();
+                const auto size = bitmap ? bitmap->GetPixelSize() : D2D1::SizeU();
                 ComPtr<ID2D1Bitmap1> staging;
                 const auto props = D2D1::BitmapProperties1(
                     D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
                     D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-                bool exported = bitmap.get() && SUCCEEDED(context->CreateBitmap(size, nullptr, 0, &props, &staging)) &&
-                    SUCCEEDED(staging->CopyFromBitmap(nullptr, bitmap.get(), nullptr));
+                bool exported = bitmap && SUCCEEDED(context->CreateBitmap(size, nullptr, 0, &props, &staging)) &&
+                    SUCCEEDED(staging->CopyFromBitmap(nullptr, bitmap, nullptr));
                 D2D1_MAPPED_RECT mapped{};
                 exported = exported && SUCCEEDED(staging->Map(D2D1_MAP_OPTIONS_READ, &mapped));
                 IconContent after_content;
@@ -202,6 +246,70 @@ struct ShellIconCacheTestAccess {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         return false;
+    }
+    static bool NativePixelsMatch(ShellIconCache& cache, const std::wstring& path, int native_index) {
+        std::shared_ptr<const std::vector<ipc::ShellIconPixels>> remote;
+        {
+            std::lock_guard lock(cache.worker_->mutex);
+            const auto found = cache.worker_->exact_index.find(path);
+            if (found == cache.worker_->exact_index.end()) return false;
+            const auto pixels = cache.worker_->pixels.find(found->second);
+            if (pixels == cache.worker_->pixels.end()) return false;
+            remote = pixels->second;
+        }
+        bool ok = remote->size() == 4;
+        if (remote->size() != 4)
+            std::printf("[INFO] pixel comparison path=%ls native_index=%d remote_sizes=%zu\n",
+                        path.c_str(), native_index, remote->size());
+        for (const auto& received : *remote) {
+            IImageList* list = nullptr;
+            HICON icon = nullptr;
+            ipc::ShellIconPixels expected;
+            const bool converted = SUCCEEDED(SHGetImageList(received.list_id, IID_IImageList,
+                reinterpret_cast<void**>(&list))) && list &&
+                SUCCEEDED(list->GetIcon(native_index, ILD_TRANSPARENT, &icon)) && icon &&
+                shell::ConvertShellIconPixels(icon, received.list_id, expected);
+            if (icon) DestroyIcon(icon);
+            if (list) list->Release();
+            const bool matches = converted && ipc::ValidShellIconPixels(received) &&
+                received.width == expected.width && received.height == expected.height &&
+                received.stride == expected.stride && received.pixels == expected.pixels;
+            if (!matches) {
+                std::printf("[INFO] pixel comparison path=%ls native_index=%d\n", path.c_str(), native_index);
+                size_t differences = 0;
+                size_t first = SIZE_MAX;
+                const size_t count = std::min(received.pixels.size(), expected.pixels.size());
+                for (size_t i = 0; i < count; ++i) {
+                    if (received.pixels[i] != expected.pixels[i]) {
+                        ++differences;
+                        if (first == SIZE_MAX) first = i;
+                    }
+                }
+                std::printf("[INFO] list=%u remote=%ux%u stride=%u bytes=%zu native=%ux%u stride=%u bytes=%zu converted=%d differing_bytes=%zu first=%zu\n",
+                    received.list_id, received.width, received.height, received.stride, received.pixels.size(),
+                    expected.width, expected.height, expected.stride, expected.pixels.size(), converted,
+                    differences, first);
+                if (cache.EnsureWic()) {
+                    CreateDirectoryW(L"bench_data\\shell_icon_fixture", nullptr);
+                    const std::wstring base = L"bench_data\\shell_icon_fixture\\windows-list-" +
+                        std::to_wstring(received.list_id);
+                    const auto save = [&](const ipc::ShellIconPixels& pixels, const wchar_t* suffix) {
+                        if (!ipc::ValidShellIconPixels(pixels)) return;
+                        ComPtr<IWICBitmap> image;
+                        if (SUCCEEDED(cache.wic_->CreateBitmapFromMemory(pixels.width, pixels.height,
+                                GUID_WICPixelFormat32bppPBGRA, pixels.stride,
+                                static_cast<UINT>(pixels.pixels.size()),
+                                const_cast<BYTE*>(pixels.pixels.data()), &image)))
+                            SavePng(cache, image.get(), base + suffix);
+                    };
+                    save(received, L"-remote.png");
+                    save(expected, L"-native.png");
+                    std::printf("[INFO] pixel diagnostics saved: %ls-{remote,native}.png\n", base.c_str());
+                }
+            }
+            ok &= matches;
+        }
+        return ok;
     }
 #ifdef PULSE_SHELL_ICONS_TESTING
     struct Block {
@@ -261,7 +369,7 @@ struct ShellIconCacheTestAccess {
             bool suppressed = true;
             for (const auto& state : retired_states) {
                 std::lock_guard lock(state->mutex);
-                suppressed &= state->exact_index.empty() && !state->notify;
+                suppressed &= state->exact_index.empty() && state->pixels.empty() && !state->notify;
             }
             std::printf("[%s] late results cannot populate or notify retired cache state\n", suppressed ? "PASS" : "FAIL");
             ok &= suppressed;
@@ -274,7 +382,7 @@ struct ShellIconCacheTestAccess {
             if (fresh.worker_) {
                 std::lock_guard lock(fresh.worker_->mutex);
                 resolved = fresh.worker_->exact_index.contains(L"fresh") &&
-                    fresh.worker_->exact_index.at(L"fresh") == 7;
+                    fresh.worker_->pixels.contains(fresh.worker_->exact_index.at(L"fresh"));
             }
             std::printf("[%s] fresh cache resolves after retirement completes\n", done && resolved ? "PASS" : "FAIL");
             ok &= done && resolved;
@@ -317,12 +425,46 @@ struct ShellIconCacheTestAccess {
         SHFILEINFOW info{};
         const bool resolved = SHGetFileInfoW(windows, 0, &info, sizeof(info),
                                             SHGFI_SYSICONINDEX | SHGFI_SMALLICON) != 0;
+        if (info.hIcon) DestroyIcon(info.hIcon);
+        check(resolved && NativePixelsMatch(cache, windows, info.iIcon),
+              "cross-process pixels match native Shell icons in all four sizes");
         {
             std::lock_guard lock(cache.worker_->mutex);
-            check(resolved && cache.worker_->exact_index.contains(windows) &&
-                  cache.worker_->exact_index.at(windows) == info.iIcon, "index matches native Shell query");
+            check(cache.worker_->exact_index.contains(windows) &&
+                  cache.worker_->pixels.contains(cache.worker_->exact_index.at(windows)),
+                  "opaque cache id owns CPU icon pixels");
             check(cache.worker_->exact_index.size() == 4096 && !cache.worker_->exact_index.contains(L"seed-0") &&
                   cache.worker_->exact_index.contains(L"seed-1"), "evicts only oldest entry");
+        }
+        // Fill the independent CPU budget with valid blobs, then make a real
+        // isolated query prove that byte pressure evicts paths and their pixels.
+        {
+            std::lock_guard lock(cache.worker_->mutex);
+            cache.worker_->exact_index.clear();
+            cache.worker_->last_used.clear();
+            cache.worker_->generic_index.clear();
+            cache.worker_->pixels.clear();
+            cache.worker_->pixel_bytes = 0;
+            for (int i = 0; i < 32; ++i) {
+                const int id = cache.worker_->next_index++;
+                ipc::ShellIconPixels icon{4, 512, 512, 2048, std::vector<uint8_t>(1024 * 1024, 0xff)};
+                const auto key = L"pixel-budget-" + std::to_wstring(i);
+                cache.worker_->pixels[id] = std::make_shared<const std::vector<ipc::ShellIconPixels>>(
+                    std::vector<ipc::ShellIconPixels>{std::move(icon)});
+                cache.worker_->pixel_bytes += 1024 * 1024;
+                cache.worker_->exact_index[key] = id;
+                cache.worker_->last_used[key] = ++cache.worker_->access_clock;
+            }
+        }
+        cache.RequestExact(windows);
+        check(Wait(cache), "query completes under CPU pixel budget pressure");
+        {
+            std::lock_guard lock(cache.worker_->mutex);
+            check(cache.worker_->pixel_bytes <= 32 * 1024 * 1024 &&
+                  !cache.worker_->exact_index.contains(L"pixel-budget-0") &&
+                  cache.worker_->exact_index.contains(windows) &&
+                  cache.worker_->pixels.size() == cache.worker_->exact_index.size(),
+                  "CPU byte limit evicts oldest path and associated pixels together");
         }
         const std::wstring missing = std::wstring(windows) + L"\\pulse-nonexistent-icon-test\\missing.exe";
         cache.RequestExact(missing);
@@ -368,7 +510,7 @@ struct ShellIconCacheTestAccess {
             cache.SetDeviceContext(nullptr);
             cache.SetDeviceContext(context.get());
             check(cache.BitmapFor(L"", L"", true, FILE_ATTRIBUTE_DIRECTORY, 32) != nullptr,
-                  "device recreation preserves native indices and rebuilds bitmap");
+                  "device recreation preserves CPU pixels and rebuilds bitmap");
             cache.Reset();
         }
         return ok;
@@ -377,7 +519,12 @@ struct ShellIconCacheTestAccess {
 }
 
 int main(int argc, char** argv) {
+    // The production UI and query host both request per-monitor awareness;
+    // native reference image lists must use the same DPI context.
+    pulse::compat::EnableDpiAwareness();
     const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
+    InitCommonControlsEx(&controls);
     bool ok = false;
     if (argc == 2 && (std::strcmp(argv[1], "--padded-icons") == 0 ||
                      std::strcmp(argv[1], "--archive-icons") == 0)) {

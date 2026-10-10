@@ -2,6 +2,7 @@
 #include "../app/places.h"
 #include "../app/home_catalog.h"
 #include "../common/localization.h"
+#include <shlobj.h>
 #include <iostream>
 
 int main() {
@@ -73,6 +74,10 @@ int main() {
     const auto recycle = std::find_if(pane.home_cards.begin(), pane.home_cards.end(),
         [](const auto& card) { return card.path == app::MakeRecyclePath(); });
     check(recycle != pane.home_cards.end() && recycle->group == 0, "recycle bin remains a navigable library card");
+    check(recycle != pane.home_cards.end() &&
+          recycle->shell_icon_path == L"::{645FF040-5081-101B-9F08-00AA002F954E}" &&
+          recycle->shell_icon_path != recycle->path,
+          "recycle native icon uses canonical Shell path while navigation retains Pulse path");
     bool capacity_valid = true;
     for (const auto& card : pane.home_cards) {
         if (card.group == 1) capacity_valid &= !card.detail.empty() && card.used_ratio <= 1.0f;
@@ -80,10 +85,25 @@ int main() {
             capacity_valid &= !card.detail.empty() && card.used_ratio <= 1.0f;
     }
     check(capacity_valid, "local and mapped drives have capacity or explicit unavailable state");
-    bool native_icons = true;
-    for (const auto& card : pane.home_cards)
-        if (card.group == 0) native_icons &= card.system_icon_index >= 0;
-    check(native_icons, "all library cards use native known-folder Shell icons after relocation");
+    const struct { const KNOWNFOLDERID* id; const char* label; } libraries[] = {
+        {&FOLDERID_Desktop, "desktop native icon uses current known-folder filesystem path"},
+        {&FOLDERID_Pictures, "pictures native icon uses current known-folder filesystem path"},
+        {&FOLDERID_Videos, "videos native icon uses current known-folder filesystem path"},
+        {&FOLDERID_Downloads, "downloads native icon uses current known-folder filesystem path"}
+    };
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    for (const auto& library : libraries) {
+        PWSTR expected_path = nullptr;
+        const HRESULT hr = SHGetKnownFolderPath(*library.id, KF_FLAG_DONT_VERIFY, nullptr, &expected_path);
+        const auto card = std::find_if(pane.home_cards.begin(), pane.home_cards.end(), [&](const auto& item) {
+            return expected_path && item.path == expected_path;
+        });
+        check(SUCCEEDED(hr) && expected_path && expected_path[0] &&
+              card != pane.home_cards.end() && card->group == 0 && card->shell_icon_path == expected_path,
+              library.label);
+        CoTaskMemFree(expected_path);
+    }
+    if (SUCCEEDED(com)) CoUninitialize();
     const auto mapped = std::find_if(pane.home_cards.begin(), pane.home_cards.end(), [](const auto& card) { return card.path == L"Z:\\"; });
     ULARGE_INTEGER available{}, total{}, free{};
     if (GetDriveTypeW(L"Z:\\") == DRIVE_REMOTE && GetDiskFreeSpaceExW(L"Z:\\", &available, &total, &free) && total.QuadPart) {

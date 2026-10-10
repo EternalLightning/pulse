@@ -1,5 +1,6 @@
 #include "../ui/drag_drop.h"
 #include "../ops/clipboard.h"
+#include "../ipc/shell_query_protocol.h"
 #include <shlobj.h>
 #include <cstdio>
 #include <atomic>
@@ -190,6 +191,64 @@ void TestDragPreparation() {
     CloseHandle(renderer_entered); CloseHandle(renderer_release);
 }
 
+void TestCidaPreparation() {
+    using namespace pulse::ui;
+    namespace fs = std::filesystem;
+    const fs::path root = fs::current_path() / L"bench_data" /
+        (L"drag_pidl_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64()));
+    fs::create_directories(root / L"other");
+    const std::vector<std::wstring> all_paths{
+        (root / L"中文 file.txt").wstring(), (root / L"second.txt").wstring(),
+        (root / L"other" / L"third.txt").wstring()};
+    for (const auto& path : all_paths) {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Check(file != INVALID_HANDLE_VALUE, L"isolated PIDL fixture file exists");
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    }
+    auto verify = [&](const std::vector<std::wstring>& paths, bool desktop_parent) {
+        auto* data = FileDataObject::Create(paths);
+        bool valid = testing::WaitForShellIdListWorker(6000);
+        FORMATETC format{static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_SHELLIDLIST)), nullptr,
+                        DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM medium{};
+        valid = valid && data->QueryGetData(&format) == S_OK && SUCCEEDED(data->GetData(&format, &medium));
+        if (valid) {
+            const auto* cida = static_cast<const CIDA*>(GlobalLock(medium.hGlobal));
+            const size_t size = GlobalSize(medium.hGlobal);
+            valid = cida && cida->cidl == paths.size();
+            if (valid) {
+                const auto* bytes = reinterpret_cast<const uint8_t*>(cida);
+                const size_t parent_size = cida->aoffset[1] - cida->aoffset[0];
+                valid = pulse::ipc::ValidShellPidl(bytes + cida->aoffset[0], parent_size) &&
+                    (desktop_parent ? parent_size == 2 : parent_size > 2);
+                for (size_t i = 0; valid && i < paths.size(); ++i) {
+                    const size_t start = cida->aoffset[i + 1];
+                    const size_t end = i + 1 < paths.size() ? cida->aoffset[i + 2] :
+                        start + ILGetSize(reinterpret_cast<PCUIDLIST_RELATIVE>(bytes + start));
+                    valid = start < end && end <= size && pulse::ipc::ValidShellPidl(bytes + start, end - start);
+                    if (!valid) break;
+                    PIDLIST_ABSOLUTE item = ILCombine(reinterpret_cast<PCIDLIST_ABSOLUTE>(bytes + cida->aoffset[0]),
+                        reinterpret_cast<PCUIDLIST_RELATIVE>(bytes + start));
+                    PWSTR path = nullptr;
+                    valid = item && SUCCEEDED(SHGetNameFromIDList(item, SIGDN_FILESYSPATH, &path)) &&
+                        path && paths[i] == path;
+                    CoTaskMemFree(path); CoTaskMemFree(item);
+                }
+            }
+            if (cida) GlobalUnlock(medium.hGlobal);
+            ReleaseStgMedium(&medium);
+        }
+        data->Release();
+        return valid;
+    };
+    Check(verify({all_paths[0]}, false), L"single Unicode drag item roundtrips its original filesystem path");
+    Check(verify({all_paths[0], all_paths[1]}, false), L"same-parent CIDA children resolve relative to the shared PIDL");
+    Check(verify({all_paths[0], all_paths[2]}, true), L"different-parent CIDA children resolve from the desktop PIDL");
+    std::error_code error;
+    fs::remove_all(root, error);
+    Check(!error, L"isolated CIDA fixtures are cleaned");
+}
+
 IDropTarget* ShellDropTarget(const std::wstring& path, bool recycle = false) {
     IShellItem* item = nullptr;
     HRESULT hr;
@@ -352,6 +411,12 @@ int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
     setvbuf(stdout, nullptr, _IONBF, 0);
     OleInitialize(nullptr);
+    if (argc > 1 && wcscmp(argv[1], L"--cida") == 0) {
+        TestCidaPreparation();
+        OleUninitialize();
+        wprintf(L"drag/drop CIDA: %d passed, %d failed\n", passed, failed);
+        return failed ? 1 : 0;
+    }
     if (argc > 1 && (wcscmp(argv[1], L"--shell-compat") == 0 || wcscmp(argv[1], L"--shell-control") == 0)) {
         TestShellCompatibility(wcscmp(argv[1], L"--shell-control") == 0);
         OleUninitialize();

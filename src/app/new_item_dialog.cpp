@@ -41,6 +41,10 @@ COLORREF Text(const DialogState& state) {
     return state.dark ? RGB(248, 248, 248) : RGB(28, 28, 28);
 }
 
+RECT ErrorBounds(const DialogState& state) {
+    return {Px(state, 25), Px(state, 138), Px(state, 325), Px(state, 156)};
+}
+
 void Fill(HDC dc, RECT rect, COLORREF color) {
     HBRUSH brush = CreateSolidBrush(color);
     FillRect(dc, &rect, brush);
@@ -83,7 +87,7 @@ void PaintDialog(HWND hwnd, const DialogState& state) {
     if (state.invalid) {
         SetTextColor(dc, RGB(225, 90, 90));
         const auto& error = l10n::Get(l10n::StringId::InvalidName);
-        RECT error_rect{Px(state, 25), Px(state, 138), Px(state, 325), Px(state, 156)};
+        RECT error_rect = ErrorBounds(state);
         DrawTextW(dc, error.c_str(), -1, &error_rect, DT_SINGLELINE | DT_VCENTER);
     }
     HPEN border_pen = CreatePen(PS_SOLID, 1,
@@ -225,9 +229,14 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             GetWindowTextW(state->edit, name.data(), length + 1);
             name.resize(static_cast<size_t>(length));
             const bool valid = IsValidFileName(name);
-            state->invalid = !name.empty() && !valid;
-            EnableWindow(state->create, valid);
-            InvalidateRect(hwnd, nullptr, FALSE);
+            const bool invalid = !name.empty() && !valid;
+            if (state->invalid != invalid) {
+                state->invalid = invalid;
+                const RECT error_rect = ErrorBounds(*state);
+                InvalidateRect(hwnd, &error_rect, FALSE);
+            }
+            if ((IsWindowEnabled(state->create) != FALSE) != valid)
+                EnableWindow(state->create, valid);
             return 0;
         }
         if (LOWORD(wp) == IDOK) {
@@ -280,7 +289,7 @@ bool PromptNewItemName(HWND owner, const std::wstring& title, bool dark,
     const int y = std::clamp(parent.top + ((parent.bottom - parent.top) - height) / 2,
         monitor.rcWork.top, std::max(monitor.rcWork.top, monitor.rcWork.bottom - height));
     HWND dialog = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
-        kClass, title.c_str(), WS_POPUP, x, y, width, height,
+        kClass, title.c_str(), WS_POPUP | WS_CLIPCHILDREN, x, y, width, height,
         owner, nullptr, wc.hInstance, &state);
     if (!dialog) return false;
     HRGN round = CreateRoundRectRgn(0, 0, width + 1, height + 1, Px(state, 10), Px(state, 10));

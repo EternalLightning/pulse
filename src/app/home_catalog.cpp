@@ -3,24 +3,13 @@
 #include "../model/drive_labels.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
+#include "../ipc/shell_query_client.h"
 #include <shlobj.h>
-#include <shellapi.h>
 #include <thread>
 #include <utility>
 
 namespace pulse::app {
 namespace {
-int KnownFolderIcon(const KNOWNFOLDERID& id) {
-    PIDLIST_ABSOLUTE pidl = nullptr;
-    int index = -1;
-    if (SUCCEEDED(SHGetKnownFolderIDList(id, KF_FLAG_DONT_VERIFY, nullptr, &pidl))) {
-        SHFILEINFOW info{};
-        if (SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl), 0, &info, sizeof(info), SHGFI_PIDL | SHGFI_SYSICONINDEX))
-            index = info.iIcon;
-    }
-    CoTaskMemFree(pidl);
-    return index;
-}
 void ReadDriveMetadata(ui::HomeCardView& card) {
     using I = l10n::StringId;
     wchar_t name[MAX_PATH + 1]{};
@@ -28,9 +17,12 @@ void ReadDriveMetadata(ui::HomeCardView& card) {
         card.label = std::wstring(name) + L" (" + card.path.substr(0, 2) + L")";
     else if (card.group == 1) card.label = l10n::Get(I::LocalDisk) + L" (" + card.path.substr(0, 2) + L")";
     else {
-        SHFILEINFOW info{};
-        if (SHGetFileInfoW(card.path.c_str(), 0, &info, sizeof(info), SHGFI_DISPLAYNAME) && info.szDisplayName[0])
-            card.label = info.szDisplayName;
+        ipc::ShellQueryRequest request;
+        request.kind = ipc::ShellQueryKind::DisplayName;
+        request.path = card.path;
+        ipc::ShellQueryResult result;
+        if (ipc::QueryShell(request, result) && SUCCEEDED(result.error) && !result.text.empty())
+            card.label = std::move(result.text);
     }
     ULARGE_INTEGER available{}, total{}, free{};
     if (GetDiskFreeSpaceExW(card.path.c_str(), &available, &total, &free) && total.QuadPart) {
@@ -68,7 +60,7 @@ void HomeCatalog::Refresh() {
                 card.label = l10n::Get(library.label);
                 card.path = path;
                 card.glyph = library.glyph;
-                card.system_icon_index = KnownFolderIcon(*library.id);
+                card.shell_icon_path = card.path;
                 cards.push_back(std::move(card));
             }
             CoTaskMemFree(path);
@@ -77,7 +69,7 @@ void HomeCatalog::Refresh() {
         recycle.label = l10n::Get(I::RecycleBin);
         recycle.path = MakeRecyclePath();
         recycle.glyph = L"\xE75C";
-        recycle.system_icon_index = KnownFolderIcon(FOLDERID_RecycleBinFolder);
+        recycle.shell_icon_path = L"::{645FF040-5081-101B-9F08-00AA002F954E}";
         cards.push_back(std::move(recycle));
         const DWORD drives = GetLogicalDrives();
         for (int i = 0; i < 26; ++i) {

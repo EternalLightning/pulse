@@ -1,6 +1,7 @@
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "entry_order_hold.h"
+#include "entry_sort.h"
 #include <algorithm>
 
 namespace pulse {
@@ -26,23 +27,35 @@ bool PublishNotifyPatch(AppState& s, const app::NotifyPatchRequest& request, boo
         else tabs.push_back(tab);
     });
     if (stale || tabs.empty()) return false;
-    std::vector<std::pair<fs::SnapshotPtr, fs::SnapshotPtr>> patches;
+    struct Projection {
+        fs::SnapshotPtr source;
+        ui::SortColumn column;
+        ui::SortDirection direction;
+        fs::SnapshotPtr snapshot;
+    };
+    std::vector<Projection> patches;
     for (auto* tab : tabs) {
         const auto found = std::find_if(patches.begin(), patches.end(),
-            [&](const auto& patch) { return patch.first == tab->snapshot; });
+            [&](const auto& patch) { return patch.source == tab->snapshot &&
+                patch.column == tab->sort_column && patch.direction == tab->sort_direction; });
         if (found != patches.end()) continue;
         auto copy = std::make_shared<std::vector<fs::DirEntry>>(*tab->snapshot);
         if (app::ApplyResolvedDirNotifies(*copy, request.resolved) != app::NotifyPatch::Applied)
             return false;
-        patches.emplace_back(tab->snapshot, std::move(copy));
+        std::sort(copy->begin(), copy->end(), [&](const auto& left, const auto& right) {
+            return app::EntryLess(left, right, tab->sort_column, tab->sort_direction,
+                app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), path);
+        });
+        patches.push_back({tab->snapshot, tab->sort_column, tab->sort_direction, std::move(copy)});
     }
-    s.store.Put(path, patches.front().second);
-    InvalidateColumnStripPath(s, path, patches.front().second);
+    s.store.Put(path, patches.front().snapshot);
+    InvalidateColumnStripPath(s, path, patches.front().snapshot);
     for (auto* tab : tabs) {
         const auto found = std::find_if(patches.begin(), patches.end(), [&](const auto& patch) {
-            return patch.first == tab->snapshot;
+            return patch.source == tab->snapshot && patch.column == tab->sort_column &&
+                patch.direction == tab->sort_direction;
         });
-        const auto& patched = found->second;
+        const auto& patched = found->snapshot;
         std::vector<std::wstring> names;
         std::wstring focus;
         if (tab->SelectedCount() > 0) {
@@ -61,7 +74,8 @@ bool PublishNotifyPatch(AppState& s, const app::NotifyPatchRequest& request, boo
             }
             if (_wcsicmp(focus.c_str(), event.old_name.c_str()) == 0) focus = event.name;
         }
-        tab->order_held = true;
+        tab->order_held = false;
+        tab->refresh_keeps_order = false;
         if (prune_renames) app::PruneEntryRenames(tab->held_renames, *patched);
         tab->SetSnapshot(patched);
         if (!names.empty()) tab->RemapSelection(names, focus);

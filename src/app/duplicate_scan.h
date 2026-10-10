@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pulse {
@@ -65,6 +66,7 @@ struct DuplicateScanSession {
     void ApplyUpdate(const index::ContentSearchProgress& progress,
                      const std::vector<index::ContentHit>& hits);
     void SetKeep(size_t group, size_t file);
+    void IgnoreGroup(size_t group);
     std::vector<std::wstring> FilesToDelete(size_t group) const;
     std::vector<std::wstring> AllFilesToDelete() const;
     void RemoveDeleted(const std::vector<std::wstring>& paths);
@@ -78,6 +80,7 @@ private:
 
     std::unordered_map<uint32_t, DuplicateFile> pending_groups_;
     std::unordered_map<uint32_t, size_t> group_indices_;
+    std::unordered_set<uint32_t> ignored_groups_;
     std::chrono::steady_clock::time_point speed_tick_{};
     uint64_t speed_files_ = 0;
     uint64_t speed_bytes_ = 0;

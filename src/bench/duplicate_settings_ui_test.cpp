@@ -64,7 +64,7 @@ bool CaptureSnapshot(pulse::ui::Compositor& compositor, std::string_view name) {
 }
 }
 
-int RunFixture() {
+int RunFixture(bool actions_only) {
     using namespace pulse;
     std::cout << "[INFO] isolated UI fixture started" << std::endl;
     compat::EnableDpiAwareness();
@@ -116,9 +116,13 @@ int RunFixture() {
         l10n::SetLanguage(language);
         vm.dup_hint = l10n::Get(l10n::StringId::DupHint);
         vm.dup_delete_all = l10n::Get(l10n::StringId::DupDeleteAllExtras) + L" · 1234567890";
-        for (float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
+        const auto scales = actions_only ? std::vector<float>{1.0f, 1.5f}
+            : std::vector<float>{1.0f, 1.25f, 1.5f, 2.0f};
+        const auto widths = actions_only ? std::vector<int>{320, 720, 1280}
+            : std::vector<int>{320, 480, 720, 759, 760, 999, 1000, 1280};
+        for (float scale : scales) {
             compositor.RecreateTextFormats(scale); renderer.SetScale(scale); painter.SetScale(scale);
-            for (int width : {320, 480, 720, 759, 760, 999, 1000, 1280}) {
+            for (int width : widths) {
                 const auto bounds = D2D1::RectF(0, 0, width * scale, 900 * scale);
                 compositor.Resize(static_cast<int>(bounds.right), static_cast<int>(bounds.bottom));
                 for (bool dark : {false, true}) {
@@ -128,9 +132,9 @@ int RunFixture() {
                     // Initialize the renderer's own painter before using real hit testing.
                     compositor.Dc()->BeginDraw(); renderer.Render(vm, bounds, theme);
                     check(SUCCEEDED(compositor.Dc()->EndDraw()), "initial renderer frame");
-                    for (int scope = 0; scope < 3; ++scope) {
+                    for (int scope = 0; scope < (actions_only ? 1 : 3); ++scope) {
                         vm.dup_scope = scope;
-                        for (int state = 0; state < 5; ++state) {
+                        for (int state = 0; state < (actions_only ? 2 : 5); ++state) {
                             vm.settings_scroll = 0;
                             vm.dup_groups = state == 2 || state == 3
                                 ? decltype(vm.dup_groups){} : result_groups;
@@ -186,6 +190,16 @@ int RunFixture() {
                                 hit(layout.dup_keep[i], ui::HitTestResult::SettingsDupKeep, layout.dup_keep_group[i], layout.dup_keep_file[i]);
                                 hit(layout.dup_open[i], ui::HitTestResult::SettingsDupOpen, layout.dup_open_group[i], layout.dup_open_file[i]);
                             }
+                            for (size_t g = 0; g < layout.dup_group_ignore.size(); ++g) {
+                                const auto ignore = layout.dup_group_ignore[g];
+                                const auto del = layout.dup_group_delete[g];
+                                check(valid(ignore, layout.dup_group_cards[g]) &&
+                                    valid(del, layout.dup_group_cards[g]), "group actions fit inside their card");
+                                check(ignore.bottom <= del.top ||
+                                    (nearly_equal(ignore.top, del.top) && ignore.right <= del.left),
+                                    "ignore precedes delete without overlap in wide and narrow layouts");
+                                hit(ignore, ui::HitTestResult::SettingsDupGroupIgnore, static_cast<int>(g));
+                            }
                             const float extent = layout.content_h;
                             vm.settings_scroll = renderer.SettingsMaxScroll(vm, bounds.right, bounds.bottom);
                             const auto scrolled = ui::MakeSettingsLayout(vm, bounds, scale, renderer.TitleBarHeight(), 28 * scale, &painter);
@@ -196,8 +210,10 @@ int RunFixture() {
                                 hit(scrolled.dup_open[i], ui::HitTestResult::SettingsDupOpen,
                                     scrolled.dup_open_group[i], scrolled.dup_open_file[i]);
                             }
-                            for (size_t g = 0; g < scrolled.dup_group_delete.size(); ++g)
+                            for (size_t g = 0; g < scrolled.dup_group_delete.size(); ++g) {
+                                hit(scrolled.dup_group_ignore[g], ui::HitTestResult::SettingsDupGroupIgnore, static_cast<int>(g));
                                 hit(scrolled.dup_group_delete[g], ui::HitTestResult::SettingsDupGroupDelete, static_cast<int>(g));
+                            }
                             if (vm.dup_show_delete_all) {
                                 check(nearly_equal(scrolled.dup_delete_all.right, right), "dynamic delete-all is right aligned");
                                 check(scrolled.dup_delete_all.bottom <= scrolled.content.bottom, "last action is reachable at max scroll");
@@ -235,8 +251,9 @@ int RunFixture() {
     return failures ? 1 : 0;
 }
 
-int main() {
-    try { return RunFixture(); }
+int main(int argc, char** argv) {
+    const bool actions_only = argc == 2 && std::string_view(argv[1]) == "--actions-only";
+    try { return RunFixture(actions_only); }
     catch (const std::exception& error) {
         std::cerr << "[FAIL] fixture exception: " << error.what() << std::endl;
         return 3;

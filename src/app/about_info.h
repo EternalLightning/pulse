@@ -9,7 +9,8 @@ namespace pulse::app {
 
 using AboutRow = std::pair<std::wstring, std::wstring>;  // label, value
 
-inline constexpr const wchar_t* kPulseHomepage = L"https://github.com/jimmgreen/pulse";
+inline constexpr const wchar_t* kPulseHomepage = L"https://github.com/EternalLightning/pulse";
+inline constexpr const wchar_t* kPulseUpstream = L"https://github.com/jimmgreen/pulse";
 
 // Label/value rows for Settings > About (version, build, Windows, location, ...).
 std::vector<AboutRow> BuildAboutRows(bool index_service, bool index_installed, float scale);

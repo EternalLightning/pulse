@@ -15,7 +15,7 @@ struct ArchiveEntry {
     bool encrypted = false;
     FILETIME mtime{};
 };
-enum class ArchiveOutcome { Success, Failed, Cancelled, OutputLimit };
+enum class ArchiveOutcome { Success, Failed, Cancelled, OutputLimit, PartialListing };
 // Required is encryption evidence, not a verdict that a supplied password is wrong.
 enum class ArchivePasswordState { Unknown, NotRequired, Required };
 struct ArchiveOperationResult {

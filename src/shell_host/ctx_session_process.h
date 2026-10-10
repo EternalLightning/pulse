@@ -11,21 +11,23 @@ inline std::wstring ContextWorkerPipeName(DWORD parent, uint32_t session) {
     return ipc::PipeNameFor(parent) + L"_context_" + std::to_wstring(session);
 }
 
-inline bool ContextProcessHasVisibleWindows(DWORD process) {
+inline bool ContextProcessHasVisibleWindows(DWORD process, bool responsive = false) {
     struct Search {
         DWORD process;
+        bool responsive;
         bool found = false;
         static BOOL CALLBACK Visit(HWND window, LPARAM context) {
             auto& search = *reinterpret_cast<Search*>(context);
             DWORD owner = 0;
             GetWindowThreadProcessId(window, &owner);
-            if (owner == search.process && IsWindowVisible(window)) {
+            if (owner == search.process && IsWindowVisible(window) &&
+                (!search.responsive || !IsHungAppWindow(window))) {
                 search.found = true;
                 return FALSE;
             }
             return TRUE;
         }
-    } search{process};
+    } search{process, responsive};
     EnumWindows(Search::Visit, reinterpret_cast<LPARAM>(&search));
     return search.found;
 }

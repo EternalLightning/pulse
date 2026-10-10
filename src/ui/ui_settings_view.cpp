@@ -4,7 +4,6 @@
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
 #include "tab_shape.h"
-#include "bloom_accent_picker.h"
 #include "typography.h"
 #include "../common/resource_ids.h"
 #include "../model/places.h"
@@ -402,6 +401,22 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             }
         }
 
+        draw_card(lay.about_distribution_card);
+        MakeBrush(dc, theme.text, brText_);
+        DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
+                     l10n::Get(l10n::StringId::AboutDistributionTitle),
+                     lay.about_distribution_card.left + 16.0f * scale_,
+                     lay.about_distribution_card.top + 12.0f * scale_,
+                     lay.about_distribution_card.right - lay.about_distribution_card.left - 32.0f * scale_,
+                     24.0f * scale_);
+        painter_.DrawWrappedCaption(l10n::Get(l10n::StringId::AboutDistributionNotice),
+            D2D1::Point2F(lay.about_distribution_notice.left, lay.about_distribution_notice.top),
+            lay.about_distribution_notice.right - lay.about_distribution_notice.left, theme.text_secondary);
+        fluent::ControlState upstream_state{};
+        upstream_state.hovered = IsHovered(vm, HitTestResult::SettingsAboutAction, 2);
+        painter_.DrawButton({lay.about_action[2], l10n::Get(l10n::StringId::AboutUpstream), {},
+                             fluent::ButtonKind::Standard, upstream_state});
+
         draw_card(lay.diagnostics_card);
         MakeBrush(dc, theme.text, brText_);
         DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
@@ -647,10 +662,21 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                     brText_.get(), file.name, open_rc.left, open_rc.top,
                     open_rc.right - open_rc.left, 18 * scale_);
-                MakeBrush(dc, theme.text_secondary, brTextSecondary_);
+                const bool open_hovered = IsHovered(vm, HitTestResult::SettingsDupOpen,
+                    static_cast<int>(g), f);
+                MakeBrush(dc, open_hovered ? theme.accent : theme.text_secondary, brTextSecondary_);
                 DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                     brTextSecondary_.get(), file.detail, open_rc.left, open_rc.top + 18 * scale_,
                     open_rc.right - open_rc.left, 18 * scale_);
+            }
+            if (g < lay.dup_group_ignore.size() &&
+                VisibleInContent(lay.dup_group_ignore[g], lay.content)) {
+                fluent::ControlState ignore{};
+                ignore.enabled = !vm.dup_scanning;
+                ignore.hovered = ignore.enabled &&
+                    IsHovered(vm, HitTestResult::SettingsDupGroupIgnore, static_cast<int>(g));
+                button(lay.dup_group_ignore[g], pulse::l10n::Get(I::DupIgnoreGroup),
+                    fluent::ButtonKind::Standard, ignore);
             }
             if (g < lay.dup_group_delete.size() &&
                 VisibleInContent(lay.dup_group_delete[g], lay.content)) {

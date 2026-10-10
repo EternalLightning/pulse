@@ -1,5 +1,6 @@
 #include "shell_window_registry.h"
 #include "shell_path.h"
+#include "../ipc/shell_query_client.h"
 #include <shlobj.h>
 #include <exdisp.h>
 #include <servprov.h>
@@ -35,19 +36,11 @@ namespace {
 using PidlItem = std::remove_pointer_t<PIDLIST_ABSOLUTE>;
 struct PidlDelete { void operator()(PidlItem* p) const { CoTaskMemFree(p); } };
 using Pidl = std::unique_ptr<PidlItem, PidlDelete>;
-Pidl Parse(const std::wstring& path) {
-    PIDLIST_ABSOLUTE p = nullptr;
-    const auto shell_path = ShellPathText(path);
-    const HRESULT hr = shell_path.empty() ? SHGetKnownFolderIDList(FOLDERID_ComputerFolder, 0, nullptr, &p)
-        : SHParseDisplayName(shell_path.c_str(), nullptr, &p, 0, nullptr);
-    return SUCCEEDED(hr) ? Pidl(p) : Pidl();
-}
-std::wstring Name(PCIDLIST_ABSOLUTE p, SIGDN kind) {
-    PWSTR text = nullptr;
-    if (!p || FAILED(SHGetNameFromIDList(p, kind, &text))) return {};
-    std::wstring result = text;
-    CoTaskMemFree(text);
-    return result;
+Pidl CopyPidl(const std::vector<uint8_t>& bytes) {
+    if (!ipc::ValidShellPidl(bytes)) return {};
+    auto* copy = static_cast<PIDLIST_ABSOLUTE>(CoTaskMemAlloc(bytes.size()));
+    if (copy) std::memcpy(copy, bytes.data(), bytes.size());
+    return Pidl(copy);
 }
 HRESULT StringResult(const std::wstring& value, BSTR* result) {
     if (!result) return E_POINTER;
@@ -57,8 +50,10 @@ HRESULT StringResult(const std::wstring& value, BSTR* result) {
 // A single COM identity supplies the browser, document service and selection view.
 class PaneBrowser final : public IWebBrowserApp, public IServiceProvider, public IShellView {
 public:
-    PaneBrowser(std::shared_ptr<ShellWindowRegistry::Shared> shared, ShellWindowEntry entry, Pidl folder)
-        : shared_(std::move(shared)), entry_(std::move(entry)), folder_(std::move(folder)) {}
+    PaneBrowser(std::shared_ptr<ShellWindowRegistry::Shared> shared, ShellWindowEntry entry, Pidl folder,
+                ipc::ShellQueryResult identity)
+        : shared_(std::move(shared)), entry_(std::move(entry)), folder_(std::move(folder)),
+          identity_(std::move(identity)) {}
     void Retire() { folder_.reset(); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
         if (!out) return E_POINTER;
@@ -89,11 +84,13 @@ public:
     HRESULT STDMETHODCALLTYPE get_Container(IDispatch** p) override { return get_Document(p); }
     HRESULT STDMETHODCALLTYPE get_HWND(SHANDLE_PTR* p) override { if (!p) return E_POINTER; *p = reinterpret_cast<SHANDLE_PTR>(shared_->window); return S_OK; }
     HRESULT STDMETHODCALLTYPE get_Name(BSTR* p) override { return StringResult(L"Pulse", p); }
-    HRESULT STDMETHODCALLTYPE get_LocationName(BSTR* p) override { return StringResult(Name(folder_.get(), SIGDN_NORMALDISPLAY), p); }
+    HRESULT STDMETHODCALLTYPE get_LocationName(BSTR* p) override {
+        return StringResult(folder_ ? identity_.text : std::wstring(), p);
+    }
     HRESULT STDMETHODCALLTYPE get_LocationURL(BSTR* p) override {
-        const auto path = Name(folder_.get(), SIGDN_FILESYSPATH);
+        const auto& path = identity_.filesystem_path;
         std::wstring url;
-        if (!path.empty()) {
+        if (folder_ && !path.empty()) {
             DWORD n = static_cast<DWORD>(path.size() * 3 + 32);
             std::vector<wchar_t> buffer(n);
             if (SUCCEEDED(UrlCreateFromPathW(path.c_str(), buffer.data(), &n, 0))) url = buffer.data();
@@ -154,13 +151,28 @@ public:
         if (!item) return E_INVALIDARG;
         if (!ShellSelectionFlagsNeedDelivery(static_cast<unsigned>(flags))) return S_OK;
         if (!folder_ || shared_->stop) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-        Pidl absolute(ILCombine(folder_.get(), item));
-        const auto path = Name(absolute.get(), SIGDN_DESKTOPABSOLUTEPARSING);
-        if (path.empty()) return E_INVALIDARG;
+        const auto* child = reinterpret_cast<const uint8_t*>(item);
+        const size_t child_size = ILGetSize(item);
+        if (!ipc::ValidShellPidl(child, child_size) || identity_.pidl.size() - sizeof(uint16_t) >
+            ipc::kShellQueryPidlLimit - child_size) return E_INVALIDARG;
+        ipc::ShellQueryRequest request;
+        request.kind = ipc::ShellQueryKind::PidlName;
+        request.pidl.assign(identity_.pidl.begin(), identity_.pidl.end() - sizeof(uint16_t));
+        request.pidl.insert(request.pidl.end(), child, child + child_size);
+        ipc::ShellQueryResult result;
+        auto cancelled = [shared = shared_, entry = entry_] {
+            if (shared->stop) return true;
+            std::lock_guard lock(shared->mutex);
+            return std::none_of(shared->wanted.begin(), shared->wanted.end(), [&](const auto& value) {
+                return value.key == entry.key && SameShellPath(value.path, entry.path);
+            });
+        };
+        if (!ipc::QueryShell(request, result, cancelled) ||
+            FAILED(result.error) || result.text.empty()) return E_INVALIDARG;
         std::lock_guard lock(shared_->mutex);
         if (shared_->stop) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         if (shared_->selections.size() >= 4096) return HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA);
-        shared_->selections.push_back({entry_.key, entry_.path, path, static_cast<unsigned>(flags)});
+        shared_->selections.push_back({entry_.key, entry_.path, result.text, static_cast<unsigned>(flags)});
         if (!PostMessageW(shared_->window, shared_->message, 0, 0)) {
             shared_->selections.pop_back(); return HRESULT_FROM_WIN32(GetLastError());
         }
@@ -172,6 +184,7 @@ private:
     std::shared_ptr<ShellWindowRegistry::Shared> shared_;
     ShellWindowEntry entry_;
     Pidl folder_;
+    ipc::ShellQueryResult identity_;
 };
 struct Registration { ComPtr<PaneBrowser> browser; long pending = 0; long window = 0; std::wstring path; };
 DWORD WINAPI RunRegistry(void* context) {
@@ -214,14 +227,29 @@ DWORD WINAPI RunRegistry(void* context) {
                 }
                 for (const auto& entry : wanted) {
                     if (!entry.key || registered.contains(entry.key) || shared->stop) continue;
-                    Pidl pidl = Parse(entry.path);
+                    ipc::ShellQueryRequest request;
+                    request.kind = ipc::ShellQueryKind::FolderIdentity;
+                    request.path = entry.path.empty() ? L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"
+                        : ShellPathText(entry.path);
+                    auto cancelled = [shared, entry] {
+                        if (shared->stop) return true;
+                        std::lock_guard lock(shared->mutex);
+                        return std::none_of(shared->wanted.begin(), shared->wanted.end(), [&](const auto& value) {
+                            return value.key == entry.key && SameShellPath(value.path, entry.path);
+                        });
+                    };
+                    ipc::ShellQueryResult identity;
+                    if (!ipc::QueryShell(request, identity, cancelled) || FAILED(identity.error)) {
+                        shared->error = identity.error; continue;
+                    }
+                    Pidl pidl = CopyPidl(identity.pidl);
                     if (!pidl) continue;
                     VARIANT location{}; VARIANT root{};
-                    HRESULT hr = InitVariantFromBuffer(pidl.get(), ILGetSize(pidl.get()), &location);
+                    HRESULT hr = InitVariantFromBuffer(pidl.get(), static_cast<UINT>(identity.pidl.size()), &location);
                     if (FAILED(hr)) { shared->error = hr; continue; }
                     Registration r;
                     r.path = entry.path;
-                    r.browser.Attach(new PaneBrowser(shared, entry, std::move(pidl)));
+                    r.browser.Attach(new PaneBrowser(shared, entry, std::move(pidl), std::move(identity)));
                     hr = windows->RegisterPending(static_cast<long>(shared->owner_thread), &location, &root,
                         SWC_BROWSER, &r.pending);
                     if (SUCCEEDED(hr)) hr = windows->Register(static_cast<IWebBrowserApp*>(r.browser.Get()),

@@ -26,6 +26,69 @@ pulse::fs::SnapshotPtr Listing(std::initializer_list<const wchar_t*> names) {
     return entries;
 }
 
+void TransferAndTitleCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
+    using namespace pulse;
+    const auto title_is = [&](const std::wstring& expected) {
+        wchar_t title[512]{};
+        BuildVm(s, false);
+        GetWindowTextW(s.hwnd, title, static_cast<int>(std::size(title)));
+        return title == expected;
+    };
+    Check(title_is(app::LayoutTabTitle(*s.window_tabs.Active()) + L" - Pulse"),
+        "taskbar title uses the active folder tab name");
+    s.window_tabs.Active()->title = L"Pinned work";
+    Check(title_is(L"Pinned work - Pulse"), "custom tab rename updates the taskbar title");
+    s.window_tabs.NewTabAt(1, app::MakeHomePath());
+    s.pane = s.window_tabs.Active()->FocusedPane();
+    Check(title_is(app::LayoutTabTitle(*s.window_tabs.Active()) + L" - Pulse"),
+        "switching tabs updates the taskbar title");
+    s.window_tabs.SwitchTab(0);
+    s.pane = s.window_tabs.Active()->FocusedPane();
+    s.window_tabs.Active()->title.clear();
+    tab.virtual_title = L"Search results";
+    Check(title_is(L"Search results - Pulse"), "virtual tab title updates the taskbar title");
+    tab.virtual_title.clear();
+
+    for (const auto direction : {ui::SortDirection::Asc, ui::SortDirection::Desc}) {
+        tab.sort_column = ui::SortColumn::Name; tab.sort_direction = direction;
+        tab.pending_generation = 0; tab.loading = false;
+        tab.SetSnapshot(Listing({L"z.txt", L"m.txt"})); tab.SelectOnly(1);
+        s.store.Put(path, tab.snapshot);
+        QueueTransferredItemsReveal(s, {path + L"\\a.txt", path + L"\\b (2).txt",
+            path + L"\\other\\nested.txt"});
+        Check(tab.pending_created_names == std::vector<std::wstring>{L"a.txt", L"b (2).txt"},
+            "transfer reveal uses actual conflict-renamed destinations and ignores nested files");
+        tab.pending_generation = 60;
+        app::WorkResult result{};
+        result.path = path; result.generation = 59;
+        result.snapshot = Listing({L"z.txt", L"m.txt", L"b (2).txt", L"a.txt"});
+        ApplyWorkerResult(s, result);
+        Check(!tab.pending_created_names.empty() && tab.selected_index == 1,
+            "stale enumeration does not consume transferred selection");
+        result.generation = 60;
+        ApplyWorkerResult(s, result);
+        Check(tab.pending_created_names.empty() && tab.SelectedCount() == 2 &&
+            tab.EntryAt(tab.selected_index).name == L"a.txt" &&
+            std::is_sorted(tab.snapshot->begin(), tab.snapshot->end(), [&](const auto& a, const auto& b) {
+                return app::EntryLess(a, b, tab.sort_column, direction, path);
+            }), "matching transfer enumeration sorts all rows and selects every transferred file");
+    }
+    tab.pending_generation = 0; tab.SelectOnly(0);
+    QueueTransferredItemsReveal(s, {path + L"\\M.TXT"});
+    Check(tab.pending_created_name == L"M.TXT", "replacement waits for refreshed metadata");
+    tab.pending_generation = 61;
+    app::WorkResult replacement{};
+    replacement.path = path; replacement.generation = 61;
+    replacement.snapshot = Listing({L"m.txt", L"z.txt"});
+    ApplyWorkerResult(s, replacement);
+    Check(tab.EntryAt(tab.selected_index).name == L"m.txt" && tab.pending_created_names.empty(),
+        "replaced destination is selected by its actual filename casing after enumeration");
+    const auto selected = tab.selected_index;
+    QueueTransferredItemsReveal(s, {path + L"\\elsewhere\\a.txt"});
+    Check(tab.pending_created_name.empty() && tab.selected_index == selected,
+        "transfer to another folder does not steal current selection");
+}
+
 void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
     using namespace pulse;
     const auto listing = [](bool include_new, bool folder = false) {
@@ -172,6 +235,14 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
 
 void ListingRaceCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
     using namespace pulse;
+    tab.sort_column = ui::SortColumn::Name;
+    tab.sort_direction = ui::SortDirection::Asc;
+    tab.applied_generation = tab.pending_generation = 0;
+    tab.loading = false;
+    tab.ClearEntryOrderHold();
+    tab.SetSnapshot(Listing({L"a.txt", L"z.txt"}));
+    s.explicit_entry_refreshes.erase(&tab);
+    s.store.Put(path, tab.snapshot);
     RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 10;
     s.explicit_entry_refreshes[&tab].generation = 10;
@@ -247,22 +318,24 @@ void ListingRaceCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
         tab.held_renames[0].old_name == L"old.txt" &&
         tab.held_renames[0].new_name == L"temporary.txt" &&
         tab.held_renames[1].old_name == L"temporary.txt" &&
-        tab.held_renames[1].new_name == L"final.txt" && tab.refresh_keeps_order,
+        tab.held_renames[1].new_name == L"final.txt" && !tab.refresh_keeps_order,
         "ordinary rename chain preserves original rows and mapping before fallback enumeration");
     sorted.generation = 27;
     tab.pending_generation = 27;
     sorted.snapshot = Listing({L"a.txt", L"final.txt", L"z.txt"});
     ApplyWorkerResult(s, sorted);
-    Check(tab.EntryAt(0).name == L"z.txt" && tab.EntryAt(1).name == L"final.txt" &&
-        tab.EntryAt(2).name == L"a.txt" && tab.IsSelected(1),
-        "ordinary rename chain follows the selected item in its original slot after fallback");
+    Check(tab.EntryAt(0).name == L"a.txt" && tab.EntryAt(1).name == L"final.txt" &&
+        tab.EntryAt(2).name == L"z.txt" && tab.IsSelected(1),
+        "ordinary rename chain sorts the fallback result and follows the selected item");
 
     tab.order_held = true;
     tab.sort_column = ui::SortColumn::Name; tab.sort_direction = ui::SortDirection::Asc;
     tab.search_relevance = false;
     SetSort(s, ui::SortColumn::Name, ui::SortDirection::Desc);
-    Check(s.explicit_entry_refreshes.contains(&tab) && !tab.refresh_keeps_order,
-        "switching sort enters explicit request rather than background hold");
+    Check(tab.EntryAt(0).name == L"z.txt" && !tab.order_held && !tab.refresh_keeps_order &&
+        tab.EntryAt(tab.selected_index).name == L"final.txt",
+        "switching sort immediately sorts the snapshot and preserves selection");
+    RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 30;
     s.explicit_entry_refreshes[&tab].generation = 30;
     app::WorkResult stale = sorted;
@@ -322,9 +395,9 @@ void ArchitectureCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstr
     other.SetSnapshot(Listing({L"c.txt", L"a.txt"}));
     s.store.Put(path, tab.snapshot);
     Check(ApplyNotifyToVisible(s, path, {FILE_ACTION_REMOVED, L"absent.txt", {}}) &&
-        tab.EntryAt(0).name == L"a.txt" && other.EntryAt(0).name == L"c.txt" &&
+        tab.EntryAt(0).name == L"a.txt" && other.EntryAt(0).name == L"a.txt" &&
         tab.snapshot != other.snapshot,
-        "distinct held pane orders are not forcibly unified by shared storage");
+        "distinct pane snapshots are independently sorted on notification publication");
     const auto first_before_failure = tab.snapshot;
     const auto other_before_failure = other.snapshot;
     const auto store_before_failure = s.store.Peek(path);
@@ -412,10 +485,15 @@ int main(int argc, char** argv) {
     const std::wstring path = fs::NormalizePath(L"C:\\pulse-created-item-memory");
     auto& tab = *ActiveTab(s);
     tab.current_path = path;
+    const bool transfer_only = argc == 2 && std::string_view(argv[1]) == "--transfer-title-only";
+    const bool listing_only = argc == 2 && std::string_view(argv[1]) == "--listing-races-only";
     const bool banner_only = argc == 2 && std::string_view(argv[1]) == "--unc-banner-only";
-    if (banner_only) failures += bench::RunUncSearchBannerCases(s, tab);
+    if (transfer_only) TransferAndTitleCases(s, tab, path);
+    else if (listing_only) ListingRaceCases(s, tab, path);
+    else if (banner_only) failures += bench::RunUncSearchBannerCases(s, tab);
     else CreatedItemCases(s, tab, path);
-    if (!banner_only && (argc != 2 || std::string_view(argv[1]) != "--created-only")) {
+    if (!banner_only && !transfer_only && !listing_only &&
+        (argc != 2 || std::string_view(argv[1]) != "--created-only")) {
         ListingRaceCases(s, tab, path);
         ArchitectureCases(s, tab, path);
     }

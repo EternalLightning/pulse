@@ -246,7 +246,6 @@ void SubmitAddressSearch(AppState& s, bool live) {
         }
         return;
     }
-    const auto previous_results = continuing ? tab->snapshot : fs::SnapshotPtr{};
     if (continuing) {
         ++tab->view_generation;
         tab->current_path = path;
@@ -260,10 +259,6 @@ void SubmitAddressSearch(AppState& s, bool live) {
             s.addressHistoryDue = 0;
             RecordSearchHistory(s, path);
         }
-    }
-    if (previous_results && !previous_results->empty() && tab->loading) {
-        tab->SetSnapshot(previous_results);
-        tab->search_retaining_results = true;
     }
     tab->search_input_path = tab->current_path;
     tab->search_input_text = query;

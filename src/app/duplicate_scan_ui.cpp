@@ -106,8 +106,15 @@ void OpenDuplicateLocation(AppState& s, size_t group, size_t file) {
     if (group >= s.duplicateScan.groups.size()) return;
     const auto& files = s.duplicateScan.groups[group].files;
     if (file >= files.size()) return;
-    const std::wstring parent = fs::ParentPath(files[file].path);
-    if (!parent.empty()) NavigateTo(s, parent);
+    ResolvedOpenTarget target;
+    target.file_path = fs::NormalizePath(files[file].path);
+    target.folder = fs::ParentPath(target.file_path);
+    const size_t slash = target.file_path.find_last_of(L"\\/");
+    target.file_leaf = slash == std::wstring::npos
+        ? target.file_path : target.file_path.substr(slash + 1);
+    if (target.folder.empty() || target.file_leaf.empty()) return;
+    NavigateTo(s, target.folder);
+    SelectLaunchedFile(s, target);
 }
 
 } // namespace pulse

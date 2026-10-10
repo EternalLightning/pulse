@@ -1009,3 +1009,7 @@
 #define IDS_HELP_EYEBROW                         2223
 #define IDS_LIST_SEPARATOR                       2224
 #define IDS_ARCHIVE_PASSWORD_UNKNOWN_RETRY       2225
+#define IDS_DUP_IGNORE_GROUP                    2226
+#define IDS_ABOUT_DISTRIBUTION_TITLE             2227
+#define IDS_ABOUT_DISTRIBUTION_NOTICE            2228
+#define IDS_ABOUT_UPSTREAM                       2229

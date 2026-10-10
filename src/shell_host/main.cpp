@@ -7,13 +7,15 @@
 // IFileOperation executes synchronously with an IFileOperationProgressSink
 // reporting RSP_PROGRESS / RSP_DONE back over the pipe.
 //
-// The process is a stateless proxy: if it dies the UI side restarts it and
-// retries the in-flight request once (see src/ipc/shell_client.cpp).
+// Only read-only requests may be retried after restart (see src/ipc/shell_client.cpp).
+// Launch requests use separate workers and are never automatically replayed.
 #include "../ipc/protocol.h"
 #include "../ipc/delete_plan_protocol.h"
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
 #include "ctx_session_process.h"
+#include "shell_launch_process.h"
+#include "shell_query_worker.h"
 #include "deletion_identity.h"
 #include "delete_fileop.h"
 #include "recycle_fileop.h"
@@ -89,6 +91,8 @@ struct HostState {
 
 bool g_context_worker = false;
 std::unique_ptr<pulse::shell::ContextSessionProcesses> g_context_processes;
+std::unique_ptr<pulse::shell::ShellLaunchProcesses> g_launch_processes;
+std::unique_ptr<pulse::shell::ShellLaunchProcesses> g_interaction_processes;
 
 // Crash-only diagnostics (plan §11: crashes are a normal design case).
 // Log under %LOCALAPPDATA%\Pulse: an installed copy lives in Program Files,
@@ -873,6 +877,8 @@ DWORD WINAPI ReaderThreadImpl() {
                 break;
             }
             case REQ_CANCEL: {
+                if (g_launch_processes && g_launch_processes->Cancel(h.request_id)) break;
+                if (g_interaction_processes && g_interaction_processes->Cancel(h.request_id)) break;
                 g.cancel_id.store(h.request_id);
                 break;
             }
@@ -883,6 +889,26 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_CTX_QUERY: {
                 if (g_context_processes) g_context_processes->Query(h.request_id, std::move(payload));
                 else StartCtxSession(h.request_id, payload.data(), payload.size());
+                break;
+            }
+            case REQ_SHELL_LAUNCH: {
+                if (g_launch_processes) {
+                    pulse::ipc::ShellLaunchRequest request;
+                    const bool interaction = pulse::ipc::ReadShellLaunch(payload.data(), payload.size(), request) &&
+                        (request.kind == pulse::ipc::ShellLaunchKind::PickFile ||
+                         request.kind == pulse::ipc::ShellLaunchKind::PickFolder ||
+                         request.kind == pulse::ipc::ShellLaunchKind::ElevatedWait);
+                    // Long-lived Photos/property sessions cannot starve modal selection.
+                    auto& pool = interaction ? g_interaction_processes : g_launch_processes;
+                    pool->Submit(h.request_id, std::move(payload));
+                }
+                else {
+                    PayloadWriter response;
+                    response.PutU32(static_cast<uint32_t>(E_ACCESSDENIED));
+                    response.PutU32(0);
+                    response.PutString(L"This worker cannot broker Shell launches; no launch occurred.");
+                    SendMsg(RSP_SHELL_LAUNCH_DONE, h.request_id, response.data());
+                }
                 break;
             }
             case REQ_CTX_INVOKE: {
@@ -1665,6 +1691,15 @@ LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
+#ifdef PULSE_SHELL_LAUNCH_TESTING
+    if (__argc == 3 && wcscmp(__wargv[1], L"--launch-test-command") == 0) {
+        return pulse::shell::RunShellLaunchTestCommand(__wargv[2]);
+    }
+    if (__argc == 2 && wcscmp(__wargv[1], L"--launch-test-child") == 0) {
+        Sleep(INFINITE);
+        return 0;
+    }
+#endif
 #ifdef PULSE_CONTEXT_PROCESS_TESTING
     if (__argc == 2 && wcscmp(__wargv[1], L"--context-test-child") == 0) {
         Sleep(INFINITE);
@@ -1676,6 +1711,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     // Declare PMv2 before COM or any HWND exists so Windows does not bitmap-scale
     // those dialogs on high-DPI displays.
     pulse::compat::EnableDpiAwareness();
+
+    if (__argc == 4 && wcscmp(__wargv[1], L"--query-worker") == 0) {
+        const DWORD parent = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
+        const uint32_t session = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));
+        return parent && session ? pulse::shell::RunShellQueryWorker(parent, session) : 1;
+    }
+
+    if (__argc == 4 && wcscmp(__wargv[1], L"--launch-worker") == 0) {
+        const DWORD parent = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
+        const uint32_t request = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));
+        return parent && request ? pulse::shell::RunShellLaunchWorker(parent, request) : 1;
+    }
 
     DWORD ui_pid = GetCurrentProcessId();
     uint32_t worker_session = 0;
@@ -1734,6 +1781,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
                 options.pending_timeout_ms = 2000;
                 if (g.running.load()) SendMsg(type, id, payload, options);
             });
+        g_launch_processes = std::make_unique<pulse::shell::ShellLaunchProcesses>(executable,
+            [](uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
+                PipeIoOptions options;
+                options.pending_timeout_ms = 2000;
+                if (g.running.load()) SendMsg(type, id, payload, options);
+            });
+        g_launch_processes->SetUiProcess(g.client_pid);
+        g_interaction_processes = std::make_unique<pulse::shell::ShellLaunchProcesses>(executable,
+            [](uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
+                PipeIoOptions options;
+                options.pending_timeout_ms = 2000;
+                if (g.running.load()) SendMsg(type, id, payload, options);
+            });
+        g_interaction_processes->SetUiProcess(g.client_pid);
     }
     HANDLE reader = CreateThread(nullptr, 0, ReaderThread, nullptr, 0, nullptr);
     if (ui_pid != GetCurrentProcessId()) {
@@ -1751,6 +1812,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     g.running.store(false);
     CancelIoEx(g.pipe, nullptr); // unblock reader thread's pending I/O
     if (g_context_processes) g_context_processes->Stop();
+    if (g_launch_processes) g_launch_processes->Stop();
+    if (g_interaction_processes) g_interaction_processes->Stop();
     if (reader) {
         WaitForSingleObject(reader, 2000);
         CloseHandle(reader);

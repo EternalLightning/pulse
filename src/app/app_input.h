@@ -21,7 +21,6 @@ std::wstring BaseName(const std::wstring& path);
 bool PointOnPaneHeader(const AppState& s, const ui::WindowViewModel& vm,
                               int pane_index, float x, float y);
 std::wstring HeaderDropHint(const std::vector<std::wstring>& sources);
-std::wstring ResolveHeaderDropFolder(const std::vector<std::wstring>& sources);
 DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
                                POINT pt, DWORD key_state, DWORD allowed, DWORD preferred = 0);
 DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,

@@ -32,7 +32,6 @@ enum class PaneHeaderIcon;
 inline constexpr unsigned kSettingsContextExpandedMask = 0x3f00u;
 inline constexpr unsigned kSettingsDefaultExpandedMask = kSettingsContextExpandedMask | 0x3u;
 
-class BloomAccentPicker;
 
 // Embedded Fluent Color SVG for a Segoe sidebar/toolbar glyph, or 0.
 int FluentSvgIdForGlyph(std::wstring_view glyph);
@@ -139,7 +138,7 @@ struct HomeCardView {
     std::wstring label, detail, path, glyph;
     int group = 0; // libraries, drives, network
     float used_ratio = -1.0f;
-    int system_icon_index = -1;
+    std::wstring shell_icon_path;
 };
 
 struct FolderSizeLabel {
@@ -618,7 +617,6 @@ struct WindowViewModel {
     int settings_row_height = 34; // current row-height pref (DIPs) for density radios
     int settings_tray_icon = 48;  // current tray-deck icon pref (DIPs) for size radios
     int settings_language = 0;    // 0 system, 1 zh-CN, 2 en-US
-    BloomAccentPicker* settings_bloom = nullptr;
     bool settings_group_on[6] = { true, true, false, false, true, true };
     std::vector<SettingsRowView> settings_items;
     bool settings_index_service = false;
@@ -788,6 +786,7 @@ struct HitTestResult {
         SettingsDupKeep,
         SettingsDupOpen,
         SettingsDupGroupDelete,
+        SettingsDupGroupIgnore,
         SettingsDupDeleteAll,
         SearchFilter,
         TrayPrev,                 // staging tray footer: previous card

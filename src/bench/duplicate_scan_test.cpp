@@ -17,7 +17,46 @@ void Check(bool condition, const wchar_t* name) {
 
 } // namespace
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--ignore-only") {
+        app::DuplicateScanSession ignored;
+        ignored.generation = 1;
+        index::ContentSearchProgress progress;
+        progress.generation = 1;
+        index::ContentHit first, second, other_first, other_second;
+        first.path = L"C:\\fixture\\one.txt"; first.group = 1; first.size = 100;
+        second = first; second.path = L"D:\\fixture\\two.txt";
+        other_first = first; other_first.path = L"C:\\fixture\\other.txt"; other_first.group = 2;
+        other_second = other_first; other_second.path = L"D:\\fixture\\other.txt";
+        ignored.ApplyUpdate(progress, {first, second, other_first, other_second});
+        const auto epoch = ignored.result_epoch;
+        ignored.IgnoreGroup(0);
+        Check(ignored.groups.size() == 1 && ignored.groups[0].id == 2 &&
+            ignored.result_epoch > epoch, L"ignore removes only the selected group and refreshes the view");
+        Check(ignored.ExtraCount() == 1 && ignored.AllFilesToDelete().size() == 1 &&
+            ignored.AllFilesToDelete()[0].find(L"other.txt") != std::wstring::npos,
+            L"ignored files are excluded from delete-all and its count");
+        ignored.ApplyUpdate(progress, {first, second});
+        Check(ignored.groups.size() == 1, L"later scan batches cannot restore an ignored group");
+        auto third = other_first; third.path = L"E:\\fixture\\other.txt";
+        ignored.ApplyUpdate(progress, {third});
+        Check(ignored.groups.size() == 1 && ignored.groups[0].files.size() == 3,
+            L"remaining group still receives updates after indices change");
+        const auto before_invalid = ignored.result_epoch;
+        ignored.IgnoreGroup(99);
+        Check(ignored.result_epoch == before_invalid && ignored.groups.size() == 1,
+            L"out-of-range ignore leaves results unchanged");
+        ignored.IgnoreGroup(0);
+        Check(ignored.groups.empty() && ignored.AllFilesToDelete().empty() && ignored.ExtraCount() == 0,
+            L"ignoring all groups leaves no deletable files");
+        ignored.ResetResults();
+        ignored.generation = ++progress.generation;
+        ignored.ApplyUpdate(progress, {first, second, other_first, other_second});
+        Check(ignored.groups.size() == 2 && ignored.ExtraCount() == 2,
+            L"new scan clears temporary ignores and restores matching groups");
+        wprintf(L"%d passed, %d failed\n", passed, failed);
+        return failed == 0 ? 0 : 1;
+    }
     app::DuplicateScanSession session;
     Check(app::DuplicateScanSession::DefaultMinimumBytes(app::DuplicateScanScope::Folder) == 1024,
           L"folder default minimum is 1 KB");

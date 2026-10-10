@@ -257,7 +257,6 @@ void Painter::SetCompositor(Compositor* compositor) noexcept {
     round_stroke_.reset();
     body_format_.reset();
     nav_format_.reset();
-    section_format_.reset();
     caption_format_.reset();
     small_icon_format_.reset();
     micro_icon_format_.reset();
@@ -272,7 +271,6 @@ void Painter::SetScale(float scale) noexcept {
         scale_ = resolved;
         body_format_.reset();
         nav_format_.reset();
-        section_format_.reset();
         caption_format_.reset();
         small_icon_format_.reset();
         micro_icon_format_.reset();
@@ -332,7 +330,6 @@ void Painter::EnsureTextFormats() {
     }
     body_format_.reset();
     nav_format_.reset();
-    section_format_.reset();
     caption_format_.reset();
     small_icon_format_.reset();
     micro_icon_format_.reset();
@@ -358,7 +355,6 @@ void Painter::EnsureTextFormats() {
     };
     create(14.0f, DWRITE_FONT_WEIGHT_NORMAL, body_format_);
     create(13.0f, DWRITE_FONT_WEIGHT_NORMAL, nav_format_);
-    create(13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, section_format_);
     create(12.0f, DWRITE_FONT_WEIGHT_NORMAL, caption_format_);
     create_icon(12.0f, small_icon_format_);
     create_icon(10.0f, micro_icon_format_);
@@ -395,10 +391,6 @@ IDWriteTextFormat* Painter::CaptionFormat() const noexcept {
 
 IDWriteTextFormat* Painter::NavFormat() const noexcept {
     return nav_format_.get() ? nav_format_.get() : BodyFormat();
-}
-
-IDWriteTextFormat* Painter::SectionFormat() const noexcept {
-    return section_format_.get() ? section_format_.get() : CaptionFormat();
 }
 
 IDWriteTextFormat* Painter::SmallIconFormat() const noexcept {
@@ -2103,7 +2095,6 @@ void Painter::InvalidateTypography() noexcept {
     ClearTextLayoutCache();
     body_format_.reset();
     nav_format_.reset();
-    section_format_.reset();
     caption_format_.reset();
     small_icon_format_.reset();
     micro_icon_format_.reset();

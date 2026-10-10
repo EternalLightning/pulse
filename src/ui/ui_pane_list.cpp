@@ -5,7 +5,6 @@
 #include "../common/localization.h"
 #include "../common/known_folder_labels.h"
 #include "tab_shape.h"
-#include "bloom_accent_picker.h"
 #include "typography.h"
 #include "details_column_widths.h"
 #include "home_layout.h"

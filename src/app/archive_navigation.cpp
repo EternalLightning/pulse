@@ -12,7 +12,7 @@
 
 namespace pulse {
 namespace app {
-struct ArchiveListing {
+struct ArchiveListing : ops::ArchiveOperationResult {
     std::wstring file, password;
     std::vector<ops::ArchiveEntry> entries;
     std::unordered_set<std::wstring> encrypted;
@@ -21,6 +21,9 @@ struct ArchiveListing {
 namespace {
 constexpr std::wstring_view kPrefix = L"pulse:archive:";
 std::atomic<uint64_t> next_request{1};
+bool CanBrowse(ops::ArchiveOutcome outcome) {
+    return outcome == ops::ArchiveOutcome::Success || outcome == ops::ArchiveOutcome::PartialListing;
+}
 struct Result : ops::ArchiveOperationResult {
     std::wstring view, file, prefix, password, open_path;
     uint64_t generation = 0;
@@ -155,13 +158,17 @@ void LoadArchiveView(AppState& s, app::Tab& tab, bool refresh) {
         result->password = password; result->generation = generation;
         try {
             result->listing = cached_listing;
-            if (result->listing) result->outcome = ops::ArchiveOutcome::Success;
+            if (result->listing)
+                static_cast<ops::ArchiveOperationResult&>(*result) =
+                    static_cast<const ops::ArchiveOperationResult&>(*result->listing);
             if (!result->listing) {
                 auto listing = ops::ListArchive(file, password, cancel.get());
                 static_cast<ops::ArchiveOperationResult&>(*result) =
                     std::move(static_cast<ops::ArchiveOperationResult&>(listing));
-                if (result->outcome == ops::ArchiveOutcome::Success && !cancel->load()) {
+                if (CanBrowse(result->outcome) && !cancel->load()) {
                     auto cache = std::make_shared<app::ArchiveListing>();
+                    static_cast<ops::ArchiveOperationResult&>(*cache) =
+                        static_cast<const ops::ArchiveOperationResult&>(*result);
                     cache->file = file;
                     cache->password = password;
                     for (auto& item : listing.entries) {
@@ -249,6 +256,7 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
         {
             if (tab.current_path != result->view || tab.pending_generation != result->generation) return;
             tab.loading = false;
+            const bool browsable = CanBrowse(result->outcome);
             bool retry_with_password = result->password_state == ops::ArchivePasswordState::Required;
             if (result->outcome == ops::ArchiveOutcome::Failed &&
                 result->password_state == ops::ArchivePasswordState::Unknown && ActiveTab(s) == &tab) {
@@ -256,13 +264,13 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
                 retry_with_password = MessageBoxW(s.hwnd, message.c_str(), L"Pulse",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
             }
-            if (result->outcome != ops::ArchiveOutcome::Success && retry_with_password && ActiveTab(s) == &tab) {
+            if (!browsable && retry_with_password && ActiveTab(s) == &tab) {
                 if (app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), tab.archive_password)) {
                     LoadArchiveView(s, tab);
                     return;
                 }
             }
-            if (result->outcome == ops::ArchiveOutcome::Success && result->listing) {
+            if (browsable && result->listing) {
                 if (tab.archive_listing != result->listing) {
                     tab.archive_listing = result->listing;
                     tab.archive_encrypted = result->listing->encrypted;
@@ -280,7 +288,9 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
             tab.pending_generation = 0;
             tab.banner_message = result->error;
             tab.SetBannerTitle(result->outcome == ops::ArchiveOutcome::Success ? app::BannerType::None : app::BannerType::Other,
-                result->outcome == ops::ArchiveOutcome::Success ? L"" : l10n::Get(l10n::StringId::ArchiveOpenFailed));
+                result->outcome == ops::ArchiveOutcome::Success ? L"" :
+                result->outcome == ops::ArchiveOutcome::PartialListing ? std::filesystem::path(result->file).filename().wstring() :
+                l10n::Get(l10n::StringId::ArchiveOpenFailed));
         }
     });
     InvalidateRect(s.hwnd, nullptr, FALSE);

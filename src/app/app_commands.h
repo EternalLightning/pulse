@@ -74,7 +74,7 @@ void ApplyAppWindowChrome(AppState& s);
 bool PickImageFile(HWND owner, std::wstring& path);
 bool PickFolder(HWND owner, std::wstring& path, const wchar_t* title);
 D2D1_COLOR_F ResolveAccentColor(const app::AppPrefs& prefs, bool dark = false);
-void ApplyAccentFromPrefs(AppState& s, bool snap_picker);
+void ApplyAccentFromPrefs(AppState& s);
 bool SelectedQuickPreviewItem(AppState& s, ui::QuickPreviewItem& item);
 void ToggleQuickPreview(AppState& s);
 void NavigateQuickPreview(AppState& s, int direction);

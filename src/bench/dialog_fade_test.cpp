@@ -9,6 +9,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <thread>
 #include <vector>
@@ -286,6 +288,147 @@ void RunPrompt(HWND owner, bool accept) {
     Check(IsWindowEnabled(owner) != FALSE, "new-item restores isolated owner after dismissal");
 }
 
+std::uint64_t ClientHash(HWND window) {
+    RECT client{};
+    GetClientRect(window, &client);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = client.right;
+    info.bmiHeader.biHeight = -client.bottom;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    HDC source = GetDC(window), memory = CreateCompatibleDC(source);
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(source, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    std::uint64_t hash = 0;
+    if (source && memory && bitmap && pixels) {
+        const auto previous = SelectObject(memory, bitmap);
+        if (BitBlt(memory, 0, 0, client.right, client.bottom, source, 0, 0, SRCCOPY)) {
+            hash = 14695981039346656037ull;
+            const auto* bytes = static_cast<const BYTE*>(pixels);
+            for (size_t i = 0; i < static_cast<size_t>(client.right) * client.bottom * 4; ++i) {
+                if (i % 4 == 3) continue;
+                hash = (hash ^ bytes[i]) * 1099511628211ull;
+            }
+        }
+        SelectObject(memory, previous);
+    }
+    if (bitmap) DeleteObject(bitmap);
+    if (memory) DeleteDC(memory);
+    if (source) ReleaseDC(window, source);
+    return hash;
+}
+
+struct InputCase {
+    HWND owner = nullptr;
+    bool dark = false, ran = false;
+    int parent_paints = 0, button_paints = 0;
+};
+InputCase* input_case = nullptr;
+constexpr UINT_PTR kInputTimer = 913;
+
+LRESULT CALLBACK ObserveInput(HWND dialog, UINT message, WPARAM wp, LPARAM lp,
+    UINT_PTR subclass, DWORD_PTR reference) {
+    auto& test = *reinterpret_cast<InputCase*>(reference);
+    if (message == WM_PAINT) ++test.parent_paints;
+    if (message == WM_DRAWITEM) ++test.button_paints;
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(dialog, ObserveInput, subclass);
+    return DefSubclassProc(dialog, message, wp, lp);
+}
+
+void CALLBACK InputTimer(HWND owner, UINT, UINT_PTR, DWORD) {
+    Search search{owner};
+    EnumThreadWindows(GetCurrentThreadId(), FindPrompt, reinterpret_cast<LPARAM>(&search));
+    if (!search.dialog || (GetWindowLongPtrW(search.dialog, GWL_EXSTYLE) & WS_EX_LAYERED)) return;
+    KillTimer(owner, kInputTimer);
+    auto& test = *input_case;
+    test.ran = true;
+    const HWND dialog = search.dialog, edit = GetDlgItem(dialog, 100);
+    const HWND create = GetDlgItem(dialog, IDOK);
+    SetWindowTextW(edit, L"报告");
+    RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    Check(SetWindowSubclass(dialog, ObserveInput, 2, reinterpret_cast<DWORD_PTR>(&test)) != FALSE,
+        "observe input redraws on dialog UI thread");
+    SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+    for (int i = 0; i < 64; ++i) {
+        const LPARAM repeat = 1 | (0x1e << 16) | (1ll << 30);
+        SendMessageW(edit, WM_KEYDOWN, 'A', repeat);
+        SendMessageW(edit, WM_CHAR, 'a', repeat);
+        UpdateWindow(dialog);
+        UpdateWindow(edit);
+    }
+    Check(GetWindowTextLengthW(edit) == 66, "held-key repeat preserves every character");
+    Check(test.parent_paints == 0, "valid repeat does not repaint dialog background");
+    Check(test.button_paints == 0, "valid repeat does not repaint unchanged buttons");
+    Check(IsWindowEnabled(create) != FALSE, "valid repeat leaves create enabled");
+
+    HideCaret(edit);
+    const auto before = ClientHash(edit);
+    InvalidateRect(dialog, nullptr, FALSE);
+    UpdateWindow(dialog);
+    Check(before != 0 && ClientHash(edit) == before, "parent repaint preserves native edit pixels");
+    ShowCaret(edit);
+
+    const auto error_only = [&] {
+        RECT update{}, edit_rect{}, overlap{};
+        GetWindowRect(edit, &edit_rect);
+        MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&edit_rect), 2);
+        return GetUpdateRect(dialog, &update, FALSE) && !IntersectRect(&overlap, &update, &edit_rect)
+            && update.bottom <= MulDiv(160, pulse::compat::WindowDpi(dialog), 96);
+    };
+    SetWindowTextW(edit, L"bad:name");
+    Check(!IsWindowEnabled(create), "invalid name disables create");
+    Check(error_only(), "invalid transition invalidates only error area above footer");
+    UpdateWindow(dialog);
+    UpdateWindow(create);
+    SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+    test.parent_paints = test.button_paints = 0;
+    for (int i = 0; i < 16; ++i) {
+        SendMessageW(edit, WM_CHAR, ':', 1);
+        UpdateWindow(dialog);
+        UpdateWindow(edit);
+    }
+    Check(test.parent_paints == 0 && test.button_paints == 0,
+        "invalid repeat does not repaint unchanged error or buttons");
+    SendMessageW(dialog, WM_COMMAND, IDOK, 0);
+    Check(IsWindow(dialog), "invalid name cannot accept dialog");
+
+    SetWindowTextW(edit, L"科技报告");
+    Check(IsWindowEnabled(create) && error_only(), "valid transition enables create and clears error locally");
+    UpdateWindow(dialog);
+    SetWindowTextW(edit, L"");
+    Check(!IsWindowEnabled(create) && !GetUpdateRect(dialog, nullptr, FALSE),
+        "empty name disables create without repainting error area");
+    SetWindowTextW(edit, L"科技报告");
+    SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+    SendMessageW(edit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"_粘贴"));
+    Check(GetWindowTextLengthW(edit) == 7 && IsWindowEnabled(create), "Unicode replacement preserves native edit validation");
+    SendMessageW(edit, EM_UNDO, 0, 0);
+    wchar_t value[32]{};
+    GetWindowTextW(edit, value, ARRAYSIZE(value));
+    Check(wcscmp(value, L"科技报告") == 0 && IsWindowEnabled(create), "native undo restores valid Unicode name");
+    RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    Check(CaptureFixture(dialog, test.dark ? L"newitem-input-dark.bmp" : L"newitem-input-light.bmp"),
+        "capture new-item dialog after repeated input and validation changes");
+    RemoveWindowSubclass(dialog, ObserveInput, 2);
+    PostMessageW(edit, WM_KEYDOWN, test.dark ? VK_RETURN : VK_ESCAPE, 1);
+}
+
+void RunInput(HWND owner, bool dark) {
+    InputCase test{owner, dark};
+    input_case = &test;
+    Check(SetTimer(owner, kInputTimer, 10, InputTimer) != 0, "schedule isolated repeated-input fixture");
+    std::wstring result = L"retained-value";
+    const bool accepted = pulse::app::PromptNewItemName(owner, L"新建文件夹", dark,
+        RGB(80, 180, 220), result);
+    KillTimer(owner, kInputTimer);
+    input_case = nullptr;
+    Check(test.ran, "repeated-input fixture reached real modal dialog");
+    Check(accepted == dark && result == (dark ? L"科技报告" : L"retained-value"),
+        "Enter accepts and Escape cancels without corrupting caller output");
+    Check(IsWindowEnabled(owner), "repeated-input prompt restores modal owner");
+}
+
 struct EscapeCase {
     HWND owner = nullptr;
     const wchar_t* dialog_class = nullptr;
@@ -380,7 +523,8 @@ void RunEscapeCases(HWND owner) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const bool input_only = argc == 2 && std::strcmp(argv[1], "--new-item-input") == 0;
     pulse::compat::EnableDpiAwareness();
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -395,12 +539,17 @@ int main() {
     Check(owner != nullptr, "create isolated modal owner");
     if (!owner) return 1;
     const bool animations = AnimationsEnabled();
-    RunNative(owner, animations);
-    RunLayered(owner);
-    RunComposed(owner);
-    RunPrompt(owner, true);
-    RunPrompt(owner, false);
-    RunEscapeCases(owner);
+    if (input_only) {
+        RunInput(owner, false);
+        RunInput(owner, true);
+    } else {
+        RunNative(owner, animations);
+        RunLayered(owner);
+        RunComposed(owner);
+        RunPrompt(owner, true);
+        RunPrompt(owner, false);
+        RunEscapeCases(owner);
+    }
     DestroyWindow(owner);
     if (SUCCEEDED(com)) CoUninitialize();
     std::printf("Dialog fade tests: %d failure(s). BMPs: bench_data/dialog_fade.\n", failures.load());

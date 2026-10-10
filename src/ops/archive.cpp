@@ -167,6 +167,14 @@ bool NoReparse(const fs::path& path) {
 }
 struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } };
 ArchiveResult ParseListing(ProcessResult run);
+std::wstring ListingDiagnostic(const std::wstring& output) {
+    // A failed ZIP scan can emit thousands of SLT records instead of a diagnostic.
+    if (output.find(L"Path = ") != std::wstring::npos &&
+        output.find(L"\nFolder = ") != std::wstring::npos)
+        return L"压缩包目录信息不完整或损坏，无法读取完整内容。";
+    constexpr size_t limit = 1024;
+    return output.size() <= limit ? output : output.substr(0, limit) + L"\n…";
+}
 }
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
 ArchiveProcessTestResult RunArchiveProcessForTest(const std::wstring& executable,
@@ -205,23 +213,46 @@ ArchiveResult ParseListing(ProcessResult run) {
     ArchiveResult result;
     result.outcome = run.outcome;
     result.exit_code = run.exit_code;
-    if (run.outcome != ArchiveOutcome::Success) { result.error = std::move(run.output); return result; }
+    const bool recovering = run.outcome == ArchiveOutcome::Failed &&
+        (run.exit_code == 1u || run.exit_code == 2u) &&
+        run.output.find(L"Descriptor_ERROR") != std::wstring::npos;
+    if (run.outcome != ArchiveOutcome::Success && !recovering) {
+        result.error = ListingDiagnostic(run.output);
+        return result;
+    }
     result.password_state = ArchivePasswordState::NotRequired;
     std::wistringstream lines(run.output); std::wstring line;
     ArchiveEntry entry; bool has_path = false, unsafe = false;
+    bool has_folder = false, has_size = false, has_encrypted = false;
+    bool local_record = false, descriptor_error = false, damaged_local_record = false;
     auto flush = [&]() {
         if (!has_path) return;
         entry.path = Normalize(entry.path);
         while (!entry.path.empty() && entry.path.back() == L'/') entry.path.pop_back();
         if (!SafeName(entry.path)) unsafe = true;
+        damaged_local_record |= local_record && descriptor_error;
         if (entry.is_dir) entry.path += L'/';
-        result.entries.push_back(entry); entry = {}; has_path = false;
+        if (!recovering || (has_folder && (entry.is_dir || has_size) && has_encrypted &&
+                            local_record && !descriptor_error))
+            result.entries.push_back(std::move(entry));
+        entry = {}; has_path = false;
+        has_folder = has_size = has_encrypted = local_record = descriptor_error = false;
     };
     while (std::getline(lines, line)) {
         if (!line.empty() && line.back() == L'\r') line.pop_back();
         if (line.empty()) { flush(); continue; }
         if (line.starts_with(L"Path = ")) { flush(); entry.path = line.substr(7); has_path = true; }
-        else if (line.starts_with(L"Size = ")) { try { entry.size = std::stoull(line.substr(7)); } catch (...) { unsafe = true; } }
+        else if (line.starts_with(L"Size = ")) {
+            const auto value = line.substr(7);
+            try {
+                size_t used = 0;
+                if (!value.empty() && value.front() >= L'0' && value.front() <= L'9') {
+                    entry.size = std::stoull(value, &used);
+                    has_size = used == value.size();
+                }
+            } catch (...) { has_size = false; }
+            if (!has_size && !recovering) unsafe = true;
+        }
         else if (line.starts_with(L"Modified = ")) {
             SYSTEMTIME local_time{};
             FILETIME local_file_time{};
@@ -231,7 +262,18 @@ ArchiveResult ParseListing(ProcessResult run) {
                 LocalFileTimeToFileTime(&local_file_time, &entry.mtime);
             }
         }
-        else if (line == L"Folder = +") entry.is_dir = true;
+        else if (line == L"Folder = +" || line == L"Folder = -") {
+            has_folder = true;
+            entry.is_dir = line == L"Folder = +";
+        }
+        else if (line.starts_with(L"Characteristics = ")) {
+            const auto value = line.substr(18);
+            local_record = value == L"Local" || value.starts_with(L"Local ");
+            const auto marker = value.find(L"Descriptor_ERROR");
+            descriptor_error = marker != std::wstring::npos &&
+                (marker == 0 || value[marker - 1] == L' ') &&
+                (marker + 16 == value.size() || value[marker + 16] == L' ');
+        }
         else if (line.starts_with(L"Attributes = ")) {
             const auto value = line.substr(13);
             if (value.find(L'D') != std::wstring::npos || value.starts_with(L"d") || value.find(L" d") != std::wstring::npos) entry.is_dir = true;
@@ -239,15 +281,25 @@ ArchiveResult ParseListing(ProcessResult run) {
         } else if ((line.starts_with(L"Symbolic Link = ") && line.size() > 16) ||
             (line.starts_with(L"Hard Link = ") && line.size() > 12) ||
             (line.starts_with(L"Copy Link = ") && line.size() > 12)) unsafe = true;
-        else if (has_path && line == L"Encrypted = +") {
-            entry.encrypted = true;
-            result.password_state = ArchivePasswordState::Required;
+        else if (has_path && (line == L"Encrypted = +" || line == L"Encrypted = -")) {
+            has_encrypted = true;
+            entry.encrypted = line == L"Encrypted = +";
+            if (entry.encrypted) result.password_state = ArchivePasswordState::Required;
         }
     }
     flush();
     if (unsafe) {
         result.outcome = ArchiveOutcome::Failed;
         result.entries.clear(); result.error = L"压缩包包含不安全路径或链接，已拒绝处理。";
+    } else if (recovering) {
+        if (damaged_local_record && !result.entries.empty()) {
+            result.outcome = ArchiveOutcome::PartialListing;
+            result.error = L"压缩包不完整，已显示可读取的内容；部分文件可能缺失或损坏。";
+        } else {
+            result.entries.clear();
+            result.password_state = ArchivePasswordState::Unknown;
+            result.error = ListingDiagnostic(run.output);
+        }
     }
     return result;
 }
@@ -265,7 +317,13 @@ ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstri
     if (archive_lock.value == INVALID_HANDLE_VALUE) { error = L"无法读取压缩包，文件可能正在被修改。"; return result; }
     auto listing = ListArchive(path, password, cancel);
     result = static_cast<ArchiveOperationResult&>(listing);
-    if (listing.outcome != ArchiveOutcome::Success) return result;
+    if (listing.outcome != ArchiveOutcome::Success) {
+        if (listing.outcome == ArchiveOutcome::PartialListing) {
+            result.outcome = ArchiveOutcome::Failed;
+            result.error = L"压缩包不完整，无法安全解压。请先使用压缩软件修复或重新获取完整文件。";
+        }
+        return result;
+    }
     result.outcome = ArchiveOutcome::Failed;
     try {
         fs::path target = fs::absolute(destination).lexically_normal();

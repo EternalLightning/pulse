@@ -56,6 +56,7 @@ bool SameShellItem(IShellFolder* folder, PCUIDLIST_RELATIVE left, PCUIDLIST_RELA
 
 struct ViewItem { Pidl pidl; SFGAOF attributes = 0; };
 struct FolderContents {
+    std::shared_ptr<void> lifetime;
     Pidl folder, selected;
     std::vector<ViewItem> items;
     int focused = -1;
@@ -88,6 +89,81 @@ struct FolderContents {
         }
         return children;
     }
+};
+
+struct ViewerWindowIdentity {
+    HWND window = nullptr;
+    DWORD pid = 0;
+    bool matching_title = false;
+};
+
+class ViewerWindowTracker {
+public:
+    explicit ViewerWindowTracker(std::wstring name) : name_(std::move(name)) {}
+    ~ViewerWindowTracker() { if (launcher_) CloseHandle(launcher_); }
+    ViewerWindowTracker(const ViewerWindowTracker&) = delete;
+    ViewerWindowTracker& operator=(const ViewerWindowTracker&) = delete;
+
+    bool CaptureBeforeLaunch() noexcept {
+        bool captured = true;
+        struct Capture { ViewerWindowTracker* tracker; bool* captured; } capture{this, &captured};
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+            auto& state = *reinterpret_cast<Capture*>(parameter);
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            try {
+                state.tracker->before_.push_back({window, pid, state.tracker->MatchesTitle(window)});
+            } catch (...) { *state.captured = false; return FALSE; }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&capture));
+        return captured;
+    }
+
+    void SetLauncher(HANDLE process) noexcept { launcher_ = process; }
+
+    bool Active() noexcept {
+        if (window_) {
+            DWORD pid = 0;
+            return IsWindow(window_) && GetWindowThreadProcessId(window_, &pid) && pid == viewer_pid_;
+        }
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+            auto& tracker = *reinterpret_cast<ViewerWindowTracker*>(parameter);
+            if (!IsWindowVisible(window)) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            const bool matching_title = tracker.MatchesTitle(window);
+            if (!matching_title) return TRUE;
+            const auto previous = std::find_if(tracker.before_.begin(), tracker.before_.end(),
+                [&](const auto& item) { return item.window == window && item.pid == pid; });
+            // Association handlers may reuse an existing viewer window. An
+            // unchanged background window with the same basename is unrelated.
+            if (previous != tracker.before_.end() && previous->matching_title &&
+                GetForegroundWindow() != window) return TRUE;
+            tracker.window_ = window;
+            tracker.viewer_pid_ = pid;
+            return FALSE;
+        }, reinterpret_cast<LPARAM>(this));
+        // Packaged viewers can return a short-lived launcher instead of their
+        // actual process. Without an identifiable viewer window, retain the
+        // context until host shutdown rather than expire a live media session.
+        return true;
+    }
+
+private:
+    bool MatchesTitle(HWND window) const noexcept {
+        wchar_t title[1024]{};
+        if (!GetWindowTextW(window, title, ARRAYSIZE(title))) return false;
+        const wchar_t* match = wcsstr(title, name_.c_str());
+        if (!match) return false;
+        const auto boundary = [](wchar_t ch) { return !ch || iswspace(ch) || ch == L'-' || ch == L'\u2014'; };
+        return (match == title || boundary(match[-1])) && boundary(match[name_.size()]);
+    }
+
+    std::wstring name_;
+    std::vector<ViewerWindowIdentity> before_;
+    HANDLE launcher_ = nullptr;
+    HWND window_ = nullptr;
+    DWORD viewer_pid_ = 0;
 };
 
 class ChildEnumerator final : public RuntimeClass<RuntimeClassFlags<ClassicCom>, IEnumIDList, FtmBase> {
@@ -392,7 +468,21 @@ HRESULT ReadContents(PCIDLIST_ABSOLUTE target, FolderContents& contents, HWND ow
 }
 }
 
-bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path) noexcept {
+struct ImageOpenSession::State {
+    explicit State(std::wstring name) : viewer(std::move(name)) {}
+    ViewerWindowTracker viewer;
+    std::shared_ptr<void> site;
+};
+
+ImageOpenSession::ImageOpenSession() = default;
+ImageOpenSession::~ImageOpenSession() = default;
+
+bool ImageOpenSession::ViewerRunning() noexcept {
+    return state_ && state_->viewer.Active();
+}
+
+bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
+                               std::shared_ptr<void> lifetime, ImageOpenSession* session) noexcept {
     try {
         const std::wstring shell_path = pulse::path::StripExtendedPathPrefix(path);
         if (!IsImagePath(shell_path)) return false;
@@ -401,18 +491,30 @@ bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path) noexcept {
         Pidl target(raw);
         if (FAILED(hr)) return false;
         auto contents = std::make_shared<FolderContents>();
+        contents->lifetime = std::move(lifetime);
         hr = ReadContents(target.get(), *contents, owner);
         if (FAILED(hr)) return false;
         const auto site = Make<ImageOpenSite>(owner, contents);
         if (!site) return false;
+        std::unique_ptr<ImageOpenSession::State> retained;
+        if (session) {
+            retained = std::make_unique<ImageOpenSession::State>(PathFindFileNameW(shell_path.c_str()));
+            if (!retained->viewer.CaptureBeforeLaunch()) return false;
+            retained->site = std::shared_ptr<void>(site.Get(), [keep = site](void*) {});
+        }
         SHELLEXECUTEINFOW execute{sizeof(execute)};
         execute.hwnd = owner;
         execute.lpVerb = L"open";
         execute.lpIDList = target.get();
         execute.hInstApp = reinterpret_cast<HINSTANCE>(static_cast<IServiceProvider*>(site.Get()));
         execute.nShow = SW_SHOWNORMAL;
-        execute.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_IDLIST | SEE_MASK_FLAG_HINST_IS_SITE | SEE_MASK_FLAG_NO_UI;
+        execute.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_IDLIST | SEE_MASK_FLAG_HINST_IS_SITE |
+            SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | (session ? SEE_MASK_NOCLOSEPROCESS : 0);
         const BOOL opened = ShellExecuteExW(&execute);
+        if (opened && session) {
+            retained->viewer.SetLauncher(execute.hProcess);
+            session->state_ = std::move(retained);
+        } else if (execute.hProcess) CloseHandle(execute.hProcess);
         return opened != FALSE;
     } catch (...) {
         return false;

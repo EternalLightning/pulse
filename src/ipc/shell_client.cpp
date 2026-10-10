@@ -5,6 +5,25 @@
 
 namespace pulse::ipc {
 
+namespace {
+bool CanReplay(uint32_t type) {
+    return type == REQ_PING || type == REQ_CTX_QUERY;
+}
+
+HRESULT DisconnectResult(uint32_t type) {
+    return type == REQ_SHELL_LAUNCH ? kShellLaunchOutcomeUnknown : HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE);
+}
+
+const wchar_t* DisconnectMessage(uint32_t type) {
+    if (type == REQ_AUTHORIZED_DELETE || type == REQ_AUTHORIZED_RECYCLE)
+        return L"Deletion outcome is unknown; the destructive request was not replayed.";
+    if (type == REQ_SHELL_LAUNCH || type == REQ_CTX_INVOKE)
+        return L"Shell 操作结果未知；为避免重复执行，未自动重试。";
+    return CanReplay(type) ? L"shell host died twice on one request"
+                           : L"Shell operation outcome is unknown; the request was not replayed.";
+}
+}
+
 ShellClient& ShellClient::Instance() {
     static ShellClient inst;
     return inst;
@@ -36,6 +55,19 @@ void ShellClient::Stop() {
             pipe_ = INVALID_HANDLE_VALUE;
         }
         KillChild();
+    }
+    {
+        std::lock_guard lock(pending_mutex_);
+        pending_.clear();
+    }
+    std::map<uint32_t, LaunchReply> replies;
+    {
+        std::lock_guard lock(launch_reply_mutex_);
+        replies.swap(launch_replies_);
+    }
+    for (auto& [id, reply] : replies) {
+        (void)id;
+        reply(HRESULT_FROM_WIN32(ERROR_CANCELLED), true, L"Shell client stopped.");
     }
 }
 
@@ -182,20 +214,22 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
             pending_.emplace(p.id, p);
             sent = SendFrame(p.type, p.id, p.payload);
             if (!sent) {
-                // Pipe broke mid-send: restart the child and retry once.
+                // A failed write may still have dispatched the complete request.
                 pending_.find(p.id)->second.retried = true;
+                p.retried = true;
                 CloseHandle(pipe_);
                 pipe_ = INVALID_HANDLE_VALUE;
                 KillChild();
-                if (EnsureConnected())
+                if (CanReplay(type) && EnsureConnected())
                     sent = SendFrame(p.type, p.id, p.payload);
             }
             if (!sent) pending_.erase(p.id);
         }
     }
     if (!sent) {
-        FireDone(p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
-                 UnreachableMessage());
+        FireRequestDone(type, p.id, type == REQ_SHELL_LAUNCH && p.retried
+            ? kShellLaunchOutcomeUnknown : HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
+            p.retried ? DisconnectMessage(type) : UnreachableMessage());
         return p.id;
     }
     return p.id;
@@ -258,6 +292,14 @@ uint32_t ShellClient::CreateNewFile(const std::wstring& path) {
     PayloadWriter w;
     w.PutString(path);
     return Submit(REQ_NEW_FILE, w.data());
+}
+
+uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply reply) {
+    return Submit(REQ_SHELL_LAUNCH, WriteShellLaunch(request),
+        reply ? std::function<void(uint32_t)>([this, reply = std::move(reply)](uint32_t id) mutable {
+            std::lock_guard lock(launch_reply_mutex_);
+            launch_replies_.emplace(id, std::move(reply));
+        }) : std::function<void(uint32_t)>{});
 }
 
 void ShellClient::Cancel(uint32_t id) {
@@ -335,6 +377,22 @@ void ShellClient::FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::
     if (cb_.done) cb_.done(id, hr, cancelled, error);
 }
 
+void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled,
+                                  const std::wstring& error) {
+    if (type == REQ_SHELL_LAUNCH) {
+        LaunchReply reply;
+        {
+            std::lock_guard lock(launch_reply_mutex_);
+            if (const auto found = launch_replies_.find(id); found != launch_replies_.end()) {
+                reply = std::move(found->second);
+                launch_replies_.erase(found);
+            }
+        }
+        if (reply) reply(static_cast<HRESULT>(hr), cancelled, error);
+        else if (cb_.launch_done) cb_.launch_done(id, hr, cancelled, error);
+    } else FireDone(id, hr, cancelled, error);
+}
+
 const std::wstring& ShellClient::UnreachableMessage() const {
     static const std::wstring kFallback = L"shell host unreachable";
     return last_error_.empty() ? kFallback : last_error_;
@@ -399,12 +457,27 @@ void ShellClient::ReaderThread() {
                 if (r.GetF32(pct) && r.GetString(item) &&
                     r.GetU32(items_done) && r.GetU32(total_items) && cb_.progress)
                     cb_.progress(h.request_id, pct, item, items_done, total_items);
+            } else if (h.type == RSP_SHELL_LAUNCH_DONE) {
+                uint32_t hr = 0, cancelled = 0;
+                std::wstring error;
+                if (!r.GetU32(hr) || !r.GetU32(cancelled) || cancelled > 1 ||
+                    !r.GetString(error) || r.remaining()) break;
+                bool pending = false;
+                {
+                    std::lock_guard lock(pending_mutex_);
+                    const auto found = pending_.find(h.request_id);
+                    if (found != pending_.end() && found->second.type == REQ_SHELL_LAUNCH) {
+                        pending_.erase(found);
+                        pending = true;
+                    }
+                }
+                if (pending) FireRequestDone(REQ_SHELL_LAUNCH, h.request_id, hr, cancelled != 0, error);
             } else if (h.type == RSP_DONE) {
                 bool pending = false, deletion = false;
                 {
                     std::lock_guard<std::mutex> lock(pending_mutex_);
                     const auto found = pending_.find(h.request_id);
-                    if (found != pending_.end()) {
+                    if (found != pending_.end() && found->second.type != REQ_SHELL_LAUNCH) {
                         deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
                         if (deletion) pending_.erase(found);
                         pending = true;
@@ -486,8 +559,7 @@ void ShellClient::ReaderThread() {
     }
 }
 
-// Pipe dropped (host died / crashed). Restart the host and resend each
-// in-flight request once; requests that already survived one retry fail out.
+// Only read-only requests may be replayed after losing a host instance.
 void ShellClient::HandleDisconnect() {
     std::vector<Pending> retry;
     std::vector<Pending> failed;
@@ -502,16 +574,13 @@ void ShellClient::HandleDisconnect() {
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
         for (auto& [id, p] : pending_) {
-            if (p.retried) failed.push_back(std::move(p));
+            if (!CanReplay(p.type) || p.retried) failed.push_back(std::move(p));
             else { p.retried = true; retry.push_back(std::move(p)); }
         }
         pending_.clear();
     }
     for (auto& p : failed)
-        FireDone(p.id, HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE), false,
-                 (p.type == REQ_AUTHORIZED_DELETE || p.type == REQ_AUTHORIZED_RECYCLE)
-                     ? L"Deletion outcome is unknown; the destructive request was not replayed."
-                     : L"shell host died twice on one request");
+        FireRequestDone(p.type, p.id, DisconnectResult(p.type), false, DisconnectMessage(p.type));
     for (auto& p : retry) {
         const uint32_t id = p.id;
         bool sent = false;
@@ -525,8 +594,7 @@ void ShellClient::HandleDisconnect() {
             }
         }
         if (!sent) {
-            FireDone(id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
-                     UnreachableMessage());
+            FireRequestDone(p.type, id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false, UnreachableMessage());
         }
     }
 }

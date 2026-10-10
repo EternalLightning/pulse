@@ -84,7 +84,7 @@ void AppPrefs::ResetToDefaults() {
     list_size_bar = false;
     folder_sort_mode = 0;
     folder_views.Clear();
-    search_pinyin = true;
+    search_pinyin = false;
     global_search_enabled = false;
     global_search_modifiers = 1;
     global_search_key = 32;
@@ -244,7 +244,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     list_size_bar = pulse::json::ExtractBool(doc, L"list_size_bar", false);
     folder_sort_mode = pulse::json::ExtractInt(doc, L"folder_sort_mode", 0);
     if (folder_sort_mode < 0 || folder_sort_mode > 2) folder_sort_mode = 0;
-    search_pinyin = pulse::json::ExtractBool(doc, L"search_pinyin", true);
+    search_pinyin = pulse::json::ExtractBool(doc, L"search_pinyin", false);
     global_search_enabled = pulse::json::ExtractBool(doc, L"global_search_enabled", false);
     const int modifiers = pulse::json::ExtractInt(doc, L"global_search_modifiers", 1);
     const int key = pulse::json::ExtractInt(doc, L"global_search_key", 32);

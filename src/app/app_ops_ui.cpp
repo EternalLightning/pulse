@@ -46,6 +46,22 @@ void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
         return _wcsicmp(entry.name.c_str(), tab.pending_created_name.c_str()) == 0;
     });
     if (found == tab.snapshot->end()) return;
+    auto names = tab.pending_created_names;
+    if (names.empty()) names.push_back(found->name);
+    if (names.size() > 1) {
+        const auto key = [](std::wstring value) {
+            for (auto& ch : value) ch = static_cast<wchar_t>(std::towlower(ch));
+            return value;
+        };
+        std::unordered_set<std::wstring> remaining;
+        for (const auto& name : names) remaining.insert(key(name));
+        std::vector<std::wstring> actual_names;
+        for (const auto& entry : *tab.snapshot) {
+            if (remaining.erase(key(entry.name))) actual_names.push_back(entry.name);
+        }
+        if (!remaining.empty()) return;
+        names = std::move(actual_names);
+    } else names.front() = found->name;
     const std::wstring name = found->name;
     auto entries = std::make_shared<std::vector<fs::DirEntry>>(*tab.snapshot);
     std::stable_sort(entries->begin(), entries->end(), [&](const auto& left, const auto& right) {
@@ -55,8 +71,9 @@ void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
     tab.SetSnapshot(std::move(entries));
     tab.refresh_keeps_order = false;
     tab.order_held = false;
-    tab.RemapSelection({name}, name);
+    tab.RemapSelection(names, name);
     tab.pending_created_name.clear();
+    tab.pending_created_names.clear();
     if (ActiveTab(s) == &tab) {
         ui::PaneViewModel pane;
         app::FillPaneViewModel(pane, *s.pane, &s.places);
@@ -75,8 +92,32 @@ void QueueCreatedItemReveal(AppState& s, const std::wstring& path) {
         auto* tab = pane.ActiveTab();
         if (!tab || _wcsicmp(tab->current_path.c_str(), parent.c_str()) != 0) return;
         tab->pending_created_name = name;
+        tab->pending_created_names = {name};
         RevealPendingCreatedItem(s, *tab);
     });
+}
+
+void QueueTransferredItemsReveal(AppState& s, const std::vector<std::wstring>& paths) {
+    std::vector<std::wstring> folders;
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        if (!tab) return;
+        std::vector<std::wstring> names;
+        for (const auto& path : paths) {
+            const auto parent = fs::ParentPath(path);
+            const std::wstring name = PathFindFileNameW(path.c_str());
+            if (!parent.empty() && !name.empty() &&
+                _wcsicmp(tab->current_path.c_str(), parent.c_str()) == 0 &&
+                std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+        }
+        if (names.empty()) return;
+        tab->pending_created_name = names.front();
+        tab->pending_created_names = std::move(names);
+        // Wait for a snapshot taken after the successful transfer, including replacements.
+        if (std::find(folders.begin(), folders.end(), tab->current_path) == folders.end())
+            folders.push_back(tab->current_path);
+    });
+    for (const auto& folder : folders) RefreshPath(s, folder, RefreshReason::OperationCompleted);
 }
 
 bool SubmitWithConflictResolution(AppState& s, ops::OpRequest request) {

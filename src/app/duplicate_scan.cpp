@@ -63,6 +63,7 @@ void DuplicateScanSession::ResetResults() {
     groups.clear();
     pending_groups_.clear();
     group_indices_.clear();
+    ignored_groups_.clear();
     speed_tick_ = {};
     speed_files_ = 0;
     speed_bytes_ = 0;
@@ -113,7 +114,7 @@ void DuplicateScanSession::SortGroups() {
 void DuplicateScanSession::AppendHits(const std::vector<index::ContentHit>& hits) {
     bool changed = false;
     for (const auto& hit : hits) {
-        if (hit.group == 0) continue;
+        if (hit.group == 0 || ignored_groups_.contains(hit.group)) continue;
         DuplicateFile file{hit.path, hit.name.empty() ? hit.path : hit.name,
                            hit.size, hit.modified};
         const auto visible = group_indices_.find(hit.group);
@@ -187,6 +188,16 @@ void DuplicateScanSession::SetKeep(size_t group, size_t file) {
     if (group >= groups.size() || file >= groups[group].files.size()) return;
     if (groups[group].keep_index == file) return;
     groups[group].keep_index = file;
+    ++result_epoch;
+}
+
+void DuplicateScanSession::IgnoreGroup(size_t group) {
+    if (group >= groups.size()) return;
+    const uint32_t id = groups[group].id;
+    ignored_groups_.insert(id);
+    pending_groups_.erase(id);
+    groups.erase(groups.begin() + static_cast<std::ptrdiff_t>(group));
+    RebuildGroupIndex();
     ++result_epoch;
 }
 

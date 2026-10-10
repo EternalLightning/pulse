@@ -242,11 +242,99 @@ void OutcomeTests() {
     Check(unsafe.outcome == ArchiveOutcome::Failed && unsafe.exit_code == 0u && unsafe.entries.empty() && !unsafe.error.empty(),
         "adapter rejection stays failed even when the process exit is zero");
 }
+
+void RecoveryTests() {
+    const std::wstring healthy = L"Path = download/good.txt\nFolder = -\nSize = 4\nEncrypted = -\nCharacteristics = Local : Descriptor UTF8\n\n";
+    const std::wstring damaged = L"Path = download/bad.m4s\nFolder = -\nSize = \nEncrypted = -\nCharacteristics = Local : Descriptor UTF8 Descriptor_ERROR\n\n";
+    const auto partial = ParseArchiveListingForTest(healthy + damaged, 2);
+    Check(partial.outcome == ArchiveOutcome::PartialListing && partial.exit_code == 2u &&
+          partial.password_state == ArchivePasswordState::NotRequired && partial.entries.size() == 1 &&
+          partial.entries[0].path == L"download/good.txt" && partial.entries[0].size == 4 &&
+          !partial.error.empty() && partial.error.size() < 1024,
+          "recoverable ZIP scan preserves healthy records, real exit code and a short warning");
+    const auto member_name = ParseArchiveListingForTest(
+        L"Path = Descriptor_ERROR.txt\nFolder = -\nSize = 4\nEncrypted = -\nCharacteristics = Local : Descriptor UTF8\n", 2);
+    Check(member_name.outcome == ArchiveOutcome::Failed && member_name.entries.empty(),
+          "member name cannot fabricate a structured ZIP recovery marker");
+    const auto empty = ParseArchiveListingForTest(damaged, 2);
+    Check(empty.outcome == ArchiveOutcome::Failed && empty.entries.empty(),
+          "a ZIP without any healthy member remains a failure");
+    const auto incomplete = ParseArchiveListingForTest(L"Path = incomplete.txt\nEncrypted = -\n\n" + damaged, 2);
+    Check(incomplete.outcome == ArchiveOutcome::Failed && incomplete.entries.empty(),
+          "partial scan requires complete metadata before publishing a member");
+    const auto unsafe = ParseArchiveListingForTest(healthy +
+        L"Path = ../outside.txt\nFolder = -\nSize = \nEncrypted = -\nCharacteristics = Local : Descriptor_ERROR\n", 2);
+    Check(unsafe.outcome == ArchiveOutcome::Failed && unsafe.entries.empty(),
+          "even omitted damaged records cannot bypass unsafe path rejection");
+    const auto linked = ParseArchiveListingForTest(healthy + L"Path = link\nFolder = -\nSize = 0\nAttributes = L\n\n" + damaged, 2);
+    Check(linked.outcome == ArchiveOutcome::Failed && linked.entries.empty(),
+          "ZIP recovery cannot bypass link rejection");
+    const auto encrypted = ParseArchiveListingForTest(
+        L"Path = locked.txt\nFolder = -\nSize = 4\nEncrypted = +\nCharacteristics = Local : Descriptor UTF8\n\n" + damaged, 2);
+    Check(encrypted.outcome == ArchiveOutcome::PartialListing && encrypted.entries.size() == 1 &&
+          encrypted.entries[0].encrypted && encrypted.password_state == ArchivePasswordState::Required,
+          "recovered metadata retains positive encryption evidence");
+    const auto fatal = ParseArchiveListingForTest(healthy + damaged, 7);
+    Check(fatal.outcome == ArchiveOutcome::Failed && fatal.entries.empty() && fatal.error.size() < 1024,
+          "unsupported process failure is never reclassified as a partial ZIP listing");
+    const auto diagnostic = ParseArchiveListingForTest(std::wstring(32768, L'x'), 2);
+    Check(diagnostic.outcome == ArchiveOutcome::Failed && diagnostic.error.size() <= 1026,
+          "large failure diagnostics are bounded before they reach the window thread");
+
+    wchar_t module[32768]{};
+    GetModuleFileNameW(nullptr, module, 32768);
+    const auto root = fs::path(module).parent_path().parent_path() / L"bench_data" /
+        (L"archive-recovery-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    fs::create_directories(root);
+    const auto fixture = root / L"truncated.zip";
+    {
+        std::ofstream stream(fixture, std::ios::binary);
+        const auto local = [&](const std::string& name, bool truncated) {
+            Word(stream, 0x04034b50, 4); Word(stream, 20, 2);
+            Word(stream, truncated ? 8 : 0, 2); Word(stream, truncated ? 8 : 0, 2);
+            Word(stream, 0, 4); Word(stream, 0, 4); Word(stream, 0, 4); Word(stream, 0, 4);
+            Word(stream, static_cast<uint32_t>(name.size()), 2); Word(stream, 0, 2); stream << name;
+        };
+        local("download/", false);
+        local("download/readable.txt", false);
+        local("download/incomplete.m4s", true);
+    }
+    const auto real = ListArchive(fixture.wstring());
+    Check(real.outcome == ArchiveOutcome::PartialListing && real.exit_code == 2u && real.entries.size() == 2 &&
+          real.password_state == ArchivePasswordState::NotRequired,
+          "real bundled 7-Zip recovers two readable entries from an isolated truncated ZIP");
+    if (real.outcome != ArchiveOutcome::PartialListing)
+        std::cout << "[DIAG] recovery outcome=" << static_cast<int>(real.outcome) << " entries=" << real.entries.size()
+                  << " error=" << DiagnosticUtf8(real.error) << '\n';
+    const auto extract = ExtractArchive(fixture.wstring(), (root / L"output").wstring(), {}, L"", nullptr);
+    Check(extract.outcome == ArchiveOutcome::Failed && extract.exit_code == 2u &&
+          !fs::exists(root / L"output"), "partial listing is never treated as a successful complete extraction");
+    std::atomic_bool cancelled{true};
+    const auto cancelled_scan = ListArchive(fixture.wstring(), L"", &cancelled);
+    Check(cancelled_scan.outcome == ArchiveOutcome::Cancelled && cancelled_scan.entries.empty(),
+          "cancelled recovery does not publish stale archive entries");
+    std::error_code error;
+    fs::remove_all(root, error);
+    Check(!error && !fs::exists(root), "isolated ZIP recovery fixtures are cleaned");
+}
 #endif
 int wmain(int argc, wchar_t** argv) {
     std::cout << std::unitbuf;
     if (argc == 2 && std::wstring(argv[1]) == L"--password-only") return PasswordTests();
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
+    if (argc >= 2 && std::wstring(argv[1]) == L"--recovery-only") {
+        RecoveryTests();
+        if (argc == 3) {
+            const auto started = std::chrono::steady_clock::now();
+            const auto real = ListArchive(argv[2]);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+            Check(real.outcome == ArchiveOutcome::PartialListing && real.exit_code == 2u &&
+                  !real.entries.empty() && real.error.size() < 1024,
+                  "read-only user ZIP scan completes with explicit partial-listing warning");
+            std::cout << "[INFO] read-only archive scan: entries=" << real.entries.size() << " elapsed_ms=" << elapsed << '\n';
+        }
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--outcome-only") {
         OutcomeTests();
         return failures ? 1 : 0;

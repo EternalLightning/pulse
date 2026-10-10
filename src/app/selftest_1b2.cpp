@@ -53,7 +53,6 @@
 #include "../ui/advanced_search_dialog.h"
 #include "../ui/typography.h"
 #include "../ui/color_picker.h"
-#include "../ui/bloom_accent_picker.h"
 #include "../ui/drag_drop.h"
 #include "../ui/ui_renderer.h"
 #include "../ui/preview_footer_layout.h"
@@ -2540,50 +2539,6 @@ void TestAppPrefsAndSettingsPath() {
     bad_accent.persist = false;
     Check(bad_accent.FromJson(L"{\"accent_rgb\":\"gggggg\"}") && bad_accent.accent_rgb.empty(),
           L"appprefs: invalid accent_rgb falls back to theme default");
-}
-
-void TestBloomAccentGeometry() {
-    Check(ui::kBloomDotCount == 19, L"bloom: 19 dots");
-    Check(std::fabs(ui::BloomDotHue(1, 0, 6) - 90.0f) < 0.01f,
-          L"bloom: ring1 index0 hue 90");
-    Check(std::fabs(ui::BloomDotHue(2, 0, 12) - 90.0f) < 0.01f,
-          L"bloom: ring2 index0 hue 90");
-    Check(std::fabs(ui::BloomDotHue(1, 3, 6) - 270.0f) < 0.01f,
-          L"bloom: ring1 index3 hue 270");
-    Check(std::fabs(ui::BloomDotHue(1, 1, 6) - 150.0f) < 0.01f,
-          L"bloom: ring1 index1 hue 150");
-    Check(ui::BloomDotRgb(0) == 0xFFFFFFu, L"bloom: center is white");
-    Check(ui::BloomDotAt(0).ring == 0 && ui::BloomDotAt(7).ring == 2,
-          L"bloom: index 0 center, 7 first outer");
-    const uint32_t pastel = ui::BloomDotRgb(1);
-    const uint32_t sat = ui::BloomDotRgb(7);
-    Check(pastel != sat && pastel != 0xFFFFFFu && sat != 0xFFFFFFu,
-          L"bloom: pastel and saturated dots differ");
-}
-
-void TestBloomSpring() {
-    auto run = [](float from, float to, float k, float d, float& peak, float& lo, float& end) {
-        float v = from;
-        float vel = 0.0f;
-        peak = from;
-        lo = from;
-        bool finite = true;
-        for (int i = 0; i < 180; ++i) {
-            ui::BloomStepSpring(v, vel, to, k, d, 0.016f);
-            if (!std::isfinite(v) || !std::isfinite(vel)) finite = false;
-            peak = (std::max)(peak, v);
-            lo = (std::min)(lo, v);
-        }
-        end = v;
-        Check(finite, L"bloom: spring stayed finite");
-    };
-    float peak = 0.0f, lo = 0.0f, end = 0.0f;
-    run(1.0f, 1.18f, 200.0f, 30.0f, peak, lo, end);
-    Check(peak < 1.35f && lo > 0.85f && std::fabs(end - 1.18f) < 0.05f,
-          L"bloom: hover scale must not explode");
-    run(0.0f, 5.0f, 100.0f, 30.0f, peak, lo, end);
-    Check(peak < 6.0f && lo > -1.0f && std::fabs(end - 5.0f) < 0.15f,
-          L"bloom: push spring must not explode");
 }
 
 void TestDragDropPure() {
@@ -6336,8 +6291,6 @@ int RunSelfTest1B2() {
     TestLayoutOwnedTabs();
     TestUtf8PersistFile();
     TestColorPickerModel();
-    TestBloomAccentGeometry();
-    TestBloomSpring();
     TestOpsThroughShell();
 
     // Cleanup: real-delete the whole sandbox via the ops layer is overkill;

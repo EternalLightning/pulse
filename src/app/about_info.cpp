@@ -107,6 +107,7 @@ std::vector<AboutRow> BuildAboutRows(bool index_service, bool index_installed, f
 std::wstring AboutRowsText(const std::vector<AboutRow>& rows) {
     std::wstring text = L"Pulse\r\n";
     for (const auto& [label, value] : rows) text += label + L": " + value + L"\r\n";
+    text += L"\r\n" + l10n::Get(l10n::StringId::AboutDistributionNotice) + L"\r\n";
     return text;
 }
 

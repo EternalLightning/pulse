@@ -3,6 +3,7 @@
 #include "../index/index_request_limits.h"
 #include "../index/network_agent_protocol.h"
 #include "../index/index_server_auth.h"
+#include "../index/index_protocol.h"
 #include "../index/change_tracking.h"
 #include <filesystem>
 #include <iostream>
@@ -33,7 +34,43 @@ void Touch(const std::wstring& path) {
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::index;
     std::cout << std::unitbuf;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--installed-service-auth-only") {
+        transport::Handle pipe(CreateFileW(kPipeName, transport::kClientPipeAccess, 0,
+            nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
+        Check(pipe.get() != INVALID_HANDLE_VALUE, "open installed index service pipe as the current user");
+        if (pipe.get() == INVALID_HANDLE_VALUE) return 1;
+        Check(transport::VerifyIndexServer(pipe.get(), transport::SiblingIndexImage(), transport::Identity::Current()),
+            "authenticate installed service without requiring access to its SYSTEM process");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--server-auth-only") {
+        SERVICE_STATUS_PROCESS status{};
+        status.dwCurrentState = SERVICE_RUNNING;
+        status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+        status.dwProcessId = 321;
+        QUERY_SERVICE_CONFIGW config{};
+        config.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+        wchar_t account[] = L"LocalSystem", command[] = L"\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service";
+        config.lpServiceStartName = account;
+        config.lpBinaryPathName = command;
+        Check(transport::IndexServiceOwnsEndpoint(321, status, config),
+            "SCM authenticates running SYSTEM service without opening its process token");
+        Check(!transport::IndexServiceOwnsEndpoint(322, status, config) &&
+              !transport::IndexServiceOwnsEndpoint(0, status, config), "foreign or missing pipe PID is rejected");
+        status.dwCurrentState = SERVICE_STOPPED;
+        Check(!transport::IndexServiceOwnsEndpoint(321, status, config), "stopped service cannot authenticate an endpoint");
+        status.dwCurrentState = SERVICE_RUNNING;
+        status.dwServiceType = SERVICE_WIN32_SHARE_PROCESS;
+        Check(!transport::IndexServiceOwnsEndpoint(321, status, config), "shared service process is rejected");
+        status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+        wchar_t other_account[] = L"LocalService", other_command[] = L"\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --test-host fake";
+        config.lpServiceStartName = other_account;
+        Check(!transport::IndexServiceOwnsEndpoint(321, status, config), "non-SYSTEM service registration is rejected");
+        config.lpServiceStartName = account;
+        config.lpBinaryPathName = other_command;
+        Check(!transport::IndexServiceOwnsEndpoint(321, status, config), "non-service command is rejected");
+        config.lpBinaryPathName = nullptr;
+        Check(!transport::IndexServiceOwnsEndpoint(321, status, config), "missing service configuration fails closed");
         const auto identity = transport::Identity::Current();
         std::wstring image(32768, L'\0'); DWORD image_size = static_cast<DWORD>(image.size());
         Check(QueryFullProcessImageNameW(GetCurrentProcess(), 0, image.data(), &image_size) != FALSE, "read actual helper fixture image");

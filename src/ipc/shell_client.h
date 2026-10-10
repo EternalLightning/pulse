@@ -2,10 +2,11 @@
 //
 // Owns the child process lifetime: pipe connects to \\.\pipe\pulse_shell_<pid>;
 // on send/receive failure the child is restarted (CreateProcess) and the
-// non-destructive requests retry once; authorized deletion is never replayed.
+// read-only requests retry once; commands and mutations are never replayed.
 // All callbacks fire on the client's reader thread — never block the UI.
 #pragma once
 #include "protocol.h"
+#include "shell_launch_protocol.h"
 #include "../common/file_identity.h"
 #include "../common/shell_menu_item.h"
 #include <windows.h>
@@ -24,6 +25,7 @@ namespace pulse::ops { class OpsManager; struct ShellCompletionTestProbe; }
 namespace pulse::ipc {
 
 using CtxMenuItem = pulse::ShellMenuItem;
+struct ShellLaunchClientTestProbe;
 
 class ShellClient {
 public:
@@ -31,6 +33,7 @@ public:
         std::function<void(uint32_t id, float percent, std::wstring item,
                            uint32_t items_done, uint32_t total_items)> progress;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> done;
+        std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> launch_done;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
                            std::vector<FileIdentity> produced_identities)> produced_done;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
@@ -56,6 +59,8 @@ public:
     void Cancel(uint32_t id);
     void Abort(uint32_t id);
     bool Ping();
+    using LaunchReply = std::function<void(HRESULT, bool, std::wstring)>;
+    uint32_t Launch(const ShellLaunchRequest& request, LaunchReply reply = {});
 
     // Explorer context-menu session. Query returns the session id; items come
     // back through Callbacks::ctx_items. Invoke completes via Callbacks::done
@@ -74,6 +79,7 @@ public:
 private:
     friend class pulse::ops::OpsManager;
     friend struct pulse::ops::ShellCompletionTestProbe;
+    friend struct ShellLaunchClientTestProbe;
     uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
                               bool recycle = false, HWND owner = nullptr,
                               const std::vector<FileIdentity>& expected_identities = {});
@@ -96,12 +102,15 @@ private:
     void ReaderThread();
     void HandleDisconnect();
     void FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
+    void FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
     const std::wstring& UnreachableMessage() const;
 
     Callbacks cb_;
     std::mutex send_mutex_;          // serializes pipe writes + reconnect
     std::mutex pending_mutex_;
     std::map<uint32_t, Pending> pending_;
+    std::mutex launch_reply_mutex_;
+    std::map<uint32_t, LaunchReply> launch_replies_;
 
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
     PROCESS_INFORMATION child_{};

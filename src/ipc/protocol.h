@@ -15,8 +15,10 @@
 //                    REQ_RENAME / REQ_NEW_FOLDER / REQ_NEW_FILE /
 //                    REQ_CANCEL / REQ_PING / REQ_SHUTDOWN / REQ_RESTORE_RECYCLE /
 //                    REQ_CTX_QUERY / REQ_CTX_INVOKE / REQ_CTX_CLOSE
+//                    REQ_SHELL_LAUNCH (versioned payload in shell_launch_protocol.h)
 //   host -> client : RSP_PROGRESS (0..N) then exactly one RSP_DONE per request,
 //                    RSP_PONG for REQ_PING, RSP_CTX_ITEMS for REQ_CTX_QUERY.
+//                    RSP_SHELL_LAUNCH_DONE for isolated launch sessions.
 //
 // Context-menu sessions (Explorer verbs): REQ_CTX_QUERY builds the third-party
 // IContextMenu on a dedicated STA thread inside the host; its request id is the
@@ -88,10 +90,12 @@ enum MsgType : uint32_t {
     REQ_AUTHORIZED_DELETE = 15,
     // Same plan fields followed by owner HWND(u64); Shell owns recycle warnings.
     REQ_AUTHORIZED_RECYCLE = 16,
+    REQ_SHELL_LAUNCH = 17, // versioned payload in shell_launch_protocol.h; never replayed
     RSP_PROGRESS = 100,
     RSP_DONE = 101,
     RSP_PONG = 102,
     RSP_CTX_ITEMS = 103,
+    RSP_SHELL_LAUNCH_DONE = 104, // HRESULT(u32), cancelled(u32), error(string)
 };
 
 // REQ_CTX_QUERY flags.

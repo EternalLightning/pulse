@@ -1,0 +1,22 @@
+Pulse — independent modified distribution
+
+Original project: Pulse, by jimmgreen and its contributors
+Original repository: https://github.com/jimmgreen/pulse
+License: Apache License, Version 2.0 (see LICENSE)
+
+This distribution is maintained by EternalLightning:
+https://github.com/EternalLightning/pulse
+It contains modifications to the original project, including changes to
+file operations, search, Shell integration, previews, user interface and
+release packaging. It is not an official release of the upstream project.
+The source history in this distribution's repository records these changes.
+
+Third-party components retain their respective licenses and notices.
+See third_party and assets in the source tree, and licenses and
+7zip/License.txt in the portable package.
+
+本程序是基于 Pulse 的独立修改发行版，由 EternalLightning 维护，
+不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发。
+原作者仓库：https://github.com/jimmgreen/pulse
+发行版仓库：https://github.com/EternalLightning/pulse
+Pulse 源码采用 Apache License 2.0；第三方组件遵循各自许可证。

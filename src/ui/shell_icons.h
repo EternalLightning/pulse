@@ -1,6 +1,7 @@
-// shell_icons.h — Windows Shell image-list icons for file rows.
+// shell_icons.h — isolated Windows Shell icon pixels for file rows.
 #pragma once
 #include "ui_compositor.h"
+#include "../ipc/shell_query_protocol.h"
 
 #include <string>
 #include <unordered_map>
@@ -13,8 +14,9 @@
 #include <functional>
 #endif
 
-struct IImageList;
+#ifdef PULSE_SHELL_ICONS_TESTING
 struct IWICImagingFactory;
+#endif
 
 namespace pulse::ui {
 
@@ -28,7 +30,7 @@ public:
     void SetDeviceContext(ID2D1DeviceContext* dc);
     void SetScale(float scale);
     void SetNotifyWindow(HWND hwnd);
-    // Never joins a possibly stuck Shell call. Old CPU-only state remains owned
+    // Cancels the isolated query without joining. Old CPU-only state remains owned
     // until actual thread exit; device resources are never used by that worker.
     void Reset();
 
@@ -46,7 +48,6 @@ public:
     bool Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
               const std::wstring& path, const std::wstring& name,
               bool is_dir, DWORD attrs);
-    bool DrawSystemIcon(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest, int index);
 
     // Icon bitmap at (about) desired_dips, or nullptr while unresolved.
     ID2D1Bitmap* BitmapFor(const std::wstring& path, const std::wstring& name,
@@ -64,6 +65,9 @@ private:
         std::unordered_map<std::wstring, int> exact_index;
         std::unordered_map<std::wstring, ULONGLONG> retry_after;
         std::unordered_map<std::wstring, uint64_t> last_used;
+        std::unordered_map<int, std::shared_ptr<const std::vector<ipc::ShellIconPixels>>> pixels;
+        size_t pixel_bytes = 0;
+        int next_index = 1;
         uint64_t access_clock = 0;
         HWND notify = nullptr;
         bool stop = false;
@@ -74,13 +78,14 @@ private:
 #endif
     };
     static int ImageListId(float desired_pixels) noexcept;
-    IImageList* EnsureImageList(int list_id);
+#ifdef PULSE_SHELL_ICONS_TESTING
     bool EnsureWic();
+    ComPtr<ID2D1Bitmap> BitmapFromIcon(HICON icon);
+#endif
     bool EnsureWorker();
     int GenericIndex(const std::wstring& name, bool is_dir, DWORD attrs);
     void RequestExact(const std::wstring& path);
     ID2D1Bitmap* BitmapForIndex(int index, int list_id);
-    ComPtr<ID2D1Bitmap> BitmapFromIcon(HICON icon);
     static DWORD WINAPI WorkerMain(void* parameter);
     static bool NeedsExactIcon(const std::wstring& name, bool is_dir,
                                const std::wstring& path);
@@ -88,8 +93,9 @@ private:
     ID2D1DeviceContext* dc_ = nullptr;
     HWND hwnd_ = nullptr;
     float scale_ = 1.0f;
-    std::unordered_map<int, IImageList*> image_lists_;
+#ifdef PULSE_SHELL_ICONS_TESTING
     ComPtr<IWICImagingFactory> wic_;
+#endif
     std::unordered_map<uint64_t, ComPtr<ID2D1Bitmap>> bitmaps_;
     std::shared_ptr<WorkerState> worker_;
 };

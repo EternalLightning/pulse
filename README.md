@@ -4,7 +4,11 @@
 
 多标签与多窗格、快速索引搜索、文件预览和可自定义外观，放在同一个工作空间里。
 
-[下载最新版](https://github.com/jimmgreen/pulse/releases/latest) · [查看更新记录](https://github.com/jimmgreen/pulse/releases) · [反馈问题](https://github.com/jimmgreen/pulse/issues)
+本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
+
+源码采用 [Apache License 2.0](LICENSE)，发行版说明见 [NOTICE](NOTICE)。第三方组件遵循各自许可证，免安装包附带 `licenses` 目录。
+
+[下载本发行版](https://github.com/EternalLightning/pulse/releases/latest) · [查看更新记录](https://github.com/EternalLightning/pulse/releases) · [反馈问题](https://github.com/EternalLightning/pulse/issues)
 
 ## 下载与安装
 

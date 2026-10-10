@@ -3,6 +3,7 @@
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include "../common/path_utils.h"
+#include "../ipc/shell_interaction_client.h"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shobjidl.h>
@@ -158,31 +159,9 @@ void PaintButton(const DialogState& s, const DRAWITEMSTRUCT& item) {
 }
 
 void Browse(HWND owner, DialogState& s) {
-    IFileOpenDialog* dialog = nullptr;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-        IID_PPV_ARGS(&dialog)))) return;
-    DWORD flags = 0;
-    dialog->GetOptions(&flags);
-    dialog->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    dialog->SetTitle(l10n::Get(l10n::StringId::ArchivePickDestination).c_str());
-    const std::wstring path = ReadEdit(s.destination);
-    IShellItem* initial = nullptr;
-    if (SUCCEEDED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&initial)))) {
-        dialog->SetFolder(initial);
-        initial->Release();
-    }
-    if (SUCCEEDED(dialog->Show(owner))) {
-        IShellItem* folder = nullptr;
-        if (SUCCEEDED(dialog->GetResult(&folder))) {
-            PWSTR selected = nullptr;
-            if (SUCCEEDED(folder->GetDisplayName(SIGDN_FILESYSPATH, &selected)) && selected) {
-                SetWindowTextW(s.destination, selected);
-                CoTaskMemFree(selected);
-            }
-            folder->Release();
-        }
-    }
-    dialog->Release();
+    std::wstring selected;
+    if (ipc::PickShellPath(owner, true, l10n::Get(l10n::StringId::ArchivePickDestination), selected,
+            {}, ReadEdit(s.destination))) SetWindowTextW(s.destination, selected.c_str());
 }
 
 LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {

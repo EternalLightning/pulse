@@ -45,6 +45,9 @@ enum class StringId : UINT {
     AboutCopyInfo = IDS_ABOUT_COPY_INFO,
     AboutHomepage = IDS_ABOUT_HOMEPAGE,
     AboutCopied = IDS_ABOUT_COPIED,
+    AboutDistributionTitle = IDS_ABOUT_DISTRIBUTION_TITLE,
+    AboutDistributionNotice = IDS_ABOUT_DISTRIBUTION_NOTICE,
+    AboutUpstream = IDS_ABOUT_UPSTREAM,
 
     GlobalSearchSaveFailed = IDS_GLOBAL_SEARCH_SAVE_FAILED,
     GlobalSearchOpenFailed = IDS_GLOBAL_SEARCH_OPEN_FAILED,
@@ -600,6 +603,7 @@ enum class StringId : UINT {
     DupMinSize10MB = IDS_DUP_MIN_SIZE_10MB,
     DupKeep = IDS_DUP_KEEP,
     DupDeleteExtras = IDS_DUP_DELETE_EXTRAS,
+    DupIgnoreGroup = IDS_DUP_IGNORE_GROUP,
     DupDeleteAllExtras = IDS_DUP_DELETE_ALL_EXTRAS,
     DupListingFormat = IDS_DUP_LISTING_FORMAT,
     DupHashingFormat = IDS_DUP_HASHING_FORMAT,

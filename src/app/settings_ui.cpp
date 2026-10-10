@@ -2,7 +2,6 @@
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "about_info.h"
-#include <shellapi.h>
 #include <algorithm>
 #include <cwctype>
 #include <cmath>
@@ -150,7 +149,9 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
             if(app::CopyTextToClipboard(s.hwnd,app::AboutRowsText(BuildVm(s,false).settings_about_rows)))
                 s.notification_toast.Show(s.hwnd,l10n::Get(I::AboutPulse),l10n::Get(I::AboutCopied),false);
         } else if(hit.index==1) {
-            ShellExecuteW(s.hwnd,L"open",app::kPulseHomepage,nullptr,nullptr,SW_SHOWNORMAL);
+            s.ops.OpenWith(app::kPulseHomepage);
+        } else if(hit.index==2) {
+            s.ops.OpenWith(app::kPulseUpstream);
         }
         break;
     default: return false;

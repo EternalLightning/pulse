@@ -1,5 +1,6 @@
 // drag_drop.cpp — See drag_drop.h for the contract.
 #include "drag_drop.h"
+#include "../ipc/shell_query_client.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -32,8 +33,8 @@ ShellIdListRenderer shell_renderer = BuildShellIdList;
 
 std::shared_ptr<ShellIdListState> PrepareShellIdList(const std::vector<std::wstring>& paths) {
     auto state = std::make_shared<ShellIdListState>();
-    // A stuck provider occupies this single slot. Later drags still have HDROP;
-    // they do not queue more work or wait for the provider during shutdown.
+    // Keep preparation bounded to one worker; optional Shell data arrives
+    // asynchronously, while every drag continues to offer HDROP immediately.
     if (paths.empty() || shell_worker_busy.exchange(true)) return state;
 #ifdef PULSE_DRAG_DROP_TESTING
     const auto renderer = shell_renderer;
@@ -358,75 +359,75 @@ HGLOBAL FileDataObject::RenderShellIdList() const {
 namespace {
 
 HGLOBAL BuildShellIdList(const std::vector<std::wstring>& paths) {
-    if (paths.empty()) return nullptr;
-    std::vector<PIDLIST_ABSOLUTE> pidls;
+    if (paths.empty() || paths.size() > ipc::kMaxPayload / sizeof(UINT) - 2) return nullptr;
+    std::vector<std::vector<uint8_t>> pidls;
     pidls.reserve(paths.size());
+    const auto deadline = GetTickCount64() + 4000;
     for (const auto& path : paths) {
-        PIDLIST_ABSOLUTE pidl = nullptr;
-        if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, nullptr)) || !pidl) {
-            for (auto* p : pidls) CoTaskMemFree(p);
-            return nullptr;
-        }
-        pidls.push_back(pidl);
+        const auto now = GetTickCount64();
+        if (now >= deadline) return nullptr;
+        ipc::ShellQueryRequest request;
+        request.kind = ipc::ShellQueryKind::ParsePidl;
+        request.path = path;
+        ipc::ShellQueryResult result;
+        if (!ipc::QueryShell(request, result, {}, static_cast<DWORD>(deadline - now)) ||
+            FAILED(result.error) || !ipc::ValidShellPidl(result.pidl)) return nullptr;
+        pidls.push_back(std::move(result.pidl));
     }
-
-    PIDLIST_ABSOLUTE parent = ILClone(pidls[0]);
-    if (parent) ILRemoveLastID(parent);
-    bool same_parent = parent != nullptr;
+    auto last_offset = [](const std::vector<uint8_t>& pidl) {
+        size_t offset = 0, last = 0;
+        while (offset + sizeof(uint16_t) < pidl.size()) {
+            uint16_t size = 0;
+            std::memcpy(&size, pidl.data() + offset, sizeof(size));
+            if (!size) break;
+            last = offset;
+            offset += size;
+        }
+        return last;
+    };
+    const size_t parent_prefix = last_offset(pidls.front());
+    std::vector<uint8_t> parent(pidls.front().begin(), pidls.front().begin() + parent_prefix);
+    parent.resize(parent_prefix + sizeof(uint16_t), 0);
+    bool same_parent = true;
     for (size_t i = 1; same_parent && i < pidls.size(); ++i) {
-        PIDLIST_ABSOLUTE other = ILClone(pidls[i]);
-        if (!other) {
-            same_parent = false;
-            break;
-        }
-        ILRemoveLastID(other);
-        same_parent = ILIsEqual(parent, other) != FALSE;
-        CoTaskMemFree(other);
+        same_parent = last_offset(pidls[i]) == parent_prefix &&
+            std::equal(parent.begin(), parent.begin() + parent_prefix, pidls[i].begin());
     }
-
+    // ILIsEqual can bind a namespace provider. Binary-identical parents use
+    // relative children; otherwise the desktop parent accepts absolute PIDLs.
     const UINT cidl = static_cast<UINT>(pidls.size());
     const UINT header = static_cast<UINT>(sizeof(UINT) * (cidl + 2));
-    auto pidl_size = [](PCUIDLIST_RELATIVE p) -> UINT {
-        return p ? ILGetSize(p) : 2;
-    };
-
-    std::vector<PCUIDLIST_RELATIVE> children;
-    children.reserve(pidls.size());
-    UINT pidl_bytes = same_parent ? pidl_size(parent) : 2;
-    if (same_parent) {
-        for (auto* p : pidls) children.push_back(ILFindLastID(p));
-    } else {
-        for (auto* p : pidls) children.push_back(p);
+    const size_t parent_size = same_parent ? parent.size() : sizeof(uint16_t);
+    if (parent_size > ipc::kMaxPayload - header) return nullptr;
+    size_t total = header + parent_size;
+    for (const auto& pidl : pidls) {
+        const size_t size = pidl.size() - (same_parent ? parent_prefix : 0);
+        if (size > ipc::kMaxPayload - total) return nullptr;
+        total += size;
     }
-    for (auto* c : children) pidl_bytes += pidl_size(c);
-
-    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, header + pidl_bytes);
-    if (!h) {
-        if (parent) CoTaskMemFree(parent);
-        for (auto* p : pidls) CoTaskMemFree(p);
-        return nullptr;
-    }
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total);
+    if (!h) return nullptr;
     auto* base = static_cast<BYTE*>(GlobalLock(h));
+    if (!base) { GlobalFree(h); return nullptr; }
     auto* ida = reinterpret_cast<CIDA*>(base);
     ida->cidl = cidl;
     UINT offset = header;
     ida->aoffset[0] = offset;
-    if (same_parent && parent) {
-        const UINT sz = ILGetSize(parent);
-        std::memcpy(base + offset, parent, sz);
+    if (same_parent) {
+        const UINT sz = static_cast<UINT>(parent.size());
+        std::memcpy(base + offset, parent.data(), sz);
         offset += sz;
     } else {
         offset += 2;
     }
     for (UINT i = 0; i < cidl; ++i) {
         ida->aoffset[i + 1] = offset;
-        const UINT sz = pidl_size(children[i]);
-        std::memcpy(base + offset, children[i], sz);
+        const size_t prefix = same_parent ? parent_prefix : 0;
+        const UINT sz = static_cast<UINT>(pidls[i].size() - prefix);
+        std::memcpy(base + offset, pidls[i].data() + prefix, sz);
         offset += sz;
     }
     GlobalUnlock(h);
-    if (parent) CoTaskMemFree(parent);
-    for (auto* p : pidls) CoTaskMemFree(p);
     return h;
 }
 

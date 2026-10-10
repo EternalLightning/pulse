@@ -697,6 +697,7 @@ BEGIN
     IDS_DUP_MIN_SIZE_10MB                 "10 MB"
     IDS_DUP_KEEP                          "保留"
     IDS_DUP_DELETE_EXTRAS                 "删除其余"
+    IDS_DUP_IGNORE_GROUP                  "忽略此项"
     IDS_DUP_DELETE_ALL_EXTRAS             "删除全部多余"
     IDS_DUP_LISTING_FORMAT                "正在列出 · %s · %s 个文件"
     IDS_DUP_HASHING_FORMAT                "正在比对内容 · %s / %s"
@@ -1284,6 +1285,7 @@ BEGIN
     IDS_DUP_MIN_SIZE_10MB                 "10 MB"
     IDS_DUP_KEEP                          "Keep"
     IDS_DUP_DELETE_EXTRAS                 "Delete extras"
+    IDS_DUP_IGNORE_GROUP                  "Ignore this item"
     IDS_DUP_DELETE_ALL_EXTRAS             "Delete all extras"
     IDS_DUP_LISTING_FORMAT                "Listing · %s · %s files"
     IDS_DUP_HASHING_FORMAT                "Comparing contents · %s / %s"
@@ -1829,8 +1831,11 @@ BEGIN
     IDS_ABOUT_INDEX_WAITING               "已安装，等待连接"
     IDS_ABOUT_INDEX_USER                  "未安装（使用用户索引）"
     IDS_ABOUT_COPY_INFO                   "复制信息"
-    IDS_ABOUT_HOMEPAGE                    "项目主页"
+    IDS_ABOUT_HOMEPAGE                    "发行版仓库"
     IDS_ABOUT_COPIED                      "已复制到剪贴板"
+    IDS_ABOUT_DISTRIBUTION_TITLE          "发行版与许可证"
+    IDS_ABOUT_DISTRIBUTION_NOTICE         "本程序是基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发。\n\n原作者仓库：https://github.com/jimmgreen/pulse\n发行版仓库：https://github.com/EternalLightning/pulse\n\nPulse 源码采用 Apache License 2.0；第三方组件遵循各自许可证。详见随附的 LICENSE、NOTICE 和 licenses 目录。"
+    IDS_ABOUT_UPSTREAM                    "原作者仓库"
 END
 LANGUAGE 0x09, 0x01
 STRINGTABLE
@@ -1848,8 +1853,11 @@ BEGIN
     IDS_ABOUT_INDEX_WAITING               "Installed, waiting to connect"
     IDS_ABOUT_INDEX_USER                  "Not installed (per-user index)"
     IDS_ABOUT_COPY_INFO                   "Copy info"
-    IDS_ABOUT_HOMEPAGE                    "Project page"
+    IDS_ABOUT_HOMEPAGE                    "Distribution repository"
     IDS_ABOUT_COPIED                      "Copied to the clipboard"
+    IDS_ABOUT_DISTRIBUTION_TITLE          "Distribution and license"
+    IDS_ABOUT_DISTRIBUTION_NOTICE         "This is an independently modified distribution of Pulse, maintained by EternalLightning. It is not an official upstream release. The original project was developed by jimmgreen and its contributors.\n\nOriginal repository: https://github.com/jimmgreen/pulse\nDistribution repository: https://github.com/EternalLightning/pulse\n\nPulse source code is licensed under Apache License 2.0. Third-party components retain their own licenses. See the included LICENSE, NOTICE and licenses directory."
+    IDS_ABOUT_UPSTREAM                    "Original repository"
 END
 LANGUAGE 0x04, 0x02
 STRINGTABLE

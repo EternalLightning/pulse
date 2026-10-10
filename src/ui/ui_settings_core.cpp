@@ -1,7 +1,6 @@
 #include "../common/windows_compat.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
-#include "bloom_accent_picker.h"
 #include "../common/localization.h"
 
 namespace pulse::ui {
@@ -99,15 +98,16 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         for(int i=0;i<3;++i) {
             const auto r=lay.theme_tile[i];auto preview=r;preview.bottom-=22*scale_;
             const bool selected=vm.settings_theme==theme_values[i];
-            MakeBrush(dc,i==0 ? HexColor(0xF1F3EE) : HexColor(0x1A1A1A),brFillHover_);
+            MakeBrush(dc,i==0 ? HexColor(0xF3F5F8) : HexColor(0x1A1A1A),brFillHover_);
             dc->FillRoundedRectangle(D2D1::RoundedRect(preview,5*scale_,5*scale_),brFillHover_.get());
             MakeBrush(dc,i==0 ? HexColor(0xFFFFFF) : HexColor(0x333333),brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+8*scale_,preview.right-preview.left-14*scale_,8*scale_,2*scale_);
             FillRoundedRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+21*scale_,14*scale_,preview.bottom-preview.top-28*scale_,2*scale_);
-            if(i==2) {MakeBrush(dc,HexColor(0xF1F3EE),brFillHover_); FillRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+8*scale_,(preview.right-preview.left)/2-7*scale_,preview.bottom-preview.top-15*scale_);}
+            if(i==2) {MakeBrush(dc,HexColor(0xF3F5F8),brFillHover_); FillRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+8*scale_,(preview.right-preview.left)/2-7*scale_,preview.bottom-preview.top-15*scale_);}
             MakeBrush(dc,selected ? theme.accent : IsHovered(vm,H::SettingsTheme,theme_values[i]) ? theme.text_secondary : theme.stroke_card,brStrokeCard_);
             dc->DrawRoundedRectangle(D2D1::RoundedRect(preview,5*scale_,5*scale_),brStrokeCard_.get(),selected ? 2*scale_ : 1);
-            if(selected) DrawIconText(preview.right-23*scale_,preview.top+3*scale_,20*scale_,20*scale_,L"\xE73E",L"",theme.accent,0.7f);
+            if(selected) DrawIconText(preview.right-23*scale_,preview.top+3*scale_,20*scale_,20*scale_,L"\xE73E",L"",
+                !vm.dark && i!=0 ? HexColor(0xFFFFFF) : theme.accent,0.7f);
             painter_.DrawText(l10n::Get(theme_names[i]),D2D1::RectF(r.left,preview.bottom+2*scale_,r.right,r.bottom),compositor_->SmallFormat(),theme.text,fluent::HorizontalAlignment::Center);
         }
         divider(lay.theme_row);

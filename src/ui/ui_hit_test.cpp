@@ -9,7 +9,6 @@
 #include "../common/localization.h"
 #include "../common/known_folder_labels.h"
 #include "tab_shape.h"
-#include "bloom_accent_picker.h"
 #include "typography.h"
 #include "../common/resource_ids.h"
 #include "../model/places.h"
@@ -371,7 +370,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 }
                 if(ContainsPt(lay.context_restore,x,y)) {r.region=HitTestResult::SettingsRestore;return r;}
             } else if (vm.settings_page == 3) {
-                for (int i = 0; i < 2; ++i) {
+                for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.about_action[i], x, y)) {
                         r.region = HitTestResult::SettingsAboutAction;
                         r.index = i;
@@ -438,6 +437,13 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         r.region = HitTestResult::SettingsDupOpen;
                         r.index = lay.dup_open_group[i];
                         r.sub_index = lay.dup_open_file[i];
+                        return r;
+                    }
+                }
+                for (size_t i = 0; i < lay.dup_group_ignore.size(); ++i) {
+                    if (ContainsPt(lay.dup_group_ignore[i], x, y)) {
+                        r.region = HitTestResult::SettingsDupGroupIgnore;
+                        r.index = static_cast<int>(i);
                         return r;
                     }
                 }

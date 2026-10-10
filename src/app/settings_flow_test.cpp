@@ -529,7 +529,7 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
         s.compositor.RecreateTextFormats(scale);s.renderer.SetScale(scale);painter.SetScale(scale);
         for(float width:{720.0f,820.0f,1280.0f,1920.0f}) {
             const auto window=D2D1::RectF(0,0,width*scale,1000*scale);
-            auto vm=BuildVm(s,false);vm.settings_open=true;vm.settings_scroll=0;vm.settings_bloom=&s.bloom_accent;
+            auto vm=BuildVm(s,false);vm.settings_open=true;vm.settings_scroll=0;
             vm.settings_content_folders={{LR"(C:\Projects\Very long project folder name)",L"Ready",false},{LR"(D:\Unavailable)",L"Unavailable (3)",true}};
             for(int page=0;page<5;++page) {
                 vm.settings_page=page;vm.settings_expanded=0;
