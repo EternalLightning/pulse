@@ -6,6 +6,7 @@
 #include "../ui/ui_compositor.h"
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -18,6 +19,8 @@
 namespace {
 std::atomic_int failures = 0;
 std::atomic_int paints = 0;
+int messages_during_fade = 0;
+constexpr UINT kResponsivenessProbe = WM_APP + 8;
 constexpr wchar_t kFixtureClass[] = L"PulseDialogFadeTestFixture";
 
 void Check(bool condition, const char* description) {
@@ -26,6 +29,10 @@ void Check(bool condition, const char* description) {
 }
 
 LRESULT CALLBACK FixtureProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == kResponsivenessProbe) {
+        if (GetPropW(window, L"Pulse.DialogFadeState")) ++messages_during_fade;
+        return 0;
+    }
     if (message == WM_PAINT) {
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(window, &paint);
@@ -104,7 +111,6 @@ bool CaptureFixture(HWND window, const wchar_t* filename) {
 
 struct Samples {
     std::vector<BYTE> alpha;
-    bool alive_at_partial = false;
     bool capture_attempted = false;
     bool capture_ok = false;
 };
@@ -119,7 +125,6 @@ std::thread Sample(HWND window, std::atomic_bool& stop, std::atomic_bool& ready,
             if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) &&
                 (flags & LWA_ALPHA) && alpha > 0 && alpha < 255) {
                 samples.alpha.push_back(alpha);
-                samples.alive_at_partial = samples.alive_at_partial || IsWindow(window);
                 if (screenshot && !samples.capture_attempted && alpha >= 64 && alpha <= 224 &&
                     paints.load() > 0) {
                     samples.capture_attempted = true;
@@ -141,6 +146,20 @@ bool AnimationsEnabled() {
     return enabled && !(contrast.dwFlags & HCF_HIGHCONTRASTON);
 }
 
+void PumpFade(HWND window) {
+    const auto deadline = GetTickCount64() + 1500;
+    while (IsWindow(window) && GetPropW(window, L"Pulse.DialogFadeState") &&
+        GetTickCount64() < deadline) {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        MsgWaitForMultipleObjectsEx(0, nullptr, 5, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    }
+    Check(!GetPropW(window, L"Pulse.DialogFadeState"), "fade completes through ordinary message dispatch");
+}
+
 void RunNative(HWND owner, bool animations) {
     HWND window = CreateWindowExW(WS_EX_TOOLWINDOW, kFixtureClass, L"Pulse fade fixture",
         WS_POPUP, 160, 160, 320, 180, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -157,6 +176,10 @@ void RunNative(HWND owner, bool animations) {
     auto helper = Sample(window, stop, ready, showing, L"native-midpoint.bmp");
     while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
     pulse::ui::ShowDialogWithFade(window);
+    Check(!animations || GetPropW(window, L"Pulse.DialogFadeState"),
+        "fade-in returns while animation remains pending");
+    PostMessageW(window, kResponsivenessProbe, 0, 0);
+    PumpFade(window);
     stop.store(true, std::memory_order_release);
     helper.join();
     Check(IsWindowVisible(window) != FALSE, "fade-in leaves native dialog visible");
@@ -164,6 +187,7 @@ void RunNative(HWND owner, bool animations) {
         "fade-in restores original extended style");
     Check(CaptureFixture(window, L"native-after.bmp"), "after: save nonblack native client screenshot");
     if (animations) {
+        Check(messages_during_fade > 0, "UI dispatches posted messages during fade-in");
         Check(!showing.alpha.empty(), "fade-in samples alpha strictly between 0 and 255");
         Check(showing.capture_attempted && showing.capture_ok,
             "midpoint: save nonblack native client screenshot during fade-in");
@@ -173,21 +197,53 @@ void RunNative(HWND owner, bool animations) {
         Check(showing.alpha.empty(), "disabled animations show immediately without layered transition");
         std::printf("[SKIP] Intermediate alpha/screenshot sampling: system animations disabled or high contrast enabled.\n");
     }
-    Samples hiding;
-    stop.store(false);
-    ready.store(false);
-    helper = Sample(window, stop, ready, hiding, nullptr);
-    while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
     pulse::ui::DestroyDialogWithFade(window);
-    stop.store(true, std::memory_order_release);
-    helper.join();
-    Check(!IsWindow(window), "fade-out destroys native dialog after returning");
-    if (animations) {
-        Check(!hiding.alpha.empty() && hiding.alive_at_partial,
-            "fade-out retains live HWND while intermediate opacity is sampled");
-        if (hiding.alpha.size() > 1)
-            Check(hiding.alpha.front() > hiding.alpha.back(), "fade-out opacity decreases");
-    } else Check(hiding.alpha.empty(), "disabled animations destroy without layered transition");
+    Check(!IsWindow(window), "closing destroys native dialog before returning");
+
+    window = CreateWindowExW(WS_EX_TOOLWINDOW, kFixtureClass, L"Pulse quick close fixture",
+        WS_POPUP, 160, 160, 320, 180, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+    pulse::ui::ShowDialogWithFade(window);
+    pulse::ui::DestroyDialogWithFade(window, owner);
+    Check(!IsWindow(window) && IsWindowEnabled(owner),
+        "rapid close cancels pending native fade and restores modal owner");
+    window = CreateWindowExW(WS_EX_TOOLWINDOW, kFixtureClass, L"Pulse direct destruction fixture",
+        WS_POPUP, 160, 160, 320, 180, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+    pulse::ui::ShowDialogWithFade(window);
+    DestroyWindow(window);
+    Check(!IsWindow(window), "direct HWND destruction cancels pending fade without an explicit hide");
+    window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP, kFixtureClass,
+        L"Pulse unbound no-redirection fixture", WS_POPUP, 160, 160, 320, 180,
+        owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+    pulse::ui::ShowDialogWithFade(window, SW_SHOWNOACTIVATE);
+    Check(IsWindowVisible(window) && !GetPropW(window, L"Pulse.DialogFadeState") &&
+        !(GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_LAYERED),
+        "unbound no-redirection window shows immediately without incompatible layering");
+    DestroyWindow(window);
+}
+
+void RunStyleChanges(HWND owner, bool animations) {
+    if (!animations) {
+        std::printf("[SKIP] Concurrent style changes: system animations disabled or high contrast enabled.\n");
+        return;
+    }
+    for (int pass = 0; pass < 2; ++pass) {
+        HWND window = CreateWindowExW(WS_EX_TOOLWINDOW, kFixtureClass, L"Pulse style change fixture",
+            WS_POPUP, 160, 160, 320, 180, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+        Check(window != nullptr, "create native style-change fixture");
+        if (!window) continue;
+        pulse::ui::ShowDialogWithFade(window, SW_SHOWNOACTIVATE);
+        Check(GetPropW(window, L"Pulse.DialogFadeState") != nullptr,
+            "change extended styles while native fade remains pending");
+        const LONG_PTR updated_style = (GetWindowLongPtrW(window, GWL_EXSTYLE) & ~WS_EX_TOOLWINDOW) |
+            WS_EX_NOACTIVATE;
+        SetWindowLongPtrW(window, GWL_EXSTYLE, updated_style);
+        if (pass == 0) PumpFade(window);
+        else pulse::ui::HideComposedDialog(window);
+        Check(GetWindowLongPtrW(window, GWL_EXSTYLE) == (updated_style & ~WS_EX_LAYERED),
+            pass == 0 ? "completed fade preserves concurrent extended-style additions and removals"
+                : "cancelled fade preserves concurrent extended-style additions and removals");
+        DestroyWindow(window);
+    }
 }
 
 void RunLayered(HWND owner) {
@@ -212,7 +268,7 @@ void RunLayered(HWND owner) {
     pulse::ui::DestroyDialogWithFade(window);
 }
 
-void RunComposed(HWND owner) {
+void RunComposed(HWND owner, bool animations) {
     HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
         kFixtureClass, L"Pulse composition fade fixture", WS_POPUP, 160, 160, 320, 180,
         owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -230,17 +286,36 @@ void RunComposed(HWND owner) {
         Check(GetPropW(window, L"Pulse.DialogComposition.Visual") != nullptr,
             "composition visual is bound to dialog lifecycle");
         const LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+        const DWORD backdrop = DWMSBT_MAINWINDOW;
+        const bool backdrop_supported = SUCCEEDED(DwmSetWindowAttribute(window,
+            DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop))) &&
+            SetPropW(window, L"Pulse.DialogBackdrop", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(backdrop)));
         for (int pass = 0; pass < 2; ++pass) {
             pulse::ui::ShowDialogWithFade(window);
             Check(IsWindowVisible(window) && GetWindowLongPtrW(window, GWL_EXSTYLE) == style,
                 "composition fade-in preserves no-redirection style without layering");
+            Check(!animations || GetPropW(window, L"Pulse.DialogFadeState"),
+                "DirectComposition animation starts without waiting for completion");
+            if (animations && backdrop_supported)
+                Check(pulse::ui::IsDialogSurfaceFading(window),
+                    "DWM backdrop follows the content surface during asynchronous fade");
+            if (pass == 0) {
+                PumpFade(window);
+                Check(!pulse::ui::IsDialogSurfaceFading(window),
+                    "completed fade restores the DWM backdrop");
+            }
             EnableWindow(owner, FALSE);
             pulse::ui::HideComposedDialog(window, owner);
             Check(!IsWindowVisible(window) && IsWindow(window) && IsWindowEnabled(owner),
                 "composition fade-out hides surface and restores modal owner");
+            Check(!pulse::ui::IsDialogSurfaceFading(window),
+                "hiding cancels transient backdrop painting");
         }
     }
+    pulse::ui::ShowDialogWithFade(window, SW_SHOWNOACTIVATE);
     compositor.Shutdown();
+    Check(!GetPropW(window, L"Pulse.DialogFadeState") && !pulse::ui::IsDialogSurfaceFading(window),
+        "compositor shutdown cancels pending fade before releasing borrowed resources");
     Check(!GetPropW(window, L"Pulse.DialogComposition.Visual"), "shutdown removes borrowed visual binding");
     DestroyWindow(window);
 }
@@ -525,6 +600,7 @@ void RunEscapeCases(HWND owner) {
 
 int main(int argc, char** argv) {
     const bool input_only = argc == 2 && std::strcmp(argv[1], "--new-item-input") == 0;
+    const bool lifecycle_only = argc == 2 && std::strcmp(argv[1], "--lifecycle") == 0;
     pulse::compat::EnableDpiAwareness();
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -544,10 +620,13 @@ int main(int argc, char** argv) {
         RunInput(owner, true);
     } else {
         RunNative(owner, animations);
+        RunStyleChanges(owner, animations);
         RunLayered(owner);
-        RunComposed(owner);
-        RunPrompt(owner, true);
-        RunPrompt(owner, false);
+        RunComposed(owner, animations);
+        if (!lifecycle_only) {
+            RunPrompt(owner, true);
+            RunPrompt(owner, false);
+        }
         RunEscapeCases(owner);
     }
     DestroyWindow(owner);

@@ -4,13 +4,6 @@
 
 namespace pulse::ui {
 
-D2D1_RECT_F MainRenderer::AddressSearchButtonRect(float w) const {
-    const auto field = SearchBarRect(w);
-    const float width = (field.right - field.left) / scale_ - 8.0f;
-    return D2D1::RectF(field.right - (width + 4.0f) * scale_, field.top + 3.0f * scale_,
-                      field.right - 4.0f * scale_, field.bottom - 3.0f * scale_);
-}
-
 void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, const Theme& theme) {
     const auto field = SearchBarRect(w);
     if (!vm.address_searching && w-EffectiveSidebarWidth(w)<480*scale_) {

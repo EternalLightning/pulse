@@ -1,5 +1,6 @@
 // fs_net_cache.cpp — Disk snapshots for UNC folders and a timed connectivity probe.
 #include "fs_net_cache.h"
+#include "path_error.h"
 #include <shlobj.h>
 #include <chrono>
 #include <fstream>
@@ -185,16 +186,6 @@ SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec) {
     return entries;
 }
 
-std::wstring FormatCacheAge(uint64_t unix_sec) {
-    if (unix_sec == 0) return L"刚才";
-    const uint64_t now = NowUnix();
-    if (now <= unix_sec) return L"刚才";
-    const uint64_t sec = now - unix_sec;
-    if (sec < 60) return std::to_wstring(sec) + L" 秒前";
-    if (sec < 3600) return std::to_wstring(sec / 60) + L" 分钟前";
-    if (sec < 86400) return std::to_wstring(sec / 3600) + L" 小时前";
-    return std::to_wstring(sec / 86400) + L" 天前";
-}
 
 namespace {
 
@@ -205,6 +196,7 @@ struct ProbeJob {
     UINT msg = 0;
     HANDLE done = nullptr;
     BOOL ok = FALSE;
+    DWORD error_code = ERROR_SUCCESS;
     DWORD rtt_ms = 0;
     HANDLE thread = nullptr;
     uint32_t slot = 0;
@@ -224,14 +216,23 @@ constexpr uint32_t kProbeLimit = 4;
 struct ProbePool {
     std::mutex mutex;
     std::array<std::shared_ptr<ProbeJob>, kProbeLimit> slots;
+    struct Waiter { HWND hwnd; UINT msg; };
+    std::vector<Waiter> waiters;
+    void WakeLocked() {
+        for (const auto& waiter : waiters)
+            PostMessageW(waiter.hwnd, waiter.msg, 1, 0);
+        waiters.clear();
+    }
 #ifdef PULSE_NET_CACHE_TESTING
     std::function<bool(const std::wstring&)> hook;
     DWORD timeout_ms = 1500;
 #endif
     void ReapLocked() {
+        bool released = false;
         for (auto& slot : slots)
             if (slot && !slot->waiter_started && slot->thread &&
-                WaitForSingleObject(slot->thread, 0) == WAIT_OBJECT_0) slot.reset();
+                WaitForSingleObject(slot->thread, 0) == WAIT_OBJECT_0) { slot.reset(); released = true; }
+        if (released) WakeLocked();
     }
 };
 
@@ -243,8 +244,15 @@ ProbePool& Probes() {
 
 DWORD WINAPI ProbeInner(LPVOID param) {
     auto* j = static_cast<ProbeJob*>(param);
+    std::shared_ptr<ProbeJob> owner;
+    {
+        auto& pool = Probes();
+        std::lock_guard lock(pool.mutex);
+        owner = pool.slots[j->slot];
+    }
     const ULONGLONG t0 = GetTickCount64();
     try {
+        SetLastError(ERROR_SUCCESS);
 #ifdef PULSE_NET_CACHE_TESTING
         if (j->hook) j->ok = j->hook(j->unc) ? TRUE : FALSE;
         else
@@ -253,9 +261,23 @@ DWORD WINAPI ProbeInner(LPVOID param) {
             WIN32_FILE_ATTRIBUTE_DATA fad{};
             j->ok = GetFileAttributesExW(j->unc.c_str(), GetFileExInfoStandard, &fad);
         }
-    } catch (...) { j->ok = FALSE; }
+        if (!j->ok) {
+            j->error_code = GetLastError();
+            if (!j->error_code) j->error_code = ERROR_GEN_FAILURE;
+        }
+    } catch (...) { j->ok = FALSE; j->error_code = ERROR_GEN_FAILURE; }
     j->rtt_ms = static_cast<DWORD>(GetTickCount64() - t0);
     SetEvent(j->done);
+    // If the waiter could not start, the IO owner still releases capacity only
+    // after the provider call returns, while retaining the job through exit.
+    {
+        auto& pool = Probes();
+        std::lock_guard lock(pool.mutex);
+        if (!j->waiter_started && pool.slots[j->slot] == owner) {
+            pool.slots[j->slot].reset();
+            pool.WakeLocked();
+        }
+    }
     return 0;
 }
 
@@ -265,8 +287,11 @@ void PostProbeResult(const std::shared_ptr<ProbeJob>& job, bool timeout) {
         result->probe_id = job->probe_id;
         result->unc = job->unc;
         result->rtt_ms = timeout ? 0 : job->rtt_ms;
-        result->status = timeout || !job->ok ? NetStatus::Offline :
-            job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online;
+        result->error_code = timeout ? ERROR_TIMEOUT : job->error_code;
+        result->final = !timeout;
+        result->status = result->error_code == ERROR_SUCCESS
+            ? (job->rtt_ms > 800 ? NetStatus::Slow : NetStatus::Online)
+            : ClassifyPathError(result->error_code) == PathError::Offline ? NetStatus::Offline : NetStatus::Unknown;
         if (PostMessageW(job->hwnd, job->msg, 0, reinterpret_cast<LPARAM>(result.get())))
             result.release();
     } catch (...) {}
@@ -284,25 +309,37 @@ DWORD WINAPI ProbeWaiter(void* parameter) {
         auto& pool = Probes();
         std::lock_guard lock(pool.mutex);
         job->waiter_started = false;
+        pool.ReapLocked();
         return 0;
     }
     if (timeout) PostProbeResult(job, false);
     auto& pool = Probes();
     std::lock_guard lock(pool.mutex);
-    if (pool.slots[job->slot] == job) pool.slots[job->slot].reset();
+    if (pool.slots[job->slot] == job) {
+        pool.slots[job->slot].reset();
+        pool.WakeLocked();
+    }
     return 0;
 }
 
 } // namespace
 
 bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id) {
-    if (!hwnd || unc.empty() || probe_id == 0) return false;
+    if (!hwnd || unc.empty() || probe_id == 0) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
     auto& pool = Probes();
     std::lock_guard lock(pool.mutex);
     pool.ReapLocked();
     uint32_t slot = 0;
     while (slot < kProbeLimit && pool.slots[slot]) ++slot;
-    if (slot == kProbeLimit) return false;
+    if (slot == kProbeLimit) {
+        try {
+            if (std::none_of(pool.waiters.begin(), pool.waiters.end(),
+                [&](const auto& waiter) { return waiter.hwnd == hwnd && waiter.msg == msg; }))
+                pool.waiters.push_back({hwnd, msg});
+        } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
+        SetLastError(ERROR_BUSY);
+        return false;
+    }
     std::shared_ptr<ProbeJob> job;
     try {
         job = std::make_shared<ProbeJob>();
@@ -310,7 +347,7 @@ bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id) {
         job->hook = pool.hook;
         job->timeout_ms = pool.timeout_ms;
 #endif
-    } catch (...) { return false; }
+    } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return false; }
     job->slot = slot;
     job->unc = std::move(unc);
     job->probe_id = probe_id;
@@ -324,9 +361,11 @@ bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id) {
     auto* argument = new (std::nothrow) std::shared_ptr<ProbeJob>(job);
     HANDLE waiter = argument ? CreateThread(nullptr, 0, ProbeWaiter, argument, 0, nullptr) : nullptr;
     if (!waiter) {
+        const DWORD error = argument ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY;
         delete argument;
         job->waiter_started = false;
         pool.ReapLocked();
+        SetLastError(error);
         return false;
     }
     CloseHandle(waiter);

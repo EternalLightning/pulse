@@ -1,4 +1,6 @@
 #include "../app/app_worker.h"
+#include "worker_projection_cases.h"
+#include "worker_net_cache_cases.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -7,7 +9,16 @@ namespace pulse::app {
 std::wstring FindGitRoot(const std::wstring&) { return {}; }
 }
 
-int main() {
+namespace pulse::fs {
+std::wstring NetCacheTestDirectory() {
+    if (bench::worker_net_cache::cache_access) bench::worker_net_cache::cache_access();
+    return bench::worker_net_cache::directory;
+}
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--net-cache") return RunWorkerNetCacheCases();
+    if (argc == 2 && std::string_view(argv[1]) == "--projection") return RunWorkerProjectionCases();
     using namespace pulse::app;
     int failures = 0;
     auto check = [&](bool ok, const char* label) {
@@ -29,6 +40,15 @@ int main() {
     auto full = WorkerCancellationTestProbe::Process(directory, 0, &checks);
     check(!full.cancelled && !full.error && full.snapshot && full.snapshot->size() == count,
           "current generation returns complete sorted directory snapshot");
+
+    WorkItem missing{(root / L"missing" / L"child").wstring(), L"missing", 4,
+                     pulse::ui::SortColumn::Name, pulse::ui::SortDirection::Asc};
+    auto error_result = WorkerCancellationTestProbe::Process(missing, 0, &checks);
+    check(error_result.error && !error_result.cancelled && !error_result.snapshot &&
+          error_result.error_code == ERROR_PATH_NOT_FOUND,
+          "directory failure preserves Win32 path-not-found code and has no snapshot");
+    check(full.error_code == ERROR_SUCCESS && stale.error_code == ERROR_SUCCESS,
+          "successful and cooperatively cancelled enumeration do not carry a filesystem error");
 
     const auto long_dir = root / std::wstring(100, L'a') / std::wstring(100, L'b');
     std::filesystem::create_directories(pulse::fs::NormalizePath(long_dir.wstring()));

@@ -12,7 +12,7 @@
 ; conservatively: only Pulse-owned index artifacts are removed.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #error AppVersion must be supplied from version.txt by build_installer.bat or build_release_ci.ps1
 #endif
 #ifndef BuildDir
   #define BuildDir "build"

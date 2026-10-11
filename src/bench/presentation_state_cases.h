@@ -111,6 +111,7 @@ inline int RunPresentationStateCases(AppState& s) {
         auto probe = [&](fs::NetStatus status) {
             auto result = std::make_unique<fs::UncProbeResult>();
             result->unc = tab->current_path;
+            result->probe_id = s.probe_scheduler.Begin(tab->current_path);
             result->status = status;
             ::WndProcImpl(s.hwnd, WM_NET_PROBE, 0, reinterpret_cast<LPARAM>(result.release()));
         };

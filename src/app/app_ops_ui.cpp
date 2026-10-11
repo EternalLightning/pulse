@@ -43,34 +43,21 @@ void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
     if (tab.pending_created_name.empty() || tab.pending_generation != 0 || !tab.snapshot ||
         tab.snapshot_path != tab.current_path) return;
     const auto found = std::find_if(tab.snapshot->begin(), tab.snapshot->end(), [&](const auto& entry) {
-        return _wcsicmp(entry.name.c_str(), tab.pending_created_name.c_str()) == 0;
+        return entry.name == tab.pending_created_name;
     });
     if (found == tab.snapshot->end()) return;
     auto names = tab.pending_created_names;
     if (names.empty()) names.push_back(found->name);
     if (names.size() > 1) {
-        const auto key = [](std::wstring value) {
-            for (auto& ch : value) ch = static_cast<wchar_t>(std::towlower(ch));
-            return value;
-        };
-        std::unordered_set<std::wstring> remaining;
-        for (const auto& name : names) remaining.insert(key(name));
+        std::unordered_set<std::wstring> remaining(names.begin(), names.end());
         std::vector<std::wstring> actual_names;
         for (const auto& entry : *tab.snapshot) {
-            if (remaining.erase(key(entry.name))) actual_names.push_back(entry.name);
+            if (remaining.erase(entry.name)) actual_names.push_back(entry.name);
         }
         if (!remaining.empty()) return;
         names = std::move(actual_names);
     } else names.front() = found->name;
     const std::wstring name = found->name;
-    auto entries = std::make_shared<std::vector<fs::DirEntry>>(*tab.snapshot);
-    std::stable_sort(entries->begin(), entries->end(), [&](const auto& left, const auto& right) {
-        return app::EntryLess(left, right, tab.sort_column, tab.sort_direction,
-                              app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), tab.current_path);
-    });
-    tab.SetSnapshot(std::move(entries));
-    tab.refresh_keeps_order = false;
-    tab.order_held = false;
     tab.RemapSelection(names, name);
     tab.pending_created_name.clear();
     tab.pending_created_names.clear();
@@ -204,13 +191,18 @@ void DeleteSelected(AppState& s, bool permanent) {
 // Stage 1B-2: built-in Fluent context menu + new-item dropdown.
 void RestoreSelected(AppState& s) {
     app::Tab* tab = ActiveTab(s);
-    if (!tab) return;
-    std::vector<std::wstring> paths = SelectedFullPaths(*tab);
-    if (paths.empty()) return;
+    if (!tab || !IsRecycleTab(tab) || !tab->snapshot) return;
     ops::OpRequest req;
     req.type = ops::OpType::RestoreRecycle;
-    req.sources = std::move(paths);
-    s.ops.Submit(std::move(req));
+    req.collision_policy = ops::CollisionPolicy::KeepBoth;
+    for (int index : tab->SelectedIndices()) {
+        if (index < 0 || index >= static_cast<int>(tab->EntryCount())) continue;
+        const auto& entry = tab->EntryAt(static_cast<size_t>(index));
+        if (entry.full_path.empty() || entry.recycle_path.empty()) continue;
+        req.sources.push_back(entry.full_path);
+        req.recycle_paths.push_back(entry.recycle_path);
+    }
+    if (!req.sources.empty()) s.ops.Submit(std::move(req));
 }
 
 void EmptyRecycleBin(AppState& s) {
@@ -274,6 +266,13 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
     const auto now = std::chrono::steady_clock::now();
     const ops::OpStatus status = s.ops.Status();
     s.operationWindow->Update(status);
+
+    if (s.permissionOperationPromptActive || (!status.active &&
+        status.phase == ops::OpPhase::Failed && status.elevation_retry_available &&
+        s.ops.IsElevationFailureCurrent(status.task_id))) {
+        if (s.operationWindow->IsVisible()) s.operationWindow->Hide();
+        return;
+    }
 
     if (status.active && status.task_id != s.operationUiTaskId) {
         s.operationUiTaskId = status.task_id;

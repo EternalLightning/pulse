@@ -102,6 +102,10 @@ bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
     passed &= Report("context menu composes cached static and live COM rows",
         display.size() >= 4 && prefs_changed);
     context_menu.InvalidateCaches();
+    passed &= Report("cache invalidation retires the old active COM session",
+        !context_menu.CompleteComQuery(17, {com_item}, GetTickCount64()).accepted);
+    context_menu.StartQuery(context, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
+    context_menu.CompleteComQuery(17, {com_item}, GetTickCount64());
     context_menu.OpenMenu({ std::move(base_item) });
     passed &= Report("context menu owns popup baseline state",
         context_menu.menu_open() && !context_menu.base_items().empty());
@@ -118,7 +122,7 @@ bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
     const bool handled_shell = context_menu.ExecuteShellCommand(
         pulse::app::CmdShellComBase + 23, {}, [&] { ++folder_refreshes; });
     passed &= Report("context menu rejects a snapshot whose live ids differ",
-        handled_shell && invoked_command == 0 && closed_sessions == 1 && folder_refreshes == 1);
+        handled_shell && invoked_command == 0 && closed_sessions == 2 && folder_refreshes == 1);
     context_menu.StartQuery(context, nullptr, { L"C:\\one.txt" }, false, L".txt",
         false, {}, {});
     context_menu.CompleteComQuery(17, {live_item}, GetTickCount64());
@@ -128,7 +132,7 @@ bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
     passed &= Report("context menu invokes the exact command in the displayed session",
         invoked_command == 42 &&
         invoked_verb == L"customverb" && invoked_text == L"Custom action" &&
-        closed_sessions == 1 && folder_refreshes == 2);
+        closed_sessions == 2 && folder_refreshes == 2);
     return passed;
 }
 
@@ -399,7 +403,106 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
 
 } // namespace
 
+#include "context_menu_refresh_cases.h"
+
+bool RunSessionLayoutTests() {
+    bool passed = true;
+    pulse::app::LayoutTabSnapshot saved;
+    saved.pinned = true;
+    saved.marker_rgb = 0x0078D4;
+    saved.group = 4;
+    saved.layout = 1;
+    saved.focused = 1;
+    saved.panes.push_back({ L"C:\\first", pulse::ui::ViewMode::Tiles, { 0.2f, 0.5f, 0.8f }, {} });
+    saved.panes.push_back({ L"D:\\loose", pulse::ui::ViewMode::Details, {}, {} });
+    saved.panes.push_back({ L"", pulse::ui::ViewMode::Details, {}, {} });
+    pulse::app::LayoutTab restored;
+    std::vector<std::wstring> loaded_paths;
+    pulse::app::RestoreLayoutTab(restored, saved,
+        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
+            tab.current_path = loaded;
+            loaded_paths.push_back(loaded);
+        });
+    passed &= Report("session layout restore skips empty panes and grows to the preset",
+        restored.pinned && restored.tab_group == 0 &&
+        restored.layout == pulse::app::LayoutPreset::TwoVertical &&
+        restored.panes.size() == 2 && restored.focused_index == 1 &&
+        loaded_paths.size() >= 2 && loaded_paths[0] == L"C:\\first");
+    const auto captured = pulse::app::CaptureLayoutTab(restored);
+    passed &= Report("session layout restore and capture preserve the tab marker",
+        restored.marker_rgb == 0x0078D4 && captured.marker_rgb == 0x0078D4);
+    passed &= Report("session layout capture preserves folder presentation state",
+        captured.pinned && captured.layout == 1 && captured.panes.size() == 2 &&
+        captured.panes[0].view == pulse::ui::ViewMode::Tiles &&
+        captured.panes[0].columns[1] == 0.5f);
+    pulse::app::LayoutTab empty_restored;
+    pulse::app::RestoreLayoutTab(empty_restored, {},
+        [](pulse::app::Tab& tab, const std::wstring& loaded) {
+            tab.current_path = loaded;
+        });
+    passed &= Report("session layout restore supplies a usable fallback folder",
+        empty_restored.panes.size() == 1 &&
+        empty_restored.panes[0]->view.current_path == pulse::path::DefaultNavigationRoot());
+    pulse::app::WindowTabs restored_tabs;
+    std::vector<pulse::app::GroupSessionSnapshot> groups{
+        { 4, L"work", 0x00112233, false },
+        { 4, L"duplicate", 0x00445566, true },
+        { -1, L"invalid", 0, false },
+    };
+    saved.pinned = false;
+    saved.group = 4;
+    pulse::app::RestoreWindowTabs(restored_tabs, { saved }, groups, 0,
+        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
+            tab.current_path = loaded;
+        });
+    passed &= Report("session window tabs restore validates groups",
+        restored_tabs.tab_groups.size() == 1 &&
+        restored_tabs.next_tab_group_id == 5 && restored_tabs.items.size() == 1 &&
+        restored_tabs.items[0]->tab_group == 4);
+    return passed;
+}
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--session-layout")
+        return RunSessionLayoutTests() ? 0 : 1;
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-refresh") {
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        return RunContextMenuRefreshTests() ? 0 : 1;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--unc-probe-only") == 0) {
+        bool ok = true;
+        using pulse::app::UncProbeScheduler;
+        UncProbeScheduler probes;
+        const std::wstring path = L"probe-path", other = L"other-path";
+        const auto a = probes.Begin(path);
+        ok &= Report("logical timeout releases slot but retains latest path ticket",
+            probes.Finish(a) && probes.Accept(path, a, false));
+        ok &= Report("latest late success remains eligible without a newer request",
+            probes.Accept(path, a) && !probes.Accept(path, a));
+        const auto old = probes.Begin(path); probes.Finish(old);
+        const auto newer = probes.Begin(path);
+        ok &= Report("stale result cannot release a newer scheduling slot",
+            !probes.Finish(old) && probes.IsActive(newer));
+        ok &= Report("newer same-path completion supersedes old late outcome",
+            probes.Accept(path, newer) && !probes.Accept(path, old));
+        probes.Finish(newer);
+        const auto pending_old = probes.Begin(path); probes.Finish(pending_old);
+        ok &= Report("queued replacement reserves freshness before physical admission",
+            probes.Enqueue(path) && !probes.Accept(path, pending_old) && probes.Pending());
+        const auto queued_id = probes.Pending()->id;
+        probes.BeginPending();
+        ok &= Report("queued admission retains its original request identity",
+            probes.IsActive(queued_id) && probes.Accept(path, queued_id, false));
+        probes.Finish(queued_id);
+        const auto own = probes.Begin(other);
+        ok &= Report("unrelated path admission preserves a valid late result",
+            probes.Accept(path, queued_id) && probes.IsActive(own));
+        probes.Finish(own); probes.Accept(other, own);
+        UncProbeScheduler restarted;
+        ok &= Report("new scheduler lifetime cannot reuse outstanding request ids",
+            restarted.Begin(path) != own && probes.latest.empty());
+        return ok ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-quick-access") {
         using namespace pulse::app;
         setvbuf(stdout, nullptr, _IONBF, 0);
@@ -877,58 +980,7 @@ int wmain(int argc, wchar_t** argv) {
     passed &= Report("settings UI controller has explicit binding lifecycle",
         !settings_ui.ui_bound());
 
-    pulse::app::LayoutTabSnapshot saved;
-    saved.pinned = true;
-    saved.marker_rgb = 0x0078D4;
-    saved.group = 4;
-    saved.layout = 1;
-    saved.focused = 1;
-    saved.panes.push_back({ L"C:\\first", pulse::ui::ViewMode::Tiles, { 0.2f, 0.5f, 0.8f }, {} });
-    saved.panes.push_back({ L"D:\\loose", pulse::ui::ViewMode::Details, {}, {} });
-    saved.panes.push_back({ L"", pulse::ui::ViewMode::Details, {}, {} });
-    pulse::app::LayoutTab restored;
-    std::vector<std::wstring> loaded_paths;
-    pulse::app::RestoreLayoutTab(restored, saved,
-        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-            loaded_paths.push_back(loaded);
-        });
-    passed &= Report("session layout restore skips empty panes and grows to the preset",
-        restored.pinned && restored.tab_group == 0 &&
-        restored.layout == pulse::app::LayoutPreset::TwoVertical &&
-        restored.panes.size() == 2 && restored.focused_index == 1 &&
-        loaded_paths.size() >= 2 && loaded_paths[0] == L"C:\\first");
-    const auto captured = pulse::app::CaptureLayoutTab(restored);
-    passed &= Report("session layout restore and capture preserve the tab marker",
-        restored.marker_rgb == 0x0078D4 && captured.marker_rgb == 0x0078D4);
-    passed &= Report("session layout capture preserves folder presentation state",
-        captured.pinned && captured.layout == 1 && captured.panes.size() == 2 &&
-        captured.panes[0].view == pulse::ui::ViewMode::Tiles &&
-        captured.panes[0].columns[1] == 0.5f);
-    pulse::app::LayoutTab empty_restored;
-    pulse::app::RestoreLayoutTab(empty_restored, {},
-        [](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-        });
-    passed &= Report("session layout restore supplies a usable fallback folder",
-        empty_restored.panes.size() == 1 &&
-        empty_restored.panes[0]->view.current_path == L"C:\\");
-    pulse::app::WindowTabs restored_tabs;
-    std::vector<pulse::app::GroupSessionSnapshot> groups{
-        { 4, L"work", 0x00112233, false },
-        { 4, L"duplicate", 0x00445566, true },
-        { -1, L"invalid", 0, false },
-    };
-    saved.pinned = false;
-    saved.group = 4;
-    pulse::app::RestoreWindowTabs(restored_tabs, { saved }, groups, 0,
-        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-        });
-    passed &= Report("session window tabs restore validates groups",
-        restored_tabs.tab_groups.size() == 1 &&
-        restored_tabs.next_tab_group_id == 5 && restored_tabs.items.size() == 1 &&
-        restored_tabs.items[0]->tab_group == 4);
+    passed &= RunSessionLayoutTests();
 
     passed &= RunContextMenuComTests(context);
 

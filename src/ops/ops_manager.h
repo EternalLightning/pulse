@@ -80,9 +80,10 @@ struct OpRequest {
     // Logical rows may own more than one physical root (Recycle Bin $R/$I).
     // These describe targets, never authorization or a recyclability claim.
     std::vector<DeleteRequestTarget> delete_targets;
-    std::vector<std::wstring> recycle_paths; // exact recycle payloads for Undo restore
+    std::vector<std::wstring> recycle_paths; // exact selected recycle payloads; also used by Undo
     std::vector<RecycleUndoIdentity> recycle_undo_identities; // in-session worker proof, never persisted
-    std::vector<FileIdentity> undo_produced_identities; // historical identity of Copy/Create products
+    std::vector<FileIdentity> undo_produced_identities; // historical identities aligned with inverse sources
+    std::vector<std::wstring> undo_cleanup_directories; // pending empty-directory cleanup; never rescan descendants
 };
 
 // Worker snapshot used only for an in-session retry; never journaled. Keeping
@@ -112,6 +113,15 @@ struct UndoEntry {
     bool recycle_verified = false; // worker-only cache; never trusted from persisted JSON
     std::vector<RecycleUndoIdentity> recycle_identities;
     std::vector<FileIdentity> produced_identities;
+    std::vector<std::wstring> cleanup_directories; // known content already restored; only delete these empty directories
+};
+
+struct RestoreItemResult {
+    std::wstring original_path;
+    std::wstring recycle_path;
+    std::wstring destination;
+    bool restored = false;
+    HRESULT error = S_OK;
 };
 
 struct OpStatus {
@@ -136,7 +146,11 @@ struct OpStatus {
     uint64_t deletes_without_mutation = 0; // suppress refusal-only model refresh
     HRESULT failure_hr = S_OK;
     std::wstring failed_path; // exact failing endpoint, independent of display text
+    bool elevation_retry_available = false;
+    std::wstring elevation_source_path;
+    std::wstring elevation_destination_path;
     bool lock_retry_available = false; // single rename can retry without Restart Manager owners
+    std::vector<RestoreItemResult> restore_results; // exact selected payload and actual per-item outcome
     std::wstring locked_path;
     std::vector<LockOwner> lock_owners;
 };
@@ -159,6 +173,7 @@ struct RecoveryEntry {
     uint64_t sequence = 0;
     OpRequest request;
     bool was_active = false;
+    bool outcome_unknown = false; // no terminal evidence; retain for inspection without replay
 };
 
 struct RecoverySnapshot {
@@ -200,6 +215,9 @@ public:
     void ResolveConflict(uint64_t token, ConflictChoice choice, bool apply_to_all);
     bool IsLockedFailureCurrent(uint64_t task_id) const;
     bool RetryLockedOperation(uint64_t task_id, bool end_owners);
+    bool IsElevationFailureCurrent(uint64_t task_id) const;
+    bool RetryElevatedOperation(uint64_t task_id);
+    void CancelElevationRetry(uint64_t task_id);
     std::optional<DeleteConfirmation> PendingDeleteConfirmation() const;
     void ResolveDeleteConfirmation(uint64_t token, bool accepted);
     std::vector<DeleteOutcome> DrainDeleteOutcomes();
@@ -260,8 +278,11 @@ public:
 private:
     friend struct DeleteIntegrationProbe;
     friend struct TransferIntegrationProbe;
+    friend class OperationElevationAdapter;
     friend struct ShellCompletionTestProbe;
     friend struct UndoIdentityTestProbe;
+    friend struct MutationUndoTestProbe;
+    friend struct SourceContractTestProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -273,15 +294,19 @@ private:
         ULONGLONG enqueued_at = 0; // diagnostics: queue wait vs shell cost
         uint64_t recovery_sequence = 0; // retained until deletion is admitted
         bool lock_retry = false;
+        bool elevated_retry = false;
         uint64_t retry_generation = 0;
         HRESULT retry_failure_hr = S_OK;
         std::wstring retry_failed_path;
         std::vector<std::wstring> retry_probe_paths; // ambiguous CopyFile2 phase: inspect both endpoints
         bool retry_rename_identity = false;
-        FILE_ID_INFO rename_source_id{};
+        FileIdentity rename_source_id;
         std::vector<LockOwner> close_first; // deliberately absent from persisted OpRequest
         std::vector<std::wstring> retry_completed_sources;
         std::vector<TransferPlanEntry> retry_transfer_plan;
+        std::shared_ptr<DestinationGuard> retry_source_directories;
+        std::shared_ptr<DestinationGuard> retry_destination_guard;
+        std::vector<FileObjectReference> retry_source_references;
     };
 
     struct MenuJob {
@@ -315,8 +340,12 @@ private:
     // front = interactive dialog request (打开方式…, 属性): it jumps ahead of
     // queued opens so the dialog answers the click. Plain opens keep FIFO order.
     void EnqueueOpen(QueueItem item, bool front = false);
-    void RunShellOp(const OpRequest& req, uint64_t task_id, const FILE_ID_INFO* rename_identity = nullptr,
-                    bool lock_retry = false);
+    void RunShellOp(const OpRequest& req, uint64_t task_id, const FileIdentity* rename_identity = nullptr,
+                    bool lock_retry = false, const std::vector<FileIdentity>* continuation_identities = nullptr,
+                    DestinationGuard* continuation_guard = nullptr);
+    void RunManualRecycleRestore(const OpRequest& req,
+        decltype(&IsCurrentUserRecyclePayload) owns_payload = &IsCurrentUserRecyclePayload,
+        DestinationGuard* continuation_guard = nullptr);
     void RunDriveLabelRename(const OpRequest& req, uint64_t task_id,
                             decltype(&SetVolumeLabelW) set_label = &SetVolumeLabelW);
     void RunDelete(const QueueItem& item,
@@ -348,19 +377,25 @@ private:
     bool WaitShellDone(uint32_t id, ShellCompletion& result);
     void RunTransfer(const OpRequest& req, uint64_t task_id,
                      const std::vector<std::wstring>& prior_completed = {},
-                     const std::vector<TransferPlanEntry>& prior_plan = {});
+                     const std::vector<TransferPlanEntry>& prior_plan = {},
+                     const std::shared_ptr<DestinationGuard>& prior_source_directories = {},
+                     const std::shared_ptr<DestinationGuard>& prior_destination_guard = {});
     void ExecuteFileOperation(QueueItem& item);
     LockReport CaptureLockedFailure(const QueueItem& retry, HRESULT error,
                                    const std::wstring& failed_item, const LockCancelled& cancelled);
     static QueueItem RemainingDeleteRetry(const QueueItem& admitted, const DeletePlan& accepted,
                                          const std::vector<std::wstring>& actual);
     bool PrepareLockRetry(QueueItem& item);
+    bool CaptureElevationFailure(QueueItem retry, HRESULT error, const std::wstring& failed_item);
     void SetStatus(const std::function<void(OpStatus&)>& fn);
+    void RefreshElevationStatusLocked();
     void RefreshRecycleUndoValidity();
     void InvalidateRecycleUndo(const std::vector<std::wstring>& changed, bool uncertain = false);
     void PushUndo(const OpRequest& req,
                   const std::vector<std::wstring>* actual_destinations = nullptr,
                   const std::vector<FileIdentity>* produced_identities = nullptr);
+    void FinishMutationUndo(const OpRequest& req);
+    bool FinishMutationUndoLocked(const OpRequest& req); // caller holds mutex_
     void LoadRecoveryJournal();
     void PersistJournal();
     std::wstring JournalJsonLocked() const;
@@ -379,6 +414,8 @@ private:
     std::deque<QueueItem> queue_;
     std::optional<QueueItem> active_item_;
     std::optional<QueueItem> lock_retry_;
+    std::optional<QueueItem> elevation_retry_;
+    bool elevation_worker_ = false;
     std::atomic<bool> lock_retry_active_{false};
     std::atomic<bool> lock_retry_cancel_{false};
     std::atomic<uint64_t> lock_retry_generation_{1};
@@ -395,7 +432,7 @@ private:
     bool running_ = false;
     bool accepting_ = true; // mutex_; shutdown rejects submissions until Start
     bool file_operation_in_flight_ = false; // covers dequeue before status publication
-    std::set<uint64_t> move_undo_reservations_;
+    uint64_t pending_mutation_undo_revision_ = 0; // mutex_; one queued or executing mutation inverse
     std::atomic<bool> stopping_{false};
     uint64_t next_seq_ = 1;
 
@@ -407,7 +444,9 @@ private:
     std::atomic<bool> transfer_pause_{false};
     std::atomic<bool> verify_copies_{false};
     decltype(&GetFileInformationByHandleEx) transfer_identity_query_ = GetFileInformationByHandleEx;
+    decltype(&CopyFile2) transfer_copy_file_ = CopyFile2;
     std::function<void(const std::wstring&)> before_source_cleanup_; // regression gate, empty in production
+    std::function<void(const std::wstring&)> before_source_enumeration_; // regression gate, empty in production
     bool force_copy_move_ = false; // isolated cross-volume regression without a second user volume
 
     mutable std::mutex transfer_control_mutex_;

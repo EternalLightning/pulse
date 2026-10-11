@@ -43,6 +43,16 @@ inline bool IsBuiltinContextVerb(std::wstring_view verb, bool background) {
     return false;
 }
 
+inline bool IsNativeNewMenuHandler(std::wstring_view clsid) {
+    return ToLowerVerb(clsid) == L"{d969a300-e7ff-11d0-a93b-00a0c90f2719}";
+}
+
+inline bool IsPulseNewTemplateVerb(std::wstring_view verb) {
+    const auto v = ToLowerVerb(verb);
+    return v == L"newfolder" || v == L".txt" || v == L"new.txt" ||
+        v == L"newtextfile" || v == L"newtextdocument";
+}
+
 // Submenu parents that are dropped entirely (their content is provided by
 // Pulse from the registry instead, so flattening them would duplicate rows).
 inline bool IsDroppedContextSubmenu(std::wstring_view verb) {

@@ -159,19 +159,15 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
     for (const auto& original : paths) {
         const auto path = pulse::path::StripExtendedPathPrefix(original);
         if (_wcsicmp(request.verb.c_str(), L"openas") == 0 || _wcsicmp(request.verb.c_str(), L"openwith") == 0) {
-            OPENASINFO info{};
-            info.pcszFile = path.c_str();
-            info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT | OAIF_EXEC;
-            const HRESULT result = SHOpenWithDialog(owner, &info);
-            if (SUCCEEDED(result)) continue;
-            if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return result;
-            SHELLEXECUTEINFOW fallback{sizeof(fallback)};
-            fallback.hwnd = owner;
-            fallback.lpVerb = L"openas";
-            fallback.lpFile = path.c_str();
-            fallback.nShow = SW_SHOWNORMAL;
-            fallback.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_NOASYNC;
-            if (!ShellExecuteExW(&fallback)) return ShellError();
+            SHELLEXECUTEINFOW chooser{sizeof(chooser)};
+            chooser.hwnd = owner;
+            chooser.lpVerb = L"openas";
+            chooser.lpFile = path.c_str();
+            chooser.nShow = SW_SHOWNORMAL;
+            // Resolve the system chooser independently of the file's current association.
+            chooser.fMask = SEE_MASK_CLASSNAME | SEE_MASK_NOASYNC;
+            chooser.lpClass = L"Unknown";
+            if (!ShellExecuteExW(&chooser)) return ShellError();
             continue;
         }
         if (properties && SHObjectProperties(owner, SHOP_FILEPATH, path.c_str(), nullptr)) continue;
@@ -185,7 +181,8 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
         }
         SHELLEXECUTEINFOW shell{sizeof(shell)};
         shell.hwnd = owner;
-        shell.lpVerb = properties ? L"properties" : (request.verb.empty() ? L"open" : request.verb.c_str());
+        shell.lpVerb = properties ? L"properties"
+            : request.verb.empty() ? L"open" : request.verb.c_str();
         shell.lpFile = path.c_str();
         shell.lpParameters = request.parameters.empty() ? nullptr : request.parameters.c_str();
         shell.lpDirectory = request.directory.empty() ? nullptr : request.directory.c_str();

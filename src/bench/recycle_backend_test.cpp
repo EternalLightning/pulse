@@ -1,5 +1,6 @@
 #include "../ops/ops_manager.h"
 #include "../common/localization.h"
+#include "../common/file_operation_error.h"
 #include "../fs/fs_recycle.h"
 #include "../common/path_utils.h"
 #include "../shell_host/deletion_identity.h"
@@ -297,9 +298,74 @@ int RunNetworkDeletion() {
 }
 }
 
+namespace {
+int RunLockedError() {
+    using namespace pulse;
+    HANDLE token = nullptr;
+    DWORD bytes = 0;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &bytes);
+        std::vector<BYTE> buffer(bytes);
+        if (bytes && GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), bytes, &bytes)) {
+            const auto* label = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(buffer.data());
+            const auto count = *GetSidSubAuthorityCount(label->Label.Sid);
+            std::cout << "[INFO] process integrity RID=" << *GetSidSubAuthority(label->Label.Sid, count - 1) << std::endl;
+        }
+        CloseHandle(token);
+    }
+    int failures = 0;
+    const auto check = [&](bool value, const char* label) {
+        std::cout << (value ? "[PASS] " : "[FAIL] ") << label << std::endl;
+        failures += !value;
+    };
+    const auto parent = std::filesystem::absolute(L"bench_data");
+    const auto root = parent / (L"recycle-locked-error-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root);
+    const auto file = root / L"occupied.txt";
+    std::ofstream(file) << "isolated sharing-violation fixture";
+    HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (held == INVALID_HANDLE_VALUE) { check(false, "hold dedicated file without delete sharing"); return 1; }
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse isolated occupied-file test", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    ops::OpsManager manager;
+    manager.SetUiWindow(owner); manager.Start([] {});
+    ops::OpRequest request;
+    request.type = ops::OpType::RecycleDelete; request.sources = {file.wstring()};
+    const auto completed_before = manager.Status().completed_ops;
+    manager.Submit(request);
+    const auto deadline = GetTickCount64() + 20000;
+    while (manager.Status().completed_ops == completed_before && GetTickCount64() < deadline) {
+        Sleep(5);
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    const auto status = manager.Status();
+    check(status.completed_ops > completed_before && status.phase == ops::OpPhase::Failed,
+        "production recycle backend reports failure for occupied file");
+    check(status.source_label == file.wstring() && status.failed_path == file.wstring(),
+        "delete lifecycle retains exact source and failed endpoint paths");
+    check(status.failure_hr == COPYENGINE_E_SHARING_VIOLATION_SRC ||
+        status.failure_hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION), "failure is a real sharing violation");
+    // The Shell host formats system messages in the user locale, independently of this fixture's UI language.
+    const auto expected = format::FileOperationErrorText(status.failure_hr, GetUserDefaultUILanguage());
+    check(expected.size() > 20 && status.last_error.find(expected) != std::wstring::npos,
+        "Shell IPC carries readable reason and original hexadecimal HRESULT");
+    check(std::filesystem::exists(file) && manager.DrainCompletions().empty(),
+        "failed recycle neither deletes fixture nor publishes a successful completion");
+    std::cout << "[INFO] " << Utf8(status.last_error) << std::endl;
+    manager.Stop(); DestroyWindow(owner); CloseHandle(held);
+    const auto cleanup = std::filesystem::absolute(root).lexically_normal();
+    if (cleanup.parent_path() == parent && cleanup.filename() == root.filename()) std::filesystem::remove_all(cleanup);
+    return failures ? 1 : 0;
+}
+}
+
 int main(int argc, char** argv) {
     using namespace pulse;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 2 && std::string_view(argv[1]) == "--locked-error") return RunLockedError();
     if (argc == 2 && std::string_view(argv[1]) == "--permanent-from-bin") return RunPermanentFromBin();
     if (argc == 2 && std::string_view(argv[1]) == "--identity-only") return RunDeletionIdentity();
     if (argc == 2 && std::string_view(argv[1]) == "--network-delete") return RunNetworkDeletion();

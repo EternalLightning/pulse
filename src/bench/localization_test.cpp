@@ -1,4 +1,5 @@
 #include "../common/localization.h"
+#include "../app/net_cache_presentation.h"
 
 #include <cstdio>
 #include <atomic>
@@ -16,14 +17,80 @@ bool Report(const char* name, bool passed) {
 int main(int argc, char** argv) {
     using namespace pulse::l10n;
     bool passed = true;
+    if (argc == 2 && std::string_view(argv[1]) == "--runtime-messages") {
+        Initialize(nullptr, L"en-US");
+        bool fallback_complete = true;
+        for (UINT id = IDS_CACHE_JUST_NOW; id <= IDS_OPERATION_STOPPED; ++id)
+            fallback_complete &= !Get(static_cast<StringId>(id)).empty();
+        passed &= Report("runtime errors remain readable without executable resources",
+            fallback_complete && Get(StringId::Copy) == L"Copy" &&
+                !Get(StringId::OperationMove).empty() && Get(StringId::StorageDefaultUnavailable) ==
+                L"Could not determine the default storage directory.");
+        for (const auto language : {L"zh-CN", L"en-US"}) {
+            Initialize(GetModuleHandleW(nullptr), language);
+            const bool chinese = std::wstring_view(language) == L"zh-CN";
+            const LANGID lang = chinese ? MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)
+                : MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
+            bool resources_complete = true;
+            for (UINT id = IDS_CACHE_JUST_NOW; id <= IDS_OPERATION_STOPPED; ++id) {
+                const HRSRC resource = FindResourceExW(GetModuleHandleW(nullptr), RT_STRING,
+                    MAKEINTRESOURCEW(id / 16 + 1), lang);
+                if (!resource) { resources_complete = false; continue; }
+                const auto data = LoadResource(GetModuleHandleW(nullptr), resource);
+                const auto* cursor = static_cast<const wchar_t*>(LockResource(data));
+                if (!cursor) { resources_complete = false; continue; }
+                for (UINT index = 0; index < id % 16; ++index) cursor += 1 + *cursor;
+                resources_complete &= *cursor != 0 && !Get(static_cast<StringId>(id)).empty();
+            }
+            passed &= Report("runtime messages are embedded in both resource languages", resources_complete);
+            constexpr uint64_t now = 200000;
+            const struct { uint64_t age; const wchar_t* zh; const wchar_t* en; } cases[] = {
+                {59, L"59 秒前", L"59 s ago"},
+                {60, L"1 分钟前", L"1 min ago"},
+                {3599, L"59 分钟前", L"59 min ago"},
+                {3600, L"1 小时前", L"1 h ago"},
+                {86399, L"23 小时前", L"23 h ago"},
+                {86400, L"1 天前", L"1 d ago"},
+            };
+            bool ages = pulse::app::FormatCacheAge(0, now) == (chinese ? L"刚才" : L"Just now") &&
+                pulse::app::FormatCacheAge(now + 1, now) == (chinese ? L"刚才" : L"Just now");
+            for (const auto& item : cases)
+                ages &= pulse::app::FormatCacheAge(now - item.age, now) == (chinese ? item.zh : item.en);
+            passed &= Report("cache ages follow display language at unit boundaries", ages);
+            const std::wstring path = L"\\\\server\\share\\" + std::wstring(9000, L'x') + L"%file.txt";
+            const auto message = Format(StringId::OperationUndoResultChangedFormat, path.c_str());
+            passed &= Report("localized errors preserve a complete path containing percent signs",
+                message.ends_with(path) && message.starts_with(chinese
+                    ? L"原操作产物已改变" : L"The original result changed"));
+            passed &= Report("localized numeric errors preserve the system code",
+                Format(StringId::StorageSaveFailedFormat, static_cast<unsigned long>(12345)).find(L"12345")
+                    != std::wstring::npos);
+        }
+        return passed ? 0 : 1;
+    }
+
     Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     if (argc == 2 && std::string_view(argv[1]) == "--centralized") {
+        constexpr StringId centralized_ids[] = {
+            StringId::ArchiveExtract, StringId::ArchiveExtractAll, StringId::ArchiveWorkerUnavailable, StringId::ArchiveExtractComplete,
+            StringId::ArchiveOpenFailed, StringId::ArchivePassword, StringId::ArchiveExtractTitle, StringId::ArchiveCancelling,
+            StringId::ArchiveExtracting, StringId::ArchiveDestination, StringId::ArchiveEnterPassword, StringId::ArchiveOptionalPassword,
+            StringId::ArchivePickDestination, StringId::ArchiveCreateFolderPrefix, StringId::ArchiveExtractFailed, StringId::ArchiveReadFailed,
+            StringId::ExitPendingTitle, StringId::ExitPendingMessage, StringId::ExitStopTasks, StringId::ExitKeepRunning,
+            StringId::ExitExiting, StringId::ExitStopping, StringId::ExitFailed, StringId::ExitWorkerFailed,
+            StringId::PlaybackPlay, StringId::PlaybackPrevFrame, StringId::PlaybackNextFrame, StringId::PlaybackSteppedPrefix,
+            StringId::PlaybackError, StringId::PlaybackControlUnavailable, StringId::PlaybackLoading, StringId::PlaybackScrubbing,
+            StringId::PlaybackSeeking, StringId::PlaybackEnded, StringId::PlaybackFramePrefix, StringId::PlaybackPlaying,
+            StringId::PlaybackPaused, StringId::LinkDestinationTitle, StringId::LinkContinue, StringId::LinkDirectoryMessage,
+            StringId::LinkFileMessage, StringId::LinkHardMessage, StringId::LinkNameCountSuffix, StringId::LinkTaskScopeNote,
+            StringId::LockedItemGenericMessage, StringId::HelpOpenKeys, StringId::HelpEyebrow, StringId::ListSeparator,
+        };
         for (const auto language : {L"zh-CN", L"en-US"}) {
             SetLanguage(language);
             const bool chinese = std::wstring_view(language) == L"zh-CN";
             bool complete = true;
-            for (UINT id = IDS_ARCHIVE_EXTRACT; id <= IDS_LIST_SEPARATOR; ++id)
-                complete &= !Get(static_cast<StringId>(id)).empty();
+            for (const auto id : centralized_ids)
+                complete &= !Get(id).empty();
             passed &= Report("centralized UI resources are present in both languages", complete);
             passed &= Report("archive exit playback and link text follow display language",
                 Get(StringId::ArchiveExtractAll) == (chinese ? L"解压全部项目" : L"Extract all") &&

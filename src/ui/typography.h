@@ -54,8 +54,11 @@ float InkPad(IDWriteTextFormat* format) noexcept;
 float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
                      std::wstring_view text);
 
+// File names stay on DirectWrite; other formats may use the enabled Luma renderer.
+bool UsesLumaText(const Compositor* compositor, IDWriteTextFormat* format) noexcept;
+
 // max(DWrite, Luma) plus InkPad so a size-to-content box does not shave
-// the last glyph. Falls back to MeasureAdvance when Luma is off.
+// the last glyph. DirectWrite formats share the MeasureAdvance entry.
 float MeasureLine(Compositor* compositor, IDWriteTextFormat* format,
                   std::wstring_view text);
 

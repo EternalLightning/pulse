@@ -33,5 +33,42 @@ int main() {
         status.percent = 37.0f;
         check(pulse::ops::PresentOperationStatus(status).percent == 37.0f, "unfinished progress preserved");
     }
+    const auto reason = [](const std::wstring& text) { return text.substr(0, text.find(L" (0x")); };
+    using pulse::format::FileOperationErrorText;
+    const auto occupied = FileOperationErrorText(static_cast<HRESULT>(0x80270027u));
+    check(reason(occupied) == reason(FileOperationErrorText(HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION))) &&
+          occupied.find(L"0x80270027") != std::wstring::npos && occupied.size() > 20,
+          "screenshot recycle HRESULT displays sharing violation reason and original hex code");
+    check(reason(FileOperationErrorText(COPYENGINE_E_SHARING_VIOLATION_DEST)) == reason(occupied),
+          "destination sharing failure has the same human-readable cause");
+    check(reason(FileOperationErrorText(COPYENGINE_E_ACCESS_DENIED_SRC)) ==
+          reason(FileOperationErrorText(E_ACCESSDENIED)) &&
+          reason(FileOperationErrorText(COPYENGINE_E_DISK_FULL)) ==
+          reason(FileOperationErrorText(HRESULT_FROM_WIN32(ERROR_DISK_FULL))),
+          "permission and disk-full errors describe their actual cause");
+    check(FileOperationErrorText(static_cast<HRESULT>(0x81230020u)) == L"0x81230020",
+          "unknown facility cannot masquerade as low-word sharing violation");
+    check(FileOperationErrorText(S_OK).empty(), "successful result is not described as an error");
+    status.phase = pulse::ops::OpPhase::Failed;
+    status.failure_hr = static_cast<HRESULT>(0x80270027u);
+    status.last_error.clear(); status.source_label.clear(); status.current_item.clear();
+    status.failed_path = L"\\\\?\\E:\\Study\\示范项目";
+    const auto failed = pulse::ops::PresentOperationStatus(status);
+    check(failed.source_label == L"E:\\Study\\示范项目" && failed.failed_path == status.failed_path,
+          "failed deletion shows the actual path instead of source placeholder");
+    check(failed.last_error == occupied && status.last_error.empty(),
+          "structured failure fills a missing error reason without changing raw operation status");
+    check(pulse::ops::OperationFailureDetails(failed).find(failed.source_label) != std::wstring::npos,
+          "expanded failure retains the complete path separately from the reason");
+    status.source_label = L"E:\\Study";
+    status.last_error = L"identity changed; deletion stopped | E:\\Study\\示范项目";
+    const auto custom = pulse::ops::PresentOperationStatus(status);
+    check(custom.last_error == status.last_error &&
+          pulse::ops::OperationFailureDetails(custom) == status.last_error,
+          "specific safety refusal is preserved and path is not repeated");
+    status.phase = pulse::ops::OpPhase::Running;
+    status.source_label.clear(); status.failed_path.clear(); status.current_item = L"E:\\Study\\示范项目";
+    check(pulse::ops::PresentOperationStatus(status).source_label == status.current_item,
+          "current item supplies a real path while deletion is running");
     return failures ? 1 : 0;
 }

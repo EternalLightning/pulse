@@ -4,6 +4,44 @@
 #include <cmath>
 #include <filesystem>
 
+namespace pulse::ui {
+struct FluentMenuTestPeer {
+    static bool Begin(FluentMenu& menu, std::vector<FluentMenuItem> items) {
+        menu.model_.SetItems(std::move(items));
+        menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_);
+        menu.base_x_ = 300; menu.base_y_ = 200;
+        menu.open_ = true; menu.animating_out_ = false; menu.result_ = 0;
+        menu.hover_row_ = -1; menu.hover_swatch_ = -1;
+        menu.anim_start_ = std::chrono::steady_clock::now();
+        if (!menu.Render()) return false;
+        SetWindowPos(menu.hwnd_, nullptr, menu.base_x_, menu.base_y_,
+            menu.surf_.w, menu.surf_.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        menu.Present(64, -8);
+        return true;
+    }
+    static void Open(FluentMenu& menu) { menu.OpenSubmenu(0); }
+    static void Hover(FluentMenu& menu) { menu.UpdateHover(0); }
+    static void Progress(FluentMenu& menu) { menu.Present(160, -3); }
+    static void PendingResult(FluentMenu& menu, int command) { menu.result_ = command; }
+    static int Result(const FluentMenu& menu) { return menu.result_; }
+    static void ChooseRow(FluentMenu& menu, int row) {
+        POINT point{FluentMenu::kShadowMargin + 40,
+            static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() +
+                menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f)};
+        menu.OnMouse(point, true);
+    }
+    static BYTE Alpha(const FluentMenu& menu) { return menu.present_alpha_; }
+    static int Offset(const FluentMenu& menu) { return menu.present_offset_; }
+    static int SubY(const FluentMenu& menu) { return menu.sub_y_; }
+    static HWND Window(const FluentMenu& menu) { return menu.hwnd_; }
+    static HWND SubWindow(const FluentMenu& menu) { return menu.sub_hwnd_; }
+    static bool SubOpen(const FluentMenu& menu) { return menu.sub_parent_row_ == 0 && IsWindowVisible(menu.sub_hwnd_); }
+    static bool Hidden(const FluentMenu& menu) { return !menu.open_ && !menu.animating_out_ &&
+        !IsWindowVisible(menu.hwnd_) && !IsWindowVisible(menu.sub_hwnd_); }
+    static bool HasChildren(const FluentMenu& menu, int count) { return menu.sub_model_.Count() == count; }
+};
+}
+
 namespace {
 int failures = 0;
 void Check(bool ok, const char* label) {
@@ -44,6 +82,25 @@ int wmain(int argc, wchar_t** argv) {
             "command patch still refuses changed captions and preserves the displayed identity");
         return failures ? 1 : 0;
     }
+    if (argc == 2 && wcscmp(argv[1], L"--live-refresh") == 0) {
+        FluentMenuModel model;
+        auto create = Item(186, L"New"); create.live_update = true;
+        create.children = {Item(30, L"Folder"), Item(31, L"File")};
+        auto stable = Item(1, L"Open");
+        auto loading = Item(0, L"Loading"); loading.live_update = true; loading.enabled = false;
+        model.SetItems({create, stable, loading}); model.Layout(nullptr, 1);
+        const float stable_y = model.RowTopPx(1);
+        create.children.push_back(Item(8012, L"Office document"));
+        auto shell = Item(8013, L"Shell action"); shell.live_update = true;
+        Check(model.ReplaceLiveItems({create, stable, shell}), "async template children and trailing extension section can refresh");
+        model.Layout(nullptr, 1);
+        Check(model.RowTopPx(1) == stable_y && model.At(0)->children.size() == 3,
+            "refresh leaves the existing built-in row at its original position");
+        stable.text = L"Changed command";
+        Check(!model.ReplaceLiveItems({create, stable, shell}) && model.At(1)->text == L"Open",
+            "live refresh still rejects changes to stable command identity");
+        return failures ? 1 : 0;
+    }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const HWND foreground = GetForegroundWindow();
@@ -52,6 +109,59 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--lifecycle") == 0) {
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create animation and dismissal host");
+            auto create = Item(186, L"New"); create.live_update = true;
+            create.children = {Item(30, L"Folder"), Item(31, L"File")};
+            auto stable = Item(1, L"Open");
+            Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "start partial-alpha menu frame");
+            FluentMenuTestPeer::Hover(menu);
+            Check(FluentMenuTestPeer::Alpha(menu) == 64 && FluentMenuTestPeer::Offset(menu) == -8,
+                "hover redraw preserves the fade and slide state");
+            FluentMenuTestPeer::Open(menu);
+            const int sub_y = FluentMenuTestPeer::SubY(menu);
+            Check(FluentMenuTestPeer::SubOpen(menu) && FluentMenuTestPeer::Alpha(menu) == 64,
+                "opening a flyout during fade-in does not force an opaque parent");
+            FluentMenuTestPeer::Progress(menu);
+            Check(FluentMenuTestPeer::SubY(menu) == sub_y + 5,
+                "flyout follows the parent slide without losing its anchor");
+            create.children.push_back(Item(8012, L"Office document"));
+            Check(menu.ReplaceItems({create, stable}) && FluentMenuTestPeer::SubOpen(menu) &&
+                FluentMenuTestPeer::HasChildren(menu, 3) && FluentMenuTestPeer::Alpha(menu) == 160,
+                "late templates refresh an open flyout without closing it or restarting opacity");
+            FluentMenuTestPeer::PendingResult(menu, 31);
+            menu.DismissForDeactivation(owner);
+            menu.DismissForDeactivation(FluentMenuTestPeer::SubWindow(menu));
+            Check(menu.IsOpen() && FluentMenuTestPeer::Result(menu) == 31,
+                "owner and menu-internal focus transfers preserve popup and pending selection");
+            menu.DismissForDeactivation(reinterpret_cast<HWND>(1));
+            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
+                "external deactivation immediately hides both windows and discards pending selection");
+            Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for cancellation message");
+            FluentMenuTestPeer::Open(menu);
+            FluentMenuTestPeer::PendingResult(menu, 31);
+            SendMessageW(FluentMenuTestPeer::Window(menu), WM_CANCELMODE, 0, 0);
+            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
+                "sent WM_CANCELMODE immediately hides both windows and rejects stale selection");
+            Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for application deactivation");
+            FluentMenuTestPeer::Open(menu);
+            FluentMenuTestPeer::PendingResult(menu, 31);
+            SendMessageW(FluentMenuTestPeer::Window(menu), WM_ACTIVATEAPP, FALSE, 0);
+            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
+                "sent application deactivation immediately discards pending selection");
+            Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for successful command selection");
+            FluentMenuTestPeer::ChooseRow(menu, 1);
+            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 1,
+                "internal command selection dismisses immediately while preserving its returned command");
+            SendMessageW(FluentMenuTestPeer::Window(menu), WM_CANCELMODE, 0, 0);
+            Check(FluentMenuTestPeer::Result(menu) == 0,
+                "external cancellation before invocation also clears a selection from an already hidden menu");
+            DestroyWindow(owner);
+            Check(GetForegroundWindow() == foreground, "menu lifecycle tests preserve foreground activation");
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
         const auto long_item = Item(2,
             L"使用 Microsoft 画图进行编辑，带有很长文件名称的 Explorer 操作测试.png");
         for (const float scale : {1.0f, 1.25f, 1.5f}) {
@@ -103,6 +213,9 @@ int wmain(int argc, wchar_t** argv) {
                 submenu.children.push_back(Item(6, L"Open"));
                 auto badge = long_item;
                 badge.badge_text = L"提示";
+                auto rename = Item(4, L"重命名"); rename.glyph = L"\xE8AC";
+                auto actions = Item(0, L"");
+                actions.quick_swatches.push_back({5, {}, false, false, L"\xE8AC"});
                 for (const bool dark : {false, true}) {
                     menu.SetTheme(dark, D2D1::ColorF(0.0f, 0.47f, 0.83f));
                     const auto filename = std::wstring(L"menu_text_") +
@@ -111,7 +224,7 @@ int wmain(int argc, wchar_t** argv) {
                     const auto output = std::filesystem::path(argv[1]) / filename;
                     Check(menu.SaveDebugSnapshot(output.c_str(),
                         {Item(1, L"使用 Microsoft 画图进行编辑"), long_item, shortcut_item,
-                         inline_item, submenu, badge}, 1), "save menu text visual evidence");
+                         inline_item, submenu, badge, rename, actions}, 1), "save menu text visual evidence");
                 }
             }
         }

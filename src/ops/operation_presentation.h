@@ -2,17 +2,32 @@
 
 #include "ops_manager.h"
 #include "../common/display_path.h"
+#include "../common/file_operation_error.h"
 
 namespace pulse::ops {
 
 inline OpStatus PresentOperationStatus(OpStatus status) {
     if (status.phase == OpPhase::Completed) status.percent = 100.0f;
+    if (status.phase == OpPhase::Failed && status.last_error.empty() && FAILED(status.failure_hr))
+        status.last_error = format::FileOperationErrorText(status.failure_hr);
     status.summary = path::FriendlyPathText(status.summary);
     status.last_error = path::FriendlyPathText(status.last_error);
     status.source_label = path::FriendlyPathText(status.source_label);
     status.destination_label = path::FriendlyPathText(status.destination_label);
     status.current_item = path::FriendlyPathText(status.current_item);
+    if (status.source_label.empty())
+        status.source_label = !status.failed_path.empty() ? path::FriendlyPathText(status.failed_path) : status.current_item;
     return status;
+}
+
+inline std::wstring OperationFailureDetails(const OpStatus& status) {
+    std::wstring text = status.last_error;
+    const auto failed_path = path::FriendlyPathText(status.failed_path);
+    if (!failed_path.empty() && text.find(failed_path) == std::wstring::npos) {
+        if (!text.empty()) text += L"\n\n";
+        text += failed_path;
+    }
+    return text;
 }
 
 } // namespace pulse::ops

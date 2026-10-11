@@ -40,7 +40,8 @@ public:
                     std::vector<std::wstring> paths, bool background,
                     std::wstring extension, bool extended,
                     const std::function<std::wstring(const std::wstring&)>& normalize_path,
-                    const std::function<void(const std::wstring&)>& prefetch_static);
+                    const std::function<void(const std::wstring&)>& prefetch_static,
+                    uint64_t context_generation = 0);
     void Close();
     void WaitUntilReady(HWND hwnd, const std::function<void()>& pump_messages,
                         uint32_t timeout_ms = 15000);
@@ -62,10 +63,10 @@ public:
                                      std::vector<ops::ShellMenuItem> items,
                                      uint64_t completed_at, bool partial = false);
 
-    void OpenMenu(std::vector<ui::FluentMenuItem> base_items);
+    void OpenMenu(std::vector<ui::FluentMenuItem> base_items, bool new_dropdown = false);
     bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     void NotePatchedDisplay();
-    void CloseMenu() noexcept { menu_open_ = false; }
+    void CloseMenu() noexcept { menu_open_ = false; new_dropdown_ = false; }
     bool menu_open() const noexcept { return menu_open_; }
     const std::vector<ui::FluentMenuItem>& base_items() const noexcept {
         return base_items_;
@@ -88,6 +89,7 @@ private:
     bool background_ = false;
     bool extended_ = false;
     bool menu_open_ = false;
+    bool new_dropdown_ = false;
     bool com_ready_ = false;
     bool com_items_current_ = false;
     std::vector<ops::ShellMenuItem> com_items_;
@@ -104,6 +106,7 @@ private:
     std::unordered_map<std::wstring, std::vector<ops::ShellMenuItem>> com_cache_;
     std::unordered_set<std::wstring> static_pending_;
     uint64_t query_started_at_ = 0;
+    uint64_t context_generation_ = 0;
     uint64_t refresh_at_ = 0;
     uint64_t refresh_again_at_ = 0;
     ShellOperations operations_;

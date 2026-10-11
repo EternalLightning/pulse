@@ -1,4 +1,5 @@
 #include "diagnostics_exporter.h"
+#include "localization.h"
 #include "pulse_version.h"
 
 #include <windows.h>
@@ -18,7 +19,7 @@ std::wstring JoinPath(std::wstring_view left, std::wstring_view right) {
     return value;
 }
 
-void SetError(std::wstring* error, const wchar_t* value) {
+void SetError(std::wstring* error, const std::wstring& value) {
     if (error) *error = value;
 }
 
@@ -102,17 +103,17 @@ bool WriteManifest(const ExportOptions& options, size_t copied) {
 
 bool Export(const ExportOptions& options, std::wstring* error) {
     if (!IsPlainDirectory(options.source_root) || !IsPlainDirectory(options.destination)) {
-        SetError(error, L"诊断源目录或目标目录不可用。");
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsRootsUnavailable));
         return false;
     }
     if (options.require_empty_destination && !IsDirectoryEmpty(options.destination)) {
-        SetError(error, L"诊断导出目标必须为空目录。");
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsDestinationNotEmpty));
         return false;
     }
 
     size_t copied = 0;
     if (!CopyCrashArtifacts(options, copied)) {
-        SetError(error, L"无法复制崩溃诊断文件。");
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsCopyCrashesFailed));
         return false;
     }
     static constexpr std::array<std::wstring_view, 4> logs = {
@@ -122,13 +123,13 @@ bool Export(const ExportOptions& options, std::wstring* error) {
         const std::wstring source = JoinPath(options.source_root, name);
         if (GetFileAttributesW(source.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
         if (!CopyNewFile(source, JoinPath(options.destination, name))) {
-            SetError(error, L"无法复制诊断日志。");
+            SetError(error, l10n::Get(l10n::StringId::DiagnosticsCopyLogFailed));
             return false;
         }
         ++copied;
     }
     if (!WriteManifest(options, copied)) {
-        SetError(error, L"无法写入诊断清单。");
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsManifestFailed));
         return false;
     }
     return true;
@@ -148,7 +149,7 @@ bool ClearCrashReports(const std::wstring& source_root, std::wstring* error) {
         if (!DeleteFileW(JoinPath(source, name).c_str())) ok = false;
     } while (FindNextFileW(find, &data));
     FindClose(find);
-    if (!ok) SetError(error, L"部分诊断文件无法删除。");
+    if (!ok) SetError(error, l10n::Get(l10n::StringId::DiagnosticsDeleteFailed));
     return ok;
 }
 

@@ -78,7 +78,18 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+#ifdef PULSE_FS_ENUM_TESTING
+struct EnumerationTestProbe {
+    static void Reset();
+    static void FailNative(LONG status, bool query = true, bool after_batch = false);
+    static void FailApi();
+    static size_t FallbackAttempts();
+};
+#endif
+
 // Returns false on cooperative cancellation and clears out; failures throw.
+// NT failures retain status and Win32 error; only unavailable native APIs and
+// explicitly unsupported directory queries retry through FindFirstFileExW.
 // Cancellation cannot force a blocking filesystem/provider call to return.
 bool EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out,
                         const std::function<bool()>& cancelled = {});

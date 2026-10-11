@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <iterator>
 
 namespace fs = std::filesystem;
 using namespace pulse::ops;
@@ -62,7 +63,7 @@ void UnsafeZip(const fs::path& file, const std::string& name, uint32_t attribute
     Word(stream, 0x06054b50, 4); Word(stream, 0, 2); Word(stream, 0, 2); Word(stream, 1, 2);
     Word(stream, 1, 2); Word(stream, size, 4); Word(stream, offset, 4); Word(stream, 0, 2);
 }
-bool Junction(const fs::path& link, const fs::path& target) {
+bool Junction(const fs::path& link, const fs::path& target, DWORD sharing = 0) {
     fs::create_directories(link);
     std::wstring substitute = L"\\??\\" + target.wstring();
     struct MountPoint {
@@ -79,7 +80,7 @@ bool Junction(const fs::path& link, const fs::path& target) {
     std::copy(substitute.begin(), substitute.end(), data.paths);
     auto display = target.wstring();
     std::copy(display.begin(), display.end(), data.paths + substitute.size() + 1);
-    HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+    HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, sharing, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (handle == INVALID_HANDLE_VALUE) return false;
     DWORD returned = 0;
@@ -87,6 +88,17 @@ bool Junction(const fs::path& link, const fs::path& target) {
         static_cast<DWORD>(data.length + 8), nullptr, 0, &returned, nullptr) != FALSE;
     CloseHandle(handle);
     return result;
+}
+bool ClearJunction(const fs::path& path) {
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    struct Header { DWORD tag; WORD length; WORD reserved; } data{IO_REPARSE_TAG_MOUNT_POINT, 0, 0};
+    DWORD returned = 0;
+    const bool cleared = DeviceIoControl(handle, FSCTL_DELETE_REPARSE_POINT, &data, sizeof(data),
+        nullptr, 0, &returned, nullptr) != FALSE;
+    CloseHandle(handle);
+    return cleared;
 }
 
 int PasswordTests() {
@@ -174,6 +186,161 @@ int PasswordTests() {
 }
 }
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
+void PublicationTests() {
+    wchar_t module[32768]{};
+    GetModuleFileNameW(nullptr, module, 32768);
+    const fs::path root = fs::path(module).parent_path().parent_path() / L"bench_data" /
+        (L"archive-publish-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    fs::create_directories(root / L"source/nested");
+    fs::create_directories(root / L"temporary");
+    fs::create_directories(root / L"outside/nested");
+    const std::string payload(2 * 1024 * 1024 + 7, 'p');
+    std::ofstream(root / L"source/nested/file.txt", std::ios::binary) << payload;
+    std::ofstream(root / L"outside/sentinel.txt") << "outside-sentinel";
+    std::ofstream(root / L"outside/nested/file.txt") << "outside-original";
+    const fs::path archive = root / L"plain.zip";
+    Check(Pack(archive, root / L"source", L""), "create publication archive fixture");
+    const auto read = [](const fs::path& path) {
+        std::ifstream stream(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+    };
+    const auto outside_unchanged = [&]() {
+        return read(root / L"outside/sentinel.txt") == "outside-sentinel" &&
+            read(root / L"outside/nested/file.txt") == "outside-original" &&
+            !fs::exists(root / L"outside/file.txt");
+    };
+    struct RestoreTemp {
+        std::wstring value;
+        RestoreTemp(const fs::path& path) {
+            wchar_t existing[32768]{};
+            if (GetEnvironmentVariableW(L"TMP", existing, 32768)) value = existing;
+            SetEnvironmentVariableW(L"TMP", path.c_str());
+        }
+        ~RestoreTemp() { SetEnvironmentVariableW(L"TMP", value.empty() ? nullptr : value.c_str()); }
+    } restore_temp(root / L"temporary");
+    const fs::path replaced = root / L"replaced";
+    fs::create_directories(replaced);
+    bool replaced_after_capture = false;
+    const auto rejected = ExtractArchiveForTest(archive.wstring(), replaced.wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point != ArchivePublicationPoint::DestinationCaptured) return;
+            replaced_after_capture = MoveFileExW(destination.c_str(), (root / L"original-target").c_str(), 0) &&
+                Junction(destination, root / L"outside");
+        });
+    Check(replaced_after_capture && rejected.outcome == ArchiveOutcome::Failed && outside_unchanged(),
+        "destination ancestor swapped after capture is rejected before extraction");
+    if (replaced_after_capture) fs::remove(replaced);
+    bool publication_seen = false, target_blocked = false, source_blocked = false, stage_blocked = false;
+    fs::path staged;
+    const auto stable = ExtractArchiveForTest(archive.wstring(), (root / L"stable").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring& source) {
+            if (point != ArchivePublicationPoint::BeforePublish || publication_seen) return;
+            publication_seen = true;
+            const fs::path parent = fs::path(destination).parent_path();
+            const fs::path source_parent = fs::path(source).parent_path();
+            staged = source_parent.parent_path().parent_path();
+            target_blocked = !MoveFileExW(parent.c_str(), (root / L"moved-target").c_str(), 0) &&
+                !Junction(parent, root / L"outside");
+            source_blocked = !MoveFileExW(source_parent.c_str(), (root / L"moved-source").c_str(), 0) &&
+                !Junction(source_parent, root / L"outside");
+            stage_blocked = !MoveFileExW(staged.c_str(), (root / L"moved-stage").c_str(), 0) &&
+                !Junction(staged, root / L"outside");
+        });
+    Check(publication_seen && target_blocked && source_blocked && stage_blocked &&
+        stable.outcome == ArchiveOutcome::Success && read(root / L"stable/nested/file.txt") == payload && outside_unchanged(),
+        "publication leases block destination source and stage ancestor rename and junction replacement");
+    if (!publication_seen || !target_blocked || !source_blocked || !stage_blocked ||
+        stable.outcome != ArchiveOutcome::Success || read(root / L"stable/nested/file.txt") != payload || !outside_unchanged())
+        std::cout << "[DIAG] publication seen=" << publication_seen << " target_blocked=" << target_blocked
+            << " source_blocked=" << source_blocked << " stage_blocked=" << stage_blocked
+            << " outcome=" << static_cast<int>(stable.outcome) << " error=" << DiagnosticUtf8(stable.error) << '\n';
+    Check(!staged.empty() && !fs::exists(staged), "successful handle publication cleans its exact stage tree");
+    fs::create_directories(root / L"relative-source/nested");
+    std::ofstream(root / L"relative-source/nested/first.txt") << "root-handle-first";
+    std::ofstream(root / L"relative-source/nested/second.txt") << "root-handle-second";
+    const fs::path relative_archive = root / L"relative.zip";
+    Check(Pack(relative_archive, root / L"relative-source", L""), "create relative-parent publication fixture");
+    bool relative_hook_seen = false, relative_parent_changed = false;
+    fs::path changed_parent;
+    const auto relative = ExtractArchiveForTest(relative_archive.wstring(), (root / L"relative-target").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point != ArchivePublicationPoint::BeforeRelativeRename || relative_hook_seen) return;
+            relative_hook_seen = true;
+            changed_parent = fs::path(destination).parent_path();
+            relative_parent_changed = Junction(changed_parent, root / L"outside",
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+        });
+    Check(relative_hook_seen && relative_parent_changed && relative.outcome == ArchiveOutcome::Failed &&
+        outside_unchanged() && !fs::exists(root / L"outside/first.txt") && !fs::exists(root / L"outside/second.txt"),
+        "relative parent reparse change cannot redirect publication or continue extraction");
+    std::cout << "[DIAG] relative parent outcome=" << static_cast<int>(relative.outcome)
+        << " error=" << DiagnosticUtf8(relative.error) << '\n';
+    const bool cleared_relative_parent = relative_parent_changed && ClearJunction(changed_parent);
+    const bool original_commit = cleared_relative_parent &&
+        read(changed_parent / L"first.txt") == "root-handle-first" && !fs::exists(changed_parent / L"second.txt");
+    const bool native_refusal = relative_hook_seen && relative_parent_changed &&
+        relative.outcome == ArchiveOutcome::Failed &&
+        relative.error.starts_with(L"无法写入解压文件 (") && relative.error.ends_with(L")。") &&
+        cleared_relative_parent && fs::is_empty(changed_parent) && outside_unchanged() &&
+        !fs::exists(root / L"outside/first.txt") && !fs::exists(root / L"outside/second.txt");
+    Check(original_commit || native_refusal,
+        "relative rename either preserves the original directory object or explicitly refuses the changed parent");
+    bool late_collision = false;
+    const auto collision = ExtractArchiveForTest(archive.wstring(), (root / L"collision").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point == ArchivePublicationPoint::BeforePublish) {
+                std::ofstream(fs::path(destination)) << "late-collision";
+                late_collision = true;
+            }
+        });
+    Check(late_collision && collision.outcome == ArchiveOutcome::Success &&
+        read(root / L"collision/nested/file.txt") == "late-collision", "handle publication preserves a late destination collision");
+    fs::create_directories(root / L"hard-collision/nested");
+    Check(CreateHardLinkW((root / L"hard-collision/nested/file.txt").c_str(),
+        (root / L"outside/nested/file.txt").c_str(), nullptr) != FALSE, "create hard-linked destination collision");
+    const auto hard_collision = ExtractArchiveForTest(archive.wstring(), (root / L"hard-collision").wstring(), {});
+    Check(hard_collision.outcome == ArchiveOutcome::Success && outside_unchanged() &&
+        read(root / L"hard-collision/nested/file.txt") == "outside-original",
+        "existing hard-linked destination stays a skipped collision");
+    const auto copied = ExtractArchiveForTest(archive.wstring(), (root / L"copied").wstring(), {}, nullptr, true);
+    Check(copied.outcome == ArchiveOutcome::Success && read(root / L"copied/nested/file.txt") == payload,
+        "owned copy fallback publishes complete data without a path move");
+    bool copy_collision = false;
+    const auto copied_collision = ExtractArchiveForTest(archive.wstring(), (root / L"copy-collision").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point == ArchivePublicationPoint::CopyProgress && !copy_collision) {
+                std::ofstream(fs::path(destination)) << "copy-collision";
+                copy_collision = true;
+            }
+        }, nullptr, true);
+    Check(copy_collision && copied_collision.outcome == ArchiveOutcome::Success &&
+        read(root / L"copy-collision/nested/file.txt") == "copy-collision" &&
+        std::distance(fs::directory_iterator(root / L"copy-collision/nested"), fs::directory_iterator{}) == 1,
+        "owned copy fallback preserves a late collision and disposes its temporary file");
+    std::atomic_bool cancelled{false};
+    bool copy_started = false;
+    const auto cancelled_copy = ExtractArchiveForTest(archive.wstring(), (root / L"cancel-copy").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring&, const std::wstring&) {
+            if (point == ArchivePublicationPoint::CopyProgress) { copy_started = true; cancelled = true; }
+        }, &cancelled, true);
+    Check(copy_started && cancelled_copy.outcome == ArchiveOutcome::Cancelled &&
+        fs::is_empty(root / L"cancel-copy/nested") && fs::is_empty(root / L"temporary"),
+        "cancelled copy fallback leaves no published or temporary file");
+    cancelled = false;
+    bool cleanup_link = false;
+    fs::path cleanup_stage;
+    const auto cancelled_cleanup = ExtractArchiveForTest(archive.wstring(), (root / L"cancel-cleanup").wstring(),
+        [&](ArchivePublicationPoint point, const std::wstring&, const std::wstring& source) {
+            if (point != ArchivePublicationPoint::BeforePublish) return;
+            cleanup_stage = fs::path(source).parent_path().parent_path().parent_path();
+            cleanup_link = Junction(cleanup_stage / L"cleanup-link", root / L"outside");
+            cancelled = true;
+        }, &cancelled);
+    Check(cleanup_link && cancelled_cleanup.outcome == ArchiveOutcome::Cancelled && outside_unchanged() &&
+        !fs::exists(cleanup_stage), "cancelled stage cleanup deletes a junction leaf without traversing outside");
+    if (failures) std::wcout << L"Publication fixtures retained at " << root.wstring() << L'\n';
+    else { std::error_code ec; fs::remove_all(root, ec); }
+}
 void ProcessTests() {
     wchar_t module[32768]{};
     GetModuleFileNameW(nullptr, module, 32768);
@@ -322,6 +489,10 @@ int wmain(int argc, wchar_t** argv) {
     std::cout << std::unitbuf;
     if (argc == 2 && std::wstring(argv[1]) == L"--password-only") return PasswordTests();
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
+    if (argc == 2 && std::wstring(argv[1]) == L"--publish-only") {
+        PublicationTests();
+        return failures ? 1 : 0;
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"--recovery-only") {
         RecoveryTests();
         if (argc == 3) {

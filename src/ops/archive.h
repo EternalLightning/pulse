@@ -6,6 +6,9 @@
 #include <string>
 #include <optional>
 #include <vector>
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+#include <functional>
+#endif
 
 namespace pulse::ops {
 struct ArchiveEntry {
@@ -32,6 +35,11 @@ struct ArchiveProcessTestResult { ArchiveOutcome outcome; std::optional<DWORD> e
 ArchiveProcessTestResult RunArchiveProcessForTest(const std::wstring& executable,
     const std::vector<std::wstring>& args, size_t output_limit, const std::atomic_bool* cancel = nullptr);
 ArchiveResult ParseArchiveListingForTest(const std::wstring& output, DWORD exit_code);
+enum class ArchivePublicationPoint { DestinationCaptured, SourceCaptured, BeforePublish, BeforeRelativeRename, CopyProgress };
+using ArchivePublicationHook = std::function<void(ArchivePublicationPoint,
+    const std::wstring& destination, const std::wstring& source)>;
+ArchiveOperationResult ExtractArchiveForTest(const std::wstring& path, const std::wstring& destination,
+    const ArchivePublicationHook& hook, const std::atomic_bool* cancel = nullptr, bool force_copy = false);
 #endif
 bool IsArchivePath(const std::wstring& path);
 bool IsSafeArchiveMember(const std::wstring& path);

@@ -40,7 +40,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
-#include <thread>
 #include <unordered_set>
 
 using namespace pulse;
@@ -96,6 +95,7 @@ bool UpdateSplitterDrag(AppState& s, int mx, int my) {
     return true;
 }
 void ClearDropFeedback(AppState& s) {
+    ClearHeaderDropHint(s);
     s.dropRow = -1;
     s.dropPaneIndex = -1;
     s.dropHeader = false;
@@ -131,16 +131,6 @@ bool PointOnPaneHeader(const AppState& s, const ui::WindowViewModel& vm,
     return x >= rc.left && x < rc.right && y >= rc.top && y < rc.top + header;
 }
 
-// Folder path, or a .lnk that DropExecute will resolve. No COM on drag-over.
-std::wstring HeaderDropHint(const std::vector<std::wstring>& sources) {
-    std::wstring folder = ui::FirstDroppableFolder(sources);
-    if (!folder.empty()) return folder;
-    for (const auto& source : sources) {
-        if (ui::LooksLikeFolderShortcut(source)) return source;
-    }
-    return {};
-}
-
 void HandleHeaderDropResult(AppState& s) {
     std::optional<HeaderDropResult> result;
     {
@@ -148,7 +138,11 @@ void HandleHeaderDropResult(AppState& s) {
         result = std::move(s.header_drop_query->result);
         s.header_drop_query->result.reset();
     }
-    if (!result || s.exit_requested) return;
+    if (s.exit_requested) return;
+    if (!result) {
+        if (s.dropTarget) s.dropTarget->RefreshDragFeedback();
+        return;
+    }
     const auto lifetime = result->pane_lifetime.lock();
     if (!lifetime) return;
     app::Pane* pane = PaneAtSlot(s, result->pane_slot);
@@ -176,7 +170,7 @@ void HandleHeaderDropResult(AppState& s) {
 }
 
 namespace {
-bool QueueHeaderShortcutDrop(AppState& s, const std::vector<std::wstring>& sources,
+bool QueueHeaderDrop(AppState& s, const std::vector<std::wstring>& sources,
                              app::Pane& pane, int pane_slot, DWORD accepted, DWORD keys, DWORD allowed, DWORD preferred) {
     HeaderDropResult intent;
     intent.pane = &pane;
@@ -213,15 +207,16 @@ bool QueueHeaderShortcutDrop(AppState& s, const std::vector<std::wstring>& sourc
         generation = s.header_drop_query->generation;
     }
     try {
-        std::thread([weak, hwnd, generation, intent = std::move(intent)]() mutable {
+        return s.worker.EnqueueIo([weak, hwnd, generation, intent = std::move(intent)]() mutable {
             const auto cancelled = [weak, generation, lifetime = intent.pane_lifetime] {
                 const auto state = weak.lock();
                 if (!state || lifetime.expired()) return true;
                 std::lock_guard lock(state->mutex);
                 return state->generation != generation;
             };
+            intent.folder = ui::FirstDroppableFolder(intent.sources, cancelled);
             for (const auto& source : intent.sources) {
-                if (cancelled()) return;
+                if (!intent.folder.empty() || cancelled()) break;
                 if (!ui::LooksLikeFolderShortcut(source)) continue;
                 fs::DirEntry entry;
                 if (app::ResolveLink(source, entry, cancelled) && entry.link_target_is_dir) {
@@ -236,11 +231,10 @@ bool QueueHeaderShortcutDrop(AppState& s, const std::vector<std::wstring>& sourc
                 state->result = std::move(intent);
                 PostMessageW(hwnd, WM_HEADER_DROP_RESULT, 0, 0);
             }
-        }).detach();
+        });
     } catch (...) {
         return false;
     }
-    return true;
 }
 }
 
@@ -333,7 +327,7 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
                PointOnPaneHeader(s, vm, hit.pane_index,
                                  static_cast<float>(pt.x), static_cast<float>(pt.y))) {
         // Drag a folder onto a pane title bar (path + nav/view) to open it there.
-        const std::wstring folder = HeaderDropHint(sources);
+        const std::wstring folder = HeaderDropHint(s, sources);
         if (!folder.empty()) {
             s.dropHeader = true;
             s.dropPaneIndex = hit.pane_index;
@@ -408,25 +402,11 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
     s.springEntered = false;
 
     if (header) {
-        const std::wstring folder = fs::NormalizePath(ui::FirstDroppableFolder(sources));
-        if (folder.empty()) {
-            if (app::Pane* pane = PaneAtSlot(s, header_pane)) {
-                if (effect == DROPEFFECT_NONE) return DROPEFFECT_NONE;
-                return QueueHeaderShortcutDrop(s, sources, *pane, header_pane, effect, key_state, allowed, preferred)
-                    ? effect : DROPEFFECT_NONE;
-            }
-            return DROPEFFECT_NONE;
-        } else {
-            if (app::Pane* pane = PaneAtSlot(s, header_pane)) {
-                if (pane != s.pane) FocusPane(s, pane);
-                app::Tab* tab = pane->ActiveTab();
-                if (!tab || _wcsicmp(tab->current_path.c_str(), folder.c_str()) != 0)
-                    NavigateTo(s, folder);
-                else
-                    InvalidateRect(s.hwnd, nullptr, FALSE);
-            }
-            return DROPEFFECT_COPY;
-        }
+        if (effect == DROPEFFECT_NONE) return DROPEFFECT_NONE;
+        if (app::Pane* pane = PaneAtSlot(s, header_pane))
+            return QueueHeaderDrop(s, sources, *pane, header_pane, effect, key_state, allowed, preferred)
+                ? effect : DROPEFFECT_NONE;
+        return DROPEFFECT_NONE;
     }
 
     if (tray) {
@@ -1941,7 +1921,6 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             s->hoverRow = newHover;
             s->hoverPaneIndex = hit.pane_index;
             s->ctxHoverSince = GetTickCount64();
-            if (newHover < 0) s->ctxHoverPrefetched.clear();
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         int newCrumb = (hit.region == ui::HitTestResult::BreadcrumbSegment) ? hit.index : -1;
@@ -1977,7 +1956,6 @@ LRESULT HandleMouseLeave(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             s->hoverRow = -1;
             s->hoverPaneIndex = -1;
             s->ctxHoverSince = 0;
-            s->ctxHoverPrefetched.clear();
             s->breadcrumbHover = -1;
             s->hoverRegion = 0;
             s->hoverControlIndex = -1;
@@ -2249,6 +2227,13 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 CancelScrollAnimation(*s);
                 tab->home_collapsed_mask ^= 1u << hit.index;
                 tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, MaxScrollForActivePane(*s));
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        } else if (hit.region == ui::HitTestResult::TabScrollLeft ||
+                   hit.region == ui::HitTestResult::TabScrollRight) {
+            const float steps = hit.region == ui::HitTestResult::TabScrollLeft ? -1.0f : 1.0f;
+            if (s->renderer.ScrollTabStrip(vm, rect.right, steps)) {
+                ApplyHoverTarget(*s, s->renderer.HitTest(vm, rect, static_cast<float>(mx), static_cast<float>(my)));
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
         } else if (hit.region == ui::HitTestResult::TabNew) {
@@ -3473,17 +3458,27 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        ScreenToClient(hwnd, &pt);
+        ui::WindowViewModel wheelVm = BuildVm(*s, false);
+        D2D1_RECT_F wheelRect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
+        ui::HitTestResult wheelHit = s->renderer.HitTest(wheelVm, wheelRect, (float)pt.x, (float)pt.y);
+        if (pt.x >= 0 && pt.x < wheelRect.right - 138.0f * s->scale &&
+            pt.y >= 0 && pt.y < s->renderer.TitleBarHeight()) {
+            const float steps = -static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / WHEEL_DELTA;
+            if (s->renderer.ScrollTabStrip(wheelVm, wheelRect.right, steps)) {
+                ApplyHoverTarget(*s, s->renderer.HitTest(wheelVm, wheelRect,
+                    static_cast<float>(pt.x), static_cast<float>(pt.y)));
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+        }
         if (IsSettingsTab(ActiveTab(*s))) {
             const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
             StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 72.0f * s->scale);
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
-        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        ScreenToClient(hwnd, &pt);
-        ui::WindowViewModel wheelVm = BuildVm(*s, false);
-        D2D1_RECT_F wheelRect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
-        ui::HitTestResult wheelHit = s->renderer.HitTest(wheelVm, wheelRect, (float)pt.x, (float)pt.y);
         if (HandleColumnStripWheel(*s, wheelVm, wheelHit, GET_WHEEL_DELTA_WPARAM(wParam))) return 0;
         const D2D1_RECT_F sidebarRc = s->renderer.SidebarRect(wheelRect.right, wheelRect.bottom);
         // Tray stack first: the panel lives inside the sidebar rect, so the

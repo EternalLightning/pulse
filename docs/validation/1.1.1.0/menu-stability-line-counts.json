@@ -1,0 +1,79 @@
+{
+  "basis": "Per-file dirty working tree immediately before this menu task; excludes docs",
+  "production_net": 0,
+  "test_net": 98,
+  "files": [
+    {
+      "path": "src/app/context_menu_controller.h",
+      "before": 113,
+      "after": 115,
+      "net": 2
+    },
+    {
+      "path": "src/app/context_menu_controller.cpp",
+      "before": 601,
+      "after": 592,
+      "net": -9
+    },
+    {
+      "path": "src/app/app_commands.h",
+      "before": 92,
+      "after": 92,
+      "net": 0
+    },
+    {
+      "path": "src/app/app_commands.cpp",
+      "before": 2004,
+      "after": 2013,
+      "net": 9
+    },
+    {
+      "path": "src/app/app_main.cpp",
+      "before": 2391,
+      "after": 2391,
+      "net": 0
+    },
+    {
+      "path": "src/ipc/protocol.h",
+      "before": 398,
+      "after": 399,
+      "net": 1
+    },
+    {
+      "path": "src/shell_host/ctx_session_process.h",
+      "before": 57,
+      "after": 57,
+      "net": 0
+    },
+    {
+      "path": "src/shell_host/main.cpp",
+      "before": 1760,
+      "after": 1760,
+      "net": 0
+    },
+    {
+      "path": "src/bench/context_menu_refresh_cases.h",
+      "before": 82,
+      "after": 176,
+      "net": 94
+    },
+    {
+      "path": "src/app/app_input.cpp",
+      "before": 3766,
+      "after": 3764,
+      "net": -2
+    },
+    {
+      "path": "src/app/app_state.h",
+      "before": 766,
+      "after": 765,
+      "net": -1
+    },
+    {
+      "path": "src/bench/app_controllers_test.cpp",
+      "before": 1091,
+      "after": 1095,
+      "net": 4
+    }
+  ]
+}

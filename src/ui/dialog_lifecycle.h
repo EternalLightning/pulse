@@ -8,16 +8,8 @@ inline bool IsDialogSurfaceFading(HWND window) {
     return GetPropW(window, L"Pulse.DialogSurfaceFading") != nullptr;
 }
 // Composition handles are borrowed only while the window's compositor is alive.
-inline void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual) {
-    if (!window) return;
-    if (device && visual) {
-        SetPropW(window, L"Pulse.DialogComposition.Device", device);
-        SetPropW(window, L"Pulse.DialogComposition.Visual", visual);
-    } else {
-        RemovePropW(window, L"Pulse.DialogComposition.Device");
-        RemovePropW(window, L"Pulse.DialogComposition.Visual");
-    }
-}
+void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual);
+// Fade-in returns immediately; hiding or compositor teardown cancels it.
 void ShowDialogWithFade(HWND dialog);
 void ShowDialogWithFade(HWND dialog, int show_command);
 void DestroyDialogWithFade(HWND dialog);

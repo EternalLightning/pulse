@@ -116,6 +116,27 @@ bool FluentMenuModel::PatchCommands(const std::vector<FluentMenuItem>& src) {
     return true;
 }
 
+bool FluentMenuModel::ReplaceLiveItems(const std::vector<FluentMenuItem>& src) {
+    size_t stable = 0;
+    while (stable < items_.size() && !items_[stable].live_update) {
+        if (stable >= src.size() || src[stable].live_update ||
+            !DisplayEqualItem(items_[stable], src[stable])) return false;
+        ++stable;
+    }
+    for (size_t i = stable; i < items_.size(); ++i) {
+        if (items_[i].live_update) continue;
+        if (i >= src.size() || src[i].live_update ||
+            !DisplayEqualItem(items_[i], src[i])) return false;
+    }
+    for (size_t i = stable; i < src.size(); ++i) {
+        if (src[i].live_update) continue;
+        if (i >= items_.size() || items_[i].live_update ||
+            !DisplayEqualItem(items_[i], src[i])) return false;
+    }
+    SetItems(src);
+    return true;
+}
+
 bool FluentMenuModel::UpdateCommandState(int command, const std::wstring& text, bool enabled) {
     bool changed = false;
     const auto update = [&](auto&& self, std::vector<FluentMenuItem>& items) -> void {
@@ -327,6 +348,16 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     if (!self) return DefWindowProcW(hwnd, msg, wParam, lParam);
     const bool is_sub = hwnd == self->sub_hwnd_ && self->sub_hwnd_ != nullptr;
     switch (msg) {
+    case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE)
+            self->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
+        break;
+    case WM_ACTIVATEAPP:
+        if (!wParam) self->DismissForDeactivation(nullptr);
+        break;
+    case WM_CANCELMODE:
+        self->DismissForDeactivation(nullptr);
+        return 0;
     case WM_MOUSEWHEEL:
         if (!is_sub && self->max_visible_rows_ > 0) {
             self->scroll_y_ = std::clamp(self->scroll_y_ -
@@ -335,7 +366,7 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 std::max(0.0f, self->model_.HeightPx() - self->BodyHeightPx()));
             self->hover_row_ = -1;
             self->UpdateTooltip(-1);
-            if (self->Render()) self->Present(255, 0);
+            if (self->Render()) self->PresentCurrent();
             return 0;
         }
         break;
@@ -353,7 +384,7 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             if (self->sub_hover_ != -1) {
                 self->sub_hover_ = -1;
                 self->sub_hover_swatch_ = -1;
-                if (self->RenderSub()) self->PresentSub(255);
+                if (self->RenderSub()) self->PresentSub(self->present_alpha_);
             }
         } else {
             // Keep the flyout: the pointer may be crossing onto it.
@@ -695,8 +726,17 @@ void FluentMenu::Present(BYTE alpha, int y_offset_px) {
     UpdateLayeredWindow(hwnd_, nullptr, &dst, &sz, surf_.mem_dc, &src, 0, &blend, ULW_ALPHA);
     SelectObject(surf_.mem_dc, old);
     present_offset_ = y_offset_px;
+    present_alpha_ = alpha;
+    if (sub_parent_row_ >= 0) {
+        PositionSubmenu();
+        PresentSub(alpha);
+    }
     if (filter_fn_ && edit_ && open_ && !animating_out_)
         PlaceFilterEdit(y_offset_px);
+}
+
+void FluentMenu::PresentCurrent() {
+    Present(present_alpha_, present_offset_);
 }
 
 void FluentMenu::PresentSub(BYTE alpha) {
@@ -745,12 +785,19 @@ void FluentMenu::OpenSubmenu(int row) {
     sub_hover_swatch_ = -1;
     sub_pending_row_ = -1;
 
+    PositionSubmenu();
+    if (RenderSub()) PresentSub(present_alpha_);
+    if (Render()) PresentCurrent(); // header row stays active
+}
+
+void FluentMenu::PositionSubmenu() {
+    if (sub_parent_row_ < 0 || !sub_hwnd_) return;
     const int content_w = sub_model_.WidthPx();
     const int w = content_w + kShadowMargin * 2;
     const int h = sub_model_.HeightPx() + kShadowMargin * 2;
     const int overlap = (int)std::lround(4.0f * scale_);
     // First child row lines up with the header row.
-    int y = base_y_ + present_offset_ + (int)(FilterHeaderPx() + model_.RowTopPx(row)) -
+    int y = base_y_ + present_offset_ + (int)(FilterHeaderPx() + model_.RowTopPx(sub_parent_row_)) -
             (int)sub_model_.RowTopPx(0);
     int x = base_x_ + model_.WidthPx() - overlap; // card edges overlap by 4dip
 
@@ -766,14 +813,12 @@ void FluentMenu::OpenSubmenu(int row) {
     sub_y_ = y;
     SetWindowPos(sub_hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, x, y, w, h,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    if (RenderSub()) PresentSub(255);
-    if (Render()) Present(255, present_offset_); // header row stays active
 }
 
 void FluentMenu::CloseSubmenu() {
     const bool was_open = sub_parent_row_ >= 0;
     HideSubWindow();
-    if (was_open && open_ && !animating_out_ && Render()) Present(255, present_offset_);
+    if (was_open && open_ && !animating_out_ && Render()) PresentCurrent();
 }
 
 void FluentMenu::OnSubMouse(POINT client_pt, bool button_up) {
@@ -797,7 +842,7 @@ void FluentMenu::OnSubMouse(POINT client_pt, bool button_up) {
     if (row != sub_hover_ || swatch != sub_hover_swatch_) {
         sub_hover_ = row;
         sub_hover_swatch_ = swatch;
-        if (RenderSub()) PresentSub(255);
+        if (RenderSub()) PresentSub(present_alpha_);
     }
     UpdateTooltip(row, true);
 }
@@ -893,7 +938,7 @@ void FluentMenu::UpdateHover(int row, int swatch) {
         if (top + model_.RowHeightPx() > scroll_y_ + BodyHeightPx())
             scroll_y_ = top + model_.RowHeightPx() - BodyHeightPx();
     }
-    if (Render()) Present(255, 0);
+    if (Render()) PresentCurrent();
 }
 
 int FluentMenu::HitTestSwatch(int row, float client_x) const {
@@ -1355,7 +1400,7 @@ int FluentMenu::RunModalLoop() {
                             sub_hover_ = sub_hover_ < 0
                                 ? sub_model_.FirstEnabled()
                                 : sub_model_.NextEnabled(sub_hover_, msg.wParam == VK_DOWN ? 1 : -1);
-                            if (RenderSub()) PresentSub(255);
+                            if (RenderSub()) PresentSub(present_alpha_);
                         } else {
                             int next = hover_row_ < 0
                                 ? model_.FirstEnabled()
@@ -1368,7 +1413,7 @@ int FluentMenu::RunModalLoop() {
                                !model_.At(hover_row_)->children.empty()) {
                         OpenSubmenu(hover_row_);
                         sub_hover_ = sub_model_.FirstEnabled();
-                        if (RenderSub()) PresentSub(255);
+                        if (RenderSub()) PresentSub(present_alpha_);
                         swallow = true;
                     } else if (!filter_fn_ && msg.wParam == VK_LEFT && sub_parent_row_ >= 0) {
                         CloseSubmenu();
@@ -1385,7 +1430,7 @@ int FluentMenu::RunModalLoop() {
                             if (hov && hov->enabled && !hov->children.empty()) {
                                 OpenSubmenu(hover_row_);
                                 sub_hover_ = sub_model_.FirstEnabled();
-                                if (RenderSub()) PresentSub(255);
+                                if (RenderSub()) PresentSub(present_alpha_);
                             } else {
                                 int cmd = InvokeRow(hover_row_);
                                 if (cmd != 0) { result_ = cmd; Dismiss(); }
@@ -1556,7 +1601,7 @@ void FluentMenu::RefreshFilter() {
     hover_row_ = model_.FirstEnabled();
     hover_swatch_ = -1;
     LayoutWindow(popup_pt_);
-    if (Render()) Present(255, present_offset_);
+    if (Render()) PresentCurrent();
     // Refresh only the results; a cached internal editor may be hidden while
     // an external search field owns input, selection and IME composition.
 }
@@ -1567,17 +1612,43 @@ void FluentMenu::RequestFilterRefresh() {
 
 bool FluentMenu::ReplaceItems(std::vector<FluentMenuItem> items) {
     if (!open_ || animating_out_ || filter_fn_ || !compositor_ || items.empty()) return false;
-    if (!model_.PatchCommands(items)) return false;
+    const auto* previous_hover = model_.At(hover_row_);
+    const std::wstring hover_text = previous_hover ? previous_hover->text : std::wstring{};
+    const auto* previous_parent = model_.At(sub_parent_row_);
+    const std::wstring parent_text = previous_parent ? previous_parent->text : std::wstring{};
+    const auto* previous_sub_hover = sub_model_.At(sub_hover_);
+    const std::wstring sub_hover_text = previous_sub_hover ? previous_sub_hover->text : std::wstring{};
+    const bool patched = model_.PatchCommands(items);
+    if (!patched) {
+        if (!model_.ReplaceLiveItems(items)) return false;
+        model_.Layout(compositor_->DwriteFactory(), scale_, static_cast<float>(model_.WidthPx()));
+        hover_row_ = -1;
+        for (int i = 0; i < model_.Count(); ++i)
+            if (!hover_text.empty() && model_.At(i)->text == hover_text && model_.At(i)->enabled) hover_row_ = i;
+        LayoutWindow(popup_pt_);
+    }
     if (const auto* hovered = model_.At(hover_row_); hovered && !hovered->enabled) hover_row_ = -1;
     if (sub_parent_row_ >= 0) {
         const auto* parent = model_.At(sub_parent_row_);
-        if (!parent || !parent->enabled || !sub_model_.PatchCommands(parent->children)) CloseSubmenu();
+        if (!parent || parent->text != parent_text || !parent->enabled) CloseSubmenu();
+        else if (!sub_model_.PatchCommands(parent->children)) {
+            if (parent->live_update) {
+                sub_model_.SetItems(parent->children);
+                sub_model_.Layout(compositor_->DwriteFactory(), scale_);
+                sub_hover_ = -1;
+                for (int i = 0; i < sub_model_.Count(); ++i)
+                    if (!sub_hover_text.empty() && sub_model_.At(i)->text == sub_hover_text && sub_model_.At(i)->enabled)
+                        sub_hover_ = i;
+                PositionSubmenu();
+                if (RenderSub()) PresentSub(present_alpha_);
+            } else CloseSubmenu();
+        }
         else {
             if (const auto* hovered = sub_model_.At(sub_hover_); hovered && !hovered->enabled) sub_hover_ = -1;
-            if (RenderSub()) PresentSub(255);
+            if (RenderSub()) PresentSub(present_alpha_);
         }
     }
-    if (Render()) Present(255, present_offset_);
+    if (Render()) PresentCurrent();
     return true;
 }
 
@@ -1591,15 +1662,21 @@ bool FluentMenu::UpdateCommandState(int command, const std::wstring& text, bool 
     if (changed) {
         model_.Layout(compositor_->DwriteFactory(), scale_, fixed_width);
         if (const auto* item = model_.At(hover_row_); item && !item->enabled) hover_row_ = -1;
-        if (Render()) Present(255, present_offset_);
+        if (Render()) PresentCurrent();
     }
     if (changed_sub && sub_parent_row_ >= 0) {
         const float sub_width = static_cast<float>(sub_model_.WidthPx());
         sub_model_.Layout(compositor_->DwriteFactory(), scale_, sub_width);
         if (const auto* item = sub_model_.At(sub_hover_); item && !item->enabled) sub_hover_ = -1;
-        if (RenderSub()) PresentSub(255);
+        if (RenderSub()) PresentSub(present_alpha_);
     }
     return true;
+}
+
+void FluentMenu::DismissForDeactivation(HWND activated) {
+    if (activated && (activated == owner_ || IsPaletteHwnd(activated))) return;
+    result_ = 0;
+    Dismiss();
 }
 
 void FluentMenu::Dismiss() {
@@ -1607,8 +1684,9 @@ void FluentMenu::Dismiss() {
     UpdateTooltip(-1);
     HideFilterEdit();
     HideSubWindow();
-    animating_out_ = true;
-    anim_start_ = std::chrono::steady_clock::now();
+    open_ = false;
+    animating_out_ = false;
+    if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
 }
 
 bool FluentMenu::SaveDebugSnapshot(const wchar_t* png_path,

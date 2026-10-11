@@ -11,4 +11,6 @@
 namespace pulse {
 void SuspendContentSearches(AppState& s);
 void HandleHeaderDropResult(AppState& s);
+std::wstring HeaderDropHint(AppState& s, const std::vector<std::wstring>& sources);
+void ClearHeaderDropHint(AppState& s);
 }

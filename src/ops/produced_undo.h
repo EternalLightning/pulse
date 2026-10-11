@@ -1,5 +1,6 @@
 #pragma once
 #include "file_identity.h"
+#include "../common/localization.h"
 #include <string>
 #include <vector>
 
@@ -8,14 +9,14 @@ inline bool ValidateProducedUndo(const std::vector<std::wstring>& paths,
                                  const std::vector<FileIdentity>& identities,
                                  std::wstring& error, std::wstring& failed_path) {
     if (paths.empty() || paths.size() != identities.size()) {
-        error = L"无法确认此撤销的原产物身份；不会删除当前同名项目。";
+        error = l10n::Get(l10n::StringId::OperationUndoIdentityUnverified);
         return false;
     }
     for (size_t i = 0; i < paths.size(); ++i) {
         FileIdentity current;
         if (!identities[i].Valid() || !pulse::ReadPathFileIdentity(paths[i], current) || current != identities[i]) {
             failed_path = paths[i];
-            error = L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + paths[i];
+            error = l10n::Format(l10n::StringId::OperationUndoResultChangedFormat, paths[i].c_str());
             return false;
         }
     }

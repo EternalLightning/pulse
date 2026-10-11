@@ -1,6 +1,7 @@
 #include "../common/preview_extensions.h"
 #include "../ipc/preview_protocol.h"
 #include "../preview_host/video_codec.h"
+#include "../ipc/preview_response.h"
 #include <windows.h>
 #include <winioctl.h>
 // gdiplus.h needs the OLE interfaces in scope, plus min/max as callable names
@@ -199,8 +200,8 @@ public:
         if (!ipc::WriteAll(pipe_, &request, sizeof(request)) ||
             !ipc::WriteAll(pipe_, path.data(), request.path_chars * sizeof(wchar_t)) ||
             !ipc::ReadAll(pipe_, &result.response, sizeof(result.response))) return false;
-        if (result.response.magic != ipc::kPreviewMagic ||
-            result.response.request_id != request.request_id) return false;
+        ipc::PreviewResponseLayout layout;
+        if (!ipc::ValidatePreviewResponse(request, result.response, layout)) return false;
         std::wstring mapping(result.response.mapping_chars, L'\0');
         if (!mapping.empty() && !ipc::ReadAll(pipe_, mapping.data(),
             result.response.mapping_chars * sizeof(wchar_t))) return false;
@@ -252,8 +253,11 @@ private:
 
 bool RunThumbnailCacheTests();
 bool RunThumbnailFailureTests();
+bool RunThumbnailTransportTests();
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--thumbnail-transport-only") == 0)
+        return RunThumbnailTransportTests() ? 0 : 1;
     if (argc == 2 && wcscmp(argv[1], L"--thumbnail-failures-only") == 0)
         return RunThumbnailFailureTests() ? 0 : 1;
     if (argc == 2 && wcscmp(argv[1], L"--text-boundaries-only") == 0) {
@@ -321,6 +325,43 @@ int wmain(int argc, wchar_t** argv) {
               surrogate_value[1021] == L'x', L"property truncation preserves surrogate boundary");
         host.Stop();
         Check(RemoveDirectoryW(root.c_str()) != 0, L"remove isolated text fixture directory");
+        return failed ? 1 : 0;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--response-compatibility-only") == 0) {
+        wchar_t temp[MAX_PATH]{}; GetTempPathW(ARRAYSIZE(temp), temp);
+        const std::wstring root = std::wstring(temp) + L"PulsePreviewResponse-" +
+            std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+        const bool created = CreateDirectoryW(root.c_str(), nullptr) != FALSE;
+        Check(created, L"create isolated response compatibility fixture");
+        if (!created) return 1;
+        Host host;
+        const bool started = host.Start();
+        Check(started, L"start real preview helper for response validation");
+        if (!started) { RemoveDirectoryW(root.c_str()); return 1; }
+        const auto text = root + L"\\text.txt", binary = root + L"\\bytes.bin", image = root + L"\\image.bmp";
+        Check(WriteBytes(text, {'h','e','l','l','o'}) && WriteBytes(binary, {0, 1, 2, 3}) &&
+            WriteBmpRgb(image, 640, 320), L"create text binary and image response fixtures");
+        for (const auto cap : {32u, 512u, 1024u}) {
+            Result response;
+            Check(host.Request(image, response, MAXDWORD, cap) && response.response.status == 0 &&
+                response.response.kind == ipc::PreviewContentKind::Bitmap && !response.pixels.empty() &&
+                response.response.width <= cap && response.response.height <= cap,
+                L"real bitmap responses fit validated dimensions and allocation budgets");
+        }
+        Result plain, hex, properties, unsupported;
+        Check(host.Request(text, plain) && plain.response.status == 0 && plain.text == L"hello",
+            L"real text response passes whole schema admission");
+        Check(host.Request(binary, hex) && hex.response.status == 0 && hex.response.kind == ipc::PreviewContentKind::Hex,
+            L"real binary hex response passes whole schema admission");
+        Check(host.Request(text, properties, MAXDWORD, 512, ipc::PreviewRequestKind::Properties) &&
+            properties.response.status == 0 && properties.response.kind == ipc::PreviewContentKind::None,
+            L"real property response passes whole schema admission");
+        Check(host.Request(text, unsupported, 0x00400000 /* FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS */) && unsupported.response.status == 1 &&
+            unsupported.response.kind == ipc::PreviewContentKind::Unsupported,
+            L"real unavailable content remains a typed provider failure");
+        host.Stop();
+        DeleteFileW(text.c_str()); DeleteFileW(binary.c_str()); DeleteFileW(image.c_str());
+        Check(RemoveDirectoryW(root.c_str()) != FALSE, L"clean isolated response compatibility fixture");
         return failed ? 1 : 0;
     }
     if (argc == 2 && wcscmp(argv[1], L"--thumbnail-cache-only") == 0)

@@ -27,7 +27,6 @@ constexpr float kPadX = 20.0f;
 constexpr float kFooterH = 52.0f;
 constexpr float kCollapsedH = 268.0f;
 constexpr float kGraphBlockH = 156.0f;
-constexpr float kDetailedH = kCollapsedH + kGraphBlockH;
 
 using pulse::ui::ScaleDip;
 
@@ -659,8 +658,10 @@ private:
             for (const auto& row : spec_.rows) {
                 const float text_height = row.is_path ? ScaleDip(scale_, 22.0f) :
                     typography::MeasureWrapped(compositor_.DwriteFactory(), compositor_.TextFormat(),
-                        row.text, std::max(1.0f, available - ScaleDip(scale_, 24.0f)));
-                const float row_height = std::max(ScaleDip(scale_, 36.0f), text_height + ScaleDip(scale_, 12.0f));
+                        row.text, std::max(1.0f, available - (row.boxed ? ScaleDip(scale_, 24.0f) : 0.0f)));
+                const float row_height = row.boxed
+                    ? std::max(ScaleDip(scale_, 36.0f), text_height + ScaleDip(scale_, 12.0f))
+                    : std::max(ScaleDip(scale_, 22.0f), text_height);
                 row_heights_.push_back(row_height);
                 height += row_height + ScaleDip(scale_, 4.0f);
             }
@@ -810,10 +811,12 @@ private:
             const auto& row = spec_.rows[index];
             const float height = row_heights_[index];
             const auto bounds = D2D1::RectF(message_rc_.left, content_y, message_rc_.right, content_y + height);
-            painter_.FillRoundedRect(bounds, ScaleDip(scale_, 4.0f), theme.fill_input);
-            const auto text_bounds = D2D1::RectF(bounds.left + ScaleDip(scale_, 12.0f),
-                bounds.top + ScaleDip(scale_, 6.0f), bounds.right - ScaleDip(scale_, 12.0f),
-                bounds.bottom - ScaleDip(scale_, 6.0f));
+            if (row.boxed) painter_.FillRoundedRect(bounds, ScaleDip(scale_, 4.0f), theme.fill_input);
+            const float horizontal_padding = row.boxed ? ScaleDip(scale_, 12.0f) : 0.0f;
+            const float vertical_padding = row.boxed ? ScaleDip(scale_, 6.0f) : 0.0f;
+            const auto text_bounds = D2D1::RectF(bounds.left + horizontal_padding,
+                bounds.top + vertical_padding, bounds.right - horizontal_padding,
+                bounds.bottom - vertical_padding);
             if (row.is_path) {
                 const auto fitted = FitPathMiddle(row.text, text_bounds.right - text_bounds.left,
                     [&](const std::wstring& value) { return typography::MeasureLine(&compositor_, compositor_.TextFormat(), value); });
@@ -1092,12 +1095,23 @@ void FileOperationWindow::SetTheme(bool dark, D2D1_COLOR_F accent) {
 
 void FileOperationWindow::Update(const ops::OpStatus& status) {
     const bool new_task = status.task_id != status_.task_id;
-    status_ = ops::PresentOperationStatus(status);
+    auto shown = ops::PresentOperationStatus(status);
+    const bool entering_failure = shown.phase == ops::OpPhase::Failed &&
+        (new_task || status_.phase != ops::OpPhase::Failed);
+    const bool detail_changed = shown.phase != status_.phase ||
+        (shown.phase == ops::OpPhase::Failed && (shown.last_error != status_.last_error ||
+            shown.failed_path != status_.failed_path));
+    status_ = std::move(shown);
+    if (new_task || detail_changed) failure_scroll_ = failure_scroll_max_ = 0.0f;
+    if (entering_failure) detailed_ = true;
     if (new_task) {
         speed_history_.clear();
         speed_sample_tick_ = 0;
     }
-    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (hwnd_) {
+        if (entering_failure || detail_changed) ResizeForDetails(false);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
 }
 
 void FileOperationWindow::Show(bool activate) {
@@ -1128,14 +1142,31 @@ void FileOperationWindow::ApplyWindowTheme() {
     backdrop_enabled_ = pulse::ui::ApplyBackdrop(hwnd_, dark_);
 }
 
+float FileOperationWindow::DetailBlockHeight() const {
+    const float minimum = kGraphBlockH * scale_;
+    if (status_.phase != ops::OpPhase::Failed) return minimum;
+    const float width = std::max(1.0f, static_cast<float>(compositor_.Width()) - 64.0f * scale_);
+    return std::max(minimum, painter_.MeasureWrappedCaptionHeight(
+        ops::OperationFailureDetails(status_), width) + 52.0f * scale_);
+}
+
 void FileOperationWindow::ResizeForDetails(bool preserve_center) {
     if (!hwnd_) return;
     RECT rect{};
     GetWindowRect(hwnd_, &rect);
     const int width = rect.right - rect.left;
     const int old_height = rect.bottom - rect.top;
-    const int height = static_cast<int>((detailed_ ? kDetailedH : kCollapsedH) * scale_);
-    const int y = preserve_center ? rect.top - (height - old_height) / 2 : rect.top;
+    int height = static_cast<int>(std::ceil(kCollapsedH * scale_ +
+        (detailed_ ? DetailBlockHeight() : 0.0f)));
+    MONITORINFO monitor{sizeof(monitor)};
+    const bool fit_failure = detailed_ && status_.phase == ops::OpPhase::Failed &&
+        GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor);
+    if (fit_failure)
+        height = std::min(height, static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top - 24));
+    int y = preserve_center ? rect.top - (height - old_height) / 2 : rect.top;
+    if (fit_failure) y = std::clamp(y, static_cast<int>(monitor.rcWork.top + 12),
+        static_cast<int>(monitor.rcWork.bottom - height - 12));
+    if (height == old_height && y == rect.top) return;
     SetWindowPos(hwnd_, nullptr, rect.left, y, width, height,
                  SWP_NOZORDER | SWP_NOOWNERZORDER);
 }
@@ -1164,7 +1195,7 @@ void FileOperationWindow::RequestClose() {
     Hide();
 }
 
-void FileOperationWindow::Render() {
+void FileOperationWindow::Render(bool present) {
     if (compositor_.NeedsRecovery()) {
         if (!compositor_.Recover()) return;
         compositor_.RecreateTextFormats(scale_);
@@ -1235,7 +1266,8 @@ void FileOperationWindow::Render() {
     painter_.FillRoundedRect(D2D1::RectF(0, ScaleDip(scale_, kTitleH), width,
                                          ScaleDip(scale_, kTitleH) + 1.0f), 0, theme.stroke_divider);
 
-    const std::wstring src = status_.source_label.empty() ? l10n::Get(l10n::StringId::OpSourceShort).c_str() : status_.source_label;
+    const std::wstring src = failed && !status_.failed_path.empty() ? path::FriendlyPathText(status_.failed_path) :
+        status_.source_label.empty() ? l10n::Get(l10n::StringId::OpFilePath) : status_.source_label;
     const std::wstring dst = status_.destination_label.empty() ? l10n::Get(l10n::StringId::OpDestination).c_str() : status_.destination_label;
     std::wstring subtitle;
     if (completed || failed || cancelled) {
@@ -1247,6 +1279,10 @@ void FileOperationWindow::Render() {
     else if (restoring) subtitle = l10n::Get(l10n::StringId::OpRestoringPrefix).c_str() + src;
     else if (moving) subtitle = l10n::Get(l10n::StringId::OpFromPrefix).c_str() + src + l10n::Get(l10n::StringId::OpMoveTo).c_str() + dst;
     else subtitle = l10n::Get(l10n::StringId::OpFromPrefix).c_str() + src + l10n::Get(l10n::StringId::OpCopyTo).c_str() + dst;
+    if (deleting) subtitle = FitPathMiddle(subtitle, (dip_w - kPadX * 2.0f - 72.0f) * scale_,
+        [&](const std::wstring& value) {
+            return typography::MeasureLine(&compositor_, compositor_.SmallFormat(), value);
+        });
     DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
         Rect(scale_, kPadX, 48, dip_w - kPadX * 2.0f - 72.0f, 18), subtitle, theme.text);
     wchar_t percent[32];
@@ -1370,7 +1406,33 @@ void FileOperationWindow::Render() {
     painter_.DrawText(speed_text, Rect(scale_, 328, 140, 112, 22),
                       compositor_.SmallFormat(), sky);
 
-    if (detailed_) {
+    if (detailed_ && failed) {
+        const auto box = Rect(scale_, kPadX, 180, dip_w - kPadX * 2.0f,
+            std::max(kGraphBlockH, (height - kFooterH * scale_) / scale_ - 192.0f));
+        painter_.FillRoundedRect(box, ScaleDip(scale_, 12.0f),
+            dark_ ? HexColor(0xFFFFFF, 0.04f) : HexColor(0x000000, 0.03f));
+        painter_.DrawText(l10n::Get(l10n::StringId::OpErrorDetails), Rect(scale_, 32, 188, dip_w - 64, 20),
+                          compositor_.SmallFormat(), theme.text);
+        const auto text_bounds = D2D1::RectF(32 * scale_, 216 * scale_,
+            width - 32 * scale_, height - 64 * scale_);
+        const auto text = ops::OperationFailureDetails(status_);
+        const float text_height = painter_.MeasureWrappedCaptionHeight(text, text_bounds.right - text_bounds.left);
+        failure_scroll_max_ = std::max(0.0f, text_height - (text_bounds.bottom - text_bounds.top));
+        failure_scroll_ = std::clamp(failure_scroll_, 0.0f, failure_scroll_max_);
+        compositor_.Dc()->PushAxisAlignedClip(text_bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        painter_.DrawWrappedCaption(text, D2D1::Point2F(text_bounds.left, text_bounds.top - failure_scroll_),
+            text_bounds.right - text_bounds.left, theme.text_secondary);
+        compositor_.Dc()->PopAxisAlignedClip();
+        if (failure_scroll_max_ > 0.0f) {
+            fluent::ScrollbarSpec scrollbar;
+            scrollbar.viewport = D2D1::RectF(text_bounds.right + 3 * scale_, text_bounds.top,
+                text_bounds.right + 13 * scale_, text_bounds.bottom);
+            scrollbar.viewport_extent = text_bounds.bottom - text_bounds.top;
+            scrollbar.content_extent = text_height;
+            scrollbar.offset = failure_scroll_;
+            painter_.DrawScrollbar(scrollbar);
+        }
+    } else if (detailed_) {
         const auto card = Rect(scale_, kPadX, 180, dip_w - kPadX * 2.0f, 140);
         painter_.FillRoundedRect(card, ScaleDip(scale_, 12.0f),
             dark_ ? HexColor(0x000000, 0.30f) : HexColor(0x000000, 0.05f));
@@ -1417,7 +1479,13 @@ void FileOperationWindow::Render() {
     cancel_state.pressed = pressed_ == 4;
     painter_.DrawButton({ chrome.cancel, labels.cancel, {},
                           fluent::ButtonKind::Standard, cancel_state });
-    pulse::ui::EndSurface(compositor_);
+    if (present) pulse::ui::EndSurface(compositor_);
+    else {
+        const HRESULT hr = compositor_.Dc()->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED ||
+            hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DRIVER_INTERNAL_ERROR)
+            compositor_.NotifyDeviceLost(hr);
+    }
 }
 
 LRESULT CALLBACK FileOperationWindow::WndProc(HWND hwnd, UINT message,
@@ -1431,6 +1499,11 @@ LRESULT CALLBACK FileOperationWindow::WndProc(HWND hwnd, UINT message,
     }
     return self ? self->HandleMessage(message, wparam, lparam)
                 : DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+void FileOperationWindow::ScrollFailureDetails(float delta) {
+    failure_scroll_ = std::clamp(failure_scroll_ + delta, 0.0f, failure_scroll_max_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
@@ -1457,6 +1530,9 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     case WM_SIZE:
         if (compositor_.Dc() && wparam != SIZE_MINIMIZED)
             compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
+        if (wparam != SIZE_MINIMIZED && detailed_ && status_.phase == ops::OpPhase::Failed &&
+            static_cast<float>(HIWORD(lparam)) < kCollapsedH * scale_ + DetailBlockHeight())
+            ResizeForDetails(false);
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     case WM_MOVE:
@@ -1533,10 +1609,26 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
+    case WM_MOUSEWHEEL:
+        if (detailed_ && status_.phase == ops::OpPhase::Failed) {
+            ScrollFailureDetails(-GET_WHEEL_DELTA_WPARAM(wparam) / 120.0f * 48.0f * scale_);
+            return 0;
+        }
+        break;
     case WM_KEYDOWN:
         if (wparam == VK_ESCAPE) {
             RequestClose();
             return 0;
+        }
+        if (detailed_ && status_.phase == ops::OpPhase::Failed) {
+            if (wparam == VK_HOME || wparam == VK_END) {
+                ScrollFailureDetails(wparam == VK_HOME ? -failure_scroll_max_ : failure_scroll_max_);
+                return 0;
+            }
+            if (wparam == VK_NEXT || wparam == VK_PRIOR || wparam == VK_DOWN || wparam == VK_UP) {
+                ScrollFailureDetails((wparam == VK_NEXT || wparam == VK_DOWN ? 1.0f : -1.0f) * 80 * scale_);
+                return 0;
+            }
         }
         break;
     case WM_CLOSE:
@@ -1560,42 +1652,52 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     return DefWindowProcW(hwnd_, message, wparam, lparam);
 }
 
+ConfirmDialogSpec BuildLinkConfirmationSpec(const ops::ConflictItemInfo& conflict) {
+    ConfirmDialogSpec spec;
+    spec.title = l10n::Get(l10n::StringId::LinkDestinationTitle);
+    spec.confirm_text = l10n::Get(l10n::StringId::LinkContinue);
+    spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
+    spec.cancel_is_default = true;
+    spec.fit_to_work_area = true;
+    spec.still_valid = conflict.still_valid;
+    const auto& impact = conflict.link_impact;
+    switch (impact.kind) {
+    case ops::DestinationLinkKind::DirectorySymbolicLink:
+    case ops::DestinationLinkKind::Junction:
+        spec.message = l10n::Get(l10n::StringId::LinkDirectoryMessage);
+        break;
+    case ops::DestinationLinkKind::FileSymbolicLink:
+        spec.message = l10n::Get(l10n::StringId::LinkFileMessage);
+        break;
+    case ops::DestinationLinkKind::HardLink:
+        spec.message = l10n::Get(l10n::StringId::LinkHardMessage);
+        spec.message += L"\n" + std::to_wstring(impact.link_count) +
+            l10n::Get(l10n::StringId::LinkNameCountSuffix);
+        break;
+    }
+    spec.rows.push_back({l10n::Get(impact.kind == ops::DestinationLinkKind::HardLink
+        ? l10n::StringId::PermissionOperationDestinationPath : l10n::StringId::LinkPath), false, false});
+    spec.rows.push_back({path::FriendlyPathText(impact.path), true});
+    if (!impact.resolved_path.empty()) {
+        spec.rows.push_back({l10n::Get(l10n::StringId::LinkResolvedPath), false, false});
+        spec.rows.push_back({path::FriendlyPathText(impact.resolved_path), true});
+    }
+    spec.note = l10n::Get(l10n::StringId::LinkTaskScopeNote);
+    return spec;
+}
+
 ConflictDialogResult ShowFileConflictDialog(HWND owner,
                                             const ops::ConflictItemInfo& conflict,
                                             bool dark,
                                             D2D1_COLOR_F accent) {
     if (conflict.link_confirmation) {
-        ConfirmDialogSpec spec;
-        spec.title = l10n::Get(l10n::StringId::LinkDestinationTitle);
-        spec.confirm_text = l10n::Get(l10n::StringId::LinkContinue);
-        spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
-        spec.cancel_is_default = true;
-        spec.fit_to_work_area = true;
-        spec.still_valid = conflict.still_valid;
-        spec.checkbox_text = l10n::Get(l10n::StringId::LinkContinueAll);
+        const auto spec = BuildLinkConfirmationSpec(conflict);
         ConflictDialogResult result;
-        spec.checkbox_checked = &result.apply_to_all;
-        const auto& impact = conflict.link_impact;
-        switch (impact.kind) {
-        case ops::DestinationLinkKind::DirectorySymbolicLink:
-        case ops::DestinationLinkKind::Junction:
-            spec.message = l10n::Get(l10n::StringId::LinkDirectoryMessage);
-            break;
-        case ops::DestinationLinkKind::FileSymbolicLink:
-            spec.message = l10n::Get(l10n::StringId::LinkFileMessage);
-            break;
-        case ops::DestinationLinkKind::HardLink:
-            spec.message = l10n::Get(l10n::StringId::LinkHardMessage);
-            spec.message += L"\n" + std::to_wstring(impact.link_count) +
-                l10n::Get(l10n::StringId::LinkNameCountSuffix);
-            break;
-        }
-        spec.rows.push_back({path::FriendlyPathText(impact.path), true});
-        if (!impact.resolved_path.empty())
-            spec.rows.push_back({path::FriendlyPathText(impact.resolved_path), true});
-        spec.note = l10n::Get(l10n::StringId::LinkContinueAllNote);
         ConfirmWindow window;
-        if (window.Show(owner, spec, dark, accent)) result.choice = ops::ConflictChoice::Continue;
+        if (window.Show(owner, spec, dark, accent)) {
+            result.choice = ops::ConflictChoice::Continue;
+            result.apply_to_all = true;
+        }
         return result;
     }
     ConflictWindow window;

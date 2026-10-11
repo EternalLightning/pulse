@@ -663,6 +663,8 @@ struct HitTestResult {
         TabClose,
         TabNew,
         TabGroup,
+        TabScrollLeft,
+        TabScrollRight,
         ThemeToggle,
         SettingsButton,
         HomeButton,
@@ -1019,13 +1021,11 @@ public:
     D2D1_RECT_F SidebarRect(float w, float h) const;
     D2D1_RECT_F SidebarSettingsRect(float w, float h) const;
     D2D1_RECT_F StagingTrayRect(const WindowViewModel& vm, float w, float h) const;
-    D2D1_RECT_F TitleBarRect(float w) const;
     D2D1_RECT_F ToolbarRect(float w) const;
     D2D1_RECT_F AddressBarRect(float w) const;
     D2D1_RECT_F SearchBarRect(float w) const;
     D2D1_RECT_F NewCommandRect(float w) const;
     D2D1_RECT_F SplitCommandRect(float w) const;
-    D2D1_RECT_F AddressSearchButtonRect(float w) const;
     void DrawAddressSearchChrome(const WindowViewModel& vm, float w, const Theme& theme);
     float NewButtonWidthPx(bool compact) const;
 
@@ -1058,7 +1058,6 @@ public:
     int PageDelta(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds) const;
     std::pair<int, int> VisibleRangeInPane(const PaneViewModel& vm,
                                            const D2D1_RECT_F& pane_bounds) const;
-    int RowFromYInPane(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds, float y) const;
     int ItemFromPointInPane(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
                             float x, float y) const;
     // Current layout rect of a tag sidebar slot (for drag-reorder geometry).
@@ -1079,6 +1078,8 @@ public:
                           D2D1_RECT_F* out) const;
     // Uniform tab pitch (excludes group-chip offsets); used by drag math.
     float TabPitchPx(const WindowViewModel& vm, float window_w) const;
+    bool ScrollTabStrip(const WindowViewModel& vm, float window_w, float steps);
+    D2D1_RECT_F TabStripViewportRect(const WindowViewModel& vm, float window_w) const;
     float SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;
     bool SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w, float window_h,
                                    D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maximum) const;
@@ -1099,6 +1100,10 @@ private:
         float h = 0.0f;
         float pitch = 0.0f;
         float end_x = 0.0f;
+        float pinned_w = 0.0f;
+        float scroll_max = 0.0f;
+        float scroll_offset = 0.0f;
+        D2D1_RECT_F viewport{}, scroll_left{}, scroll_right{}, new_button{};
         std::vector<float> extra; // per tab: px shift from group chips before it
         struct Chip {
             float left = 0.0f;
@@ -1106,6 +1111,14 @@ private:
             int group = -1; // index into WindowViewModel::tab_groups
         };
         std::vector<Chip> chips;  // one chip at the start of each same-group run
+    };
+    struct TabStripScrollState {
+        float offset = 0.0f;
+        float viewport_w = -1.0f;
+        float content_w = -1.0f;
+        float scale = 0.0f;
+        int active = -1;
+        size_t count = 0;
     };
     TabStripMetrics ComputeTabStrip(const WindowViewModel& vm, float window_w) const;
     void DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
@@ -1263,6 +1276,7 @@ private:
     ComPtr<ID2D1SvgDocument> exclude_empty_svg_;
     std::unordered_map<int, ComPtr<ID2D1SvgDocument>> fluent_svgs_;
     std::unordered_set<int> fluent_svg_failed_;
+    mutable TabStripScrollState tab_strip_scroll_;
 
 };
 

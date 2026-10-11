@@ -140,10 +140,7 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
                               const D2D1_COLOR_F& foreground,
                               const D2D1_COLOR_F& background,
                               DWRITE_TEXT_ALIGNMENT alignment) {
-    // File names use DirectWrite in every state, including extension effects
-    // and search highlights. Keep their font fallback and metrics consistent.
-    if (format == fileNameFormat_.get()) return false;
-    if (!lumaText_ || !lumaText_->Enabled()) return false;
+    if (!typography::UsesLumaText(this, format)) return false;
     if (lumaText_->Draw(text, format, bounds, foreground, background, alignment)) {
         return true;
     }
@@ -153,8 +150,7 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
 
 bool Compositor::MeasureLumaText(std::wstring_view text, IDWriteTextFormat* format,
                                  float& width, float* height) {
-    if (format == fileNameFormat_.get()) return false;
-    if (!lumaText_ || !lumaText_->Enabled()) return false;
+    if (!typography::UsesLumaText(this, format)) return false;
     return lumaText_->Measure(text, format, width, height);
 }
 

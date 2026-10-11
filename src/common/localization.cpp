@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_NETWORK_SEARCH_HINT;
+constexpr UINT kLastString = IDS_OPERATION_STOPPED;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -28,6 +28,20 @@ std::mutex g_mutex;
 std::array<std::array<std::wstring, kLastString - kFirstString + 1>, 2> g_cache;
 std::array<std::array<bool, kLastString - kFirstString + 1>, 2> g_loaded{};
 const std::wstring g_empty;
+
+const std::wstring& RuntimeMessage(UINT id, Language language) {
+    switch (id) {
+#define PULSE_LOCALIZED_MESSAGE(message_id, zh, en) \
+    case message_id: { \
+        static const std::wstring chinese = L##zh; \
+        static const std::wstring english = L##en; \
+        return language == Language::ZhCN ? chinese : english; \
+    }
+#include "runtime_messages.inc"
+#undef PULSE_LOCALIZED_MESSAGE
+    default: return g_empty;
+    }
+}
 
 Language SystemLanguage() noexcept {
     const LANGID language = GetUserDefaultUILanguage();
@@ -106,14 +120,16 @@ const std::wstring& Get(StringId id) {
     if (value < kFirstString || value > kLastString) return g_empty;
     const size_t index = value - kFirstString;
     std::lock_guard lock(g_mutex);
-    if (!g_module) return g_empty;
     const Language language = g_effective.load();
+    if (!g_module) return RuntimeMessage(value, language);
     const size_t locale = language == Language::ZhCN ? 0 : 1;
     if (!g_loaded[locale][index]) {
         g_cache[locale][index] = LoadStringResource(value, ResourceLanguage(language));
         if (g_cache[locale][index].empty() && language != Language::EnUS) {
             g_cache[locale][index] = LoadStringResource(value, ResourceLanguage(Language::EnUS));
         }
+        if (g_cache[locale][index].empty())
+            g_cache[locale][index] = RuntimeMessage(value, language);
         g_loaded[locale][index] = true;
     }
     return g_cache[locale][index];

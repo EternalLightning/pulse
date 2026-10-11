@@ -137,10 +137,6 @@ D2D1_RECT_F MainRenderer::ContentRect(float w, float h) const {
     float bottom = h - status_height_ - margin_;
     return D2D1::RectF(left, top, w - margin_ - DetailsPanelWidth(w), bottom);
 }
-D2D1_RECT_F MainRenderer::TitleBarRect(float w) const {
-    return D2D1::RectF(0, 0, w, title_bar_height_);
-}
-
 D2D1_RECT_F MainRenderer::ToolbarRect(float w) const {
     return D2D1::RectF(EffectiveSidebarWidth(w), title_bar_height_, w, title_bar_height_ + toolbar_height_);
 }
@@ -449,10 +445,12 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     const TabStripMetrics strip = ComputeTabStrip(vm, rect.right);
     const float tabH = strip.h;
     const float tabY = strip.y;
+    dc->PushAxisAlignedClip(strip.viewport, D2D1_ANTIALIAS_MODE_ALIASED);
     auto drawTab = [&](size_t i, float left, bool raised) {
         const bool active = vm.tabs[i].active;
         const bool pinned = vm.tabs[i].pinned;
-        const float tabW = pinned ? (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_ : strip.w;
+        const float tabW = pinned ? strip.pinned_w : strip.w;
+        if (tabW <= 0.0f || left + tabW <= strip.viewport.left || left >= strip.viewport.right) return;
         const bool hovered = IsHovered(vm, HitTestResult::Tab, static_cast<int>(i)) ||
                              IsHovered(vm, HitTestResult::TabClose, static_cast<int>(i));
         const bool connect = active || raised;
@@ -634,8 +632,15 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
     }
 
+    dc->PopAxisAlignedClip();
+
     auto tab_left_at = [&](int i) -> float {
-        if (inDragRun(i)) return vm.tab_drag_x + static_cast<float>(i - dragI) * strip.pitch;
+        if (inDragRun(i)) {
+            float left = vm.tab_drag_x;
+            for (int k = dragI; k < i; ++k)
+                if (!vm.tabs[static_cast<size_t>(k)].hidden) left += strip.pitch;
+            return left;
+        }
         const float extra = i < static_cast<int>(strip.extra.size())
             ? strip.extra[static_cast<size_t>(i)] : 0.0f;
         return strip.x0
@@ -644,11 +649,12 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     };
     const int connected = dragI >= 0 ? dragI : activeI;
     if (connected >= 0 && connected < static_cast<int>(vm.tabs.size())) {
-        const float connW = vm.tabs[static_cast<size_t>(connected)].pinned
-            ? (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_ : strip.w;
+        const float connW = vm.tabs[static_cast<size_t>(connected)].pinned ? strip.pinned_w : strip.w;
         const float shoulder = 8.0f * scale_;
-        const float cut_l = tab_left_at(connected) - shoulder;
-        const float cut_r = tab_left_at(connected) + connW + shoulder;
+        const float cut_l = std::clamp(tab_left_at(connected) - shoulder,
+            strip.viewport.left, strip.viewport.right);
+        const float cut_r = std::clamp(tab_left_at(connected) + connW + shoulder,
+            strip.viewport.left, strip.viewport.right);
         if (cut_l > 0.0f)
             FillRect(dc, brStrokeDivider_.get(), 0.0f, h - 1.0f, cut_l, 1.0f);
         if (cut_r < rect.right)
@@ -657,9 +663,28 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         FillRect(dc, brStrokeDivider_.get(), 0.0f, h - 1.0f, rect.right, 1.0f);
     }
 
-    const float new_tab_x = strip.end_x;
-    // New tab button follows the final rest slot (not the sliding tabs).
-    D2D1_RECT_F newRc = D2D1::RectF(new_tab_x, tabY, new_tab_x + 32 * scale_, tabY + tabH);
+    auto drawScroll = [&](const D2D1_RECT_F& bounds, bool left, bool enabled) {
+        if (bounds.right <= bounds.left) return;
+        const auto region = left ? HitTestResult::TabScrollLeft : HitTestResult::TabScrollRight;
+        if (enabled && IsHovered(vm, region)) {
+            MakeBrush(dc, theme.fill_hover, brFillHover_);
+            FillRoundedRect(dc, brFillHover_.get(), bounds.left, bounds.top,
+                bounds.right - bounds.left, bounds.bottom - bounds.top, theme.radius_control * scale_);
+        }
+        MakeBrush(dc, enabled ? theme.text_secondary : WithAlpha(theme.text_secondary, 0.35f), brText_);
+        const float cx = (bounds.left + bounds.right) * 0.5f;
+        const float cy = (bounds.top + bounds.bottom) * 0.5f;
+        const float dx = std::min(3.0f * scale_, (bounds.right - bounds.left) * 0.20f);
+        const float side = left ? 1.0f : -1.0f;
+        dc->DrawLine(D2D1::Point2F(cx + side * dx, cy - 4.0f * scale_),
+            D2D1::Point2F(cx - side * dx, cy), brText_.get(), 1.5f * scale_);
+        dc->DrawLine(D2D1::Point2F(cx - side * dx, cy),
+            D2D1::Point2F(cx + side * dx, cy + 4.0f * scale_), brText_.get(), 1.5f * scale_);
+    };
+    drawScroll(strip.scroll_left, true, strip.scroll_offset > 0.0f);
+    drawScroll(strip.scroll_right, false, strip.scroll_offset < strip.scroll_max);
+    const D2D1_RECT_F newRc = strip.new_button;
+    dc->PushAxisAlignedClip(newRc, D2D1_ANTIALIAS_MODE_ALIASED);
     if (IsHovered(vm, HitTestResult::TabNew)) {
         MakeBrush(dc, theme.fill_hover, brFillHover_);
         FillRoundedRect(dc, brFillHover_.get(), newRc.left, newRc.top,
@@ -676,6 +701,8 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         brText_.get(), addStroke);
     dc->DrawLine(D2D1::Point2F(addX, addY - addHalf), D2D1::Point2F(addX, addY + addHalf),
         brText_.get(), addStroke);
+
+    dc->PopAxisAlignedClip();
 
     // Window controls, right-aligned in Win11 order: min, max/restore, close.
     const float ctrlY = y;
@@ -800,74 +827,140 @@ void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& r
 MainRenderer::TabStripMetrics MainRenderer::ComputeTabStrip(
     const WindowViewModel& vm, float window_w) const {
     TabStripMetrics m;
-
     const TitleChrome chrome = MakeTitleChrome(window_w, scale_, title_bar_height_);
-    m.x0 = 12.0f * scale_;
-    const float tabsRight = chrome.chrome_left - 8.0f * scale_;
-
-    // Group chips: one at the start of each consecutive same-group run. Their
-    // widths come out of the strip budget before tabs are sized; positions
-    // are resolved in the second pass once the tab pitch is known.
-    const float chipGap = 4.0f * scale_;
-    float chipsTotal = 0.0f;
-    IDWriteTextFormat* chipFmt = compositor_ ? compositor_->SmallFormat() : nullptr;
+    const float tabs_right = std::max(0.0f, chrome.chrome_left - 8.0f * scale_);
+    m.x0 = std::min(12.0f * scale_, tabs_right);
+    m.y = 4.0f * scale_;
+    m.h = title_bar_height_ - 8.0f * scale_;
+    const float new_w = std::min(32.0f * scale_, tabs_right - m.x0);
+    const float new_gap = std::min(4.0f * scale_, tabs_right - m.x0 - new_w);
+    const float available = std::max(0.0f, tabs_right - m.x0 - new_w - new_gap);
+    const float chip_gap = 4.0f * scale_;
+    float chips_total = 0.0f;
+    IDWriteTextFormat* chip_fmt = compositor_ ? compositor_->SmallFormat() : nullptr;
     for (size_t i = 0; i < vm.tabs.size(); ++i) {
         const int g = vm.tabs[i].group;
-        const bool runStart = g >= 0 && (i == 0 || vm.tabs[i - 1].group != g);
-        if (!runStart) continue;
-        float cw = 8.0f * scale_; // unnamed group: slim color bar
+        if (g < 0 || (i > 0 && vm.tabs[i - 1].group == g)) continue;
+        float width = 8.0f * scale_;
         if (g < static_cast<int>(vm.tab_groups.size()) &&
             !vm.tab_groups[static_cast<size_t>(g)].name.empty()) {
-            const float tw = std::min(88.0f * scale_,
-                MeasureTextWidth(compositor_->DwriteFactory(), chipFmt,
-                                 vm.tab_groups[static_cast<size_t>(g)].name));
-            cw = tw + 16.0f * scale_; // Edge-style block: text + side padding
+            const float text_w = std::min(88.0f * scale_,
+                MeasureTextWidth(compositor_ ? compositor_->DwriteFactory() : nullptr,
+                    chip_fmt, vm.tab_groups[static_cast<size_t>(g)].name));
+            width = text_w + 16.0f * scale_;
         }
         TabStripMetrics::Chip chip;
-        chip.width = cw;
+        chip.width = width;
         chip.group = g;
-        chipsTotal += cw + chipGap;
+        chips_total += width + chip_gap;
         m.chips.push_back(chip);
     }
     m.extra.assign(vm.tabs.size(), 0.0f);
-
-    const float available = std::max(0.0f, tabsRight - m.x0 - 36.0f * scale_ - chipsTotal);
-    size_t visibleCount = 0;
-    size_t pinnedCount = 0; // visible pinned tabs get a fixed narrow slot
-    for (const auto& t : vm.tabs) {
-        if (t.hidden) continue;
-        if (t.pinned) ++pinnedCount; else ++visibleCount;
+    size_t ordinary_count = 0, pinned_count = 0;
+    int active = -1;
+    for (size_t i = 0; i < vm.tabs.size(); ++i) {
+        if (vm.tabs[i].active) active = static_cast<int>(i);
+        if (vm.tabs[i].hidden) continue;
+        if (vm.tabs[i].pinned) ++pinned_count; else ++ordinary_count;
     }
-    const float pinnedW = (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_;
-    const float pinnedTotal = static_cast<float>(pinnedCount) * (pinnedW + control_gap_);
-    m.w = visibleCount == 0 ? 0.0f
-        : std::min(kTabMaxW * scale_, std::max(kTabMinW * scale_,
-            std::max(0.0f, available - pinnedTotal)
-                / static_cast<float>(visibleCount) - control_gap_));
-    m.y = 4.0f * scale_;
-    m.h = title_bar_height_ - 8.0f * scale_;
+    m.pinned_w = (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_;
+    const float pinned_total = static_cast<float>(pinned_count) * (m.pinned_w + control_gap_);
+    m.w = ordinary_count == 0 ? 0.0f
+        : std::clamp(std::max(0.0f, available - chips_total - pinned_total)
+            / static_cast<float>(ordinary_count) - control_gap_,
+            kTabMinW * scale_, kTabMaxW * scale_);
+    m.w = std::min(m.w, available);
+    m.pinned_w = std::min(m.pinned_w, available);
+    auto content_width = [&] {
+        const float trailing_gap = ordinary_count + pinned_count > 0 ? control_gap_
+            : m.chips.empty() ? 0.0f : chip_gap;
+        return std::max(0.0f, chips_total + static_cast<float>(pinned_count) * (m.pinned_w + control_gap_)
+            + static_cast<float>(ordinary_count) * (m.w + control_gap_) - trailing_gap);
+    };
+    const bool overflow = content_width() > available;
+    const float scroll_w = overflow ? std::min(24.0f * scale_, available * 0.20f) : 0.0f;
+    const float viewport_left = m.x0 + scroll_w;
+    const float viewport_right = m.x0 + available - scroll_w;
+    const float viewport_w = std::max(0.0f, viewport_right - viewport_left);
+    m.viewport = D2D1::RectF(viewport_left, 0.0f, viewport_right, title_bar_height_ + 1.0f);
+    if (overflow) {
+        m.scroll_left = D2D1::RectF(m.x0, m.y, viewport_left, m.y + m.h);
+        m.scroll_right = D2D1::RectF(viewport_right, m.y,
+            viewport_right + scroll_w, m.y + m.h);
+        // A single tab must still fit when the viewport is narrower than its
+        // usual minimum; scroll keeps every other tab reachable at its size.
+        m.w = std::min(m.w, viewport_w);
+        m.pinned_w = std::min(m.pinned_w, viewport_w);
+    }
     m.pitch = m.w + control_gap_;
-
-    // Final pass: per-tab extra offset + definitive chip positions. Collapsed
-    // members contribute zero width (chip stays visible at the fold point);
-    // pinned tabs use the fixed narrow slot.
     float acc = 0.0f;
-    size_t chipIdx = 0;
+    size_t chip_index = 0;
     for (size_t i = 0; i < vm.tabs.size(); ++i) {
         const int g = vm.tabs[i].group;
-        const bool runStart = g >= 0 && (i == 0 || vm.tabs[i - 1].group != g);
-        if (runStart && chipIdx < m.chips.size()) {
-            TabStripMetrics::Chip& chip = m.chips[chipIdx++];
-            chip.left = m.x0 + static_cast<float>(i) * m.pitch + acc;
-            acc += chip.width + chipGap;
+        if (g >= 0 && (i == 0 || vm.tabs[i - 1].group != g) && chip_index < m.chips.size()) {
+            auto& chip = m.chips[chip_index++];
+            chip.left = viewport_left + static_cast<float>(i) * m.pitch + acc;
+            acc += chip.width + chip_gap;
         }
         m.extra[i] = acc;
         if (vm.tabs[i].hidden) acc -= m.pitch;
-        else if (vm.tabs[i].pinned) acc += pinnedW - m.w;
+        else if (vm.tabs[i].pinned) acc += m.pinned_w - m.w;
     }
-    m.end_x = m.x0 + chipsTotal + static_cast<float>(pinnedCount) *
-        (pinnedW + control_gap_) + static_cast<float>(visibleCount) * m.pitch;
+    const float content_w = content_width();
+    m.scroll_max = overflow ? std::max(0.0f, content_w - viewport_w) : 0.0f;
+    auto& scroll = tab_strip_scroll_;
+    scroll.offset = std::clamp(scroll.offset, 0.0f, m.scroll_max);
+    const bool layout_changed = scroll.active != active || scroll.count != vm.tabs.size() ||
+        scroll.viewport_w != viewport_w || scroll.content_w != content_w || scroll.scale != scale_;
+    if (layout_changed && vm.tab_drag_index < 0) {
+        float reveal_left = 0.0f, reveal_right = 0.0f;
+        if (active >= 0) {
+            const size_t i = static_cast<size_t>(active);
+            reveal_left = static_cast<float>(active) * m.pitch + m.extra[i];
+            reveal_right = reveal_left + (vm.tabs[i].pinned ? m.pinned_w : m.w);
+            for (const auto& chip : m.chips) {
+                if (chip.group != vm.tabs[i].group) continue;
+                const float chip_left = chip.left - viewport_left;
+                if (vm.tabs[i].hidden) {
+                    reveal_left = chip_left;
+                    reveal_right = chip_left + std::min(chip.width, viewport_w);
+                } else if (reveal_right - chip_left <= viewport_w) {
+                    reveal_left = chip_left;
+                }
+                break;
+            }
+            if (reveal_left < scroll.offset) scroll.offset = reveal_left;
+            if (reveal_right > scroll.offset + viewport_w) scroll.offset = reveal_right - viewport_w;
+            scroll.offset = std::clamp(scroll.offset, 0.0f, m.scroll_max);
+        }
+        scroll.active = active;
+        scroll.count = vm.tabs.size();
+        scroll.viewport_w = viewport_w;
+        scroll.content_w = content_w;
+        scroll.scale = scale_;
+    }
+    m.scroll_offset = scroll.offset;
+    m.x0 = viewport_left - m.scroll_offset;
+    for (auto& chip : m.chips) chip.left -= m.scroll_offset;
+    m.end_x = overflow ? viewport_right + scroll_w + new_gap : m.x0 + content_w + new_gap;
+    m.new_button = D2D1::RectF(m.end_x, m.y, m.end_x + new_w, m.y + m.h);
     return m;
+}
+
+bool MainRenderer::ScrollTabStrip(const WindowViewModel& vm, float window_w, float steps) {
+    if (steps == 0.0f || vm.tab_drag_index >= 0) return false;
+    const auto strip = ComputeTabStrip(vm, window_w);
+    const float step = std::max(1.0f,
+        (strip.viewport.right - strip.viewport.left) * 0.75f);
+    const float offset = std::clamp(strip.scroll_offset + step * steps,
+        0.0f, strip.scroll_max);
+    if (offset == tab_strip_scroll_.offset) return false;
+    tab_strip_scroll_.offset = offset;
+    return true;
+}
+
+D2D1_RECT_F MainRenderer::TabStripViewportRect(const WindowViewModel& vm, float window_w) const {
+    return ComputeTabStrip(vm, window_w).viewport;
 }
 
 } // namespace pulse::ui

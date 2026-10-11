@@ -8,6 +8,15 @@
 
 namespace pulse::path {
 
+inline std::wstring DefaultNavigationRoot() {
+    wchar_t windows_path[MAX_PATH]{};
+    const UINT length = GetWindowsDirectoryW(windows_path, ARRAYSIZE(windows_path));
+    if (length >= 3 && length < ARRAYSIZE(windows_path) &&
+        windows_path[1] == L':' && windows_path[2] == L'\\')
+        return std::wstring(windows_path, 3);
+    return {}; // Empty paths open the existing This PC view.
+}
+
 inline bool Exists(std::wstring_view p) {
     const std::wstring path(p);
     return !path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;

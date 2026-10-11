@@ -11,9 +11,9 @@
 //   u32     := 4 bytes
 //
 // Message flow:
-//   client -> host : REQ_DELETE_RECYCLE / REQ_REALDELETE /
-//                    REQ_RENAME / REQ_NEW_FOLDER / REQ_NEW_FILE /
-//                    REQ_CANCEL / REQ_PING / REQ_SHUTDOWN / REQ_RESTORE_RECYCLE /
+//   client -> host : REQ_AUTHORIZED_RECYCLE / REQ_AUTHORIZED_DELETE /
+//                    REQ_NEW_FOLDER / REQ_NEW_FILE /
+//                    REQ_CANCEL / REQ_PING / REQ_SHUTDOWN /
 //                    REQ_CTX_QUERY / REQ_CTX_INVOKE / REQ_CTX_CLOSE
 //                    REQ_SHELL_LAUNCH (versioned payload in shell_launch_protocol.h)
 //   host -> client : RSP_PROGRESS (0..N) then exactly one RSP_DONE per request,
@@ -31,10 +31,7 @@
 // in every callback, aborting the running IFileOperation.
 //
 // Payload layouts (all strings UTF-16, wchar_count first):
-//   REQ_DELETE_RECYCLE /
-//   REQ_REALDELETE /
-//   REQ_RESTORE_RECYCLE  : paths(array) + exact recycle payloads(array, optional)
-//   REQ_RENAME               : path(string) + new_name(string)  (name only, not a path)
+//   Legacy deletion frames are rejected; retired rename/restore ids stay reserved.
 //   REQ_NEW_FOLDER /
 //   REQ_NEW_FILE             : path(string)  (full path of the item to create)
 //   REQ_CANCEL / REQ_PING /
@@ -70,18 +67,19 @@ namespace pulse::ipc {
 
 constexpr uint32_t kMagic = 0x53504C50; // 'PLPS'
 constexpr size_t kMaxPayload = 16 * 1024 * 1024;
+constexpr DWORD kContextMenuSessionLifetimeMs = 120000;
 constexpr HRESULT kMalformedDeleteResult = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0201);
 
 enum MsgType : uint32_t {
     REQ_DELETE_RECYCLE = 3,
     REQ_REALDELETE = 4,
-    REQ_RENAME = 5,
+    // 5: retired rename request; never reuse.
     REQ_CANCEL = 6,
     REQ_PING = 7,
     REQ_SHUTDOWN = 8,
     REQ_NEW_FOLDER = 9,
     REQ_NEW_FILE = 10,
-    REQ_RESTORE_RECYCLE = 11,
+    // 11: retired recycle restore request; never reuse.
     REQ_CTX_QUERY = 12,
     REQ_CTX_INVOKE = 13,
     REQ_CTX_CLOSE = 14,
@@ -308,16 +306,16 @@ inline std::wstring PipeNameFor(uint32_t ui_pid) {
 // ---------------------------------------------------------------------------
 // Exact byte-mode pipe I/O. The mode must match how the handle was opened.
 // Concurrent reads/writes on one handle require FILE_FLAG_OVERLAPPED; anonymous
-// pipes and the preview transport retain their synchronous mode.
+// pipes retain their synchronous mode.
 // ---------------------------------------------------------------------------
 struct PipeIoOptions {
     bool overlapped = true;
-    // Timeout for each pending chunk, NOT a whole-frame deadline. Callers with
-    // request-level budgets must enforce those separately (e.g. cancel event).
+    // Per-chunk pending timeout. Use deadline to share one budget across a frame.
     DWORD pending_timeout_ms = INFINITE;
     HANDLE cancel_event = nullptr;
     DWORD chunk_size = MAXDWORD;
     HANDLE progress_event = nullptr; // Signalled after every successful chunk.
+    ULONGLONG deadline = 0; // Absolute GetTickCount64 budget shared by a whole frame.
 };
 
 namespace detail {
@@ -326,7 +324,7 @@ inline bool PipeTransfer(HANDLE pipe, Byte* data, DWORD size, const PipeIoOption
     if (!size) return true;
     // A synchronous ReadFile/WriteFile cannot be interrupted by these options.
     if (!options.chunk_size || (!options.overlapped &&
-        (options.cancel_event || options.pending_timeout_ms != INFINITE))) {
+        (options.cancel_event || options.pending_timeout_ms != INFINITE || options.deadline))) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return false;
     }
@@ -343,6 +341,14 @@ inline bool PipeTransfer(HANDLE pipe, Byte* data, DWORD size, const PipeIoOption
             if (wait == WAIT_OBJECT_0) return finish(ERROR_CANCELLED);
             if (wait == WAIT_FAILED) return finish(GetLastError());
         }
+        DWORD timeout = options.pending_timeout_ms;
+        if (options.deadline) {
+            const ULONGLONG now = GetTickCount64();
+            if (now >= options.deadline) return finish(ERROR_TIMEOUT);
+            const ULONGLONG remaining = options.deadline - now;
+            const DWORD budget = remaining >= MAXDWORD ? MAXDWORD - 1 : static_cast<DWORD>(remaining);
+            if (budget < timeout) timeout = budget;
+        }
         const DWORD chunk = size < options.chunk_size ? size : options.chunk_size;
         OVERLAPPED ov{};
         ov.hEvent = event;
@@ -354,7 +360,7 @@ inline bool PipeTransfer(HANDLE pipe, Byte* data, DWORD size, const PipeIoOption
         if (!ok && event && GetLastError() == ERROR_IO_PENDING) {
             HANDLE waits[]{event, options.cancel_event};
             const DWORD wait = WaitForMultipleObjects(options.cancel_event ? 2 : 1, waits,
-                FALSE, options.pending_timeout_ms);
+                FALSE, timeout);
             if (wait != WAIT_OBJECT_0) {
                 const DWORD error = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT :
                     wait == WAIT_OBJECT_0 + 1 ? ERROR_CANCELLED :
@@ -370,6 +376,7 @@ inline bool PipeTransfer(HANDLE pipe, Byte* data, DWORD size, const PipeIoOption
         }
         if (!ok) return finish(GetLastError());
         if (!done) return finish(ERROR_BROKEN_PIPE);
+        if (options.deadline && GetTickCount64() >= options.deadline) return finish(ERROR_TIMEOUT);
         if (options.progress_event) SetEvent(options.progress_event);
         data += done;
         size -= done;

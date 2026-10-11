@@ -29,6 +29,7 @@
 #include "app_worker.h"
 #include "entry_sort.h"
 #include "snapshot_patch.h"
+#include "directory_projection.h"
 #include "tray_metadata.h"
 #include "session.h"
 #include "app_prefs.h"
@@ -2958,49 +2959,58 @@ void TestSnapshotPatch() {
     fs::DirNotifyEvent added;
     added.action = FILE_ACTION_ADDED;
     added.name = L"alpha.txt";
-    Check(ApplyDirNotify(entries, dir, added, ui::SortColumn::Name, ui::SortDirection::Asc) ==
-              NotifyPatch::Applied &&
-          entries.size() == 1 && _wcsicmp(entries[0].name.c_str(), L"alpha.txt") == 0,
-          L"patch: ADDED inserts a real file");
+    auto resolved = ResolveDirNotifies(dir, {added});
+    Check(ApplyResolvedDirNotifies(entries, resolved) == NotifyPatch::Applied &&
+          entries.size() == 1 && entries[0].name == L"alpha.txt",
+          L"patch: resolved ADDED inserts a real file");
 
     hf = CreateFileW(b.c_str(), GENERIC_WRITE, 0, nullptr,
                      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hf != INVALID_HANDLE_VALUE) CloseHandle(hf);
     added.name = L"beta.txt";
-    Check(ApplyDirNotify(entries, dir, added, ui::SortColumn::Name, ui::SortDirection::Asc) ==
-              NotifyPatch::Applied &&
+    resolved = ResolveDirNotifies(dir, {added});
+    Check(ApplyResolvedDirNotifies(entries, resolved) == NotifyPatch::Applied &&
           entries.size() == 2,
-          L"patch: second ADDED keeps sort order");
-    Check(_wcsicmp(entries[0].name.c_str(), L"alpha.txt") == 0 &&
-          _wcsicmp(entries[1].name.c_str(), L"beta.txt") == 0,
-          L"patch: name sort is alpha then beta");
+          L"patch: second resolved ADDED adds one row");
+    auto snapshot = ProjectDirectorySnapshot(
+        std::make_shared<std::vector<fs::DirEntry>>(entries), dir,
+        ui::SortColumn::Name, ui::SortDirection::Asc, FolderSortMode::FoldersFirst);
+    Check(snapshot && snapshot->size() == 2 && (*snapshot)[0].name == L"alpha.txt" &&
+          (*snapshot)[1].name == L"beta.txt",
+          L"patch: projected name sort is alpha then beta");
 
     fs::DirNotifyEvent renamed;
     renamed.action = FILE_ACTION_RENAMED_NEW_NAME;
     renamed.old_name = L"beta.txt";
     renamed.name = L"gamma.txt";
     MoveFileW(b.c_str(), (dir + L"\\gamma.txt").c_str());
-    Check(ApplyDirNotify(entries, dir, renamed, ui::SortColumn::Name, ui::SortDirection::Asc) ==
-              NotifyPatch::Applied,
-          L"patch: RENAMED applies");
-    Check(entries.size() == 2 && _wcsicmp(entries[1].name.c_str(), L"gamma.txt") == 0,
-          L"patch: rename updates the listing name");
+    resolved = ResolveDirNotifies(dir, {renamed});
+    Check(ApplyResolvedDirNotifies(entries, resolved) == NotifyPatch::Applied,
+          L"patch: resolved RENAMED applies");
+    snapshot = ProjectDirectorySnapshot(
+        std::make_shared<std::vector<fs::DirEntry>>(entries), dir,
+        ui::SortColumn::Name, ui::SortDirection::Asc, FolderSortMode::FoldersFirst);
+    Check(snapshot && snapshot->size() == 2 && (*snapshot)[0].name == L"alpha.txt" &&
+          (*snapshot)[1].name == L"gamma.txt",
+          L"patch: projected rename replaces the old listing name");
 
     fs::DirNotifyEvent removed;
     removed.action = FILE_ACTION_REMOVED;
     removed.name = L"alpha.txt";
     DeleteFileW(a.c_str());
-    Check(ApplyDirNotify(entries, dir, removed, ui::SortColumn::Name, ui::SortDirection::Asc) ==
-              NotifyPatch::Applied &&
-          entries.size() == 1,
-          L"patch: REMOVED drops the file");
+    resolved = ResolveDirNotifies(dir, {removed});
+    Check(ApplyResolvedDirNotifies(entries, resolved) == NotifyPatch::Applied &&
+          entries.size() == 1 && entries[0].name == L"gamma.txt",
+          L"patch: resolved REMOVED drops only the deleted file");
 
     fs::DirNotifyEvent nested;
     nested.action = FILE_ACTION_ADDED;
     nested.name = L"sub\\file.txt";
-    Check(ApplyDirNotify(entries, dir, nested, ui::SortColumn::Name, ui::SortDirection::Asc) ==
-              NotifyPatch::NeedFullEnum,
-          L"patch: nested names require a full enumeration");
+    resolved = ResolveDirNotifies(dir, {nested});
+    Check(resolved.status == NotifyPatch::NeedFullEnum &&
+          ApplyResolvedDirNotifies(entries, resolved) == NotifyPatch::NeedFullEnum &&
+          entries.size() == 1 && entries[0].name == L"gamma.txt",
+          L"patch: nested names require enumeration without changing facts");
 
     DeleteFileW((dir + L"\\gamma.txt").c_str());
     RemoveDirectoryW(dir.c_str());
@@ -3013,13 +3023,22 @@ void TestSnapshotPatchBatch() {
                              std::to_wstring(GetCurrentProcessId());
     CreateDirectoryW(dir.c_str(), nullptr);
     const auto full = [&](const wchar_t* name) { return dir + L"\\" + name; };
+    const auto set_time = [&](HANDLE file, DWORD seconds) {
+        ULARGE_INTEGER ticks{};
+        ticks.QuadPart = 132000000000000000ull + seconds * 10000000ull;
+        const FILETIME time{ticks.LowPart, ticks.HighPart};
+        Check(SetFileTime(file, nullptr, nullptr, &time) != FALSE,
+              L"patch batch: deterministic fixture timestamp is set");
+    };
     const auto make = [&](const wchar_t* name, DWORD bytes) {
         HANDLE hf = CreateFileW(full(name).c_str(), GENERIC_WRITE, 0, nullptr,
                                 CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Check(hf != INVALID_HANDLE_VALUE, L"patch batch: fixture file is created");
         if (hf == INVALID_HANDLE_VALUE) return;
         std::vector<char> data(bytes, 'x');
         DWORD written = 0;
         if (bytes) WriteFile(hf, data.data(), bytes, &written, nullptr);
+        set_time(hf, bytes);
         CloseHandle(hf);
     };
     const struct { const wchar_t* name; DWORD bytes; } seed[] = {
@@ -3033,11 +3052,18 @@ void TestSnapshotPatchBatch() {
     }
     CreateDirectoryW(full(L"docs").c_str(), nullptr);
     {
+        HANDLE folder = CreateFileW(full(L"docs").c_str(), FILE_WRITE_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        Check(folder != INVALID_HANDLE_VALUE, L"patch batch: fixture folder is opened");
+        if (folder != INVALID_HANDLE_VALUE) {
+            set_time(folder, 0);
+            CloseHandle(folder);
+        }
         fs::DirEntry entry;
         if (FillDirEntry(dir, L"docs", entry)) initial.push_back(std::move(entry));
     }
 
-    // Disk reaches its final state first; both paths then stat the same files.
     make(L"file3.txt", 7);
     DeleteFileW(full(L"beta.log").c_str());
     MoveFileW(full(L"delta.txt").c_str(), full(L"omega.txt").c_str());
@@ -3056,55 +3082,96 @@ void TestSnapshotPatchBatch() {
         ev(FILE_ACTION_REMOVED, L"beta.log"),
         ev(FILE_ACTION_RENAMED_NEW_NAME, L"omega.txt", L"delta.txt"),
         ev(FILE_ACTION_RENAMED_NEW_NAME, L"gamma.txt", L"Gamma.txt"),
-        ev(FILE_ACTION_ADDED, L"temp.tmp"), ev(FILE_ACTION_REMOVED, L"temp.tmp"),
         ev(FILE_ACTION_MODIFIED, L"zeta.txt"), ev(FILE_ACTION_ADDED, L"file20.txt"),
-        ev(FILE_ACTION_ADDED, L"ghost.txt"), ev(FILE_ACTION_REMOVED, L"missing.txt")};
+        ev(FILE_ACTION_REMOVED, L"missing.txt")};
 
-    bool same = true;
+    const auto resolved = ResolveDirNotifies(dir, events);
+    auto facts = std::make_shared<std::vector<fs::DirEntry>>(initial);
+    Check(resolved.status == NotifyPatch::Applied &&
+          ApplyResolvedDirNotifies(*facts, resolved) == NotifyPatch::Applied,
+          L"patch batch: production resolver and fact patch accept valid events");
+    const auto has = [&](const wchar_t* name) {
+        return std::any_of(facts->begin(), facts->end(),
+                           [&](const fs::DirEntry& e) { return e.name == name; });
+    };
+    Check(facts->size() == 10 && has(L"file3.txt") && has(L"file20.txt") && has(L"omega.txt") &&
+              has(L"gamma.txt") && !has(L"Gamma.txt") && !has(L"beta.log") &&
+              !has(L"delta.txt") && !has(L"missing.txt"),
+          L"patch batch: exact leaf names resolve adds, deletes and case-only renames");
+    const auto zeta = std::find_if(facts->begin(), facts->end(),
+        [](const fs::DirEntry& e) { return e.name == L"zeta.txt"; });
+    Check(zeta != facts->end() && zeta->size == 99,
+          L"patch batch: MODIFIED refreshes file size from resolved disk facts");
+
+    // Expected physical names are independent of the sorting implementation.
+    const std::vector<std::wstring> name_order = {
+        L"docs", L"alpha.txt", L"epsilon.md", L"file2.txt", L"file3.txt", L"file10.txt",
+        L"file20.txt", L"gamma.txt", L"omega.txt", L"zeta.txt"};
+    const std::vector<std::wstring> size_order = {
+        L"docs", L"alpha.txt", L"file2.txt", L"file20.txt", L"epsilon.md", L"file3.txt",
+        L"gamma.txt", L"omega.txt", L"file10.txt", L"zeta.txt"};
+    const std::vector<std::wstring> type_order = {
+        L"docs", L"epsilon.md", L"alpha.txt", L"file2.txt", L"file3.txt", L"file10.txt",
+        L"file20.txt", L"gamma.txt", L"omega.txt", L"zeta.txt"};
     const ui::SortColumn cols[] = {ui::SortColumn::Name, ui::SortColumn::Size,
                                    ui::SortColumn::Mtime, ui::SortColumn::Type};
     const ui::SortDirection dirs[] = {ui::SortDirection::Asc, ui::SortDirection::Desc};
-    std::vector<fs::DirEntry> last;
     for (const auto col : cols) {
         for (const auto sort_dir : dirs) {
-            std::vector<fs::DirEntry> base = initial;
-            std::sort(base.begin(), base.end(), [&](const fs::DirEntry& a, const fs::DirEntry& b) {
-                return EntryLess(a, b, col, sort_dir);
-            });
-            std::vector<fs::DirEntry> seq = base;
-            for (const auto& event : events)
-                ApplyDirNotify(seq, dir, event, col, sort_dir);
-            std::vector<fs::DirEntry> batch = base;
-            if (ApplyDirNotifyBatch(batch, dir, events, col, sort_dir) != NotifyPatch::Applied ||
-                batch.size() != seq.size()) {
-                same = false;
-                continue;
+            auto expected = col == ui::SortColumn::Size || col == ui::SortColumn::Mtime
+                ? size_order : col == ui::SortColumn::Type ? type_order : name_order;
+            // Mtime mixes directories with files, with name as its timestamp tie-breaker.
+            if (col == ui::SortColumn::Mtime) {
+                expected.erase(expected.begin());
+                expected.insert(expected.begin() + 1, L"docs");
             }
-            for (size_t i = 0; i < seq.size(); ++i) {
-                if (seq[i].name != batch[i].name || seq[i].size != batch[i].size ||
-                    seq[i].is_dir != batch[i].is_dir)
-                    same = false;
+            if (sort_dir == ui::SortDirection::Desc) {
+                const auto first = col == ui::SortColumn::Mtime ? expected.begin()
+                                                               : expected.begin() + 1;
+                std::reverse(first, expected.end());
             }
-            last = batch;
+            const auto projection = ProjectDirectorySnapshot(facts, dir, col, sort_dir,
+                                                              FolderSortMode::FoldersFirst);
+            bool correct = projection && projection->size() == expected.size();
+            if (correct) {
+                for (size_t index = 0; index < expected.size(); ++index)
+                    correct = correct && (*projection)[index].name == expected[index];
+            }
+            Check(correct, (L"patch batch: explicit projected order column=" +
+                std::to_wstring(static_cast<int>(col)) + L" direction=" +
+                std::to_wstring(static_cast<int>(sort_dir))).c_str());
         }
     }
-    Check(same, L"patch batch: identical to per-event patching for every sort order");
-    const auto has = [&](const wchar_t* name) {
-        return std::any_of(last.begin(), last.end(),
-                           [&](const fs::DirEntry& e) { return e.name == name; });
-    };
-    Check(last.size() == 10 && has(L"file3.txt") && has(L"file20.txt") && has(L"omega.txt") &&
-              has(L"gamma.txt") && !has(L"Gamma.txt") && !has(L"beta.log") &&
-              !has(L"delta.txt") && !has(L"temp.tmp") && !has(L"ghost.txt"),
-          L"patch batch: adds, removes, renames and case-only renames resolve");
-    const std::vector<fs::DirNotifyEvent> nested = {
-        ev(FILE_ACTION_ADDED, L"a.txt"), ev(FILE_ACTION_ADDED, L"b.txt"),
-        ev(FILE_ACTION_ADDED, L"c.txt"), ev(FILE_ACTION_ADDED, L"d.txt"),
-        ev(FILE_ACTION_ADDED, L"sub\\file.txt")};
-    std::vector<fs::DirEntry> scratch = initial;
-    Check(ApplyDirNotifyBatch(scratch, dir, nested, ui::SortColumn::Name,
-                              ui::SortDirection::Asc) == NotifyPatch::NeedFullEnum,
-          L"patch batch: nested names require a full enumeration");
+    Check(facts->size() == 10 && (*facts)[1].name == L"gamma.txt" &&
+          (*facts)[2].name == L"omega.txt" && (*facts)[8].name == L"file3.txt",
+          L"patch batch: projecting views leaves patched facts in their original slots");
+
+    const std::vector<std::vector<fs::DirNotifyEvent>> invalid_batches = {
+        {ev(FILE_ACTION_REMOVED, L"alpha.txt"), ev(FILE_ACTION_ADDED, L"sub\\file.txt")},
+        {ev(FILE_ACTION_REMOVED, L"alpha.txt"), ev(FILE_ACTION_ADDED, L"")},
+        {ev(FILE_ACTION_REMOVED, L"alpha.txt"),
+         ev(FILE_ACTION_RENAMED_NEW_NAME, L"omega.txt", L"sub/old.txt")},
+        {ev(FILE_ACTION_REMOVED, L"alpha.txt"), ev(FILE_ACTION_ADDED, L"ghost.txt")},
+        {ev(FILE_ACTION_ADDED, L"temp.tmp"), ev(FILE_ACTION_REMOVED, L"temp.tmp")},
+        {ev(FILE_ACTION_REMOVED, L"alpha.txt"), ev(FILE_ACTION_RENAMED_OLD_NAME, L"omega.txt")}};
+    for (size_t batch = 0; batch < invalid_batches.size(); ++batch) {
+        auto scratch = initial;
+        const auto invalid = ResolveDirNotifies(dir, invalid_batches[batch]);
+        bool unchanged = invalid.status == NotifyPatch::NeedFullEnum &&
+            ApplyResolvedDirNotifies(scratch, invalid) == NotifyPatch::NeedFullEnum &&
+            scratch.size() == initial.size();
+        if (unchanged) {
+            for (size_t index = 0; index < initial.size(); ++index) {
+                const auto& before = initial[index];
+                const auto& after = scratch[index];
+                unchanged = unchanged && before.name == after.name && before.size == after.size &&
+                    before.attrs == after.attrs && before.is_dir == after.is_dir &&
+                    CompareFileTime(&before.mtime, &after.mtime) == 0;
+            }
+        }
+        Check(unchanged, (L"patch batch: invalid or inconclusive batch preserves all facts case=" +
+                          std::to_wstring(batch)).c_str());
+    }
 
     for (const wchar_t* name : {L"alpha.txt", L"gamma.txt", L"omega.txt", L"epsilon.md",
                                 L"file2.txt", L"file3.txt", L"file10.txt", L"file20.txt",

@@ -14,7 +14,9 @@ struct Handle {
 struct PipePair {
     Handle server, client;
     bool Open() {
-        const auto name = L"\\\\.\\pipe\\pulse_io_test_" + std::to_wstring(GetCurrentProcessId());
+        static uint32_t sequence = 0;
+        const auto name = L"\\\\.\\pipe\\pulse_io_test_" + std::to_wstring(GetCurrentProcessId()) +
+            L"_" + std::to_wstring(++sequence);
         server.value = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             1, 4096, 4096, 0, nullptr);
@@ -147,6 +149,63 @@ void TestPipeIo(Check check) {
             timeout ? "timed-out blocked write is reaped without replay; connection survives" :
                 "cancelled blocked write is reaped without replay; connection survives");
     }
+    {
+        const uint8_t expected = 0x71;
+        byte = 0xab;
+        const bool sent = WriteAll(pair.server.value, &expected, 1);
+        const bool read = PipeRead(pair.client.value, &byte, 1, {.deadline = GetTickCount64() - 1});
+        const DWORD error = GetLastError();
+        uint8_t received = 0;
+        const bool retained = !read && PipeRead(pair.client.value, &received, 1, {.pending_timeout_ms = 1000});
+        check(sent && !read && error == ERROR_TIMEOUT && byte == 0xab && retained && received == expected,
+            "expired frame budget never issues even immediately ready I/O");
+    }
+    {
+        std::vector<uint8_t> actual(8, 0xab);
+        bool sent = true;
+        std::thread writer([&] {
+            for (uint8_t value = 1; value <= 8; ++value) {
+                Sleep(40);
+                sent = WriteAll(pair.server.value, &value, 1) && sent;
+            }
+        });
+        const auto started = GetTickCount64();
+        const bool read = PipeRead(pair.client.value, actual.data(), static_cast<DWORD>(actual.size()),
+            {.pending_timeout_ms = 1000, .deadline = started + 100});
+        const DWORD error = GetLastError();
+        const auto elapsed = GetTickCount64() - started;
+        writer.join();
+        DWORD available = 0;
+        PeekNamedPipe(pair.client.value, nullptr, 0, nullptr, &available, nullptr);
+        std::vector<uint8_t> suffix(available);
+        const bool drained = PipeRead(pair.client.value, suffix.data(), available, {.pending_timeout_ms = 1000});
+        check(sent && !read && error == ERROR_TIMEOUT && elapsed < 300 && drained,
+            "slow partial chunks cannot renew a whole-frame deadline");
+    }
+    {
+        bool sent = false;
+        std::thread writer([&] {
+            const uint8_t header = 0x31, body = 0x32;
+            Sleep(20);
+            sent = WriteAll(pair.server.value, &header, 1);
+            Sleep(150);
+            sent = WriteAll(pair.server.value, &body, 1) && sent;
+        });
+        PipeIoOptions options; options.pending_timeout_ms = 1000; options.deadline = GetTickCount64() + 100;
+        uint8_t header = 0, body = 0xab;
+        const bool first = PipeRead(pair.client.value, &header, 1, options);
+        const bool second = first && PipeRead(pair.client.value, &body, 1, options);
+        const DWORD error = GetLastError();
+        writer.join();
+        DWORD available = 0;
+        PeekNamedPipe(pair.client.value, nullptr, 0, nullptr, &available, nullptr);
+        std::vector<uint8_t> suffix(available);
+        const bool drained = PipeRead(pair.client.value, suffix.data(), available, {.pending_timeout_ms = 1000});
+        check(sent && first && header == 0x31 && !second && error == ERROR_TIMEOUT && body == 0xab && drained,
+            "header and body share the same absolute frame deadline");
+    }
+    check(!PipeRead(INVALID_HANDLE_VALUE, &byte, 1, {.overlapped = false, .deadline = GetTickCount64() + 10}) &&
+        GetLastError() == ERROR_INVALID_PARAMETER, "reject frame deadlines on uninterruptible synchronous I/O");
     check(DisconnectNamedPipe(pair.server.value) != FALSE &&
         !PipeRead(pair.client.value, &byte, 1, {.pending_timeout_ms = 1000}) &&
         (GetLastError() == ERROR_BROKEN_PIPE || GetLastError() == ERROR_PIPE_NOT_CONNECTED),

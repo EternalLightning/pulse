@@ -1,5 +1,8 @@
 #include "legacy_icons.h"
 #include "command_icons.h"
+#include "../common/resource_ids.h"
+#include <shlwapi.h>
+#pragma comment(lib, "shlwapi.lib")
 #include "../common/localization.h"
 #include "fluent_components.h"
 #include "tab_shape.h"
@@ -255,6 +258,8 @@ void Painter::SetCompositor(Compositor* compositor) noexcept {
     }
     scratch_brush_.reset();
     round_stroke_.reset();
+    rename_svg_dc_.reset();
+    for (auto& svg : rename_svgs_) svg.reset();
     body_format_.reset();
     nav_format_.reset();
     caption_format_.reset();
@@ -587,6 +592,7 @@ void Painter::DrawGlyphWithBrush(std::wstring_view glyph, const D2D1_RECT_F& bou
     if (!compositor_) {
         return;
     }
+    if (glyph == L"\xE8AC" && DrawRenameResource(bounds, Brush(brush)->GetColor())) return;
     const auto command = command_icons::FromGlyph(glyph);
     if (command != command_icons::Icon::None) {
         EnsureStrokeStyle();
@@ -597,8 +603,49 @@ void Painter::DrawGlyphWithBrush(std::wstring_view glyph, const D2D1_RECT_F& bou
                       HorizontalAlignment::Center);
 }
 
+bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color) {
+    if (!dc_ || !theme_) return false;
+    if (!rename_svg_dc_.get() && FAILED(dc_->QueryInterface(IID_PPV_ARGS(&rename_svg_dc_)))) return false;
+    const auto disabled = theme_->text_disabled;
+    const bool monochrome = high_contrast_ ||
+        (color.r == disabled.r && color.g == disabled.g && color.b == disabled.b);
+    const size_t variant = monochrome ? 0 : dark_ ? 2 : 1;
+    auto& svg = rename_svgs_[variant];
+    if (!svg.get()) {
+        const int resource_id = monochrome ? IDR_FILES_RENAME_SVG :
+            dark_ ? IDR_FILES_RENAME_COLOR_DARK_SVG : IDR_FILES_RENAME_COLOR_SVG;
+        const HMODULE module = GetModuleHandleW(nullptr);
+        const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
+        const HGLOBAL loaded = resource ? LoadResource(module, resource) : nullptr;
+        const void* bytes = loaded ? LockResource(loaded) : nullptr;
+        const DWORD size = resource ? SizeofResource(module, resource) : 0;
+        if (!bytes || !size) return false;
+        ComPtr<IStream> stream;
+        stream.p = SHCreateMemStream(static_cast<const BYTE*>(bytes), size);
+        if (!stream.get() || FAILED(rename_svg_dc_->CreateSvgDocument(stream.get(),
+            D2D1::SizeF(24, 24), &svg))) return false;
+    }
+    if (monochrome) {
+        ComPtr<ID2D1SvgElement> root;
+        svg->GetRoot(&root);
+        ComPtr<ID2D1SvgPaint> fill;
+        if (root.get() && SUCCEEDED(root->GetAttributeValue(L"fill", IID_PPV_ARGS(&fill))) && fill.get())
+            fill->SetColor(&color);
+    }
+    const auto icon = command_icons::CenteredBounds(bounds, Px(20.0f));
+    D2D1_MATRIX_3X2_F previous{};
+    rename_svg_dc_->GetTransform(&previous);
+    rename_svg_dc_->SetTransform(D2D1::Matrix3x2F::Scale(
+        (icon.right - icon.left) / 24.0f, (icon.bottom - icon.top) / 24.0f) *
+        D2D1::Matrix3x2F::Translation(icon.left, icon.top) * previous);
+    rename_svg_dc_->DrawSvgDocument(svg.get());
+    rename_svg_dc_->SetTransform(previous);
+    return true;
+}
+
 void Painter::DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                                   const D2D1_COLOR_F& color, IDWriteTextFormat* format) {
+    if (glyph == L"\xE8AC" && DrawRenameResource(bounds, color)) return;
     const auto command = command_icons::FromGlyph(glyph);
     if (command != command_icons::Icon::None) {
         EnsureStrokeStyle();
@@ -2189,64 +2236,6 @@ float Painter::MeasureBadgeWidth(std::wstring_view text) const {
     const float text_w = MeasureTextWidth(compositor_, CaptionFormat(), text);
     const float fallback = Px(12.0f) * static_cast<float>(text.size());
     return std::max(Px(28.0f), std::ceil((text_w > 0.0f ? text_w : fallback) + Px(14.0f)));
-}
-
-float Painter::OmnibarHintReservePx() const {
-    const float label = MeasureTextWidth(compositor_, CaptionFormat(), kOmnibarHintBadge);
-    const float label_w = label > 0.0f ? label : Px(24.0f);
-    return Px(8.0f) + Px(8.0f) + Px(16.0f) + Px(6.0f) + label_w + Px(6.0f)
-         + MeasureBadgeWidth(kOmnibarHintKey) + Px(6.0f);
-}
-
-D2D1_RECT_F Painter::DrawOmnibarHints(const D2D1_RECT_F& field, bool skip_search_glyph) {
-    if (!theme_ || Width(field) <= 0.0f || Height(field) <= 0.0f) return {};
-    const float reserve = OmnibarHintReservePx();
-    if (Width(field) < reserve + Px(48.0f)) return {};
-
-    const float chip_left = field.right - reserve;
-    const float chip_right = field.right - Px(8.0f);
-    const float chip_top = field.top + Px(3.0f);
-    const float chip_bottom = field.bottom - Px(3.0f);
-    const D2D1_RECT_F chip = D2D1::RectF(chip_left, chip_top, chip_right, chip_bottom);
-    const D2D1_COLOR_F chip_fill = high_contrast_ ? theme_->fill_input
-        : dark_ ? Rgba(0xFFFFFF, 18) : Rgba(0x000000, 14);
-    FillRoundedRect(chip, Height(chip) * 0.5f, chip_fill);
-
-    float x = chip_left + Px(8.0f);
-    const float icon = Px(16.0f);
-    const float icon_y = chip_top + (Height(chip) - icon) * 0.5f;
-    const D2D1_RECT_F icon_rc = D2D1::RectF(x, icon_y, x + icon, icon_y + icon);
-    if (!skip_search_glyph) {
-        DrawGlyph(kSearch, icon_rc, theme_->text_secondary);
-    }
-    x += icon + Px(6.0f);
-
-    const float label = MeasureTextWidth(compositor_, CaptionFormat(), kOmnibarHintBadge);
-    const float label_w = label > 0.0f ? label : Px(24.0f);
-    DrawText(kOmnibarHintBadge,
-             D2D1::RectF(x, chip_top, x + label_w, chip_bottom),
-             CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Left,
-             BlendOver(chip_fill, theme_->bg));
-    x += label_w + Px(6.0f);
-
-    const float key_w = MeasureBadgeWidth(kOmnibarHintKey);
-    DrawBadge({D2D1::RectF(x, chip_top + Px(1.0f), x + key_w, chip_bottom - Px(1.0f)),
-               kOmnibarHintKey, BadgeKind::Keycap});
-    return icon_rc;
-}
-
-D2D1_RECT_F Painter::ButtonGlyphRect(const D2D1_RECT_F& bounds, bool icon_only) const {
-    const float icon = Px(20.0f);
-    if (icon_only) {
-        const float cx = (bounds.left + bounds.right) * 0.5f;
-        const float cy = (bounds.top + bounds.bottom) * 0.5f;
-        return D2D1::RectF(cx - icon * 0.5f, cy - icon * 0.5f,
-                           cx + icon * 0.5f, cy + icon * 0.5f);
-    }
-    const float pad_x = Px(8.0f);
-    const float pad_y = Px(4.0f);
-    return D2D1::RectF(bounds.left + pad_x, bounds.top + pad_y,
-                       bounds.left + pad_x + icon, bounds.bottom - pad_y);
 }
 
 D2D1_RECT_F Painter::SidebarItemIconRect(const D2D1_RECT_F& bounds, bool status_dot) const {

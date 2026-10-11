@@ -407,10 +407,89 @@ void TestShellCompatibility(bool native_control = false) {
 }
 }
 
+void TestTargetSession() {
+    using namespace pulse::ui;
+    testing::SetShellIdListRenderer(FailedRenderer);
+    HWND window = CreateWindowExW(0, L"STATIC", L"drop target session fixture", WS_POPUP,
+        300, 250, 200, 100, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    Check(window != nullptr, L"isolated hidden drop-target window exists");
+    if (!window) { testing::SetShellIdListRenderer(nullptr); return; }
+    const std::vector<std::wstring> entering_paths{L"C:\\fixture\\enter.txt"};
+    const std::vector<std::wstring> dropped_paths{L"C:\\fixture\\final.txt", L"C:\\fixture\\second.txt"};
+    auto* entering = FileDataObject::Create(entering_paths);
+    auto* dropped = FileDataObject::Create(dropped_paths);
+    Check(SetEffect(entering, CFSTR_PREFERREDDROPEFFECT, DROPEFFECT_MOVE) &&
+          SetEffect(dropped, CFSTR_PREFERREDDROPEFFECT, DROPEFFECT_COPY),
+          L"owned entering and final data objects carry different source preferences");
+    size_t overs = 0, drops = 0, leaves = 0;
+    bool metadata_ready = false;
+    std::vector<std::wstring> observed_sources;
+    POINT observed_point{};
+    DWORD observed_keys = 0, observed_allowed = 0, observed_preferred = 0;
+    DropTargetCallbacks callbacks;
+    const auto observe = [&](const auto& paths, POINT point, DWORD keys, DWORD allowed, DWORD preferred) {
+        observed_sources = paths; observed_point = point;
+        observed_keys = keys; observed_allowed = allowed; observed_preferred = preferred;
+    };
+    callbacks.drag_over = [&](const auto& paths, POINT point, DWORD keys, DWORD allowed, DWORD preferred) {
+        ++overs; observe(paths, point, keys, allowed, preferred);
+        return metadata_ready ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+    };
+    callbacks.drag_leave = [&] { ++leaves; };
+    callbacks.drop = [&](const auto& paths, POINT point, DWORD keys, DWORD allowed, DWORD preferred) {
+        ++drops; observe(paths, point, keys, allowed, preferred); return DROPEFFECT_COPY;
+    };
+    auto* target = new WindowDropTarget(window, std::move(callbacks));
+    const auto screen = [&](LONG x, LONG y) {
+        POINT point{x, y}; ClientToScreen(window, &point); return POINTL{point.x, point.y};
+    };
+    DWORD effect = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    target->DragEnter(entering, 0, screen(5, 7), &effect);
+    Check(effect == DROPEFFECT_COPY && overs == 1 && observed_sources == entering_paths,
+          L"enter owns the source paths and publishes initial feedback");
+    effect = DROPEFFECT_MOVE;
+    target->DragOver(MK_SHIFT, screen(23, 31), &effect);
+    metadata_ready = true;
+    Check(target->RefreshDragFeedback() == DROPEFFECT_MOVE && overs == 3 &&
+          observed_sources == entering_paths && observed_point.x == 23 && observed_point.y == 31 &&
+          observed_keys == MK_SHIFT && observed_allowed == DROPEFFECT_MOVE && observed_preferred == DROPEFFECT_MOVE,
+          L"metadata refresh replays the latest client point, modifiers, allowed mask and source preference");
+    target->DragLeave();
+    const auto after_leave = overs;
+    effect = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    target->DragOver(0, screen(40, 45), &effect);
+    Check(target->RefreshDragFeedback() == DROPEFFECT_NONE && effect == DROPEFFECT_NONE &&
+          overs == after_leave && leaves == 1,
+          L"DragLeave ends the session so metadata completion cannot replay old feedback");
+    metadata_ready = false;
+    effect = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    target->DragEnter(entering, 0, screen(8, 9), &effect);
+    const auto before_drop = overs;
+    effect = DROPEFFECT_COPY;
+    target->Drop(dropped, MK_CONTROL, screen(42, 43), &effect);
+    Check(effect == DROPEFFECT_COPY && drops == 1 && observed_sources == dropped_paths &&
+          observed_point.x == 42 && observed_point.y == 43 && observed_keys == MK_CONTROL &&
+          observed_allowed == DROPEFFECT_COPY && observed_preferred == DROPEFFECT_COPY &&
+          dropped->PerformedEffect() == DROPEFFECT_COPY,
+          L"Drop re-extracts the final owned data object and records its performed effect");
+    Check(target->RefreshDragFeedback() == DROPEFFECT_NONE && overs == before_drop && leaves == 1,
+          L"completed Drop retires hover context without replaying feedback or adding leave callbacks");
+    target->Release(); entering->Release(); dropped->Release();
+    Check(testing::WaitForShellIdListWorker(2000), L"optional data-object preparation finishes before session fixture cleanup");
+    testing::SetShellIdListRenderer(nullptr);
+    DestroyWindow(window);
+}
+
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
     setvbuf(stdout, nullptr, _IONBF, 0);
     OleInitialize(nullptr);
+    if (argc == 2 && wcscmp(argv[1], L"--target-session-only") == 0) {
+        TestTargetSession();
+        OleUninitialize();
+        wprintf(L"drag/drop target session: %d passed, %d failed\n", passed, failed);
+        return failed ? 1 : 0;
+    }
     if (argc > 1 && wcscmp(argv[1], L"--cida") == 0) {
         TestCidaPreparation();
         OleUninitialize();

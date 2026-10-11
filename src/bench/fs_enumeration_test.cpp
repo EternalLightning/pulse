@@ -1,4 +1,5 @@
 #include "../fs/fs_enum.h"
+#include "fs_enum_fallback_cases.h"
 #include "../ipc/shell_client.h"
 #include <algorithm>
 #include <filesystem>
@@ -65,6 +66,7 @@ int RunCancellationCases() {
 int main(int argc, char** argv) {
     using namespace pulse::fs;
     if (argc == 2 && std::strcmp(argv[1], "--cancel-only") == 0) return RunCancellationCases();
+    if (argc == 2 && std::strcmp(argv[1], "--fallback-only") == 0) return RunEnumerationFallbackCases();
     if (argc == 2 && std::strcmp(argv[1], "--paths-only") == 0) {
         int failures = 0;
         auto check = [&](bool ok, const char* label) {
@@ -125,7 +127,7 @@ int main(int argc, char** argv) {
         mid.Next(item) == DirectoryRead::Entry, "cancellation between entries does not consume the next record");
     DirectoryEnumerator moved(std::move(mid));
     check(!collect(moved).empty(), "move transfers cursor handle ownership and position");
-    bool stream_error = false, combined_error = false;
+    bool stream_error = false, native_error = false;
     try { DirectoryEnumerator missing((root / L"missing").wstring()); missing.Next(item); }
     catch (const EnumerationError& error) {
         const std::string message = error.what();
@@ -135,10 +137,12 @@ int main(int argc, char** argv) {
     try { EnumerateDirectory((root / L"missing").wstring(), snapshot); }
     catch (const EnumerationError& error) {
         const std::string message = error.what();
-        combined_error = message.find("NT primary:") != std::string::npos && message.find("Win32 fallback:") != std::string::npos && error.Code() == ERROR_PATH_NOT_FOUND;
+        native_error = message.find("NT primary:") != std::string::npos && message.find("NtCreateFile") != std::string::npos &&
+            message.find("Win32 fallback:") == std::string::npos &&
+            (error.Code() == ERROR_FILE_NOT_FOUND || error.Code() == ERROR_PATH_NOT_FOUND);
         std::cout << "[INFO] " << message << '\n';
     }
-    check(stream_error && combined_error, "errors retain numeric Win32 code, path and both backend failures");
+    check(stream_error && native_error, "errors retain numeric code and path without retrying a missing directory");
     bool invalid = false;
     try { DirectoryEnumerator no_path(L""); } catch (const EnumerationError& error) { invalid = error.Code() == ERROR_INVALID_NAME; }
     check(invalid, "filesystem cursor does not turn empty path into This PC");

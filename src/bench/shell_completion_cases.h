@@ -48,7 +48,7 @@ struct ShellCompletionTestProbe {
     static bool TransportIdle() {
         auto& client = ipc::ShellClient::Instance();
         std::lock_guard lock(client.send_mutex_);
-        return !client.running_.load() && client.pipe_ == INVALID_HANDLE_VALUE &&
+        return !client.running_.load() && !client.CurrentConnection() &&
             !client.child_started_ && !client.reader_.joinable();
     }
     static void ExpireWait(OpsManager& manager) {
@@ -71,7 +71,7 @@ struct ShellCompletionTestProbe {
                 // without starting a reader or attempting to spawn a helper.
                 client.running_.store(false);
             });
-        no_helper = !client.child_started_ && client.pipe_ == INVALID_HANDLE_VALUE && !client.reader_.joinable();
+        no_helper = !client.child_started_ && !client.CurrentConnection() && !client.reader_.joinable();
         return id;
     }
 };

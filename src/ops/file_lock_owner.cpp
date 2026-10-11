@@ -130,11 +130,15 @@ std::vector<RM_PROCESS_INFO> Owners(const std::vector<std::wstring>& files, std:
 }
 
 bool IsLockFailure(HRESULT error) noexcept {
-    for (const auto code : {ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_ACCESS_DENIED,
-            ERROR_USER_MAPPED_FILE, ERROR_DIR_NOT_EMPTY})
+    for (const auto code : {ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_USER_MAPPED_FILE})
         if (error == HRESULT_FROM_WIN32(code)) return true;
-    return error == static_cast<HRESULT>(0x80270021u) || error == static_cast<HRESULT>(0x80270022u)
-        || error == static_cast<HRESULT>(0x80270027u) || error == static_cast<HRESULT>(0x80270028u);
+    return error == static_cast<HRESULT>(0x80270027u) || error == static_cast<HRESULT>(0x80270028u);
+}
+
+bool MayBeLockFailure(HRESULT error) noexcept {
+    return IsLockFailure(error) || error == E_ACCESSDENIED ||
+        error == HRESULT_FROM_WIN32(ERROR_DIR_NOT_EMPTY) ||
+        error == static_cast<HRESULT>(0x80270021u) || error == static_cast<HRESULT>(0x80270022u);
 }
 
 LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
@@ -142,7 +146,7 @@ LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
     const LockCancelled& cancelled, std::wstring* diagnostics) {
     if (diagnostics) diagnostics->clear();
     LockReport report;
-    if (!IsLockFailure(error) || Cancelled(cancelled)) return report;
+    if (!MayBeLockFailure(error) || Cancelled(cancelled)) return report;
     const auto& failed = failed_item;
     if (failed.empty() || failed.find(L'\0') != std::wstring::npos) return report;
     std::vector<std::wstring> roots;
@@ -180,7 +184,10 @@ LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
     auto owners = Owners(files, diagnostics);
     if (Cancelled(cancelled)) return {};
     report.path = absolute ? failed : files.size() == 1 ? files.front() : roots.front();
+    const auto current_pid = GetCurrentProcessId();
     for (const auto& found : owners) {
+        // Restart Manager also reports our own leases; they are not external lock evidence.
+        if (found.Process.dwProcessId == current_pid) continue;
         if (std::any_of(report.owners.begin(), report.owners.end(), [&](const auto& owner) {
                 return owner.pid == found.Process.dwProcessId;
             })) continue;

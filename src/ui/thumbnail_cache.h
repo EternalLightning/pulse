@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <functional>
 #include <condition_variable>
 #include <deque>
 #include <list>
@@ -135,11 +136,14 @@ private:
     bool StoreResult(const Request& request, Item result);
     void Touch(Item& item);
     bool Connect();
+    bool FetchResponse(const Request& request, Item& result);
+    std::function<void()> before_response_body_; // regression gate, empty in production
     void StopChild();
     std::wstring Key(const std::wstring& path, uint32_t pixels, uint64_t modified,
                      uint64_t size, uint32_t frame_index = 0) const;
     std::array<ConsumerState, 2> consumers_;
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
+    HANDLE stop_event_ = nullptr; // persistent until the worker has joined
     PROCESS_INFORMATION child_{};
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> next_id_{1};

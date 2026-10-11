@@ -1,4 +1,5 @@
 #include "thumbnail_cache.h"
+#include "../ipc/preview_response.h"
 #include <algorithm>
 #include <chrono>
 
@@ -10,12 +11,13 @@ constexpr ULONGLONG kFailureRetryDelayMs = 2000;
 }
 
 ThumbnailCache::ThumbnailCache() {
+    stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     const uint32_t sequence = g_preview_cache_sequence.fetch_add(1);
     pipe_token_ = GetCurrentProcessId() ^ (sequence * 0x9E3779B9u);
     if (!pipe_token_) pipe_token_ = sequence ? sequence : 1;
 }
 
-ThumbnailCache::~ThumbnailCache() { Reset(); }
+ThumbnailCache::~ThumbnailCache() { Reset(); if (stop_event_) CloseHandle(stop_event_); }
 void ThumbnailCache::BeginFrame(Consumer consumer) {
     std::lock_guard lock(mutex_);
     auto& state = consumers_[static_cast<size_t>(consumer)];
@@ -60,12 +62,12 @@ std::wstring ThumbnailCache::Key(const std::wstring& path, uint32_t pixels,
            L":" + std::to_wstring(size) + L":" + std::to_wstring(frame_index);
 }
 void ThumbnailCache::StopChild() {
-    if (pipe_ != INVALID_HANDLE_VALUE) { CancelIoEx(pipe_, nullptr); CloseHandle(pipe_); pipe_ = INVALID_HANDLE_VALUE; }
+    if (pipe_ != INVALID_HANDLE_VALUE) { CloseHandle(pipe_); pipe_ = INVALID_HANDLE_VALUE; }
     if (child_.hProcess) { TerminateProcess(child_.hProcess, 0); CloseHandle(child_.hProcess); CloseHandle(child_.hThread); child_ = {}; }
 }
 void ThumbnailCache::Reset() {
     running_ = false; cv_.notify_all();
-    if (worker_.joinable()) CancelSynchronousIo(worker_.native_handle());
+    if (stop_event_) SetEvent(stop_event_);
     if (worker_.joinable()) worker_.join();
     StopChild();
     std::lock_guard lock(mutex_); queue_.clear(); pending_.clear(); items_.clear(); lru_.clear();
@@ -143,10 +145,14 @@ void ThumbnailCache::QueueRequest(Request request, Consumer consumer) {
     if (request.kind == ipc::PreviewRequestKind::Properties) queue_.push_back(std::move(request));
     else queue_.push_front(std::move(request));
     if (queue_.size() > 128) { pending_.erase(queue_.back().key); queue_.pop_back(); }
-    if (!running_.exchange(true)) worker_ = std::thread([this]{ Worker(); });
+    if (!running_.exchange(true)) {
+        if (stop_event_) ResetEvent(stop_event_);
+        worker_ = std::thread([this]{ Worker(); });
+    }
     cv_.notify_one();
 }
 bool ThumbnailCache::Connect() {
+    if (!running_ || !stop_event_ || WaitForSingleObject(stop_event_, 0) != WAIT_TIMEOUT) return false;
     if (pipe_ != INVALID_HANDLE_VALUE) return true;
     const std::wstring pipeName = ipc::PreviewPipeName(pipe_token_);
     wchar_t exe[MAX_PATH]{}; GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
@@ -160,7 +166,7 @@ bool ThumbnailCache::Connect() {
     const ULONGLONG deadline = GetTickCount64() + 3000;
     do {
         pipe_ = CreateFileW(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                            OPEN_EXISTING, 0, nullptr);
+                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
         if (pipe_ != INVALID_HANDLE_VALUE) {
             ULONG server_pid = 0;
             if (GetNamedPipeServerProcessId(pipe_, &server_pid) &&
@@ -427,6 +433,80 @@ void ThumbnailCache::Trim() {
     }
 }
 
+bool ThumbnailCache::FetchResponse(const Request& req, Item& result) {
+    if (!stop_event_ || !running_) return false;
+    ipc::PipeIoOptions options;
+    options.cancel_event = stop_event_;
+    options.deadline = GetTickCount64() + 1000;
+    const auto read = [&](void* data, DWORD bytes) { return ipc::PipeRead(pipe_, data, bytes, options); };
+    const auto write = [&](const void* data, DWORD bytes) { return ipc::PipeWrite(pipe_, data, bytes, options); };
+    try {
+        if (req.path.empty() || req.path.size() > 32768) return false;
+        ipc::PreviewRequest wire;
+        wire.request_id = req.id; wire.generation = req.generation; wire.kind = req.kind;
+        wire.pixel_size = req.pixels; wire.attrs = req.attrs; wire.frame_index = req.frame_index;
+        wire.path_chars = static_cast<uint32_t>(req.path.size());
+        ipc::PreviewResponse response{};
+        if (!write(&wire, sizeof(wire)) || !write(req.path.data(), wire.path_chars * sizeof(wchar_t)) ||
+            !read(&response, sizeof(response))) return false;
+        ipc::PreviewResponseLayout layout;
+        if (!ipc::ValidatePreviewResponse(wire, response, layout)) return false;
+        if (before_response_body_) before_response_body_();
+        const auto read_string = [&](std::wstring& text, uint32_t chars) {
+            text.resize(chars);
+            return read(text.data(), chars * sizeof(wchar_t));
+        };
+        std::wstring mapping;
+        if (!read_string(mapping, response.mapping_chars) ||
+            (response.mapping_chars && (!mapping.starts_with(L"Local\\PulsePreviewMap-") ||
+                mapping.find(L'\0') != std::wstring::npos)) ||
+            !read_string(result.text, response.text_chars) || !read_string(result.error, response.error_chars)) return false;
+        result.properties.reserve(response.property_count);
+        for (uint32_t i = 0; i < response.property_count; ++i) {
+            PreviewProperty property;
+            uint32_t label_chars = 0, value_chars = 0;
+            if (!read(&label_chars, sizeof(label_chars)) || label_chars > ipc::kPreviewMaxPropertyLabelChars ||
+                !read_string(property.label, label_chars) || !read(&value_chars, sizeof(value_chars)) ||
+                value_chars > ipc::kPreviewMaxPropertyValueChars || !read_string(property.value, value_chars)) return false;
+            result.properties.push_back(std::move(property));
+        }
+        if (response.status == 0 && response.mapping_chars) {
+            struct Mapping {
+                HANDLE handle = nullptr;
+                void* view = nullptr;
+                ~Mapping() { if (view) UnmapViewOfFile(view); if (handle) CloseHandle(handle); }
+            } mapped;
+            mapped.handle = OpenFileMappingW(FILE_MAP_READ, FALSE, mapping.c_str());
+            if (!mapped.handle) return false;
+            mapped.view = MapViewOfFile(mapped.handle, FILE_MAP_READ, 0, 0, layout.pixel_bytes);
+            if (!mapped.view) return false;
+            result.pixels.resize(layout.pixel_bytes);
+            std::memcpy(result.pixels.data(), mapped.view, layout.pixel_bytes);
+            result.w = response.width; result.h = response.height; result.stride = response.stride;
+        }
+        if (response.mapping_chars) { const uint8_t ack = 1; if (!write(&ack, sizeof(ack))) return false; }
+        if (WaitForSingleObject(stop_event_, 0) != WAIT_TIMEOUT || GetTickCount64() >= options.deadline) return false;
+        result.kind = response.kind;
+        result.truncated = (response.flags & ipc::kPreviewFlagTruncated) != 0;
+        result.bytes_read = response.bytes_read;
+        result.frame_count = response.frame_count; result.frame_delay_ms = response.frame_delay_ms;
+        result.loop_count = response.loop_count; result.frame_index = req.frame_index;
+        result.source_width = response.source_width; result.source_height = response.source_height;
+        result.cost = result.pixels.size() + (result.text.size() + result.error.size()) * sizeof(wchar_t);
+        for (const auto& property : result.properties)
+            result.cost += (property.label.size() + property.value.size()) * sizeof(wchar_t);
+        result.failed = response.status != 0;
+        result.retryable = result.failed && (response.status == 2 || result.error == L"provider-failed" ||
+            result.error == L"path-unavailable" || result.error == L"image-decode-failed" ||
+            result.error == L"content-read-failed" || result.error == L"svg-render-failed");
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
+}
+
 void ThumbnailCache::Worker() {
     while (running_) {
         Request req;
@@ -451,105 +531,13 @@ void ThumbnailCache::Worker() {
             }
             if (!running_) break;
         }
-        Item result; bool ok = Connect();
-        ipc::PreviewRequest wire; wire.request_id=req.id; wire.generation=req.generation;
-        wire.kind=req.kind; wire.pixel_size=req.pixels; wire.attrs=req.attrs;
-        wire.frame_index = req.frame_index;
-        wire.path_chars=(uint32_t)req.path.size();
-        if (ok) ok = ipc::WriteAll(pipe_, &wire, sizeof(wire)) &&
-                     ipc::WriteAll(pipe_, req.path.data(), wire.path_chars * sizeof(wchar_t));
-        ipc::PreviewResponse response{};
-        if (ok) {
-            const ULONGLONG deadline = GetTickCount64() + 1000;
-            DWORD available = 0;
-            while (running_ && GetTickCount64() < deadline) {
-                if (!PeekNamedPipe(pipe_, nullptr, 0, nullptr, &available, nullptr)) { ok=false; break; }
-                if (available >= sizeof(response)) break;
-                if (child_.hProcess && WaitForSingleObject(child_.hProcess, 0) == WAIT_OBJECT_0) { ok=false; break; }
-                Sleep(10);
-            }
-            if (available < sizeof(response)) ok=false;
+        Item result;
+        const bool ok = Connect() && FetchResponse(req, result);
+        if (!ok) {
+            result = {};
+            result.failed = true;
+            result.retryable = true;
         }
-        if (ok) ok = ipc::ReadAll(pipe_, &response, sizeof(response)) &&
-                     response.magic == ipc::kPreviewMagic && response.request_id == req.id &&
-                     response.generation == req.generation;
-        std::wstring mapping;
-        if (ok && response.mapping_chars) { mapping.resize(response.mapping_chars);
-            ok = ipc::ReadAll(pipe_, mapping.data(), response.mapping_chars * sizeof(wchar_t)); }
-        std::wstring previewText;
-        if (ok && response.text_chars) {
-            if (response.text_chars > 32768) ok = false;
-            else {
-                previewText.resize(response.text_chars);
-                ok = ipc::ReadAll(pipe_, previewText.data(),
-                                  response.text_chars * sizeof(wchar_t));
-            }
-        }
-        std::wstring errorText;
-        if (ok && response.error_chars) {
-            if (response.error_chars > 512) ok = false;
-            else {
-                errorText.resize(response.error_chars);
-                ok = ipc::ReadAll(pipe_, errorText.data(),
-                                  response.error_chars * sizeof(wchar_t));
-            }
-        }
-        std::vector<PreviewProperty> properties;
-        if (ok && response.property_count > ipc::kPreviewMaxPropertyCount) ok = false;
-        for (uint32_t i = 0; ok && i < response.property_count; ++i) {
-            uint32_t labelChars = 0, valueChars = 0;
-            ok = ipc::ReadAll(pipe_, &labelChars, sizeof(labelChars)) &&
-                labelChars <= ipc::kPreviewMaxPropertyLabelChars;
-            PreviewProperty property;
-            if (ok && labelChars) {
-                property.label.resize(labelChars);
-                ok = ipc::ReadAll(pipe_, property.label.data(), labelChars * sizeof(wchar_t));
-            }
-            if (ok) ok = ipc::ReadAll(pipe_, &valueChars, sizeof(valueChars)) &&
-                valueChars <= ipc::kPreviewMaxPropertyValueChars;
-            if (ok && valueChars) {
-                property.value.resize(valueChars);
-                ok = ipc::ReadAll(pipe_, property.value.data(), valueChars * sizeof(wchar_t));
-            }
-            if (ok) properties.push_back(std::move(property));
-        }
-        if (ok && response.status == 0 && !mapping.empty()) {
-            HANDLE map = OpenFileMappingW(FILE_MAP_READ, FALSE, mapping.c_str());
-            if (map) { const size_t bytes=(size_t)response.stride*response.height;
-                if (void* p=MapViewOfFile(map, FILE_MAP_READ,0,0,bytes)) {
-                    result.pixels.assign((uint8_t*)p,(uint8_t*)p+bytes); UnmapViewOfFile(p);
-                    result.w=response.width; result.h=response.height; result.stride=response.stride;
-                } CloseHandle(map); }
-        }
-        if (ok && response.mapping_chars) { const unsigned char ack=1; ok=ipc::WriteAll(pipe_,&ack,1); }
-        if (ok) {
-            result.kind = response.kind;
-            result.text = std::move(previewText);
-            result.error = std::move(errorText);
-            result.properties = std::move(properties);
-            result.truncated = (response.flags & ipc::kPreviewFlagTruncated) != 0;
-            result.bytes_read = response.bytes_read;
-            result.frame_count = (std::max)(1u, response.frame_count);
-            result.frame_delay_ms = response.frame_delay_ms;
-            result.loop_count = response.loop_count;
-            result.frame_index = req.frame_index;
-            result.animation_identity = req.identity;
-            result.source_width = response.source_width;
-            result.source_height = response.source_height;
-        }
-        result.cost = result.text.size() * sizeof(wchar_t)
-            + result.error.size() * sizeof(wchar_t)
-            + static_cast<size_t>(response.stride) * response.height;
-        for (const auto& property : result.properties)
-            result.cost += (property.label.size() + property.value.size()) * sizeof(wchar_t);
-        result.failed = !ok || response.status != 0 ||
-            (req.kind == ipc::PreviewRequestKind::Content &&
-             result.kind == ipc::PreviewContentKind::Bitmap && result.pixels.empty());
-        result.retryable = result.failed && (!ok || response.status == 2 ||
-            result.error == L"provider-failed" || result.error == L"path-unavailable" ||
-            result.error == L"image-decode-failed" || result.error == L"content-read-failed" ||
-            result.error == L"svg-render-failed" ||
-            (result.kind == ipc::PreviewContentKind::Bitmap && result.pixels.empty()));
         result.animation_identity = req.identity;
         StoreResult(req, std::move(result));
         if (!ok) StopChild();

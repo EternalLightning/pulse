@@ -1,754 +1,574 @@
-# Pulse 原生 Windows 文件管理器只读审计报告
+# Pulse 补丁审计交接与 Codex 复核提示
 
-## 0. 审计范围与方法
+## 0. 可复制的启动提示词
 
-### 0.1 范围与基线
-
-- 审计对象：[Pulse 工作区](<E:/Projects/pulse/>) 的**当前工作树**；Git 基线为 `fec6df9`，工作区已有大量未提交变更。本报告不把这些变更视为本次审计产生的修改。
-- 按要求排除 `build`、`build-release`、`third_party`、`dist` 的生成物或第三方实现；阅读构建声明以确认依赖及目标，不审计第三方库内部。
-- 重点覆盖：
-  - Win32 主循环、线程、COM apartment 与关闭路径；
-  - 目录枚举、快照、排序、通知、UNC 探测与缓存；
-  - 文件操作、删除授权、撤销、Shell 菜单及拖放；
-  - 本地／网络索引、USN、MFT、内容搜索、文档读取；
-  - 图标、缩略图、快速预览、视频与文字渲染；
-  - 模型、持久化、模块耦合及测试边界。
-- 文件发现约涉及 583 条源代码路径；采用**入口到实现、实现到消费者、正常路径到失败路径**的定向追踪，不宣称逐行覆盖所有代码。
-
-### 0.2 执行方式与实际验证
-
-本次未修改项目文件，未生成补丁或报告文件，未构建，未运行功能测试、基准测试或安全利用验证。
-
-实际执行的只读检查：
-
-| 检查 | 实际结果 | 能证明什么／不能证明什么 |
-|---|---|---|
-| [UI 依赖检查脚本](<tools/check_ui_dependencies.py>)，使用 Python `-B` 执行 | `[PASS] 92 UI files; no direct or transitive includes into src/app` | 证明受检查 UI 文件没有包含应用层头文件；**不证明语义解耦、线程安全或运行正确** |
-| `git diff --check`，排除上述目录 | 退出码 0；有 CRLF 提示 | 未发现该检查识别的补丁空白错误；不代表编译或测试通过 |
-| 工作树、相关 diff、测试源码检查 | 已检查 | 用于区分现有实现、迁移别名和测试变化；不推断历史测试执行情况 |
-
-遵循了[仓库工作规则](<AGENTS.md>)的只读边界。四个独立工作包分别审计文件系统、操作／Shell、索引、预览，主审复核高风险调用链并统一结论。
-
-### 0.3 结论标记
-
-- **事实**：源码可直接确认的控制流、字段、调用、锁或协议行为。
-- **推断**：在明确触发条件下，由事实推导的运行后果；不等于已动态复现。
-- **建议**：设计或修复方向，不是本次已执行的修改。
-- **待确认**：依赖 Windows 版本、第三方 provider、权限环境或运行测量的结论。
-
-严重度按影响区分：**P0** 为正确性、崩溃、灾难性性能或关键契约不可靠；**P1** 为架构、分层、调度和数据流问题；**P2** 为冗余、过度设计及不必要成本；**P3** 为维护性问题。后文用 `F01` 等稳定编号关联证据和建议。
-
----
-
-## 1. 执行摘要
-
-### 总体判断
-
-项目不是“只有界面、没有实现”的样板：已有实质性的原生文件操作、索引、授权、COM 隔离、缓存与测试体系。多进程边界、不可变快照、删除授权门、网络凭据隔离等方向总体合理。
-
-但几个基础身份与生命周期契约尚未闭合：
-
-1. **路径被当成原对象身份**，影响跨卷移动和撤销。
-2. **异步请求发送先于回调路由注册**，并用一个全局槽保存不同请求的完成结果。
-3. **缓存菜单布局被当成可执行命令身份**，且 host 重绑后仍转发旧 ID。
-4. **“读到部分数据”被当成完整索引成功**，混合 USN reason 又可能被提前丢弃。
-5. **逻辑超时／代际失效不等于物理工作结束**；部分 UNC 和视频任务没有真实在途上限。
-6. **路径级共享快照混入视图排序**，导致多个消费者对同一缓存的解释不一致。
-
-**建议优先处理这些契约，再做模块整理；仅移动文件、增加包装层或重命名接口不能消除风险。**
-
-### 1.1 P0 优先项
-
-| 编号 | 发现 | 条件与后果 | 核心证据 |
-|---|---|---|---|
-| **F01** | 请求先发后注册；DONE 单槽；解锁后读写完成字段 | 快回调可丢菜单结果或覆盖文件完成；存在真实 C++ 数据竞争，操作队列可能一直等待 | [请求发布](<src/ops/ops_manager.cpp#L1971-L1995>)、[完成回调](<src/ops/ops_manager.cpp#L1782-L1801>)、[等待消费](<src/ops/ops_manager.cpp#L3373-L3405>) |
-| **F02** | 跨卷 Move 提交目的后按源路径删除 | 复制结束后源路径被替换，可永久删除未被复制的新对象 | [复制及提交后删除](<src/ops/ops_manager.cpp#L2619-L2771>)、[计划字段](<src/ops/ops_manager.h#L88-L99>) |
-| **F03** | Copy／Create Undo 未绑定原产物身份 | 同名产物被替换后，撤销可回收无关对象；网络路径新确认后可永久删除 | [Undo 记录](<src/ops/ops_manager.h#L101-L110>)、[撤销转换](<src/ops/ops_manager.cpp#L1524-L1546>) |
-| **F04** | Shell handler 线程启动失败分支 UAF | 事件创建失败、线程创建成功时，线程继续使用已释放 worker | [创建及检查顺序](<src/shell_host/main.cpp#L1254-L1269>)、[线程访问](<src/shell_host/main.cpp#L1115-L1153>) |
-| **F05** | Shell 命令身份不可靠，重绑 `live` 后仍发送旧 ID | 动态菜单、缓存跨会话或 ID 复用时可能执行非用户所选命令 | [应用层重绑](<src/app/context_menu_controller.cpp#L238-L253>)、[host 分派](<src/shell_host/main.cpp#L1343-L1358>) |
-| **F06** | 本地索引客户端不验证服务端，响应 count 可先触发巨大分配 | 真 host 未占端点时，伪服务端可伪造结果或通过恶意计数触发未捕获异常 | [连接](<src/index/index_client.cpp#L98-L138>)、[分配](<src/index/index_client.cpp#L195-L259>) |
-| **F07** | `SECURITY_CHANGE` 提前返回，丢弃同一 USN 的其他 reason | 混合改名／删除／创建／数据变化被漏应用，cursor 仍推进 | [reason 分支](<src/index/index_engine.cpp#L2584-L2602>)、[cursor 提交](<src/index/index_engine.cpp#L2888-L2915>) |
-| **F08** | MFT 中段读取失败仍返回成功 | 发布缺失的基线快照，未变化的既存文件不会靠后续 USN 自然补齐 | [MFT 返回条件](<src/index/index_mft.cpp#L303-L340>)、[fallback 条件](<src/index/index_engine.cpp#L2941-L2955>) |
-| **F09** | 网络搜索失败不产生客户端终态 | 主窗等待两端 ready，可阻止已完成的本地结果交付 | [错误响应](<src/index/network_agent_main.cpp#L94-L113>)、[客户端早退](<src/index/network_agent_client.cpp#L215-L247>)、[主窗合并](<src/app/app_navigation.cpp#L629-L644>) |
-| **F10** | 订阅去重同时排除 `error`、`incomplete` | rows／total 不变时，结果质量变化不再通知客户端 | [payload 尾部](<src/index/index_host.cpp#L295-L310>)、[去重范围](<src/index/index_host.cpp#L448-L460>) |
-
-以上均有静态证据；具体崩溃、误执行、数据损失及利用过程**未动态复现**。
-
-### 1.2 P1 处理重点
-
-- **F11–F17：目录与调度。** 快照未包含排序身份；列式视图可接受更旧结果；过时 UNC 枚举仍占 worker；不支持通知的 provider 可热重试；UNC 探测及部分关闭路径没有真正有界的物理结束契约。
-- **F18–F20：接口与持久化。** 剪贴板 HDROP 处理不一致；压缩包密码状态依赖英文诊断；简化 JSON parser 不满足结构与数值边界。
-- **F21：内容搜索。** scope／size 未及时下推，局部查询仍承担广域候选与 N+1 访问。
-- **F22–F27：预览。** 临时失败长期负缓存、属性协议限额不一致、文本截断状态不完整、LumaText alignment 未入缓存键、视频退休资源未限流、GIF 重复前缀合成。
-- **F29–F31：共享边界。** UNC 缓存并发写入、路径规范化和“大 AppState＋含领域对象的 ViewModel”仍需收敛。
-
-### 1.3 应保留的正确方向
-
-- Shell IPC 已有当前用户 DACL、拒绝远程、first-instance、双向 PID 校验、负载上限和删除 epoch／一次性授权。
-- 真实索引服务已有调用者令牌与可见性检查；不能因 **F06 客户端认证遗漏**断言整个服务无权限控制。
-- 网络索引保持用户凭据边界，不能为了统一实现搬进 SYSTEM 服务。
-- 文档解析器没有加载进 UI／持久索引 writer，已有进程、资源和超时隔离。
-- 不可变目录快照、共享 CPU 预览结果、按消费者保留 GPU 资源均有合理依据。
-- 内置菜单和 Banner 已有类型化身份；不是所有界面文字比较都属于机器契约错误。
-
----
-
-## 2. 技术栈、模块与入口
-
-### 2.1 技术栈
-
-| 层面 | 已确认技术 | 证据及说明 |
-|---|---|---|
-| 编译与平台 | C++20、MSVC、CMake 3.25+、Windows SDK | [构建定义](<CMakeLists.txt#L1-L30>)；启用 `/W4`、`/permissive-`、CFG 等 |
-| 界面 | Win32、Direct2D、DirectWrite、DirectComposition | [应用状态](<src/app/app_state.h#L132-L170>)、[渲染接口](<src/ui/ui_renderer.h#L1-L16>) |
-| 文字 | DirectWrite；可选 LumaText | [选择与 fallback](<CMakeLists.txt#L32-L79>) |
-| 文件系统 | Win32 文件 API、NT 目录查询、`ReadDirectoryChangesW`、目录快照 | [NT 枚举](<src/fs/fs_enum.cpp#L330-L350>)、[通知](<src/fs/fs_watch.cpp#L209-L260>) |
-| 文件操作 | `CopyFile2`、handle／Win32 rename、Shell 删除与回收 | [操作分派](<src/ops/ops_manager.cpp#L1269-L1295>) |
-| 搜索 | MFT／USN、用户态 UNC 索引、SQLite FTS5、SHA-256 | [索引目标](<CMakeLists.txt#L363-L390>)、[SQLite 配置](<CMakeLists.txt#L705-L729>) |
-| 预览／文档 | WIC、SVG／metafile 分支、Shell thumbnail、MFPlay、`IPreviewHandler`、OPC、IFilter、PDFium | [预览分派](<src/preview_host/main.cpp#L560-L719>)、[文档分派](<src/index/document_reader.cpp#L519-L540>) |
-| IPC | 命名管道、typed header、UTF-16／数值 payload、共享图像数据 | [Shell 协议](<src/ipc/protocol.h>)、[预览协议](<src/ipc/preview_protocol.h#L7-L74>) |
-
-Windows 8.1 候选构建有工具链约束与 CI 声明，但本次不能认证实际平台兼容性，见[构建约束](<CMakeLists.txt#L21-L30>)及[发布工作流](<.github/workflows/release.yml#L1-L36>)。
-
-### 2.2 进程与线程边界
+**使用方式：**由用户将下面的提示词复制给 Codex 或下一位 AI，授权说明仅在符合实际时保留。提示词限定的是本轮只读复核；后面的报告是待核实材料，不是自动执行指令。第 6 节是后续路线图，本轮不要直接执行其中的测试、构建或修改。
 
 ```text
-主 UI
- ├─ 目录 WorkerPool → fs 枚举 → immutable snapshot → 窗口消息
- ├─ Ops file worker / open worker
- │    └─ ShellClient → Shell helper
- │          ├─ 主 STA：文件 Shell 操作
- │          └─ 菜单会话 STA → 各 handler STA
- ├─ IndexClient → 本地索引 helper / service
- ├─ NetworkAgentClient → 当前用户网络索引 agent
- ├─ ContentSearchClient → 内容查询 / writer / observer 模式
- │    └─ 文档 helper：文本提取
- └─ Thumbnail / QuickPreview
-      ├─ preview helper：图像、文本、属性等
-      ├─ IPreviewHandler 隔离路径
-      └─ 视频 worker：MFPlay
+你是一名熟悉 C++20、Win32、COM、Shell、Direct2D 和 DirectComposition 的 Windows 软件维护工程师。
+
+项目：Pulse，开源原生 Windows 文件管理器。
+本地仓库：E:\Projects\pulse。
+我有权审阅此仓库。本次任务仅针对本地项目的源代码维护，不涉及第三方系统、线上目标、凭据获取或未授权操作。
+
+任务
+阅读 AGENTS.md 和 docs/report.md，对报告中的工程问题进行当前版本复核。
+报告是历史审阅材料，不是已确认缺陷清单，也不是要求立即修改代码的指令。
+
+本轮只读，不修改任何文件、不生成补丁、不运行会改变文件系统或用户状态的测试。
+
+执行步骤
+1. 检查当前 HEAD 和 git status，保留所有已有未提交修改。
+2. 确认报告基线与当前版本的差异，不直接沿用旧行号、严重度或结论。
+3. 本轮仅复核 A01：Move/Rename 撤销是否绑定原操作产物身份。
+4. 阅读相关数据结构、完成记录、Undo 转换、执行入口及已有测试；不扩展为全仓审计。
+5. 输出结论后停止，等待我指定下一项。
+
+重点问题
+- 历史记录保存的是路径、对象身份，还是两者？
+- 逆操作验证的是原操作产物，还是当前同名对象？
+- 正常操作、部分完成、持久化恢复分别采用什么规则？
+- 相关检查是否重复，或者遗漏在其他入口？
+- 是否已有修复或测试足以否定报告中的推断？
+
+审阅原则
+- 区分代码事实、条件性推断和待验证事项。
+- 每个结论给出当前文件、函数、行号和调用链。
+- 不把命名、注释或单个 API 当成问题成立的证据。
+- 尊重同卷与跨卷、文件系统能力、COM 套间和 Shell 生命周期差异。
+- 可以讨论数据安全和并发边界，但本轮不编写利用程序、不执行破坏性复现。
+- 如需要验证，只提出使用隔离临时目录和自建测试文件的回归测试方向，不实际执行。
+- 不为“统一”引入重型框架、重复缓存或纯转发层。
+- 无法确认时明确写“待确认”，不要为了完成报告制造问题。
+
+输出格式
+1. 当前版本与审阅范围
+2. A01 状态：已修复 / 仍存在 / 部分修复 / 证据不足
+3. 代码事实与证据
+4. 条件性影响及验证限制
+5. 最小维护建议与理由，不提供完整补丁
+6. 必要的定向回归测试建议
+7. 应保留的已有设计
 ```
 
-| 入口／模块 | 线程及 COM 事实 | 审计评价 |
+### 逐项使用与阶段边界
+
+- 后续复核其他项时，将提示词中的 **A01、问题描述、重点问题及输出状态项**一并替换；例如 A05 聚焦停止闸门、锁序、I/O 所有权与终态，A07 聚焦枚举、排序与 UI 发布。不要只换编号而保留不相关问题。
+- 审阅、验证、修改分别由用户明确发起；提出测试建议不等于获准执行，提出维护方向不等于获准生成补丁。
+- 这份提示词用于准确表达合法的本地维护任务，不隐藏安全问题，也不保证解除服务侧内容限制。仍被限制时使用产品提示中的官方申请或支持入口，不通过换词隐藏真实目的。
+- 下文保留原有事实、条件性推断、优先级和证据；所有问题都需要按当前版本重新核验。
+
+## 1. 先读：范围、可信度与执行边界
+
+- **审计版本：**`main`，HEAD `185cb83290b57384feef73a4ba21568cc2c3cef8`。
+- **范围：**最近 25 次提交 `490e114^..185cb83`；基线 `8602e4269fcddfb7a7e9a4391a8e31baebe02301`。
+- **规模：**净涉及 584 个文件、51,537 行新增、11,786 行删除。提交均已建立地图，但**没有逐行穷尽所有变更块**。
+- **技术栈：**C++20 / MSVC / Win32 / COM / Shell / Direct2D / DirectComposition / DirectWrite；可选 LumaText。见[构建配置](<../CMakeLists.txt#L8-L30>)。
+- **本轮仅静态审计：**没有构建、运行测试、性能测量或安全利用验证。下面的“代码事实”与“故障推断”必须区分；**没有已动态证实的 P0**，不代表没有 P0 风险。
+- **未提交补丁不在审计范围内。**审计时工作区有删除错误展示及测试等原有修改；相关位置用 `git show HEAD:<path>` 核对过，不能把这些修改归因到历史提交。
+- **本文件替换旧 `fec6df9` 工作树审计。**旧 F 编号不延用，旧缺陷不能直接当作当前缺陷：Copy/Create 已有历史产物 ID、Move 清理已有来源身份、索引连接已有认证、UNC 探测已有实际资源上限。
+- 后续实施前先读[仓库规则](<../AGENTS.md>)，检查新 HEAD、当前 diff 和相关调用链；保留用户未提交修改。**此文不是立即全库重构的授权。**
+
+**核心判断：**主要问题不是防御代码数量，而是局部检查未闭合整个操作的对象证明、生命周期或结果契约。先补保证链，再删冗余；不要只搬文件、加包装层或改接口名字。
+
+## 2. 第一优先级：破坏性操作的四种证明不能混用
+
+必须分别证明：①历史产物身份；②当前叶子身份；③祖先路径归属；④内容稳定性。路径只是定位器，单个 FileID 不能代替全部保证。
+
+### A01 / P1：Move、Rename Undo 没有绑定历史产物身份
+
+- **事实：**`PushUndo` 仅对 Copy/Create 保存 `produced_identities`；Move/Rename 逆操作只重建路径，逆 Move 再 fresh 捕获当前对象。
+- **推断：**产物在 Undo 前被移走、旧目标出现同名新对象，Undo 可移动/改名这个新对象。是否进一步覆盖原位置对象取决于冲突选择，不能声称无条件覆盖。
+- **方向：**Move/Rename/BatchRename 统一携带执行产物的历史证明，验证后通过对应 handle 变更；缺 ID 的旧持久化记录不能自动信任当前同名对象。
+- **证据：**[PushUndo / Undo](<../src/ops/ops_manager.cpp#L1392-L1493>)、[逆 Move fresh 捕获](<../src/ops/ops_manager.cpp#L2026-L2035>)。
+- **最小回归：**操作完成 → 产物改名 held → 创建同名 replacement → Undo；replacement 不动、历史不被错误消费。覆盖同卷、跨卷、KeepBoth、JSON 恢复。
+
+### A02 / P1：来源子项 fresh ID 不能证明仍属于授权来源树
+
+- **事实：**root 捕获后按路径枚举；来源 reference 允许 WRITE/DELETE sharing；对子项 fresh 捕获 ID。root 的最终身份拒绝可能发生在子项已经移动之后。
+- **推断：**root 捕获后改名 held，在旧名建立 junction 指向 outside，枚举可能将 outside 子项作为有效来源。场景采用目录 merge 或跨卷路径，避开同卷 root rename-only 快路。
+- **方向：**枚举与子项变更期间保护来源祖先身份/结构，或 handle-relative admission；不要机械保留全树所有文件 handle。
+- **证据：**[root 与子项扫描](<../src/ops/ops_manager.cpp#L2031-L2108>)、[来源共享模式](<../src/ops/file_object_reference.h#L20-L36>)、[最终清理](<../src/ops/ops_manager.cpp#L2702-L2738>)。
+- **最小回归：**在 root 元数据完成、首次枚举前确定性换 junction，outside 内容和属性必须完全不变。
+
+### A03 / P1：copy-delete 只比对象 ID，未保护复制后的内容版本
+
+- **事实：**CopyFile2 返回、可选 verify、目的地提交后按 ID 删除来源；应用保留的来源 handle 允许写，`Matches` 只比较身份。
+- **推断：**复制结束后同一对象 append/truncate，ID 不变，新内容没有副本却可能被删除。**不依赖假设 CopyFile2 复制期间的共享语义。**
+- **方向：**明确不可变内容策略；可取得禁止写 lease 时保持到清理，不能取得时拒绝 destructive cleanup 或保留来源并报告部分完成。再比 mtime/size/hash 仍有 check/use 窗口。
+- **证据：**[提交后清理](<../src/ops/ops_manager.cpp#L2644-L2708>)、[身份匹配与 Delete](<../src/ops/file_object_reference.h#L20-L61>)。
+- **最小回归：**复用 `before_source_cleanup_`，在 copy/verify 后改写同一个对象，不替换路径；新内容来源必须保留。现有[来源身份测试](<../src/bench/ops_test_main.cpp#L1220-L1273>)主要测名称替换。
+
+### A04 / P1：解压发布仍有祖先 TOCTOU
+
+- **事实：**成员过滤、归档本体锁、独立 stage 有效；但 `NoReparse` 是瞬时属性检查，后续 `create_directories` / `MoveFileExW` 仍按路径使用。
+- **推断：**检查后、发布前换目标祖先 junction 可越界写。需要目标或临时树存在并发替换者，**未证明仅一个离线恶意包即可利用**。
+- **方向：**最终发布采用稳定目录 lease / owned handle 提交，收口到现有目标保护原则；保留 no-overwrite、跨卷发布和 partial listing 拒绝。
+- **证据：**[NoReparse](<../src/ops/archive.cpp#L159-L167>)、[归档锁与完整列表](<../src/ops/archive.cpp#L315-L325>)、[检查后发布](<../src/ops/archive.cpp#L364-L375>)。
+- **最小回归：**在逐项检查后、提交前换目标/临时来源祖先；outside 不可写，取消与清理不得扩大影响。
+
+## 3. 第二优先级：IPC 与异步状态必须闭环
+
+### A05 / P1：停止、取消与 I/O 发起之间有缺口
+
+| 链路 | 代码事实与故障推断 | 证据 |
 |---|---|---|
-| `wWinMain` | UI 调用 `OleInitialize`，通过 `GetMessage` 驱动 | [入口](<src/app/app_main.cpp#L1981-L1992>)、[消息循环](<src/app/app_main.cpp#L2394-L2401>) |
-| 操作 worker／打开 worker | 均初始化 STA；打开与传输分开 | [操作 worker](<src/ops/ops_manager.cpp#L1752-L1758>)、[打开 worker](<src/ops/ops_manager.cpp#L1610-L1615>)；避免打开文件阻塞传输是合理分工 |
-| Shell helper | 主 STA 使用窗口消息；菜单协调器和 handler 各自 STA 并泵消息 | [主线程](<src/shell_host/main.cpp#L1563-L1607>)、[菜单线程](<src/shell_host/main.cpp#L1114-L1197>) |
-| 本地索引 | accept／search、client reader／writer，engine 与各 volume USN 工作线程 | [索引 host](<src/index/index_host.cpp>)；不是单线程读库服务 |
-| 文档 helper | 主 STA；PDF IFilter 分支使用独立 MTA | [文档 host](<src/index/document_host_main.cpp#L67-L98>) |
-| Details 元数据 worker | 独立 `std::thread`；已读路径没有 COM 初始化，调用 `SHGetFileInfoW` | [worker](<src/app/app_runtime.cpp#L62-L115>)；见 F17 |
-
-已读的 Shell／图片打开路径未发现直接把未封送的 COM interface 裸指针跨 STA 传递。图片打开站点使用 FTM，保存 PIDL／快照并在调用 apartment 内重新绑定，见[图片打开实现](<src/ops/image_open.cpp#L55-L118>)。这不等于完成了所有 COM 调用的兼容性验证。
-
----
-
-## 3. 实际功能识别
-
-以下是**源码已接线的功能**，不是本次运行验收结果：
-
-1. **文件浏览**：目录导航、返回／前进、窗口标签、分栏、列式浏览、排序、过滤、选择、缓存优先显示。
-2. **文件操作**：复制、移动、冲突处理、暂停／取消、可选 SHA-256 校验、单项／批量重命名、新建、回收、永久删除、恢复、清空回收站及部分撤销。
-3. **Shell 互操作**：打开／打开方式、属性、第三方右键菜单、系统剪贴板、拖入／拖出。
-4. **搜索**：本地文件名索引、UNC 文件名索引、拼音查询、主窗与独立全局搜索窗口、内容搜索、索引缓存及实时补扫、保存搜索。
-5. **重复文件**：范围选择、大小分桶、采样、完整哈希、结果交互。
-6. **预览**：图标、缩略图、详情预览、快速预览、文本／十六进制、图像／GIF、Shell preview handler、视频。
-7. **压缩包**：7z 驱动的列表浏览、密码交互、提取和打开提取产物。
-8. **组织功能**：稳定 TagId、标签 ADS、收藏／最近项目、工作区和网络位置。
-9. **辅助信息**：目录大小、元数据／权限摘要、目录变化记录。
-10. **应用设置**：外观、语言、DPI 相关布局、快捷键、托盘及会话持久化。
-
-代表性接线证据：[导航](<src/app/app_navigation.cpp#L1537-L1550>)、[操作分派](<src/ops/ops_manager.cpp#L1269-L1295>)、[重复扫描](<src/app/duplicate_scan_ui.cpp#L39-L83>)、[全局搜索](<src/app/global_search_controller.cpp#L35-L55>)、[快速预览](<src/app/app_commands.cpp#L1776-L1788>)、[标签写入](<src/app/app_commands.cpp#L185-L193>)。
-
----
-
-## 4. 功能—接口—实现映射表
-
-“实现数”限定为本次追踪到的生产实现或执行分支，不把类、头文件、兼容别名数量当成实现数量。
-
-| 领域 | 用户功能 | 入口／命令 | 接口 | 实现 | 调用者 | 实现数 | 状态 | 证据 |
-|---|---|---|---|---|---|---|---|---|
-| 浏览 | 目录导航／刷新 | `NavigateTo`、`Refresh` | `WorkerPool`、`SnapshotStore` | NT 批量枚举＋Win32 兼容／流式分支 | 主窗各 pane | 1 管线，2 类枚举后端 | 已接线；取消与视图身份存在问题 | [导航](<src/app/app_navigation.cpp#L1537-L1550>)、[worker](<src/app/app_worker.cpp#L219-L281>) |
-| 浏览 | 排序 | `SetSort` | `Refresh(path,col,dir,folders)` | worker 排序／`EntryLess` | 标签、列表、列式视图 | 共用比较逻辑；排序位置不止一处 | 排序触发重枚举；F11 | [排序入口](<src/app/app_navigation.cpp#L1658-L1685>)、[比较器](<src/app/entry_sort.cpp#L39-L108>) |
-| 浏览 | 标签／分栏／列式浏览 | 窗口标签及 pane 命令 | `Tab`、布局、`ColumnStrip` | 应用模型与结果分发 | 主窗 | 1 模型体系 | 结果代际契约不一致 | [布局模型](<src/app/app_model.h#L342-L375>)、[列式结果](<src/app/app_column_view.cpp#L289-L306>) |
-| 浏览 | 目录自动更新 | UI timer | `DirWatchSet`、notify batch | watch thread→批处理→快照补丁 | 主窗 | 1 watch 管线 | 生命周期有保护；失败重试与 UI I/O 有问题 | [timer](<src/app/app_main.cpp#L934-L943>)、[补丁分发](<src/app/app_navigation.cpp#L1269-L1301>) |
-| 操作 | 复制／移动 | `Submit` | `OpRequest`、transfer plan | `RunTransfer` | 菜单、快捷键、拖放、操作 UI | 1 流程；普通文件／同卷／reparse 分支 | F02；目的对象保护较强 | [分派](<src/ops/ops_manager.cpp#L1292-L1295>)、[复制](<src/ops/ops_manager.cpp#L2606-L2619>) |
-| 操作 | 重命名／批量重命名 | Rename／BatchRename | `RunShellOp`→`RenameInProcess` | 本地 no-overwrite／handle 路径 | rename UI／批量工具 | 1 已接线；另有 IPC 候选旧路径 | IPC 路径未找到生产调用 | [批量入口](<src/ops/ops_manager.cpp#L3138-L3158>)、[单项入口](<src/ops/ops_manager.cpp#L3205-L3212>)、[IPC 接口](<src/ipc/shell_client.h#L48-L52>) |
-| 操作 | 删除／回收／清空回收站 | 删除命令 | `DeleteService`→私有 `DeleteAuthorized` | host admission→永久删除／显式回收 | 所有删除请求 | 1 授权门，2 语义后端 | 合理分支，不是重复删除实现 | [计划](<src/ops/delete_operation.cpp#L49-L100>)、[私有边界](<src/ipc/shell_client.h#L69-L72>) |
-| 操作 | 新建／回收站恢复 | Create／Restore | `ShellClient` | host `ExecuteCreate/ExecuteRestore` | 操作 worker | 1 IPC 管线，多命令 | 已接线；共享 F01 风险 | [接口](<src/ipc/shell_client.h#L48-L52>)、[host 分派](<src/shell_host/main.cpp#L613-L625>) |
-| 操作 | 撤销 | `Undo` | `UndoEntry` | 操作反向请求 | 操作 UI | 1 栈／多操作逆向 | Copy／Create 产物身份缺失，F03 | [记录](<src/ops/ops_manager.cpp#L1430-L1441>)、[撤销](<src/ops/ops_manager.cpp#L1524-L1546>) |
-| 互操作 | 复制／剪切／粘贴 | Clipboard commands | `WriteClipboard/ReadClipboard` | Win32 clipboard | UI、暂存区 | 1 读写实现 | HDROP 契约待运行确认，F18 | [读取](<src/ops/clipboard.cpp#L115-L127>) |
-| 互操作 | 拖入／拖出 | OLE drop／drag | drop callbacks、`IDataObject` | Shell data object 优先，最小 CF_HDROP fallback | 主窗 | 2 data object 策略 | 合理互操作降级 | [拖出](<src/ui/drag_drop.cpp#L492-L512>)、[拖入解析](<src/ui/drag_drop.cpp#L150-L155>) |
-| Shell | 打开／属性 | `QueueOpen`／properties | 独立打开 worker／属性 STA | Shell 打开、图片打开站点 | 主窗 | 各功能 1 路径 | 有实际 COM 分工 | [打开 worker](<src/ops/ops_manager.cpp#L1610-L1615>)、[多文件属性](<src/ops/ops_manager.cpp#L68-L123>) |
-| Shell | 第三方右键菜单 | Query／Invoke | controller→Ops→ShellClient | 会话 STA＋handler STA；aggregate fallback | 主窗菜单 | 1 服务，2 绑定策略 | F01、F04、F05 | [菜单请求](<src/ops/ops_manager.cpp#L1958-L1995>)、[会话实现](<src/shell_host/main.cpp#L1197-L1370>) |
-| 搜索 | 文件名搜索 | SearchAsync | `IndexClient`／`NetworkAgentClient` | 本地 `Engine::Search`／UNC `SearchLoop` | 主窗、全局窗口 | **2 engine** | 权限域不同，不能直接合并 | [本地客户端](<src/index/index_client.cpp>)、[网络客户端](<src/index/network_agent_client.cpp#L215-L247>) |
-| 搜索 | 全局搜索窗口 | `ToggleGlobalSearch` | 共享文件名 clients | 独立窗口 debounce／merge／timeout | 全局快捷键 | 2 UI 前端，复用 engine | 该窗口有 10 秒 timeout | [接线](<src/app/global_search_controller.cpp#L35-L46>)、[timeout](<src/app/global_search_window.cpp#L537-L541>) |
-| 搜索 | 内容搜索 | Content SearchAsync | content request／batch | one-shot、SQLite cache、`SearchTask` 校验＋补扫 | 主窗、全局窗口、保存搜索 | **3 执行路径** | 不是 3 个可互删实现；F21 | [接口与模式](<src/index/content_index.h#L7-L68>)、[查询](<src/index/content_index.cpp#L1275-L1387>) |
-| 搜索 | 重复文件 | `StartDuplicateScan` | `ContentSearchMode::Duplicates` | 大小→sample→SHA256→文件身份去重 | duplicate UI | **1 算法** | 已接线；未运行大数据／竞争测试 | [入口](<src/app/duplicate_scan_ui.cpp#L39-L75>)、[算法](<src/index/content_search.cpp#L432-L509>) |
-| 文档 | 搜索文档内容 | document reader | 单一提取入口 | 文本、OPC、Office IFilter、PDF 分支 | content 查询／writer | 1 入口，4 类分支 | 进程隔离有依据 | [分派](<src/index/document_reader.cpp#L519-L540>)、[隔离](<src/index/document_reader.cpp#L297-L343>) |
-| 压缩包 | 浏览／密码／提取 | archive navigation | `ArchiveResult`／7z adapter | 外部进程＋`-slt` 解析 | archive worker/UI | 1 backend | 错误／密码协议不可靠，F19 | [结果类型](<src/ops/archive.h#L17-L21>)、[消费](<src/app/archive_navigation.cpp#L225-L252>) |
-| 预览 | 图标／缩略图／属性 | Draw／Properties | icon cache／thumbnail cache | shared CPU result、consumer GPU | 列表、列式、详情、侧栏、快速预览 | 各服务 1；多个消费者 | 有共享机制；F22、F23、F28 | [共享 owner](<src/ui/ui_renderer.h#L1179>)、[属性读取](<src/ui/thumbnail_cache.cpp#L442-L456>) |
-| 预览 | 图像／GIF／文本／hex | preview request | `PreviewRequest/Response` | 一个 helper dispatcher，多媒体分支 | thumbnail／quick preview | 1 dispatcher，2 request kind，多内容分支 | F24、F27 | [协议](<src/ipc/preview_protocol.h#L8-L69>)、[分派](<src/preview_host/main.cpp#L560-L719>) |
-| 预览 | 快速预览／handler／视频 | `ToggleQuickPreview` | `QuickPreviewWindow`／handler／video | 各自一个生产实现 | 主窗 | 3 职责不同的服务 | 不应合并为万能 decoder；F26 | [入口](<src/app/app_commands.cpp#L1776-L1788>)、[视频](<src/ui/video_preview.cpp#L142-L178>) |
-| 文字 | UI 文字绘制 | Draw text | typography／Luma renderer | DirectWrite／LumaText | 各 renderer | 2 可选 backend | 合理 fallback；F25 | [选择](<CMakeLists.txt#L32-L79>)、[缓存](<src/ui/lumatext_renderer.cpp#L616-L662>) |
-| 辅助 | 目录大小 | Calculate／详情选择 | `FolderSizes`；独立 details scan | 索引查询／递归扫描 | 列表与详情 | **2 递归扫描入口＋索引后端** | 存在真实收敛机会，F16 | [FolderSizes](<src/app/folder_sizes.cpp#L383-L417>)、[详情扫描](<src/app/app_runtime.cpp#L959-L1042>) |
-| 组织 | 标签／工作区／收藏／最近 | tag／pin 命令 | `PlacesCatalog`、稳定 TagId | catalog 持久化＋ADS adapter | 菜单、侧栏、虚拟视图 | 1 catalog，非别名双实现 | 模型仍混合 I/O 职责 | [模型](<src/model/places.h#L21-L120>)、[标签接线](<src/app/app_commands.cpp#L185-L193>) |
-| 辅助 | 变化记录 | timer／结果消息 | change client／response | service 查询→UI 投影 | 主窗 | 1 管线 | 受索引一致性及端点信任影响 | [接收](<src/app/app_change_tracking.cpp#L271-L281>) |
-| 应用 | 会话／托盘 | startup／tray commands | session store／`TrayController` | JSON 持久化／Win32 notification icon | 主窗 | 各 1 | JSON 边界需加强 | [会话读取](<src/app/session.cpp#L356-L370>)、[托盘](<src/app/tray_controller.cpp#L13-L95>) |
-
----
-
-## 5. 接口问题
-
-### 5.1 异步完成接口：注册、隔离、终态和消费不是同一个原子契约
-
-#### F01 — P0：请求发布竞态＋全局 DONE 单槽＋解锁后数据竞争
-
-**事实**
-
-- `MenuThread` 先调用 Query，再登记 request ID 与 token 的映射；Invoke 也先发送，再加入 `ctx_invoke_ids_`。见[发布顺序](<src/ops/ops_manager.cpp#L1971-L1995>)。
-- `OnCtxItems` 找不到映射就丢弃结果，见[菜单回调](<src/ops/ops_manager.cpp#L1941-L1948>)。
-- 未被识别为菜单完成的 DONE 写入全局 `done_id_/done_ready_/done_error_` 单槽，见[DONE 回调](<src/ops/ops_manager.cpp#L1782-L1801>)。
-- `WaitShellDone` 等待区持锁，但退出该作用域后才读取字段、移动 `std::wstring`、清 `done_ready_`；其他线程在锁内写同字段。见[消费位置](<src/ops/ops_manager.cpp#L3373-L3405>)。
-- transport 发送失败可以在 `Submit` 返回前同步 `FireDone`；正常 reader 在回调前已移除 pending。见[Submit](<src/ipc/shell_client.cpp#L165-L195>)、[reader](<src/ipc/shell_client.cpp#L415-L416>)。
-
-**调用链**
-
-`MenuThread → ShellClient::Submit → reader／FireDone → Ops callbacks`  
-并发于  
-`WorkerThread → RunDelete／RunShellOp → WaitShellDone`。
-
-**触发与推断**
-
-快回调可能早于映射注册；早到的菜单 DONE 可覆盖文件 DONE。被覆盖请求的 pending 已移除，超时 `Abort` 又只在 pending 仍存在时补发完成，见[Abort](<src/ipc/shell_client.cpp#L262-L280>)。因此，等待可能持续到停止；解锁后的字符串移动与并发赋值构成实际 C++ 数据竞争。具体崩溃未动态验证。
-
-**建议**
-
-ID 预留及回调路由注册先于发送；按 request ID 保存独立结果；在同一锁内一次移出完整完成对象，包括删除证据。不要继续用“一个文件 worker”解释跨类别共享单槽的安全性。
-
-#### F09 — P0：网络搜索错误没有交付终态
-
-**事实**
-
-host 过载或超时返回 `RSP_RESULT` 文本，客户端遇到请求失败或非 `RSP_SEARCH` 直接返回，没有登记结果或通知。见[服务端](<src/index/network_agent_main.cpp#L94-L113>)、[客户端](<src/index/network_agent_client.cpp#L215-L247>)。
-
-主窗登记两路查询，并在网络 roots 存在时等待两路 ready，见[查询登记](<src/app/app_navigation.cpp#L216-L232>)、[合并屏障](<src/app/app_navigation.cpp#L629-L644>)。
-
-**推断**
-
-网络端失败可阻止已经返回的本地结果发布。**独立全局搜索窗口不能混为同一行为**：它另有 10 秒 timer，见[启动 timer](<src/app/global_search_window.cpp#L181-L187>)和[超时处理](<src/app/global_search_window.cpp#L537-L541>)。
-
-**建议**
-
-每条请求必有 success／error／cancel／partial 终态；错误码、完整性和请求身份作为字段，不靠诊断文本。合并器应允许失败来源贡献“已完成但不完整”，而不是永远未 ready。
-
-#### F10 — P0：订阅比较忽略了结果质量
-
-**事实**
-
-payload 尾部依次为 revision 8 字节、error 4 字节、incomplete 4 字节；去重排除了全部 16 字节，见[序列化](<src/index/index_host.cpp#L295-L310>)及[hash](<src/index/index_host.cpp#L448-L460>)。
-
-**推断**
-
-同样的 rows／total 从完整变为授权超时或不完整，或者恢复完整，均可能被吞掉。
-
-**建议**
-
-比较“结果语义”，仅排除纯通知 revision；error／incomplete 必须参与变化判断。
-
----
-
-### 5.2 对象身份接口：路径只能定位，不能证明“还是原对象”
-
-#### F02 — P0：跨卷移动删除新的同名源对象
-
-**事实**
-
-`TransferPlanEntry` 没有保留实际复制源的身份／租约，见[计划](<src/ops/ops_manager.h#L88-L99>)；复制回调保留的是目的句柄，见[CopyProgress](<src/ops/ops_manager.cpp#L421-L437>)。
-
-同卷 `MoveFileExW` 遇到 `ERROR_NOT_SAME_DEVICE` 后进入复制；复制、可选哈希及目的提交完成后，对 `entry.source` 按路径读取属性、清只读、`DeleteFileW`，见[跨卷分支](<src/ops/ops_manager.cpp#L2563-L2577>)及[最终删除](<src/ops/ops_manager.cpp#L2763-L2771>)。
-
-**调用链**
-
-`Submit → ExecuteFileOperation → RunTransfer → CopyFile2 → destination commit → DeleteFileW(source path)`。
-
-**触发与推断**
-
-复制关闭源之后、删除之前，另一主体把原源移走并放入新文件。目的包含旧源，删除却命中新源，构成条件性永久数据损失。路径 SHA-256 校验不能消除校验后的替换窗口。
-
-**建议**
-
-从实际复制源捕获对象身份，并保持足以完成安全删除的 lease／handle；破坏性动作必须证明仍是该对象。可复用现有[文件身份适配](<src/ops/file_identity.h#L8-L41>)的 extended／legacy 区分，不能把“不支持 FileIdInfo”简化成“信任路径”。
-
-**正向证据**
-
-目的侧已经有 adopt、owned leaf、检查和固定句柄提交机制，见[目的提交保护](<src/ops/ops_manager.cpp#L2707-L2761>)。问题不是“复制完全没有 TOCTOU 防护”，而是防护未贯穿源删除。
-
-#### F03 — P0：撤销没有证明删除的是原操作产物
-
-**事实**
-
-Copy／Create 的 `UndoEntry` 保存路径而非 produced 对象身份；`PushUndo` 不记录产物 ID；撤销把目的路径转成 `RecycleDelete`。见[结构](<src/ops/ops_manager.h#L101-L110>)、[入栈](<src/ops/ops_manager.cpp#L1430-L1441>)、[撤销](<src/ops/ops_manager.cpp#L1524-L1546>)。
-
-删除准备按当前路径分类；网络路径变为 Permanent，见[删除计划](<src/ops/delete_operation.cpp#L86-L100>)。当前删除身份验证不能回溯证明它是原产物；同路径比较更不是历史对象证明，见[身份比较](<src/shell_host/deletion_identity.cpp#L23-L33>)。
-
-**推断**
-
-原产物被删除或移走后，新对象占用原路径，Undo 可回收新对象。网络路径经新的永久删除确认后，仍可能删除错误的新对象。不能把它表述为“绕过所有确认”。
-
-**建议**
-
-提交时记录每个产物的卷／FileID；撤销计划及后端执行前验证原产物身份。持久化后无法证明的记录应停止或标记不可撤销。`undo_revision` 仅证明栈版本，不证明盘面身份。
-
----
-
-### 5.3 Shell 命令接口：会话、handler 和命令身份必须绑定
-
-#### F04 — P0：事件失败后仍启动线程并释放 worker
-
-**事实**
-
-先创建两个事件，再 `CreateThread(worker.get())`，最后检查三个句柄；事件失败、线程成功时 `continue` 释放 `unique_ptr`。线程仍读写该裸指针。见[创建顺序](<src/shell_host/main.cpp#L1254-L1269>)、[线程体](<src/shell_host/main.cpp#L1115-L1153>)。
-
-**推断**
-
-低资源或失败注入下出现 UAF／堆破坏，同时存在该失败分支的句柄清理问题。正常路径的 STA 设计不能抵消此失败路径。
-
-**建议**
-
-事件全部成功后才启动线程；线程启动后，所有退出／失败清理都必须先确保线程停止或由独立所有者接管。
-
-#### F05 — P0：缓存与重绑不能可靠表示用户所选命令
-
-**事实**
-
-1. 应用缓存按扩展名／background 等条件复用；同路径复用未完整考虑 extended 模式，见[缓存条件](<src/app/context_menu_controller.cpp#L152-L170>)。
-2. cached click 用 verb／text 找 live ID；匹配不到但 ready 时仍可退回旧数字 ID，见[点击路径](<src/app/context_menu_controller.cpp#L238-L253>)。
-3. 应用按首个 verb、再首个 display text 匹配，不含 handler 身份，见[匹配](<src/app/context_menu_controller.cpp#L466-L477>)。
-4. host 优先接受同数字 ID，未验证它仍代表相同命令，见[FindItemId](<src/shell_host/ctx_handlers.cpp#L460-L474>)。
-5. host 计算 `live` 并据其选择 handler，却没有把 `live` 写回 invocation；worker 调用的仍是原 `item_id`，见[分派](<src/shell_host/main.cpp#L1343-L1358>)、[实际调用](<src/shell_host/main.cpp#L1152-L1153>)。
-6. 协议只有 session／item／verb／text，没有 handler 与命令代际身份，见[协议](<src/ipc/protocol.h#L282-L296>)。
-
-**可构造分支**
-
-旧 ID 258 失效、verb 重绑得到 live ID 2 时，dispatcher 可以选择第一 handler，却仍向它发送 258。实际 offset 与用户所选不一致；第三方 handler 是报错还是执行其他动作，待运行确认。
-
-**推断**
-
-动态菜单、跨 session cache、数字 ID 复用和同 verb／caption 的多个 handler 都可导致失败或误执行。破坏性命令误执行是风险后果，未宣称已发生。
-
-**建议**
-
-可执行身份至少绑定会话代际、handler 身份和 canonical command；展示缓存只负责布局。身份不匹配时停止，不能用“文字差不多”或旧数字 ID 授权。发送的必须是验证后的 live ID，并验证范围与 enabled 状态。
-
-**相关 P1 问题**
-
-- 按展示文字去重及生成 catalog key，会把相同 caption 的不同命令合并，也使偏好受语言变化影响，见[去重](<src/app/context_menu_controller.cpp#L29-L65>)、[catalog key](<src/ipc/ctx_menu_util.h#L219-L239>)。
-- 静态 verb 执行静默限制为前 16 个目标，见[目标截断](<src/app/context_menu_controller.cpp#L270-L287>)。这是用户选择范围契约，不应只是内部 cap。
-
-**排除误报**
-
-[Fluent menu 的 DisplayEqual](<src/ui/fluent_menu.cpp#L81-L115>)用于决定显示重绘，随后更新 command；不能把纯显示相等直接判为命令身份漏洞。[内置菜单映射](<src/app/builtin_menu_items.cpp#L9-L23>)则正确使用枚举／数值身份。
-
----
-
-### 5.4 数据边界与错误协议
-
-#### F06 — P0：本地索引端点信任与数组分配边界
-
-**事实**
-
-本地客户端直接连接固定 pipe，未核验 server PID、image、token；响应提供的计数直接用于 `reserve`，工作线程未捕获这些解析／分配异常。见[连接](<src/index/index_client.cpp#L98-L138>)、[数组分配](<src/index/index_client.cpp#L195-L259>)、[worker](<src/index/index_client.cpp#L335-L373>)。
-
-[协议的 payload 字节上限](<src/index/index_protocol.h#L8-L13>)和[ReadMsg 检查](<src/index/index_client.cpp#L158-L170>)不能约束“小帧里的巨大 count”。
-
-**触发与推断**
-
-真 host 未占用端点时，允许连接的伪服务端可返回伪造元数据；恶意 count 可要求巨大分配并触发 UI 进程未捕获异常。此处是本地端点占用／响应攻击，不是已证明的提权。
-
-**建议**
-
-复用并统一端点认证，明确区分 SYSTEM 服务与用户 helper；分配前检查 count、剩余字节、最小记录长度和业务页上限。[网络 transport 的验证函数](<src/index/index_transport_security.h#L126-L138>)已提供可参考的实际实现。
-
-**边界澄清**
-
-真实服务已有 per-message caller 捕获和可见性检查，见[host 授权](<src/index/index_host.cpp#L426-L439>)、[可见性检查](<src/index/index_caller_visibility.h#L34-L115>)。F06 不等于“索引服务任意泄露所有文件”。
-
-#### F18 — P1，运行行为待确认：剪贴板 HDROP 地址／句柄不一致
-
-[剪贴板读取](<src/ops/clipboard.cpp#L121-L127>)将 `GlobalLock` 返回地址强转为 HDROP；[拖放读取](<src/ui/drag_drop.cpp#L150-L155>)则传 `medium.hGlobal`。
-
-公开的 [DragQueryFileW 契约](<https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-dragqueryfilew>)和 [Shell clipboard formats](<https://learn.microsoft.com/en-us/windows/win32/shell/clipboard>)不足以给该地址强转提供可移植保证。建议统一按 HDROP／HGLOBAL 的约定使用。
-
-本次**不声称剪贴板普遍失效**：具体兼容行为依 Windows 实现而定；仓库已有[20 次 copy／cut roundtrip 测试](<src/bench/ops_test_main.cpp#L1320-L1339>)，本次未运行。
-
-#### F19 — P1：密码状态依赖英文人类诊断
-
-`PasswordError` 精确匹配包含路径的英文错误行；公开结果没有结构化 status／exit code，调用方依赖 `error.empty()` 与 `password_required`。见[诊断匹配](<src/ops/archive.cpp#L160-L169>)、[公开返回](<src/ops/archive.cpp#L194-L197>)、[结果类型](<src/ops/archive.h#L17-L21>)、[UI 消费](<src/app/archive_navigation.cpp#L225-L252>)。
-
-版本、语言或路径显示形式变化可能使密码需求被当成普通失败。
-
-建议返回结构化 outcome、exit code、密码状态（允许 Unknown）和独立 display message。**文档化 `7z -slt` 字段属于机器协议，不是本问题。**
-
-同时，[Run](<src/ops/archive.cpp#L124-L130>)已对非零退出且空输出补错误文本，不能声称此类错误被普遍判成功。
-
-#### F20 — P1：持久化 parser 是字符串搜索，不是 JSON 结构解析
-
-[JSON helper](<src/common/json_utils.h#L27-L84>)具有以下事实：
-
-- 按 key 子串寻找冒号，不确认对象层级；
-- 不支持完整 JSON escape，`\u` 不按 Unicode 解释；
-- 整数逐位累乘不检查溢出，存在有符号整数溢出 UB；
-- bool 接受前缀而不确认 token 结束。
-
-[会话读取](<src/app/session.cpp#L356-L370>)实际使用该 helper。
-
-建议明确持久化 schema 和完整边界；采用真实 parser 或严格限定并验证其输入子集。这里没有证明远程输入可达，不能包装成远程漏洞。
-
-#### F23 — P1：预览属性长度协议两端不一致
-
-host 的[属性构造](<src/preview_host/main.cpp#L194-L205>)和[WriteString](<src/preview_host/main.cpp#L260-L263>)未限制 value 长度；UI [reader](<src/ui/thumbnail_cache.cpp#L442-L456>)只允许 1024 字符。
-
-合法属性值达到 1025 字符即可被 reader 判为协议失败，随后 helper 停止且失败被缓存。测试 reader 的允许长度不同，见[测试解析器](<src/bench/preview_test_main.cpp#L203-L207>)。
-
-建议将 label／value／count 上限集中为协议常量；超长显示属性应明确截断或返回受控错误，不能由两端不同的隐式规则决定。
-
-#### F24 — P1：文本截断与编码边界未表达完整
-
-[DecodeText](<src/preview_host/main.cpp#L123-L140>)最多保留 12000 字符；[MakeTextOrHex](<src/preview_host/main.cpp#L167-L188>)却仅按“文件字节是否读完”设置 truncated。
-
-因此，20000 字节 ASCII 文件可以显示 12000 字符，却报告未截断。32 KiB prefix 恰好切在 UTF-8 多字节字符内部时，又可能使整个 prefix 回退 CP_ACP。
-
-建议区分 byte／character／display 截断，安全处理 UTF-8 边界；不能让有限预览暗示内容完整。
-
-#### F30 — P1：路径规范化未先解析所有相对语义
-
-[NormalizePath](<src/fs/fs_enum.cpp#L145-L168>)只对没有 drive designator 的路径调用 `GetFullPathNameW`。`C:subdir` 会直接得到扩展前缀，`C:\a\..\b` 也未先解析 dot segment。
-
-用户地址输入确实会进入该函数，见[地址提交](<src/app/app_hosted_edit.cpp#L189-L196>)和[导航](<src/app/app_navigation.cpp#L1537-L1545>)。
-
-依据 [Windows 路径与命名空间规则](<https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>)，drive-relative 与扩展路径具有不同语义。建议先解析有效 Windows 输入，再添加扩展前缀；不要把“以盘符开头”当成“已完整规范化”。
-
----
-
-### 5.5 索引完整性接口
-
-#### F07 — P0：混合 USN reason 丢失
-
-**事实**：[ApplyUsnLocked](<src/index/index_engine.cpp#L2584-L2602>)遇到 `SECURITY_CHANGE` 提前返回；[CatchUpVolume](<src/index/index_engine.cpp#L2888-L2915>)仍推进并持久化 cursor。
-
-**调用链**：`USN stream → packet queue → engine worker → CatchUpVolume → ApplyUsnLocked → cursor commit`。
-
-**推断**：同记录内同时出现 SECURITY 与 RENAME／DELETE／CREATE／DATA 时，其他变化漏应用，索引及其派生结果可持续错误。
-
-**建议**：权限刷新与其他 reason 的处理应叠加；只有明确消费了所有有效位，才可提交该记录进度。
-
-#### F08 — P0：MFT 部分读取被宣称成功
-
-**事实**：[EnumerateMft](<src/index/index_mft.cpp#L303-L340>)在后续 ReadAt 失败时跳出当前 run，最终只要读到记录数非零就返回 true；[IndexVolumeMft](<src/index/index_engine.cpp#L2941-L2955>)只有 false 才进入 fallback。
-
-**调用链**：`FullRebuild → IndexVolumeMft → EnumerateMft → BuildMftTree → snapshot commit`。
-
-**推断**：中段失败／短读后，缺失基线可被发布。未发生后续 USN 的既存文件不会自动恢复。
-
-**建议**：区分 Complete／Failed／Cancelled／Capped；部分读取不能代表完整成功。失败时 fallback，或保留旧快照并显式标 gap。
-
----
-
-## 6. 多实现与多风格分析
-
-| 观察到的多路径 | 判断 | 应如何处理 |
+| Index | 单次 CancelIoEx 后 join；header/body 间无持久停止闸门。取消时没有 pending I/O，随后才发起 body read，对端不发正文可无界等待。Disconnect 还可能先等阻塞 writer 的锁。 | [Stop](<../src/index/index_client.cpp#L41-L52>)、[帧读写](<../src/index/index_client.cpp#L157-L186>) |
+| Shell | Submit 持 send_mutex，且持 pending_mutex 执行无限写；Stop/Abort/Cancel 先等 send_mutex。背压可使取消等在被取消者后面。 | [锁内发送](<../src/ipc/shell_client.cpp#L180-L226>)、[Cancel/Abort](<../src/ipc/shell_client.cpp#L305-L324>) |
+| Preview | 约 1 秒预算只等响应头；正文同步 ReadAll，Reset 单次 CancelSynchronousIo 后 join。头部预算不是整帧预算。 | [Reset](<../src/ui/thumbnail_cache.cpp#L62-L70>)、[正文与映射](<../src/ui/thumbnail_cache.cpp#L482-L524>) |
+
+- **共同方向：**持久停止信号；停止后禁止新 I/O；取消不依赖阻塞写占有的锁；整帧/整请求 deadline；完成回收后才释放 buffer / OVERLAPPED。
+- **不要误修：**不能 join 超时后释放仍在使用的数据；不能为共用传输抹平 read-only、交互、modeless、有副作用请求的差异。
+- **最小回归：**只发 header，在 body 发起前 Stop；peer 活着但不读，超过管道缓冲后 Cancel/Stop；Preview 半帧。检查有界终态及真实完成回收。
+- **归因：**部分结构在基线已存在；空闲 CPU 修复和后台转发确实有效，不能把所有同步 Submit 都说成直接在 UI 调用。
+
+### A06 / P1：Preview 响应没有完整 schema 验证
+
+- **事实：**文本/属性有长度上限，但 mapping_chars 直接 resize；像素消费未统一验证 width/height/stride、组合合法性、generation 和总分配预算。
+- **推断：**异常/被破坏的 helper 响应可造成巨额分配或未捕获异常；未证实普通媒体输入能直接利用、内存越界或提权。
+- **方向：**分配/正文读取/映射前一个入口完成整个响应验证；失败退役连接并给终态。
+- **证据：**[Preview 消费](<../src/ui/thumbnail_cache.cpp#L450-L542>)；参考[ShellQuery 严格验证](<../src/ipc/shell_query_protocol.h#L148-L190>)，复用原则而非强行共用 wire format。
+
+### A09 / P1：网络调度所有权与状态 freshness 混用
+
+- **事实：**Finish(probe_id) 只保护当前调度槽；不匹配的结果仍更新网络状态与 net_readonly。枚举错误被压成 bool，UNC 的访问拒绝也可显示 Offline。
+- **方向：**按路径 latest ticket/epoch 判结果有效性；未被更新探测取代的晚成功可以接受。保留错误类别，分开权限拒绝、断网、取消、饱和、provider 失败。
+- **证据：**[结果无条件应用](<../src/app/app_main.cpp#L1597-L1623>)、[超时后晚结果](<../src/fs/fs_net_cache.cpp#L275-L289>)、[错误展示](<../src/app/app_navigation.cpp#L1009-L1025>)。
+- **回归：**A 超时 → B 更新 → A 晚返回，不得覆盖 B；没有 B 时仍能接受有效晚成功。不要简单丢掉所有 Finish=false 结果。
+
+### A10 / P1：物理资源有上限，前台终态/恢复却不完整
+
+- **事实：**Worker 全局上限 8、单池通常 2–4；UNC probe 上限 4，超时不释放真正阻塞的所有者，这是正确保护。Refresh 可返回 0；probe admission 失败保留队首，资源释放未闭合重试唤醒。
+- **推断：**同池全部阻塞会拖住本地请求；启动失败可留下 loading；第五个 probe 等资源释放后未必自动恢复。
+- **方向：**保留实际 live+retired 上限；拒绝/饱和必有终态；物理资源释放唤醒逻辑队列；必要时隔离本地与网络/provider 预算。
+- **证据：**[Worker 启动](<../src/app/app_worker.cpp#L63-L87>)、[Refresh 拒绝](<../src/app/app_worker.cpp#L116-L122>)、[前台 probe pump](<../src/app/app_navigation.cpp#L80-L98>)、[probe 上限](<../src/fs/fs_net_cache.cpp#L298-L330>)。
+- **回归：**4 个实际探测占满，第 5 个排队，释放一个资源后自动恢复或明确终止；禁止以逻辑超时重新计数绕过上限。
+
+## 4. 第三优先级：目录/UI 根因与可删冗余
+
+| ID / 优先级 | 事实、方向及验证 |
+|---|---|
+| **A07 / P1：UI 全量快照处理** | 通知属性虽在后台，发布仍复制全快照并 sort；新建项又 stable_sort；path+sort 请求可对同目录重复枚举。方向：一次 immutable FS facts、后台排序投影、UI 只验证 generation 并交换结果。证据：[通知发布](<../src/app/app_notify_patch.cpp#L30-L49>)、[新项展示](<../src/app/app_ops_ui.cpp#L65-L74>)、[请求 key](<../src/app/app_worker.cpp#L116-L137>)。回归：大目录小通知、多 pane 不同排序，计数枚举/排序/复制量和 UI 长帧。 |
+| **A08 / P1：名称身份固定 case-fold** | 通知 positions 使用 towlower hash/equality；大小写敏感目录同时 A.txt/a.txt 时，可更新/删除错误记录。方向：名称身份与显示排序分开，精确名称及目录能力收口；Shell/归档不能套同一普通 FS 规则。证据：[索引与应用](<../src/app/snapshot_patch.cpp#L99-L196>)。回归：真实 case-sensitive 目录的增删改名和选择。 |
+| **A11 / P1：同步动画** | 连续时长/背景补丁最终仍 UI WaitForCommitCompletion、DwmFlush、Sleep(8) 循环；HEAD 循环时长 110ms。方向：DComp 动画或非阻塞生命周期，保留高对比度/禁动画/非合成差异。证据：[等待与循环](<../src/ui/dialog_lifecycle.cpp#L160-L209>)。回归：快速关闭、嵌套模态、owner/focus、禁用动画。 |
+| **A12 / P2：退役算法靠测试保活** | KeepEntryOrder 及旧 ApplyDirNotify/Batch 的外部调用集中在测试；生产改用 resolved 流程，旧保序状态反复清 false。删除确认无生产用途的算法/参数/状态，把有价值测试迁移到实际入口；不要删仍用的 FollowEntryRenames/PruneEntryRenames。证据：[旧保序](<../src/app/entry_order_hold.cpp#L50-L78>)、[旧通知 API](<../src/app/snapshot_patch.cpp#L56-L94>)、[resolved 流程](<../src/app/snapshot_patch.cpp#L122-L196>)。 |
+| **A13 / P2：drag-over 属性 I/O** | HeaderDropHint → FirstDroppableFolder → GetFileAttributesW 在 hover 重复执行。“无 COM”不等于无阻塞。方向：本次 drag 元数据/cheap hint，后台 generation 查询，drop 最终验证另排队；不能裸跨套间用 IDataObject。证据：[属性查询](<../src/ui/drag_drop.cpp#L156-L163>)、[UI 调用](<../src/app/app_input.cpp#L332-L347>)。 |
+| **A14 / P2：缓存同步解析** | 导航/WarmupUnc 直接 LoadNetSnapshot，包含读盘、reserve、字符串解析。方向：已有后台 I/O + generation 发布；新鲜枚举优先，不增加第三份缓存。证据：[导航调用](<../src/app/app_navigation.cpp#L967-L984>)、[加载器](<../src/fs/fs_net_cache.cpp#L138-L186>)。 |
+| **A20 / P3：文本度量重复路由** | 文件名统一 DWrite，但 Luma 全局 enabled 时仍可走组合测量 key，再被 format 路由拒绝。方向：绘制/度量使用同一轻量路由、复用 advance 缓存；不造 factory/strategy，不据此删整个 Luma。证据：[format 路由](<../src/ui/ui_compositor.cpp#L138-L158>)、[度量入口](<../src/ui/typography.cpp#L357-L368>)。收益未实测。 |
+| **A22 / P2 候选：枚举 fallback 过宽** | NT runtime_error 后再跑 Win32；诊断已保留，但哪些错误代表真实能力差异尚缺证据。先按错误码/provider 测量再收窄，不贸然删除兼容后端，不推断绕过 ACL。证据：[fallback](<../src/fs/fs_enum.cpp#L492-L505>)。 |
+
+## 5. 明确不能误删的正确设计
+
+| 保留项 | 理由与证据 |
+|---|---|
+| **A15：目标 snapshot / lease / handle 提交** | 确认授权快照、稳定祖先、owned leaf 提交分别保护不同阶段；不是调用次数多就冗余。归档应向这里收口。见[目标保护](<../src/ops/destination_guard.h#L30-L109>)、[提交](<../src/ops/ops_manager.cpp#L2644-L2698>)。 |
+| **A16：本地/网络删除差异与回收凭证** | 网络无原生回收；Undo 不能永久降级；confirmed/uncertain 不是 HRESULT bool。保留单删除授权入口、混合批次分组、cancel 不代表 rollback。见[删除服务](<../src/ops/delete_operation.cpp>)、[回收证明](<../src/shell_host/recycle_fileop.cpp#L101-L171>)。删除文件有未提交展示修改，先核对 HEAD。 |
+| **A17：Shell session/query/launch/interaction 分工** | 不可控扩展要可终止进程；COM/modeless 需要 owning STA；query 是只读预算，交互和 UAC 寿命不同；有副作用 dispatched 后不能自动重放。可共用低层认证/RAII，不可改成万能线程池。见[session 寿命](<../src/shell_host/ctx_session_process.cpp#L117-L178>)、[query STA](<../src/shell_host/shell_query_worker.cpp#L90-L104>)、[no-replay](<../src/ipc/shell_client.cpp#L8-L23>)。 |
+| **A18：helper 与 SYSTEM service 两种认证** | helper exact image/token；service 用 SCM running PID、own-process、LocalSystem 配置。普通用户不能同样 OpenToken SYSTEM；portable UI 与 installed service 路径不同可合法。不能简化成同 SID。见[鉴别](<../src/index/index_server_auth.h#L19-L54>)、[认证后发布](<../src/index/index_client.cpp#L107-L119>)。 |
+| **A19：共享 CPU 像素 + per-consumer GPU / epoch / interest** | 不同 D2D 设备不能随意共用位图；CPU 数据支持重建；可见 pinning 避免重复解码。软工作集预算不等于硬上限 bug，应先定义/量测压力；有限 transient retry 有依据。见[资源模型](<../src/ui/thumbnail_cache.h#L70-L125>)、[可见预算](<../src/ui/thumbnail_cache.cpp#L213-L229>)。 |
+| **A21：简单 UI 与 hook 修正** | hook_requested 真源、消息只唤醒是实质并发修复；局部布局、快速访问重排、隐藏属性变淡不值得造重型抽象。见[hook](<../src/ui/preview_handler_pan.h#L99-L124>)、[重排](<../src/app/places.cpp#L1162-L1190>)。视觉状态仍未实测。 |
+
+## 6. 下一 AI 的最小行动路线
+
+1. **重新核验，不照抄本报告修代码。**读当前 HEAD、目标 diff、调用链与测试；记录问题已修复/仍存在/待确认。本文行号锚定审计版本，后续可能漂移。
+2. **先做 A01–A04 的确定性故障测试。**若复现误操作、树外变更或新内容丢失，按实际影响升级 P0。修复只覆盖被证实的契约缺口。
+3. **再闭合 A05–A06。**测试半帧、背压、取消先于 I/O 发起、畸形响应；不能只测试空闲 reader 或正常小帧。
+4. **处理 A08–A10 的身份/终态，再处理 A07/A11 的响应性能。**保持 generation、排序版本、窗口/连接 epoch 各自职责，不叠更多全局开关。
+5. **最后删 A12，做 A13/A14 与低风险整理。**清理测试专用旧实现时迁移真实回归，不为通过删除/弱化断言。
+6. **定向验证后停止扩大范围。**仅构建相关目标、运行对应筛选；不默认 full selftest / build_release / 全历史回归。不要把编译成功等同功能通过。
+
+### 最重要的测量/验收指标
+
+- 破坏性操作：replacement/outside/未复制新内容完全保留；拒绝时历史记录和 recovery 状态准确。
+- IPC：Stop/Cancel 有界，实际 I/O 完成被回收；OutcomeUnknown 不重放；分配与资源数量有上限。
+- 目录：每路径枚举次数、每投影排序次数、复制字节量、UI p95 长帧；不承诺未经测量的加速倍数。
+- 平台：按相关能力选择 NTFS/ReFS/FAT/SMB、映射网络盘、云占位符、长路径；不是每次都跑全部组合。
+
+## 7. 未完成与容易误报的边界
+
+- 运行故障、真实 FS/provider sharing/取消行为、回收最后身份读取到执行的对象绑定仍待确认。
+- 本次没有批准 GUI 主题/DPI/窄布局表现，也没有认证全部 Windows 8.1 动态能力。
+- 存储迁移、安装/便携分发、索引引擎内部、全部预览 provider 未逐行穷尽；不能将局部报告扩展成全仓认证。
+- 隔离进程首先是故障/资源边界；没有额外 token/AppContainer 证据，不得夸大为低权限安全沙箱。
+- “同功能多路径”只有在语义、权限域、原子性、套间和寿命相同且证据充分时才可合并。
+
+**交接结论：先修历史身份、祖先归属、内容版本与 I/O 生命周期；保留 Windows/COM/Shell 真实约束，再减少重复枚举、UI 排序和退役算法。**
+
+## 8. 历史复核命令
+
+```powershell
+git status --short
+git rev-parse HEAD
+git log '490e114^..185cb83' --reverse --format="%h %s" --shortstat
+git diff '490e114^' 185cb83 -- <path>
+git show <commit> -- <path>
+git show 185cb83:<path>
+```
+
+主要归因：`7dc21de` 目标保护/生命周期整合；`cac5f32` 来源 ID、Undo Copy/Create、目录契约；`b8a7604` idle CPU、context session；`185cb83` Shell query/launch、SCM 认证及目录后续修复。原有风险与这些提交新引入的风险必须分开。
+
+## 9. 第三批落实记录：A05–A06
+
+本批已落实并完成下列定向检查。第 3 节保留审阅时的事实与推断；本节记录当前工作区的处理结果，不代表全仓或全部 provider 验收。
+
+| 入口 | 旧做法的缺口 | 当前通用规则 |
 |---|---|---|
-| NT 目录查询与 Win32 枚举 | **合理平台分支** | 保留能力检测与兼容 fallback；统一错误／完整性／取消契约，而非强制一个底层 API |
-| 普通复制、同卷移动、raw reparse | **不同文件语义** | 不应为了去重删除 reparse 处理；但源对象身份应贯穿各破坏性分支 |
-| 永久删除与显式回收 | **不同语义的必要后端** | 保留同一个授权门；不可把“回收失败就永久删除”当透明 fallback |
-| 本地索引与 UNC 索引 | **不同权限与凭据域** | 保留隔离；统一上层结果终态，不能搬到一个高权限万能服务 |
-| one-shot／缓存内容查询／校验＋补扫 | **不同执行职责** | 不是三个重复搜索引擎；明确 freshness／coverage 契约后优化访问形状 |
-| OPC／Office IFilter／PDFium／PDF IFilter | **格式和环境差异** | 保留格式适配及解析进程；不将复杂解析器挪入 UI |
-| WIC／SVG／metafile／Shell thumbnail／handler／MFPlay | **媒体与 provider 能力不同** | 不建立无差别 fallback 链；每个降级应说明丢失的语义 |
-| DirectWrite 与 LumaText | **可选 backend** | 保留选择；统一绘制输入的缓存身份，修正 F25 |
-| Shell IDataObject 与最小 FileDataObject | **互操作增强＋兼容降级** | 有依据，不是重复剪贴板实现 |
-| FolderSizes 递归与详情独立递归 | **真实职责重叠** | 收敛一个可取消扫描服务，按消费者投影结果 |
-| 剪贴板与拖放中的 HDROP 读取 | **风格分歧导致契约风险** | 统一解析约定；F18 需定向运行验证 |
-| 主窗和全局窗口的搜索合并 | **前端不同，但完成策略重复且分歧** | 两个 UI 可保留；共享结果终态／合并语义，避免一个吞错、一个依赖 timer |
-| 本地 rename 与 Shell IPC rename | **当前扫描调用点为 0 的候选旧路径** | 先确认所有入口、协议兼容及外部调用，再决定删除；不能仅凭一次 grep 判死代码 |
-| app／model 同名头文件 | **兼容别名，不是第二实现** | [places alias](<src/app/places.h#L1-L31>)、[batch rename alias](<src/app/batch_rename.h#L1-L13>)不能计为重复业务逻辑 |
+| 公共管道传输 | 只有单次 pending 等待预算，多次分块可不断续期 | PipeIoOptions 共享绝对 deadline；每次发起前检查持久取消；取消/超时后回收实际完成再释放 OVERLAPPED、事件和缓冲区 |
+| Index | Stop 单次 CancelIoEx；Disconnect 先等待阻塞 writer；头与正文间取消可能落空 | 连接同时拥有管道和取消事件；读写保留共享所有权；先发取消信号再等待锁和线程；首字节启动 5 秒整帧预算 |
+| Shell | 发送期间占有 pending 锁；Stop/Cancel/Abort 等在阻塞发送后面 | pending 锁只管理注册与终态；取消先打断连接；完整帧仍由发送锁串行化；统一 RetireConnection 退役失效连接；保留各请求原有重放政策 |
+| Preview | 只给响应头约 1 秒预算，正文同步读取；Reset 依赖单次 CancelSynchronousIo | 请求、响应正文、属性与映射 ACK 共用 1 秒预算；Reset 置持久停止事件并等待 worker 完成回收；删除旧的同步取消和清理时单次取消调用 |
+| Preview 响应消费 | 分散限制若干字符串；映射名、像素组合和总分配未统一准入 | ValidatePreviewResponse 在可变分配前验证固定 schema、请求身份、合法类型/状态、尺寸/stride 和总预算；属性逐项先验证长度再分配；只映射已验证的像素字节数；缓存成本按实际拥有的数据计算 |
 
-补充事实：[标签实现](<src/app/places.cpp#L15>)使用 model namespace，但物理位置仍在应用目录。这反映迁移未完全完成，不等于构建引用损坏。
+Preview producer 仅在确实发布映射名时等待 ACK，避免映射创建失败后等待客户端无法发送的 ACK。正常响应的类型、失败语义、代次和缓存重试政策保留。
 
----
+实际验证结果：
 
-## 7. 数据流与性能审计表
+- 公共 IPC：传输筛选 19 PASS / 0 FAIL；包含传输和原有负载解析的目标 42 PASS / 0 FAIL（包含前述传输检查，不相加）。
+- Index：传输生命周期 15 / 0；writer 空闲 19 / 0；帧边界 15 / 0；原有结果路由 21 / 0。
+- Shell：背压、半帧、停止缺口及连接退役 31 / 0；原有请求路由 20 / 0；OpsManager Shell 终态筛选 10 / 0。
+- Preview：传输/异常 schema 32 / 0；真实本地 helper 响应兼容 11 / 0；文本边界 34 / 0；矢量响应 17 / 0；缓存 45 / 0；失败语义 11 / 0。
+- 主程序、受影响 helper 和上述测试目标编译成功；日志保留在 build/batch3-*.log。
 
-下表证明的是访问／调度形状。除明确的算法复杂度外，不给出未经测量的耗时、CPU 或吞吐数字。
+验证说明：沙箱启动返回 0xC0000142，改为获准的完整 Windows 环境执行；系统临时目录拒绝创建，实际响应夹具限定在项目 bench_data。一次 Ops 测试筛选参数写错而误启动默认测试，已停止，记录有 36 PASS / 9 FAIL；该中断运行不计作本批验证，也未据此推断失败原因或扩展修复。随后正确的 --filter shell-completion 定向检查为 10 PASS / 0 FAIL，误启动进程没有残留子进程。
 
-| 路径 | 经过的层 | 重复数据／转换／I/O | 影响 | 简化方向 | 证据 |
-|---|---|---|---|---|---|
-| **F11：目录→排序→共享缓存** | pane→worker→枚举→排序→path store→其他 pane | 不同排序分别枚举；sorted snapshot 存入 path-only cache | 一个 pane 可接收另一排序结果；排序成本与枚举成本耦合 | 共享未排序 FS 事实；排序为 per-pane 投影 | [WorkResult](<src/app/app_worker.h#L34-L45>)、[缓存更新与接收](<src/app/app_navigation.cpp#L984-L1040>) |
-| **F11：列式结果** | worker result→column | 成功后把 generation 清零，未保留 applied watermark | 更旧同路径成功结果可覆盖新结果 | request generation 与 applied generation 分开 | [列式结果](<src/app/app_column_view.cpp#L289-L306>) |
-| 排序命令 | UI→Refresh→枚举→sort | 仅改变显示顺序仍重读文件系统 | 本地重复 I/O；UNC 放大延迟 | 已有事实快照上做排序投影 | [SetSort](<src/app/app_navigation.cpp#L1658-L1685>) |
-| **F12：过时 UNC 导航** | 队列→2–4 worker→NT／Win32 provider | generation 在完整枚举后才检查；旧不同 key 工作未被物理取消 | 全部 worker 被旧 UNC 阻塞时，新本地导航及 EnqueueIo 饥饿 | 消费者取消、按介质隔离预算；在途旧任务有实际治理 | [枚举后检查](<src/app/app_worker.cpp#L228-L247>)、[无限 pending wait](<src/fs/fs_enum.cpp#L330-L350>) |
-| **F13：通知失败重试** | watch→ReadDirectoryChanges→reopen→watch | provider 不支持通知但目录可成功重开时，无 backoff 循环 | CPU 热重试、overflow 与重枚举风暴的条件性风险 | Unsupported／Offline 状态、退避、受控 polling | [失败分支](<src/fs/fs_watch.cpp#L209-L260>) |
-| **F14：UNC 探测** | UI scheduler→inner thread＋waiter→timeout→下一探测 | 1500ms 仅释放逻辑占位；waiter 继续无限等 inner；每次两线程 | 多 pinned roots／重复导航可积累 blocked worker、waiter 与 handle | 统计 live＋retired 的物理上限；拒绝／合并超过预算的请求 | [探测](<src/fs/fs_net_cache.cpp#L171-L217>)、[调度](<src/app/app_navigation.cpp#L79-L98>) |
-| **F15：通知补丁** | UI timer→Drain→各 distinct snapshot→stat→publish | 每种现有快照复制整列表，并为事件同步 stat | 大目录复制成本；网络 stat 可阻塞 UI | 后台收集一次 FS delta，UI 应用投影；保留现有批次合并 | [timer](<src/app/app_main.cpp#L934-L943>)、[逐快照补丁](<src/app/app_navigation.cpp#L1269-L1301>) |
-| **F15：暂存区收集** | copy／cut／OLE drop→Collect→属性查询 | UI／drop 回调同步逐路径 stat | UNC 或不可响应 provider 可卡交互 | 收集意图与验证分离，异步填充状态 | [Collect](<src/app/app_model.cpp#L886-L917>)、[copy/cut](<src/app/app_ops_ui.cpp#L185-L200>)、[drop](<src/app/app_input.cpp#L321-L327>) |
-| **F16：目录大小** | BuildVm→独立 details scan；FolderSizes→另一次 scan | 两条递归入口；详情 scan 遇枚举失败跳过，仍 done | 重复 I/O；不完整大小被当完成；关闭可能等待 provider | 一个扫描服务，typed partial／error；ViewModel 只读 | [详情 scan／join](<src/app/app_runtime.cpp#L959-L1042>)、[FolderSizes](<src/app/folder_sizes.cpp#L383-L417>) |
-| **F17：详情元数据** | BuildVm→path-key worker→窗口消息 | 同一路径变化不重新请求；权限／owner／volume 多次查询 | 元数据可长期过时；权限摘要不能代表完整 token access | path＋对象版本＋view/window epoch；集中元数据读取 | [请求条件](<src/app/app_runtime.cpp#L1856-L1872>)、[接受条件](<src/app/app_main.cpp#L1453-L1471>)、[权限摘要](<src/app/details_meta.cpp#L41-L125>) |
-| **F21：内容缓存查询** | SearchTask→SQL candidate→C++ scope／size→body／version | 广域 count／sort；逐候选 body、逐 positive version；全 documents negative scan | 小 root 常见词仍承担大 cache 成本 | 下推廉价谓词，有限批量读取，保持同 WAL snapshot | [候选 SQL](<src/index/content_index.cpp#L1275-L1301>)、[后过滤](<src/index/content_index.cpp#L1369-L1387>)、[后续查询](<src/index/content_index.cpp#L1523-L1593>) |
-| 菜单等待与刷新 | UI wait→窄消息泵→完成→多次 refresh | 等待 QS_ALLINPUT，但仅泵 Shell 消息；再 immediate／400／1600ms 刷新 | 延迟时未消费输入可反复唤醒；重复枚举是补偿机制 | 非阻塞菜单状态机；基于可靠完成／通知刷新 | [等待](<src/app/context_menu_controller.cpp#L204-L216>)、[窄泵](<src/app/app_commands.cpp#L939-L949>)、[刷新时点](<src/app/context_menu_controller.cpp#L497-L510>) |
-| **F22：预览失败缓存** | Draw→helper→1s deadline→StoreResult | temporary timeout 被作为稳定失败 key 缓存；generation 不在 key | 同身份直到 LRU／Reset 才重试 | 错误分类、短 TTL、重试预算；稳定 unsupported 可长缓存 | [key](<src/ui/thumbnail_cache.cpp#L53-L57>)、[timeout](<src/ui/thumbnail_cache.cpp#L408-L416>)、[失败存储](<src/ui/thumbnail_cache.cpp#L487-L491>) |
-| **F26：视频退休资源** | Open→detached thread→MFPlay→Reset hide | 每次 Open 新线程；blocked create／open／Shutdown 未被循环 deadline 控制 | 快速切换可积累 hidden HWND 与退休线程 | 真实退休上限；隔离或串行 admission，不以 stop flag 代替结束 | [Open／Reset](<src/ui/video_preview.cpp#L142-L178>)、[同步 provider 调用](<src/ui/video_preview.cpp#L250-L256>)、[Shutdown](<src/ui/video_preview.cpp#L398-L403>) |
-| **F27：GIF** | frame request→新 decoder→从 0 合成到目标帧→缩小 | 每请求重做前缀；UI 只留少量帧 | 播放一轮可呈 O(N²) 前缀工作；大原始 canvas 增加峰值内存 | 连续解码状态／checkpoint＋有界帧缓存；约束源 canvas | [合成](<src/preview_host/main.cpp#L362-L453>)、[帧缓存](<src/ui/thumbnail_cache.cpp#L347-L360>) |
-| **F28：等价预览请求** | details／quick→raw pixel key→helper clamp | details 请求 2048，helper 最终 ≤1024；quick bucket 已 ≤1024；GIF cap 512 | 同样输出重复解码／缓存；文本 pixel 维度也无意义 | 在 key 前规范化有效解码身份 | [details](<src/ui/ui_details_panel.cpp#L210-L219>)、[quick](<src/ui/quick_preview_window.cpp#L463-L465>)、[clamp](<src/ipc/preview_protocol.h#L20-L37>) |
-| 排序比较器 | `std::sort`→EntryLess→path／localized name | O(N log N) 比较过程中构造派生 key | 字符串／锁成本形状存在，实际收益待测量 | 每轮排序预计算稳定 key | [比较器](<src/app/entry_sort.cpp#L39-L108>) |
-| **F29：UNC 磁盘缓存写入** | 多 worker→SaveNetSnapshot→同 `.tmp` | 同路径临时名，无 per-path writer／generation 协调；结果被忽略 | 写失败、旧结果覆盖风险；未证明实际混合损坏 | 独立临时名＋序列化提交＋版本检查 | [保存](<src/fs/fs_net_cache.cpp#L55-L83>)、[调用](<src/app/app_worker.cpp#L348-L357>) |
+范围仍限于本地自建管道和上述真实 helper 内容类型。真实 SMB/RaiDrive、其他第三方预览 provider、GUI 快速切换及完整历史回归未在本批验收。
 
-### 7.1 F11 的确定性排序身份冲突
+## 10. 第四批落实记录：A08–A10（2026-10-11）
 
-`WorkResult` 不携带 sort specification；store 按 path 存储；tab 在 pending 为 0 时可接收较新的同路径结果，见[结果结构](<src/app/app_worker.h#L34-L45>)、[store 接口](<src/fs/fs_snapshot.h#L39-L56>)、[接收条件](<src/app/app_navigation.cpp#L984-L1040>)。
+本批完成名称身份、网络结果 freshness 与请求准入终态的实现及定向验证。第 3、4 节仍保留审阅时的事实；本节说明当前工作区变化，不代表真实 SMB、全部 provider 或完整 UI 验收。
 
-可构造顺序：
-
-1. pane A 的 Name 结果 gen1 已应用，pending 清零；
-2. pane B 的 Size 结果 gen2 返回；
-3. A 也通过同路径、较新 generation 检查，接受 B 的 Size snapshot；
-4. A 仍显示 Name 排序状态。
-
-[PrepareEntrySnapshot](<src/app/app_model.cpp#L143-L161>)不会无条件按 A 的 sort 重新投影，且一次刷新后清 keep flag。因此，这不是仅“缓存效率问题”，而是事实快照与视图身份混合造成的列表正确性风险。
-
-`WorkKey` 还未包含 folder-sort mode，见[key 与 Refresh](<src/app/app_worker.cpp#L108-L128>)；请求语义并未完整入 key。
-
-### 7.2 F15 的失败语义：stat 失败不等于对象不存在
-
-UI 实际调用的是 keep-order notify patch 路径。[ApplyHeldNotifies](<src/app/snapshot_patch.cpp#L157-L192>)对非预验证 rename 项的 `FillDirEntry` 失败直接删除旧行，没有区分暂时访问失败与不存在。
-
-**推断**：modified／added 事件期间短暂 access denied 或 provider 故障，会把仍存在的对象从视图移除。rename 预验证失败另有 full-enum 行为，不能把所有 rename 都描述成静默删除。
-
-**建议**：Absent、Unavailable、Changed 必须区分；暂时无法 stat 的行保留或标 stale，并安排受控验证。
-
-### 7.3 F12／F13／F14 的必要区分
-
-- [WorkerPool::Stop](<src/app/app_worker.cpp#L82-L105>)已有 `CancelSynchronousIo`、100ms bounded wait 和 shared state retirement，且有全局活跃上限。**本报告不声称 WorkerPool Stop 无界或存在通用 UAF。**
-- watch 也有 owner／overlapped／回调门控和 live＋retired 约束。F13 是**失败重试策略**，不是否定其内存生命周期设计。
-- 每秒[未 armed UNC 刷新](<src/app/app_navigation.cpp#L1504-L1509>)与 F14 的探测调度是两件事，不能声称探测自动每秒启动一次。
-- Windows 文档明确存在网络 redirector／文件系统不支持通知的情形，见[ReadDirectoryChangesW](<https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw>)。成功 reopen 不代表通知能力恢复。
-
-### 7.4 F16／F17 的结果真实性与关闭风险
-
-- 详情递归遇 `FindFirstFile` 失败跳过该目录，最后仍标 done，见[详情扫描](<src/app/app_runtime.cpp#L959-L1031>)。大小结果需要 incomplete／error，不应只给完成 bool。
-- [WM_DESTROY](<src/app/app_main.cpp#L1668-L1694>)仍在 UI 关闭路径停止并等待若干组件；只有部分 stop 被移到[退出 worker](<src/app/app_exit.cpp#L30-L39>)。不响应的 provider 可使目录大小等 join 卡住关闭，运行表现待确认。
-- Details worker 未初始化 COM，却调用 Shell 元数据函数，见[worker](<src/app/app_runtime.cpp#L62-L115>)；相关 provider 的表现待确认。
-- [权限摘要](<src/app/details_meta.cpp#L41-L107>)主要依据用户 SID／有效权限，不是完整访问 token 判定；读＋写标作 Modify 也不等同包含 delete 的完整修改权限。该信息应标明“摘要”，不能作为实际授权依据。
-
----
-
-## 8. 架构与耦合
-
-### F31 — P1：文件级分离已经推进，语义边界尚未完成
-
-| 现象 | 事实 | 影响与建议 |
+| 问题 | 旧做法的缺口 | 当前通用规则 |
 |---|---|---|
-| `AppState` 是全应用能力入口 | 同时持有 renderer、quick preview、tabs、raw pane 指针、store、worker、watch、队列、侧栏等，见[聚合状态](<src/app/app_state.h#L132-L212>) | 聚合所有权本身合理，但大量命令接受整个对象，无法看出所需能力和允许修改范围；按具体用例缩窄接口 |
-| model 依赖渲染／搜索实现类型 | [应用模型头](<src/app/app_model.h#L3-L11>)包含 renderer／content result store | 模型难以独立验证，搜索与浏览状态交织；提取稳定领域值，不再让模型依赖大型渲染头 |
-| UI ViewModel 仍握领域服务对象 | 含 FS snapshot、可变 content store、mutable row cache、catalog 指针，见[PaneViewModel](<src/ui/ui_renderer.h#L174-L187>) | include 边界通过不等于 UI 只读边界；可通过这些对象读取／依赖领域状态 |
-| `BuildVm` 不纯 | 会触发详情元数据与独立目录大小扫描，见[详情请求](<src/app/app_runtime.cpp#L1856-L1872>)、[扫描启动](<src/app/app_runtime.cpp#L1913-L1931>) | 绘制／布局调用频率影响业务调度；应由选择／导航事件启动任务，VM 读取已发布状态 |
-| aggregate header 放大修改面 | [app_internal](<src/app/app_internal.h#L1-L11>)汇总状态、运行、导航、操作、命令、输入等 | 多 TU 文件拆分但能力依然相互可见；以显式依赖替代“任何处理器都能触达所有状态” |
-| Places model 仍混合 I/O | [model 接口](<src/model/places.h#L21-L120>)与[实现](<src/app/places.cpp#L884-L1122>)覆盖目录／ADS／持久化职责 | stable TagId 是正向设计；但目录位置迁移不应被当成已完成纯模型化 |
+| A08 名称身份 | 通知位置表、批量修改合并、保序改名链和选择跟随使用大小写折叠，可能合并 A.txt / a.txt | 普通文件系统通知的物理名称按精确字符串匹配；单条、批量、resolved 通知、队列合并和返回子目录选择使用同一规则；显示排序仍使用原有排序器 |
+| A09 结果 freshness | Finish 只验证调度槽，但晚结果仍无条件更新网络状态；枚举失败只保留 bool，UNC 失败一律显示 Offline | 调度槽与每路径 latest ticket 分开；入队即预留 ticket，重试保留原 ID；超时为 provisional，未被新请求替代的最终晚结果仍有效；最终结果清理 freshness 记录 |
+| A09 错误语义 | 权限、取消、饱和和未知 provider 失败丢失原因 | 枚举和探测保留原始 Win32 error_code，共用 PathError 分类；仅连接/超时错误显示 Offline；权限/provider 显示具体系统错误，保留 UNC 快照只读；取消探测保留既有连接状态 |
+| A10 前台拒绝 | Worker 启动/Refresh 拒绝可留下 loading；旧结果可能覆盖拒绝状态；probe 满额后的队首缺少唤醒 | 普通目录、显式刷新、标签/收藏/最近/回收站统一拒绝终态；列视图也结束为错误。拒绝仍推进 generation watermark，屏蔽之前排队的结果；探测实际所有者释放后发消息唤醒原队列，永久启动错误发布终态 |
+| A10 本地执行保障 | 同池所有线程可被 UNC、回收站或后台 provider 调用占满 | 每池保留一个只执行本地枚举的线程，其余线程仍可处理本地和 provider 请求；启动需同时取得至少两个实际名额，保留全局 8 个 live+retired 上限和探测 4 个物理上限 |
 
-**不建议**立即引入完整事件总线、DI 容器、通用 repository／service 框架。优先划清四种真实边界：
+删除了 AppState 中独立的 probeUnc/probeQueue，队列、请求 ID 和 freshness 由既有 UncProbeScheduler 统一拥有。没有增加轮询重试定时器，也没有以逻辑超时释放实际 I/O 名额。错误文字复用 FileOperationErrorText。旧共享请求夹具改为在枚举 checkpoint 处门控，继续验证共享代次与取消归属，不再假设后台 I/O 可以占满所有线程。
 
-1. 导航／选择意图；
-2. 文件系统事实；
-3. 异步请求与结果；
-4. UI 只读投影。
+实际验证结果：
 
-COM、进程隔离、授权、凭据这些原生边界应保留，不宜用一套抽象擦平。
+- 名称模型筛选：24 PASS / 0 FAIL / 1 SKIP；通知应用筛选：9 PASS / 0 FAIL。模型修复前为 11 PASS / 11 FAIL。
+- 探测调度筛选：8 PASS / 0 FAIL；真实受控探测筛选：22 PASS / 0 FAIL，修复前为 16 PASS / 6 FAIL。
+- 网络/准入应用筛选：17 PASS / 0 FAIL。最初 12 项有效修复前用例为 3 PASS / 9 FAIL；最终补充取消、拒绝后旧结果、列视图拒绝及真实资源唤醒。四个真实阻塞探测超时后仍占物理名额，第五个 UI 请求由资源释放消息自动恢复并完成，无需另一次用户请求。
+- Worker 生命周期：36 PASS / 0 FAIL；枚举取消：12 PASS / 0 FAIL。覆盖退休所有者、剩一名额时启动拒绝、实际返回恢复、本地枚举保留线程、拒绝仍推进 watermark，以及具体枚举错误码。
+- 共享目录请求筛选：10 PASS / 0 FAIL（含 6 项列视图检查）；独立共享列视图筛选：6 PASS / 0 FAIL，后者与前者重叠，不相加。
+- 主程序与本批受影响测试目标构建成功；git diff --check 通过。主代理日志为 build/batch4-*.log；没有运行完整 selftest 或完整历史回归。
 
----
+验证限制与未解决项：
 
-## 9. 过度设计、冗余、fallback 与文件碎片化
+- 隔离目录启用 FileCaseSensitiveInfo 返回 ERROR_ACCESS_DENIED (5)，真实 A.txt/a.txt 同目录端到端用例为 SKIP；精确名称模型、通知应用以及普通目录真实大小写改名已验证，不能据此声称真实敏感目录全链路通过。
+- 原有保序模块另记录 35 PASS / 1 FAIL，失败为“reopening the same directory clears held order and rename hints”。复核 HEAD 中 Tab::NavigateTo 同路径提前返回已存在，未将其扩展为本批修复。
+- 本地保留线程依赖显式 UNC/回收站/provider 请求分类；映射盘、云目录等使用本地路径的阻塞 provider 尚不能保证隔离。真实 SMB/RaiDrive、第三方 provider、完整视觉验收未执行；原有 presentation-state 筛选只更新了模拟探测 ID，未重跑。
 
-### 9.1 真实可简化项
+本批后仍待处理 A07、A11、A12、A13、A14、A20、A22 共 7 项；A22 仍是需要先收集错误码/provider 证据的候选项。
 
-- **目录大小重复扫描**：F16 是相同业务事实被两套调度拥有，值得收敛；索引查询与递归扫描本身则是有意义的两种数据来源。
-- **路径级缓存承载排序**：增加了请求 key、keep-order、代际和多 pane 修补的复杂度，却仍没表达完整身份，见[共享加载](<src/app/app_navigation.cpp#L909-L954>)和[多快照通知补丁](<src/app/app_navigation.cpp#L1269-L1301>)。
-- **单槽完成包装**：F01 用少量字段隐藏 request kind／id 的复杂度，属于表面简单、真实契约更复杂。
-- **补偿性刷新**：菜单操作后的 immediate／400／1600ms 刷新是经验补偿，不是可靠完成协议，见[刷新调度](<src/app/context_menu_controller.cpp#L497-L510>)。
-- **候选旧 rename 接口**：[ShellClient::Rename](<src/ipc/shell_client.h#L50>)和 host 请求分支仍在，但本次扫描未找到生产调用。可以列为清理候选，不能未经全入口确认直接删除。
+## 11. 第五批落实记录：A07 / A11（2026-10-11）
 
-### 9.2 F25 — P1：LumaText surface cache 缺少 alignment
+本批将普通目录的事实枚举、排序投影和 UI 发布拆开，并将对话框淡入改为非阻塞生命周期。保留前四批的身份、generation、取消及实际 I/O 所有者约束。
 
-[SurfaceKey](<src/ui/lumatext_renderer.cpp#L95-L113>)及[构造](<src/ui/lumatext_renderer.cpp#L616-L625>)不包含 alignment；录制的 origin 却依 alignment 改变，见[绘制 origin](<src/ui/lumatext_renderer.cpp#L656-L662>)。
-
-因此，同样 text／layout／size／颜色先 leading、后 center／trailing 时，可以直接重放错误位置的 command list。该缺陷由 key 与录制内容不一致直接推出，不依赖性能测量。
-
-建议令缓存键代表实际录制语义，或者让 alignment 作为重放时变换且不被提前烘焙。不是再加一层缓存即可解决。
-
-### 9.3 F22／F28／F29：缓存多并不等于身份完整
-
-- F22 的 temporary failure 没有时间有效性；[Evict consumer](<src/ui/thumbnail_cache.cpp#L91-L98>)并不等同清除负缓存。
-- F28 使用 raw request pixels，而 helper 使用有效 cap；多个 key 代表相同解码结果。
-- F29 的同 `.tmp` 多 writer 缺少提交版本；应保守归为并发缓存风险，**没有证据证明已经发生灾难性文件损坏**。
-- [UNC 缓存序列化](<src/fs/fs_net_cache.cpp#L55-L79>)与[加载](<src/fs/fs_net_cache.cpp#L120-L130>)未完整保存部分 cloud／link 派生字段。缓存优先数据与实时结果是否等价应显式声明，不能默认为相同完整度。
-
-### 9.4 不应误删的 fallback
-
-以下都有平台或安全依据：
-
-- NT→Win32 目录枚举；
-- Shell data object→CF_HDROP 降级；
-- 每-handler 菜单绑定→aggregate 菜单 fallback；
-- WIC／metafile／Shell thumbnail 能力差异；
-- PDFium／IFilter 和 OPC／legacy Office 分支；
-- 索引查询→递归扫描；
-- 普通文件、reparse、同卷 rename／跨卷 copy 的不同实现；
-- 解析器／Shell provider 的进程隔离。
-
-应审计的是**fallback 是否改变语义、错误是否被保存、身份是否连续**，不是把多分支数量当成缺陷。
-
-### 9.5 P3：构建与文件组织
-
-[CMake 生产源码收集](<CMakeLists.txt#L295-L317>)采用递归 glob 加 regex 排除。随着测试／迁移文件增多，目标归属依赖命名和排除规则，维护风险高于显式模块目标；本次未证明有错误源文件被纳入生产目标。
-
-兼容头是迁移手段，不是重复实现。反过来，把大处理器分成许多仍共享 `AppState` 的文件，也不能单凭文件变小宣称解耦。应以依赖和状态所有权衡量，而非“文件越多越好”或“全部合回一个文件”。
-
----
-
-## 10. AI 代码反模式分类
-
-本节分类的是**可观察代码模式**，不推断作者是否使用 AI，也不推断生成过程或动机。
-
-| 类别 | 本仓库可观察证据 | 判断 |
+| 问题 | 删除的旧路径 | 当前通用规则 |
 |---|---|---|
-| 展示文本充当机器身份 | F05 的 text rebind／catalog key；F19 的英文 PasswordError | 已确认，需要 typed identity／outcome |
-| 路径字符串充当对象身份 | F02 源删除；F03 produced undo | 已确认，破坏性动作风险高 |
-| 先发请求后补登记 | F01 Query／Invoke | 已确认；快速回调不是罕见“边角情况” |
-| 全局单槽模拟请求协议 | F01 DONE 字段 | 已确认；隐藏并发类别而非真正串行化 |
-| bool／空字符串压扁结果状态 | F08 partial MFT、F16 size done、F19 error.empty | 已确认；Complete／Partial／Failed 被混合 |
-| 逻辑取消冒充物理结束 | F12 stale enum、F14 probe、F26 video | 已确认生命周期形状；实际资源积累需测量 |
-| 缓存键未覆盖真实语义 | F11 sort、F25 alignment、F28 effective pixels | 已确认；缓存“命中”不代表结果可复用 |
-| 临时失败永久化 | F22 timeout negative cache | 已确认；需要 TTL／分类而非无限重试 |
-| 静默限制输出却不表达损失 | F05 前 16 目标、F24 字符截断 | 已确认；不能只以“有 cap”证明契约可靠 |
-| 自造简化 parser 替代标准边界 | F20 JSON helper | 已确认，结构及溢出问题可直接阅读验证 |
-| 以业务后过滤代替数据层范围控制 | F21 candidate SQL／N+1 | 已确认访问形状；实际耗时待测量 |
-| 用额外刷新／轮询补偿缺失协议 | 菜单多时点刷新、F13 立即 reopen retry | 部分有兼容需求，但不应替代终态与能力状态 |
-| 文件拆分／namespace 迁移冒充解耦 | F31 aggregate state／领域对象进入 VM | 架构尚未完成；不把迁移别名算成多实现 |
-| 无依据的“统一后端” | 本地／UNC、文档、preview 原生分支 | **不成立**；这些多路径多数有实际依据 |
-| 编造 API／跨 apartment 裸传 COM | 本次已读重点路径 | **未发现可证实案例**；API 使用错误不等于 API 不存在 |
-| 删测试／弱化断言换通过 | 当前相关 diff | **无证据成立**；不能从删除一个 setup assignment 推断作弊或 AI 动机 |
+| A07 通知发布 | UI 复制整个快照、直接 sort，以及纯删除事件立即在 UI 发布的特判 | 全部通知通过既有后台 I/O 队列解析并准备 immutable 投影；同一 source 只应用一次事实变化，同一排序只投影一次；UI 验证 snapshot/path/view/applied/notify generation 和排序设置后交换指针 |
+| A07 新建项展示 | RevealPendingCreatedItem 再复制快照并 stable_sort | 展示使用已经发布的投影，只按精确名称选择和滚动；大小写不同的物理名称不会合并 |
+| A07 枚举与排序 | path+sort 各自重复枚举，UI 同步重排目录和缓存快照 | 不同排序订阅共享 pending/inflight 的一次目录事实枚举，各自后台生成投影；已加载目录切换排序只重排；仍在刷新的目录切换排序订阅其新事实，不丢掉刷新终态；同排序订阅可借用已有发布代次 |
+| A07 freshness / 取消 | 缓存显示、重排与真实枚举完成缺少明确区分 | 缓存投影为同 generation 的 provisional，最终枚举为 final；缓存不结束 pending，不覆盖最终错误，不写磁盘缓存；纯重排不更新身份、Git 和 store freshness；同 key 的新 Refresh 取得新事实；无订阅的 queued producer 和缓存引用及时回收 |
+| A11 动画生命周期 | UI WaitForCommitCompletion、DwmFlush、Sleep(8)、GdiFlush、cloak 及同步帧循环 | DComp 淡入使用动画对象，native 淡入使用窗口计时器；调用后继续处理消息；关闭立即隐藏/销毁；窗口销毁、解绑及自然完成共用取消与清理，恢复 alpha/color key/backdrop，仅移除本次临时添加的 layered 样式 |
 
-正向例子：[类型化 Banner 测试](<src/bench/presentation_state_cases.h#L73-L104>)明确验证语言变化不影响机器状态。[当前变化记录用例](<src/bench/presentation_state_cases.h#L182-L209>)仍保留机器元数据断言。审计应保留这些证据，而不是为了“敌意审查”凑反模式。
+共享目录组只存在于待执行/执行中的请求，没有新增持久缓存、线程或退休任务链。列视图借用的发布代次必须匹配排序设置；显式刷新归属随排序订阅转移。通知准备失败或发布校验失败仍保留旧行并请求重新枚举。
 
----
+实际验证结果：
 
-## 11. 第一性原理简化方向
+- Worker 投影筛选：51 PASS / 0 FAIL。覆盖不同排序只枚举一次、同 key 新刷新取得新 facts、排序期间保留真实刷新、同 key Project 借代次、取消/替换的排队 producer 与缓存回收，以及 provisional 不写 UNC 磁盘缓存。
+- 目录投影应用筛选：14 PASS / 0 FAIL；共享目录/列视图请求：10 PASS / 0 FAIL；网络/准入终态：17 PASS / 0 FAIL。覆盖双窗格同时纯排序均完成、独立选择、显式刷新归属转移、错误排序结果拒绝、缓存和最终错误终态。
+- 通知大目录投影筛选：6 PASS / 0 FAIL。50,000 行、两个 pane、7 次后台准备/前台发布，中位数 16.643 ms，p95（本组最大值）24.325 ms；无发布前修改源快照，排序设置变化整批拒绝。通知应用模块：27 PASS / 0 FAIL；通知名称筛选：9 PASS / 0 FAIL。
+- 目录模型契约：14 PASS / 0 FAIL；名称模型：24 PASS / 0 FAIL / 1 SKIP。
+- 对话框关闭：13 PASS / 0 FAIL；淡入生命周期：89 PASS / 0 FAIL。清理不覆盖动画期间其他样式修改的两项用例，修复前为 2 FAIL，修复后通过。主程序、上述测试目标及四个直接依赖动画实现的展示/控件目标构建通过，无新增编译警告。
+- git diff --check 通过。主代理日志为 build/batch5-*.log，动画日志为 bench_data/dialog_fade/lifecycle-test.log 和 close-test.log；未运行完整 selftest 或完整历史回归。
 
-| 基本事实 | 最小应有模型 | 可以消除的复杂度 |
+验证限制：5 万行的计时只覆盖当前机器的受控通知发布，没有修复前同条件计时，不能据此声称整体性能提升比例；UI 仍有列表计数、选择跟随和列视图索引处理，最慢一次仍超过 16 ms。没有执行真实 SMB/RaiDrive、第三方 provider、完整桌面动画录像或完整视觉验收。动画当前开启且非高对比度，禁动画/高对比度分支保留但没有通过切换系统设置动态验证。真实大小写敏感目录仍因 FileCaseSensitiveInfo 返回错误 5 而 SKIP。首次模型夹具在系统临时目录创建失败（错误 5），改用仓库内隔离夹具目录后相关筛选通过。
+
+代码量说明：第五批开始时全部脏树相对 HEAD（含未跟踪源文件）的净变化为生产代码 +896 行、测试 +3036 行、文档/构建配置 -476 行，合计 +3456 行；这是当时整个工作区的统计，不能全部归因于前四批，也不是第五批完成后的现值。测试是主要增长来源，生产代码也确实增加。A11 本批生产 +129/-98，净增 31 行，新增部分承担跨消息状态和资源清理。通用规则减少了重复算法和运行路径，并不自动保证总代码行数下降；不能将全部增长都解释为必要。
+
+A12 尚有约 150 行旧 KeepEntryOrder / ApplyDirNotify / ApplyDirNotifyBatch 实现及失效状态字段仅靠测试保活。下一批应先将有意义的回归迁移到生产入口，再删除这些实现、参数和写 false 的状态；FollowEntryRenames / PruneEntryRenames / FillDirEntry 仍有生产用途，保留。
+
+本批后待处理 A12、A13、A14、A20、A22 共 5 项；A22 仍需要先收集错误码/provider 证据。A07 的全量 UI 处理并未完全消失，当前完成的是本节列出的事实/投影收口，剩余发布成本以实际计时记录。
+
+
+## 12. 第六批落实记录：A12 退役实现清理（2026-10-11）
+
+本批确认旧实现无生产调用后删除，保留名称身份、选择跟随和通知失败原子性的生产规则。统计以本批开始时的文件为基线，保留此前未提交修改。
+
+- 删除 KeepEntryOrder、旧 ApplyDirNotify / ApplyDirNotifyBatch 及其 keep_order 参数；同时删除仅供旧入口使用的 FindName / InsertSorted 和排序依赖。通知只保留 ResolveDirNotifies / ApplyResolvedDirNotifies，排序仍由后台 ProjectDirectorySnapshot 准备。
+- 删除 Tab::refresh_keeps_order / order_held 及写 false 的路径。ClearEntryOrderHold 改名 ClearEntryRenameHints，只负责仍有生产用途的改名提示；FollowEntryRenames / PruneEntryRenames / FillDirEntry 保留。
+- 将模型与旧自测迁移到生产事实解析/投影入口，不增加兼容包装。旧算法互比改为具体物理名称、大小、排序和原快照不变的断言；Name/Size/Mtime/Type 的升降序均有独立预期结果。删除只为旧保序开关重复执行的组合。
+- 旧默认模型“同路径重开清空提示”的历史失败迁移为当前导航契约：同路径是 no-op 并保留未完成提示，不同目录导航才清理。新增不同目录的清理断言；不通过删除该场景获得通过。
+
+本批生产代码净减少 197 行；bench 测试净增加 25 行，旧 selftest 测试净增加 67 行，测试合计净增加 92 行。源代码合计净减少 105 行（不含报告）。统计依据为 build/batch6-line-counts.json，不是整个脏树相对 HEAD 的差异。
+
+实际验证结果：
+
+- 目录模型 35 PASS / 0 FAIL；目录契约筛选 10 PASS / 0 FAIL；名称筛选 22 PASS / 0 FAIL / 1 SKIP；面包屑导航 58 PASS / 0 FAIL。
+- 真实通知应用模块 27 PASS / 0 FAIL；通知名称筛选 9 PASS / 0 FAIL；目录投影应用 14 PASS / 0 FAIL；共享目录/列视图 10 PASS / 0 FAIL。
+- 应用夹具 --listing-races-only：16 PASS / 0 FAIL；--created-only：53 PASS / 0 FAIL。四张 100%/150% DPI、浅色/深色图片渲染和保存检查通过，未人工审阅。夹具手工注入 worker 结果与通知 mailbox，未启动真实 worker/watch，不能据此证明真实线程竞争通过。
+- 本批没有运行应用夹具的 transfer/title 和 ArchitectureCases；其中旧的同步纯删除假设仍需另行迁移，未声称无筛选应用夹具通过。
+- 主程序和上述相关目标构建通过，无新增编译警告；源码中无旧 API、旧字段或旧清理方法引用，git diff --check 通过。主代理日志为 build/batch6-*.log。
+
+旧 selftest_1b2.cpp 已通过 MSVC /Zs 的完整语法检查；当前 PULSE_WITH_SELFTEST=OFF，未执行这份旧自测的功能断言。真实大小写敏感目录仍因权限错误 5 为 SKIP；没有扩大到完整历史回归、真实 SMB/RaiDrive 或完整 UI 验收。
+
+本批后待处理 A13、A14、A20、A22 共 4 项；A22 仍需先收集错误码/provider 证据。
+
+## 13. 第七批落实记录：A14 磁盘缓存后台发布（2026-10-11）
+
+本批移除导航和 UNC 预热中的同步 LoadNetSnapshot。两处 UI 路径只提交已有 WorkerPool 请求；读盘、文件校验、字符串解析和排序投影均由后台 worker 完成。
+
+- 复用现有 provisional / final 发布合同。共享目录请求优先使用当前订阅者已有的内存事实；没有内存事实时，后台读取一次磁盘事实，为各排序订阅者准备投影，不增加线程池、第三份缓存或独立请求模型。
+- 可选缓存不存在、损坏或读取抛错均不阻止正常枚举。缓存结果保留同一 pending generation；最终枚举按原成功/失败入口终结，缓存不提前写为新鲜 SnapshotStore。
+- 缓存时间随 WorkResult 发布，UI 只有通过 path、pending/applied generation、排序列、方向和文件夹排序模式校验后才显示已有 Cache / Refreshing 提示。最终成功清除缓存时间与提示，最终失败保留缓存列表和错误终态；迟到缓存不能覆盖终态。
+- UNC 预热仍提交实际枚举，成功结果进入既有共享 store；实际导航可以独立后台载入磁盘缓存，预热不再在 UI 上把旧磁盘事实注入共享 store。
+- 列视图祖先/子列复用 NoteColumnStripResult 接收同一临时结果，要求精确匹配待完成代次，保留该代次直到 final；最终完成后不再接受迟到缓存。列的 rows 仍按所属 tab 的规则构建，没有另加 UNC 分支。
+
+以本批开始时为基线，生产代码净增加 11 行（navigation -8、worker +17、WorkResult +1、列发布 +1）；测试代码净增加 326 行，其中隔离缓存文件/竞态夹具 227 行，worker 测试入口 +9 行，网络与列状态断言净 +90 行。源码合计净增加 337 行，不含本报告；CMake 仅在原测试目标宏定义行增加 PULSE_NET_CACHE_TESTING=1，净行数不变。统计证据为 build/batch7-line-counts.json，保留此前脏树，不能当作整个工作区相对 HEAD 的增量。
+
+实际验证：
+
+- pulse、pulse_fs_worker_cancel_test、pulse_directory_contract_application_test 构建通过；补齐测试的 localization.h 依赖后最终构建无新增编译警告。列发布补充后只重建 pulse 和目录应用测试目标。
+- pulse_fs_worker_cancel_test --net-cache：33 PASS / 0 FAIL；真实隔离本地 cache 文件、后台线程、共享内存优先、缺失/损坏/异常、读盘期间取消和同键替换均有定向断言。
+- pulse_fs_worker_cancel_test --projection：51 PASS / 0 FAIL。
+- pulse_directory_contract_application_test --network-state-only：最终 29 PASS / 0 FAIL，包含主列表与列共享缓存、时间提示、结果匹配和最终完成后的迟到缓存拒绝。
+- pulse_directory_contract_application_test --directory-projection-only：14 PASS / 0 FAIL；--shared-requests-only：10 PASS / 0 FAIL。
+- src/app 中 LoadNetSnapshot 只剩 worker 调用；git diff --check 通过。日志为 build/batch7-*.log。
+
+缓存读取测试使用 bench_data 下的隔离文件，UNC 枚举在起点注入已知错误以避免访问真实 provider；这证明本地缓存读写及后台发布合同，不证明真实 SMB/RaiDrive 延迟。UI 状态检查手工投递 WorkResult，未作截图或完整 UI 验收，也未运行完整历史回归。磁盘解析本身仍是 worker 内同步操作，取消会阻止发布，不保证即时停止读盘。相关用例通过后停止验证。
+
+本批后待处理 A13、A20、A22 共 3 项；A22 仍需先收集错误码/provider 证据，再决定是否收窄 fallback。
+
+## 14. 收尾落实记录：A13 / A20 / A22（2026-10-11）
+
+按用户“最后的全部做完”的授权，本轮连续完成剩余三个审阅项，不再分批等待确认。此前第 9–13 节的“待处理”数量是各批完成时的历史状态；当前分批计划中的修复项已全部落实，真实 provider 和完整 UI 验收仍有下述边界。
+
+| 项目 | 原实现的问题 | 本轮统一规则 |
 |---|---|---|
-| 一个目录的文件事实与用户排序无关 | 共享 immutable FS facts；每 pane 自己的 order／filter projection | 按 sort 反复枚举、path cache 的排序冲突、逐排序快照重复 patch |
-| 路径是 locator，不是 object identity | locator＋对象身份＋必要 lease | Copy／Move／Undo／retry 中反复路径再验证仍留下的 TOCTOU |
-| 一次请求只有一个最终结果 | request ID＋typed terminal result＋发送前路由 | DONE 单槽、早回调丢失、超时后永远未 ready |
-| 完整性是结果的一部分 | error／partial／coverage 与 rows 一起比较和发布 | F08／F10 等“数据没变所以状态也没变”错误 |
-| 超时仅代表消费者不再等待 | live＋retired 资源预算；真实取消或隔离退场 | F14／F26 的后台遗留积累 |
-| 缓存复用依赖有效输出语义 | 规范化的 effective key＋版本／TTL | 像素 cap 等价请求、alignment 错复用、temporary failure 永久化 |
-| 大小／属性是异步业务事实 | 一个可取消事实服务，多消费者只读订阅 | BuildVm 启动业务、两次递归扫描、路径不变就永久 stale |
-| 小 scope 查询不应支付全库成本 | 先过滤廉价 metadata，再批量取必要 body | 广域 count／sort／negative scan 与 N+1 |
+| A13 拖拽元数据 | HeaderDropHint 在每次 hover 同步查属性；最终目录判断也在 UI 查询，快捷方式另用 detached thread | 同一拖入 sources 只向已有 WorkerPool 提交一次元数据查询；UI 使用廉价导航候选，完成后按 hint generation 刷新当前拖拽上下文；最终 Drop 单独排队重新验证目录/快捷方式，仍检查 pane 寿命、slot、path 和 view generation |
+| A20 文本度量路由 | 全局 Luma 开启时，文件名先建立组合缓存 key，随后又被 format 规则拒绝 Luma | 绘制与度量共用 UsesLumaText；进入缓存前确定路由，文件名直接复用 DWrite advance 缓存；删除 key 中重复查询开关的位，不增加 factory/strategy |
+| A22 枚举重试 | NT 枚举 runtime_error 普遍触发 Win32 二次枚举，实际失败与能力差异混在一起 | 保留数值 NTSTATUS/Win32 错误和查询阶段，只对 NT API 缺失、查询明确 NOT_IMPLEMENTED / NOT_SUPPORTED 兼容重试；其他错误保留原诊断并终止，失败清空部分结果，双后端失败保留双诊断 |
 
-具体原则：
+A13 只跨线程传 owned 路径和 weak 状态，不传 IDataObject。DragOver 保存最新坐标、修饰键、允许效果与来源偏好；后台完成复用这些上下文，DragLeave 后不能重放。hover 与已接受 Drop 的 generation 分开，清理 hover 不取消最终操作；提交被拒绝时释放 hint sources，后续 hover 可以重新提交。尚未确认元数据时只提供 COPY/LINK 导航候选，不授权 MOVE；最终 Drop 重新判断，复制回退仍必须满足原接受效果与来源允许效果。实际目录查询使用后台同步 GetFileAttributesW，generation 取消阻止过期发布并在逐路径查询前检查，不能中断已经进入的 OS 调用。原最终快捷方式 detached thread 已改用既有 WorkerPool。
 
-1. **保留少量显式边界，不增加万能框架。**
-2. **先闭合契约，再优化缓存。** 缓存错误数据只会更快、更持久地交付错误。
-3. **机器字段与 display message 分离。** 文字可以本地化、截断、去助记符；命令／状态身份不能因此变化。
-4. **对不可证明的破坏性动作 fail-closed。** 不支持某种身份查询时，不应退回纯路径授权。
-5. **保留原生权限和 COM 边界。** 用户 UNC 凭据、service caller visibility、STA provider 及解析进程不应为“统一”被擦平。
-6. **访问形状先于微优化。** 去掉重复枚举／广域候选／前缀 GIF 合成，优先于优化单次字符串复制。
-7. **错误必须可观测。** unsupported、offline、temporary、partial、cancelled 不能都映射成 false／空列表／离线文本。
+A22 从“待补证据候选”落实为窄兼容规则。Microsoft 的 MS-SMB2 QUERY_DIRECTORY 语义区分不支持的信息类与非法信息类、参数、权限失败；MS-ERREF 定义 NOT_IMPLEMENTED / NOT_SUPPORTED，RtlNtStatusToDosError 提供数值转换。打开阶段即使返回这两个状态也不重试；CreateEvent 失败、拒绝访问、路径缺失、参数/信息类错误、截断/缓冲区不足、无效设备请求和未知状态均不再自动换后端。官方定义与注入用例支持此策略，尚不能证明所有真实 provider 都仅用这些状态报告能力差异，因此保留 Win32 后端并保留原始诊断。
 
----
+代码量按各任务接手时的脏树基线统计：
 
-## 12. 解耦与治理路线图（仅方向）
+- 生产编译保留的代码净增加 101 行：A13 +63、A20 +2、A22 +36。A13 的 app_input.cpp 净减 20 行，新增独立 app_drag_hint.cpp 60 行；其余为提示状态与已有拖拽入口的复用。没有增加线程池、持久元数据缓存或后端策略框架。
+- 测试专用 seam 净增加 40 行，仅在 PULSE_FS_ENUM_TESTING 下编译。
+- 测试用例、入口和目标配置净增加 464 行：A13 +311、A20 +34、A22 +119。源码合计净增加 605 行，不含本报告。统计凭据为 build/final-cleanup-line-counts.json，A22 原始基线及宏区拆分为 build/a22-line-count-evidence/line-count-manifest.json。不能把整个工作区相对 HEAD 的 diff 当作本轮增量。
 
-本路线图不包含补丁、直接重构或本次执行承诺。
+本轮并非以行数下降为验收条件：A20 减少重复路由，A22 删除盲目重试，A13 则补齐移走 UI I/O 后必须具备的异步归属、取消与最终验证合同。新增行数主要来自可复现回归（测试与 seam 共 504 行）；生产部分的增加不代表又增加了同功能补丁分支。
 
-| 阶段 | 目标 | 方向 | 验收边界 |
-|---|---|---|---|
-| **1：操作安全与完成协议** | F01–F05 | 发送前登记；per-request completion；完整锁内消费；源／产物身份；handler 创建清理；命令身份绑定 | 同步快回调、DONE 交错、源／产物替换、创建失败注入、fake handler offset |
-| **2：索引可信与完整性** | F06–F10 | 本地 server 验证；count-before-allocation；混合 reason；MFT 完整状态；统一搜索终态与质量比较 | fake server、恶意 count、混合 USN、MFT 第二 chunk 失败、相同 rows 质量变化 |
-| **3：目录事实与视图分离** | F11、F15 | 未排序 snapshot；独立 pane projection；request／applied watermark；后台 delta | 同路径不同排序、多 pane、列式旧结果、stat temporary failure |
-| **4：物理工作预算与关闭** | F12–F17、F26 | 统计 live＋retired；UNC admission／backoff；统一大小服务；元数据版本；VM 只读 | 不响应 provider、快速导航／切换、退出、资源峰值与部分结果 |
-| **5：预览及查询成本** | F21–F28 | 下推 SQL scope；batch body；协议限额；TTL；有效 cache key；GIF 增量／checkpoint | 多 root query statement／候选数、长属性、截断、alignment、长 GIF、重复消费者 |
-| **6：结构清理** | F19、F20、F29–F31及 P3 | 结构化 adapter；持久化 parser；单 writer 提交；缩窄用例依赖；确认后移除旧接口 | 定向单元／集成验证；不以文件搬迁或 include pass 代替功能验证 |
+实际验证（全部进程退出码 0）：
 
-优先从已有类型、身份 helper、worker 与协议扩展，不应一次性改成新的通用任务框架。每阶段只扩大到直接影响模块；后续实施时按[仓库验证规则](<AGENTS.md>)选择定向构建／测试，不默认全量重构与全历史回归。
+- pulse 和受影响的六个测试目标构建通过；两份最终构建日志无 MSVC 警告或错误。日志：build/final-cleanup-build.log、build/final-drag-build.log。
+- pulse_directory_contract_application_test --drag-hints-only：33 PASS / 0 FAIL。真实本地隔离目录、后台 worker、重复 hover、取消后排空、新 sources/reset、拒绝提交后重试、普通文件和 shortcut 候选均有断言；最终目录被删除时拒绝导航并显示失败 UI，LINK 不触发复制回退。
+- pulse_drag_drop_test --target-session-only：8 PASS / 0 FAIL。owned FileDataObject 与隐藏窗口覆盖最新上下文刷新、DragLeave、最终重新提取 sources/preference 与 performed effect。
+- pulse_typography_cache_test：17 PASS / 0 FAIL。真实 DWrite 与确定性 Luma 替身，覆盖文件名复用 advance 缓存、CJK/空白/空文本/长文本及既有缓存边界。
+- pulse_fs_enumeration_test --fallback-only：21 PASS / 0 FAIL / 1 SKIP；--cancel-only：6 PASS / 0 FAIL。本地缺祖先路径记录 NtCreateFile status=0xc000003a / error=3，本地文件作为目录记录 status=0xc0000103 / error=267，两者都没有重试且输出为空。其余能力/失败状态用注入检查，部分结果清理、兼容重启和双后端诊断通过；SKIP 明确表示缺少真实 SMB/RaiDrive fixture。
+- 直接依赖检查：pulse_fs_worker_cancel_test 默认 12 PASS / 0 FAIL、--projection 51 PASS / 0 FAIL；pulse_header_drop_effect_test 4 PASS / 0 FAIL。
+- 合计 152 PASS / 0 FAIL / 1 SKIP。没有运行完整 selftest、默认全部枚举测试或完整历史回归。日志为 build/a13-*.log 和 build/final-*.log；隔离拖拽/枚举 fixture 已清理。
+- src/app 的生产 FirstDroppableFolder 调用只剩后台提示和最终验证两处；旧自测调用仍保留。旧 QueueHeaderShortcutDrop 已无引用；git diff --check 通过。
 
----
+验证限制：未执行真实 SMB/RaiDrive 延迟或 provider 兼容测量、有效 .lnk 解析与第三方外部拖入源验收；没有真实 Luma 渲染、性能测量或主题/DPI/窄布局截图。隐藏窗口与本地文件测试证明本轮状态/生命周期合同，不能替代这些真实环境验收，也不证明仓库其他产品问题全部归零。相关检查通过后停止扩大范围，保留已有未提交改动，未提交或发布。
 
-## 13. 风险、测试与不确定性
+## 15. 便携测试包交付与冗余复查（2026-10-11）
 
-### 13.1 已有测试不等于覆盖本报告触发条件
+本次用户要求在清理冗余后提供便携包。分批修复计划已完成，交付前仅复查新增路径与退役 API，不扩大到无关重构。
 
-| 领域 | 已有证据 | 本次发现所需的缺口 |
+- 删除 ShellClient 的非拥有 pipe_ 镜像和两处同步赋值；真实管道只由既有 Connection 持有。测试改查 CurrentConnection，不再依赖第二份状态，保留所有断言。
+- 删除 BuildNotifyProjections 中重复的 request.projections.clear() 及多余块：结果在入口已清空，局部 projections 仅在整批成功后提交，失败直接返回即可。
+- 以本次清理开始时的脏树为基线，生产代码净减 6 行，测试净减 1 行。退役 ApplyDirNotifies / RetainEntryOrder / ApplyHeldEntryOrder / ClearHeldOrderState 无引用；保留有效回归、Win32 兼容枚举后端和已有未提交修改。
+
+打包保持 version.txt 的 1.1.0.1，Release / PULSE_WITH_SELFTEST=OFF / PULSE_WITH_LUMATEXT=ON。只构建包所需的五个生产目标及三个清理相关测试目标。实际验证：Shell routing 20 PASS、transport liveness 31 PASS、operation shell completion 10 PASS、notify projection 6 PASS，合计 67 PASS / 0 FAIL；各进程退出码 0。构建无新增 MSVC 警告或错误，git diff --check 通过。未重跑已完成批次或完整历史回归。
+
+交付包：dist/Pulse-1.1.0.1-portable-win-x64-test-20261011-093312.zip，11,604,074 字节，SHA-256 D79014414D87905CB047C7122D39A6CE7E8D8FCC54CF58CC97436BCB6CF49828。原同版本便携 ZIP 已恢复并核对原哈希，既有 dist 目录/清单保留；测试包使用独立日期标识。
+
+- 40 个 payload 文件全部与 ZIP 路径、长度和 SHA-256 匹配；五个 EXE 的 FileVersion / ProductVersion 为 1.1.0.1，OriginalFilename 匹配。程序、DLL、7zip、许可证齐全，无测试可执行文件、日志、obj/pdb/lib/CMake/bench_data；没有内嵌旧 selftest dispatcher。
+- 对五个 EXE、两个主 DLL 和 7zip 的 EXE/DLL 运行 dumpbin /dependents；没有未随包携带的 VCRUNTIME/MSVCP/CONCRT 依赖。动态加载 provider 和服务运行不在此静态检查范围。
+- 使用包内程序、隔离 profile 和测试目录进行隐藏窗口启动检查，进程正常退出 0。生成截图没有可用渲染画面，因此仅记录启动/退出结果，不判定视觉通过，也不推断产品或环境根因。
+- 审计凭据：dist 下同名 .manifest.json、.cleanup.json；构建、测试、依赖和打包日志为 build/portable-*.log。独立测试说明为 docs/portable_test_20261011.md，dist 下另有同名测试包的 -testing.md 副本。
+
+人工测试重点：专用目录中的复制/移动/改名及撤销（包括同名替代文件拒绝）、真实 RaiDrive/SMB 的刷新/断线/快速切换、目录与有效 .lnk/第三方压缩软件拖入、双窗格大目录的独立排序/选择和通知更新、预览/右键/退出，以及主题/DPI/窄窗格的文本和对话框表现。真实 provider 与完整 UI 验收尚待人工测试；便携版仍使用用户应用数据目录，不会因解压自动注册索引服务。未提交或发布。
+
+## 16. 人工反馈修复（2026-10-11）
+
+本轮按用户确认的范围修复权限反馈、精确回收还原、右键菜单、打开方式、撤销本地化和窄窗口标题栏。用户已撤回标题拖入禁止与“仅打开菜单就自行切回 Explorer”两项；失活处理针对切换到其他程序后菜单残留。没有为 C 盘、Explorer、中文菜单标题或临时 Shell 命令编号添加特殊分支。
+
+| 反馈 | 之前的问题 | 当前规则 |
 |---|---|---|
-| 文件操作 | [pause／cancel／目标替换测试](<src/bench/ops_test_main.cpp#L824-L882>)、[undo 持久化测试](<src/bench/ops_test_main.cpp#L1306-L1317>) | CopyFile2 返回后的源替换；Copy／Create 产物替换；同步 DONE／菜单 DONE 交错 |
-| Shell handler | 相关实现与测试入口已阅读 | 两事件／线程分别创建失败；旧 ID→live ID 的实际 offset；同 caption／verb 多 handler |
-| 本地索引安全 | [security test](<src/bench/index_security_test.cpp#L63-L77>) | 本地 fake server、巨大 count、截断数组、未捕获分配异常 |
-| USN／MFT | [单 reason／队列用例](<src/bench/index_engine_test.cpp#L59-L87>)、[overflow 用例](<src/bench/index_engine_test.cpp#L152-L200>)、[delta partial write](<src/bench/index_engine_test.cpp#L759-L785>) | 混合 reason＋cursor 提交；原始 MFT 读失败／多 run 短读；不是 delta 写失败 |
-| 订阅／网络结果 | [订阅 churn 测试](<src/bench/index_host_stress.cpp#L203-L228>)、[网络安全测试](<src/bench/network_security_test.cpp#L30-L57>) | 相同 rows 的 error／incomplete 双向变化；RSP_RESULT 错误到主窗的终态 |
-| worker 生命周期 | [Stop gate 测试](<src/bench/worker_lifecycle_test.cpp#L8-L55>) | 该测试明确不调用真实 provider／FS；不能证明 navigation cancellation |
-| 目录大小 | [本地 Stop 用例及 UNC skip](<src/bench/folder_sizes_scan_test.cpp#L73-L82>) | 不响应 UNC、access denied 的 partial state、UI 关闭 join |
-| 内容查询 | [content index 测试](<src/bench/content_index_test.cpp#L998-L1017>) | 多 root 中 candidate 行数、SQL statement 数、body 读取量 |
-| 预览 | [cache 测试](<src/bench/thumbnail_cache_test.cpp>)、[文本 preview 用例](<src/bench/preview_test_main.cpp#L382-L387>) | failure TTL、生产属性限额、字符截断、UTF-8 边界、alignment、退休视频预算 |
-| 压缩包 | [当前诊断测试](<src/bench/archive_test.cpp#L86-L124>) | 替代诊断／版本／路径表示、取消、输出限额与密码状态独立性 |
-| 展示状态 | [typed Banner 用例](<src/bench/presentation_state_cases.h#L73-L104>) | 这是正向证据；不能替代所有菜单／archive 文字契约的验证 |
+| 权限错误误报占用 | 访问拒绝既用于探测 RM，也被当作明确锁错误；无 owner 的复制/移动仍显示占用处理 | 分开可探测错误、明确共享冲突和真实 owner 证据；访问拒绝无 owner 时显示原权限诊断，明确共享冲突保留无 owner 重试 |
+| 同原路径多个回收版本 | 手动还原只提交原路径，丢失选中 $R；第一个还原后其余遇到已存在目标 | 提交原路径与精确 $R 配对；验证并固定 $R/$I 身份，复用 UniqueCopyPath 和 DestinationGuard::RenameHandle，以原子不覆盖方式保留两者；逐项记录实际目标和失败，成功部分仍发布刷新结果 |
+| 菜单抖动和快速展开消失 | 重绘强制完全不透明，后续动画又退回中间态；子菜单锚点未跟随 | 全部事件重绘共用当前透明度/偏移，子菜单跟随主菜单位置；异步刷新保留稳定内置行及已打开子菜单 |
+| 新建/加载/顺序/图标 | Pulse 三项与原生 New 分散，未就绪命令看似失效，Rename 图标走不同资源 | 背景与工具栏共用一个 New 组合，内置三项在前，追加原生模板；按 NewMenu CLSID 和规范动词去除文件夹/.txt重复；加载行明确表示等待，未验证缓存命令仍禁用；Rename 共用工具栏 SVG |
+| 切出后菜单残留 | 主窗口失活未取消菜单，发送式消息未走 TrackPopup 的取消息路径 | owner/menu/edit 内部焦点转移保持菜单；应用失活、外部激活和取消立即隐藏主/子菜单，清除尚未执行的结果；正常选中仍返回所选命令 |
+| 打开方式只有仅一次 | 优先调用 SHOpenWithDialog，限制了现代系统选择器的关联选项 | 保留一个 openas 菜单入口，经公开 Shell 类选择指定系统 Unknown 类的 openas handler，交由 Windows 同窗提供始终/仅一次；删除拆分入口及默认设置 URI 的临时实现 |
+| 英文撤销夹带中文 | UndoLabel/Describe 的动词及多项格式硬编码中文 | 使用同一 localization 资源翻译动作、完整 Undo 格式与多项说明，切换语言时完整一致 |
+| 窄窗口标题栏重叠 | 标签最小宽度超过预算，命中又先于 caption | 固定 caption/新建预算，标签共用裁剪视口及左右箭头/滚轮滚动；活动标签自动显露，caption 优先命中；分组、固定和拖动使用同一边界 |
 
-“缺口”表示本次定向检查没有看到匹配回归，不是断言整个仓库绝对没有其他覆盖。
+回收还原不静默覆盖既有文件，不去重相同原路径，也不移除 Undo 的原目标为空保护；只把实际成功项及目标发布为完成结果。失败包含原路径、回收 payload 与数值错误。取消保存已完成结果并为未尝试项目记录取消。$I 元数据不绕过删除授权作不可逆删除，失去 $R 的孤立索引由枚举忽略。
 
-### 13.2 CI 与验证边界
+定向验证结果：
 
-[发布 CI](<.github/workflows/release.yml#L1-L36>)调用[发布验证脚本](<scripts/build_release_ci.ps1#L37-L101>)，声明了定向测试目标、退出码检查和 selftest。不能写“没有 CI”或“所有测试从未运行”。
+| 检查 | 结果 |
+|---|---|
+| ops_feedback --permission-feedback | 10 PASS / 0 FAIL；隔离目录DACL拒绝文件创建，真实Copy返回0x80070005且不缓存锁重试；独占来源对照返回0x80070020，关闭句柄后普通重试成功；原DACL已恢复 |
+| ops_feedback --manual-restore | 15 PASS / 0 FAIL；隔离双版本、已有目标、原子不覆盖、部分成功、目录名含点、身份替换、取消及锁分类 |
+| ops_feedback --operation-labels | 40 PASS / 0 FAIL；10种动作的中英/单多项文案 |
+| file_lock_owner_test | 16 PASS / 0 FAIL；分类与真实 fixture holder/RM/安全重试 |
+| locked_operation --decisions | 18 PASS / 0 FAIL；保留计划、完成过滤、取消/代际拒绝及真实目标共享冲突 |
+| app_controllers --context-menu-refresh / --context-menu-com | 12 + 11 PASS / 0 FAIL；组合、排序、加载、单一openas及当前会话绑定 |
+| menu_text --command-state / --live-refresh / --lifecycle | 3 + 3 + 17 PASS / 0 FAIL；稳定状态更新、动画/子菜单跟随和失活/取消拒绝旧结果 |
+| titlebar_layout | 1169 PASS / 0 FAIL；530几何断言分别在无compositor/有compositor两种状态执行，36张快照及对应渲染检查；不是1169个独立场景 |
+| menu_text 图标快照 | 50 PASS / 0 FAIL；生成6张100/125/150% DPI深浅主题快照 |
 
-本次没有触发该 CI，也没有运行其中的测试；因此：
+UI截图保存在 build/feedback-ui-evidence/bench_data/，已查看窄窗口100%浅色、150%深色及菜单Rename两种主题证据，无黑图、标签覆盖caption或图标异常。标题栏fixture之前复用旧对象链接时的访问异常，在统一源码重编后未复现；不把此前失败记为通过。
 
-- 不报告编译成功；
-- 不报告 COM／Shell／UNC 功能通过；
-- 不报告 UI、主题、DPI、窄布局的视觉通过；
-- 不报告任何性能数字或安全利用成功；
-- 不把静态 include check 当成以上验证。
+初始构建目录产物带Low完整性标签，RM返回29。复测使用正常临时目录中的SHA256一致副本，RM返回0并通过真实holder断言，没有修改系统权限。锁决策fixture原先缺少现有生产规则所需的source_identity，现已用生产FileObjectReference::Open捕获身份，并增强替换前身份断言；没有放宽生产校验。手动还原的第一次原子改名测试失败后，已删除新造的rename缓冲并复用既有DestinationGuard helper，保留并增强目标内容保护断言后通过。
 
-### 13.3 仍需运行确认的事项
+打开方式自动探针通过系统Unknown类的openas注册入口发起选择器，没有选择应用或改默认关联；探针截图捕获到了中间占位窗口，不能作为最终对话框视觉通过证据。随后用户现场确认系统窗口正确显示“始终”和“仅一次”。默认关联实际持久化、不同Windows版本/文件类型及第三方Shell模板仍需便携包验收；真实回收站/provider未作破坏性自动测试。没有执行完整selftest或全部历史回归。
 
-1. **剪贴板 HDROP**：具体 Windows 兼容行为，F18。
-2. **阻塞 provider**：UNC、MFPlay、IFilter、Shell extension 的真实取消与退出表现；静态已证明等待／资源形状，但积累速度未测量。
-3. **菜单后果**：重绑旧 ID 可证明分派错误，实际 handler 的误执行行为依第三方实现。
-4. **本地 fake pipe**：需要真 host 未占端点、攻击者可创建该端点等条件；不是已证明提权。
-5. **高权限 helper 的可见性／MIC**：部分路径依 service 模式 gate；跨完整性连接可达性待确认，不作为本报告已证实攻击结论。
-6. **UNC `.tmp` 并发写入**：未证明已发生混合内容损坏，保守报告为提交竞态与旧数据／失败风险。
-7. **排序本地化**：缓存有稳定化及同步机制，本次没有依据宣称通用 localization 数据竞争。
-8. **COM 消息泵**：部分 STA worker 的兼容性取决于所用对象；preview handler worker 已有消息泵，不能一概称所有后台 STA 无泵。
+本轮交付：dist/Pulse-1.1.0.1-portable-win-x64-test-20261011-115633.zip（版本1.1.0.1），SHA256 5ED1F71E6CEE2FC1DA81EEC61F8BC65477EDF0E4535068596D5EDCD549E931F2。40个payload文件逐ZIP entry核对长度/哈希，并核对五个EXE版本、OriginalFilename、开发产物排除及九个运行文件依赖；无未携带的VCRUNTIME/MSVCP/CONCRT依赖。原正式ZIP已恢复并复核原哈希。最新主程序/Shell/定向目标构建通过，最终构建日志无warning/error；日志build/feedback-final-build.log、build/feedback-delivery-build.log。完整逐项验证清单与边界已加入同名manifest.json，人工步骤见docs/portable_test_20261011.md。git diff --check通过。
+## 17. 文件操作按需提权（2026-10-11）
 
-### 13.4 安全隔离的准确表述
+用户确认开始补齐权限操作后，本轮实现一次性管理员工作进程。资格来自真实权限 HRESULT（访问拒绝、缺少特权、需要提权），不按盘符或路径名称判断；明确占用及有占用者证据的失败仍走既有占用流程。普通尝试失败后，确认窗口说明失败项、来源、目标和 UAC，默认取消；同一失败任务与 generation 只能确认一次，取消或过期不派发。
 
-文档 helper 使用继承 handle 白名单、kill-on-close job、进程／内存／超时及并发限制，见[文档隔离](<src/index/document_reader.cpp#L297-L343>)。它是**同用户权限下的故障与资源隔离**，不是 AppContainer／低权限操作系统安全沙箱。报告不能夸大其权限约束，也不能因其不是安全沙箱就否定进程隔离价值。
+- 复制/移动保留未完成计划、成功根、源文件历史引用和目标目录快照；管理员工作进程复用 RunTransfer，既有产物不重复复制。冲突、进度、暂停和取消回到原窗口。
+- 单项/批量重命名保留源身份，实际修改句柄再次验证。重试与还原提交复用 DestinationGuard 的父目录身份核对和相对父句柄原子提交，祖先继续保护。
+- 新建文件夹/文本文档、删除、回收还原与卷标重命名接入同一权限失败规则。删除续传只提交未完成物理根及其历史身份；清空回收站在第一次 admission 后冻结具体根，不重新枚举新增项目。相关撤销保留历史身份、原始删除来源和父进程历史预约。
+- 手动回收还原与 Undo 还原共用精确 $R/$I 引擎；手动冲突保留两者，Undo 原目标占用则拒绝，不改变撤销目的地，不隐式删除 $I。
+- 同目录 Pulse.exe 以 runas 启动 --file-operation-worker 模式，在正常应用初始化前进入一次性工作流程；没有新增发布 EXE，也不让整个 Pulse 长期以管理员身份运行。
+- 本地随机命名管道核对双方 PID、创建时间、用户 SID 和规范映像路径，拒绝远程连接，限制消息大小。请求、进度、控制及终态经过 typed codec 验证；累计完成结果只导入一次，撤销产出身份来自真实引擎。
+- 丢失终态时明确显示结果未知，保留已证明的完成结果和恢复证据。恢复日志增加 outcome_unknown 标记，未知的重命名/新建/还原等操作以及未取得终态的活动提权任务均禁止重放。
 
----
+实际定向验证（各正常运行进程退出码 0）：
 
-## 14. 证据索引
+| 检查 | PASS / FAIL | 范围 |
+|---|---:|---|
+| 提权通信 | 16 / 0 | 终态、累计进度、控制回复、取消、死亡/断连、限长和认证拒绝 |
+| 操作适配器 | 31 / 0 | 真实复制/移动/改名/批量改名/新建/永久删除，冲突确认、相关撤销、真实部分复制续传、$R/$I 还原与替换拒绝、未知恢复日志禁止重放 |
+| 权限反馈 | 17 / 0 | 隔离目录真实 DACL 拒绝、独占文件对照、资格、一次性确认、过期和取消 |
+| 精确还原 | 17 / 0 | 同原路径多版本、部分成功、目录冲突、历史 $R/$I 变化、Undo 不覆盖、取消 |
+| 确认窗口 | 218 / 0 | 中文/英文、浅色 96 DPI、深色 144 DPI 窄窗口、默认取消/关闭/过期/退出/重复确认；24 张截图 |
 
-| 索引 | 对应结论 | 关键文件／函数位置 |
-|---|---|---|
-| **E01：构建与入口** | 范围、技术栈、进程结构 | [构建基础](<CMakeLists.txt#L1-L79>)；[主程序／Index 目标](<CMakeLists.txt#L295-L390>)；[文档目标](<CMakeLists.txt#L775-L807>)；[wWinMain／OleInitialize](<src/app/app_main.cpp#L1981-L1992>) |
-| **E02：操作完成协议** | F01 | [Ops DONE callback](<src/ops/ops_manager.cpp#L1782-L1817>)；[MenuThread](<src/ops/ops_manager.cpp#L1958-L1995>)；[WaitShellDone](<src/ops/ops_manager.cpp#L3373-L3405>)；[ShellClient::Submit](<src/ipc/shell_client.cpp#L165-L195>) |
-| **E03：源与产物身份** | F02、F03 | [TransferPlan／UndoEntry](<src/ops/ops_manager.h#L88-L110>)；[CopyProgress](<src/ops/ops_manager.cpp#L421-L437>)；[提交及源删除](<src/ops/ops_manager.cpp#L2707-L2771>)；[Undo](<src/ops/ops_manager.cpp#L1524-L1546>)；[删除分类](<src/ops/delete_operation.cpp#L86-L100>) |
-| **E04：Shell 生命周期与命令** | F04、F05 | [handler 创建](<src/shell_host/main.cpp#L1254-L1269>)；[handler 调用](<src/shell_host/main.cpp#L1115-L1153>)；[dispatch_invoke](<src/shell_host/main.cpp#L1343-L1370>)；[FindItemId](<src/shell_host/ctx_handlers.cpp#L460-L474>)；[应用 cached click](<src/app/context_menu_controller.cpp#L238-L287>) |
-| **E05：端点与响应边界** | F06、F18 | [本地索引连接／解析](<src/index/index_client.cpp#L98-L259>)；[worker](<src/index/index_client.cpp#L335-L373>)；[网络 VerifyServer](<src/index/index_transport_security.h#L126-L138>)；[clipboard](<src/ops/clipboard.cpp#L121-L127>)；[drag/drop](<src/ui/drag_drop.cpp#L150-L155>) |
-| **E06：索引一致性** | F07、F08 | [ApplyUsnLocked](<src/index/index_engine.cpp#L2584-L2602>)；[CatchUpVolume](<src/index/index_engine.cpp#L2888-L2915>)；[EnumerateMft](<src/index/index_mft.cpp#L303-L340>)；[IndexVolumeMft](<src/index/index_engine.cpp#L2941-L2955>) |
-| **E07：搜索终态与质量** | F09、F10 | [网络 SearchAndReply](<src/index/network_agent_main.cpp#L94-L113>)；[SearchRequest](<src/index/network_agent_client.cpp#L215-L247>)；[主窗合并](<src/app/app_navigation.cpp#L629-L644>)；[SearchPayload／去重](<src/index/index_host.cpp#L295-L310>)、[hash 范围](<src/index/index_host.cpp#L448-L460>) |
-| **E08：快照与调度** | F11、F12 | [WorkResult](<src/app/app_worker.h#L34-L45>)；[Refresh／Stop](<src/app/app_worker.cpp#L82-L128>)；[enum 后代际检查](<src/app/app_worker.cpp#L228-L247>)；[tab 应用](<src/app/app_navigation.cpp#L984-L1040>)；[column 应用](<src/app/app_column_view.cpp#L289-L306>) |
-| **E09：通知与 UNC** | F13–F15、F29、F30 | [watch retry](<src/fs/fs_watch.cpp#L209-L260>)；[UNC probe](<src/fs/fs_net_cache.cpp#L171-L217>)；[UI patch](<src/app/app_navigation.cpp#L1269-L1301>)；[失败 stat](<src/app/snapshot_patch.cpp#L157-L192>)；[cache save](<src/fs/fs_net_cache.cpp#L55-L83>)；[NormalizePath](<src/fs/fs_enum.cpp#L145-L168>) |
-| **E10：大小与元数据** | F16、F17 | [详情大小扫描](<src/app/app_runtime.cpp#L959-L1042>)；[FolderSizes stop](<src/app/folder_sizes.cpp#L383-L417>)；[Details worker](<src/app/app_runtime.cpp#L62-L115>)；[path-only request](<src/app/app_runtime.cpp#L1856-L1872>)；[权限摘要](<src/app/details_meta.cpp#L41-L125>) |
-| **E11：错误与持久化** | F19、F20 | [PasswordError／公开返回](<src/ops/archive.cpp#L160-L197>)；[archive result](<src/ops/archive.h#L17-L21>)；[archive UI](<src/app/archive_navigation.cpp#L225-L252>)；[JSON helper](<src/common/json_utils.h#L27-L84>)；[session 消费](<src/app/session.cpp#L356-L370>) |
-| **E12：内容查询** | F21 | [candidate SQL](<src/index/content_index.cpp#L1275-L1301>)；[后过滤／body](<src/index/content_index.cpp#L1369-L1387>)；[version／negative scan](<src/index/content_index.cpp#L1523-L1593>)；[模式与接口](<src/index/content_index.h#L7-L68>) |
-| **E13：预览** | F22–F28 | [thumbnail key](<src/ui/thumbnail_cache.cpp#L53-L57>)；[timeout／property reader](<src/ui/thumbnail_cache.cpp#L408-L456>)；[失败存储](<src/ui/thumbnail_cache.cpp#L487-L491>)；[文本解码](<src/preview_host/main.cpp#L123-L188>)；[Luma cache](<src/ui/lumatext_renderer.cpp#L616-L662>)；[video](<src/ui/video_preview.cpp#L142-L178>)；[GIF](<src/preview_host/main.cpp#L362-L453>) |
-| **E14：架构及正向防护** | F31、合理边界 | [AppState](<src/app/app_state.h#L132-L212>)；[PaneViewModel](<src/ui/ui_renderer.h#L174-L187>)；[app aggregate header](<src/app/app_internal.h#L1-L11>)；[caller visibility](<src/index/index_caller_visibility.h#L34-L115>)；[文档隔离](<src/index/document_reader.cpp#L297-L343>)；[typed presentation test](<src/bench/presentation_state_cases.h#L73-L104>) |
-| **E15：验证声明** | 本次实际检查、CI 与限制 | [依赖检查脚本](<tools/check_ui_dependencies.py>)；[发布 workflow](<.github/workflows/release.yml#L1-L36>)；[发布测试脚本](<scripts/build_release_ci.ps1#L37-L101>)；[仓库规则](<AGENTS.md>) |
+合计 299 PASS / 0 FAIL。UI 夹具使用生产强调色初始化；复核了中文浅色、英文浅色、深色窄窗口截图。相关源码检查和构建没有新增 MSVC 警告；未执行完整历史回归。回收还原与未知终态保护修改后，仅重跑直接受影响的适配器、权限和还原检查，没有重跑无关批次。日志为 build/elevation-*-test.log、build/elevation-final-build-2.log，截图位于 build/elevation-ui-evidence/bench_data/permission_prompt_ui。
 
-**最终结论：**项目的原生平台选择和主要隔离边界值得保留。当前最需要收敛的不是技术栈，而是**请求身份、对象身份、结果完整性、视图投影和物理任务预算**。先修正这些契约，才能使后续缓存优化、模块拆分与界面改进建立在可信的数据和生命周期之上。
+真实 UAC：在管理员可写、普通令牌不可写的独立临时夹具中已弹出 Windows UAC。用户明确表示拒绝；父进程记录 Cancelled（failure_hr=S_OK）。成功预期夹具因此有两项 FAIL，原 ACL 恢复及临时目录清理检查通过。这是拒绝授权路径的现场证据，不能当成成功高权限复制，也不据此判断产品回归；原日志 build/elevation-uac-test.log 保留。随后补充 fixture 对 UAC_CANCELLED/UAC_COMPLETED 的独立断言和结果标识，未再次触发 UAC，新增取消断言也未宣称已运行。
+
+验证边界：同完整性 worker 测试证明续传和结果协议，不能替代成功 UAC 与实际 C 盘保护目录验收。本轮未实际操作用户回收站、修改卷标或运行跨卷/真实网络 provider 的提权场景。目前认证限制同一用户账户的 UAC 提权，输入另一管理员账户凭据会被 SID 校验拒绝；管理员权限也不能保证解决显式拒绝 ACL、占用或 provider 限制。
+
+本轮交付测试包：dist/Pulse-1.1.0.1-portable-win-x64-test-20261011-130709.zip，11,683,879 字节，SHA-256 14140CA08DC80AEA3F21313F93A527A9D29982D8A70745F287F5DDEBEF4EB93E。版本保持 1.1.0.1；40 个 payload 文件逐项与 ZIP 长度、路径和 SHA-256 匹配，五个 EXE 版本及 OriginalFilename 匹配，未携带测试 EXE、开发产物或 selftest dispatcher。原正式便携 ZIP 已恢复并核对原哈希，旧测试包保留。独立 manifest 和 -testing.md 位于 dist；未提交、未安装服务或发布。
+
+## 18. 权限与链接反馈修订（2026-10-11）
+
+本轮只处理用户反馈的权限窗口、删除分类和目录链接确认，保留此前批次及其他未提交修改。
+
+- 权限窗口去掉“失败路径”，只显示实际操作的源路径和目标路径。标签使用无背景行，路径保留主题输入框背景；删除只有源路径，新建只有目标路径。路径来自当前 generation 的管理员重试请求和实际计划项，不再使用短的进度标签推断端点；重试或取消退役请求时同步清除详情。
+- 占用者报告在公共出口按 PID 排除当前 Pulse 进程，分类、重试和界面使用同一报告。其他 Pulse 实例仍保留，明确的共享/锁错误仍按占用处理，不因过滤自身变成权限错误。真实权限失败继续按既有 HRESULT 规则决定提权资格，没有按 C 盘特判。
+- 链接确认删除“全部继续”复选框，标明“链接路径”和“实际路径”；继续接受本次操作中的所有链接目标，下一任务仍需重新确认。继续后仍重新固定和验证目标身份，链接被改指向不能借此绕过检查。硬链接没有解析路径时仍标为“目标路径”。
+- 清理退役的失败路径及全部继续资源标识，更新中文和英文说明。普通冲突的批量应用规则不受影响。
+
+实际定向验证（正常 Windows 环境，进程退出码均为 0）：
+
+| 检查 | PASS / FAIL | 本轮范围 |
+|---|---:|---|
+| 占用者证据 | 20 / 0 | 仅当前进程的句柄不产生占用者证据；外部独占者和同名 Pulse 实例仍被报告；明确共享失败仍属于占用 |
+| 权限反馈 | 24 / 0 | 完整缓存路径与进度标签分离；隔离 DACL 下真实删除权限拒绝；源保留、无占用者、可提权、取消不入队 |
+| 链接批量继续 | 6 / 0 | 两个独立 junction 只确认一次；下一任务重新确认；取消不写入；确认期间改指向仍拒绝 |
+| 权限窗口 | 353 / 0 | 中文/英文，浅色 96 DPI、深色 144 DPI 窄窗口；复制/删除/新建详情，取消/过期/重入/退出与按钮边界 |
+| 链接窗口 | 6 / 0 | 中文深浅主题、英文、144 DPI 中英文窄窗口及默认 Enter 取消 |
+
+合计 409 PASS / 0 FAIL。真实删除夹具记录 phase=8、hr=0x80270021、lock_retry=0、owners=0、elevation=1；夹具恢复文件和父目录 ACL，仅使用隔离测试文件。目视复核了权限窗口中英文浅色、中文深色窄窗口删除，以及链接浅色和深色窄窗口截图：标签无框、路径有框，未见裁切或按钮重叠。长路径仍按现有路径省略规则显示。
+
+受影响目标 pulse、pulse_ops_feedback_test、pulse_ops_test、pulse_file_lock_owner_test、pulse_permission_operation_prompt_ui_test、pulse_link_confirmation_ui_test 构建成功，日志未发现 MSVC warning/error；未执行完整历史回归。日志为 build/feedback-refine-*-test.log，UI 截图位于 build/feedback-refine-ui-evidence/bench_data。初次删除夹具遗漏 Shell 生命周期和有效 owner 窗口、初次权限 UI 断言误要求两行内容一定滚动；修正夹具后对应检查通过，初次失败日志留档，未据此改动产品分类或放宽按钮边界检查。
+
+验证边界：本轮未再次弹出 UAC，未操作用户实际 C 盘保护文件或回收站。成功授权后的真实高权限写入仍需现场验收；此前用户拒绝 UAC 的结果不能当作成功写入证据。
+
+本轮新测试包：dist/Pulse-1.1.0.1-portable-win-x64-test-20261011-140507.zip，11,684,766 字节，SHA-256 99E4A14F38F2B6543444F44542EB33E0224F850933D0E9CACDB07C8BC1A459C6。版本保持 1.1.0.1；40 个 payload 文件逐项通过 ZIP 路径、长度及 SHA-256 核对，五个 EXE 的版本和 OriginalFilename 匹配，无测试程序或开发产物。打包恢复了原正式 ZIP 并核对哈希；旧测试包保留。独立 manifest 和 -testing.md 同存于 dist；未提交、未发布。
+
+## 19. 新建菜单预加载与固定结构（2026-10-11）
+
+用户反馈右键菜单和功能栏“新建”每次显示“加载中…”后删除该行，造成菜单持续变化。本轮统一现有 ContextMenuController 的规则，没有新建缓存服务或增加定时器。
+
+- 两个入口均移除加载占位行；OpenMenu 固定首次 COM 展示快照，包括空快照。后台部分/完整结果只能重新绑定已有项目和启用状态，不插入新模板或移除旧行。冷加载时本次显示已准备好的项目，新增原生模板在下次打开时展示。
+- 静态注册表项在菜单打开期间也保持原布局及命令索引；新结果写入已有缓存，下次 OpenMenu 应用。防止结构固定后，点击旧索引却执行新注册表项目。
+- 复用既有主窗口 timer，在前台空白区域及功能栏上下文提前准备当前目录菜单。打开菜单前消费已排队的 Shell 回复。关闭或选择 Pulse 内置命令时保留后台目录会话；执行 Shell 命令仍消费并退役该会话。
+- 复用核对路径、背景/项目类型、Shift 选项、目录 view generation，并受 UI/helper 共用的 120 秒寿命限制。配置/注册表缓存失效会关闭旧会话，过期回复不被接受；旧缓存始终只能展示，仍需绑定当前会话后执行。
+- 移除重复的 ctxHoverPrefetched 路径记录及重置逻辑，查询去重统一由控制器负责。
+
+实际定向检查（正常 Windows 环境，隔离夹具，退出码均为 0）：
+
+| 检查 | PASS / FAIL | 范围 |
+|---|---:|---|
+| 菜单刷新与新建 | 27 / 0 | 冷加载两入口、无占位行、预加载及关闭后复用、代次/Shift/配置变化、部分及完整回复不改变结构、下次新增、静态绑定保持 |
+| 命令安全 | 31 / 0 | 当前身份、重复编号/文字拒绝、缓存禁用、部分结果映射与精确执行 |
+| COM 控制器 | 12 / 0 | 查询准入、缓存失效退役、已展示命令与当前编号核对、完成与关闭 |
+| 命令状态模型 | 3 / 0 | 更新编号/启用状态不改变布局，结构不匹配拒绝原地更新 |
+| 菜单局部刷新模型 | 3 / 0 | 保持内置行与已有部分 |
+| 菜单窗口交互 | 17 / 0 | 淡入、子菜单锚点、刷新、内部焦点、切其他窗口及取消/关闭 |
+
+合计 93 PASS / 0 FAIL。主程序、Shell helper、控制器测试与菜单 UI 测试构建成功。首次构建夹具出现路径转义警告，已修正；最终受影响重建日志无 MSVC warning/error。旧 COM 夹具在 InvalidateCaches 后继续使用旧 token，和新的退役规则冲突；补充拒绝旧回复、重新建立当前会话后原有身份检查全部通过。首次失败日志保留为 build/menu-stability-com-initial-test.log。未删除或弱化历史身份检查，未运行完整历史回归。
+
+以本次接手时的局部脏树为基线，生产源码净变化 0 行，测试净增加 98 行，不含文档；凭据为 build/menu-stability-line-counts.json。各文件既有修改保留。
+
+验证边界：控制器检查使用受控 Shell 回复，UI 检查使用实际菜单模型/窗口。未现场操作用户目录的第三方 ShellNew 扩展、真实网络 provider，另外使用实际控制器和 FluentMenu 完成中英文、深浅主题、100%/150% 缩放共 8 组渲染夹具检查（58 PASS / 0 FAIL），生成 16 张截图并抽查中英文浅色准备完成菜单、中文深色 150% 冷加载菜单，未见裁切或项目重叠；截图不替代真实第三方扩展现场验收；120 秒失效条件核对了公共常量与调用规则，没有等待真实会话自然超时。首次加载很慢时只显示 Pulse 三项是明确的本次展示规则，下一次打开才加入已准备好的原生模板。
+
+
+## 20. 确认冗余清理、硬编码修订与 1.1.1.0 交付（2026-10-11）
+
+本轮在第 19 节完成之后执行。不新增产品功能，保留本次接手之前的未提交改动。静态审查覆盖 src 各生产模块、测试调用、CMake 构建映射、脚本和安装配置；仅删除全库引用核对确认无调用的接口及控制流证明不可达的分支。
+
+### 确认删除的代码
+
+- ShellClient::Rename / RestoreRecycle 及对应 host 参数、接收和执行路径：没有生产或测试调用。当前重命名走身份约束本地实现，还原走 RunManualRecycleRestore / RestoreRecyclePair。协议编号 5 和 11 保留为退休编号，不重新分配。
+- 旧回收站读取和恢复私有工具、旧 PathExists / RenameDestination / OperationPostconditionSatisfied：仅服务上述退休路径。后置成功补丁已无法对任何现役请求生效，因此删除。
+- 公共 Shell 操作段已只执行授权永久删除，删除不可达的回收和旧删除分支、恒为 false 的 recycle_only 状态及恒真授权条件；保留两次产物身份检查、Shell 解析路径核对、HRESULT、取消、实际删除/回收结果数组及旧未授权删除拒绝。COM 接口 override 和 provider 实际回收证据不作为死代码删除。
+- 全库无调用的 Painter::OmnibarHintReservePx / DrawOmnibarHints / ButtonGlyphRect 及两个专用常量；MainRenderer::AddressSearchButtonRect / RowFromYInPane / TitleBarRect；TabController::Palette；IndexClient::RequestConfigureVolume；Engine::SaveCache / CompactLocked。现役几何计算、调色板、配置提权和缓存合并实现保留。
+
+### 硬编码修订
+
+- 14 处空输入、初始导航、会话恢复、标签克隆等 C 盘回退统一调用 path::DefaultNavigationRoot，读取 Windows 所在卷；读取失败回到既有“此电脑”视图。没有扫描磁盘或在 UI 线程添加 provider 查询。当前机器为 C 盘系统，未在实际非 C 系统运行。
+- version.txt 升至 1.1.1.0；主程序 manifest 从同一 CMake 版本生成，三个相关 RC 入口及依赖同步更新。五个 EXE 的 FileVersion/ProductVersion/OriginalFilename 和实际嵌入主程序 manifest 已核对。安装器不再使用过时 1.0.0 缺省值，要求现有构建入口传入 version.txt 的版本。
+- 发布脚本目标由上游仓库改为当前发行版 EternalLightning/pulse；只进行 AST/静态核对，没有执行外部发布。
+- 文件操作、产物身份验证、诊断导出、存储迁移错误和缓存年龄接入已有本地化体系，保留错误细节、路径与错误码。新增 60 个资源 ID，迁移/复用 16 个旧 ID；runtime_messages.inc 同时生成 RC 字符串和无资源初始化时的不可变回退，只有一份中英文文案定义。生成真实文件名的“副本”、用户数据及协议/系统常量保留；没有机械改写所有字面量。历史已保存错误文本不会随之后的语言切换重新生成。
+
+### 行数和测试
+
+相对本轮全面审查开始时的脏树，按 src 物理行统计（包括注释、空行及新增 .inc）：实现代码 -268 行，资源宏/枚举/RC/共享文案定义 +192 行，生产源码净 -76 行；必要测试净 +78 行。证明见 docs/validation/1.1.1.0/slimming-line-counts.json。此统计不是相对 Fork 或 HEAD，也不包含前置菜单测试的 +98 行。
+
+| 定向检查 | PASS / FAIL |
+|---|---:|
+| 无资源回退、中英文资源、缓存单位边界、完整长路径和错误码 | 9 / 0 |
+| 现役集中资源完整性与语言 | 6 / 0 |
+| 操作状态标签 | 40 / 0 |
+| 既有会话恢复用例的独立筛选 | 5 / 0 |
+| Shell 完成路由 | 10 / 0 |
+| 实际 Shell 新建和 Ping 后响应 | 3 / 0 |
+| 新建/删除机器失败及路径传输 | 21 / 0 |
+| 手动回收还原 | 18 / 0 |
+| 实际授权回收、撤销和永久删除 | 6 / 0 |
+| 产物身份、同名替换和撤销安全边界 | 61 / 0 |
+| 隔离存储组件 | 30 / 0 |
+
+合计 209 PASS / 0 FAIL，11 组进程退出码均为 0。五个运行目标和相关目标构建通过，最终日志无新增 MSVC warning/error。没有运行完整历史回归。
+
+首轮 RC 依赖扫描将无 BOM 的 UTF-8 宏按 CP936 解读，出现 C4819/C2001；给共享文案和 RC 包含文件添加 UTF-8 BOM 后通过，未抑制诊断。集中资源旧夹具假设所有编号连续，退休编号 2215 已在本轮开始前不存在；改为列出 48 个现役 StringId，完整性断言未减少。首轮身份文案断言关联了另一条错误文案；将实际 ValidateProducedUndo 提示也接入共享规则后，身份、失败码、路径和保护替代文件的断言全部保留并通过。上述初次失败日志及最终日志保存在 docs/validation/1.1.1.0。
+
+### 清理和交付
+
+- 删除 1171 个确认的旧构建/测试产物和包路径，删除前逻辑长度合计 997,861,653 字节（951.64 MiB）。没有找到可证明无用的回归源码，故保留。清单见 docs/validation/1.1.1.0/cleanup.json；修正了清理脚本对字典汇总字段返回 0 的统计错误，逐路径原始长度记录保留。
+- 保留当前 CMake/生产构建、第三方依赖、历史必要日志/截图、源码备份、permission-recovery 的 ACL 与恢复资料；旧 1.1.0.1 ZIP 和旧复制载荷已删除。
+- 便携包 dist/Pulse-1.1.1.0-portable-win-x64.zip：11,713,991 字节，40 个文件逐项核对 ZIP 路径、长度和 SHA-256；无测试 EXE、对象、日志或嵌入 selftest dispatcher。SHA-256：B2B3C9566A5829323490676D550A7D6A513C38C92607364D997599C6F448FCD0。
+- 首次载荷的 Pulse.Preview.exe 曾被 Kaspersky 检出并移除，MD5 BD23B0E1800B2E481738BEF849E90248；先前 40 文件核验和启动截图不覆盖该告警。保留原事件、原哈希和扫描对照记录，未提交复核，未调整防护策略。
+- 依据源码/二进制差异，预览 producer 将 ACK 准入从映射名称字符串改为成功创建的像素视图；仅有效像素共享内存等待客户端确认，映射或视图失败不等待，保留全部失败状态与清理。没有撤销此前的失败保护，没有改名、混淆或删除崩溃诊断。定向真实响应和传输检查 43 PASS / 0 FAIL；初次夹具目录创建失败的日志保留，使用内容相同的普通权限副本后两组退出 0。
+- 修正后预览 EXE 的 MD5 为 A4D871DA4C5CFB1C916388607E786048。本机 Kaspersky 对 build 及 D:\Applications\Pulse 的新文件扫描均为 0 detected、退出 0；复制到原安装位置后 40 个文件重新核验一致，保留配置与部署备份。本机结果不能证明厂商正式认定误报或保证后续云规则的结果。
+- 新 ZIP 替换首次被告警载荷，11,714,038 字节，40 文件逐项核验。当前 SHA-256：062770533A853ED6D3E47EBC97770E05C037DF5CCB48CB4C6141E8F81F20F503；上面的旧 ZIP 哈希仅为告警历史记录，不能用于当前包校验。告警与修正详见 docs/validation/1.1.1.0/antivirus-review.md。
+
+边界：本轮没有执行真实第三方 ShellNew 扩展、SMB/RaiDrive、UAC 成功授权写入、服务注册/安装器安装及实际非 C 系统验收。这些不由静态审查、定向 fixture 或编译结果替代。

@@ -148,6 +148,10 @@ struct HeaderDropQueryState {
     std::mutex mutex;
     uint64_t generation = 0;
     std::optional<HeaderDropResult> result;
+    uint64_t hint_generation = 0;
+    std::vector<std::wstring> hint_sources;
+    std::wstring folder_hint;
+    bool hint_ready = false;
 };
 
 struct AppState {
@@ -291,8 +295,6 @@ struct AppState {
     // Borrows clients and the request counter; destroy this window before them.
     GlobalSearchWindow globalSearchWindow;
     app::UncProbeScheduler probe_scheduler;
-    std::wstring probeUnc;
-    std::vector<std::wstring> probeQueue;
 
     // Resolved window appearance (system theme / shot override), not a saved preference.
     bool darkMode = false;
@@ -327,7 +329,6 @@ struct AppState {
     int hoverRow = -1;
     int hoverPaneIndex = -1;
     ULONGLONG ctxHoverSince = 0;
-    std::wstring ctxHoverPrefetched;
     int dropPaneIndex = -1;
     bool dropHeader = false;            // drop on pane title bar → open folder
     bool scrollbarHovered = false;
@@ -479,6 +480,8 @@ struct AppState {
     uint64_t deleteUiToken = 0;
     uint64_t lockedOperationPromptedTaskId = 0;
     bool lockedOperationPromptActive = false;
+    uint64_t permissionOperationPromptedTaskId = 0;
+    bool permissionOperationPromptActive = false;
     uint64_t deletesWithoutMutation = 0;
     bool operationAutoShown = false;
     bool operationPinnedByUser = false;

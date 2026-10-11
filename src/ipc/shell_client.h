@@ -51,9 +51,6 @@ public:
     void Start(Callbacks cb);
     void Stop();
 
-    uint32_t RestoreRecycle(const std::vector<std::wstring>& paths,
-                            const std::vector<std::wstring>& recycle_paths = {});
-    uint32_t Rename(const std::wstring& path, const std::wstring& new_name);
     uint32_t CreateFolder(const std::wstring& path);
     uint32_t CreateNewFile(const std::wstring& path);
     void Cancel(uint32_t id);
@@ -93,6 +90,16 @@ private:
         bool retried = false;
     };
 
+    struct Connection {
+        explicit Connection(HANDLE handle);
+        ~Connection();
+        HANDLE pipe;
+        HANDLE cancel;
+    };
+    std::shared_ptr<Connection> CurrentConnection();
+    void SignalConnection();
+    void RetireConnection();
+
     uint32_t Submit(uint32_t type, const std::vector<uint8_t>& payload,
                     const std::function<void(uint32_t)>& before_send = {});
     bool EnsureConnected();
@@ -100,24 +107,26 @@ private:
     void KillChild();
     bool SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload);
     void ReaderThread();
-    void HandleDisconnect();
+    void HandleDisconnect(const std::shared_ptr<Connection>& expected = {});
     void FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
     void FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
     const std::wstring& UnreachableMessage() const;
 
     Callbacks cb_;
-    std::mutex send_mutex_;          // serializes pipe writes + reconnect
+    std::mutex send_mutex_;          // serializes complete frames + reconnect
+    std::mutex connection_mutex_;    // short publication/cancellation lock; never holds I/O
+    std::shared_ptr<Connection> connection_;
     std::mutex pending_mutex_;
     std::map<uint32_t, Pending> pending_;
     std::mutex launch_reply_mutex_;
     std::map<uint32_t, LaunchReply> launch_replies_;
 
-    HANDLE pipe_ = INVALID_HANDLE_VALUE;
     PROCESS_INFORMATION child_{};
     bool child_started_ = false;
     std::wstring last_error_;
     ULONGLONG last_spawn_try_ = 0;
 
+    std::function<void()> before_frame_body_;
     std::thread reader_;
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> next_id_{1};

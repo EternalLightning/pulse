@@ -44,10 +44,10 @@ using namespace pulse;
 namespace pulse {
 std::wstring FormatAddressPath(const std::wstring& text) {
     std::wstring t = text;
-    if (t.empty()) return L"C:\\";
+    if (t.empty()) return pulse::path::DefaultNavigationRoot();
     auto start = t.find_first_not_of(L" \"");
     auto end = t.find_last_not_of(L" \"");
-    if (start == std::wstring::npos) return L"C:\\";
+    if (start == std::wstring::npos) return pulse::path::DefaultNavigationRoot();
     t = t.substr(start, end - start + 1);
     if (t.size() == 2 && t[1] == L':') t += L'\\';
     return t;

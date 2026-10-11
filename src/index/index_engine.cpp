@@ -2211,10 +2211,6 @@ bool Engine::FlattenLocked(Store& out, std::vector<VolState>& vols_out) const {
     return true;
 }
 
-void Engine::SaveCache() {
-    MergeBase(true);
-}
-
 DeltaLog* Engine::DeltaFor(wchar_t letter) {
     wchar_t key = letter ? static_cast<wchar_t>(towupper(letter)) : 0;
     auto it = delta_logs_.find(key);
@@ -2517,25 +2513,6 @@ bool Engine::TryLoadCache() {
     SetStatus(L"已加载 " + std::to_wstring(indexed_.load()) + L" 项");
     ready_ = true;
     return true;
-}
-
-void Engine::CompactLocked() {
-    Store neu;
-    std::vector<VolState> vols;
-    FlattenLocked(neu, vols);
-    if (map_) {
-        map_->Close();
-        map_.reset();
-    }
-    live_ = std::move(neu);
-    vols_ = std::move(vols);
-    tombstones_.clear();
-    patches_.clear();
-    deleted_ = 0;
-    pool_waste_ = 0;
-    RebuildChildMapLocked();
-    indexed_.store(live_.nodes.size());
-    InvalidateFilterLocked();
 }
 
 int32_t Engine::FindByFrnLocked(const VolState& v, uint64_t frn) const {

@@ -56,6 +56,7 @@ void RequestColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col
     ForEachPane(s, [&](app::Pane& pane) {
         const app::Tab* other = pane.ActiveTab();
         if (shared == 0 && other && other->pending_generation != 0 &&
+            other->sort_column == tab.sort_column && other->sort_direction == tab.sort_direction &&
             SamePath(other->current_path, col.path)) {
             shared = other->pending_generation;
         }
@@ -75,6 +76,10 @@ void RequestColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col
     if (!col.snapshot) col.snapshot = s.store.Peek(col.path);
     col.generation = s.worker.Refresh(col.path, tab.sort_column, tab.sort_direction,
                                      app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
+    if (!col.generation) {
+        col.applied_generation = (std::max)(col.applied_generation, s.worker.ResultWatermark());
+        col.error = true;
+    }
 }
 
 void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab, app::FolderSortMode folders) {
@@ -288,6 +293,8 @@ uint64_t SharedColumnStripGeneration(AppState& s, const std::wstring& path,
         const auto* tab = pane.ActiveTab();
         if (!tab || tab == excluding || !Eligible(*tab) ||
             tab->column_strip.for_path != tab->current_path) return;
+        if (!generation && excluding && (tab->sort_column != excluding->sort_column ||
+            tab->sort_direction != excluding->sort_direction)) return;
         for (const auto& col : tab->column_strip.ancestors) consider(col);
         consider(tab->column_strip.child);
     });
@@ -325,6 +332,7 @@ void NoteColumnStripResult(AppState& s, const app::WorkResult& res) {
         if (col.path.empty() || !SamePath(col.path, res.path)) return;
         if (res.generation <= col.notify_watermark ||
             res.generation < col.applied_generation) return;
+        if (!res.final && col.generation != res.generation) return;
         if (res.error) {
             if (col.generation == 0 || res.generation < col.generation) return;
             col.generation = 0;
@@ -335,7 +343,7 @@ void NoteColumnStripResult(AppState& s, const app::WorkResult& res) {
         }
         if (!res.snapshot) return;
         if (col.generation != 0 && res.generation < col.generation) return;
-        col.generation = 0;
+        if (res.final) col.generation = 0;
         col.applied_generation = res.generation;
         col.error = false;
         col.snapshot = res.snapshot;

@@ -37,7 +37,8 @@ DWORD ComputeDropEffect(DWORD key_state, const std::wstring& source_sample,
 
 // First source that is a real directory (not a file or broken path).
 // Used when dropping onto a pane header to navigate instead of copy/move.
-std::wstring FirstDroppableFolder(const std::vector<std::wstring>& sources);
+std::wstring FirstDroppableFolder(const std::vector<std::wstring>& sources,
+                                  const std::function<bool()>& cancelled = {});
 
 // True when path looks like a .lnk, so a header drop can try to open the target.
 bool LooksLikeFolderShortcut(const std::wstring& path);
@@ -145,6 +146,7 @@ struct DropTargetCallbacks {
 class WindowDropTarget final : public IDropTarget {
 public:
     WindowDropTarget(HWND hwnd, DropTargetCallbacks cb);
+    DWORD RefreshDragFeedback();
 
     IFACEMETHODIMP QueryInterface(REFIID riid, void** out) override;
     IFACEMETHODIMP_(ULONG) AddRef() override { return ++ref_; }
@@ -162,6 +164,9 @@ private:
     DropTargetCallbacks cb_;
     std::vector<std::wstring> sources_; // cached from DragEnter
     DWORD preferred_ = 0;
+    POINT drag_point_{};
+    DWORD drag_keys_ = 0;
+    DWORD drag_allowed_ = DROPEFFECT_NONE;
 };
 
 } // namespace pulse::ui

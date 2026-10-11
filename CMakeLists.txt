@@ -125,6 +125,12 @@ endif()
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(cmake/pulse_version.h.in generated/pulse_version.h @ONLY)
+configure_file(cmake/pulse.manifest.in generated/pulse_app.manifest @ONLY)
+set_source_files_properties(src/app/pulse.rc src/bench/child_edit_test.rc
+    src/bench/dialog_edit_test.rc PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/generated")
+set_property(SOURCE src/app/pulse.rc src/bench/child_edit_test.rc
+    src/bench/dialog_edit_test.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_BINARY_DIR}/generated/pulse_app.manifest")
 
 function(pulse_add_version_resource target description internal_name original_filename)
     set(PULSE_FILE_DESCRIPTION "${description}")
@@ -138,12 +144,12 @@ add_library(pulse_crash_reporter STATIC
     src/common/crash_reporter.cpp
     src/common/diagnostics_exporter.cpp)
 target_include_directories(pulse_crash_reporter PUBLIC "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32)
+target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32 pulse_localization)
 
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
 add_library(pulse_user_storage STATIC src/common/user_storage.cpp)
-target_link_libraries(pulse_user_storage PUBLIC shell32 ole32 advapi32)
+target_link_libraries(pulse_user_storage PUBLIC shell32 ole32 advapi32 pulse_localization)
 add_executable(pulse_user_storage_test src/bench/user_storage_test.cpp)
 target_link_libraries(pulse_user_storage_test PRIVATE pulse_user_storage)
 add_executable(pulse_user_index_storage_test
@@ -253,7 +259,7 @@ add_executable(pulse_fluent_gallery WIN32
     src/ui/fluent_components.cpp
     src/ui/tab_shape.cpp
     src/ui/typography.cpp
-    src/ui/ui_compositor.cpp
+    src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp
     src/ui/window_helpers.cpp)
 target_link_libraries(pulse_fluent_gallery PRIVATE
     d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 windowscodecs comctl32
@@ -294,6 +300,7 @@ target_link_libraries(pulse_search_client_routing_test PRIVATE user32 shell32 ad
 add_executable(pulse_fs_enumeration_test
     src/bench/fs_enumeration_test.cpp src/fs/fs_enum.cpp)
 target_link_libraries(pulse_fs_enumeration_test PRIVATE shell32 shlwapi netapi32)
+target_compile_definitions(pulse_fs_enumeration_test PRIVATE PULSE_FS_ENUM_TESTING=1)
 add_executable(pulse_folder_sizes_scan_test
     src/bench/folder_sizes_scan_test.cpp src/app/folder_sizes.cpp src/fs/fs_enum.cpp)
 target_link_libraries(pulse_folder_sizes_scan_test PRIVATE pulse_fs_watch shell32 shlwapi netapi32 advapi32)
@@ -415,7 +422,7 @@ add_executable(pulse_fs_worker_cancel_test
     src/bench/fs_enumeration_worker_test.cpp src/app/app_worker.cpp src/app/entry_sort.cpp
     src/app/link_resolve.cpp src/fs/fs_enum.cpp src/fs/fs_snapshot.cpp
     src/fs/fs_recycle.cpp src/fs/fs_net_cache.cpp)
-target_compile_definitions(pulse_fs_worker_cancel_test PRIVATE PULSE_WORKER_TESTING=1)
+target_compile_definitions(pulse_fs_worker_cancel_test PRIVATE PULSE_WORKER_TESTING=1 PULSE_NET_CACHE_TESTING=1)
 target_link_libraries(pulse_fs_worker_cancel_test PRIVATE pulse_localization ole32 shell32 uuid shlwapi netapi32 pulse_shell_query_client)
 add_executable(pulse_fs_watch_lifecycle_test
     src/bench/fs_watch_lifecycle_test.cpp src/fs/fs_watch.cpp src/fs/fs_enum.cpp)
@@ -455,7 +462,13 @@ add_executable(pulse_recycle_backend_test src/bench/recycle_backend_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp src/shell_host/deletion_identity.cpp
     src/bench/localization_test.rc)
 set_source_files_properties(src/app/pulse.rc src/bench/localization_test.rc PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h")
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h;${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.inc")
+set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_BINARY_DIR}/generated/pulse_app.manifest")
+set_property(SOURCE src/bench/dialog_edit_test.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.inc")
 target_link_libraries(pulse_recycle_backend_test PRIVATE ole32 shell32 uuid bcrypt)
 # Standalone OpsManager tests need the deletion service's direct dependencies.
 foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test)
@@ -550,7 +563,7 @@ add_executable(pulse_material_test
     src/bench/window_material_test.cpp
     src/ui/window_material.cpp
     src/ui/typography.cpp
-    src/ui/ui_compositor.cpp)
+    src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp)
 target_compile_definitions(pulse_material_test PRIVATE
     PULSE_WINDOW_MATERIAL_TESTING=1)
 target_link_libraries(pulse_material_test PRIVATE
@@ -621,7 +634,7 @@ add_executable(pulse_dialog_close_test src/bench/dialog_close_test.cpp src/ui/di
 target_compile_features(pulse_dialog_close_test PRIVATE cxx_std_20)
 target_compile_options(pulse_dialog_close_test PRIVATE /W4 /permissive- /utf-8)
 target_compile_definitions(pulse_dialog_close_test PRIVATE UNICODE _UNICODE NOMINMAX)
-target_link_libraries(pulse_dialog_close_test PRIVATE dwmapi user32)
+target_link_libraries(pulse_dialog_close_test PRIVATE dwmapi user32 comctl32)
 
 add_executable(pulse_dialog_fade_test
     src/bench/dialog_fade_test.cpp src/bench/localization_test.rc
@@ -637,7 +650,7 @@ pulse_enable_lumatext(pulse_dialog_fade_test)
 
 add_executable(pulse_child_edit_test
     src/bench/child_edit_test.cpp src/bench/child_edit_test.rc
-    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ui/edit_host.cpp)
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp src/ui/edit_host.cpp)
 target_compile_options(pulse_child_edit_test PRIVATE /W4 /permissive- /utf-8)
 target_compile_definitions(pulse_child_edit_test PRIVATE PULSE_TEST_LUMATEXT_INIT_FAILURE=1)
 target_link_options(pulse_child_edit_test PRIVATE /MANIFEST:NO)
@@ -717,8 +730,31 @@ add_executable(pulse_locked_operation_test
 target_link_libraries(pulse_locked_operation_test PRIVATE
     pulse_localization ole32 shell32 uuid bcrypt advapi32 shlwapi netapi32 mpr rstrtmgr)
 
+foreach(elevation_ops_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test pulse_locked_operation_test)
+    target_sources(${elevation_ops_target} PRIVATE
+        src/ops/operation_permission.cpp src/ops/operation_elevation_adapter.cpp
+        src/ops/operation_elevation_transport.cpp)
+endforeach()
+
+add_executable(pulse_operation_elevation_adapter_test
+    src/bench/operation_elevation_adapter_test.cpp src/bench/localization_test.rc
+    src/ops/ops_manager.cpp src/ops/operation_permission.cpp
+    src/ops/operation_elevation_adapter.cpp src/ops/operation_elevation_transport.cpp
+    src/ops/delete_service.cpp src/ops/delete_operation.cpp src/ops/file_lock_owner.cpp
+    src/ops/recycle_undo_validation.cpp src/ipc/shell_client.cpp src/fs/fs_enum.cpp src/fs/fs_recycle.cpp)
+target_compile_definitions(pulse_operation_elevation_adapter_test PRIVATE PULSE_OPERATION_ELEVATION_TESTING)
+target_link_libraries(pulse_operation_elevation_adapter_test PRIVATE
+    pulse_localization ole32 shell32 uuid bcrypt advapi32 shlwapi netapi32 mpr rstrtmgr)
+add_dependencies(pulse_operation_elevation_adapter_test pulse_shell)
+
+add_executable(pulse_operation_elevation_transport_test
+    src/bench/operation_elevation_transport_test.cpp src/ops/operation_elevation_transport.cpp)
+target_compile_definitions(pulse_operation_elevation_transport_test PRIVATE PULSE_OPERATION_ELEVATION_TESTING)
+target_link_libraries(pulse_operation_elevation_transport_test PRIVATE shell32 advapi32 bcrypt)
+
 add_executable(pulse_ops_feedback_test
-    src/bench/ops_feedback_test.cpp src/ops/ops_manager.cpp
+    src/bench/ops_feedback_test.cpp src/bench/localization_test.rc src/ops/ops_manager.cpp
+    src/ops/operation_permission.cpp src/ops/operation_elevation_adapter.cpp src/ops/operation_elevation_transport.cpp
     src/ops/delete_service.cpp src/ops/delete_operation.cpp src/ops/file_lock_owner.cpp
     src/ops/recycle_undo_validation.cpp src/ipc/shell_client.cpp src/fs/fs_enum.cpp src/fs/fs_recycle.cpp
     src/shell_host/recycle_fileop.cpp src/shell_host/deletion_identity.cpp)
@@ -728,7 +764,7 @@ target_link_libraries(pulse_ops_feedback_test PRIVATE
 
 add_executable(pulse_menu_text_test
     src/bench/menu_text_test.cpp src/bench/localization_test.rc
-    src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/ui_compositor.cpp
+    src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp
     src/ui/tab_shape.cpp src/ui/typography.cpp src/ui/edit_host.cpp)
 target_link_options(pulse_menu_text_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_menu_text_test PRIVATE
@@ -747,6 +783,18 @@ target_link_libraries(pulse_locked_item_prompt_ui_test PRIVATE
     pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
     comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
 pulse_enable_lumatext(pulse_locked_item_prompt_ui_test)
+
+add_executable(pulse_file_operation_failure_test
+    src/bench/file_operation_failure_test.cpp src/bench/localization_test.rc
+    src/ui/file_operation_dialog.cpp src/ui/fluent_components.cpp src/ui/window_helpers.cpp
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp)
+target_compile_definitions(pulse_file_operation_failure_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_file_operation_failure_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_file_operation_failure_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
+pulse_enable_lumatext(pulse_file_operation_failure_test)
 
 add_executable(pulse_rename_locked_prompt_ui_test
     src/bench/rename_locked_prompt_ui_test.cpp src/bench/localization_test.rc
@@ -930,11 +978,15 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/rename_enter_test.cpp ${architecture_sources})
     add_executable(pulse_archive_navigation_test
         src/bench/archive_navigation_test.cpp ${architecture_sources})
+    add_executable(pulse_titlebar_layout_test
+        src/bench/titlebar_layout_test.cpp ${architecture_sources})
+    add_executable(pulse_permission_operation_prompt_ui_test
+        src/bench/permission_operation_prompt_ui_test.cpp ${architecture_sources})
     set(global_search_fixture_sources ${architecture_sources})
     list(FILTER global_search_fixture_sources EXCLUDE REGEX "global_search_window\\.cpp$")
     add_executable(pulse_global_search_window_test
         src/bench/global_search_window_test.cpp ${global_search_fixture_sources})
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})
@@ -943,6 +995,8 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
             endif()
         endforeach()
     endforeach()
+    target_compile_definitions(pulse_permission_operation_prompt_ui_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+    target_compile_definitions(pulse_directory_contract_application_test PRIVATE PULSE_WORKER_TESTING=1 PULSE_NET_CACHE_TESTING=1)
 endif()
 
 # Opt-in integration fixture for content-search progress rendering.

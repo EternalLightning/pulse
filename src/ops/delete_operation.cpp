@@ -6,6 +6,7 @@
 #include "../ipc/delete_plan_protocol.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
+#include "../common/file_operation_error.h"
 #include <winnetwk.h>
 #include <algorithm>
 #include <chrono>
@@ -230,6 +231,8 @@ OpsManager::QueueItem OpsManager::RemainingDeleteRetry(const QueueItem& admitted
     const std::vector<std::wstring>& actual) {
     QueueItem retry = admitted;
     retry.req.sources.clear(); retry.req.delete_targets.clear();
+    retry.retry_source_references.clear();
+    retry.req.undo_produced_identities.clear();
     retry.close_first.clear();
     for (const auto& target : accepted.targets) {
         DeleteRequestTarget remaining{target.path, {}, false};
@@ -243,6 +246,12 @@ OpsManager::QueueItem OpsManager::RemainingDeleteRetry(const QueueItem& admitted
             }
             remaining.physical_paths.push_back(root);
             retry.req.sources.push_back(root);
+            const auto original = std::find(admitted.req.sources.begin(), admitted.req.sources.end(), root);
+            const auto index = static_cast<size_t>(original - admitted.req.sources.begin());
+            if (index < admitted.retry_source_references.size())
+                retry.retry_source_references.push_back(admitted.retry_source_references[index]);
+            if (index < admitted.req.undo_produced_identities.size())
+                retry.req.undo_produced_identities.push_back(admitted.req.undo_produced_identities[index]);
         }
         if (!remaining.physical_paths.empty()) retry.req.delete_targets.push_back(std::move(remaining));
     }
@@ -279,7 +288,9 @@ void OpsManager::RunDelete(const QueueItem& item,
         status.summary = l10n::Get(l10n::StringId::DeletePreparing);
         status.last_error.clear(); status.current_item.clear();
         status.failure_hr = S_OK; status.failed_path.clear();
-        status.source_label.clear(); status.destination_label.clear();
+        status.source_label = !item.req.delete_targets.empty() ? item.req.delete_targets.front().path :
+            !item.req.sources.empty() ? item.req.sources.front() : L"";
+        status.destination_label.clear();
         status.total_items = status.completed_items = status.total_bytes = status.transferred_bytes = 0;
         status.bytes_per_second = status.peak_bytes_per_second = 0; status.eta_seconds = 0;
     });
@@ -361,6 +372,9 @@ void OpsManager::RunDelete(const QueueItem& item,
     }
     QueueItem admitted = item;
     admitted.req.sources = physical;
+    if (admitted.retry_source_references.empty()) {
+        for (const auto& root : physical) admitted.retry_source_references.push_back(FileObjectReference::Open(root));
+    }
     const bool recycle = !recycle_roots.empty();
     admitted.req.type = recycle ? OpType::RecycleDelete : OpType::RealDelete; // Freeze empty-bin roots.
     admitted.req.delete_targets.clear();
@@ -390,7 +404,20 @@ void OpsManager::RunDelete(const QueueItem& item,
         if (group.second.empty()) continue;
         if (!execution_token) { hr = static_cast<uint32_t>(E_UNEXPECTED); break; }
         std::vector<FileIdentity> expected_identities;
-        if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
+        if (!item.retry_source_references.empty()) {
+            for (const auto& path : group.second) {
+                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), path);
+                const auto index = static_cast<size_t>(source - item.req.sources.begin());
+                auto current = FileObjectReference::Open(path);
+                if (index >= item.retry_source_references.size() ||
+                    !item.retry_source_references[index].Matches(current.Get())) {
+                    hr = static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_FILE_INVALID));
+                    error = l10n::Get(l10n::StringId::OperationFailedMessage); failed_path = path; break;
+                }
+                expected_identities.push_back(item.retry_source_references[index].identity);
+            }
+            if (FAILED(static_cast<HRESULT>(hr))) break;
+        } else if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
             for (const auto& path : group.second) {
                 const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), path);
                 if (source == item.req.sources.end()) break;
@@ -497,10 +524,15 @@ void OpsManager::RunDelete(const QueueItem& item,
         }
     }
     LockReport locks;
-    if (!cancelled && !backend_lost && IsLockFailure(static_cast<HRESULT>(hr)) && !item.req.undo_revision) {
+    if (!cancelled && !backend_lost &&
+        (MayBeLockFailure(static_cast<HRESULT>(hr)) || format::FileOperationMessageCode(static_cast<HRESULT>(hr)) == ERROR_PRIVILEGE_NOT_HELD ||
+            format::FileOperationMessageCode(static_cast<HRESULT>(hr)) == ERROR_ELEVATION_REQUIRED)) {
         QueueItem retry = RemainingDeleteRetry(admitted, *accepted, actual);
-        if (!retry.req.sources.empty()) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), failed_path,
+        if (!retry.req.sources.empty()) {
+            CaptureElevationFailure(retry, static_cast<HRESULT>(hr), failed_path);
+            if (!item.req.undo_revision) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), failed_path,
             [&] { return stopping_.load() || delete_cancel_.load(); });
+        }
     }
     InvalidateRecycleUndo(actual, backend_lost);
     finish(std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled, locks,

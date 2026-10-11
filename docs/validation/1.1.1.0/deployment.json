@@ -1,0 +1,16 @@
+{
+  "version": "1.1.1.0",
+  "destination": "D:\\Applications\\Pulse",
+  "files_verified": 40,
+  "backup": "E:\\Projects\\pulse\\build\\deploy-backup-ba7aeaf4526441c28732d695925fb4fc",
+  "archive_sha256": "062770533A853ED6D3E47EBC97770E05C037DF5CCB48CB4C6141E8F81F20F503",
+  "status": "verified_after_preview_view_state_correction",
+  "verification_scope": "files_verified records the initial copy only; current state is recorded below",
+  "rechecked_at": "2026-10-11T18:18:57.0073779+08:00",
+  "currently_verified_files": 40,
+  "currently_missing_files": [],
+  "currently_mismatched_files": [],
+  "antivirus_evidence": "antivirus-detection.json",
+  "installed_preview_scan_exit": 0,
+  "installed_preview_scan_report": "kaspersky-installed-preview-view-state.log"
+}

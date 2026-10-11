@@ -3,6 +3,7 @@
 #include "string_ids.h"
 
 #include <windows.h>
+#include <cwchar>
 #include <string>
 #include <string_view>
 
@@ -15,6 +16,78 @@ enum class Language {
 };
 
 enum class StringId : UINT {
+    CacheJustNow = IDS_CACHE_JUST_NOW,
+    CacheSecondsAgoFormat = IDS_CACHE_SECONDS_AGO_FORMAT,
+    CacheMinutesAgoFormat = IDS_CACHE_MINUTES_AGO_FORMAT,
+    CacheHoursAgoFormat = IDS_CACHE_HOURS_AGO_FORMAT,
+    CacheDaysAgoFormat = IDS_CACHE_DAYS_AGO_FORMAT,
+    DiagnosticsRootsUnavailable = IDS_DIAGNOSTICS_ROOTS_UNAVAILABLE,
+    DiagnosticsDestinationNotEmpty = IDS_DIAGNOSTICS_DESTINATION_NOT_EMPTY,
+    DiagnosticsCopyCrashesFailed = IDS_DIAGNOSTICS_COPY_CRASHES_FAILED,
+    DiagnosticsCopyLogFailed = IDS_DIAGNOSTICS_COPY_LOG_FAILED,
+    DiagnosticsManifestFailed = IDS_DIAGNOSTICS_MANIFEST_FAILED,
+    DiagnosticsDeleteFailed = IDS_DIAGNOSTICS_DELETE_FAILED,
+    StorageReparseNotAllowed = IDS_STORAGE_REPARSE_NOT_ALLOWED,
+    StorageDefaultUnavailable = IDS_STORAGE_DEFAULT_UNAVAILABLE,
+    StorageSaveFailedFormat = IDS_STORAGE_SAVE_FAILED_FORMAT,
+    StorageInvalidTarget = IDS_STORAGE_INVALID_TARGET,
+    StorageActiveOverlap = IDS_STORAGE_ACTIVE_OVERLAP,
+    StoragePendingOverlap = IDS_STORAGE_PENDING_OVERLAP,
+    StorageTargetNotEmptyWritable = IDS_STORAGE_TARGET_NOT_EMPTY_WRITABLE,
+    StorageTargetWriteFailed = IDS_STORAGE_TARGET_WRITE_FAILED,
+    StorageBusy = IDS_STORAGE_BUSY,
+    StorageSeparateDirectories = IDS_STORAGE_SEPARATE_DIRECTORIES,
+    StorageLockFailed = IDS_STORAGE_LOCK_FAILED,
+    StorageRequestChanged = IDS_STORAGE_REQUEST_CHANGED,
+    StorageMigrationLockFailed = IDS_STORAGE_MIGRATION_LOCK_FAILED,
+    StorageReadSourceFailed = IDS_STORAGE_READ_SOURCE_FAILED,
+    StorageReadFileFailed = IDS_STORAGE_READ_FILE_FAILED,
+    StoragePlainFileRequired = IDS_STORAGE_PLAIN_FILE_REQUIRED,
+    StorageCopyVerifyFailed = IDS_STORAGE_COPY_VERIFY_FAILED,
+    StorageCopiedAppReadFailed = IDS_STORAGE_COPIED_APP_READ_FAILED,
+    StorageWallpaperUpdateFailed = IDS_STORAGE_WALLPAPER_UPDATE_FAILED,
+    StorageMigrationFailed = IDS_STORAGE_MIGRATION_FAILED,
+    OperationSourceIdentityChanged = IDS_OPERATION_SOURCE_IDENTITY_CHANGED,
+    OperationRenameFailedFormat = IDS_OPERATION_RENAME_FAILED_FORMAT,
+    OperationFileFailed = IDS_OPERATION_FILE_FAILED,
+    OperationHashInitializeFailed = IDS_OPERATION_HASH_INITIALIZE_FAILED,
+    OperationUndoReservationMissing = IDS_OPERATION_UNDO_RESERVATION_MISSING,
+    OperationCancelled = IDS_OPERATION_CANCELLED,
+    OperationUndoRecordChanged = IDS_OPERATION_UNDO_RECORD_CHANGED,
+    OperationDriveUnsupported = IDS_OPERATION_DRIVE_UNSUPPORTED,
+    OperationUndoIdentityUnverified = IDS_OPERATION_UNDO_IDENTITY_UNVERIFIED,
+    OperationShellFailed = IDS_OPERATION_SHELL_FAILED,
+    OperationPreparingFormat = IDS_OPERATION_PREPARING_FORMAT,
+    OperationTransferMissingPaths = IDS_OPERATION_TRANSFER_MISSING_PATHS,
+    OperationRetryTypeChangedFormat = IDS_OPERATION_RETRY_TYPE_CHANGED_FORMAT,
+    OperationUndoResultChangedFormat = IDS_OPERATION_UNDO_RESULT_CHANGED_FORMAT,
+    OperationNestedDestinationFormat = IDS_OPERATION_NESTED_DESTINATION_FORMAT,
+    OperationWaitingLink = IDS_OPERATION_WAITING_LINK,
+    OperationProgressFormat = IDS_OPERATION_PROGRESS_FORMAT,
+    OperationWaitingConflict = IDS_OPERATION_WAITING_CONFLICT,
+    OperationUndoExactNameFormat = IDS_OPERATION_UNDO_EXACT_NAME_FORMAT,
+    OperationKeepBothLinkFormat = IDS_OPERATION_KEEP_BOTH_LINK_FORMAT,
+    OperationMoveReplaceUnsupportedFormat = IDS_OPERATION_MOVE_REPLACE_UNSUPPORTED_FORMAT,
+    OperationVerifyingFormat = IDS_OPERATION_VERIFYING_FORMAT,
+    OperationHashFailedFormat = IDS_OPERATION_HASH_FAILED_FORMAT,
+    OperationBackupRecoveryFailedFormat = IDS_OPERATION_BACKUP_RECOVERY_FAILED_FORMAT,
+    OperationStateFormat = IDS_OPERATION_STATE_FORMAT,
+    OperationRecycledIdentityChanged = IDS_OPERATION_RECYCLED_IDENTITY_CHANGED,
+    OperationWorkerNotStarted = IDS_OPERATION_WORKER_NOT_STARTED,
+    OperationTimeout = IDS_OPERATION_TIMEOUT,
+    OperationStopped = IDS_OPERATION_STOPPED,
+    PermissionOperationOutcomeUnknown = IDS_PERMISSION_OPERATION_OUTCOME_UNKNOWN,
+    PermissionOperationTitle = IDS_PERMISSION_OPERATION_TITLE,
+    PermissionOperationMessage = IDS_PERMISSION_OPERATION_MESSAGE,
+    PermissionOperationContinue = IDS_PERMISSION_OPERATION_CONTINUE,
+    PermissionOperationUacHint = IDS_PERMISSION_OPERATION_UAC_HINT,
+    PermissionOperationSourcePath = IDS_PERMISSION_OPERATION_SOURCE_PATH,
+    PermissionOperationDestinationPath = IDS_PERMISSION_OPERATION_DESTINATION_PATH,
+    LinkPath = IDS_LINK_PATH,
+    LinkResolvedPath = IDS_LINK_RESOLVED_PATH,
+    OperationMove = IDS_OPERATION_MOVE,
+    OperationItemsFormat = IDS_OPERATION_ITEMS_FORMAT,
+    OperationUndoFormat = IDS_OPERATION_UNDO_FORMAT,
     NetworkSearchAdd = IDS_NETWORK_SEARCH_ADD,
     NetworkSearchRunning = IDS_NETWORK_SEARCH_RUNNING,
     NetworkSearchComplete = IDS_NETWORK_SEARCH_COMPLETE,
@@ -675,6 +748,8 @@ enum class StringId : UINT {
     OpPause = IDS_OP_PAUSE,
     OpResume = IDS_OP_RESUME,
     OpDetails = IDS_OP_DETAILS,
+    OpErrorDetails = IDS_OP_ERROR_DETAILS,
+    OpFilePath = IDS_OP_FILE_PATH,
     OpSummary = IDS_OP_SUMMARY,
     StatusHintIdle = IDS_STATUS_HINT_IDLE,
     StatusHintSelected = IDS_STATUS_HINT_SELECTED,
@@ -987,12 +1062,11 @@ enum class StringId : UINT {
     PlaybackPaused = IDS_PLAYBACK_PAUSED,
     LinkDestinationTitle = IDS_LINK_DESTINATION_TITLE,
     LinkContinue = IDS_LINK_CONTINUE,
-    LinkContinueAll = IDS_LINK_CONTINUE_ALL,
     LinkDirectoryMessage = IDS_LINK_DIRECTORY_MESSAGE,
     LinkFileMessage = IDS_LINK_FILE_MESSAGE,
     LinkHardMessage = IDS_LINK_HARD_MESSAGE,
     LinkNameCountSuffix = IDS_LINK_NAME_COUNT_SUFFIX,
-    LinkContinueAllNote = IDS_LINK_CONTINUE_ALL_NOTE,
+    LinkTaskScopeNote = IDS_LINK_TASK_SCOPE_NOTE,
     LockedItemGenericMessage = IDS_LOCKED_ITEM_GENERIC_MESSAGE,
     HelpOpenKeys = IDS_HELP_OPEN_KEYS,
     HelpEyebrow = IDS_HELP_EYEBROW,
@@ -1008,5 +1082,15 @@ Language preference() noexcept;
 Language effective_language() noexcept;
 const wchar_t* LocaleName() noexcept;
 const std::wstring& Get(StringId id);
+
+template<typename... Args>
+std::wstring Format(StringId id, Args... args) {
+    const auto& pattern = Get(id);
+    const int length = _scwprintf(pattern.c_str(), args...);
+    if (length < 0) return pattern;
+    std::wstring result(static_cast<size_t>(length), L'\0');
+    swprintf_s(result.data(), result.size() + 1, pattern.c_str(), args...);
+    return result;
+}
 
 } // namespace pulse::l10n

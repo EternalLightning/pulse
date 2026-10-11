@@ -32,7 +32,7 @@ void StopShellRegistryWatch();
 void SeedShellVerbCache(AppState& s);
 void StartCtxQuery(AppState& s, std::vector<std::wstring> paths,
                           bool background, const std::wstring& ext);
-void MaybePrefetchHoverCtxMenu(AppState& s);
+void MaybePrefetchCtxMenu(AppState& s);
 void PumpShellMenuMessages(AppState& s);
 void WaitForShellMenuReady(AppState& s);
 void ScheduleFolderRefresh(AppState& s);

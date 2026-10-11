@@ -31,8 +31,7 @@ bool MainRenderer::TabItemRect(const WindowViewModel& vm, float window_w, int in
     const TabStripMetrics m = ComputeTabStrip(vm, window_w);
     const float left = m.x0 + static_cast<float>(index) * m.pitch
         + (index < static_cast<int>(m.extra.size()) ? m.extra[static_cast<size_t>(index)] : 0.0f);
-    const float w = vm.tabs[static_cast<size_t>(index)].pinned
-        ? (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_ : m.w;
+    const float w = vm.tabs[static_cast<size_t>(index)].pinned ? m.pinned_w : m.w;
     *out = D2D1::RectF(left, m.y, left + w, m.y + m.h);
     return true;
 }
@@ -88,6 +87,14 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     HitTestResult r;
     if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) return r;
 
+    // Caption buttons own their fixed right-aligned area, including during a
+    // tab or group drag. Check it before any other title-bar content.
+    if (y < title_bar_height_) {
+        const float ctrl_w = 46.0f * scale_;
+        if (x >= rect.right - ctrl_w) { r.region = HitTestResult::Close; return r; }
+        if (x >= rect.right - ctrl_w * 2.0f) { r.region = HitTestResult::Maximize; return r; }
+        if (x >= rect.right - ctrl_w * 3.0f) { r.region = HitTestResult::Minimize; return r; }
+    }
     if (vm.change_popover.visible) {
         const auto popup = ChangePopoverRect(vm.change_popover, rect, scale_);
         if (ContainsPt(popup, x, y)) {
@@ -99,12 +106,20 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     }
     // Title bar.
     if (y < title_bar_height_) {
-        const float ctrlW = 46.0f * scale_;
         const TabStripMetrics strip = ComputeTabStrip(vm, rect.right);
+        if (ContainsPt(strip.new_button, x, y)) { r.region = HitTestResult::TabNew; return r; }
+        if (ContainsPt(strip.scroll_left, x, y)) {
+            if (strip.scroll_offset > 0.0f) r.region = HitTestResult::TabScrollLeft;
+            return r;
+        }
+        if (ContainsPt(strip.scroll_right, x, y)) {
+            if (strip.scroll_offset < strip.scroll_max) r.region = HitTestResult::TabScrollRight;
+            return r;
+        }
+        if (x < strip.viewport.left || x >= strip.viewport.right || y < strip.y) return r;
         auto hitTab = [&](int i) -> bool {
             if (vm.tabs[static_cast<size_t>(i)].hidden) return false;
-            const float tabW = vm.tabs[static_cast<size_t>(i)].pinned
-                ? (vm.show_pinned_tab_names ? kTabPinnedNamedW : kTabPinnedW) * scale_ : strip.w;
+            const float tabW = vm.tabs[static_cast<size_t>(i)].pinned ? strip.pinned_w : strip.w;
             const float extra = i < static_cast<int>(strip.extra.size())
                 ? strip.extra[static_cast<size_t>(i)] : 0.0f;
             float tabLeft = strip.x0
@@ -134,9 +149,23 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                  k < vm.tab_drag_index + dragN && k < static_cast<int>(vm.tabs.size()); ++k)
                 if (hitTab(k)) return r;
         }
-        // Group chips: strip slots between tabs, click opens the group popup.
+        // The active tab is drawn over siblings and chips during animation.
+        for (int i = 0; i < static_cast<int>(vm.tabs.size()); ++i)
+            if (vm.tabs[static_cast<size_t>(i)].active && hitTab(i)) return r;
+        // Group chips use the same animated/floating positions as drawing.
         for (const auto& chip : strip.chips) {
-            if (x >= chip.left && x < chip.left + chip.width &&
+            float chip_left = chip.left;
+            if (chip.group >= 0 && chip.group < static_cast<int>(vm.tab_groups.size())) {
+                const auto& group = vm.tab_groups[static_cast<size_t>(chip.group)];
+                chip_left += group.x_offset;
+                if (vm.tab_drag_chip && vm.tab_drag_index >= 0 &&
+                    vm.tab_drag_index < static_cast<int>(vm.tabs.size()) &&
+                    vm.tabs[static_cast<size_t>(vm.tab_drag_index)].group == chip.group) {
+                    chip_left = group.collapsed ? vm.tab_drag_x
+                        : vm.tab_drag_x - chip.width - 4.0f * scale_;
+                }
+            }
+            if (x >= chip_left && x < chip_left + chip.width &&
                 y >= strip.y + 4.0f * scale_ && y < strip.y + strip.h - 4.0f * scale_) {
                 r.region = HitTestResult::TabGroup;
                 r.index = chip.group;
@@ -148,17 +177,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 i < vm.tab_drag_index + std::max(1, vm.tab_drag_count)) continue;
             if (hitTab(i)) return r;
         }
-        const float cx = strip.end_x;
-        if (x >= cx && x < cx + 32.0f * scale_) {
-            r.region = HitTestResult::TabNew;
-            return r;
-        }
-        float ctrlX = rect.right - ctrlW;
-        if (x >= ctrlX) { r.region = HitTestResult::Close; return r; }
-        ctrlX -= ctrlW;
-        if (x >= ctrlX) { r.region = HitTestResult::Maximize; return r; }
-        ctrlX -= ctrlW;
-        if (x >= ctrlX) { r.region = HitTestResult::Minimize; return r; }
         return r;
     }
 

@@ -2,6 +2,7 @@
 #include "../ops/ops_manager.h"
 #include "../ops/produced_undo.h"
 #include "../common/file_create.h"
+#include "../common/localization.h"
 #include "../shell_host/recycle_fileop.h"
 #include "../ipc/file_identity_protocol.h"
 #include "../ipc/delete_plan_protocol.h"
@@ -137,7 +138,8 @@ inline int RunUndoIdentityRegressions(const std::wstring& fixture_root) {
             UndoIdentityTestProbe::DeleteInverse(restored, std::move(inverse));
             const auto status = restored.Status();
             check(status.phase == OpPhase::Failed && status.failure_hr == E_ACCESSDENIED &&
-                status.failed_path == path && status.last_error.find(L"原操作产物") != std::wstring::npos && exists(path),
+                status.failed_path == path && status.last_error == pulse::l10n::Format(
+                    pulse::l10n::StringId::OperationUndoResultChangedFormat, path.c_str()) && exists(path),
                 L"replaced Copy/Create product is preserved with an explicit identity failure");
             const auto backend = pulse::shell::RecycleAuthorized({path}, {}, {}, identities);
             check(backend.identity_mismatch && backend.error == E_ACCESSDENIED && backend.sources.empty() && exists(path),

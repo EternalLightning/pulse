@@ -1948,10 +1948,6 @@ std::pair<int, int> MainRenderer::VisibleRangeInPane(
     return layout.VisibleRange();
 }
 
-int MainRenderer::RowFromYInPane(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds, float y) const {
-    return ItemFromPointInPane(vm, pane_bounds, PaneBodyBounds(vm, pane_bounds).left + 1.0f, y);
-}
-
 int MainRenderer::ItemFromPointInPane(const PaneViewModel& vm,
                                       const D2D1_RECT_F& full_bounds,
                                       float x, float y) const {

@@ -49,12 +49,40 @@ struct IndexClientTestAccess {
         return mode == 1 || client.volume_refresh_requested_;
     }
     static void ConnectWriter(IndexClient& client, HANDLE pipe) {
-        { std::lock_guard lock(client.pipe_mu_); client.pipe_ = pipe; }
+        { std::lock_guard lock(client.pipe_mu_); client.connection_ = std::make_shared<IndexClient::Connection>(pipe); }
         {
             std::lock_guard lock(client.mu_);
             client.connected_ = true;
         }
         client.pending_cv_.notify_one();
+    }
+    static void AttachIo(IndexClient& client, HANDLE pipe) {
+        std::lock_guard lock(client.pipe_mu_);
+        client.connection_ = std::make_shared<IndexClient::Connection>(pipe);
+        client.running_ = true;
+        client.connected_ = true;
+    }
+    static void ReadIo(IndexClient& client, HANDLE done, bool& received, DWORD& error) {
+        client.worker_ = std::thread([&client, done, &received, &error] {
+            ipc::MsgHeader header{}; std::vector<uint8_t> payload;
+            received = client.ReadMsg(header, payload);
+            error = received ? ERROR_SUCCESS : GetLastError();
+            SetEvent(done);
+        });
+    }
+    static void BodyGate(IndexClient& client, std::function<void()> gate) {
+        client.before_frame_body_ = std::move(gate);
+    }
+    static bool Running(IndexClient& client) { return client.running_.load(); }
+    static void WriteIo(IndexClient& client, HANDLE done, bool& sent) {
+        client.writer_ = std::thread([&client, done, &sent] {
+            const std::vector<uint8_t> payload(1024 * 1024, 0x53);
+            sent = client.WriteMsg(REQ_IDX_SEARCH, 1, payload);
+            SetEvent(done);
+        });
+    }
+    static void DisconnectIo(IndexClient& client, HANDLE done) {
+        client.worker_ = std::thread([&client, done] { client.Disconnect(); SetEvent(done); });
     }
 };
 struct SearchClientRoutingTestPeer {
@@ -74,6 +102,8 @@ struct SearchClientRoutingTestPeer {
     }
 };
 }
+
+#include "index_client_io_cases.h"
 
 namespace {
 constexpr UINT kMain = WM_APP + 201, kPopup = WM_APP + 202;
@@ -331,6 +361,8 @@ void Exercise(const char* name, HWND main, HWND popup) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--transport-liveness-only")
+        return pulse::index::RunIndexClientIoRegressions();
     if (argc == 2 && std::wstring_view(argv[1]) == L"--writer-idle-only") {
         WriterIdle();
         return failures ? 1 : 0;

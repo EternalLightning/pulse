@@ -1,12 +1,14 @@
 // app_navigation.h — Navigation, watches, search, and virtual places.
 #pragma once
 #include "app_runtime.h"
+#include "../fs/fs_net_cache.h"
 
 namespace pulse {
 std::vector<std::wstring> CollectPanePaths(const AppState& s);
 std::vector<ui::ViewMode> CollectPaneViews(const AppState& s);
 bool IsUncPath(const std::wstring& p);
 void PumpUncProbe(AppState& s);
+void ApplyUncProbeResult(AppState& s, const fs::UncProbeResult& result);
 void RequestUncProbe(AppState& s, std::wstring unc);
 void ProbePinnedNetworks(AppState& s);
 void WarmupUnc(AppState& s, const std::wstring& path);

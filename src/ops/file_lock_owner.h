@@ -20,7 +20,11 @@ struct LockReport {
 };
 
 using LockCancelled = std::function<bool()>;
+// Explicit sharing failures permit retry even when Restart Manager finds no owner.
 bool IsLockFailure(HRESULT error) noexcept;
+// Access denial or a nonempty directory needs owner evidence before showing a lock.
+bool MayBeLockFailure(HRESULT error) noexcept;
+// Reports external processes only; the current process is not owner evidence.
 // Blocking filesystem/Restart Manager work; call only from an operation worker.
 LockReport ProbeFileLocks(HRESULT error, const std::wstring& failed_item,
     const std::vector<std::wstring>& candidates, const std::wstring& protected_directory,

@@ -3,7 +3,9 @@
 #include "drive_label_rename.h"
 #include "../ops/archive.h"
 #include "../ops/drop_staging.h"
+#include "../ops/operation_elevation_adapter.h"
 #include "locked_operation_prompt.h"
+#include "permission_operation_prompt.h"
 #include "../common/windows_compat.h"
 #include "quick_access.h"
 #include "filter_animation.h"
@@ -616,7 +618,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             else if (app::Tab* t = ActiveTab(*s))
                 RememberPath(*s, t->current_path);
         } else {
-        std::wstring startPath = s->shot.active ? s->shot.path : L"C:\\";
+        std::wstring startPath = s->shot.active ? s->shot.path : pulse::path::DefaultNavigationRoot();
         ResolvedOpenTarget openTarget;
         if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
         else if (!s->shot.active && !s->open_path.empty()) {
@@ -877,11 +879,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
 
     case WM_ACTIVATE:
+        if (s && s->menu && LOWORD(wParam) == WA_INACTIVE)
+            s->menu->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
         if (s) s->renderer.NotifyPreviewActivate(LOWORD(wParam) != WA_INACTIVE);
         break;
 
     case WM_ACTIVATEAPP:
         if (s && !wParam) {
+            if (s->menu) s->menu->DismissForDeactivation(nullptr);
             s->detailsPreviewPanning = false;
             s->renderer.EndDetailsPreviewPan();
             if (GetCapture() == hwnd) ReleaseCapture();
@@ -974,7 +979,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
             if (PumpRecycleRefresh(*s, now)) dirty = true;
             if (s->home_catalog.ConsumeUpdate()) dirty = true;
-            MaybePrefetchHoverCtxMenu(*s);
+            MaybePrefetchCtxMenu(*s);
             s->places.FlushPendingSave(false);
             if (s->renameClickCandidate && s->renameClickDue != 0 &&
                 now >= s->renameClickDue) {
@@ -1054,6 +1059,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
             QueueVisibleTagDiscovery(*s);
             UpdateOperationWindow(*s, false);
+            PumpPermissionOperationPrompt(*s);
             if (dirty) InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -1139,6 +1145,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_CANCELMODE:
+        if (s && s->menu) s->menu->DismissForDeactivation(nullptr);
         HandleSidebarResize(s, hwnd, msg, lParam);
         if (s) { s->detailsPreviewPanning = false; s->renderer.EndDetailsPreviewPan(); }
         if (GetCapture() == hwnd) ReleaseCapture();
@@ -1265,7 +1272,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s) {
             for (const auto& error : s->ops.DrainShellLaunchErrors())
                 s->notification_toast.ShowError(hwnd, l10n::Get(l10n::StringId::Open), error);
-            UpdateOperationWindow(*s, !s->exit_requested && !s->lockedOperationPromptActive);
+            UpdateOperationWindow(*s, !s->exit_requested && !s->lockedOperationPromptActive &&
+                !s->permissionOperationPromptActive);
             const ops::OpStatus st = s->ops.Status();
             if (s->ops.TakeCtxInvokeDone()) {
                 if (app::Tab* tab = ActiveTab(*s)) s->store.MarkDirty(tab->current_path);
@@ -1407,7 +1415,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 }
                 if (s->previewDeleteIntent && s->previewDeleteIntent->succeeded) SyncQuickPreview(*s);
             }
-            PumpLockedOperationPrompt(*s);
+            PumpPermissionOperationPrompt(*s);
+            if (!s->permissionOperationPromptActive) PumpLockedOperationPrompt(*s);
             RefreshOpenCtxMenu(*s);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -1595,35 +1604,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
 
     case WM_NET_PROBE: {
-        auto* result = reinterpret_cast<fs::UncProbeResult*>(lParam);
-        if (s && result) {
-            const bool completed_current_probe = s->probe_scheduler.Finish(result->probe_id);
-            if (completed_current_probe) s->probeUnc.clear();
-            s->places.SetNetworkStatus(result->unc, result->status, result->rtt_ms);
-            if (result->status == fs::NetStatus::Offline) {
-                ForEachPane(*s, [&](app::Pane& pane) {
-                    app::Tab* tab = pane.ActiveTab();
-                    if (!tab || tab->current_path != result->unc) return;
-                    if (tab->snapshot) {
-                        tab->net_readonly = true;
-                        tab->SetBannerTitle(app::BannerType::Offline, l10n::Get(l10n::StringId::Offline));
-                        tab->banner_message = l10n::Get(l10n::StringId::OfflineSnapshot);
-                    }
-                });
-            } else {
-                ForEachPane(*s, [&](app::Pane& pane) {
-                    app::Tab* tab = pane.ActiveTab();
-                    if (!tab || tab->current_path != result->unc) return;
-                    tab->net_readonly = false;
-                    if (tab->banner_type == app::BannerType::Offline) {
-                        tab->ClearBanner();
-                    }
-                });
-            }
-            if (completed_current_probe) PumpUncProbe(*s);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        delete result;
+        std::unique_ptr<fs::UncProbeResult> result(reinterpret_cast<fs::UncProbeResult*>(lParam));
+        if (s && result) ApplyUncProbeResult(*s, *result);
+        else if (s && wParam) PumpUncProbe(*s);
         return 0;
     }
 
@@ -1985,6 +1968,8 @@ bool SkipSingletonFromArgv() {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     pulse::crash::Initialize({pulse::crash::ProcessRole::App, false, {}});
+    if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
+        return ops::OperationElevationAdapter::RunWorker(__argc, __wargv);
     for (int i = 1; i < __argc; ++i) {
         if (wcscmp(__wargv[i], L"--restore-file-manager") == 0) {
             const auto result = app::RestoreDefaultFileManager(app::SystemExecutablePath());
@@ -2166,7 +2151,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         }
     }
     if (state.shot.active && state.shot.path.empty()) {
-        state.shot.path = L"C:\\";
+        state.shot.path = pulse::path::DefaultNavigationRoot();
     }
     if (!state.shot.active && !state.menushot && !state.colorpickshot &&
         !state.colorpickdialog) {

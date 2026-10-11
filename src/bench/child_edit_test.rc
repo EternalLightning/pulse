@@ -1,2 +1,2 @@
 #include <windows.h>
-1 RT_MANIFEST "../app/pulse.manifest"
+1 RT_MANIFEST "pulse_app.manifest"

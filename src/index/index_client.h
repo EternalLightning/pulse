@@ -4,7 +4,9 @@
 #include "index_protocol.h"
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,7 +35,6 @@ public:
     std::vector<std::wstring> ExcludedPaths() const;
     bool GetScope(std::vector<VolumeInfo>& volumes, std::vector<std::wstring>& excluded) const;
     void RefreshVolumesAsync();
-    bool RequestConfigureVolume(const std::wstring& volume_id, bool enabled);
     bool RequestRebuild();
     static bool ConfigureVolumeElevated(const std::wstring& volume_id, bool enabled);
     static bool RebuildElevated();
@@ -70,7 +71,18 @@ private:
     HWND notify_ = nullptr;
     UINT status_msg_ = 0;
     UINT search_msg_ = 0;
-    HANDLE pipe_ = INVALID_HANDLE_VALUE;
+    struct Connection {
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        HANDLE cancel = nullptr;
+        explicit Connection(HANDLE handle) : pipe(handle), cancel(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
+        ~Connection() {
+            if (pipe != INVALID_HANDLE_VALUE) CloseHandle(pipe);
+            if (cancel) CloseHandle(cancel);
+        }
+    };
+    std::shared_ptr<Connection> connection_; // pipe_mu_; I/O keeps ownership through completion
+    void SignalConnection();
+    std::shared_ptr<Connection> CurrentConnection();
     std::wstring pipe_name_ = kPipeName;
     HANDLE child_proc_ = nullptr;
     HANDLE child_thread_ = nullptr;
@@ -108,6 +120,7 @@ private:
     std::map<uint32_t, SearchResult> results_;
     bool volume_refresh_requested_ = true;
     std::condition_variable pending_cv_;
+    std::function<void()> before_frame_body_; // regression gate, empty in production
 };
 
 } // namespace pulse::index

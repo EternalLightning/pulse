@@ -16,6 +16,8 @@ struct UncProbeResult {
     std::wstring unc;
     NetStatus status = NetStatus::Unknown;
     DWORD rtt_ms = 0;
+    DWORD error_code = ERROR_SUCCESS;
+    bool final = true;
 };
 
 struct NetSnapshotWriteState;
@@ -34,13 +36,14 @@ bool SaveNetSnapshot(const std::wstring& path, const SnapshotPtr& snapshot,
                      const std::function<bool()>& cancelled = {},
                      const NetSnapshotWriteTicket& ticket = {});
 SnapshotPtr LoadNetSnapshot(const std::wstring& path, uint64_t* unix_sec = nullptr);
-std::wstring FormatCacheAge(uint64_t unix_sec);
 
 // Background probe: posts `msg` to `hwnd` with lParam = heap UncProbeResult*.
 // The 1500ms timeout reports Offline; it does not cancel the blocking filesystem
 // call. A late completion is posted separately with the same probe ID.
 // Live and timed-out calls share four physical slots until their IO returns.
-// False means no request was admitted; no result will be posted for that ID.
+// False posts no result for that ID. ERROR_BUSY retains the logical request;
+// capacity release posts msg with nonzero wParam and null lParam to wake retry.
+// Timeout results are provisional; final results follow actual IO completion.
 bool StartUncProbe(HWND hwnd, UINT msg, std::wstring unc, UncProbeId probe_id);
 
 #ifdef PULSE_NET_CACHE_TESTING

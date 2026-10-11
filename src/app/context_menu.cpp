@@ -169,9 +169,10 @@ std::vector<ui::FluentMenuItem> BuildRecyclePlaceMenu(bool can_empty) {
 std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_undo,
                                                     const std::wstring& undo_label) {
     std::vector<ui::FluentMenuItem> items;
-    items.push_back(Item(CmdNewFolder, l10n::Get(l10n::StringId::NewFolder).c_str(), kGlyphNewFolder, L"F7"));
-    items.push_back(Item(CmdNewFile, l10n::Get(l10n::StringId::File).c_str(), kGlyphNewFile));
-    items.push_back(Item(CmdNewTextFile, l10n::Get(l10n::StringId::NewTextDocument).c_str(), kGlyphNewFile));
+    auto create = Item(CmdNewMenu, l10n::Get(l10n::StringId::New).c_str(), kGlyphNewFile);
+    create.children = BuildNewMenu();
+    create.live_update = true;
+    items.push_back(std::move(create));
     items.back().separator_after = true;
     items.push_back(Item(CmdPaste, l10n::Get(l10n::StringId::Paste).c_str(), kGlyphPaste, L"Ctrl+V", can_paste));
     items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink, L"Ctrl+Shift+C"));

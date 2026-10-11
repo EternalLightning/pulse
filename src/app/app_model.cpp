@@ -82,7 +82,7 @@ bool Tab::NavigateTo(const std::wstring& path) {
     } else if (SameShellPath(fs::NormalizePath(path), fs::NormalizePath(current_path))) {
         return false;
     }
-    ClearEntryOrderHold();
+    ClearEntryRenameHints();
     ++view_generation;
     if (!current_path.empty()) {
         AlignHistoryOrigins(back_stack, back_search_origins);
@@ -122,9 +122,7 @@ fs::DirEntry Tab::EntryAt(size_t index) const {
     return snapshot && index<snapshot->size() ? (*snapshot)[index] : fs::DirEntry{};
 }
 
-void Tab::ClearEntryOrderHold() {
-    refresh_keeps_order = false;
-    order_held = false;
+void Tab::ClearEntryRenameHints() {
     held_renames.clear();
 }
 
@@ -138,39 +136,21 @@ void Tab::HoldEntryRename(const std::wstring& old_name, const std::wstring& new_
 
 void Tab::PrepareEntryRefresh(bool explicit_refresh) {
     if (current_path.empty() || fs::IsVirtualPath(current_path) || !archive_file.empty()) {
-        ClearEntryOrderHold();
+        ClearEntryRenameHints();
         return;
     }
-    if (explicit_refresh) {
-        refresh_keeps_order = false;
-        if (SelectedCount() > 0) pending_ensure_selection_visible = true;
-    }
-    refresh_keeps_order = false;
+    if (explicit_refresh && SelectedCount() > 0) pending_ensure_selection_visible = true;
 }
 
 fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                          std::vector<std::wstring>& selected_names,
-                                         std::wstring& focus_name, FolderSortMode folders) {
+                                         std::wstring& focus_name) {
     const bool ordinary = !current_path.empty() && !fs::IsVirtualPath(current_path) &&
                           archive_file.empty();
     if (ordinary && fresh) FollowEntryRenames(held_renames, *fresh, selected_names, focus_name);
-    fs::SnapshotPtr result = fresh;
-    if (ordinary && fresh) {
-        PruneEntryRenames(held_renames, *fresh);
-        const auto less = [&](const auto& a, const auto& b) {
-            return EntryLess(a, b, sort_column, sort_direction, folders, current_path);
-        };
-        if (!std::is_sorted(fresh->begin(), fresh->end(), less)) {
-            auto sorted = std::make_shared<std::vector<fs::DirEntry>>(*fresh);
-            std::sort(sorted->begin(), sorted->end(), less);
-            result = std::move(sorted);
-        }
-    } else {
-        held_renames.clear();
-    }
-    refresh_keeps_order = false;
-    order_held = false;
-    return result;
+    if (ordinary && fresh) PruneEntryRenames(held_renames, *fresh);
+    else held_renames.clear();
+    return fresh;
 }
 
 void Tab::SetSnapshot(fs::SnapshotPtr value) {
@@ -496,7 +476,7 @@ void Tab::RemapSelection(const std::vector<std::wstring>& names, const std::wstr
 
 std::wstring Tab::GoBack() {
     if (back_stack.empty()) return current_path;
-    ClearEntryOrderHold();
+    ClearEntryRenameHints();
     AlignHistoryOrigins(back_stack, back_search_origins);
     AlignHistoryOrigins(forward_stack, forward_search_origins);
     forward_stack.push(current_path);
@@ -517,7 +497,7 @@ std::wstring Tab::GoBack() {
 
 std::wstring Tab::GoForward() {
     if (forward_stack.empty()) return current_path;
-    ClearEntryOrderHold();
+    ClearEntryRenameHints();
     AlignHistoryOrigins(forward_stack, forward_search_origins);
     AlignHistoryOrigins(back_stack, back_search_origins);
     back_stack.push(current_path);
@@ -594,7 +574,7 @@ std::unique_ptr<LayoutTab> MakeSingleLayoutTab(const std::wstring& path, const T
         pane->view.column_layout = source->column_layout;
         pane->view.column_widths_dip = source->column_widths_dip;
     }
-    pane->NewTab(path.empty() ? L"C:\\" : path);
+    pane->NewTab(path.empty() ? pulse::path::DefaultNavigationRoot() : path);
     tab->panes.push_back(std::move(pane));
     tab->root = SplitContainer::CreateLeaf(tab->panes[0].get());
     tab->layout = LayoutPreset::Single;

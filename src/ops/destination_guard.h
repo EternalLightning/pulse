@@ -10,6 +10,7 @@
 #include <climits>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -31,15 +32,22 @@ struct DestinationLinkImpact {
 // leases deny both deletion and reparse writes, including the resolved directory.
 class DestinationGuard {
 public:
-    explicit DestinationGuard(decltype(&GetFileInformationByHandleEx) identity_query = GetFileInformationByHandleEx)
-        : identity_query_(identity_query) {}
-
     struct HandleCloser {
         void operator()(void* handle) const {
             if (handle && handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
         }
     };
     using Handle = std::unique_ptr<void, HandleCloser>;
+    struct DirectoryLeases {
+        std::map<std::wstring, Handle> handles;
+        std::set<std::wstring> commit_parents;
+        std::function<void(const std::wstring&)> before_relative_rename; // regression gate, empty in production
+    };
+    explicit DestinationGuard(decltype(&GetFileInformationByHandleEx) identity_query = GetFileInformationByHandleEx,
+        std::shared_ptr<DirectoryLeases> directory_leases = {})
+        : identity_query_(identity_query), leases_(directory_leases ? std::move(directory_leases)
+            : std::make_shared<DirectoryLeases>()) {}
+    std::shared_ptr<DirectoryLeases> SharedDirectoryLeases() const { return leases_; }
     struct Snapshot {
         bool exists = false;
         bool directory = false;
@@ -52,6 +60,58 @@ public:
         std::shared_ptr<void> resolved_reference;
         std::wstring resolved_path;
     };
+
+    struct ElevationSnapshot {
+        std::wstring path;
+        Snapshot snapshot;
+        uint64_t reference_handle = 0;
+        uint64_t resolved_reference_handle = 0;
+    };
+
+    std::vector<ElevationSnapshot> ExportForElevation() const {
+        std::vector<ElevationSnapshot> result;
+        result.reserve(snapshots_.size());
+        for (const auto& [path, snapshot] : snapshots_) {
+            ElevationSnapshot entry{path, snapshot,
+                reinterpret_cast<uint64_t>(snapshot.reference.get()),
+                reinterpret_cast<uint64_t>(snapshot.resolved_reference.get())};
+            entry.snapshot.reference.reset();
+            entry.snapshot.resolved_reference.reset();
+            result.push_back(std::move(entry));
+        }
+        return result;
+    }
+
+    bool ImportForElevation(const std::vector<ElevationSnapshot>& entries,
+        HANDLE parent_process, std::wstring& error) {
+        if (!snapshots_.empty() || entries.size() > 65536 || !parent_process) return false;
+        for (const auto& entry : entries) {
+            const auto parts = Components(entry.path);
+            if (parts.empty() || parts.back() != entry.path || snapshots_.contains(entry.path))
+                return Fail(entry.path, error);
+            Snapshot snapshot = entry.snapshot;
+            const auto duplicate = [&](uint64_t value, const FileIdentity& expected,
+                std::shared_ptr<void>& reference) {
+                if (!value) return !expected.Valid();
+                HANDLE raw = nullptr;
+                if (!DuplicateHandle(parent_process, reinterpret_cast<HANDLE>(value),
+                    GetCurrentProcess(), &raw, 0, FALSE, DUPLICATE_SAME_ACCESS)) return false;
+                reference = std::shared_ptr<void>(raw, HandleCloser{});
+                FileIdentity identity;
+                return ReadFileIdentity(raw, identity, identity_query_) && identity == expected;
+            };
+            if (snapshot.exists && (!snapshot.id.Valid() ||
+                !duplicate(entry.reference_handle, snapshot.id, snapshot.reference)))
+                return Fail(entry.path, error);
+            if (!snapshot.reparse.empty() && (!snapshot.resolved_id.Valid() ||
+                !duplicate(entry.resolved_reference_handle, snapshot.resolved_id, snapshot.resolved_reference)))
+                return Fail(entry.path, error);
+            Snapshot current;
+            if (!Read(entry.path, current) || !Same(snapshot, current)) return Fail(entry.path, error);
+            snapshots_.emplace(entry.path, std::move(snapshot));
+        }
+        return true;
+    }
 
     bool Capture(const std::wstring& path, std::wstring& error) {
         const auto parts = Components(path);
@@ -91,22 +151,52 @@ public:
         return true;
     }
 
+    bool PinPlainDirectory(const std::wstring& path, const FileIdentity& identity, std::wstring& error) {
+        if (!Capture(path, error)) return false;
+        const auto parts = Components(path);
+        if (parts.empty()) return Fail(path, error);
+        const auto found = snapshots_.find(parts.back());
+        if (found == snapshots_.end() || !found->second.exists || !found->second.directory ||
+            !found->second.reparse.empty() || found->second.id != identity) return Fail(path, error);
+        return PinDirectories(path, error);
+    }
+
     bool PinDirectories(const std::wstring& path, std::wstring& error) {
         for (const auto& part : Components(path)) {
             const auto found = snapshots_.find(part);
             if (found == snapshots_.end()) return Fail(part, error);
             if (!found->second.exists) continue;
             if (!found->second.directory) continue;
-            if (leases_.contains(part)) continue;
-            Handle handle(Open(part, false));
+            if (leases_->handles.contains(part) && !leases_->commit_parents.contains(part)) continue;
+            Handle handle(Open(part, false, created_directories_.contains(part) ? FILE_WRITE_ATTRIBUTES : 0));
             Snapshot current;
             if (!handle || !Read(part, current, handle.get()) || !Same(found->second, current))
                 return Fail(part, error);
-            leases_.emplace(part, std::move(handle));
+            leases_->handles[part] = std::move(handle);
+            leases_->commit_parents.erase(part);
             if (!current.reparse.empty() && !PinDirectories(current.resolved_path, error))
                 return false;
         }
         return true;
+    }
+
+    // Release our directory before mutating that leaf, retaining its ancestors
+    // and the snapshot used to validate any later admission or retry.
+    void ReleaseDirectory(const std::wstring& path) {
+        const auto parts = Components(path);
+        if (!parts.empty()) {
+            leases_->handles.erase(parts.back());
+            leases_->commit_parents.erase(parts.back());
+        }
+    }
+
+    void ReleaseDirectories() { leases_->handles.clear(); leases_->commit_parents.clear(); }
+
+    void ForgetLeaf(const std::wstring& path) {
+        const auto parts = Components(path);
+        if (parts.empty()) return;
+        ReleaseDirectory(path);
+        snapshots_.erase(parts.back());
     }
 
     bool EnsureDirectories(const std::wstring& path, std::wstring& error) {
@@ -125,7 +215,7 @@ public:
             if (!handle || !Read(part, created, handle.get()) || !created.directory ||
                 !created.reparse.empty()) return Fail(part, error);
             found->second = std::move(created);
-            leases_.emplace(part, std::move(handle));
+            leases_->handles.emplace(part, std::move(handle));
             created_directories_.insert(part);
         }
         return true;
@@ -179,8 +269,8 @@ public:
                               DWORD source_attributes, std::wstring& error) {
         const auto parts = Components(path);
         if (parts.empty()) return Fail(path, error);
-        const auto lease = leases_.find(parts.back());
-        if (lease == leases_.end() || !Check(path, error)) return false;
+        const auto lease = leases_->handles.find(parts.back());
+        if (lease == leases_->handles.end() || !Check(path, error)) return false;
         if (!created_directories_.contains(parts.back())) {
             // Do not rewrite the metadata of a preexisting merge directory (or a
             // linked target). Its lease deliberately denies attribute/reparse writes.
@@ -211,6 +301,7 @@ public:
     bool AdoptCreatedLeaf(const std::wstring& path, HANDLE handle, std::wstring& error) {
         const auto parts = Components(path);
         if (!handle || parts.empty()) return Fail(path, error);
+        if (parts.size() < 2 || !PinDirectories(parts[parts.size() - 2], error)) return false;
         Snapshot snapshot;
         if (!Read(parts.back(), snapshot, handle)) return Fail(path, error);
         Snapshot current;
@@ -225,6 +316,7 @@ public:
         FILE_DISPOSITION_INFO disposition{TRUE};
         if (!SetFileInformationByHandle(handle.get(), FileDispositionInfo,
                                        &disposition, sizeof(disposition))) return Fail(path, error);
+        ForgetLeaf(path);
         handle.reset();
         return RefreshOwnedLeaf(path, error);
     }
@@ -238,18 +330,58 @@ public:
         return Handle(handle);
     }
 
-    static bool RenameHandle(HANDLE handle, const std::wstring& destination) {
+    bool RenameLeaf(HANDLE handle, const std::wstring& destination) const {
+        const auto parts = Components(destination);
+        if (parts.size() < 2) { SetLastError(ERROR_INVALID_NAME); return false; }
+        const auto& parent_path = parts[parts.size() - 2];
+        const auto snapshot = snapshots_.find(parent_path);
+        if (!leases_->handles.contains(parent_path) || snapshot == snapshots_.end()) {
+            SetLastError(ERROR_INVALID_HANDLE); return false;
+        }
+        // Rename opens the target parent for adding a name. Permit that access
+        // only on this pinned object and commit relative to its handle. Ancestors
+        // retain their strict leases, and the next path admission repins this leaf.
+        leases_->handles.erase(parent_path);
+        const DWORD access = FILE_LIST_DIRECTORY | (created_directories_.contains(parent_path) ? FILE_WRITE_ATTRIBUTES : 0);
+        Handle parent(CreateFileW(parent_path.c_str(), access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        Snapshot current;
+        if (parent.get() == INVALID_HANDLE_VALUE) { parent.release(); return false; }
+        if (!parent || !Read(parent_path, current, parent.get()) || !Same(snapshot->second, current)) {
+            SetLastError(ERROR_FILE_INVALID); return false;
+        }
+        const auto raw_parent = parent.get();
+        leases_->handles[parent_path] = std::move(parent);
+        leases_->commit_parents.insert(parent_path);
+        if (leases_->before_relative_rename) leases_->before_relative_rename(destination);
+        return RenameHandle(handle, destination, raw_parent);
+    }
+
+    static bool RenameHandle(HANDLE handle, const std::wstring& destination, HANDLE parent = nullptr) {
         const auto parts = Components(destination);
         if (parts.empty()) return false;
-        const auto& name = parts.back();
+        const std::wstring name = parent ? std::filesystem::path(parts.back()).filename().wstring() : parts.back();
         const size_t bytes = sizeof(FILE_RENAME_INFO) + name.size() * sizeof(wchar_t);
         if (bytes > MAXDWORD) return false;
         std::vector<BYTE> buffer(bytes);
         auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
         rename->ReplaceIfExists = FALSE;
-        rename->RootDirectory = nullptr;
+        rename->RootDirectory = parent;
         rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
         std::memcpy(rename->FileName, name.data(), rename->FileNameLength);
+        if (parent) {
+            using Rename = NTSTATUS (NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
+            using StatusError = ULONG (NTAPI*)(NTSTATUS);
+            static const auto rename_file = reinterpret_cast<Rename>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationFile"));
+            static const auto status_error = reinterpret_cast<StatusError>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
+            if (!rename_file) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
+            IO_STATUS_BLOCK status{};
+            constexpr auto rename_information = static_cast<FILE_INFORMATION_CLASS>(10);
+            const NTSTATUS result = rename_file(handle, &status, rename, static_cast<ULONG>(buffer.size()), rename_information);
+            if (result < 0) { SetLastError(status_error ? status_error(result) : ERROR_ACCESS_DENIED); return false; }
+            return true;
+        }
         return SetFileInformationByHandle(handle, FileRenameInfo, rename,
                                           static_cast<DWORD>(buffer.size())) != FALSE;
     }
@@ -259,8 +391,8 @@ private:
         error = L"目标路径身份无法确认或已变化，操作已停止：" + path;
         return false;
     }
-    static HANDLE Open(const std::wstring& path, bool deletion) {
-        HANDLE handle = CreateFileW(path.c_str(), deletion ? DELETE | FILE_READ_ATTRIBUTES : 0,
+    static HANDLE Open(const std::wstring& path, bool deletion, DWORD extra_access = 0) {
+        HANDLE handle = CreateFileW(path.c_str(), (deletion ? DELETE | FILE_READ_ATTRIBUTES : FILE_LIST_DIRECTORY) | extra_access,
             FILE_SHARE_READ, nullptr, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         return handle == INVALID_HANDLE_VALUE ? nullptr : handle;
@@ -307,7 +439,7 @@ private:
         result.exists = true;
         result.directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         result.links = result.directory ? 0 : standard.NumberOfLinks;
-        if (!result.id.extended && owned)
+        if (owned)
             result.reference = std::shared_ptr<void>(owned.release(), HandleCloser{});
         if (!(attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
         result.reparse.resize(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
@@ -338,7 +470,7 @@ private:
             return false;
         }
         result.resolved_path.assign(name.data(), length);
-        if (!result.resolved_id.extended)
+        if (resolved)
             result.resolved_reference = std::shared_ptr<void>(resolved.release(), HandleCloser{});
         return true;
     }
@@ -375,7 +507,7 @@ private:
 
     decltype(&GetFileInformationByHandleEx) identity_query_;
     std::map<std::wstring, Snapshot> snapshots_;
-    std::map<std::wstring, Handle> leases_;
+    std::shared_ptr<DirectoryLeases> leases_;
     std::set<std::wstring> created_directories_;
     std::vector<DestinationLinkImpact> impacts_;
 };

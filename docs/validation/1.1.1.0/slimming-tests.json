@@ -1,0 +1,68 @@
+[
+  {
+    "name": "operation-labels",
+    "exit_code": 0,
+    "pass": 40,
+    "fail": 0
+  },
+  {
+    "name": "session-layout",
+    "exit_code": 0,
+    "pass": 5,
+    "fail": 0
+  },
+  {
+    "name": "shell-completion",
+    "exit_code": 0,
+    "pass": 10,
+    "fail": 0
+  },
+  {
+    "name": "shell-roundtrip",
+    "exit_code": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  {
+    "name": "operation-resources",
+    "exit_code": 0,
+    "pass": 21,
+    "fail": 0
+  },
+  {
+    "name": "manual-restore",
+    "exit_code": 0,
+    "pass": 18,
+    "fail": 0
+  },
+  {
+    "name": "actual-deletion-undo",
+    "exit_code": 0,
+    "pass": 6,
+    "fail": 0
+  },
+  {
+    "name": "storage",
+    "exit_code": 0,
+    "pass": 30,
+    "fail": 0
+  },
+  {
+    "name": "runtime-messages",
+    "exit_code": 0,
+    "pass": 9,
+    "fail": 0
+  },
+  {
+    "name": "centralized-resources",
+    "exit_code": 0,
+    "pass": 6,
+    "fail": 0
+  },
+  {
+    "name": "undo-identity",
+    "exit_code": 0,
+    "pass": 61,
+    "fail": 0
+  }
+]

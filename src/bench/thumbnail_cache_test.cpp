@@ -1,8 +1,243 @@
 #include "../ui/thumbnail_cache.h"
 #include <cstdio>
+#include <functional>
+#include <algorithm>
+#include "../ipc/preview_response.h"
 
 namespace pulse::ui {
 struct ThumbnailCacheTestAccess {
+    static bool RunTransport() {
+        bool ok = true;
+        unsigned passed = 0, failed = 0;
+        std::mutex check_mutex;
+        auto check = [&](bool value, const char* name) {
+            std::lock_guard lock(check_mutex);
+            std::printf("[%s] %s\n", value ? "PASS" : "FAIL", name);
+            value ? ++passed : ++failed;
+            ok &= value;
+            std::fflush(stdout);
+        };
+        const auto run = [&](const char* name,
+                             const std::function<void(HANDLE, HANDLE, const ipc::PreviewRequest&)>& send,
+                             bool reset = false, bool success = false,
+                             ipc::PreviewRequestKind kind = ipc::PreviewRequestKind::Content,
+                             bool accepted_failure = false, bool pause_body = false) {
+            ThumbnailCache cache;
+            const std::wstring pipe_name = L"\\\\.\\pipe\\PulsePreviewTransportTest-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(cache.pipe_token_);
+            HANDLE server = CreateNamedPipeW(pipe_name.c_str(), PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_WAIT, 1, 4096, 4096, 0, nullptr);
+            HANDLE client = server == INVALID_HANDLE_VALUE ? INVALID_HANDLE_VALUE :
+                CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                    OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+            HANDLE peer_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            HANDLE header_sent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (client == INVALID_HANDLE_VALUE || !peer_stop || !header_sent) {
+                check(false, name);
+                if (client != INVALID_HANDLE_VALUE) CloseHandle(client);
+                if (server != INVALID_HANDLE_VALUE) CloseHandle(server);
+                if (peer_stop) CloseHandle(peer_stop);
+                if (header_sent) CloseHandle(header_sent);
+                return;
+            }
+            ConnectNamedPipe(server, nullptr);
+            cache.pipe_ = client;
+            ThumbnailCache::Request req;
+            req.id = 17; req.generation = 29; req.path = L"fixture.txt";
+            req.key = req.identity = L"wire-fixture"; req.pixels = 512; req.kind = kind;
+            req.epoch = cache.epoch_.load(); req.failure_attempts = 2;
+            ThumbnailCache::Pending pending;
+            pending.id = req.id; pending.identity = req.identity;
+            pending.interests[0] = {true, false, req.generation, cache.consumers_[0].epoch};
+            cache.pending_[req.key] = pending;
+            cache.queue_.push_back(req);
+            std::thread peer([&] {
+                ipc::PreviewRequest wire;
+                if (ipc::ReadAll(server, &wire, sizeof(wire)) && wire.path_chars <= 32768) {
+                    std::wstring path(wire.path_chars, L'\0');
+                    if (ipc::ReadAll(server, path.data(), wire.path_chars * sizeof(wchar_t))) {
+                        send(server, peer_stop, wire);
+                        SetEvent(header_sent);
+                        WaitForSingleObject(peer_stop, 3000);
+                    }
+                }
+            });
+            std::atomic<bool> body_entered{false};
+            if (pause_body) cache.before_response_body_ = [&] {
+                body_entered = true;
+                SetEvent(header_sent);
+                WaitForSingleObject(cache.stop_event_, 1500);
+            };
+            cache.running_ = true;
+            const ULONGLONG started = GetTickCount64();
+            cache.worker_ = std::thread([&] { cache.Worker(); });
+            if (reset) {
+                if (pause_body) {
+                    const auto ready_deadline = GetTickCount64() + 700;
+                    while (!body_entered && GetTickCount64() < ready_deadline) Sleep(1);
+                } else WaitForSingleObject(header_sent, 700);
+                const ULONGLONG reset_started = GetTickCount64();
+                cache.Reset();
+                check(GetTickCount64() - reset_started < 500 &&
+                    WaitForSingleObject(peer_stop, 0) == WAIT_TIMEOUT &&
+                    cache.pending_.empty() && cache.queue_.empty() && (!pause_body || body_entered), name);
+            } else {
+                bool completed = false, result_ok = false;
+                while (GetTickCount64() - started < 1400) {
+                    {
+                        std::lock_guard lock(cache.mutex_);
+                        if (auto item = cache.items_.find(req.key); item != cache.items_.end()) {
+                            completed = true;
+                            const auto& response = item->second;
+                            bool payload_ok = true;
+                            if (success && response.kind == ipc::PreviewContentKind::Bitmap)
+                                payload_ok = response.pixels.size() == 4 &&
+                                    std::all_of(response.pixels.begin(), response.pixels.end(), [](uint8_t b) { return b == 0x7f; });
+                            if (success && (response.kind == ipc::PreviewContentKind::Text || response.kind == ipc::PreviewContentKind::Hex))
+                                payload_ok = response.text.empty() || response.text == L"ok";
+                            if (success && kind == ipc::PreviewRequestKind::Properties)
+                                payload_ok = response.properties.empty() || (response.properties.size() == 1 &&
+                                    response.properties[0].label == L"ok" && response.properties[0].value == L"ok");
+                            result_ok = success ? !item->second.failed && payload_ok :
+                                item->second.failed && (accepted_failure || item->second.cost == 0);
+                            break;
+                        }
+                    }
+                    Sleep(5);
+                }
+                cache.running_ = false; cache.cv_.notify_all();
+                if (completed) cache.worker_.join();
+                const bool retired = completed && cache.pipe_ == INVALID_HANDLE_VALUE;
+                check(completed && result_ok && ((success || accepted_failure) ? !retired : retired) &&
+                    cache.pending_.empty() && GetTickCount64() - started < 1350, name);
+                cache.Reset();
+            }
+            SetEvent(peer_stop);
+            peer.join();
+            CloseHandle(header_sent); CloseHandle(peer_stop); CloseHandle(server);
+        };
+        const auto text_header = [](const ipc::PreviewRequest& req) {
+            ipc::PreviewResponse response;
+            response.request_id = req.request_id; response.generation = req.generation;
+            response.kind = ipc::PreviewContentKind::Text; response.text_chars = 20;
+            return response;
+        };
+        run("header-only live peer obeys whole-frame deadline", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+        });
+        run("partial body live peer obeys whole-frame deadline", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+            const wchar_t part = L'a'; ipc::WriteAll(pipe, &part, sizeof(part));
+        });
+        run("slow drip cannot renew whole-frame deadline", [&](HANDLE pipe, HANDLE stop, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+            for (unsigned i = 0; i < response.text_chars && WaitForSingleObject(stop, 80) == WAIT_TIMEOUT; ++i) {
+                const wchar_t part = L'a'; if (!ipc::WriteAll(pipe, &part, sizeof(part))) break;
+            }
+        });
+        run("Reset cancels body while peer stays alive", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+        }, true);
+        run("oversized mapping is rejected before body allocation", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.mapping_chars = 513;
+            ipc::WriteAll(pipe, &response, sizeof(response));
+        });
+        run("invalid bitmap dimensions cannot inflate cache cost", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.kind = ipc::PreviewContentKind::Bitmap;
+            response.text_chars = 0; response.width = response.height = response.stride = MAXDWORD;
+            ipc::WriteAll(pipe, &response, sizeof(response));
+        });
+        run("unknown response kind retires connection", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.kind = static_cast<ipc::PreviewContentKind>(99);
+            response.text_chars = 0; ipc::WriteAll(pipe, &response, sizeof(response));
+        });
+        run("Reset before body initiation leaves no uncancelled I/O", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+        }, true, false, ipc::PreviewRequestKind::Content, false, true);
+        for (const auto kind : {ipc::PreviewContentKind::Text, ipc::PreviewContentKind::Hex}) {
+            run("valid text and hex responses retain payload and connection", [&](HANDLE pipe, HANDLE, const auto& req) {
+                auto response = text_header(req); response.kind = kind; response.text_chars = 2;
+                const wchar_t body[] = L"ok";
+                ipc::WriteAll(pipe, &response, sizeof(response)); ipc::WriteAll(pipe, body, 2 * sizeof(wchar_t));
+            }, false, true);
+        }
+        run("empty text content is a valid completed response", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.text_chars = 0;
+            ipc::WriteAll(pipe, &response, sizeof(response));
+        }, false, true);
+        run("properties admit bounded labels and values", [&](HANDLE pipe, HANDLE, const auto& req) {
+            ipc::PreviewResponse response; response.request_id = req.request_id; response.generation = req.generation;
+            response.property_count = 1;
+            const uint32_t chars = 2; const wchar_t text[] = L"ok";
+            ipc::WriteAll(pipe, &response, sizeof(response));
+            for (int i = 0; i < 2; ++i) { ipc::WriteAll(pipe, &chars, sizeof(chars)); ipc::WriteAll(pipe, text, 2 * sizeof(wchar_t)); }
+        }, false, true, ipc::PreviewRequestKind::Properties);
+        run("empty property list completes normally", [&](HANDLE pipe, HANDLE, const auto& req) {
+            ipc::PreviewResponse response; response.request_id = req.request_id; response.generation = req.generation;
+            ipc::WriteAll(pipe, &response, sizeof(response));
+        }, false, true, ipc::PreviewRequestKind::Properties);
+        run("unsupported provider result stays a valid failure without retiring connection", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.status = 1; response.kind = ipc::PreviewContentKind::Unsupported;
+            response.text_chars = 0; ipc::WriteAll(pipe, &response, sizeof(response));
+        }, false, false, ipc::PreviewRequestKind::Content, true);
+        run("mapping creation failure preserves bounded bitmap metadata without waiting for ACK", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); response.status = 2; response.kind = ipc::PreviewContentKind::Bitmap;
+            response.text_chars = 0; response.width = response.height = 1; response.stride = 4;
+            ipc::WriteAll(pipe, &response, sizeof(response));
+        }, false, false, ipc::PreviewRequestKind::Content, true);
+        run("valid bitmap maps bounded pixels and acknowledges receipt", [&](HANDLE pipe, HANDLE, const auto& req) {
+            const std::wstring name = L"Local\\PulsePreviewMap-test-" + std::to_wstring(GetCurrentProcessId());
+            const HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4, name.c_str());
+            void* pixels = mapping ? MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 4) : nullptr;
+            if (pixels) std::memset(pixels, 0x7f, 4);
+            auto response = text_header(req); response.kind = ipc::PreviewContentKind::Bitmap; response.text_chars = 0;
+            response.width = response.height = 1; response.stride = 4; response.mapping_chars = static_cast<uint32_t>(name.size());
+            ipc::WriteAll(pipe, &response, sizeof(response)); ipc::WriteAll(pipe, name.data(), response.mapping_chars * sizeof(wchar_t));
+            uint8_t ack = 0; const bool acknowledged = ipc::ReadAll(pipe, &ack, 1) && ack == 1;
+            check(mapping && pixels && acknowledged, "bitmap ACK arrives before producer releases mapping");
+            if (pixels) UnmapViewOfFile(pixels); if (mapping) CloseHandle(mapping);
+        }, false, true);
+        run("embedded NUL mapping name rejects before opening mapping", [&](HANDLE pipe, HANDLE, const auto& req) {
+            std::wstring name = L"Local\\PulsePreviewMap-"; name.push_back(L'\0'); name += L"foreign";
+            auto response = text_header(req); response.kind = ipc::PreviewContentKind::Bitmap; response.text_chars = 0;
+            response.width = response.height = 1; response.stride = 4; response.mapping_chars = static_cast<uint32_t>(name.size());
+            ipc::WriteAll(pipe, &response, sizeof(response)); ipc::WriteAll(pipe, name.data(), response.mapping_chars * sizeof(wchar_t));
+        });
+        run("oversized property value rejects before allocation", [&](HANDLE pipe, HANDLE, const auto& req) {
+            ipc::PreviewResponse response; response.request_id = req.request_id; response.generation = req.generation;
+            response.property_count = 1; const uint32_t empty = 0, invalid = MAXDWORD;
+            ipc::WriteAll(pipe, &response, sizeof(response)); ipc::WriteAll(pipe, &empty, sizeof(empty));
+            ipc::WriteAll(pipe, &invalid, sizeof(invalid));
+        }, false, false, ipc::PreviewRequestKind::Properties);
+        const ipc::PreviewRequest request{.request_id = 17, .generation = 29, .pixel_size = 512};
+        ipc::PreviewResponse valid; valid.request_id = 17; valid.generation = 29;
+        valid.kind = ipc::PreviewContentKind::Bitmap; valid.width = valid.height = 512;
+        valid.stride = 512 * 4; valid.mapping_chars = 40;
+        ipc::PreviewResponseLayout layout;
+        check(ipc::ValidatePreviewResponse(request, valid, layout) && layout.pixel_bytes == 1024 * 1024,
+            "response validator computes bounded bitmap allocation before consuming body");
+        for (unsigned fault = 0; fault < 12; ++fault) {
+            auto invalid = valid;
+            switch (fault) {
+            case 0: ++invalid.generation; break;
+            case 1: ++invalid.request_id; break;
+            case 2: invalid.magic = 0; break;
+            case 3: invalid.status = 3; break;
+            case 4: invalid.width = 0; break;
+            case 5: invalid.stride = MAXDWORD; break;
+            case 6: invalid.height = 1025; break;
+            case 7: invalid.flags = 2; break;
+            case 8: invalid.property_count = 7; break;
+            case 9: invalid.text_chars = 32769; break;
+            case 10: invalid.error_chars = 513; break;
+            case 11: invalid.frame_count = 0; break;
+            }
+            check(!ipc::ValidatePreviewResponse(request, invalid, layout),
+                "malformed identity dimensions stride flags lengths and frame metadata reject at admission");
+        }
+        std::printf("Thumbnail transport: %u passed, %u failed\n", passed, failed);
+        return ok;
+    }
     static bool RunFailures() {
         ThumbnailCache cache;
         bool ok = true;
@@ -458,4 +693,8 @@ bool RunThumbnailCacheTests() {
 
 bool RunThumbnailFailureTests() {
     return pulse::ui::ThumbnailCacheTestAccess::RunFailures();
+}
+
+bool RunThumbnailTransportTests() {
+    return pulse::ui::ThumbnailCacheTestAccess::RunTransport();
 }

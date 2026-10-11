@@ -1,4 +1,8 @@
 #include "../app/app_internal.h"
+#include "network_state_cases.h"
+#include "drag_hint_application_cases.h"
+#include "directory_projection_cases.h"
+#include "../app/directory_projection.h"
 #include "../app/app_column_view.h"
 #include "../app/folder_sizes_ui.h"
 #include "../common/localization.h"
@@ -9,10 +13,17 @@
 #include <thread>
 #include <string_view>
 
+namespace pulse::fs {
+std::wstring NetCacheTestDirectory() { return {}; }
+}
+
 int main(int argc, char** argv) {
+    const bool directory_projection_only = argc == 2 && std::string_view(argv[1]) == "--directory-projection-only";
+    const bool drag_hints_only = argc == 2 && std::string_view(argv[1]) == "--drag-hints-only";
+    const bool network_state_only = argc == 2 && std::string_view(argv[1]) == "--network-state-only";
     const bool shared_column_only = argc == 2 && std::string_view(argv[1]) == "--shared-column-cancel-only";
     const bool shared_requests_only = argc == 2 && std::string_view(argv[1]) == "--shared-requests-only";
-    if (argc != 1 && !shared_column_only && !shared_requests_only) {
+    if (argc != 1 && !shared_column_only && !shared_requests_only && !network_state_only && !directory_projection_only && !drag_hints_only) {
         std::fputs("Unknown directory-contract test selector\n", stderr);
         return 2;
     }
@@ -41,6 +52,13 @@ int main(int argc, char** argv) {
     s.renderer.SetCompositor(&s.compositor);
     s.window_tabs.EnsureDefault();
     s.pane = s.window_tabs.Active()->FocusedPane();
+    if (network_state_only || directory_projection_only || drag_hints_only) {
+        const int result = drag_hints_only ? RunDragHintApplicationCases(s)
+            : network_state_only ? RunNetworkStateCases(s) : RunDirectoryProjectionCases(s);
+        DestroyWindow(s.hwnd); s.hwnd = nullptr;
+        owned.reset(); OleUninitialize();
+        return result;
+    }
     auto& name_tab = *ActiveTab(s);
     auto second = std::make_unique<app::Pane>();
     auto& size_tab = second->view;
@@ -70,22 +88,21 @@ int main(int argc, char** argv) {
             std::lock_guard lock(mutex);
             results.push_back(std::move(result)); changed.notify_all();
         });
-        const auto count = (std::min)(4u, (std::max)(2u, std::thread::hardware_concurrency()));
-        for (unsigned i = 0; i < count; ++i) s.worker.EnqueueIo([&] {
+        app::WorkerCancellationTestProbe::SetCheckpoint(s.worker, [&] {
             std::unique_lock lock(mutex);
             ++entered; changed.notify_all();
             changed.wait(lock, [&] { return release; });
         });
         bool blocked = false;
-        {
-            std::unique_lock lock(mutex);
-            blocked = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered == count; });
-        }
         s.shot.active = true;
         name_tab.sort_column = size_tab.sort_column = ui::SortColumn::Name;
         name_tab.sort_direction = size_tab.sort_direction = ui::SortDirection::Asc;
         name_tab.pending_generation = size_tab.pending_generation = 0;
         StartLoadingPath(s, name_tab, fixture);
+        {
+            std::unique_lock lock(mutex);
+            blocked = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered >= 1; });
+        }
         StartLoadingPath(s, size_tab, fixture);
         const auto shared = size_tab.pending_generation;
         const bool shared_before = shared && name_tab.pending_generation == shared;
@@ -96,7 +113,11 @@ int main(int argc, char** argv) {
         changed.notify_all();
         {
             std::unique_lock lock(mutex);
-            changed.wait_for(lock, std::chrono::seconds(5), [&] { return !results.empty(); });
+            changed.wait_for(lock, std::chrono::seconds(5), [&] {
+                return std::any_of(results.begin(), results.end(), [&](const auto& result) {
+                    return result.final && result.generation == shared;
+                });
+            });
         }
         s.worker.Stop();
         for (auto& result : results) ApplyWorkerResult(s, result);
@@ -130,17 +151,12 @@ int main(int argc, char** argv) {
             std::lock_guard lock(mutex);
             results.push_back(std::move(result)); changed.notify_all();
         });
-        const auto count = (std::min)(4u, (std::max)(2u, std::thread::hardware_concurrency()));
-        for (unsigned i = 0; i < count; ++i) s.worker.EnqueueIo([&] {
+        app::WorkerCancellationTestProbe::SetCheckpoint(s.worker, [&] {
             std::unique_lock lock(mutex);
             ++entered; changed.notify_all();
             changed.wait(lock, [&] { return release; });
         });
         bool blocked = false;
-        {
-            std::unique_lock lock(mutex);
-            blocked = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered == count; });
-        }
         s.shot.active = true;
         name_tab.column_layout = false;
         name_tab.pending_generation = size_tab.pending_generation = 0;
@@ -153,6 +169,10 @@ int main(int argc, char** argv) {
         column.path = fs::NormalizePath(fixture);
         size_tab.column_strip.ancestors.push_back(std::move(column));
         StartLoadingPath(s, name_tab, fixture);
+        {
+            std::unique_lock lock(mutex);
+            blocked = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered >= 1; });
+        }
         const auto shared = name_tab.pending_generation;
         SyncColumnStrips(s);
         const bool borrowed = shared && size_tab.column_strip.ancestors.front().generation == shared;
@@ -167,7 +187,7 @@ int main(int argc, char** argv) {
             std::unique_lock lock(mutex);
             changed.wait_for(lock, std::chrono::seconds(5), [&] {
                 return std::any_of(results.begin(), results.end(), [&](const auto& result) {
-                    return result.generation == shared;
+                    return result.final && result.generation == shared;
                 });
             });
         }
@@ -208,19 +228,33 @@ int main(int argc, char** argv) {
     for (auto& entry : *facts) entry.attrs = FILE_ATTRIBUTE_NORMAL;
     name_tab.pending_generation = 1; size_tab.pending_generation = 2;
     app::WorkResult result{};
-    result.path = path; result.generation = 1; result.snapshot = facts;
+    result.path = path; result.generation = 1;
+    result.snapshot = app::ProjectDirectorySnapshot(facts, path, name_tab.sort_column,
+        name_tab.sort_direction, app::FolderSortMode::FoldersFirst);
     ApplyWorkerResult(s, result);
     name_tab.SelectOnly(1);
-    result.generation = 2; result.sort_column = ui::SortColumn::Size;
+    result.generation = 2; result.sort_column = ui::SortColumn::Size; result.snapshot = facts;
     ApplyWorkerResult(s, result);
     check(name_tab.EntryAt(0).name == L"a.txt" && size_tab.EntryAt(0).name == L"b.txt" &&
           name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" && facts->at(0).name == L"b.txt",
           "shared worker completion preserves each pane's order and existing selection");
-    const auto before_sort_generation = name_tab.pending_generation;
+    std::mutex projection_mutex;
+    std::condition_variable projection_ready;
+    std::vector<app::WorkResult> projections;
+    s.worker.Start([&](app::WorkResult completed) {
+        std::lock_guard lock(projection_mutex);
+        projections.push_back(std::move(completed)); projection_ready.notify_all();
+    });
     SetSort(s, ui::SortColumn::Size, ui::SortDirection::Asc);
-    check(name_tab.EntryAt(0).name == L"b.txt" && !name_tab.order_held &&
+    {
+        std::unique_lock lock(projection_mutex);
+        projection_ready.wait_for(lock, std::chrono::seconds(5), [&] { return !projections.empty(); });
+    }
+    s.worker.Stop();
+    for (auto& projected : projections) ApplyWorkerResult(s, projected);
+    check(name_tab.EntryAt(0).name == L"b.txt" &&
           name_tab.EntryAt(name_tab.selected_index).name == L"b.txt" &&
-          name_tab.pending_generation == before_sort_generation && !name_tab.loading,
+          !name_tab.pending_generation && !name_tab.loading,
           "sort command projects current facts without enumeration or selection loss");
     name_tab.sort_column = ui::SortColumn::Name;
     for (auto* tab : {&name_tab, &size_tab}) {

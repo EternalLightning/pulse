@@ -46,11 +46,16 @@ public:
     bool IsVisible() const;
 
 private:
+#ifdef PULSE_UI_TEST_HOOKS
+    friend struct FileOperationFailureProbe;
+#endif
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
     void ApplyWindowTheme();
-    void Render();
+    void Render(bool present = true);
     void ResizeForDetails(bool preserve_center);
+    float DetailBlockHeight() const;
+    void ScrollFailureDetails(float delta);
     int HitTestControl(float x, float y) const;
     void RequestClose();
 
@@ -67,6 +72,8 @@ private:
     bool detailed_ = false;
     bool positioned_ = false;
     float scale_ = 1.0f;
+    float failure_scroll_ = 0.0f;
+    float failure_scroll_max_ = 0.0f;
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;
     int pressed_ = 0;
@@ -85,6 +92,7 @@ ConflictDialogResult ShowFileConflictDialog(HWND owner,
 struct ConfirmDialogRow {
     std::wstring text;
     bool is_path = true;
+    bool boxed = true;
 };
 
 struct ConfirmDialogSpec {
@@ -104,6 +112,8 @@ struct ConfirmDialogSpec {
     std::vector<ConfirmDialogRow> rows;
     std::wstring note;
 };
+
+ConfirmDialogSpec BuildLinkConfirmationSpec(const ops::ConflictItemInfo& conflict);
 
 struct LockedItemDialogText {
     std::wstring title;

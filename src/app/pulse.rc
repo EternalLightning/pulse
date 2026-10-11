@@ -2,7 +2,7 @@
 // Common Controls v6, Windows 11 activation context, and the app icon.
 #include "resource.h"
 #include "../common/strings.rcinc"
-1 24 "pulse.manifest"
+1 24 "pulse_app.manifest"
 IDI_PULSE ICON "pulse.ico"
 // Files Community app icon for the global-search window, including high DPI.
 IDR_GLOBAL_SEARCH_LOGO RCDATA "../../assets/global-search-logo.png"

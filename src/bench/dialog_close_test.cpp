@@ -60,6 +60,14 @@ int main() {
         HWND overlay = nullptr;
         {
             pulse::ui::OwnerDimScope dim(owner);
+            dialog = Make(owner);
+            pulse::ui::ShowDialogWithFade(dialog, SW_SHOWNOACTIVATE);
+            const ULONGLONG deadline = GetTickCount64() + 1500;
+            while (GetPropW(dialog, L"Pulse.DialogFadeState") && GetTickCount64() < deadline) {
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+                MsgWaitForMultipleObjectsEx(0, nullptr, 5, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            }
             overlay = reinterpret_cast<HWND>(GetPropW(owner, L"Pulse.OwnerDimOverlay"));
             BYTE alpha = 0; COLORREF key = 0; DWORD flags = 0;
             Check(IsWindow(overlay) && IsWindowVisible(overlay) &&
@@ -75,6 +83,8 @@ int main() {
             }
             Check(IsWindow(overlay) && GetPropW(owner, L"Pulse.OwnerDimOverlay") == overlay,
                 "nested dismissal preserves the outer dim surface");
+            pulse::ui::DestroyDialogWithFade(dialog);
+            dialog = nullptr;
         }
         Check(!IsWindow(overlay) && !GetPropW(owner, L"Pulse.OwnerDimOverlay") &&
             GetForegroundWindow() == foreground,

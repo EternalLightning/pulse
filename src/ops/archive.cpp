@@ -1,8 +1,8 @@
 #include "archive.h"
+#include "destination_guard.h"
 #include <windows.h>
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <cwctype>
 #include <cwchar>
@@ -156,16 +156,114 @@ bool SafeName(const std::wstring& path) {
     }
     return true;
 }
-bool NoReparse(const fs::path& path) {
-    fs::path current;
-    for (const auto& part : path) {
-        current /= part;
-        DWORD attributes = GetFileAttributesW(current.c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
-    }
+bool CapturePlain(DestinationGuard& guard, const fs::path& path, std::wstring& error) {
+    if (!guard.Capture(path.wstring(), error)) return false;
+    if (std::any_of(guard.Impacts().begin(), guard.Impacts().end(), [](const DestinationLinkImpact& impact) {
+        return impact.kind != DestinationLinkKind::HardLink;
+    })) { error = L"路径包含链接，无法安全解压。"; return false; }
     return true;
 }
-struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } };
+// Each directory stays pinned while its children are enumerated and deleted.
+// A changed identity is left behind; a reparse leaf is never traversed.
+bool RemoveStageTree(const fs::path& path, DestinationGuard& guard) {
+    std::wstring ignored;
+    if (!guard.Capture(path.wstring(), ignored) ||
+        !guard.PinDirectories(path.parent_path().wstring(), ignored)) return false;
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) return false;
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        if (!guard.PinDirectories(path.wstring(), ignored) || !guard.Check(path.wstring(), ignored)) return false;
+        std::error_code ec;
+        fs::directory_iterator children(path, ec);
+        if (ec) return false;
+        bool removed = true;
+        for (; children != fs::directory_iterator{}; children.increment(ec)) {
+            if (ec) { removed = false; break; }
+            removed = RemoveStageTree(children->path(), guard) && removed;
+        }
+        if (ec) removed = false;
+        guard.ReleaseDirectory(path.wstring());
+        if (!removed) return false;
+    }
+    return guard.DeleteOwnedLeaf(path.wstring(), ignored);
+}
+struct Cleanup {
+    fs::path path;
+    DestinationGuard& guard;
+    ~Cleanup() { if (!path.empty()) RemoveStageTree(path, guard); }
+};
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+thread_local const ArchivePublicationHook* publication_hook = nullptr;
+thread_local bool force_publication_copy = false;
+void PublicationPoint(ArchivePublicationPoint point, const fs::path& output, const fs::path& source = {}) {
+    if (publication_hook && *publication_hook) (*publication_hook)(point, output.wstring(), source.wstring());
+}
+#endif
+bool CopyAndPublish(const fs::path& source, const fs::path& output, DestinationGuard& guard,
+    const std::atomic_bool* cancel, std::wstring& error, bool& cancelled) {
+    Handle input{CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
+    if (input.value == INVALID_HANDLE_VALUE) { error = L"无法读取临时解压文件。"; return false; }
+    DestinationGuard::Handle owned;
+    fs::path temporary;
+    for (unsigned attempt = 0; attempt < 100; ++attempt) {
+        temporary = output.parent_path() / (L".pulse-archive-" + std::to_wstring(GetCurrentProcessId()) +
+            L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(attempt));
+        if (!CapturePlain(guard, temporary, error)) return false;
+        HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) { owned.reset(file); break; }
+        const DWORD code = GetLastError();
+        if (code != ERROR_FILE_EXISTS && code != ERROR_ALREADY_EXISTS) {
+            error = L"无法创建解压发布文件 (" + std::to_wstring(code) + L")。"; return false;
+        }
+    }
+    if (!owned) { error = L"无法创建解压发布文件。"; return false; }
+    struct Dispose {
+        HANDLE handle;
+        bool published = false;
+        ~Dispose() {
+            if (!published) {
+                FILE_DISPOSITION_INFO disposition{TRUE};
+                SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition));
+            }
+        }
+    } dispose{owned.get()};
+    if (!guard.AdoptCreatedLeaf(temporary.wstring(), owned.get(), error)) return false;
+    std::vector<BYTE> buffer(1024 * 1024);
+    for (;;) {
+        if (cancel && cancel->load()) { cancelled = true; error = L"已取消解压。"; return false; }
+        DWORD read = 0;
+        if (!ReadFile(input.value, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) {
+            error = L"无法读取临时解压文件。"; return false;
+        }
+        if (!read) break;
+        DWORD offset = 0;
+        while (offset < read) {
+            DWORD written = 0;
+            if (!WriteFile(owned.get(), buffer.data() + offset, read - offset, &written, nullptr) || !written) {
+                error = L"无法写入解压发布文件。"; return false;
+            }
+            offset += written;
+        }
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+        PublicationPoint(ArchivePublicationPoint::CopyProgress, output, source);
+#endif
+    }
+    FILETIME created{}, accessed{}, modified{};
+    if (!GetFileTime(input.value, &created, &accessed, &modified) ||
+        !SetFileTime(owned.get(), &created, &accessed, &modified) || !FlushFileBuffers(owned.get())) {
+        error = L"无法完成解压发布文件。"; return false;
+    }
+    if (cancel && cancel->load()) { cancelled = true; error = L"已取消解压。"; return false; }
+    if (!guard.RenameLeaf(owned.get(), output.wstring())) {
+        const DWORD code = GetLastError();
+        if (code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS) return true;
+        error = L"无法写入解压文件 (" + std::to_wstring(code) + L")。"; return false;
+    }
+    dispose.published = true;
+    return guard.AdoptCreatedLeaf(output.wstring(), owned.get(), error);
+}
 ArchiveResult ParseListing(ProcessResult run);
 std::wstring ListingDiagnostic(const std::wstring& output) {
     // A failed ZIP scan can emit thousands of SLT records instead of a diagnostic.
@@ -327,7 +425,17 @@ ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstri
     result.outcome = ArchiveOutcome::Failed;
     try {
         fs::path target = fs::absolute(destination).lexically_normal();
-        if (!NoReparse(target)) { error = L"目标路径包含链接，无法安全解压。"; return result; }
+        DestinationGuard destination_guard;
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+        destination_guard.SharedDirectoryLeases()->before_relative_rename = [](const std::wstring& output) {
+            PublicationPoint(ArchivePublicationPoint::BeforeRelativeRename, fs::path(output));
+        };
+#endif
+        if (!CapturePlain(destination_guard, target, error)) return result;
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+        PublicationPoint(ArchivePublicationPoint::DestinationCaptured, target);
+#endif
+        if (!destination_guard.PinDirectories(target.wstring(), error)) return result;
         std::vector<ArchiveEntry> selected;
         for (const auto& entry : listing.entries) {
             bool include = selected_paths.empty();
@@ -341,17 +449,55 @@ ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstri
         wchar_t temp[MAX_PATH]{};
         DWORD temp_length = GetTempPathW(MAX_PATH, temp);
         if (!temp_length || temp_length >= MAX_PATH) { error = L"无法访问临时目录。"; return result; }
+        DestinationGuard stage_guard(GetFileInformationByHandleEx, destination_guard.SharedDirectoryLeases());
+        const fs::path temporary_root = fs::absolute(temp).lexically_normal();
+        if (!CapturePlain(stage_guard, temporary_root, error) ||
+            !stage_guard.PinDirectories(temporary_root.wstring(), error)) return result;
         fs::path stage;
         for (unsigned attempt = 0; attempt < 100; ++attempt) {
-            stage = fs::path(temp) / (L"PulseArchive-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(attempt));
-            if (fs::create_directory(stage)) break;
+            stage = temporary_root / (L"PulseArchive-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(attempt));
+            if (!CapturePlain(stage_guard, stage, error)) return result;
+            auto created = DestinationGuard::CreateDirectoryLeaf(stage.wstring(), false, error);
+            if (created) {
+                error.clear();
+                if (!stage_guard.AdoptCreatedLeaf(stage.wstring(), created.get(), error) ||
+                    !stage_guard.PinDirectories(stage.wstring(), error)) return result;
+                break;
+            }
+            const DWORD code = GetLastError();
+            if (code != ERROR_ALREADY_EXISTS && code != ERROR_FILE_EXISTS) return result;
             stage.clear();
         }
         if (stage.empty()) { error = L"无法创建临时解压目录。"; return result; }
-        Cleanup cleanup{stage};
+        Cleanup cleanup{stage, stage_guard};
         fs::path contents = stage / L"contents";
         fs::path selection = stage / L"selection.txt";
-        { std::ofstream stream(selection, std::ios::binary); for (const auto& entry : selected) if (!entry.is_dir) stream << Encode(entry.path) << '\n'; }
+        if (!CapturePlain(stage_guard, contents, error) || !stage_guard.EnsureDirectories(contents.wstring(), error)) return result;
+        for (const auto& entry : selected) {
+            if (cancel && cancel->load()) { result.outcome = ArchiveOutcome::Cancelled; error = L"已取消解压。"; return result; }
+            const fs::path member = contents / fs::path(entry.path);
+            const fs::path directory = entry.is_dir ? member : member.parent_path();
+            if (!CapturePlain(stage_guard, directory, error) ||
+                !stage_guard.EnsureDirectories(directory.wstring(), error)) return result;
+        }
+        Handle selection_lock{CreateFileW(selection.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+            nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        if (selection_lock.value == INVALID_HANDLE_VALUE) { error = L"无法创建临时解压列表。"; return result; }
+        if (!stage_guard.AdoptCreatedLeaf(selection.wstring(), selection_lock.value, error)) return result;
+        for (const auto& entry : selected) if (!entry.is_dir) {
+            const auto line = Encode(entry.path) + '\n';
+            DWORD written = 0;
+            if (line.size() > MAXDWORD || !WriteFile(selection_lock.value, line.data(),
+                static_cast<DWORD>(line.size()), &written, nullptr) || written != line.size()) {
+                error = L"无法写入临时解压列表。"; return result;
+            }
+        }
+        CloseHandle(selection_lock.value);
+        selection_lock.value = CreateFileW(selection.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (selection_lock.value == INVALID_HANDLE_VALUE || !stage_guard.Check(selection.wstring(), error)) {
+            error = L"临时解压列表身份无法确认。"; return result;
+        }
         const bool files = std::any_of(selected.begin(), selected.end(), [](const ArchiveEntry& entry) { return !entry.is_dir; });
         if (files) {
             auto run = Run({L"x", L"-y", L"-aos", L"-spd", L"-bd", L"-sccUTF-8", L"-scsUTF-8", L"-p" + password,
@@ -364,20 +510,67 @@ ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstri
         for (const auto& entry : selected) {
             if (cancel && cancel->load()) { result.outcome = ArchiveOutcome::Cancelled; error = L"已取消解压。"; return result; }
             fs::path output = target / fs::path(entry.path);
-            if (!NoReparse(output)) { error = L"目标路径包含链接，无法安全解压。"; return result; }
-            if (entry.is_dir) { fs::create_directories(output); continue; }
+            if (!CapturePlain(destination_guard, output, error)) return result;
+            if (entry.is_dir) {
+                if (!destination_guard.EnsureDirectories(output.wstring(), error)) return result;
+                continue;
+            }
             fs::path source = contents / fs::path(entry.path);
-            if (!NoReparse(source) || !fs::is_regular_file(source)) { error = L"解压输出不是安全的普通文件。"; return result; }
-            fs::create_directories(output.parent_path());
-            if (!MoveFileExW(source.c_str(), output.c_str(), MOVEFILE_COPY_ALLOWED)) {
-                DWORD code = GetLastError();
-                if (code != ERROR_ALREADY_EXISTS && code != ERROR_FILE_EXISTS) { error = L"无法写入解压文件 (" + std::to_wstring(code) + L")。"; return result; }
+            if (!CapturePlain(stage_guard, source, error)) return result;
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+            PublicationPoint(ArchivePublicationPoint::SourceCaptured, output, source);
+#endif
+            if (!stage_guard.PinDirectories(source.parent_path().wstring(), error) ||
+                !destination_guard.EnsureDirectories(output.parent_path().wstring(), error)) return result;
+            auto source_handle = stage_guard.PinLeaf(source.wstring(), error);
+            FILE_ATTRIBUTE_TAG_INFO attributes{};
+            if (!source_handle || !GetFileInformationByHandleEx(source_handle.get(), FileAttributeTagInfo,
+                &attributes, sizeof(attributes)) ||
+                (attributes.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+                error = L"解压输出不是安全的普通文件。"; return result;
+            }
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+            PublicationPoint(ArchivePublicationPoint::BeforePublish, output, source);
+#endif
+            if (cancel && cancel->load()) { result.outcome = ArchiveOutcome::Cancelled; error = L"已取消解压。"; return result; }
+            bool renamed = false;
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+            if (!force_publication_copy)
+#endif
+                renamed = destination_guard.RenameLeaf(source_handle.get(), output.wstring());
+            if (renamed) {
+                if (!destination_guard.AdoptCreatedLeaf(output.wstring(), source_handle.get(), error)) return result;
+                continue;
+            }
+            DWORD code = GetLastError();
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+            if (force_publication_copy) code = ERROR_NOT_SAME_DEVICE;
+#endif
+            if (code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS) continue;
+            if (code != ERROR_NOT_SAME_DEVICE) { error = L"无法写入解压文件 (" + std::to_wstring(code) + L")。"; return result; }
+            bool cancelled = false;
+            if (!CopyAndPublish(source, output, destination_guard, cancel, error, cancelled)) {
+                if (cancelled) result.outcome = ArchiveOutcome::Cancelled;
+                return result;
             }
         }
         result.outcome = ArchiveOutcome::Success;
         return result;
     } catch (const fs::filesystem_error& exception) { error = L"解压文件系统错误：" + Decode(exception.what()); return result; }
 }
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+ArchiveOperationResult ExtractArchiveForTest(const std::wstring& path, const std::wstring& destination,
+    const ArchivePublicationHook& hook, const std::atomic_bool* cancel, bool force_copy) {
+    struct Restore {
+        const ArchivePublicationHook* previous = publication_hook;
+        bool previous_copy = force_publication_copy;
+        ~Restore() { publication_hook = previous; force_publication_copy = previous_copy; }
+    } restore;
+    publication_hook = &hook;
+    force_publication_copy = force_copy;
+    return ExtractArchive(path, destination, {}, L"", cancel);
+}
+#endif
 bool ExtractArchive(const std::wstring& path, const std::wstring& destination,
     const std::vector<std::wstring>& selected_paths, const std::wstring& password, std::wstring& error,
     const std::atomic_bool* cancel) {

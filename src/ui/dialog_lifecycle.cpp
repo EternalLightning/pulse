@@ -1,6 +1,6 @@
 #include "dialog_lifecycle.h"
-#include "FluentTokens.h"
 #include <dwmapi.h>
+#include <commctrl.h>
 #include <dcomp.h>
 #include <wrl/client.h>
 #include <algorithm>
@@ -13,6 +13,9 @@ namespace {
 constexpr wchar_t kDevice[] = L"Pulse.DialogComposition.Device";
 constexpr wchar_t kVisual[] = L"Pulse.DialogComposition.Visual";
 constexpr wchar_t kFading[] = L"Pulse.DialogFading";
+constexpr wchar_t kFadeState[] = L"Pulse.DialogFadeState";
+constexpr UINT_PTR kFadeSubclass = 0x50464144;
+constexpr float kFadeSeconds = 0.110f;
 constexpr wchar_t kOwnerDim[] = L"Pulse.OwnerDimOverlay";
 constexpr wchar_t kDimClass[] = L"PulseOwnerDimOverlay";
 struct DimState { HWND owner = nullptr; unsigned scopes = 1; HWND dialog = nullptr; };
@@ -126,102 +129,138 @@ private:
     bool active_ = false;
 };
 
-void Fade(HWND window, bool show, int show_command = SW_SHOW) {
-    if (!IsWindow(window) || (!show && !IsWindowVisible(window))) return;
-    const BOOL disable_transitions = TRUE;
-    DwmSetWindowAttribute(window, DWMWA_TRANSITIONS_FORCEDISABLED,
-        &disable_transitions, sizeof(disable_transitions));
-    const HWND dim = CompanionDimOverlay(window, show);
-    const auto show_immediately = [&] {
-        if (dim) {
-            SetDimOpacity(dim, show ? 1.0f : 0.0f);
-            if (show) ShowWindow(dim, SW_SHOWNOACTIVATE);
-            else HideWithoutActivation(dim);
-        }
-        if (show) ShowWindow(window, show_command);
-    };
-    if (!AnimationsEnabled()) {
-        show_immediately();
-        return;
-    }
-    Microsoft::WRL::ComPtr<IDCompositionDevice> device = reinterpret_cast<IDCompositionDevice*>(GetPropW(window, kDevice));
-    Microsoft::WRL::ComPtr<IDCompositionVisual> visual = reinterpret_cast<IDCompositionVisual*>(GetPropW(window, kVisual));
-    Microsoft::WRL::ComPtr<IDCompositionEffectGroup> effect;
-    const bool composed = device && visual;
-    const LONG_PTR original_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
-    if ((composed && FAILED(device->CreateEffectGroup(&effect))) ||
-        (!composed && (original_style & WS_EX_NOREDIRECTIONBITMAP))) {
-        show_immediately();
-        return;
-    }
+struct FadeState {
+    HWND window;
+    HWND dim;
+    ULONGLONG start = GetTickCount64();
+    UINT_PTR timer = 0;
+    LONG_PTR original_style;
     BYTE original_alpha = 255;
     COLORREF original_key = 0;
     DWORD original_flags = LWA_ALPHA;
-    if (composed) {
-        effect->SetOpacity(show ? 0.0f : 1.0f);
-        visual->SetEffect(effect.Get());
-        device->Commit();
-        // Apply the initial transparent frame before making the HWND visible.
-        if (show) device->WaitForCommitCompletion();
-    } else {
-        GetLayeredWindowAttributes(window, &original_key, &original_alpha, &original_flags);
-        SetWindowLongPtrW(window, GWL_EXSTYLE, original_style | WS_EX_LAYERED);
-        SetLayeredWindowAttributes(window, original_key, show ? 0 : original_alpha,
-            original_flags | LWA_ALPHA);
-    }
-    // DWM's backdrop is outside the content visual. During a fade, paint the
-    // background into that visual so it follows the same opacity as the text.
-    SurfaceFadeScope surface_fade(window, composed);
-    if (show) {
-        const BOOL cloak = TRUE;
-        const bool cloaked = SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CLOAK, &cloak, sizeof(cloak)));
-        ShowWindow(window, show_command);
-        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-        if (composed) device->WaitForCommitCompletion();
-        GdiFlush();
-        DwmFlush();
-        if (cloaked) {
-            const BOOL uncloak = FALSE;
-            DwmSetWindowAttribute(window, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
-        }
-        if (dim) {
-            SetDimOpacity(dim, 0.0f);
-            ShowWindow(dim, SW_SHOWNOACTIVATE);
-        }
-    } else {
-        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-        if (composed) device->WaitForCommitCompletion();
-    }
-    const ULONGLONG start = GetTickCount64();
-    const float duration = 110.0f;
-    for (;;) {
-        const float t = std::min(1.0f, static_cast<float>(GetTickCount64() - start) / duration);
-        const float eased = t * t * (3.0f - 2.0f * t);
-        const float opacity = show ? eased : 1.0f - eased;
-        if (composed) {
-            effect->SetOpacity(opacity);
-            device->Commit();
-        } else SetLayeredWindowAttributes(window, original_key,
-            static_cast<BYTE>(std::lround(opacity * original_alpha)), original_flags | LWA_ALPHA);
-        SetDimOpacity(dim, opacity);
-        DwmFlush();
-        if (t >= 1.0f) break;
-        Sleep(8);
-    }
-    if (!show) {
-        HideWithoutActivation(window);
-        if (dim) HideWithoutActivation(dim);
-    }
-    if (composed) {
-        visual->SetEffect(nullptr);
-        device->Commit();
-    }
-    if (!composed) {
+    Microsoft::WRL::ComPtr<IDCompositionDevice> device;
+    Microsoft::WRL::ComPtr<IDCompositionVisual> visual;
+    Microsoft::WRL::ComPtr<IDCompositionEffectGroup> effect;
+    SurfaceFadeScope surface;
+
+    FadeState(HWND hwnd, HWND overlay) : window(hwnd), dim(overlay),
+        original_style(GetWindowLongPtrW(hwnd, GWL_EXSTYLE)),
+        device(reinterpret_cast<IDCompositionDevice*>(GetPropW(hwnd, kDevice))),
+        visual(reinterpret_cast<IDCompositionVisual*>(GetPropW(hwnd, kVisual))),
+        surface(hwnd, device && visual) {
         if (original_style & WS_EX_LAYERED)
-            SetLayeredWindowAttributes(window, original_key, original_alpha, original_flags);
-        else SetWindowLongPtrW(window, GWL_EXSTYLE, original_style);
+            GetLayeredWindowAttributes(hwnd, &original_key, &original_alpha, &original_flags);
     }
+    ~FadeState() {
+        if (effect) {
+            visual->SetEffect(nullptr);
+            device->Commit();
+        } else if (IsWindow(window)) {
+            if (original_style & WS_EX_LAYERED)
+                SetLayeredWindowAttributes(window, original_key, original_alpha, original_flags);
+            else {
+                const LONG_PTR current_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+                SetWindowLongPtrW(window, GWL_EXSTYLE, current_style & ~WS_EX_LAYERED);
+            }
+        }
+    }
+};
+
+LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+    UINT_PTR subclass, DWORD_PTR data);
+
+void CancelFade(HWND window) {
+    auto* state = static_cast<FadeState*>(GetPropW(window, kFadeState));
+    if (!state) return;
+    RemovePropW(window, kFadeState);
+    RemoveWindowSubclass(window, FadeProc, kFadeSubclass);
+    if (state->timer) KillTimer(window, state->timer);
+    delete state;
 }
+
+LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+    UINT_PTR subclass, DWORD_PTR data) {
+    auto* state = reinterpret_cast<FadeState*>(data);
+    if (message == WM_NCDESTROY) CancelFade(window);
+    else if (message == WM_TIMER && wp == state->timer) {
+        const float t = std::min(1.0f,
+            static_cast<float>(GetTickCount64() - state->start) / (kFadeSeconds * 1000.0f));
+        const float opacity = t * t * (3.0f - 2.0f * t);
+        if (!state->effect)
+            SetLayeredWindowAttributes(window, state->original_key,
+                static_cast<BYTE>(std::lround(opacity * state->original_alpha)),
+                state->original_flags | LWA_ALPHA);
+        SetDimOpacity(state->dim, opacity);
+        if (t >= 1.0f) CancelFade(window);
+        return 0;
+    }
+    (void)subclass;
+    return DefSubclassProc(window, message, wp, lp);
+}
+
+void ShowFade(HWND window, int show_command) {
+    const BOOL disable_transitions = TRUE;
+    DwmSetWindowAttribute(window, DWMWA_TRANSITIONS_FORCEDISABLED,
+        &disable_transitions, sizeof(disable_transitions));
+    const HWND dim = CompanionDimOverlay(window, true);
+    const auto show_immediately = [&] {
+        SetDimOpacity(dim, 1.0f);
+        if (dim) ShowWindow(dim, SW_SHOWNOACTIVATE);
+        ShowWindow(window, show_command);
+    };
+    if (!AnimationsEnabled()) { show_immediately(); return; }
+    auto* state = new (std::nothrow) FadeState(window, dim);
+    if (!state) { show_immediately(); return; }
+    bool ready = true;
+    if (state->device && state->visual) {
+        Microsoft::WRL::ComPtr<IDCompositionAnimation> animation;
+        ready = SUCCEEDED(state->device->CreateEffectGroup(&state->effect)) &&
+            SUCCEEDED(state->device->CreateAnimation(&animation)) &&
+            SUCCEEDED(animation->AddCubic(0.0, 0.0f, 0.0f,
+                3.0f / (kFadeSeconds * kFadeSeconds),
+                -2.0f / (kFadeSeconds * kFadeSeconds * kFadeSeconds))) &&
+            SUCCEEDED(animation->End(kFadeSeconds, 1.0f)) &&
+            SUCCEEDED(state->effect->SetOpacity(animation.Get())) &&
+            SUCCEEDED(state->visual->SetEffect(state->effect.Get())) &&
+            SUCCEEDED(state->device->Commit());
+    } else if (state->original_style & WS_EX_NOREDIRECTIONBITMAP) ready = false;
+    else {
+        GetLayeredWindowAttributes(window, &state->original_key,
+            &state->original_alpha, &state->original_flags);
+        SetWindowLongPtrW(window, GWL_EXSTYLE, state->original_style | WS_EX_LAYERED);
+        ready = SetLayeredWindowAttributes(window, state->original_key, 0,
+            state->original_flags | LWA_ALPHA) != FALSE;
+    }
+    if (!ready || !SetPropW(window, kFadeState, state)) {
+        delete state;
+        show_immediately();
+        return;
+    }
+    if (!SetWindowSubclass(window, FadeProc, kFadeSubclass, reinterpret_cast<DWORD_PTR>(state)) ||
+        !(state->timer = SetTimer(window, reinterpret_cast<UINT_PTR>(state), 16, nullptr))) {
+        CancelFade(window);
+        show_immediately();
+        return;
+    }
+    state->start = GetTickCount64();
+    SetDimOpacity(dim, 0.0f);
+    if (dim) ShowWindow(dim, SW_SHOWNOACTIVATE);
+    ShowWindow(window, show_command);
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
+}
+
+void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual) {
+    if (!window) return;
+    CancelFade(window);
+    if (device && visual) {
+        SetPropW(window, kDevice, device);
+        SetPropW(window, kVisual, visual);
+    } else {
+        RemovePropW(window, kDevice);
+        RemovePropW(window, kVisual);
+    }
 }
 
 OwnerDimScope::OwnerDimScope(HWND owner) {
@@ -254,7 +293,6 @@ OwnerDimScope::~OwnerDimScope() {
     auto* state = reinterpret_cast<DimState*>(GetWindowLongPtrW(overlay_, GWLP_USERDATA));
     if (!state || --state->scopes != 0) return;
     if (IsWindow(owner_) && GetPropW(owner_, kOwnerDim) == overlay_) RemovePropW(owner_, kOwnerDim);
-    Fade(overlay_, false);
     DestroyWindow(overlay_);
 }
 
@@ -264,7 +302,7 @@ void ShowDialogWithFade(HWND dialog) {
 
 void ShowDialogWithFade(HWND dialog, int show_command) {
     if (!IsWindow(dialog) || IsWindowVisible(dialog)) return;
-    Fade(dialog, true, show_command);
+    ShowFade(dialog, show_command);
 }
 
 void DestroyDialogWithFade(HWND dialog) {
@@ -298,8 +336,9 @@ void HideComposedDialog(HWND dialog, HWND modal_owner) {
     // Hide any remaining owned auxiliary windows before releasing composition.
     // Hide all of them while the dialog surface still covers the owner.
     for (HWND window : owned.windows) HideWithoutActivation(window);
-    Fade(dialog, false);
     HideWithoutActivation(dialog);
-    DwmFlush();
+    const HWND dim = CompanionDimOverlay(dialog, false);
+    if (dim) HideWithoutActivation(dim);
+    CancelFade(dialog);
 }
 }

@@ -1,6 +1,5 @@
 #pragma once
-#include "entry_sort.h"
-#include "../ui/ui_renderer.h"
+#include "../fs/fs_enum.h"
 #include <string>
 #include <vector>
 
@@ -11,14 +10,7 @@ struct EntryRenameHint {
     std::wstring new_name;
 };
 
-// Uses physical leaf names, including when the UI shows localized folder labels.
-std::vector<fs::DirEntry> KeepEntryOrder(const std::vector<fs::DirEntry>& shown,
-                                       const std::vector<fs::DirEntry>& fresh,
-                                       const std::vector<EntryRenameHint>& renames,
-                                       ui::SortColumn column, ui::SortDirection direction,
-                                       const std::wstring& parent,
-                                       FolderSortMode folders = FolderSortMode::FoldersFirst);
-
+// Rename and selection identity use exact physical leaf names.
 void FollowEntryRenames(const std::vector<EntryRenameHint>& renames,
                        const std::vector<fs::DirEntry>& fresh,
                        std::vector<std::wstring>& selected_names, std::wstring& focus_name);

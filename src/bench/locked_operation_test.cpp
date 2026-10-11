@@ -200,6 +200,7 @@ int Decisions() {
     Write(subtree / L"A.txt", "new A"); Write(subtree / L"B.txt", "pending B");
     Write(subtree / L"new-unrelated.txt", "not selected"); Write(actual / L"A.txt", "successful A");
     std::vector<TransferPlanEntry> plan;
+    bool identities_captured = true;
     for (const auto& pair : {std::pair{source / L"tree", destination / L"tree"},
             std::pair{subtree, actual}, std::pair{subtree / L"A.txt", actual / L"A.txt"},
             std::pair{subtree / L"B.txt", actual / L"B.txt"}}) {
@@ -208,8 +209,11 @@ int Decisions() {
         entry.directory = std::filesystem::is_directory(pair.first);
         entry.destination_preexisting = entry.directory;
         if (!entry.directory) entry.bytes = std::filesystem::file_size(pair.first);
+        entry.source_identity = FileObjectReference::Open(entry.source);
+        identities_captured = identities_captured && entry.source_identity.Get() && entry.source_identity.identity.Valid();
         plan.push_back(entry);
     }
+    Check(identities_captured, "decision-only retained plan captures real pinned source identities");
     OpRequest request;
     request.sources = {(source / L"tree").wstring()}; request.dest_dir = destination.wstring();
     request.collision_policy = CollisionPolicy::KeepBoth;
@@ -273,6 +277,9 @@ int Decisions() {
     Write(changed_source, "planned file");
     TransferPlanEntry changed;
     changed.source = changed_source.wstring(); changed.destination = changed_target.wstring();
+    changed.source_identity = FileObjectReference::Open(changed.source);
+    Check(changed.source_identity.Get() && changed.source_identity.identity.Valid(),
+        "decision-only changed-type fixture captures the original file identity before replacement");
     DeleteFileW(changed_source.c_str());
     std::filesystem::create_directory(changed_source);
     Write(changed_source / L"unrelated-child.txt", "must remain outside operation");

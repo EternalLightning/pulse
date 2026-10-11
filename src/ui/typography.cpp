@@ -207,6 +207,11 @@ D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept {
     return snapped;
 }
 
+bool UsesLumaText(const Compositor* compositor, IDWriteTextFormat* format) noexcept {
+    return compositor && format && format != compositor->FileNameFormat() &&
+        compositor->LumaTextEnabled();
+}
+
 float InkPad(IDWriteTextFormat* format) noexcept {
     const float size = format ? format->GetFontSize() : 14.0f;
     return std::max(4.0f, size * 0.25f);
@@ -251,7 +256,7 @@ struct MeasureKey {
     const void* compositor = nullptr;
     const void* format = nullptr;
     float size = 0.0f;
-    std::uint32_t style = 0; // weight | style << 16 | stretch << 20 | luma << 24
+    std::uint32_t style = 0; // weight | style << 16 | stretch << 20
     float tab_stop = 0.0f;
     DWRITE_READING_DIRECTION reading = DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
     DWRITE_FLOW_DIRECTION flow = DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM;
@@ -314,7 +319,6 @@ MeasureKey MakeMeasureKey(IDWriteFactory2* factory, Compositor* compositor,
     key.style = static_cast<std::uint32_t>(format->GetFontWeight()) & 0xFFFFu;
     key.style |= (static_cast<std::uint32_t>(format->GetFontStyle()) & 0xFu) << 16;
     key.style |= (static_cast<std::uint32_t>(format->GetFontStretch()) & 0xFu) << 20;
-    if (compositor && compositor->LumaTextEnabled()) key.style |= 1u << 24;
     key.tab_stop = format->GetIncrementalTabStop();
     key.reading = format->GetReadingDirection();
     key.flow = format->GetFlowDirection();
@@ -353,12 +357,11 @@ float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
 
 float MeasureLine(Compositor* compositor, IDWriteTextFormat* format,
                    std::wstring_view text) {
-    if (!format || text.empty() || text.size() > 1024)
-        return MeasureLineUncached(compositor, format, text);
     IDWriteFactory2* factory = compositor ? compositor->DwriteFactory() : nullptr;
-    // Without Luma this is the same measurement, so share the advance entry.
-    if (!compositor || !compositor->LumaTextEnabled())
+    if (!UsesLumaText(compositor, format))
         return MeasureAdvance(factory, format, text);
+    if (text.empty() || text.size() > 1024)
+        return MeasureLineUncached(compositor, format, text);
     auto& cache = CurrentMeasureCache();
     auto key = MakeMeasureKey(factory, compositor, format, text);
     if (const auto found = cache.widths.find(key); found != cache.widths.end())

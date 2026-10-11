@@ -58,11 +58,13 @@ int ProbeCases() {
     Check(hwnd != nullptr, "create isolated probe result receiver");
     if (!hwnd) return 1;
     std::vector<UncProbeResult> results;
+    unsigned wakeups = 0;
     const auto drain = [&] {
         MSG msg{};
         while (PeekMessageW(&msg, hwnd, message, message, PM_REMOVE)) {
             std::unique_ptr<UncProbeResult> result(reinterpret_cast<UncProbeResult*>(msg.lParam));
             if (result) results.push_back(std::move(*result));
+            else if (msg.wParam) ++wakeups;
         }
     };
     const auto await = [&](auto predicate, DWORD budget = 3000) {
@@ -122,6 +124,36 @@ int ProbeCases() {
           await([&] { return results.size() == 1 && UncProbeResourcesForTest().live == 0; }) &&
           results[0].probe_id == 600 && results[0].status == NetStatus::Online,
           "completed provider produces one terminal result and immediately reuses admission");
+    for (const DWORD error : {ERROR_ACCESS_DENIED, ERROR_BAD_NETPATH, ERROR_OPERATION_ABORTED,
+                              ERROR_BUSY, ERROR_GEN_FAILURE}) {
+        SetUncProbeHookForTest([error](const std::wstring&) { SetLastError(error); return false; }, 1000);
+        results.clear();
+        Check(StartUncProbe(hwnd, message, L"\\\\error-fixture.invalid\\share", 700 + error) &&
+            await([&] { return results.size() == 1 && UncProbeResourcesForTest().live == 0; }),
+            "failed probe posts one terminal result and releases its actual owner");
+        const auto expected = error == ERROR_BAD_NETPATH ? NetStatus::Offline : NetStatus::Unknown;
+        Check(results.size() == 1 && results[0].error_code == error && results[0].status == expected,
+            "probe preserves permission cancellation saturation and provider errors separately from offline");
+    }
+    results.clear(); wakeups = 0;
+    block = std::make_shared<ProbeBlock>();
+    SetUncProbeHookForTest([block](const std::wstring&) {
+        ++block->entered; WaitForSingleObject(block->release, INFINITE); return true;
+    }, 30);
+    admitted = true;
+    for (uint32_t i = 0; i < limit; ++i)
+        admitted &= StartUncProbe(hwnd, message, L"\\\\wake-fixture.invalid\\share", 900 + i);
+    Check(admitted && await([&] { return block->entered == limit && results.size() == limit; }),
+        "all physical owners remain occupied after logical timeouts");
+    const bool saturated = !StartUncProbe(hwnd, message, L"\\\\queued-fixture.invalid\\share", 950);
+    SetUncProbeHookForTest([](const std::wstring&) { return true; }, 1000);
+    SetEvent(block->release);
+    Check(saturated && await([&] { return wakeups != 0 && UncProbeResourcesForTest().live < limit; }),
+        "physical resource release wakes the rejected probe consumer without another user action");
+    Check(StartUncProbe(hwnd, message, L"\\\\queued-fixture.invalid\\share", 950) &&
+        await([&] { return UncProbeResourcesForTest().live == 0 && std::any_of(results.begin(), results.end(),
+            [](const auto& result) { return result.probe_id == 950 && result.status == NetStatus::Online; }); }),
+        "queued fifth request resumes within the original physical admission limit");
     SetUncProbeHookForTest({});
     drain();
     DestroyWindow(hwnd);

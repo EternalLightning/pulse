@@ -2,6 +2,7 @@
 #include "../app/app_column_view.h"
 #include "../common/localization.h"
 #include "../app/entry_sort.h"
+#include "../app/directory_projection.h"
 #include "unc_search_banner_fixture.h"
 #include <algorithm>
 #include <cstdio>
@@ -24,6 +25,16 @@ pulse::fs::SnapshotPtr Listing(std::initializer_list<const wchar_t*> names) {
         entries->push_back(std::move(entry));
     }
     return entries;
+}
+
+void PrepareListingResult(const pulse::AppState& s, const pulse::app::Tab& tab,
+                          pulse::app::WorkResult& result) {
+    result.sort_column = tab.sort_column;
+    result.sort_direction = tab.sort_direction;
+    result.folder_sort = pulse::app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode);
+    result.facts = result.snapshot;
+    result.snapshot = pulse::app::ProjectDirectorySnapshot(result.facts, result.path,
+        result.sort_column, result.sort_direction, result.folder_sort);
 }
 
 void TransferAndTitleCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
@@ -91,7 +102,7 @@ void TransferAndTitleCases(pulse::AppState& s, pulse::app::Tab& tab, const std::
 
 void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {
     using namespace pulse;
-    const auto listing = [](bool include_new, bool folder = false) {
+    const auto listing = [&](bool include_new, bool folder = false) {
         auto entries = std::make_shared<std::vector<fs::DirEntry>>();
         for (unsigned i = 0; i < 96; ++i) {
             fs::DirEntry entry;
@@ -108,7 +119,8 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
             entry.attrs = folder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
             entries->insert(entries->begin() + 2, std::move(entry));
         }
-        return entries;
+        return app::ProjectDirectorySnapshot(entries, path, tab.sort_column, tab.sort_direction,
+            app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
     };
     const auto visible = [&] {
         ui::PaneViewModel pane;
@@ -123,8 +135,8 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
             for (const auto direction : {ui::SortDirection::Asc, ui::SortDirection::Desc}) {
                 tab.sort_column = column;
                 tab.sort_direction = direction;
-                tab.SetSnapshot(listing(true, folder));
-                tab.order_held = tab.refresh_keeps_order = true;
+                const auto prepared = listing(true, folder);
+                tab.SetSnapshot(prepared);
                 tab.scroll_y = folder ? MaxScrollForActivePane(s) : 0;
                 s.scrollAnimating = true;
                 QueueCreatedItemReveal(s, path + L"\\created");
@@ -132,10 +144,10 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
                     return app::EntryLess(left, right, column, direction,
                         app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), path);
                 };
-                Check(tab.selected_index >= 0 && tab.EntryAt(tab.selected_index).name == L"created" &&
-                    tab.pending_created_name.empty() && !tab.order_held && !tab.refresh_keeps_order &&
+                Check(tab.snapshot == prepared && tab.pending_created_name.empty() &&
+                    tab.selected_index >= 0 && tab.EntryAt(tab.selected_index).name == L"created" &&
                     std::is_sorted(tab.snapshot->begin(), tab.snapshot->end(), less),
-                    "creation sorts files and folders by the current column and direction and selects the item");
+                    "creation selects files and folders from the prepared projection without changing its order");
                 Check(visible() && !s.scrollAnimating && s.scrollTargetY == tab.scroll_y,
                     "creation reveals its sorted row and cancels the old scroll target");
             }
@@ -165,10 +177,12 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     tab.pending_generation = 40;
     app::WorkResult result{};
     result.path = path; result.generation = 39; result.snapshot = listing(true);
+    PrepareListingResult(s, tab, result);
     ApplyWorkerResult(s, result);
     Check(tab.pending_created_name == L"created" && tab.selected_index == 10,
         "stale enumeration does not consume the creation intent");
     result.generation = 40;
+    PrepareListingResult(s, tab, result);
     ApplyWorkerResult(s, result);
     Check(tab.pending_created_name.empty() && tab.selected_index == 96 && visible(),
         "matching enumeration selects and reveals the created sorted row");
@@ -177,6 +191,7 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     QueueCreatedItemReveal(s, path + L"\\created");
     RefreshPath(s, path, RefreshReason::OperationCompleted);
     tab.pending_generation = 41; result.generation = 41;
+    PrepareListingResult(s, tab, result);
     ApplyWorkerResult(s, result);
     Check(tab.pending_created_name.empty() && tab.selected_index == 0 && visible(),
         "time-sorted delayed enumeration reveals the created first row");
@@ -187,6 +202,7 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     Check(tab.pending_created_name == L"created" && tab.selected_index == 8,
         "creation already listed waits for an in-flight enumeration before revealing");
     result.generation = 43;
+    PrepareListingResult(s, tab, result);
     ApplyWorkerResult(s, result);
     Check(tab.pending_created_name.empty() && tab.selected_index == 0 && visible(),
         "in-flight enumeration cannot overwrite the creation selection with its old selection");
@@ -197,10 +213,12 @@ void CreatedItemCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     QueueCreatedItemReveal(s, path + L"\\other-folder\\created");
     Check(tab.pending_created_name.empty() && tab.selected_index == 8,
         "creation in another folder does not move selection in the current folder");
+    const auto ordinary_selection = tab.EntryAt(tab.selected_index).name;
     RefreshPath(s, path, RefreshReason::OperationCompleted);
     tab.pending_generation = 44; result.generation = 44;
+    PrepareListingResult(s, tab, result);
     ApplyWorkerResult(s, result);
-    Check(tab.EntryAt(tab.selected_index).name == L"8.txt",
+    Check(tab.EntryAt(tab.selected_index).name == ordinary_selection,
         "ordinary additions without a local creation intent do not steal selection");
     const auto output = std::filesystem::absolute(L"bench_data/created-item-reveal");
     std::filesystem::create_directories(output);
@@ -239,71 +257,74 @@ void ListingRaceCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
     tab.sort_direction = ui::SortDirection::Asc;
     tab.applied_generation = tab.pending_generation = 0;
     tab.loading = false;
-    tab.ClearEntryOrderHold();
+    tab.ClearEntryRenameHints();
     tab.SetSnapshot(Listing({L"a.txt", L"z.txt"}));
     s.explicit_entry_refreshes.erase(&tab);
     s.store.Put(path, tab.snapshot);
     RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 10;
-    s.explicit_entry_refreshes[&tab].generation = 10;
+    s.explicit_entry_refreshes[&tab] = {path, 10};
     // The ordinary production drain marks dirty without touching a pending tab.
     s.notify_queue.push_back({path, false, {{FILE_ACTION_MODIFIED, L"z.txt", L""}}});
     DrainDirNotifies(s);
-    Check(s.store.IsDirty(path) && !tab.refresh_keeps_order,
-        "watch event during explicit enumeration keeps sorted request intent");
+    Check(s.store.IsDirty(path) && s.explicit_entry_refreshes.at(&tab).path == path,
+        "watch event during explicit enumeration retains the dirty marker and request owner");
     app::WorkResult sorted{};
     sorted.path = path; sorted.generation = 10; sorted.snapshot = Listing({L"a.txt", L"z.txt"});
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
-    Check(tab.EntryAt(0).name == L"a.txt" && !tab.order_held && !tab.refresh_keeps_order &&
-        s.explicit_entry_refreshes.contains(&tab),
-        "dirty followup after F5 does not re-hold the sorted enumeration");
+    Check(tab.EntryAt(0).name == L"a.txt" && !s.explicit_entry_refreshes.contains(&tab),
+        "dirty result stays sorted and a rejected worker retry closes explicit ownership");
     sorted.generation = 11;
-    s.explicit_entry_refreshes[&tab].generation = 11;
+    s.explicit_entry_refreshes[&tab] = {path, 11};
     tab.pending_generation = 11;
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
-    Check(!tab.order_held && !tab.refresh_keeps_order && !s.explicit_entry_refreshes.contains(&tab),
+    Check(!s.explicit_entry_refreshes.contains(&tab),
         "clean matching followup clears only the completed explicit intent");
 
     tab.SetSnapshot(Listing({L"z.txt", L"old.txt"}));
     tab.SelectOnly(1);
     tab.HoldEntryRename(L"old.txt", L"new.txt");
-    tab.order_held = true;
     RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 20;
-    s.explicit_entry_refreshes[&tab].generation = 20;
+    s.explicit_entry_refreshes[&tab] = {path, 20};
     const auto before = tab.snapshot;
     fs::DirNotifyEvent renamed;
     renamed.action = FILE_ACTION_RENAMED_NEW_NAME; renamed.old_name = L"old.txt"; renamed.name = L"new.txt";
     Check(!ApplyNotifyToVisible(s, path, renamed) && tab.snapshot == before && tab.held_renames.size() == 1,
         "direct watch patch cannot prune rename mapping during explicit enumeration");
     sorted.generation = 20; sorted.snapshot = Listing({L"new.txt", L"z.txt"});
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
-    Check(tab.EntryAt(0).name == L"new.txt" && tab.IsSelected(0) && !tab.order_held && !tab.refresh_keeps_order,
-        "matching sorted result follows renamed selection without re-holding rows");
+    Check(tab.EntryAt(0).name == L"new.txt" && tab.IsSelected(0),
+        "matching prepared result follows renamed selection");
     sorted.generation = 21; tab.pending_generation = 21;
-    s.explicit_entry_refreshes[&tab].generation = 21;
+    s.explicit_entry_refreshes[&tab] = {path, 21};
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
     Check(!s.explicit_entry_refreshes.contains(&tab), "rename race followup releases explicit intent");
 
     tab.SetSnapshot(Listing({L"old.txt", L"z.txt"}));
     tab.SelectOnly(0);
     RefreshPath(s, path, RefreshReason::Explicit);
-    tab.pending_generation = 24; s.explicit_entry_refreshes[&tab].generation = 24;
+    tab.pending_generation = 24; s.explicit_entry_refreshes[&tab] = {path, 24};
     s.notify_queue.push_back({path, false, {renamed}});
     DrainDirNotifies(s);
     sorted.generation = 24; sorted.snapshot = Listing({L"old.txt", L"z.txt"});
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
-    Check(tab.held_renames.size() == 1 && !tab.refresh_keeps_order,
+    Check(tab.held_renames.size() == 1,
         "rename arriving after enumeration began survives its pre-rename result");
     sorted.generation = 25; sorted.snapshot = Listing({L"new.txt", L"z.txt"});
-    tab.pending_generation = 25; s.explicit_entry_refreshes[&tab].generation = 25;
+    tab.pending_generation = 25; s.explicit_entry_refreshes[&tab] = {path, 25};
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
     Check(tab.IsSelected(0) && tab.EntryAt(0).name == L"new.txt" && tab.held_renames.empty(),
         "explicit dirty retry restores renamed selection then clears consumed mapping");
 
     tab.SetSnapshot(Listing({L"z.txt", L"old.txt", L"a.txt"}));
     tab.SelectOnly(1);
-    tab.order_held = true;
     tab.pending_generation = 0;
     s.store.Put(path, tab.snapshot);
     const auto before_chain = tab.snapshot;
@@ -318,35 +339,69 @@ void ListingRaceCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstri
         tab.held_renames[0].old_name == L"old.txt" &&
         tab.held_renames[0].new_name == L"temporary.txt" &&
         tab.held_renames[1].old_name == L"temporary.txt" &&
-        tab.held_renames[1].new_name == L"final.txt" && !tab.refresh_keeps_order,
+        tab.held_renames[1].new_name == L"final.txt",
         "ordinary rename chain preserves original rows and mapping before fallback enumeration");
     sorted.generation = 27;
     tab.pending_generation = 27;
     sorted.snapshot = Listing({L"a.txt", L"final.txt", L"z.txt"});
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
     Check(tab.EntryAt(0).name == L"a.txt" && tab.EntryAt(1).name == L"final.txt" &&
         tab.EntryAt(2).name == L"z.txt" && tab.IsSelected(1),
         "ordinary rename chain sorts the fallback result and follows the selected item");
 
-    tab.order_held = true;
     tab.sort_column = ui::SortColumn::Name; tab.sort_direction = ui::SortDirection::Asc;
     tab.search_relevance = false;
+    const auto before_sort = tab.snapshot;
     SetSort(s, ui::SortColumn::Name, ui::SortDirection::Desc);
-    Check(tab.EntryAt(0).name == L"z.txt" && !tab.order_held && !tab.refresh_keeps_order &&
-        tab.EntryAt(tab.selected_index).name == L"final.txt",
-        "switching sort immediately sorts the snapshot and preserves selection");
+    Check(tab.snapshot == before_sort && tab.EntryAt(tab.selected_index).name == L"final.txt",
+        "switching sort retains the published snapshot and selection while projection is pending");
+    tab.pending_generation = 28;
+    sorted.generation = 28;
+    sorted.projection_only = true;
+    PrepareListingResult(s, tab, sorted);
+    ApplyWorkerResult(s, sorted);
+    Check(tab.EntryAt(0).name == L"z.txt" && tab.EntryAt(tab.selected_index).name == L"final.txt",
+        "matching prepared sort projection publishes order and preserves selection");
+    sorted.projection_only = false;
     RefreshPath(s, path, RefreshReason::Explicit);
     tab.pending_generation = 30;
-    s.explicit_entry_refreshes[&tab].generation = 30;
+    s.explicit_entry_refreshes[&tab] = {path, 30};
     app::WorkResult stale = sorted;
     stale.generation = 29;
+    PrepareListingResult(s, tab, stale);
     ApplyWorkerResult(s, stale);
     Check(tab.pending_generation == 30 && s.explicit_entry_refreshes[&tab].generation == 30,
         "stale completion does not clear newer explicit request");
     sorted.generation = 30; sorted.snapshot = Listing({L"z.txt", L"final.txt", L"a.txt"});
+    PrepareListingResult(s, tab, sorted);
     ApplyWorkerResult(s, sorted);
-    Check(!tab.order_held && tab.EntryAt(0).name == L"z.txt" && !s.explicit_entry_refreshes.contains(&tab),
+    Check(tab.EntryAt(0).name == L"z.txt" && !s.explicit_entry_refreshes.contains(&tab),
         "matching sort completion retains sorted order and clears intent");
+
+    const auto before_removal = tab.snapshot;
+    auto request = std::make_shared<app::NotifyPatchRequest>();
+    request->path = path;
+    request->generation = ++s.notify_patches.generation;
+    request->folders = app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode);
+    request->resolved = app::ResolveDirNotifies(path, {{FILE_ACTION_REMOVED, L"a.txt", {}}});
+    request->targets.push_back({&tab, tab.snapshot, tab.view_generation, tab.applied_generation,
+                               tab.sort_column, tab.sort_direction});
+    tab.notify_patch_generation = request->generation;
+    app::BuildNotifyProjections(*request);
+    Check(tab.snapshot == before_removal && tab.EntryCount() == 3,
+        "preparing a deletion projection leaves the published snapshot untouched");
+    s.notify_patches.pending.emplace(path, app::PendingNotifyPatch{request, {}});
+    {
+        std::lock_guard lock(s.notify_patches.mailbox->mutex);
+        s.notify_patches.mailbox->completed.push_back(request);
+    }
+    DrainNotifyPatches(s);
+    Check(tab.snapshot != before_removal && before_removal->size() == 3 &&
+        tab.EntryCount() == 2 && tab.EntryAt(0).name == L"z.txt" &&
+        tab.EntryAt(tab.selected_index).name == L"final.txt" &&
+        s.store.Peek(path) == tab.snapshot && !s.notify_patches.pending.contains(path),
+        "matching background deletion publication preserves order, selection and shared cache");
 }
 
 void ArchitectureCases(pulse::AppState& s, pulse::app::Tab& tab, const std::wstring& path) {

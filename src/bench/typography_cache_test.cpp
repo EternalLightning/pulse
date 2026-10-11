@@ -30,13 +30,19 @@ LumaTextRenderer::~LumaTextRenderer() = default;
 Compositor::Compositor() {
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory2),
                        reinterpret_cast<IUnknown**>(&dwriteFactory_));
+    if (dwriteFactory_.get()) {
+        dwriteFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-US",
+            &fileNameFormat_);
+    }
 }
 Compositor::~Compositor() = default;
 bool Compositor::LumaTextEnabled() const noexcept { return luma_enabled; }
-bool Compositor::MeasureLumaText(std::wstring_view, IDWriteTextFormat*, float& width, float*) {
+bool Compositor::MeasureLumaText(std::wstring_view, IDWriteTextFormat* format, float& width, float*) {
     ++luma_calls;
+    if (!typography::UsesLumaText(this, format)) return false;
     width = luma_width;
-    return luma_enabled;
+    return true;
 }
 }
 
@@ -64,7 +70,7 @@ int main() {
     Compositor compositor;
     IDWriteFactory2* factory = compositor.DwriteFactory();
     ComPtr<IDWriteTextFormat> format;
-    if (!factory || FAILED(factory->CreateTextFormat(L"Segoe UI", nullptr,
+    if (!factory || !compositor.FileNameFormat() || FAILED(factory->CreateTextFormat(L"Segoe UI", nullptr,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             14.0f, L"en-US", &format)) || !format.get()) {
         Check(false, "real DirectWrite factory/format created");
@@ -103,6 +109,34 @@ int main() {
           type::CurrentMeasureCache().widths.size() == 2 &&
           Near(type::MeasureLine(&compositor, format.get(), label), line) && luma_calls == measured_calls,
           "Luma composite width stays separate and hits cache without altering advance");
+    Check(type::UsesLumaText(&compositor, format.get()) &&
+          !type::UsesLumaText(&compositor, compositor.FileNameFormat()) &&
+          !type::UsesLumaText(nullptr, format.get()) && !type::UsesLumaText(&compositor, nullptr),
+          "shared drawing/measurement route rejects filenames and invalid formats with Luma enabled");
+    type::ClearMeasurementCache();
+    IDWriteTextFormat* filename_format = compositor.FileNameFormat();
+    const float filename_advance = type::MeasureAdvance(factory, filename_format, label);
+    const int filename_calls = luma_calls;
+    Check(Near(type::MeasureLine(&compositor, filename_format, label), filename_advance) &&
+          Near(type::MeasureLine(&compositor, filename_format, label), filename_advance) &&
+          type::CurrentMeasureCache().widths.size() == 1 && luma_calls == filename_calls,
+          "Luma-enabled filenames share the advance entry without attempting Luma measurement");
+    bool filename_equivalent = true;
+    for (const auto& text : cases) {
+        filename_equivalent = filename_equivalent &&
+            Near(type::MeasureLine(&compositor, filename_format, text),
+                 LegacyWidth(factory, filename_format, text));
+    }
+    Check(filename_equivalent && luma_calls == filename_calls,
+          "filename routing preserves DWrite CJK/whitespace/empty/long-text widths with Luma enabled");
+    const size_t filename_entries = type::CurrentMeasureCache().widths.size();
+    Check(type::MeasureLine(&compositor, filename_format, L"") == 0.0f &&
+          type::MeasureLine(&compositor, nullptr, label) == 0.0f &&
+          type::MeasureLine(nullptr, filename_format, label) == 0.0f &&
+          Near(type::MeasureLine(&compositor, filename_format, std::wstring(1100, L'W')),
+               LegacyWidth(factory, filename_format, std::wstring(1100, L'W'))) &&
+          type::CurrentMeasureCache().widths.size() == filename_entries && luma_calls == filename_calls,
+          "invalid/empty/long DirectWrite lines bypass composite keys and Luma calls");
     luma_enabled = false;
     const auto generation = type::Generation();
     type::InvalidateCaches();

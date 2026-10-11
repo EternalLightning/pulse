@@ -153,8 +153,10 @@ DWORD ComputeDropEffect(DWORD key_state, const std::wstring& source_sample,
     return DROPEFFECT_NONE;
 }
 
-std::wstring FirstDroppableFolder(const std::vector<std::wstring>& sources) {
+std::wstring FirstDroppableFolder(const std::vector<std::wstring>& sources,
+                                  const std::function<bool()>& cancelled) {
     for (const auto& path : sources) {
+        if (cancelled && cancelled()) return {};
         if (path.empty()) continue;
         const DWORD attrs = GetFileAttributesW(path.c_str());
         if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
@@ -643,14 +645,16 @@ HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt
     if (!effect) return E_POINTER;
     sources_.clear();
     preferred_ = 0;
+    drag_allowed_ = DROPEFFECT_NONE;
     if (!ExtractHDropPaths(obj, sources_)) {
         *effect = DROPEFFECT_NONE;
         return S_OK;
     }
     preferred_ = PreferredDropEffect(obj);
-    const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
-    *effect = allowed && cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed, preferred_) & allowed
-                            : DROPEFFECT_NONE;
+    drag_point_ = ClientPoint(pt);
+    drag_keys_ = key_state;
+    drag_allowed_ = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
+    *effect = RefreshDragFeedback();
     return S_OK;
 }
 
@@ -660,15 +664,23 @@ HRESULT WindowDropTarget::DragOver(DWORD key_state, POINTL pt, DWORD* effect) {
         *effect = DROPEFFECT_NONE;
         return S_OK;
     }
-    const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
-    *effect = allowed && cb_.drag_over ? cb_.drag_over(sources_, ClientPoint(pt), key_state, allowed, preferred_) & allowed
-                            : DROPEFFECT_NONE;
+    drag_point_ = ClientPoint(pt);
+    drag_keys_ = key_state;
+    drag_allowed_ = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
+    *effect = RefreshDragFeedback();
     return S_OK;
+}
+
+DWORD WindowDropTarget::RefreshDragFeedback() {
+    return !sources_.empty() && drag_allowed_ && cb_.drag_over
+        ? cb_.drag_over(sources_, drag_point_, drag_keys_, drag_allowed_, preferred_) & drag_allowed_
+        : DROPEFFECT_NONE;
 }
 
 HRESULT WindowDropTarget::DragLeave() {
     sources_.clear();
     preferred_ = 0;
+    drag_allowed_ = DROPEFFECT_NONE;
     if (cb_.drag_leave) cb_.drag_leave();
     return S_OK;
 }

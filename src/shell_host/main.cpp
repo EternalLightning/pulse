@@ -1,4 +1,5 @@
 #include "../common/windows_compat.h"
+#include "../common/file_operation_error.h"
 // main.cpp — Pulse.Shell.exe: windowless STA+COM shell-operation proxy.
 //
 // Pipe server on \\.\pipe\pulse_shell_<ui-pid> (ui-pid passed as argv[1],
@@ -67,9 +68,7 @@ void PostCtxMessage(uint32_t session_id, UINT message, WPARAM wParam, LPARAM lPa
 struct Request {
     uint32_t type = 0;
     uint32_t id = 0;
-    std::wstring new_name;
     std::vector<std::wstring> sources;
-    std::vector<std::wstring> recycle_paths;
     uint64_t delete_epoch = 0;
     uint64_t delete_token = 0;
     std::vector<pulse::FileIdentity> expected_identities;
@@ -167,9 +166,9 @@ void SendDone(uint32_t id, HRESULT hr, bool cancelled, const std::wstring& error
 // ---------------------------------------------------------------------------
 class ProgressSink : public IFileOperationProgressSink {
 public:
-    ProgressSink(uint32_t req_id, size_t total_items, std::wstring authorized_root = {}, bool recycle_only = false)
+    ProgressSink(uint32_t req_id, size_t total_items, std::wstring authorized_root = {})
         : authorized_root_(std::move(authorized_root)), req_id_(req_id),
-          total_items_(total_items ? total_items : 1), recycle_only_(recycle_only) {}
+          total_items_(total_items ? total_items : 1) {}
 
     // IUnknown — stack-allocated, no real refcounting.
     IFACEMETHODIMP QueryInterface(REFIID riid, void** out) override {
@@ -245,8 +244,7 @@ public:
                 const HRESULT result = destination->GetDisplayName(SIGDN_FILESYSPATH, &path);
                 recycle_destinations_.push_back(SUCCEEDED(result) && path ? path : L"");
                 if (path) CoTaskMemFree(path);
-            } else if (!recycle_only_) deleted_paths_.push_back(authorized_root_);
-            else NoteItemResult(E_UNEXPECTED); // no recycle payload evidence: never report a restorable delete
+            } else deleted_paths_.push_back(authorized_root_);
         }
         ++items_done_;
         MaybeReport(items_done_ == total_items_);
@@ -324,7 +322,6 @@ private:
     std::wstring authorized_root_;
     uint32_t req_id_ = 0;
     size_t total_items_ = 1;
-    bool recycle_only_ = false;
     size_t items_done_ = 0;
     float byte_percent_ = 0.0f;
     bool has_byte_progress_ = false;
@@ -350,35 +347,6 @@ HRESULT MakeItem(const std::wstring& path, IShellItem** out) {
     if (FAILED(hr) && parsed != path)
         hr = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(out));
     return hr;
-}
-
-bool PathExists(const std::wstring& path) {
-    const std::wstring parsed = ToParsingPath(path);
-    if (GetFileAttributesW(parsed.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
-    return parsed != path && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
-}
-
-std::wstring RenameDestination(const std::wstring& source, const std::wstring& new_name) {
-    std::wstring path = ToParsingPath(source);
-    const auto slash = path.find_last_of(L"\\/");
-    if (slash == std::wstring::npos) return new_name;
-    path.resize(slash + 1);
-    path += new_name;
-    return path;
-}
-
-bool OperationPostconditionSatisfied(const Request& req) {
-    if ((req.type == REQ_DELETE_RECYCLE || req.type == REQ_REALDELETE) &&
-        !req.sources.empty()) {
-        return std::all_of(req.sources.begin(), req.sources.end(), [](const auto& source) {
-            return !PathExists(source);
-        });
-    }
-    if (req.type == REQ_RENAME && req.sources.size() == 1 && !req.new_name.empty()) {
-        return !PathExists(req.sources.front()) &&
-               PathExists(RenameDestination(req.sources.front(), req.new_name));
-    }
-    return false;
 }
 
 std::wstring DescribeCreateError(HRESULT hr) {
@@ -439,167 +407,6 @@ HRESULT ExecuteCreate(const uint32_t type, const std::wstring& path,
     return S_OK;
 }
 
-std::wstring CanonPath(std::wstring p) {
-    p = ToParsingPath(std::move(p));
-    for (auto& c : p) {
-        if (c == L'/') c = L'\\';
-        c = static_cast<wchar_t>(towupper(c));
-    }
-    while (p.size() > 3 && p.back() == L'\\') p.pop_back();
-    return p;
-}
-
-bool ReadRecycleOriginal(const std::wstring& i_path, std::wstring& original) {
-    HANDLE h = CreateFileW(i_path.c_str(), GENERIC_READ,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER sz{};
-    if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 28 || sz.QuadPart > 64 * 1024) {
-        CloseHandle(h);
-        return false;
-    }
-    std::vector<BYTE> buf(static_cast<size_t>(sz.QuadPart));
-    DWORD read = 0;
-    const BOOL ok = ReadFile(h, buf.data(), static_cast<DWORD>(buf.size()), &read, nullptr);
-    CloseHandle(h);
-    if (!ok || read < 28) return false;
-
-    uint64_t ver = 0;
-    memcpy(&ver, buf.data(), 8);
-    if (ver == 2) {
-        uint32_t nchars = 0;
-        memcpy(&nchars, buf.data() + 24, 4);
-        if (nchars == 0 || nchars > 32768) return false;
-        const size_t need = 28ull + static_cast<size_t>(nchars) * 2ull;
-        size_t bytes = static_cast<size_t>(nchars) * 2ull;
-        if (need > buf.size()) {
-            if (buf.size() <= 28) return false;
-            bytes = buf.size() - 28;
-            nchars = static_cast<uint32_t>(bytes / 2);
-        }
-        original.assign(reinterpret_cast<const wchar_t*>(buf.data() + 28), nchars);
-        while (!original.empty() && original.back() == L'\0') original.pop_back();
-        return !original.empty();
-    }
-    if (ver == 1) {
-        const size_t maxn = (std::min)((buf.size() - 24) / 2, static_cast<size_t>(260));
-        const wchar_t* p = reinterpret_cast<const wchar_t*>(buf.data() + 24);
-        original.assign(p, wcsnlen(p, maxn));
-        return !original.empty();
-    }
-    return false;
-}
-
-bool RestoreOneFromRecycle(const std::wstring& wanted_canon, std::wstring& error) {
-    const wchar_t drive = wanted_canon.size() >= 2 && wanted_canon[1] == L':'
-        ? wanted_canon[0] : L'\0';
-    if (!drive) {
-        error = L"无法确定回收站卷";
-        return false;
-    }
-
-    wchar_t bin[32];
-    swprintf_s(bin, L"%c:\\$Recycle.Bin", drive);
-    const std::wstring sid = pulse::CurrentUserSidString();
-    if (sid.empty()) {
-        error = L"无法确定当前用户的回收站";
-        return false;
-    }
-    const std::wstring sidDir = std::wstring(bin) + L"\\" + sid;
-    WIN32_FIND_DATAW iFd{};
-    HANDLE iFind = FindFirstFileW((sidDir + L"\\$I*").c_str(), &iFd);
-    if (iFind == INVALID_HANDLE_VALUE) {
-        error = L"无法打开当前用户的回收站";
-        return false;
-    }
-    bool restored = false;
-    do {
-        if (iFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        std::wstring iPath = sidDir + L"\\" + iFd.cFileName;
-        std::wstring original;
-        if (!ReadRecycleOriginal(iPath, original)) continue;
-        if (CanonPath(original) != wanted_canon) continue;
-
-        std::wstring rName = iFd.cFileName;
-        if (rName.size() >= 2) rName[1] = (rName[1] == L'I') ? L'R' : L'r';
-        std::wstring rPath = sidDir + L"\\" + rName;
-        if (GetFileAttributesW(rPath.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-
-        std::wstring dest = ToParsingPath(original);
-        if (GetFileAttributesW(dest.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            error = L"还原目标已存在";
-            FindClose(iFind);
-            return false;
-        }
-        if (!MoveFileExW(rPath.c_str(), dest.c_str(), 0)) {
-            error = L"还原失败";
-            FindClose(iFind);
-            return false;
-        }
-        // Restoring content does not authorize irreversible metadata deletion.
-        // Retain the orphan $I record rather than bypass the deletion service.
-        restored = true;
-        break;
-    } while (FindNextFileW(iFind, &iFd));
-    FindClose(iFind);
-
-    if (!restored) error = L"回收站中未找到该项";
-    return restored;
-}
-
-bool RestoreExactRecycle(const std::wstring& original, const std::wstring& recycled, std::wstring& error) {
-    const auto payload = ToParsingPath(recycled);
-    const auto wanted = ToParsingPath(original);
-    const auto sid = pulse::CurrentUserSidString();
-    if (sid.empty() || payload.size() < 3 || wanted.size() < 3 ||
-        payload[1] != L':' || wanted[1] != L':' || towupper(payload[0]) != towupper(wanted[0])) {
-        error = L"Invalid exact recycle restore identity"; return false;
-    }
-    const auto parent = payload.substr(0, payload.find_last_of(L'\\'));
-    const auto expected_parent = payload.substr(0, 2) + L"\\$Recycle.Bin\\" + sid;
-    const auto leaf = payload.substr(payload.find_last_of(L'\\') + 1);
-    if (CanonPath(parent) != CanonPath(expected_parent) || leaf.size() < 3 ||
-        leaf[0] != L'$' || (leaf[1] != L'R' && leaf[1] != L'r')) {
-        error = L"Invalid current-user recycle payload"; return false;
-    }
-    auto index_leaf = leaf; index_leaf[1] = leaf[1] == L'R' ? L'I' : L'i';
-    std::wstring recorded;
-    if (!ReadRecycleOriginal(parent + L"\\" + index_leaf, recorded) ||
-        ToParsingPath(recorded) != wanted) {
-        error = L"Recycle item no longer matches the recorded original path"; return false;
-    }
-    // No fallback search by original name: that could restore an older version.
-    if (GetFileAttributesW(wanted.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        error = L"还原目标已存在"; return false;
-    }
-    if (!MoveFileExW(payload.c_str(), wanted.c_str(), 0)) {
-        error = L"Exact recycle restore failed (" + std::to_wstring(GetLastError()) + L")"; return false;
-    }
-    return true;
-}
-
-HRESULT ExecuteRestore(const std::vector<std::wstring>& paths, const std::vector<std::wstring>& recycle_paths,
-                       std::wstring& error) {
-    if (paths.empty()) return E_INVALIDARG;
-    size_t ok = 0;
-    for (size_t i = 0; i < paths.size(); ++i) {
-        const auto& src = paths[i];
-        std::wstring one_error;
-        const bool restored = recycle_paths.empty() ? RestoreOneFromRecycle(CanonPath(src), one_error)
-            : i < recycle_paths.size() && RestoreExactRecycle(src, recycle_paths[i], one_error);
-        if (restored) {
-            ++ok;
-        } else if (error.empty()) {
-            error = one_error;
-        }
-    }
-    if (ok == paths.size()) return S_OK;
-    if (ok == 0) return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-    if (error.empty()) error = L"部分项目未能还原";
-    return HRESULT_FROM_WIN32(ERROR_PARTIAL_COPY);
-}
-
 void ExecuteRequest(Request* req) {
     if (req->type == REQ_DELETE_RECYCLE || req->type == REQ_REALDELETE) {
         SendDone(req->id, E_ACCESSDENIED, false, L"Legacy deletion frame has no deletion-service authorization.");
@@ -628,7 +435,7 @@ void ExecuteRequest(Request* req) {
         const auto error = result.identity_mismatch
             ? L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + result.failed_path
             : FAILED(result.error) && !result.cancelled
-                ? L"回收失败（错误 " + std::to_wstring(static_cast<unsigned long>(result.error)) + L"） | " + result.failed_path
+                ? L"回收失败：" + pulse::format::FileOperationErrorText(result.error) + L" | " + result.failed_path
                 : std::wstring{};
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
         SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations, result.failed_path);
@@ -643,13 +450,6 @@ void ExecuteRequest(Request* req) {
         delete req;
         return;
     }
-    if (req->type == REQ_RESTORE_RECYCLE) {
-        std::wstring error;
-        HRESULT hr = ExecuteRestore(req->sources, req->recycle_paths, error);
-        SendDone(req->id, hr, false, FAILED(hr) ? error : L"");
-        delete req;
-        return;
-    }
 
     HRESULT hr = S_OK;
     IFileOperation* op = nullptr;
@@ -658,21 +458,11 @@ void ExecuteRequest(Request* req) {
                               IID_PPV_ARGS(&op));
     }
 
-    ProgressSink sink(req->id, req->sources.size(), {}, req->type == REQ_AUTHORIZED_RECYCLE);
+    ProgressSink sink(req->id, req->sources.size());
     DWORD sink_cookie = 0;
     if (SUCCEEDED(hr)) {
-        DWORD flags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
-        if (IsAuthorizedDeletion(req->type)) {
-            // 0x4000 is WANTNUKEWARNING, not a nonexistent DONTDISPLAYUI flag.
-            // Recycle-only failures are returned to the Pulse deletion service
-            // for a new permanent-delete confirmation, never answered in Shell.
-            flags = pulse::shell::AuthorizedDeleteFlags(req->type == REQ_AUTHORIZED_RECYCLE);
-            if (SUCCEEDED(hr)) hr = op->SetOperationFlags(flags);
-            if (SUCCEEDED(hr)) hr = op->Advise(&sink, &sink_cookie);
-        } else {
-            op->SetOperationFlags(flags);
-            op->Advise(&sink, &sink_cookie);
-        }
+        hr = op->SetOperationFlags(pulse::shell::AuthorizedDeleteFlags(false));
+        if (SUCCEEDED(hr)) hr = op->Advise(&sink, &sink_cookie);
     }
 
     std::vector<std::unique_ptr<ProgressSink>> root_sinks;
@@ -693,7 +483,7 @@ void ExecuteRequest(Request* req) {
             }
             IShellItem* item = nullptr;
             HRESULT ihr = MakeItem(src, &item);
-            if (SUCCEEDED(ihr) && IsAuthorizedDeletion(req->type)) {
+            if (SUCCEEDED(ihr)) {
                 PWSTR resolved = nullptr;
                 ihr = item->GetDisplayName(SIGDN_FILESYSPATH, &resolved);
                 if (SUCCEEDED(ihr) && (!resolved || !pulse::shell::IsSameDeletionItem(src, resolved))) ihr = E_ACCESSDENIED;
@@ -707,17 +497,10 @@ void ExecuteRequest(Request* req) {
                 break;
             }
             switch (req->type) {
-            case REQ_DELETE_RECYCLE:
-            case REQ_REALDELETE: ihr = op->DeleteItem(item, nullptr); break;
-            case REQ_AUTHORIZED_RECYCLE:
-                // Handled above by explicit RecycleItem; never allow DeleteItem fallback.
-                ihr = E_UNEXPECTED;
-                break;
             case REQ_AUTHORIZED_DELETE:
-                root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src, req->type == REQ_AUTHORIZED_RECYCLE));
+                root_sinks.push_back(std::make_unique<ProgressSink>(req->id, 1, src));
                 ihr = op->DeleteItem(item, root_sinks.back().get());
                 break;
-            case REQ_RENAME: ihr = op->RenameItem(item, req->new_name.c_str(), nullptr); break;
             default: ihr = E_INVALIDARG; break;
             }
             item->Release();
@@ -742,15 +525,7 @@ void ExecuteRequest(Request* req) {
         hr = op->PerformOperations();
         BOOL aborted = FALSE;
         const HRESULT aborted_hr = op->GetAnyOperationsAborted(&aborted);
-        if (IsAuthorizedDeletion(req->type) && FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
-        if (req->type == REQ_AUTHORIZED_RECYCLE) {
-            HRESULT recycle_failure = sink.item_failure();
-            for (const auto& root_sink : root_sinks)
-                if (pulse::shell::NeedsPermanentDeleteConfirmation(root_sink->item_failure()))
-                    recycle_failure = root_sink->item_failure();
-            if (g.cancel_id.load() != req->id && pulse::shell::NeedsPermanentDeleteConfirmation(recycle_failure))
-                hr = recycle_failure; // retain explicit failure instead of a provider's cancellation wrapper
-        }
+        if (FAILED(aborted_hr) && SUCCEEDED(hr)) hr = aborted_hr;
         cancelled = (g.cancel_id.load() == req->id) || hr == HRESULT_FROM_WIN32(ERROR_CANCELLED);
         if (SUCCEEDED(hr) && FAILED(sink.item_failure())) hr = sink.item_failure();
         if (aborted && !cancelled && SUCCEEDED(hr)) {
@@ -769,16 +544,10 @@ void ExecuteRequest(Request* req) {
             if (failed_path.empty()) failed_path = root_sink->last_failed_item();
         }
     }
-    // Some shell providers finish the filesystem mutation and then return a
-    // failure from final bookkeeping. The filesystem state is authoritative;
-    // never tell the UI that a completed delete/rename failed. Setup failures
-    // are excluded so a source that was already missing cannot become success.
-    if (FAILED(hr) && !cancelled && !setup_failed && OperationPostconditionSatisfied(*req))
-        hr = S_OK;
 
     if (SUCCEEDED(hr) || cancelled) failed_path.clear();
     std::wstring error;
-    if (IsAuthorizedDeletion(req->type) && FAILED(hr) &&
+    if (FAILED(hr) &&
         GetEnvironmentVariableW(L"PULSE_DELETE_DIAGNOSTICS", nullptr, 0)) {
         wchar_t stage[160]{};
         swprintf_s(stage, L"delete diagnostics: setup_failed=%d hr=0x%08X item_hr=0x%08X", setup_failed,
@@ -786,16 +555,8 @@ void ExecuteRequest(Request* req) {
         error = stage;
     }
     if (FAILED(hr) && !cancelled) {
-        LPWSTR msg = nullptr;
-        const DWORD win_error = HRESULT_FACILITY(hr) == FACILITY_WIN32
-            ? HRESULT_CODE(hr) : static_cast<DWORD>(hr);
-        if (FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-                           nullptr, win_error, 0, (LPWSTR)&msg, 0, nullptr) && msg) {
-            error = msg;
-            LocalFree(msg);
-            while (!error.empty() && (error.back() == L'\r' || error.back() == L'\n'))
-                error.pop_back();
-        }
+        const auto reason = pulse::format::FileOperationErrorText(hr);
+        error = error.empty() ? reason : reason + L"\n" + error;
         if (!failed_path.empty()) {
             if (!error.empty()) error += L" | ";
             error += failed_path;
@@ -806,15 +567,13 @@ void ExecuteRequest(Request* req) {
     if (produced_identity_mismatch)
         error = L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + failed_path;
     if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
-    if (IsAuthorizedDeletion(req->type)) {
-        std::vector<std::wstring> deleted, recycled, destinations;
-        for (const auto& root_sink : root_sinks) {
-            deleted.insert(deleted.end(), root_sink->deleted_paths().begin(), root_sink->deleted_paths().end());
-            recycled.insert(recycled.end(), root_sink->recycled_paths_.begin(), root_sink->recycled_paths_.end());
-            destinations.insert(destinations.end(), root_sink->recycle_destinations_.begin(), root_sink->recycle_destinations_.end());
-        }
-        SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations, failed_path);
-    } else SendDone(req->id, hr, cancelled, error);
+    std::vector<std::wstring> deleted, recycled, destinations;
+    for (const auto& root_sink : root_sinks) {
+        deleted.insert(deleted.end(), root_sink->deleted_paths().begin(), root_sink->deleted_paths().end());
+        recycled.insert(recycled.end(), root_sink->recycled_paths_.begin(), root_sink->recycled_paths_.end());
+        destinations.insert(destinations.end(), root_sink->recycle_destinations_.begin(), root_sink->recycle_destinations_.end());
+    }
+    SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations, failed_path);
     delete req;
 }
 
@@ -941,10 +700,8 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_REALDELETE:
             case REQ_AUTHORIZED_RECYCLE:
             case REQ_AUTHORIZED_DELETE:
-            case REQ_RENAME:
             case REQ_NEW_FOLDER:
-            case REQ_NEW_FILE:
-            case REQ_RESTORE_RECYCLE: {
+            case REQ_NEW_FILE: {
                 if (g_context_worker) {
                     SendDone(h.request_id, E_ACCESSDENIED, false, L"Context workers cannot perform file operations");
                     break;
@@ -954,11 +711,7 @@ DWORD WINAPI ReaderThreadImpl() {
                 req->id = h.request_id;
                 PayloadReader r(payload.data(), payload.size());
                 bool ok = true;
-                if (req->type == REQ_RENAME) {
-                    std::wstring path;
-                    ok = r.GetString(path) && r.GetString(req->new_name);
-                    req->sources.push_back(std::move(path));
-                } else if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
+                if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
                     std::wstring path;
                     ok = r.GetString(path);
                     req->sources.push_back(std::move(path));
@@ -977,10 +730,6 @@ DWORD WINAPI ReaderThreadImpl() {
                         req->expected_identities = std::move(plan.expected_identities);
                     } else {
                         ok = r.GetStringArray(req->sources);
-                        if (req->type == REQ_RESTORE_RECYCLE) {
-                            ok = ok && r.TryStringArray(req->recycle_paths) && r.remaining() == 0 &&
-                                (req->recycle_paths.empty() || req->recycle_paths.size() == req->sources.size());
-                        }
                     }
                 }
                 if (!ok || r.remaining() != 0) {
@@ -1013,7 +762,7 @@ DWORD WINAPI ReaderThreadImpl() {
 // ---------------------------------------------------------------------------
 constexpr UINT kCtxIdFirst = 1;
 constexpr UINT kCtxIdLast = 0x7FFF;
-constexpr DWORD kCtxSessionExpireMs = 120 * 1000;
+constexpr DWORD kCtxSessionExpireMs = pulse::ipc::kContextMenuSessionLifetimeMs;
 
 struct CtxSessionData {
     uint32_t session_id = 0;   // == REQ_CTX_QUERY request id

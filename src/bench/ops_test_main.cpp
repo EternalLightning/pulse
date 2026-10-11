@@ -10,6 +10,8 @@
 #include "../ops/destination_guard.h"
 #include "shell_completion_cases.h"
 #include "undo_identity_cases.h"
+#include "mutation_undo_cases.h"
+#include "source_contract_cases.h"
 #include "../common/path_utils.h"
 #include "../ipc/shell_client.h"
 #include <windows.h>
@@ -528,6 +530,40 @@ int RunReviewRegressions(const std::wstring& filter) {
         Check(cancelled.Status().phase == ops::OpPhase::Cancelled && !Exists(root + L"\\cancelled-dst"),
             L"cancel before scanning performs no destination mutation");
     }
+    if (filter == L"link-continue") {
+        const auto first_source = src + L"\\one", second_source = src + L"\\two";
+        const auto first_target = root + L"\\actual-one", second_target = root + L"\\actual-two";
+        const auto replacement = root + L"\\replacement";
+        for (const auto& path : {first_source, second_source, first_target, second_target, replacement}) MakeDir(path);
+        MakeFile(first_source + L"\\first.txt", new_data, sizeof(new_data));
+        MakeFile(second_source + L"\\second.txt", new_data, sizeof(new_data));
+        const auto first_link = dst + L"\\one", second_link = dst + L"\\two";
+        const bool ready = MakeJunction(first_link, first_target) && MakeJunction(second_link, second_target);
+        Check(ready, L"create two independent directory link destinations");
+        if (ready) {
+            size_t links = 0;
+            auto status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+                {first_source.c_str(), second_source.c_str()}, dst.c_str()), true, false, &links);
+            Check(links == 1 && status.phase == ops::OpPhase::Completed &&
+                FileHash(first_source + L"\\first.txt") == FileHash(first_target + L"\\first.txt") &&
+                FileHash(second_source + L"\\second.txt") == FileHash(second_target + L"\\second.txt"),
+                L"Continue accepts every link destination in one task without an apply-all checkbox");
+            g_ops.DrainCompletions();
+            MakeFile(first_source + L"\\next-task.txt", new_data, sizeof(new_data));
+            status = RunLinkOp(SimpleOp(ops::OpType::Copy, {first_source.c_str()}, dst.c_str()), false, false, &links);
+            Check(links == 1 && status.phase == ops::OpPhase::Cancelled && !Exists(first_target + L"\\next-task.txt"),
+                L"link acceptance expires at the next task and Cancel writes nothing");
+            bool retargeted = false;
+            status = RunLinkOp(SimpleOp(ops::OpType::Copy, {first_source.c_str()}, dst.c_str()), true, false, &links, nullptr, [&] {
+                retargeted = RemoveDirectoryW(first_link.c_str()) && MakeJunction(first_link, replacement);
+            });
+            Check(retargeted && status.phase == ops::OpPhase::Failed &&
+                !Exists(first_target + L"\\next-task.txt") && !Exists(replacement + L"\\next-task.txt") &&
+                g_ops.DrainCompletions().empty(),
+                L"task-wide Continue still rejects a changed link identity before any write");
+        }
+        RemoveDirectoryW(first_link.c_str()); RemoveDirectoryW(second_link.c_str());
+    }
     if (filter == L"links" || filter == L"review") {
         const auto outside = root + L"\\actual", redirect = root + L"\\redirect";
         MakeDir(outside); MakeDir(redirect);
@@ -701,7 +737,7 @@ int RunReviewRegressions(const std::wstring& filter) {
               L"partial directory inverse retries pending leaf and cleans empty original root");
         ops::OpsManager legacy;
         Check(legacy.UndoFromJson(L"[{\"type\":1,\"sup\":true,\"dest\":\"C:\\\\tmp\",\"name\":\"\",\"src\":[\"C:\\\\original.txt\"]}]") &&
-              legacy.CanUndo(), L"legacy move undo mapping still accepted");
+              !legacy.CanUndo(), L"legacy move history parses without authorizing objects with unknown identity");
     }
     if (filter == L"shutdown" || filter == L"review") {
         MakeFile(src + L"\\shutdown.bin", new_data, sizeof(new_data));
@@ -811,6 +847,9 @@ int RunNetworkIdentityRegressions() {
     auto replace = SimpleOp(ops::OpType::Copy, {source.c_str()}, (root + L"\\dst").c_str());
     replace.collision_policy = ops::CollisionPolicy::Replace;
     status = RunOp(std::move(replace));
+    if (status.phase != ops::OpPhase::Completed)
+        wprintf(L"[diagnostic] legacy replace phase=%d hr=0x%08lX path=%s error=%s\n",
+            static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.failed_path.c_str(), status.last_error.c_str());
     Check(status.phase == ops::OpPhase::Completed && FileHash(source) == FileHash(target),
           L"legacy identity supports checked replacement and backup cleanup");
     const auto empty = root + L"\\empty.bin";
@@ -1112,7 +1151,17 @@ int wmain(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
         if (filter == L"transfer-updates") return RunTransferUpdateRegressions();
+        if (filter == L"source-contract") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return ops::RunSourceContractRegressions(SandboxRoot() + L"-source-contract-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        }
         if (filter == L"shell-completion") return ops::RunShellCompletionRegressions();
+        if (filter == L"mutation-undo") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return ops::RunMutationUndoRegressions(SandboxRoot() + L"-mutation-undo-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        }
         if (filter == L"undo-identity") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunUndoIdentityRegressions(SandboxRoot() + L"-undo-identity-" +
@@ -1124,13 +1173,14 @@ int wmain(int argc, wchar_t** argv) {
                 L"-" + std::to_wstring(GetTickCount64());
             const auto from = root + L"\\src", target = root + L"\\dst";
             const auto outside = root + L"\\outside", unrelated = root + L"\\unrelated";
+            const auto holdings = root + L"\\holdings";
             std::error_code error;
-            for (const auto& path : {root, from, target, outside, unrelated})
+            for (const auto& path : {root, from, target, outside, unrelated, holdings})
                 std::filesystem::create_directories(path, error);
             if (error) return 2;
             const char payload[] = "unmodified junction target";
             Check(MakeFile(outside + L"\\payload.txt", payload, sizeof(payload)), L"create isolated junction target bytes");
-            const auto link = from + L"\\link", held = from + L"\\held";
+            const auto link = from + L"\\link", held = holdings + L"\\held";
             Check(MakeJunction(link, outside), L"create isolated source junction");
             g_ops.Start([] {});
             ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
@@ -1160,10 +1210,12 @@ int wmain(int argc, wchar_t** argv) {
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
             const auto source = root + L"\\src", target = root + L"\\dst";
             const auto original_folder = source + L"\\folder", moved_folder = target + L"\\folder";
-            const auto held_folder = target + L"\\original-held";
+            const auto holdings = root + L"\\holdings";
+            const auto held_folder = holdings + L"\\original-held";
             std::error_code error;
             std::filesystem::create_directories(original_folder, error);
             std::filesystem::create_directories(target, error);
+            std::filesystem::create_directories(holdings, error);
             if (error) return 2;
             const char payload[] = "original payload";
             Check(MakeFile(original_folder + L"\\payload.txt", payload, sizeof(payload)),
@@ -1222,9 +1274,11 @@ int wmain(int argc, wchar_t** argv) {
             const auto root = SandboxRoot() + L"-source-identity-" + std::to_wstring(GetCurrentProcessId()) +
                 L"-" + std::to_wstring(GetTickCount64());
             const auto source = root + L"\\src", target = root + L"\\dst";
+            const auto holdings = root + L"\\holdings";
             std::error_code error;
             std::filesystem::create_directories(source, error);
             std::filesystem::create_directories(target, error);
+            std::filesystem::create_directories(holdings, error);
             if (error) return 2;
             g_ops.Start([] {});
             ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
@@ -1240,7 +1294,7 @@ int wmain(int argc, wchar_t** argv) {
                 Check(status.phase == ops::OpPhase::Completed && !Exists(from) && FileSize(to) == bytes,
                     L"copied move removes only authenticated original, including readonly and empty files");
             }
-            const auto from = source + L"\\replaced.txt", held = source + L"\\original-held.txt";
+            const auto from = source + L"\\replaced.txt", held = holdings + L"\\original-held.txt";
             const auto to = target + L"\\replaced.txt";
             Check(MakeFile(from, original, sizeof(original)), L"create replacement race fixture");
             const auto original_hash = FileHash(from);
@@ -1256,7 +1310,7 @@ int wmain(int argc, wchar_t** argv) {
                 FileHash(to) == original_hash && FileHash(held) == original_hash,
                 L"replacement content and attributes survive while committed copy retains original bytes");
             ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            const auto folder = source + L"\\folder", old_folder = source + L"\\folder-held";
+            const auto folder = source + L"\\folder", old_folder = holdings + L"\\folder-held";
             MakeDir(folder);
             bool folder_replaced = false;
             ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
@@ -1308,7 +1362,7 @@ int wmain(int argc, wchar_t** argv) {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return RunDriveRegressions();
         }
-        if (filter != L"review" && filter != L"links" && filter != L"undo" && filter != L"shutdown" && filter != L"enumeration") return 2;
+        if (filter != L"review" && filter != L"links" && filter != L"link-continue" && filter != L"undo" && filter != L"shutdown" && filter != L"enumeration") return 2;
         setvbuf(stdout, nullptr, _IONBF, 0);
         return RunReviewRegressions(filter);
     }
@@ -1608,7 +1662,7 @@ int wmain(int argc, wchar_t** argv) {
         g_ops.Undo();
         const auto undo_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (std::chrono::steady_clock::now() < undo_deadline) {
-            if (g_ops.Status().completed_ops >= prev + 2 &&
+            if (g_ops.Status().completed_ops >= prev + 1 &&
                 Exists(srcDir + L"\\batch-a.txt") && Exists(srcDir + L"\\batch-b.txt") &&
                 !Exists(srcDir + L"\\batch-a2.txt") && !Exists(srcDir + L"\\batch-b2.txt"))
                 break;
@@ -1617,8 +1671,8 @@ int wmain(int argc, wchar_t** argv) {
         Check(Exists(srcDir + L"\\batch-a.txt") && Exists(srcDir + L"\\batch-b.txt") &&
               !Exists(srcDir + L"\\batch-a2.txt") && !Exists(srcDir + L"\\batch-b2.txt"),
               L"batch-rename: undo restores original names");
-        Check(g_ops.Status().completed_ops == prev + 2,
-              L"batch-rename: both undo operations finish before the next request");
+        Check(g_ops.Status().completed_ops == prev + 1,
+              L"batch-rename: one batch inverse finishes before the next request");
 
         // copy src\d.txt -> dst, then undo (deletes the copy, to recycle bin)
         RunOp(SimpleOp(ops::OpType::Copy, { (srcDir + L"\\d.txt").c_str() }, dstDir.c_str()));
@@ -1640,8 +1694,8 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring legacy = L"[{\"type\":0,\"sup\":true,\"dest\":\"C:\\\\tmp\","
             L"\"name\":\"\",\"src\":[\"C:\\\\tmp\\\\legacy.txt\"]}]";
         ops::OpsManager legacy_manager;
-        Check(legacy_manager.UndoFromJson(legacy) && legacy_manager.CanUndo(),
-              L"legacy undo JSON without destination mappings remains compatible");
+        Check(legacy_manager.UndoFromJson(legacy) && !legacy_manager.CanUndo(),
+              L"legacy Copy history parses without authorizing products with unknown identity");
     }
 
     // --- 11. Clipboard round-trip -------------------------------------------

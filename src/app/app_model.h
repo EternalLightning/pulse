@@ -108,8 +108,6 @@ struct Tab {
     bool pending_ensure_selection_visible = false;
     std::wstring pending_created_name;
     std::vector<std::wstring> pending_created_names;
-    bool refresh_keeps_order = false;
-    bool order_held = false;
     std::vector<EntryRenameHint> held_renames;
     ColumnStripState column_strip; // listings shown beside the list in column view
     std::wstring git_root;
@@ -227,11 +225,11 @@ struct Tab {
     void SetSnapshot(fs::SnapshotPtr value);
     void HoldEntryRename(const std::wstring& old_name, const std::wstring& new_name);
     void PrepareEntryRefresh(bool explicit_refresh);
-    void ClearEntryOrderHold();
+    void ClearEntryRenameHints();
+    // Consumes a background projection; only follows and prunes selection rename hints.
     fs::SnapshotPtr PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                         std::vector<std::wstring>& selected_names,
-                                        std::wstring& focus_name,
-                                        FolderSortMode folders = FolderSortMode::FoldersFirst);
+                                        std::wstring& focus_name);
 };
 
 bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle);

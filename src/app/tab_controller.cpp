@@ -1,3 +1,4 @@
+#include "../common/path_utils.h"
 #include "tab_controller.h"
 
 #include "context_menu.h"
@@ -31,10 +32,6 @@ ui::FluentMenuItem MenuItem(int command, const wchar_t* text,
 }
 
 } // namespace
-
-const uint32_t* TabController::Palette() noexcept {
-    return kPalette;
-}
 
 TabGroup* TabController::FindGroup(WindowTabs& tabs, int id) const {
     for (auto& group : tabs.tab_groups) {
@@ -153,7 +150,7 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
         if (last_member >= 0) {
             const Tab* folder = tabs.items[static_cast<size_t>(last_member)]->ActiveFolder();
             const std::wstring path = callbacks_.new_tab_path ? callbacks_.new_tab_path() :
-                folder ? folder->current_path : L"C:\\";
+                folder ? folder->current_path : pulse::path::DefaultNavigationRoot();
             WillChangeLayout();
             tabs.NewTabAt(static_cast<size_t>(last_member + 1), path);
             tabs.Active()->tab_group = id;
@@ -299,8 +296,8 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         const Tab* folder = tab.ActiveFolder();
         const Tab* current = tabs.Active() ? tabs.Active()->ActiveFolder() : nullptr;
         const std::wstring path = command == CmdTabDuplicate
-            ? (folder ? folder->current_path : L"C:\\")
-            : (current ? current->current_path : L"C:\\");
+            ? (folder ? folder->current_path : pulse::path::DefaultNavigationRoot())
+            : (current ? current->current_path : pulse::path::DefaultNavigationRoot());
         WillChangeLayout();
         tabs.NewTabAt(static_cast<size_t>(tab_index) + 1, path);
         LayoutChanged();

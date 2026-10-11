@@ -1,3 +1,4 @@
+#include "../common/path_utils.h"
 #include "session.h"
 
 #include <algorithm>
@@ -95,7 +96,7 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
         auto pane = std::make_unique<Pane>();
         pane->focused = true;
         tab.panes.push_back(std::move(pane));
-        if (load_tab) load_tab(*tab.panes.front()->ActiveTab(), L"C:\\");
+        if (load_tab) load_tab(*tab.panes.front()->ActiveTab(), pulse::path::DefaultNavigationRoot());
     }
     const size_t need = SnapshotPresetCount(tab.layout);
     while (tab.panes.size() < need) {
@@ -106,7 +107,7 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
         pane->view.search_column_dividers = source.search_column_dividers;
         pane->view.column_layout = source.column_layout;
         pane->view.column_widths_dip = source.column_widths_dip;
-        const std::wstring clone = source.current_path.empty() ? L"C:\\" : source.current_path;
+        const std::wstring clone = source.current_path.empty() ? pulse::path::DefaultNavigationRoot() : source.current_path;
         pane->view.current_path = clone;
         Tab* raw = pane->ActiveTab();
         tab.panes.push_back(std::move(pane));

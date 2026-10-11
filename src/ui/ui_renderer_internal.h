@@ -1404,7 +1404,7 @@ struct TitleChrome {
 TitleChrome MakeTitleChrome(float window_w, float scale, float title_h) {
     TitleChrome c;
     const float ctrl_w = 46.0f * scale;
-    c.chrome_left = window_w - ctrl_w * 3.0f;
+    c.chrome_left = std::max(0.0f, window_w - ctrl_w * 3.0f);
     c.theme_left = c.chrome_left;
     c.settings_left = c.chrome_left;
     c.cmd_w = 0.0f;

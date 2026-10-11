@@ -42,18 +42,12 @@ void IndexClient::Stop() {
     { std::lock_guard lock(mu_); running_ = false; }
     pinyin_ready_ = false;
     pending_cv_.notify_all();
-    HANDLE pipe = INVALID_HANDLE_VALUE;
-    {
-        std::lock_guard<std::mutex> lock(pipe_mu_);
-        pipe = pipe_;
-    }
-    if (pipe != INVALID_HANDLE_VALUE) CancelIoEx(pipe, nullptr);
+    SignalConnection();
     if (worker_.joinable()) worker_.join();
     if (writer_.joinable()) writer_.join();
     {
         std::lock_guard<std::mutex> lock(pipe_mu_);
-        if (pipe_ != INVALID_HANDLE_VALUE) CloseHandle(pipe_);
-        pipe_ = INVALID_HANDLE_VALUE;
+        connection_.reset();
     }
     if (child_proc_) {
         CloseHandle(child_proc_);
@@ -102,7 +96,7 @@ bool IndexClient::SpawnHelper() {
 bool IndexClient::EnsureConnected() {
     {
         std::lock_guard<std::mutex> lock(pipe_mu_);
-        if (pipe_ != INVALID_HANDLE_VALUE) return true;
+        if (connection_) return true;
     }
     auto try_open = [&]() -> HANDLE {
         HANDLE h = CreateFileW(pipe_name_.c_str(), transport::kClientPipeAccess, 0, nullptr,
@@ -139,7 +133,9 @@ bool IndexClient::EnsureConnected() {
             CloseHandle(h);
             return false;
         }
-        pipe_ = h;
+        auto connection = std::make_shared<Connection>(h);
+        if (!connection->cancel) return false;
+        connection_ = std::move(connection);
     }
     {
         std::lock_guard lock(mu_);
@@ -154,37 +150,46 @@ bool IndexClient::EnsureConnected() {
     return true;
 }
 
+std::shared_ptr<IndexClient::Connection> IndexClient::CurrentConnection() {
+    std::lock_guard lock(pipe_mu_);
+    return connection_;
+}
+
+void IndexClient::SignalConnection() {
+    std::lock_guard lock(pipe_mu_);
+    if (connection_) SetEvent(connection_->cancel);
+}
+
 bool IndexClient::WriteMsg(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
-    std::lock_guard<std::mutex> lock(write_mu_);
-    HANDLE pipe = INVALID_HANDLE_VALUE;
-    {
-        std::lock_guard<std::mutex> pipe_lock(pipe_mu_);
-        pipe = pipe_;
-    }
-    if (pipe == INVALID_HANDLE_VALUE) return false;
-    auto hdr = MakeIndexHdr(type, id, static_cast<uint32_t>(payload.size()));
-    if (!ipc::PipeWrite(pipe, reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr)))
-        return false;
-    if (!payload.empty() &&
-        !ipc::PipeWrite(pipe, payload.data(), static_cast<DWORD>(payload.size())))
-        return false;
-    return true;
+    std::lock_guard lock(write_mu_);
+    const auto connection = CurrentConnection();
+    if (!running_ || !connection) { SetLastError(ERROR_CANCELLED); return false; }
+    if (payload.size() > kIndexMaxPayload) { SetLastError(ERROR_INVALID_DATA); return false; }
+    ipc::PipeIoOptions options;
+    options.cancel_event = connection->cancel;
+    options.deadline = GetTickCount64() + 5000;
+    const auto header = MakeIndexHdr(type, id, static_cast<uint32_t>(payload.size()));
+    const bool sent = ipc::PipeWrite(connection->pipe, &header, sizeof(header), options) &&
+        ipc::PipeWrite(connection->pipe, payload.data(), static_cast<DWORD>(payload.size()), options);
+    if (!sent) SetEvent(connection->cancel); // A partial frame cannot be reused.
+    return sent;
 }
 
 bool IndexClient::ReadMsg(ipc::MsgHeader& hdr, std::vector<uint8_t>& payload) {
-    HANDLE pipe;
-    {
-        std::lock_guard<std::mutex> lock(pipe_mu_);
-        pipe = pipe_;
+    const auto connection = CurrentConnection();
+    if (!running_ || !connection) { SetLastError(ERROR_CANCELLED); return false; }
+    ipc::PipeIoOptions options; options.cancel_event = connection->cancel;
+    auto* bytes = reinterpret_cast<uint8_t*>(&hdr);
+    // Idle connections stay open; the first byte starts the complete-frame budget.
+    if (!ipc::PipeRead(connection->pipe, bytes, 1, options)) return false;
+    options.deadline = GetTickCount64() + 5000;
+    if (!ipc::PipeRead(connection->pipe, bytes + 1, sizeof(hdr) - 1, options)) return false;
+    if (hdr.magic != kIndexMagic || hdr.payload_size > kIndexMaxPayload) {
+        SetLastError(ERROR_INVALID_DATA); return false;
     }
-    if (pipe == INVALID_HANDLE_VALUE) return false;
-    if (!ipc::PipeRead(pipe, reinterpret_cast<uint8_t*>(&hdr), sizeof(hdr))) return false;
-    if (hdr.magic != kIndexMagic || hdr.payload_size > kIndexMaxPayload) return false;
     payload.resize(hdr.payload_size);
-    if (hdr.payload_size &&
-        !ipc::PipeRead(pipe, payload.data(), hdr.payload_size))
-        return false;
-    return true;
+    if (before_frame_body_) before_frame_body_();
+    return ipc::PipeRead(connection->pipe, payload.data(), hdr.payload_size, options);
 }
 
 void IndexClient::HandleStatus(const uint8_t* p, size_t n) {
@@ -356,12 +361,10 @@ void IndexClient::Writer() {
 }
 
 void IndexClient::Disconnect() {
+    SignalConnection();
     std::lock_guard<std::mutex> write_lock(write_mu_);
     std::lock_guard<std::mutex> pipe_lock(pipe_mu_);
-    if (pipe_ != INVALID_HANDLE_VALUE) {
-        CloseHandle(pipe_);
-        pipe_ = INVALID_HANDLE_VALUE;
-    }
+    connection_.reset();
     pinyin_ready_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -528,12 +531,6 @@ bool RunElevatedIndexCommand(const std::wstring& exe, const std::wstring& parame
 }
 
 } // namespace
-
-bool IndexClient::RequestConfigureVolume(const std::wstring& volume_id, bool enabled) {
-    const bool ok = ConfigureVolumeElevated(volume_id, enabled);
-    if (ok) RefreshVolumesAsync();
-    return ok;
-}
 
 bool IndexClient::ConfigureVolumeElevated(const std::wstring& volume_id, bool enabled) {
     const std::wstring parameters = L"--configure-volume " + QuoteCommandArg(volume_id) +

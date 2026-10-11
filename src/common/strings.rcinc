@@ -1,4 +1,4 @@
-#include "string_ids.h"
+﻿#include "string_ids.h"
 
 LANGUAGE 0x04, 0x02
 STRINGTABLE
@@ -112,12 +112,9 @@ BEGIN
     IDS_OP_MOVE_TO                        " 移动到 "
     IDS_OP_COPY_TO                        " 复制到 "
     IDS_OP_FAILED                         "操作失败"
-    IDS_OP_FAILED_BADGE                   "失败"
     IDS_OP_ITEM_PREFIX                    "项目："
-    IDS_OP_PAUSED                         "已暂停"
     IDS_OP_WAITING_CONFLICT               "等待冲突"
     IDS_OP_ALL_COMPLETED                  "全部项目已完成"
-    IDS_OP_COMPLETED                      "已完成"
     IDS_OP_SCANNING                       "正在扫描文件…"
     IDS_OP_PREPARING                      "准备中"
     IDS_OP_DELETING                       "正在删除"
@@ -249,12 +246,9 @@ BEGIN
     IDS_OP_MOVE_TO                        " moving to "
     IDS_OP_COPY_TO                        " copying to "
     IDS_OP_FAILED                         "Operation failed"
-    IDS_OP_FAILED_BADGE                   "Failed"
     IDS_OP_ITEM_PREFIX                    "Item: "
-    IDS_OP_PAUSED                         "Paused"
     IDS_OP_WAITING_CONFLICT               "Needs attention"
     IDS_OP_ALL_COMPLETED                  "All items completed"
-    IDS_OP_COMPLETED                      "Completed"
     IDS_OP_SCANNING                       "Scanning files…"
     IDS_OP_PREPARING                      "Preparing"
     IDS_OP_DELETING                       "Deleting"
@@ -414,7 +408,6 @@ BEGIN
     IDS_NO_CONTENT                        "暂无内容"
     IDS_FOLDER_EMPTY                      "此文件夹为空"
     IDS_FOLDER_EMPTY_MESSAGE              "没有任何文件或文件夹"
-    IDS_NEW_FOLDER                        "新建文件夹"
     IDS_FILTER_PLACEHOLDER                "按名称/标签过滤..."
     IDS_NEW                               "新建"
     IDS_ITEMS_COUNT_FORMAT                "%d 项"
@@ -513,7 +506,6 @@ BEGIN
     IDS_TOOLTIP_ADD_EXCLUSION             "添加索引排除文件夹"
     IDS_TOOLTIP_REMOVE_EXCLUSION          "移除索引排除项"
     IDS_MINIMIZE                          "最小化"
-    IDS_RESTORE                           "还原"
     IDS_MAXIMIZE                          "最大化"
     IDS_BACK                              "后退"
     IDS_FORWARD                           "前进"
@@ -536,7 +528,6 @@ BEGIN
     IDS_RESIZE_SPLIT                      "拖动调整分屏区域大小"
     IDS_FAVORITE                          "收藏"
     IDS_MORE_ACTIONS                      "更多操作"
-    IDS_RENAME                            "重命名"
     IDS_RESIZE_DETAILS                    "拖动调整详情栏宽度"
     IDS_PREVIEW_FIT                       "适应"
     IDS_EXPAND_COLLAPSE                   "展开/折叠"
@@ -545,15 +536,12 @@ BEGIN
     IDS_UNPIN                             "取消固定"
     IDS_UNDO                              "撤销"
     IDS_CUT                               "剪切"
-    IDS_COPY                              "复制"
     IDS_PASTE                             "粘贴"
-    IDS_DELETE                            "删除"
     IDS_PROPERTIES                        "属性"
     IDS_OPEN_TERMINAL_HERE                "在此处打开终端"
     IDS_PIN_WORKSPACE                     "固定到工作区"
     IDS_PIN_NETWORK                       "固定到网络位置"
     IDS_TAGS_ELLIPSIS                     "标签..."
-    IDS_NEW_TEXT_DOCUMENT                 "新建文本文档"
     IDS_FOLDER                            "文件夹"
     IDS_TEXT_DOCUMENT                     "文本文档"
     IDS_LAYOUT_SINGLE                     "单栏"
@@ -637,13 +625,11 @@ BEGIN
     IDS_SELECT_ALL                        "全选"
     IDS_RECYCLE_BIN                       "回收站"
     IDS_RECYCLE_OCCUPANCY_FORMAT          "%s 项 · %s"
-    IDS_EMPTY_RECYCLE_BIN                 "清空回收站"
     IDS_EMPTY_RECYCLE_CONFIRM_TITLE       "清空回收站"
     IDS_EMPTY_RECYCLE_CONFIRM             "清空回收站后无法还原这些项目。确定继续？"
     IDS_COLUMN_DELETED                    "删除日期"
     IDS_RECYCLE_EMPTY                     "回收站是空的"
     IDS_RECYCLE_EMPTY_MESSAGE             "删除的文件会显示在这里，可以还原或永久删除。"
-    IDS_BATCH_RENAME                      "批量重命名"
     IDS_FIND                              "查找"
     IDS_REPLACE                           "替换"
     IDS_PREFIX                            "前缀"
@@ -653,9 +639,7 @@ BEGIN
     IDS_PREVIEW                           "预览"
     IDS_UNCHANGED                         "未更改"
     IDS_NAME_COLLISION                    "名称冲突"
-    IDS_INVALID_NAME                      "无效名称"
     IDS_CANCEL                            "取消"
-    IDS_PERMANENT_DELETE                  "永久删除"
     IDS_INVERT_SELECTION                  "反选"
     IDS_SELECT_WILDCARD                   "通配选择…"
     IDS_SELECT_WILDCARD_HINT              "例如 *.jpg"
@@ -874,10 +858,8 @@ BEGIN
     IDS_CANNOT_CREATE_FOLDER              "无法新建文件夹"
     IDS_CANNOT_CREATE_TEXT_FILE           "无法新建文本文档"
     IDS_CANNOT_RENAME                     "无法重命名"
-    IDS_RENAME_TARGET_EXISTS              "此文件夹中已存在同名项目，请换一个名称。"
     IDS_FOLDER_NO_WRITE_PERMISSION        "当前文件夹没有写入权限。"
     IDS_RENAME_NO_PERMISSION              "没有权限重命名此项。"
-    IDS_OPERATION_FAILED_MESSAGE          "操作失败。"
     IDS_SETTINGS_SHOW_PERFORMANCE_DESC    "帧时、FPS 与内存，便于排查卡顿"
 END
 
@@ -1002,7 +984,6 @@ BEGIN
     IDS_NO_CONTENT                        "No content"
     IDS_FOLDER_EMPTY                      "This folder is empty"
     IDS_FOLDER_EMPTY_MESSAGE              "There are no files or folders here"
-    IDS_NEW_FOLDER                        "New folder"
     IDS_FILTER_PLACEHOLDER                "Filter by name or tag..."
     IDS_NEW                               "New"
     IDS_ITEMS_COUNT_FORMAT                "%d items"
@@ -1101,7 +1082,6 @@ BEGIN
     IDS_TOOLTIP_ADD_EXCLUSION             "Add an index exclusion"
     IDS_TOOLTIP_REMOVE_EXCLUSION          "Remove index exclusion"
     IDS_MINIMIZE                          "Minimize"
-    IDS_RESTORE                           "Restore"
     IDS_MAXIMIZE                          "Maximize"
     IDS_BACK                              "Back"
     IDS_FORWARD                           "Forward"
@@ -1124,7 +1104,6 @@ BEGIN
     IDS_RESIZE_SPLIT                      "Drag to resize panes"
     IDS_FAVORITE                          "Favorite"
     IDS_MORE_ACTIONS                      "More actions"
-    IDS_RENAME                            "Rename"
     IDS_RESIZE_DETAILS                    "Drag to resize details"
     IDS_PREVIEW_FIT                       "Fit"
     IDS_EXPAND_COLLAPSE                   "Expand or collapse"
@@ -1133,15 +1112,12 @@ BEGIN
     IDS_UNPIN                             "Unpin"
     IDS_UNDO                              "Undo"
     IDS_CUT                               "Cut"
-    IDS_COPY                              "Copy"
     IDS_PASTE                             "Paste"
-    IDS_DELETE                            "Delete"
     IDS_PROPERTIES                        "Properties"
     IDS_OPEN_TERMINAL_HERE                "Open terminal here"
     IDS_PIN_WORKSPACE                     "Pin as workspace"
     IDS_PIN_NETWORK                       "Pin as network location"
     IDS_TAGS_ELLIPSIS                     "Tags..."
-    IDS_NEW_TEXT_DOCUMENT                 "New text document"
     IDS_FOLDER                            "Folder"
     IDS_TEXT_DOCUMENT                     "Text document"
     IDS_LAYOUT_SINGLE                     "Single pane"
@@ -1225,13 +1201,11 @@ BEGIN
     IDS_SELECT_ALL                        "Select all"
     IDS_RECYCLE_BIN                       "Recycle Bin"
     IDS_RECYCLE_OCCUPANCY_FORMAT          "%s items · %s"
-    IDS_EMPTY_RECYCLE_BIN                 "Empty Recycle Bin"
     IDS_EMPTY_RECYCLE_CONFIRM_TITLE       "Empty Recycle Bin"
     IDS_EMPTY_RECYCLE_CONFIRM             "Items cannot be restored after the Recycle Bin is emptied. Continue?"
     IDS_COLUMN_DELETED                    "Date deleted"
     IDS_RECYCLE_EMPTY                     "Recycle Bin is empty"
     IDS_RECYCLE_EMPTY_MESSAGE             "Deleted files appear here so you can restore or permanently delete them."
-    IDS_BATCH_RENAME                      "Batch rename"
     IDS_FIND                              "Find"
     IDS_REPLACE                           "Replace"
     IDS_PREFIX                            "Prefix"
@@ -1241,9 +1215,7 @@ BEGIN
     IDS_PREVIEW                           "Preview"
     IDS_UNCHANGED                         "Unchanged"
     IDS_NAME_COLLISION                    "Name collision"
-    IDS_INVALID_NAME                      "Invalid name"
     IDS_CANCEL                            "Cancel"
-    IDS_PERMANENT_DELETE                  "Delete permanently"
     IDS_INVERT_SELECTION                  "Invert selection"
     IDS_SELECT_WILDCARD                   "Select by pattern…"
     IDS_SELECT_WILDCARD_HINT              "e.g. *.jpg"
@@ -1462,10 +1434,8 @@ BEGIN
     IDS_CANNOT_CREATE_FOLDER              "Cannot create folder"
     IDS_CANNOT_CREATE_TEXT_FILE           "Cannot create text document"
     IDS_CANNOT_RENAME                     "Cannot rename"
-    IDS_RENAME_TARGET_EXISTS              "An item with this name already exists in this folder. Choose a different name."
     IDS_FOLDER_NO_WRITE_PERMISSION        "You do not have permission to write to this folder."
     IDS_RENAME_NO_PERMISSION              "You do not have permission to rename this item."
-    IDS_OPERATION_FAILED_MESSAGE          "The operation failed."
     IDS_SETTINGS_SHOW_PERFORMANCE_DESC    "Frame time, FPS, and memory for diagnosing jank"
 END
 
@@ -1836,6 +1806,8 @@ BEGIN
     IDS_ABOUT_DISTRIBUTION_TITLE          "发行版与许可证"
     IDS_ABOUT_DISTRIBUTION_NOTICE         "本程序是基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发。\n\n原作者仓库：https://github.com/jimmgreen/pulse\n发行版仓库：https://github.com/EternalLightning/pulse\n\nPulse 源码采用 Apache License 2.0；第三方组件遵循各自许可证。详见随附的 LICENSE、NOTICE 和 licenses 目录。"
     IDS_ABOUT_UPSTREAM                    "原作者仓库"
+    IDS_OP_ERROR_DETAILS                  "失败原因"
+    IDS_OP_FILE_PATH                      "文件路径"
 END
 LANGUAGE 0x09, 0x01
 STRINGTABLE
@@ -1858,6 +1830,8 @@ BEGIN
     IDS_ABOUT_DISTRIBUTION_TITLE          "Distribution and license"
     IDS_ABOUT_DISTRIBUTION_NOTICE         "This is an independently modified distribution of Pulse, maintained by EternalLightning. It is not an official upstream release. The original project was developed by jimmgreen and its contributors.\n\nOriginal repository: https://github.com/jimmgreen/pulse\nDistribution repository: https://github.com/EternalLightning/pulse\n\nPulse source code is licensed under Apache License 2.0. Third-party components retain their own licenses. See the included LICENSE, NOTICE and licenses directory."
     IDS_ABOUT_UPSTREAM                    "Original repository"
+    IDS_OP_ERROR_DETAILS                  "Reason for failure"
+    IDS_OP_FILE_PATH                      "File path"
 END
 LANGUAGE 0x04, 0x02
 STRINGTABLE
@@ -2063,12 +2037,11 @@ BEGIN
     IDS_PLAYBACK_PAUSED                   " · 已暂停"
     IDS_LINK_DESTINATION_TITLE            "目标是链接"
     IDS_LINK_CONTINUE                     "继续"
-    IDS_LINK_CONTINUE_ALL                 "全部继续"
     IDS_LINK_DIRECTORY_MESSAGE            "操作将写入目录链接指向的位置。"
     IDS_LINK_FILE_MESSAGE                 "替换将移除此文件链接；链接指向的文件不变。"
     IDS_LINK_HARD_MESSAGE                 "替换仅影响当前文件名，其他硬链接的内容不变。"
     IDS_LINK_NAME_COUNT_SUFFIX            " 个硬链接名称"
-    IDS_LINK_CONTINUE_ALL_NOTE            "全部继续仅在本次请求生效。"
+    IDS_LINK_TASK_SCOPE_NOTE            "继续将接受本次操作中的所有链接目标。"
     IDS_LOCKED_ITEM_GENERIC_MESSAGE       "该文件正在被占用。"
     IDS_HELP_OPEN_KEYS                    "Enter / 双击"
     IDS_HELP_EYEBROW                      "A LITTLE HELP"
@@ -2118,14 +2091,94 @@ BEGIN
     IDS_PLAYBACK_PAUSED                   " · Paused"
     IDS_LINK_DESTINATION_TITLE            "The destination is a link"
     IDS_LINK_CONTINUE                     "Continue"
-    IDS_LINK_CONTINUE_ALL                 "Continue all"
     IDS_LINK_DIRECTORY_MESSAGE            "The operation will write to the location this directory link points to."
     IDS_LINK_FILE_MESSAGE                 "Replace will remove this file link; the file it points to stays unchanged."
     IDS_LINK_HARD_MESSAGE                 "Replace affects only this file name; other hard links keep their existing data."
     IDS_LINK_NAME_COUNT_SUFFIX            " hard-link names"
-    IDS_LINK_CONTINUE_ALL_NOTE            "Continue all applies only to this task. It does not mean Replace all."
+    IDS_LINK_TASK_SCOPE_NOTE            "Continue accepts all link destinations for this operation."
     IDS_LOCKED_ITEM_GENERIC_MESSAGE       "This file is in use."
     IDS_HELP_OPEN_KEYS                    "Enter / Double-click"
     IDS_HELP_EYEBROW                      "A LITTLE HELP"
     IDS_LIST_SEPARATOR                    ", "
+END
+
+
+
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_ITEMS_FORMAT                 "%s 等 %llu 项"
+    IDS_OPERATION_UNDO_FORMAT                  "撤销%s"
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_ITEMS_FORMAT                 "%s (%llu items)"
+    IDS_OPERATION_UNDO_FORMAT                  "Undo %s"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_TITLE             "需要管理员权限"
+    IDS_PERMISSION_OPERATION_MESSAGE           "此操作所需权限不足，可使用管理员权限重试。"
+    IDS_PERMISSION_OPERATION_CONTINUE          "以管理员权限继续"
+    IDS_PERMISSION_OPERATION_UAC_HINT          "继续后，Windows 将请求管理员权限。"
+    IDS_PERMISSION_OPERATION_SOURCE_PATH       "源路径："
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_TITLE             "Administrator permission required"
+    IDS_PERMISSION_OPERATION_MESSAGE           "This operation failed because permission was denied. You can retry the unfinished items with administrator permission."
+    IDS_PERMISSION_OPERATION_CONTINUE          "Continue as administrator"
+    IDS_PERMISSION_OPERATION_UAC_HINT          "Windows will request administrator permission after you continue."
+    IDS_PERMISSION_OPERATION_SOURCE_PATH       "Source path:"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_OUTCOME_UNKNOWN   "管理员进程未能返回完整结果。部分项目可能已经完成，请检查来源和目标后再操作。"
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_OUTCOME_UNKNOWN   "The administrator process did not return a complete result. Some items may have completed. Check the source and destination before trying again."
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_DESTINATION_PATH  "目标路径："
+    IDS_LINK_PATH                              "链接路径："
+    IDS_LINK_RESOLVED_PATH                     "实际路径："
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_PERMISSION_OPERATION_DESTINATION_PATH  "Destination path:"
+    IDS_LINK_PATH                              "Link path:"
+    IDS_LINK_RESOLVED_PATH                     "Actual path:"
+END
+
+LANGUAGE 0x04, 0x02
+STRINGTABLE
+BEGIN
+#define PULSE_LOCALIZED_MESSAGE(id, zh, en) id zh
+#include "runtime_messages.inc"
+#undef PULSE_LOCALIZED_MESSAGE
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+#define PULSE_LOCALIZED_MESSAGE(id, zh, en) id en
+#include "runtime_messages.inc"
+#undef PULSE_LOCALIZED_MESSAGE
 END

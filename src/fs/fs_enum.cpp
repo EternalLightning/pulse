@@ -26,6 +26,8 @@ using NetBufferOwner = UniqueResource<BYTE*, nullptr, FreeNetBuffer>;
 using NTSTATUS = LONG;
 constexpr NTSTATUS STATUS_SUCCESS = 0;
 constexpr NTSTATUS STATUS_NO_MORE_FILES = static_cast<NTSTATUS>(0x80000006L);
+constexpr NTSTATUS kStatusNotImplemented = static_cast<NTSTATUS>(0xC0000002L);
+constexpr NTSTATUS kStatusNotSupported = static_cast<NTSTATUS>(0xC00000BBL);
 
 struct NtUnicodeString {
     USHORT Length;
@@ -112,6 +114,52 @@ using NtQueryDirectoryFile_t = NTSTATUS (NTAPI*)(
     NtUnicodeString* FileName,
     BOOLEAN RestartScan);
 
+class NativeEnumerationError : public EnumerationError {
+public:
+    NativeEnumerationError(std::string message, DWORD code, bool compatible)
+        : EnumerationError(std::move(message), code), compatible_(compatible) {}
+    bool CanFallback() const noexcept { return compatible_; }
+private:
+    bool compatible_;
+};
+
+static DWORD NativeErrorCode(NTSTATUS status) {
+    using ConvertStatus = ULONG (WINAPI*)(NTSTATUS);
+    static const auto convert = reinterpret_cast<ConvertStatus>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
+    return convert ? convert(status) : ERROR_MR_MID_NOT_FOUND;
+}
+
+[[noreturn]] static void ThrowNativeError(const char* api, NTSTATUS status, bool query) {
+    // MS-SMB2 3.3.5.18 distinguishes unsupported classes (NOT_SUPPORTED)
+    // from invalid classes (INVALID_INFO_CLASS), parameters and access failures.
+    const bool compatible = query && (status == kStatusNotImplemented || status == kStatusNotSupported);
+    const DWORD error = NativeErrorCode(status);
+    std::ostringstream message;
+    message << api << " failed, status=0x" << std::hex << static_cast<ULONG>(status)
+            << std::dec << ", error=" << error;
+    throw NativeEnumerationError(message.str(), error, compatible);
+}
+
+#ifdef PULSE_FS_ENUM_TESTING
+namespace {
+struct EnumerationInjection {
+    LONG status = 0;
+    bool query = true;
+    bool after_batch = false;
+    bool api_unavailable = false;
+    size_t fallback_attempts = 0;
+};
+thread_local EnumerationInjection enumeration_injection;
+}
+void EnumerationTestProbe::Reset() { enumeration_injection = {}; }
+void EnumerationTestProbe::FailNative(LONG status, bool query, bool after_batch) {
+    enumeration_injection = {status, query, after_batch};
+}
+void EnumerationTestProbe::FailApi() { enumeration_injection = {}; enumeration_injection.api_unavailable = true; }
+size_t EnumerationTestProbe::FallbackAttempts() { return enumeration_injection.fallback_attempts; }
+#endif
+
 struct NtApi {
     NtCreateFile_t create_file = nullptr;
     NtQueryDirectoryFile_t query_directory = nullptr;
@@ -122,12 +170,12 @@ static const NtApi& InitNtApi() {
     // initializer rather than exposing one populated function pointer.
     static const NtApi api = [] {
         const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-        if (!ntdll) throw std::runtime_error("ntdll.dll not loaded");
+        if (!ntdll) throw NativeEnumerationError("ntdll.dll not loaded", ERROR_MOD_NOT_FOUND, true);
         NtApi result;
         result.create_file = reinterpret_cast<NtCreateFile_t>(GetProcAddress(ntdll, "NtCreateFile"));
         result.query_directory = reinterpret_cast<NtQueryDirectoryFile_t>(GetProcAddress(ntdll, "NtQueryDirectoryFile"));
         if (!result.create_file || !result.query_directory)
-            throw std::runtime_error("NtCreateFile / NtQueryDirectoryFile not found");
+            throw NativeEnumerationError("NtCreateFile / NtQueryDirectoryFile not found", ERROR_PROC_NOT_FOUND, true);
         return result;
     }();
     return api;
@@ -294,6 +342,12 @@ static bool EnumerateFindFirstFileEx(const std::wstring& path, std::vector<DirEn
 static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& out,
                              const std::function<bool()>& cancelled) {
     if (cancelled && cancelled()) return false;
+#ifdef PULSE_FS_ENUM_TESTING
+    if (enumeration_injection.api_unavailable)
+        throw NativeEnumerationError("NtCreateFile / NtQueryDirectoryFile not found", ERROR_PROC_NOT_FOUND, true);
+    if (enumeration_injection.status && !enumeration_injection.query)
+        ThrowNativeError("NtCreateFile", enumeration_injection.status, false);
+#endif
     const auto& api = InitNtApi();
 
     std::wstring target = path;
@@ -326,11 +380,7 @@ static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
         nullptr,
         0);
 
-    if (status != STATUS_SUCCESS) {
-        std::ostringstream oss;
-        oss << "NtCreateFile failed, status=0x" << std::hex << status;
-        throw std::runtime_error(oss.str());
-    }
+    if (status != STATUS_SUCCESS) ThrowNativeError("NtCreateFile", status, false);
 
     const WinHandleOwner directory_owner(h);
     if (cancelled && cancelled()) return false;
@@ -340,13 +390,19 @@ static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
     HANDLE hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!hEvent) {
         std::ostringstream message;
-        message << "CreateEventW failed, error=" << GetLastError();
-        throw std::runtime_error(message.str());
+        const DWORD error = GetLastError();
+        message << "CreateEventW failed, error=" << error;
+        throw EnumerationError(message.str(), error);
     }
     const WinHandleOwner event_owner(hEvent);
 
     for (;;) {
         if (cancelled && cancelled()) return false;
+#ifdef PULSE_FS_ENUM_TESTING
+        if (enumeration_injection.status && enumeration_injection.query &&
+            (!enumeration_injection.after_batch || !restart))
+            ThrowNativeError("NtQueryDirectoryFile", enumeration_injection.status, true);
+#endif
         iosb = {};
         status = api.query_directory(
             h,
@@ -379,11 +435,7 @@ static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
         // The native request must finish before releasing its buffer/IOSB.
         if (cancelled && cancelled()) return false;
         if (status == STATUS_NO_MORE_FILES) break;
-        if (status != STATUS_SUCCESS) {
-            std::ostringstream oss;
-            oss << "NtQueryDirectoryFile failed, status=0x" << std::hex << status;
-            throw std::runtime_error(oss.str());
-        }
+        if (status != STATUS_SUCCESS) ThrowNativeError("NtQueryDirectoryFile", status, true);
 
         auto* info = reinterpret_cast<NtFileFullDirInformation*>(buffer.data());
         for (;;) {
@@ -491,19 +543,32 @@ bool EnumerateDirectory(const std::wstring& path, std::vector<DirEntry>& out,
     }
     try {
         return finish(EnumerateNtQuery(normalized, out, cancelled));
-    } catch (const std::runtime_error& primary) {
-        if (cancelled && cancelled()) return finish(false);
-        // This intentional compatibility fallback remains until benchmarks
-        // justify removing a backend. Never hide either API's failure reason.
-        const std::string context = std::string(primary.what()) + " | " + PathDiagnostic(normalized);
-        OutputDebugStringA(("Pulse fs: NT enumeration fallback: " + context + "\n").c_str());
+    } catch (const NativeEnumerationError& primary) {
         out.clear();
+        if (cancelled && cancelled()) return false;
+        const std::string context = std::string(primary.what()) + " | " + PathDiagnostic(normalized);
+        if (!primary.CanFallback()) throw EnumerationError("NT primary: " + context, primary.Code());
+        OutputDebugStringA(("Pulse fs: NT enumeration capability fallback: " + context + "\n").c_str());
+#ifdef PULSE_FS_ENUM_TESTING
+        ++enumeration_injection.fallback_attempts;
+#endif
         try {
             return finish(EnumerateFindFirstFileEx(normalized, out, cancelled));
         } catch (const EnumerationError& fallback) {
-            if (cancelled && cancelled()) return finish(false);
+            out.clear();
+            if (cancelled && cancelled()) return false;
             throw EnumerationError("NT primary: " + context + "; Win32 fallback: " + fallback.what(), fallback.Code());
+        } catch (...) {
+            out.clear();
+            throw;
         }
+    } catch (const EnumerationError& primary) {
+        out.clear();
+        if (cancelled && cancelled()) return false;
+        throw EnumerationError(std::string(primary.what()) + " | " + PathDiagnostic(normalized), primary.Code());
+    } catch (...) {
+        out.clear();
+        throw;
     }
 }
 

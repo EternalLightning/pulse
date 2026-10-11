@@ -303,7 +303,6 @@ private:
     void RequestPinyinBuildLocked();
     void StopPinyinWorker();
     bool TryLoadCache();
-    void SaveCache();
     void MergeBase(bool force, const char* reason = "forced");
     const char* MaintenanceMergeReason(ULONGLONG now, uint64_t delta_bytes) const;
     bool CompactNamePoolLocked(ULONGLONG now);
@@ -320,7 +319,6 @@ private:
     bool IndexVolumeMft(const VolumeInfo& volume);
     bool RebuildVolumeMft(const VolumeInfo& volume);
     void WalkTree(int32_t parent, const std::wstring& dir, int depth);
-    void CompactLocked();
     bool FlattenLocked(Store& out, std::vector<VolState>& vols_out) const;
     bool WriteIndexFile(const std::wstring& path, const Store& s,
                         const std::vector<VolState>& vols, uint64_t built_unix) const;

@@ -33,6 +33,34 @@ ShellClient::~ShellClient() {
     Stop();
 }
 
+ShellClient::Connection::Connection(HANDLE handle)
+    : pipe(handle), cancel(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
+
+ShellClient::Connection::~Connection() {
+    if (pipe != INVALID_HANDLE_VALUE) CloseHandle(pipe);
+    if (cancel) CloseHandle(cancel);
+}
+
+std::shared_ptr<ShellClient::Connection> ShellClient::CurrentConnection() {
+    std::lock_guard lock(connection_mutex_);
+    return connection_;
+}
+
+void ShellClient::SignalConnection() {
+    std::lock_guard lock(connection_mutex_);
+    if (connection_) SetEvent(connection_->cancel);
+}
+
+// Caller holds send_mutex_; active I/O retains its own Connection ownership.
+void ShellClient::RetireConnection() {
+    {
+        std::lock_guard lock(connection_mutex_);
+        if (connection_) SetEvent(connection_->cancel);
+        connection_.reset();
+    }
+    KillChild();
+}
+
 void ShellClient::Start(Callbacks cb) {
     if (running_.exchange(true)) return;
     cb_ = std::move(cb);
@@ -41,25 +69,17 @@ void ShellClient::Start(Callbacks cb) {
 
 void ShellClient::Stop() {
     if (!running_.exchange(false)) return;
-    {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        // Connection publication and read initiation use this same lock. Once
-        // cancelled, no reader can issue another operation on this pipe.
-        if (pipe_ != INVALID_HANDLE_VALUE) CancelIoEx(pipe_, nullptr);
-    }
+    SignalConnection();
     if (reader_.joinable()) reader_.join();
+    std::map<uint32_t, Pending> stopped;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
-        if (pipe_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(pipe_);
-            pipe_ = INVALID_HANDLE_VALUE;
-        }
-        KillChild();
+        RetireConnection();
+        std::lock_guard pending_lock(pending_mutex_);
+        stopped.swap(pending_);
     }
-    {
-        std::lock_guard lock(pending_mutex_);
-        pending_.clear();
-    }
+    for (const auto& [id, pending] : stopped)
+        FireRequestDone(pending.type, id, HRESULT_FROM_WIN32(ERROR_CANCELLED), true, L"Shell client stopped.");
     std::map<uint32_t, LaunchReply> replies;
     {
         std::lock_guard lock(launch_reply_mutex_);
@@ -123,7 +143,10 @@ bool ShellClient::SpawnChild() {
 // Caller must hold send_mutex_.
 bool ShellClient::EnsureConnected() {
     if (!running_.load()) return false;
-    if (pipe_ != INVALID_HANDLE_VALUE) return true;
+    if (const auto connection = CurrentConnection()) {
+        if (WaitForSingleObject(connection->cancel, 0) == WAIT_TIMEOUT) return true;
+        RetireConnection();
+    }
 
     std::wstring name = PipeNameFor(GetCurrentProcessId());
     if (!child_started_ && !SpawnChild()) return false;
@@ -171,28 +194,41 @@ bool ShellClient::EnsureConnected() {
         fprintf(stderr, "[shell_client] pipe CreateFile err=%lu\n", err);
         return false;
     }
-    if (!running_.load()) { CloseHandle(h); return false; }
-    pipe_ = h;
+    auto connection = std::make_shared<Connection>(h);
+    if (!connection->cancel) return false;
+    {
+        std::lock_guard lock(connection_mutex_);
+        if (!running_.load()) return false;
+        connection_ = std::move(connection);
+    }
     return true;
 }
 
 // Caller must hold send_mutex_.
 bool ShellClient::SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
     if (!running_.load()) return false;
+    const auto connection = CurrentConnection();
+    if (!connection) return false;
     MsgHeader h;
     h.type = type;
     h.request_id = id;
     h.payload_size = (uint32_t)payload.size();
 
-    auto write_all = [this](const void* data, DWORD size) {
-        bool ok = PipeWrite(pipe_, static_cast<const uint8_t*>(data), size);
+    PipeIoOptions options;
+    options.cancel_event = connection->cancel;
+    options.deadline = GetTickCount64() + 5000;
+    auto write_all = [&](const void* data, DWORD size) {
+        bool ok = PipeWrite(connection->pipe, static_cast<const uint8_t*>(data), size, options);
         if (!ok)
             fprintf(stderr, "[client] WriteFile size=%lu failed gle=%lu\n", size, GetLastError());
         return ok;
     };
 
-    if (!write_all(&h, sizeof(h))) return false;
-    if (!payload.empty() && !write_all(payload.data(), (DWORD)payload.size())) return false;
+    if (!write_all(&h, sizeof(h)) ||
+        (!payload.empty() && !write_all(payload.data(), (DWORD)payload.size()))) {
+        SetEvent(connection->cancel); // A partial frame cannot be reused.
+        return false;
+    }
     return true;
 }
 
@@ -207,31 +243,21 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
     if (before_send) before_send(p.id);
 
     bool sent = false;
+    std::shared_ptr<Connection> connection;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
         if (EnsureConnected()) {
-            std::lock_guard<std::mutex> pending_lock(pending_mutex_);
-            pending_.emplace(p.id, p);
-            sent = SendFrame(p.type, p.id, p.payload);
-            if (!sent) {
-                // A failed write may still have dispatched the complete request.
-                pending_.find(p.id)->second.retried = true;
-                p.retried = true;
-                CloseHandle(pipe_);
-                pipe_ = INVALID_HANDLE_VALUE;
-                KillChild();
-                if (CanReplay(type) && EnsureConnected())
-                    sent = SendFrame(p.type, p.id, p.payload);
+            connection = CurrentConnection();
+            {
+                std::lock_guard pending_lock(pending_mutex_);
+                pending_.emplace(p.id, p);
             }
-            if (!sent) pending_.erase(p.id);
+            sent = SendFrame(p.type, p.id, p.payload);
         }
     }
-    if (!sent) {
-        FireRequestDone(type, p.id, type == REQ_SHELL_LAUNCH && p.retried
-            ? kShellLaunchOutcomeUnknown : HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
-            p.retried ? DisconnectMessage(type) : UnreachableMessage());
-        return p.id;
-    }
+    if (!sent && connection) HandleDisconnect(connection);
+    else if (!sent) FireRequestDone(type, p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
+                                    UnreachableMessage());
     return p.id;
 }
 
@@ -245,6 +271,7 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
     pending.type = recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE;
     pending.retried = true; // Never replay a destructive request on a new host.
     bool sent = false;
+    std::shared_ptr<Connection> connection;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
         FILETIME created{}, exited{}, kernel{}, user{};
@@ -256,30 +283,18 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
             if (!expected_identities.empty()) WriteFileIdentities(writer, expected_identities);
             if (recycle) writer.PutU64(reinterpret_cast<uintptr_t>(owner));
             pending.payload = writer.data();
-            std::lock_guard<std::mutex> pending_lock(pending_mutex_);
-            pending_.emplace(pending.id, pending);
+            connection = CurrentConnection();
+            {
+                std::lock_guard pending_lock(pending_mutex_);
+                pending_.emplace(pending.id, pending);
+            }
             sent = SendFrame(pending.type, pending.id, pending.payload);
-            if (!sent) pending_.erase(pending.id);
         }
     }
-    if (!sent) FireDone(pending.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
+    if (!sent && connection) HandleDisconnect(connection);
+    else if (!sent) FireDone(pending.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
                         L"Deletion outcome is unknown; the destructive request was not replayed.");
     return pending.id;
-}
-
-uint32_t ShellClient::RestoreRecycle(const std::vector<std::wstring>& paths,
-                                     const std::vector<std::wstring>& recycle_paths) {
-    PayloadWriter w;
-    w.PutStringArray(paths);
-    w.PutStringArray(recycle_paths);
-    return Submit(REQ_RESTORE_RECYCLE, w.data());
-}
-
-uint32_t ShellClient::Rename(const std::wstring& path, const std::wstring& new_name) {
-    PayloadWriter w;
-    w.PutString(path);
-    w.PutString(new_name);
-    return Submit(REQ_RENAME, w.data());
 }
 
 uint32_t ShellClient::CreateFolder(const std::wstring& path) {
@@ -303,30 +318,32 @@ uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply repl
 }
 
 void ShellClient::Cancel(uint32_t id) {
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    if (pipe_ == INVALID_HANDLE_VALUE) return;
-    SendFrame(REQ_CANCEL, id, {});
+    std::unique_lock lock(send_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        // The frame writer owns the stream. Interrupt it rather than appending
+        // a cancellation frame into a partially written request.
+        SignalConnection();
+        return;
+    }
+    const auto connection = CurrentConnection();
+    if (!connection) return;
+    const bool sent = SendFrame(REQ_CANCEL, id, {});
+    lock.unlock();
+    if (!sent) HandleDisconnect(connection);
 }
 
 void ShellClient::Abort(uint32_t id) {
-    bool removed = false;
+    SignalConnection();
+    uint32_t type = 0;
     {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        {
-            std::lock_guard<std::mutex> pending_lock(pending_mutex_);
-            removed = pending_.erase(id) != 0;
+        std::lock_guard pending_lock(pending_mutex_);
+        const auto found = pending_.find(id);
+        if (found != pending_.end()) {
+            type = found->second.type;
+            pending_.erase(found);
         }
-        if (pipe_ != INVALID_HANDLE_VALUE) {
-            CancelIoEx(pipe_, nullptr);
-            CloseHandle(pipe_);
-            pipe_ = INVALID_HANDLE_VALUE;
-        }
-        KillChild();
     }
-    if (removed) {
-        FireDone(id, HRESULT_FROM_WIN32(ERROR_TIMEOUT), false,
-                 L"shell host timed out");
-    }
+    if (type) FireRequestDone(type, id, DisconnectResult(type), false, DisconnectMessage(type));
 }
 
 uint32_t ShellClient::QueryContextMenu(const std::vector<std::wstring>& paths,
@@ -365,7 +382,7 @@ void ShellClient::CloseContextMenu(uint32_t session_id) {
         std::lock_guard pending_lock(pending_mutex_);
         pending_.erase(session_id);
     }
-    if (pipe_ == INVALID_HANDLE_VALUE) return;
+    if (!CurrentConnection()) return;
     SendFrame(REQ_CTX_CLOSE, 0, w.data());
 }
 
@@ -398,56 +415,31 @@ const std::wstring& ShellClient::UnreachableMessage() const {
     return last_error_.empty() ? kFallback : last_error_;
 }
 
-static bool ReadFull(HANDLE pipe, void* out, DWORD size,
-                     std::mutex& send_mutex, const std::atomic<bool>& running) {
-    auto* bytes = static_cast<uint8_t*>(out);
-    while (size) {
-        OVERLAPPED overlapped{};
-        overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!overlapped.hEvent) return false;
-        DWORD got = 0, error = ERROR_OPERATION_ABORTED;
-        BOOL ok = FALSE;
-        {
-            std::lock_guard<std::mutex> lock(send_mutex);
-            if (running.load()) {
-                ok = ReadFile(pipe, bytes, size, &got, &overlapped);
-                if (!ok) error = GetLastError();
-            }
-        }
-        // Stop cancels while holding send_mutex, but joins outside it. Keep the
-        // OVERLAPPED and event alive until cancellation has actually completed.
-        if (!ok && error == ERROR_IO_PENDING)
-            ok = GetOverlappedResult(pipe, &overlapped, &got, TRUE);
-        CloseHandle(overlapped.hEvent);
-        if (!ok || !got) return false;
-        bytes += got; size -= got;
-    }
-    return true;
-}
-
 void ShellClient::ReaderThread() {
     while (running_.load()) {
-        HANDLE pipe;
+        std::shared_ptr<Connection> connection;
         {
             std::lock_guard<std::mutex> lock(send_mutex_);
-            if (!EnsureConnected()) {
-                // Child won't start: back off and retry while running.
-                pipe = INVALID_HANDLE_VALUE;
-            } else {
-                pipe = pipe_;
-            }
+            if (EnsureConnected()) connection = CurrentConnection();
         }
-        if (pipe == INVALID_HANDLE_VALUE) {
+        if (!connection) {
             for (int i = 0; i < 30 && running_.load(); ++i) Sleep(50);
             continue;
         }
 
         while (running_.load()) {
             MsgHeader h{};
-            if (!ReadFull(pipe, &h, sizeof(h), send_mutex_, running_)) break;
+            PipeIoOptions options;
+            options.cancel_event = connection->cancel;
+            // Idle is unbounded, but a peer cannot hold a half-frame forever.
+            if (!PipeRead(connection->pipe, &h, 1, options)) break;
+            options.deadline = GetTickCount64() + 5000;
+            if (!PipeRead(connection->pipe, reinterpret_cast<uint8_t*>(&h) + 1,
+                          sizeof(h) - 1, options)) break;
             if (h.magic != kMagic || h.payload_size > kMaxPayload) break;
             std::vector<uint8_t> payload(h.payload_size);
-            if (h.payload_size && !ReadFull(pipe, payload.data(), h.payload_size, send_mutex_, running_)) break;
+            if (before_frame_body_) before_frame_body_();
+            if (h.payload_size && !PipeRead(connection->pipe, payload.data(), h.payload_size, options)) break;
 
             PayloadReader r(payload.data(), payload.size());
             if (h.type == RSP_PROGRESS) {
@@ -555,48 +547,50 @@ void ShellClient::ReaderThread() {
         }
 
         if (!running_.load()) break;
-        HandleDisconnect();
+        HandleDisconnect(connection);
     }
 }
 
 // Only read-only requests may be replayed after losing a host instance.
-void ShellClient::HandleDisconnect() {
+void ShellClient::HandleDisconnect(const std::shared_ptr<Connection>& expected) {
+    if (expected) SetEvent(expected->cancel);
     std::vector<Pending> retry;
     std::vector<Pending> failed;
+    std::vector<Pending> unavailable;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
-        if (pipe_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(pipe_);
-            pipe_ = INVALID_HANDLE_VALUE;
-        }
-        KillChild();
-    }
-    {
-        std::lock_guard<std::mutex> lock(pending_mutex_);
-        for (auto& [id, p] : pending_) {
-            if (!CanReplay(p.type) || p.retried) failed.push_back(std::move(p));
-            else { p.retried = true; retry.push_back(std::move(p)); }
-        }
-        pending_.clear();
-    }
-    for (auto& p : failed)
-        FireRequestDone(p.type, p.id, DisconnectResult(p.type), false, DisconnectMessage(p.type));
-    for (auto& p : retry) {
-        const uint32_t id = p.id;
-        bool sent = false;
+        // A sender may already have retired the connection read by this reader.
+        // It must not tear down the replacement or consume its pending requests.
+        if (expected && (CurrentConnection() != expected || !running_.load())) return;
+        RetireConnection();
         {
-            std::lock_guard<std::mutex> lock(send_mutex_);
-            if (EnsureConnected()) {
-                std::lock_guard<std::mutex> pending_lock(pending_mutex_);
-                pending_.emplace(id, p);
-                sent = SendFrame(p.type, id, p.payload);
-                if (!sent) pending_.erase(id);
+            std::lock_guard pending_lock(pending_mutex_);
+            for (auto& [id, p] : pending_) {
+                if (!CanReplay(p.type) || p.retried) failed.push_back(std::move(p));
+                else { p.retried = true; retry.push_back(std::move(p)); }
             }
+            pending_.clear();
         }
-        if (!sent) {
-            FireRequestDone(p.type, id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false, UnreachableMessage());
+        for (auto& p : retry) {
+            bool sent = false;
+            if (EnsureConnected()) {
+                {
+                    std::lock_guard pending_lock(pending_mutex_);
+                    pending_.emplace(p.id, p);
+                }
+                sent = SendFrame(p.type, p.id, p.payload);
+                if (!sent) {
+                    std::lock_guard pending_lock(pending_mutex_);
+                    pending_.erase(p.id);
+                }
+            }
+            if (!sent) unavailable.push_back(std::move(p));
         }
     }
+    for (const auto& p : failed)
+        FireRequestDone(p.type, p.id, DisconnectResult(p.type), false, DisconnectMessage(p.type));
+    for (const auto& p : unavailable)
+        FireRequestDone(p.type, p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false, UnreachableMessage());
 }
 
 } // namespace pulse::ipc

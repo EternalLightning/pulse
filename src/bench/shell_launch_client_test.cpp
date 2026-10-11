@@ -101,6 +101,12 @@ public:
         return true;
     }
     HANDLE ReleaseClient() { return client_.release(); }
+    void DropPeer() { server_.reset(INVALID_HANDLE_VALUE); }
+    bool ReadHeader(MsgHeader& header) {
+        PipeIoOptions options;
+        options.pending_timeout_ms = kDeadlineMs;
+        return PipeRead(server_.get(), &header, sizeof(header), options);
+    }
     bool ReadRequest(uint32_t type, uint32_t id) {
         PipeIoOptions options;
         options.pending_timeout_ms = kDeadlineMs;
@@ -110,6 +116,11 @@ public:
         std::vector<uint8_t> payload(header.payload_size);
         return PipeRead(server_.get(), payload.data(), header.payload_size, options) &&
             header.type == type && header.request_id == id;
+    }
+    bool WriteRaw(const void* data, DWORD size) {
+        PipeIoOptions options;
+        options.deadline = GetTickCount64() + kDeadlineMs;
+        return PipeWrite(server_.get(), data, size, options);
     }
     bool Respond(uint32_t type, uint32_t id, HRESULT hr = S_OK, const std::wstring& error = {}) {
         PayloadWriter writer;
@@ -147,9 +158,9 @@ public:
         };
         return callbacks;
     }
-    bool Wait(size_t count) {
+    bool Wait(size_t count, DWORD timeout = kDeadlineMs) {
         std::unique_lock lock(mutex_);
-        return changed_.wait_for(lock, std::chrono::milliseconds(kDeadlineMs),
+        return changed_.wait_for(lock, std::chrono::milliseconds(timeout),
             [&] { return events_.size() >= count; });
     }
     std::vector<Completion> Snapshot() {
@@ -178,6 +189,121 @@ ShellLaunchRequest LaunchRequest() {
 
 namespace pulse::ipc {
 struct ShellLaunchClientTestProbe {
+    static void Backpressure() {
+        for (unsigned action = 0; action != 3; ++action) {
+            Recorder recorder;
+            PipePair pair;
+            ShellClient client;
+            Check(pair.Connect(), "connect live non-reading peer");
+            const auto endpoint = pair.ReleaseClient();
+            if (endpoint == INVALID_HANDLE_VALUE) return;
+            Prepare(client, endpoint, recorder);
+            Read(client);
+            Handle writer_done(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            Handle action_done(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            uint32_t id = 0;
+            std::thread writer([&] {
+                client.Submit(REQ_NEW_FILE, std::vector<uint8_t>(1024 * 1024),
+                    [&](uint32_t assigned) { id = assigned; });
+                SetEvent(writer_done.get());
+            });
+            MsgHeader header;
+            const bool blocked = pair.ReadHeader(header) && header.type == REQ_NEW_FILE &&
+                WaitForSingleObject(writer_done.get(), 100) == WAIT_TIMEOUT;
+            Check(blocked, "large frame blocks while peer remains alive without reading body");
+            std::thread action_thread([&] {
+                if (action == 0) client.Stop();
+                else if (action == 1) client.Cancel(header.request_id);
+                else client.Abort(header.request_id);
+                SetEvent(action_done.get());
+            });
+            const bool bounded = WaitForSingleObject(action_done.get(), 1000) == WAIT_OBJECT_0;
+            Check(bounded, action == 0 ? "Stop interrupts blocked submission without waiting for peer" :
+                action == 1 ? "Cancel interrupts blocked submission without waiting for peer" :
+                              "Abort interrupts blocked submission without waiting for peer");
+            if (!bounded) pair.DropPeer();
+            action_thread.join();
+            Check(WaitForSingleObject(writer_done.get(), 2000) == WAIT_OBJECT_0,
+                "cancelled write reclaims OVERLAPPED and returns within deadline");
+            if (WaitForSingleObject(writer_done.get(), 0) != WAIT_OBJECT_0) pair.DropPeer();
+            writer.join();
+            client.Stop();
+            const auto completions = recorder.Snapshot();
+            Check(completions.size() == 1 && completions[0].id == id && Empty(client),
+                "backpressure request receives exactly one terminal completion");
+        }
+    }
+    static void FrameLiveness() {
+        for (unsigned mode = 0; mode != 3; ++mode) {
+            Recorder recorder;
+            PipePair pair;
+            ShellClient client;
+            Check(pair.Connect(), "connect isolated Shell half-frame fixture");
+            const auto endpoint = pair.ReleaseClient();
+            if (endpoint == INVALID_HANDLE_VALUE) return;
+            Prepare(client, endpoint, recorder);
+            AddPending(client, REQ_NEW_FILE, 77);
+            Handle body_gate(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            Handle release_body(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            Handle stopped(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            if (mode == 0) client.before_frame_body_ = [&] {
+                SetEvent(body_gate.get());
+                WaitForSingleObject(release_body.get(), INFINITE);
+            };
+            const auto connection = client.CurrentConnection();
+            Read(client);
+            MsgHeader header;
+            header.type = RSP_DONE;
+            header.request_id = 77;
+            header.payload_size = 12;
+            const auto start = GetTickCount64();
+            Check(pair.WriteRaw(&header, mode == 1 ? 1 : sizeof(header)),
+                "peer supplies partial Shell frame and remains alive");
+            if (mode == 0) {
+                const bool gated = WaitForSingleObject(body_gate.get(), 1000) == WAIT_OBJECT_0;
+                Check(gated, "Shell reaches deterministic gap before body admission");
+                std::thread stop([&] { client.Stop(); SetEvent(stopped.get()); });
+                const bool signalled = WaitForSingleObject(connection->cancel, 1000) == WAIT_OBJECT_0;
+                SetEvent(release_body.get());
+                const bool bounded = WaitForSingleObject(stopped.get(), 1000) == WAIT_OBJECT_0;
+                Check(signalled && bounded, "Shell Stop forbids body I/O after durable cancellation");
+                if (!bounded) pair.DropPeer();
+                stop.join();
+            } else {
+                const bool terminal = recorder.Wait(1, 6500);
+                const auto elapsed = GetTickCount64() - start;
+                Check(terminal && elapsed >= 4500 && elapsed < 6500,
+                    mode == 1 ? "Shell partial header expires under whole-frame budget" :
+                                "Shell complete header does not grant unlimited body wait");
+                client.Stop();
+            }
+            const auto events = recorder.Snapshot();
+            Check(events.size() == 1 && events[0].id == 77 && Empty(client) && !client.reader_.joinable(),
+                "Shell half-frame reclaims reader and completes request exactly once");
+        }
+    }
+    static void RetiredStream() {
+        Recorder recorder;
+        PipePair pair;
+        ShellClient client;
+        Check(pair.Connect(), "connect isolated retired Shell stream fixture");
+        const auto endpoint = pair.ReleaseClient();
+        if (endpoint == INVALID_HANDLE_VALUE) return;
+        Prepare(client, endpoint, recorder);
+        const auto old = client.CurrentConnection();
+        SetEvent(old->cancel);
+        bool connected = false;
+        {
+            std::lock_guard lock(client.send_mutex_);
+            connected = client.EnsureConnected();
+        }
+        Check(!connected && !client.CurrentConnection() && !client.child_started_,
+            "a cancelled Shell stream is retired before attempting a fresh connection");
+        Check(GetFileType(old->pipe) == FILE_TYPE_PIPE &&
+            WaitForSingleObject(old->cancel, 0) == WAIT_OBJECT_0,
+            "retired Shell connection stays owned until active users release it");
+        client.Stop();
+    }
     static void InteractionReplyRouting() {
         Recorder recorder;
         PipePair pair;
@@ -216,7 +342,7 @@ struct ShellLaunchClientTestProbe {
     }
     static void Prepare(ShellClient& client, HANDLE pipe, Recorder& recorder) {
         client.cb_ = recorder.Callbacks();
-        client.pipe_ = pipe;
+        client.connection_ = std::make_shared<ShellClient::Connection>(pipe);
         // Suppress real helper creation even when an incorrect replay branch is entered.
         client.last_spawn_try_ = GetTickCount64();
         client.running_.store(true);
@@ -248,7 +374,7 @@ struct ShellLaunchClientTestProbe {
             !events[0].cancelled && !events[0].error.empty(),
             "failed launch write completes once through launch_done with unknown outcome");
         Check(client.last_spawn_try_ == spawn_before && !client.child_started_ &&
-            client.pipe_ == INVALID_HANDLE_VALUE && Empty(client),
+            !client.CurrentConnection() && Empty(client),
             "failed launch submission leaves no replay or child restart state");
         client.Stop();
     }
@@ -327,8 +453,8 @@ struct ShellLaunchClientTestProbe {
         const uint32_t stale = client.Launch(LaunchRequest());
         Check(first.ReadRequest(REQ_SHELL_LAUNCH, stale), "leave one dispatched launch pending at Stop");
         client.Stop();
-        Check(Empty(client) && !client.reader_.joinable() && client.pipe_ == INVALID_HANDLE_VALUE &&
-            recorder.Snapshot().size() == 4, "Stop cancels reader and clears pending without reporting stale completion");
+        Check(Empty(client) && !client.reader_.joinable() && !client.CurrentConnection() &&
+            recorder.Snapshot().size() == 5, "Stop cancels reader and completes pending launch exactly once");
         const bool second_connected = second.Connect();
         Check(second_connected, "connect a fresh fixture for restarted reader lifetime");
         if (!second_connected) return;
@@ -342,18 +468,24 @@ struct ShellLaunchClientTestProbe {
         Read(client);
         const bool restarted = second.Respond(RSP_SHELL_LAUNCH_DONE, stale) &&
             second.Respond(RSP_SHELL_LAUNCH_DONE, fresh) && second.Respond(RSP_DONE, barrier);
-        Check(restarted && recorder.Wait(6), "new reader accepts fresh completions within deadline");
+        Check(restarted && recorder.Wait(7), "new reader accepts fresh completions within deadline");
         client.Stop();
         const auto after = recorder.Snapshot();
-        Check(fresh != stale && after.size() == 6 && after[4].id == fresh && after[4].launch &&
-            after[5].id == barrier && !after[5].launch && Empty(client),
+        Check(fresh != stale && after.size() == 7 && after[5].id == fresh && after[5].launch &&
+            after[6].id == barrier && !after[6].launch && Empty(client),
             "old completion cannot consume a new lifetime request or invoke a stale callback");
     }
 };
 }
 
-int main() {
+int main(int argc, char** argv) {
     std::cout << std::unitbuf;
+    if (argc == 2 && std::string(argv[1]) == "--transport-liveness") {
+        pulse::ipc::ShellLaunchClientTestProbe::Backpressure();
+        pulse::ipc::ShellLaunchClientTestProbe::FrameLiveness();
+        pulse::ipc::ShellLaunchClientTestProbe::RetiredStream();
+        return failures ? 1 : 0;
+    }
     pulse::ipc::ShellLaunchClientTestProbe::FailedSubmission();
     pulse::ipc::ShellLaunchClientTestProbe::DisconnectPolicy();
     pulse::ipc::ShellLaunchClientTestProbe::TransportRouting();

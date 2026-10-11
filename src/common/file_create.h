@@ -30,7 +30,7 @@ inline HANDLE CreateDirectoryHandle(const std::wstring& path, bool reparse = fal
     constexpr ULONG directory_file = 0x00000001;
     constexpr ULONG synchronous = 0x00000020;
     constexpr ULONG open_reparse = 0x00200000;
-    const ACCESS_MASK access = FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE |
+    const ACCESS_MASK access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE |
         (reparse ? GENERIC_WRITE | DELETE : 0);
     const NTSTATUS result = create(&handle, access, &attributes, &status, nullptr, FILE_ATTRIBUTE_DIRECTORY,
         FILE_SHARE_READ, create_new, directory_file | synchronous | open_reparse, nullptr, 0);

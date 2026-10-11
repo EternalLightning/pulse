@@ -1,4 +1,5 @@
 #include "user_storage.h"
+#include "localization.h"
 #include "json_utils.h"
 #include "utf8_file.h"
 #include <shlobj.h>
@@ -62,7 +63,7 @@ bool NoReparse(const std::wstring& path, std::wstring& error) {
     for (fs::path current(path); !current.empty(); current = current.parent_path()) {
         const DWORD attrs = GetFileAttributesW(current.c_str());
         if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
-            error = L"目录不能包含符号链接或联接点。"; return false;
+            error = l10n::Get(l10n::StringId::StorageReparseNotAllowed); return false;
         }
         if (current == current.parent_path()) break;
     }
@@ -107,7 +108,7 @@ Locator Read(bool allow_import = true) {
     return result;
 }
 bool Save(const Locator& value, std::wstring& error) {
-    if (DefaultRoot().empty()) { error = L"无法确定默认存储目录。"; return false; }
+    if (DefaultRoot().empty()) { error = l10n::Get(l10n::StringId::StorageDefaultUnavailable); return false; }
     const wchar_t* keys[] = {L"configuration", L"index", L"pending_configuration", L"pending_index", L"configuration_error", L"index_error"};
     const std::wstring* fields[] = {&value.active[0], &value.active[1], &value.pending[0], &value.pending[1], &value.error[0], &value.error[1]};
     std::wstring text = L"{\n";
@@ -117,7 +118,7 @@ bool Save(const Locator& value, std::wstring& error) {
     }
     const auto key = LocatorKey();
     const bool saved = key.empty() ? WriteUtf8FileAtomic(Anchor(), text) : WriteRegistryLocator(key, text);
-    if (!saved) { error = L"无法保存存储位置设置（系统错误 " + std::to_wstring(GetLastError()) + L"）。"; return false; }
+    if (!saved) { error = l10n::Format(l10n::StringId::StorageSaveFailedFormat, GetLastError()); return false; }
     cache = value; loaded = true; return true;
 }
 void LoadCache() { if (!loaded) { Lock disk; cache = Read(static_cast<bool>(disk)); loaded = true; } }
@@ -127,26 +128,26 @@ std::wstring Root(const Locator& value, size_t slot) {
 bool Validate(const Locator& value, const std::wstring& target, std::wstring& error) {
     if (target.empty() || fs::path(target) == fs::path(target).root_path() ||
         target.rfind(L"\\\\?", 0) == 0 || target.rfind(L"\\\\.", 0) == 0) {
-        error = L"请选择完整的独立文件夹路径，不能使用磁盘根目录。"; return false;
+        error = l10n::Get(l10n::StringId::StorageInvalidTarget); return false;
     }
     for (size_t slot = 0; slot < 2; ++slot) {
         const auto active = Root(value, slot);
         if (Within(target, active) || Within(active, target)) {
-            error = L"目标目录不能与当前配置或索引目录重叠。"; return false;
+            error = l10n::Get(l10n::StringId::StorageActiveOverlap); return false;
         }
         if (!value.pending[slot].empty() && Same(target, value.pending[slot])) continue;
         if (!value.pending[slot].empty() && (Within(target, value.pending[slot]) || Within(value.pending[slot], target))) {
-            error = L"目标目录不能与待迁移目录重叠。"; return false;
+            error = l10n::Get(l10n::StringId::StoragePendingOverlap); return false;
         }
     }
     if (!NoReparse(target, error)) return false;
     std::error_code ec;
     fs::create_directories(target, ec);
-    if (ec || !fs::is_empty(target, ec) || ec) { error = L"目标目录必须为空且可写。"; return false; }
+    if (ec || !fs::is_empty(target, ec) || ec) { error = l10n::Get(l10n::StringId::StorageTargetNotEmptyWritable); return false; }
     const auto probe = target + L"\\.pulse-storage-probe";
     HANDLE file = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                                FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-    if (file == INVALID_HANDLE_VALUE) { error = L"无法写入目标目录。"; return false; }
+    if (file == INVALID_HANDLE_VALUE) { error = l10n::Get(l10n::StringId::StorageTargetWriteFailed); return false; }
     CloseHandle(file); return true;
 }
 struct File {
@@ -197,27 +198,27 @@ std::wstring LastError(Kind kind) { std::lock_guard lock(gate); LoadCache(); ret
 void Refresh() { std::lock_guard lock(gate); Lock disk; cache = Read(static_cast<bool>(disk)); loaded = true; }
 bool Schedule(Kind kind, const std::wstring& requested, std::wstring& error) {
     std::lock_guard lock(gate); error.clear(); Lock disk;
-    if (!disk) { error = L"存储位置设置正被其他进程使用。"; return false; }
+    if (!disk) { error = l10n::Get(l10n::StringId::StorageBusy); return false; }
     auto value = Read(); const auto slot = Slot(kind); const auto target = Normalize(requested);
     if (Same(target, Root(value, slot))) { value.pending[slot].clear(); value.error[slot].clear(); return Save(value, error); }
     if (!Validate(value, target, error)) return false;
     if (!value.pending[1 - slot].empty() && Same(target, value.pending[1 - slot])) {
-        error = L"配置和索引必须使用不同目录。"; return false;
+        error = l10n::Get(l10n::StringId::StorageSeparateDirectories); return false;
     }
     value.pending[slot] = target; value.error[slot].clear(); return Save(value, error);
 }
 bool Commit(Kind kind, const std::wstring& target, std::wstring& error) {
     std::lock_guard lock(gate); Lock disk;
-    if (!disk) { error = L"无法锁定存储位置设置。"; return false; }
+    if (!disk) { error = l10n::Get(l10n::StringId::StorageLockFailed); return false; }
     auto value = Read(); const auto slot = Slot(kind);
     const auto normalized = Normalize(target);
-    if (normalized.empty() || !Same(value.pending[slot], normalized)) { error = L"迁移请求已更改，未切换存储位置。"; return false; }
+    if (normalized.empty() || !Same(value.pending[slot], normalized)) { error = l10n::Get(l10n::StringId::StorageRequestChanged); return false; }
     if (!NoReparse(normalized, error)) return false;
     value.active[slot] = target; value.pending[slot].clear(); value.error[slot].clear(); return Save(value, error);
 }
 bool ClearPending(Kind kind, std::wstring& error) {
     std::lock_guard lock(gate); Lock disk;
-    if (!disk) { error = L"无法锁定存储位置设置。"; return false; }
+    if (!disk) { error = l10n::Get(l10n::StringId::StorageLockFailed); return false; }
     auto value = Read(); value.pending[Slot(kind)].clear(); value.error[Slot(kind)].clear(); return Save(value, error);
 }
 void RecordError(Kind kind, const std::wstring& error) {
@@ -226,7 +227,7 @@ void RecordError(Kind kind, const std::wstring& error) {
 }
 bool ApplyConfiguration(std::wstring& error) {
     std::lock_guard lock(gate); error.clear(); Lock disk;
-    if (!disk) { error = L"无法锁定配置迁移设置。"; return false; }
+    if (!disk) { error = l10n::Get(l10n::StringId::StorageMigrationLockFailed); return false; }
     auto value = Read(); cache = value; loaded = true;
     const auto target = value.pending[0]; if (target.empty()) return true;
     const auto source = Root(value, 0);
@@ -251,27 +252,27 @@ bool ApplyConfiguration(std::wstring& error) {
             const auto name = it->path().filename().wstring();
             if (name.rfind(L"wallpaper.", 0) == 0) inputs.push_back(it->path());
         }
-        if (ec) { error = L"无法读取原配置目录。"; return fail(); }
+        if (ec) { error = l10n::Get(l10n::StringId::StorageReadSourceFailed); return fail(); }
     }
     for (const auto& input : inputs) {
         const DWORD attrs = GetFileAttributesW(input.c_str());
         if (attrs == INVALID_FILE_ATTRIBUTES) {
             if (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND) continue;
-            error = L"无法读取原配置文件。"; return fail();
+            error = l10n::Get(l10n::StringId::StorageReadFileFailed); return fail();
         }
         if ((attrs & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-            error = L"配置文件不能是目录、符号链接或联接点。"; return fail();
+            error = l10n::Get(l10n::StringId::StoragePlainFileRequired); return fail();
         }
         if (!NoReparse(input.wstring(), error)) return fail();
         const auto output_name = input.filename() == L"content-v1.sqlite.config" ?
             fs::path(L"content-index.config") : input.filename();
         const auto output = fs::path(target) / output_name;
-        if (!CopyVerified(input, output, copied)) { error = L"无法复制或验证配置文件，原配置已保留。"; return fail(); }
+        if (!CopyVerified(input, output, copied)) { error = l10n::Get(l10n::StringId::StorageCopyVerifyFailed); return fail(); }
     }
     const auto app = target + L"\\app.json";
     if (GetFileAttributesW(app.c_str()) != INVALID_FILE_ATTRIBUTES) {
         std::wstring text;
-        if (!ReadUtf8File(app, text)) { error = L"无法读取已复制的应用配置。"; return fail(); }
+        if (!ReadUtf8File(app, text)) { error = l10n::Get(l10n::StringId::StorageCopiedAppReadFailed); return fail(); }
         const auto wallpaper = json::ExtractString(text, L"background_image");
         if (!wallpaper.empty() && Same(fs::path(wallpaper).parent_path().wstring(), source) &&
             fs::path(wallpaper).filename().wstring().rfind(L"wallpaper.", 0) == 0) {
@@ -281,7 +282,7 @@ bool ApplyConfiguration(std::wstring& error) {
                 std::wstring replacement = L"\"";
                 json::Escape((fs::path(target) / fs::path(wallpaper).filename()).wstring(), replacement);
                 replacement += L'"'; text.replace(begin, end - begin, replacement);
-                if (!WriteUtf8FileAtomic(app, text)) { error = L"无法更新壁纸位置。"; return fail(); }
+                if (!WriteUtf8FileAtomic(app, text)) { error = l10n::Get(l10n::StringId::StorageWallpaperUpdateFailed); return fail(); }
             }
         }
     }
@@ -290,7 +291,7 @@ bool ApplyConfiguration(std::wstring& error) {
     if (!Save(committed, error)) return fail();
     return true;
     } catch (const std::exception&) {
-        error = L"配置迁移失败，原配置已保留。"; return fail();
+        error = l10n::Get(l10n::StringId::StorageMigrationFailed); return fail();
     }
 }
 }

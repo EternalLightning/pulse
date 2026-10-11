@@ -63,7 +63,6 @@ int wmain() {
         tab.scroll_y = 123.0f;
         tab.scroll_x = 45.0f;
         tab.filter_text = L"keep";
-        tab.order_held = true;
         tab.virtual_title = L"Current location";
         tab.SetBannerTitle(app::BannerType::Other, L"keep banner");
         tab.pending_generation = 42;
@@ -76,7 +75,7 @@ int wmain() {
         check(tab.view_generation == generation && tab.pending_generation == 42 && !tab.loading,
             "repeated current breadcrumb does not restart a view or its pending load");
         check(tab.selected_index == 1 && tab.selected.contains(1) && tab.scroll_y == 123.0f &&
-              tab.scroll_x == 45.0f && tab.filter_text == L"keep" && tab.order_held &&
+              tab.scroll_x == 45.0f && tab.filter_text == L"keep" &&
               tab.virtual_title == L"Current location" && tab.banner_title == L"keep banner",
             "repeated current breadcrumb preserves selection, scrolling and view state");
         check(tab.GoBack() == L"pulse:home" && tab.back_stack.empty(),

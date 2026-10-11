@@ -906,12 +906,22 @@ void StartCtxQuery(AppState& s, std::vector<std::wstring> paths,
         background, ext, (GetKeyState(VK_SHIFT) & 0x8000) != 0,
         ClipboardPath, [&s](const std::wstring& extension) {
             PrefetchStaticVerbs(s, extension);
-        });
+        }, ActiveTab(s) ? ActiveTab(s)->view_generation : 0);
+    PumpShellMenuMessages(s);
 }
 
-void MaybePrefetchHoverCtxMenu(AppState& s) {
-    if (s.context_menu.menu_open() || s.safeMode) return;
-    if (s.hoverRow < 0) return;
+void MaybePrefetchCtxMenu(AppState& s) {
+    if (s.context_menu.menu_open() || s.safeMode || GetForegroundWindow() != s.hwnd) return;
+    if (s.hoverRow < 0) {
+        const auto* tab = ActiveTab(s);
+        if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) ||
+            IsArchiveView(tab->current_path)) {
+            s.context_menu.Close();
+            return;
+        }
+        StartCtxQuery(s, {tab->current_path}, true, ipc::kBackgroundVerbKey);
+        return;
+    }
     const ULONGLONG now = GetTickCount64();
     if (s.ctxHoverSince == 0 || now - s.ctxHoverSince < 150) return;
     app::Pane* pane = s.hoverPaneIndex >= 0 ? PaneAtSlot(s, s.hoverPaneIndex) : s.pane;
@@ -919,8 +929,7 @@ void MaybePrefetchHoverCtxMenu(AppState& s) {
     if (!tab || !tab->snapshot || fs::IsVirtualPath(tab->current_path)) return;
     if (s.hoverRow >= tab->CountBound()) return;
     std::wstring path = EntryFullPath(*tab, s.hoverRow);
-    if (path.empty() || path == s.ctxHoverPrefetched) return;
-    s.ctxHoverPrefetched = path;
+    if (path.empty()) return;
     std::vector<std::wstring> paths;
     std::wstring ext;
     if (tab->IsSelected(s.hoverRow)) {
@@ -1076,7 +1085,23 @@ void ShowNewDropdown(AppState& s) {
     if (!EnsureMenu(s)) return;
     const auto anchor = s.renderer.NewCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
     ClientToScreen(s.hwnd, &pt);
-    int cmd = s.menu->TrackPopup(pt, app::BuildNewMenu());
+    if (tab->current_path.empty() || fs::IsVirtualPath(tab->current_path)) return;
+    if (s.safeMode) {
+        const int cmd = s.menu->TrackPopup(pt, app::BuildNewMenu());
+        if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
+        return;
+    }
+    StartCtxQuery(s, { tab->current_path }, true, ipc::kBackgroundVerbKey);
+    s.context_menu.SeedComItemsFromCache();
+    ui::FluentMenuItem create;
+    create.command = app::CmdNewMenu;
+    create.text = l10n::Get(l10n::StringId::New);
+    create.children = app::BuildNewMenu();
+    create.live_update = true;
+    s.context_menu.OpenMenu({ std::move(create) }, true);
+    const int cmd = s.menu->TrackPopup(pt, ExplorerMenu(s, s.context_menu.base_items()));
+    s.context_menu.CloseMenu();
+    if (HandleShellMenuCommand(s, cmd)) return;
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
 }
 

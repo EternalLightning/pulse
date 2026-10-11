@@ -52,6 +52,7 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
         row.command = e.command;
         row.text = e.text;
         row.enabled = e.enabled;
+        row.live_update = true;
         // Software-owned submenu: keep the hierarchy as a one-level flyout.
         for (const auto& c : e.children) {
             if (c.text.empty() || c.command == 0 || native_quick_access(c) ||
@@ -164,12 +165,15 @@ void ContextMenuController::StartQuery(
     std::vector<std::wstring> paths, bool background, std::wstring extension,
     bool extended,
     const std::function<std::wstring(const std::wstring&)>& normalize_path,
-    const std::function<void(const std::wstring&)>& prefetch_static) {
+    const std::function<void(const std::wstring&)>& prefetch_static,
+    uint64_t context_generation) {
     if (paths.empty()) return;
     if (normalize_path) {
         for (auto& path : paths) path = normalize_path(path);
     }
-    if (token_ != 0 && background_ == background && extended_ == extended && paths_ == paths) {
+    if (token_ != 0 && background_ == background && extended_ == extended && paths_ == paths &&
+        context_generation_ == context_generation &&
+        GetTickCount64() - query_started_at_ < ipc::kContextMenuSessionLifetimeMs) {
         if (prefetch_static) prefetch_static(extension);
         return;
     }
@@ -184,6 +188,7 @@ void ContextMenuController::StartQuery(
     extension_ = std::move(extension);
     if (background && extension_.empty()) extension_ = ipc::kBackgroundVerbKey;
     token_ = token;
+    context_generation_ = context_generation;
     com_ready_ = false;
     com_items_.clear();
     query_started_at_ = token == 0 ? 0 : GetTickCount64();
@@ -208,6 +213,7 @@ void ContextMenuController::Close() {
     static_verbs_.clear();
     extension_.clear();
     query_started_at_ = 0;
+    context_generation_ = 0;
     if (live && operations_.close) operations_.close(live);
 }
 
@@ -230,10 +236,34 @@ std::vector<ui::FluentMenuItem> ContextMenuController::BuildDisplay(
     ContextMenuPrefs& prefs, const std::vector<ui::FluentMenuItem>& base_items,
     bool& prefs_changed) const {
     std::vector<ui::FluentMenuItem> display = base_items;
-    AppendShellSection(display, ApplyExplorerPrefs(
-        prefs, ComposeEntries(prefs, prefs_changed)));
+    auto entries = ApplyExplorerPrefs(prefs, ComposeEntries(prefs, prefs_changed));
+    for (auto& row : display) {
+        if (row.command != CmdNewMenu) continue;
+        const size_t builtin_count = row.children.size();
+        for (auto it = entries.begin(); it != entries.end();) {
+            if (!ipc::IsNativeNewMenuHandler(it->clsid) || it->children.empty()) { ++it; continue; }
+            for (const auto& entry : it->children) {
+                if (!entry.command || ipc::IsPulseNewTemplateVerb(entry.verb)) continue;
+                ui::FluentMenuItem child;
+                child.command = entry.command;
+                child.text = entry.text;
+                child.enabled = entry.enabled;
+                row.children.push_back(std::move(child));
+            }
+            it = entries.erase(it);
+        }
+        if (row.children.size() > builtin_count && builtin_count)
+            row.children[builtin_count - 1].separator_after = true;
+    }
+    if (new_dropdown_ && !display.empty()) {
+        auto children = std::move(display.front().children);
+        for (auto& child : children) child.live_update = true;
+        return children;
+    }
+    AppendShellSection(display, entries);
     ui::FluentMenuItem manage;
     manage.command = CmdSettingsContextMenu;
+    manage.live_update = true;
     manage.text = pulse::l10n::Get(pulse::l10n::StringId::ManageContext);
     manage.glyph = L"\xE713";
     if (!display.empty()) display.back().separator_after = true;
@@ -291,7 +321,7 @@ bool ContextMenuController::ExecuteShellCommand(
         if (refresh_folder) refresh_folder();
         return true;
     }
-    Close();
+    if (!background_) Close();
     return false;
 }
 
@@ -325,12 +355,13 @@ bool ContextMenuController::CompleteStaticVerbs(const std::wstring& extension,
     static_pending_.erase(extension);
     static_seeded_.erase(extension);
     static_cache_[extension] = std::move(verbs);
-    if (extension_ != extension) return false;
+    if (extension_ != extension || menu_open_) return false;
     static_verbs_ = static_cache_[extension];
     return true;
 }
 
 void ContextMenuController::InvalidateCaches() {
+    Close();
     static_cache_.clear();
     static_seeded_.clear();
     com_cache_.clear();
@@ -480,7 +511,10 @@ const ops::ShellMenuItem* ContextMenuController::FindInvokableComItem(uint32_t i
     return live;
 }
 
-void ContextMenuController::OpenMenu(std::vector<ui::FluentMenuItem> base_items) {
+void ContextMenuController::OpenMenu(std::vector<ui::FluentMenuItem> base_items, bool new_dropdown) {
+    new_dropdown_ = new_dropdown;
+    if (const auto found = static_cache_.find(extension_); found != static_cache_.end())
+        static_verbs_ = found->second;
     base_items_ = std::move(base_items);
     menu_layout_com_items_ = com_items_;
     menu_open_ = true;

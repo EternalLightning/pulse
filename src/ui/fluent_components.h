@@ -2,6 +2,7 @@
 
 #include "ui_compositor.h"
 
+#include <d2d1svg.h>
 #include <array>
 #include <cstddef>
 #include <string_view>
@@ -39,8 +40,6 @@ enum class MenuPictogram {
     LayoutFour,
 };
 
-inline constexpr wchar_t kOmnibarHintBadge[] = L"\u547D\u4EE4";
-inline constexpr wchar_t kOmnibarHintKey[] = L"Ctrl+K";
 
 struct MotionSpec {
     float duration_ms = 0.0f;
@@ -420,9 +419,6 @@ public:
                                 bool drop_down = false) const;
     void DrawTag(const TagSpec& spec);
     float MeasureTagWidth(std::wstring_view text) const;
-    float OmnibarHintReservePx() const;
-    D2D1_RECT_F DrawOmnibarHints(const D2D1_RECT_F& field, bool skip_search_glyph = false);
-    D2D1_RECT_F ButtonGlyphRect(const D2D1_RECT_F& bounds, bool icon_only) const;
     void DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec);
     // Leading-icon slot of a section header (valid when its glyph is set).
     D2D1_RECT_F SidebarSectionHeaderIconRect(const D2D1_RECT_F& bounds) const;
@@ -482,6 +478,7 @@ private:
                            HorizontalAlignment alignment = HorizontalAlignment::Left);
     void DrawGlyphWithBrush(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                             BrushId brush);
+    bool DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
     void DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                              const D2D1_COLOR_F& color, IDWriteTextFormat* format);
     void DrawCheckMark(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
@@ -508,6 +505,8 @@ private:
     std::array<ComPtr<ID2D1SolidColorBrush>, static_cast<size_t>(BrushId::Count)> brushes_{};
     ComPtr<ID2D1SolidColorBrush> scratch_brush_;
     ComPtr<ID2D1StrokeStyle> round_stroke_;
+    ComPtr<ID2D1DeviceContext5> rename_svg_dc_;
+    std::array<ComPtr<ID2D1SvgDocument>, 3> rename_svgs_;
     ComPtr<IDWriteTextFormat> body_format_;
     ComPtr<IDWriteTextFormat> nav_format_;
     ComPtr<IDWriteTextFormat> caption_format_;

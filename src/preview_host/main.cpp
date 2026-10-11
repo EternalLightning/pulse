@@ -847,7 +847,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             if (!ok) break;
             ok = WriteString(pipe, property.label) && WriteString(pipe, property.value);
         }
-        if (ok && mapping) { unsigned char ack=0; ok=ipc::ReadAll(pipe,&ack,1); }
+        if (ok && view) { unsigned char ack=0; ok=ipc::ReadAll(pipe,&ack,1); }
         if (view) UnmapViewOfFile(view); if (mapping) CloseHandle(mapping);
         if (!ok) break;
     }

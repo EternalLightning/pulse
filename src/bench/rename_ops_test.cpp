@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
     cancel_batch = true;
     const auto before = ops.Status().completed_ops; ops.Submit(batch); Check(Wait(ops, before), "batch terminates");
     Check(Exact(root / L"first-new.txt") && Exact(root / L"second.txt") && Exact(root / L"third.txt") &&
-        ops.Status().phase == OpPhase::Failed && ops.Status().completed_items == 1, "cancel after first item leaves remaining files unchanged");
+        ops.Status().phase == OpPhase::Cancelled && ops.Status().completed_items == 1, "cancel after first item leaves remaining files unchanged with Cancelled terminal state");
     undo(); Check(Exact(root / L"first.txt"), "cancelled batch retains completed item undo");
     Check(Exact(root / L"second.txt") && Exact(root / L"third.txt"), "partial undo leaves unprocessed items unchanged");
     OpRequest invalid_count; invalid_count.type = OpType::Rename;

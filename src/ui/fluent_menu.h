@@ -42,6 +42,7 @@ struct FluentMenuItem {
     std::wstring shortcut;        // right-aligned caption, e.g. L"Ctrl+Shift+C"
     std::wstring badge_text;      // right-aligned Fluent badge (takes priority over shortcut)
     bool enabled = true;
+    bool live_update = false;     // Async section or flyout; may refresh its children in place.
     bool separator_after = false;
     bool has_swatch = false;
     bool checked = false;
@@ -80,6 +81,7 @@ public:
     std::wstring TooltipText(int i) const;
     // Copy command ids and enabled states when text/structure matches. No layout.
     bool PatchCommands(const std::vector<FluentMenuItem>& src);
+    bool ReplaceLiveItems(const std::vector<FluentMenuItem>& src);
     // Refresh one live command without moving rows or resizing an open popup.
     bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     // Content y (px) of row i's top edge.
@@ -127,12 +129,13 @@ public:
 
     bool IsOpen() const { return open_; }
     void Dismiss(); // immediate (no animation); safe anytime
+    void DismissForDeactivation(HWND activated);
     // Safe from the owner window while TrackPopup's modal loop is running
     // (e.g. async index hits arrived). No-op if the menu is closed.
     void RequestFilterRefresh();
     // Swap command ids while the menu is open if the visible structure matches.
-    // Never grows or shrinks an open menu (Explorer COM arriving late must not
-    // restyle the popup). Returns true when ids were patched.
+    // Stable built-in rows keep their identity; async sections and flyout children
+    // can refresh without closing the selected parent. Returns true on success.
     bool ReplaceItems(std::vector<FluentMenuItem> items);
     bool UpdateCommandState(int command, const std::wstring& text, bool enabled);
     void SetFilterPlaceholder(std::wstring text) { filter_placeholder_ = std::move(text); }
@@ -186,6 +189,8 @@ private:
                        float header_px, bool draw_filter_field, Surface& s);
     bool Render();                 // model_ -> dib_ (pixels), current hover state
     void Present(BYTE alpha, int y_offset_px);
+    void PresentCurrent();
+    void PositionSubmenu();
     // One-level flyout for FluentMenuItem::children.
     bool EnsureSubWindow();
     void OpenSubmenu(int row);
@@ -246,6 +251,7 @@ private:
     HFONT edit_font_ = nullptr;
     HBRUSH edit_brush_ = nullptr;
     int present_offset_ = 0;
+    BYTE present_alpha_ = 0;
     int hover_row_ = -1;
     int hover_swatch_ = -1;
     int max_visible_rows_ = 0;
