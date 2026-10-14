@@ -17,6 +17,31 @@ int wmain(int argc, wchar_t** argv) {
         PIDLIST_ABSOLUTE raw = nullptr;
         HRESULT hr = SHParseDisplayName(executable, nullptr, &raw, 0, nullptr);
         Pidl target(raw);
+        if (SUCCEEDED(hr)) {
+            auto lazy = std::make_shared<FolderContents>();
+            check(PrepareContents(target.get(), *lazy), "Prepare activation without enumerating siblings");
+            const auto lazy_site = Make<ImageOpenSite>(nullptr, lazy);
+            int selected_count = 0;
+            ComPtr<IShellItemArray> selection;
+            const HRESULT selection_hr = lazy_site->GetSelection(FALSE, &selection);
+            lazy_site->ItemCount(SVGIO_SELECTION, &selected_count);
+            check(SUCCEEDED(selection_hr) && selected_count == 1 && lazy->items.empty() &&
+                lazy->read_result == E_PENDING, "Selection requests do not load the folder view");
+            int count = 0;
+            const HRESULT loaded = lazy_site->ItemCount(SVGIO_ALLVIEW, &count);
+            int focus = -1;
+            lazy_site->GetFocusedItem(&focus);
+            PITEMID_CHILD focused_raw = nullptr;
+            const HRESULT focused_hr = lazy_site->Item(focus, &focused_raw);
+            Pidl focused_item(focused_raw);
+            check(SUCCEEDED(loaded) && count > 0 && SUCCEEDED(focused_hr) &&
+                lazy->MatchesSelected(focused_item.get()), "Lazy folder view preserves the selected image index");
+            const auto* snapshot = lazy->items.data();
+            int repeated_count = 0;
+            check(SUCCEEDED(lazy_site->ItemCount(SVGIO_ALLVIEW, &repeated_count)) &&
+                repeated_count == count && lazy->items.data() == snapshot,
+                "Repeated folder requests reuse the same snapshot");
+        }
         auto contents = std::make_shared<FolderContents>();
         if (SUCCEEDED(hr)) hr = ReadContents(target.get(), *contents, nullptr);
         check(SUCCEEDED(hr), "Load an isolated Shell folder model");

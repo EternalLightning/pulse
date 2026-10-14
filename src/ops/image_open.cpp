@@ -55,11 +55,34 @@ bool SameShellItem(IShellFolder* folder, PCUIDLIST_RELATIVE left, PCUIDLIST_RELA
 }
 
 struct ViewItem { Pidl pidl; SFGAOF attributes = 0; };
+struct FolderContents;
+HRESULT ReadContents(PCIDLIST_ABSOLUTE target, FolderContents& contents, HWND owner);
 struct FolderContents {
     std::shared_ptr<void> lifetime;
     Pidl folder, selected;
-    std::vector<ViewItem> items;
-    int focused = -1;
+    mutable std::vector<ViewItem> items;
+    mutable int focused = -1;
+    bool lazy = false;
+    mutable std::once_flag read_once;
+    mutable HRESULT read_result = E_PENDING;
+    HRESULT EnsureContents() const {
+        if (!lazy) return S_OK;
+        return ComCall([&]() -> HRESULT {
+            std::call_once(read_once, [&] {
+                read_result = ComCall([&]() -> HRESULT {
+                    Pidl target(ILCombine(folder.get(), selected.get()));
+                    if (!target) return E_OUTOFMEMORY;
+                    FolderContents loaded;
+                    const HRESULT hr = ReadContents(target.get(), loaded, nullptr);
+                    if (FAILED(hr)) return hr;
+                    items = std::move(loaded.items);
+                    focused = loaded.focused;
+                    return S_OK;
+                });
+            });
+            return read_result;
+        });
+    }
     // Bind on the calling apartment. No apartment-bound Shell objects are kept
     // in the free-threaded site if the handler retains it after activation.
     HRESULT Bind(IShellFolder** out) const {
@@ -90,6 +113,15 @@ struct FolderContents {
         return children;
     }
 };
+
+bool PrepareContents(PCIDLIST_ABSOLUTE target, FolderContents& contents) {
+    contents.folder.reset(ILCloneFull(target));
+    contents.selected.reset(ILClone(ILFindLastID(target)));
+    if (!contents.folder || !contents.selected ||
+        !ILRemoveLastID(contents.folder.get())) return false;
+    contents.lazy = true;
+    return true;
+}
 
 struct ViewerWindowIdentity {
     HWND window = nullptr;
@@ -286,6 +318,8 @@ public:
     HRESULT STDMETHODCALLTYPE Item(int index, PITEMID_CHILD* out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
+        const HRESULT ready = contents_->EnsureContents();
+        if (FAILED(ready)) return ready;
         if (index < 0 || static_cast<size_t>(index) >= contents_->items.size()) return E_INVALIDARG;
         *out = ILClone(contents_->items[static_cast<size_t>(index)].pidl.get());
         return *out ? S_OK : E_OUTOFMEMORY;
@@ -295,6 +329,10 @@ public:
         *out = 0;
         const UINT type = flags & SVGIO_TYPE_MASK;
         if (type != SVGIO_SELECTION && type != SVGIO_ALLVIEW && type != SVGIO_BACKGROUND) return E_INVALIDARG;
+        if (type != SVGIO_SELECTION) {
+            const HRESULT ready = contents_->EnsureContents();
+            if (FAILED(ready)) return ready;
+        }
         *out = type == SVGIO_SELECTION ? 1 : static_cast<int>(contents_->items.size());
         return S_OK;
     }
@@ -329,6 +367,8 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (!contents_->MatchesFolder(folder)) return E_INVALIDARG;
+        const HRESULT ready = contents_->EnsureContents();
+        if (FAILED(ready)) return ready;
         const HRESULT hr = ComCall([&]() -> HRESULT {
             std::vector<PCUITEMID_CHILD> children;
             for (const auto& item : contents_->items) {
@@ -344,6 +384,9 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetFocusedItem(int* out) override {
         if (!out) return E_POINTER;
+        *out = -1;
+        const HRESULT ready = contents_->EnsureContents();
+        if (FAILED(ready)) return ready;
         *out = contents_->focused;
         return *out >= 0 ? S_OK : E_FAIL;
     }
@@ -351,12 +394,17 @@ public:
     HRESULT STDMETHODCALLTYPE GetItem(int index, REFIID iid, void** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
+        const HRESULT ready = contents_->EnsureContents();
+        if (FAILED(ready)) return ready;
         if (index < 0 || static_cast<size_t>(index) >= contents_->items.size()) return E_INVALIDARG;
         return SHCreateItemWithParent(contents_->folder.get(), nullptr,
             contents_->items[static_cast<size_t>(index)].pidl.get(), iid, out);
     }
     HRESULT STDMETHODCALLTYPE GetSelectedItem(int start, int* out) override {
         if (!out) return E_POINTER;
+        *out = -1;
+        const HRESULT ready = contents_->EnsureContents();
+        if (FAILED(ready)) return ready;
         // iStart is inclusive; a search from zero must include the first image.
         *out = contents_->focused >= 0 && contents_->focused >= start ? contents_->focused : -1;
         return *out >= 0 ? S_OK : S_FALSE;
@@ -492,8 +540,9 @@ bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
         if (FAILED(hr)) return false;
         auto contents = std::make_shared<FolderContents>();
         contents->lifetime = std::move(lifetime);
-        hr = ReadContents(target.get(), *contents, owner);
-        if (FAILED(hr)) return false;
+        // Identity and selection are enough to activate the viewer. Enumerate
+        // siblings only if the handler requests the folder view, once per site.
+        if (!PrepareContents(target.get(), *contents)) return false;
         const auto site = Make<ImageOpenSite>(owner, contents);
         if (!site) return false;
         std::unique_ptr<ImageOpenSession::State> retained;
@@ -508,7 +557,9 @@ bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
         execute.lpIDList = target.get();
         execute.hInstApp = reinterpret_cast<HINSTANCE>(static_cast<IServiceProvider*>(site.Get()));
         execute.nShow = SW_SHOWNORMAL;
-        execute.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_IDLIST | SEE_MASK_FLAG_HINST_IS_SITE |
+        // Keep the folder-view site without forcing IContextMenu activation,
+        // which loads context-menu handlers before opening the default viewer.
+        execute.fMask = SEE_MASK_IDLIST | SEE_MASK_FLAG_HINST_IS_SITE |
             SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | (session ? SEE_MASK_NOCLOSEPROCESS : 0);
         const BOOL opened = ShellExecuteExW(&execute);
         if (opened && session) {
