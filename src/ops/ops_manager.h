@@ -26,6 +26,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <atomic>
 #include <optional>
@@ -186,7 +187,7 @@ using ShellMenuItem = pulse::ShellMenuItem;
 
 class OpsManager {
 public:
-    OpsManager() = default;
+    OpsManager();
     ~OpsManager();
 
     // notify is invoked from worker/IPC threads whenever status changes.
@@ -425,11 +426,9 @@ private:
     std::atomic<bool> lock_retry_cancel_{false};
     std::atomic<uint64_t> lock_retry_generation_{1};
     std::vector<RecoveryEntry> pending_recovery_;
-    std::wstring journal_path_;
-    std::vector<std::wstring> journal_paths_;
-    std::map<uint64_t, std::wstring> recovery_journal_sources_;
-    std::map<std::wstring, std::vector<std::wstring>> opaque_recovery_entries_;
-    std::set<std::wstring> opaque_journal_files_;
+    struct JournalState;
+    // Shell operation workers do not configure application recovery journals.
+    std::unique_ptr<JournalState> journal_;
     OpStatus status_;
     std::deque<UndoEntry> undo_;
     uint64_t undo_revision_ = 1;

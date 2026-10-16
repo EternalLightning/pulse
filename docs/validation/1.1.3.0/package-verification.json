@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-10-16T22:36:25.9833204+08:00",
+  "timestamp": "2026-10-16T22:54:58.1216897+08:00",
   "version": "1.1.3.0",
   "build_id": "20261016T113115Z-7CB90C40",
   "archive": "E:\\Projects\\pulse\\dist\\Pulse-1.1.3.0-portable-win-x64.zip",
-  "sha256": "A9F68712F368220D21F4A4212654313D19096E180FFB680155BA1C11CEB2047C",
-  "bytes": 12169995,
-  "payload_path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable",
+  "sha256": "3647D13CF6F640E69EC134F8F5FFD4B831927A03F03097C46538C5845D87A5A1",
+  "bytes": 12169851,
+  "payload_path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable",
   "files": 40,
   "zip_hashes_match": true,
   "versions": [

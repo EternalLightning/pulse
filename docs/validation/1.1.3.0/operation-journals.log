@@ -1,4 +1,6 @@
+[PASS] unconfigured Shell workers persist and discard without allocating recovery journals
 [PASS] new windows reserve unique journal paths
+[PASS] application windows allocate recovery state when their journal is configured
 [PASS] a newly reserved journal persists pending work while another empty window closes
 [PASS] create independent manager journals with colliding local sequences
 [PASS] each manager loads only its own recovery journal

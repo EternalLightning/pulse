@@ -587,44 +587,56 @@ bool ParseRecoveryEntry(const std::wstring& object, RecoveryEntry& entry) {
 
 } // namespace
 
+struct OpsManager::JournalState {
+    std::wstring path;
+    std::vector<std::wstring> paths;
+    std::map<uint64_t, std::wstring> recovery_sources;
+    std::map<std::wstring, std::vector<std::wstring>> opaque_entries;
+    std::set<std::wstring> opaque_files;
+};
+
+OpsManager::OpsManager() = default;
+
 OpsManager::~OpsManager() {
     Stop();
 }
 
 void OpsManager::SetJournalPath(std::wstring path) {
     if (running_) return;
-    journal_path_ = std::move(path);
-    journal_paths_.clear();
-    if (!journal_path_.empty()) journal_paths_.push_back(journal_path_);
+    if (!journal_) journal_ = std::make_unique<JournalState>();
+    journal_->path = std::move(path);
+    journal_->paths.clear();
+    if (!journal_->path.empty()) journal_->paths.push_back(journal_->path);
     LoadRecoveryJournal();
 }
 
 void OpsManager::SetJournalPaths(std::vector<std::wstring> paths) {
     if (running_) return;
-    journal_paths_.clear();
+    if (!journal_) journal_ = std::make_unique<JournalState>();
+    journal_->paths.clear();
     for (auto& path : paths) {
-        if (path.empty() || std::find(journal_paths_.begin(), journal_paths_.end(), path) != journal_paths_.end())
+        if (path.empty() || std::find(journal_->paths.begin(), journal_->paths.end(), path) != journal_->paths.end())
             continue;
-        journal_paths_.push_back(std::move(path));
+        journal_->paths.push_back(std::move(path));
     }
-    journal_path_ = journal_paths_.empty() ? std::wstring{} : journal_paths_.front();
+    journal_->path = journal_->paths.empty() ? std::wstring{} : journal_->paths.front();
     LoadRecoveryJournal();
 }
 
 void OpsManager::LoadRecoveryJournal() {
     pending_recovery_.clear();
-    recovery_journal_sources_.clear();
-    opaque_recovery_entries_.clear();
-    opaque_journal_files_.clear();
+    journal_->recovery_sources.clear();
+    journal_->opaque_entries.clear();
+    journal_->opaque_files.clear();
     next_seq_ = 1;
-    if (journal_paths_.empty() && !journal_path_.empty()) journal_paths_.push_back(journal_path_);
+    if (journal_->paths.empty() && !journal_->path.empty()) journal_->paths.push_back(journal_->path);
     std::set<uint64_t> used_sequences;
     uint64_t remapped_sequence = 1;
-    for (const auto& path : journal_paths_) {
+    for (const auto& path : journal_->paths) {
         std::wstring text;
         if (!ReadUtf8File(path, text)) {
             if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
-                opaque_journal_files_.insert(path);
+                journal_->opaque_files.insert(path);
             continue;
         }
         if (text.empty()) continue;
@@ -634,13 +646,13 @@ void OpsManager::LoadRecoveryJournal() {
             !entries_value || entries_value->kind != json::Kind::Array ||
             std::any_of(entries_value->children.begin(), entries_value->children.end(),
                 [](const json::Value& value) { return value.kind != json::Kind::Object; })) {
-            opaque_journal_files_.insert(path);
+            journal_->opaque_files.insert(path);
             continue;
         }
         for (const auto& object : json::ExtractObjectArray(doc, L"entries")) {
             RecoveryEntry entry;
             if (!ParseRecoveryEntry(object, entry)) {
-                opaque_recovery_entries_[path].push_back(object);
+                journal_->opaque_entries[path].push_back(object);
                 continue;
             }
             constexpr uint64_t kHighSequenceThreshold = UINT64_MAX / 2;
@@ -648,14 +660,14 @@ void OpsManager::LoadRecoveryJournal() {
                 while (remapped_sequence < kHighSequenceThreshold &&
                        used_sequences.contains(remapped_sequence)) ++remapped_sequence;
                 if (remapped_sequence >= kHighSequenceThreshold) {
-                    opaque_recovery_entries_[path].push_back(object);
+                    journal_->opaque_entries[path].push_back(object);
                     continue;
                 }
                 entry.sequence = remapped_sequence++;
             }
             used_sequences.insert(entry.sequence);
             next_seq_ = (std::max)(next_seq_, entry.sequence + 1);
-            recovery_journal_sources_.insert_or_assign(entry.sequence, path);
+            journal_->recovery_sources.insert_or_assign(entry.sequence, path);
             pending_recovery_.push_back(std::move(entry));
         }
     }
@@ -728,11 +740,15 @@ void OpsManager::DiscardRecovery() {
         pending_recovery_.clear();
         scheduled_recovery_.clear();
         std::erase_if(queue_, [](const QueueItem& item) { return item.recovery_sequence != 0; });
-        recovery_journal_sources_.clear();
-        opaque_recovery_entries_.clear();
-        opaque_journal_files_.clear();
+        if (journal_) {
+            journal_->recovery_sources.clear();
+            journal_->opaque_entries.clear();
+            journal_->opaque_files.clear();
+        }
     }
-    for (const auto& path : journal_paths_) DeleteFileW(path.c_str());
+    if (journal_) {
+        for (const auto& path : journal_->paths) DeleteFileW(path.c_str());
+    }
     cv_.notify_one();
 }
 
@@ -767,29 +783,29 @@ std::wstring OpsManager::JournalJsonLocked(const std::wstring& path) const {
         }
         out += L"}";
     };
-    if (path == journal_path_) {
+    if (path == journal_->path) {
         if (active_item_ && active_item_->recovery_sequence == 0) append(*active_item_, true);
         for (const auto& item : queue_)
             if (!IsDeleteOperation(item.req.type) && item.recovery_sequence == 0) append(item, false);
     }
     if (active_item_ && active_item_->recovery_sequence != 0) {
-        const auto source = recovery_journal_sources_.find(active_item_->recovery_sequence);
-        const std::wstring& source_path = source == recovery_journal_sources_.end()
-            ? journal_path_ : source->second;
+        const auto source = journal_->recovery_sources.find(active_item_->recovery_sequence);
+        const std::wstring& source_path = source == journal_->recovery_sources.end()
+            ? journal_->path : source->second;
         if (source_path == path) append(*active_item_, true);
     }
     for (const auto& recovery : pending_recovery_) {
         if (active_item_ && active_item_->recovery_sequence == recovery.sequence) continue;
-        const auto source = recovery_journal_sources_.find(recovery.sequence);
-        const std::wstring& source_path = source == recovery_journal_sources_.end()
-            ? journal_path_ : source->second;
+        const auto source = journal_->recovery_sources.find(recovery.sequence);
+        const std::wstring& source_path = source == journal_->recovery_sources.end()
+            ? journal_->path : source->second;
         if (source_path != path) continue;
         QueueItem item;
         item.seq = recovery.sequence; item.req = recovery.request;
         append(item, recovery.was_active, recovery.outcome_unknown);
     }
-    if (const auto opaque = opaque_recovery_entries_.find(path);
-        opaque != opaque_recovery_entries_.end()) {
+    if (const auto opaque = journal_->opaque_entries.find(path);
+        opaque != journal_->opaque_entries.end()) {
         for (const auto& object : opaque->second) {
             if (!first) out += L",";
             first = false;
@@ -801,31 +817,32 @@ std::wstring OpsManager::JournalJsonLocked(const std::wstring& path) const {
 }
 
 void OpsManager::PersistJournal() {
-    if (journal_paths_.empty() && !journal_path_.empty()) journal_paths_.push_back(journal_path_);
-    for (const auto& path : journal_paths_) {
+    if (!journal_) return;
+    if (journal_->paths.empty() && !journal_->path.empty()) journal_->paths.push_back(journal_->path);
+    for (const auto& path : journal_->paths) {
         std::wstring text;
         bool has_entries = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (opaque_journal_files_.contains(path)) continue;
-            const auto opaque = opaque_recovery_entries_.find(path);
-            has_entries = opaque != opaque_recovery_entries_.end() && !opaque->second.empty();
-            if (path == journal_path_) {
+            if (journal_->opaque_files.contains(path)) continue;
+            const auto opaque = journal_->opaque_entries.find(path);
+            has_entries = opaque != journal_->opaque_entries.end() && !opaque->second.empty();
+            if (path == journal_->path) {
                 has_entries = has_entries || (active_item_ && active_item_->recovery_sequence == 0) ||
                     std::any_of(queue_.begin(), queue_.end(), [](const QueueItem& item) {
                         return !IsDeleteOperation(item.req.type) && item.recovery_sequence == 0;
                     });
             }
             if (active_item_ && active_item_->recovery_sequence != 0) {
-                const auto source = recovery_journal_sources_.find(active_item_->recovery_sequence);
-                has_entries = has_entries || (source == recovery_journal_sources_.end()
-                    ? journal_path_ == path : source->second == path);
+                const auto source = journal_->recovery_sources.find(active_item_->recovery_sequence);
+                has_entries = has_entries || (source == journal_->recovery_sources.end()
+                    ? journal_->path == path : source->second == path);
             }
             has_entries = has_entries || std::any_of(pending_recovery_.begin(), pending_recovery_.end(),
                 [&](const RecoveryEntry& entry) {
-                    const auto source = recovery_journal_sources_.find(entry.sequence);
-                    return source == recovery_journal_sources_.end()
-                        ? journal_path_ == path : source->second == path;
+                    const auto source = journal_->recovery_sources.find(entry.sequence);
+                    return source == journal_->recovery_sources.end()
+                        ? journal_->path == path : source->second == path;
                 });
             if (has_entries) text = JournalJsonLocked(path);
         }

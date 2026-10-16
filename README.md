@@ -4,7 +4,7 @@
 
 Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.3.0，面向 Windows 10 和 Windows 11 x64。
 
-1.1.3.0 的 `Pulse.Shell.exe` 出现卡巴斯基启发式检测，原因待复核；当前仅提交源码和验证记录，暂不上传该版本程序包。详情见 [验证记录](docs/validation/1.1.3.0/review.md)。
+1.1.3.0 已调整 Shell 工作进程的恢复日志状态初始化，修复后产物及安装文件通过本机卡巴斯基扫描。告警对照构建、扫描结果和验证边界见 [验证记录](docs/validation/1.1.3.0/review.md)。
 
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 

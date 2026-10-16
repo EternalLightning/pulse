@@ -10,6 +10,7 @@ using namespace pulse;
 
 namespace pulse::ops {
 struct OperationJournalProbe {
+    static bool HasJournal(const OpsManager& manager) { return bool(manager.journal_); }
     static void Persist(OpsManager& manager) { manager.PersistJournal(); }
     static void QueueCopy(OpsManager& manager, const std::wstring& source) {
         OpsManager::QueueItem item;
@@ -79,6 +80,14 @@ int wmain() {
         return 2;
     }
 
+    ops::OpsManager shell_worker;
+    ops::OperationJournalProbe::QueueCopy(shell_worker, root + L"\\worker-source.txt");
+    ops::OperationJournalProbe::Persist(shell_worker);
+    shell_worker.DiscardRecovery();
+    Check(!ops::OperationJournalProbe::HasJournal(shell_worker) &&
+          shell_worker.PendingRecovery().entries.empty(),
+          L"unconfigured Shell workers persist and discard without allocating recovery journals");
+
     const auto allocated_directory = root + L"\\allocated";
     std::filesystem::create_directory(allocated_directory);
     const auto allocated_first = ops::AssignOperationJournalPaths(allocated_directory, false);
@@ -90,6 +99,9 @@ int wmain() {
     ops::OpsManager fresh_second;
     fresh_first.SetJournalPath(allocated_first.window_path);
     fresh_second.SetJournalPath(allocated_second.window_path);
+    Check(ops::OperationJournalProbe::HasJournal(fresh_first) &&
+          ops::OperationJournalProbe::HasJournal(fresh_second),
+          L"application windows allocate recovery state when their journal is configured");
     ops::OperationJournalProbe::QueueCopy(fresh_first, root + L"\\pending-source.txt");
     ops::OperationJournalProbe::Persist(fresh_first);
     ops::OperationJournalProbe::Persist(fresh_second);
