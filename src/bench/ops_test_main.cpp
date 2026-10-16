@@ -126,6 +126,44 @@ std::atomic<bool> g_pause_when_active{false};
 std::mutex g_status_mutex;
 std::vector<ops::OpStatus> g_status_history;
 
+int RunMultiwindowOpenWorkers() {
+    struct Gate {
+        std::atomic<unsigned> entered{0};
+        std::atomic<unsigned> returned{0};
+        std::atomic<bool> release{false};
+    };
+    auto gate = std::make_shared<Gate>();
+    std::vector<std::unique_ptr<ops::OpsManager>> windows;
+    for (unsigned i = 0; i < 5; ++i) {
+        auto window = std::make_unique<ops::OpsManager>();
+        window->Start([] {});
+        ops::TransferIntegrationProbe::GateOpenWorker(*window, [gate] {
+            ++gate->entered;
+            while (!gate->release.load()) Sleep(1);
+            ++gate->returned;
+        });
+        window->OpenWith(L"pulse-open-worker-gate");
+        windows.push_back(std::move(window));
+    }
+    auto deadline = GetTickCount64() + 3000;
+    while (gate->entered.load() < windows.size() && GetTickCount64() < deadline) Sleep(1);
+    Check(gate->entered.load() == windows.size(),
+          L"all five windows have a file-open worker while the other windows remain alive");
+    for (auto& window : windows) window->BeginShutdown();
+    const auto started = GetTickCount64();
+    for (auto& window : windows) window->Stop();
+    Check(GetTickCount64() - started < 2000,
+          L"closing five windows retires blocked file-open workers within the shutdown bound");
+    windows.clear();
+    gate->release.store(true);
+    deadline = GetTickCount64() + 3000;
+    while (gate->returned.load() != gate->entered.load() && GetTickCount64() < deadline) Sleep(1);
+    Check(gate->returned.load() == 5,
+          L"retired file-open workers finish safely after their window managers are destroyed");
+    wprintf(L"== multiwindow open workers: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
 bool MakePatternFile(const std::wstring& path, uint64_t bytes) {
     HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -1210,6 +1248,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
+        if (filter == L"open-workers") return RunMultiwindowOpenWorkers();
         if (filter == L"delete-progress") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunDeleteProgressRegressions(SandboxRoot() + L"-delete-progress-" +

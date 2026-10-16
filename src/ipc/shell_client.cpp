@@ -30,6 +30,59 @@ ShellClient& ShellClient::Instance() {
     return inst;
 }
 
+ShellClient::CallbackOwner::~CallbackOwner() {
+    client->ReleaseOwner(*this);
+}
+
+ShellClient::Owner ShellClient::Acquire(Callbacks cb) {
+    auto owner = std::make_shared<CallbackOwner>(this, std::move(cb));
+    std::lock_guard lock(owners_mutex_);
+    Start({});
+    ++owners_;
+    owner->attached = true;
+    return owner;
+}
+
+void ShellClient::Release(const Owner& owner) {
+    if (owner) ReleaseOwner(*owner);
+}
+
+void ShellClient::ReleaseOwner(CallbackOwner& owner) {
+    if (!owner.active.exchange(false)) return;
+    {
+        // Wait for an in-flight callback before its window state is destroyed.
+        std::lock_guard lock(owner.mutex);
+        owner.callbacks = {};
+    }
+    std::lock_guard lock(owners_mutex_);
+    if (owner.attached && --owners_ == 0) Stop();
+}
+
+void ShellClient::BindOwner(uint32_t id, const Owner& owner) {
+    if (!owner) return;
+    std::lock_guard lock(request_owners_mutex_);
+    request_owners_.emplace(id, owner);
+}
+
+void ShellClient::Dispatch(uint32_t id, bool terminal, const std::function<void(Callbacks&)>& invoke) {
+    std::weak_ptr<CallbackOwner> weak_owner;
+    bool scoped = false;
+    {
+        std::lock_guard lock(request_owners_mutex_);
+        if (const auto found = request_owners_.find(id); found != request_owners_.end()) {
+            scoped = true;
+            weak_owner = found->second;
+            if (terminal) request_owners_.erase(found);
+        }
+    }
+    if (!scoped) {
+        invoke(cb_);
+    } else if (const auto owner = weak_owner.lock()) {
+        std::lock_guard lock(owner->mutex);
+        if (owner->active.load()) invoke(owner->callbacks);
+    }
+}
+
 ShellClient::~ShellClient() {
     Stop();
 }
@@ -235,13 +288,14 @@ bool ShellClient::SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_
 }
 
 uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
-                             const std::function<void(uint32_t)>& before_send) {
-    if (!running_.load()) return 0;
+                             const std::function<void(uint32_t)>& before_send, const Owner& owner) {
+    if (!running_.load() || (owner && !owner->active.load())) return 0;
 
     Pending p;
     p.type = type;
     p.payload = payload;
     p.id = next_id_.fetch_add(1);
+    BindOwner(p.id, owner);
     if (before_send) before_send(p.id);
 
     bool sent = false;
@@ -266,12 +320,15 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
 }
 
 uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
-                                      bool recycle, HWND owner, const std::vector<FileIdentity>& expected_identities) {
-    if (!running_.load() || paths.empty() || token == 0) return 0;
+                                      bool recycle, HWND owner, const std::vector<FileIdentity>& expected_identities,
+                                      const Owner& callbacks) {
+    if (!running_.load() || paths.empty() || token == 0 ||
+        (callbacks && !callbacks->active.load())) return 0;
     if (!expected_identities.empty() && (expected_identities.size() != paths.size() ||
         std::any_of(expected_identities.begin(), expected_identities.end(), [](const auto& id) { return !id.Valid(); }))) return 0;
     Pending pending;
     pending.id = next_id_.fetch_add(1);
+    BindOwner(pending.id, callbacks);
     pending.type = recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE;
     pending.retried = true; // Never replay a destructive request on a new host.
     bool sent = false;
@@ -301,24 +358,24 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
     return pending.id;
 }
 
-uint32_t ShellClient::CreateFolder(const std::wstring& path) {
+uint32_t ShellClient::CreateFolder(const std::wstring& path, const Owner& owner) {
     PayloadWriter w;
     w.PutString(path);
-    return Submit(REQ_NEW_FOLDER, w.data());
+    return Submit(REQ_NEW_FOLDER, w.data(), {}, owner);
 }
 
-uint32_t ShellClient::CreateNewFile(const std::wstring& path) {
+uint32_t ShellClient::CreateNewFile(const std::wstring& path, const Owner& owner) {
     PayloadWriter w;
     w.PutString(path);
-    return Submit(REQ_NEW_FILE, w.data());
+    return Submit(REQ_NEW_FILE, w.data(), {}, owner);
 }
 
-uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply reply) {
+uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply reply, const Owner& owner) {
     return Submit(REQ_SHELL_LAUNCH, WriteShellLaunch(request),
         reply ? std::function<void(uint32_t)>([this, reply = std::move(reply)](uint32_t id) mutable {
             std::lock_guard lock(launch_reply_mutex_);
             launch_replies_.emplace(id, std::move(reply));
-        }) : std::function<void(uint32_t)>{});
+        }) : std::function<void(uint32_t)>{}, owner);
 }
 
 void ShellClient::Cancel(uint32_t id) {
@@ -353,7 +410,7 @@ void ShellClient::Abort(uint32_t id) {
 uint32_t ShellClient::QueryContextMenu(const std::vector<std::wstring>& paths,
                                        uint32_t owner_hwnd, bool background, bool extended,
                                         const std::vector<std::wstring>& disabled_clsids,
-                                        const std::function<void(uint32_t)>& before_send) {
+                                        const std::function<void(uint32_t)>& before_send, const Owner& owner) {
     PayloadWriter w;
     w.PutU32(owner_hwnd);
     uint32_t flags = 0;
@@ -362,18 +419,18 @@ uint32_t ShellClient::QueryContextMenu(const std::vector<std::wstring>& paths,
     w.PutU32(flags);
     w.PutStringArray(paths);
     w.PutStringArray(disabled_clsids);
-    return Submit(REQ_CTX_QUERY, w.data(), before_send);
+    return Submit(REQ_CTX_QUERY, w.data(), before_send, owner);
 }
 
 uint32_t ShellClient::InvokeContextMenu(uint32_t session_id, uint32_t item_id,
                                          const std::wstring& verb, const std::wstring& text,
-                                         const std::function<void(uint32_t)>& before_send) {
+                                         const std::function<void(uint32_t)>& before_send, const Owner& owner) {
     PayloadWriter w;
     w.PutU32(session_id);
     w.PutU32(item_id);
     w.PutString(verb);
     w.PutString(text);
-    return Submit(REQ_CTX_INVOKE, w.data(), before_send);
+    return Submit(REQ_CTX_INVOKE, w.data(), before_send, owner);
 }
 
 // Fire-and-forget like Cancel: no pending entry, no retry-on-restart (a fresh
@@ -386,6 +443,7 @@ void ShellClient::CloseContextMenu(uint32_t session_id) {
         std::lock_guard pending_lock(pending_mutex_);
         pending_.erase(session_id);
     }
+    { std::lock_guard owners_lock(request_owners_mutex_); request_owners_.erase(session_id); }
     if (!CurrentConnection()) return;
     SendFrame(REQ_CTX_CLOSE, 0, w.data());
 }
@@ -395,7 +453,9 @@ bool ShellClient::Ping() {
 }
 
 void ShellClient::FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error) {
-    if (cb_.done) cb_.done(id, hr, cancelled, error);
+    Dispatch(id, true, [&](Callbacks& cb) {
+        if (cb.done) cb.done(id, hr, cancelled, error);
+    });
 }
 
 void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled,
@@ -409,8 +469,10 @@ void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool 
                 launch_replies_.erase(found);
             }
         }
-        if (reply) reply(static_cast<HRESULT>(hr), cancelled, error);
-        else if (cb_.launch_done) cb_.launch_done(id, hr, cancelled, error);
+        Dispatch(id, true, [&](Callbacks& cb) {
+            if (reply) reply(static_cast<HRESULT>(hr), cancelled, error);
+            else if (cb.launch_done) cb.launch_done(id, hr, cancelled, error);
+        });
     } else FireDone(id, hr, cancelled, error);
 }
 
@@ -451,8 +513,11 @@ void ShellClient::ReaderThread() {
                 std::wstring item;
                 uint32_t items_done = 0, total_items = 0;
                 if (r.GetF32(pct) && r.GetString(item) &&
-                    r.GetU32(items_done) && r.GetU32(total_items) && cb_.progress)
-                    cb_.progress(h.request_id, pct, item, items_done, total_items);
+                    r.GetU32(items_done) && r.GetU32(total_items)) {
+                    Dispatch(h.request_id, false, [&](Callbacks& cb) {
+                        if (cb.progress) cb.progress(h.request_id, pct, item, items_done, total_items);
+                    });
+                }
             } else if (h.type == RSP_SHELL_LAUNCH_DONE) {
                 uint32_t hr = 0, cancelled = 0;
                 std::wstring error;
@@ -485,11 +550,13 @@ void ShellClient::ReaderThread() {
                         result.hr = static_cast<uint32_t>(kMalformedDeleteResult);
                         result.error = L"Malformed deletion result";
                     }
-                    if (cb_.delete_done)
-                        cb_.delete_done(h.request_id, result.hr, result.cancelled, std::move(result.error),
-                            std::move(result.deleted_paths), std::move(result.recycled_paths),
-                            std::move(result.recycle_destinations), std::move(result.failed_path));
-                    else FireDone(h.request_id, result.hr, result.cancelled, result.error);
+                    Dispatch(h.request_id, true, [&](Callbacks& cb) {
+                        if (cb.delete_done)
+                            cb.delete_done(h.request_id, result.hr, result.cancelled, std::move(result.error),
+                                std::move(result.deleted_paths), std::move(result.recycled_paths),
+                                std::move(result.recycle_destinations), std::move(result.failed_path));
+                        else if (cb.done) cb.done(h.request_id, result.hr, result.cancelled, result.error);
+                    });
                 } else if (pending) {
                     uint32_t hr = 0, cancelled = 0;
                     std::wstring err;
@@ -501,9 +568,11 @@ void ShellClient::ReaderThread() {
                             produced.clear();
                         }
                         { std::lock_guard<std::mutex> lock(pending_mutex_); pending_.erase(h.request_id); }
-                        if (cb_.produced_done && !produced.empty())
-                            cb_.produced_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(produced));
-                        else FireDone(h.request_id, hr, cancelled != 0, err);
+                        Dispatch(h.request_id, true, [&](Callbacks& cb) {
+                            if (cb.produced_done && !produced.empty())
+                                cb.produced_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(produced));
+                            else if (cb.done) cb.done(h.request_id, hr, cancelled != 0, err);
+                        });
                     }
                 }
             } else if (h.type == RSP_CTX_ITEMS) {
@@ -540,9 +609,10 @@ void ShellClient::ReaderThread() {
                             pending = pending_.erase(h.request_id) != 0;
                         }
                     }
-                    if (pending && cb_.ctx_items)
-                        cb_.ctx_items(h.request_id, std::move(items), partial,
-                                      std::move(slow_clsids));
+                    if (pending) Dispatch(h.request_id, !partial, [&](Callbacks& cb) {
+                        if (cb.ctx_items) cb.ctx_items(h.request_id, std::move(items), partial,
+                                                      std::move(slow_clsids));
+                    });
                 }
             } else if (h.type == RSP_PONG) {
                 std::lock_guard<std::mutex> lock(pending_mutex_);

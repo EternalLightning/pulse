@@ -1,0 +1,32 @@
+; --- Settings ---
+; Action on detect:	Report only
+; Scan objects:	All objects
+; Use iChecker:	Yes
+; Use iSwift:	Yes
+; Try disinfect:	No
+; Try delete:	No
+; Try delete container:	No
+; Scan archives:	No
+; Exclude by mask:	No
+; Include by mask:	No
+; Objects to scan:
+; 	"D:\Applications\Pulse\Pulse.exe"	Enable = Yes	Recursive = No
+; 	"D:\Applications\Pulse\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; ------------------
+2026-10-17 00:16:04	Scan_Objects$10370                         starting   1
+2026-10-17 00:16:04	D:\Applications\Pulse\Pulse.exe	ok
+2026-10-17 00:16:04	D:\Applications\Pulse\Pulse.Shell.exe	ok
+2026-10-17 00:16:04	Scan_Objects$10370                         running    100
+2026-10-17 00:16:04	Scan_Objects$10370                         completed
+;  --- Statistics ---
+; Time Start:	2026-10-17 00:16:04
+; Time Finish:	2026-10-17 00:16:04
+; Processed objects:	2
+; Total OK:	2
+; Total detected:	0
+; Suspicions:	0
+; Total skipped:	0
+; Password protected:	0
+; Corrupted:	0
+; Errors:	0
+;  ------------------

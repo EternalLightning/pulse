@@ -20,6 +20,7 @@
 #include "recycle_undo_validation.h"
 #include "file_object_reference.h"
 #include "../common/shell_menu_item.h"
+#include "../ipc/shell_client.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -330,8 +331,10 @@ private:
 
     void WorkerThread();
     void StartShellClient();
+    ipc::ShellClient::Owner ShellOwner() const;
     void MenuThread();
     struct OpenMailbox {
+        ipc::ShellClient::Owner shell_owner;
         std::mutex mutex;
         std::condition_variable cv;
         std::condition_variable finished_cv;

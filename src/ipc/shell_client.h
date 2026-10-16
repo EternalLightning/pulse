@@ -18,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace pulse::ops { class OpsManager; struct ShellCompletionTestProbe; }
@@ -28,6 +29,7 @@ using CtxMenuItem = pulse::ShellMenuItem;
 struct ShellLaunchClientTestProbe;
 
 class ShellClient {
+    struct CallbackOwner;
 public:
     struct Callbacks {
         std::function<void(uint32_t id, float percent, std::wstring item,
@@ -48,16 +50,20 @@ public:
 
     static ShellClient& Instance();
 
+    using Owner = std::shared_ptr<CallbackOwner>;
+    Owner Acquire(Callbacks cb);
+    void Release(const Owner& owner);
+
     void Start(Callbacks cb);
     void Stop();
 
-    uint32_t CreateFolder(const std::wstring& path);
-    uint32_t CreateNewFile(const std::wstring& path);
+    uint32_t CreateFolder(const std::wstring& path, const Owner& owner = {});
+    uint32_t CreateNewFile(const std::wstring& path, const Owner& owner = {});
     void Cancel(uint32_t id);
     void Abort(uint32_t id);
     bool Ping();
     using LaunchReply = std::function<void(HRESULT, bool, std::wstring)>;
-    uint32_t Launch(const ShellLaunchRequest& request, LaunchReply reply = {});
+    uint32_t Launch(const ShellLaunchRequest& request, LaunchReply reply = {}, const Owner& owner = {});
 
     // Explorer context-menu session. Query returns the session id; items come
     // back through Callbacks::ctx_items. Invoke completes via Callbacks::done
@@ -66,11 +72,11 @@ public:
     uint32_t QueryContextMenu(const std::vector<std::wstring>& paths,
                               uint32_t owner_hwnd, bool background, bool extended,
                               const std::vector<std::wstring>& disabled_clsids = {},
-                              const std::function<void(uint32_t)>& before_send = {});
+                              const std::function<void(uint32_t)>& before_send = {}, const Owner& owner = {});
     uint32_t InvokeContextMenu(uint32_t session_id, uint32_t item_id,
                                const std::wstring& verb = {},
                                const std::wstring& text = {},
-                               const std::function<void(uint32_t)>& before_send = {});
+                               const std::function<void(uint32_t)>& before_send = {}, const Owner& owner = {});
     void CloseContextMenu(uint32_t session_id);
 
 private:
@@ -79,7 +85,8 @@ private:
     friend struct ShellLaunchClientTestProbe;
     uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
                               bool recycle = false, HWND owner = nullptr,
-                              const std::vector<FileIdentity>& expected_identities = {});
+                              const std::vector<FileIdentity>& expected_identities = {},
+                              const Owner& callbacks = {});
     ShellClient() = default;
     ~ShellClient();
 
@@ -101,7 +108,7 @@ private:
     void RetireConnection();
 
     uint32_t Submit(uint32_t type, const std::vector<uint8_t>& payload,
-                    const std::function<void(uint32_t)>& before_send = {});
+                    const std::function<void(uint32_t)>& before_send = {}, const Owner& owner = {});
     bool EnsureConnected();
     bool SpawnChild();
     void KillChild();
@@ -112,6 +119,24 @@ private:
     void FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
     // Caller holds send_mutex_; return a snapshot for dispatch after unlocking.
     std::wstring UnreachableMessage() const;
+
+    struct CallbackOwner {
+        CallbackOwner(ShellClient* source_client, Callbacks cb)
+            : client(source_client), callbacks(std::move(cb)) {}
+        ~CallbackOwner();
+        ShellClient* client;
+        std::mutex mutex;
+        Callbacks callbacks;
+        std::atomic<bool> active{true};
+        bool attached = false;
+    };
+    void ReleaseOwner(CallbackOwner& owner);
+    void BindOwner(uint32_t id, const Owner& owner);
+    void Dispatch(uint32_t id, bool terminal, const std::function<void(Callbacks&)>& invoke);
+    std::mutex owners_mutex_;
+    size_t owners_ = 0;
+    std::mutex request_owners_mutex_;
+    std::map<uint32_t, std::weak_ptr<CallbackOwner>> request_owners_;
 
     Callbacks cb_;
     std::mutex send_mutex_;          // serializes complete frames + reconnect

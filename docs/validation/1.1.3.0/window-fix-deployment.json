@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-10-17T00:14:06.3293256+08:00",
+  "target": "D:\\Applications\\Pulse",
+  "backup": "D:\\Applications\\Pulse\\backups\\before-window-open-fix-20261017-001404",
+  "version": "1.1.3.0",
+  "build_id": "20261016T113115Z-7CB90C40",
+  "package_sha256": "A77C2854B2164D5C738ECC83A8A19F738CC4B0697CE507C98E5D6555E253A1BA",
+  "payload_files": 40,
+  "replaced_files": 2,
+  "unchanged_files": 38,
+  "all_payload_hashes_match": true,
+  "service_state": "Running",
+  "service_start_mode": "Auto",
+  "service_pid_unchanged": true
+}

@@ -1,0 +1,4 @@
+[PASS] all five windows have a file-open worker while the other windows remain alive
+[PASS] closing five windows retires blocked file-open workers within the shutdown bound
+[PASS] retired file-open workers finish safely after their window managers are destroyed
+== multiwindow open workers: 3 passed, 0 failed ==

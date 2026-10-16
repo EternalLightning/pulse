@@ -79,7 +79,9 @@ bool HasBlockedDriveSource(const OpRequest& req) {
 }
 
 std::atomic<unsigned> open_workers{0};
-constexpr unsigned kOpenWorkerLimit = 2;
+// Reserve one worker for each of the 32 supported windows, with room for
+// bounded retirement of workers still returning from a blocked provider.
+constexpr unsigned kOpenWorkerLimit = 64;
 
 bool ReserveOpenWorker() {
     unsigned current = open_workers.load();
@@ -864,8 +866,10 @@ void OpsManager::Start(std::function<void()> notify) {
         std::lock_guard<std::mutex> lock(menu_mutex_);
         menu_running_ = true;
     }
-    if (ReserveOpenWorker()) {
+    const bool open_worker_reserved = ReserveOpenWorker();
+    {
         auto mailbox = std::make_shared<OpenMailbox>();
+        mailbox->running = open_worker_reserved;
         mailbox->owner.store(ui_hwnd_.load());
         {
             std::lock_guard<std::mutex> lock(open_mutex_);
@@ -875,12 +879,12 @@ void OpsManager::Start(std::function<void()> notify) {
     StartShellClient();
     thread_ = std::thread([this] { WorkerThread(); });
     menu_thread_ = std::thread([this] { MenuThread(); });
-    if (const auto mailbox = open_mailbox_) {
+    if (const auto mailbox = open_mailbox_; mailbox && open_worker_reserved) {
         try {
             open_thread_ = std::thread([mailbox] { OpenThread(mailbox); });
         } catch (...) {
             std::lock_guard<std::mutex> lock(open_mutex_);
-            open_mailbox_.reset();
+            open_mailbox_->running = false;
             open_workers.fetch_sub(1);
         }
     }
@@ -924,7 +928,10 @@ void OpsManager::BeginShutdown() {
 }
 
 void OpsManager::Stop() {
-    if (!thread_.joinable() && !menu_thread_.joinable() && !open_thread_.joinable()) return;
+    if (!thread_.joinable() && !menu_thread_.joinable() && !open_thread_.joinable()) {
+        if (const auto owner = ShellOwner()) ipc::ShellClient::Instance().Release(owner);
+        return;
+    }
     {
         std::lock_guard<std::mutex> lock(delete_wait_mutex_);
         stopping_ = true;
@@ -964,6 +971,7 @@ void OpsManager::Stop() {
     cv_.notify_all();
     done_cv_.notify_all();
     if (thread_.joinable()) thread_.join();
+    if (mailbox && mailbox->shell_owner) ipc::ShellClient::Instance().Release(mailbox->shell_owner);
     {
         std::lock_guard lock(done_mutex_);
         done_results_.clear();
@@ -1739,7 +1747,7 @@ void OpsManager::OpenThread(std::shared_ptr<OpenMailbox> mailbox) {
                 ? std::vector<std::wstring>{std::move(item.open_path)} : std::move(item.open_paths);
         }
         // Forward only; extension code and interactive dialogs run in a child.
-        ipc::ShellClient::Instance().Launch(request);
+        ipc::ShellClient::Instance().Launch(request, {}, mailbox->shell_owner);
     }
     {
         std::lock_guard lock(mailbox->mutex);
@@ -1748,7 +1756,13 @@ void OpsManager::OpenThread(std::shared_ptr<OpenMailbox> mailbox) {
     mailbox->finished_cv.notify_all();
 }
 
+ipc::ShellClient::Owner OpsManager::ShellOwner() const {
+    std::lock_guard lock(open_mutex_);
+    return open_mailbox_ ? open_mailbox_->shell_owner : ipc::ShellClient::Owner{};
+}
+
 void OpsManager::StartShellClient() {
+    if (!open_mailbox_) open_mailbox_ = std::make_shared<OpenMailbox>();
     const auto mailbox = open_mailbox_;
     const auto notify = notify_;
     ipc::ShellClient::Callbacks cb;
@@ -1794,7 +1808,7 @@ void OpsManager::StartShellClient() {
                           std::vector<std::wstring> slow_clsids) {
         OnCtxItems(id, std::move(items), partial, std::move(slow_clsids));
     };
-    ipc::ShellClient::Instance().Start(cb);
+    mailbox->shell_owner = ipc::ShellClient::Instance().Acquire(std::move(cb));
 }
 
 void OpsManager::WorkerThread() {
@@ -1846,7 +1860,6 @@ void OpsManager::WorkerThread() {
         if (!IsDeleteOperation(item.req.type)) PersistJournal();
     }
 
-    ipc::ShellClient::Instance().Stop();
     CoUninitialize();
 }
 
@@ -1992,7 +2005,7 @@ void OpsManager::MenuThread() {
                 job.paths, job.owner_hwnd, job.background, job.extended,
                 job.disabled_clsids, [&](uint32_t request_id) {
                     RegisterShellMenuQuery(job.token, request_id);
-                });
+                }, ShellOwner());
             if (id == 0) {
                 ShellMenuCallback callback;
                 { std::lock_guard lock(menu_mutex_); callback = menu_cb_; }
@@ -2013,7 +2026,7 @@ void OpsManager::MenuThread() {
             const uint32_t id = client.InvokeContextMenu(session, job.item_id,
                 job.verb, job.text, [&](uint32_t request_id) {
                     RegisterShellMenuInvoke(request_id);
-                });
+                }, ShellOwner());
             if (id == 0) { ctx_invoke_done_.fetch_add(1); if (notify_) notify_(); }
             break;
         }
@@ -3605,10 +3618,10 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FileId
     case OpType::Rename: // Handled above; never send rename to the Shell host.
         break;
     case OpType::CreateFolder:
-        if (!req.sources.empty()) id = client.CreateFolder(req.sources.front());
+        if (!req.sources.empty()) id = client.CreateFolder(req.sources.front(), ShellOwner());
         break;
     case OpType::CreateTextFile:
-        if (!req.sources.empty()) id = client.CreateNewFile(req.sources.front());
+        if (!req.sources.empty()) id = client.CreateNewFile(req.sources.front(), ShellOwner());
         break;
     case OpType::RestoreRecycle: {
         {

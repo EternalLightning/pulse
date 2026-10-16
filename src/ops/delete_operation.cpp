@@ -451,7 +451,7 @@ void OpsManager::RunDelete(const QueueItem& item,
                 lock.unlock();
                 cancelled = true; break;
             }
-            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load(), expected_identities);
+            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load(), expected_identities, ShellOwner());
             current_req_id_.store(id);
         }
         if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);

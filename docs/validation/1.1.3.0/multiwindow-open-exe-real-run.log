@@ -1,0 +1,187 @@
+[PASS] prepare a harmless real executable for file-open lifecycle checks
+[PASS] prepare an isolated batch file for real Shell file-open lifecycle checks
+[PASS] production window initializes with an isolated directory and configuration
+[DIAG] confirm fixture-only security warning: worker=28840 broker=25608 request=1; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=4875 marker_created=true
+[PASS] the first real window opens a file through its operations manager
+[PASS] a single tab starts a vertical drag without moving the physical mouse
+[PASS] losing capture clears the single-tab drag state
+[PASS] external tab mode opens another tab in the existing window
+[PASS] explicit tab mode creates a new tab even when the folder is already open
+[PASS] reuse mode activates the existing tab without adding a duplicate
+[PASS] external new-window mode creates a second real Pulse window
+[DIAG] confirm fixture-only security warning: worker=29008 broker=25608 request=4; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=2484 marker_created=true
+[PASS] a second live window opens a file through its own operations manager
+[PASS] a failed file open reaches the requesting second window instead of the first window
+[PASS] opening a file location in a new window selects the requested file
+[PASS] real windows share the graphics device and icons while keeping thumbnail cancellation independent
+[PASS] all windows edit the same preferences, places and staging tray
+[PASS] an outside open can activate a matching tab in another window
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] closing extra windows releases their workers while the first pair remains usable
+[DIAG] confirm fixture-only security warning: worker=18928 broker=25608 request=8; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=1828 marker_created=true
+[DIAG] confirm fixture-only security warning: worker=2296 broker=25608 request=9; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=2344 marker_created=true
+[PASS] both original windows can still open files after other windows close
+[PASS] the window factory restores tabs, active layout, sidebar and geometry from its session
+[PASS] a restored window closes independently
+[PASS] a layout tab moves between real windows and resumes loading in its destination
+[PASS] one split pane moves independently without moving the other source pane
+[PASS] prepare a loaded two-pane layout tab for content-area drag routing
+[PASS] dropping a multi-pane tab on content preserves every pane and joins the target split
+[PASS] dropping a tab on the target tab strip preserves it as a separate tab
+[PASS] dropping a tab outside all windows creates a detached top-level window
+[PASS] the detached window contains the moved tab and finishes loading
+[DIAG] confirm fixture-only security warning: worker=38624 broker=25608 request=10; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=1922 marker_created=true
+[PASS] a detached tab window can open a file before its tab returns
+[PASS] returning a detached window's only tab closes its empty source window
+[PASS] a detached tab window closes without affecting the root pair
+[DIAG] confirm fixture-only security warning: worker=34536 broker=25608 request=12; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=2375 marker_created=true
+[DIAG] confirm fixture-only security warning: worker=9656 broker=25608 request=14; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=2406 marker_created=true
+[PASS] the receiving and other live windows still open files after a detached tab returns
+[PASS] dropping a pane outside all windows creates a detached top-level window
+[PASS] pane detachment replaces the new window starter and leaves one source pane
+[PASS] a detached pane window closes without affecting the root pair
+[PASS] dropping a window title bar merges every tab and keeps pinned tabs before unpinned tabs
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] closing the first window keeps the second window and process alive
+[DIAG] confirm fixture-only security warning: worker=36660 broker=25608 request=15; displayed path is abbreviated, pending request matches the exact fixture target
+[DIAG] security dialog text: 无法验证发布者。你确定要运行此软件吗?
+[DIAG] security dialog text: 名称:
+[DIAG] security dialog text: ...multiwindow\open-probe\pulse-open-marker.exe
+[DIAG] security dialog text: 发行商:
+[DIAG] security dialog text: 未知发布者
+[DIAG] security dialog text: 类型:
+[DIAG] security dialog text: 应用程序
+[DIAG] security dialog text: 发送方:
+[DIAG] security dialog text: E:\Projects\pulse\bench_data\release-1.1.3.0\multi...
+[DIAG] security dialog text: 运行(&R)
+[DIAG] security dialog text: 保存(&S)
+[DIAG] security dialog text: 取消
+[DIAG] security dialog text: 打开此文件前总是询问(&W)
+[DIAG] security dialog text: 此文件没有包含有效的数字签名以验证其发布者。你应该只运行来自你信任的发布者的软件。<A>如何决定要运行的软件?</A>
+[DIAG] fixture Run input: sent=4 cursor_restored=true; marker remains the success condition
+[DIAG] open probe: elapsed_ms=2391 marker_created=true
+[PASS] the surviving window still opens files after the original Shell owner closes
+[PASS] the surviving window still accepts outside folder opens
+[PASS] closing the final window completes its asynchronous shutdown
+multiwindow application: 0 failures

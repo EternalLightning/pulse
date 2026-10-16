@@ -1,4 +1,5 @@
 #include "../ipc/shell_client.h"
+#include "../ipc/file_identity_protocol.h"
 #include <sddl.h>
 #include <chrono>
 #include <condition_variable>
@@ -127,6 +128,9 @@ public:
         writer.PutU32(static_cast<uint32_t>(hr));
         writer.PutU32(0);
         writer.PutString(error);
+        return RespondPayload(type, id, writer);
+    }
+    bool RespondPayload(uint32_t type, uint32_t id, const PayloadWriter& writer) {
         MsgHeader header;
         header.type = type;
         header.request_id = id;
@@ -189,6 +193,129 @@ ShellLaunchRequest LaunchRequest() {
 
 namespace pulse::ipc {
 struct ShellLaunchClientTestProbe {
+    static void MultiwindowOwners() {
+        Recorder first, second, fallback;
+        ShellClient client;
+        client.cb_ = fallback.Callbacks();
+        const auto first_owner = std::make_shared<ShellClient::CallbackOwner>(&client, first.Callbacks());
+        const auto second_owner = std::make_shared<ShellClient::CallbackOwner>(&client, second.Callbacks());
+        client.BindOwner(101, first_owner);
+        client.BindOwner(102, second_owner);
+        client.FireRequestDone(REQ_SHELL_LAUNCH, 102, static_cast<uint32_t>(E_ACCESSDENIED), false,
+            L"second window launch failed");
+        client.FireDone(101, S_OK, false, {});
+        const auto first_events = first.Snapshot();
+        const auto second_events = second.Snapshot();
+        Check(first_events.size() == 1 && first_events[0].id == 101 && !first_events[0].launch &&
+            second_events.size() == 1 && second_events[0].id == 102 && second_events[0].launch &&
+            second_events[0].hr == static_cast<uint32_t>(E_ACCESSDENIED) &&
+            second_events[0].error == L"second window launch failed" && fallback.Snapshot().empty(),
+            "interleaved window completions and launch errors reach only their requesting owners");
+        client.BindOwner(103, first_owner);
+        client.BindOwner(104, second_owner);
+        client.BindOwner(105, first_owner);
+        client.Release(first_owner);
+        client.FireDone(103, S_OK, false, {});
+        client.FireRequestDone(REQ_SHELL_LAUNCH, 105, static_cast<uint32_t>(E_FAIL), false, L"late launch error");
+        client.FireDone(104, S_OK, false, {});
+        const auto surviving_events = second.Snapshot();
+        Check(first.Snapshot().size() == 1 && surviving_events.size() == 2 &&
+            surviving_events[1].id == 104 && fallback.Snapshot().empty() &&
+            client.request_owners_.empty(),
+            "closing one owner suppresses its late callback while the surviving owner completes normally");
+        client.Release(second_owner);
+    }
+    static void MultiwindowOwnerFrames() {
+        Recorder fallback;
+        PipePair pair;
+        ShellClient client;
+        Check(pair.Connect(), "connect isolated multiwindow callback-routing fixture");
+        const auto endpoint = pair.ReleaseClient();
+        if (endpoint == INVALID_HANDLE_VALUE) return;
+        Prepare(client, endpoint, fallback);
+        std::mutex event_mutex;
+        std::condition_variable changed;
+        std::vector<std::pair<uint32_t, std::string>> events;
+        bool payloads_valid = true;
+        const auto record = [&](uint32_t id, std::string kind, bool valid) {
+            {
+                std::lock_guard lock(event_mutex);
+                events.emplace_back(id, std::move(kind));
+                payloads_valid = payloads_valid && valid;
+            }
+            changed.notify_all();
+        };
+        const auto callbacks = [&](const std::string& window) {
+            ShellClient::Callbacks result;
+            result.progress = [&, window](uint32_t id, float percent, std::wstring item,
+                                           uint32_t done, uint32_t total) {
+                record(id, window + ":progress", percent == 25.0f && item == L"item" && done == 1 && total == 4);
+            };
+            result.ctx_items = [&, window](uint32_t id, std::vector<CtxMenuItem> items, bool partial,
+                                           std::vector<std::wstring> slow) {
+                record(id, window + (partial ? ":partial-context" : ":context"), items.empty() && slow.empty());
+            };
+            result.delete_done = [&, window](uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
+                                             std::vector<std::wstring> deleted, std::vector<std::wstring> recycled,
+                                             std::vector<std::wstring> destinations, std::wstring failed) {
+                record(id, window + ":delete", hr == S_OK && !cancelled && error.empty() &&
+                    deleted == std::vector<std::wstring>{L"deleted"} && recycled.empty() &&
+                    destinations.empty() && failed.empty());
+            };
+            result.produced_done = [&, window](uint32_t id, uint32_t hr, bool cancelled, std::wstring error,
+                                               std::vector<FileIdentity> identities) {
+                record(id, window + ":produced", hr == S_OK && !cancelled && error.empty() &&
+                    identities.size() == 1 && identities[0].Valid() && identities[0].value.VolumeSerialNumber == 7);
+            };
+            return result;
+        };
+        const auto first_owner = std::make_shared<ShellClient::CallbackOwner>(&client, callbacks("first"));
+        const auto second_owner = std::make_shared<ShellClient::CallbackOwner>(&client, callbacks("second"));
+        AddPending(client, REQ_AUTHORIZED_DELETE, 201);
+        AddPending(client, REQ_CTX_QUERY, 202);
+        AddPending(client, REQ_NEW_FILE, 203);
+        client.BindOwner(201, first_owner);
+        client.BindOwner(202, second_owner);
+        client.BindOwner(203, second_owner);
+        const auto wait_events = [&](size_t count) {
+            std::unique_lock lock(event_mutex);
+            return changed.wait_for(lock, std::chrono::milliseconds(kDeadlineMs), [&] { return events.size() >= count; });
+        };
+        Read(client);
+        PayloadWriter progress, partial;
+        progress.PutF32(25.0f); progress.PutString(L"item"); progress.PutU32(1); progress.PutU32(4);
+        partial.PutU32(202); partial.PutU32(CTX_ITEMS_PARTIAL); partial.PutU32(0); partial.PutStringArray({});
+        const bool partial_received = pair.RespondPayload(RSP_PROGRESS, 201, progress) &&
+            pair.RespondPayload(RSP_CTX_ITEMS, 202, partial) && wait_events(2);
+        bool bindings_retained = false;
+        {
+            std::lock_guard lock(client.request_owners_mutex_);
+            bindings_retained = client.request_owners_.contains(201) && client.request_owners_.contains(202);
+        }
+        Check(partial_received && bindings_retained,
+            "progress and partial context frames preserve their requesting window until terminal completion");
+        PayloadWriter deletion, context, produced;
+        deletion.PutU32(S_OK); deletion.PutU32(0); deletion.PutString({});
+        deletion.PutStringArray({L"deleted"}); deletion.PutStringArray({}); deletion.PutStringArray({}); deletion.PutString({});
+        context.PutU32(202); context.PutU32(0); context.PutU32(0); context.PutStringArray({});
+        produced.PutU32(S_OK); produced.PutU32(0); produced.PutString({});
+        FileIdentity identity;
+        identity.value.VolumeSerialNumber = 7;
+        identity.value.FileId.Identifier[0] = 1;
+        WriteFileIdentities(produced, {identity});
+        const bool terminal_received = pair.RespondPayload(RSP_DONE, 203, produced) &&
+            pair.RespondPayload(RSP_CTX_ITEMS, 202, context) &&
+            pair.RespondPayload(RSP_DONE, 201, deletion) && wait_events(5);
+        client.Stop();
+        const std::vector<std::pair<uint32_t, std::string>> expected{
+            {201, "first:progress"}, {202, "second:partial-context"}, {203, "second:produced"},
+            {202, "second:context"}, {201, "first:delete"}};
+        Check(terminal_received && payloads_valid && events == expected && fallback.Snapshot().empty() &&
+            client.request_owners_.empty() && Empty(client),
+            "reader routes context, produced identities and deletion results to their owners and retires terminal bindings");
+        client.Release(first_owner);
+        client.Release(second_owner);
+    }
     static void EarlyStartupExit() {
         ShellClient client;
         std::wstring executable(32768, L'\0');
@@ -541,6 +668,11 @@ struct ShellLaunchClientTestProbe {
 int main(int argc, char** argv) {
     std::cout << std::unitbuf;
     if (argc == 2 && std::string(argv[1]) == "--exit-before-pipe") return 7;
+    if (argc == 2 && std::string(argv[1]) == "--multiwindow-owners") {
+        pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwners();
+        pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwnerFrames();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--startup-recovery") {
         pulse::ipc::ShellLaunchClientTestProbe::EarlyStartupExit();
         pulse::ipc::ShellLaunchClientTestProbe::FailureMessageSnapshot();
@@ -558,5 +690,7 @@ int main(int argc, char** argv) {
     pulse::ipc::ShellLaunchClientTestProbe::DisconnectPolicy();
     pulse::ipc::ShellLaunchClientTestProbe::TransportRouting();
     pulse::ipc::ShellLaunchClientTestProbe::InteractionReplyRouting();
+    pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwners();
+    pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwnerFrames();
     return failures ? 1 : 0;
 }

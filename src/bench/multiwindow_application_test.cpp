@@ -2,9 +2,14 @@
 #include "../app/app_exit.h"
 #include "../app/app_input.h"
 #include "../app/tab_transfer.h"
+#include "../common/file_identity.h"
 #include "../common/localization.h"
 #include "../common/user_storage.h"
 #include "../common/windows_compat.h"
+#include "../ipc/shell_client.h"
+#include <tlhelp32.h>
+#include <winternl.h>
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -13,6 +18,24 @@
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
+namespace pulse::ipc {
+struct ShellLaunchClientTestProbe {
+    static uint32_t NextRequestId() { return ShellClient::Instance().next_id_.load(); }
+    static bool MatchesPendingLaunch(DWORD broker, uint32_t id, HWND owner, const std::wstring& path) {
+        auto& client = ShellClient::Instance();
+        std::lock_guard send_lock(client.send_mutex_);
+        if (client.child_.dwProcessId != broker) return false;
+        std::lock_guard pending_lock(client.pending_mutex_);
+        const auto found = client.pending_.find(id);
+        ShellLaunchRequest request;
+        return found != client.pending_.end() && found->second.type == REQ_SHELL_LAUNCH &&
+            ReadShellLaunch(found->second.payload.data(), found->second.payload.size(), request) &&
+            request.owner_hwnd == reinterpret_cast<uintptr_t>(owner) && request.verb == L"open" &&
+            request.executable.empty() && request.paths == std::vector<std::wstring>{path};
+    }
+};
+}
+
 namespace {
 using namespace pulse;
 int failures = 0;
@@ -20,10 +43,11 @@ void Check(bool passed, const char* label) {
     std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
     failures += !passed;
 }
-void Pump() {
+void Pump(const std::function<bool(const MSG&)>& before_dispatch = {}) {
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
         if (message.message == WM_QUIT) continue;
+        if (before_dispatch && !before_dispatch(message)) continue;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -32,6 +56,185 @@ bool Wait(const std::function<bool()>& done) {
     const auto deadline = GetTickCount64() + 10000;
     while (!done() && GetTickCount64() < deadline) { Pump(); Sleep(10); }
     return done();
+}
+void ConfirmFixtureOpenWarning(AppState& state, const std::filesystem::path& executable,
+                               uint32_t minimum_request, bool& confirmed) {
+    if (confirmed) return;
+    struct Context {
+        AppState& state;
+        const std::filesystem::path& executable;
+        uint32_t minimum_request;
+        bool& confirmed;
+    } warning_context{state, executable, minimum_request, confirmed};
+    EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+        auto& context = *reinterpret_cast<Context*>(parameter);
+        if (context.confirmed || !IsWindowVisible(window)) return TRUE;
+        wchar_t title[128]{};
+        GetWindowTextW(window, title, ARRAYSIZE(title));
+        if (wcscmp(title, L"打开文件 - 安全警告") != 0 && wcscmp(title, L"Open File - Security Warning") != 0) return TRUE;
+        DWORD worker = 0, broker = 0;
+        GetWindowThreadProcessId(window, &worker);
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) return TRUE;
+        PROCESSENTRY32W entry{sizeof(entry)};
+        if (Process32FirstW(snapshot, &entry)) do {
+            if (entry.th32ProcessID == worker) { broker = entry.th32ParentProcessID; break; }
+        } while (Process32NextW(snapshot, &entry));
+        CloseHandle(snapshot);
+        using QueryProcess = LONG(NTAPI*)(HANDLE, ULONG, void*, ULONG, ULONG*);
+        const auto query = reinterpret_cast<QueryProcess>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess"));
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, worker);
+        if (!process || !query) { if (process) CloseHandle(process); return TRUE; }
+        ULONG bytes = 0;
+        query(process, 60, nullptr, 0, &bytes);
+        if (bytes < sizeof(UNICODE_STRING) || bytes > 65536) { CloseHandle(process); return TRUE; }
+        std::vector<uint8_t> command_buffer(bytes);
+        const LONG status = query(process, 60, command_buffer.data(), bytes, &bytes);
+        CloseHandle(process);
+        if (status < 0) return TRUE;
+        const auto& command_string = *reinterpret_cast<const UNICODE_STRING*>(command_buffer.data());
+        const std::wstring command(command_string.Buffer, command_string.Length / sizeof(wchar_t));
+        const std::wstring worker_flag = L" --launch-worker " + std::to_wstring(broker) + L" ";
+        const auto flag_at = command.find(worker_flag);
+        if (flag_at == std::wstring::npos) return TRUE;
+        wchar_t* end = nullptr;
+        const auto id = wcstoul(command.c_str() + flag_at + worker_flag.size(), &end, 10);
+        if (!id || id < context.minimum_request || !end || *end || !ipc::ShellLaunchClientTestProbe::MatchesPendingLaunch(
+                broker, static_cast<uint32_t>(id), context.state.hwnd, context.executable.wstring())) return TRUE;
+        struct Controls { bool target_seen = false; HWND run = nullptr; std::vector<std::wstring> text; } controls;
+        EnumChildWindows(window, [](HWND child, LPARAM child_parameter) -> BOOL {
+            auto& child_controls = *reinterpret_cast<Controls*>(child_parameter);
+            wchar_t text[2048]{}, kind[64]{};
+            GetWindowTextW(child, text, ARRAYSIZE(text));
+            GetClassNameW(child, kind, ARRAYSIZE(kind));
+            if (*text) child_controls.text.emplace_back(text);
+            if (wcsstr(text, L"open-probe\\pulse-open-marker.exe")) child_controls.target_seen = true;
+            if (wcscmp(kind, L"Button") == 0 && (wcscmp(text, L"运行(&R)") == 0 ||
+                wcscmp(text, L"&Run") == 0 || wcscmp(text, L"Run") == 0)) child_controls.run = child;
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&controls));
+        if (!controls.target_seen || !controls.run || !IsWindowEnabled(controls.run)) return TRUE;
+        RECT run_bounds{};
+        POINT original_cursor{};
+        if (!GetWindowRect(controls.run, &run_bounds) || !GetCursorPos(&original_cursor)) return TRUE;
+        const POINT run_center{(run_bounds.left + run_bounds.right) / 2, (run_bounds.top + run_bounds.bottom) / 2};
+        if (WindowFromPoint(run_center) != controls.run) return TRUE;
+        std::printf("[DIAG] confirm fixture-only security warning: worker=%lu broker=%lu request=%lu; displayed path is abbreviated, pending request matches the exact fixture target\n",
+            worker, broker, id);
+        for (const auto& text : controls.text) {
+            char utf8[8192]{};
+            WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, utf8, ARRAYSIZE(utf8), nullptr, nullptr);
+            std::printf("[DIAG] security dialog text: %s\n", utf8);
+        }
+        UINT sent = 0;
+        for (unsigned attempt = 0; attempt < 2; ++attempt) {
+            if (attempt) Sleep(300);
+            DWORD current_worker = 0;
+            GetWindowThreadProcessId(window, &current_worker);
+            if (!IsWindow(window) || current_worker != worker || !IsWindowEnabled(controls.run) ||
+                !ipc::ShellLaunchClientTestProbe::MatchesPendingLaunch(broker, static_cast<uint32_t>(id),
+                    context.state.hwnd, context.executable.wstring()) ||
+                !GetWindowRect(controls.run, &run_bounds)) break;
+            const POINT click_center{(run_bounds.left + run_bounds.right) / 2, (run_bounds.top + run_bounds.bottom) / 2};
+            if (WindowFromPoint(click_center) != controls.run || !SetCursorPos(click_center.x, click_center.y) ||
+                WindowFromPoint(click_center) != controls.run) break;
+            INPUT click[2]{};
+            click[0].type = click[1].type = INPUT_MOUSE;
+            click[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            click[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+            const UINT this_click = SendInput(ARRAYSIZE(click), click, sizeof(INPUT));
+            sent += this_click;
+            if (this_click == 1) SendInput(1, &click[1], sizeof(INPUT));
+        }
+        SetCursorPos(original_cursor.x, original_cursor.y);
+        context.confirmed = sent != 0;
+        std::printf("[DIAG] fixture Run input: sent=%u cursor_restored=true; marker remains the success condition\n", sent);
+        return context.confirmed ? FALSE : TRUE;
+    }, reinterpret_cast<LPARAM>(&warning_context));
+}
+bool OpenProbe(AppState& state, const std::filesystem::path& executable) {
+    const auto started = GetTickCount64();
+    const auto marker = executable.parent_path() / L"opened.marker";
+    std::error_code error;
+    std::filesystem::remove(marker, error);
+    std::vector<std::wstring> launch_errors;
+    bool deferred_notify = false;
+    const auto capture_errors = [&] {
+        auto pending = state.ops.DrainShellLaunchErrors();
+        launch_errors.insert(launch_errors.end(), pending.begin(), pending.end());
+    };
+    const auto capture_before_notify = [&](const MSG& message) {
+        if (message.hwnd != state.hwnd || message.message != WM_OPS_NOTIFY) return true;
+        capture_errors();
+        deferred_notify = true;
+        return false;
+    };
+    bool opened = false;
+    bool warning_confirmed = false;
+    if (!error) {
+        const auto minimum_request = ipc::ShellLaunchClientTestProbe::NextRequestId();
+        state.ops.OpenWith(executable.wstring());
+        const auto deadline = GetTickCount64() + 60000;
+        do {
+            capture_errors();
+            ConfirmFixtureOpenWarning(state, executable, minimum_request, warning_confirmed);
+            opened = GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES;
+            if (opened) break;
+            Pump(capture_before_notify);
+            Sleep(10);
+        } while (GetTickCount64() < deadline);
+        capture_errors();
+        opened = GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES;
+    }
+    if (deferred_notify) PostMessageW(state.hwnd, WM_OPS_NOTIFY, 0, 0);
+    std::printf("[DIAG] open probe: elapsed_ms=%llu marker_created=%s\n",
+        static_cast<unsigned long long>(GetTickCount64() - started), opened ? "true" : "false");
+    if (!opened) {
+        const auto utf8 = [](const std::wstring& text) {
+            const int bytes = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                nullptr, 0, nullptr, nullptr);
+            std::string result(static_cast<size_t>(bytes), '\0');
+            if (bytes) WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                result.data(), bytes, nullptr, nullptr);
+            return result;
+        };
+        WIN32_FILE_ATTRIBUTE_DATA attributes{};
+        const bool attributes_read = GetFileAttributesExW(executable.c_str(), GetFileExInfoStandard, &attributes) != FALSE;
+        const DWORD attributes_error = attributes_read ? ERROR_SUCCESS : GetLastError();
+        FileIdentity identity;
+        const bool identified = ReadPathFileIdentity(executable.wstring(), identity);
+        const DWORD identity_error = identified ? ERROR_SUCCESS : GetLastError();
+        std::printf("[DIAG] open probe failed: target=%s marker=%s owner=%p cleanup_error=%d shell_errors=%zu\n",
+            utf8(executable.wstring()).c_str(), utf8(marker.wstring()).c_str(), static_cast<void*>(state.hwnd),
+            error.value(), launch_errors.size());
+        std::printf("[DIAG] open target: size=%llu write_time=%llu attributes_error=%lu identity_error=%lu volume=%llu file_id=",
+            (static_cast<unsigned long long>(attributes.nFileSizeHigh) << 32) | attributes.nFileSizeLow,
+            (static_cast<unsigned long long>(attributes.ftLastWriteTime.dwHighDateTime) << 32) |
+                attributes.ftLastWriteTime.dwLowDateTime, attributes_error, identity_error,
+            static_cast<unsigned long long>(identity.value.VolumeSerialNumber));
+        for (const auto byte : identity.value.FileId.Identifier) std::printf("%02x", static_cast<unsigned>(byte));
+        std::printf("\n");
+        for (const auto& launch_error : launch_errors)
+            std::printf("[DIAG] open probe Shell error: %s\n", utf8(launch_error).c_str());
+    }
+    return opened;
+}
+bool ShellErrorReachesRequester(AppState& requester, AppState& other,
+                               const std::filesystem::path& missing) {
+    requester.ops.OpenWith(missing.wstring());
+    std::vector<std::wstring> requested_errors, other_errors;
+    const auto deadline = GetTickCount64() + 10000;
+    do {
+        auto requested = requester.ops.DrainShellLaunchErrors();
+        auto unrelated = other.ops.DrainShellLaunchErrors();
+        requested_errors.insert(requested_errors.end(), requested.begin(), requested.end());
+        other_errors.insert(other_errors.end(), unrelated.begin(), unrelated.end());
+        if (!requested_errors.empty() || !other_errors.empty()) break;
+        // The normal WM_OPS_NOTIFY handler drains these same mailboxes.
+        Sleep(10);
+    } while (GetTickCount64() < deadline);
+    Pump();
+    return requested_errors.size() == 1 && other_errors.empty();
 }
 bool Forward(HWND hwnd, const std::wstring& path) {
     COPYDATASTRUCT data{};
@@ -71,12 +274,32 @@ app::LayoutTab* AddLoadedTab(AppState& state, const std::wstring& path) {
 
 int main() {
     using namespace pulse;
+    wchar_t executable_name[32768]{};
+    const DWORD executable_length = GetModuleFileNameW(nullptr, executable_name, ARRAYSIZE(executable_name));
+    if (!executable_length || executable_length >= ARRAYSIZE(executable_name)) return 2;
+    const std::filesystem::path executable(executable_name);
+    if (executable.filename() == L"pulse-open-marker.exe") {
+        std::ofstream marker(executable.parent_path() / L"opened.marker", std::ios::binary | std::ios::trunc);
+        marker << "opened";
+        marker.close();
+        return marker ? 0 : 2;
+    }
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
     const auto root = std::filesystem::absolute(L"bench_data/release-1.1.3.0/multiwindow");
     std::filesystem::create_directories(root / L"first");
     std::filesystem::create_directories(root / L"second");
+    std::filesystem::create_directories(root / L"open-probe");
+    const auto open_probe = root / L"open-probe" / L"pulse-open-marker.exe";
+    const auto batch_probe_path = root / L"open-probe" / L"pulse-open-marker.bat";
+    std::error_code copy_error;
+    std::filesystem::copy_file(executable, open_probe, std::filesystem::copy_options::overwrite_existing, copy_error);
+    Check(!copy_error, "prepare a harmless real executable for file-open lifecycle checks");
+    std::ofstream batch_probe(batch_probe_path, std::ios::binary | std::ios::trunc);
+    batch_probe << "@echo off\r\n>\"%~dp0opened.marker\" echo opened\r\nexit\r\n";
+    batch_probe.close();
+    Check(static_cast<bool>(batch_probe), "prepare an isolated batch file for real Shell file-open lifecycle checks");
     std::ofstream(root / L"second" / L"reveal.txt") << "folder reveal fixture";
     storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
@@ -96,6 +319,8 @@ int main() {
     Check(primary && Wait([&] { const auto* tab = ActiveTab(state); return tab && !tab->loading; }),
         "production window initializes with an isolated directory and configuration");
     if (!primary) { OleUninitialize(); return 1; }
+    Check(!copy_error && OpenProbe(state, open_probe),
+        "the first real window opens a file through its operations manager");
 
     BYTE saved_keyboard[256]{};
     BYTE drag_keyboard[256]{};
@@ -141,6 +366,10 @@ int main() {
     if (secondary) {
         ShowWindow(secondary->hwnd, SW_HIDE);
         Wait([&] { return ActiveTab(*secondary) && !ActiveTab(*secondary)->loading; });
+        Check(!copy_error && OpenProbe(*secondary, open_probe),
+            "a second live window opens a file through its own operations manager");
+        Check(ShellErrorReachesRequester(*secondary, state, root / L"open-probe" / L"missing.exe"),
+            "a failed file open reaches the requesting second window instead of the first window");
         Check(Wait([&] {
             const auto* tab = ActiveTab(*secondary);
             return tab && tab->selected_index >= 0 &&
@@ -186,6 +415,8 @@ int main() {
         for (AppState* extra : extra_windows) RequestWindowClose(*extra);
         Check(Wait([&] { return state.core.windows.Count() == 2; }),
             "closing extra windows releases their workers while the first pair remains usable");
+        Check(!copy_error && OpenProbe(state, open_probe) && OpenProbe(*secondary, open_probe),
+            "both original windows can still open files after other windows close");
         app::WindowSessionSnapshot saved_window;
         saved_window.window_rect = {60, 60, 960, 760};
         saved_window.active_path = (root / L"second").wstring();
@@ -284,9 +515,20 @@ int main() {
             detached_tab_window->window_tabs.items.size() == 1 &&
             Wait([&] { return ActiveTab(*detached_tab_window) && !ActiveTab(*detached_tab_window)->loading; }),
             "the detached window contains the moved tab and finishes loading");
-        if (detached_tab_window) RequestWindowClose(*detached_tab_window);
+        if (detached_tab_window && detached_tab_window != &state && detached_tab_window != secondary) {
+            const HWND detached_hwnd = detached_tab_window->hwnd;
+            Check(!copy_error && OpenProbe(*detached_tab_window, open_probe),
+                "a detached tab window can open a file before its tab returns");
+            const size_t tabs_before_return = state.window_tabs.items.size();
+            Check(TransferLayoutTab(*detached_tab_window, 0, state) &&
+                state.window_tabs.items.size() == tabs_before_return + 1 &&
+                Wait([&] { return !IsWindow(detached_hwnd) && state.core.windows.Count() == 2; }),
+                "returning a detached window's only tab closes its empty source window");
+        }
         Check(Wait([&] { return state.core.windows.Count() == 2; }),
             "a detached tab window closes without affecting the root pair");
+        Check(!copy_error && OpenProbe(state, open_probe) && OpenProbe(*secondary, open_probe),
+            "the receiving and other live windows still open files after a detached tab returns");
 
         ApplyLayoutPreset(state, app::LayoutPreset::TwoVertical);
         const size_t detached_pane_count = state.core.windows.Count() + 1;
@@ -368,6 +610,8 @@ int main() {
         RequestWindowClose(state);
         Check(Wait([&] { return !IsWindow(primary) && state.core.windows.Count() == 1; }),
             "closing the first window keeps the second window and process alive");
+        Check(!copy_error && OpenProbe(*secondary, open_probe),
+            "the surviving window still opens files after the original Shell owner closes");
         secondary->appPrefs.external_open_mode = app::ExternalOpenMode::Tab;
         const size_t surviving_tabs = secondary->window_tabs.items.size();
         Check(Forward(secondary->hwnd, (root / L"first").wstring()) &&
