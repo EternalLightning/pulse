@@ -1,5 +1,6 @@
 #pragma once
 #include "default_file_manager.h"
+#include "external_open.h"
 #include <memory>
 
 namespace pulse { struct AppState; }
@@ -19,6 +20,9 @@ public:
     bool StartForTesting(AppState& state, DefaultManagerRegistry registry);
     void Toggle(AppState& state, int control);
     void Publish(AppState& state);
+    bool IsExternalOpenActive(uint64_t takeover_token) const;
+    void CompleteExternalOpen(AppState& owner, AppState* destination,
+                              const ExternalOpenResult& request, bool opened);
     bool Tick(AppState& state);
     bool pending() const;
     const std::wstring& error() const;

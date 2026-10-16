@@ -714,7 +714,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
 
 D2D1_RECT_F MainRenderer::SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const {
     const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_);
-    return index==0 ? l.effect_choice : l.language_choice;
+    return index==0 ? l.effect_choice : index==2 ? l.external_open_choice : l.language_choice;
 }
 
 float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int setting_id, float window_w, float window_h) const {
@@ -751,6 +751,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::PinnedNames: target=l.pinned_names_row;break;
     case I::SettingsBlankClickBack: target=l.blank_click_row;break;
     case I::SettingsNewTabHome: target=l.new_tab_row;break;
+    case I::SettingsExternalOpen: target=l.external_open_card;break;
     case I::SettingsChangeTracking: target=l.change_tracking_row;break;
     case I::GlobalSearch: target=l.global_search_row;break;
     case I::GlobalSearchHotkey: target=l.global_search_hotkey_row;break;

@@ -1,5 +1,6 @@
 // clipboard.cpp — CF_HDROP + CFSTR_PREFERREDDROPEFFECT interop.
 #include "clipboard.h"
+#include "../common/path_utils.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -152,6 +153,79 @@ bool ReadClipboard(ClipboardData& out) {
     }
     return ok;
 }
+
+namespace {
+bool DropShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_effect) {
+    if (!data) return false;
+    IDropTarget* drop = nullptr;
+    IShellItem* folder = nullptr;
+    const std::wstring shell_path = path::StripExtendedPathPrefix(dir);
+    if (SUCCEEDED(SHCreateItemFromParsingName(shell_path.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+        folder->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&drop));
+        folder->Release();
+    }
+
+    bool ok = false;
+    if (drop) {
+        const DWORD wanted = PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+        DWORD effect = wanted;
+        POINTL point{0, 0};
+        if (SUCCEEDED(drop->DragEnter(data, MK_LBUTTON, point, &effect))) {
+            if (effect & wanted) {
+                effect = wanted;
+                ok = SUCCEEDED(drop->Drop(data, MK_LBUTTON, point, &effect)) &&
+                    effect != DROPEFFECT_NONE;
+            } else {
+                drop->DragLeave();
+            }
+        }
+        drop->Release();
+    }
+    return ok;
+}
+} // namespace
+
+bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
+    const HRESULT ole = OleInitialize(nullptr);
+    if (FAILED(ole)) return false;
+    struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
+
+    if (GetClipboardSequenceNumber() != expected_sequence) return false;
+    IDataObject* data = nullptr;
+    if (FAILED(OleGetClipboard(&data)) || !data) return false;
+    if (GetClipboardSequenceNumber() != expected_sequence) {
+        data->Release();
+        return false;
+    }
+
+    DWORD preferred_effect = DROPEFFECT_COPY;
+    const UINT preferred_format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
+    FORMATETC format{ static_cast<CLIPFORMAT>(preferred_format), nullptr,
+                      DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM medium{};
+    if (preferred_format && SUCCEEDED(data->GetData(&format, &medium))) {
+        if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal &&
+            GlobalSize(medium.hGlobal) >= sizeof(DWORD)) {
+            if (const auto* preferred = static_cast<const DWORD*>(GlobalLock(medium.hGlobal))) {
+                preferred_effect = *preferred;
+                GlobalUnlock(medium.hGlobal);
+            }
+        }
+        ReleaseStgMedium(&medium);
+    }
+    const bool ok = DropShellData(data, dir, preferred_effect);
+    data->Release();
+    return ok;
+}
+
+#ifdef PULSE_CLIPBOARD_TESTING
+bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t preferred_effect) {
+    const HRESULT ole = OleInitialize(nullptr);
+    if (FAILED(ole)) return false;
+    struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
+    return DropShellData(data, dir, preferred_effect);
+}
+#endif
 
 bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths) {
     if (sequence == 0 || expected_paths.empty() || GetClipboardSequenceNumber() != sequence)

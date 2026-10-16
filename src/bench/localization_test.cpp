@@ -76,6 +76,10 @@ int main(int argc, char** argv) {
             StringId::ArchiveOpenFailed, StringId::ArchivePassword, StringId::ArchiveExtractTitle, StringId::ArchiveCancelling,
             StringId::ArchiveExtracting, StringId::ArchiveDestination, StringId::ArchiveEnterPassword, StringId::ArchiveOptionalPassword,
             StringId::ArchivePickDestination, StringId::ArchiveCreateFolderPrefix, StringId::ArchiveExtractFailed, StringId::ArchiveReadFailed,
+            StringId::ArchivePasswordOrDataError,
+            StringId::ArchivePasswordRetryHint,
+            StringId::SettingsExternalOpen, StringId::SettingsExternalOpenDesc,
+            StringId::ExternalOpenReuse, StringId::ExternalOpenTab, StringId::ExternalOpenWindow,
             StringId::ExitPendingTitle, StringId::ExitPendingMessage, StringId::ExitStopTasks, StringId::ExitKeepRunning,
             StringId::ExitExiting, StringId::ExitStopping, StringId::ExitFailed, StringId::ExitWorkerFailed,
             StringId::PlaybackPlay, StringId::PlaybackPrevFrame, StringId::PlaybackNextFrame, StringId::PlaybackSteppedPrefix,
@@ -94,6 +98,12 @@ int main(int argc, char** argv) {
             passed &= Report("centralized UI resources are present in both languages", complete);
             passed &= Report("archive exit playback and link text follow display language",
                 Get(StringId::ArchiveExtractAll) == (chinese ? L"解压全部项目" : L"Extract all") &&
+                Get(StringId::ArchivePasswordOrDataError) == (chinese
+                    ? L"密码不正确，或压缩包数据已损坏。"
+                    : L"The password is incorrect or the archive data is damaged.") &&
+                Get(StringId::ArchivePasswordRetryHint) == (chinese
+                    ? L"请关闭此窗口，重新打开文件并输入密码。如果密码无误，压缩包可能已损坏。"
+                    : L"Close this window, reopen the file, and enter the password again. If the password is correct, the archive may be damaged.") &&
                 Get(StringId::ExitStopTasks) == (chinese ? L"停止任务并退出" : L"Stop tasks and exit") &&
                 Get(StringId::PlaybackNextFrame) == (chinese ? L"下一帧" : L"Next frame") &&
                 Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue") &&

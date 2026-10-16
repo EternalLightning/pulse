@@ -713,6 +713,11 @@ add_executable(pulse_json_persistence_test src/bench/json_persistence_test.cpp $
 target_link_libraries(pulse_json_persistence_test PRIVATE
     pulse_sqlite pulse_localization pulse_text pulse_user_storage
     shell32 ole32 uuid shlwapi netapi32 bcrypt secur32 advapi32 user32)
+get_target_property(session_windows_sources pulse_json_persistence_test SOURCES)
+list(FILTER session_windows_sources EXCLUDE REGEX "json_persistence_test\\.cpp$")
+add_executable(pulse_session_windows_test src/bench/session_windows_test.cpp ${session_windows_sources})
+get_target_property(session_windows_libraries pulse_json_persistence_test LINK_LIBRARIES)
+target_link_libraries(pulse_session_windows_test PRIVATE ${session_windows_libraries})
 target_sources(pulse_ops_test PRIVATE src/bench/json_undo_parser_test.cpp)
 
 add_executable(pulse_file_lock_owner_test
@@ -737,6 +742,10 @@ add_dependencies(pulse_shell_registry_ipc_test pulse_shell)
 add_executable(pulse_dialog_text_fit_test src/bench/dialog_text_fit_test.cpp)
 add_executable(pulse_clipboard_availability_test src/bench/clipboard_availability_test.cpp)
 target_compile_options(pulse_clipboard_availability_test PRIVATE /W4 /permissive- /utf-8)
+add_executable(pulse_virtual_clipboard_test src/bench/virtual_clipboard_test.cpp
+    src/ops/clipboard.cpp)
+target_compile_definitions(pulse_virtual_clipboard_test PRIVATE PULSE_CLIPBOARD_TESTING=1)
+target_link_libraries(pulse_virtual_clipboard_test PRIVATE shell32 ole32 oleaut32 uuid user32 shlwapi)
 add_executable(pulse_window_result_mailbox_test src/bench/window_result_mailbox_test.cpp)
 target_compile_options(pulse_window_result_mailbox_test PRIVATE /W4 /permissive- /utf-8)
 target_link_libraries(pulse_window_result_mailbox_test PRIVATE user32)
@@ -999,6 +1008,10 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/rename_enter_test.cpp ${architecture_sources})
     add_executable(pulse_archive_navigation_test
         src/bench/archive_navigation_test.cpp ${architecture_sources})
+    add_executable(pulse_multiwindow_application_test
+        src/bench/multiwindow_application_test.cpp ${architecture_sources})
+    add_executable(pulse_ops_journal_test
+        src/bench/ops_journal_test_main.cpp ${architecture_sources})
     add_executable(pulse_titlebar_layout_test
         src/bench/titlebar_layout_test.cpp ${architecture_sources})
     add_executable(pulse_permission_operation_prompt_ui_test
@@ -1009,7 +1022,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     list(FILTER global_search_fixture_sources EXCLUDE REGEX "global_search_window\\.cpp$")
     add_executable(pulse_global_search_window_test
         src/bench/global_search_window_test.cpp ${global_search_fixture_sources})
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_ops_journal_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})

@@ -1,0 +1,41 @@
+[PASS] production window initializes with an isolated directory and configuration
+[PASS] a single tab starts a vertical drag without moving the physical mouse
+[PASS] losing capture clears the single-tab drag state
+[PASS] external tab mode opens another tab in the existing window
+[PASS] explicit tab mode creates a new tab even when the folder is already open
+[PASS] reuse mode activates the existing tab without adding a duplicate
+[PASS] external new-window mode creates a second real Pulse window
+[PASS] opening a file location in a new window selects the requested file
+[PASS] real windows share the graphics device and icons while keeping thumbnail cancellation independent
+[PASS] all windows edit the same preferences, places and staging tray
+[PASS] an outside open can activate a matching tab in another window
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] each of five simultaneous windows can finish its directory listing
+[PASS] closing extra windows releases their workers while the first pair remains usable
+[PASS] the window factory restores tabs, active layout, sidebar and geometry from its session
+[PASS] a restored window closes independently
+[PASS] a layout tab moves between real windows and resumes loading in its destination
+[PASS] one split pane moves independently without moving the other source pane
+[PASS] prepare a loaded two-pane layout tab for content-area drag routing
+[PASS] dropping a multi-pane tab on content preserves every pane and joins the target split
+[PASS] dropping a tab on the target tab strip preserves it as a separate tab
+[PASS] dropping a tab outside all windows creates a detached top-level window
+[PASS] the detached window contains the moved tab and finishes loading
+[PASS] a detached tab window closes without affecting the root pair
+[PASS] dropping a pane outside all windows creates a detached top-level window
+[PASS] pane detachment replaces the new window starter and leaves one source pane
+[PASS] a detached pane window closes without affecting the root pair
+[PASS] dropping a window title bar merges every tab and keeps pinned tabs before unpinned tabs
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] theme changes update every live window
+[PASS] save a rendered external-open setting in the actual window
+[PASS] closing the first window keeps the second window and process alive
+[PASS] the surviving window still accepts outside folder opens
+[PASS] closing the final window completes its asynchronous shutdown
+multiwindow application: 0 failures

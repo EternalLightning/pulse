@@ -13,6 +13,7 @@ struct ClipboardAvailabilityRequest {
     uint64_t generation = 0;
     uint32_t sequence = 0;
     bool file_format = false;
+    bool shell_format = false;
     bool tray_present = false;
     std::vector<std::wstring> tray_paths;
 };
@@ -42,6 +43,10 @@ inline ClipboardAvailabilityResult ProbeClipboardAvailability(
         result.clipboard_available = read_clipboard(clipboard) && clipboard.sequence == request.sequence &&
             valid_paths(clipboard.paths);
     }
+    // Virtual files have no paths to validate. Their formats and clipboard
+    // sequence are captured by the UI pump; tray paths still get worker checks.
+    if (!result.clipboard_available && request.shell_format && !(cancelled && cancelled()))
+        result.clipboard_available = true;
     if (request.tray_present && result.clipboard_available) result.tray_available = valid_paths(request.tray_paths);
     return result;
 }
@@ -60,13 +65,15 @@ public:
     };
 
     bool Update(uint32_t sequence, bool file_format, bool tray_present,
-                std::vector<std::wstring> tray_paths) {
+                std::vector<std::wstring> tray_paths, bool shell_format = false) {
         tray_revision_.reset();
         if (initialized_ && inputs_.sequence == sequence && inputs_.file_format == file_format &&
-            inputs_.tray_present == tray_present && inputs_.tray_paths == tray_paths) return false;
+            inputs_.shell_format == shell_format && inputs_.tray_present == tray_present &&
+            inputs_.tray_paths == tray_paths) return false;
         const bool previously_available = Available();
         initialized_ = true;
         inputs_.sequence = sequence; inputs_.file_format = file_format;
+        inputs_.shell_format = shell_format;
         inputs_.tray_present = tray_present; inputs_.tray_paths = std::move(tray_paths);
         inputs_.generation = mailbox_->generation.fetch_add(1) + 1;
         clipboard_available_ = tray_available_ = false;
@@ -76,10 +83,12 @@ public:
 
     template<class CollectPaths>
     bool UpdateVersioned(uint32_t sequence, bool file_format, bool tray_present,
-                         uint64_t tray_revision, CollectPaths&& collect_paths) {
+                         uint64_t tray_revision, CollectPaths&& collect_paths,
+                         bool shell_format = false) {
         if (initialized_ && tray_revision_ == tray_revision && inputs_.sequence == sequence &&
-            inputs_.file_format == file_format && inputs_.tray_present == tray_present) return false;
-        const bool changed = Update(sequence, file_format, tray_present, collect_paths());
+            inputs_.file_format == file_format && inputs_.shell_format == shell_format &&
+            inputs_.tray_present == tray_present) return false;
+        const bool changed = Update(sequence, file_format, tray_present, collect_paths(), shell_format);
         tray_revision_ = tray_revision;
         return changed;
     }
@@ -99,8 +108,9 @@ public:
     }
 
     std::optional<ClipboardAvailabilityRequest> BeginRefresh(uint64_t now) {
-        if (!initialized_ || pending_ || now < next_probe_ || !inputs_.file_format ||
-            (inputs_.tray_present && inputs_.tray_paths.empty())) return {};
+        if (!initialized_ || pending_ || now < next_probe_ ||
+            (!inputs_.file_format && !inputs_.shell_format) ||
+            (inputs_.tray_present && inputs_.tray_paths.empty() && !inputs_.shell_format)) return {};
         pending_ = true;
         next_probe_ = now + 1000;
         return inputs_;
@@ -111,7 +121,8 @@ public:
     }
 
     bool Available() const noexcept {
-        return clipboard_available_ && (!inputs_.tray_present || tray_available_);
+        return clipboard_available_ &&
+            (!inputs_.tray_present || tray_available_ || inputs_.shell_format);
     }
 
     std::shared_ptr<Mailbox> mailbox() const { return mailbox_; }

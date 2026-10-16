@@ -1,5 +1,6 @@
 #include "../app/app_internal.h"
 #include "../app/archive_navigation.h"
+#include "../app/archive_operation_ui.h"
 #include "../common/localization.h"
 #include "../ops/archive.h"
 #include <atomic>
@@ -10,6 +11,7 @@
 #include <map>
 #include <set>
 #include <thread>
+#include <vector>
 
 namespace {
 namespace stdfs = std::filesystem;
@@ -20,12 +22,13 @@ struct Probe {
     unsigned delivered = 0, pings = 0;
 };
 constexpr UINT kPing = WM_APP + 190;
+constexpr wchar_t kProbeProperty[] = L"PulseArchiveNavigationProbe";
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
-    auto* probe = reinterpret_cast<Probe*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
-        probe = static_cast<Probe*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(probe));
+        auto* state = static_cast<pulse::AppState*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
     }
+    auto* probe = static_cast<Probe*>(GetPropW(hwnd, kProbeProperty));
     if (probe && message == pulse::WM_ARCHIVE_RESULT) {
         ++probe->delivered;
         if (probe->hold) probe->held.push_back(lp);
@@ -33,6 +36,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (probe && (message == kPing || message == WM_TIMER)) { ++probe->pings; return 0; }
+    if (message == WM_NCDESTROY) RemovePropW(hwnd, kProbeProperty);
     return DefWindowProcW(hwnd, message, wp, lp);
 }
 void Pump() {
@@ -63,16 +67,69 @@ void MakeTruncatedZip(const stdfs::path& path) {
     local("download/readable.txt", false);
     local("download/incomplete.m4s", true);
 }
+bool MakeEncrypted7z(const stdfs::path& archive, const stdfs::path& source) {
+    stdfs::path executable;
+#ifdef PULSE_ARCHIVE_RUNTIME_DIR
+    executable = stdfs::path(PULSE_ARCHIVE_RUNTIME_DIR) / L"7z.exe";
+#else
+    wchar_t module[32768]{};
+    GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
+    executable = stdfs::path(module).parent_path() / L"7zip" / L"7z.exe";
+#endif
+    std::wstring command = L"\"" + executable.wstring() + L"\" a -y -bd -psecret \"" +
+        archive.wstring() + L"\" \".\\*\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW, nullptr, source.c_str(), &startup, &process)) return false;
+    const bool exited = WaitForSingleObject(process.hProcess, 30000) == WAIT_OBJECT_0;
+    DWORD code = 2;
+    if (exited) GetExitCodeProcess(process.hProcess, &code);
+    else {
+        TerminateProcess(process.hProcess, 2);
+        WaitForSingleObject(process.hProcess, INFINITE);
+    }
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    return exited && code == 0;
+}
 struct DialogWatch {
     HWND owner = nullptr;
     std::atomic_bool seen{false};
+    std::atomic_bool password_error_seen{false};
+    std::atomic_uint password_prompts{0};
+    std::vector<std::wstring> password_inputs;
+    std::set<HWND> handled_password_dialogs;
     std::set<std::wstring> auxiliary_classes;
+    std::set<std::wstring> operation_titles;
 };
 BOOL CALLBACK CancelOwnDialog(HWND window, LPARAM data) {
     auto& watch = *reinterpret_cast<DialogWatch*>(data);
     if (GetWindow(window, GW_OWNER) != watch.owner) return TRUE;
     wchar_t window_class[256]{};
     GetClassNameW(window, window_class, 256);
+    wchar_t window_title[512]{};
+    GetWindowTextW(window, window_title, ARRAYSIZE(window_title));
+    const std::wstring_view class_name(window_class);
+    if (class_name == L"IME" || class_name == L"MSCTFIME UI" ||
+        class_name == L"PulseOwnerDimOverlay" || class_name == L"tooltips_class32") return TRUE;
+    std::erase_if(watch.handled_password_dialogs, [](HWND handle) { return !IsWindow(handle); });
+    if (std::wstring_view(window_class) == L"PulseArchiveDialog" &&
+        std::wstring_view(window_title) == pulse::l10n::Get(pulse::l10n::StringId::ArchivePassword) &&
+        watch.handled_password_dialogs.insert(window).second) {
+        const auto index = watch.password_prompts.fetch_add(1, std::memory_order_relaxed);
+        if (index < watch.password_inputs.size()) {
+            const auto text = watch.password_inputs[index];
+            SendMessageW(GetDlgItem(window, 101), WM_SETTEXT, 0, reinterpret_cast<LPARAM>(text.c_str()));
+            PostMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED),
+                reinterpret_cast<LPARAM>(GetDlgItem(window, IDOK)));
+        } else {
+            PostMessageW(window, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED),
+                reinterpret_cast<LPARAM>(GetDlgItem(window, IDCANCEL)));
+        }
+        return TRUE;
+    }
     const bool known_dialog = std::wstring_view(window_class) == L"#32770" ||
         std::wstring_view(window_class) == L"PulseArchiveDialog";
     const bool visible = IsWindowVisible(window) != FALSE;
@@ -84,7 +141,24 @@ BOOL CALLBACK CancelOwnDialog(HWND window, LPARAM data) {
                 static_cast<uint32_t>(GetWindowLongPtrW(window, GWL_STYLE)) << std::dec << L'\n';
         return TRUE;
     }
+    if (std::wstring_view(window_class) == L"PulseFileOperationWindow") {
+        if (watch.operation_titles.insert(window_title).second) {
+            const int length = WideCharToMultiByte(CP_UTF8, 0, window_title, -1, nullptr, 0, nullptr, nullptr);
+            std::string title(static_cast<size_t>((std::max)(1, length)), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, window_title, -1, title.data(), length, nullptr, nullptr);
+            std::cout << "[INFO] archive operation title=" << title.c_str() << '\n';
+        }
+        if (std::wstring_view(window_title) == pulse::l10n::Get(pulse::l10n::StringId::ArchivePasswordOrDataError)) {
+            watch.password_error_seen.store(true);
+            PostMessageW(window, WM_KEYDOWN, VK_ESCAPE, 0);
+        } else if (std::wstring_view(window_title) == pulse::l10n::Get(pulse::l10n::StringId::ArchiveExtractFailed)) {
+            watch.seen.store(true);
+            PostMessageW(window, WM_KEYDOWN, VK_ESCAPE, 0);
+        }
+        return TRUE;
+    }
     watch.seen.store(true);
+    std::wcout << L"[INFO] unexpected owned modal class=" << window_class << L" title=" << window_title << L'\n';
     // Only windows belonging to this fixture's UI thread are enumerated.
     PostMessageW(window, WM_COMMAND, IDNO, 0);
     PostMessageW(window, WM_CLOSE, 0, 0);
@@ -134,6 +208,22 @@ int wmain(int argc, wchar_t** argv) {
     const auto fixture = stdfs::absolute(stdfs::path(L"bench_data") /
         (L"archive-navigation-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
     stdfs::create_directories(fixture, error);
+    struct RestoreTemporaryEnvironment {
+        std::wstring tmp, temp;
+        RestoreTemporaryEnvironment() {
+            wchar_t value[32768]{};
+            if (GetEnvironmentVariableW(L"TMP", value, ARRAYSIZE(value))) tmp = value;
+            if (GetEnvironmentVariableW(L"TEMP", value, ARRAYSIZE(value))) temp = value;
+        }
+        ~RestoreTemporaryEnvironment() {
+            SetEnvironmentVariableW(L"TMP", tmp.empty() ? nullptr : tmp.c_str());
+            SetEnvironmentVariableW(L"TEMP", temp.empty() ? nullptr : temp.c_str());
+        }
+    } restore_temporary_environment;
+    const auto temporary = fixture / L"temp";
+    stdfs::create_directories(temporary, error);
+    SetEnvironmentVariableW(L"TMP", temporary.c_str());
+    SetEnvironmentVariableW(L"TEMP", temporary.c_str());
     const bool external = argc == 2;
     const stdfs::path archive = external ? stdfs::absolute(argv[1]) : fixture / L"truncated.zip";
     if (!external) MakeTruncatedZip(archive);
@@ -153,8 +243,10 @@ int wmain(int argc, wchar_t** argv) {
     wc.lpszClassName = L"PulseArchiveNavigationFixture";
     RegisterClassW(&wc);
     state.hwnd = CreateWindowExW(0, wc.lpszClassName, L"Archive navigation fixture", WS_OVERLAPPEDWINDOW,
-        -30000, -30000, 1100, 720, nullptr, nullptr, wc.hInstance, &probe);
+        -30000, -30000, 1100, 720, nullptr, nullptr, wc.hInstance, &state);
+    if (state.hwnd) SetPropW(state.hwnd, kProbeProperty, &probe);
     DialogWatch watch; watch.owner = state.hwnd;
+    watch.password_inputs = {L"wrong-password", L"secret"};
     std::atomic_bool finished{false};
     const DWORD ui_thread = GetCurrentThreadId();
     std::thread watchdog([&] {
@@ -200,6 +292,38 @@ int wmain(int argc, wchar_t** argv) {
                 "fixture window remains responsive and no modal password retry opens");
             check(tab.archive_listing && tab.snapshot && Actual(tab) == Expected(*reference, L""),
                 "root snapshot publishes exactly accepted safe records and their parent folders");
+            if (!reference->entries.empty()) {
+                const auto member = reference->entries.front().path;
+                tab.archive_encrypted.insert(member);
+                tab.archive_password = L"wrong-password";
+                ops::ArchiveOperationResult wrong_password;
+                wrong_password.outcome = ops::ArchiveOutcome::Failed;
+                wrong_password.exit_code = 2;
+                wrong_password.password_state = ops::ArchivePasswordState::Required;
+                UpdateArchiveOpenPassword(tab, tab.current_path, tab.applied_generation,
+                    archive.wstring(), tab.archive_password, wrong_password);
+                check(tab.archive_password.empty() && tab.archive_encrypted.contains(member),
+                    "failed encrypted member open clears the cached password while retaining encryption evidence");
+                check(tab.archive_encrypted.contains(member) && tab.archive_password.empty(),
+                    "the next double-click again enters the password prompt path");
+                const auto failed_view = tab.current_path;
+                tab.current_path = fixture.wstring();
+                tab.archive_password = L"newer-tab-password";
+                UpdateArchiveOpenPassword(tab, failed_view, tab.applied_generation,
+                    archive.wstring(), L"wrong-password", wrong_password);
+                check(tab.archive_password == L"newer-tab-password",
+                    "late extraction failure cannot clear a password after the tab switches views");
+                tab.current_path = failed_view;
+                tab.archive_password.clear();
+                ops::ArchiveOperationResult success;
+                success.outcome = ops::ArchiveOutcome::Success;
+                UpdateArchiveOpenPassword(tab, tab.current_path, tab.applied_generation,
+                    archive.wstring(), L"verified-password", success);
+                check(tab.archive_password == L"verified-password",
+                    "archive open caches the supplied password only after successful extraction");
+                tab.archive_password.clear();
+                tab.archive_encrypted.erase(member);
+            }
             const auto cache = tab.archive_listing;
             const auto warning = tab.banner_message;
             check(tab.net_readonly && !warning.empty() && warning == reference->error &&
@@ -271,13 +395,63 @@ int wmain(int argc, wchar_t** argv) {
             check(tab.current_path == fixture.wstring() && tab.snapshot == sentinel && !tab.loading &&
                 tab.banner_message == L"other view warning", "late archive result cannot pollute a different view");
             probe.hold = false;
+
+            const auto password_source = fixture / L"password-source";
+            const auto password_archive = fixture / L"encrypted.7z";
+            stdfs::create_directories(password_source, error);
+            std::ofstream(password_source / L"secret.noapp", std::ios::binary) << "encrypted member payload";
+            const bool packed = !error && MakeEncrypted7z(password_archive, password_source);
+            check(packed, "create an actual password-protected 7z archive for the double-click flow");
+            if (packed) {
+                tab.archive_password.clear();
+                tab.current_path = ArchiveViewPath(password_archive.wstring());
+                LoadArchiveView(state, tab);
+                const bool loaded = Wait([&] { return !tab.loading; });
+                const auto member_name = L"secret.noapp";
+                check(loaded && tab.archive_listing && tab.archive_encrypted.contains(member_name),
+                    "real 7z listing reports the selected member as encrypted");
+                if (loaded && tab.archive_listing && tab.snapshot && tab.archive_encrypted.contains(member_name)) {
+                    auto found = std::find_if(tab.snapshot->begin(), tab.snapshot->end(), [&](const auto& entry) {
+                        return entry.name == member_name;
+                    });
+                    check(found != tab.snapshot->end(), "encrypted member appears in the navigable snapshot");
+                    if (found != tab.snapshot->end()) {
+                        auto extraction = std::make_shared<ops::ArchiveOperationResult>();
+                        auto extraction_done = std::make_shared<std::atomic_bool>(false);
+                        const auto probe_destination = (fixture / L"password-probe").wstring();
+                        const bool probe_queued = state.worker.EnqueueIo([extraction, extraction_done,
+                            password_archive, probe_destination, member_name] {
+                            *extraction = ops::ExtractArchive(password_archive.wstring(), probe_destination,
+                                {member_name}, L"wrong-password");
+                            extraction_done->store(true);
+                        });
+                        check(probe_queued && Wait([&] { return extraction_done->load(); }) &&
+                            app::IsArchivePasswordFailure(*extraction),
+                            "real encrypted member extraction reports wrong password with 7z exit 2");
+                        watch.password_error_seen.store(false);
+                        tab.SelectOnly(static_cast<int>(found - tab.snapshot->begin()));
+                        const bool first_open = OpenArchiveSelection(state);
+                        check(first_open && watch.password_prompts.load() == 1 && tab.archive_password.empty(),
+                            "wrong password fails the first double-click without caching it");
+                        check(watch.password_error_seen.load(),
+                            "wrong encrypted password presents and closes the localized failure window");
+
+                        tab.SelectOnly(static_cast<int>(found - tab.snapshot->begin()));
+                        const bool second_open = OpenArchiveSelection(state);
+                        check(second_open && watch.password_prompts.load() == 2,
+                            "a second double-click opens the password dialog again");
+                        check(tab.archive_password == L"secret",
+                            "correct password is cached only after the second extraction succeeds");
+                    }
+                }
+            }
         }
         if (tab.archive_cancel) tab.archive_cancel->store(true);
         state.worker.Stop();
         Pump();
         for (const auto payload : probe.held) DiscardArchiveResult(payload);
         probe.held.clear();
-        check(!watch.seen.load(), "only nonmodal archive warning was displayed throughout navigation");
+        check(!watch.seen.load(), "navigation and password retries displayed no unexpected modal dialog");
         state.renderer.SetCompositor(nullptr);
         state.compositor.Shutdown();
     }

@@ -1,8 +1,11 @@
 // clipboard.h — System clipboard interop with Explorer (CF_HDROP + drop effect).
 #pragma once
+#include <windows.h>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+struct IDataObject;
 
 namespace pulse::ops {
 
@@ -24,6 +27,24 @@ bool WriteClipboardText(const std::wstring& text);
 
 // Reads an Explorer copy/cut (CF_HDROP). Returns false if no files present.
 bool ReadClipboard(ClipboardData& out);
+
+// Shell virtual files (for example files copied from RDP, archives or Outlook)
+// have no filesystem paths. Paste them through the destination's shell drop
+// target. Call from an STA worker; the shell may perform provider I/O here.
+inline bool ClipboardHasShellFiles() {
+    return IsClipboardFormatAvailable(RegisterClipboardFormatW(L"Shell IDList Array")) ||
+           IsClipboardFormatAvailable(RegisterClipboardFormatW(L"FileGroupDescriptorW"));
+}
+
+inline bool ClipboardHasPasteableFiles() {
+    return IsClipboardFormatAvailable(CF_HDROP) || ClipboardHasShellFiles();
+}
+
+bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
+
+#ifdef PULSE_CLIPBOARD_TESTING
+bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t preferred_effect);
+#endif
 
 // Clears a completed cut only if the clipboard still contains the exact cut
 // captured by ReadClipboard. This never clears a newer clipboard value.

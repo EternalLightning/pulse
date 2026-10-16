@@ -282,6 +282,8 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
             scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
     l.new_tab_row=toggle_row(I::SettingsNewTabHomeDesc);
+    l.external_open_card=row(narrow ? 98.0f : 64.0f);
+    l.external_open_choice=choice(l.external_open_card,224);
     l.group[1]=D2D1::RectF(left,l.startup_row[0].top,right,y);
     section(2);
     l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);

@@ -1,5 +1,6 @@
 #include "archive_navigation.h"
 #include "app_exit.h"
+#include "../ops/operation_journal_paths.h"
 #include "drive_label_rename.h"
 #include "../ops/archive.h"
 #include "../ops/drop_staging.h"
@@ -259,6 +260,56 @@ bool Render(AppState& s) {
     return s.ui_schedule.animation_active;
 }
 
+static void RestoreWindowSessionState(AppState& state, const app::WindowSessionSnapshot& session) {
+    state.session_path = session.active_path;
+    state.session_layout_tabs = session.layout_tabs;
+    state.session_tab_groups = session.tab_groups;
+    state.session_active_layout_tab = session.active_layout_tab;
+    state.darkMode = session.dark;
+    state.sidebarCollapsedMask = static_cast<uint32_t>(session.sidebar_collapsed);
+    state.sidebarHiddenMask = static_cast<uint32_t>(session.sidebar_hidden);
+    state.sidebarOrder = session.sidebar_order.empty() ? app::DefaultSidebarOrder() : session.sidebar_order;
+    state.sidebarQuickAccessHiddenMask = static_cast<uint32_t>(session.quick_access_hidden);
+    state.starredExpanded = session.starred_expanded;
+    state.pending_undo_json = session.undo_json;
+    state.showDetailsPanel = session.details_panel;
+    state.detailsPreviewOnly = session.details_preview_only;
+    state.detailsPreviewEnabled = session.details_preview;
+    state.detailsPreviewExpansion = session.details_preview_only ? 1.0f : 0.0f;
+    state.detailsPanelWidth = static_cast<float>(session.details_panel_width);
+    state.renderer.SetDetailsPanelWidth(state.detailsPanelWidth);
+    if (state.darkMode) state.themeOverride = ui::ThemeMode::Dark;
+}
+
+app::WindowSessionSnapshot CaptureWindowSession(AppState& s, HWND hwnd) {
+    app::WindowSessionSnapshot snap;
+    WINDOWPLACEMENT wp{ sizeof(wp) };
+    if (GetWindowPlacement(hwnd, &wp)) {
+        snap.window_rect = wp.rcNormalPosition;
+        snap.maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+    }
+    snap.dark = s.darkMode;
+    if (app::Tab* tab = ActiveTab(s)) snap.active_path = tab->current_path;
+    RememberLayoutFocus(s);
+    snap.active_layout_tab = static_cast<int>(s.window_tabs.active);
+    for (const auto& group : s.window_tabs.tab_groups)
+        snap.tab_groups.push_back({group.id, group.name, group.color_rgb, group.collapsed});
+    for (const auto& layout : s.window_tabs.items)
+        snap.layout_tabs.push_back(app::CaptureLayoutTab(*layout));
+    snap.tray = s.tray;
+    snap.undo_json = s.ops.UndoToJson();
+    snap.sidebar_collapsed = static_cast<int>(s.sidebarCollapsedMask);
+    snap.sidebar_hidden = static_cast<int>(s.sidebarHiddenMask);
+    snap.sidebar_order = app::NormalizeSidebarOrder(s.sidebarOrder);
+    snap.quick_access_hidden = static_cast<int>(s.sidebarQuickAccessHiddenMask);
+    snap.starred_expanded = s.starredExpanded;
+    snap.details_panel = s.showDetailsPanel;
+    snap.details_preview_only = s.detailsPreviewOnly;
+    snap.details_preview = s.detailsPreviewEnabled;
+    snap.details_panel_width = static_cast<int>(std::lround(s.detailsPanelWidth));
+    return snap;
+}
+
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     AppState* s = GetAppState(hwnd);
     if (s && msg == app::TrayController::TaskbarCreatedMessage()) {
@@ -306,14 +357,20 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s = reinterpret_cast<AppState*>(cs->lpCreateParams);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(s));
         s->hwnd = hwnd;
+        if (!s->core.instance) s->core.instance = cs->hInstance;
+        s->core.windows.Add(hwnd, s);
+        if (!s->core.global_ui_owner) s->core.global_ui_owner = hwnd;
         s->shell_verbs_mailbox = std::make_shared<app::WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
         s->shell_registry_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
+        s->clipboard_paste_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_CLIPBOARD_PASTE_RESULT);
+        s->external_open_mailbox = std::make_shared<app::WindowResultMailbox<app::ExternalOpenResult>>(
+            hwnd, WM_EXTERNAL_OPEN_READY);
         s->dup_volumes_mailbox = std::make_shared<app::WindowResultMailbox<std::vector<index::VolumeInfo>>>(hwnd, WM_DUP_VOLUMES);
         s->dup_volume_cache_pending = false;
-        s->tray_controller.Attach(hwnd, cs->hInstance);
         s->tray_controller.SetBeforeRestore([s] {
             s->tray_controller.SetVisible(s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled);
         });
+        if (s->core.global_ui_owner == hwnd) s->tray_controller.Attach(hwnd, cs->hInstance);
 
         s->scale = s->shot_scale_override > 0.0f
             ? s->shot_scale_override : (float)pulse::compat::WindowDpi(hwnd) / 96.0f;
@@ -357,15 +414,18 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->places.persist = false;
             s->appPrefs.persist = false;
         }
-        s->savedSearches.Load();
+        if (!s->core.shared_preferences_loaded) {
+            s->savedSearches.Load();
+            s->places.Load();
+            ProbePinnedNetworks(*s);
+            s->ctxMenuPrefs.Load();
+            s->appPrefs.Load();
+            s->searchHistory.persist = !s->shot.active && !s->menushot && !s->isolatedTest;
+            if (s->searchHistory.persist) s->searchHistory.Load();
+            s->core.shared_preferences_loaded = true;
+        }
         SyncSavedSearchSidebar(*s);
-        s->places.Load();
-        ProbePinnedNetworks(*s);
-        s->ctxMenuPrefs.Load();
-        s->appPrefs.Load();
         s->darkMode = ui::ShouldUseDarkMode(s->EffectiveThemeMode());
-        s->searchHistory.persist = !s->shot.active && !s->menushot && !s->isolatedTest;
-        if (s->searchHistory.persist) s->searchHistory.Load();
         s->showFps = s->forceStatusPerformance || s->appPrefs.show_status_performance;
         s->duplicateScan.scope = static_cast<app::DuplicateScanScope>(
             std::clamp(s->appPrefs.duplicate_scan_scope, 0, 2));
@@ -386,7 +446,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->appPrefs.background_image.clear();
         } else {
             SeedShellVerbCache(*s);
-            StartShellRegistryWatch(*s);
+            if (s->core.global_ui_owner == hwnd) StartShellRegistryWatch(*s);
         }
         s->renderer.SetRowHeightDip(static_cast<float>(s->appPrefs.row_height));
         s->renderer.SetListStyle(s->appPrefs.list_smart_date, s->appPrefs.list_zebra_rows,
@@ -413,8 +473,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             ApplySettingsEffects(*s, effects);
         };
         settings_callbacks.toggle_system_integration = [s](int control) {
-            s->systemIntegration.Toggle(*s, control);
-            InvalidateRect(s->hwnd, nullptr, FALSE);
+            AppState* owner = s->core.windows.Lookup(s->core.global_ui_owner);
+            if (!owner) owner = s;
+            owner->systemIntegration.Toggle(*owner, control);
+            InvalidateRect(owner->hwnd, nullptr, FALSE);
         };
         settings_callbacks.task_completion = SettingsCompletion(hwnd);
         settings_callbacks.open_path = [s](const std::wstring& path) {
@@ -492,7 +554,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                            s->networkIndex, std::move(settings_callbacks));
         ApplyGlobalSearchSettings(*s);
 
-        s->worker.Start([s](app::WorkResult res) { PostWorkerResult(*s, std::move(res)); });
+        if (!s->worker.Start([s](app::WorkResult res) { PostWorkerResult(*s, std::move(res)); })) {
+            MessageBoxW(hwnd, L"Pulse could not start its directory worker pool.", L"Pulse",
+                       MB_OK | MB_ICONERROR);
+            return -1;
+        }
         if (!s->isolatedTest && !s->shot.active && !s->menushot) {
             s->worker.EnqueueIo([] { ops::SweepDropStages(ops::DropStageRoot(), false); });
         }
@@ -500,8 +566,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         // Ops layer: queue worker + shell host IPC; notify repaints the status bar.
         const std::wstring data_dir = app::GetPulseDataDir();
-        if (!s->isolatedTest && !data_dir.empty())
-            s->ops.SetJournalPath(data_dir + L"\\operations.json");
+        if (!s->isolatedTest && !data_dir.empty()) {
+            auto journals = ops::AssignOperationJournalPaths(data_dir, !s->secondary_window);
+            if (s->secondary_window) s->ops.SetJournalPath(std::move(journals.window_path));
+            else s->ops.SetJournalPaths(std::move(journals.paths));
+        }
         s->ops.SetVerifyCopies(s->appPrefs.verify_copies);
         // Shell dialogs (打开方式…/属性) must be owned by the Pulse window.
         s->ops.SetUiWindow(hwnd);
@@ -626,7 +695,12 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         } else {
         std::wstring startPath = s->shot.active ? s->shot.path : pulse::path::DefaultNavigationRoot();
         ResolvedOpenTarget openTarget;
-        if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
+        const bool has_initial_external_target = s->initial_external_open_target.has_value();
+        if (has_initial_external_target) {
+            openTarget = std::move(*s->initial_external_open_target);
+            s->initial_external_open_target.reset();
+            startPath = openTarget.folder;
+        } else if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
         else if (!s->shot.active && !s->open_path.empty()) {
             if (ops::IsArchivePath(s->open_path)) startPath = ArchiveViewPath(fs::NormalizePath(s->open_path));
             else {
@@ -646,7 +720,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             !s->shot.active && !s->session_path.empty()
                 ? PathLoadReason::RestoreSession : PathLoadReason::Navigate);
         RememberPath(*s, startPath);
-        if (!s->shot.active && s->session_path.empty() && !s->open_path.empty())
+        if (!s->shot.active && s->session_path.empty() &&
+            (has_initial_external_target || !s->open_path.empty()))
             SelectLaunchedFile(*s, openTarget);
         }
 
@@ -655,7 +730,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             OpenFolderInNewTab(*s, s->open_path);
         }
 
-        s->systemIntegration.Start(*s);
+        if (s->core.global_ui_owner == hwnd) s->systemIntegration.Start(*s);
 
         s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
         s->renderer.SetDetailsPanelWidth(s->detailsPanelWidth);
@@ -774,6 +849,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_NCLBUTTONDOWN: {
         if (!s) break;
+        if (wParam == HTCAPTION) s->window_caption_dragging = true;
         if (wParam == HTMINBUTTON) {
             ShowWindow(hwnd, SW_MINIMIZE);
             return 0;
@@ -783,6 +859,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         if (wParam == HTCLOSE) {
+            if (s->core.windows.Count() > 1) {
+                RequestWindowClose(*s);
+                return 0;
+            }
             if (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled) {
                 SuspendContentSearches(*s);
                 s->globalSearchWindow.Hide();
@@ -793,7 +873,19 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
+    case WM_EXITSIZEMOVE:
+        if (s && s->window_caption_dragging) {
+            s->window_caption_dragging = false;
+            POINT screen{};
+            if (GetCursorPos(&screen)) TryMergeWindowAtScreenPoint(*s, screen);
+        }
+        return 0;
+
     case WM_CLOSE: {
+        if (s && (s->core.exiting || s->core.windows.Count() > 1)) {
+            RequestWindowClose(*s);
+            return 0;
+        }
         if (s && (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled)) {
             SuspendContentSearches(*s);
             s->globalSearchWindow.Hide();
@@ -808,12 +900,83 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s) CompleteApplicationExit(*s);
         return 0;
 
+    case WM_NEW_WINDOW: {
+        std::unique_ptr<ResolvedOpenTarget> target(
+            reinterpret_cast<ResolvedOpenTarget*>(lParam));
+        if (!s || !target || s->exit_requested || s->core.exiting) return 0;
+        // Only synchronous startup restoration supplies this borrowed snapshot.
+        const auto* restore = reinterpret_cast<const app::WindowSessionSnapshot*>(wParam);
+        if (s->core.windows.Count() >= kMaxTopLevelWindows) {
+            s->notification_toast.ShowError(hwnd, l10n::Get(l10n::StringId::Open),
+                l10n::Get(l10n::StringId::OperationFailedMessage));
+            return 0;
+        }
+        const HINSTANCE instance = s->core.instance ? s->core.instance : GetModuleHandleW(nullptr);
+        auto child = std::make_shared<AppState>(s->core);
+        child->secondary_window = true;
+        child->isolatedTest = s->isolatedTest;
+        child->safeMode = s->safeMode;
+        child->contentIndexObserver = s->contentIndexObserver;
+        child->open_path = target->folder;
+        child->initial_external_open_target = std::move(*target);
+        if (restore) {
+            RestoreWindowSessionState(*child, *restore);
+            child->open_path.clear();
+            child->initial_external_open_target.reset();
+        }
+        s->core.owned_windows.push_back(child);
+        RECT source{};
+        if (!GetWindowRect(hwnd, &source)) source = RECT{0, 0, 1600, 960};
+        int left = source.left + 32, top = source.top + 32;
+        int width = (std::max)(640L, source.right - source.left);
+        int height = (std::max)(480L, source.bottom - source.top);
+        if (restore && restore->window_rect.right - restore->window_rect.left >= 320 &&
+            restore->window_rect.bottom - restore->window_rect.top >= 420) {
+            const auto& saved = restore->window_rect;
+            left = saved.left; top = saved.top;
+            width = saved.right - saved.left; height = saved.bottom - saved.top;
+            if (!MonitorFromRect(&saved, MONITOR_DEFAULTTONULL)) {
+                MONITORINFO monitor{sizeof(monitor)};
+                if (GetMonitorInfoW(MonitorFromRect(&saved, MONITOR_DEFAULTTONEAREST), &monitor)) {
+                    left = monitor.rcWork.left; top = monitor.rcWork.top;
+                }
+            }
+        }
+        HWND created = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP,
+            app::SingleInstanceCoordinator::WindowClassName(), L"Pulse",
+            WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+            left, top, width, height,
+            nullptr, nullptr, instance, child.get());
+        if (!created) {
+            std::erase(s->core.owned_windows, child);
+            return 0;
+        }
+        HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_PULSE));
+        if (icon) SendMessageW(created, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+        const bool hidden_restore = restore && !IsWindowVisible(hwnd);
+        ShowWindow(created, hidden_restore ? SW_HIDE : restore && restore->maximized
+            ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+        UpdateWindow(created);
+        return reinterpret_cast<LRESULT>(child.get());
+    }
+
+    case WM_DETACH_LAYOUT_TAB: {
+        if (!s || s->core.windows.Count() >= kMaxTopLevelWindows ||
+            wParam >= s->window_tabs.items.size()) return 0;
+        auto target = std::make_unique<ResolvedOpenTarget>();
+        target->this_pc = true;
+        auto* child = reinterpret_cast<AppState*>(SendMessageW(hwnd, WM_NEW_WINDOW, 0,
+            reinterpret_cast<LPARAM>(target.release())));
+        if (child && !TransferLayoutTab(*s, static_cast<size_t>(wParam), *child, true, true))
+            RequestWindowClose(*child);
+        return 0;
+    }
+
     case WM_COPYDATA: {
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         std::wstring path;
         if (!s || !app::SingleInstanceCoordinator::DecodeOpenPath(cds, path)) return FALSE;
-        OpenFolderInNewTab(*s, path);
-        return TRUE;
+        return RouteExternalFolderOpen(*s, path) ? TRUE : FALSE;
     }
 
     case app::kSystemIntegrationMessage:
@@ -884,6 +1047,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
 
     case WM_ACTIVATE:
+        if (s && LOWORD(wParam) != WA_INACTIVE) s->core.windows.Touch(hwnd);
         if (s && s->menu && LOWORD(wParam) == WA_INACTIVE)
             s->menu->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
         if (s) s->renderer.NotifyPreviewActivate(LOWORD(wParam) != WA_INACTIVE);
@@ -1404,6 +1568,35 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_CLIPBOARD_PASTE_RESULT:
+        if (s && s->clipboard_paste_mailbox) {
+            for (const bool success : s->clipboard_paste_mailbox->Take(wParam)) {
+                if (!success) s->notification_toast.Show(hwnd,
+                    l10n::Get(l10n::StringId::OpCopyFailed),
+                    l10n::Get(l10n::StringId::OperationFailedMessage));
+            }
+        }
+        return 0;
+
+    case WM_EXTERNAL_OPEN_READY:
+        if (s) ApplyExternalOpenResults(*s, wParam);
+        return 0;
+
+    case WM_DETACH_PANE: {
+        if (!s || lParam < 0 ||
+            static_cast<size_t>(lParam) >= s->window_tabs.items.size()) return 0;
+        ResolvedOpenTarget empty_target;
+        empty_target.this_pc = true;
+        auto* payload = new (std::nothrow) ResolvedOpenTarget(std::move(empty_target));
+        if (!payload) return 0;
+        auto* child = reinterpret_cast<AppState*>(SendMessageW(hwnd, WM_NEW_WINDOW, 0,
+            reinterpret_cast<LPARAM>(payload)));
+        if (child && !TransferPane(*s, static_cast<size_t>(wParam), *child,
+                static_cast<size_t>(lParam), true))
+            PostMessageW(child->hwnd, WM_CLOSE, 0, 0);
+        return 0;
+    }
+
     case WM_HEADER_DROP_RESULT:
         if (s) HandleHeaderDropResult(*s);
         return 0;
@@ -1588,15 +1781,35 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s) {
             if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
             if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
+            if (s->clipboard_paste_mailbox) s->clipboard_paste_mailbox->Close();
+            if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
+            s->core.windows.Remove(hwnd);
         }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        if (s && s->secondary_window) {
+            auto& owned = s->core.owned_windows;
+            const auto it = std::find_if(owned.begin(), owned.end(),
+                [s](const auto& candidate) { return candidate.get() == s; });
+            if (it != owned.end()) {
+                s->core.retired_windows.push_back(std::move(*it));
+                owned.erase(it);
+            }
+        }
         return DefWindowProcW(hwnd, msg, wParam, lParam);
 
     case WM_DESTROY: {
         if (s) {
+            const bool was_global_owner = s->core.global_ui_owner == hwnd;
+            if (was_global_owner) s->core.global_ui_owner = nullptr;
+            s->core.windows.Remove(hwnd);
+            const bool last_window = s->core.windows.Count() == 0;
+            AppState* next_owner = !last_window && was_global_owner
+                ? s->core.windows.MostRecent() : nullptr;
             if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
             if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
+            if (s->clipboard_paste_mailbox) s->clipboard_paste_mailbox->Close();
+            if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
             StopUiScheduling(*s);
             // Destruction paths used by tests also save only after operations settle.
@@ -1604,7 +1817,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->systemIntegration.Stop();
             s->ops.Stop();
             ShutdownGlobalSearch(*s);
-            StopShellRegistryWatch();
+            if (was_global_owner || last_window) {
+                StopShellRegistryWatch();
+            }
             s->watches.Stop();
             s->folderSizes.Stop();
             s->settings.ResetUi();
@@ -1621,12 +1836,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             MSG archive_message{};
             while (PeekMessageW(&archive_message, hwnd, WM_ARCHIVE_RESULT, WM_ARCHIVE_RESULT, PM_REMOVE))
                 DiscardArchiveResult(archive_message.lParam);
-            const bool sweep_drops = !s->isolatedTest && !s->shot.active && !s->menushot;
-            std::thread archive_cleanup([sweep_drops] {
-                CleanupArchiveFiles();
-                if (sweep_drops) ops::SweepDropStages(ops::DropStageRoot(), true);
-            });
-            archive_cleanup.join();
+            if (last_window) {
+                const bool sweep_drops = !s->isolatedTest && !s->shot.active && !s->menushot;
+                std::thread archive_cleanup([sweep_drops] {
+                    CleanupArchiveFiles();
+                    if (sweep_drops) ops::SweepDropStages(ops::DropStageRoot(), true);
+                });
+                archive_cleanup.join();
+            }
 
             if (s->dropTarget) {
                 RevokeDragDrop(hwnd);
@@ -1659,51 +1876,48 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 DeleteObject(s->editBrush);
                 s->editBrush = nullptr;
             }
-            // Visual-regression runs must never overwrite the user's real
-            // window, path, tray, or undo session.
+            // Retain each closed window's state, then write one complete session
+            // only after the last top-level window closes.
             if (!s->shot.active && !s->menushot && !s->isolatedTest) {
-                app::SessionSnapshot snap;
-                WINDOWPLACEMENT wp{ sizeof(wp) };
-                if (GetWindowPlacement(hwnd, &wp)) {
-                    snap.window_rect = wp.rcNormalPosition;
-                    snap.maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+                if (last_window) {
+                    app::SessionSnapshot snap;
+                    if (s->core.exiting) {
+                        s->core.closed_window_sessions.push_back(
+                            CaptureWindowSession(*s, hwnd));
+                        snap.windows = std::move(s->core.closed_window_sessions);
+                    } else {
+                        snap.windows.push_back(CaptureWindowSession(*s, hwnd));
+                    }
+                    if (!snap.windows.empty())
+                        static_cast<app::WindowSessionSnapshot&>(snap) = snap.windows.front();
+                    app::SaveSession(snap);
+                } else if (s->core.exiting) {
+                    s->core.closed_window_sessions.push_back(
+                        CaptureWindowSession(*s, hwnd));
                 }
-                snap.dark = s->darkMode;
-                app::Tab* tab = ActiveTab(*s);
-                if (tab) snap.active_path = tab->current_path;
-                RememberLayoutFocus(*s);
-                snap.active_layout_tab = static_cast<int>(s->window_tabs.active);
-                for (const auto& group : s->window_tabs.tab_groups)
-                    snap.tab_groups.push_back(
-                        {group.id, group.name, group.color_rgb, group.collapsed});
-                for (const auto& layout : s->window_tabs.items)
-                    snap.layout_tabs.push_back(app::CaptureLayoutTab(*layout));
-                snap.tray = s->tray;
-                snap.undo_json = s->ops.UndoToJson();
-                snap.sidebar_collapsed = static_cast<int>(s->sidebarCollapsedMask);
-                snap.sidebar_hidden = static_cast<int>(s->sidebarHiddenMask);
-                snap.sidebar_order = app::NormalizeSidebarOrder(s->sidebarOrder);
-                snap.quick_access_hidden = static_cast<int>(s->sidebarQuickAccessHiddenMask);
-                snap.starred_expanded = s->starredExpanded;
-                snap.details_panel = s->showDetailsPanel;
-                snap.details_preview_only = s->detailsPreviewOnly;
-                snap.details_preview = s->detailsPreviewEnabled;
-                snap.details_panel_width = static_cast<int>(std::lround(s->detailsPanelWidth));
-                app::SaveSession(snap);
                 s->places.Save();
                 s->ctxMenuPrefs.Save();
                 s->appPrefs.Save();
             }
 
-            s->tray_controller.Detach();
-            s->single_instance.Release();
+            if (was_global_owner) {
+                s->tray_controller.Detach();
+                if (next_owner && !s->core.exiting) {
+                    s->core.global_ui_owner = next_owner->hwnd;
+                    next_owner->tray_controller.Attach(next_owner->hwnd, s->core.instance);
+                    next_owner->systemIntegration.Start(*next_owner);
+                    if (!next_owner->safeMode) StartShellRegistryWatch(*next_owner);
+                    ApplyGlobalSearchSettings(*next_owner);
+                }
+            }
+            if (last_window) s->single_instance.Release();
 
             s->renderer.SetIconNotifyWindow(nullptr);
             s->renderer.SetCompositor(nullptr);
             s->compositor.Shutdown();
             s->hwnd = nullptr;
         }
-        PostQuitMessage(0);
+        if (!s || s->core.windows.Count() == 0) PostQuitMessage(0);
         return 0;
     }
     }
@@ -1994,26 +2208,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     // Load previous session before parsing overrides.
     app::SessionSnapshot session;
     if (!state.isolatedTest && app::LoadSession(session)) {
-        state.session_path = session.active_path;
-        state.session_layout_tabs = std::move(session.layout_tabs);
-        state.session_tab_groups = std::move(session.tab_groups);
-        state.session_active_layout_tab = session.active_layout_tab;
+        RestoreWindowSessionState(state, session);
         state.tray = session.tray;
-        state.darkMode = session.dark;
-        state.sidebarCollapsedMask = static_cast<uint32_t>(session.sidebar_collapsed);
-        state.sidebarHiddenMask = static_cast<uint32_t>(session.sidebar_hidden);
-        state.sidebarOrder = session.sidebar_order.empty()
-            ? app::DefaultSidebarOrder() : session.sidebar_order;
-        state.sidebarQuickAccessHiddenMask = static_cast<uint32_t>(session.quick_access_hidden);
-        state.starredExpanded = session.starred_expanded;
-        state.pending_undo_json = session.undo_json;
-        state.showDetailsPanel = session.details_panel;
-        state.detailsPreviewOnly = session.details_preview_only;
-        state.detailsPreviewEnabled = session.details_preview;
-        state.detailsPreviewExpansion = session.details_preview_only ? 1.0f : 0.0f;
-        state.detailsPanelWidth = static_cast<float>(session.details_panel_width);
-        state.renderer.SetDetailsPanelWidth(state.detailsPanelWidth);
-        if (state.darkMode) state.themeOverride = ui::ThemeMode::Dark;
     }
 
     bool startup_launch = false;
@@ -2172,6 +2368,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
     ShowWindow(hwnd, test_hidden || startup_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL : nCmdShow);
     UpdateWindow(hwnd);
+    if (!state.shot.active && !state.menushot && !state.colorpickshot) {
+        for (size_t i = 1; i < session.windows.size(); ++i) {
+            auto target = std::make_unique<ResolvedOpenTarget>();
+            target->folder = session.windows[i].active_path;
+            target->this_pc = target->folder.empty();
+            SendMessageW(hwnd, WM_NEW_WINDOW, reinterpret_cast<WPARAM>(&session.windows[i]),
+                reinterpret_cast<LPARAM>(target.release()));
+        }
+    }
 
     if (state.menushot) {
         // Render the built-in item menu to a PNG (GUI verification for 1B-2).
@@ -2338,6 +2543,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         if (ret == -1) break;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
+        // Retired child states survive reentrant DestroyWindow calls until the
+        // top-level dispatch has returned and its callbacks can no longer use them.
+        state.core.retired_windows.clear();
     }
     OleUninitialize();
     return (int)msg.wParam;

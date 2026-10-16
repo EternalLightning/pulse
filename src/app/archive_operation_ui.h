@@ -6,6 +6,8 @@
 
 namespace pulse::app {
 
+bool IsArchivePasswordFailure(const ops::ArchiveOperationResult& result) noexcept;
+
 ops::OpStatus ArchiveOperationStatus(const ops::ArchiveProgress& progress,
     const std::wstring& archive, const std::wstring& destination, bool cancelling);
 

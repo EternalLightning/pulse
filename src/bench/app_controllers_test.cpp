@@ -621,6 +621,30 @@ int wmain(int argc, wchar_t** argv) {
             verb_calls == 1 && command_calls == 1 && executed_command == custom.command);
         return ok ? 0 : 1;
     }
+    if (argc == 2 && std::wstring(argv[1]) == L"--external-open-prefs") {
+        using pulse::app::AppPrefs;
+        using pulse::app::ExternalOpenMode;
+        AppPrefs prefs, loaded;
+        prefs.persist = loaded.persist = false;
+        bool ok = Report("external folder opens reuse an open location by default",
+            prefs.external_open_mode == ExternalOpenMode::ReuseOpenedLocation);
+        for (auto mode : {ExternalOpenMode::ReuseOpenedLocation, ExternalOpenMode::Tab, ExternalOpenMode::NewWindow}) {
+            prefs.external_open_mode = mode;
+            ok &= Report("external open choice survives a preferences round trip",
+                loaded.FromJson(prefs.ToJson()) && loaded.external_open_mode == mode);
+        }
+        for (const auto* json : {L"{}", L"{\"external_open_mode\":-1}", L"{\"external_open_mode\":3}",
+                L"{\"external_open_mode\":\"window\"}"}) {
+            loaded.external_open_mode = ExternalOpenMode::NewWindow;
+            ok &= Report("missing or invalid external open preferences restore the default",
+                loaded.FromJson(json) && loaded.external_open_mode == ExternalOpenMode::ReuseOpenedLocation);
+        }
+        loaded.external_open_mode = ExternalOpenMode::NewWindow;
+        loaded.ResetToDefaults();
+        ok &= Report("reset restores the external open default",
+            loaded.external_open_mode == ExternalOpenMode::ReuseOpenedLocation);
+        return ok ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--new-tab-home") {
         wchar_t temporary[MAX_PATH]{};
         if (!GetTempPathW(MAX_PATH, temporary)) return 1;

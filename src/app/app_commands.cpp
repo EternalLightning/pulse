@@ -1915,7 +1915,7 @@ void SyncQuickPreview(AppState& s) {
 
 void EnsureEditVisuals(AppState& s);
 
-void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
+static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects) {
     if (app::HasEffect(effects, app::SettingsEffect::FileVisibility)) {
         ForEachPane(s, [&](app::Pane& pane) {
             if (auto* tab = pane.ActiveTab()) {
@@ -1949,16 +1949,15 @@ void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
     }
     if (app::HasEffect(effects, app::SettingsEffect::TrayDeckIcon))
         s.renderer.SetTrayIconDip(static_cast<float>(s.appPrefs.tray_icon_size));
-    if (app::HasEffect(effects, app::SettingsEffect::TrayVisibility))
+    if (app::HasEffect(effects, app::SettingsEffect::TrayVisibility) &&
+        (!s.core.global_ui_owner || s.core.global_ui_owner == s.hwnd))
         s.tray_controller.SetVisible(s.appPrefs.keep_running_on_close || s.appPrefs.global_search_enabled);
     if (app::HasEffect(effects, app::SettingsEffect::GlobalSearch))
         ApplyGlobalSearchSettings(s);
     if (app::HasEffect(effects, app::SettingsEffect::StatusBarPerformance))
         s.showFps = s.forceStatusPerformance || s.appPrefs.show_status_performance;
     if (app::HasEffect(effects, app::SettingsEffect::Language)) {
-        l10n::SetLanguage(s.appPrefs.language);
         RefreshSidebarModel(s);
-        ui::typography::InvalidateCaches();
         s.compositor.RecreateTextFormats(s.scale);
         s.renderer.InvalidateTypography();
         if (s.editFont) {
@@ -1982,6 +1981,20 @@ void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 
+void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
+    if (app::HasEffect(effects, app::SettingsEffect::Language)) {
+        l10n::SetLanguage(s.appPrefs.language);
+        ui::typography::InvalidateCaches();
+    }
+    if (s.core.windows.Count() == 0) {
+        ApplyWindowSettingsEffects(s, effects);
+        return;
+    }
+    s.core.windows.ForEach([&](HWND, AppState& window) {
+        if (!window.exit_requested) ApplyWindowSettingsEffects(window, effects);
+    });
+}
+
 app::SettingsTaskCompletion SettingsCompletion(HWND hwnd) {
     return [hwnd](app::SettingsTaskResult result) {
         auto* message = new app::SettingsTaskResult(std::move(result));
@@ -1992,9 +2005,7 @@ app::SettingsTaskCompletion SettingsCompletion(HWND hwnd) {
 void ToggleTheme(AppState& s) {
     SetThemeMode(s, s.darkMode ? 1 : 2);
 }
-void SetThemeMode(AppState& s, int mode) {
-    s.appPrefs.theme_mode = std::clamp(mode, 0, 2);
-    s.appPrefs.Save();
+static void ApplyWindowThemeMode(AppState& s) {
     if (s.shot.active)
         s.themeOverride = s.appPrefs.theme_mode == 1 ? ui::ThemeMode::Light :
             s.appPrefs.theme_mode == 2 ? ui::ThemeMode::Dark : ui::ThemeMode::Auto;
@@ -2012,6 +2023,18 @@ void SetThemeMode(AppState& s, int mode) {
     if (s.hwndFilterEdit) InvalidateRect(s.hwndFilterEdit, nullptr, TRUE);
     if (s.operationWindow) s.operationWindow->SetTheme(s.darkMode, s.accentColor);
     InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+
+void SetThemeMode(AppState& s, int mode) {
+    s.appPrefs.theme_mode = std::clamp(mode, 0, 2);
+    s.appPrefs.Save();
+    if (s.core.windows.Count() == 0) {
+        ApplyWindowThemeMode(s);
+        return;
+    }
+    s.core.windows.ForEach([](HWND, AppState& window) {
+        if (!window.exit_requested) ApplyWindowThemeMode(window);
+    });
 }
 
 } // namespace pulse

@@ -1,6 +1,8 @@
 // shell_icons.h — isolated Windows Shell icon pixels for file rows.
 #pragma once
 #include "ui_compositor.h"
+#include "d2d_device_binding.h"
+#include "repaint_targets.h"
 #include "../ipc/shell_query_protocol.h"
 
 #include <string>
@@ -31,6 +33,8 @@ public:
     void SetDeviceContext(ID2D1DeviceContext* dc);
     void SetScale(float scale);
     void SetNotifyWindow(HWND hwnd);
+    void AddNotifyWindow(HWND hwnd);
+    void RemoveNotifyWindow(HWND hwnd);
     // Cancels the isolated query without joining. Old CPU-only state remains owned
     // until actual thread exit; device resources are never used by that worker.
     void Reset();
@@ -72,7 +76,7 @@ private:
         std::atomic<uint64_t> eviction_generation{0};
         int next_index = 1;
         uint64_t access_clock = 0;
-        HWND notify = nullptr;
+        std::shared_ptr<RepaintTargets> notify;
         bool stop = false;
         HANDLE thread = nullptr;
         uint32_t slot = 0;
@@ -95,7 +99,8 @@ private:
                                const std::wstring& path);
 
     ID2D1DeviceContext* dc_ = nullptr;
-    HWND hwnd_ = nullptr;
+    D2DDeviceBinding device_binding_;
+    std::shared_ptr<RepaintTargets> notify_ = std::make_shared<RepaintTargets>();
     float scale_ = 1.0f;
 #ifdef PULSE_SHELL_ICONS_TESTING
     ComPtr<IWICImagingFactory> wic_;

@@ -137,14 +137,22 @@ void PasteIntoCurrent(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
     if (!CanPasteIntoCurrent(s)) return;
-    if (!s.tray.batches().empty()) {
+    const uint32_t observed_sequence = GetClipboardSequenceNumber();
+    const bool has_path_files = IsClipboardFormatAvailable(CF_HDROP) != 0;
+    const bool virtual_files = !has_path_files && ops::ClipboardHasShellFiles();
+    if (observed_sequence != GetClipboardSequenceNumber()) return;
+    if (!virtual_files && !s.tray.batches().empty()) {
         size_t idx = s.tray.batches().size() - 1;
         if (s.tray.batches()[idx].move_intent) s.cutPaths.clear();
         ReleaseTrayBatch(s, idx);
         return;
     }
+
     ops::ClipboardData cb;
-    if (ops::ReadClipboard(cb)) {
+    const bool clipboard_paths = ops::ReadClipboard(cb);
+    const uint32_t clipboard_sequence = clipboard_paths ? cb.sequence : observed_sequence;
+    if (clipboard_sequence != GetClipboardSequenceNumber()) return;
+    if (clipboard_paths) {
         ops::OpRequest req;
         req.type = cb.cut ? ops::OpType::Move : ops::OpType::Copy;
         req.dest_dir = tab->current_path;
@@ -155,6 +163,20 @@ void PasteIntoCurrent(AppState& s) {
             s.pendingCutClipboardPaths = cb.paths;
             s.completedCutClipboardPaths.clear();
         }
+    } else if (virtual_files) {
+        // Shell providers can block while materializing virtual files. The I/O
+        // worker is an STA, so OleGetClipboard and the folder drop target stay
+        // off the UI thread and in one apartment.
+        const std::wstring destination = tab->current_path;
+        const uint32_t sequence = clipboard_sequence;
+        const auto mailbox = s.clipboard_paste_mailbox;
+        const bool queued = s.worker.EnqueueIo([destination, sequence, mailbox] {
+            const bool pasted = ops::PasteShellClipboard(destination, sequence);
+            // Clipboard replacement is a stale request, not a user-visible failure.
+            if (pasted || GetClipboardSequenceNumber() == sequence)
+                if (mailbox) mailbox->Publish(pasted);
+        });
+        if (!queued && mailbox) mailbox->Publish(false);
     }
 }
 

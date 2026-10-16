@@ -86,6 +86,24 @@ int wmain() {
     availability.Update(1, false, false, {});
     Check(!availability.Available() && !availability.BeginRefresh(0),
           "empty or text clipboard disables paste without source probes");
+    availability.Update(1, false, false, {}, true);
+    const auto virtual_files = availability.BeginRefresh(0);
+    if (!virtual_files) return 2;
+    const unsigned reads_before_virtual = reads;
+    const auto virtual_result = app::ProbeClipboardAvailability(*virtual_files, reader, exists);
+    availability.mailbox()->Publish(virtual_result);
+    availability.Consume();
+    Check(availability.Available() && reads == reads_before_virtual,
+          "virtual-file formats enable paste without treating them as filesystem paths");
+    availability.Update(1, false, true, {}, true);
+    const auto virtual_without_tray_paths = availability.BeginRefresh(1000);
+    Check(virtual_without_tray_paths.has_value(),
+          "new virtual clipboard remains available when the older tray batch has no live paths");
+    if (!virtual_without_tray_paths) return 2;
+    availability.mailbox()->Publish(app::ProbeClipboardAvailability(
+        *virtual_without_tray_paths, reader, exists));
+    availability.Consume();
+    Check(availability.Available(), "virtual clipboard takes priority over unavailable older tray paths");
     availability.Update(1, true, false, {});
     const auto first = availability.BeginRefresh(0);
     Check(first.has_value() && !availability.Available(), "file clipboard waits for worker validation");

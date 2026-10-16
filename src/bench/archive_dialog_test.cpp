@@ -399,12 +399,26 @@ void RunFailureCases(HWND owner, DWORD thread) {
     result.error = L"ERROR: Data Error in encrypted file. Wrong password? : 童欣文.pptx";
     const auto failure = app::ArchiveFailureStatus(result, L"C:\\fixtures\\example.zip", L"C:\\output");
     Check(failure.phase == ops::OpPhase::Failed && !failure.active && failure.failure_hr == S_OK &&
-        failure.last_error == result.error && failure.source_label == L"C:\\fixtures\\example.zip" &&
+        failure.last_error == l10n::Get(l10n::StringId::ArchivePasswordRetryHint) + L"\n\n" + result.error &&
+        failure.last_error.ends_with(result.error) && failure.source_label == L"C:\\fixtures\\example.zip" &&
         failure.destination_label == L"C:\\output" && failure.bytes_per_second == 0 && failure.eta_seconds == 0,
         "archive failure preserves diagnostics and endpoints without treating 7zip exit 2 as a Windows error");
+    Check(app::IsArchivePasswordFailure(result) &&
+        failure.summary == l10n::Get(l10n::StringId::ArchivePasswordOrDataError),
+        "encrypted extraction exit 2 gets a localized password-or-damaged-data summary");
+    result.password_state = ops::ArchivePasswordState::NotRequired;
+    Check(!app::IsArchivePasswordFailure(result), "unencrypted extraction errors are not mislabeled as password failures");
+    result.password_state = ops::ArchivePasswordState::Required;
     result.error.clear();
     Check(app::ArchiveFailureStatus(result, L"archive.zip", L"output").last_error ==
-        l10n::Get(l10n::StringId::ArchiveExtractFailed), "empty extraction failure has a localized explanation");
+        l10n::Get(l10n::StringId::ArchivePasswordRetryHint),
+        "empty encrypted extraction failure still has a localized password-or-data explanation");
+    result.password_state = ops::ArchivePasswordState::NotRequired;
+    Check(app::ArchiveFailureStatus(result, L"archive.zip", L"output").last_error ==
+        l10n::Get(l10n::StringId::ArchiveExtractFailed),
+        "empty generic extraction failure retains its localized generic explanation");
+    result.password_state = ops::ArchivePasswordState::Required;
+    result.error = L"ERROR: Data Error in encrypted file. Wrong password? : 童欣文.pptx";
     for (bool dark : {false, true}) {
         for (bool immediate : {false, true}) {
             std::atomic_bool done = immediate, cancel = false;

@@ -91,34 +91,60 @@ void Compositor::Shutdown() {
 }
 
 bool Compositor::InitD3D() {
-    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    struct SharedGraphics {
+        ComPtr<ID3D11Device> d3d;
+        ComPtr<IDXGIDevice1> dxgi;
+        ComPtr<ID2D1Factory1> factory;
+        ComPtr<ID2D1Device> d2d;
+    };
+    // Windows on this UI thread share bitmap resource domains, while their
+    // targets, text formats, DPI and LumaText renderers remain independent.
+    static thread_local SharedGraphics shared;
+    const auto retain = []<typename T>(ComPtr<T>& destination, T* source) {
+        destination.reset();
+        destination.p = source;
+        if (source) source->AddRef();
+    };
+    HRESULT hr = S_OK;
+    if (shared.d2d.get() && SUCCEEDED(shared.d3d->GetDeviceRemovedReason())) {
+        retain(d3dDevice_, shared.d3d.get());
+        retain(dxgiDevice_, shared.dxgi.get());
+        retain(d2dFactory_, shared.factory.get());
+        retain(d2dDevice_, shared.d2d.get());
+    } else {
+        UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #ifdef _DEBUG
-    flags |= D3D11_CREATE_DEVICE_DEBUG;
+        flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
-    D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1 };
-    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
-        levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
-        &d3dDevice_, nullptr, nullptr);
-    if (FAILED(hr)) {
-        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
+        D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1 };
+        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
             levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
             &d3dDevice_, nullptr, nullptr);
-    }
-    if (!CheckGraphics(hr, L"D3D11CreateDevice (hardware/WARP)")) return false;
+        if (FAILED(hr)) {
+            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
+                levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
+                &d3dDevice_, nullptr, nullptr);
+        }
+        if (!CheckGraphics(hr, L"D3D11CreateDevice (hardware/WARP)")) return false;
 
-    hr = d3dDevice_->QueryInterface(&dxgiDevice_);
-    if (!CheckGraphics(hr, L"IDXGIDevice1")) return false;
+        hr = d3dDevice_->QueryInterface(&dxgiDevice_);
+        if (!CheckGraphics(hr, L"IDXGIDevice1")) return false;
 
-    D2D1_FACTORY_OPTIONS opts{};
+        D2D1_FACTORY_OPTIONS opts{};
 #ifdef _DEBUG
-    opts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+        opts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #endif
-    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1),
-        &opts, reinterpret_cast<void**>(&d2dFactory_));
-    if (!CheckGraphics(hr, L"D2D1CreateFactory")) return false;
+        hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1),
+            &opts, reinterpret_cast<void**>(&d2dFactory_));
+        if (!CheckGraphics(hr, L"D2D1CreateFactory")) return false;
 
-    hr = d2dFactory_->CreateDevice(dxgiDevice_.get(), &d2dDevice_);
-    if (!CheckGraphics(hr, L"D2D CreateDevice")) return false;
+        hr = d2dFactory_->CreateDevice(dxgiDevice_.get(), &d2dDevice_);
+        if (!CheckGraphics(hr, L"D2D CreateDevice")) return false;
+        retain(shared.d3d, d3dDevice_.get());
+        retain(shared.dxgi, dxgiDevice_.get());
+        retain(shared.factory, d2dFactory_.get());
+        retain(shared.d2d, d2dDevice_.get());
+    }
 
     hr = d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc_);
     if (!CheckGraphics(hr, L"D2D CreateDeviceContext")) return false;

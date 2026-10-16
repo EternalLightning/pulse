@@ -5,6 +5,10 @@
 namespace pulse {
 void ApplyGlobalSearchSettings(AppState& s) {
     if (s.isolatedTest) return;
+    // Register one process-wide hotkey against the current service owner only.
+    // Secondary windows may still edit their local preferences, but cannot
+    // steal or duplicate the global registration.
+    if (s.core.global_ui_owner && s.core.global_ui_owner != s.hwnd) return;
     const bool enabled = s.appPrefs.global_search_enabled;
     const bool ok = s.globalSearchHotkey.Update(s.hwnd, enabled,
         s.appPrefs.global_search_modifiers, s.appPrefs.global_search_key);

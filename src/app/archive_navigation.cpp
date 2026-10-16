@@ -30,8 +30,11 @@ bool CanBrowse(ops::ArchiveOutcome outcome) {
 }
 struct Result : ops::ArchiveOperationResult {
     std::wstring view, file, prefix, password, open_path;
+    std::wstring source_view;
     uint64_t generation = 0;
+    uint64_t source_generation = 0;
     bool extraction = false;
+    bool cache_password_on_success = false;
     std::shared_ptr<const app::ArchiveListing> listing;
     fs::SnapshotPtr snapshot;
 };
@@ -78,7 +81,8 @@ fs::SnapshotPtr BuildArchiveSnapshot(const app::ArchiveListing& listing, const s
 }
 void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& destination,
                    const std::vector<std::wstring>& selected, const std::wstring& password,
-                   const std::wstring& member = {}) {
+                   const std::wstring& member = {}, const std::wstring& source_view = {},
+                   uint64_t source_generation = 0) {
     struct Task {
         std::atomic_bool done{false}, cancel{false};
         std::mutex progress_mutex;
@@ -88,6 +92,11 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
     };
     auto task = std::make_shared<Task>();
     task->result->extraction = true;
+    task->result->file = file;
+    task->result->password = password;
+    task->result->source_view = source_view;
+    task->result->source_generation = source_generation;
+    task->result->cache_password_on_success = !member.empty();
     if (!s.worker.EnqueueIo([task, file, destination, selected, password, member] {
         try {
             static_cast<ops::ArchiveOperationResult&>(*task->result) =
@@ -108,7 +117,9 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
         task->result->error = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
         task->done.store(true, std::memory_order_release);
     }
-    if (app::ShowArchiveProgressWindow(s.hwnd, s.darkMode, Accent(s), task->done, task->cancel,
+    const HWND owner = s.hwnd;
+    const AppState* expected_state = &s;
+    const bool progress_completed = app::ShowArchiveProgressWindow(owner, s.darkMode, Accent(s), task->done, task->cancel,
         [task, file, destination] {
             if (task->done.load(std::memory_order_acquire) &&
                 task->result->outcome != ops::ArchiveOutcome::Success &&
@@ -118,8 +129,15 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
             auto status = app::ArchiveOperationStatus(task->progress, file, destination, task->cancel.load());
             status.peak_bytes_per_second = task->peak_bytes_per_second;
             return status;
-        }))
-        HandleArchiveResult(s, reinterpret_cast<LPARAM>(task->result.release()));
+        });
+    if (!task->done.load(std::memory_order_acquire)) {
+        task->cancel.store(true, std::memory_order_release);
+        return;
+    }
+    if (!IsWindow(owner) || GetAppState(owner) != expected_state) return;
+    if (task->result->outcome == ops::ArchiveOutcome::Success &&
+        (!progress_completed || task->cancel.load(std::memory_order_acquire))) return;
+    HandleArchiveResult(s, reinterpret_cast<LPARAM>(task->result.release()));
 }
 }
 bool IsArchiveView(const std::wstring& path) { return path.starts_with(kPrefix); }
@@ -231,12 +249,32 @@ bool OpenArchiveSelection(AppState& s) {
         const auto destination = (std::filesystem::temp_directory_path() / L"PulseArchive" /
             std::to_wstring(GetCurrentProcessId()) / std::to_wstring(next_request++)).wstring();
         auto open_password = password;
-        if (tab->archive_encrypted.contains(member) && open_password.empty() && !app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), open_password))
-            return true;
-        tab->archive_password = open_password;
-        RunExtraction(s, file, destination, {member}, open_password, member);
+        const auto source_view = tab->current_path;
+        const auto source_generation = tab->applied_generation;
+        const bool needs_password = tab->archive_encrypted.contains(member) && open_password.empty();
+        if (needs_password && !app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), open_password)) return true;
+        bool source_still_active = false;
+        ForEachPane(s, [&](app::Pane& pane) {
+            auto& current = pane.view;
+            if (current.current_path == source_view && current.archive_file == file &&
+                current.applied_generation == source_generation && ActiveTab(s) == &current &&
+                !current.loading && current.snapshot) source_still_active = true;
+        });
+        if (!source_still_active) return true;
+        RunExtraction(s, file, destination, {member}, open_password, member, source_view, source_generation);
     }
     return true;
+}
+void UpdateArchiveOpenPassword(app::Tab& tab, const std::wstring& source_view,
+    uint64_t source_generation, const std::wstring& file, const std::wstring& password,
+    const ops::ArchiveOperationResult& result) {
+    if (tab.current_path != source_view || tab.archive_file != file ||
+        tab.applied_generation != source_generation) return;
+    if (app::IsArchivePasswordFailure(result)) {
+        if (tab.archive_password == password) tab.archive_password.clear();
+    } else if (result.outcome == ops::ArchiveOutcome::Success) {
+        tab.archive_password = password;
+    }
 }
 void ExtractArchiveSelection(AppState& s, bool all) {
     auto* tab = ActiveTab(s);
@@ -262,9 +300,15 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
     std::unique_ptr<Result> result(reinterpret_cast<Result*>(payload));
     if (!result) return;
     if (result->extraction) {
-        // Failed extraction already remains visible in the shared operation window.
+        if (!result->source_view.empty() && (result->cache_password_on_success ||
+            app::IsArchivePasswordFailure(*result))) {
+            ForEachPane(s, [&](app::Pane& pane) {
+                UpdateArchiveOpenPassword(pane.view, result->source_view, result->source_generation,
+                    result->file, result->password, *result);
+            });
+        }
         if (result->outcome != ops::ArchiveOutcome::Success) return;
-        if (!result->open_path.empty()) {
+        if (!result->open_path.empty() && !s.isolatedTest) {
             if (ops::IsArchivePath(result->open_path)) NavigateTo(s, ArchiveViewPath(result->open_path));
             else s.ops.OpenWith(result->open_path);
         }
@@ -274,27 +318,14 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
         auto& tab = pane.view;
         {
             if (tab.current_path != result->view || tab.pending_generation != result->generation) return;
+            const auto result_view = tab.current_path;
+            const auto result_file = tab.archive_file;
             tab.loading = false;
             const bool browsable = CanBrowse(result->outcome);
-            bool retry_with_password = result->password_state == ops::ArchivePasswordState::Required;
-            if (result->outcome == ops::ArchiveOutcome::Failed &&
-                result->password_state == ops::ArchivePasswordState::Unknown && ActiveTab(s) == &tab) {
-                ui::ConfirmDialogSpec spec;
-                spec.title = l10n::Get(l10n::StringId::ArchiveOpenFailed);
-                spec.message = l10n::Get(l10n::StringId::ArchivePasswordUnknownRetry);
-                spec.confirm_text = l10n::Get(l10n::StringId::ArchiveEnterPassword);
-                spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
-                spec.cancel_is_default = true;
-                spec.fit_to_work_area = true;
-                spec.rows = {{result->error, false, false}, {result->file, true, true}};
-                retry_with_password = ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor);
-            }
-            if (!browsable && retry_with_password && ActiveTab(s) == &tab) {
-                if (app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), tab.archive_password)) {
-                    LoadArchiveView(s, tab);
-                    return;
-                }
-            }
+            const bool offer_password_retry = result->outcome == ops::ArchiveOutcome::Failed &&
+                result->password_state == ops::ArchivePasswordState::Unknown && ActiveTab(s) == &tab;
+            if (!browsable && !result->password.empty() && tab.archive_password == result->password)
+                tab.archive_password.clear();
             if (browsable && result->listing) {
                 if (tab.archive_listing != result->listing) {
                     tab.archive_listing = result->listing;
@@ -316,6 +347,33 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
                 result->outcome == ops::ArchiveOutcome::Success ? L"" :
                 result->outcome == ops::ArchiveOutcome::PartialListing ? std::filesystem::path(result->file).filename().wstring() :
                 l10n::Get(l10n::StringId::ArchiveOpenFailed));
+            if (!browsable && (result->password_state == ops::ArchivePasswordState::Required || offer_password_retry)) {
+                bool retry_with_password = result->password_state == ops::ArchivePasswordState::Required;
+                if (offer_password_retry) {
+                    ui::ConfirmDialogSpec spec;
+                    spec.title = l10n::Get(l10n::StringId::ArchiveOpenFailed);
+                    spec.message = l10n::Get(l10n::StringId::ArchivePasswordUnknownRetry);
+                    spec.confirm_text = l10n::Get(l10n::StringId::ArchiveEnterPassword);
+                    spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
+                    spec.cancel_is_default = true;
+                    spec.fit_to_work_area = true;
+                    spec.rows = {{result->error, false, false}, {result->file, true, true}};
+                    retry_with_password = ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor);
+                }
+                if (retry_with_password) {
+                    std::wstring retry_password;
+                    if (app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), retry_password)) {
+                        ForEachPane(s, [&](app::Pane& retry_pane) {
+                            auto& current = retry_pane.view;
+                            if (current.current_path != result_view || current.applied_generation != result->generation ||
+                                current.archive_file != result_file || ActiveTab(s) != &current) return;
+                            current.archive_password = std::move(retry_password);
+                            LoadArchiveView(s, current);
+                        });
+                    }
+                }
+                return;
+            }
         }
     });
     InvalidateRect(s.hwnd, nullptr, FALSE);

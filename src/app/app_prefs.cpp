@@ -79,6 +79,7 @@ void AppPrefs::ResetToDefaults() {
     show_status_performance = false;
     show_pinned_tab_names = true;
     new_tab_home = false;
+    external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
     list_smart_date = true;
     list_zebra_rows = true;
     list_size_bar = false;
@@ -143,6 +144,7 @@ std::wstring AppPrefs::ToJson() const {
     out += show_pinned_tab_names ? L"true" : L"false";
     out += L",\n  \"new_tab_home\":";
     out += new_tab_home ? L"true" : L"false";
+    out += L",\n  \"external_open_mode\":" + std::to_wstring(static_cast<int>(external_open_mode));
     out += L",\n  \"list_smart_date\":";
     out += list_smart_date ? L"true" : L"false";
     out += L",\n  \"list_zebra_rows\":";
@@ -239,6 +241,9 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     show_status_performance = pulse::json::ExtractBool(doc, L"show_status_performance", false);
     show_pinned_tab_names = pulse::json::ExtractBool(doc, L"show_pinned_tab_names", true);
     new_tab_home = pulse::json::ExtractBool(doc, L"new_tab_home", false);
+    const int external_mode = pulse::json::ExtractInt(doc, L"external_open_mode", 0);
+    external_open_mode = external_mode >= 0 && external_mode <= 2
+        ? static_cast<ExternalOpenMode>(external_mode) : ExternalOpenMode::ReuseOpenedLocation;
     list_smart_date = pulse::json::ExtractBool(doc, L"list_smart_date", true);
     list_zebra_rows = pulse::json::ExtractBool(doc, L"list_zebra_rows", true);
     list_size_bar = pulse::json::ExtractBool(doc, L"list_size_bar", false);

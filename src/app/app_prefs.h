@@ -8,6 +8,8 @@
 
 namespace pulse::app {
 
+enum class ExternalOpenMode { ReuseOpenedLocation = 0, Tab = 1, NewWindow = 2 };
+
 struct AppPrefs {
     bool persist = true;
     bool launch_on_startup = false;
@@ -22,6 +24,7 @@ struct AppPrefs {
     bool show_status_performance = false;
     bool show_pinned_tab_names = true;
     bool new_tab_home = false;
+    ExternalOpenMode external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
     // Details list presentation.
     bool list_smart_date = true;
     bool list_zebra_rows = true;

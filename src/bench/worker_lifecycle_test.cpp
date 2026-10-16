@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <mutex>
 #include <atomic>
+#include <memory>
+#include <vector>
 
 namespace {
 struct LocalGate {
@@ -72,6 +74,69 @@ int main() {
         errors.Stop();
     }
     const unsigned desired = std::min(4u, std::max(2u, std::thread::hardware_concurrency()));
+    {
+        g_local_gate = std::make_shared<LocalGate>();
+        std::vector<std::unique_ptr<WorkerPool>> windows;
+        bool started_all = true;
+        for (unsigned window_index = 0; window_index < 5; ++window_index) {
+            auto window = std::make_unique<WorkerPool>();
+            started_all &= window->Start([](pulse::app::WorkResult) {});
+            for (unsigned request_index = 0; request_index < desired; ++request_index)
+                window->Refresh(L"worker-local-slot-window-" + std::to_wstring(windows.size()) + L"-" +
+                                    std::to_wstring(request_index),
+                                pulse::ui::SortColumn::Name, pulse::ui::SortDirection::Asc);
+            windows.push_back(std::move(window));
+        }
+        check(started_all, "five active owners fit the process-wide worker budget");
+        check(wait([&] { return g_local_gate->entered == desired * 5; }),
+              "each active owner keeps its full desired worker concurrency");
+        {
+            std::lock_guard lock(g_local_gate->mutex);
+            g_local_gate->release = true;
+        }
+        g_local_gate->cv.notify_all();
+        for (auto& window : windows) window->Stop();
+        g_local_gate.reset();
+    }
+    {
+        g_local_gate = std::make_shared<LocalGate>();
+        WorkerPool owner;
+        unsigned owner_live = 0;
+        unsigned round = 0;
+        while (owner_live < 8) {
+            check(owner.Start([](pulse::app::WorkResult) {}),
+                  "owner can reserve a bounded block of its worker slots");
+            const unsigned count = std::min(desired, 8u - owner_live);
+            bool accepted = true;
+            for (unsigned i = 0; i < count; ++i)
+                accepted &= owner.Refresh(L"worker-local-slot-owner-" + std::to_wstring(round) + L"-" +
+                                              std::to_wstring(i),
+                                          pulse::ui::SortColumn::Name, pulse::ui::SortDirection::Asc) != 0;
+            check(accepted && wait([&] { return g_local_gate->entered == owner_live + count; }),
+                  "owner threads remain live across Stop and Start");
+            owner.Stop();
+            owner_live += count;
+            ++round;
+        }
+        check(owner_live == 8 && !owner.Start([](pulse::app::WorkResult) {}),
+              "one owner cannot exceed eight live or retired workers");
+        WorkerPool independent_owner;
+        check(independent_owner.Start([](pulse::app::WorkResult) {}),
+              "one saturated owner does not consume another owner's quota");
+        independent_owner.Stop();
+        {
+            std::lock_guard lock(g_local_gate->mutex);
+            g_local_gate->release = true;
+        }
+        g_local_gate->cv.notify_all();
+        bool recovered = false;
+        check(wait([&] {
+            if (!recovered) recovered = owner.Start([](pulse::app::WorkResult) {});
+            return recovered;
+        }), "owner quota recovers after its blocked workers actually exit");
+        owner.Stop();
+        g_local_gate.reset();
+    }
     {
         g_local_gate = std::make_shared<LocalGate>();
         WorkerPool local;

@@ -193,6 +193,10 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             divider(r);
         }
         toggle(lay.new_tab_row,I::SettingsNewTabHome,I::SettingsNewTabHomeDesc,L"\xE80F",vm.settings_new_tab_home,20);
+        divider(lay.new_tab_row);
+        const I external_modes[]={I::ExternalOpenReuse,I::ExternalOpenTab,I::ExternalOpenWindow};
+        dropdown(lay.external_open_card,lay.external_open_choice,I::SettingsExternalOpen,I::SettingsExternalOpenDesc,
+            l10n::Get(external_modes[std::clamp(vm.settings_external_open_mode,0,2)]),2);
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
         toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);

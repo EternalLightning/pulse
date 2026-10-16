@@ -68,14 +68,13 @@ std::wstring ShellPath(const std::wstring& path) {
 ShellIconCache::ShellIconCache() = default;
 
 ShellIconCache::~ShellIconCache() {
-    hwnd_ = nullptr;
+    notify_->Set(nullptr);
     Reset();
 }
 
 void ShellIconCache::SetDeviceContext(ID2D1DeviceContext* dc) {
-    if (dc_ == dc) return;
-    dc_ = dc;
-    bitmaps_.clear();
+    if (device_binding_.Bind(dc)) bitmaps_.clear();
+    dc_ = device_binding_.Dc();
 }
 
 void ShellIconCache::SetScale(float scale) {
@@ -84,15 +83,23 @@ void ShellIconCache::SetScale(float scale) {
 }
 
 void ShellIconCache::SetNotifyWindow(HWND hwnd) {
-    hwnd_ = hwnd;
-    if (worker_) {
-        std::lock_guard lock(worker_->mutex);
-        worker_->notify = hwnd;
-    }
+    notify_->Set(hwnd);
     if (hwnd) {
         GenericIndex(L"", true, FILE_ATTRIBUTE_DIRECTORY);
         GenericIndex(L"", false, FILE_ATTRIBUTE_NORMAL);
     }
+}
+
+void ShellIconCache::AddNotifyWindow(HWND hwnd) {
+    notify_->Add(hwnd);
+    if (hwnd) {
+        GenericIndex(L"", true, FILE_ATTRIBUTE_DIRECTORY);
+        GenericIndex(L"", false, FILE_ATTRIBUTE_NORMAL);
+    }
+}
+
+void ShellIconCache::RemoveNotifyWindow(HWND hwnd) {
+    notify_->Remove(hwnd);
 }
 
 ShellIconCache::WorkerState::~WorkerState() {
@@ -129,7 +136,7 @@ bool ShellIconCache::EnsureWorker() {
         if (pool.slots[i].thread) continue;
         auto state = std::make_shared<WorkerState>();
         state->slot = i;
-        state->notify = hwnd_;
+        state->notify = notify_;
 #ifdef PULSE_SHELL_ICONS_TESTING
         {
             std::lock_guard hook_lock(g_hook_mutex);
@@ -155,7 +162,7 @@ void ShellIconCache::Reset() {
         {
             std::lock_guard lock(worker->mutex);
             worker->stop = true;
-            worker->notify = nullptr;
+            worker->notify.reset();
         }
         worker->cv.notify_all();
         auto& pool = Workers();
@@ -169,6 +176,7 @@ void ShellIconCache::Reset() {
     wic_.reset();
 #endif
     dc_ = nullptr;
+    device_binding_.Bind(nullptr);
 }
 
 #ifdef PULSE_SHELL_ICONS_TESTING
@@ -332,7 +340,7 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
                 if (state->retry_after.size() >= kExactIndexLimit) state->retry_after.erase(state->retry_after.begin());
                 state->retry_after[path] = GetTickCount64() + 2000;
             }
-            if (state->notify) InvalidateRect(state->notify, nullptr, FALSE);
+            if (state->notify) state->notify->InvalidateAll();
         }
     }
     return 0;

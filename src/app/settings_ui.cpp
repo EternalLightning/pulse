@@ -48,6 +48,7 @@ constexpr SettingDestination destinations[]={
     {I::SettingsBlankClickBack,0,1},{I::SettingsChangeTracking,0,1},
     {I::ConfigurationLocation,0,0},
     {I::SettingsNewTabHome,0,0},
+    {I::SettingsExternalOpen,0,0},
     {I::SettingsDefaultManager,0,0},{I::SettingsOpenFolders,0,0},
     {I::SettingsTakeoverWinE,0,0},{I::ThisPc,0,0},{I::SettingsExplorerTakeover,0,0},
     {I::StartToTray,0,0},{I::CloseLastTabWindow,0,0},
@@ -154,7 +155,20 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
     case H::SettingsTheme: SetThemeMode(s,hit.index);break;
     case H::SettingsDropdown: {
         std::vector<ui::FluentMenuItem> items;
-        if(hit.index==0) {
+        if(hit.index==2) {
+            const I labels[]={I::ExternalOpenReuse,I::ExternalOpenTab,I::ExternalOpenWindow};
+            for(int i=0;i<3;++i) items.push_back(Item(i+1,labels[i],static_cast<int>(s.appPrefs.external_open_mode)==i));
+            const int command=Dropdown(s,hit.index,std::move(items));
+            if(command>=1 && command<=3) {
+                const auto mode=static_cast<app::ExternalOpenMode>(command-1);
+                s.appPrefs.external_open_mode=mode;
+                s.core.windows.ForEach([&](HWND, AppState& window) {
+                    window.appPrefs.external_open_mode=mode;
+                    InvalidateRect(window.hwnd,nullptr,FALSE);
+                });
+                s.appPrefs.Save();
+            }
+        } else if(hit.index==0) {
             const I labels[]={I::EffectNone,I::EffectAcrylic,I::EffectMica,I::EffectMicaAlt};
             for(int i=0;i<ui::kWindowEffectCount;++i) {
                 auto item=Item(i+1,labels[i],s.appPrefs.window_effect==ui::WindowEffectId(static_cast<ui::WindowEffect>(i)));

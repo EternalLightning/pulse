@@ -36,7 +36,7 @@ struct LayoutTabSnapshot {
     std::vector<PaneFolderSnapshot> panes;
 };
 
-struct SessionSnapshot {
+struct WindowSessionSnapshot {
     RECT window_rect = {};
     bool maximized = false;
     bool dark = false; // legacy serialization/migration, projected from window appearance
@@ -58,9 +58,15 @@ struct SessionSnapshot {
     int active_layout_tab = 0;
 };
 
+struct SessionSnapshot : WindowSessionSnapshot {
+    std::vector<WindowSessionSnapshot> windows;
+};
+
 std::wstring GetPulseDataDir();
 bool SaveSession(const SessionSnapshot& snap);
 bool LoadSession(SessionSnapshot& snap);
+std::wstring SessionToJson(const SessionSnapshot& snap);
+bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap);
 
 std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs);
 bool ParseLayoutTabs(const std::wstring& array_json,

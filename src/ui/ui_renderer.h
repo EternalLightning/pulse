@@ -10,6 +10,7 @@
 #include "column_strip_layout.h"
 #include "panel_metrics.h"
 #include "thumbnail_cache.h"
+#include "render_caches.h"
 #include "name_highlight.h"
 #include "preview_handler_host.h"
 #include "../fs/fs_enum.h"
@@ -612,6 +613,7 @@ struct WindowViewModel {
     std::wstring settings_system_status;
     bool settings_blank_click_go_back = false;
     bool settings_new_tab_home = false;
+    int settings_external_open_mode = 0;
     bool settings_change_tracking = false;
     int settings_change_days = 3;
     int settings_row_height = 34; // current row-height pref (DIPs) for density radios
@@ -824,7 +826,9 @@ class MainRenderer {
     friend struct ColumnResizeUiTest;
 public:
     MainRenderer();
+    explicit MainRenderer(RenderCaches& caches);
     ~MainRenderer();
+    RenderCaches& Caches() noexcept { return caches_; }
     std::shared_ptr<ThumbnailCache> SharedThumbnailCache() const { return thumbnail_cache_owner_; }
 
     void SetScale(float scale);
@@ -1193,7 +1197,9 @@ private:
     WindowMaterial material_;
     Compositor* compositor_ = nullptr;
     fluent::Painter painter_;
-    ShellIconCache icon_cache_;
+    std::unique_ptr<RenderCaches> owned_caches_;
+    RenderCaches& caches_;
+    ShellIconCache& icon_cache_ = caches_.icons;
     std::shared_ptr<ThumbnailCache> thumbnail_cache_owner_ = std::make_shared<ThumbnailCache>();
     ThumbnailCache& thumbnail_cache_ = *thumbnail_cache_owner_;
     PreviewHandlerHost preview_handler_;

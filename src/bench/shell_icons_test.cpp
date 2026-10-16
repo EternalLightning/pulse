@@ -17,6 +17,81 @@
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
+    static bool SharedWindows() {
+        bool ok = true;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            ok &= passed;
+        };
+        HWND first = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"",
+            WS_POPUP | WS_VISIBLE, -32000, -32000, 32, 32, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        HWND second = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"",
+            WS_POPUP | WS_VISIBLE, -32000, -32000, 32, 32, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ShellIconCache cache;
+        cache.AddNotifyWindow(first);
+        cache.AddNotifyWindow(second);
+        cache.AddNotifyWindow(first);
+        check(first && second && cache.notify_->Count() == 2 && Wait(cache),
+            "two windows subscribe to one icon worker without replacing each other");
+        ValidateRect(first, nullptr);
+        ValidateRect(second, nullptr);
+        cache.GenericIndex(L"multiwindow.pulse-notify-test", false, FILE_ATTRIBUTE_NORMAL);
+        check(Wait(cache) && GetUpdateRect(first, nullptr, FALSE) && GetUpdateRect(second, nullptr, FALSE),
+            "an isolated Shell result invalidates both subscribed windows");
+
+        ComPtr<ID3D11Device> d3d;
+        ComPtr<IDXGIDevice> dxgi;
+        ComPtr<ID2D1Factory1> factory;
+        ComPtr<ID2D1Device> device;
+        ComPtr<ID2D1DeviceContext> a, b;
+        const bool graphics = SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &d3d, nullptr, nullptr)) &&
+            SUCCEEDED(d3d->QueryInterface(IID_PPV_ARGS(&dxgi))) &&
+            SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->CreateDevice(dxgi.get(), &device)) &&
+            SUCCEEDED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &a)) &&
+            SUCCEEDED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &b));
+        check(graphics, "create independent contexts on the same Direct2D device");
+        if (graphics) {
+            cache.SetDeviceContext(a.get());
+            auto* bitmap = cache.BitmapFor(L"", L"", true, FILE_ATTRIBUTE_DIRECTORY, 32);
+            const auto* creation_context = cache.dc_;
+            cache.SetDeviceContext(b.get());
+            check(bitmap && creation_context != a.get() && creation_context != b.get() &&
+                cache.BitmapFor(L"", L"", true, FILE_ATTRIBUTE_DIRECTORY, 32) == bitmap,
+                "painting a second window retains the icon bitmap and private creation context");
+            cache.RemoveNotifyWindow(first);
+            DestroyWindow(first);
+            first = nullptr;
+            a.reset();
+            const uint32_t pixel = 0xffffffff;
+            ComPtr<ID2D1Bitmap> created;
+            const auto properties = D2D1::BitmapProperties(
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            check(SUCCEEDED(cache.dc_->CreateBitmap(D2D1::SizeU(1, 1), &pixel, 4, &properties, &created)),
+                "closing the first context leaves shared bitmap creation alive");
+            ComPtr<ID2D1Bitmap1> target;
+            const auto target_properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            HRESULT draw = b->CreateBitmap(D2D1::SizeU(64, 64), nullptr, 0, &target_properties, &target);
+            if (SUCCEEDED(draw) && bitmap) {
+                b->SetTarget(target.get());
+                b->BeginDraw();
+                b->DrawBitmap(bitmap, D2D1::RectF(0, 0, 32, 32));
+                draw = b->EndDraw();
+            }
+            check(bitmap && SUCCEEDED(draw), "remaining window draws the retained cached icon");
+        }
+        ValidateRect(second, nullptr);
+        cache.notify_->InvalidateAll();
+        check(cache.notify_->Count() == (first ? 2u : 1u) && GetUpdateRect(second, nullptr, FALSE),
+            "notification subscription survives closing another window");
+        cache.RemoveNotifyWindow(first);
+        cache.RemoveNotifyWindow(second);
+        if (first) DestroyWindow(first);
+        if (second) DestroyWindow(second);
+        return ok;
+    }
     static bool CachePrune() {
         bool ok = true;
         const auto check = [&](bool passed, const char* name) {
@@ -588,6 +663,9 @@ int main(int argc, char** argv) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&controls);
     bool ok = false;
+    if (argc == 2 && std::strcmp(argv[1], "--shared-windows") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::SharedWindows();
+    } else
     if (argc == 2 && std::strcmp(argv[1], "--cache-prune") == 0) {
         ok = pulse::ui::ShellIconCacheTestAccess::CachePrune();
     } else

@@ -20,7 +20,8 @@ namespace {
 // migrates (or discards) values written by older versions.
 //   6 -> 7: BuiltinQuickAccess lost its reserved "starred" bit, so the stored
 //           quick-access mask is dropped for files written before 7.
-constexpr int kSessionVersion = 7;
+constexpr int kSessionVersion = 8;
+constexpr size_t kMaxSessionWindows = 32;
 
 std::wstring FormatScaled3(const std::array<float, 3>& edges) {
     return std::to_wstring(static_cast<int>(std::lround(edges[0] * 10000.0f))) + L","
@@ -275,10 +276,7 @@ std::wstring GetPulseDataDir() {
     return root;
 }
 
-bool SaveSession(const SessionSnapshot& snap) {
-    std::wstring dir = GetPulseDataDir();
-    if (dir.empty()) return false;
-
+static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap) {
     std::wstring trayJson;
     snap.tray.ToJson(trayJson);
 
@@ -318,16 +316,13 @@ bool SaveSession(const SessionSnapshot& snap) {
     f << L"  \"tabGroups\":" << TabGroupsToJson(snap.tab_groups) << L",\n";
     f << L"  \"layoutTabs\":" << LayoutTabsToJson(snap.layout_tabs) << L"\n";
     f << L"}\n";
-    return WriteUtf8FileAtomic(dir + L"\\session.json", f.str());
+    return f.str();
 }
 
-bool LoadSession(SessionSnapshot& snap) {
-    std::wstring dir = GetPulseDataDir();
-    if (dir.empty()) return false;
-    std::wstring json;
-    if (!ReadUtf8File(dir + L"\\session.json", json) || json.empty()) return false;
+static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapshot& snap) {
     const pulse::json::Document doc(json);
     if (!doc.Is(pulse::json::Kind::Object)) return false;
+    snap = {};
 
     snap.window_rect.left = pulse::json::ExtractInt(doc, L"left");
     snap.window_rect.top = pulse::json::ExtractInt(doc, L"top");
@@ -368,7 +363,7 @@ bool LoadSession(SessionSnapshot& snap) {
     }
     // Bit positions changed in version 7 (the reserved starred bit is gone), so
     // anything older restarts with every built-in link visible.
-    snap.quick_access_hidden = pulse::json::ExtractInt(doc, L"version") >= kSessionVersion
+    snap.quick_access_hidden = pulse::json::ExtractInt(doc, L"version") >= 7
         ? pulse::json::ExtractInt(doc, L"quickAccessHidden") : 0;
     snap.starred_expanded = !doc.Find(L"starredExpanded")
         ? true : pulse::json::ExtractBool(doc, L"starredExpanded");
@@ -414,6 +409,59 @@ bool LoadSession(SessionSnapshot& snap) {
             snap.layout_tabs = std::move(parsed);
     }
     return true;
+}
+
+std::wstring SessionToJson(const SessionSnapshot& snap) {
+    const WindowSessionSnapshot& primary = snap.windows.empty()
+        ? static_cast<const WindowSessionSnapshot&>(snap) : snap.windows.front();
+    auto out = WindowSessionToJson(primary);
+    const auto closing = out.find_last_of(L'}');
+    out.resize(closing);
+    out += L",\n  \"windows\":[";
+    if (snap.windows.empty()) {
+        out += WindowSessionToJson(primary);
+    } else {
+        const size_t count = (std::min)(snap.windows.size(), kMaxSessionWindows);
+        for (size_t i = 0; i < count; ++i) {
+            if (i) out += L",";
+            out += WindowSessionToJson(snap.windows[i]);
+        }
+    }
+    out += L"]\n}\n";
+    return out;
+}
+
+bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap) {
+    SessionSnapshot parsed;
+    if (!ParseWindowSessionJson(json, parsed)) return false;
+    const pulse::json::Document doc(json);
+    const auto* windows = doc.Find(L"windows");
+    if (windows && windows->kind == pulse::json::Kind::Array && !windows->children.empty() &&
+        std::all_of(windows->children.begin(), windows->children.end(), [](const auto& item) {
+            return item.kind == pulse::json::Kind::Object;
+        })) {
+        for (const auto& item : pulse::json::Objects(doc, windows)) {
+            if (parsed.windows.size() == kMaxSessionWindows) break;
+            WindowSessionSnapshot window;
+            if (!ParseWindowSessionJson(item, window)) return false;
+            parsed.windows.push_back(std::move(window));
+        }
+    }
+    if (parsed.windows.empty()) parsed.windows.push_back(parsed);
+    static_cast<WindowSessionSnapshot&>(parsed) = parsed.windows.front();
+    snap = std::move(parsed);
+    return true;
+}
+
+bool SaveSession(const SessionSnapshot& snap) {
+    const auto dir = GetPulseDataDir();
+    return !dir.empty() && WriteUtf8FileAtomic(dir + L"\\session.json", SessionToJson(snap));
+}
+
+bool LoadSession(SessionSnapshot& snap) {
+    const auto dir = GetPulseDataDir();
+    std::wstring json;
+    return !dir.empty() && ReadUtf8File(dir + L"\\session.json", json) && ParseSessionJson(json, snap);
 }
 
 } // namespace pulse::app

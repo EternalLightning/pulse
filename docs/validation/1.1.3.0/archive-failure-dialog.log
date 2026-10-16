@@ -1,0 +1,35 @@
+[PASS] archive failure preserves diagnostics and endpoints without treating 7zip exit 2 as a Windows error
+[PASS] encrypted extraction exit 2 gets a localized password-or-damaged-data summary
+[PASS] unencrypted extraction errors are not mislabeled as password failures
+[PASS] empty encrypted extraction failure still has a localized password-or-data explanation
+[PASS] empty generic extraction failure retains its localized generic explanation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] archive failure preserves diagnostics and endpoints without treating 7zip exit 2 as a Windows error
+[PASS] encrypted extraction exit 2 gets a localized password-or-damaged-data summary
+[PASS] unencrypted extraction errors are not mislabeled as password failures
+[PASS] empty encrypted extraction failure still has a localized password-or-data explanation
+[PASS] empty generic extraction failure retains its localized generic explanation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+[PASS] extraction failure reuses the existing operation window and modal owner
+[PASS] failed extraction stays visible after the worker completes
+[PASS] closing a failure restores its owner without issuing another cancellation
+Archive failure dialog tests: 0 failure(s).

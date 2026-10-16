@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <windows.h>
+#include "../ops/archive.h"
 namespace pulse {
 struct AppState;
 namespace app { struct Tab; }
@@ -10,6 +11,9 @@ std::wstring ArchiveViewPath(const std::wstring& file, const std::wstring& prefi
 void LoadArchiveView(AppState& s, app::Tab& tab, bool refresh = false);
 bool OpenArchiveSelection(AppState& s);
 void ExtractArchiveSelection(AppState& s, bool all);
+void UpdateArchiveOpenPassword(app::Tab& tab, const std::wstring& source_view,
+    uint64_t source_generation, const std::wstring& file, const std::wstring& password,
+    const ops::ArchiveOperationResult& result);
 void HandleArchiveResult(AppState& s, LPARAM payload);
 void DiscardArchiveResult(LPARAM payload);
 std::wstring ArchiveParent(const std::wstring& path);

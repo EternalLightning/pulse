@@ -48,6 +48,7 @@ struct SystemIntegration::Shared {
     ExplorerWindowTakeover takeover;
     bool registry_started = false;
     bool takeover_started = false;
+    std::map<uint64_t, ULONGLONG> pending_takeover_tokens;
     std::thread worker;
 };
 struct SystemIntegration::UiState {
@@ -136,34 +137,52 @@ std::wstring Failure(const DefaultManagerResult& result) {
     }
     return message;
 }
-Tab* FindTab(AppState& s, SystemIntegration::UiState& ui, uint64_t key, bool activate) {
-    for (size_t i = 0; i < s.window_tabs.items.size(); ++i) {
-        auto& layout = s.window_tabs.items[i];
-        if (!layout) continue;
-        for (auto& pane : layout->panes) {
-            Tab* tab = pane ? pane->ActiveTab() : nullptr;
-            const auto found = ui.identities.find(tab);
-            if (!tab || found == ui.identities.end() || found->second != key) continue;
-            if (activate) {
-                if (s.window_tabs.active != i) SwitchTab(s, i);
-                FocusPane(s, pane.get());
+struct LocatedTab { AppState* window = nullptr; Tab* tab = nullptr; };
+LocatedTab FindTab(AppState& owner, SystemIntegration::UiState& ui, uint64_t key, bool activate) {
+    LocatedTab found_tab;
+    owner.core.windows.ForEach([&](HWND, AppState& window) {
+        if (found_tab.tab) return;
+        for (size_t i = 0; i < window.window_tabs.items.size() && !found_tab.tab; ++i) {
+            auto& layout = window.window_tabs.items[i];
+            if (!layout) continue;
+            for (auto& pane : layout->panes) {
+                Tab* tab = pane ? pane->ActiveTab() : nullptr;
+                const auto found = ui.identities.find(tab);
+                if (!tab || found == ui.identities.end() || found->second != key) continue;
+                if (activate) {
+                    if (window.window_tabs.active != i) SwitchTab(window, i);
+                    FocusPane(window, pane.get());
+                }
+                found_tab = {&window, tab};
+                break;
             }
-            return tab;
         }
-    }
-    return nullptr;
+    });
+    return found_tab;
 }
-bool QueueSelection(AppState& s, SystemIntegration::UiState& ui, uint64_t key, uint64_t token,
+bool QueueSelection(AppState& owner, SystemIntegration::UiState& ui, uint64_t key, uint64_t token,
                     const std::wstring& folder, std::vector<std::wstring> paths, unsigned flags) {
-    Tab* tab = FindTab(s, ui, key, false);
+    auto located = FindTab(owner, ui, key, false);
+    Tab* tab = located.tab;
     if (!tab || !SameShellPath(tab->current_path, folder) || ui.selections.size() >= 128) return false;
-    tab = FindTab(s, ui, key, true);
+    located = FindTab(owner, ui, key, true);
+    tab = located.tab;
     if (!tab || !SameShellPath(tab->current_path, folder)) return false;
     ui.selections.push_back({key, token, tab->pending_generation ? tab->pending_generation : tab->applied_generation,
         tab->view_generation, folder, std::move(paths), flags,
         GetTickCount64() + 14000});
-    s.tray_controller.RestoreWindow();
+    RestoreAppWindow(*located.window);
     return true;
+}
+bool HasPendingTakeover(const std::shared_ptr<SystemIntegration::Shared>& shared, uint64_t token) {
+    if (!shared || !token) return false;
+    std::lock_guard lock(shared->mutex);
+    return shared->pending_takeover_tokens.contains(token);
+}
+void RemovePendingTakeover(const std::shared_ptr<SystemIntegration::Shared>& shared, uint64_t token) {
+    if (!shared || !token) return;
+    std::lock_guard lock(shared->mutex);
+    shared->pending_takeover_tokens.erase(token);
 }
 }
 SystemIntegration::SystemIntegration() : ui_(std::make_unique<UiState>()) {}
@@ -225,19 +244,47 @@ void SystemIntegration::Publish(AppState& s) {
     if (!shared_ || s.exit_requested) return;
     std::set<Tab*> alive;
     std::vector<ShellWindowEntry> wanted;
-    ForEachPane(s, [&](Pane& pane) {
-        Tab* tab = pane.ActiveTab();
-        if (!tab || (!tab->current_path.empty() && fs::IsVirtualPath(tab->current_path))) return;
-        alive.insert(tab);
-        auto [it, inserted] = ui_->identities.try_emplace(tab);
-        if (inserted) it->second = ui_->next_key++;
-        wanted.push_back({it->second, ShellPathText(tab->current_path)});
+    s.core.windows.ForEach([&](HWND, AppState& window) {
+        ForEachPane(window, [&](Pane& pane) {
+            Tab* tab = pane.ActiveTab();
+            if (!tab || (!tab->current_path.empty() && fs::IsVirtualPath(tab->current_path))) return;
+            alive.insert(tab);
+            auto [it, inserted] = ui_->identities.try_emplace(tab);
+            if (inserted) it->second = ui_->next_key++;
+            wanted.push_back({it->second, ShellPathText(tab->current_path)});
+        });
     });
     for (auto it = ui_->identities.begin(); it != ui_->identities.end();) {
         if (!alive.contains(it->first)) it = ui_->identities.erase(it);
         else ++it;
     }
     shared_->registry.Publish(std::move(wanted));
+}
+bool SystemIntegration::IsExternalOpenActive(uint64_t takeover_token) const {
+    return shared_ && HasPendingTakeover(shared_, takeover_token) &&
+        shared_->takeover.IsRequestActive(takeover_token);
+}
+void SystemIntegration::CompleteExternalOpen(AppState& owner, AppState* destination,
+                                             const ExternalOpenResult& request, bool opened) {
+    if (!shared_ || !request.takeover_token || !HasPendingTakeover(shared_, request.takeover_token)) return;
+    if (!opened || !destination || !shared_->takeover.IsRequestActive(request.takeover_token)) {
+        RemovePendingTakeover(shared_, request.takeover_token);
+        shared_->takeover.Acknowledge(request.takeover_token, false);
+        return;
+    }
+    Publish(owner);
+    Tab* tab = ActiveTab(*destination);
+    const auto identity = ui_->identities.find(tab);
+    if (!tab || identity == ui_->identities.end() ||
+        !QueueSelection(owner, *ui_, identity->second, request.takeover_token,
+            request.target.folder, request.selected_paths, request.selection_flags)) {
+        RemovePendingTakeover(shared_, request.takeover_token);
+        shared_->takeover.Acknowledge(request.takeover_token, false);
+    } else {
+        std::lock_guard lock(shared_->mutex);
+        if (auto it = shared_->pending_takeover_tokens.find(request.takeover_token);
+            it != shared_->pending_takeover_tokens.end()) it->second = GetTickCount64() + 14000;
+    }
 }
 bool SystemIntegration::Tick(AppState& s) {
     if (!shared_ || s.exit_requested) return false;
@@ -255,6 +302,18 @@ bool SystemIntegration::Tick(AppState& s) {
         Publish(s); changed = true;
     }
     const auto now = GetTickCount64();
+    std::vector<uint64_t> expired_takeovers;
+    {
+        std::lock_guard lock(shared_->mutex);
+        for (auto it = shared_->pending_takeover_tokens.begin(); it != shared_->pending_takeover_tokens.end();) {
+            if (now >= it->second) {
+                expired_takeovers.push_back(it->first);
+                it = shared_->pending_takeover_tokens.erase(it);
+            } else ++it;
+        }
+    }
+    for (const uint64_t token : expired_takeovers)
+        shared_->takeover.Acknowledge(token, false);
     if (now >= ui_->next_publish) { Publish(s); ui_->next_publish = now + 250; }
     for (auto& request : shared_->registry.DrainSelections()) {
         QueueSelection(s, *ui_, request.key, 0, request.folder, {request.path}, request.flags);
@@ -264,20 +323,22 @@ bool SystemIntegration::Tick(AppState& s) {
         if (!s.appPrefs.experimental_explorer_takeover || !shared_->takeover.IsRequestActive(request.token)) {
             shared_->takeover.Acknowledge(request.token, false); continue;
         }
-        OpenFolderInNewTab(s, request.folder.empty() ? kThisPcParsingName : request.folder);
-        Publish(s);
-        Tab* tab = ActiveTab(s);
-        const auto identity = ui_->identities.find(tab);
-        if (!tab || identity == ui_->identities.end() || !SameShellPath(tab->current_path, request.folder)) {
-            shared_->takeover.Acknowledge(request.token, false); continue;
+        {
+            std::lock_guard lock(shared_->mutex);
+            shared_->pending_takeover_tokens.insert_or_assign(request.token, now + 14000);
         }
-        if (!QueueSelection(s, *ui_, identity->second, request.token, request.folder,
-            std::move(request.selected_paths), SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE))
+        if (!RouteExternalFolderOpen(s,
+                request.folder.empty() ? kThisPcParsingName : request.folder,
+                request.token, std::move(request.selected_paths),
+                SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE)) {
+            RemovePendingTakeover(shared_, request.token);
             shared_->takeover.Acknowledge(request.token, false);
+        }
         changed = true;
     }
     for (auto it = ui_->selections.begin(); it != ui_->selections.end();) {
-        Tab* tab = FindTab(s, *ui_, it->key, false);
+        auto located = FindTab(s, *ui_, it->key, false);
+        Tab* tab = located.tab;
         bool finished = !tab || ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation) ||
             now >= it->deadline ||
             (it->token && (!s.appPrefs.experimental_explorer_takeover ||
@@ -286,18 +347,22 @@ bool SystemIntegration::Tick(AppState& s) {
         if (!finished && !tab->loading && !tab->pending_generation) {
             finished = true;
             std::vector<int> rows;
-            FindTab(s, *ui_, it->key, true);
+            located = FindTab(s, *ui_, it->key, true);
+            tab = located.tab;
             // Activation can schedule a refresh. Recheck after it, before ACK;
             // a previously selected cached row is not a completed delivery.
-            delivered = !ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation) &&
+            delivered = tab && !ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation) &&
                 ApplyShellSelection(*tab, s.places, it->paths, it->flags, rows);
             if (delivered) {
-                if (!rows.empty()) EnsureRowVisible(s, *tab, rows.back());
-                InvalidateRect(s.hwnd, nullptr, FALSE); changed = true;
+                if (!rows.empty()) EnsureRowVisible(*located.window, *tab, rows.back());
+                InvalidateRect(located.window->hwnd, nullptr, FALSE); changed = true;
             }
         }
         if (finished) {
-            if (it->token) shared_->takeover.Acknowledge(it->token, delivered);
+            if (it->token) {
+                RemovePendingTakeover(shared_, it->token);
+                shared_->takeover.Acknowledge(it->token, delivered);
+            }
             it = ui_->selections.erase(it);
         } else ++it;
     }
@@ -311,7 +376,16 @@ bool SystemIntegration::Tick(AppState& s) {
 }
 void SystemIntegration::Stop() {
     if (!shared_) return;
-    { std::lock_guard lock(shared_->mutex); shared_->stop = true; shared_->task.reset(); }
+    {
+        std::lock_guard lock(shared_->mutex);
+        for (const auto& [token, deadline] : shared_->pending_takeover_tokens) {
+            (void)deadline;
+            shared_->takeover.Acknowledge(token, false);
+        }
+        shared_->pending_takeover_tokens.clear();
+        shared_->stop = true;
+        shared_->task.reset();
+    }
     shared_->cv.notify_all();
     if (shared_->worker.joinable()) shared_->worker.join();
     // Leave the shared pointer intact while the shutdown worker runs; UI is gated by exit_requested.

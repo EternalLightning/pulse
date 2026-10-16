@@ -22,7 +22,9 @@
 #include <string_view>
 
 namespace pulse::ui {
-MainRenderer::MainRenderer() = default;
+MainRenderer::MainRenderer()
+    : owned_caches_(std::make_unique<RenderCaches>()), caches_(*owned_caches_) {}
+MainRenderer::MainRenderer(RenderCaches& caches) : caches_(caches) {}
 SIZE MainRenderer::BackgroundImageSize(const std::wstring& path) {
     if (path.empty()) return {};
     auto* bitmap = material_.SourceBitmap(path);
@@ -32,6 +34,7 @@ SIZE MainRenderer::BackgroundImageSize(const std::wstring& path) {
 }
 
 MainRenderer::~MainRenderer() {
+    icon_cache_.RemoveNotifyWindow(notify_hwnd_);
     thumbnail_cache_.SetNotifyWindow(nullptr);
     thumbnail_cache_.Evict();
     thumbnail_cache_.SetDeviceContext(nullptr);
@@ -56,7 +59,7 @@ void MainRenderer::SetCompositor(Compositor* comp) {
     material_.SetCompositor(comp);
     painter_.SetCompositor(comp);
     if (!comp) {
-        icon_cache_.Reset();
+        // Shared icons outlive this window; its context is never retained.
         thumbnail_cache_.Evict();
         thumbnail_cache_.SetNotifyWindow(nullptr);
         thumbnail_cache_.SetDeviceContext(nullptr);
@@ -76,8 +79,9 @@ void MainRenderer::InvalidateTypography() {
     painter_.InvalidateTypography();
 }
 void MainRenderer::SetIconNotifyWindow(HWND hwnd) {
+    if (notify_hwnd_ && notify_hwnd_ != hwnd) icon_cache_.RemoveNotifyWindow(notify_hwnd_);
     notify_hwnd_ = hwnd;
-    icon_cache_.SetNotifyWindow(hwnd);
+    icon_cache_.AddNotifyWindow(hwnd);
     thumbnail_cache_.SetNotifyWindow(hwnd);
     preview_handler_.SetNotifyWindow(hwnd);
 }
@@ -309,6 +313,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     for (auto& names : painted_name_truncation_) names.clear();
     ID2D1DeviceContext* dc = compositor_->Dc();
     icon_cache_.SetDeviceContext(compositor_->Dc());
+    icon_cache_.SetScale(scale_);
     UpdateBrushes(theme);
     text_background_ = theme.bg;
     painter_.BeginFrame(theme, IsHighContrast());

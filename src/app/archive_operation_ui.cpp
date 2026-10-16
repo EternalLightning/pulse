@@ -5,6 +5,11 @@
 
 namespace pulse::app {
 
+bool IsArchivePasswordFailure(const ops::ArchiveOperationResult& result) noexcept {
+    return result.outcome == ops::ArchiveOutcome::Failed &&
+        result.password_state == ops::ArchivePasswordState::Required && result.exit_code == 2u;
+}
+
 ops::OpStatus ArchiveOperationStatus(const ops::ArchiveProgress& progress,
     const std::wstring& archive, const std::wstring& destination, bool cancelling) {
     ops::OpStatus status;
@@ -32,10 +37,16 @@ ops::OpStatus ArchiveFailureStatus(const ops::ArchiveOperationResult& result,
     const std::wstring& archive, const std::wstring& destination) {
     ops::OpStatus status;
     status.phase = ops::OpPhase::Failed;
-    status.summary = l10n::Get(l10n::StringId::ArchiveExtractFailed);
+    status.summary = l10n::Get(IsArchivePasswordFailure(result)
+        ? l10n::StringId::ArchivePasswordOrDataError : l10n::StringId::ArchiveExtractFailed);
     status.source_label = archive;
     status.destination_label = destination;
-    status.last_error = result.error.empty() ? status.summary : result.error;
+    if (IsArchivePasswordFailure(result)) {
+        status.last_error = l10n::Get(l10n::StringId::ArchivePasswordRetryHint);
+        if (!result.error.empty()) status.last_error += L"\n\n" + result.error;
+    } else {
+        status.last_error = result.error.empty() ? status.summary : result.error;
+    }
     return status;
 }
 

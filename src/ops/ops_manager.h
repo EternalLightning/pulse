@@ -37,6 +37,7 @@
 namespace pulse::ops {
 
 struct DeleteIntegrationProbe;
+struct OperationJournalProbe;
 
 enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder, CreateTextFile, RestoreRecycle, EmptyRecycle, BatchRename };
 enum class CollisionPolicy { System, Replace, KeepBoth };
@@ -195,6 +196,9 @@ public:
     void BeginShutdown();
 
     void SetJournalPath(std::wstring path);
+    // First-window recovery owner only: load/retain entries from several
+    // per-window journals while routing new work to the first (legacy) path.
+    void SetJournalPaths(std::vector<std::wstring> paths);
     RecoverySnapshot PendingRecovery() const;
     bool RetryRecovery();
     void DiscardRecovery();
@@ -283,6 +287,7 @@ private:
     friend struct UndoIdentityTestProbe;
     friend struct MutationUndoTestProbe;
     friend struct SourceContractTestProbe;
+    friend struct OperationJournalProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -398,7 +403,7 @@ private:
     bool FinishMutationUndoLocked(const OpRequest& req); // caller holds mutex_
     void LoadRecoveryJournal();
     void PersistJournal();
-    std::wstring JournalJsonLocked() const;
+    std::wstring JournalJsonLocked(const std::wstring& path) const;
     bool ConsumeCtxInvokeDone(uint32_t id);   // true = RSP_DONE was a menu invoke
     void RegisterShellMenuQuery(uint32_t token, uint32_t request_id);
     void RegisterShellMenuInvoke(uint32_t request_id);
@@ -421,6 +426,10 @@ private:
     std::atomic<uint64_t> lock_retry_generation_{1};
     std::vector<RecoveryEntry> pending_recovery_;
     std::wstring journal_path_;
+    std::vector<std::wstring> journal_paths_;
+    std::map<uint64_t, std::wstring> recovery_journal_sources_;
+    std::map<std::wstring, std::vector<std::wstring>> opaque_recovery_entries_;
+    std::set<std::wstring> opaque_journal_files_;
     OpStatus status_;
     std::deque<UndoEntry> undo_;
     uint64_t undo_revision_ = 1;

@@ -13,6 +13,7 @@
 #include "../fs/fs_snapshot.h"
 #include "../fs/fs_watch.h"
 #include "app_model.h"
+#include "app_core.h"
 #include "sidebar_scrollbar_fade.h"
 #include "ui_schedule_state.h"
 #include "home_catalog.h"
@@ -22,6 +23,7 @@
 #include "app_notify_patch.h"
 #include "tray_metadata.h"
 #include "window_result_mailbox.h"
+#include "external_open.h"
 #include "clipboard_availability.h"
 #include "tag_discovery_cache.h"
 #include "places.h"
@@ -91,6 +93,11 @@ constexpr UINT WM_SEARCH_HISTORY = WM_APP + 62;
 constexpr UINT WM_CHANGE_TRACKING = WM_APP + 63;
 constexpr UINT WM_EXIT_READY = WM_APP + 67;
 constexpr UINT WM_HEADER_DROP_RESULT = WM_APP + 71;
+constexpr UINT WM_CLIPBOARD_PASTE_RESULT = WM_APP + 72;
+constexpr UINT WM_EXTERNAL_OPEN_READY = WM_APP + 73;
+constexpr UINT WM_NEW_WINDOW = WM_APP + 76; // heap resolved target for the new window
+constexpr UINT WM_DETACH_LAYOUT_TAB = WM_APP + 77;
+constexpr UINT WM_DETACH_PANE = WM_APP + 78;
 constexpr UINT kTimerUi = 1;
 constexpr UINT kTimerUiDeadline = 2;
 
@@ -162,7 +169,24 @@ struct ShellVerbsResult {
     std::vector<app::StaticVerb> verbs;
 };
 
-struct AppState {
+struct AppState : AppCoreOwner {
+    AppState()
+        : AppCoreOwner(std::make_unique<AppCore>()), core(*owned_core),
+          renderer(core.render_caches), tray(core.tray), places(core.places),
+          ctxMenuPrefs(core.context_menu_prefs), appPrefs(core.app_prefs),
+          searchHistory(core.search_history), searchHistoryWriter(core.search_history_writer),
+          single_instance(core.single_instance), savedSearches(core.saved_searches) {}
+    explicit AppState(AppCore& shared)
+        : AppCoreOwner(), core(shared), renderer(core.render_caches),
+          tray(core.tray), places(core.places), ctxMenuPrefs(core.context_menu_prefs),
+          appPrefs(core.app_prefs), searchHistory(core.search_history),
+          searchHistoryWriter(core.search_history_writer), single_instance(core.single_instance),
+          savedSearches(core.saved_searches) {}
+    AppState(const AppState&) = delete;
+    AppState& operator=(const AppState&) = delete;
+
+    AppCore& core;
+    bool secondary_window = false;
     bool exit_confirming = false;
     bool exit_requested = false;
     std::atomic<bool> exit_stop_finished{false};
@@ -170,6 +194,11 @@ struct AppState {
     HWND hwnd = nullptr;
     std::shared_ptr<app::WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
     std::shared_ptr<app::WindowResultMailbox<bool>> shell_registry_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<bool>> clipboard_paste_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
+    uint64_t external_open_issued_sequence = 0;
+    uint64_t external_open_next_apply_sequence = 1;
+    std::unordered_map<uint64_t, app::ExternalOpenResult> external_open_pending;
     std::shared_ptr<app::WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
     app::UiScheduleState ui_schedule;
     ui::Compositor compositor;
@@ -248,21 +277,21 @@ struct AppState {
     bool starredExpanded = true;
     float sidebarScroll = 0.0f;
     app::SidebarScrollbarFade sidebarScrollbarFade;
-    app::StagingTray tray;
+    app::StagingTray& tray;
     app::TrayMetadataWorkerState tray_metadata;
-    app::PlacesCatalog places;
-    app::ContextMenuPrefs ctxMenuPrefs;
+    app::PlacesCatalog& places;
+    app::ContextMenuPrefs& ctxMenuPrefs;
     // Explorer COM/static menu session, caches, and delayed refresh state.
     app::ContextMenuController context_menu;
-    app::AppPrefs appPrefs;
+    app::AppPrefs& appPrefs;
     app::SystemIntegration systemIntegration;
-    app::SearchHistory searchHistory;
-    app::SearchHistoryWriter searchHistoryWriter;
+    app::SearchHistory& searchHistory;
+    app::SearchHistoryWriter& searchHistoryWriter;
     app::SettingsController settings;
     app::TabController tabs;
     app::TrayController tray_controller;
     GlobalSearchHotkey globalSearchHotkey;
-    app::SingleInstanceCoordinator single_instance;
+    app::SingleInstanceCoordinator& single_instance;
     std::unordered_set<std::wstring> tagFallbackVolumes;
     std::unordered_set<std::wstring> tagAdsDiscoveryQueued;
     app::TagDiscoveryCache tagAdsDiscoveryChecked;
@@ -286,7 +315,7 @@ struct AppState {
     std::vector<index::VolumeInfo> dup_volume_cache;
     ULONGLONG dup_volume_cache_tick = 0;
     bool dup_volume_cache_pending = false;
-    app::SavedSearchStore savedSearches;
+    app::SavedSearchStore& savedSearches;
     struct PendingIndexSearch {
         index::Query query;
         index::SearchResult local;
@@ -379,6 +408,12 @@ struct AppState {
 
     bool tabDragPending = false;
     bool tabDragging = false;
+    bool window_caption_dragging = false;
+    bool paneDragPending = false;
+    bool paneDragging = false;
+    int paneDragLayoutIndex = -1;
+    int paneDragPaneIndex = -1;
+    POINT paneDragStartPt{};
     int tabDragIndex = -1;               // window_tabs.items index of the dragged tab
     POINT tabDragStartPt{};
     int tabDragLastX = 0;
@@ -413,6 +448,7 @@ struct AppState {
 
     ShotRequest shot;
     std::wstring open_path;   // folder to open as a new tab after session restore
+    std::optional<ResolvedOpenTarget> initial_external_open_target;
     Timing timing;
     std::wstring session_path;
     std::vector<app::LayoutTabSnapshot> session_layout_tabs;

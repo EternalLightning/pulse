@@ -1,0 +1,29 @@
+[PASS] drive toolbar disables cut copy and delete
+[PASS] single drive toolbar keeps volume label rename and properties
+[PASS] mixed or multiple drive selection disables toolbar rename
+[PASS] toolbar paste follows availability independently of selection
+[PASS] ordinary file toolbar retains file operations
+[PASS] archive toolbar forbids paste
+[PASS] unchanged tray inputs do not recollect paths on 10k UI updates
+[PASS] unrelated tray revision keeps validated identical paths available
+[PASS] changed tray paths invalidate validation and reject the old result
+[PASS] direct updates invalidate the revision shortcut for mixed callers
+[PASS] clipboard sequence change still refreshes the input snapshot
+[PASS] empty or text clipboard disables paste without source probes
+[PASS] virtual-file formats enable paste without treating them as filesystem paths
+[PASS] new virtual clipboard remains available when the older tray batch has no live paths
+[PASS] virtual clipboard takes priority over unavailable older tray paths
+[PASS] file clipboard waits for worker validation
+[PASS] existing clipboard file enables paste after worker probe
+[PASS] unchanged clipboard is not reprobed on every UI tick
+[PASS] deleted source disables paste with unchanged clipboard sequence
+[PASS] stale worker result cannot reenable paste after clipboard changed to text
+[PASS] clipboard change during decode rejects mismatched sequence
+[PASS] empty file drop disables paste even when format is present
+[PASS] text or empty clipboard disables paste despite a live old tray batch
+[PASS] valid file clipboard and tray sources enable paste
+[PASS] deleted clipboard source disables paste despite live old tray sources
+[PASS] deleted tray source disables paste instead of trusting cached exists flag
+[PASS] empty newest tray cannot incorrectly enable clipboard fallback
+[PASS] isolated clipboard fixture cleaned up
+28 checks, 0 failures

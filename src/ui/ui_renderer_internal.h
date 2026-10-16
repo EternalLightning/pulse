@@ -1459,6 +1459,7 @@ struct SettingsLayout {
     D2D1_RECT_F startup_tray_row{}, last_tab_row{};
     D2D1_RECT_F default_manager_rows[4]{}, system_status{};
     D2D1_RECT_F new_tab_row{};
+    D2D1_RECT_F external_open_card{}, external_open_choice{};
     D2D1_RECT_F hidden_files_row{};
     D2D1_RECT_F protected_files_row{};
     D2D1_RECT_F pinned_names_row{};

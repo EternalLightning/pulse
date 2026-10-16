@@ -1,6 +1,8 @@
 // app_runtime.h — Shared layout accessors and window-model helpers.
 #pragma once
 #include "app_state.h"
+#include "external_open.h"
+#include "tab_transfer.h"
 
 namespace pulse {
 
@@ -54,15 +56,17 @@ void RememberLayoutFocus(AppState& s);
 std::vector<std::wstring> VisibleFolderPaths(const AppState& s);
 void SyncVisibleWatches(AppState& s);
 void BindCurrentLayout(AppState& s);
-struct ResolvedOpenTarget {
-    std::wstring folder;
-    std::wstring file_path;
-    std::wstring file_leaf;
-};
-ResolvedOpenTarget ResolveOpenTarget(std::wstring path);
 // Consumes already-resolved metadata; selection performs no filesystem queries.
 void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target);
+void RestoreAppWindow(AppState& s);
 void OpenFolderInNewTab(AppState& s, const std::wstring& raw);
+void OpenFolderInNewTab(AppState& s, const ResolvedOpenTarget& target);
+bool RouteExternalFolderOpen(AppState& s, const std::wstring& raw,
+    uint64_t takeover_token = 0, std::vector<std::wstring> selected_paths = {},
+    unsigned selection_flags = 0);
+void ApplyExternalOpenResults(AppState& s, WPARAM identity);
+AppState* PostOpenFolderInNewWindow(AppState& s, const std::wstring& raw);
+AppState* PostOpenFolderInNewWindow(AppState& s, const ResolvedOpenTarget& target);
 void PostWorkerResult(AppState& s, app::WorkResult res);
 D2D1_RECT_F FocusedPaneRect(const AppState& s);
 app::Pane* PaneAtSlot(AppState& s, int index);

@@ -1014,6 +1014,25 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             }
         }
 
+        if (s->paneDragPending || s->paneDragging) {
+            if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
+                s->paneDragPending = false;
+                s->paneDragging = false;
+                s->paneDragLayoutIndex = s->paneDragPaneIndex = -1;
+                if (GetCapture() == hwnd) ReleaseCapture();
+            } else {
+                if (!s->paneDragging && s->paneDragPaneIndex >= 0 &&
+                    std::abs(mx - s->paneDragStartPt.x) +
+                    std::abs(my - s->paneDragStartPt.y) >= GetSystemMetrics(SM_CXDRAG))
+                    s->paneDragging = true;
+                if (s->paneDragging) {
+                    SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
+        }
+
         if (s->tabDragPending) {
             if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
                 s->tabDragPending = false;
@@ -1027,8 +1046,9 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 s->tabOrder.clear();
                 if (GetCapture() == hwnd) ReleaseCapture();
             } else if (s->tabDragging ||
-                       (s->pane && s->window_tabs.items.size() >= 2 &&
-                        std::abs(mx - s->tabDragStartPt.x) >= 2)) {
+                       (s->pane && !s->window_tabs.items.empty() &&
+                        (std::abs(mx - s->tabDragStartPt.x) >= 2 ||
+                         std::abs(my - s->tabDragStartPt.y) >= GetSystemMetrics(SM_CYDRAG)))) {
                 if (!s->tabDragging && s->pane &&
                     s->tabDragIndex >= 0 &&
                     s->tabDragIndex < static_cast<int>(s->window_tabs.items.size())) {
@@ -1057,7 +1077,7 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                             }
                         }
                     }
-                    if (n0 >= 2 && n0 == static_cast<int>(s->window_tabs.items.size()) &&
+                    if (n0 >= 1 && n0 == static_cast<int>(s->window_tabs.items.size()) &&
                         haveEnds && selfOk) {
                         s->tabDragging = true;
                         s->tabFlowLeft = first.left;
@@ -1912,6 +1932,15 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         }
         if (hit.pane_index >= 0) {
             if (app::Pane* p = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, p);
+        }
+        if (hit.region == ui::HitTestResult::PaneHeader && hit.pane_index >= 0) {
+            s->paneDragPending = true;
+            s->paneDragging = false;
+            s->paneDragLayoutIndex = static_cast<int>(s->window_tabs.active);
+            s->paneDragPaneIndex = hit.pane_index;
+            s->paneDragStartPt = POINT{ mx, my };
+            SetCapture(hwnd);
+            return 0;
         }
         if (HandleChangeClick(*s, hit, POINT{mx, my})) {
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2912,8 +2941,36 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
             }
+            if (s->paneDragPending || s->paneDragging) {
+                if (s->paneDragging && s->paneDragLayoutIndex >= 0 &&
+                    s->paneDragPaneIndex >= 0) {
+                    POINT screen{};
+                    if (GetCursorPos(&screen)) TryTransferPaneAtScreenPoint(*s,
+                        static_cast<size_t>(s->paneDragLayoutIndex),
+                        static_cast<size_t>(s->paneDragPaneIndex), screen);
+                }
+                s->paneDragPending = false;
+                s->paneDragging = false;
+                s->paneDragLayoutIndex = s->paneDragPaneIndex = -1;
+                if (GetCapture() == hwnd) ReleaseCapture();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
             if (s->tabDragPending || s->tabDragging) {
                 const bool wasActive = s->tabDragging;
+                if (wasActive && !s->tabDragFromChip && s->tabDragIndex >= 0) {
+                    POINT screen{};
+                    if (GetCursorPos(&screen) && TryTransferLayoutTabAtScreenPoint(
+                            *s, static_cast<size_t>(s->tabDragIndex), screen)) {
+                        s->tabDragPending = false;
+                        s->tabDragging = false;
+                        s->tabDragIndex = -1;
+                        s->tabOrder.clear();
+                        if (GetCapture() == hwnd) ReleaseCapture();
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                        return 0;
+                    }
+                }
                 if (wasActive && s->pane && s->tabDragIndex >= 0 &&
                     s->tabDragIndex < static_cast<int>(s->window_tabs.items.size())) {
                     int cur = -1;
@@ -3140,6 +3197,9 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
         (void)wParam;
         (void)lParam;
         if (s) {
+            s->paneDragPending = false;
+            s->paneDragging = false;
+            s->paneDragLayoutIndex = s->paneDragPaneIndex = -1;
             s->columnResizing = false;
             s->columnResizeIndex = -1;
             s->columnResizePane = -1;

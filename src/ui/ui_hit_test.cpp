@@ -213,6 +213,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 r.region=HitTestResult::SettingsDropdown;r.index=ContainsPt(lay.effect_choice,x,y) ? 0 : 1;return r;
             }
             if(ContainsPt(lay.new_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=20;return r;}
+            if(ContainsPt(lay.external_open_choice,x,y)) {r.region=HitTestResult::SettingsDropdown;r.index=2;return r;}
             if(ContainsPt(lay.performance_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=4;return r;}
             for(int list_row=0;list_row<3;++list_row)
                 if(ContainsPt(lay.list_style_row[list_row],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=17+list_row;return r;}

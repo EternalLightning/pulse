@@ -287,31 +287,6 @@ void BindCurrentLayout(AppState& s) {
     }
     SyncVisibleWatches(s);
 }
-ResolvedOpenTarget ResolveOpenTarget(std::wstring path) {
-    if (app::IsThisPcArgument(path)) return {};
-    while (!path.empty() && (path.front() == L'"' || path.back() == L'"')) {
-        if (path.front() == L'"') path.erase(path.begin());
-        if (!path.empty() && path.back() == L'"') path.pop_back();
-    }
-    if (path.empty()) return {};
-    ResolvedOpenTarget target;
-    // This is the pre-existing open-target attribute query; retain its metadata
-    // so file selection never performs a second, potentially remote query.
-    const DWORD attrs = GetFileAttributesW(path.c_str());
-    if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        if (ops::IsArchivePath(path)) {
-            target.folder = ArchiveViewPath(fs::NormalizePath(path));
-            return target;
-        }
-        target.file_path = fs::NormalizePath(path);
-        const size_t slash = target.file_path.find_last_of(L"\\/");
-        target.file_leaf = slash == std::wstring::npos ? target.file_path : target.file_path.substr(slash + 1);
-        target.folder = fs::ParentPath(target.file_path);
-    } else {
-        target.folder = fs::NormalizePath(path);
-    }
-    return target;
-}
 
 void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target) {
     app::Tab* tab = ActiveTab(s);
@@ -331,9 +306,22 @@ void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target) {
     tab->pending_ensure_selection_visible = true;
 }
 
+void RestoreAppWindow(AppState& s) {
+    if (s.core.global_ui_owner == s.hwnd) {
+        s.tray_controller.RestoreWindow();
+    } else if (s.hwnd) {
+        ShowWindow(s.hwnd, IsIconic(s.hwnd) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(s.hwnd);
+    }
+}
+
 void OpenFolderInNewTab(AppState& s, const std::wstring& raw) {
-    s.tray_controller.RestoreWindow();
-    if (app::IsThisPcArgument(raw)) {
+    OpenFolderInNewTab(s, ResolveOpenTarget(raw));
+}
+
+void OpenFolderInNewTab(AppState& s, const ResolvedOpenTarget& target) {
+    RestoreAppWindow(s);
+    if (target.this_pc) {
         for (size_t i = 0; i < s.window_tabs.items.size(); ++i) {
             if (!s.window_tabs.items[i]) continue;
             for (auto& pane : s.window_tabs.items[i]->panes) {
@@ -343,7 +331,6 @@ void OpenFolderInNewTab(AppState& s, const std::wstring& raw) {
         }
         OpenTabAt(s, L""); return;
     }
-    const auto target = ResolveOpenTarget(raw);
     if (!target.folder.empty() && !ActivateExistingFolderTab(s, target.folder)) NewTab(s, target.folder);
     else InvalidateRect(s.hwnd, nullptr, FALSE);
     if (!target.folder.empty()) SelectLaunchedFile(s, target);
@@ -498,6 +485,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 ? l10n::Get(l10n::StringId::SettingsSystemApplying) : s.systemIntegration.error();
             vm.settings_blank_click_go_back = s.appPrefs.blank_click_go_back;
             vm.settings_new_tab_home = s.appPrefs.new_tab_home;
+            vm.settings_external_open_mode = static_cast<int>(s.appPrefs.external_open_mode);
             vm.settings_change_tracking = s.appPrefs.change_tracking_enabled;
             vm.settings_change_days = s.appPrefs.change_tracking_days;
             vm.settings_row_height = s.appPrefs.row_height;
@@ -1422,7 +1410,7 @@ bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
                     if (item.exists) paths.push_back(item.path);
             }
             return paths;
-        });
+        }, !IsClipboardFormatAvailable(CF_HDROP) && ops::ClipboardHasShellFiles());
     changed = availability.Consume() || changed;
     if (auto request = availability.BeginRefresh(now)) {
         const auto mailbox = availability.mailbox();

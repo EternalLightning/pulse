@@ -1,0 +1,44 @@
+[PASS] initialize fixture UI apartment
+[PASS] open isolated fixture or external archive without write access
+[PASS] initialize isolated application window and renderer
+[PASS] real WorkerPool completes bundled 7-Zip listing
+[PASS] incomplete ZIP supplies safe records, real exit code and bounded warning
+[INFO] accepted_records=2 exit_code=2
+[PASS] WM_ARCHIVE_RESULT finishes actual archive navigation
+[PASS] fixture window remains responsive and no modal password retry opens
+[PASS] root snapshot publishes exactly accepted safe records and their parent folders
+[PASS] failed encrypted member open clears the cached password while retaining encryption evidence
+[PASS] the next double-click again enters the password prompt path
+[PASS] late extraction failure cannot clear a password after the tab switches views
+[PASS] archive open caches the supplied password only after successful extraction
+[PASS] partial listing displays explicit nonmodal warning alongside read-only contents
+[INFO] navigation_ms=62 ui_pings=5
+[PASS] production pane model exposes warning and read-only state
+[PASS] production renderer draws archive content and warning
+[PASS] save archive warning UI evidence
+[PASS] internal directory navigation reuses cache and preserves partial-listing warning
+[PASS] every published internal member remains within the safe archive namespace
+[INFO] internal_directories=1 published_internal_files=1
+[PASS] production pane model exposes warning and read-only state
+[PASS] production renderer draws archive content and warning
+[PASS] save archive warning UI evidence
+[PASS] capture actual worker result before UI delivery
+[PASS] old generation cannot overwrite newer request at the same archive path
+[PASS] capture archive result before switching to another view
+[PASS] late archive result cannot pollute a different view
+[PASS] create an actual password-protected 7z archive for the double-click flow
+[PASS] real 7z listing reports the selected member as encrypted
+[PASS] encrypted member appears in the navigable snapshot
+[PASS] real encrypted member extraction reports wrong password with 7z exit 2
+[INFO] archive operation title=正在准备文件列表
+[INFO] archive operation title=正在解压…
+[INFO] archive operation title=密码不正确，或压缩包数据已损坏
+[PASS] wrong password fails the first double-click without caching it
+[PASS] wrong encrypted password presents and closes the localized failure window
+[PASS] a second double-click opens the password dialog again
+[PASS] correct password is cached only after the second extraction succeeds
+[PASS] only nonmodal archive warning was displayed throughout navigation
+[PASS] archive size and modification time stay unchanged after read-only navigation
+[PASS] cleanup target stays inside owned bench_data fixture
+[PASS] close fixture window and remove only isolated test files
+[INFO] failures=0

@@ -31,9 +31,16 @@ std::wstring WorkKey(const std::wstring& path, ui::SortColumn col,
 } // namespace
 
 namespace {
-std::atomic<unsigned> g_live_workers{0};
-constexpr unsigned kMaxLiveWorkers = 8;
+std::mutex g_worker_budget_mutex;
+std::condition_variable g_worker_budget_changed;
+unsigned g_live_workers = 0;
+constexpr unsigned kMaxWorkersPerPool = 8;
+constexpr unsigned kMaxLiveWorkers = 128;
 }
+
+struct WorkerPool::Budget {
+    unsigned live = 0;
+};
 
 struct DirectoryWork {
     std::vector<WorkItem> projections;
@@ -51,6 +58,7 @@ struct WorkerPool::State {
     struct IoTask { std::function<void()> run; std::function<void()> complete; };
     std::queue<IoTask> io_queue;
     std::atomic<bool> running{false};
+    std::shared_ptr<Budget> budget;
     unsigned live = 0;
     std::unordered_map<std::wstring, uint64_t> current_gen;
     std::unordered_map<std::wstring, std::vector<std::shared_ptr<DirectoryWork>>> directories;
@@ -110,7 +118,7 @@ struct WorkerPool::State {
 #endif
 };
 
-WorkerPool::WorkerPool() = default;
+WorkerPool::WorkerPool() : budget_(std::make_shared<Budget>()) {}
 
 WorkerPool::~WorkerPool() {
     Stop();
@@ -119,28 +127,47 @@ WorkerPool::~WorkerPool() {
 bool WorkerPool::Start(ResultCallback cb) {
     Stop();
     const unsigned desired = std::min(4u, std::max(2u, std::thread::hardware_concurrency()));
-    // Reserve both lanes together; a partial pool cannot provide isolation.
-    unsigned live = g_live_workers.load();
     unsigned count = 0;
-    do {
-        count = std::min(desired, kMaxLiveWorkers - live);
+    {
+        std::lock_guard lock(g_worker_budget_mutex);
+        const unsigned owner_available = kMaxWorkersPerPool - budget_->live;
+        const unsigned process_available = kMaxLiveWorkers - g_live_workers;
+        count = std::min(desired, std::min(owner_available, process_available));
         if (count < 2) return false;
-    } while (!g_live_workers.compare_exchange_weak(live, live + count));
+        budget_->live += count;
+        g_live_workers += count;
+    }
     unsigned started = 0;
     try {
         auto state = std::make_shared<State>();
         state->callback = std::move(cb);
+        state->budget = budget_;
         state->threads.reserve(count);
         state->running = true;
         state_ = state;
         for (; started < count; ++started) {
+            {
+                std::lock_guard budget_lock(g_worker_budget_mutex);
+                ++state->live;
+            }
             std::lock_guard lock(state->mutex);
-            state->threads.emplace_back(&WorkerPool::WorkerThread, state, started == 0);
-            ++state->live;
+            try {
+                state->threads.emplace_back(&WorkerPool::WorkerThread, state, started == 0);
+            } catch (...) {
+                {
+                    std::lock_guard budget_lock(g_worker_budget_mutex);
+                    --state->live;
+                }
+                throw;
+            }
         }
         return true;
     } catch (...) {
-        g_live_workers.fetch_sub(count - started);
+        {
+            std::lock_guard lock(g_worker_budget_mutex);
+            budget_->live -= count - started;
+            g_live_workers -= count - started;
+        }
         Stop();
         return false;
     }
@@ -165,8 +192,8 @@ void WorkerPool::Stop() {
     for (auto& thread : state->threads)
         if (thread.joinable()) CancelSynchronousIo(thread.native_handle());
     {
-        std::unique_lock lock(state->mutex);
-        state->finished.wait_for(lock, std::chrono::milliseconds(100), [&] { return state->live == 0; });
+        std::unique_lock lock(g_worker_budget_mutex);
+        g_worker_budget_changed.wait_for(lock, std::chrono::milliseconds(100), [&] { return state->live == 0; });
     }
     // Blocked provider calls retain only the mailbox, never the destroyed pool/UI.
     for (auto& thread : state->threads) if (thread.joinable()) thread.detach();
@@ -506,8 +533,13 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state, bool local_owner) {
     struct Finish {
         std::shared_ptr<State> state;
         ~Finish() {
-            { std::lock_guard lock(state->mutex); --state->live; }
-            --g_live_workers;
+            {
+                std::lock_guard lock(g_worker_budget_mutex);
+                --state->live;
+                --state->budget->live;
+                --g_live_workers;
+            }
+            g_worker_budget_changed.notify_all();
             state->finished.notify_all();
         }
     } finish{state};

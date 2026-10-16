@@ -6,17 +6,9 @@
 #include <thread>
 
 namespace pulse {
-void RequestApplicationExit(AppState& s) {
-    if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
-    s.exit_confirming = true;
-    if (s.ops.HasPendingFileOperations()) {
-        const auto spec = app::ExitConfirmationSpec();
-        if (!ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor)) {
-            s.exit_confirming = false;
-            return;
-        }
-    }
-    s.exit_confirming = false;
+namespace {
+void BeginWindowShutdown(AppState& s) {
+    if (s.exit_requested || !s.hwnd) return;
     s.exit_requested = true;
     SuspendContentSearches(s);
     s.globalSearchWindow.Hide();
@@ -43,6 +35,35 @@ void RequestApplicationExit(AppState& s) {
         s.notification_toast.ShowError(s.hwnd, l10n::Get(l10n::StringId::ExitFailed),
             l10n::Get(l10n::StringId::ExitWorkerFailed));
     }
+}
+
+bool ConfirmWindowShutdown(AppState& s, bool pending) {
+    s.exit_confirming = true;
+    const bool accepted = !pending || ui::ShowConfirmDialog(s.hwnd,
+        app::ExitConfirmationSpec(), s.darkMode, s.accentColor);
+    s.exit_confirming = false;
+    return accepted;
+}
+}
+
+void RequestWindowClose(AppState& s) {
+    if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
+    if (!s.core.exiting && !ConfirmWindowShutdown(s, s.ops.HasPendingFileOperations())) return;
+    BeginWindowShutdown(s);
+}
+
+void RequestApplicationExit(AppState& s) {
+    if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
+    bool pending = s.ops.HasPendingFileOperations();
+    s.core.windows.ForEach([&](HWND, AppState& window) {
+        pending = pending || window.ops.HasPendingFileOperations();
+    });
+    if (!ConfirmWindowShutdown(s, pending)) return;
+    s.core.exiting = true;
+    // Each window drains its own operation callbacks while the shared UI
+    // thread keeps pumping. No window bypasses its asynchronous shutdown.
+    s.core.windows.ForEach([](HWND, AppState& window) { BeginWindowShutdown(window); });
+    BeginWindowShutdown(s);
 }
 
 bool CompleteApplicationExit(AppState& s) {

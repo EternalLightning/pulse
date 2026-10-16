@@ -99,11 +99,13 @@ public:
     uint64_t ResultWatermark() const noexcept { return global_gen_; }
 
 private:
+    struct Budget;
     struct State;
     static bool IsCancelled(const std::shared_ptr<State>& state, const WorkItem& item);
     static void Publish(const std::shared_ptr<State>& state, const WorkItem& item, WorkResult result);
     static void WorkerThread(std::shared_ptr<State> state, bool local_owner);
     static WorkResult Process(const std::shared_ptr<State>& state, const WorkItem& item);
+    std::shared_ptr<Budget> budget_;
     std::shared_ptr<State> state_;
     uint64_t global_gen_ = 0;
 #ifdef PULSE_WORKER_TESTING
