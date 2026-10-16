@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <functional>
 
 namespace pulse::model {
 
@@ -39,6 +40,8 @@ bool BatchRenamePatternUsesIndex(std::wstring_view pattern);
 std::wstring ApplyBatchRenameRule(const std::wstring& name, size_t index,
                                   const BatchRenameRule& rule);
 std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>& paths,
-                                                const BatchRenameRule& rule);
+    const BatchRenameRule& rule,
+    const std::function<bool()>& cancelled = {},
+    const std::function<bool(const std::wstring&)>& exists = {});
 
 } // namespace pulse::model

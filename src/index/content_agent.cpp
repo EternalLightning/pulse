@@ -40,92 +40,6 @@ bool WriteAll(HANDLE pipe, const void* input, DWORD size) {
     return true;
 }
 
-bool ParseRequest(const std::vector<uint8_t>& payload, ContentSearchRequest& request) {
-    ipc::PayloadReader reader(payload.data(), payload.size());
-    uint32_t mode = 0;
-    uint32_t flags = 0;
-    uint32_t maximum_hits = 0;
-    if (!reader.GetU64(request.generation) || !reader.GetU32(mode) ||
-        !reader.GetU32(flags) || !reader.GetU64(request.maximum_file_bytes) ||
-        !reader.GetU32(maximum_hits) || !reader.GetString(request.root) ||
-        !reader.GetString(request.needle)) return false;
-    if (mode > static_cast<uint32_t>(ContentSearchMode::Duplicates) ||
-        request.root.size() > 32768 || request.needle.size() > 4096 ||
-        request.maximum_file_bytes > 64ull * 1024ull * 1024ull ||
-        (mode == static_cast<uint32_t>(ContentSearchMode::Duplicates) && maximum_hits > 10000)) return false;
-    request.mode = static_cast<ContentSearchMode>(mode);
-    request.recursive = (flags & 1) != 0;
-    request.case_sensitive = (flags & 2) != 0;
-    request.skip_system_locations = (flags & 4) != 0;
-    request.whole_word = (flags & 8) != 0;
-    request.maximum_hits = maximum_hits;
-    if (reader.remaining() >= 12) {
-        uint32_t extra_roots = 0;
-        if (!reader.GetU64(request.minimum_file_bytes) || !reader.GetU32(extra_roots) ||
-            extra_roots > 32) return false;
-        std::vector<std::wstring> extras;
-        extras.reserve(extra_roots);
-        for (uint32_t i = 0; i < extra_roots; ++i) {
-            std::wstring extra;
-            if (!reader.GetString(extra) || extra.empty() || extra.size() > 32768) return false;
-            extras.push_back(std::move(extra));
-        }
-        if (!request.root.empty()) request.roots.push_back(request.root);
-        request.roots.insert(request.roots.end(), extras.begin(), extras.end());
-        if (reader.remaining() >= 12) {
-            uint32_t match_mode = 0;
-            uint32_t extra_needles = 0;
-            if (!reader.GetU32(match_mode) || !reader.GetU32(extra_needles) ||
-                extra_needles > 32 || match_mode > 2) return false;
-            request.match_mode = static_cast<ContentMatchMode>(match_mode);
-            request.needles.reserve(extra_needles);
-            for (uint32_t i = 0; i < extra_needles; ++i) {
-                std::wstring needle;
-                if (!reader.GetString(needle) || needle.size() > 4096) return false;
-                if (!needle.empty()) request.needles.push_back(std::move(needle));
-            }
-            uint32_t excluded = 0;
-            if (!reader.GetU32(excluded) || excluded > 32) return false;
-            request.excluded_needles.reserve(excluded);
-            for (uint32_t i = 0; i < excluded; ++i) {
-                std::wstring needle;
-                if (!reader.GetString(needle) || needle.size() > 4096) return false;
-                if (!needle.empty()) request.excluded_needles.push_back(std::move(needle));
-            }
-            uint32_t candidates = 0;
-            if (!reader.GetU32(candidates) || candidates > 10000) return false;
-            request.candidate_paths.reserve(candidates);
-            for (uint32_t i = 0; i < candidates; ++i) {
-                std::wstring path;
-                if (!reader.GetString(path) || path.empty() || path.size() > 32768) return false;
-                request.candidate_paths.push_back(std::move(path));
-            }
-        }
-    } else if (!request.root.empty()) {
-        request.roots.push_back(request.root);
-    }
-    if (reader.remaining() && !reader.GetString(request.filename_query)) return false;
-    if (reader.remaining()) {
-        uint32_t sort = 0, descending = 0;
-        if (!reader.GetU32(sort) || sort > 5 || !reader.GetU32(descending) || descending > 1) return false;
-        request.sort = static_cast<ContentResultSort>(sort); request.sort_desc = descending != 0;
-    }
-    if (request.mode == ContentSearchMode::Duplicates && request.roots.empty() && request.candidate_paths.empty()) return false;
-    if (request.root.empty() && !request.roots.empty()) request.root = request.roots.front();
-    if (reader.remaining()) {
-        uint32_t version = 0;
-        if (!reader.GetU32(version) || version != 1 || !reader.GetU64(request.session_id)) return false;
-    }
-    if (reader.remaining() && (!reader.GetU64(request.maximum_document_bytes) || !request.maximum_document_bytes ||
-        request.maximum_document_bytes > 512ull * 1024 * 1024)) return false;
-    if (reader.remaining()) {
-        uint32_t task_scan = 0;
-        if (!reader.GetU32(task_scan) || task_scan > 1) return false;
-        request.task_scan = task_scan != 0;
-    }
-    return reader.remaining() == 0;
-}
-
 bool SendBatch(HANDLE pipe, const ContentSearchProgress& progress,
                const std::vector<ContentHit>& hits) {
     ipc::PayloadWriter writer;
@@ -194,7 +108,7 @@ int RunContentAgent(const std::wstring& token) {
         return ERROR_BROKEN_PIPE;
     }
     ContentSearchRequest request;
-    if (!ParseRequest(payload, request)) {
+    if (!content::ParseSearchRequest(payload, request)) {
         CloseHandle(pipe);
         return ERROR_INVALID_DATA;
     }
@@ -212,14 +126,15 @@ int RunContentAgent(const std::wstring& token) {
 int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, bool read_only) {
     return RunPersistentContentAgent(token, parent_pid, read_only ? ContentAgentMode::Observer : ContentAgentMode::LegacyWriter);
 }
-int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, ContentAgentMode mode) {
+int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, ContentAgentMode mode,
+                              const std::wstring& database_path) {
     if (token.empty() || token.size() > 64 || !parent_pid ||
         !std::all_of(token.begin(), token.end(), [](wchar_t c) { return iswalnum(c) || c == L'-' || c == L'_'; })) return ERROR_INVALID_PARAMETER;
     HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
     if (!parent) return static_cast<int>(GetLastError());
     CurrentUserSecurityAttributes security;
     if (!security) { CloseHandle(parent); return ERROR_ACCESS_DENIED; }
-    ContentIndex index({}, mode);
+    ContentIndex index(database_path, mode);
     std::atomic<bool> stopping{false};
     HANDLE accept_thread = nullptr;
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &accept_thread, THREAD_TERMINATE, FALSE, 0);
@@ -241,10 +156,17 @@ int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, Conte
         for (auto it = handlers.begin(); it != handlers.end();) {
             if (it->done->load()) { it->thread.join(); it = handlers.erase(it); } else ++it;
         }
+        // Keep one instance available for controls when all 16 query slots are occupied.
         HANDLE pipe = CreateNamedPipeW(pipe_name.c_str(), PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-            16, 64 * 1024, 64 * 1024, 0, security.get());
-        if (pipe == INVALID_HANDLE_VALUE) break;
+            17, 64 * 1024, 64 * 1024, 0, security.get());
+        if (pipe == INVALID_HANDLE_VALUE) {
+            if (GetLastError() == ERROR_PIPE_BUSY) {
+                if (WaitForSingleObject(parent, 25) == WAIT_OBJECT_0) stopping = true;
+                continue;
+            }
+            break;
+        }
         if (!ConnectNamedPipe(pipe, nullptr) && GetLastError() != ERROR_PIPE_CONNECTED) { CloseHandle(pipe); if (stopping) break; continue; }
         if (stopping) { CloseHandle(pipe); break; }
         auto done = std::make_shared<std::atomic<bool>>(false);
@@ -255,10 +177,24 @@ int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, Conte
             if (valid && !payload.empty()) valid = ReadAll(pipe, payload.data(), header.payload_size);
             if (valid && (header.type == content::REQ_SEARCH || header.type == content::REQ_SUBSCRIBE)) {
                 ContentSearchRequest request;
-                if (ParseRequest(payload, request) && request.mode == ContentSearchMode::Content) {
+                if (content::ParseSearchRequest(payload, request) && request.mode == ContentSearchMode::Content) {
                     auto cancel = std::make_shared<std::atomic<bool>>(false);
                     request.subscribe = header.type == content::REQ_SUBSCRIBE;
-                    { std::lock_guard lock(sessions_mu); *cancel = cancelled_generations.contains(request.generation); sessions[request.generation] = cancel; }
+                    bool admitted = false;
+                    {
+                        std::lock_guard lock(sessions_mu);
+                        if (sessions.size() < 16 && !sessions.contains(request.generation)) {
+                            *cancel = cancelled_generations.contains(request.generation);
+                            sessions[request.generation] = cancel; admitted = true;
+                        }
+                    }
+                    if (!admitted) {
+                        ContentSearchProgress progress; progress.generation = request.generation;
+                        progress.done = true; progress.error = ERROR_BUSY;
+                        SendBatch(pipe, progress, {});
+                        FlushFileBuffers(pipe); DisconnectNamedPipe(pipe); CloseHandle(pipe); *done = true;
+                        return;
+                    }
                     do {
                         uint64_t revision = request.after_revision;
                         const auto send = [&](const auto& progress, auto hits) {

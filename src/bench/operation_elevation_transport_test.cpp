@@ -4,6 +4,8 @@
 #include <array>
 #include <atomic>
 #include <thread>
+#include <filesystem>
+#include <fstream>
 
 #ifndef PULSE_OPERATION_ELEVATION_TESTING
 #error This target must define PULSE_OPERATION_ELEVATION_TESTING.
@@ -90,6 +92,26 @@ std::wstring SelfPath() {
     path.resize(size);
     return path;
 }
+struct PathFixture {
+    std::filesystem::path root;
+    bool Create() {
+        root = std::filesystem::absolute(L"bench_data") /
+            (L"pulse-elevation-path-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        std::error_code error;
+        std::filesystem::create_directories(root / L"Program Files" / L"Pulse", error);
+        if (error) return false;
+        std::filesystem::create_directories(root / L"Other", error);
+        if (error) return false;
+        return std::ofstream(root / L"Program Files" / L"Pulse" / L"Pulse.exe").good() &&
+            std::ofstream(root / L"Program Files" / L"Pulse" / L"Pulse.Shell.exe").good() &&
+            std::ofstream(root / L"Other" / L"Pulse.Shell.exe").good();
+    }
+    ~PathFixture() {
+        std::error_code error;
+        std::filesystem::remove_all(root, error);
+        Check(!error, "remove isolated allowlist fixture files");
+    }
+};
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -155,6 +177,18 @@ int wmain(int argc, wchar_t** argv) {
     result = RunElevatedOperation(executable, nullptr, request);
     Check(result.error == E_ACCESSDENIED && !result.outcome_unknown,
         "production entry rejects fixture path before UAC", &result);
+    PathFixture paths;
+    Check(paths.Create(), "create existing isolated allowlist fixture files");
+    const std::wstring production_parent = (paths.root / L"Program Files" / L"Pulse" / L"Pulse.exe").wstring();
+    const std::wstring production_worker = (paths.root / L"Program Files" / L"Pulse" / L"Pulse.Shell.exe").wstring();
+    Check(OperationElevationPathsForTest(production_parent, production_worker, false) &&
+        !OperationElevationPathsForTest(production_parent, production_parent, false) &&
+        !OperationElevationPathsForTest(production_parent, (paths.root / L"Other" / L"Pulse.Shell.exe").wstring(), false) &&
+        !OperationElevationPathsForTest(production_worker, production_worker, false),
+        "production elevation accepts only main parent and its sibling Shell worker");
+    Check(OperationElevationPathsForTest(executable, executable, true) &&
+        !OperationElevationPathsForTest(executable, production_worker, true),
+        "same-image transport fixture exception stays within explicit testing mode");
     wchar_t executable_arg[] = L"fixture.exe";
     wchar_t worker_arg[] = L"--file-operation-worker";
     wchar_t invalid_pipe[] = L"\\\\server\\pipe\\Pulse.OperationElevation.bad";

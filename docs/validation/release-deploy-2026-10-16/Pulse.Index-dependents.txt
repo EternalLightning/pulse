@@ -1,0 +1,30 @@
+Microsoft (R) COFF/PE Dumper Version 14.44.35229.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file build\Pulse.Index.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    ADVAPI32.dll
+    SHLWAPI.dll
+    ole32.dll
+    SHELL32.dll
+    NETAPI32.dll
+    MPR.dll
+    bcrypt.dll
+    USER32.dll
+    dbghelp.dll
+    KERNEL32.dll
+
+  Summary
+
+       2B000 .data
+        1000 .fptable
+       19000 .pdata
+       90000 .rdata
+        3000 .reloc
+        1000 .rsrc
+      274000 .text

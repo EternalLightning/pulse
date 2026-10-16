@@ -66,7 +66,7 @@ bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut) {
     // Ownership of hdrop transferred to the clipboard.
 
     UINT fmtEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-    HGLOBAL heffect = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+    HGLOBAL heffect = fmtEffect ? GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD)) : nullptr;
     bool effect_set = false;
     if (fmtEffect != 0 && heffect) {
         DWORD* effect = static_cast<DWORD*>(GlobalLock(heffect));
@@ -168,7 +168,7 @@ bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& ex
         return false;
     }
     const UINT format = RegisterClipboardFormatW(CFSTR_PERFORMEDDROPEFFECT);
-    HGLOBAL value = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+    HGLOBAL value = format ? GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD)) : nullptr;
     bool ok = false;
     if (format && value) {
         auto* effect = static_cast<DWORD*>(GlobalLock(value));

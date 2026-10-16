@@ -767,6 +767,12 @@ std::wstring ExecutablePath() {
     path.resize(count);
     return path;
 }
+std::wstring ShellHelperPath(const std::wstring& executable) {
+    if (executable.empty()) return {};
+    auto path = std::filesystem::path(executable);
+    path.replace_filename(L"Pulse.Shell.exe");
+    return path.wstring();
+}
 } // namespace
 
 struct OperationElevationAdapter::ParentState {
@@ -947,6 +953,7 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
         status.lock_retry_available = false;
     });
     OperationElevationResult result;
+    bool helper_missing = false;
     try {
         WireRequest wire;
         wire.request = item.req;
@@ -991,8 +998,21 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
 #else
         (void)native_consent;
 #endif
-            result = RunElevatedOperation(helper, manager.UiWindow(), payload,
-                                          {&state, &ParentProgress, &ParentCancelled});
+        {
+            const DWORD attributes = GetFileAttributesW(helper.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES) {
+                const DWORD last_error = GetLastError();
+                const DWORD error = last_error ? last_error : ERROR_GEN_FAILURE;
+                helper_missing = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+                result.error = HRESULT_FROM_WIN32(error);
+            } else if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+                helper_missing = true;
+                result.error = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+            } else {
+                result = RunElevatedOperation(helper, manager.UiWindow(), payload,
+                                              {&state, &ParentProgress, &ParentCancelled});
+            }
+        }
         if (result.response.empty() && state.serial && FAILED(result.error))
             result.outcome_unknown = true;
         if (!result.response.empty()) {
@@ -1030,7 +1050,7 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
             status.phase = OpPhase::Failed;
             status.failure_hr = FAILED(result.error) ? result.error : E_FAIL;
             status.last_error = format::FileOperationErrorText(status.failure_hr);
-            status.failed_path = item.retry_failed_path;
+            status.failed_path = helper_missing ? helper : item.retry_failed_path;
             status.summary = status.last_error;
         } else if (!IsTerminal(status.phase)) {
             status.phase = OpPhase::Failed;
@@ -1375,7 +1395,7 @@ OperationElevationResult OperationElevationAdapter::ExecuteWorker(void* raw, std
     }
 }
 void OperationElevationAdapter::RunParent(OpsManager& manager, const OpsManager::QueueItem& item) {
-    RunParentImpl(manager, item, ExecutablePath(), true);
+    RunParentImpl(manager, item, ShellHelperPath(ExecutablePath()), true);
 }
 
 int OperationElevationAdapter::RunWorker(int argc, wchar_t** argv) {
@@ -1624,6 +1644,14 @@ bool OperationElevationAdapter::UnknownRecoveryPersistenceForTest(const std::wst
            std::all_of(after.entries.begin(), after.entries.end(), [](const auto& entry) {
                return entry.outcome_unknown && entry.was_active;
            });
+}
+
+bool OperationElevationAdapter::HelperPathChecksForTest() {
+    const std::wstring root = L"C:\\Program Files\\Pulse\\";
+    return ShellHelperPath(root + L"Pulse.exe") == root + L"Pulse.Shell.exe" &&
+        ShellHelperPath(L"\\\\?\\" + root + L"Pulse.exe") == L"\\\\?\\" + root + L"Pulse.Shell.exe" &&
+        ShellHelperPath(L"\\\\server\\share\\Pulse.exe") == L"\\\\server\\share\\Pulse.Shell.exe" &&
+        ShellHelperPath(L"").empty();
 }
 
 bool OperationElevationAdapter::CodecChecksForTest() {

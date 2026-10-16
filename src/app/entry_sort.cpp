@@ -38,13 +38,12 @@ int NameCompare(const std::wstring& a, const std::wstring& b) {
 
 const std::wstring& DisplaySortName(const fs::DirEntry& entry, std::wstring_view parent) {
     if (!entry.is_dir || entry.change_record_only) return entry.name;
-    std::wstring full = entry.full_path;
-    if (full.empty() && !parent.empty() && !parent.starts_with(L"pulse:")) {
-        full = parent;
-        if (full.back() != L'\\' && full.back() != L'/') full += L'\\';
-        full += entry.name;
-    }
-    if (const auto* folder = pulse::path::FindKnownFolderLabel(full, pulse::path::KnownFolderLabels())) {
+    const auto& folders = pulse::path::KnownFolderLabels();
+    const auto* folder = !entry.full_path.empty()
+        ? pulse::path::FindKnownFolderLabel(entry.full_path, folders)
+        : !parent.empty() && !parent.starts_with(L"pulse:")
+            ? pulse::path::FindKnownFolderChildLabel(parent, entry.name, folders) : nullptr;
+    if (folder) {
         const auto& label = l10n::Get(folder->label);
         if (!label.empty()) return label;
     }

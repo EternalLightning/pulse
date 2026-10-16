@@ -1,0 +1,9 @@
+{
+  "source_root": "F:\\Pulse-copy-rate-test-6d467197785d4d8b85cd7d80d94d720a\\bench_data",
+  "target_root": "E:\\Projects\\pulse\\bench_data\\copy-rate-probe-6d467197785d4d8b85cd7d80d94d720a",
+  "binary_root": "D:\\AppData\\Temp\\Pulse-copy-callback-6d467197785d4d8b85cd7d80d94d720a",
+  "source": "F:\\Pulse-copy-rate-test-6d467197785d4d8b85cd7d80d94d720a\\bench_data\\before.bin",
+  "destination": "E:\\Projects\\pulse\\bench_data\\copy-rate-probe-6d467197785d4d8b85cd7d80d94d720a\\before.bin",
+  "bytes": 4294967296,
+  "binary_sha256": "E3FE03529B07066D94DFFC5E7F788E973622127F933452B9BA857410EE417602"
+}

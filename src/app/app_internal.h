@@ -1,6 +1,7 @@
 // app_internal.h — Aggregate declarations for Pulse window TUs.
 #pragma once
 #include "app_state.h"
+#include "app_render.h"
 #include "app_runtime.h"
 #include "app_navigation.h"
 #include "app_ops_ui.h"

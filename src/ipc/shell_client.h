@@ -110,7 +110,8 @@ private:
     void HandleDisconnect(const std::shared_ptr<Connection>& expected = {});
     void FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
     void FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled, const std::wstring& error);
-    const std::wstring& UnreachableMessage() const;
+    // Caller holds send_mutex_; return a snapshot for dispatch after unlocking.
+    std::wstring UnreachableMessage() const;
 
     Callbacks cb_;
     std::mutex send_mutex_;          // serializes complete frames + reconnect

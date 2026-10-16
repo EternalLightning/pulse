@@ -42,6 +42,7 @@ bool Compositor::IsDeviceLost(HRESULT hr) {
 
 bool Compositor::Init(HWND hwnd) {
     initialization_error_.clear();
+    animation_frames_paused_ = true;
     hwnd_ = hwnd;
     device_lost_ = false;
     if (!InitD3D()) return false;
@@ -56,6 +57,7 @@ bool Compositor::Init(HWND hwnd) {
 }
 
 void Compositor::Shutdown() {
+    animation_frames_paused_ = true;
     BindDialogComposition(hwnd_, nullptr, nullptr);
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
@@ -251,6 +253,7 @@ bool Compositor::CreateSwapChain() {
 }
 
 void Compositor::ResizeSwapChain() {
+    animation_frames_paused_ = true;
     if (!swapChain_.get() || width_ <= 0 || height_ <= 0) return;
     targetBitmap_.reset();
     dc_->SetTarget(nullptr);
@@ -285,6 +288,7 @@ void Compositor::ResizeSwapChain() {
         return;
     }
     dc_->SetTarget(targetBitmap_.get());
+    animation_frames_paused_ = false;
 }
 
 void Compositor::Resize(int width, int height) {
@@ -313,19 +317,22 @@ bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
 }
 
 void Compositor::Present() {
-    if (device_lost_) return;
+    animation_frames_paused_ = true;
+    if (device_lost_ || !swapChain_.get()) return;
     if (hwnd_) UpdateTextRenderingParams(
         MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
-    HRESULT hr = S_OK;
-    if (swapChain_.get()) hr = swapChain_->Present(1, 0);
+    HRESULT hr = swapChain_->Present(1, 0);
     if (FAILED(hr)) {
         if (IsDeviceLost(hr)) NotifyDeviceLost(hr);
         return;
     }
+    // OCCLUDED is a success status, but does not pace the animation loop.
+    const bool presented = hr == S_OK;
     if (compositionDevice_.get()) {
         hr = compositionDevice_->Commit();
         if (FAILED(hr) && IsDeviceLost(hr)) NotifyDeviceLost(hr);
     }
+    animation_frames_paused_ = !presented || FAILED(hr);
 }
 
 void Compositor::NotifyDeviceLost(HRESULT) {

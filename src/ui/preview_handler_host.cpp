@@ -211,6 +211,7 @@ std::mutex& g_association_mutex = *new std::mutex;
 std::once_flag g_register_class_once;
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
 std::atomic<uint32_t> g_test_open_attempts{0};
+std::atomic<uint32_t> g_test_association_lookups{0};
 std::mutex g_test_hook_mutex;
 std::function<void()> g_test_open_hook;
 // PlaceOverlay entries and returns. They differ only while the window manager
@@ -246,7 +247,8 @@ bool IsOfflinePlaceholder(DWORD attrs) {
     return (attrs & (kRecallOnOpen | kRecallOnData)) && !(attrs & kPinned);
 }
 
-bool FindPreviewHandlerClsid(const std::wstring& extension, CLSID& clsid) {
+bool FindPreviewHandlerClsid(const std::wstring& extension, CLSID& clsid,
+                             bool defer_uncached = false) {
     static auto& cache = *new std::unordered_map<std::wstring, CLSID>;
     // A lookup that found nothing is remembered, but only for a while: the shell
     // can fail this query while it is busy with something else, and carrying
@@ -266,23 +268,19 @@ bool FindPreviewHandlerClsid(const std::wstring& extension, CLSID& clsid) {
         }
     }
 
-    // The shell lookup runs outside the lock. This is reached from the paint
-    // path too, and a lookup queued behind another thread's slow call used to
-    // freeze the window along with it. Resolving the same extension twice is
-    // harmless.
+    // Paint only asks for eligibility. Unknown extensions are resolved by the
+    // existing STA worker, where the normal open timeout also covers COM lookup.
+    if (defer_uncached) return true;
+#ifdef PULSE_PREVIEW_HANDLER_TESTING
+    g_test_association_lookups.fetch_add(1, std::memory_order_relaxed);
+#endif
     ComPtr<IQueryAssociations> assoc;
-    HRESULT hr = AssocCreate(kQueryAssociations, IID_PPV_ARGS(&assoc));
-    if (FAILED(hr)) {
-        return false;
-    }
-    hr = assoc->Init(ASSOCF_INIT_DEFAULTTOSTAR, extension.c_str(), nullptr, nullptr);
-    if (FAILED(hr)) {
-        return false;
-    }
     wchar_t guid[64]{};
     DWORD chars = ARRAYSIZE(guid);
     CLSID resolved{};
     const bool found =
+        SUCCEEDED(AssocCreate(kQueryAssociations, IID_PPV_ARGS(&assoc))) &&
+        SUCCEEDED(assoc->Init(ASSOCF_INIT_DEFAULTTOSTAR, extension.c_str(), nullptr, nullptr)) &&
         SUCCEEDED(assoc->GetString(ASSOCF_NOTRUNCATE, ASSOCSTR_SHELLEXTENSION,
                                    kPreviewHandlerIid, guid, &chars)) &&
         SUCCEEDED(CLSIDFromString(guid, &resolved));
@@ -452,7 +450,7 @@ bool PreviewHandlerHost::CanHost(const std::wstring& path) {
     }
 #endif
     CLSID clsid{};
-    return FindPreviewHandlerClsid(extension, clsid);
+    return FindPreviewHandlerClsid(extension, clsid, true);
 }
 
 bool PreviewHandlerHost::CanHostPath(const std::wstring& path) const {
@@ -467,7 +465,7 @@ bool PreviewHandlerHost::CanHostPath(const std::wstring& path) const {
     }
 #endif
     CLSID clsid{};
-    return FindPreviewHandlerClsid(extension, clsid);
+    return FindPreviewHandlerClsid(extension, clsid, true);
 }
 
 struct PreviewHandlerHost::WorkerState {
@@ -1194,6 +1192,15 @@ void ResetPreviewHandlerOpenAttemptsForTest() {
 
 uint32_t PreviewHandlerOpenAttemptsForTest() {
     return g_test_open_attempts.load(std::memory_order_relaxed);
+}
+
+uint32_t PreviewHandlerAssociationLookupsForTest() {
+    return g_test_association_lookups.load(std::memory_order_relaxed);
+}
+
+bool ResolvePreviewAssociationForTest(const std::wstring& path) {
+    CLSID clsid{};
+    return FindPreviewHandlerClsid(ExtensionOf(path), clsid);
 }
 
 void ResetOverlayPlaceCountsForTest() {

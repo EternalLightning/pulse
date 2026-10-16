@@ -797,7 +797,7 @@ void FluentMenu::PositionSubmenu() {
     const int h = sub_model_.HeightPx() + kShadowMargin * 2;
     const int overlap = (int)std::lround(4.0f * scale_);
     // First child row lines up with the header row.
-    int y = base_y_ + present_offset_ + (int)(FilterHeaderPx() + model_.RowTopPx(sub_parent_row_)) -
+    int y = base_y_ + present_offset_ + (int)(FilterHeaderPx() + model_.RowTopPx(sub_parent_row_) - scroll_y_) -
             (int)sub_model_.RowTopPx(0);
     int x = base_x_ + model_.WidthPx() - overlap; // card edges overlap by 4dip
 

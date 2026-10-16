@@ -1,7 +1,6 @@
 #pragma once
 
 #include <windows.h>
-#include <atomic>
 #include <string>
 
 namespace pulse::app {
@@ -17,7 +16,5 @@ bool ShowArchiveExtractDialog(HWND owner, bool dark, COLORREF accent,
                               ArchiveExtractOptions& options);
 bool ShowArchivePasswordDialog(HWND owner, bool dark, COLORREF accent,
                                std::wstring& password);
-bool ShowArchiveProgressDialog(HWND owner, bool dark, COLORREF accent,
-                               std::atomic_bool& done, std::atomic_bool& cancel);
 
 } // namespace pulse::app

@@ -2,6 +2,7 @@
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "about_info.h"
+#include "background_window_fit.h"
 #include <algorithm>
 #include <cwctype>
 #include <cmath>
@@ -43,7 +44,7 @@ constexpr SettingDestination destinations[]={
     {I::SettingsTheme,0,0},{I::SettingsThemeColor,0,0},{I::SettingsWindowEffect,0,0},{I::SettingsLanguage,0,0},
     {I::SettingsLaunch,0,0},{I::SettingsKeepRunning,0,0},{I::SettingsRowHeight,0,0},{I::SettingsShowPerformance,0,0},
     {I::ListSmartDate,0,0},{I::ListZebraRows,0,0},{I::ListSizeBar,0,0},{I::SettingsFolderSort,0,0},
-    {I::SettingsWallpaper,0,1},{I::SettingsWallpaperLook,0,1},{I::SettingsWallpaperBlur,0,1},{I::SettingsTrayIcon,0,1},{I::SettingsShowHidden,0,1},{I::SettingsShowProtected,0,1},{I::PinnedNames,0,1},
+    {I::SettingsWallpaper,0,1},{I::SettingsMatchBackground,0,1},{I::SettingsWallpaperLook,0,1},{I::SettingsWallpaperBlur,0,1},{I::SettingsTrayIcon,0,1},{I::SettingsShowHidden,0,1},{I::SettingsShowProtected,0,1},{I::PinnedNames,0,1},
     {I::SettingsBlankClickBack,0,1},{I::SettingsChangeTracking,0,1},
     {I::ConfigurationLocation,0,0},
     {I::SettingsNewTabHome,0,0},
@@ -100,6 +101,30 @@ void ContentOptions(AppState& s) {
     for (auto& root : config.roots) root.encoding=static_cast<text::Encoding>(command-1);
     s.contentSearch.Configure(config);
 }
+
+void MatchWindowToBackground(AppState& s) {
+    const auto image = s.renderer.BackgroundImageSize(s.appPrefs.background_image);
+    if (image.cx <= 0 || image.cy <= 0) return;
+    MONITORINFO monitor{sizeof(monitor)};
+    if (!GetMonitorInfoW(MonitorFromWindow(s.hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) return;
+    if (IsZoomed(s.hwnd)) ShowWindow(s.hwnd, SW_RESTORE);
+    RECT window{}, client{};
+    if (!GetWindowRect(s.hwnd, &window) || !GetClientRect(s.hwnd, &client)) return;
+    MINMAXINFO limits{};
+    SendMessageW(s.hwnd, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&limits));
+    const SIZE frame{window.right - window.left - client.right,
+                     window.bottom - window.top - client.bottom};
+    const auto& work = monitor.rcWork;
+    const auto size = app::FitBackgroundWindowSize(image, {client.right, client.bottom}, frame,
+        {limits.ptMinTrackSize.x, limits.ptMinTrackSize.y},
+        {work.right - work.left, work.bottom - work.top});
+    if (size.cx <= 0 || size.cy <= 0) return;
+    const LONG left = std::clamp(window.left + (window.right - window.left - size.cx) / 2,
+        work.left, work.right - size.cx);
+    const LONG top = std::clamp(window.top + (window.bottom - window.top - size.cy) / 2,
+        work.top, work.bottom - size.cy);
+    SetWindowPos(s.hwnd, nullptr, left, top, size.cx, size.cy, SWP_NOZORDER | SWP_NOACTIVATE);
+}
 }
 
 #ifdef PULSE_WITH_SELFTEST
@@ -112,6 +137,10 @@ bool TestSettingsFilter(const std::wstring& query,I expected) {
 
 bool HandleSettingsControl(AppState& s,const H& hit) {
     switch(hit.region) {
+    case H::SettingsWallpaper:
+        if (hit.index != 2) return false;
+        MatchWindowToBackground(s);
+        break;
     case H::SettingsFind: FindSetting(s);break;
     case H::SettingsDisclosure: {
         if(hit.index!=0 && hit.index!=1 && (hit.index<8 || hit.index>12)) return true;

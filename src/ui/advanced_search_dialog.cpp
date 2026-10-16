@@ -132,7 +132,7 @@ public:
         if (edit_name_) SetFocus(edit_name_);
 
         MSG message{};
-        while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
+        while (!done_ && GetModalMessage(message)) {
             if (EditId(message.hwnd) == 0 && IsDialogMessageW(hwnd_, &message)) continue;
             TranslateMessage(&message);
             DispatchMessageW(&message);
@@ -199,6 +199,21 @@ private:
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
 
     D2D1_COLOR_F EditBackground() const { return ChildEditColor(ChildEditBackColor(dark_)); }
+
+    void RecreateEditFont() {
+        const int height = -std::max(1, static_cast<int>(std::lround(14.0f * scale_)));
+        HFONT next = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE, typography::PreferredTextFamily());
+        if (!next) next = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        if (!next) return;
+        for (HWND edit : {edit_name_, edit_content_, edit_exclude_, edit_exts_})
+            if (edit) SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
+        if (font_) DeleteObject(font_);
+        font_ = next;
+    }
 
     HWND CreateField(int id, const std::wstring& text) {
         HWND edit = CreateChildEdit(hwnd_, text.c_str());
@@ -530,16 +545,7 @@ private:
             painter_.SetCompositor(&compositor_);
             painter_.SetScale(scale_);
             backdrop_ = ApplyBackdrop(hwnd_, dark_);
-            const int height = -std::max(1, static_cast<int>(std::lround(14.0f * scale_)));
-            const wchar_t* family = typography::PreferredTextFamily();
-            font_ = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-                DEFAULT_PITCH | FF_DONTCARE, family);
-            if (!font_) {
-                font_ = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-                    DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-            }
+            RecreateEditFont();
             if (edit_brush_) { DeleteObject(edit_brush_); edit_brush_ = nullptr; }
             edit_brush_ = CreateSolidBrush(dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
             edit_name_ = CreateField(1, spec_.name);
@@ -558,6 +564,7 @@ private:
         case WM_DPICHANGED: {
             const auto* rc = reinterpret_cast<RECT*>(lparam);
             scale_ = static_cast<float>(HIWORD(wparam)) / 96.0f;
+            RecreateEditFont();
             SetWindowPos(hwnd_, nullptr, rc->left, rc->top, rc->right - rc->left,
                          rc->bottom - rc->top, SWP_NOZORDER | SWP_NOACTIVATE);
             compositor_.RecreateTextFormats(scale_);

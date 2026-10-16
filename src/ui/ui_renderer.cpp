@@ -23,6 +23,14 @@
 
 namespace pulse::ui {
 MainRenderer::MainRenderer() = default;
+SIZE MainRenderer::BackgroundImageSize(const std::wstring& path) {
+    if (path.empty()) return {};
+    auto* bitmap = material_.SourceBitmap(path);
+    if (!bitmap) return {};
+    const auto size = bitmap->GetPixelSize();
+    return {static_cast<LONG>(size.width), static_cast<LONG>(size.height)};
+}
+
 MainRenderer::~MainRenderer() {
     thumbnail_cache_.SetNotifyWindow(nullptr);
     thumbnail_cache_.Evict();
@@ -31,7 +39,6 @@ MainRenderer::~MainRenderer() {
 
 void MainRenderer::SetCompositor(Compositor* comp) {
     paneHeaderStroke_.reset();
-    tray_shadows_.clear();
     ClearTextWidthCache();
     name_layout_cache_.clear();
     name_layout_order_.clear();
@@ -77,7 +84,6 @@ void MainRenderer::SetIconNotifyWindow(HWND hwnd) {
 
 void MainRenderer::SetScale(float scale) {
     if (scale_ != scale) {
-        tray_shadows_.clear();
         preview_mono_format_.reset();
         sized_icon_formats_.clear();
         ClearTextWidthCache();

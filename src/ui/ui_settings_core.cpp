@@ -244,6 +244,13 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                               fluent::ButtonKind::Standard, clear });
 
 
+            draw_card(lay.wallpaper_fit_card);
+            label(lay.wallpaper_fit_card,l10n::Get(I::SettingsMatchBackground),l10n::Get(I::SettingsMatchBackgroundDesc),L"\xE740",
+                lay.wallpaper_fit.left < lay.wallpaper_fit_card.left+100*scale_
+                    ? lay.wallpaper_fit_card.right-16*scale_ : lay.wallpaper_fit.left-12*scale_);
+            const auto background_size = BackgroundImageSize(vm.background_image);
+            button(lay.wallpaper_fit,l10n::Get(I::MatchWindowSize),H::SettingsWallpaper,2,false,
+                background_size.cx>0 && background_size.cy>0);
             const int levels[]={0,1,2};
             draw_card(lay.wallpaper_look_card);
             label(lay.wallpaper_look_card,l10n::Get(I::SettingsWallpaperLook),l10n::Get(I::SettingsWallpaperLookDesc),L"\xE8A4",

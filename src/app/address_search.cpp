@@ -1,3 +1,4 @@
+#include "pane_animations.h"
 #include "app_internal.h"
 #include "../index/content_scope.h"
 #include "../index/content_search_protocol.h"
@@ -126,7 +127,7 @@ void ShowAddressSearch(AppState& s) {
     ShowAddressEditor(s);
     if (!s.addressEditing || !s.hwndAddressEdit) return;
     s.addressSearching = true;
-    s.addressAnimationTick = GetTickCount64();
+    s.addressAnimationTick = app::PaneAnimationTimeMs();
     SetWindowTextW(s.hwndAddressEdit, query.c_str());
     SendMessageW(s.hwndAddressEdit, EM_SETSEL, 0, -1);
     const auto cue = l10n::Get(s.addressSearchContent ? l10n::StringId::SearchContentHint : l10n::StringId::SearchNameHint);
@@ -308,7 +309,7 @@ void ShowAddressSearchScope(AppState& s) {
     if (command == 1 || command == 2) {
         s.addressSearchCurrent = command == 1;
         s.addressScopeAnimation = 1.0f;
-        s.addressAnimationTick = GetTickCount64();
+        s.addressAnimationTick = app::PaneAnimationTimeMs();
         QueueAddressSearch(s);
     }
     SetForegroundWindow(GetAncestor(s.hwndAddressEdit, GA_ROOT));
@@ -318,12 +319,12 @@ void ShowAddressSearchScope(AppState& s) {
 }
 
 bool TickAddressSearch(AppState& s, ULONGLONG now) {
+    const bool dirty = TickAddressSearchDeadlines(s, now);
+    return TickAddressSearchMaintenance(s, now) || dirty;
+}
+
+bool TickAddressSearchMaintenance(AppState& s, ULONGLONG now) {
     bool searched = false;
-    if (s.searchOptionsPending && !s.searchHistoryOpen && (!s.menu || !s.menu->IsOpen())) {
-        s.searchOptionsPending = false;
-        ShowSearchOptions(s);
-        return true;
-    }
     if (now - s.contentStatusTick >= 750) {
         s.contentStatusTick = now;
         std::vector<index::VolumeInfo> volumes;
@@ -385,6 +386,16 @@ bool TickAddressSearch(AppState& s, ULONGLONG now) {
             searched = true;
         });
     }
+    return searched;
+}
+
+bool TickAddressSearchDeadlines(AppState& s, ULONGLONG now) {
+    bool searched = false;
+    if (s.searchOptionsPending && !s.searchHistoryOpen && (!s.menu || !s.menu->IsOpen())) {
+        s.searchOptionsPending = false;
+        ShowSearchOptions(s);
+        return true;
+    }
     if (s.addressLiveDue && now >= s.addressLiveDue && !s.addressSearchComposing) {
         s.addressLiveDue = 0;
         if (s.addressSearching && ActiveTab(s) && ActiveTab(s)->current_path == s.addressLiveContext) {
@@ -397,8 +408,15 @@ bool TickAddressSearch(AppState& s, ULONGLONG now) {
         if (ActiveTab(s) && ActiveTab(s)->current_path == s.addressHistoryPath)
             RecordSearchHistory(s, s.addressHistoryPath);
     }
+    return searched;
+}
+
+bool TickAddressSearchAnimation(AppState& s, uint64_t now) {
     const float target = s.addressSearching ? 1.0f : 0.0f;
-    if (s.addressSearchAnimation == target && s.addressScopeAnimation == 0.0f) return searched;
+    if (s.addressSearchAnimation == target && s.addressScopeAnimation == 0.0f) {
+        s.addressAnimationTick = 0;
+        return false;
+    }
     BOOL animate = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0);
     const float dt = s.addressAnimationTick ? static_cast<float>(now - s.addressAnimationTick) : 16.0f;
@@ -408,7 +426,7 @@ bool TickAddressSearch(AppState& s, ULONGLONG now) {
     if (std::abs(s.addressSearchAnimation - target) < 0.005f) s.addressSearchAnimation = target;
     s.addressScopeAnimation *= 1.0f - blend;
     if (s.addressScopeAnimation < 0.005f) s.addressScopeAnimation = 0.0f;
-    return true;
+    return s.addressSearchAnimation != target || s.addressScopeAnimation != 0.0f;
 }
 
 } // namespace pulse

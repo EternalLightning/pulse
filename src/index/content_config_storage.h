@@ -38,20 +38,33 @@ inline bool SameConfig(const ContentIndexConfig& a, const ContentIndexConfig& b)
     if (a.shared_scope != b.shared_scope || a.excluded_paths != b.excluded_paths || a.default_encoding != b.default_encoding ||
         a.maximum_document_bytes != b.maximum_document_bytes) return false;
     if (a.maximum_file_bytes != b.maximum_file_bytes || a.roots.size() != b.roots.size() || a.excluded_directories.size() != b.excluded_directories.size()) return false;
-    for (const auto& root : a.roots) if (std::none_of(b.roots.begin(), b.roots.end(), [&](const auto& other) { return SameStoredPath(root.path, other.path) && root.encoding == other.encoding; })) return false;
-    for (const auto& ex : a.excluded_directories) if (std::none_of(b.excluded_directories.begin(), b.excluded_directories.end(), [&](const auto& other) { return SameStoredPath(ex, other); })) return false;
-    return true;
+    return std::is_permutation(a.roots.begin(), a.roots.end(), b.roots.begin(), b.roots.end(),
+        [](const auto& root, const auto& other) { return SameStoredPath(root.path, other.path) && root.encoding == other.encoding; }) &&
+        std::is_permutation(a.excluded_directories.begin(), a.excluded_directories.end(),
+            b.excluded_directories.begin(), b.excluded_directories.end(), SameStoredPath);
 }
 inline bool ReadSidecar(const std::wstring& path, uint32_t type, std::vector<uint8_t>& bytes) {
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
     LARGE_INTEGER size{};
-    bool ok = GetFileSizeEx(h, &size) && size.QuadPart >= 8 && size.QuadPart <= static_cast<LONGLONG>(content::kMaximumPayload);
-    if (ok) { bytes.resize(static_cast<size_t>(size.QuadPart)); DWORD n = 0; ok = ::ReadFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &n, nullptr) && n == bytes.size(); }
+    bool ok = GetFileSizeEx(h, &size) != FALSE;
+    DWORD read_error = ok ? ERROR_SUCCESS : GetLastError();
+    if (ok && (size.QuadPart < 8 || size.QuadPart > static_cast<LONGLONG>(content::kMaximumPayload))) {
+        ok = false; read_error = ERROR_INVALID_DATA;
+    }
+    if (ok) {
+        bytes.resize(static_cast<size_t>(size.QuadPart)); DWORD n = 0;
+        ok = ::ReadFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &n, nullptr) != FALSE;
+        if (!ok) read_error = GetLastError();
+        else if (n != bytes.size()) { ok = false; read_error = ERROR_INVALID_DATA; }
+    }
     CloseHandle(h);
-    if (!ok) return false;
+    if (!ok) { SetLastError(read_error); return false; }
     ipc::PayloadReader r(bytes.data(), bytes.size()); uint32_t magic = 0, actual = 0;
-    return r.GetU32(magic) && r.GetU32(actual) && magic == 0x58494350 && actual == type;
+    if (!r.GetU32(magic) || !r.GetU32(actual) || magic != 0x58494350 || actual != type) {
+        SetLastError(ERROR_INVALID_DATA); return false;
+    }
+    return true;
 }
 inline bool WriteSidecar(const std::wstring& path, uint32_t type, const std::vector<uint8_t>& payload) {
     const auto temp = path + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
@@ -79,7 +92,10 @@ inline bool ReadConfigFile(const std::wstring& path, ContentIndexConfig& config)
         sidecar = path + L".config";
     if (!ReadSidecar(sidecar, 1, bytes)) return false;
     ipc::PayloadReader r(bytes.data() + 8, bytes.size() - 8);
-    return content::GetConfig(r, config) && r.remaining() == 0;
+    ContentIndexConfig parsed;
+    if (!content::GetConfig(r, parsed) || r.remaining() != 0) { SetLastError(ERROR_INVALID_DATA); return false; }
+    config = std::move(parsed);
+    return true;
 }
 inline bool WriteConfigFile(const std::wstring& path, const ContentIndexConfig& config) {
     HANDLE mutex = NamedMutex(path, L"config");
@@ -97,8 +113,12 @@ inline bool LoadOrCreateConfig(const std::wstring& path, const ContentIndexConfi
     const DWORD wait = WaitForSingleObject(mutex, 5000);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) { CloseHandle(mutex); return false; }
     bool ok = ReadConfigFile(path, actual);
-    if (!ok) { actual = fallback; ipc::PayloadWriter w; content::PutConfig(w, actual); ok = WriteSidecar(ConfigurationPath(path), 1, w.data()); }
-    ReleaseMutex(mutex); CloseHandle(mutex); return ok;
+    if (!ok && (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND)) {
+        ipc::PayloadWriter w; content::PutConfig(w, fallback); ok = WriteSidecar(ConfigurationPath(path), 1, w.data());
+        if (ok) actual = fallback;
+    }
+    const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+    ReleaseMutex(mutex); CloseHandle(mutex); SetLastError(error); return ok;
 }
 inline bool ReadStatusFile(const std::wstring& path, ContentIndexStatus& status) {
     std::vector<uint8_t> bytes;

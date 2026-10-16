@@ -12,6 +12,7 @@
 #include "undo_identity_cases.h"
 #include "mutation_undo_cases.h"
 #include "source_contract_cases.h"
+#include "delete_progress_cases.h"
 #include "../common/path_utils.h"
 #include "../ipc/shell_client.h"
 #include <windows.h>
@@ -931,6 +932,65 @@ void TestTransferControl(const std::wstring& srcDir, const std::wstring& dstDir)
 
 int RunJsonUndoParserRegressions();
 
+int RunDirectorySkipRegressions() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    const auto root = SandboxRoot() + L"-directory-skip-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64());
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) return 2;
+    g_ops.Start([] {
+        if (const auto conflict = g_ops.PendingConflict())
+            g_ops.ResolveConflict(conflict->token, ops::ConflictChoice::Skip, true);
+    });
+    for (const auto type : {ops::OpType::Copy, ops::OpType::Move}) {
+        for (const bool nested : {false, true}) {
+            const auto case_root = root + (type == ops::OpType::Copy ? L"\\copy" : L"\\move") +
+                (nested ? L"-nested" : L"-root");
+            const auto src = case_root + L"\\src", dst = case_root + L"\\dst";
+            const auto source_root = src + L"\\tree", destination_root = dst + L"\\tree";
+            const auto skipped_source = nested ? source_root + L"\\skip" : source_root;
+            const auto skipped_destination = nested ? destination_root + L"\\skip" : destination_root;
+            error.clear();
+            std::filesystem::create_directories(skipped_source + L"\\child", error);
+            std::filesystem::create_directories(nested ? destination_root : dst, error);
+            const char source_bytes[] = "source bytes", original_bytes[] = "keep original";
+            Check(!error && MakeFile(skipped_source + L"\\child\\leaf.txt", source_bytes, sizeof(source_bytes)) &&
+                MakeFile(skipped_destination, original_bytes, sizeof(original_bytes)) &&
+                (!nested || MakeFile(source_root + L"\\sibling.txt", source_bytes, sizeof(source_bytes))),
+                L"prepare isolated directory versus file skip fixture");
+            const auto source_hash = FileHash(skipped_source + L"\\child\\leaf.txt");
+            const auto original_hash = FileHash(skipped_destination);
+            g_ops.UndoFromJson(L"[]");
+            g_ops.DrainCompletions();
+            auto status = RunOp(SimpleOp(type, {source_root.c_str()}, dst.c_str()));
+            if (status.phase != ops::OpPhase::Completed)
+                wprintf(L"[diagnostic] directory skip type=%d nested=%d phase=%d hr=0x%08lX %s\n",
+                    static_cast<int>(type), nested, static_cast<int>(status.phase),
+                    static_cast<unsigned long>(status.failure_hr), status.last_error.c_str());
+            Check(status.phase == ops::OpPhase::Completed && status.last_error.empty(),
+                L"skipping directory conflict completes without metadata failure");
+            Check(Exists(skipped_source + L"\\child\\leaf.txt") &&
+                FileHash(skipped_source + L"\\child\\leaf.txt") == source_hash &&
+                FileHash(skipped_destination) == original_hash,
+                L"skip preserves source subtree and original destination file");
+            const auto completions = g_ops.DrainCompletions();
+            const bool skipped_recorded = std::any_of(completions.begin(), completions.end(), [&](const auto& completed) {
+                return std::find(completed.sources.begin(), completed.sources.end(), skipped_source) != completed.sources.end();
+            });
+            Check(!skipped_recorded && (nested ? Exists(destination_root + L"\\sibling.txt") &&
+                FileHash(destination_root + L"\\sibling.txt") == source_hash &&
+                (type == ops::OpType::Copy || !Exists(source_root + L"\\sibling.txt")) : !g_ops.CanUndo()),
+                L"unskipped sibling transfers and skipped directory adds no completion or undo");
+        }
+    }
+    g_ops.Stop();
+    std::filesystem::remove_all(root, error);
+    Check(!error && !Exists(root), L"isolated directory skip fixtures cleaned");
+    wprintf(L"== directory skip: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
 int RunTransferUpdateRegressions() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const auto root = SandboxRoot() + L"-transfer-updates-" + std::to_wstring(GetCurrentProcessId());
@@ -1150,6 +1210,12 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
+        if (filter == L"delete-progress") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return ops::RunDeleteProgressRegressions(SandboxRoot() + L"-delete-progress-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        }
+        if (filter == L"directory-skip") return RunDirectorySkipRegressions();
         if (filter == L"transfer-updates") return RunTransferUpdateRegressions();
         if (filter == L"source-contract") {
             setvbuf(stdout, nullptr, _IONBF, 0);

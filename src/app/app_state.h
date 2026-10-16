@@ -14,12 +14,14 @@
 #include "../fs/fs_watch.h"
 #include "app_model.h"
 #include "sidebar_scrollbar_fade.h"
+#include "ui_schedule_state.h"
 #include "home_catalog.h"
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
 #include "app_notify_patch.h"
 #include "tray_metadata.h"
+#include "window_result_mailbox.h"
 #include "clipboard_availability.h"
 #include "tag_discovery_cache.h"
 #include "places.h"
@@ -69,9 +71,9 @@ constexpr UINT WM_INDEX_SEARCH = WM_APP + 42;
 constexpr UINT WM_NET_PROBE = WM_APP + 41;
 constexpr UINT WM_TAG_ADS_WARNING = WM_APP + 43;
 constexpr UINT WM_TAG_ADS_DISCOVERED = WM_APP + 44;
-// Explorer context-menu integration (优化.md §7). lParam owns a heap payload.
+// Explorer context-menu integration (优化.md §7).
 constexpr UINT WM_SHELLCTX_ITEMS = WM_APP + 45;  // ShellCtxItemsPayload*
-constexpr UINT WM_SHELL_VERBS = WM_APP + 46;     // ShellVerbsResult*
+constexpr UINT WM_SHELL_VERBS = WM_APP + 46;     // WindowResultMailbox notification
 constexpr UINT WM_DETAILS_META = WM_APP + 47;    // DetailsMetaResult*
 constexpr UINT WM_SETTINGS_TASK_RESULT = WM_APP + 48;
 constexpr UINT WM_SHELL_CACHE_INVALIDATE = WM_APP + 49;
@@ -84,12 +86,13 @@ constexpr UINT WM_QUICK_PREVIEW_NAVIGATE = WM_APP + 54;
 constexpr UINT WM_QUICK_PREVIEW_OPEN = WM_APP + 55;
 constexpr UINT WM_QUICK_PREVIEW_COMMAND = WM_APP + 65;  // wParam ui::QuickPreviewAction, lParam bit0 = Shift
 constexpr UINT WM_RECYCLE_INFO = WM_APP + 57;
-constexpr UINT WM_DUP_VOLUMES = WM_APP + 59;
+constexpr UINT WM_DUP_VOLUMES = WM_APP + 59;     // WindowResultMailbox notification
 constexpr UINT WM_SEARCH_HISTORY = WM_APP + 62;
 constexpr UINT WM_CHANGE_TRACKING = WM_APP + 63;
 constexpr UINT WM_EXIT_READY = WM_APP + 67;
 constexpr UINT WM_HEADER_DROP_RESULT = WM_APP + 71;
 constexpr UINT kTimerUi = 1;
+constexpr UINT kTimerUiDeadline = 2;
 
 enum class OmnibarMode { Path, Mixed, Command, Project };
 
@@ -154,12 +157,21 @@ struct HeaderDropQueryState {
     bool hint_ready = false;
 };
 
+struct ShellVerbsResult {
+    std::wstring ext;
+    std::vector<app::StaticVerb> verbs;
+};
+
 struct AppState {
     bool exit_confirming = false;
     bool exit_requested = false;
     std::atomic<bool> exit_stop_finished{false};
     std::thread exit_thread;
     HWND hwnd = nullptr;
+    std::shared_ptr<app::WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<bool>> shell_registry_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
+    app::UiScheduleState ui_schedule;
     ui::Compositor compositor;
     ui::NotificationToast notification_toast;
     ui::MainRenderer renderer;
@@ -319,7 +331,6 @@ struct AppState {
     bool forceStatusPerformance = false; // --fps for this process only
     double lastFrameMs = 0.0;
     double lastFps = 0.0;
-    std::chrono::steady_clock::time_point lastFrameTime;
     std::deque<std::chrono::steady_clock::time_point> fpsWindow; // recent Present times
     double processCpuPercent = 0.0;
     double workingSetMb = 0.0;
@@ -340,6 +351,9 @@ struct AppState {
     float scrollbarGrabOffset = 0.0f;
     float scrollbarDragStartScroll = 0.0f;
     float scrollbarHoverWidth = 0.0f;
+    double visualAnimationSampleMs = 0.0;
+    float scrollbarHoverTarget = 0.0f;
+    uint64_t sidebarFadeDeadline = 0;
 
     bool splitterDragging = false;
     int splitterDragIndex = -1;
@@ -725,11 +739,6 @@ struct AppState {
 
 };
 
-// WM_SHELL_VERBS heap payload (posted by the registry enumeration thread).
-struct ShellVerbsResult {
-    std::wstring ext;
-    std::vector<app::StaticVerb> verbs;
-};
 
 struct ShellCtxItemsPayload {
     std::vector<ops::ShellMenuItem> items;

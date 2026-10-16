@@ -213,6 +213,8 @@ int ViewLayout::HitTest(float x, float y) const noexcept {
         return y >= cell.top && y < cell.bottom ? lo : -1;
     }
     const int row = std::max(0, static_cast<int>(local_y / metrics_.cell_height));
+    if (col >= metrics_.columns ||
+        (metrics_.column_major && row >= metrics_.rows_per_column)) return -1;
     const int index = metrics_.column_major
         ? col * metrics_.rows_per_column + row
         : row * metrics_.columns + col;

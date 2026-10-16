@@ -1,5 +1,6 @@
 #include "../ui/ui_renderer.h"
 #include "../ui/ui_compositor.h"
+#include "../ui/text_hit_ranges.h"
 #include "../common/localization.h"
 #include <algorithm>
 #include <cmath>
@@ -153,9 +154,73 @@ void GeometryCases(pulse::ui::MainRenderer& renderer) {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     using namespace pulse;
+    if (argc == 2 && std::strcmp(argv[1], "--preview-text-ranges") == 0) {
+        ui::ComPtr<IDWriteFactory> factory;
+        const HRESULT created = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+            __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&factory));
+        Check(SUCCEEDED(created), "create DirectWrite factory for text hit range regression");
+        if (FAILED(created)) return 1;
+        ui::ComPtr<IDWriteTextFormat> format;
+        factory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"en-US", &format);
+        Check(format.get() != nullptr, "create hit range font");
+        if (!format.get()) return 1;
+        std::wstring text;
+        for (int line = 0; line < 140; ++line) text += L"line\n";
+        ui::ComPtr<IDWriteTextLayout> layout;
+        factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), format.get(),
+            300.0f, 10000.0f, &layout);
+        Check(layout.get() != nullptr, "create multiline hit range layout");
+        if (!layout.get()) return 1;
+        const auto ranges = ui::TextHitRanges(layout.get(), 0, static_cast<UINT32>(text.size()), 7, 11);
+        Check(ranges.size() > 96 && ranges.back().textPosition >= 139 * 5 &&
+            ranges.back().top > ranges.front().top,
+            "selection spanning more than 96 lines retains final line highlight");
+        Check(ui::TextHitRanges(layout.get(), 0, 4, 0, 0).size() == 1,
+            "short selection retains single hit range");
+        Check(ui::TextHitRanges(layout.get(), 0, 0, 0, 0).empty() &&
+            ui::TextHitRanges(nullptr, 0, 4, 0, 0).empty(), "empty and missing layout are safe");
+        return failures ? 1 : 0;
+    }
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     ui::MainRenderer renderer;
+    if (argc == 2 && std::strcmp(argv[1], "--details-panel") == 0) {
+        renderer.SetDetailsPanelVisible(true);
+        renderer.SetSidebarWidthDip(224.0f);
+        renderer.SetDetailsPanelWidth(900.0f);
+        for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
+            renderer.SetScale(scale);
+            for (const float width : {1600.0f, 1000.0f, 1600.0f}) {
+                const float w = width * scale, h = 720.0f * scale;
+                const auto panel = renderer.DetailsPanelRect(w, h);
+                const auto content = renderer.ContentRect(w, h);
+                Check(std::abs(panel.left - content.right - renderer.Margin()) < 0.01f,
+                    "details drawing and hit bounds match the width reserved beside the list");
+                Check(std::abs((panel.right - panel.left) / scale -
+                    (width == 1000.0f ? renderer.DetailsMaxWidthDip(w) : 900.0f)) < 0.01f,
+                    "narrowing caps details width and widening restores the preferred width");
+            }
+            Check(renderer.DetailsPanelWidth(999.0f * scale) == 0.0f &&
+                renderer.DetailsPanelRect(999.0f * scale, 720.0f * scale).right == 0.0f,
+                "details panel and reserved space disappear together below the visibility threshold");
+            ui::WindowViewModel vm;
+            vm.details.has_selection = true;
+            vm.details.multi_count = 1;
+            vm.details.preview_enabled = false;
+            vm.details.preview_expansion = 0.0f;
+            const float off = renderer.DetailsContentHeightDip(vm, 1600 * scale, 720 * scale);
+            vm.details.preview_expansion = 1.0f;
+            Check(off > 0.0f && std::abs(off -
+                renderer.DetailsContentHeightDip(vm, 1600 * scale, 720 * scale)) < 0.01f,
+                "disabled preview contributes no height regardless of saved expansion");
+            vm.details.preview_enabled = true;
+            Check(renderer.DetailsContentHeightDip(vm, 1600 * scale, 720 * scale) > off,
+                "enabling preview restores its contribution to scroll content height");
+        }
+        OleUninitialize();
+        return failures == 0 ? 0 : 1;
+    }
     GeometryCases(renderer);
     if (argc == 2 && std::strcmp(argv[1], "--geometry-only") == 0) {
         std::printf("titlebar geometry: %d failures\n", failures);

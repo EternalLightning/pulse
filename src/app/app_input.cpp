@@ -4,6 +4,7 @@
 #include "tab_shortcuts.h"
 #include "app_internal.h"
 #include "app_column_view.h"
+#include "pane_animations.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
@@ -758,100 +759,6 @@ void CancelScrollAnimation(AppState& s) {
     s.scrollVelocityY = 0.0f;
 }
 
-// --- Tag slide animation ------------------------------------------------------
-// SortableJS-style reorder motion: a quick easeOutCubic with no overshoot.
-// On 32px rows an overshoot spring (the old Pivot indicator curve) reads as
-// wobble, especially when fast drags restart the track mid-flight.
-float TagEaseOutCubic(float x) {
-    const float u = 1.0f - x;
-    return 1.0f - u * u * u;
-}
-
-float TagEaseInOutQuad(float t) { // used by the window-tab slide animation
-    const float u = -2.0f * t + 2.0f;
-    return t < 0.5f ? 2.0f * t * t : 1.0f - u * u * 0.5f;
-}
-
-void TickTagTransitions(AppState& s) {
-    const auto now = std::chrono::steady_clock::now();
-    for (auto it = s.tagTracks.begin(); it != s.tagTracks.end();) {
-        const float t = std::chrono::duration<float, std::milli>(now - it->second.t0).count()
-            / static_cast<float>(it->second.durationMs);
-        if (t >= 1.0f) {
-            s.tagOffsets.erase(it->first);
-            it = s.tagTracks.erase(it);
-        } else {
-            s.tagOffsets[it->first] = it->second.start * (1.0f - TagEaseOutCubic(t));
-            ++it;
-        }
-    }
-    // Insertion indicator chase (same 180ms easeOutCubic as the slides).
-    if (s.tagGapFrom != s.tagGapTo) {
-        const float t = std::chrono::duration<float, std::milli>(now - s.tagGapT0).count()
-            / 180.0f;
-        if (t >= 1.0f) {
-            s.tagGapLineY = s.tagGapTo;
-            s.tagGapFrom = s.tagGapTo;
-        } else {
-            s.tagGapLineY = s.tagGapFrom +
-                (s.tagGapTo - s.tagGapFrom) * TagEaseOutCubic(t);
-        }
-    }
-}
-
-void TickTabTransitions(AppState& s) {
-    std::unordered_set<const app::LayoutTab*> live;
-    if (s.pane) {
-        for (const auto& t : s.window_tabs.items) live.insert(t.get());
-    }
-    const auto now = std::chrono::steady_clock::now();
-    for (auto it = s.tabTracks.begin(); it != s.tabTracks.end();) {
-        if (!live.count(it->first)) {
-            s.tabOffsets.erase(it->first);
-            it = s.tabTracks.erase(it);
-            continue;
-        }
-        const float t = std::chrono::duration<float, std::milli>(now - it->second.t0).count()
-            / static_cast<float>(it->second.durationMs);
-        if (t >= 1.0f) {
-            s.tabOffsets.erase(it->first);
-            it = s.tabTracks.erase(it);
-        } else {
-            s.tabOffsets[it->first] = it->second.start * (1.0f - TagEaseInOutQuad(t));
-            ++it;
-        }
-    }
-    for (auto it = s.tabOffsets.begin(); it != s.tabOffsets.end();) {
-        if (!live.count(it->first)) it = s.tabOffsets.erase(it);
-        else ++it;
-    }
-    // Chip slide channel: same easing, px units, keyed by group id.
-    std::unordered_set<int> liveGroups;
-    if (s.pane) {
-        for (const auto& g : s.window_tabs.tab_groups) liveGroups.insert(g.id);
-    }
-    for (auto it = s.chipTracks.begin(); it != s.chipTracks.end();) {
-        if (!liveGroups.count(it->first)) {
-            s.chipOffsets.erase(it->first);
-            it = s.chipTracks.erase(it);
-            continue;
-        }
-        const float t = std::chrono::duration<float, std::milli>(now - it->second.t0).count()
-            / static_cast<float>(it->second.durationMs);
-        if (t >= 1.0f) {
-            s.chipOffsets.erase(it->first);
-            it = s.chipTracks.erase(it);
-        } else {
-            s.chipOffsets[it->first] = it->second.start * (1.0f - TagEaseInOutQuad(t));
-            ++it;
-        }
-    }
-    for (auto it = s.chipOffsets.begin(); it != s.chipOffsets.end();) {
-        if (!liveGroups.count(it->first)) it = s.chipOffsets.erase(it);
-        else ++it;
-    }
-}
-
 void UpdateSmoothScroll(AppState& s);
 
 static float SmoothScrollMaximum(AppState& s) {
@@ -929,7 +836,7 @@ void UpdateSmoothScroll(AppState& s) {
 
 void StartSidebarFold(AppState& s, int section) {
     if (section < 0 || section >= app::kSidebarSectionCount) return;
-    const ULONGLONG now = GetTickCount64();
+    const ULONGLONG now = app::PaneAnimationTimeMs();
     const float target = (s.sidebarCollapsedMask & (1u << section)) ? 0.0f : 1.0f;
     float current = 1.0f - target;
     if (const auto it = s.sidebarFoldTracks.find(section); it != s.sidebarFoldTracks.end()) {
@@ -2060,7 +1967,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         if (hit.region == ui::HitTestResult::DetailsPreviewToggle) {
             s->detailsPreviewOnly = !s->detailsPreviewOnly;
             s->detailsPreviewExpansionFrom = s->detailsPreviewExpansion;
-            s->detailsPreviewFoldStart = GetTickCount64();
+            s->detailsPreviewFoldStart = app::PaneAnimationTimeMs();
             s->detailsScroll = 0;
             s->dragPending = false;
             InvalidateRect(hwnd, nullptr, FALSE);

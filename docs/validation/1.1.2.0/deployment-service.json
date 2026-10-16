@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-10-12T20:06:45.3650600+08:00",
+  "was_running": true,
+  "state_after": "Running",
+  "start_mode_before": "Auto",
+  "start_mode_after": "Auto",
+  "path_before": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+  "path_after": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+  "process_id_after": 30712,
+  "deployment_error": null,
+  "restoration_error": null
+}

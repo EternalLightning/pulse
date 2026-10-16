@@ -84,16 +84,20 @@ struct WorkerPool::State {
         std::erase(stored->second, group);
         if (stored->second.empty()) directories.erase(stored);
     }
-    // Called with mutex held; inactive queued producers must not retain cached facts.
-    void PruneQueuedDirectories() {
-        std::erase_if(queue, [&](const WorkItem& item) {
-            const auto& group = item.directory_work;
-            if (!group) return false;
-            std::erase_if(group->projections, [&](const WorkItem& request) { return !IsCurrent(request); });
-            if (!group->closed && !group->projections.empty()) return false;
-            group->closed = true;
-            ForgetDirectory(item.path, group);
-            return true;
+    // Called with mutex held; running producers also own their subscription caches.
+    void PruneDirectories() {
+        for (auto stored = directories.begin(); stored != directories.end();) {
+            std::erase_if(stored->second, [&](const auto& group) {
+                std::erase_if(group->projections, [&](const WorkItem& request) { return !IsCurrent(request); });
+                if (!group->closed && !group->projections.empty()) return false;
+                group->closed = true;
+                return true;
+            });
+            if (stored->second.empty()) stored = directories.erase(stored);
+            else ++stored;
+        }
+        std::erase_if(queue, [](const WorkItem& item) {
+            return item.directory_work && item.directory_work->closed;
         });
     }
 
@@ -210,7 +214,7 @@ uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
         });
         state->queue.push_back(std::move(item));
     }
-    state->PruneQueuedDirectories();
+    state->PruneDirectories();
     state->cv.notify_all();
     return gen;
 }
@@ -240,7 +244,7 @@ uint64_t WorkerPool::Project(const std::wstring& path, fs::SnapshotPtr facts,
         item.source_snapshot = std::move(facts);
         state->queue.push_back(std::move(item));
     }
-    state->PruneQueuedDirectories();
+    state->PruneDirectories();
     state->cv.notify_all();
     return gen;
 }
@@ -258,16 +262,7 @@ void WorkerPool::Cancel(const std::wstring& path, uint64_t generation) {
             it = state->current_gen.erase(it);
         else ++it;
     }
-    const auto groups = state->directories.find(path);
-    if (groups != state->directories.end()) {
-        std::erase_if(groups->second, [&](const auto& group) {
-            if (state->HasCurrent(*group)) return false;
-            group->closed = true;
-            return true;
-        });
-        if (groups->second.empty()) state->directories.erase(groups);
-    }
-    state->PruneQueuedDirectories();
+    state->PruneDirectories();
     std::deque<WorkItem> pending;
     while (!state->queue.empty()) {
         auto& item = state->queue.front();
@@ -308,7 +303,7 @@ uint64_t WorkerPool::LoadPaths(const std::wstring& view_path,
     item.provider_request = fs::IsUncPath(view_path) || fs::IsRecycleViewPath(view_path) ||
         std::any_of(item.paths.begin(), item.paths.end(), fs::IsUncPath);
     state->queue.push_back(std::move(item));
-    state->PruneQueuedDirectories();
+    state->PruneDirectories();
     state->cv.notify_all();
     return gen;
 }

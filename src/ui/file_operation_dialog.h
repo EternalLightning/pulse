@@ -32,12 +32,28 @@ struct FileOperationCallbacks {
     std::function<void()> dismiss;
 };
 
+struct FileOperationWindowOptions {
+    bool use_summary_title = false;
+    bool estimated_bytes = false;
+    bool item_progress_known = true;
+    bool modal_owner = false;
+};
+
+#ifdef PULSE_UI_TEST_HOOKS
+struct FileOperationProgressInspection {
+    std::wstring title, subtitle, file_line, percent, remaining_label, remaining, time, speed, peak;
+    bool show_pause = false;
+    bool indeterminate = false;
+    D2D1_RECT_F details{}, pause{}, cancel{};
+};
+#endif
+
 class FileOperationWindow {
 public:
     FileOperationWindow();
     ~FileOperationWindow();
 
-    bool Create(HWND owner, FileOperationCallbacks callbacks);
+    bool Create(HWND owner, FileOperationCallbacks callbacks, FileOperationWindowOptions options = {});
     void Destroy();
     void SetTheme(bool dark, D2D1_COLOR_F accent);
     void Update(const ops::OpStatus& status);
@@ -64,6 +80,10 @@ private:
     Compositor compositor_;
     fluent::Painter painter_;
     FileOperationCallbacks callbacks_;
+    FileOperationWindowOptions options_;
+#ifdef PULSE_UI_TEST_HOOKS
+    FileOperationProgressInspection progress_inspection_;
+#endif
     ops::OpStatus status_;
     std::deque<double> speed_history_;
     ULONGLONG speed_sample_tick_ = 0;
@@ -71,6 +91,7 @@ private:
     bool backdrop_enabled_ = false;
     bool detailed_ = false;
     bool positioned_ = false;
+    bool cancel_requested_ = false;
     float scale_ = 1.0f;
     float failure_scroll_ = 0.0f;
     float failure_scroll_max_ = 0.0f;

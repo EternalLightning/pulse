@@ -8,8 +8,56 @@
 #include <fstream>
 #include <iostream>
 
-int main(int argc, char**) {
+int ConfigEqualityTest() {
+    namespace fs = std::filesystem;
+    namespace config_storage = pulse::index::config_storage;
+    using pulse::index::ContentIndexConfig;
+    const auto fixture = fs::absolute(fs::path(L"bench_data") /
+        (L"config-equality-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    fs::create_directories(fixture);
+    SetEnvironmentVariableW(L"LOCALAPPDATA", fixture.c_str());
+    pulse::storage::OverrideDefaultRootForTesting(fixture.wstring());
+    const auto database = (fixture / L"isolated.sqlite").wstring();
+    int failed = 0;
+    auto check = [&](bool ok, const char* name) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << name << '\n';
+        if (!ok) ++failed;
+    };
+    ContentIndexConfig duplicate, distinct;
+    duplicate.roots = {{L"C:\\First"}, {L"c:\\first"}};
+    distinct = duplicate;
+    distinct.roots[1].path = L"C:\\Second";
+    check(!config_storage::SameConfig(duplicate, distinct) && !config_storage::SameConfig(distinct, duplicate),
+        "duplicate roots cannot conceal another root in either comparison direction");
+    auto reordered = distinct;
+    std::reverse(reordered.roots.begin(), reordered.roots.end());
+    reordered.roots[1].path = L"c:\\FIRST";
+    check(config_storage::SameConfig(distinct, reordered), "root order and path case remain insignificant");
+    reordered.roots[1].encoding = pulse::text::Encoding::Utf8;
+    check(!config_storage::SameConfig(distinct, reordered), "root encoding changes remain significant");
+    check(config_storage::WriteConfigFile(database, duplicate), "seed isolated duplicate-root configuration");
+    ContentIndexConfig loaded;
+    check(config_storage::WriteConfigFile(database, distinct) && config_storage::ReadConfigFile(database, loaded) &&
+        loaded.roots.size() == 2 && loaded.roots[1].path == L"C:\\Second",
+        "replacing duplicate root persists the newly selected root");
+    duplicate = distinct;
+    duplicate.excluded_directories = {L"build", L"BUILD"};
+    distinct.excluded_directories = {L"build", L"private"};
+    check(!config_storage::SameConfig(duplicate, distinct) && !config_storage::SameConfig(distinct, duplicate),
+        "duplicate exclusions cannot conceal a newly excluded directory");
+    check(config_storage::WriteConfigFile(database, duplicate) && config_storage::WriteConfigFile(database, distinct) &&
+        config_storage::ReadConfigFile(database, loaded) && loaded.excluded_directories == distinct.excluded_directories,
+        "replacing duplicate exclusion persists the new exclusion");
+    reordered = distinct;
+    reordered.excluded_directories = {L"PRIVATE", L"Build"};
+    check(config_storage::SameConfig(distinct, reordered), "exclusion order and case remain insignificant");
+    std::cout << "failures=" << failed << "; isolated fixture retained for inspection\n";
+    return failed ? 1 : 0;
+}
+
+int main(int argc, char** argv) {
     std::cout << std::unitbuf;
+    if (argc == 2 && std::string_view(argv[1]) == "--config-equality") return ConfigEqualityTest();
     namespace fs = std::filesystem;
     namespace storage = pulse::storage;
     const auto fixture = fs::absolute(fs::path(L"bench_data") /

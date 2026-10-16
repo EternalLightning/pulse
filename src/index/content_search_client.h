@@ -37,6 +37,7 @@ public:
     void Rebuild();
 private:
     friend struct ContentRefreshTestPeer;
+    friend struct ContentClientLifecycleTestPeer;
     struct Command { uint32_t type; std::vector<uint8_t> payload; };
     void Worker();
     struct ActiveQuery {

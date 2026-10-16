@@ -1,0 +1,9 @@
+AV bases release date: 2026-10-12 09:25:00 (full)
+Warning: scan action parameter is ignored due to non-interactive mode is in effect
+2026-10-12 21:23:22	Scan_Objects$9485                          starting   1          
+2026-10-12 21:23:22	Scan_Objects$9485                          running    1          
+Progress 1%...
+Progress 33%...
+Progress 33%...
+2026-10-12 21:23:25	Scan_Objects$9485                          completed             
+Info: task 'ods' finished, last error code 0

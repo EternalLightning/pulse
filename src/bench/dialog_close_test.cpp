@@ -25,6 +25,18 @@ HWND Make(HWND parent) {
 }
 }
 int main() {
+    MSG modal_message{};
+    PeekMessageW(&modal_message, nullptr, 0, 0, PM_NOREMOVE);
+    Check(PostThreadMessageW(GetCurrentThreadId(), WM_APP + 42, 17, 23) != FALSE,
+          "queue ordinary modal message");
+    Check(pulse::ui::GetModalMessage(modal_message) && modal_message.message == WM_APP + 42 &&
+          modal_message.wParam == 17 && modal_message.lParam == 23,
+          "modal message reader preserves ordinary messages");
+    PostQuitMessage(73);
+    Check(!pulse::ui::GetModalMessage(modal_message), "inner modal loop observes thread shutdown");
+    Check(!pulse::ui::GetModalMessage(modal_message), "outer modal loop also observes thread shutdown");
+    Check(GetMessageW(&modal_message, nullptr, 0, 0) == 0 && modal_message.wParam == 73,
+          "main loop receives original quit exit code after nested modal loops");
     WNDCLASSW wc{};
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"PulseCloseTest";

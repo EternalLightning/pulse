@@ -8,9 +8,11 @@
 #include <cstdio>
 #include <string_view>
 #include <vector>
+#include <atomic>
 
 namespace pulse::diagnostics {
 namespace {
+std::atomic<decltype(&FindNextFileW)> find_next{&FindNextFileW};
 
 std::wstring JoinPath(std::wstring_view left, std::wstring_view right) {
     std::wstring value(left);
@@ -23,25 +25,41 @@ void SetError(std::wstring* error, const std::wstring& value) {
     if (error) *error = value;
 }
 
+bool IsMissing(DWORD error) {
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+}
+
+bool OptionalCrashDirectory(const std::wstring& path, bool& exists) {
+    const DWORD attrs = GetFileAttributesW(path.c_str());
+    exists = attrs != INVALID_FILE_ATTRIBUTES;
+    if (!exists) return IsMissing(GetLastError());
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) && !(attrs & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+
 bool IsPlainDirectory(const std::wstring& path) {
     const DWORD attrs = GetFileAttributesW(path.c_str());
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) &&
         !(attrs & FILE_ATTRIBUTE_REPARSE_POINT);
 }
 
-bool IsDirectoryEmpty(const std::wstring& path) {
+bool IsDirectoryEmpty(const std::wstring& path, bool& empty) {
+    empty = false;
     WIN32_FIND_DATAW data{};
     HANDLE find = FindFirstFileW(JoinPath(path, L"*").c_str(), &data);
-    if (find == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND;
-    bool empty = true;
+    if (find == INVALID_HANDLE_VALUE) {
+        empty = GetLastError() == ERROR_FILE_NOT_FOUND;
+        return empty;
+    }
+    empty = true;
     do {
         if (wcscmp(data.cFileName, L".") != 0 && wcscmp(data.cFileName, L"..") != 0) {
             empty = false;
             break;
         }
-    } while (FindNextFileW(find, &data));
+    } while (find_next.load()(find, &data));
+    const DWORD enumeration_error = GetLastError();
     FindClose(find);
-    return empty;
+    return !empty || enumeration_error == ERROR_NO_MORE_FILES;
 }
 
 bool CopyNewFile(const std::wstring& source, const std::wstring& destination) {
@@ -55,7 +73,9 @@ bool IsCrashArtifact(std::wstring_view name, bool include_dumps) {
 
 bool CopyCrashArtifacts(const ExportOptions& options, size_t& copied) {
     const std::wstring source = JoinPath(options.source_root, L"Diagnostics\\Crashes");
-    if (!IsPlainDirectory(source)) return true;
+    bool exists = false;
+    if (!OptionalCrashDirectory(source, exists)) return false;
+    if (!exists) return true;
     const std::wstring destination = JoinPath(options.destination, L"Crashes");
     if (!CreateDirectoryW(destination.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
         return false;
@@ -72,9 +92,10 @@ bool CopyCrashArtifacts(const ExportOptions& options, size_t& copied) {
             break;
         }
         ++copied;
-    } while (FindNextFileW(find, &data));
+    } while (find_next.load()(find, &data));
+    const DWORD enumeration_error = GetLastError();
     FindClose(find);
-    return ok;
+    return ok && enumeration_error == ERROR_NO_MORE_FILES;
 }
 
 bool WriteManifest(const ExportOptions& options, size_t copied) {
@@ -101,14 +122,26 @@ bool WriteManifest(const ExportOptions& options, size_t copied) {
 
 } // namespace
 
+void SetFindNextForTesting(decltype(&FindNextFileW) next) {
+    find_next.store(next ? next : &FindNextFileW);
+}
+
 bool Export(const ExportOptions& options, std::wstring* error) {
+    if (error) error->clear();
     if (!IsPlainDirectory(options.source_root) || !IsPlainDirectory(options.destination)) {
         SetError(error, l10n::Get(l10n::StringId::DiagnosticsRootsUnavailable));
         return false;
     }
-    if (options.require_empty_destination && !IsDirectoryEmpty(options.destination)) {
-        SetError(error, l10n::Get(l10n::StringId::DiagnosticsDestinationNotEmpty));
-        return false;
+    if (options.require_empty_destination) {
+        bool empty = false;
+        if (!IsDirectoryEmpty(options.destination, empty)) {
+            SetError(error, l10n::Get(l10n::StringId::DiagnosticsRootsUnavailable));
+            return false;
+        }
+        if (!empty) {
+            SetError(error, l10n::Get(l10n::StringId::DiagnosticsDestinationNotEmpty));
+            return false;
+        }
     }
 
     size_t copied = 0;
@@ -121,7 +154,11 @@ bool Export(const ExportOptions& options, std::wstring* error) {
     };
     for (const auto name : logs) {
         const std::wstring source = JoinPath(options.source_root, name);
-        if (GetFileAttributesW(source.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+        if (GetFileAttributesW(source.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            if (IsMissing(GetLastError())) continue;
+            SetError(error, l10n::Get(l10n::StringId::DiagnosticsCopyLogFailed));
+            return false;
+        }
         if (!CopyNewFile(source, JoinPath(options.destination, name))) {
             SetError(error, l10n::Get(l10n::StringId::DiagnosticsCopyLogFailed));
             return false;
@@ -136,19 +173,31 @@ bool Export(const ExportOptions& options, std::wstring* error) {
 }
 
 bool ClearCrashReports(const std::wstring& source_root, std::wstring* error) {
+    if (error) error->clear();
     const std::wstring source = JoinPath(source_root, L"Diagnostics\\Crashes");
-    if (!IsPlainDirectory(source)) return true;
+    bool exists = false;
+    if (!OptionalCrashDirectory(source, exists)) {
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsDeleteFailed));
+        return false;
+    }
+    if (!exists) return true;
     WIN32_FIND_DATAW data{};
     HANDLE find = FindFirstFileW(JoinPath(source, L"*").c_str(), &data);
-    if (find == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND;
+    if (find == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == ERROR_FILE_NOT_FOUND) return true;
+        SetError(error, l10n::Get(l10n::StringId::DiagnosticsDeleteFailed));
+        return false;
+    }
     bool ok = true;
     do {
         if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         const std::wstring_view name(data.cFileName);
         if (!IsCrashArtifact(name, true)) continue;
         if (!DeleteFileW(JoinPath(source, name).c_str())) ok = false;
-    } while (FindNextFileW(find, &data));
+    } while (find_next.load()(find, &data));
+    const DWORD enumeration_error = GetLastError();
     FindClose(find);
+    ok = ok && enumeration_error == ERROR_NO_MORE_FILES;
     if (!ok) SetError(error, l10n::Get(l10n::StringId::DiagnosticsDeleteFailed));
     return ok;
 }

@@ -1,7 +1,9 @@
 #include "../index/search_result_merge.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <limits>
 
 using namespace pulse::index;
 
@@ -14,6 +16,7 @@ SearchResult PreviousMerge(const Query& query, SearchResult local, SearchResult 
     result.revision = (std::max)(local.revision, network.revision);
     result.error = local.error ? local.error : network.error;
     result.incomplete = local.incomplete || network.incomplete || result.error != ERROR_SUCCESS;
+    result.scanning = local.scanning || network.scanning;
     result.hits.reserve(local.hits.size() + network.hits.size());
     for (auto& hit : local.hits) result.hits.push_back(std::move(hit));
     for (auto& hit : network.hits) result.hits.push_back(std::move(hit));
@@ -49,7 +52,7 @@ SearchResult PreviousMerge(const Query& query, SearchResult local, SearchResult 
 
 bool Same(const SearchResult& a, const SearchResult& b) {
     if (a.total != b.total || a.revision != b.revision || a.incomplete != b.incomplete ||
-        a.error != b.error || a.hits.size() != b.hits.size()) return false;
+        a.scanning != b.scanning || a.error != b.error || a.hits.size() != b.hits.size()) return false;
     for (size_t i = 0; i < a.hits.size(); ++i) {
         const Hit& x = a.hits[i];
         const Hit& y = b.hits[i];
@@ -83,6 +86,31 @@ SearchResult Fixture(size_t count, uint32_t seed) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--benchmark") {
+        const auto local = Fixture(10000, 11);
+        const auto network = Fixture(10000, 29);
+        for (const wchar_t* needle : {L"report", L"wd"}) {
+            for (bool rank : {false, true}) {
+                Query query;
+                query.needle = needle;
+                query.rank = rank;
+                query.limit = 48;
+                size_t returned = 0;
+                MergeSearchResults(query, local, network);
+                std::array<double, 7> samples{};
+                for (auto& sample : samples) {
+                    const auto start = std::chrono::steady_clock::now();
+                    returned += MergeSearchResults(query, local, network).hits.size();
+                    sample = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - start).count();
+                }
+                std::sort(samples.begin(), samples.end());
+                std::printf("needle=%ls rank=%d candidates=20000 median_ms=%.3f returned=%zu\n",
+                    needle, rank, samples[samples.size() / 2], returned);
+            }
+        }
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--quality-only") {
         Query query; query.limit = 10;
         SearchResult local;
@@ -114,7 +142,7 @@ int main(int argc, char** argv) {
         const Hit* local_storage = local.hits.data();
         const Hit* network_storage = network.hits.data();
         bool equivalent = true;
-        for (const wchar_t* needle : {L"", L"report", L"报告", L"wd"}) {
+        for (const wchar_t* needle : {L"", L"report", L"报告", L"wd", L"r*?", L"report | wd !other"}) {
             for (ResultSort sort : {ResultSort::Index, ResultSort::Name, ResultSort::Size, ResultSort::Mtime}) {
                 for (bool rank : {false, true}) {
                     for (bool desc : {false, true}) {
@@ -163,6 +191,25 @@ int main(int argc, char** argv) {
     const auto owned = MergeSearchResults(query, Fixture(5, 42), Fixture(7, 69));
     check(Same(owned, PreviousMerge(query, Fixture(5, 42), Fixture(7, 69))),
           "returned page owns its strings after temporary inputs are destroyed");
+    local.scanning = true;
+    for (bool rank : {false, true}) {
+        query.rank = rank;
+        query.offset = 1;
+        query.limit = (std::numeric_limits<size_t>::max)();
+        auto bounded = query;
+        bounded.limit = local.hits.size() + network.hits.size();
+        check(Same(MergeSearchResults(query, local, network), PreviousMerge(bounded, local, network)),
+              "maximum page limit does not overflow and retains scanning metadata");
+        query.offset = (std::numeric_limits<size_t>::max)();
+        bounded = query;
+        bounded.limit = 0;
+        check(Same(MergeSearchResults(query, local, network), PreviousMerge(bounded, local, network)),
+              "out-of-range page preserves metadata without returning hits");
+        query.offset = 0;
+        query.limit = 0;
+        check(Same(MergeSearchResults(query, local, network), PreviousMerge(query, local, network)),
+              "zero-sized page preserves scanning and error metadata");
+    }
     std::printf("Compared %zu query/page combinations; %d failures\n", cases, failures);
     return failures ? 1 : 0;
 }

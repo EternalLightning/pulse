@@ -1,0 +1,20 @@
+[
+  {
+    "path": "E:\\AppData\\Toolchains\\VS2022BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
+    "status": "Valid",
+    "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+    "sha256": "FE251EF50A1545B1B0835EE17B1E785459712B38D79E45B5C1D3D28970A36619"
+  },
+  {
+    "path": "E:\\AppData\\Toolchains\\VS2022BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
+    "status": "Valid",
+    "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+    "sha256": "A364AF801A8539E4324D9489313DBF001D959128451FC99A27B24676BBAC058F"
+  },
+  {
+    "path": "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe",
+    "status": "Valid",
+    "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+    "sha256": "43DA1503C262C30894C851589BF0155F8365D77E63A5F7BC13982320E3A6B42D"
+  }
+]

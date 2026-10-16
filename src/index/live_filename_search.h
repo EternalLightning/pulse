@@ -29,27 +29,14 @@ inline bool MatchLiveFilename(const Hit& hit, const CompiledQuery& query, bool f
     for (const auto& group : query.groups) {
         bool matched = true;
         for (const auto& term : group) {
-            if ((term.folder && !hit.is_dir) || (term.file && hit.is_dir)) { matched = false; break; }
             const auto accepts = [](bool value, bool negate) { return value != negate; };
             if ((!term.exts.empty() && !accepts(MatchExt(hit.name.data(), static_cast<uint32_t>(hit.name.size()), term), term.ext_not)) ||
                 (term.size_how != SizeHow::Any && !accepts(MatchSize(hit.size, term), term.size_not)) ||
                 (term.date_how != DateHow::Any && !accepts(hit.mtime && MatchDate(hit.mtime, term), term.date_not))) { matched = false; break; }
-            if (term.name_how == NameHow::Any) continue;
-            bool name = false;
-            if (!term.name_in_path) name = MatchName(hit.name.data(), static_cast<uint32_t>(hit.name.size()), term);
-            else if (term.name_how == NameHow::Wildcard)
-                name = WildcardFolded(hit.path.data(), static_cast<uint32_t>(hit.path.size()), term.name);
-            else {
-                size_t begin = 0;
-                while (begin < hit.path.size()) {
-                    const auto end = hit.path.find(L'\\', begin);
-                    const auto length = (end == std::wstring::npos ? hit.path.size() : end) - begin;
-                    if (length && MatchName(hit.path.data() + begin, static_cast<uint32_t>(length), term)) { name = true; break; }
-                    if (end == std::wstring::npos) break;
-                    begin = end + 1;
-                }
-            }
-            if (!accepts(name, term.name_not)) { matched = false; break; }
+            const bool name = term.name_how == NameHow::Any || (term.name_in_path
+                ? MatchPath(hit.path, term)
+                : MatchName(hit.name.data(), static_cast<uint32_t>(hit.name.size()), term));
+            if (!MatchNameAndType(name, hit.is_dir, term)) { matched = false; break; }
         }
         if (matched) return true;
     }

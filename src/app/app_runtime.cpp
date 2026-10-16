@@ -4,6 +4,7 @@
 // app_runtime.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "app_column_view.h"
+#include "pane_animations.h"
 #include "folder_sizes_ui.h"
 #include "index_volume_badge.h"
 #include "about_info.h"
@@ -360,7 +361,7 @@ D2D1_RECT_F FocusedPaneRect(const AppState& s) {
         static_cast<float>(s.compositor.Width()), static_cast<float>(s.compositor.Height()));
     if (!Root(s) || !s.pane) return content;
     std::vector<std::pair<app::Pane*, D2D1_RECT_F>> laid;
-    app::LayoutSplitTree(*Root(s), content, 4.0f * s.scale, laid);
+    app::LayoutSplitTree(*Root(s), content, 8.0f * s.scale, laid);
     for (const auto& item : laid) {
         if (item.first == s.pane) return item.second;
     }
@@ -1410,15 +1411,18 @@ static std::wstring ContextStatusHint(const app::Tab* tab) {
 }
 
 bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
-    std::vector<std::wstring> tray_paths;
     const bool tray_present = !s.tray.batches().empty();
-    if (tray_present) {
-        for (const auto& item : s.tray.batches().back().items)
-            if (item.exists) tray_paths.push_back(item.path);
-    }
     auto& availability = s.clipboard_availability;
-    bool changed = availability.Update(GetClipboardSequenceNumber(),
-        IsClipboardFormatAvailable(CF_HDROP) != 0, tray_present, std::move(tray_paths));
+    bool changed = availability.UpdateVersioned(GetClipboardSequenceNumber(),
+        IsClipboardFormatAvailable(CF_HDROP) != 0, tray_present, s.tray.AvailabilityRevision(), [&] {
+            std::vector<std::wstring> paths;
+            if (tray_present) {
+                paths.reserve(s.tray.batches().back().items.size());
+                for (const auto& item : s.tray.batches().back().items)
+                    if (item.exists) paths.push_back(item.path);
+            }
+            return paths;
+        });
     changed = availability.Consume() || changed;
     if (auto request = availability.BeginRefresh(now)) {
         const auto mailbox = availability.mailbox();
@@ -1470,11 +1474,15 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         s.sidebarQuickAccessHiddenMask);
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
     vm.can_paste = CanPasteIntoCurrent(s);
-    if (const auto* tab = ActiveTab(s)) {
-        const auto selected_paths = SelectedFullPaths(*tab);
-        vm.selection_has_drive_root = std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath);
+    if (const auto* tab = ActiveTab(s); tab && !IsArchiveView(tab->current_path)) {
+        if (!tab->content_results) {
+            vm.selection_has_drive_root = tab->SnapshotSelectionHasDriveRoot();
+        } else {
+            const auto selected_paths = SelectedFullPaths(*tab);
+            vm.selection_has_drive_root = std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath);
+        }
     }
-    const ULONGLONG fold_now = GetTickCount64();
+    const ULONGLONG fold_now = app::PaneAnimationTimeMs();
     for (auto& group : vm.sidebar) {
         group.expansion = group.collapsed ? 0.0f : 1.0f;
         if (const auto it = s.sidebarFoldTracks.find(group.id); it != s.sidebarFoldTracks.end()) {
@@ -2007,6 +2015,7 @@ std::wstring TooltipForHover(AppState& s) {
         return text(I::SettingsWindowEffect);
     }
     case R::SettingsWallpaper:
+        if (s.hoverControlIndex == 2) return text(I::MatchWindowSizeHint);
         return text(s.hoverControlIndex == 1
             ? I::TooltipClearBackground : I::TooltipChooseBackground);
     case R::SettingsDensity: return text(I::SettingsRowHeight);

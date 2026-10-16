@@ -33,17 +33,22 @@ struct ShardManifest {
     std::wstring source_id;
 };
 
-bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstring* error = nullptr);
+enum class ShardReadStatus { Missing, Invalid, IoError, Valid, Unsupported };
+
+// Missing manifests retain the legacy true result; status distinguishes absence.
+bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstring* error = nullptr,
+                       ShardReadStatus* status = nullptr);
 bool SaveShardManifest(const std::wstring& path, const ShardManifest& value,
                        std::wstring* error = nullptr);
 
 // V9 storage operations. A base file is treated as opaque here; the index
 // engine validates its PIDX header after publication before adopting it.
-uint64_t FileCrc64(const std::wstring& path);
+uint64_t FileCrc64(const std::wstring& path, ShardReadStatus* status = nullptr);
 bool ValidateShardBase(const std::wstring& path, uint64_t expected_bytes = 0,
-                       uint64_t expected_crc64 = 0);
+                       uint64_t expected_crc64 = 0, ShardReadStatus* status = nullptr);
 bool ResolveActiveShard(const ShardPaths& paths, ShardManifest& manifest,
-                        std::wstring& active_path, std::wstring* error = nullptr);
+                        std::wstring& active_path, std::wstring* error = nullptr,
+                        ShardReadStatus* status = nullptr);
 bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
                       uint64_t built_unix, uint64_t wal_bytes,
                       ShardManifest& published, std::wstring* error = nullptr,

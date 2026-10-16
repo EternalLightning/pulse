@@ -174,7 +174,12 @@ struct ContentResultStore::Impl {
 ContentResultStore::ContentResultStore(HWND notify,UINT message):impl_(std::make_shared<Impl>(notify,message)) {
     std::thread([state=impl_]{state->Run();}).detach();
 }
-ContentResultStore::~ContentResultStore() { impl_->stopping=true; impl_->wake.notify_all(); }
+ContentResultStore::~ContentResultStore() {
+    // Publish shutdown under the wait mutex so notification cannot fall
+    // between the worker's predicate check and its transition to sleep.
+    { std::lock_guard lock(impl_->mu); impl_->stopping=true; }
+    impl_->wake.notify_all();
+}
 bool ContentResultStore::Append(const std::vector<ContentHit>& hits) {
     if(hits.empty()) return true;
     auto& p=*impl_; std::lock_guard lock(p.io);
@@ -338,11 +343,14 @@ bool ContentResultStore::Ready(size_t index) const {
 void ContentResultStore::Prefetch(size_t index) const {
     if(index>=Count() || Filtering()) return;
     const auto page=index/kPageSize;
-    const auto epoch=impl_->page_epoch.load();
+    uint64_t epoch;
     {
         std::lock_guard lock(impl_->mu);
         const auto found=impl_->pages.find(page);
         if((found!=impl_->pages.end() && index%kPageSize<found->second.size()) || impl_->pending.contains(page) || impl_->pending.size()>=kCachePages) return;
+        // Register against the same generation that owns pending. Otherwise a
+        // refresh between capture and insertion can strand a stale request.
+        epoch=impl_->page_epoch.load();
         impl_->pending.insert(page);
     }
     impl_->Enqueue([state=impl_,page,epoch]{state->Load(page,epoch);});

@@ -31,6 +31,31 @@ int wmain() {
     Check(file_commands.Enabled(0) && file_commands.Enabled(1) && file_commands.Enabled(3) && file_commands.Enabled(4),
           "ordinary file toolbar retains file operations");
     Check(!ui::ToolbarCommandState{true, 1, false, true}.Enabled(2), "archive toolbar forbids paste");
+    app::ClipboardAvailability cached;
+    unsigned collections = 0;
+    std::vector<std::wstring> tray_paths{L"one"};
+    const auto collect = [&] { ++collections; return tray_paths; };
+    cached.UpdateVersioned(1, true, true, 1, collect);
+    const auto cached_request = cached.BeginRefresh(0);
+    if (!cached_request) return 2;
+    cached.mailbox()->Publish({cached_request->generation, true, true});
+    cached.Consume();
+    for (int i = 0; i < 10000; ++i) cached.UpdateVersioned(1, true, true, 1, collect);
+    Check(collections == 1 && cached.Available(), "unchanged tray inputs do not recollect paths on 10k UI updates");
+    cached.UpdateVersioned(1, true, true, 2, collect);
+    Check(collections == 2 && cached.Available(), "unrelated tray revision keeps validated identical paths available");
+    tray_paths = {L"two"};
+    cached.UpdateVersioned(1, true, true, 3, collect);
+    cached.mailbox()->Publish({cached_request->generation, true, true});
+    cached.Consume();
+    Check(!cached.Available(), "changed tray paths invalidate validation and reject the old result");
+    cached.Update(1, true, true, {L"direct"});
+    cached.UpdateVersioned(1, true, true, 3, collect);
+    const auto mixed = cached.BeginRefresh(1000);
+    Check(mixed && mixed->tray_paths == tray_paths && collections == 4,
+          "direct updates invalidate the revision shortcut for mixed callers");
+    cached.UpdateVersioned(2, true, true, 3, collect);
+    Check(collections == 5, "clipboard sequence change still refreshes the input snapshot");
     wchar_t executable[32768]{};
     if (!GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable))) return 2;
     const auto fixture = std::filesystem::path(executable).parent_path().parent_path() /

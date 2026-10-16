@@ -1,0 +1,25 @@
+Run date: 2026-10-16
+Authorized isolated default user-storage fixture; no repository build or product changes.
+Source: E:\Projects\pulse\bench_data\audit-medium-ee159e3460384dcea2ee343d8aa2ca3e\pulse_user_storage_test.exe
+New copy: C:\Users\EternalLightning\AppData\Local\Temp\PulseStorageMedium-d91dd4e291f04b4d903e44bf368f0b78\pulse_user_storage_test.exe
+Source SHA256: 77C8AE73D73BF79C481061ECFE5FF75691C5140D9A9B7D09119432A76DFC32D2
+New copy SHA256: 77C8AE73D73BF79C481061ECFE5FF75691C5140D9A9B7D09119432A76DFC32D2
+Copy method: File.ReadAllBytes + File.WriteAllBytes creates a new file in native LOCALAPPDATA\Temp; no security label is copied.
+TEMP/TMP for child: C:\Users\EternalLightning\AppData\Local\Temp\PulseStorageMedium-d91dd4e291f04b4d903e44bf368f0b78\fixture-temp
+Child PID: 8068
+Actual child TokenIntegrityLevel RID: 8192 (Medium)
+Token was queried from the real child created suspended, then its primary thread was resumed.
+Exit code: 0 (0x00000000)
+Result: 30 PASS, 0 FAIL
+Output: pulse_user_storage_test-default-medium-token8192.log
+Reproduction helper actually used: pulse_user_storage_test-default-medium-probe.ps1
+No source EXE/repository ACL or registry production settings were changed. The test uses a unique HKCU Software\Pulse\StorageTests\PID key and its own TEMP fixture.
+
+Earlier Low-integrity evidence is retained separately:
+- Original default run: 0xC0000409 and no stdout (main-agent tool record).
+- Command-local repository TEMP/TMP and repository copies: Save storage location settings system error 5.
+- Main-agent observed the build EXE and repository copy labels as Low Mandatory NW; its escalation PowerShell was Medium and could write an isolated HKCU StorageTests key.
+- Main-agent attempts to raise only the isolated owned folder/file labels using icacls /setintegritylevel M returned Access denied; no repository-wide ACL changes were made.
+- Existing files pulse_user_storage_test-default.log, pulse_user_storage_test-default-local-temp.log, pulse_user_storage_test-default-medium-copy.log, and pulse_user_storage_test-default-medium-label.log are preserved, not overwritten.
+
+The later wallpaper-ADS selector binary has SHA256 1DCE7DF3109BD7C8C855C38D4030B9926F745FCCCDE5F2C872311CFC07A9F87B (build EXE hash observed after the default run). Its final 17-PASS selector log is separate; the default-run hash above identifies the exact content actually executed.

@@ -1,0 +1,30 @@
+[
+  {
+    "path": "E:\\Projects\\TestPrograms\\Pulse\\Pulse.exe",
+    "bytes": 7250944,
+    "md5": "0CEB8066D10A147C368FEEE9697F22CD",
+    "sha256": "B4BA5A3340CA6A4BA89B5ED15A5878CBB781CACA4B2D5DF318446B64D23ADF84",
+    "signature": "NotSigned"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build\\Pulse.exe",
+    "bytes": 7250944,
+    "md5": "356942EE85F3FB10A664C0EAB583B4AF",
+    "sha256": "224AA0010FC51DA4770E344C7C783C5F228D5E7578B45E149C75A7D152640DD9",
+    "signature": "NotSigned"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build\\Pulse.Shell.exe",
+    "bytes": 499712,
+    "md5": "A891BDC12DC4CD0B7A3B1762DD824F0A",
+    "sha256": "6D12F1A4653D3A6E732007F14098A5A269F73F8D7BE85363DAD201CB5AF90792",
+    "signature": "NotSigned"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build\\deploy-backup-ba7aeaf4526441c28732d695925fb4fc\\Pulse.exe",
+    "bytes": 6941696,
+    "md5": "4442128433779292AD1779C1DBF24C5E",
+    "sha256": "2037DAA26A6F36E930F4A280CCF0A9FE69B26835065BB164630ADAEFD065945E",
+    "signature": "NotSigned"
+  }
+]

@@ -27,7 +27,7 @@ struct ContentSearchRequest {
     bool subscribe = false;
     ContentSearchMode mode = ContentSearchMode::Content;
     std::wstring root;
-    std::vector<std::wstring> roots;
+    std::vector<std::wstring> roots; // Nonempty roots overrides the legacy single root.
     std::vector<std::wstring> candidate_paths;
     bool indexed = true;
     bool task_scan = false; // Interactive query also examines uncached files.
@@ -86,9 +86,15 @@ struct ContentSearchProgress {
 using ContentBatchCallback = std::function<bool(const ContentSearchProgress&,
                                                  std::vector<ContentHit>)>;
 
+// Optional fixture hooks return real find handles and preserve GetLastError on failure.
+struct ContentSearchEnumerationHooks {
+    std::function<HANDLE(const std::wstring&, WIN32_FIND_DATAW&)> first;
+    std::function<bool(HANDLE, WIN32_FIND_DATAW&)> next;
+};
+
 bool MatchContentFilename(const std::wstring& path, uint64_t size, uint64_t modified, const CompiledQuery& query);
 
 bool RunContentSearch(const ContentSearchRequest& request, const std::atomic<bool>& cancelled,
-                      ContentBatchCallback callback);
+                      ContentBatchCallback callback, const ContentSearchEnumerationHooks* hooks = nullptr);
 
 } // namespace pulse::index

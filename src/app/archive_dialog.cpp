@@ -18,7 +18,7 @@ constexpr wchar_t kClass[] = L"PulseArchiveDialog";
 constexpr int kDestination = 100, kPassword = 101, kBrowse = 102, kCreateFolder = 103;
 
 struct DialogState {
-    bool dark = false, password_only = false, progress = false, all = false, accepted = false;
+    bool dark = false, password_only = false, all = false, accepted = false;
     COLORREF accent = RGB(80, 180, 220);
     UINT dpi = 96;
     ArchiveExtractOptions options;
@@ -27,8 +27,6 @@ struct DialogState {
     HWND modal_owner = nullptr;
     HFONT font = nullptr, title_font = nullptr;
     HBRUSH edit_brush = nullptr;
-    std::atomic_bool* done = nullptr;
-    std::atomic_bool* cancel = nullptr;
     ~DialogState() {
         if (font) DeleteObject(font);
         if (title_font) DeleteObject(title_font);
@@ -37,8 +35,8 @@ struct DialogState {
 };
 
 int Px(const DialogState& s, int value) { return MulDiv(value, static_cast<int>(s.dpi), 96); }
-int Width(const DialogState& s) { return s.password_only || s.progress ? 420 : 520; }
-int FooterTop(const DialogState& s) { return s.progress ? 136 : s.password_only ? 160 : s.all ? 284 : 242; }
+int Width(const DialogState& s) { return s.password_only ? 420 : 520; }
+int FooterTop(const DialogState& s) { return s.password_only ? 160 : s.all ? 284 : 242; }
 COLORREF Background(const DialogState& s) { return s.dark ? RGB(42, 42, 42) : RGB(250, 250, 250); }
 COLORREF Footer(const DialogState& s) { return s.dark ? RGB(35, 35, 35) : RGB(242, 242, 242); }
 COLORREF Text(const DialogState& s) { return s.dark ? RGB(248, 248, 248) : RGB(28, 28, 28); }
@@ -92,19 +90,11 @@ void Paint(HWND hwnd, const DialogState& s) {
                 s.dark ? RGB(62, 62, 62) : RGB(196, 196, 196), Px(s, 5));
         Fill(dc, {Px(s, 26), Px(s, y + 32), Px(s, right - 2), Px(s, y + 34)}, s.accent);
     };
-    if (s.progress) {
-        RECT status{Px(s, 24), Px(s, 70), Px(s, Width(s) - 24), Px(s, 106)};
-        DrawTextW(dc, s.cancel->load(std::memory_order_acquire)
-            ? l10n::Get(l10n::StringId::ArchiveCancelling).c_str()
-            : l10n::Get(l10n::StringId::ArchiveExtracting).c_str(),
-            -1, &status, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else {
-        if (!s.password_only)
-            draw_input(100, Width(s) - 124, l10n::Get(l10n::StringId::ArchiveDestination).c_str());
-        draw_input(s.password_only ? 100 : 192, Width(s) - 24,
-            s.password_only ? l10n::Get(l10n::StringId::ArchiveEnterPassword).c_str()
-                            : l10n::Get(l10n::StringId::ArchiveOptionalPassword).c_str());
-    }
+    if (!s.password_only)
+        draw_input(100, Width(s) - 124, l10n::Get(l10n::StringId::ArchiveDestination).c_str());
+    draw_input(s.password_only ? 100 : 192, Width(s) - 24,
+        s.password_only ? l10n::Get(l10n::StringId::ArchiveEnterPassword).c_str()
+                        : l10n::Get(l10n::StringId::ArchiveOptionalPassword).c_str());
     HPEN border = CreatePen(PS_SOLID, 1, s.dark ? RGB(62, 75, 84) : RGB(188, 196, 202));
     HGDIOBJ old_pen = SelectObject(dc, border);
     HGDIOBJ old_brush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
@@ -172,12 +162,6 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, D
     return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
-void RequestCancel(HWND hwnd, DialogState& state) {
-    state.cancel->store(true, std::memory_order_release);
-    EnableWindow(GetDlgItem(hwnd, IDCANCEL), FALSE);
-    InvalidateRect(hwnd, nullptr, FALSE);
-}
-
 LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* s = reinterpret_cast<DialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (msg == WM_NCCREATE) {
@@ -215,12 +199,6 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(s->font), TRUE);
             return child;
         };
-        if (s->progress) {
-            button(IDCANCEL, l10n::Get(l10n::StringId::Cancel).c_str(),
-                Width(*s) - 170, FooterTop(*s) + 24, 146);
-            if (!SetTimer(hwnd, 1, 100, nullptr)) return -1;
-            return 0;
-        }
         if (!s->password_only) {
             s->destination = edit(kDestination, 100, Width(*s) - 124, s->options.destination, false);
             const std::wstring browse_label = l10n::Get(l10n::StringId::DupBrowse) + L"…";
@@ -242,16 +220,6 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (msg == WM_ERASEBKGND) return 1;
-    if (msg == WM_TIMER && s->progress && wp == 1) {
-        if (s->done->load(std::memory_order_acquire)) {
-            s->accepted = !s->cancel->load(std::memory_order_acquire);
-            ui::DestroyDialogWithFade(hwnd, s->modal_owner);
-        } else if (s->cancel->load(std::memory_order_acquire)) {
-            EnableWindow(GetDlgItem(hwnd, IDCANCEL), FALSE);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        return 0;
-    }
     if (msg == WM_PAINT) { Paint(hwnd, *s); return 0; }
     if (msg == WM_DRAWITEM) { PaintButton(*s, *reinterpret_cast<DRAWITEMSTRUCT*>(lp)); return TRUE; }
     if (msg == WM_CTLCOLOREDIT) {
@@ -261,10 +229,6 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_COMMAND) {
         const int id = LOWORD(wp);
-        if (s->progress) {
-            if (id == IDCANCEL) RequestCancel(hwnd, *s);
-            return 0;
-        }
         if (id == kDestination && HIWORD(wp) == EN_CHANGE) {
             if (s->confirm) EnableWindow(s->confirm, GetWindowTextLengthW(s->destination) != 0);
             return 0;
@@ -286,12 +250,10 @@ LRESULT CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (id == IDCANCEL) { ui::DestroyDialogWithFade(hwnd, s->modal_owner); return 0; }
     }
     if (msg == WM_CLOSE) {
-        if (s->progress) RequestCancel(hwnd, *s);
-        else ui::DestroyDialogWithFade(hwnd, s->modal_owner);
+        ui::DestroyDialogWithFade(hwnd, s->modal_owner);
         return 0;
     }
     if (msg == WM_NCDESTROY) {
-        if (s->progress) KillTimer(hwnd, 1);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -330,7 +292,7 @@ bool Show(HWND owner, DialogState& s) {
     if (owner_enabled) EnableWindow(owner, FALSE);
     ui::ShowDialogWithFade(dialog);
     SetForegroundWindow(dialog);
-    SetFocus(s.progress ? GetDlgItem(dialog, IDCANCEL) : s.password_only ? s.password : s.destination);
+    SetFocus(s.password_only ? s.password : s.destination);
     MSG msg{};
     int status = 1;
     while (IsWindow(dialog) && (status = static_cast<int>(GetMessageW(&msg, nullptr, 0, 0))) > 0) {
@@ -339,7 +301,6 @@ bool Show(HWND owner, DialogState& s) {
             DispatchMessageW(&msg);
         }
     }
-    if (s.progress && status <= 0) s.cancel->store(true, std::memory_order_release);
     if (IsWindow(dialog)) ui::DestroyDialogWithFade(dialog, s.modal_owner);
     if (status == 0) PostQuitMessage(static_cast<int>(msg.wParam));
     if (owner_enabled && IsWindow(owner)) {
@@ -376,18 +337,5 @@ bool ShowArchivePasswordDialog(HWND owner, bool dark, COLORREF accent, std::wstr
     if (!Show(owner, state)) return false;
     password = std::move(state.options.password);
     return true;
-}
-
-bool ShowArchiveProgressDialog(HWND owner, bool dark, COLORREF accent,
-                               std::atomic_bool& done, std::atomic_bool& cancel) {
-    DialogState state;
-    state.dark = dark;
-    state.accent = accent;
-    state.progress = true;
-    state.done = &done;
-    state.cancel = &cancel;
-    const bool completed = Show(owner, state);
-    if (!completed) cancel.store(true, std::memory_order_release);
-    return completed;
 }
 } // namespace pulse::app

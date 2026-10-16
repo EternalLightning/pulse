@@ -2,6 +2,8 @@
 #include "../fs/fs_enum.h"
 #include <algorithm>
 #include <cwctype>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 #include <unordered_map>
 
@@ -61,10 +63,11 @@ std::wstring ReplaceInsensitive(const std::wstring& text, const std::wstring& fi
     return out;
 }
 
-std::wstring FormatNumber(int value, int digits) {
+std::wstring FormatNumber(int64_t value, int digits) {
     wchar_t buf[32]{};
-    if (digits > 0) swprintf_s(buf, L"%0*d", digits, value);
-    else swprintf_s(buf, L"%d", value);
+    digits = std::clamp(digits, 0, 9);
+    if (digits > 0) swprintf_s(buf, L"%0*lld", digits, static_cast<long long>(value));
+    else swprintf_s(buf, L"%lld", static_cast<long long>(value));
     return buf;
 }
 
@@ -76,7 +79,7 @@ bool ConsumeToken(std::wstring_view pattern, size_t& i, std::wstring_view token)
 }
 
 std::wstring ExpandPattern(std::wstring_view pattern, std::wstring_view stem,
-                           std::wstring_view ext, int value) {
+                           std::wstring_view ext, int64_t value) {
     std::wstring out;
     out.reserve(pattern.size() + stem.size() + ext.size() + 8);
     size_t i = 0;
@@ -98,7 +101,7 @@ std::wstring ExpandPattern(std::wstring_view pattern, std::wstring_view stem,
                 size_t j = i + 3;
                 int pad = 0;
                 while (j < pattern.size() && pattern[j] >= L'0' && pattern[j] <= L'9') {
-                    pad = pad * 10 + (pattern[j] - L'0');
+                    pad = std::min(9, pad * 10 + (pattern[j] - L'0'));
                     ++j;
                 }
                 if (j < pattern.size() && pattern[j] == L'}') {
@@ -174,7 +177,10 @@ std::wstring ApplyBatchRenameRule(const std::wstring& name, size_t index,
     }
     std::wstring stem, ext;
     SplitFileName(working, stem, ext);
-    const int value = rule.start + static_cast<int>(index);
+    const auto maximum_index = static_cast<uint64_t>((std::numeric_limits<int64_t>::max)())
+        - static_cast<uint64_t>(std::max(0, rule.start));
+    const int64_t value = rule.start + static_cast<int64_t>(
+        std::min(static_cast<uint64_t>(index), maximum_index));
     if (!rule.pattern.empty()) {
         return ExpandPattern(rule.pattern, stem, ext, value);
     }
@@ -186,11 +192,13 @@ std::wstring ApplyBatchRenameRule(const std::wstring& name, size_t index,
 }
 
 std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>& paths,
-                                                const BatchRenameRule& rule) {
+    const BatchRenameRule& rule, const std::function<bool()>& cancelled,
+    const std::function<bool(const std::wstring&)>& exists) {
     std::vector<BatchRenameItem> items;
     items.reserve(paths.size());
     std::unordered_map<std::wstring, int> new_counts;
     for (size_t i = 0; i < paths.size(); ++i) {
+        if (cancelled && cancelled()) return {};
         BatchRenameItem item;
         item.source_path = paths[i];
         item.original_name = FileNameOf(paths[i]);
@@ -207,6 +215,7 @@ std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>&
         }
     }
     for (auto& item : items) {
+        if (cancelled && cancelled()) return {};
         if (item.status != BatchRenameStatus::Ok) continue;
         std::wstring key = JoinName(ParentOf(item.source_path), item.new_name);
         const std::wstring dest = key;
@@ -216,7 +225,9 @@ std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>&
             continue;
         }
         const std::wstring normalized = fs::NormalizePath(dest);
-        if (GetFileAttributesW(normalized.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+        const bool present = exists ? exists(normalized)
+            : GetFileAttributesW(normalized.c_str()) != INVALID_FILE_ATTRIBUTES;
+        if (!present) continue;
         const std::wstring source = fs::NormalizePath(item.source_path);
         if (_wcsicmp(normalized.c_str(), source.c_str()) != 0)
             item.status = BatchRenameStatus::Collision;

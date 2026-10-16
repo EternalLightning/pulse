@@ -1,4 +1,5 @@
 #include "ops/archive.h"
+#include "ops/archive_retry.h"
 #include <windows.h>
 #include <winioctl.h>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <thread>
 #include <chrono>
 #include <iterator>
+#include <array>
 
 namespace fs = std::filesystem;
 using namespace pulse::ops;
@@ -44,6 +46,96 @@ bool Pack(const fs::path& archive, const fs::path& source, const std::wstring& o
     CloseHandle(process.hProcess); CloseHandle(process.hThread);
     if (code != 0) std::cerr << "[DIAG] archive fixture process exit: " << code << '\n';
     return code == 0;
+}
+void ProgressTests() {
+    ArchiveProgressTracker tracker;
+    tracker.Begin(ArchivePhase::Extracting, 10000000, 2, 0);
+    tracker.Feed("  2", 300);
+    tracker.Feed("5% 1 - file.txt\r", 1000);
+    Check(tracker.Status().percent == 25 && tracker.Status().processed_bytes == 2500000 &&
+        tracker.Status().bytes_per_second > 0 && tracker.Status().eta_seconds > 0,
+        "split 7-Zip progress yields estimated unpacked bytes, speed and ETA");
+    tracker.Feed("  10%\r999%\rfilename 100%\r", 1500);
+    Check(tracker.Status().percent == 25, "backwards and malformed percentages do not advance progress");
+    tracker.Feed("\b 60%", 2000);
+    Check(tracker.Status().percent == 60 && tracker.Status().processed_bytes == 6000000,
+        "carriage return and backspace progress updates are parsed");
+    tracker.Begin(ArchivePhase::Extracting, 10000000, 2, 2000);
+    Check(tracker.Status().processed_bytes == 0 && tracker.Status().bytes_per_second == 0 &&
+        tracker.Status().eta_seconds == 0, "a new extraction starts a fresh rate estimate");
+    tracker.Advance(3000000, 1, L"file.txt", 3000);
+    Check(tracker.Status().percent == 30 && tracker.Status().eta_seconds > 0 &&
+        tracker.Status().current_item == L"file.txt", "byte progress tracks rate and item name");
+    tracker.Begin(ArchivePhase::Extracting, 0, 2, 3000);
+    tracker.Advance(0, 1, L"empty", 4000);
+    Check(tracker.Status().percent == 50 && tracker.Status().bytes_per_second == 0,
+        "zero-byte archives report item progress without invented throughput");
+    tracker.Begin(ArchivePhase::Extracting, UINT64_MAX, 1, 0);
+    tracker.Feed("100%", 1000);
+    Check(tracker.Status().processed_bytes == UINT64_MAX, "large archive progress does not overflow");
+    tracker.Begin(ArchivePhase::Completed, 0, 0, 0);
+    tracker.Advance(0, 0, {}, 0);
+    Check(tracker.Status().percent == 100, "empty or fully skipped archives finish at 100 percent");
+#ifdef PULSE_ARCHIVE_PROCESS_TEST
+    wchar_t module[32768]{};
+    GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
+    const auto fixture = (fs::path(module).parent_path() / L"pulse_archive_process_fixture.exe").wstring();
+    for (const auto mode : {L"progress", L"progress-error"}) {
+        tracker.Begin(ArchivePhase::Extracting, 10000000, 1, GetTickCount64());
+        const auto run = RunArchiveProcessForTest(fixture, {mode}, 64, nullptr,
+            [&](std::string_view chunk) { tracker.Feed(chunk, GetTickCount64()); });
+        Check(tracker.Status().percent == 100 && (std::wstring_view(mode) == L"progress"
+            ? run.outcome == ArchiveOutcome::Success && run.output.empty()
+            : run.outcome == ArchiveOutcome::Failed && run.exit_code == 2u && run.output == L"fixture-error"),
+            "progress pipe drains final updates without consuming diagnostic budget or hiding errors");
+    }
+    std::atomic_bool pipe_cancel = false;
+    const auto interrupted = RunArchiveProcessForTest(fixture, {L"progress-cancel"}, 64, &pipe_cancel,
+        [&](std::string_view chunk) { if (!chunk.empty()) pipe_cancel = true; });
+    Check(interrupted.outcome == ArchiveOutcome::Cancelled,
+        "in-flight progress cancellation terminates the archive process");
+#endif
+
+    const auto root = fs::absolute(fs::path(L"bench_data") /
+        (L"archive-progress-" + std::to_wstring(GetCurrentProcessId())));
+    fs::create_directories(root / L"source/sub/empty");
+    std::ofstream(root / L"source/top.txt") << "preserve me";
+    {
+        std::ofstream file(root / L"source/sub/data.bin", std::ios::binary);
+        const std::string block(1024 * 1024, 'x');
+        for (int i = 0; i < 16; ++i) file.write(block.data(), block.size());
+    }
+    for (const auto& extension : {L"zip", L"7z"}) {
+        const auto archive = root / (std::wstring(L"test.") + extension);
+        Check(Pack(archive, root / L"source", L""), "pack real archive progress fixture");
+        std::vector<ArchiveProgress> updates;
+        const auto capture = [&](const ArchiveProgress& p) { updates.push_back(p); };
+        auto result = ExtractArchive(archive.wstring(), (root / (std::wstring(L"selected-") + extension)).wstring(),
+            {L"sub/"}, L"", nullptr, capture);
+        if (result.outcome != ArchiveOutcome::Success)
+            std::cout << "[DIAG] selected extraction: exit=" << (result.exit_code ? std::to_string(*result.exit_code) : "none")
+                << " error=" << DiagnosticUtf8(result.error) << '\n';
+        Check(result.outcome == ArchiveOutcome::Success && !updates.empty() &&
+            updates.front().phase == ArchivePhase::Preparing && updates.back().phase == ArchivePhase::Completed &&
+            updates.back().total_bytes == 16 * 1024 * 1024 && updates.back().processed_bytes == updates.back().total_bytes &&
+            fs::exists(root / (std::wstring(L"selected-") + extension) / L"sub/data.bin") &&
+            !fs::exists(root / (std::wstring(L"selected-") + extension) / L"top.txt"),
+            "real selected ZIP/7z extraction reports selected totals and completion after direct extraction");
+
+        updates.clear();
+        std::atomic_bool cancel = false;
+        result = ExtractArchive(archive.wstring(), (root / (std::wstring(L"cancel-") + extension)).wstring(), {}, L"", &cancel,
+            [&](const ArchiveProgress& p) { updates.push_back(p); if (p.phase == ArchivePhase::Extracting) cancel = true; });
+        Check(result.outcome == ArchiveOutcome::Cancelled && std::none_of(updates.begin(), updates.end(), [](const auto& p) {
+            return p.phase == ArchivePhase::Completed;
+        }), "cancelled extraction never reports completed progress");
+        updates.clear();
+        result = ExtractArchive(archive.wstring(), (root / (std::wstring(L"empty-") + extension)).wstring(), {L"sub/empty/"}, L"", nullptr, capture);
+        Check(result.outcome == ArchiveOutcome::Success && updates.back().total_bytes == 0 &&
+            updates.back().completed_items == updates.back().total_items && updates.back().percent == 100,
+            "empty-directory extraction completes using item counts");
+    }
+    if (!failures) { std::error_code error; fs::remove_all(root, error); }
 }
 void Word(std::ofstream& stream, uint32_t value, unsigned bytes) {
     for (unsigned i = 0; i < bytes; ++i) stream.put(static_cast<char>(value >> (i * 8)));
@@ -145,6 +237,18 @@ int PasswordTests() {
     Check(broken.outcome == ArchiveOutcome::Failed && !broken.error.empty() && broken.password_state == ArchivePasswordState::Unknown,
         "corrupt archive with password keywords stays a generic failure");
     for (const auto extension : {L"7z", L"zip"}) {
+        const auto plain_archive = root / (std::wstring(L"无密码 archive.") + extension);
+        Check(Pack(plain_archive, root / L"source", L""), "create unencrypted password fixture");
+        const auto plain_listing = ListArchive(plain_archive.wstring(), L"arbitrary-password");
+        const auto plain_destination = root / (std::wstring(L"plain-") + extension);
+        const auto plain_extraction = ExtractArchive(plain_archive.wstring(), plain_destination.wstring(), {}, L"arbitrary-password");
+        std::ifstream plain_file(plain_destination / L"password encrypted.txt", std::ios::binary);
+        const std::string plain_content{std::istreambuf_iterator<char>(plain_file), std::istreambuf_iterator<char>()};
+        Check(plain_listing.outcome == ArchiveOutcome::Success &&
+            plain_listing.password_state == ArchivePasswordState::NotRequired &&
+            plain_extraction.outcome == ArchiveOutcome::Success && plain_extraction.exit_code == 0u &&
+            plain_extraction.error.empty() && plain_content == "password encrypted",
+            "an unused password does not prevent exact extraction of unencrypted content");
         const auto archive = root / (std::wstring(L"加密 password archive.") + extension);
         Check(Pack(archive, root / L"source", std::wstring(L"-psecret ") +
             (std::wstring(extension) == L"7z" ? L"-mhe=on" : L"-mem=AES256")),
@@ -186,160 +290,359 @@ int PasswordTests() {
 }
 }
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
-void PublicationTests() {
-    wchar_t module[32768]{};
-    GetModuleFileNameW(nullptr, module, 32768);
-    const fs::path root = fs::path(module).parent_path().parent_path() / L"bench_data" /
-        (L"archive-publish-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-    fs::create_directories(root / L"source/nested");
-    fs::create_directories(root / L"temporary");
-    fs::create_directories(root / L"outside/nested");
-    const std::string payload(2 * 1024 * 1024 + 7, 'p');
-    std::ofstream(root / L"source/nested/file.txt", std::ios::binary) << payload;
-    std::ofstream(root / L"outside/sentinel.txt") << "outside-sentinel";
-    std::ofstream(root / L"outside/nested/file.txt") << "outside-original";
-    const fs::path archive = root / L"plain.zip";
-    Check(Pack(archive, root / L"source", L""), "create publication archive fixture");
+// Audit reproducer: PASS means the documented retry hazard was reproduced,
+// not that extraction integrity is correct. Kept out of the normal suite.
+void RetryIntegrityAudit() {
+    const auto root = fs::absolute(fs::path(L"bench_data") /
+        (L"archive-retry-audit-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    fs::create_directories(root / L"source");
+    const std::string payload(128 * 1024 * 1024 + 7, 'p');
+    std::ofstream(root / L"source/member.bin", std::ios::binary) << payload;
+    std::ofstream(root / L"source/existing.txt") << "archive existing entry";
+    const auto archive = root / L"plain.zip";
+    if (!Pack(archive, root / L"source", L"-mx=0")) {
+        Check(false, "audit fixture creation");
+        return;
+    }
     const auto read = [](const fs::path& path) {
         std::ifstream stream(path, std::ios::binary);
         return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
     };
-    const auto outside_unchanged = [&]() {
-        return read(root / L"outside/sentinel.txt") == "outside-sentinel" &&
-            read(root / L"outside/nested/file.txt") == "outside-original" &&
-            !fs::exists(root / L"outside/file.txt");
+    const auto damaged = root / L"damaged.zip";
+    fs::copy_file(archive, damaged);
+    {
+        const auto bytes = read(damaged);
+        const auto offset = bytes.find(std::string(64, 'p'));
+        if (offset == std::string::npos) {
+            Check(false, "audit stored payload location");
+            return;
+        }
+        std::fstream stream(damaged, std::ios::binary | std::ios::in | std::ios::out);
+        stream.seekp(static_cast<std::streamoff>(offset));
+        stream.put('q');
+    }
+    fs::create_directories(root / L"failure");
+    std::ofstream(root / L"failure/unrelated.txt") << "user-data";
+    std::ofstream(root / L"failure/existing.txt") << "existing user content";
+    const auto first = ExtractArchive(damaged.wstring(), (root / L"failure").wstring(), {}, L"");
+    const auto corrupt = read(root / L"failure/member.bin");
+    Check(first.outcome == ArchiveOutcome::Failed && first.exit_code == 2u &&
+        corrupt.size() == payload.size() && corrupt != payload,
+        "AUDIT: CRC failure leaves a full-size corrupt final-name member");
+    bool extraction_started = false;
+    fs::copy_file(archive, damaged, fs::copy_options::overwrite_existing);
+    const auto retry = ExtractArchiveForTest(damaged.wstring(), (root / L"failure").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring&, const std::wstring&) {
+            if (point == ArchiveExtractionPoint::BeforeExtract) extraction_started = true;
+        });
+    {
+        if (retry.outcome != ArchiveOutcome::Success) std::cout << "[DIAG] retry: " << DiagnosticUtf8(retry.error) << '\n';
+        Check(retry.outcome == ArchiveOutcome::Success && extraction_started &&
+            read(root / L"failure/member.bin") == payload && read(root / L"failure/unrelated.txt") == "user-data" &&
+            read(root / L"failure/existing.txt") == "existing user content" &&
+            !fs::exists(root / L"failure/.pulse-extract-state"),
+            "retry repairs CRC residual, preserves unrelated data and clears journal");
+    }
+    std::atomic_bool cancel = false, finished = false, partial_seen = false;
+    std::thread observer([&] {
+        while (!finished.load()) {
+            std::error_code ec;
+            const auto size = fs::file_size(root / L"cancel/member.bin", ec);
+            // 7-Zip can preallocate the final size before writing its payload.
+            if (!ec && size > 0) {
+                partial_seen = true;
+                cancel = true;
+                return;
+            }
+            Sleep(0);
+        }
+    });
+    const auto interrupted = ExtractArchive(archive.wstring(), (root / L"cancel").wstring(), {}, L"", &cancel);
+    finished = true;
+    observer.join();
+    const auto partial = read(root / L"cancel/member.bin");
+    const auto resumed = ExtractArchive(archive.wstring(), (root / L"cancel").wstring(), {}, L"");
+    std::cout << "[INFO] cancellation partial_seen=" << partial_seen.load()
+        << " cancelled=" << (interrupted.outcome == ArchiveOutcome::Cancelled)
+        << " retained_bytes=" << partial.size() << " expected_bytes=" << payload.size()
+        << " retry_success=" << (resumed.outcome == ArchiveOutcome::Success) << '\n';
+    if (partial_seen && interrupted.outcome == ArchiveOutcome::Cancelled && !partial.empty() && partial != payload) {
+        {
+            if (resumed.outcome != ArchiveOutcome::Success) std::cout << "[DIAG] cancel retry: " << DiagnosticUtf8(resumed.error) << '\n';
+            Check(resumed.outcome == ArchiveOutcome::Success && read(root / L"cancel/member.bin") == payload,
+                "retry repairs cancelled residual completely");
+        }
+    } else {
+        std::cout << "[LIMIT] cancellation did not retain a partial member in this timing window\n";
+    }
+    std::cout << "[INFO] retained isolated audit fixture: " << DiagnosticUtf8(root.wstring()) << '\n';
+}
+
+void RetryOwnershipTests() {
+    const auto root = fs::absolute(fs::path(L"bench_data") /
+        (L"archive-retry-ownership-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    fs::create_directories(root);
+    const std::vector<ArchiveEntry> members{{L"member.txt", false, 4}};
+    const auto read = [](const fs::path& file) {
+        std::ifstream stream(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(stream), {});
     };
+    auto prepare = [&](const wchar_t* name, bool reported = true) {
+        const auto target = root / name;
+        fs::create_directories(target);
+        ArchiveRetry journal;
+        std::wstring error;
+        bool ok = journal.Open(target, (root / L"source.zip").wstring(), error) && journal.Begin(members, error);
+        std::ofstream(target / L"member.txt") << "part";
+        if (std::wstring_view(name) == L"readonly") SetFileAttributesW((target / L"member.txt").c_str(), FILE_ATTRIBUTE_READONLY);
+        if (reported) journal.Feed("- member.txt\n");
+        ok = ok && journal.Finish(false, error);
+        Check(ok, "persist isolated interrupted extraction record");
+        return target;
+    };
+    for (const auto name : {L"replacement", L"modified", L"unknown", L"normal", L"readonly"}) {
+        const auto target = prepare(name, std::wstring_view(name) != L"unknown");
+        if (std::wstring_view(name) == L"replacement") {
+            fs::rename(target / L"member.txt", target / L"retained.txt");
+            std::ofstream(target / L"member.txt") << "user replacement";
+        } else if (std::wstring_view(name) == L"modified") std::ofstream(target / L"member.txt") << "user edited content";
+        const auto before = read(target / L"member.txt");
+        ArchiveRetry journal;
+        DestinationGuard guard;
+        std::wstring error;
+        const bool recovered = journal.Open(target, (root / L"source.zip").wstring(), error) && journal.Recover(members, guard, error);
+        if (std::wstring_view(name) == L"normal" || std::wstring_view(name) == L"readonly")
+            Check(recovered && !fs::exists(target / L"member.txt"), "matching residual including readonly output is admitted for replacement");
+        else Check(!recovered && read(target / L"member.txt") == before, "replaced modified or unreported files cannot be overwritten");
+    }
+    const auto target = prepare(L"concurrent");
+    ArchiveRetry owner, other;
+    std::wstring error;
+    Check(owner.Open(target, (root / L"source.zip").wstring(), error) &&
+        !other.Open(target, (root / L"source.zip").wstring(), error), "concurrent retry cannot acquire the same journal");
+    fs::create_directories(root / L"foreign");
+    std::ofstream(root / L"foreign/.pulse-extract-state") << "";
+    ArchiveRetry foreign;
+    Check(!foreign.Open(root / L"foreign", (root / L"source.zip").wstring(), error), "preexisting empty user marker is not adopted");
+    const auto torn = prepare(L"torn");
+    { std::ofstream output(torn / ArchiveRetry::kName, std::ios::binary | std::ios::app); output << "{\"incomplete"; }
+    ArchiveRetry restored;
+    DestinationGuard guard;
+    Check(restored.Open(torn, (root / L"source.zip").wstring(), error) && restored.Recover(members, guard, error),
+        "torn trailing record retains the previous complete retry snapshot");
+    const auto different = prepare(L"different-source");
+    ArchiveRetry wrong_source;
+    Check(!wrong_source.Open(different, (root / L"other.zip").wstring(), error) && read(different / L"member.txt") == "part",
+        "another archive cannot consume the pending recovery record");
+}
+
+void DirectExtractionTests() {
+    const fs::path root = fs::absolute(fs::path(L"bench_data") /
+        (L"archive-direct-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    fs::create_directories(root / L"source/nested/empty");
+    fs::create_directories(root / L"temporary");
+    fs::create_directories(root / L"outside/nested");
+    const std::string payload(32 * 1024 * 1024 + 7, 'p');
+    std::ofstream(root / L"source/nested/file.txt", std::ios::binary) << payload;
+    std::ofstream(root / L"source/top.txt") << "top-data";
+    std::ofstream(root / L"outside/nested/file.txt") << "outside-original";
     struct RestoreTemp {
         std::wstring value;
         RestoreTemp(const fs::path& path) {
             wchar_t existing[32768]{};
-            if (GetEnvironmentVariableW(L"TMP", existing, 32768)) value = existing;
+            if (GetEnvironmentVariableW(L"TMP", existing, ARRAYSIZE(existing))) value = existing;
             SetEnvironmentVariableW(L"TMP", path.c_str());
         }
         ~RestoreTemp() { SetEnvironmentVariableW(L"TMP", value.empty() ? nullptr : value.c_str()); }
     } restore_temp(root / L"temporary");
-    const fs::path replaced = root / L"replaced";
-    fs::create_directories(replaced);
-    bool replaced_after_capture = false;
-    const auto rejected = ExtractArchiveForTest(archive.wstring(), replaced.wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
-            if (point != ArchivePublicationPoint::DestinationCaptured) return;
-            replaced_after_capture = MoveFileExW(destination.c_str(), (root / L"original-target").c_str(), 0) &&
-                Junction(destination, root / L"outside");
+    const auto read = [](const fs::path& path) {
+        std::ifstream stream(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+    };
+    const auto outside_unchanged = [&] { return read(root / L"outside/nested/file.txt") == "outside-original"; };
+    const auto archive = root / L"plain.zip";
+    Check(Pack(archive, root / L"source", L"-mx=0"), "create direct-extraction ZIP fixture");
+    bool direct_seen = false, no_list = true;
+    std::vector<ArchiveProgress> updates;
+    auto result = ExtractArchiveForTest(archive.wstring(), (root / L"direct").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point != ArchiveExtractionPoint::ProcessProgress) return;
+            direct_seen |= fs::exists(fs::path(destination) / L"nested/file.txt");
+            no_list &= fs::is_empty(root / L"temporary");
+        }, nullptr, [&](const auto& p) { updates.push_back(p); });
+    if (result.outcome != ArchiveOutcome::Success)
+        std::cout << "[DIAG] direct error=" << DiagnosticUtf8(result.error) << '\n';
+    Check(result.outcome == ArchiveOutcome::Success && direct_seen && no_list &&
+        read(root / L"direct/nested/file.txt") == payload && fs::is_directory(root / L"direct/nested/empty") &&
+        fs::is_empty(root / L"temporary"), "7-Zip writes directly to destination without temporary payload or a list for extract-all");
+    Check(!updates.empty() && updates.back().phase == ArchivePhase::Completed && updates.back().percent == 100 &&
+        updates.back().processed_bytes == payload.size() + 8, "direct extraction reports completion after successful extractor exit");
+
+    fs::create_directories(root / L"replaced");
+    bool replaced = false;
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"replaced").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point == ArchiveExtractionPoint::DestinationCaptured)
+                replaced = MoveFileExW(destination.c_str(), (root / L"original-target").c_str(), 0) &&
+                    Junction(destination, root / L"outside");
         });
-    Check(replaced_after_capture && rejected.outcome == ArchiveOutcome::Failed && outside_unchanged(),
-        "destination ancestor swapped after capture is rejected before extraction");
-    if (replaced_after_capture) fs::remove(replaced);
-    bool publication_seen = false, target_blocked = false, source_blocked = false, stage_blocked = false;
-    fs::path staged;
-    const auto stable = ExtractArchiveForTest(archive.wstring(), (root / L"stable").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring& source) {
-            if (point != ArchivePublicationPoint::BeforePublish || publication_seen) return;
-            publication_seen = true;
-            const fs::path parent = fs::path(destination).parent_path();
-            const fs::path source_parent = fs::path(source).parent_path();
-            staged = source_parent.parent_path().parent_path();
-            target_blocked = !MoveFileExW(parent.c_str(), (root / L"moved-target").c_str(), 0) &&
-                !Junction(parent, root / L"outside");
-            source_blocked = !MoveFileExW(source_parent.c_str(), (root / L"moved-source").c_str(), 0) &&
-                !Junction(source_parent, root / L"outside");
-            stage_blocked = !MoveFileExW(staged.c_str(), (root / L"moved-stage").c_str(), 0) &&
-                !Junction(staged, root / L"outside");
+    Check(replaced && result.outcome == ArchiveOutcome::Failed && outside_unchanged(),
+        "destination swapped between preflight and pinning is rejected before direct extraction");
+    if (replaced) fs::remove(root / L"replaced");
+
+    bool before_seen = false, before_blocked = false, during_seen = false, during_blocked = false;
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"stable").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring& destination, const std::wstring&) {
+            const auto parent = fs::path(destination) / L"nested";
+            if (point == ArchiveExtractionPoint::BeforeExtract) {
+                before_seen = true;
+                before_blocked = !MoveFileExW(parent.c_str(), (root / L"moved-before").c_str(), 0) &&
+                    !Junction(parent, root / L"outside");
+            } else if (point == ArchiveExtractionPoint::ProcessProgress && !during_seen) {
+                during_seen = true;
+                during_blocked = !MoveFileExW(parent.c_str(), (root / L"moved-during").c_str(), 0) &&
+                    !Junction(parent, root / L"outside");
+            }
         });
-    Check(publication_seen && target_blocked && source_blocked && stage_blocked &&
-        stable.outcome == ArchiveOutcome::Success && read(root / L"stable/nested/file.txt") == payload && outside_unchanged(),
-        "publication leases block destination source and stage ancestor rename and junction replacement");
-    if (!publication_seen || !target_blocked || !source_blocked || !stage_blocked ||
-        stable.outcome != ArchiveOutcome::Success || read(root / L"stable/nested/file.txt") != payload || !outside_unchanged())
-        std::cout << "[DIAG] publication seen=" << publication_seen << " target_blocked=" << target_blocked
-            << " source_blocked=" << source_blocked << " stage_blocked=" << stage_blocked
-            << " outcome=" << static_cast<int>(stable.outcome) << " error=" << DiagnosticUtf8(stable.error) << '\n';
-    Check(!staged.empty() && !fs::exists(staged), "successful handle publication cleans its exact stage tree");
-    fs::create_directories(root / L"relative-source/nested");
-    std::ofstream(root / L"relative-source/nested/first.txt") << "root-handle-first";
-    std::ofstream(root / L"relative-source/nested/second.txt") << "root-handle-second";
-    const fs::path relative_archive = root / L"relative.zip";
-    Check(Pack(relative_archive, root / L"relative-source", L""), "create relative-parent publication fixture");
-    bool relative_hook_seen = false, relative_parent_changed = false;
-    fs::path changed_parent;
-    const auto relative = ExtractArchiveForTest(relative_archive.wstring(), (root / L"relative-target").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
-            if (point != ArchivePublicationPoint::BeforeRelativeRename || relative_hook_seen) return;
-            relative_hook_seen = true;
-            changed_parent = fs::path(destination).parent_path();
-            relative_parent_changed = Junction(changed_parent, root / L"outside",
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
-        });
-    Check(relative_hook_seen && relative_parent_changed && relative.outcome == ArchiveOutcome::Failed &&
-        outside_unchanged() && !fs::exists(root / L"outside/first.txt") && !fs::exists(root / L"outside/second.txt"),
-        "relative parent reparse change cannot redirect publication or continue extraction");
-    std::cout << "[DIAG] relative parent outcome=" << static_cast<int>(relative.outcome)
-        << " error=" << DiagnosticUtf8(relative.error) << '\n';
-    const bool cleared_relative_parent = relative_parent_changed && ClearJunction(changed_parent);
-    const bool original_commit = cleared_relative_parent &&
-        read(changed_parent / L"first.txt") == "root-handle-first" && !fs::exists(changed_parent / L"second.txt");
-    const bool native_refusal = relative_hook_seen && relative_parent_changed &&
-        relative.outcome == ArchiveOutcome::Failed &&
-        relative.error.starts_with(L"无法写入解压文件 (") && relative.error.ends_with(L")。") &&
-        cleared_relative_parent && fs::is_empty(changed_parent) && outside_unchanged() &&
-        !fs::exists(root / L"outside/first.txt") && !fs::exists(root / L"outside/second.txt");
-    Check(original_commit || native_refusal,
-        "relative rename either preserves the original directory object or explicitly refuses the changed parent");
+    Check(result.outcome == ArchiveOutcome::Success && before_seen && before_blocked && during_seen && during_blocked &&
+        read(root / L"stable/nested/file.txt") == payload && outside_unchanged(),
+        "pinned destination directories block rename and junction replacement before and during 7-Zip execution");
+
+    fs::create_directories(root / L"collision/nested");
+    Check(CreateHardLinkW((root / L"collision/nested/file.txt").c_str(), (root / L"outside/nested/file.txt").c_str(), nullptr) != FALSE,
+        "create existing hard-linked collision");
+    std::ofstream(root / L"collision/top.txt") << "keep-top";
+    SetFileAttributesW((root / L"collision/top.txt").c_str(), FILE_ATTRIBUTE_READONLY);
+    updates.clear();
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"collision").wstring(), {}, nullptr,
+        [&](const auto& p) { updates.push_back(p); });
+    Check(result.outcome == ArchiveOutcome::Success && outside_unchanged() &&
+        read(root / L"collision/nested/file.txt") == "outside-original" && read(root / L"collision/top.txt") == "keep-top" &&
+        updates.back().total_bytes == 0, "preflight excludes existing files including readonly and hard-linked collisions from extraction and byte totals");
+    SetFileAttributesW((root / L"collision/top.txt").c_str(), FILE_ATTRIBUTE_NORMAL);
+
     bool late_collision = false;
-    const auto collision = ExtractArchiveForTest(archive.wstring(), (root / L"collision").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
-            if (point == ArchivePublicationPoint::BeforePublish) {
-                std::ofstream(fs::path(destination)) << "late-collision";
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"late").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring& destination, const std::wstring&) {
+            if (point == ArchiveExtractionPoint::BeforeExtract) {
+                std::ofstream(fs::path(destination) / L"nested/file.txt") << "late-collision";
                 late_collision = true;
             }
         });
-    Check(late_collision && collision.outcome == ArchiveOutcome::Success &&
-        read(root / L"collision/nested/file.txt") == "late-collision", "handle publication preserves a late destination collision");
-    fs::create_directories(root / L"hard-collision/nested");
-    Check(CreateHardLinkW((root / L"hard-collision/nested/file.txt").c_str(),
-        (root / L"outside/nested/file.txt").c_str(), nullptr) != FALSE, "create hard-linked destination collision");
-    const auto hard_collision = ExtractArchiveForTest(archive.wstring(), (root / L"hard-collision").wstring(), {});
-    Check(hard_collision.outcome == ArchiveOutcome::Success && outside_unchanged() &&
-        read(root / L"hard-collision/nested/file.txt") == "outside-original",
-        "existing hard-linked destination stays a skipped collision");
-    const auto copied = ExtractArchiveForTest(archive.wstring(), (root / L"copied").wstring(), {}, nullptr, true);
-    Check(copied.outcome == ArchiveOutcome::Success && read(root / L"copied/nested/file.txt") == payload,
-        "owned copy fallback publishes complete data without a path move");
-    bool copy_collision = false;
-    const auto copied_collision = ExtractArchiveForTest(archive.wstring(), (root / L"copy-collision").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring& destination, const std::wstring&) {
-            if (point == ArchivePublicationPoint::CopyProgress && !copy_collision) {
-                std::ofstream(fs::path(destination)) << "copy-collision";
-                copy_collision = true;
+    Check(late_collision && result.outcome == ArchiveOutcome::Success &&
+        read(root / L"late/nested/file.txt") == "late-collision", "7-Zip skip mode preserves a collision created after preflight");
+
+    Check(Junction(root / L"linked/nested", root / L"outside"), "create linked destination subtree");
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"linked").wstring(), {});
+    Check(result.outcome == ArchiveOutcome::Failed && outside_unchanged() && !fs::exists(root / L"linked/top.txt"),
+        "linked destination subtree rejects the whole plan before any file is extracted");
+    fs::remove(root / L"linked/nested");
+
+    std::atomic_bool cancel = false;
+    bool cancellation_point = false;
+    updates.clear();
+    result = ExtractArchiveForTest(archive.wstring(), (root / L"cancel").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring&, const std::wstring&) {
+            if (point == ArchiveExtractionPoint::ProcessProgress && !cancellation_point) {
+                cancellation_point = true;
+                cancel = true;
             }
-        }, nullptr, true);
-    Check(copy_collision && copied_collision.outcome == ArchiveOutcome::Success &&
-        read(root / L"copy-collision/nested/file.txt") == "copy-collision" &&
-        std::distance(fs::directory_iterator(root / L"copy-collision/nested"), fs::directory_iterator{}) == 1,
-        "owned copy fallback preserves a late collision and disposes its temporary file");
-    std::atomic_bool cancelled{false};
-    bool copy_started = false;
-    const auto cancelled_copy = ExtractArchiveForTest(archive.wstring(), (root / L"cancel-copy").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring&, const std::wstring&) {
-            if (point == ArchivePublicationPoint::CopyProgress) { copy_started = true; cancelled = true; }
-        }, &cancelled, true);
-    Check(copy_started && cancelled_copy.outcome == ArchiveOutcome::Cancelled &&
-        fs::is_empty(root / L"cancel-copy/nested") && fs::is_empty(root / L"temporary"),
-        "cancelled copy fallback leaves no published or temporary file");
-    cancelled = false;
-    bool cleanup_link = false;
-    fs::path cleanup_stage;
-    const auto cancelled_cleanup = ExtractArchiveForTest(archive.wstring(), (root / L"cancel-cleanup").wstring(),
-        [&](ArchivePublicationPoint point, const std::wstring&, const std::wstring& source) {
-            if (point != ArchivePublicationPoint::BeforePublish) return;
-            cleanup_stage = fs::path(source).parent_path().parent_path().parent_path();
-            cleanup_link = Junction(cleanup_stage / L"cleanup-link", root / L"outside");
-            cancelled = true;
-        }, &cancelled);
-    Check(cleanup_link && cancelled_cleanup.outcome == ArchiveOutcome::Cancelled && outside_unchanged() &&
-        !fs::exists(cleanup_stage), "cancelled stage cleanup deletes a junction leaf without traversing outside");
-    if (failures) std::wcout << L"Publication fixtures retained at " << root.wstring() << L'\n';
-    else { std::error_code ec; fs::remove_all(root, ec); }
+        }, &cancel, [&](const auto& p) { updates.push_back(p); });
+    Check(cancellation_point && result.outcome == ArchiveOutcome::Cancelled &&
+        std::none_of(updates.begin(), updates.end(), [](const auto& p) { return p.phase == ArchivePhase::Completed; }) &&
+        fs::is_empty(root / L"temporary"), "cancellation stops direct extraction and cleans its list without claiming completion");
+
+    const auto damaged = root / L"damaged.zip";
+    fs::copy_file(archive, damaged);
+    {
+        std::fstream stream(damaged, std::ios::binary | std::ios::in | std::ios::out);
+        const auto bytes = read(damaged);
+        const auto data = bytes.find(std::string(64, 'p'));
+        Check(data != std::string::npos, "locate stored payload without damaging archive metadata");
+        if (data != std::string::npos) {
+            stream.seekp(static_cast<std::streamoff>(data));
+            stream.put(static_cast<char>(bytes[data] ^ 1));
+        }
+    }
+    updates.clear();
+    const auto listing = ListArchive(damaged.wstring());
+    result = ExtractArchive(damaged.wstring(), (root / L"failure").wstring(), {}, L"", nullptr,
+        [&](const auto& p) { updates.push_back(p); });
+    Check(listing.outcome == ArchiveOutcome::Success && result.outcome == ArchiveOutcome::Failed &&
+        result.exit_code == 2u && !result.error.empty() &&
+        std::none_of(updates.begin(), updates.end(), [](const auto& p) { return p.phase == ArchivePhase::Completed; }) &&
+        fs::is_empty(root / L"temporary"), "payload CRC failure stays a failure even after progress reaches 100 and leaves no temporary payload");
+
+    SetEnvironmentVariableW(L"TMP", (root / L"missing-temp").c_str());
+    result = ExtractArchive(archive.wstring(), (root / L"no-temp").wstring(), {L"top.txt"}, L"");
+    Check(result.outcome == ArchiveOutcome::Success && read(root / L"no-temp/top.txt") == "top-data" &&
+        !fs::exists(root / L"missing-temp"), "short selections use in-memory arguments and work without a temporary directory");
+    SetEnvironmentVariableW(L"TMP", (root / L"temporary").c_str());
+
+    fs::create_directories(root / L"many-source/many");
+    for (int i = 0; i < 700; ++i)
+        std::ofstream(root / L"many-source/many" / (std::wstring(64, L'x') + std::to_wstring(i) + L".txt")) << "list-data";
+    const auto many_archive = root / L"many.zip";
+    Check(Pack(many_archive, root / L"many-source", L""), "pack a selection longer than the Windows command line limit");
+    bool fallback_seen = false, locked = false;
+    result = ExtractArchiveForTest(many_archive.wstring(), (root / L"many").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring&, const std::wstring& selection) {
+            if (point != ArchiveExtractionPoint::BeforeExtract) return;
+            fallback_seen = !selection.empty();
+            const HANDLE overwrite = CreateFileW(selection.c_str(), GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+            const DWORD overwrite_error = GetLastError();
+            if (overwrite != INVALID_HANDLE_VALUE) CloseHandle(overwrite);
+            locked = overwrite == INVALID_HANDLE_VALUE && overwrite_error == ERROR_SHARING_VIOLATION &&
+                !MoveFileExW(selection.c_str(), (root / L"replaced-list.txt").c_str(), 0) && !DeleteFileW(selection.c_str());
+        }, nullptr, {}, {L"many/"});
+    if (result.outcome != ArchiveOutcome::Success)
+        std::cout << "[DIAG] long selection error=" << DiagnosticUtf8(result.error) << '\n';
+    Check(result.outcome == ArchiveOutcome::Success && fallback_seen && locked && fs::is_empty(root / L"temporary") &&
+        std::distance(fs::directory_iterator(root / L"many/many"), fs::directory_iterator{}) == 700,
+        "oversized selections use a locked private list that cannot be overwritten, renamed or deleted during extraction");
+
+    bool list_edited = false, extraction_started = false;
+    result = ExtractArchiveForTest(many_archive.wstring(), (root / L"edited-list").wstring(),
+        [&](ArchiveExtractionPoint point, const std::wstring&, const std::wstring& selection) {
+            if (point == ArchiveExtractionPoint::SelectionWritten) {
+                std::fstream list(fs::path(selection), std::ios::binary | std::ios::in | std::ios::out);
+                list.put('z');
+                list.flush();
+                list_edited = list.good();
+            }
+            if (point == ArchiveExtractionPoint::BeforeExtract) extraction_started = true;
+        }, nullptr, {}, {L"many/"});
+    Check(list_edited && !extraction_started && result.outcome == ArchiveOutcome::Failed && !result.error.empty() &&
+        fs::is_empty(root / L"edited-list/many") && fs::is_empty(root / L"temporary"),
+        "same-size list edits during handle transition are rejected before extraction");
+
+    std::array<ArchiveOperationResult, 2> concurrent_results;
+    std::array<std::wstring, 2> concurrent_lists;
+    std::array<std::thread, 2> concurrent_workers;
+    for (size_t i = 0; i < concurrent_workers.size(); ++i) {
+        concurrent_workers[i] = std::thread([&, i] {
+            concurrent_results[i] = ExtractArchiveForTest(many_archive.wstring(), (root / (L"concurrent-" + std::to_wstring(i))).wstring(),
+                [&](ArchiveExtractionPoint point, const std::wstring&, const std::wstring& selection) {
+                    if (point == ArchiveExtractionPoint::BeforeExtract) { concurrent_lists[i] = selection; Sleep(50); }
+                }, nullptr, {}, {L"many/"});
+        });
+    }
+    for (auto& worker : concurrent_workers) worker.join();
+    Check(concurrent_results[0].outcome == ArchiveOutcome::Success && concurrent_results[1].outcome == ArchiveOutcome::Success &&
+        !concurrent_lists[0].empty() && !concurrent_lists[1].empty() && concurrent_lists[0] != concurrent_lists[1] &&
+        fs::is_empty(root / L"temporary"), "concurrent oversized selections use separate list files and clean only their own directories");
+
+    SetEnvironmentVariableW(L"TMP", (root / L"missing-temp").c_str());
+    updates.clear();
+    result = ExtractArchive(many_archive.wstring(), (root / L"list-failure").wstring(), {L"many/"}, L"", nullptr,
+        [&](const auto& p) { updates.push_back(p); });
+    Check(result.outcome == ArchiveOutcome::Failed && !result.error.empty() &&
+        std::none_of(updates.begin(), updates.end(), [](const auto& p) { return p.phase == ArchivePhase::Completed; }) &&
+        fs::is_empty(root / L"list-failure/many"), "unavailable list storage fails explicitly without launching extraction or claiming success");
+    SetEnvironmentVariableW(L"TMP", (root / L"temporary").c_str());
+    if (!failures) { std::error_code ec; fs::remove_all(root, ec); }
+    else std::wcout << L"Direct extraction fixtures retained at " << root.wstring() << L'\n';
 }
 void ProcessTests() {
     wchar_t module[32768]{};
@@ -408,6 +711,9 @@ void OutcomeTests() {
     const auto unsafe = ParseArchiveListingForTest(L"Path = ../outside.txt\nEncrypted = -\n", 0);
     Check(unsafe.outcome == ArchiveOutcome::Failed && unsafe.exit_code == 0u && unsafe.entries.empty() && !unsafe.error.empty(),
         "adapter rejection stays failed even when the process exit is zero");
+    const auto deletion = ParseArchiveListingForTest(L"Path = existing-folder\nFolder = +\nAnti = +\nEncrypted = -\n", 0);
+    Check(deletion.outcome == ArchiveOutcome::Failed && deletion.entries.empty(),
+        "7-Zip deletion records are rejected before direct target mutation");
 }
 
 void RecoveryTests() {
@@ -486,11 +792,24 @@ void RecoveryTests() {
 }
 #endif
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--retry-recovery-only") {
+        RetryIntegrityAudit();
+        RetryOwnershipTests();
+        return failures ? 1 : 0;
+    }
     std::cout << std::unitbuf;
     if (argc == 2 && std::wstring(argv[1]) == L"--password-only") return PasswordTests();
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
-    if (argc == 2 && std::wstring(argv[1]) == L"--publish-only") {
-        PublicationTests();
+    if (argc == 2 && std::wstring(argv[1]) == L"--retry-integrity-only") {
+        RetryIntegrityAudit();
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--progress-only") {
+        ProgressTests();
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--direct-only") {
+        DirectExtractionTests();
         return failures ? 1 : 0;
     }
     if (argc >= 2 && std::wstring(argv[1]) == L"--recovery-only") {

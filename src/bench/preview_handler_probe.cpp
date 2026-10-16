@@ -12,6 +12,8 @@
 namespace pulse::ui {
 void ResetPreviewHandlerOpenAttemptsForTest();
 uint32_t PreviewHandlerOpenAttemptsForTest();
+uint32_t PreviewHandlerAssociationLookupsForTest();
+bool ResolvePreviewAssociationForTest(const std::wstring& path);
 bool PreviewHandlerCanActivateIsolatedForTest(const std::wstring& path);
 void ResetSlowPreviewProvidersForTest();
 bool PreviewProviderCoolingDownForTest(const std::wstring& path);
@@ -140,6 +142,25 @@ bool Lifecycle(HWND owner, bool permanent) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--association-cache-test") == 0) {
+        using namespace pulse::ui;
+        const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(init)) return 2;
+        const std::wstring path = L"fixture.pulse-audit-20261016-no-handler";
+        const auto before = PreviewHandlerAssociationLookupsForTest();
+        PreviewHandlerHost host;
+        const bool provisional = PreviewHandlerHost::CanHost(path) &&
+            PreviewHandlerHost::CanHost(path) && host.CanHostPath(path);
+        const bool deferred = PreviewHandlerAssociationLookupsForTest() == before;
+        const bool resolved = ResolvePreviewAssociationForTest(path);
+        const bool cache_matches = PreviewHandlerHost::CanHost(path) == resolved &&
+            host.CanHostPath(path) == resolved;
+        const bool once = PreviewHandlerAssociationLookupsForTest() == before + 1;
+        wprintf(L"[%s] cold eligibility defers COM; resolved eligibility reuses cache\n",
+            provisional && deferred && cache_matches && once ? L"PASS" : L"FAIL");
+        CoUninitialize();
+        return provisional && deferred && cache_matches && once ? 0 : 1;
+    }
     if (argc < 2 || ((wcscmp(argv[1], L"--selftest") == 0 ||
                       wcscmp(argv[1], L"--isolated-test") == 0) && argc < 3)) {
         wprintf(L"usage: pulse_preview_handler_probe.exe "

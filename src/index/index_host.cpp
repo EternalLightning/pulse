@@ -12,7 +12,9 @@
 #include "index_engine.h"
 #include "search_trace.h"
 #include "index_service_start.h"
+#include "index_service_reload.h"
 #include "index_config.h"
+#include "index_machine_config_actions.h"
 #include "index_caller_visibility.h"
 #include "index_request_limits.h"
 #include "index_raw_storage_security.h"
@@ -314,13 +316,14 @@ std::vector<uint8_t> SearchPayload(const SearchResult& sr) {
 std::vector<uint8_t> VolumesPayload(Client& client) {
     PayloadWriter w;
     IndexConfig config;
+    bool config_loaded = true;
     if (g.as_service) {
-        LoadMachineConfig(config, nullptr);
+        config_loaded = LoadMachineConfig(config, nullptr);
         CallerVisibility visibility(client.caller ? client.caller->get() : nullptr, 2000, true);
         std::erase_if(config.excluded_paths, [&](const auto& path) { return !visibility.Visible(path); });
         if (!visibility.ValidateDirectories()) config.excluded_paths.clear();
     }
-    const auto volumes = g.engine.Volumes();
+    const auto volumes = config_loaded ? g.engine.Volumes() : std::vector<VolumeInfo>{};
     w.PutU32(g.as_service ? 1u : 0u);
     w.PutString(DataDir());
     w.PutU32(static_cast<uint32_t>(volumes.size()));
@@ -1004,9 +1007,10 @@ int InstallService() {
     // Repair privileged ProgramData roots; raw metadata is never AU-readable.
     (void)MachineDataRoot();
     (void)MachineIndexRoot();
-    IndexConfig config;
-    LoadMachineConfig(config, nullptr);
-    SaveMachineConfig(config, nullptr);
+    const DWORD configuration_error = PrepareMachineConfiguration(
+        [](IndexConfig& config) { return LoadMachineConfig(config, nullptr); },
+        [](const IndexConfig& config) { return SaveMachineConfig(config, nullptr); });
+    if (configuration_error != ERROR_SUCCESS) return static_cast<int>(configuration_error);
     const std::wstring bin = L"\"" + SelfPath() + L"\" --service";
 
     DWORD last_err = ERROR_GEN_FAILURE;
@@ -1072,21 +1076,6 @@ bool IsElevated() {
     return elevated;
 }
 
-bool ReloadService() {
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (!scm) return false;
-    SC_HANDLE svc = OpenServiceW(scm, kServiceName, SERVICE_USER_DEFINED_CONTROL);
-    if (!svc) {
-        CloseServiceHandle(scm);
-        return false;
-    }
-    SERVICE_STATUS status{};
-    const bool ok = ControlService(svc, kServiceReloadControl, &status) != FALSE;
-    CloseServiceHandle(svc);
-    CloseServiceHandle(scm);
-    return ok;
-}
-
 int ConfigureCommand(const std::vector<std::wstring>& args) {
     if (!IsElevated()) return ERROR_ELEVATION_REQUIRED;
     struct ConfigurationLock {
@@ -1117,10 +1106,10 @@ int ConfigureCommand(const std::vector<std::wstring>& args) {
         if (!enabled && !disabled) return ERROR_INVALID_PARAMETER;
         ok = ConfigureExcludePath(args[2], enabled, &error);
     } else if (args.size() >= 2 && args[1] == L"--rebuild-index") {
-        ok = true;
+        return static_cast<int>(SubmitServiceReload(kServiceName, kServiceReloadControl));
     }
     if (!ok) return ERROR_INVALID_DATA;
-    ReloadService();
+    SubmitServiceReload(kServiceName, kServiceReloadControl);
     return 0;
 }
 

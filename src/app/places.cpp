@@ -146,7 +146,7 @@ bool PlacesCatalog::SaveTagFile(const std::vector<ColorTag>& snapshot) {
 }
 
 void PlacesCatalog::QueueTagSave() const {
-    if (!persist) return;
+    if (!persist || !tag_saves_enabled_) return;
     {
         std::lock_guard<std::mutex> lock(tag_save_mutex_);
         pending_tag_save_ = tags;
@@ -209,6 +209,7 @@ void PlacesCatalog::EnsureDefaults() {
 }
 
 bool PlacesCatalog::Load() {
+    tag_saves_enabled_ = true;
     workspaces.clear();
     tags.clear();
     networks.clear();
@@ -344,10 +345,52 @@ bool PlacesCatalog::Load() {
 
     bool tags_loaded = false;
     std::wstring tag_json;
-    if (ReadUtf8File(dir + L"\\tags.json", tag_json) && !tag_json.empty()) {
+    const auto tag_path = dir + L"\\tags.json";
+    const bool tags_read = ReadUtf8File(tag_path, tag_json);
+    bool tags_missing = false;
+    if (!tags_read) {
+        const DWORD attributes = GetFileAttributesW(tag_path.c_str());
+        const DWORD error = GetLastError();
+        tags_missing = attributes == INVALID_FILE_ATTRIBUTES &&
+            (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND);
+        tag_saves_enabled_ = tags_missing;
+    } else {
         std::vector<ColorTag> loaded;
         const pulse::json::Document tags_doc(tag_json, true);
-        for (const auto& block : ExtractObjectArray(tags_doc, L"tags")) {
+        const auto* array = tags_doc.Find(L"tags");
+        bool valid = tags_doc.Is(pulse::json::Kind::Object) && array &&
+            array->kind == pulse::json::Kind::Array;
+        std::unordered_set<std::wstring> ids;
+        if (valid) for (const auto& value : array->children) {
+            const auto* id = value.Find(L"id");
+            const auto* name = value.Find(L"name");
+            const auto* paths = value.Find(L"paths");
+            const auto* rgb = value.Find(L"rgb");
+            bool valid_rgb = true;
+            if (rgb) {
+                std::wstring_view number = rgb->text;
+                unsigned base = 10;
+                if (number.starts_with(L"0x") || number.starts_with(L"0X")) {
+                    number.remove_prefix(2);
+                    base = 16;
+                }
+                uint64_t parsed = 0;
+                valid_rgb = rgb->kind == pulse::json::Kind::Number &&
+                    pulse::json::ParseUnsigned(number, parsed, base) && parsed <= UINT32_MAX;
+            }
+            if (value.kind != pulse::json::Kind::Object || !id || !name ||
+                id->kind != pulse::json::Kind::String || name->kind != pulse::json::Kind::String ||
+                id->text.empty() || name->text.empty() || !ids.insert(id->text).second ||
+                !valid_rgb ||
+                (paths && (paths->kind != pulse::json::Kind::Array ||
+                    std::any_of(paths->children.begin(), paths->children.end(), [](const auto& path) {
+                        return path.kind != pulse::json::Kind::String;
+                    })))) {
+                valid = false;
+                break;
+            }
+        }
+        if (valid) for (const auto& block : ExtractObjectArray(tags_doc, L"tags")) {
             const pulse::json::Document block_doc(block, true);
             ColorTag tag;
             tag.id = pulse::json::ExtractString(block_doc, L"id");
@@ -356,17 +399,18 @@ bool PlacesCatalog::Load() {
             tag.paths = pulse::json::ExtractStringArray(block_doc, L"paths");
             if (!tag.id.empty() && !tag.name.empty()) loaded.push_back(std::move(tag));
         }
-        if (!loaded.empty()) {
+        if (valid) {
             tags = std::move(loaded);
             tags_loaded = true;
         }
+        tag_saves_enabled_ = valid;
     }
 
-    EnsureDefaults();
+    if (!tags_loaded) EnsureDefaults();
     RebuildTagIndex();
     RebuildStarIndex();
-    if (places_loaded && !tags_loaded) QueueTagSave();
-    return places_loaded || tags_loaded;
+    if (places_loaded && tags_missing) QueueTagSave();
+    return tag_saves_enabled_ && (places_loaded || tags_loaded);
 }
 
 bool ParsePulsePath(const std::wstring& path, std::wstring* kind, std::wstring* rest) {

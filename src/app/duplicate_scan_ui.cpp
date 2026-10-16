@@ -15,17 +15,15 @@ void PersistDuplicateScanPrefs(AppState& s) {
 }
 
 void RequestDuplicateVolumeCache(AppState& s, bool force) {
-    if (!s.hwnd || s.dup_volume_cache_pending) return;
+    if (!s.hwnd || !s.dup_volumes_mailbox || s.dup_volume_cache_pending) return;
     if (!force && s.dup_volume_cache_tick != 0 &&
         GetTickCount64() - s.dup_volume_cache_tick <= 2000)
         return;
     s.dup_volume_cache_pending = true;
-    HWND hwnd = s.hwnd;
-    std::thread([hwnd] {
+    const auto mailbox = s.dup_volumes_mailbox;
+    std::thread([mailbox] {
         index::IndexConfig config;
-        auto* payload = new std::vector<index::VolumeInfo>(index::EnumerateLocalVolumes(config));
-        if (!PostMessageW(hwnd, WM_DUP_VOLUMES, 0, reinterpret_cast<LPARAM>(payload)))
-            delete payload;
+        mailbox->Publish(index::EnumerateLocalVolumes(config));
     }).detach();
 }
 

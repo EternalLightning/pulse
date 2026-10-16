@@ -122,6 +122,20 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
     using namespace command_icons;
+    if (argc == 2 && wcscmp(argv[1], L"--high-contrast-only") == 0) {
+        const auto theme = MakeHighContrastTheme();
+        const auto matches = [](D2D1_COLOR_F actual, int system_color) {
+            const COLORREF expected = GetSysColor(system_color);
+            return std::abs(actual.r - GetRValue(expected) / 255.0f) < 0.0001f &&
+                std::abs(actual.g - GetGValue(expected) / 255.0f) < 0.0001f &&
+                std::abs(actual.b - GetBValue(expected) / 255.0f) < 0.0001f && actual.a == 1.0f;
+        };
+        Check(matches(theme.bg, COLOR_WINDOW), "high-contrast background uses system RGB channels");
+        Check(matches(theme.text, COLOR_WINDOWTEXT), "high-contrast text uses system RGB channels");
+        Check(matches(theme.fill_selected, COLOR_HIGHLIGHT), "high-contrast selection uses system RGB channels");
+        Check(matches(theme.stroke_card, COLOR_WINDOWFRAME), "high-contrast border uses system RGB channels");
+        return failures ? 1 : 0;
+    }
     Apartment apartment;
     Check(SUCCEEDED(apartment.result),"COM initialization");
     if (failures) return 1;

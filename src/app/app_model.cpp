@@ -155,6 +155,7 @@ fs::SnapshotPtr Tab::PrepareEntrySnapshot(fs::SnapshotPtr fresh,
 
 void Tab::SetSnapshot(fs::SnapshotPtr value) {
     snapshot = std::move(value);
+    selection_size_cache.revision = UINT64_MAX;
     view_cache_snapshot.reset();
     view_cache_places = nullptr;
     view_cache_places_revision = 0;
@@ -420,8 +421,9 @@ void Tab::SelectionSizeSummary(uint64_t* bytes, int* files, int* folders) const 
     auto& c = selection_size_cache;
     const int count = SelectedCount();
     const size_t entries = EntryCount();
+    const bool parent_is_drive_root = path::IsDriveRootPath(current_path) && !current_path.ends_with(L"/");
     if (c.revision != selection_revision || c.snapshot != snapshot.get() ||
-        c.entry_count != entries || c.selected_count != count) {
+        c.entry_count != entries || c.selected_count != count || c.parent_is_drive_root != parent_is_drive_root) {
         c.revision = selection_revision;
         c.snapshot = snapshot.get();
         c.entry_count = entries;
@@ -429,11 +431,16 @@ void Tab::SelectionSizeSummary(uint64_t* bytes, int* files, int* folders) const 
         c.bytes = 0;
         c.files = 0;
         c.folders = 0;
+        c.has_drive_root = false;
+        c.parent_is_drive_root = parent_is_drive_root;
         if (snapshot && !content_results) {
             const auto add = [&](int index) {
                 if (index < 0 || static_cast<size_t>(index) >= snapshot->size()) return;
                 const fs::DirEntry& entry = (*snapshot)[static_cast<size_t>(index)];
                 if (entry.change_record_only) return;
+                c.has_drive_root |= !entry.full_path.empty()
+                    ? path::IsDriveRootPath(entry.full_path)
+                    : entry.name.empty() && parent_is_drive_root;
                 if (entry.is_dir) ++c.folders;
                 else { ++c.files; c.bytes += entry.size; }
             };
@@ -447,6 +454,11 @@ void Tab::SelectionSizeSummary(uint64_t* bytes, int* files, int* folders) const 
     if (bytes) *bytes = c.bytes;
     if (files) *files = c.files;
     if (folders) *folders = c.folders;
+}
+
+bool Tab::SnapshotSelectionHasDriveRoot() const {
+    SelectionSizeSummary(nullptr, nullptr, nullptr);
+    return selection_size_cache.has_drive_root;
 }
 
 void Tab::RemapSelection(const std::vector<std::wstring>& names, const std::wstring& focus_name) {
@@ -888,18 +900,24 @@ StagingTray& StagingTray::operator=(const StagingTray& other) {
 }
 
 StagingTray::StagingTray(StagingTray&& other) : batches_(std::move(other.batches_)) {
+    ++other.availability_revision_;
+    other.metadata_queries_exhausted_ = other.batches_.empty();
     ResetMetadataTickets();
 }
 
 StagingTray& StagingTray::operator=(StagingTray&& other) {
     if (this != &other) {
         batches_ = std::move(other.batches_);
+        ++other.availability_revision_;
+        other.metadata_queries_exhausted_ = other.batches_.empty();
         ResetMetadataTickets();
     }
     return *this;
 }
 
 void StagingTray::ResetMetadataTickets() {
+    ++availability_revision_;
+    metadata_queries_exhausted_ = batches_.empty();
     for (auto& batch : batches_) {
         batch.total_size = 0;
         for (auto& item : batch.items) {
@@ -928,11 +946,18 @@ void StagingTray::Collect(const std::vector<std::wstring>& paths, bool move_inte
         if (!seen.insert(it.path).second) continue;
         batch.items.push_back(std::move(it));
     }
-    if (!batch.items.empty()) batches_.push_back(std::move(batch));
+    if (!batch.items.empty()) {
+        batches_.push_back(std::move(batch));
+        ++availability_revision_;
+        metadata_queries_exhausted_ = false;
+    }
 }
 
 void StagingTray::RemoveBatch(size_t idx) {
-    if (idx < batches_.size()) batches_.erase(batches_.begin() + idx);
+    if (idx < batches_.size()) {
+        batches_.erase(batches_.begin() + idx);
+        ++availability_revision_;
+    }
 }
 
 void StagingTray::RemoveItem(size_t batch_idx, size_t item_idx) {
@@ -941,14 +966,19 @@ void StagingTray::RemoveItem(size_t batch_idx, size_t item_idx) {
     if (item_idx < b.items.size()) {
         b.total_size -= std::min(b.total_size, b.items[item_idx].size);
         b.items.erase(b.items.begin() + item_idx);
+        ++availability_revision_;
     }
     if (b.items.empty()) batches_.erase(batches_.begin() + batch_idx);
 }
 
-void StagingTray::Clear() { batches_.clear(); }
+void StagingTray::Clear() {
+    if (!batches_.empty()) { batches_.clear(); ++availability_revision_; }
+    metadata_queries_exhausted_ = true;
+}
 
 std::vector<TrayMetadataRequest> StagingTray::BeginMetadataQueries(size_t limit) {
     std::vector<TrayMetadataRequest> requests;
+    if (metadata_queries_exhausted_) return requests;
     for (auto& batch : batches_) {
         for (auto& item : batch.items) {
             if (requests.size() >= limit) return requests;
@@ -957,6 +987,7 @@ std::vector<TrayMetadataRequest> StagingTray::BeginMetadataQueries(size_t limit)
             item.metadata_state = TrayMetadataState::Resolving;
         }
     }
+    metadata_queries_exhausted_ = true;
     return requests;
 }
 
@@ -967,13 +998,17 @@ void StagingTray::RetryMetadataQueries(const std::vector<TrayMetadataRequest>& r
     for (auto& batch : batches_)
         for (auto& item : batch.items)
             if (item.metadata_state == TrayMetadataState::Resolving &&
-                tickets.contains(item.metadata_ticket.get())) item.metadata_state = TrayMetadataState::Pending;
+                tickets.contains(item.metadata_ticket.get())) {
+                item.metadata_state = TrayMetadataState::Pending;
+                metadata_queries_exhausted_ = false;
+            }
 }
 
 bool StagingTray::ApplyMetadataResults(const std::vector<TrayMetadataResult>& results) {
     std::unordered_map<const TrayMetadataTicket*, const TrayMetadataResult*> facts;
     for (const auto& result : results)
         if (const auto ticket = result.request.ticket.lock()) facts.emplace(ticket.get(), &result);
+    if (facts.empty()) return false;
     bool changed = false;
     for (auto& batch : batches_) {
         for (auto& item : batch.items) {
@@ -985,7 +1020,9 @@ bool StagingTray::ApplyMetadataResults(const std::vector<TrayMetadataResult>& re
                 result.state != TrayMetadataState::Unavailable) continue;
             batch.total_size -= std::min(batch.total_size, item.size);
             item.metadata_state = result.state;
-            item.exists = result.state != TrayMetadataState::Missing;
+            const bool exists = result.state != TrayMetadataState::Missing;
+            if (item.exists != exists) ++availability_revision_;
+            item.exists = exists;
             item.attrs = result.state == TrayMetadataState::Ready ? result.attrs : 0;
             item.is_dir = (item.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
             item.size = result.state == TrayMetadataState::Ready && !item.is_dir ? result.size : 0;
@@ -1056,6 +1093,8 @@ bool StagingTray::FromJson(const std::wstring& in) {
         if (!batch.items.empty()) parsed.push_back(std::move(batch));
     }
     batches_ = std::move(parsed);
+    ++availability_revision_;
+    metadata_queries_exhausted_ = batches_.empty();
     return true;
 }
 
@@ -1383,15 +1422,18 @@ static bool WildcardMatch(const std::wstring& text, const std::wstring& pat) {
     return pi == pn;
 }
 
-bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle) {
-    if (needle.empty()) return true;
+static bool NameMatchesFoldedPattern(std::wstring_view name, const std::wstring& folded_pat,
+                                     bool wildcard) {
+    if (folded_pat.empty()) return true;
     const std::wstring folded_name = ToLowerCopy(std::wstring(name));
-    const std::wstring folded_pat = ToLowerCopy(std::wstring(needle));
-    if (folded_pat.find(L'*') != std::wstring::npos ||
-        folded_pat.find(L'?') != std::wstring::npos) {
-        return WildcardMatch(folded_name, folded_pat);
-    }
+    if (wildcard) return WildcardMatch(folded_name, folded_pat);
     return folded_name.find(folded_pat) != std::wstring::npos;
+}
+
+bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle) {
+    const std::wstring folded_pat = ToLowerCopy(std::wstring(needle));
+    return NameMatchesFoldedPattern(name, folded_pat,
+        folded_pat.find_first_of(L"*?") != std::wstring::npos);
 }
 
 static void ParseFilterText(const std::wstring& text, std::wstring& name_needle,
@@ -1434,8 +1476,9 @@ index::ContentResultStore::Filter ContentFilter(const std::wstring& text, const 
         if(TagMatchesNeedle(places.tags[id],static_cast<int>(id),needle))
             for(const auto& path:places.tags[id].paths) paths.insert(ToLowerCopy(path));
     }
-    return [name=std::move(name),has_tags=!tags.empty(),paths=std::move(paths)](const fs::DirEntry& entry) {
-        return NameMatchesPattern(entry.name,name) && (!has_tags || paths.contains(ToLowerCopy(entry.full_path)));
+    const bool wildcard = name.find_first_of(L"*?") != std::wstring::npos;
+    return [name=std::move(name),wildcard,has_tags=!tags.empty(),paths=std::move(paths)](const fs::DirEntry& entry) {
+        return NameMatchesFoldedPattern(entry.name,name,wildcard) && (!has_tags || paths.contains(ToLowerCopy(entry.full_path)));
     };
 }
 
@@ -1443,6 +1486,7 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
     out.clear();
     if (!tab.snapshot) return;
     const int n = static_cast<int>(tab.EntryCount());
+    if (n == 0) return;
     if(tab.content_results) { out.reserve(n); for(int i=0;i<n;++i) out.push_back(i); return; }
     if (tab.filter_text.empty() && tab.ShowsEveryEntry()) {
         out.reserve(static_cast<size_t>(n));
@@ -1454,27 +1498,50 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
     ParseFilterText(tab.filter_text, name_needle, tag_needles);
     if (name_needle.empty() && tag_needles.empty())
         name_needle = ToLowerCopy(tab.filter_text);
+    const bool wildcard = name_needle.find_first_of(L"*?") != std::wstring::npos;
+    std::vector<bool> matching_tags;
+    if (!tag_needles.empty()) {
+        if (!places) return;
+        // Tiny directories must not scan a much larger tag catalog up front.
+        if (places->tags.size() <= static_cast<size_t>(n)) {
+            matching_tags.resize(places->tags.size());
+            for (size_t id = 0; id < places->tags.size(); ++id) {
+                for (const auto& needle : tag_needles) {
+                    if (TagMatchesNeedle(places->tags[id], static_cast<int>(id), needle)) {
+                        matching_tags[id] = true;
+                        break;
+                    }
+                }
+            }
+            if (std::none_of(matching_tags.begin(), matching_tags.end(), [](bool match) { return match; })) return;
+        }
+    }
     out.reserve(static_cast<size_t>(n));
+    const fs::DirEntry empty_entry;
     for (int i = 0; i < n; ++i) {
-        const auto& e = tab.EntryAt(static_cast<size_t>(i));
         if (!tab.EntryVisible(i)) continue;
-        const bool name_ok = NameMatchesPattern(e.name, name_needle);
+        // Content-backed rows returned above; borrow immutable snapshot rows here.
+        const auto& e = static_cast<size_t>(i) < tab.snapshot->size()
+            ? (*tab.snapshot)[static_cast<size_t>(i)] : empty_entry;
+        if (!NameMatchesFoldedPattern(e.name, name_needle, wildcard)) continue;
         bool tag_ok = tag_needles.empty();
         if (!tag_ok && places) {
             const std::wstring full = EntryPathOf(tab, e);
-            const auto ids = places->TagsForPath(full);
-            for (int id : ids) {
-                if (id < 0 || id >= static_cast<int>(places->tags.size())) continue;
-                for (const auto& needle : tag_needles) {
-                    if (TagMatchesNeedle(places->tags[static_cast<size_t>(id)], id, needle)) {
+            if (const auto* ids = places->TagIndicesForPath(full)) {
+                for (int id : *ids) {
+                    if (id < 0 || static_cast<size_t>(id) >= places->tags.size()) continue;
+                    const bool matches = matching_tags.empty()
+                        ? std::any_of(tag_needles.begin(), tag_needles.end(), [&](const auto& needle) {
+                            return TagMatchesNeedle(places->tags[id], id, needle);
+                        }) : matching_tags[id];
+                    if (matches) {
                         tag_ok = true;
                         break;
                     }
                 }
-                if (tag_ok) break;
             }
         }
-        if (name_ok && tag_ok) out.push_back(i);
+        if (tag_ok) out.push_back(i);
     }
 }
 

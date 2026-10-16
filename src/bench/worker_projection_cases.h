@@ -179,6 +179,69 @@ inline int RunWorkerProjectionCases() {
             "rapid Project subscriptions keep the active producer alive and publish fresh facts instead of stale input");
         std::filesystem::remove(root / L"project-fresh.bin");
     }
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        std::mutex mutex;
+        std::condition_variable changed;
+        bool reached = false, release = false;
+        std::vector<WorkResult> results;
+        WorkerPool pool;
+        check(pool.Start([&](WorkResult result) {
+            if (!result.final) return;
+            std::lock_guard lock(mutex);
+            results.push_back(std::move(result));
+            changed.notify_all();
+        }), "running subscription reclamation pool starts");
+        WorkerCancellationTestProbe::SetFactsCheckpoint(pool, [&] {
+            std::unique_lock lock(mutex);
+            if (reached) return;
+            reached = true;
+            changed.notify_all();
+            changed.wait(lock, [&] { return release; });
+        });
+        auto cached = std::make_shared<std::vector<fs::DirEntry>>();
+        cached->push_back(fs::DirEntry{L"obsolete running subscription cache"});
+        std::weak_ptr<const std::vector<fs::DirEntry>> retained = cached;
+        const auto first = pool.Refresh(root.wstring(), ui::SortColumn::Name, ui::SortDirection::Asc,
+                                        FolderSortMode::FoldersFirst, cached);
+        cached.reset();
+        {
+            std::unique_lock lock(mutex);
+            check(changed.wait_for(lock, std::chrono::seconds(5), [&] { return reached; }),
+                  "running producer pauses after provisional cache use and fresh enumeration");
+        }
+        check(!retained.expired(), "current running subscription still owns its cached facts");
+        uint64_t other = 0, replacement = 0;
+        if (scenario != 0)
+            other = pool.Project(root.wstring(), shared_facts, ui::SortColumn::Name, ui::SortDirection::Desc);
+        if (scenario == 2)
+            replacement = pool.Refresh(root.wstring(), ui::SortColumn::Name, ui::SortDirection::Asc);
+        else pool.Cancel(root.wstring(), first);
+        check(retained.expired(), scenario == 2 ?
+              "refresh replacement releases obsolete running subscriber cache before producer resumes" :
+              "cancellation releases obsolete running subscriber cache before producer resumes");
+        {
+            std::lock_guard lock(mutex);
+            release = true;
+        }
+        changed.notify_all();
+        const size_t expected = scenario == 0 ? 0 : scenario == 1 ? 1 : 2;
+        if (expected) {
+            std::unique_lock lock(mutex);
+            check(changed.wait_for(lock, std::chrono::seconds(5), [&] { return results.size() >= expected; }),
+                  "remaining running subscriptions finish after obsolete cache reclamation");
+        }
+        pool.Stop();
+        bool correct = first && results.size() == expected;
+        for (const auto& result : results)
+            correct = correct && (result.generation == other || result.generation == replacement) &&
+                result.generation != first && !result.error && !result.cancelled && result.snapshot &&
+                result.snapshot->size() == count && result.facts != shared_facts;
+        if (scenario != 0)
+            correct = correct && std::count_if(results.begin(), results.end(), [&](const WorkResult& result) {
+                return result.generation == other;
+            }) == 1;
+        check(correct, "running cache reclamation preserves valid Project subscribers and suppresses obsolete generations");
+    }
     {
         std::mutex mutex;
         std::condition_variable changed;

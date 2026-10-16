@@ -189,6 +189,66 @@ ShellLaunchRequest LaunchRequest() {
 
 namespace pulse::ipc {
 struct ShellLaunchClientTestProbe {
+    static void EarlyStartupExit() {
+        ShellClient client;
+        std::wstring executable(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, executable.data(),
+            static_cast<DWORD>(executable.size()));
+        Check(length != 0 && length < executable.size(), "locate isolated startup-exit child fixture");
+        if (!length || length >= executable.size()) return;
+        executable.resize(length);
+        std::wstring command = L"\"" + executable + L"\" --exit-before-pipe";
+        STARTUPINFOW startup{sizeof(startup)};
+        PROCESS_INFORMATION process{};
+        const bool started = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr,
+            FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process) != FALSE;
+        Check(started, "start test-owned child that exits without creating a Shell pipe");
+        if (!started) return;
+        client.child_ = process;
+        client.child_started_ = true;
+        client.running_.store(true);
+        client.last_spawn_try_ = GetTickCount64();
+        const bool exited = WaitForSingleObject(process.hProcess, kDeadlineMs) == WAIT_OBJECT_0;
+        Check(exited, "test-owned startup child exits within deadline");
+        if (!exited) { client.Stop(); return; }
+        bool connected = false;
+        {
+            std::lock_guard lock(client.send_mutex_);
+            connected = client.EnsureConnected();
+        }
+        Check(!connected && !client.child_started_ && !client.child_.hProcess &&
+            !client.child_.hThread && !client.CurrentConnection(),
+            "pre-pipe child exit retires startup state so later requests can spawn again");
+        {
+            std::lock_guard lock(client.send_mutex_);
+            client.last_spawn_try_ = GetTickCount64();
+            connected = client.EnsureConnected();
+        }
+        Check(!connected && !client.child_started_,
+            "fresh startup attempts retain spawn backoff after early exit");
+        client.Stop();
+    }
+    static void FailureMessageSnapshot() {
+        ShellClient client;
+        const std::wstring failed_attempt = L"connection attempt failed before callback dispatch";
+        client.last_error_ = failed_attempt;
+        AddPending(client, REQ_NEW_FILE, 81);
+        AddPending(client, REQ_PING, 82);
+        std::wstring reported;
+        unsigned completed = 0;
+        client.cb_.done = [&](uint32_t id, uint32_t, bool, std::wstring error) {
+            ++completed;
+            if (id == 81) {
+                std::lock_guard lock(client.send_mutex_);
+                client.last_error_ = L"a later connection attempt replaced the diagnostic";
+            } else if (id == 82) reported = std::move(error);
+        };
+        // Fail the queued retry without creating a production helper. The first
+        // callback replaces connection state before the retry callback is fired.
+        client.HandleDisconnect();
+        Check(completed == 2 && reported == failed_attempt && Empty(client),
+            "failure callbacks run unlocked and keep their connection attempt's error snapshot");
+    }
     static void Backpressure() {
         for (unsigned action = 0; action != 3; ++action) {
             Recorder recorder;
@@ -480,12 +540,20 @@ struct ShellLaunchClientTestProbe {
 
 int main(int argc, char** argv) {
     std::cout << std::unitbuf;
+    if (argc == 2 && std::string(argv[1]) == "--exit-before-pipe") return 7;
+    if (argc == 2 && std::string(argv[1]) == "--startup-recovery") {
+        pulse::ipc::ShellLaunchClientTestProbe::EarlyStartupExit();
+        pulse::ipc::ShellLaunchClientTestProbe::FailureMessageSnapshot();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--transport-liveness") {
         pulse::ipc::ShellLaunchClientTestProbe::Backpressure();
         pulse::ipc::ShellLaunchClientTestProbe::FrameLiveness();
         pulse::ipc::ShellLaunchClientTestProbe::RetiredStream();
         return failures ? 1 : 0;
     }
+    pulse::ipc::ShellLaunchClientTestProbe::EarlyStartupExit();
+    pulse::ipc::ShellLaunchClientTestProbe::FailureMessageSnapshot();
     pulse::ipc::ShellLaunchClientTestProbe::FailedSubmission();
     pulse::ipc::ShellLaunchClientTestProbe::DisconnectPolicy();
     pulse::ipc::ShellLaunchClientTestProbe::TransportRouting();

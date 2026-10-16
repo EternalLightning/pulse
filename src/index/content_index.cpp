@@ -344,7 +344,6 @@ struct ContentIndex::Impl {
     HANDLE writer_mutex = nullptr;
     HANDLE pause_event = nullptr;
     HANDLE rebuild_event = nullptr;
-    std::array<HANDLE, 4> query_slots{};
     bool owns_writer = false;
     std::vector<uint8_t> last_status_payload;
     mutable std::mutex mu;
@@ -398,17 +397,13 @@ struct ContentIndex::Impl {
     std::map<std::wstring, Retry> retries;
     const ContentAgentMode mode;
     const bool read_only;
-    explicit Impl(std::wstring value, ContentAgentMode selected) : path(value.empty() ? DatabasePath() : std::move(value)), mode(selected), read_only(selected != ContentAgentMode::LegacyWriter) {
+    const ContentIndexScanHooks scan_hooks;
+    explicit Impl(std::wstring value, ContentAgentMode selected, ContentIndexScanHooks hooks = {}) : path(value.empty() ? DatabasePath() : std::move(value)), mode(selected), read_only(selected != ContentAgentMode::LegacyWriter), scan_hooks(std::move(hooks)) {
         writer_mutex = NamedMutex(path, L"writer");
         pause_event = NamedEvent(path, L"paused", true);
         rebuild_event = NamedEvent(path, L"rebuild", false);
-        for (size_t i = 0; i < query_slots.size(); ++i) query_slots[i] = NamedMutex(path, (L"reader" + std::to_wstring(i)).c_str());
         if (mode == ContentAgentMode::Instant) {
-            if (!ReadConfigFile(path, config)) {
-                sqlite3* db = nullptr;
-                if (Open(path, &db, true)) config = ReadConfig(db);
-                if (db) sqlite3_close(db);
-            }
+            if (!LoadContentIndexConfig(path, config)) Error(GetLastError());
         } else {
             status.pending_files = 1; worker = std::thread([this] { Run(); });
         }
@@ -420,19 +415,9 @@ struct ContentIndex::Impl {
         if (feed_thread.joinable()) feed_thread.join();
         CloseHandle(feed_stop);
         watches.clear();
-        for (HANDLE h : query_slots) if (h) CloseHandle(h);
         if (writer_mutex) CloseHandle(writer_mutex);
         if (pause_event) CloseHandle(pause_event);
         if (rebuild_event) CloseHandle(rebuild_event);
-    }
-    bool OtherQueryActive() const {
-        for (HANDLE h : query_slots) {
-            if (!h) continue;
-            const DWORD wait = WaitForSingleObject(h, 0);
-            if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) return true;
-            ReleaseMutex(h);
-        }
-        return false;
     }
     bool ContinueIndexing() {
         std::unique_lock lock(mu);
@@ -784,6 +769,7 @@ struct ContentIndex::Impl {
             HANDLE find = INVALID_HANDLE_VALUE;
             WIN32_FIND_DATAW data{};
             bool complete = true, available = false, finished = false;
+            DWORD error = ERROR_SUCCESS;
             ~Cursor() { if (find != INVALID_HANDLE_VALUE) FindClose(find); }
         };
         Exec(db, "CREATE TABLE IF NOT EXISTS scan_queue(root TEXT,path TEXT PRIMARY KEY,epoch INTEGER)");
@@ -840,11 +826,11 @@ struct ContentIndex::Impl {
                     if (cursor.find == INVALID_HANDLE_VALUE) {
                         if (cursor.directories.empty()) { cursor.finished = true; break; }
                         cursor.directory = std::move(cursor.directories.front()); cursor.directories.pop_front();
-                        cursor.find = FindFirstFileExW((LongPath(cursor.directory) + L"\\*").c_str(), FindExInfoBasic,
+                        cursor.find = scan_hooks.enumeration.first ? scan_hooks.enumeration.first(cursor.directory, cursor.data) : FindFirstFileExW((LongPath(cursor.directory) + L"\\*").c_str(), FindExInfoBasic,
                             &cursor.data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
                         if (cursor.find == INVALID_HANDLE_VALUE) {
                             const auto error = GetLastError();
-                            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) { cursor.complete = false; Error(error); }
+                            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES) { cursor.complete = false; cursor.error = error; Error(error); }
                         }
                     }
                     if (cursor.find != INVALID_HANDLE_VALUE) {
@@ -856,8 +842,9 @@ struct ContentIndex::Impl {
                                     !text::IsOfflinePlaceholder(cursor.data.dwFileAttributes) && !ExcludedContentPath(c,file)) enqueue(root,cursor,file);
                             } else IndexFile(db,root,file,cursor.data,c);
                         }
-                        if (FindNextFileW(cursor.find,&cursor.data)) continue;
-                        if (GetLastError() != ERROR_NO_MORE_FILES) { cursor.complete = false; Error(GetLastError()); }
+                        if (scan_hooks.enumeration.next ? scan_hooks.enumeration.next(cursor.find, cursor.data) : FindNextFileW(cursor.find,&cursor.data)) continue;
+                        const DWORD error = GetLastError();
+                        if (error != ERROR_NO_MORE_FILES) { cursor.complete = false; cursor.error = error; Error(error); }
                         FindClose(cursor.find); cursor.find = INVALID_HANDLE_VALUE;
                     }
                     // Persist the frontier only after this directory's reads have
@@ -880,7 +867,10 @@ struct ContentIndex::Impl {
             }
             std::lock_guard lock(mu); auto& state = status.root_status[i];
             state.indexing = false;
-            if (state.available) state.state = cursor.finished ? ContentIndexRootStatus::State::Ready : ContentIndexRootStatus::State::Waiting;
+            if (cursor.error) state.error = cursor.error;
+            if (state.available) state.state = !cursor.complete
+                ? (cursor.error == ERROR_ACCESS_DENIED ? ContentIndexRootStatus::State::AccessFailed : ContentIndexRootStatus::State::Recovering)
+                : cursor.finished ? ContentIndexRootStatus::State::Ready : ContentIndexRootStatus::State::Waiting;
         }
         UpdateCounts(db);
         {
@@ -945,6 +935,7 @@ struct ContentIndex::Impl {
         IndexFeedConnection source(feed_stop);
         std::vector<uint64_t> cursors(c.roots.size());
         std::vector<bool> completed(c.roots.size());
+        std::vector<DWORD> scan_errors(c.roots.size());
         std::vector<FileFeedPage> pages(c.roots.size());
         std::vector<size_t> offsets(c.roots.size());
         std::vector<bool> loaded(c.roots.size());
@@ -976,7 +967,15 @@ struct ContentIndex::Impl {
                     ProcessChanges(db,c);
                     if(ExcludedContentPath(c,record.path)) {++offsets[i];advanced=true;continue;}
                     WIN32_FILE_ATTRIBUTE_DATA attributes{};
-                    if(!GetFileAttributesExW(LongPath(record.path).c_str(),GetFileExInfoStandard,&attributes)) {++offsets[i];advanced=true;continue;}
+                    const bool attributes_ok = scan_hooks.attributes ? scan_hooks.attributes(record.path, attributes)
+                        : GetFileAttributesExW(LongPath(record.path).c_str(),GetFileExInfoStandard,&attributes) != FALSE;
+                    if (!attributes_ok) {
+                        const DWORD error = GetLastError();
+                        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                            scan_errors[i] = error; Error(error);
+                        }
+                        ++offsets[i]; advanced=true; continue;
+                    }
                     WIN32_FIND_DATAW data{};data.dwFileAttributes=attributes.dwFileAttributes;data.ftLastWriteTime=attributes.ftLastWriteTime;
                     data.nFileSizeLow=attributes.nFileSizeLow;data.nFileSizeHigh=attributes.nFileSizeHigh;
                     const auto dot = record.path.find_last_of(L'.');
@@ -1006,18 +1005,19 @@ struct ContentIndex::Impl {
         while(outstanding) {if(ContinueIndexing()) ProcessChanges(db,c);Drain(db,true);PublishScanProgress(db);}
         for(size_t i=0;i<c.roots.size();++i) {
             const auto& root=c.roots[i];const bool available=Accessible(root.path);
-            const DWORD error=available ? 0 : GetLastError();
+            const DWORD error=available ? scan_errors[i] : GetLastError();
             Statement state(db,"UPDATE roots SET available=?2 WHERE path=?1");state.Text(1,root.path);state.Int(2,available);state.Done();
             // The source snapshot is authoritative only after the corresponding
             // change stream remains continuous through the last page.
             bool continuous=false;{std::lock_guard lock(mu);continuous=feed_ready && feed_epoch==source_epoch;}
             bool pending_changes=false;{std::lock_guard lock(mu);pending_changes=!changes.empty();}
-            if(completed[i] && available && continuous && !pending_changes && ContinueIndexing()) {
+            if(completed[i] && available && !scan_errors[i] && continuous && !pending_changes && ContinueIndexing()) {
                 Statement prune(db,"DELETE FROM documents WHERE root=?1 AND epoch<>?2");prune.Text(1,root.path);prune.Int(2,epoch);
                 if(!prune.Done()) Error(ERROR_WRITE_FAULT);else if(sqlite3_changes(db)) Changed();
             }
             std::lock_guard lock(mu);auto& status_root=status.root_status[i];status_root.available=available;status_root.error=error;status_root.indexing=false;
             status_root.state=!available ? (error==ERROR_ACCESS_DENIED ? ContentIndexRootStatus::State::AccessFailed : ContentIndexRootStatus::State::Offline)
+                : scan_errors[i] ? (error == ERROR_ACCESS_DENIED ? ContentIndexRootStatus::State::AccessFailed : ContentIndexRootStatus::State::Recovering)
                 : completed[i] ? ContentIndexRootStatus::State::Ready : ContentIndexRootStatus::State::Waiting;
         }
         UpdateCounts(db);
@@ -1065,6 +1065,10 @@ struct ContentIndex::Impl {
     void RunWriter() {
         ContentIndexConfig durable;
         const bool have_durable = ReadConfigFile(path, durable);
+        const DWORD config_error = have_durable ? ERROR_SUCCESS : GetLastError();
+        if (!have_durable && config_error != ERROR_FILE_NOT_FOUND && config_error != ERROR_PATH_NOT_FOUND) {
+            Error(config_error); return;
+        }
         sqlite3* db = nullptr;
         auto initialize = [&] { return Open(path, &db, false) && Exec(db,
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA recursive_triggers=ON;"
@@ -1109,7 +1113,11 @@ struct ContentIndex::Impl {
         }
         Changed();
         const auto database_config = ReadConfig(db);
-        if (!LoadOrCreateConfig(path, database_config, durable)) Error(ERROR_WRITE_FAULT);
+        if (!LoadOrCreateConfig(path, database_config, durable)) {
+            const DWORD error = GetLastError();
+            Error(error ? error : ERROR_WRITE_FAULT);
+            writer_db = nullptr; sqlite3_close(db); return;
+        }
         { std::lock_guard lock(mu); if (!config_changed) config = durable; c = config; config_changed = !SameConfig(database_config, config); dirty = true; }
         for (unsigned i = 0; i < 4; ++i) readers.emplace_back([this] { Reader(); });
         { Statement previous(db, "SELECT coalesce(max(epoch),0) FROM documents"); if (previous.p && sqlite3_step(previous.p) == SQLITE_ROW) epoch = static_cast<uint64_t>(sqlite3_column_int64(previous.p, 0)); }
@@ -1163,6 +1171,7 @@ struct ContentIndex::Impl {
 };
 ContentIndex::ContentIndex(std::wstring path, bool read_only) : ContentIndex(std::move(path), read_only ? ContentAgentMode::Observer : ContentAgentMode::LegacyWriter) {}
 ContentIndex::ContentIndex(std::wstring path, ContentAgentMode mode) : impl_(std::make_unique<Impl>(std::move(path), mode)) {}
+ContentIndex::ContentIndex(std::wstring path, ContentAgentMode mode, ContentIndexScanHooks hooks) : impl_(std::make_unique<Impl>(std::move(path), mode, std::move(hooks))) {}
 ContentIndex::~ContentIndex() = default;
 bool ContentIndex::Configure(const ContentIndexConfig& input) {
     if (impl_->mode == ContentAgentMode::Observer) return false;
@@ -1261,7 +1270,7 @@ bool ContentIndex::SearchCached(const ContentSearchRequest& r, const std::atomic
             const auto overlaps = [&](const std::wstring& scope) {
                 return scope.empty() || Under(path, scope) || Under(scope, path);
             };
-            if (!overlaps(r.root) || (!r.roots.empty() &&
+            if ((r.roots.empty() && !overlaps(r.root)) || (!r.roots.empty() &&
                 std::none_of(r.roots.begin(), r.roots.end(), overlaps))) continue;
             if (Accessible(path)) {
                 live_roots.push_back(std::move(path));
@@ -1368,7 +1377,7 @@ bool ContentIndex::SearchCached(const ContentSearchRequest& r, const std::atomic
             // older versions. Never surface those rows while pruning catches up.
             if (InternalContentPath(path)) continue;
             if (std::none_of(live_roots.begin(), live_roots.end(), [&](const auto& live) { return Same(root, live); })) continue;
-            if (!r.root.empty() && !Under(path, r.root, r.recursive)) continue;
+            if (r.roots.empty() && !r.root.empty() && !Under(path, r.root, r.recursive)) continue;
             if (!r.roots.empty() && std::none_of(r.roots.begin(), r.roots.end(), [&](const auto& scope) { return Under(path, scope, r.recursive); })) continue;
             const uint64_t size = static_cast<uint64_t>(sqlite3_column_int64(candidates.p, 1));
             const uint64_t modified = static_cast<uint64_t>(sqlite3_column_int64(candidates.p, 2));

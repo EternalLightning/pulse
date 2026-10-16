@@ -1,5 +1,7 @@
 #include "../common/windows_compat.h"
 #include "../common/file_operation_error.h"
+#include "../common/progress_percent.h"
+#include "host_log_line.h"
 // main.cpp — Pulse.Shell.exe: windowless STA+COM shell-operation proxy.
 //
 // Pipe server on \\.\pipe\pulse_shell_<ui-pid> (ui-pid passed as argv[1],
@@ -26,6 +28,9 @@
 #include "../common/file_identity.h"
 #include "../ipc/file_identity_protocol.h"
 #include "../common/crash_reporter.h"
+#ifdef PULSE_OPERATION_ELEVATION_HOST
+#include "../ops/operation_elevation_adapter.h"
+#endif
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -104,9 +109,11 @@ void HostLog(const wchar_t* msg) {
     path += L"\\pulse_shell_host.log";
     if (HANDLE f = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr); f != INVALID_HANDLE_VALUE) {
-        char buf[512];
-        int n = snprintf(buf, sizeof(buf), "[%lu] %ls\n", GetCurrentProcessId(), msg);
-        if (n > 0) { DWORD w = 0; WriteFile(f, buf, (DWORD)n, &w, nullptr); }
+        const auto line = pulse::shell::FormatHostLogLine(GetCurrentProcessId(), msg);
+        if (line.length) {
+            DWORD written = 0;
+            WriteFile(f, line.bytes.data(), static_cast<DWORD>(line.length), &written, nullptr);
+        }
         CloseHandle(f);
     }
 }
@@ -254,10 +261,7 @@ public:
     IFACEMETHODIMP PostNewItem(DWORD, IShellItem*, LPCWSTR, LPCWSTR, DWORD, HRESULT, IShellItem*) override { return CheckCancel(); }
 
     IFACEMETHODIMP UpdateProgress(UINT work_total, UINT work_done) override {
-        if (work_total > 0) {
-            byte_percent_ = (float)((double)work_done * 100.0 / (double)work_total);
-            has_byte_progress_ = true;
-        }
+        work_percent_ = pulse::WorkProgressPercent(work_done, work_total);
         MaybeReport();
         return CheckCancel();
     }
@@ -306,25 +310,23 @@ private:
         }
     }
     void MaybeReport(bool force = false) {
+        // Root sinks record exact deletion outcomes; only the advised sink
+        // publishes progress for the entire operation.
+        if (!authorized_root_.empty()) return;
         // Throttle to ~20 updates/sec to keep the pipe quiet.
         auto now = GetTickCount64();
         if (!force && now - last_send_ < 50) return;
         last_send_ = now;
-        float pct;
-        if (has_byte_progress_ && total_items_ == 1) {
-            pct = byte_percent_;
-        } else {
-            pct = (float)((double)items_done_ * 100.0 / (double)total_items_);
-        }
-        SendProgress(req_id_, pct, current_item_, items_done_, total_items_);
+        // PostDeleteItem includes descendants, while total_items_ counts queued
+        // roots. Their ratio is not an operation percentage.
+        SendProgress(req_id_, work_percent_, current_item_, items_done_, total_items_);
     }
 
     std::wstring authorized_root_;
     uint32_t req_id_ = 0;
     size_t total_items_ = 1;
     size_t items_done_ = 0;
-    float byte_percent_ = 0.0f;
-    bool has_byte_progress_ = false;
+    float work_percent_ = -1.0f;
     std::wstring current_item_;
     std::wstring current_path_;
     std::wstring last_failed_item_;
@@ -1456,6 +1458,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     }
 #endif
     pulse::crash::Initialize({pulse::crash::ProcessRole::Shell, false, {}});
+#ifdef PULSE_OPERATION_ELEVATION_HOST
+    if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
+        return pulse::ops::OperationElevationAdapter::RunWorker(__argc, __wargv);
+#endif
     // IFileOperation creates its conflict/confirmation UI in this process.
     // Declare PMv2 before COM or any HWND exists so Windows does not bitmap-scale
     // those dialogs on high-DPI displays.

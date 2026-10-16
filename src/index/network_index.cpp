@@ -14,7 +14,48 @@
 #include <winnetwk.h>
 
 namespace pulse::index {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+namespace testing {
+const NetworkIndexHooks* network_hooks = nullptr;
+void SetNetworkIndexHooks(const NetworkIndexHooks* hooks) { network_hooks = hooks; }
+}
+#endif
 namespace {
+
+HANDLE NetworkFindFirst(const wchar_t* pattern, WIN32_FIND_DATAW* find, DWORD flags) {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && testing::network_hooks->find_first)
+        return testing::network_hooks->find_first(pattern, FindExInfoBasic, find,
+                                                  FindExSearchNameMatch, nullptr, flags);
+#endif
+    return FindFirstFileExW(pattern, FindExInfoBasic, find, FindExSearchNameMatch, nullptr, flags);
+}
+
+BOOL NetworkFindNext(HANDLE handle, WIN32_FIND_DATAW* find) {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && testing::network_hooks->find_next)
+        return testing::network_hooks->find_next(handle, find);
+#endif
+    return FindNextFileW(handle, find);
+}
+
+void NetworkFindClose(HANDLE handle) {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && testing::network_hooks->find_close) {
+        testing::network_hooks->find_close(handle);
+        return;
+    }
+#endif
+    FindClose(handle);
+}
+
+DWORD UniversalNetworkName(LPCWSTR path, DWORD level, LPVOID buffer, LPDWORD bytes) {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && testing::network_hooks->universal_name)
+        return testing::network_hooks->universal_name(path, level, buffer, bytes);
+#endif
+    return WNetGetUniversalNameW(path, level, buffer, bytes);
+}
 
 #pragma pack(push, 1)
 struct NetworkHeader {
@@ -187,49 +228,17 @@ std::wstring NetworkDataDir() {
 }
 
 std::wstring ShardPath(const std::wstring& root, int slot = -1) {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && !testing::network_hooks->shard_base.empty()) {
+        return testing::network_hooks->shard_base +
+               (slot >= 0 ? L"-" + std::to_wstring(slot) : L"") + L".bin";
+    }
+#endif
     const std::wstring dir = NetworkDataDir();
     if (dir.empty()) return {};
     std::wstring path = dir + L"\\network-" + Hex64(HashPath(root));
     if (slot >= 0) path += L"-" + std::to_wstring(slot);
     return path + L".bin";
-}
-
-std::vector<std::wstring> ExtractStringArray(const std::wstring& json,
-                                             const std::wstring& key) {
-    std::vector<std::wstring> result;
-    const std::wstring marker = L"\"" + key + L"\"";
-    size_t at = json.find(marker);
-    if (at == std::wstring::npos || (at = json.find(L'[', at + marker.size())) == std::wstring::npos)
-        return result;
-    ++at;
-    while (at < json.size()) {
-        while (at < json.size() && iswspace(json[at])) ++at;
-        if (at == json.size() || json[at] == L']') break;
-        if (json[at++] != L'\"') return {};
-        std::wstring value;
-        while (at < json.size() && json[at] != L'\"') {
-            if (json[at] != L'\\') {
-                value.push_back(json[at++]);
-                continue;
-            }
-            if (++at >= json.size()) return {};
-            switch (json[at]) {
-            case L'\"': value.push_back(L'\"'); break;
-            case L'\\': value.push_back(L'\\'); break;
-            case L'n': value.push_back(L'\n'); break;
-            case L'r': value.push_back(L'\r'); break;
-            case L't': value.push_back(L'\t'); break;
-            default: value.push_back(json[at]); break;
-            }
-            ++at;
-        }
-        if (at >= json.size()) return {};
-        ++at;
-        result.push_back(std::move(value));
-        while (at < json.size() && iswspace(json[at])) ++at;
-        if (at < json.size() && json[at] == L',') ++at;
-    }
-    return result;
 }
 
 bool WriteAll(HANDLE file, const void* data, size_t bytes) {
@@ -341,8 +350,6 @@ bool MatchNetworkRecord(const NetworkRecord& record, std::wstring_view path,
     if (folders_only && !is_dir) return false;
     if (query.groups.empty()) return true;
     auto match_term = [&](const Term& term) {
-        if (term.folder && !is_dir) return false;
-        if (term.file && is_dir) return false;
         if (!term.exts.empty()) {
             bool ok = MatchExt(name.data(), static_cast<uint32_t>(name.size()), term);
             if (term.ext_not) ok = !ok;
@@ -358,28 +365,11 @@ bool MatchNetworkRecord(const NetworkRecord& record, std::wstring_view path,
             if (term.date_not) ok = !ok;
             if (!ok) return false;
         }
-        if (term.name_how != NameHow::Any) {
-            bool ok = false;
-            if (!term.name_in_path) {
-                ok = MatchName(name.data(), static_cast<uint32_t>(name.size()), term);
-            } else if (term.name_how == NameHow::Wildcard) {
-                ok = WildcardFolded(path.data(), static_cast<uint32_t>(path.size()), term.name);
-            } else {
-                size_t begin = 0;
-                while (begin < path.size()) {
-                    const size_t end = path.find(L'\\', begin);
-                    const size_t length = (end == std::wstring_view::npos ? path.size() : end) - begin;
-                    if (length && MatchName(path.data() + begin, static_cast<uint32_t>(length), term)) {
-                        ok = true;
-                        break;
-                    }
-                    if (end == std::wstring_view::npos) break;
-                    begin = end + 1;
-                }
-            }
-            if (term.name_not) ok = !ok;
-            if (!ok) return false;
-        }
+        bool name_ok = true;
+        if (term.name_how != NameHow::Any)
+            name_ok = term.name_in_path ? MatchPath(path, term) :
+                MatchName(name.data(), static_cast<uint32_t>(name.size()), term);
+        if (!MatchNameAndType(name_ok, is_dir, term)) return false;
         return true;
     };
     for (const auto& group : query.groups) {
@@ -396,6 +386,16 @@ bool MatchNetworkRecord(const NetworkRecord& record, std::wstring_view path,
 }
 
 } // namespace
+
+#ifdef PULSE_NETWORK_INDEX_TESTING
+bool testing::MatchNetworkFilenameForTest(const Hit& hit, const CompiledQuery& query) {
+    NetworkRecord record{};
+    record.flags = hit.is_dir ? kRecordDirectory : 0;
+    record.size = hit.size;
+    record.mtime = hit.mtime;
+    return MatchNetworkRecord(record, hit.path, hit.name, query, false);
+}
+#endif
 
 struct NetworkIndex::Shard {
     HANDLE file = INVALID_HANDLE_VALUE;
@@ -459,13 +459,14 @@ std::wstring NormalizeNetworkRoot(std::wstring path) {
         path = path.substr(1, path.size() - 2);
     std::replace(path.begin(), path.end(), L'/', L'\\');
     if (path.rfind(L"\\\\?\\UNC\\", 0) == 0) path = L"\\\\" + path.substr(8);
+    if (path.rfind(L"\\\\?\\", 0) == 0 || path.rfind(L"\\\\.\\", 0) == 0) return {};
 
     if (path.size() >= 2 && path[1] == L':') {
         DWORD bytes = 0;
-        WNetGetUniversalNameW(path.c_str(), UNIVERSAL_NAME_INFO_LEVEL, nullptr, &bytes);
-        if (GetLastError() == ERROR_MORE_DATA && bytes) {
+        const DWORD status = UniversalNetworkName(path.c_str(), UNIVERSAL_NAME_INFO_LEVEL, nullptr, &bytes);
+        if (status == ERROR_MORE_DATA && bytes) {
             std::vector<uint8_t> buffer(bytes);
-            if (WNetGetUniversalNameW(path.c_str(), UNIVERSAL_NAME_INFO_LEVEL,
+            if (UniversalNetworkName(path.c_str(), UNIVERSAL_NAME_INFO_LEVEL,
                                       buffer.data(), &bytes) == NO_ERROR) {
                 const auto* info = reinterpret_cast<const UNIVERSAL_NAME_INFOW*>(buffer.data());
                 if (info->lpUniversalName) path = info->lpUniversalName;
@@ -483,6 +484,10 @@ std::wstring NormalizeNetworkRoot(std::wstring path) {
 }
 
 std::wstring NetworkConfigPath() {
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    if (testing::network_hooks && !testing::network_hooks->config_path.empty())
+        return testing::network_hooks->config_path;
+#endif
     // The network agent can survive an app restart that relocates configuration.
     storage::Refresh();
     const std::wstring root = storage::ConfigurationRoot();
@@ -500,28 +505,57 @@ bool LoadNetworkRoots(std::vector<std::wstring>& roots, std::wstring* error) {
 }
 
 bool LoadNetworkRootsFile(const std::wstring& path, std::vector<std::wstring>& roots,
-                          std::wstring* error) {
+                          std::wstring* error, NetworkConfigLoadStatus* status) {
     roots.clear();
+    SetError(error, L"");
+    if (status) *status = NetworkConfigLoadStatus::IoError;
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES &&
-        GetLastError() == ERROR_FILE_NOT_FOUND) return true;
+        GetLastError() == ERROR_FILE_NOT_FOUND) {
+        if (status) *status = NetworkConfigLoadStatus::MissingFile;
+        return true;
+    }
     std::vector<uint8_t> bytes;
     if (!ReadBytes(path, bytes, error)) return false;
+    if (status) *status = NetworkConfigLoadStatus::Invalid;
     std::wstring json;
     if (!pulse::DecodeUtf8Bytes(bytes, json)) {
         SetError(error, L"网络索引配置不是有效的 UTF-8 文件");
         return false;
     }
-    if (json.find(L'{') == std::wstring::npos) {
+    const pulse::json::Document document(json);
+    if (!document.Is(pulse::json::Kind::Object)) {
         SetError(error, L"网络索引配置已损坏");
         return false;
     }
-    for (const auto& raw : ExtractStringArray(json, L"roots")) {
-        std::wstring root = NormalizeNetworkRoot(raw);
-        if (root.empty()) continue;
-        if (std::none_of(roots.begin(), roots.end(), [&](const auto& existing) {
-                return EqualPath(existing, root);
-            })) roots.push_back(std::move(root));
+    const auto* array = document.Find(L"roots");
+    if (!array) {
+        if (status) *status = NetworkConfigLoadStatus::MissingRoots;
+        SetError(error, L"网络索引配置缺少 roots 数组");
+        return false;
     }
+    const auto root_keys = std::count_if(document.Root().children.begin(),
+        document.Root().children.end(), [](const auto& item) { return item.name == L"roots"; });
+    if (root_keys != 1 || array->kind != pulse::json::Kind::Array) {
+        SetError(error, L"网络索引配置的 roots 必须是唯一的字符串数组");
+        return false;
+    }
+    std::vector<std::wstring> configured;
+    for (const auto& item : array->children) {
+        if (item.kind != pulse::json::Kind::String) {
+            SetError(error, L"网络索引配置的 roots 包含非字符串项");
+            return false;
+        }
+        std::wstring root = NormalizeNetworkRoot(item.text);
+        if (root.empty() || item.text.find(L'\0') != std::wstring::npos) {
+            SetError(error, L"网络索引配置包含无效的 UNC 路径");
+            return false;
+        }
+        if (std::none_of(configured.begin(), configured.end(), [&](const auto& existing) {
+                return EqualPath(existing, root);
+            })) configured.push_back(std::move(root));
+    }
+    roots = std::move(configured);
+    if (status) *status = roots.empty() ? NetworkConfigLoadStatus::Empty : NetworkConfigLoadStatus::Loaded;
     return true;
 }
 
@@ -536,6 +570,9 @@ bool SaveNetworkRoots(const std::vector<std::wstring>& roots, std::wstring* erro
 
 bool SaveNetworkRootsFile(const std::wstring& path, const std::vector<std::wstring>& roots,
                           std::wstring* error) {
+    // Refuse to replace a configuration we could not read completely.
+    std::vector<std::wstring> existing;
+    if (!LoadNetworkRootsFile(path, existing, error)) return false;
     std::wstring json = L"{\n  \"version\":1,\n  \"roots\":[";
     for (size_t i = 0; i < roots.size(); ++i) {
         std::wstring escaped;
@@ -629,6 +666,19 @@ void NetworkIndex::ObserveChanges(const std::wstring& root, const BYTE* data, DW
     changes_.Gap();
 }
 
+bool NetworkIndex::LoadConfiguration(std::vector<std::wstring>& configured) {
+    std::wstring error;
+    const bool loaded = LoadNetworkRoots(configured, &error);
+    std::lock_guard lock(mu_);
+    config_error_ = loaded ? L"" : std::move(error);
+    return loaded;
+}
+
+std::wstring NetworkIndex::ConfigurationError() const {
+    std::lock_guard lock(mu_);
+    return config_error_;
+}
+
 void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
     changes_.Open(NetworkDataDir());
     Stop();
@@ -636,8 +686,7 @@ void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
     status_msg_ = status_msg;
     search_msg_ = search_msg;
     std::vector<std::wstring> configured;
-    std::wstring error;
-    LoadNetworkRoots(configured, &error);
+    LoadConfiguration(configured);
     {
         std::lock_guard<std::mutex> lock(mu_);
         roots_.clear();
@@ -700,6 +749,10 @@ bool NetworkIndex::AddRoot(const std::wstring& raw, std::wstring* error) {
         return false;
     }
     std::lock_guard<std::mutex> lock(mu_);
+    if (!config_error_.empty()) {
+        SetError(error, config_error_);
+        return false;
+    }
     if (std::any_of(roots_.begin(), roots_.end(), [&](const RootState& root) {
             return EqualPath(root.info.path, path);
         })) return true;
@@ -723,6 +776,10 @@ bool NetworkIndex::AddRoot(const std::wstring& raw, std::wstring* error) {
 bool NetworkIndex::RemoveRoot(const std::wstring& raw, std::wstring* error) {
     const std::wstring path = NormalizeNetworkRoot(raw);
     std::lock_guard<std::mutex> lock(mu_);
+    if (!config_error_.empty()) {
+        SetError(error, config_error_);
+        return false;
+    }
     auto found = std::find_if(roots_.begin(), roots_.end(), [&](const RootState& root) {
         return EqualPath(root.info.path, path);
     });
@@ -794,7 +851,6 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
     std::vector<std::wstring> stack{path};
     DWORD failure = builder.Valid() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
     bool root_accessible = true;
-    bool storage_failure = !builder.Valid();
     uint64_t since_notify = 0;
     while (!stack.empty() && running_ && failure == ERROR_SUCCESS) {
         if (!RootStillCurrent(path, generation)) {
@@ -805,18 +861,15 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         stack.pop_back();
         const std::wstring pattern = LongPath(directory) + L"\\*";
         WIN32_FIND_DATAW find{};
-        HANDLE handle = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &find,
-                                         FindExSearchNameMatch, nullptr,
-                                         FIND_FIRST_EX_LARGE_FETCH);
+        HANDLE handle = NetworkFindFirst(pattern.c_str(), &find, FIND_FIRST_EX_LARGE_FETCH);
         if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_INVALID_PARAMETER) {
-            handle = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &find,
-                                      FindExSearchNameMatch, nullptr, 0);
+            handle = NetworkFindFirst(pattern.c_str(), &find, 0);
         }
         if (handle == INVALID_HANDLE_VALUE) {
-            if (EqualPath(directory, path)) {
-                failure = GetLastError();
-                root_accessible = false;
-            }
+            const DWORD error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) continue;
+            failure = error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error;
+            if (EqualPath(directory, path)) root_accessible = false;
             continue;
         }
         do {
@@ -825,7 +878,6 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
             std::wstring full = directory + L"\\" + find.cFileName;
             if (!builder.Add(full, find)) {
                 failure = ERROR_WRITE_FAULT;
-                storage_failure = true;
                 break;
             }
             if ((find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
@@ -841,8 +893,13 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 }
                 NotifyStatus();
             }
-        } while (FindNextFileW(handle, &find));
-        FindClose(handle);
+        } while (NetworkFindNext(handle, &find));
+        if (failure == ERROR_SUCCESS) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_NO_MORE_FILES)
+                failure = error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error;
+        }
+        NetworkFindClose(handle);
     }
     if (!running_) return;
     if (!RootStillCurrent(path, generation)) {
@@ -850,7 +907,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         return;
     }
 
-    const bool server_accessible = root_accessible && (failure == ERROR_SUCCESS || storage_failure);
+    const bool server_accessible = root_accessible;
     int next_slot = 0;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -865,7 +922,6 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         shard = Shard::Open(publish_path, next_slot);
     if (failure == ERROR_SUCCESS && !shard) {
         failure = ERROR_WRITE_FAULT;
-        storage_failure = true;
     }
 
     {

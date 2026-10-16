@@ -92,7 +92,35 @@ void PumpClient(index::ContentSearchClient& client, int polls,
 
 } // namespace
 
+#include "content_task_enumeration_cases.h"
+#include "content_transient_error_cases.h"
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--filename-query-boundaries") {
+        struct Case { const wchar_t* query; bool foo; bool other; };
+        const Case cases[] = {
+            {L"file:foo", true, false}, {L"!file:foo", false, true},
+            {L"!!file:foo", true, false}, {L"!folder:foo", true, true},
+            {L"!file:", false, false}, {L"!folder:", true, true},
+            {L"!ext:txt", false, true}, {L"!foo", false, true},
+            {L"!size:1", false, true}, {L"path:foo\\bar", true, false},
+            {L"!path:C:\\skip", true, false},
+            {L"path:C:\\ path:C:\\skip", false, true},
+            {L"!size:18446744073709551616", false, false},
+            {L"size:18014398509481984kb", false, false},
+            {L"dm:2023-02-29", false, false}, {L"!dm:garbage", false, false},
+            {L"!dm:2024", true, true},
+        };
+        for (const auto& item : cases) {
+            const auto query = index::ParseQuery(item.query);
+            Check(index::MatchContentFilename(L"C:\\foo\\bar\\foo.txt", 1, 1, query) == item.foo &&
+                      index::MatchContentFilename(L"C:\\skip\\other.pdf", 2, 1, query) == item.other,
+                  item.query);
+        }
+        return failed ? 1 : 0;
+    }
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--task-enumeration") return RunTaskEnumerationCases();
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--transient-errors") return RunTransientErrorCases();
     const bool fixture_only = argc > 1 && std::wstring_view(argv[1]) == L"--fixture-only";
     namespace fs = std::filesystem;
     const std::wstring root = FixtureRoot();

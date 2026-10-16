@@ -1,13 +1,54 @@
 #include "../ui/name_highlight.h"
 #include "../ui/address_search_layout.h"
 #include "../app/search_query.h"
+#include "../index/filename_pinyin.h"
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <iostream>
+#include <random>
 #include <string>
 #include <utility>
 namespace {
+using namespace pulse;
+using ui::NameMatchRange;
+// Frozen pre-optimization implementation for range equivalence checks.
+std::vector<NameMatchRange> ReferenceNameMatchRanges(std::wstring_view name, const std::vector<index::Term>& terms) {
+    if (name.empty() || terms.empty()) return {};
+    std::vector<bool> mask(name.size(), false);
+    const auto folded = index::Fold(name);
+    for (const auto& term : terms) {
+        if (!index::MatchName(name.data(), static_cast<uint32_t>(name.size()), term)) continue;
+        if (term.pinyin && term.name_how == index::NameHow::Substring &&
+            folded.find(term.name) == std::wstring::npos) {
+            const auto match = index::FindPinyinMatch(name, term.name);
+            if (match && match.start + match.length <= mask.size())
+                std::fill(mask.begin() + match.start, mask.begin() + match.start + match.length, true);
+        }
+        for (size_t i = 0; i < term.name.size();) {
+            const size_t start = i;
+            if (term.name_how == index::NameHow::Wildcard) {
+                while (i < term.name.size() && term.name[i] != L'*' && term.name[i] != L'?') ++i;
+            } else i = term.name.size();
+            const auto literal = term.name.substr(start, i - start);
+            if (!literal.empty()) for (size_t at = 0; (at = folded.find(literal, at)) != std::wstring::npos; ++at) {
+                std::fill(mask.begin() + at, mask.begin() + at + literal.size(), true);
+            }
+            if (i < term.name.size()) ++i;
+        }
+    }
+    std::vector<NameMatchRange> result;
+    for (size_t i = 0; i < mask.size();) {
+        if (!mask[i]) { ++i; continue; }
+        const size_t start = i;
+        while (i < mask.size() && mask[i]) ++i;
+        result.push_back({static_cast<UINT32>(start), static_cast<UINT32>(i - start)});
+    }
+    return result;
+}
+
 int failures = 0;
 void Check(bool pass, const char* label) {
     std::cout << (pass ? "[PASS] " : "[FAIL] ") << label << '\n';
@@ -56,9 +97,79 @@ void LayoutCase(float width, float scale, bool logical_width) {
                   << " inputDIP=" << input_width << " inside=" << inside << " separated=" << separated << '\n';
     Check(inside && separated && enough_input, logical_width ? "DIP-scaled address search bounds/input" : "physical-width address search bounds/input");
 }
+bool SameRanges(const std::vector<NameMatchRange>& a, const std::vector<NameMatchRange>& b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+        [](const auto& x, const auto& y) { return x.start == y.start && x.length == y.length; });
 }
-int main() {
+void CheckRangeEquivalence() {
+    std::vector<std::wstring> names = {L"", L"aaaaa", L"Report-report.TXT", L"中国报告.txt", L"重庆音乐.txt",
+        L"中国-zhongguo.txt", L"foo-文档Report2026.txt", L"\U00020000中国\U0001f600.txt", L"ÉΩÄéωä.txt",
+        std::wstring(L"foo\0bar", 7), std::wstring(260, L'a')};
+    std::mt19937 random(20261013);
+    constexpr std::wstring_view alphabet = L"aAbB.-*?中国重庆éΩ";
+    for (size_t i = 0; i < 100; ++i) {
+        std::wstring name;
+        for (size_t j = random() % 40; j; --j) name += alphabet[random() % alphabet.size()];
+        names.push_back(std::move(name));
+    }
+    std::vector<std::wstring> patterns = {L"", L"a", L"aa", L"aba", L"txt", L"report", L"*", L"?", L"**?*",
+        L"a*a", L"*a*", L"*a?b*", L"*.txt", L"zhongguo", L"zg", L"zgbg", L"chongqing", L"中国baogao",
+        L"wendangreport2026", L"é", L"ω", L"\U00020000", std::wstring(L"o\0b", 3), std::wstring(261, L'a')};
+    for (size_t i = 0; i < 60; ++i) {
+        std::wstring pattern;
+        for (size_t j = random() % 8; j; --j) pattern += alphabet[random() % alphabet.size()];
+        patterns.push_back(index::Fold(pattern));
+    }
+    bool same = true;
+    size_t checked = 0;
+    for (const auto& name : names) {
+        std::vector<index::Term> combined;
+        for (auto how : {index::NameHow::Any, index::NameHow::Substring, index::NameHow::Exact, index::NameHow::Wildcard}) {
+            for (const auto& pattern : patterns) for (bool pinyin : {false, true}) {
+                index::Term term;
+                term.name = index::Fold(pattern);
+                term.name_how = how;
+                term.pinyin = pinyin;
+                const std::vector<index::Term> terms{term};
+                same &= SameRanges(ReferenceNameMatchRanges(name, terms), ui::NameMatchRanges(name, terms));
+                combined.push_back(std::move(term));
+                ++checked;
+            }
+        }
+        same &= SameRanges(ReferenceNameMatchRanges(name, combined), ui::NameMatchRanges(name, combined));
+        ++checked;
+    }
+    std::cout << "[INFO] reference comparison cases=" << checked << '\n';
+    Check(same, "optimized ranges equal original across modes, overlaps, Unicode, NUL, pinyin and combined terms");
+}
+void BenchmarkRanges() {
+    struct Case { std::wstring name, query; };
+    for (const auto& sample : std::array<Case, 3>{{
+        {L"Annual-Report-Report-2026-budget.xlsx", L"report annual budget 2026 xlsx"},
+        {L"报告-中国重庆音乐文档2026.txt", L"zhongguo chongqing wendang yinyue zgbg"},
+        {L"long-report-annual-report-final-document.xlsx", L"*report* *document* *.xlsx"}}}) {
+        const auto terms = ui::NameHighlightTerms({}, sample.query);
+        auto measure = [&](auto matcher) {
+            size_t checksum = 0;
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < 10000; ++i) {
+                const auto ranges = matcher(sample.name, terms);
+                for (const auto& range : ranges) checksum += range.start + range.length;
+            }
+            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::cout << " checksum=" << checksum;
+            return elapsed;
+        };
+        const double old_ms = measure(ReferenceNameMatchRanges);
+        const double new_ms = measure(ui::NameMatchRanges);
+        std::cout << " original_ms=" << old_ms << " optimized_ms=" << new_ms << " speedup=" << old_ms / new_ms << '\n';
+    }
+}
+}
+int main(int argc, char** argv) {
     using namespace pulse;
+    CheckRangeEquivalence();
+    if (argc > 1 && std::string_view(argv[1]) == "--benchmark") BenchmarkRanges();
     Ranges(L"报告-中国.txt", L"zhongguo", {{3, 2}}, "full-pinyin highlights original Chinese characters");
     Ranges(L"中国报告.txt", L"zgbg", {{0, 4}}, "initials highlight original character span");
     Ranges(L"重庆音乐.txt", L"chongqing", {{0, 2}}, "polyphonic full-pinyin highlight");

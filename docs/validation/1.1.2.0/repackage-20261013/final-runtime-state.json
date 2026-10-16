@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-10-13T19:57:12.5349131+08:00",
+  "service_state": "Running",
+  "service_start_mode": "Auto",
+  "service_path": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+  "service_process_id": 25988,
+  "network_agent_process_ids": [
+    27120
+  ]
+}

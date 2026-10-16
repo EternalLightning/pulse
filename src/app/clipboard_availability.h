@@ -61,6 +61,7 @@ public:
 
     bool Update(uint32_t sequence, bool file_format, bool tray_present,
                 std::vector<std::wstring> tray_paths) {
+        tray_revision_.reset();
         if (initialized_ && inputs_.sequence == sequence && inputs_.file_format == file_format &&
             inputs_.tray_present == tray_present && inputs_.tray_paths == tray_paths) return false;
         const bool previously_available = Available();
@@ -71,6 +72,16 @@ public:
         clipboard_available_ = tray_available_ = false;
         pending_ = false; next_probe_ = 0;
         return previously_available;
+    }
+
+    template<class CollectPaths>
+    bool UpdateVersioned(uint32_t sequence, bool file_format, bool tray_present,
+                         uint64_t tray_revision, CollectPaths&& collect_paths) {
+        if (initialized_ && tray_revision_ == tray_revision && inputs_.sequence == sequence &&
+            inputs_.file_format == file_format && inputs_.tray_present == tray_present) return false;
+        const bool changed = Update(sequence, file_format, tray_present, collect_paths());
+        tray_revision_ = tray_revision;
+        return changed;
     }
 
     bool Consume() {
@@ -107,6 +118,7 @@ public:
 
 private:
     ClipboardAvailabilityRequest inputs_;
+    std::optional<uint64_t> tray_revision_;
     std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>();
     uint64_t next_probe_ = 0;
     bool initialized_ = false;

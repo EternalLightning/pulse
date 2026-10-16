@@ -279,6 +279,14 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                     r.index = 1;
                     return r;
                 }
+                if (ContainsPt(lay.wallpaper_fit, x, y)) {
+                    const auto size = material_.LoadedSourceSize(vm.background_image);
+                    if (size.cx > 0 && size.cy > 0) {
+                        r.region = HitTestResult::SettingsWallpaper;
+                        r.index = 2;
+                    }
+                    return r;
+                }
                 if (ContainsPt(lay.wallpaper_look_value,x,y)) {
                     r.region = HitTestResult::SettingsWallpaperLook;
                     r.index = 0;

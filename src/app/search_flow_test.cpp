@@ -9,7 +9,6 @@
 
 #ifdef PULSE_WITH_SELFTEST
 using namespace pulse;
-void Render(pulse::AppState&);
 int RunSearchManagementTest(AppState& s,const wchar_t* output) {
     std::ofstream log{std::filesystem::path(output)};int failures=0;
     auto check=[&](bool ok,const char* label){log<<(ok ? "[PASS] " : "[FAIL] ")<<label<<std::endl;if(!ok)++failures;};

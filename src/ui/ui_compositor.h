@@ -54,6 +54,10 @@ public:
     void Shutdown();
     void Resize(int width, int height);
     void Present();
+    bool CanScheduleAnimationFrame() const {
+        return !animation_frames_paused_ && !device_lost_ && swapChain_.get() &&
+               targetBitmap_.get() && width_ > 0 && height_ > 0;
+    }
     void NotifyDeviceLost(HRESULT reason);
     bool Recover();
     bool NeedsRecovery() const { return device_lost_; }
@@ -126,6 +130,7 @@ private:
     HMONITOR text_params_monitor_ = nullptr;
     bool transparentComposition_ = false;
     bool device_lost_ = false;
+    bool animation_frames_paused_ = true;
 };
 
 } // namespace pulse::ui

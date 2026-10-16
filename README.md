@@ -2,13 +2,13 @@
 
 **为 Windows 打造的文件管理器，让浏览、搜索和整理文件更顺手。**
 
-Pulse 将多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.2.0，面向 Windows 10 和 Windows 11 x64；另提供 Windows 8.1 兼容构建。
+Pulse 将多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.2.0，面向 Windows 10 和 Windows 11 x64。
 
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 
 源码采用 [Apache License 2.0](LICENSE)，发行版说明见 [NOTICE](NOTICE)。第三方组件遵循各自许可证，免安装包附带 `licenses` 目录。
 
-[下载本发行版](https://github.com/EternalLightning/pulse/releases/latest) · [查看更新记录](https://github.com/EternalLightning/pulse/releases) · [反馈问题](https://github.com/EternalLightning/pulse/issues)
+[反馈问题](https://github.com/EternalLightning/pulse/issues)
 
 ## 文件管理
 
@@ -31,21 +31,6 @@ Pulse 将多标签、多窗格、文件与正文搜索、预览和批量文件�
 ![Pulse 外观设置与壁纸背景](docs/images/appearance.png)
 
 ![Pulse 多窗格文件管理](docs/images/panes.png)
-
-## 1.1.2.0 更新
-
-- 管理员文件操作交由随程序提供的 Pulse.Shell.exe 执行；需要权限时通过标准 Windows UAC 请求授权。
-- 图片打开路径减少不必要的 Shell 菜单处理，并将同目录图片列表读取延后到查看器需要时。
-- 更新文件操作与压缩包进度界面，并改进压缩包错误反馈。
-
-## 下载与安装
-
-在发布页按系统选择安装包：
-
-| 版本 | 适用系统 | 安装包 |
-| --- | --- | --- |
-| Windows 版（64位） | Windows 10 / Windows 11 | `PulseSetup-版本.exe` |
-| Windows 8.1 兼容版（64位） | Windows 8.1 | `PulseSetup-版本-win81.exe` |
 
 运行安装包，按向导完成安装。安装时可以启用 PulseIndex 服务，用于全盘索引搜索。
 

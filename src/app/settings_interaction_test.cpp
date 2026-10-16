@@ -5,7 +5,6 @@
 
 #ifdef PULSE_WITH_SELFTEST
 using namespace pulse;
-void Render(pulse::AppState&);
 int RunSettingsInteractionTest(AppState& s,const wchar_t* output) {
     using H=ui::HitTestResult;using I=l10n::StringId;
     std::ofstream log{std::filesystem::path(output)};int failures=0;

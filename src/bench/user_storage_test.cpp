@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <windows.h>
 #include <vector>
+#include <winioctl.h>
 
 namespace fs = std::filesystem;
 bool WriteBytes(const std::wstring& path, const std::vector<unsigned char>& bytes) {
@@ -22,7 +23,157 @@ std::vector<unsigned char> ReadBytes(const std::wstring& path) {
     const bool ok = ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) != 0 && read == bytes.size();
     CloseHandle(file); return ok ? bytes : std::vector<unsigned char>{};
 }
-int wmain() {
+
+int ConfigurationIdentityTest() {
+    using namespace pulse::storage;
+    const auto fixture = fs::absolute(fs::path(L"bench_data") /
+        (L"configuration-identity-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    const auto source = fixture / L"source", target = fixture / L"target";
+    fs::create_directories(source);
+    OverrideDefaultRootForTesting(source.wstring());
+    pulse::WriteUtf8FileAtomic((source / L"app.json").wstring(), L"{}");
+    int failed = 0;
+    auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+        if (!ok) ++failed;
+    };
+    std::wstring error;
+    check(Schedule(Kind::Configuration, target.wstring(), error), "schedule isolated identity fixture");
+    bool attempted = false, replaced = false, moved_directory = false;
+    SetConfigurationCopyHookForTesting([&](const std::wstring& output) {
+        attempted = true;
+        replaced = MoveFileExW(output.c_str(), (fixture / L"original-copy.json").c_str(), 0) != FALSE;
+        if (replaced) pulse::WriteUtf8FileAtomic(output, L"replacement-owned-by-another-writer");
+        if (!replaced) moved_directory = MoveFileExW(target.c_str(), (fixture / L"renamed-target").c_str(), 0) != FALSE;
+        if (moved_directory) fs::create_directories(target);
+        pulse::WriteUtf8FileAtomic((target / L"unrelated.txt").wstring(), L"keep");
+        return false;
+    });
+    check(!ApplyConfiguration(error) && attempted, "abort migration after first verified copy");
+    SetConfigurationCopyHookForTesting({});
+    std::wstring content;
+    check(!replaced || (pulse::ReadUtf8File((target / L"app.json").wstring(), content) &&
+        content == L"replacement-owned-by-another-writer"), "rollback never deletes replacement object");
+    check(!replaced && !moved_directory, "destination file and directory retain leases until rollback");
+    check(ConfigurationRoot() == source.wstring() && !Pending(Kind::Configuration).empty() &&
+        !LastError(Kind::Configuration).empty(), "failure preserves active root and reports pending failure");
+    check(fs::exists(target / L"unrelated.txt"), "rollback preserves unrelated writer file");
+    std::printf("replacement=%d directory_rename=%d; fixture retained\n", replaced, moved_directory);
+    return failed ? 1 : 0;
+}
+
+int ConfigurationMetadataTest() {
+    using namespace pulse::storage;
+    const auto fixture = fs::absolute(fs::path(L"bench_data") /
+        (L"configuration-metadata-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    const auto source = fixture / L"ads-source", target = fixture / L"ads-target";
+    fs::create_directories(source);
+    OverrideDefaultRootForTesting(source.wstring());
+    int failed = 0;
+    auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+        if (!ok) ++failed;
+    };
+    const auto app = (source / L"app.json").wstring();
+    const std::vector<unsigned char> metadata{'m', 'e', 't', 'a', 0, 0xFF};
+    check(pulse::WriteUtf8FileAtomic(app, L"{}") && WriteBytes(app + L":metadata", metadata),
+        "seed a real named stream in an isolated configuration");
+    const auto old_copy = (fixture / L"copyfile-reference.json").wstring();
+    check(CopyFileW(app.c_str(), old_copy.c_str(), TRUE) && ReadBytes(old_copy + L":metadata") == metadata,
+        "CopyFileW baseline preserves the named stream");
+    const auto plain_copy = (fixture / L"default-stream-only.json").wstring();
+    check(WriteBytes(plain_copy, ReadBytes(app)) && ReadBytes(plain_copy + L":metadata").empty(),
+        "default-stream-only copying demonstrates metadata loss");
+    std::wstring error;
+    check(Schedule(Kind::Configuration, target.wstring(), error), "schedule isolated named-stream configuration");
+    const bool migrated = ApplyConfiguration(error);
+    check(!migrated && ConfigurationRoot() == source.wstring() && Pending(Kind::Configuration) == target.wstring() &&
+        !error.empty() && !fs::exists(target / L"app.json") && ReadBytes(app + L":metadata") == metadata,
+        "unsupported named stream refuses migration without switching root or losing the stream");
+
+    const auto wallpaper_source = fixture / L"wallpaper-source", wallpaper_target = fixture / L"wallpaper-target";
+    fs::create_directories(wallpaper_source);
+    OverrideDefaultRootForTesting(wallpaper_source.wstring());
+    const auto wallpaper = (wallpaper_source / L"wallpaper.png").wstring();
+    check(pulse::WriteUtf8FileAtomic((wallpaper_source / L"app.json").wstring(), L"{}") &&
+        WriteBytes(wallpaper, {'i', 'm', 'a', 'g', 'e'}) && WriteBytes(wallpaper + L":metadata", metadata),
+        "seed a wallpaper named stream after an ordinary configuration");
+    check(Schedule(Kind::Configuration, wallpaper_target.wstring(), error) && !ApplyConfiguration(error) &&
+        ConfigurationRoot() == wallpaper_source.wstring() && !fs::exists(wallpaper_target / L"app.json") &&
+        !fs::exists(wallpaper_target / L"wallpaper.png") && ReadBytes(wallpaper + L":metadata") == metadata,
+        "late wallpaper metadata refusal rolls back earlier owned copies and preserves original streams");
+
+    const auto basic_source = fixture / L"basic-source", basic_target = fixture / L"basic-target";
+    fs::create_directories(basic_source);
+    OverrideDefaultRootForTesting(basic_source.wstring());
+    const auto basic_app = (basic_source / L"app.json").wstring();
+    check(pulse::WriteUtf8FileAtomic(basic_app, L"{}"), "seed ordinary configuration metadata fixture");
+    HANDLE file = CreateFileW(basic_app.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    FILE_BASIC_INFO basic{};
+    basic.CreationTime.QuadPart = 132223104000000000LL;
+    basic.LastWriteTime.QuadPart = 132224104000000000LL;
+    basic.FileAttributes = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_READONLY;
+    check(file != INVALID_HANDLE_VALUE && SetFileInformationByHandle(file, FileBasicInfo, &basic, sizeof(basic)),
+        "set ordinary attributes and timestamps through the owned fixture handle");
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    check(Schedule(Kind::Configuration, basic_target.wstring(), error) && ApplyConfiguration(error),
+        "ordinary file metadata remains migratable");
+    const auto copied_app = (basic_target / L"app.json").wstring();
+    file = CreateFileW(copied_app.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    FILE_BASIC_INFO copied_basic{};
+    check(file != INVALID_HANDLE_VALUE && GetFileInformationByHandleEx(file, FileBasicInfo, &copied_basic, sizeof(copied_basic)) &&
+        copied_basic.CreationTime.QuadPart == basic.CreationTime.QuadPart &&
+        copied_basic.LastWriteTime.QuadPart == basic.LastWriteTime.QuadPart &&
+        (copied_basic.FileAttributes & basic.FileAttributes) == basic.FileAttributes,
+        "migration preserves creation time last-write time and ordinary file attributes");
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+
+    const auto rollback = fixture / L"readonly-rollback";
+    check(Schedule(Kind::Configuration, rollback.wstring(), error), "schedule readonly metadata rollback fixture");
+    HANDLE locator = INVALID_HANDLE_VALUE;
+    SetConfigurationCopyHookForTesting([&](const std::wstring&) {
+        locator = CreateFileW((basic_source / L"storage-locations.json").c_str(), GENERIC_READ, 0, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return locator != INVALID_HANDLE_VALUE;
+    });
+    const bool rollback_result = ApplyConfiguration(error);
+    SetConfigurationCopyHookForTesting({});
+    if (locator != INVALID_HANDLE_VALUE) CloseHandle(locator);
+    check(!rollback_result && locator != INVALID_HANDLE_VALUE && ConfigurationRoot() == basic_target.wstring() &&
+        !fs::exists(rollback / L"app.json"), "failed locator commit removes only the owned readonly copy");
+    const auto special_source = fixture / L"sparse-source", special_target = fixture / L"sparse-target";
+    fs::create_directories(special_source);
+    OverrideDefaultRootForTesting(special_source.wstring());
+    const auto special_app = (special_source / L"app.json").wstring();
+    check(pulse::WriteUtf8FileAtomic(special_app, L"{}"), "seed sparse configuration fixture");
+    file = CreateFileW(special_app.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD returned = 0;
+    const bool sparse = file != INVALID_HANDLE_VALUE && DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    check(sparse && Schedule(Kind::Configuration, special_target.wstring(), error) && !ApplyConfiguration(error) &&
+        ConfigurationRoot() == special_source.wstring() && !fs::exists(special_target / L"app.json"),
+        "unsupported sparse source refuses migration without switching root");
+
+    const auto encrypted_source = fixture / L"efs-source", encrypted_target = fixture / L"efs-target";
+    fs::create_directories(encrypted_source);
+    OverrideDefaultRootForTesting(encrypted_source.wstring());
+    const auto encrypted_app = (encrypted_source / L"app.json").wstring();
+    check(pulse::WriteUtf8FileAtomic(encrypted_app, L"{}"), "seed encrypted configuration fixture");
+    if (EncryptFileW(encrypted_app.c_str())) {
+        check(Schedule(Kind::Configuration, encrypted_target.wstring(), error) && !ApplyConfiguration(error) &&
+            ConfigurationRoot() == encrypted_source.wstring() && !fs::exists(encrypted_target / L"app.json") &&
+            (GetFileAttributesW(encrypted_app.c_str()) & FILE_ATTRIBUTE_ENCRYPTED),
+            "unsupported EFS source is never published as plaintext");
+    } else {
+        std::printf("[SKIP] EFS fixture unavailable; Win32 error=%lu\n", GetLastError());
+    }
+    std::printf("fixture retained; failures=%d\n", failed);
+    return failed ? 1 : 0;
+}
+
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--configuration-metadata") == 0) return ConfigurationMetadataTest();
+    if (argc == 2 && wcscmp(argv[1], L"--configuration-identity") == 0) return ConfigurationIdentityTest();
     wchar_t temp[MAX_PATH]{}; GetTempPathW(ARRAYSIZE(temp), temp);
     const fs::path fixture = fs::path(temp) / (L"pulse-storage-test-" + std::to_wstring(GetCurrentProcessId()));
     const auto original = (fixture / L"original").wstring();

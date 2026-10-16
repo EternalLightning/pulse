@@ -9,6 +9,7 @@
 #include "fluent_components.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
+#include "text_hit_ranges.h"
 
 #include <commctrl.h>
 #include <d2d1helper.h>
@@ -68,36 +69,31 @@ std::wstring ExtensionLabel(const std::wstring& path) {
 }
 
 COLORREF FindEditBgColor(bool dark) noexcept {
-    return dark ? RGB(30, 30, 30) : RGB(255, 255, 255);
+    return ChildEditBackColor(dark);
 }
 
 COLORREF FindEditFgColor(bool dark) noexcept {
-    return dark ? RGB(255, 255, 255) : RGB(26, 26, 26);
+    return ChildEditTextColor(dark);
 }
 
 D2D1_COLOR_F FindEditBg(bool dark) noexcept {
-    return dark ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                : D2D1::ColorF(1.0f, 1.0f, 1.0f);
+    return ChildEditColor(FindEditBgColor(dark));
 }
 
 D2D1_COLOR_F FindEditFg(bool dark) noexcept {
-    return dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
+    return ChildEditColor(FindEditFgColor(dark));
 }
 
 void FillHitRange(ID2D1DeviceContext* dc, IDWriteTextLayout* layout,
                   uint32_t start, uint32_t length, float origin_x, float origin_y,
-                  ID2D1SolidColorBrush* brush) {
+                  ID2D1SolidColorBrush* brush, float outline = 0.0f) {
     if (!dc || !layout || !brush || length == 0) return;
-    DWRITE_HIT_TEST_METRICS metrics[96];
-    UINT32 actual = 0;
-    if (FAILED(layout->HitTestTextRange(start, length, origin_x, origin_y,
-                                        metrics, ARRAYSIZE(metrics), &actual))) return;
-    const UINT32 count = (std::min)(actual, static_cast<UINT32>(ARRAYSIZE(metrics)));
-    for (UINT32 i = 0; i < count; ++i) {
-        dc->FillRectangle(D2D1::RectF(metrics[i].left, metrics[i].top,
-                                      metrics[i].left + metrics[i].width,
-                                      metrics[i].top + metrics[i].height), brush);
+    for (const auto& metric : TextHitRanges(layout, start, length, origin_x, origin_y)) {
+        const auto bounds = D2D1::RectF(metric.left, metric.top,
+                                      metric.left + metric.width,
+                                      metric.top + metric.height);
+        if (outline > 0.0f) dc->DrawRectangle(bounds, brush, outline);
+        else dc->FillRectangle(bounds, brush);
     }
 }
 
@@ -473,7 +469,8 @@ void QuickPreviewWindow::DrawHud(ID2D1DeviceContext* dc, const D2D1_RECT_F& cont
     const D2D1_RECT_F hud = D2D1::RectF(content.left, content.bottom - hud_h,
                                         content.right, content.bottom);
     ComPtr<ID2D1SolidColorBrush> background;
-    dc->CreateSolidColorBrush(D2D1::ColorF(0x000000, dark_ ? 0.45f : 0.28f), &background);
+    dc->CreateSolidColorBrush(IsHighContrast() ? MakeHighContrastTheme().bg :
+        D2D1::ColorF(0x000000, dark_ ? 0.45f : 0.28f), &background);
     dc->FillRectangle(hud, background.get());
 
     const uint32_t shown_w = source_w_ ? source_w_ : decoded_w_;
@@ -954,7 +951,8 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
     find_painter_.SetScale(scale_);
     if (!find_painter_.BeginFrame(theme, high_contrast)) return;
     ComPtr<ID2D1SolidColorBrush> fill;
-    dc->CreateSolidColorBrush(dark_ ? D2D1::ColorF(0x1F1F1F) : D2D1::ColorF(0xEDEDED), &fill);
+    dc->CreateSolidColorBrush(high_contrast ? theme.bg :
+        dark_ ? D2D1::ColorF(0x1F1F1F) : D2D1::ColorF(0xEDEDED), &fill);
     dc->FillRectangle(bar, fill.get());
     fluent::TextFieldSpec field{};
     field.bounds = FindFieldRect();
@@ -979,6 +977,7 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
 void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT_F& content,
                                           ID2D1SolidColorBrush* text_brush) {
     if (!text_layout_.get() || !dc) return;
+    const bool high_contrast = IsHighContrast();
     const float pad = 20.0f * scale_;
     const float origin_x = pad;
     const float origin_y = content.top + pad - text_scroll_;
@@ -991,20 +990,25 @@ void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT
     if (find_open_ && !find_query_.empty() && !find_matches_.empty()) {
         ComPtr<ID2D1SolidColorBrush> match_brush;
         ComPtr<ID2D1SolidColorBrush> current_brush;
-        dc->CreateSolidColorBrush(D2D1::ColorF(0xC19C00, 0.28f), &match_brush);
-        dc->CreateSolidColorBrush(D2D1::ColorF(0xCA5010, 0.40f), &current_brush);
+        dc->CreateSolidColorBrush(high_contrast ? text_brush->GetColor() :
+            D2D1::ColorF(0xC19C00, 0.28f), &match_brush);
+        dc->CreateSolidColorBrush(high_contrast ? text_brush->GetColor() :
+            D2D1::ColorF(0xCA5010, 0.40f), &current_brush);
         const uint32_t length = static_cast<uint32_t>(find_query_.size());
         for (size_t i = 0; i < find_matches_.size(); ++i) {
             FillHitRange(dc, text_layout_.get(), find_matches_[i], length, origin_x, origin_y,
-                         i == find_index_ ? current_brush.get() : match_brush.get());
+                         i == find_index_ ? current_brush.get() : match_brush.get(),
+                         high_contrast ? (i == find_index_ ? 2.0f : 1.0f) * scale_ : 0.0f);
         }
     }
     const uint32_t a = (std::min)(sel_anchor_, sel_focus_);
     const uint32_t b = (std::max)(sel_anchor_, sel_focus_);
     if (b > a) {
         ComPtr<ID2D1SolidColorBrush> sel;
-        dc->CreateSolidColorBrush(D2D1::ColorF(0x0078D4, 0.35f), &sel);
-        FillHitRange(dc, text_layout_.get(), a, b - a, origin_x, origin_y, sel.get());
+        dc->CreateSolidColorBrush(high_contrast ? text_brush->GetColor() :
+            D2D1::ColorF(0x0078D4, 0.35f), &sel);
+        FillHitRange(dc, text_layout_.get(), a, b - a, origin_x, origin_y, sel.get(),
+            high_contrast ? 2.0f * scale_ : 0.0f);
     }
     dc->DrawTextLayout(D2D1::Point2F(origin_x, origin_y), text_layout_.get(), text_brush,
                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
@@ -1060,7 +1064,8 @@ void QuickPreviewWindow::DrawChromeButtons(ID2D1DeviceContext* dc,
                 D2D1::RectF(rect.left + inset_x, rect.top + inset_y,
                             rect.right - inset_x, rect.bottom - inset_y),
                 radius, radius};
-            dc->FillRoundedRectangle(pill, hover_brush.get());
+            if (IsHighContrast()) dc->DrawRoundedRectangle(pill, text_brush, scale_);
+            else dc->FillRoundedRectangle(pill, hover_brush.get());
         }
         if (!DrawLegacyIcon(dc, compositor_.DwriteFactory(), spec.glyph, rect, text_brush))
             dc->DrawTextW(spec.glyph, 1,
@@ -1087,11 +1092,12 @@ void QuickPreviewWindow::Render() {
         return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
             (value.dwFlags & HCF_HIGHCONTRASTON);
     }();
+    const Theme high_contrast_theme = high_contrast ? MakeHighContrastTheme() : Theme{};
     const D2D1_COLOR_F background = high_contrast
-        ? D2D1::ColorF(GetSysColor(COLOR_WINDOW))
+        ? high_contrast_theme.bg
         : dark_ ? D2D1::ColorF(0x151515) : D2D1::ColorF(0xF7F7F7);
     const D2D1_COLOR_F foreground = high_contrast
-        ? D2D1::ColorF(GetSysColor(COLOR_WINDOWTEXT))
+        ? high_contrast_theme.text
         : dark_ ? D2D1::ColorF(0xF4F4F4) : D2D1::ColorF(0x202020);
     const D2D1_COLOR_F secondary = high_contrast ? foreground
         : dark_ ? D2D1::ColorF(0xB8B8B8) : D2D1::ColorF(0x606060);
@@ -1114,11 +1120,13 @@ void QuickPreviewWindow::Render() {
                                                width, header);
     if (close_hover_) {
         ComPtr<ID2D1SolidColorBrush> close_background;
-        dc->CreateSolidColorBrush(D2D1::ColorF(0xC42B1C), &close_background);
+        dc->CreateSolidColorBrush(high_contrast ? ChildEditColor(GetSysColor(COLOR_HIGHLIGHT)) :
+            D2D1::ColorF(0xC42B1C), &close_background);
         dc->FillRectangle(close_rect, close_background.get());
     }
     ComPtr<ID2D1SolidColorBrush> close_brush;
-    dc->CreateSolidColorBrush(close_hover_ ? D2D1::ColorF(0xFFFFFF) : foreground,
+    dc->CreateSolidColorBrush(close_hover_ ? (high_contrast
+        ? ChildEditColor(GetSysColor(COLOR_HIGHLIGHTTEXT)) : D2D1::ColorF(0xFFFFFF)) : foreground,
                               &close_brush);
     static constexpr wchar_t close_glyph[] = L"\xE711";
     if (!DrawLegacyIcon(dc, compositor_.DwriteFactory(), close_glyph, close_rect, close_brush.get()))

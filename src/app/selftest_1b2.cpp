@@ -1172,16 +1172,16 @@ void TestAddressSearch() {
     bool bounded = true;
     for (int i = 0; i < 40; ++i) {
         const float before = state->addressSearchAnimation;
-        TickAddressSearch(*state, now += 16);
+        TickAddressSearchAnimation(*state, now += 16);
         bounded &= state->addressSearchAnimation >= before && state->addressSearchAnimation <= 1.0f;
     }
     Check(bounded && state->addressSearchAnimation == 1.0f,
           L"address search: entrance animation settles without overshoot");
     state->addressSearching = false;
     state->addressScopeAnimation = 1.0f;
-    for (int i = 0; i < 40; ++i) TickAddressSearch(*state, now += 16);
+    for (int i = 0; i < 40; ++i) TickAddressSearchAnimation(*state, now += 16);
     Check(state->addressSearchAnimation == 0.0f && state->addressScopeAnimation == 0.0f &&
-          !TickAddressSearch(*state, now + 16), L"address search: exit and scope feedback stop repainting");
+          !TickAddressSearchAnimation(*state, now + 16), L"address search: exit and scope feedback stop repainting");
     AdvancedSearchSpec spec;
     spec.name = L"report 2026";
     spec.current_folder = L"C:\\Users\\TestUser\\Desktop";
@@ -4397,6 +4397,19 @@ void TestRecycleAndBatchRename() {
     rule.start = 1;
     Check(ApplyBatchRenameRule(L"photo.jpg", 0, rule) == L"photo_001.jpg",
           L"batch-rename: {n:3} zero-pads the index");
+    rule.pattern = L"{name}_{n:999999999999999999999999999999999999}{ext}";
+    Check(ApplyBatchRenameRule(L"photo.jpg", 0, rule) == L"photo_000000001.jpg",
+          L"batch-rename: oversized template padding saturates without overflow");
+    rule = {};
+    rule.insert_number = true;
+    rule.digits = 100;
+    Check(ApplyBatchRenameRule(L"photo.jpg", 0, rule) == L"photo (000000001).jpg",
+          L"batch-rename: legacy padding stays inside the supported width");
+    rule = {};
+    rule.pattern = L"{name}_{n}{ext}";
+    rule.start = INT_MAX;
+    Check(ApplyBatchRenameRule(L"photo.jpg", 1, rule) == L"photo_2147483648.jpg",
+          L"batch-rename: numbering continues beyond the signed int boundary");
 
     rule = {};
     rule.pattern = L"{name}.png";

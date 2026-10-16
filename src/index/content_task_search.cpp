@@ -195,7 +195,8 @@ struct Result {
 bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSearchRequest &request,
                               const std::atomic<bool> &cancelled, const ContentTaskCache &cache,
                               ContentSearchProgress progress, size_t hits, ContentBatchCallback callback,
-                              ContentTaskReader reader, ContentTiming* supplied_timing) {
+                              ContentTaskReader reader, ContentTiming* supplied_timing,
+                              const ContentTaskEnumerationHooks* enumeration_hooks) {
     std::unique_ptr<ContentTiming> owned_timing;
     if (!supplied_timing) owned_timing = std::make_unique<ContentTiming>(request.generation);
     auto& timing = supplied_timing ? *supplied_timing : *owned_timing;
@@ -451,7 +452,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                     const auto root = std::find_if(config.roots.begin(), config.roots.end(),
                                                    [&](const auto &scope) { return InScope(path, scope.path, true); });
                     if (root == config.roots.end() ||
-                        (!request.root.empty() && !InScope(path, request.root, request.recursive)) ||
+                        (request.roots.empty() && !request.root.empty() && !InScope(path, request.root, request.recursive)) ||
                         (!request.roots.empty() &&
                          std::none_of(request.roots.begin(), request.roots.end(),
                                       [&](const auto &scope) { return InScope(path, scope, request.recursive); })))
@@ -538,19 +539,32 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                                     FindClose(frame.find);
                         }
                     } close_finds{stack};
+                    auto intersects_scope = [&](const std::wstring &path, const std::wstring &scope) {
+                        const auto key = ContentScopeKey(path), base = ContentScopeKey(scope);
+                        return ContentPathUnder(base, key) || (request.recursive && ContentPathUnder(key, base));
+                    };
                     auto open = [&](const std::wstring &path) {
                         if (cache.excluded(path) || (request.skip_system_locations && SystemPath(path)))
                             return;
+                        if ((request.roots.empty() && !request.root.empty() && !intersects_scope(path, request.root)) ||
+                            (!request.roots.empty() && std::none_of(request.roots.begin(), request.roots.end(),
+                                [&](const auto &scope) { return intersects_scope(path, scope); })))
+                            return;
                         Frame frame;
                         frame.path = path;
-                        frame.find = FindFirstFileExW((NativePath(path) + L"\\*").c_str(), FindExInfoBasic, &frame.data,
-                                                      FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+                        frame.find = enumeration_hooks && enumeration_hooks->first
+                            ? enumeration_hooks->first(path, frame.data)
+                            : FindFirstFileExW((NativePath(path) + L"\\*").c_str(), FindExInfoBasic, &frame.data,
+                                              FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
                         if (frame.find != INVALID_HANDLE_VALUE)
                             stack.push_back(std::move(frame));
                         else {
-                            complete = false;
-                            std::lock_guard lock(mutex);
-                            error = GetLastError();
+                            const auto code = GetLastError();
+                            if (code != ERROR_FILE_NOT_FOUND && code != ERROR_NO_MORE_FILES) {
+                                complete = false;
+                                std::lock_guard lock(mutex);
+                                error = code;
+                            }
                         }
                     };
                     for (const auto &root : roots) {
@@ -559,9 +573,18 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                             auto &frame = stack.back();
                             const auto data = frame.data;
                             const auto child = frame.path + L"\\" + data.cFileName;
-                            if (!FindNextFileW(frame.find, &frame.data)) {
+                            const bool next = enumeration_hooks && enumeration_hooks->next
+                                ? enumeration_hooks->next(frame.find, frame.data)
+                                : FindNextFileW(frame.find, &frame.data) != FALSE;
+                            if (!next) {
+                                const auto code = GetLastError();
                                 FindClose(frame.find);
                                 stack.pop_back();
+                                if (code != ERROR_NO_MORE_FILES) {
+                                    complete = false;
+                                    std::lock_guard lock(mutex);
+                                    error = code;
+                                }
                             }
                             if (!wcscmp(data.cFileName, L".") || !wcscmp(data.cFileName, L".."))
                                 continue;

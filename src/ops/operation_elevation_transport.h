@@ -59,6 +59,7 @@ int RunOperationElevationWorker(int argc, wchar_t** argv,
 OperationElevationResult RunOperationElevationForTest(const std::wstring& helper_exe,
     std::span<const uint8_t> request,
     const OperationElevationCallbacks& callbacks = {});
+bool OperationElevationPathsForTest(const std::wstring& parent, const std::wstring& worker, bool testing);
 #endif
 
 } // namespace pulse::ops

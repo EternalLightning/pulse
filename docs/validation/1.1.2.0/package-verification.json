@@ -1,0 +1,44 @@
+{
+  "version": "1.1.2.0",
+  "build_id": "20261012T113225Z-E52E6BD6",
+  "archive": "E:\\Projects\\pulse\\dist\\Pulse-1.1.2.0-portable-win-x64.zip",
+  "bytes": 12053612,
+  "sha256": "540FC58F525054786C66DE37815D0B99DC47486A29706CB5CDDBC30D9AE30570",
+  "payload_path": "E:\\Projects\\pulse\\dist\\portable-stage-0aee892703a446d79fac1511a761c370\\Pulse-1.1.2.0-portable",
+  "file_count": 40,
+  "zip_entries_match": true,
+  "versions": [
+    {
+      "name": "Pulse.exe",
+      "file_version": "1.1.2.0",
+      "product_version": "1.1.2.0",
+      "original_filename": "Pulse.exe"
+    },
+    {
+      "name": "Pulse.Index.exe",
+      "file_version": "1.1.2.0",
+      "product_version": "1.1.2.0",
+      "original_filename": "Pulse.Index.exe"
+    },
+    {
+      "name": "Pulse.Document.exe",
+      "file_version": "1.1.2.0",
+      "product_version": "1.1.2.0",
+      "original_filename": "Pulse.Document.exe"
+    },
+    {
+      "name": "Pulse.Preview.exe",
+      "file_version": "1.1.2.0",
+      "product_version": "1.1.2.0",
+      "original_filename": "Pulse.Preview.exe"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "file_version": "1.1.2.0",
+      "product_version": "1.1.2.0",
+      "original_filename": "Pulse.Shell.exe"
+    }
+  ],
+  "installed": false,
+  "signed": false
+}

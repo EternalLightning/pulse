@@ -213,6 +213,7 @@ private:
     std::unordered_set<std::wstring> starred_index_;
     mutable std::atomic<ULONGLONG> places_save_due_{0};
     uint64_t tag_revision_ = 1;
+    bool tag_saves_enabled_ = true;
     mutable std::mutex tag_save_mutex_;
     mutable std::condition_variable tag_save_cv_;
     mutable std::optional<std::vector<ColorTag>> pending_tag_save_;

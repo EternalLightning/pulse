@@ -1,0 +1,13 @@
+Pulse 1.1.1.0 管理员 worker 隔离更新（2026-10-12）
+
+此包用于更新已有的完整 Pulse 目录。请关闭 Pulse，配套替换 Pulse.exe 和 Pulse.Shell.exe，并保留原目录中其余辅助程序、DLL、7zip 和 licenses。
+管理员文件操作仍通过标准 Windows UAC 授权，由同目录 Pulse.Shell.exe 执行。
+
+本机 Kaspersky 对这两份新文件未检出；同轮扫描原始样本仍检出 BypassUAC。该结果仅适用于当前文件、当前本机规则，不能保证后续云规则或其他机器结果。程序未数字签名。
+54 项定向夹具及 6 项真实 UAC 隔离复制检查通过。本包不代表完整 UI、云盘或所有历史功能回归通过。
+
+SHA-256:
+Pulse.exe       AF45578D96F37089D2817326081F635BD233DCF258C800BC8847322C7970E93A
+Pulse.Shell.exe EE9E688FECD9866A89CEB1F35F121E3AC6504CA175B25ABE0090F060C899473A
+
+详情: docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/review.md

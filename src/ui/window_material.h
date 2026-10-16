@@ -40,6 +40,7 @@ public:
     void Invalidate();
 
     ID2D1Bitmap* SourceBitmap(const std::wstring& path);
+    SIZE LoadedSourceSize(const std::wstring& path) const noexcept;
     // blur_px > 0 paints a Gaussian-blurred cover baked once per path/size/radius.
     bool DrawSourceCover(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
                          const std::wstring& path, float blur_px = 0.0f);

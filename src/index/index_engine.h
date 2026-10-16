@@ -425,6 +425,8 @@ private:
     size_t pool_waste_ = 0;
     ULONGLONG name_pool_retry_after_tick_ = 0;
     uint64_t built_unix_ = 0;
+    bool delta_replay_failed_ = false;
+    bool base_parent_changed_ = false;
     uint64_t index_dir_frn_ = 0;
     std::wstring index_directory_;
     wchar_t index_dir_letter_ = 0;

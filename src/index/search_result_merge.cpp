@@ -11,14 +11,7 @@ int CompareName(const Hit& a, const Hit& b) {
     return by_path == CSTR_LESS_THAN ? -1 : by_path == CSTR_GREATER_THAN ? 1 : 0;
 }
 
-bool BetterHit(const Hit& a, const Hit& b, const Query& query,
-               const CompiledQuery& compiled) {
-    if (query.rank) {
-        const int as = RankName(a.name.data(), static_cast<uint32_t>(a.name.size()), a.is_dir, compiled);
-        const int bs = RankName(b.name.data(), static_cast<uint32_t>(b.name.size()), b.is_dir, compiled);
-        if (as != bs) return as > bs;
-        return CompareName(a, b) < 0;
-    }
+bool BetterHit(const Hit& a, const Hit& b, const Query& query) {
     int cmp = 0;
     if (query.sort == ResultSort::Size && a.size != b.size) cmp = a.size < b.size ? -1 : 1;
     else if (query.sort == ResultSort::Mtime && a.mtime != b.mtime) cmp = a.mtime < b.mtime ? -1 : 1;
@@ -37,19 +30,49 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
     result.error = local.error ? local.error : network.error;
     result.incomplete = local.incomplete || network.incomplete || result.error != ERROR_SUCCESS;
     result.scanning = local.scanning || network.scanning;
+    const size_t count = local.hits.size() + network.hits.size();
+    const size_t begin = (std::min)(query.offset, count);
+    const size_t end = begin + (std::min)(query.limit, count - begin);
+    if (begin == end) return result;
+    result.hits.reserve(end - begin);
+    if (!query.rank && query.sort == ResultSort::Index) {
+        for (size_t i = begin; i < end; ++i) {
+            result.hits.push_back(i < local.hits.size() ? local.hits[i]
+                : network.hits[i - local.hits.size()]);
+        }
+        return result;
+    }
+    if (query.rank) {
+        struct RankedHit {
+            const Hit* hit;
+            int score;
+        };
+        const CompiledQuery compiled = ParseQuery(query.needle);
+        std::vector<RankedHit> ranked;
+        ranked.reserve(count);
+        auto append = [&](const SearchResult& source) {
+            for (const auto& hit : source.hits) {
+                ranked.push_back({&hit, RankName(hit.name.data(),
+                    static_cast<uint32_t>(hit.name.size()), hit.is_dir, compiled)});
+            }
+        };
+        append(local);
+        append(network);
+        // Keep the full sort and comparator ties identical to the unscored path.
+        std::sort(ranked.begin(), ranked.end(), [](const RankedHit& a, const RankedHit& b) {
+            if (a.score != b.score) return a.score > b.score;
+            return CompareName(*a.hit, *b.hit) < 0;
+        });
+        for (size_t i = begin; i < end; ++i) result.hits.push_back(*ranked[i].hit);
+        return result;
+    }
     std::vector<const Hit*> candidates;
-    candidates.reserve(local.hits.size() + network.hits.size());
+    candidates.reserve(count);
     for (const auto& hit : local.hits) candidates.push_back(&hit);
     for (const auto& hit : network.hits) candidates.push_back(&hit);
-    const CompiledQuery compiled = ParseQuery(query.needle);
-    if (query.rank || query.sort != ResultSort::Index) {
-        std::sort(candidates.begin(), candidates.end(), [&](const Hit* a, const Hit* b) {
-            return BetterHit(*a, *b, query, compiled);
-        });
-    }
-    const size_t begin = (std::min)(query.offset, candidates.size());
-    const size_t end = (std::min)(candidates.size(), begin + query.limit);
-    result.hits.reserve(end - begin);
+    std::sort(candidates.begin(), candidates.end(), [&](const Hit* a, const Hit* b) {
+        return BetterHit(*a, *b, query);
+    });
     for (size_t i = begin; i < end; ++i) result.hits.push_back(*candidates[i]);
     return result;
 }

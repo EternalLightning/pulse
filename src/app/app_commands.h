@@ -27,7 +27,7 @@ std::wstring CommonExtension(const app::Tab& tab,
 std::wstring StaticVerbKey(const app::Tab& tab, const std::vector<int>& indices);
 void PrefetchStaticVerbs(AppState& s, const std::wstring& ext);
 DWORD WINAPI ShellRegistryWatch(LPVOID param);
-void StartShellRegistryWatch(HWND hwnd);
+void StartShellRegistryWatch(AppState& s);
 void StopShellRegistryWatch();
 void SeedShellVerbCache(AppState& s);
 void StartCtxQuery(AppState& s, std::vector<std::wstring> paths,

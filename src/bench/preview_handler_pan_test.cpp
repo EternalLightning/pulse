@@ -11,6 +11,8 @@ struct PreviewHandlerPanTest {
         HANDLE resume = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         std::atomic<unsigned> installs{0}, removals{0}, syncs{0};
         std::atomic<bool> live{false};
+        std::atomic<bool> release_consumed{false}, retained{false};
+        std::function<void(unsigned)> on_sync;
         bool pause_first = false;
 
         ~HookProbe() {
@@ -46,6 +48,7 @@ struct PreviewHandlerPanTest {
             const unsigned count = ++probe->syncs;
             SetEvent(probe->synced);
             if (probe->pause_first && count == 1) WaitForSingleObject(probe->resume, 5000);
+            if (probe->on_sync) probe->on_sync(count);
         };
         PreviewHandlerPan::test_hooks_ = std::move(hooks);
         return probe;
@@ -128,6 +131,42 @@ struct PreviewHandlerPanTest {
                 "destruction before input-thread startup never installs a hook");
         }
         DestroyWindow(visible);
+    }
+
+    template <typename Check>
+    static void RunPendingRelease(Check check) {
+        for (const bool stopping : {false, true}) {
+            auto probe = PrepareThread();
+            auto input = std::make_shared<PreviewHandlerPan::InputState>();
+            input->test_hooks = PreviewHandlerPan::test_hooks_;
+            input->suppress_left_up = true;
+            input->stop = stopping;
+            probe->on_sync = [input_raw = input.get(), probe_raw = probe.get()](unsigned count) {
+                if (count != 1) return;
+                probe_raw->retained = probe_raw->live.load();
+                probe_raw->release_consumed = PreviewHandlerPan::ConsumeMouse(*input_raw, WM_LBUTTONUP, POINT{});
+            };
+            auto* argument = new std::shared_ptr<PreviewHandlerPan::InputState>(input);
+            input->thread = CreateThread(nullptr, 0, PreviewHandlerPan::InputMain, argument, 0, nullptr);
+            if (!input->thread) {
+                delete argument;
+                check(false, "start pending-release input thread");
+                continue;
+            }
+            SetEvent(probe->start);
+            if (!stopping) {
+                const bool synced = probe->WaitForSync(2);
+                check(synced && probe->retained && probe->release_consumed && !probe->live && probe->removals == 1,
+                    "hidden preview retains hook until drag release then removes it");
+                input->stop = true;
+                PostThreadMessageW(input->thread_id, WM_NULL, 0, 0);
+            }
+            const bool exited = WaitForSingleObject(input->thread, 2000) == WAIT_OBJECT_0;
+            check(exited && probe->retained && probe->release_consumed && probe->removals == 1,
+                stopping ? "destroyed preview consumes pending release and input thread exits"
+                         : "hidden preview input thread exits after pending release");
+            PreviewHandlerPan::test_hooks_.reset();
+        }
     }
 
     struct NativeCanvas { int clicks = 0, cancellations = 0; bool pressed = false; };
@@ -337,6 +376,7 @@ struct PreviewHandlerPanTest {
             "distinct open and closed hand cursors created");
         pan.Disable();
         RunThreadLifecycle(check);
+        RunPendingRelease(check);
         DestroyWindow(host);
         return failures;
     }

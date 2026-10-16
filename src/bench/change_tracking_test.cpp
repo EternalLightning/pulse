@@ -42,6 +42,39 @@ int wmain(int argc, wchar_t** argv) {
     std::filesystem::create_directories(root);
     int failures = 0;
     auto check = [&](bool ok, const char* name) { std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name); failures += !ok; };
+    auto merge_cases = [&] {
+        auto sequence = [&](ChangeRecord first, ChangeRecord second, ChangeKind expected, const char* name) {
+            ChangeTracker merged; merged.Open(root.wstring()); merged.Lease(L"merge", true);
+            first.file_id = second.file_id = 9001;
+            first.time = ChangeTracker::Now(); second.time = first.time + 1;
+            merged.Record(first); merged.Record(second);
+            const auto details = merged.Details(L"merge", L"C:\\watched", 0, 0, 200);
+            const auto summary = merged.Summaries(L"merge", {L"C:\\watched"});
+            check(details.records.size() == 1 && details.records[0].kind == expected, name);
+            check(summary.summaries.size() == 1 && summary.summaries[0].count == 1 &&
+                summary.summaries[0].counts[static_cast<uint32_t>(expected)] == 1 &&
+                !summary.summaries[0].has_deleted, "merged summary agrees with latest outcome");
+            check(details.records.size() == 1 && details.records[0].id == 2 &&
+                details.records[0].file_id == second.file_id && details.records[0].path == second.path &&
+                details.records[0].old_path == second.old_path && details.records[0].time == second.time,
+                "merged details preserve latest event identity, paths and time");
+        };
+        ChangeRecord moved_in; moved_in.kind = ChangeKind::Renamed;
+        moved_in.old_path = L"C:\\outside\\a.txt"; moved_in.path = L"C:\\watched\\a.txt";
+        ChangeRecord moved_out = moved_in;
+        moved_out.old_path = moved_in.path; moved_out.path = L"C:\\elsewhere\\a.txt";
+        sequence(moved_in, moved_out, ChangeKind::MovedOut, "move in then out keeps latest equal-priority kind");
+        ChangeRecord returned = moved_in; returned.old_path = moved_out.path;
+        sequence(moved_out, returned, ChangeKind::MovedIn, "move out then in keeps latest equal-priority kind");
+        ChangeRecord removed; removed.kind = ChangeKind::Deleted; removed.path = moved_in.path;
+        ChangeRecord restored = removed; restored.kind = ChangeKind::Created;
+        sequence(removed, restored, ChangeKind::Created, "creation still supersedes prior deletion");
+    };
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--merge-only") {
+        merge_cases();
+        std::filesystem::remove_all(root);
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--flush-only") {
         ChangeTracker batched; batched.Open(root.wstring()); batched.Lease(L"batch", true);
         ChangeRecord event; event.path = L"C:\\batch\\first.txt";
@@ -75,6 +108,7 @@ int wmain(int argc, wchar_t** argv) {
         std::filesystem::remove_all(root);
         return failures ? 1 : 0;
     }
+    merge_cases();
     ChangeTracker tracker; tracker.Open(root.wstring()); tracker.Lease(L"test", true);
     check(tracker.Summaries(L"test", {L"C:\\root"}).state == ChangeState::Available, "first enable starts complete observed history without pre-install gap");
     const auto first_origin = ChangeTrackerTestAccess::Origin(tracker, L"test");

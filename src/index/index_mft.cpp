@@ -130,7 +130,13 @@ bool ApplyUsa(BYTE* rec, uint32_t rec_size, uint32_t sector) {
     for (uint16_t i = 1; i < h->usa_count; ++i) {
         const uint64_t off = static_cast<uint64_t>(i) * sector - 2;
         if (off > rec_size || rec_size - static_cast<uint32_t>(off) < 2) return false;
-        *reinterpret_cast<uint16_t*>(rec + static_cast<uint32_t>(off)) = usa[i];
+        // A mismatched sequence word denotes a torn/corrupt record. Validate
+        // every sector before replacing any of its protected trailing words.
+        if (*reinterpret_cast<const uint16_t*>(rec + static_cast<uint32_t>(off)) != usa[0]) return false;
+    }
+    for (uint16_t i = 1; i < h->usa_count; ++i) {
+        const uint32_t off = static_cast<uint32_t>(i) * sector - 2;
+        *reinterpret_cast<uint16_t*>(rec + off) = usa[i];
     }
     return true;
 }
@@ -249,6 +255,7 @@ bool ParseMftRecord0Runs(BYTE* rec, uint32_t rec_size, uint32_t sector,
         if (a->type == kAttrData && a->name_len == 0 && a->non_resident) {
             if (a->length < sizeof(AttrHeader) + sizeof(AttrNonResident)) return false;
             auto* nr = reinterpret_cast<const AttrNonResident*>(p + sizeof(AttrHeader));
+            if (nr->start_vcn != 0) return false;
             const uint32_t min_pairs_off = sizeof(AttrHeader) + sizeof(AttrNonResident);
             if (nr->pairs_off < min_pairs_off || nr->pairs_off >= a->length) return false;
             const BYTE* pairs = p + nr->pairs_off;
@@ -287,14 +294,20 @@ MftReadStatus EnumerateMft(HANDLE volume,
     if (!read(mft_off, rec0.data(), rec_size)) return MftReadStatus::Failed;
 
     std::vector<Run> runs;
-    if (!ParseMftRecord0Runs(rec0.data(), rec_size, sector, runs) || runs.empty()) {
-        // Contiguous fallback: treat the start LCN as a long run covering ValidDataLength.
-        Run r;
-        r.lcn = static_cast<uint64_t>(vd.MftStartLcn.QuadPart);
-        const uint64_t valid_bytes = static_cast<uint64_t>(vd.MftValidDataLength.QuadPart);
-        r.clusters = valid_bytes / cluster + (valid_bytes % cluster != 0 ? 1 : 0);
-        runs.push_back(r);
+    if (!ParseMftRecord0Runs(rec0.data(), rec_size, sector, runs) || runs.empty())
+        return MftReadStatus::Failed;
+    const uint64_t valid_bytes = static_cast<uint64_t>(vd.MftValidDataLength.QuadPart);
+    if (!valid_bytes || valid_bytes % rec_size != 0) return MftReadStatus::Failed;
+    uint64_t mapped_bytes = 0;
+    for (const Run& run : runs) {
+        uint64_t bytes = 0;
+        if (!CheckedMultiply(run.clusters, cluster, bytes) ||
+            !CheckedAdd(mapped_bytes, bytes, mapped_bytes))
+            return MftReadStatus::Failed;
     }
+    // An incomplete mapping cannot establish a baseline. Let the caller use
+    // the system enumeration instead of guessing physical MFT continuity.
+    if (mapped_bytes < valid_bytes) return MftReadStatus::Failed;
 
     // Read the MFT in large sequential blocks. The previous implementation
     // moved the volume file pointer and issued one ReadFile per record,
@@ -306,6 +319,7 @@ MftReadStatus EnumerateMft(HANDLE volume,
     uint64_t file_off = 0;
     for (const Run& run : runs) {
         if (running && !running->load()) return MftReadStatus::Cancelled;
+        if (file_off >= valid_bytes) break;
         if (run.sparse) {
             uint64_t run_bytes = 0;
             if (!CheckedMultiply(run.clusters, cluster, run_bytes) ||
@@ -318,6 +332,7 @@ MftReadStatus EnumerateMft(HANDLE volume,
         if (!CheckedMultiply(run.lcn, cluster, disk) ||
             !CheckedMultiply(run.clusters, cluster, left))
             return MftReadStatus::Failed;
+        left = (std::min)(left, valid_bytes - file_off);
         while (left >= rec_size) {
             if (running && !running->load()) return MftReadStatus::Cancelled;
             const uint64_t wanted = (std::min)(left, static_cast<uint64_t>(chunk_bytes));

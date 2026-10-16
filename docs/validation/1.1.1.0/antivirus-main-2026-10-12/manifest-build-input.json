@@ -1,0 +1,8 @@
+{
+  "path": "E:\\Projects\\pulse\\build\\Pulse.exe",
+  "bytes": 7250944,
+  "md5": "356942EE85F3FB10A664C0EAB583B4AF",
+  "sha256": "224AA0010FC51DA4770E344C7C783C5F228D5E7578B45E149C75A7D152640DD9",
+  "signature": "NotSigned",
+  "change": "Explicit asInvoker and uiAccess=false in the application manifest"
+}

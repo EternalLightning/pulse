@@ -2,7 +2,6 @@
 #include "../common/localization.h"
 #include <iostream>
 
-void Render(pulse::AppState&);
 namespace {
 struct Messages { int margins=0,positions=0,redraw=0,hidden=0,text=0,size=0,selection=0; bool trace=false; };
 LRESULT CALLBACK Observe(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data) {

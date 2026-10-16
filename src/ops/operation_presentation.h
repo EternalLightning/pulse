@@ -3,8 +3,26 @@
 #include "ops_manager.h"
 #include "../common/display_path.h"
 #include "../common/file_operation_error.h"
+#include "../common/progress_percent.h"
 
 namespace pulse::ops {
+
+inline void ApplyShellProgress(OpStatus& status, float percent, const std::wstring& item,
+                               uint32_t items_done, uint32_t total_items, bool deleting) {
+    status.percent = NormalizeProgressPercent(percent);
+    status.current_item = item;
+    if (!deleting) {
+        if (total_items > 0) status.total_items = total_items;
+        status.completed_items = (std::min)(static_cast<uint64_t>(items_done), status.total_items);
+    }
+    const auto suffix = status.summary.find(L"  (");
+    if (suffix != std::wstring::npos) status.summary.erase(suffix);
+    if (!item.empty() && status.percent >= 0.0f) {
+        wchar_t text[32];
+        swprintf_s(text, L"  (%.0f%%)", status.percent);
+        status.summary += text;
+    }
+}
 
 inline OpStatus PresentOperationStatus(OpStatus status) {
     if (status.phase == OpPhase::Completed) status.percent = 100.0f;

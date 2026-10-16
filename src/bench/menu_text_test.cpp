@@ -1,4 +1,5 @@
 #include "../ui/fluent_menu.h"
+#include "../ui/popup_origin.h"
 #include "../common/localization.h"
 #include <cstdio>
 #include <cmath>
@@ -22,6 +23,10 @@ struct FluentMenuTestPeer {
     static void Open(FluentMenu& menu) { menu.OpenSubmenu(0); }
     static void Hover(FluentMenu& menu) { menu.UpdateHover(0); }
     static void Progress(FluentMenu& menu) { menu.Present(160, -3); }
+    static void Scroll(FluentMenu& menu, float offset) {
+        menu.scroll_y_ = offset;
+        menu.PositionSubmenu();
+    }
     static void PendingResult(FluentMenu& menu, int command) { menu.result_ = command; }
     static int Result(const FluentMenu& menu) { return menu.result_; }
     static void ChooseRow(FluentMenu& menu, int row) {
@@ -58,6 +63,33 @@ pulse::ui::FluentMenuItem Item(int command, const wchar_t* text) {
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
+    if (argc == 2 && wcscmp(argv[1], L"--popup-placement") == 0) {
+        const RECT work{-1920, -100, 0, 940};
+        const auto inside = ConstrainPopupOrigin({-1000, 200}, {300, 600}, work);
+        Check(inside.x == -1000 && inside.y == 200, "popup preserves an interior anchor");
+        const auto trailing = ConstrainPopupOrigin({-50, 900}, {300, 600}, work);
+        Check(trailing.x == -300 && trailing.y == 340, "popup clamps trailing work-area edges");
+        const auto oversized = ConstrainPopupOrigin({-50, 900}, {2200, 1250}, work);
+        Check(oversized.x == work.left && oversized.y == work.top,
+            "oversized popup uses ordered bounds at high DPI on a small work area");
+        const auto leading = ConstrainPopupOrigin({-3000, -500}, {300, 600}, work);
+        Check(leading.x == work.left && leading.y == work.top, "popup clamps leading edges on a negative monitor");
+        for (const RECT area : {RECT{0, 0, 1920, 1040}, RECT{0, 0, 320, 240},
+                                RECT{-300, -100, 0, 940}}) {
+            const float scale = FitPopupScale(2.0f, 292.0f, 599.0f, 24, area);
+            const SIZE size{static_cast<LONG>(std::lround(292.0f * scale)) + 48,
+                            static_cast<LONG>(std::lround(599.0f * scale)) + 48};
+            const auto origin = ConstrainPopupOrigin({area.right, area.bottom}, size, area);
+            Check(scale >= 0.25f && scale <= 2.0f && size.cx <= area.right - area.left &&
+                size.cy <= area.bottom - area.top, "fitted popup surface fits the small work area");
+            Check(origin.y + 24 + 591.0f * scale <= area.bottom && origin.x >= area.left &&
+                origin.x + size.cx <= area.right,
+                "fitted popup accept row remains reachable at trailing work-area edge");
+        }
+        Check(FitPopupScale(1.0f, 292.0f, 599.0f, 24, RECT{0, 0, 1920, 1040}) == 1.0f,
+            "fitting popup preserves requested DPI scale");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--command-state") == 0) {
         FluentMenuModel model;
         auto pending = Item(8001, L"Shell action");
@@ -126,6 +158,10 @@ int wmain(int argc, wchar_t** argv) {
             FluentMenuTestPeer::Progress(menu);
             Check(FluentMenuTestPeer::SubY(menu) == sub_y + 5,
                 "flyout follows the parent slide without losing its anchor");
+            FluentMenuTestPeer::Scroll(menu, 24.0f);
+            Check(FluentMenuTestPeer::SubY(menu) == sub_y + 5 - 24,
+                "flyout follows its visible parent row after menu scrolling");
+            FluentMenuTestPeer::Scroll(menu, 0.0f);
             create.children.push_back(Item(8012, L"Office document"));
             Check(menu.ReplaceItems({create, stable}) && FluentMenuTestPeer::SubOpen(menu) &&
                 FluentMenuTestPeer::HasChildren(menu, 3) && FluentMenuTestPeer::Alpha(menu) == 160,

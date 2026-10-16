@@ -3,12 +3,13 @@
 #include "drive_label_rename.h"
 #include "../ops/archive.h"
 #include "../ops/drop_staging.h"
-#include "../ops/operation_elevation_adapter.h"
 #include "locked_operation_prompt.h"
 #include "permission_operation_prompt.h"
 #include "../common/windows_compat.h"
 #include "quick_access.h"
-#include "filter_animation.h"
+#include "pane_animations.h"
+#include "app_visual_animation.h"
+#include "app_ui_schedule.h"
 #include "sidebar_resize.h"
 // app_main.cpp — Pulse UI process entry point, window, input, shot mode.
 #include "../ui/ui_compositor.h"
@@ -183,7 +184,16 @@ bool Render(AppState& s) {
 
     if (s.scrollAnimating) UpdateSmoothScroll(s);
     const bool tray_animating = TickTrayDeck(s);
-    UpdateProcessMetrics(s);
+    bool pane_animating = false;
+    const uint64_t animation_now = app::PaneAnimationTimeMs();
+    for (auto& pane : Panes(s)) {
+        const bool focused = pane.get() == s.pane;
+        pane_animating |= app::TickPaneAnimations(*pane, focused,
+            s.filterEditing && focused, animation_now);
+    }
+    const bool visual_animating = TickVisualAnimations(s);
+    const bool address_animating = TickAddressSearchAnimation(s, animation_now);
+    if (s.showFps) UpdateProcessMetrics(s);
     ui::WindowViewModel vm = BuildVm(s);
     vm.backdrop_enabled = !hc && s.compositor.UsesTransparentComposition() && s.backdropActive;
     vm.pane.hover_index = s.hoverRow;
@@ -214,6 +224,7 @@ bool Render(AppState& s) {
     if (!s.tagRenameId.empty()) LayoutTagRenameOverlay(s);
     if (s.addressEditing) LayoutAddressEditor(s);
     if (s.filterEditing) LayoutFilterEditor(s);
+    CompleteFilterFocus(s);
 
     if (s.shot.active && !s.timing.first_frame_recorded) {
         s.timing.first_frame_ms = std::chrono::duration<double, std::milli>(
@@ -228,7 +239,7 @@ bool Render(AppState& s) {
     // paints reported the idle gap as "1 FPS" and back-to-back paints as
     // thousands. An idle gap restarts the window instead of being averaged in,
     // and the value only updates once the window spans enough frames.
-    {
+    if (s.showFps) {
         using secs = std::chrono::duration<double>;
         constexpr double kIdleGap = 0.25, kWindow = 1.0, kMinSpan = 0.05;
         if (!s.fpsWindow.empty() && secs(t1 - s.fpsWindow.back()).count() > kIdleGap)
@@ -239,22 +250,13 @@ bool Render(AppState& s) {
         const double span = secs(t1 - s.fpsWindow.front()).count();
         if (s.fpsWindow.size() >= 3 && span >= kMinSpan)
             s.lastFps = static_cast<double>(s.fpsWindow.size() - 1) / span;
+    } else {
+        s.fpsWindow.clear();
+        s.lastFps = 0;
     }
-    s.lastFrameTime = t1;
-    return tray_animating;
-}
-
-// kTimerUi drives animations and light polling. Minimized or hidden to the
-// tray nothing animates, so poll gently instead of 60 wakeups per second.
-constexpr UINT kUiTimerVisibleMs = 16;
-constexpr UINT kUiTimerHiddenMs = 200;
-static UINT g_uiTimerMs = kUiTimerVisibleMs;
-
-static void SyncUiTimerRate(HWND hwnd, bool visible) {
-    const UINT want = visible ? kUiTimerVisibleMs : kUiTimerHiddenMs;
-    if (want == g_uiTimerMs) return;
-    g_uiTimerMs = want;
-    SetTimer(hwnd, kTimerUi, want, nullptr);
+    s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating ||
+        address_animating || s.scrollAnimating;
+    return s.ui_schedule.animation_active;
 }
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -304,6 +306,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s = reinterpret_cast<AppState*>(cs->lpCreateParams);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(s));
         s->hwnd = hwnd;
+        s->shell_verbs_mailbox = std::make_shared<app::WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
+        s->shell_registry_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
+        s->dup_volumes_mailbox = std::make_shared<app::WindowResultMailbox<std::vector<index::VolumeInfo>>>(hwnd, WM_DUP_VOLUMES);
+        s->dup_volume_cache_pending = false;
         s->tray_controller.Attach(hwnd, cs->hInstance);
         s->tray_controller.SetBeforeRestore([s] {
             s->tray_controller.SetVisible(s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled);
@@ -380,7 +386,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->appPrefs.background_image.clear();
         } else {
             SeedShellVerbCache(*s);
-            StartShellRegistryWatch(hwnd);
+            StartShellRegistryWatch(*s);
         }
         s->renderer.SetRowHeightDip(static_cast<float>(s->appPrefs.row_height));
         s->renderer.SetListStyle(s->appPrefs.list_smart_date, s->appPrefs.list_zebra_rows,
@@ -651,10 +657,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         s->systemIntegration.Start(*s);
 
-        s->lastFrameTime = std::chrono::steady_clock::now();
         s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
         s->renderer.SetDetailsPanelWidth(s->detailsPanelWidth);
-        SetTimer(hwnd, kTimerUi, 16, nullptr);
+        SyncUiScheduling(*s);
         SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER |
             SWP_NOACTIVATE | SWP_FRAMECHANGED);
@@ -875,7 +880,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_SHOWWINDOW:
         // Sent before the window becomes visible; restore full rate right away.
-        if (s && wParam && !IsIconic(hwnd)) SyncUiTimerRate(hwnd, true);
+        if (s && wParam && !IsIconic(hwnd)) SyncUiScheduling(*s);
         break;
 
     case WM_ACTIVATE:
@@ -907,7 +912,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s) {
             s->compositor.Resize(LOWORD(lParam), HIWORD(lParam));
             s->maximized = (wParam == SIZE_MAXIMIZED);
-            if (wParam != SIZE_MINIMIZED && IsWindowVisible(hwnd)) SyncUiTimerRate(hwnd, true);
+            if (wParam != SIZE_MINIMIZED && IsWindowVisible(hwnd)) SyncUiScheduling(*s);
             if (s->addressEditing) LayoutAddressEditor(*s);
             if (s->filterEditing && !s->filterFocusPending) LayoutFilterEditor(*s);
             if (!s->tagRenameId.empty()) LayoutTagRenameOverlay(*s);
@@ -920,11 +925,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
-        const bool tray_animating = s && Render(*s);
+        const bool animating = s && Render(*s);
         EndPaint(hwnd, &ps);
         // Present throttles animations to the display. Queue the next low-priority
         // paint after EndPaint so high-refresh monitors are not capped by WM_TIMER.
-        if (s && (s->scrollAnimating || tray_animating) && !s->compositor.NeedsRecovery() &&
+        if (s && (s->scrollAnimating || animating) && s->compositor.CanScheduleAnimationFrame() &&
             IsWindowVisible(hwnd) && !IsIconic(hwnd))
             InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
@@ -944,103 +949,38 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_TIMER: {
+        if (s && s->ui_schedule.stopped) return 0;
+        if (s && wParam == kTimerUiDeadline) {
+            KillTimer(hwnd, kTimerUiDeadline);
+            s->ui_schedule.deadline = 0;
+            if (!s->exit_requested && RunUiDeadlines(*s, GetTickCount64()))
+                InvalidateRect(hwnd, nullptr, FALSE);
+            SyncUiScheduling(*s);
+            return 0;
+        }
         if (s && wParam == kTimerUi) {
             if (CompleteApplicationExit(*s)) return 0;
             if (s->exit_requested) return 0;
-            SyncUiTimerRate(hwnd, IsWindowVisible(hwnd) && !IsIconic(hwnd));
+            SyncUiScheduling(*s);
             bool dirty = false;
             if (s->systemIntegration.Tick(*s)) dirty = true;
             if (TickChangeTracking(*s)) dirty = true;
             if (s->folderSizes.TakeChanged()) dirty = true;
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
+            if (RunUiDeadlines(*s, now)) dirty = true;
+            // Probe stalled animation presentation at maintenance rate, never
+            // spin WM_PAINT when the swap chain is occluded or unavailable.
+            if (IsWindowVisible(hwnd) && !IsIconic(hwnd) &&
+                (s->ui_schedule.animation_active || s->compositor.NeedsRecovery())) dirty = true;
             if (PumpClipboardAvailability(*s, now)) dirty = true;
             if (app::PumpTrayMetadata(s->tray, s->worker, s->tray_metadata)) dirty = true;
-            if (s->sidebarScrollbarFade.Tick(now, s->sidebarScroll,
-                    s->hoverRegion == static_cast<int>(ui::HitTestResult::Scrollbar) && s->hoverPaneIndex < 0,
-                    s->scrollbarDragging && s->scrollbarSidebar)) dirty = true;
-            if (TickSidebarFolds(*s, now)) dirty = true;
-            if (s->renderer.TickDetailsPreview(now)) dirty = true;
-            if (s->detailsPreviewFoldStart) {
-                const float t = std::min(1.0f, static_cast<float>(now - s->detailsPreviewFoldStart) / 150.0f);
-                const float eased = t * t * (3.0f - 2.0f * t);
-                const float target = s->detailsPreviewOnly ? 1.0f : 0.0f;
-                s->detailsPreviewExpansion = s->detailsPreviewExpansionFrom +
-                    (target - s->detailsPreviewExpansionFrom) * eased;
-                if (t >= 1) s->detailsPreviewFoldStart = 0;
-                dirty = true;
-            }
-            if (TickAddressSearch(*s, now)) dirty = true;
+            if (TickAddressSearchMaintenance(*s, now)) dirty = true;
             if (RefreshContentResults(*s)) dirty = true;
-            const int shell_refreshes = s->context_menu.ConsumeDueRefreshes(now);
-            for (int i = 0; i < shell_refreshes; ++i) {
-                RefreshActiveTab(*s, RefreshReason::ShellNotification);
-                dirty = true;
-            }
             if (PumpRecycleRefresh(*s, now)) dirty = true;
             if (s->home_catalog.ConsumeUpdate()) dirty = true;
             MaybePrefetchCtxMenu(*s);
             s->places.FlushPendingSave(false);
-            if (s->renameClickCandidate && s->renameClickDue != 0 &&
-                now >= s->renameClickDue) {
-                app::Tab* tab = ActiveTab(*s);
-                const int index = s->renameClickIndex;
-                const bool valid = s->pane == s->renameClickPane &&
-                    tab == s->renameClickTab && tab &&
-                    tab->SelectedCount() == 1 && tab->selected_index == index &&
-                    index >= 0 && index < tab->CountBound() &&
-                    (s->renameClickPath.empty() ||
-                     EntryFullPath(*tab, index) == s->renameClickPath) &&
-                    s->renameIndex < 0 && s->tagRenameId.empty() &&
-                    !s->addressEditing && !s->filterEditing &&
-                    !s->dragPending && !s->marqueePending && !s->marqueeActive &&
-                    !s->scrollbarDragging && !s->splitterDragging;
-                CancelRenameClick(*s);
-                if (valid) ShowRenameOverlay(*s);
-            }
-            // Search affordance: expand only the focused pane, then reveal
-            // the hosted edit once it has enough room for stable text layout.
-            for (auto& pane : Panes(*s)) {
-                if (pane->header_animation.Tick(pane.get() == s->pane, now))
-                    dirty = true;
-                if (app::TickFilterAnimation(*pane, s->filterEditing && pane.get() == s->pane, now))
-                    dirty = true;
-            }
-            const float focusedExpand = s->pane ? s->pane->filter_expand : 0.0f;
-            if (s->filterFocusPending && focusedExpand >= 1.0f &&
-                s->hwndFilterEdit) {
-                if (s->pane) s->pane->filter_expand = 1.0f;
-                LayoutFilterEditor(*s);
-                s->filterIgnoreKillFocus = true;
-                ShowWindow(s->hwndFilterEdit, SW_SHOW);
-                SetForegroundWindow(GetAncestor(s->hwndFilterEdit, GA_ROOT));
-                SetFocus(s->hwndFilterEdit);
-                SendMessageW(s->hwndFilterEdit, EM_SETSEL, 0, -1);
-                s->filterFocusPending = false;
-                s->filterIgnoreKillFocus = false;
-                dirty = true;
-            }
-            // Scrollbar hover expansion.
-            float target = s->scrollbarHovered ? (s->renderer.Margin() * 1.5f - 6.0f * s->scale) : 0.0f;
-            target = std::max(0.0f, target);
-            float step = (target - s->scrollbarHoverWidth) * 0.25f;
-            if (std::abs(step) > 0.1f) {
-                s->scrollbarHoverWidth += step;
-                dirty = true;
-            } else if (s->scrollbarHoverWidth != target) {
-                s->scrollbarHoverWidth = target;
-                dirty = true;
-            }
-            // Active scrolling queues its own next paint after Present.
-            // Tag slide animation.
-            if (!s->tagTracks.empty() || s->tagGapFrom != s->tagGapTo) {
-                TickTagTransitions(*s);
-                dirty = true;
-            }
-            if (!s->tabTracks.empty() || !s->chipTracks.empty()) {
-                TickTabTransitions(*s);
-                dirty = true;
-            }
             // Tray animation advances during painting, like smooth scrolling.
             if (app::Tab* tab = ActiveTab(*s)) {
                 std::wstring kind, rest;
@@ -1050,17 +990,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     if (page == 4 && s->duplicateScan.scanning) dirty = true;
                 }
             }
-            // 150 ms: the icon rail relies on the hint to name each row, and the
-            // old 400 ms delay read as "no tooltip at all".
-            if (s->hoverRegion != 0 && s->tooltipText.empty() && s->hoverSince != 0 &&
-                GetTickCount64() - s->hoverSince >= 150) {
-                s->tooltipText = TooltipForHover(*s);
-                dirty = !s->tooltipText.empty() || dirty;
-            }
             QueueVisibleTagDiscovery(*s);
             UpdateOperationWindow(*s, false);
             PumpPermissionOperationPrompt(*s);
             if (dirty) InvalidateRect(hwnd, nullptr, FALSE);
+            SyncUiScheduling(*s);
         }
         return 0;
     }
@@ -1453,19 +1387,17 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SHELL_VERBS: {
-        auto* result = reinterpret_cast<ShellVerbsResult*>(lParam);
-        if (s && result) {
-            if (s->context_menu.CompleteStaticVerbs(
-                    result->ext, std::move(result->verbs))) {
-                RefreshOpenCtxMenu(*s);
+        if (s && s->shell_verbs_mailbox) {
+            for (auto& result : s->shell_verbs_mailbox->Take(wParam)) {
+                if (s->context_menu.CompleteStaticVerbs(result.ext, std::move(result.verbs)))
+                    RefreshOpenCtxMenu(*s);
             }
         }
-        delete result;
         return 0;
     }
 
     case WM_SHELL_CACHE_INVALIDATE: {
-        if (s) {
+        if (s && s->shell_registry_mailbox && !s->shell_registry_mailbox->Take(wParam).empty()) {
             s->context_menu.InvalidateCaches();
             SeedShellVerbCache(*s);
         }
@@ -1584,9 +1516,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_DUP_VOLUMES: {
-        auto* payload = reinterpret_cast<std::vector<index::VolumeInfo>*>(lParam);
-        if (s && payload) ApplyDuplicateVolumeCache(*s, std::move(*payload));
-        delete payload;
+        if (s && s->dup_volumes_mailbox) {
+            for (auto& volumes : s->dup_volumes_mailbox->Take(wParam))
+                ApplyDuplicateVolumeCache(*s, std::move(volumes));
+        }
         return 0;
     }
 
@@ -1650,8 +1583,22 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_NCDESTROY:
+        // WM_CREATE failure can bypass the normal WM_DESTROY cleanup path.
+        if (s) {
+            if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
+            if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
+            if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
+        }
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+
     case WM_DESTROY: {
         if (s) {
+            if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
+            if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
+            if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
+            StopUiScheduling(*s);
             // Destruction paths used by tests also save only after operations settle.
             if (s->exit_thread.joinable()) s->exit_thread.join();
             s->systemIntegration.Stop();
@@ -1766,7 +1713,13 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     __try {
-        return WndProcImpl(hwnd, msg, wParam, lParam);
+        const LRESULT result = WndProcImpl(hwnd, msg, wParam, lParam);
+        // Re-evaluate deadlines after input/completion messages, including ones
+        // which cancel or replace a pending task. No per-frame timer reset.
+        if (msg != WM_DESTROY && msg != WM_NCDESTROY && IsWindow(hwnd)) {
+            if (AppState* state = GetAppState(hwnd)) SyncUiScheduling(*state);
+        }
+        return result;
     } __except (pulse::crash::AddBreadcrumb(1, msg, static_cast<int32_t>(GetExceptionCode())),
                 pulse::crash::ReportFatal(GetExceptionInformation(), "wndproc")) {
         TerminateProcess(GetCurrentProcess(), GetExceptionCode());
@@ -1969,7 +1922,7 @@ bool SkipSingletonFromArgv() {
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     pulse::crash::Initialize({pulse::crash::ProcessRole::App, false, {}});
     if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
-        return ops::OperationElevationAdapter::RunWorker(__argc, __wargv);
+        return ERROR_NOT_SUPPORTED;
     for (int i = 1; i < __argc; ++i) {
         if (wcscmp(__wargv[i], L"--restore-file-manager") == 0) {
             const auto result = app::RestoreDefaultFileManager(app::SystemExecutablePath());

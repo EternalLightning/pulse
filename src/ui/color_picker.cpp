@@ -16,6 +16,8 @@
 //   - 120ms fade + 10px horizontal slide, 170ms OutCubic (QFluent execAt).
 // Card metrics (DIP): width 292, inner 256, margins 18/14/8, spacing 10.
 #include "color_picker.h"
+#include "popup_origin.h"
+#include "dialog_lifecycle.h"
 
 #include "fluent_components.h"
 #include "fluent_menu.h"
@@ -156,6 +158,8 @@ struct State {
     bool dark = true;
     D2D1_COLOR_F accent{};
     Theme theme{};
+    ComPtr<IDWriteTextFormat> body_format;
+    ComPtr<IDWriteTextFormat> icon_format;
     fluent::Painter painter;
 
     uint32_t argb = 0xFF000000u; // source of truth
@@ -446,14 +450,15 @@ void FillChecker(ID2D1DeviceContext* dc, const D2D1_RECT_F& r, float cell) {
 // (6.5 hovered, 4 pressed).
 void DrawChannelThumb(State& s, ID2D1DeviceContext* dc, const D2D1_RECT_F& slot,
                       float t, bool hovered, bool pressed) {
+    const bool hc = IsHighContrast();
     const D2D1_RECT_F g = GrooveRect(s, slot);
     const float cx = g.left + t * (g.right - g.left);
     const float cy = (g.top + g.bottom) * 0.5f;
     ComPtr<ID2D1SolidColorBrush> fill, ring, dot;
-    dc->CreateSolidColorBrush(s.dark ? D2D1::ColorF(0.2706f, 0.2706f, 0.2706f, 1.0f) // #454545
+    dc->CreateSolidColorBrush(hc ? s.theme.fill_input : s.dark ? D2D1::ColorF(0.2706f, 0.2706f, 0.2706f, 1.0f) // #454545
                                      : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &fill);
     const float ring_a = (s.dark ? 90.0f : 25.0f) / 255.0f;
-    dc->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, ring_a), &ring);
+    dc->CreateSolidColorBrush(hc ? s.theme.text : D2D1::ColorF(0.0f, 0.0f, 0.0f, ring_a), &ring);
     dc->CreateSolidColorBrush(s.accent, &dot);
     const float outer = Px(s, 10.0f);
     const auto ellipse = D2D1::Ellipse(D2D1::Point2F(cx, cy), outer, outer);
@@ -468,16 +473,17 @@ void DrawChannelThumb(State& s, ID2D1DeviceContext* dc, const D2D1_RECT_F& slot,
 // light) at ~55% radius — the QSS radial gradient with hard stops.
 void DrawBrightThumb(State& s, ID2D1DeviceContext* dc, const D2D1_RECT_F& slot,
                      float t) {
+    const bool hc = IsHighContrast();
     const float r = Px(s, 8.0f);
     const float cx = slot.left + r + t * (slot.right - slot.left - 2.0f * r);
     const float cy = (slot.top + slot.bottom) * 0.5f;
     ComPtr<ID2D1SolidColorBrush> border, ring, dot;
-    dc->CreateSolidColorBrush(s.dark ? D2D1::ColorF(0.2157f, 0.2157f, 0.2157f, 1.0f) // #373737
+    dc->CreateSolidColorBrush(hc ? s.theme.text : s.dark ? D2D1::ColorF(0.2157f, 0.2157f, 0.2157f, 1.0f) // #373737
                                      : D2D1::ColorF(0.8706f, 0.8706f, 0.8706f, 1.0f), // #DEDEDE
                               &border);
-    dc->CreateSolidColorBrush(s.dark ? D2D1::ColorF(0.2706f, 0.2706f, 0.2706f, 1.0f)
+    dc->CreateSolidColorBrush(hc ? s.theme.fill_input : s.dark ? D2D1::ColorF(0.2706f, 0.2706f, 0.2706f, 1.0f)
                                      : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &ring);
-    dc->CreateSolidColorBrush(s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f)
+    dc->CreateSolidColorBrush(hc ? s.theme.text : s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f)
                                      : D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f), &dot);
     const auto c = D2D1::Point2F(cx, cy);
     dc->FillEllipse(D2D1::Ellipse(c, r, r), border.get());
@@ -493,6 +499,12 @@ void DrawBrightThumb(State& s, ID2D1DeviceContext* dc, const D2D1_RECT_F& slot,
 void DrawPopupField(State& s, ID2D1DeviceContext* dc, const D2D1_RECT_F& rc,
                     bool focused, bool hovered) {
     const float radius = Px(s, 5.0f);
+    if (IsHighContrast()) {
+        s.painter.FillRoundedRect(rc, radius, s.theme.fill_input);
+        s.painter.StrokeRoundedRect(rc, radius, focused ? s.theme.accent : s.theme.text,
+            Px(s, focused ? 2.0f : 1.0f));
+        return;
+    }
     D2D1_COLOR_F fill = s.dark ? D2D1::ColorF(0.1765f, 0.1765f, 0.1765f, 1.0f) // #2D2D2D
                                : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
     if (hovered) {
@@ -624,7 +636,7 @@ bool Render(State& s) {
         DrawBrightThumb(s, dc, s.r_bright, s.hsv.v / 255.0f);
     }
 
-    IDWriteTextFormat* body = s.compositor->TextFormat();
+    IDWriteTextFormat* body = s.body_format.get();
 
     // Mode combo (ComboBox look: field frame + text + chevron).
     {
@@ -637,9 +649,9 @@ bool Render(State& s) {
         const float g = Px(s, 8.0f);
         const float cx = s.r_combo.right - Px(s, 14.0f);
         const float cy = (s.r_combo.top + s.r_combo.bottom) * 0.5f;
-        s.painter.DrawGlyph(L"\xE70D",
+        s.painter.DrawText(L"\xE70D",
                             D2D1::RectF(cx - g, cy - g, cx + g, cy + g),
-                            s.theme.text_secondary);
+                            s.icon_format.get(), s.theme.text_secondary, fluent::HorizontalAlignment::Center);
     }
 
     // Hex + channel fields: D2D draws frame and value text; once the native
@@ -687,7 +699,7 @@ bool Render(State& s) {
 
     // Separator (color_picker.qss: white 8% dark / black 8% light).
     s.painter.FillRoundedRect(s.r_sep, 0.0f,
-                              s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.08f)
+                              IsHighContrast() ? s.theme.stroke_divider : s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.08f)
                                      : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.08f));
 
     // Accept / cancel glyph buttons. The hover pill is inset and rounded so
@@ -704,8 +716,8 @@ bool Render(State& s) {
         const float g = Px(s, 8.0f);
         const float cx = (rc.left + rc.right) * 0.5f;
         const float cy = (rc.top + rc.bottom) * 0.5f;
-        s.painter.DrawGlyph(glyph, D2D1::RectF(cx - g, cy - g, cx + g, cy + g),
-                            s.theme.text);
+        s.painter.DrawText(glyph, D2D1::RectF(cx - g, cy - g, cx + g, cy + g),
+                            s.icon_format.get(), s.theme.text, fluent::HorizontalAlignment::Center);
     };
     // CheckMark E73E + Close E8BB are the matched bold pair in Segoe Fluent
     // Icons (Accept E8FB is visibly thinner than Close, so it is not used).
@@ -891,11 +903,11 @@ bool PaintLumaEditControl(State& s, HWND hwnd, HDC hdc) {
     (void)hdc;
     if (!s.compositor || !s.compositor->LumaTextEnabled()) return false;
     HideCaret(hwnd);
-    const D2D1_COLOR_F fg = s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
+    const D2D1_COLOR_F fg = IsHighContrast() ? s.theme.text : s.dark ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
                                    : D2D1::ColorF(32.0f / 255.0f, 32.0f / 255.0f, 32.0f / 255.0f);
-    const D2D1_COLOR_F bg = s.dark ? D2D1::ColorF(45.0f / 255.0f, 45.0f / 255.0f, 45.0f / 255.0f)
+    const D2D1_COLOR_F bg = IsHighContrast() ? s.theme.fill_input : s.dark ? D2D1::ColorF(45.0f / 255.0f, 45.0f / 255.0f, 45.0f / 255.0f)
                                    : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-    return s.compositor->PresentLumaEdit(hwnd, s.compositor->TextFormat(), fg, bg);
+    return s.compositor->PresentLumaEdit(hwnd, s.body_format.get(), fg, bg);
 }
 
 LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
@@ -911,7 +923,7 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
     case WM_CAPTURECHANGED:
         if (s->compositor && s->compositor->LumaTextEnabled()) {
             const LRESULT result = s->compositor->CallLumaEditMouse(
-                hwnd, msg, wp, lp, s->compositor->TextFormat());
+                hwnd, msg, wp, lp, s->body_format.get());
             if (msg != WM_MOUSEMOVE || GetCapture() == hwnd)
                 PaintLumaEditControl(*s, hwnd, nullptr);
             return result;
@@ -924,7 +936,7 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
             HDC hdc = BeginPaint(hwnd, &ps);
             RECT rc{};
             GetClientRect(hwnd, &rc);
-            FillRect(hdc, &rc, s->edit_brush);
+            FillRect(hdc, &rc, ChildEditBackBrush(s->edit_brush));
             EndPaint(hwnd, &ps);
         }
         return 0;
@@ -1019,9 +1031,11 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (index < 0) break;
         HDC hdc = reinterpret_cast<HDC>(wp);
         // QSS text colors: white on dark, rgb(32,32,32) on light.
-        SetTextColor(hdc, s->dark ? RGB(255, 255, 255) : RGB(32, 32, 32));
-        SetBkColor(hdc, s->dark ? RGB(45, 45, 45) : RGB(255, 255, 255));
-        return reinterpret_cast<LRESULT>(s->edit_brush);
+        SetTextColor(hdc, IsHighContrast() ? GetSysColor(COLOR_WINDOWTEXT) :
+            s->dark ? RGB(255, 255, 255) : RGB(32, 32, 32));
+        SetBkColor(hdc, IsHighContrast() ? GetSysColor(COLOR_WINDOW) :
+            s->dark ? RGB(45, 45, 45) : RGB(255, 255, 255));
+        return reinterpret_cast<LRESULT>(ChildEditBackBrush(s->edit_brush));
     }
     case WM_COMMAND: {
         const HWND from = reinterpret_cast<HWND>(lp);
@@ -1133,6 +1147,13 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_CLOSE:
         s->done = true;
+        return 0;
+    case WM_THEMECHANGED:
+    case WM_SETTINGCHANGE:
+        s->theme = IsHighContrast() ? MakeHighContrastTheme() : MakeTheme(s->dark, GetAccentColor());
+        s->accent = s->theme.accent;
+        Repaint(*s);
+        for (HWND edit : s->edits) if (edit) InvalidateRect(edit, nullptr, TRUE);
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -1249,6 +1270,16 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     s.theme = IsHighContrast() ? MakeHighContrastTheme() : MakeTheme(dark, s.accent);
     s.argb = 0xFF000000u | (initial_rgb & 0x00FFFFFFu);
     s.hsv = HsvFromRgb(initial_rgb);
+    s.accent = s.theme.accent;
+    MONITORINFO mi{ sizeof(mi) };
+    if (!GetMonitorInfoW(MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST), &mi)) return false;
+    s.scale = FitPopupScale(s.scale, kCardW, kCardH, kShadow, mi.rcWork);
+    if (s.scale < 0.25f) return false;
+    typography::CreateTextFormat(compositor->DwriteFactory(),
+        {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
+    typography::CreateTextFormat(compositor->DwriteFactory(),
+        {typography::FontRole::Icon, 16.0f * s.scale}, &s.icon_format);
+    if (!s.body_format.get() || !s.icon_format.get()) return false;
     s.painter.SetCompositor(compositor);
     s.painter.SetScale(s.scale);
     Layout(s);
@@ -1259,11 +1290,9 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     if (!s.hwnd) return false;
 
     // Anchor at the menu point, clamped to the work area (QFluent execAt).
-    HMONITOR monitor = MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{ sizeof(mi) };
-    GetMonitorInfoW(monitor, &mi);
-    s.base_x = std::clamp(screen_pt.x, mi.rcWork.left, mi.rcWork.right - s.win_w);
-    s.base_y = std::clamp(screen_pt.y, mi.rcWork.top, mi.rcWork.bottom - s.win_h);
+    const POINT origin = ConstrainPopupOrigin(screen_pt, {s.win_w, s.win_h}, mi.rcWork);
+    s.base_x = origin.x;
+    s.base_y = origin.y;
 
     CreateBrushes(s);
     CreateEdits(s);
@@ -1297,7 +1326,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     Repaint(s);
 
     MSG msg{};
-    while (!s.done && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (!s.done && GetModalMessage(msg)) {
         const bool click = msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN ||
                            msg.message == WM_MBUTTONDOWN || msg.message == WM_NCLBUTTONDOWN ||
                            msg.message == WM_NCRBUTTONDOWN || msg.message == WM_NCMBUTTONDOWN;
@@ -1329,6 +1358,10 @@ bool ColorPickerPopup::SaveDebugSnapshot(Compositor* compositor, const wchar_t* 
     s.dark = dark;
     s.accent = accent;
     s.theme = MakeTheme(dark, accent);
+    typography::CreateTextFormat(compositor->DwriteFactory(),
+        {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
+    typography::CreateTextFormat(compositor->DwriteFactory(),
+        {typography::FontRole::Icon, 16.0f * s.scale}, &s.icon_format);
     // Sample color from the QFluent reference screenshot.
     s.argb = 0xFF2FDFF1u;
     s.hsv = HsvFromRgb(0x2FDFF1u);

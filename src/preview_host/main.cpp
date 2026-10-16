@@ -123,6 +123,7 @@ bool DecodeText(const std::vector<uint8_t>& bytes, std::wstring& text, bool& tru
             offset = 3;
         const char* raw = reinterpret_cast<const char*>(bytes.data() + offset);
         int raw_size = static_cast<int>(bytes.size() - offset);
+        if (raw_size == 0) { text.clear(); return true; }
         int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, raw, raw_size,
                                         nullptr, 0);
         if (chars <= 0 && truncated && raw_size > 0) {

@@ -115,8 +115,7 @@ bool ExpectedPaths(const std::wstring& parent_path, const std::wstring& worker_p
     (void)testing;
 #endif
     return EqualPath(parent, CanonicalPath(Sibling(worker, L"Pulse.exe"))) &&
-        (EqualPath(worker, CanonicalPath(Sibling(parent, L"Pulse.exe"))) ||
-         EqualPath(worker, CanonicalPath(Sibling(parent, L"Pulse.Shell.exe"))));
+        EqualPath(worker, CanonicalPath(Sibling(parent, L"Pulse.Shell.exe")));
 }
 std::wstring MakePipeName() {
     std::array<uint8_t, 32> random{};
@@ -486,6 +485,9 @@ OperationElevationResult RunElevatedOperation(const std::wstring& helper_exe,
     catch (...) { return {E_OUTOFMEMORY, false, submitted, {}}; }
 }
 #ifdef PULSE_OPERATION_ELEVATION_TESTING
+bool OperationElevationPathsForTest(const std::wstring& parent, const std::wstring& worker, bool testing) {
+    return ExpectedPaths(parent, worker, testing);
+}
 OperationElevationResult RunOperationElevationForTest(const std::wstring& helper_exe,
     std::span<const uint8_t> request, const OperationElevationCallbacks& callbacks) {
     bool submitted = false;

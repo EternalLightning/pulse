@@ -1,5 +1,6 @@
 #include "../ops/operation_presentation.h"
 #include <cstdio>
+#include <limits>
 
 int main() {
     int failures = 0;
@@ -8,6 +9,27 @@ int main() {
         failures += !ok;
     };
     using pulse::path::FriendlyPathText;
+    check(pulse::WorkProgressPercent(123456, 1) == 100.0f,
+          "Shell work counters cannot produce six-digit percentages");
+    check(pulse::WorkProgressPercent(123456, 246912) == 50.0f,
+          "recursive batch uses Shell work totals instead of selected root count");
+    check(pulse::WorkProgressPercent(50, 0) == -1.0f,
+          "unknown Shell work total remains indeterminate");
+    pulse::ops::OpStatus progress;
+    progress.summary = L"Deleting"; progress.total_items = 2;
+    pulse::ops::ApplyShellProgress(progress, 123456.0f, L"child.txt", 123456, 2, true);
+    check(progress.percent == 100.0f && progress.summary == L"Deleting  (100%)" &&
+          progress.total_items == 2 && progress.completed_items == 0,
+          "bottom detail text bounds raw percentages and preserves logical delete counts");
+    pulse::ops::ApplyShellProgress(progress, 50.0f, L"child.txt", 5000, 2, true);
+    check(progress.summary == L"Deleting  (50%)",
+          "later Shell progress replaces the previous detail percentage");
+    for (float invalid : {-1.0f, std::numeric_limits<float>::infinity(),
+                          std::numeric_limits<float>::quiet_NaN()}) {
+        pulse::ops::ApplyShellProgress(progress, invalid, L"child.txt", 0, 0, true);
+        check(progress.percent == -1.0f && progress.summary == L"Deleting",
+              "unknown or invalid progress removes the stale detail percentage");
+    }
     check(FriendlyPathText(L"删除 \\\\?\\C:\\文件 完成") == L"删除 C:\\文件 完成", "embedded extended drive path");
     check(FriendlyPathText(L"\\??\\C:\\文件") == L"C:\\文件", "NT drive path");
     check(FriendlyPathText(L"\\\\?\\UNC\\server\\share\\文件") == L"\\\\server\\share\\文件", "extended UNC path");

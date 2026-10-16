@@ -1,5 +1,6 @@
 #include "index_paths.h"
 #include "index_config.h"
+#include "index_machine_config_actions.h"
 #include <atomic>
 #include <mutex>
 #include <shlobj.h>
@@ -32,12 +33,10 @@ std::wstring DataDir() {
         if (!g_active_directory.empty()) return g_active_directory;
     }
     if (MachineIndexScope()) {
-        IndexConfig config;
-        if (LoadMachineConfig(config, nullptr) && !config.index_path.empty()) {
-            CreateDirectoryW(config.index_path.c_str(), nullptr);
-            return config.index_path;
-        }
-        return MachineIndexRoot();
+        const auto directory = LoadMachineIndexDirectory(
+            [](IndexConfig& config) { return LoadMachineConfig(config, nullptr); });
+        if (!directory.empty()) CreateDirectoryW(directory.c_str(), nullptr);
+        return directory;
     }
     return UserIndexRoot();
 }

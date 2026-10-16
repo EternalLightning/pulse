@@ -94,15 +94,18 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
         }
         SetEvent(changes.stop); changes.wake.notify_all();
     });
-    const auto included = [&](const std::wstring& path) {
+    const auto configured = [&](const std::wstring& path) {
         return !path.empty() && !IsInternalContentPath(path) && !ContentPathExcluded(config, path) &&
-            std::any_of(config.roots.begin(), config.roots.end(), [&](const auto& root) { return Under(path, root.path); }) &&
-            (request.root.empty() || Under(path, request.root));
+            std::any_of(config.roots.begin(), config.roots.end(), [&](const auto& root) { return Under(path, root.path); });
+    };
+    const auto included = [&](const std::wstring& path) {
+        return configured(path) && (request.root.empty() || Under(path, request.root));
+    };
+    const auto ancestor = [&](const std::wstring& path) {
+        return !request.root.empty() && Under(request.root, path) && configured(path);
     };
     auto enqueue = [&](const std::wstring& path, bool imported = false) {
-        const bool ancestor = !request.root.empty() && Under(request.root, path) &&
-            std::any_of(config.roots.begin(), config.roots.end(), [&](const auto& root) { return Under(path, root.path); });
-        if (path.empty() || IsInternalContentPath(path) || ContentPathExcluded(config, path) || (!included(path) && !ancestor)) return;
+        if (!included(path) && !ancestor(path)) return;
         std::lock_guard lock(changes.mutex);
         if (changes.sealed) return;
         const auto key = ContentScopeKey(path);
@@ -230,9 +233,24 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
                     while (it != end && !error && !cancelled) {
                         const auto child = it->path().wstring();
                         const auto attr = GetFileAttributesW(child.c_str());
-                        if (!included(child) || (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_REPARSE_POINT))) it.disable_recursion_pending();
-                        else if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) files.insert(child);
+                        if ((!included(child) && !ancestor(child)) ||
+                            (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_REPARSE_POINT))) it.disable_recursion_pending();
+                        else if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY) && included(child)) files.insert(child);
                         it.increment(error);
+                    }
+                    // Directory events can coalesce a removal and replacement.
+                    // Only confirmed absence invalidates old descendants; an
+                    // incomplete enumeration or access error preserves them.
+                    for (auto old = matched.begin(); old != matched.end() && !cancelled;) {
+                        if (Under(old->second, path) && GetFileAttributesW(old->second.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                            const auto missing = GetLastError();
+                            if (missing == ERROR_FILE_NOT_FOUND || missing == ERROR_PATH_NOT_FOUND) {
+                                ContentHit hit; hit.path = old->second; hit.removed = true;
+                                removed.push_back(std::move(hit)); old = matched.erase(old);
+                                continue;
+                            }
+                        }
+                        ++old;
                     }
                 }
             }

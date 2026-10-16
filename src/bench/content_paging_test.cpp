@@ -21,6 +21,37 @@ bool WaitRow(const std::shared_ptr<index::ContentResultStore>& store,size_t i,in
 std::wstring Name(int i) { wchar_t name[40]{}; swprintf_s(name,L"f%05d.%s",i,i%2 ? L"txt":L"md"); return name; }
 }
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--store-shutdown") {
+        const auto directory = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
+            (L"store-shutdown-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+        std::filesystem::create_directories(directory);
+        SetEnvironmentVariableW(L"TEMP", directory.c_str());
+        SetEnvironmentVariableW(L"TMP", directory.c_str());
+        std::vector<std::wstring> paths;
+        bool appended = true;
+        for (unsigned i = 0; i < 64; ++i) {
+            auto store = std::make_shared<index::ContentResultStore>(nullptr, 0);
+            const bool saved = store->Append({{L"C:\\fixture\\close.txt", L"close.txt", L"text", 4, 0, 1}});
+            appended &= saved;
+            if (!saved) wprintf(L"[INFO] iteration=%u error=%lu path=%ls\n", i, store->Error(), store->CachePath().c_str());
+            paths.push_back(store->CachePath());
+            if (i % 2) store->SetFilter([](const fs::DirEntry&) { return true; });
+        }
+        Check(appended, "create isolated result spools for idle and queued shutdown");
+        const auto deadline = GetTickCount64() + 5000;
+        auto removed = [&] {
+            return std::all_of(paths.begin(), paths.end(), [](const auto& path) {
+                if (path.empty() || GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
+                return GetLastError() == ERROR_FILE_NOT_FOUND;
+            });
+        };
+        while (!removed() && GetTickCount64() < deadline) Sleep(2);
+        Check(removed(), "idle and queued workers release all spools after owner destruction");
+        std::error_code error;
+        std::filesystem::remove(directory, error);
+        Check(!error, "isolated spool directory is empty after shutdown");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--task-stream") {
         index::ContentSearchRequest request; request.generation=440; request.task_scan=true;
         request.paged_results=true; request.sort=index::ContentResultSort::Name;

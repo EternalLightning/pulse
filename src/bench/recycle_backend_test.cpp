@@ -22,6 +22,121 @@ struct DeleteIntegrationProbe {
 }
 
 namespace {
+int RunConfirmationIdentity() {
+    using namespace pulse;
+    const auto parent = std::filesystem::absolute(L"bench_data").lexically_normal();
+    const auto root = parent / (L"delete-confirmation-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root);
+    const auto source = root / L"selected.txt";
+    const auto original = root / L"original.txt";
+    std::ofstream(source) << "original";
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse confirmation identity fixture", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    ops::OpsManager manager;
+    manager.SetUiWindow(owner);
+    manager.Start([] {});
+    ops::OpRequest request;
+    request.type = ops::OpType::RealDelete;
+    request.sources = {source.wstring()};
+    const auto task = manager.Submit(request);
+    const auto deadline = GetTickCount64() + 10000;
+    std::optional<ops::DeleteConfirmation> pending;
+    while (!(pending = manager.PendingDeleteConfirmation()) && GetTickCount64() < deadline) Sleep(10);
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n';
+        if (!ok) ++failures;
+    };
+    check(task && pending.has_value(), "permanent deletion waits for confirmation");
+    if (pending) {
+        std::filesystem::rename(source, original);
+        std::ofstream(source) << "replacement";
+        manager.ResolveDeleteConfirmation(pending->token, true);
+        while (manager.HasPendingFileOperations() && GetTickCount64() < deadline) Sleep(10);
+        const auto status = manager.Status();
+        check(status.task_id == task && status.phase == ops::OpPhase::Failed &&
+            status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID),
+            "confirmation refuses a same-name replacement before backend dispatch");
+        check(std::filesystem::exists(source) && std::filesystem::exists(original) &&
+            manager.DrainCompletions().empty(), "replacement and renamed original both survive rejected deletion");
+        const auto second_task = manager.Submit(request);
+        const auto second_deadline = GetTickCount64() + 10000;
+        pending.reset();
+        while (!(pending = manager.PendingDeleteConfirmation()) && GetTickCount64() < second_deadline) Sleep(10);
+        check(second_task && pending.has_value(), "a fresh request receives a new confirmation");
+        if (pending) {
+            manager.ResolveDeleteConfirmation(pending->token, true);
+            while (manager.HasPendingFileOperations() && GetTickCount64() < second_deadline) Sleep(10);
+            check(manager.Status().phase == ops::OpPhase::Completed && !std::filesystem::exists(source) &&
+                std::filesystem::exists(original), "confirmed unchanged identity deletes only its selected fixture");
+        }
+    }
+    manager.Stop();
+    DestroyWindow(owner);
+    const auto cleanup = std::filesystem::absolute(root).lexically_normal();
+    if (cleanup.parent_path() == parent && cleanup.filename() == root.filename())
+        std::filesystem::remove_all(cleanup);
+    return failures ? 1 : 0;
+}
+
+int RunIndexValidation() {
+    const auto parent = std::filesystem::absolute(L"bench_data").lexically_normal();
+    const auto root = parent / (L"recycle-index-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root);
+    const auto index = root / L"$Itest";
+    std::ofstream(root / L"$Rtest") << "fixture";
+    const auto write = [&](const std::wstring& path, uint32_t declared) {
+        std::ofstream stream(index, std::ios::binary | std::ios::trunc);
+        const uint64_t version = 2, size = 7, deleted = 0;
+        stream.write(reinterpret_cast<const char*>(&version), sizeof(version));
+        stream.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        stream.write(reinterpret_cast<const char*>(&deleted), sizeof(deleted));
+        stream.write(reinterpret_cast<const char*>(&declared), sizeof(declared));
+        stream.write(reinterpret_cast<const char*>(path.data()), path.size() * sizeof(wchar_t));
+    };
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n';
+        if (!ok) ++failures;
+    };
+    pulse::fs::RecycleItem item;
+    std::wstring original = (root / L"original.txt").wstring();
+    original.push_back(L'\0');
+    write(original, static_cast<uint32_t>(original.size()));
+    check(pulse::fs::ReadRecycleIndex(index.wstring(), item) &&
+        item.original_path == (root / L"original.txt").wstring(), "valid recycle index preserves exact original path");
+    write(original, static_cast<uint32_t>(original.size() + 5));
+    check(!pulse::fs::ReadRecycleIndex(index.wstring(), item), "truncated recycle index cannot shorten restore destination");
+    original += L"suffix";
+    write(original, static_cast<uint32_t>(original.size()));
+    check(!pulse::fs::ReadRecycleIndex(index.wstring(), item), "embedded null cannot hide restore path suffix");
+    const auto write_v1 = [&](const std::wstring& path) {
+        std::ofstream stream(index, std::ios::binary | std::ios::trunc);
+        const uint64_t version = 1, size = 7, deleted = 0;
+        stream.write(reinterpret_cast<const char*>(&version), sizeof(version));
+        stream.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        stream.write(reinterpret_cast<const char*>(&deleted), sizeof(deleted));
+        stream.write(reinterpret_cast<const char*>(path.data()), path.size() * sizeof(wchar_t));
+    };
+    original = (root / L"original.txt").wstring();
+    const std::wstring terminated = original + std::wstring(1, L'\0');
+    write_v1(terminated);
+    check(pulse::fs::ReadRecycleIndex(index.wstring(), item) && item.original_path == original,
+        "valid v1 recycle index preserves exact original path");
+    write_v1(original);
+    check(!pulse::fs::ReadRecycleIndex(index.wstring(), item),
+        "v1 recycle index without a terminator cannot authorize a restore path");
+    write_v1(original.substr(0, original.size() - 3));
+    check(!pulse::fs::ReadRecycleIndex(index.wstring(), item),
+        "truncated v1 recycle index cannot shorten restore destination");
+    const auto cleanup = std::filesystem::absolute(root).lexically_normal();
+    if (cleanup.parent_path() == parent && cleanup.filename() == root.filename())
+        std::filesystem::remove_all(cleanup);
+    return failures ? 1 : 0;
+}
+
 std::string Utf8(const std::wstring& text) {
     const int count = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     std::string result(count, '\0');
@@ -365,6 +480,8 @@ int RunLockedError() {
 int main(int argc, char** argv) {
     using namespace pulse;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 2 && std::string_view(argv[1]) == "--confirmation-identity") return RunConfirmationIdentity();
+    if (argc == 2 && std::string_view(argv[1]) == "--index-validation") return RunIndexValidation();
     if (argc == 2 && std::string_view(argv[1]) == "--locked-error") return RunLockedError();
     if (argc == 2 && std::string_view(argv[1]) == "--permanent-from-bin") return RunPermanentFromBin();
     if (argc == 2 && std::string_view(argv[1]) == "--identity-only") return RunDeletionIdentity();

@@ -13,7 +13,7 @@
 
 namespace pulse::index {
 
-inline constexpr uint32_t kDeltaVer = 1;
+inline constexpr uint32_t kDeltaVer = 2;
 
 enum class DeltaOp : uint8_t {
     Add = 1,
@@ -42,7 +42,7 @@ public:
     // path_ while Close() was running and could not reopen the log.
     bool Reset(uint64_t base_built);
 
-    void QueueAdd(int32_t parent, uint8_t flags, uint32_t mtime, uint64_t size,
+    void QueueAdd(int32_t idx, int32_t parent, uint8_t flags, uint32_t mtime, uint64_t size,
                   std::wstring_view name, uint64_t frn);
     void QueuePatch(int32_t idx, uint8_t which, int32_t parent, uint8_t flags,
                     uint32_t mtime, uint64_t size, std::wstring_view name);
@@ -52,21 +52,20 @@ public:
     bool Flush();
     uint64_t BytesOnDisk() const { return bytes_on_disk_; }
     bool HasPending() const { return !pending_.empty(); }
-    uint64_t BaseBuilt() const { return base_built_; }
 
     using ReplayFn = std::function<void(DeltaOp op, int32_t idx, int32_t parent,
                                         uint8_t flags, uint8_t which,
                                         uint32_t mtime, uint64_t size,
                                         std::wstring_view name, uint64_t frn,
                                         uint64_t journal_id, int64_t next_usn)>;
-    static bool Replay(const std::wstring& path, uint64_t expected_built, ReplayFn fn);
+    static bool Replay(const std::wstring& path, uint64_t expected_built, ReplayFn fn,
+                       DWORD* error = nullptr);
 
 private:
     HANDLE file_ = INVALID_HANDLE_VALUE;
     std::wstring path_;
     std::vector<uint8_t> pending_;
     uint64_t bytes_on_disk_ = 0;
-    uint64_t base_built_ = 0;
 
     void PutU8(uint8_t v);
     void PutU16(uint16_t v);

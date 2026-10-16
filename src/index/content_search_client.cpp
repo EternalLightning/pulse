@@ -45,42 +45,6 @@ HANDLE Connect(const std::wstring& token, HANDLE process, HANDLE cancel) {
     }
     return INVALID_HANDLE_VALUE;
 }
-std::vector<uint8_t> RequestPayload(const ContentSearchRequest& request) {
-    ipc::PayloadWriter writer;
-    writer.PutU64(request.generation);
-    writer.PutU32(static_cast<uint32_t>(request.mode));
-    uint32_t flags = request.recursive ? 1u : 0u;
-    if (request.case_sensitive) flags |= 2u;
-    if (request.skip_system_locations) flags |= 4u;
-    if (request.whole_word) flags |= 8u;
-    writer.PutU32(flags);
-    writer.PutU64(request.maximum_file_bytes);
-    writer.PutU32(static_cast<uint32_t>(request.maximum_hits));
-    std::vector<std::wstring> roots = request.roots;
-    if (roots.empty() && !request.root.empty()) roots.push_back(request.root);
-    writer.PutString(roots.empty() ? std::wstring{} : roots.front());
-    writer.PutString(request.needle);
-    writer.PutU64(request.minimum_file_bytes);
-    const uint32_t extra = roots.size() > 1 ? static_cast<uint32_t>(roots.size() - 1) : 0;
-    writer.PutU32(extra);
-    for (uint32_t i = 0; i < extra; ++i) writer.PutString(roots[i + 1]);
-    writer.PutU32(static_cast<uint32_t>(request.match_mode));
-    writer.PutU32(static_cast<uint32_t>(request.needles.size()));
-    for (const auto& needle : request.needles) writer.PutString(needle);
-    writer.PutU32(static_cast<uint32_t>(request.excluded_needles.size()));
-    for (const auto& needle : request.excluded_needles) writer.PutString(needle);
-    writer.PutU32(static_cast<uint32_t>(request.candidate_paths.size()));
-    for (const auto& path : request.candidate_paths) writer.PutString(path);
-    if (request.mode == ContentSearchMode::Content) {
-        writer.PutString(request.filename_query);
-        writer.PutU32(static_cast<uint32_t>(request.sort)); writer.PutU32(request.sort_desc ? 1u : 0u);
-        writer.PutU32(1); writer.PutU64(request.session_id);
-        writer.PutU64(request.maximum_document_bytes);
-        writer.PutU32(request.task_scan ? 1u : 0u);
-    }
-    return writer.data();
-}
-
 bool ParseUpdate(const std::vector<uint8_t>& payload, ContentSearchUpdate& update) {
     ipc::PayloadReader reader(payload.data(), payload.size());
     uint32_t flags = 0;
@@ -256,7 +220,11 @@ void ContentSearchClient::Control(const Command& command) {
     if (!persistent_enabled_) return;
     if (mode_ == ContentAgentMode::Instant && (command.type == content::REQ_STATUS || command.type == content::REQ_CONFIG)) {
         // Configuration is independent of the optional body cache and never starts an agent.
-        auto config = LoadContentIndexConfig();
+        ContentIndexConfig config;
+        if (command.type == content::REQ_STATUS && !LoadContentIndexConfig(config)) {
+            const DWORD error = GetLastError();
+            std::lock_guard lock(state_mu_); status_.error = error; return;
+        }
         if (command.type == content::REQ_CONFIG) {
             ipc::PayloadReader reader(command.payload.data(), command.payload.size());
             // Acquire the shared configuration lock with cancellation before entering
@@ -336,6 +304,12 @@ void ContentSearchClient::Worker() {
             }
         }
         if (running_ && mode_ != ContentAgentMode::Instant) Control({content::REQ_STATUS, {}});
+        // The query lambda also owns ActiveQuery. Join before releasing our
+        // ownership so its thread cannot destroy and join itself on return.
+        for (const auto& query : replaced) {
+            SetEvent(query->cancel);
+            if (query->thread.joinable()) query->thread.join();
+        }
         std::vector<std::shared_ptr<ActiveQuery>> retired;
         {
             std::lock_guard lock(state_mu_);
@@ -345,6 +319,7 @@ void ContentSearchClient::Worker() {
                 } else ++it;
             }
         }
+        for (const auto& query : retired) if (query->thread.joinable()) query->thread.join();
     }
     std::map<uint64_t, std::shared_ptr<ActiveQuery>> active;
     { std::lock_guard lock(state_mu_); active.swap(active_queries_); }
@@ -417,7 +392,7 @@ void ContentSearchClient::Run(ContentSearchRequest request, const std::shared_pt
     }
     HANDLE pipe = Connect(token, process, cancel_event);
     if (pipe != INVALID_HANDLE_VALUE) {
-        const auto payload = RequestPayload(request);
+        const auto payload = content::SerializeSearchRequest(request);
         const auto header = content::Header(persistent && request.subscribe ? content::REQ_SUBSCRIBE : content::REQ_SEARCH, static_cast<uint32_t>(payload.size()));
         bool ok = WriteAll(pipe, &header, sizeof(header), cancel_event) && WriteAll(pipe, payload.data(), static_cast<DWORD>(payload.size()), cancel_event);
         while (ok && running_ && WaitForSingleObject(cancel_event, 0) != WAIT_OBJECT_0) {

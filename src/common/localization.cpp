@@ -10,14 +10,16 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_OPERATION_STOPPED;
+constexpr UINT kLastString = IDS_MATCH_WINDOW_SIZE_HINT;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
               static_cast<UINT>(StringId::WallpaperBlurStrong) <= kLastString &&
               static_cast<UINT>(StringId::CreateItemNamePrompt) <= kLastString &&
               static_cast<UINT>(StringId::CreateItemAction) <= kLastString &&
-              static_cast<UINT>(StringId::DeleteReasonNetwork) <= kLastString);
+              static_cast<UINT>(StringId::DeleteReasonNetwork) <= kLastString &&
+              static_cast<UINT>(StringId::OpRemainingSize) <= kLastString &&
+              static_cast<UINT>(StringId::MatchWindowSizeHint) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

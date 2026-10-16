@@ -157,7 +157,9 @@ private:
     }
 
     static void SyncHook(InputState& input, HHOOK& hook) {
-        SetHook(input, hook, !input.stop && input.hook_requested);
+        // A consumed drag still owns its release even after the preview hides.
+        // Unhooking early would leak that release and strand the stopping thread.
+        SetHook(input, hook, input.suppress_left_up || (!input.stop && input.hook_requested));
 #ifdef PULSE_PREVIEW_PAN_TESTING
         if (input.test_hooks && input.test_hooks->after_sync)
             input.test_hooks->after_sync(hook != nullptr);
@@ -303,6 +305,8 @@ private:
             input.active = false;
             if (host) PostMessageW(host, kEnd, input.generation.load(), MAKELPARAM(point.x, point.y));
             if (input.stop) PostQuitMessage(0);
+            else if (!input.hook_requested && input.thread_id)
+                PostThreadMessageW(input.thread_id, kHookCommand, 0, 0);
             return true;
         }
         if (!host) return false;

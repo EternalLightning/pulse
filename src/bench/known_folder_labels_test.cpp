@@ -27,6 +27,26 @@ int wmain() {
           !path::FindKnownFolderLabel(L"D:\\Photos\\Vacation", redirected) &&
           !path::FindKnownFolderLabel(L"D:\\Photos2", redirected),
         "ordinary same-named folders and children retain physical names");
+    bool child_lookup_equivalent = true;
+    for (const std::wstring_view parent : {L"D:", L"D:\\", L"D:\\parent", L"D:\\parent\\",
+            L"D:\\parent\\\\", L"d:/parent/", L"\\\\?\\D:\\parent", L"\\\\server\\share",
+            L"\\\\?\\UNC\\server\\share", L"//?/UNC/server/share", L"\\\\?", L"\\\\?\\", L"relative", L""}) {
+        for (const std::wstring_view name : {L"Photos", L"photos", L"其他", L"Photos\\", L"child/Photos", L""}) {
+            std::wstring full(parent);
+            if (!full.empty() && full.back() != L'\\' && full.back() != L'/') full += L'\\';
+            full += name;
+            const auto key = path::KnownFolderPathKey(full);
+            const std::array<path::KnownFolderLabel, 3> candidates{{
+                {L"Z:\\unrelated", l10n::StringId::Downloads},
+                {key, l10n::StringId::KnownFolderPictures},
+                {key + L"2", l10n::StringId::KnownFolderVideos}}};
+            const auto* expected = key.empty() ? nullptr : &candidates[1];
+            child_lookup_equivalent &= path::FindKnownFolderLabel(full, candidates) == expected &&
+                path::FindKnownFolderChildLabel(parent, name, candidates) == expected;
+        }
+    }
+    check(child_lookup_equivalent,
+        "split-path lookup preserves normalized matching for drive, UNC, separators and unusual names");
     check(l10n::Get(l10n::StringId::KnownFolderPictures) == L"图片" &&
           l10n::Get(l10n::StringId::KnownFolderVideos) == L"视频",
         "Chinese pictures and videos labels exist");

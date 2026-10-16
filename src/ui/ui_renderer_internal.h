@@ -1450,6 +1450,7 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_preview{};
     D2D1_RECT_F wallpaper_choose{};
     D2D1_RECT_F wallpaper_clear{};
+    D2D1_RECT_F wallpaper_fit_card{}, wallpaper_fit{};
     D2D1_RECT_F wallpaper_look_card{};
     D2D1_RECT_F wallpaper_look_value{};
     D2D1_RECT_F wallpaper_blur_card{};

@@ -1,0 +1,50 @@
+{
+  "created": "2026-10-14T18:31:00.2148116+08:00",
+  "version": "1.1.2.0",
+  "archive": "E:\\Projects\\pulse\\dist\\Pulse-1.1.2.0-portable-win-x64.zip",
+  "archiveBytes": 12069176,
+  "archiveSha256": "AB50750DB98B41377800CFAF644C5CC513F9F95EE473D0B7A8738E02E0E19F63",
+  "archiveIntegrity": "7z test passed",
+  "archiveFiles": 40,
+  "deployment": "D:\\Applications\\Pulse",
+  "deploymentFilesVerified": 40,
+  "payloadStage": "E:\\Projects\\pulse\\dist\\portable-stage-f69812d621474fb5b5541d810eddb228",
+  "binaries": [
+    {
+      "file": "Pulse.exe",
+      "productVersion": "1.1.2.0",
+      "fileVersion": "1.1.2.0",
+      "sha256": "8DA36850966F7C3579850F279C6B83EC936F59A268744D6E6B0F80489FED05BE",
+      "deployedSha256": "8DA36850966F7C3579850F279C6B83EC936F59A268744D6E6B0F80489FED05BE"
+    },
+    {
+      "file": "Pulse.Index.exe",
+      "productVersion": "1.1.2.0",
+      "fileVersion": "1.1.2.0",
+      "sha256": "792ACC6B0CE29C026D00689135519C17F51BD4C9A5CA4145178A6F1FE453F1AA",
+      "deployedSha256": "792ACC6B0CE29C026D00689135519C17F51BD4C9A5CA4145178A6F1FE453F1AA"
+    },
+    {
+      "file": "Pulse.Document.exe",
+      "productVersion": "1.1.2.0",
+      "fileVersion": "1.1.2.0",
+      "sha256": "1C355329B44393BDF126E6EC76AA56832A86F0DA4DC10AD2AD0938425BA10376",
+      "deployedSha256": "1C355329B44393BDF126E6EC76AA56832A86F0DA4DC10AD2AD0938425BA10376"
+    },
+    {
+      "file": "Pulse.Preview.exe",
+      "productVersion": "1.1.2.0",
+      "fileVersion": "1.1.2.0",
+      "sha256": "51045A88088ADAF7B84D7F1EF30C3037A05483FEC211EBC599A4C3E9CB0475B9",
+      "deployedSha256": "51045A88088ADAF7B84D7F1EF30C3037A05483FEC211EBC599A4C3E9CB0475B9"
+    },
+    {
+      "file": "Pulse.Shell.exe",
+      "productVersion": "1.1.2.0",
+      "fileVersion": "1.1.2.0",
+      "sha256": "B73DABCF8D1E5D6A56CC6E3479FEBB7E706BC5A09B7520C2E49DCFE6B88BAE79",
+      "deployedSha256": "B73DABCF8D1E5D6A56CC6E3479FEBB7E706BC5A09B7520C2E49DCFE6B88BAE79"
+    }
+  ],
+  "runtimeSelftest": "OFF"
+}

@@ -290,6 +290,10 @@ int wmain(int argc, wchar_t** argv) {
                   (result.text.empty() || result.text.back() < 0xD800 || result.text.back() > 0xDBFF), label);
             DeleteFileW(path.c_str());
         };
+        text_case({}, 0, false, L"empty text file previews successfully");
+        text_case({0xEF, 0xBB, 0xBF}, 0, false, L"UTF-8 BOM-only file previews as empty text");
+        text_case({0xFF, 0xFE}, 0, false, L"UTF-16 LE BOM-only file previews as empty text");
+        text_case({0xFE, 0xFF}, 0, false, L"UTF-16 BE BOM-only file previews as empty text");
         for (size_t length : {11999u, 12000u, 12001u, 20000u})
             text_case(std::vector<unsigned char>(length, 'x'), (std::min)(length, size_t{12000}),
                 length > 12000, L"ASCII character limit reports complete versus truncated");

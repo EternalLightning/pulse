@@ -18,11 +18,7 @@ namespace {
 command_icons::Icon CommandIconForResource(int resource_id) noexcept {
     using I = command_icons::Icon;
     switch (resource_id) {
-    case IDR_FLUENT_CUT_SVG: return I::Cut;
     case IDR_FLUENT_COPY_SVG: return I::Copy;
-    case IDR_FLUENT_PASTE_SVG: return I::Paste;
-    case IDR_FLUENT_RENAME_SVG: return I::Rename;
-    case IDR_FLUENT_DELETE_SVG: return I::Delete;
     case IDR_FLUENT_STAR_SVG: return I::Star;
     case IDR_FLUENT_HISTORY_SVG: return I::History;
     case IDR_FLUENT_DESKTOP_SVG: return I::Desktop;
@@ -31,11 +27,10 @@ command_icons::Icon CommandIconForResource(int resource_id) noexcept {
     case IDR_FLUENT_DRIVE_SVG: return I::Drive;
     case IDR_FLUENT_FOLDER_SVG: return I::Folder;
     case IDR_FLUENT_NETWORK_SVG: return I::Network;
-    case IDR_FLUENT_SEARCH_SVG: case IDR_FLUENT_OMNIBAR_SEARCH_SVG: return I::Search;
+    case IDR_FLUENT_SEARCH_SVG: return I::Search;
     case IDR_FLUENT_APPS_SVG: return I::Grid;
     case IDR_FLUENT_PANEL_SVG: return I::Panel;
     case IDR_FLUENT_PANEL_CLOSE_SVG: return I::PanelClose;
-    case IDR_FLUENT_ADD_SVG: return I::Add;
     case IDR_FLUENT_PC_SVG: return I::Computer;
     case IDR_FLUENT_TAG_SVG: return I::Tag;
     default: return I::None;

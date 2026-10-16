@@ -39,7 +39,89 @@ uint64_t Cpu() {
     return ((uint64_t{k.dwHighDateTime} << 32) | k.dwLowDateTime) + ((uint64_t{u.dwHighDateTime} << 32) | u.dwLowDateTime);
 }
 }
+int RunInstantDirectoryTests(const std::filesystem::path& base) {
+    const auto logs = base / L"directory-logs";
+    SetEnvironmentVariableW(L"PULSE_CONTENT_TIMING_DIR", logs.c_str());
+    for (bool ancestor : {false, true}) {
+        const auto fixture = base / (ancestor ? L"ancestor-import" : L"directory-replace");
+        const auto root = fixture / L"files", profile = fixture / L"profile";
+        const auto slot = root / L"slot";
+        const auto scope = ancestor ? slot / L"mid" / L"leaf" : root;
+        std::filesystem::create_directories(scope);
+        std::filesystem::create_directories(slot);
+        std::filesystem::create_directories(profile);
+        if (!ancestor) {
+            Write(slot / L"old.txt", "directory_marker old");
+            Write(slot / L"changed.txt", "directory_marker before");
+        }
+        ContentIndex index((profile / L"content.sqlite").wstring(), ContentAgentMode::Instant);
+        ContentIndexConfig config; config.roots = {{root.wstring()}};
+        config.excluded_directories = {L"excluded"};
+        const bool configured = index.Configure(config);
+        Check(configured, "directory delta fixture has isolated instant configuration");
+        if (!configured) continue;
+        ContentSearchRequest request;
+        request.generation = ancestor ? 992002 : 992001;
+        request.root = scope.wstring(); request.needle = L"directory_marker";
+        request.task_scan = request.subscribe = true;
+        std::atomic<bool> cancel{false};
+        ContentInstantSessionHooks hooks;
+        ContentInstantSessionHooks::Enqueue enqueue;
+        ContentInstantSessionHooks::Fail fail;
+        hooks.arm = [&](auto notify, auto error) { enqueue = std::move(notify); fail = std::move(error); };
+        size_t full_scans = 0, local_scans = 0;
+        bool bounded = true, paused = false;
+        const auto expected = ancestor ? scope / L"new.txt" : slot / L"new.txt";
+        hooks.search = [&](const auto& query, const auto& cancelled, auto deliver) {
+            if (!query.candidate_paths.empty()) {
+                ++local_scans;
+                for (const auto& path : query.candidate_paths)
+                    bounded &= path == expected.wstring() || (!ancestor && path == (slot / L"changed.txt").wstring());
+                return index.SearchTask(query, cancelled, std::move(deliver));
+            }
+            ++full_scans;
+            const bool ok = index.SearchTask(query, cancelled, std::move(deliver));
+            // One directory notification represents each whole-tree move; no
+            // synthetic child notifications hide a missing reconciliation.
+            std::filesystem::rename(slot, fixture / L"departed");
+            enqueue(slot.wstring(), false);
+            std::filesystem::create_directories(expected.parent_path());
+            Write(expected, "directory_marker new");
+            if (!ancestor) Write(slot / L"changed.txt", "no match after replacement");
+            else {
+                std::filesystem::create_directories(slot / L"sibling");
+                Write(slot / L"sibling" / L"outside.txt", "directory_marker unrelated");
+                std::filesystem::create_directories(scope / L"excluded");
+                Write(scope / L"excluded" / L"hidden.txt", "directory_marker excluded");
+            }
+            enqueue(slot.wstring(), true);
+            // Seal after the known event to make this local reconciliation
+            // deterministic without a timing-dependent session shutdown.
+            fail(ContentSubscriptionFailure::FeedGap, ERROR_NOTIFY_ENUM_DIR);
+            return ok;
+        };
+        std::map<std::wstring, ContentHit> visible;
+        RunInstantContentSession(index, request, cancel, [&](const auto& progress, auto hits) {
+            for (auto& hit : hits) {
+                const auto key = ContentScopeKey(hit.path);
+                if (hit.removed) visible.erase(key);
+                else visible[key] = std::move(hit);
+            }
+            paused |= progress.subscription_error == ERROR_NOTIFY_ENUM_DIR;
+            return true;
+        }, &hooks);
+        Check(visible.size() == 1 && visible.contains(ContentScopeKey(expected.wstring())), ancestor ?
+            "deep ancestor import reaches the query root and restores its matching file" :
+            "coalesced directory replacement removes missing and nonmatching old descendants");
+        Check(full_scans == 1 && bounded && local_scans == (ancestor ? 1u : 2u) && paused, ancestor ?
+            "ancestor traversal skips unrelated siblings and excluded directories" :
+            "directory replacement rescans only current files without restarting the full query");
+    }
+    printf("directory delta failures=%d\n", failures);
+    return failures ? 1 : 0;
+}
 int RunInstantGapTests(const std::filesystem::path& base) {
+    if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_DIRECTORIES", nullptr, 0)) return RunInstantDirectoryTests(base);
     const auto root = base / L"gap-files", logs = base / L"gap-logs";
     std::filesystem::create_directories(root);
     std::filesystem::create_directories(base / L"gap-profile");

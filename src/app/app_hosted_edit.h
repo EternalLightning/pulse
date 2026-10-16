@@ -27,7 +27,11 @@ void RecordSearchHistory(AppState& s, const std::wstring& path);
 void SubmitAddressSearch(AppState& s, bool live = false);
 void QueueAddressSearch(AppState& s);
 void FlushAddressSearch(AppState& s);
+// Combined business tick retained for isolated callers without the UI scheduler.
 bool TickAddressSearch(AppState& s, ULONGLONG now);
+bool TickAddressSearchMaintenance(AppState& s, ULONGLONG now);
+bool TickAddressSearchDeadlines(AppState& s, ULONGLONG now);
+bool TickAddressSearchAnimation(AppState& s, uint64_t now);
 void LayoutFilterEditor(AppState& s);
 void ShowFilterEditor(AppState& s, bool select_mode = false);
 void ShowWildcardSelect(AppState& s);

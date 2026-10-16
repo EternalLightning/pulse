@@ -829,6 +829,8 @@ public:
 
     void SetScale(float scale);
     void SetCompositor(Compositor* comp);
+    // Returns only asynchronously decoded dimensions; never opens an image here.
+    SIZE BackgroundImageSize(const std::wstring& path);
     void InvalidateTypography();
     void SetIconNotifyWindow(HWND hwnd);
     void NotifyPreviewActivate(bool active) { preview_handler_.NotifyAppActivate(active); }
@@ -921,6 +923,7 @@ public:
         }
         return false;
     }
+    ULONGLONG DetailsPreviewDeadline() const { return details_zoom_label_until_; }
     void ScrollDetailsPreview(float steps, float x, float y, bool horizontal = false);
     void ToggleDetailsPreviewFit(float x, float y);
 
@@ -1191,7 +1194,6 @@ private:
     Compositor* compositor_ = nullptr;
     fluent::Painter painter_;
     ShellIconCache icon_cache_;
-    std::unordered_map<ID2D1Bitmap*, ComPtr<ID2D1Effect>> tray_shadows_;
     std::shared_ptr<ThumbnailCache> thumbnail_cache_owner_ = std::make_shared<ThumbnailCache>();
     ThumbnailCache& thumbnail_cache_ = *thumbnail_cache_owner_;
     PreviewHandlerHost preview_handler_;

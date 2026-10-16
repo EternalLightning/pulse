@@ -23,6 +23,18 @@ FILETIME LocalDate(WORD year, WORD month, WORD day) {
 
 int main() {
     using namespace pulse;
+    bool gutters = true;
+    for (const float scale : {1.0f, 1.5f, 2.0f}) {
+        const auto bounds = D2D1::RectF(0, 0, 500 * scale, 205 * scale);
+        ui::ViewLayout grid(ui::ViewMode::ExtraLargeIcons, bounds, 20, 0, 0, scale);
+        const float gutter_x = grid.Metrics().columns * grid.Metrics().cell_width + 1;
+        gutters &= grid.HitTest(gutter_x, 5) == -1 && grid.HitTest(5, 5) == 0;
+        ui::ViewLayout list(ui::ViewMode::List, bounds, 20, 0, 0, scale);
+        const float gutter_y = list.Metrics().rows_per_column * list.Metrics().cell_height + 1;
+        gutters &= list.HitTest(5, gutter_y) == -1 && list.HitTest(5, 5) == 0;
+    }
+    std::printf("[%s] unused grid columns and list rows do not select another item\n",
+        gutters ? "PASS" : "FAIL");
     auto entries = std::make_shared<std::vector<fs::DirEntry>>();
     for (const auto& date : {std::tuple{2026, 9, 29}, {2026, 9, 28},
                              {2026, 9, 23}, {2026, 9, 22},
@@ -63,5 +75,5 @@ int main() {
         filtered_groups[1].first == 1 && filtered_groups[2].first == 2;
     const bool ok = buckets && geometry && scrolled_and_filtered;
     std::printf("[%s] date buckets and grouped row hit testing\n", ok ? "PASS" : "FAIL");
-    return ok ? 0 : 1;
+    return ok && gutters ? 0 : 1;
 }

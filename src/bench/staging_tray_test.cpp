@@ -19,6 +19,49 @@ int main() {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
         failures += !passed;
     };
+    {
+        app::StagingTray tray;
+        tray.Collect({LR"(C:\fixture\one)", LR"(C:\fixture\two)"}, false);
+        const auto initial = tray.AvailabilityRevision();
+        tray.Collect({LR"(C:\fixture\one)"}, false);
+        check(tray.AvailabilityRevision() == initial, "duplicate collection does not invalidate paste inputs");
+        const auto first = tray.BeginMetadataQueries(1);
+        const auto second = tray.BeginMetadataQueries(1);
+        check(first.size() == 1 && second.size() == 1 && tray.BeginMetadataQueries().empty(),
+              "bounded metadata batches drain before idle scans stop");
+        if (first.size() == 1 && second.size() == 1) {
+            tray.RetryMetadataQueries(first);
+            const auto retried = tray.BeginMetadataQueries();
+            check(retried.size() == 1 && retried.front().path == first.front().path,
+                  "enqueue retry wakes an exhausted metadata queue");
+            tray.ApplyMetadataResults({{first.front(), app::TrayMetadataState::Ready, 0, 5}});
+            check(tray.AvailabilityRevision() == initial,
+                  "size-only metadata keeps the paste path revision stable");
+            tray.ApplyMetadataResults({{second.front(), app::TrayMetadataState::Missing}});
+            check(tray.AvailabilityRevision() != initial && !tray.batches().front().items[1].exists,
+                  "confirmed missing file invalidates paste paths");
+        }
+        check(!tray.ApplyMetadataResults({}) && tray.BeginMetadataQueries().empty(),
+              "idle metadata maintenance has no remaining work");
+        const auto before_remove = tray.AvailabilityRevision();
+        tray.RemoveItem(0, 1);
+        check(tray.AvailabilityRevision() != before_remove, "item removal invalidates paste paths");
+        const auto before_move = tray.AvailabilityRevision();
+        app::StagingTray moved(std::move(tray));
+        check(tray.AvailabilityRevision() != before_move && moved.BeginMetadataQueries().size() == 1,
+              "move invalidates source inputs and starts independent destination metadata");
+        const auto before_assign = moved.AvailabilityRevision();
+        moved = tray;
+        check(moved.AvailabilityRevision() != before_assign && moved.BeginMetadataQueries().empty(),
+              "copy assignment invalidates destination inputs and preserves empty idle state");
+        moved.Collect({LR"(C:\fixture
+ew)"}, false);
+        check(moved.BeginMetadataQueries().size() == 1, "new collection wakes metadata after an idle period");
+        const auto before_clear = moved.AvailabilityRevision();
+        moved.Clear();
+        check(moved.AvailabilityRevision() != before_clear && moved.BeginMetadataQueries().empty(),
+              "clear invalidates paste inputs and ends metadata work");
+    }
     wchar_t cwd[MAX_PATH]{};
     GetCurrentDirectoryW(MAX_PATH, cwd);
     const auto root = std::wstring(cwd) + L"\\bench_data\\staging-metadata-" +

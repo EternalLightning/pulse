@@ -3,6 +3,7 @@
 #include "../ipc/shell_query_protocol.h"
 #include <shlobj.h>
 #include <cstdio>
+#include <cstring>
 #include <atomic>
 #include <filesystem>
 #include <utility>
@@ -57,6 +58,115 @@ private:
     DWORD preferred_;
     pulse::ui::FileDataObject* inner_ = nullptr;
 };
+
+class MediumOwner final : public IUnknown {
+public:
+    MediumOwner(HGLOBAL data, unsigned& released) : data_(data), released_(released) {}
+    IFACEMETHODIMP QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown) return E_NOINTERFACE;
+        *out = this; AddRef(); return S_OK;
+    }
+    IFACEMETHODIMP_(ULONG) AddRef() override { return ++refs_; }
+    IFACEMETHODIMP_(ULONG) Release() override {
+        const ULONG remaining = --refs_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+private:
+    ~MediumOwner() { if (data_) GlobalFree(data_); ++released_; }
+    ULONG refs_ = 1;
+    HGLOBAL data_;
+    unsigned& released_;
+};
+
+class MediumDataObject final : public IDataObject {
+public:
+    MediumDataObject(DWORD tymed, bool empty, unsigned& released)
+        : tymed_(tymed), empty_(empty), released_(released) {}
+    IFACEMETHODIMP QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IDataObject) return E_NOINTERFACE;
+        *out = this; AddRef(); return S_OK;
+    }
+    IFACEMETHODIMP_(ULONG) AddRef() override { return ++refs_; }
+    IFACEMETHODIMP_(ULONG) Release() override {
+        const ULONG remaining = --refs_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    IFACEMETHODIMP GetData(FORMATETC* fmt, STGMEDIUM* out) override {
+        if (!fmt || !out) return E_POINTER;
+        *out = {};
+        if (fmt->cfFormat != CF_HDROP) return DV_E_FORMATETC;
+        HGLOBAL data = nullptr;
+        if (!empty_) {
+            constexpr wchar_t paths[] = L"C:\\fixture\\one.txt\0C:\\fixture\\two.txt\0";
+            data = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DROPFILES) + sizeof(paths));
+            if (!data) return E_OUTOFMEMORY;
+            auto* header = static_cast<DROPFILES*>(GlobalLock(data));
+            if (!header) { GlobalFree(data); return E_OUTOFMEMORY; }
+            header->pFiles = sizeof(DROPFILES);
+            header->fWide = TRUE;
+            memcpy(reinterpret_cast<BYTE*>(header) + sizeof(DROPFILES), paths, sizeof(paths));
+            GlobalUnlock(data);
+        }
+        out->tymed = tymed_;
+        out->hGlobal = data;
+        // Custom owner also makes a deliberately mismatched medium safe to release.
+        out->pUnkForRelease = new MediumOwner(data, released_);
+        last_owner_ = out->pUnkForRelease;
+        last_owner_->AddRef();
+        return S_OK;
+    }
+    IFACEMETHODIMP GetDataHere(FORMATETC*, STGMEDIUM*) override { return E_NOTIMPL; }
+    IFACEMETHODIMP QueryGetData(FORMATETC*) override { return E_NOTIMPL; }
+    IFACEMETHODIMP GetCanonicalFormatEtc(FORMATETC*, FORMATETC*) override { return E_NOTIMPL; }
+    IFACEMETHODIMP SetData(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+    IFACEMETHODIMP EnumFormatEtc(DWORD, IEnumFORMATETC**) override { return E_NOTIMPL; }
+    IFACEMETHODIMP DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override { return OLE_E_ADVISENOTSUPPORTED; }
+    IFACEMETHODIMP DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+    IFACEMETHODIMP EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
+    void FinishProbe() {
+        if (last_owner_) {
+            // Retain an observer reference so the old leaking path can be cleaned after checking it.
+            const ULONG remaining = last_owner_->Release();
+            if (remaining) last_owner_->Release();
+            last_owner_ = nullptr;
+        }
+    }
+    ULONG OwnerReferences() {
+        last_owner_->AddRef();
+        return last_owner_->Release();
+    }
+private:
+    ULONG refs_ = 1;
+    DWORD tymed_;
+    bool empty_;
+    unsigned& released_;
+    IUnknown* last_owner_ = nullptr;
+};
+
+void TestDropMediumOwnership() {
+    using namespace pulse::ui;
+    const auto probe = [](DWORD tymed, bool empty, bool expected, const wchar_t* label) {
+        unsigned released = 0;
+        auto* object = new MediumDataObject(tymed, empty, released);
+        std::vector<std::wstring> paths{L"stale"};
+        const bool result = ExtractHDropPaths(object, paths);
+        Check(result == expected && (expected ? paths == std::vector<std::wstring>{
+                  L"C:\\fixture\\one.txt", L"C:\\fixture\\two.txt"} : paths.empty()), label);
+        Check(object->OwnerReferences() == 1, L"successful GetData medium relinquishes its owner reference on every exit");
+        object->FinishProbe();
+        Check(released == 1, L"medium owner frees its resource exactly once");
+        object->Release();
+    };
+    probe(TYMED_HGLOBAL, false, true, L"valid HDROP retains exact Unicode path extraction");
+    probe(TYMED_HGLOBAL, true, false, L"empty HDROP is rejected and stale paths cleared");
+    probe(TYMED_GDI, false, false, L"wrong medium type is rejected before interpreting its union as HDROP");
+}
 
 HANDLE renderer_entered = nullptr, renderer_release = nullptr;
 std::atomic_uint renderer_calls = 0;
@@ -484,6 +594,12 @@ int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
     setvbuf(stdout, nullptr, _IONBF, 0);
     OleInitialize(nullptr);
+    if (argc == 2 && wcscmp(argv[1], L"--medium-only") == 0) {
+        TestDropMediumOwnership();
+        OleUninitialize();
+        wprintf(L"drag/drop medium: %d passed, %d failed\n", passed, failed);
+        return failed ? 1 : 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--target-session-only") == 0) {
         TestTargetSession();
         OleUninitialize();

@@ -3,6 +3,7 @@
 // sets failbit on any wchar_t outside 0x00-0x7F, so Chinese tag names, UNC
 // folders, and starred paths never reached disk.
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <windows.h>
@@ -75,9 +76,18 @@ inline bool ReadUtf8File(const std::wstring& path, std::wstring& text) {
 inline bool WriteUtf8FileAtomic(const std::wstring& path, const std::wstring& text) {
     std::vector<uint8_t> bytes;
     if (!EncodeUtf8Bytes(text, bytes)) return false;
-    const std::wstring temp = path + L".tmp";
-    HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    // Each writer owns its temporary file until replacement. A shared .tmp
+    // can be truncated or deleted by another writer after the handle closes.
+    static std::atomic<uint64_t> sequence{0};
+    std::wstring temp;
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (unsigned attempt = 0; attempt < 32; ++attempt) {
+        temp = path + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." +
+            std::to_wstring(sequence.fetch_add(1, std::memory_order_relaxed));
+        file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+        if (file != INVALID_HANDLE_VALUE || GetLastError() != ERROR_FILE_EXISTS) break;
+    }
     if (file == INVALID_HANDLE_VALUE) return false;
     size_t done = 0;
     while (done < bytes.size()) {

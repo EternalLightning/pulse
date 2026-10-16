@@ -7,6 +7,7 @@
 #include "ui_compositor.h"
 #include "window_helpers.h"
 #include "../common/localization.h"
+#include "../model/batch_rename_preview.h"
 
 #include <commctrl.h>
 #include <windowsx.h>
@@ -76,7 +77,7 @@ public:
         if (edit_find_) SetFocus(edit_find_);
 
         MSG message{};
-        while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
+        while (!done_ && GetModalMessage(message)) {
             const bool edit_msg = EditId(message.hwnd) != 0;
             if (!edit_msg && IsDialogMessageW(hwnd_, &message)) continue;
             TranslateMessage(&message);
@@ -277,7 +278,20 @@ private:
         const std::wstring number = EditText(edit_number_);
         rule_.start = number.empty() ? 1 : _wtoi(number.c_str());
         if (rule_.start < 0) rule_.start = 0;
-        items_ = model::PreviewBatchRename(paths_, rule_);
+        can_apply_ = false;
+        preview_pending_ = true;
+        preview_failed_ = false;
+        items_.clear();
+        rename_count_ = unchanged_count_ = collision_count_ = 0;
+        preview_.Request(paths_, rule_);
+    }
+
+    void PollPreview() {
+        auto items = preview_.Take();
+        if (!items) return;
+        items_ = std::move(*items);
+        preview_pending_ = false;
+        preview_failed_ = items_.empty() && !paths_.empty();
         rename_count_ = 0;
         unchanged_count_ = 0;
         collision_count_ = 0;
@@ -287,6 +301,7 @@ private:
             else if (item.status == model::BatchRenameStatus::Collision) ++collision_count_;
         }
         can_apply_ = rename_count_ > 0;
+        InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
     void ApplyChip(const wchar_t* pattern) {
@@ -298,7 +313,6 @@ private:
 
     void Complete(bool accepted) {
         if (accepted) {
-            SyncRuleFromEdits();
             if (!can_apply_) return;
             result_.accepted = true;
             result_.rule = rule_;
@@ -445,7 +459,10 @@ private:
         wchar_t summary[128]{};
         swprintf_s(summary, l10n::Get(l10n::StringId::BatchRenameSummary).c_str(),
                    rename_count_, unchanged_count_, collision_count_);
-        painter_.DrawText(summary, SummaryRect(), compositor_.SmallFormat(),
+        const std::wstring summary_text = preview_pending_
+            ? l10n::Get(l10n::StringId::LoadingEllipsis)
+            : preview_failed_ ? l10n::Get(l10n::StringId::OperationFailedMessage) : summary;
+        painter_.DrawText(summary_text, SummaryRect(), compositor_.SmallFormat(),
                           theme.text_secondary);
 
         fluent::ControlState cancel_state{};
@@ -491,9 +508,13 @@ private:
             edit_replace_ = CreateField(2, {});
             edit_pattern_ = CreateField(3, {});
             edit_number_ = CreateField(4, L"1", true);
+            if (!SetTimer(hwnd_, 1, 50, nullptr)) return -1;
             SyncRuleFromEdits();
             return 0;
         }
+        case WM_TIMER:
+            if (wparam == 1) PollPreview();
+            return 0;
         case WM_NCCALCSIZE:
             return 0;
         case WM_NCHITTEST:
@@ -596,6 +617,8 @@ private:
         case WM_ERASEBKGND:
             return 1;
         case WM_DESTROY:
+            preview_.Close();
+            KillTimer(hwnd_, 1);
             DestroyEdits();
             if (font_) {
                 DeleteObject(font_);
@@ -624,12 +647,15 @@ private:
     fluent::Painter painter_;
     std::vector<std::wstring> paths_;
     model::BatchRenameRule rule_;
+    model::BatchRenamePreview preview_;
     std::vector<model::BatchRenameItem> items_;
     BatchRenameDialogResult result_;
     bool dark_ = false;
     bool backdrop_enabled_ = false;
     bool done_ = false;
     bool can_apply_ = false;
+    bool preview_pending_ = false;
+    bool preview_failed_ = false;
     float scale_ = 1.0f;
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;

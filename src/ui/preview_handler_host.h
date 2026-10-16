@@ -44,6 +44,7 @@ public:
               bool immediate = false);
 
     State state() const;
+    // Cache-only eligibility; an unknown extension is resolved on the STA worker.
     static bool CanHost(const std::wstring& path);
     // Reuses this host's existing slot even when the process-wide pool is full.
     bool CanHostPath(const std::wstring& path) const;

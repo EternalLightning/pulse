@@ -742,6 +742,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::ListSizeBar: target=l.list_style_row[2];break;
     case I::SettingsFolderSort: target=l.folder_sort_card;break;
     case I::SettingsWallpaper: target=l.wallpaper_card;break;
+    case I::SettingsMatchBackground: target=l.wallpaper_fit_card;break;
     case I::SettingsWallpaperLook: target=l.wallpaper_look_card;break;
     case I::SettingsWallpaperBlur: target=l.wallpaper_blur_card;break;
     case I::SettingsTrayIcon: target=l.tray_icon_card;break;

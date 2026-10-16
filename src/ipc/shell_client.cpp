@@ -2,6 +2,7 @@
 #include "shell_client.h"
 #include "file_identity_protocol.h"
 #include <algorithm>
+#include <utility>
 
 namespace pulse::ipc {
 
@@ -182,6 +183,7 @@ bool ShellClient::EnsureConnected() {
                 GetExitCodeProcess(child_.hProcess, &code);
                 fprintf(stderr, "[shell_client] child exited early code=%lu\n", code);
                 last_error_ = L"Pulse.Shell.exe \u542F\u52A8\u540E\u7ACB\u5373\u9000\u51FA";
+                KillChild();
                 return false;
             }
             if (GetTickCount64() > deadline) {
@@ -244,6 +246,7 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
 
     bool sent = false;
     std::shared_ptr<Connection> connection;
+    std::wstring unavailable_error;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
         if (EnsureConnected()) {
@@ -254,10 +257,11 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
             }
             sent = SendFrame(p.type, p.id, p.payload);
         }
+        if (!sent && !connection) unavailable_error = UnreachableMessage();
     }
     if (!sent && connection) HandleDisconnect(connection);
     else if (!sent) FireRequestDone(type, p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
-                                    UnreachableMessage());
+                                    unavailable_error);
     return p.id;
 }
 
@@ -410,7 +414,7 @@ void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool 
     } else FireDone(id, hr, cancelled, error);
 }
 
-const std::wstring& ShellClient::UnreachableMessage() const {
+std::wstring ShellClient::UnreachableMessage() const {
     static const std::wstring kFallback = L"shell host unreachable";
     return last_error_.empty() ? kFallback : last_error_;
 }
@@ -556,7 +560,7 @@ void ShellClient::HandleDisconnect(const std::shared_ptr<Connection>& expected) 
     if (expected) SetEvent(expected->cancel);
     std::vector<Pending> retry;
     std::vector<Pending> failed;
-    std::vector<Pending> unavailable;
+    std::vector<std::pair<Pending, std::wstring>> unavailable;
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
         // A sender may already have retired the connection read by this reader.
@@ -584,13 +588,13 @@ void ShellClient::HandleDisconnect(const std::shared_ptr<Connection>& expected) 
                     pending_.erase(p.id);
                 }
             }
-            if (!sent) unavailable.push_back(std::move(p));
+            if (!sent) unavailable.emplace_back(std::move(p), UnreachableMessage());
         }
     }
     for (const auto& p : failed)
         FireRequestDone(p.type, p.id, DisconnectResult(p.type), false, DisconnectMessage(p.type));
-    for (const auto& p : unavailable)
-        FireRequestDone(p.type, p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false, UnreachableMessage());
+    for (const auto& [p, error] : unavailable)
+        FireRequestDone(p.type, p.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false, error);
 }
 
 } // namespace pulse::ipc

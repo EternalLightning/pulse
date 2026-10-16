@@ -83,7 +83,6 @@ int RunSettingsWidthBorderTest(AppState& s, const wchar_t* output) {
     return failures ? 1 : 0;
 }
 
-void Render(pulse::AppState&);
 int RunSettingsDropdownTest(AppState& s,const wchar_t* output) {
     using H=ui::HitTestResult;
     std::ofstream log{std::filesystem::path(output)};int failures=0;

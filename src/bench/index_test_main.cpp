@@ -1,21 +1,163 @@
 #include "../index/index_config.h"
 #include "../index/index_query.h"
+#include "../index/live_filename_search.h"
 #include "../index/network_index.h"
 #include "../index/search_result_merge.h"
 #include "../index/index_shard.h"
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <limits>
+#include <cstdio>
+#include <exception>
 
 using namespace pulse::index;
 
 namespace {
 
 int failures = 0;
+int checks = 0;
 
 void Check(bool condition, const wchar_t* name) {
-    std::wcout << (condition ? L"[PASS] " : L"[FAIL] ") << name << L'\n';
+    const int count = WideCharToMultiByte(CP_UTF8, 0, name, -1, nullptr, 0, nullptr, nullptr);
+    std::string label(count > 0 ? static_cast<size_t>(count) : 1, '\0');
+    if (count > 0) WideCharToMultiByte(CP_UTF8, 0, name, -1, label.data(), count, nullptr, nullptr);
+    std::fprintf(stdout, "%s %s\n", condition ? "[PASS]" : "[FAIL]", label.c_str());
+    std::fflush(stdout);
+    ++checks;
     if (!condition) ++failures;
+}
+
+void RunFolderKindNegationTests() {
+    struct Case {
+        const wchar_t* query;
+        bool folder, file, ext_not;
+        bool pdf, binary, directory;
+    };
+    const Case cases[] = {
+        {L"type:folder", true, false, false, false, false, true},
+        {L"kind:folder", true, false, false, false, false, true},
+        {L"!type:folder", false, true, false, true, true, false},
+        {L"!kind:folder", false, true, false, true, true, false},
+        {L"!!type:folder", true, false, false, false, false, true},
+        {L"!!kind:folder", true, false, false, false, false, true},
+        {L"\u7c7b\u578b:\u6587\u4ef6\u5939", true, false, false, false, false, true},
+        {L"!\u7c7b\u578b:\u6587\u4ef6\u5939", false, true, false, true, true, false},
+        {L"!!\u7c7b\u578b:\u6587\u4ef6\u5939", true, false, false, false, false, true},
+        {L"!kind:\u6587\u4ef6\u5939", false, true, false, true, true, false},
+        {L"type:document", false, false, false, true, false, false},
+        {L"!type:document", false, false, true, false, true, true},
+        {L"kind:pdf", false, false, false, true, false, false},
+        {L"!kind:pdf", false, false, true, false, true, true},
+        {L"!!kind:pdf", false, false, false, true, false, false},
+        {L"!ext:pdf", false, false, true, false, true, true},
+    };
+    Hit pdf;
+    pdf.name = L"fixture.pdf";
+    Hit binary;
+    binary.name = L"fixture.bin";
+    Hit directory;
+    directory.name = L"fixture-folder";
+    directory.is_dir = true;
+    size_t case_index = 0;
+    for (const auto& item : cases) {
+        const auto label = std::wstring(L"folder kind case ") + std::to_wstring(++case_index);
+        const auto compiled = ParseQuery(item.query);
+        const bool single = compiled.groups.size() == 1 && compiled.groups[0].size() == 1;
+        const auto* term = single ? &compiled.groups[0][0] : nullptr;
+        const auto flags_label = label + L": compiled kind and negation flags";
+        Check(term && term->folder == item.folder && term->file == item.file &&
+                  term->ext_not == item.ext_not && term->exts.empty() == (item.folder || item.file),
+              flags_label.c_str());
+        const auto match_label = label + L": real filename matcher selects files and directories";
+        Check(MatchLiveFilename(pdf, compiled, false) == item.pdf &&
+                  MatchLiveFilename(binary, compiled, false) == item.binary &&
+                  MatchLiveFilename(directory, compiled, false) == item.directory,
+              match_label.c_str());
+    }
+}
+
+void RunQueryBoundaryTests() {
+    Hit hits[4];
+    for (size_t i = 0; i < 4; ++i) {
+        hits[i].name = i % 2 ? L"other.txt" : L"foo.txt";
+        hits[i].path = L"C:\\fixture\\" + hits[i].name;
+        hits[i].is_dir = i >= 2;
+        hits[i].size = 1;
+        hits[i].mtime = 1;
+    }
+    const auto check_set = [&](std::wstring_view raw, unsigned expected, const Hit* fixture) {
+        const auto compiled = ParseQuery(raw);
+        unsigned live = 0, network = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            if (MatchLiveFilename(fixture[i], compiled, false)) live |= 1u << i;
+            if (testing::MatchNetworkFilenameForTest(fixture[i], compiled)) network |= 1u << i;
+        }
+        const auto label = std::wstring(raw) + L": live and network exact hit sets";
+        Check(live == expected && network == expected, label.c_str());
+    };
+    struct Typed { const wchar_t* query; unsigned expected; };
+    const Typed types[] = {
+        {L"file:foo", 1}, {L"!file:foo", 14}, {L"!!file:foo", 1},
+        {L"folder:foo", 4}, {L"!folder:foo", 11}, {L"!!folder:foo", 4},
+        {L"!file:", 12}, {L"!folder:", 3}, {L"!!file:", 3}, {L"!!folder:", 12},
+        {L"!file:foo !folder:foo", 10}, {L"!file:f*", 14},
+        {L"!\u6587\u4ef6:foo", 14}, {L"!\u6587\u4ef6\u5939:foo", 11},
+    };
+    for (const auto& item : types) check_set(item.query, item.expected, hits);
+    const wchar_t* paths[] = {
+        L"C:\\skip\\a.txt", L"C:\\skip2\\a.txt", L"C:\\foo\\bar\\a.txt", L"C:\\other\\a.txt"
+    };
+    for (size_t i = 0; i < 4; ++i) {
+        hits[i].path = paths[i];
+        hits[i].name = L"a.txt";
+        hits[i].is_dir = false;
+    }
+    const Typed path_cases[] = {
+        {L"foo\\bar", 4}, {L"path:foo\\bar", 4}, {L"path:foo/bar", 4},
+        {L"!path:C:\\skip", 14}, {L"!path:C:/skip/", 14},
+        {L"path:C:\\ path:C:\\skip", 1}, {L"path:C:\\ !path:C:\\skip", 14},
+        {L"!path:skip", 12}, {L"path:*foo*bar*", 4},
+        {L"!path:\\\\?\\C:\\skip", 14},
+    };
+    for (const auto& item : path_cases) check_set(item.query, item.expected, hits);
+    for (auto& hit : hits) hit.path.replace(0, 2, L"\\\\server\\share");
+    const Typed unc_cases[] = {
+        {L"!path:\\\\server\\share\\skip", 14},
+        {L"path:\\\\server\\share path:\\\\server\\share\\skip", 1},
+        {L"path:foo\\bar", 4}, {L"!path:\\\\?\\UNC\\server\\share\\skip", 14},
+    };
+    for (const auto& item : unc_cases) check_set(item.query, item.expected, hits);
+    const wchar_t* invalid[] = {
+        L"size:18446744073709551616", L"!size:18446744073709551616",
+        L"size:18014398509481984kb", L"!size:18014398509481984kb",
+        L"size:184467440737095516160000000000000000", L"size:bad",
+        L"dm:2023-02-29", L"!dm:2023-02-29", L"dm:1900-02-29",
+        L"dm:2024-00", L"dm:2024-13", L"dm:2024-04-31", L"dm:2024-01-00",
+        L"dm:0000", L"dm:1600", L"dm:2024-02-30..2024-03-01",
+        L"dm:2024-03-01..2024-02-01", L"dm:garbage", L"!dm:garbage",
+    };
+    for (const auto* raw : invalid) check_set(raw, 0, hits);
+    check_set(L"size:18446744073709551616 | other", 0, hits);
+    hits[0].name = L"other";
+    check_set(L"size:18446744073709551616 | other", 1, hits);
+    hits[0].size = (std::numeric_limits<uint64_t>::max)();
+    check_set(L"size:18446744073709551615", 1, hits);
+    const auto leap = ParseQuery(L"dm:2024-02-29");
+    const auto century = ParseQuery(L"dm:2000-02-29");
+    Check(leap.groups[0][0].date_how == DateHow::Range &&
+              century.groups[0][0].date_how == DateHow::Range &&
+              leap.groups[0][0].date_hi > leap.groups[0][0].date_lo,
+          L"query date: leap day and Gregorian century remain valid");
+    const auto& day = leap.groups[0][0];
+    Check(MatchDate(day.date_lo, day) && MatchDate(day.date_hi - 1, day) &&
+              !MatchDate(day.date_lo - 1, day) && !MatchDate(day.date_hi, day),
+          L"query date: exact lower inclusive and upper exclusive boundaries");
+    const auto safe_unit = ParseQuery(L"size:18014398509481983kb");
+    const auto& size = safe_unit.groups[0][0];
+    Check(size.size_how == SizeHow::Eq && size.size_lo == 18446744073709550592ull &&
+              MatchSize(18446744073709550592ull, size),
+          L"query size: largest representable KB multiplier remains valid");
 }
 
 } // namespace
@@ -100,7 +242,36 @@ void RunNetworkIntegration(const std::wstring& root) {
     if (!config_existed) DeleteFileW(config_path.c_str());
 }
 
+int RunNetworkIndexRegressionTests();
+int RunNetworkConfigRegressionTests();
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--network-config") == 0) {
+        std::fputs("[DIAG] --network-config selector entered\n", stderr);
+        std::fflush(stderr);
+        try {
+            return RunNetworkConfigRegressionTests();
+        } catch (const std::exception& exception) {
+            std::fprintf(stderr, "[FAIL] network-config uncaught C++ exception: %s\n", exception.what());
+        } catch (...) {
+            std::fputs("[FAIL] network-config uncaught non-standard C++ exception\n", stderr);
+        }
+        std::fflush(stderr);
+        return 2;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--query-boundaries") == 0) {
+        RunQueryBoundaryTests();
+        std::fprintf(stdout, "[SUMMARY] query-boundaries: %d PASS / %d FAIL / %d checks\n",
+                     checks - failures, failures, checks);
+        std::fflush(stdout);
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--network-scan-failures") == 0)
+        return RunNetworkIndexRegressionTests();
+    if (argc == 2 && wcscmp(argv[1], L"--folder-kind-negation") == 0) {
+        RunFolderKindNegationTests();
+        return failures ? 1 : 0;
+    }
     Check(NormalizeVolumeId(L"  \\\\?\\Volume{abc}\\  ") == L"\\\\?\\VOLUME{ABC}\\",
           L"volume id normalization");
 

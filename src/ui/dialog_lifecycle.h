@@ -4,6 +4,12 @@ struct IDCompositionDevice;
 struct IDCompositionVisual;
 
 namespace pulse::ui {
+// A nested modal loop must leave thread shutdown for the outer message loop.
+inline bool GetModalMessage(MSG& message) {
+    const BOOL result = GetMessageW(&message, nullptr, 0, 0);
+    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
+    return result > 0;
+}
 inline bool IsDialogSurfaceFading(HWND window) {
     return GetPropW(window, L"Pulse.DialogSurfaceFading") != nullptr;
 }

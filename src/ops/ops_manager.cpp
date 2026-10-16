@@ -1,5 +1,7 @@
 // ops_manager.cpp — See ops_manager.h for the contract.
 #include "ops_manager.h"
+#include "transfer_rate.h"
+#include "copy_progress_report.h"
 #include "operation_elevation_adapter.h"
 #include "operation_presentation.h"
 #include "delete_operation.h"
@@ -283,95 +285,13 @@ struct CopyProgressContext {
     std::atomic<bool>* pause = nullptr;
     std::function<void(uint64_t, uint64_t)> report;
     bool pause_sent = false;
-    ULONGLONG last_report = 0;
+    CopyProgressReporter progress;
     DestinationGuard::Handle destination_handle;
     COPYFILE2_COPY_PHASE error_phase = COPYFILE2_PHASE_NONE;
     const FileObjectReference* source_identity = nullptr;
     decltype(&GetFileInformationByHandleEx) identity_query = GetFileInformationByHandleEx;
     bool source_checked = false;
     bool source_changed = false;
-};
-
-class TransferRateEstimator {
-public:
-    void Reset(ULONGLONG tick, uint64_t bytes) {
-        samples_.clear();
-        samples_.push_back({ tick, bytes });
-        smoothed_speed_ = 0.0;
-        eta_seconds_ = 0;
-        last_rate_tick_ = tick;
-        last_eta_tick_ = tick;
-    }
-
-    void Observe(ULONGLONG tick, uint64_t bytes, uint64_t total_bytes) {
-        if (samples_.empty() || bytes < samples_.back().bytes) {
-            Reset(tick, bytes);
-            return;
-        }
-
-        constexpr ULONGLONG kMinimumSampleMs = 100;
-        constexpr ULONGLONG kWindowMs = 4000;
-        constexpr ULONGLONG kWarmupMs = 750;
-        if (tick - samples_.back().tick < kMinimumSampleMs && bytes < total_bytes)
-            return;
-
-        if (tick == samples_.back().tick) {
-            samples_.back().bytes = bytes;
-        } else {
-            samples_.push_back({ tick, bytes });
-        }
-        while (samples_.size() > 2 && samples_[1].tick + kWindowMs <= tick)
-            samples_.pop_front();
-
-        const ULONGLONG span = tick - samples_.front().tick;
-        const uint64_t byte_delta = bytes - samples_.front().bytes;
-        if (span < kWarmupMs || byte_delta == 0) return;
-
-        const double window_speed = static_cast<double>(byte_delta) * 1000.0
-            / static_cast<double>(span);
-        if (smoothed_speed_ <= 0.0) {
-            smoothed_speed_ = window_speed;
-        } else {
-            const double seconds = static_cast<double>(tick - last_rate_tick_) / 1000.0;
-            const double alpha = 1.0 - std::exp(-seconds);
-            smoothed_speed_ += alpha * (window_speed - smoothed_speed_);
-        }
-        last_rate_tick_ = tick;
-
-        if (bytes >= total_bytes || smoothed_speed_ <= 1.0) {
-            eta_seconds_ = 0;
-            return;
-        }
-        if (eta_seconds_ != 0 && tick - last_eta_tick_ < 1000) return;
-
-        const double raw_eta = static_cast<double>(total_bytes - bytes) / smoothed_speed_;
-        if (eta_seconds_ == 0) {
-            eta_seconds_ = (std::max)(uint64_t{ 1 },
-                static_cast<uint64_t>(std::ceil(raw_eta)));
-        } else {
-            // React faster to a slowdown than to a transient speed-up.
-            const double alpha = raw_eta > static_cast<double>(eta_seconds_) ? 0.45 : 0.20;
-            const double blended = static_cast<double>(eta_seconds_)
-                + alpha * (raw_eta - static_cast<double>(eta_seconds_));
-            eta_seconds_ = (std::max)(uint64_t{ 1 },
-                static_cast<uint64_t>(std::llround(blended)));
-        }
-        last_eta_tick_ = tick;
-    }
-
-    double speed() const { return smoothed_speed_; }
-    uint64_t eta_seconds() const { return eta_seconds_; }
-
-private:
-    struct Sample {
-        ULONGLONG tick = 0;
-        uint64_t bytes = 0;
-    };
-    std::deque<Sample> samples_;
-    double smoothed_speed_ = 0.0;
-    uint64_t eta_seconds_ = 0;
-    ULONGLONG last_rate_tick_ = 0;
-    ULONGLONG last_eta_tick_ = 0;
 };
 
 COPYFILE2_MESSAGE_ACTION CALLBACK CopyProgress(const COPYFILE2_MESSAGE* message,
@@ -404,30 +324,9 @@ COPYFILE2_MESSAGE_ACTION CALLBACK CopyProgress(const COPYFILE2_MESSAGE* message,
                 FILE_READ_ATTRIBUTES, FALSE, 0)) return COPYFILE2_PROGRESS_CANCEL;
         ctx->destination_handle.reset(owned);
     }
-    uint64_t transferred = 0;
-    uint64_t total = 0;
-    switch (message->Type) {
-    case COPYFILE2_CALLBACK_CHUNK_FINISHED:
-        transferred = message->Info.ChunkFinished.uliTotalBytesTransferred.QuadPart;
-        total = message->Info.ChunkFinished.uliTotalFileSize.QuadPart;
-        break;
-    case COPYFILE2_CALLBACK_STREAM_FINISHED:
-        transferred = message->Info.StreamFinished.uliTotalBytesTransferred.QuadPart;
-        total = message->Info.StreamFinished.uliTotalFileSize.QuadPart;
-        break;
-    case COPYFILE2_CALLBACK_ERROR:
+    if (message->Type == COPYFILE2_CALLBACK_ERROR)
         ctx->error_phase = message->Info.Error.CopyPhase;
-        transferred = message->Info.Error.uliTotalBytesTransferred.QuadPart;
-        total = message->Info.Error.uliTotalFileSize.QuadPart;
-        break;
-    default:
-        break;
-    }
-    const ULONGLONG now = GetTickCount64();
-    if (ctx->report && (transferred == total || now - ctx->last_report >= 100)) {
-        ctx->last_report = now;
-        ctx->report(transferred, total);
-    }
+    if (ctx->report) ctx->progress.Observe(*message, GetTickCount64(), ctx->report);
     if (ctx->cancel && ctx->cancel->load()) return COPYFILE2_PROGRESS_CANCEL;
     if (ctx->pause && ctx->pause->load() && !ctx->pause_sent) {
         ctx->pause_sent = true;
@@ -1762,20 +1661,7 @@ void OpsManager::StartShellClient() {
                          uint32_t items_done, uint32_t total_items) {
         shell_activity_tick_ = GetTickCount64();
         SetStatus([&](OpStatus& st) {
-            st.percent = pct;
-            st.current_item = item;
-            if (!delete_active_.load()) {
-                if (total_items > 0) st.total_items = total_items;
-                st.completed_items = (std::min)(static_cast<uint64_t>(items_done), st.total_items);
-            }
-            if (!item.empty()) {
-                std::wstring base = st.summary;
-                auto sep = base.find(L"  (");
-                if (sep != std::wstring::npos) base.erase(sep);
-                wchar_t buf[32];
-                swprintf_s(buf, L"  (%.0f%%)", pct);
-                st.summary = base + buf;
-            }
+            ApplyShellProgress(st, pct, item, items_done, total_items, delete_active_.load());
         });
     };
     // Done results land here (reader thread) and RunShellOp waits on them.
@@ -2374,6 +2260,11 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     ConflictChoice repeated = req.collision_policy == CollisionPolicy::KeepBoth
         ? ConflictChoice::KeepBoth : ConflictChoice::Replace;
     std::vector<std::wstring> skipped_prefixes;
+    const auto in_skipped_subtree = [&](const std::wstring& source) {
+        return std::any_of(skipped_prefixes.begin(), skipped_prefixes.end(), [&](const auto& prefix) {
+            return StartsWithPath(source, prefix);
+        });
+    };
     std::vector<std::wstring> renamed_directories;
     auto already_renamed = [&](const std::wstring& source) {
         return std::any_of(renamed_directories.begin(), renamed_directories.end(), [&](const auto& prefix) {
@@ -2914,7 +2805,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
 
     if (failure.empty() && !cancelled && req.type == OpType::Copy) {
         for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
-            if (it->directory && !it->reparse &&
+            if (it->directory && !it->reparse && !in_skipped_subtree(it->source) &&
                 !guard_result(destination_guard.SetDirectoryMetadata(it->destination,
                     it->created, it->accessed, it->modified, it->attributes, failure), it->destination)) break;
         }
@@ -2940,6 +2831,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     if (failure.empty() && !cancelled && req.type == OpType::Move) {
         for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
             if (!already_renamed(it->source) && it->directory && !it->reparse && !cleanup_only(it->source) &&
+                !in_skipped_subtree(it->source) &&
                 !guard_result(destination_guard.SetDirectoryMetadata(it->destination,
                     it->created, it->accessed, it->modified, it->attributes, failure), it->destination)) break;
         }

@@ -6,18 +6,13 @@
 #include <windows.h>
 #include <algorithm>
 #include <cwctype>
+#include <limits>
 
 namespace pulse::index {
 
 namespace {
 
 const wchar_t* Lut() { return FoldTable(); }
-
-int CountChar(std::wstring_view s, wchar_t c) {
-    int n = 0;
-    for (wchar_t ch : s) if (ch == c) ++n;
-    return n;
-}
 
 bool HasWild(std::wstring_view s) {
     return s.find(L'*') != std::wstring_view::npos || s.find(L'?') != std::wstring_view::npos;
@@ -69,7 +64,9 @@ bool ParseU64(std::wstring_view s, uint64_t& out) {
     uint64_t v = 0;
     for (wchar_t c : s) {
         if (c < L'0' || c > L'9') return false;
-        v = v * 10 + static_cast<uint64_t>(c - L'0');
+        const uint64_t digit = static_cast<uint64_t>(c - L'0');
+        if (v > ((std::numeric_limits<uint64_t>::max)() - digit) / 10) return false;
+        v = v * 10 + digit;
     }
     out = v;
     return true;
@@ -92,6 +89,7 @@ bool ParseSizeBytes(std::wstring_view raw, uint64_t& bytes) {
     else if (unit == L"gb" || unit == L"g") mul = 1024ull * 1024ull * 1024ull;
     else if (unit == L"tb" || unit == L"t") mul = 1024ull * 1024ull * 1024ull * 1024ull;
     else return false;
+    if (n > (std::numeric_limits<uint64_t>::max)() / mul) return false;
     bytes = n * mul;
     return true;
 }
@@ -120,19 +118,26 @@ bool ParseYmd(std::wstring_view s, int& y, int& m, int& d, int& parts) {
     };
     if (s.size() < 4 || !take(0, 4, y)) return false;
     parts = 1;
+    if (y < 1601 || y > 9999) return false;
     if (s.size() == 4) return true;
     if (s.size() < 7 || s[4] != L'-' || !take(5, 2, m)) return false;
     parts = 2;
+    if (m < 1 || m > 12) return false;
     if (s.size() == 7) return true;
     if (s.size() < 10 || s[7] != L'-' || !take(8, 2, d)) return false;
     parts = 3;
+    const int month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const int days = month_days[m - 1] + (m == 2 && y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+    if (d < 1 || d > days) return false;
     return s.size() == 10;
 }
 
 void ApplyDateToken(Term& t, std::wstring_view raw) {
+    t.date_how = DateHow::Invalid;
     std::wstring s = Fold(raw);
     SYSTEMTIME now = LocalNow();
     auto set_range = [&](uint64_t lo, uint64_t hi) {
+        if (!lo || !hi || hi <= lo) return;
         t.date_how = DateHow::Range;
         t.date_lo = lo;
         t.date_hi = hi;
@@ -200,6 +205,7 @@ void ApplyDateToken(Term& t, std::wstring_view raw) {
 }
 
 void ApplySizeToken(Term& t, std::wstring_view raw) {
+    t.size_how = SizeHow::Invalid;
     std::wstring s = Fold(raw);
     uint64_t lo = 0, hi = 0;
     if (NamedSizeRange(s, lo, hi)) {
@@ -350,13 +356,13 @@ Term ParseTerm(std::wstring_view tok, bool quoted, bool negated) {
     }
     if (!quoted && (IsModifier(tok, L"size", val) || IsModifier(tok, L"\u5927\u5c0f", val))) {
         ApplySizeToken(t, val);
-        t.size_not = negated;
+        t.size_not = negated && t.size_how != SizeHow::Invalid;
         return t;
     }
     if (!quoted && (IsModifier(tok, L"dm", val) || IsModifier(tok, L"datemodified", val) ||
                     IsModifier(tok, L"\u4fee\u6539", val) || IsModifier(tok, L"\u65e5\u671f", val))) {
         ApplyDateToken(t, val);
-        t.date_not = negated;
+        t.date_not = negated && t.date_how != DateHow::Invalid;
         return t;
     }
     if (!quoted && (IsModifier(tok, L"folder", val) || IsModifier(tok, L"\u6587\u4ef6\u5939", val))) {
@@ -369,6 +375,7 @@ Term ParseTerm(std::wstring_view tok, bool quoted, bool negated) {
     if (!quoted && (IsModifier(tok, L"file", val) || IsModifier(tok, L"\u6587\u4ef6", val))) {
         t.file = true;
         if (!val.empty()) ApplyName(t, val, false);
+        t.name_not = negated && !val.empty();
         if (negated && val.empty()) { t.file = false; t.folder = true; }
         return t;
     }
@@ -381,8 +388,10 @@ Term ParseTerm(std::wstring_view tok, bool quoted, bool negated) {
     if (!quoted && IsTypeKey(tok, val)) {
         bool folders_only = false;
         if (ExpandKindToken(val, t.exts, folders_only)) {
-            if (folders_only) t.folder = true;
-            t.ext_not = negated;
+            if (folders_only) {
+                t.folder = !negated;
+                t.file = negated;
+            } else t.ext_not = negated;
             return t;
         }
         ApplyExt(t, val);
@@ -558,8 +567,45 @@ bool MatchExt(const wchar_t* s, uint32_t n, const Term& t) {
     return false;
 }
 
+bool MatchNameAndType(bool name_match, bool is_dir, const Term& t) {
+    const bool type_match = (!t.folder || is_dir) && (!t.file || !is_dir);
+    const bool matched = type_match && name_match;
+    return t.name_not ? !matched : matched;
+}
+
+bool MatchPath(std::wstring_view raw, const Term& t) {
+    const auto normalize = [](std::wstring_view value) {
+        std::wstring result = Fold(value);
+        std::replace(result.begin(), result.end(), L'/', L'\\');
+        if (result.starts_with(L"\\\\?\\unc\\")) return L"\\\\" + result.substr(8);
+        if (result.starts_with(L"\\\\?\\")) return result.substr(4);
+        return result;
+    };
+    const std::wstring full = normalize(raw);
+    std::wstring needle = normalize(t.name);
+    if (HasWild(needle))
+        return WildcardFolded(full.data(), static_cast<uint32_t>(full.size()), needle);
+    if (LooksLikeAbsPath(needle)) {
+        while (needle.size() > 3 && needle.back() == L'\\') needle.pop_back();
+        return StartsWithFolded(full.data(), static_cast<uint32_t>(full.size()), needle) &&
+            (full.size() == needle.size() || needle.back() == L'\\' || full[needle.size()] == L'\\');
+    }
+    if (needle.find(L'\\') != std::wstring::npos)
+        return ContainsFolded(full.data(), static_cast<uint32_t>(full.size()), needle);
+    size_t begin = 0;
+    while (begin < full.size()) {
+        const auto end = full.find(L'\\', begin);
+        const auto length = (end == std::wstring::npos ? full.size() : end) - begin;
+        if (length && MatchName(full.data() + begin, static_cast<uint32_t>(length), t)) return true;
+        if (end == std::wstring::npos) break;
+        begin = end + 1;
+    }
+    return false;
+}
+
 bool MatchSize(uint64_t bytes, const Term& t) {
     switch (t.size_how) {
+    case SizeHow::Invalid: return false;
     case SizeHow::Eq:    return bytes == t.size_lo;
     case SizeHow::Gt:    return bytes > t.size_lo;
     case SizeHow::Ge:    return bytes >= t.size_lo;
@@ -571,6 +617,7 @@ bool MatchSize(uint64_t bytes, const Term& t) {
 }
 
 bool MatchDate(uint64_t filetime, const Term& t) {
+    if (t.date_how == DateHow::Invalid) return false;
     if (t.date_how != DateHow::Range) return true;
     if (filetime < t.date_lo) return false;
     if (t.date_hi != 0 && filetime >= t.date_hi) return false;
@@ -669,16 +716,21 @@ int RankName(const wchar_t* s, uint32_t n, bool is_dir, const CompiledQuery& q) 
 
 bool QueryCanNarrow(std::wstring_view prev, std::wstring_view next) {
     if (prev.empty() || next.size() < prev.size()) return false;
+    if (next.substr(0, prev.size()) != prev) return false;
     const auto previous = ParseQuery(prev);
     const auto following = ParseQuery(next);
-    if (!QueryHasPinyin(previous) && QueryHasPinyin(following)) return false;
-    for (const auto& group : previous.groups)
-        for (const auto& term : group)
-            if (term.pinyin && term.name_not) return false; // extending an exclusion broadens results
-    if (next.substr(0, prev.size()) != prev) return false;
-    if (CountChar(next, L'|') != CountChar(prev, L'|')) return false;
-    if (CountChar(next, L'!') < CountChar(prev, L'!')) return false;
-    return true;
+    // Only positive substring extension is known to preserve the old match set.
+    // Appending to bounds, alternatives, exclusions or exact names can add hits.
+    auto simple = [](const CompiledQuery& query) {
+        return query.path_prefix.empty() && !QueryHasContent(query) &&
+            QueryIsSimpleName(query) && query.groups[0][0].name_how == NameHow::Substring;
+    };
+    if (!simple(previous) || !simple(following) ||
+        previous.pinyin_enabled != following.pinyin_enabled) return false;
+    const auto& before = previous.groups[0][0];
+    const auto& after = following.groups[0][0];
+    if (!before.pinyin && after.pinyin) return false;
+    return after.name.starts_with(before.name);
 }
 
 CompiledQuery ParseQuery(std::wstring_view raw) {

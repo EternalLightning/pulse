@@ -21,6 +21,28 @@ bool SafePath(const fs::path& path) {
     }
     return true;
 }
+bool LocalStoragePath(const std::wstring& value) {
+    if (value.size() <= 3 || value[1] != L':' || value[2] != L'\\' ||
+        !((value[0] >= L'A' && value[0] <= L'Z') || (value[0] >= L'a' && value[0] <= L'z')) ||
+        value.find(L'\0') != std::wstring::npos || value.find(L':', 2) != std::wstring::npos) return false;
+    if (value.find_first_of(L"<>\"|?*", 3) != std::wstring::npos) return false;
+    for (wchar_t c : value) if (c < 32) return false;
+    for (size_t start = 3; start < value.size();) {
+        size_t end = value.find(L'\\', start);
+        if (end == std::wstring::npos) end = value.size();
+        const auto component = value.substr(start, end - start);
+        if (component.empty() || component.back() == L'.' || component.back() == L' ') return false;
+        auto stem = Lower(component.substr(0, component.find(L'.')));
+        while (!stem.empty() && stem.back() == L' ') stem.pop_back();
+        if (stem == L"con" || stem == L"prn" || stem == L"aux" || stem == L"nul" ||
+            stem == L"conin$" || stem == L"conout$") return false;
+        if (stem.size() == 4 && (stem.starts_with(L"com") || stem.starts_with(L"lpt")) &&
+            ((stem[3] >= L'1' && stem[3] <= L'9') || stem[3] == L'\u00b9' || stem[3] == L'\u00b2' || stem[3] == L'\u00b3')) return false;
+        start = end + 1;
+    }
+    const UINT drive = GetDriveTypeW(value.substr(0, 3).c_str());
+    return drive != DRIVE_REMOTE && drive != DRIVE_UNKNOWN && drive != DRIVE_NO_ROOT_DIR;
+}
 bool HashFile(const fs::path& path, uint64_t& size, uint64_t& hash) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) return false;
@@ -160,6 +182,66 @@ bool SameIndexLocation(const std::wstring& source, const std::wstring& target) {
         const auto from = normalize(source), to = normalize(target);
         return !from.empty() && from == to;
     } catch (...) { return false; }
+}
+
+bool PrepareServiceIndexMigration(const std::wstring& source, const std::wstring& target,
+    const std::function<bool(const std::wstring&)>& protect_file,
+    const std::function<bool(const std::wstring&)>& protect_tree,
+    IndexMigration& preparation, std::wstring& error) {
+    preparation = {};
+    preparation.failure = ERROR_INVALID_PARAMETER;
+    try {
+        if (source.find(L'\0') != std::wstring::npos || target.find(L'\0') != std::wstring::npos)
+            throw std::runtime_error("embedded null");
+        fs::path from = fs::path(source).lexically_normal().make_preferred();
+        fs::path to = ResolveIndexMigrationTarget(target);
+        while (from != from.root_path() && from.filename().empty()) from = from.parent_path();
+        while (to != to.root_path() && to.filename().empty()) to = to.parent_path();
+        if (!LocalStoragePath(from.wstring()) || !LocalStoragePath(to.wstring()) ||
+            !SafePath(from) || !SafePath(to)) throw std::runtime_error("unsafe service directory");
+        preparation.source = from.wstring();
+        preparation.target = to.wstring();
+        if ((fs::exists(from) && !fs::is_directory(from)) || (fs::exists(to) && !fs::is_directory(to)))
+            throw std::runtime_error("not a directory");
+        auto a = Lower(preparation.source), b = Lower(preparation.target);
+        if (a == b) { preparation.failure = 0; return true; }
+        if ((a + L"\\").starts_with(b + L"\\") || (b + L"\\").starts_with(a + L"\\"))
+            throw std::runtime_error("overlapping directories");
+        preparation.files = Inventory(from);
+        // A service destination is dedicated raw storage. Inventory deliberately
+        // ignores unrelated files for user migrations, so inspect every entry here.
+        if (fs::exists(to)) {
+            for (fs::recursive_directory_iterator it(to), end; it != end; ++it) {
+                const auto relative = it->path().lexically_relative(to);
+                if (!SafePath(it->path())) throw std::runtime_error("unsafe destination entry");
+                if (it->is_directory()) {
+                    if (!ArtifactDirectory(relative)) throw std::runtime_error("unrelated destination directory");
+                    continue;
+                }
+                if (!it->is_regular_file() || !Artifact(relative))
+                    throw std::runtime_error("unrelated destination file");
+                const auto found = std::find_if(preparation.files.begin(), preparation.files.end(), [&](const auto& file) {
+                    return Lower(file.relative) == Lower(relative.wstring());
+                });
+                if (found == preparation.files.end() || !Matches(it->path(), *found)) {
+                    preparation.failure = ERROR_ALREADY_EXISTS;
+                    throw std::runtime_error("different destination index");
+                }
+            }
+        }
+        // All admission checks above are read-only. Never change a mixed source
+        // directory DACL: inheritable ACE updates would also affect user files.
+        preparation.failure = ERROR_ACCESS_DENIED;
+        for (const auto& file : preparation.files)
+            if (!protect_file((from / file.relative).wstring())) throw std::runtime_error("protect source artifact");
+        fs::create_directories(to);
+        if (!protect_tree(to.wstring())) throw std::runtime_error("protect destination");
+        preparation.failure = 0;
+        return true;
+    } catch (...) {
+        error = L"索引迁移准备失败：请使用独立的本地索引目录，检查目标内容、路径及权限。";
+        return false;
+    }
 }
 
 bool CopyIndexForMigration(const std::wstring& source, const std::wstring& target,

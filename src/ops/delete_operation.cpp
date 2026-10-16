@@ -326,6 +326,36 @@ void OpsManager::RunDelete(const QueueItem& item,
             false, {}, {}, false, {}, E_ACCESSDENIED);
         return;
     }
+    // Freeze the objects before publishing confirmation. Path strings alone
+    // would authorize a replacement created while the dialog is open.
+    QueueItem admitted = item;
+    admitted.req.sources.clear();
+    admitted.retry_source_references.clear();
+    for (const auto& target : plan.targets) {
+        for (const auto& root : target.physical_paths) {
+            auto reference = FileObjectReference::Open(root);
+            if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
+                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), root);
+                const auto index = static_cast<size_t>(source - item.req.sources.begin());
+                if (index >= item.req.undo_produced_identities.size() ||
+                    reference.identity != item.req.undo_produced_identities[index]) reference = {};
+            }
+            if (!item.retry_source_references.empty()) {
+                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), root);
+                const auto index = static_cast<size_t>(source - item.req.sources.begin());
+                if (index >= item.retry_source_references.size() ||
+                    !item.retry_source_references[index].Matches(reference.Get())) reference = {};
+                else reference = item.retry_source_references[index];
+            }
+            if (!reference.Get()) {
+                finish(l10n::Get(l10n::StringId::OperationFailedMessage), {}, false, false,
+                    {}, {}, false, {}, HRESULT_FROM_WIN32(ERROR_FILE_INVALID), root);
+                return;
+            }
+            admitted.req.sources.push_back(root);
+            admitted.retry_source_references.push_back(std::move(reference));
+        }
+    }
     const auto prepared = delete_service_.Prepare(std::move(plan));
     if (prepared.decision == DeleteDecision::Blocked) {
         finish(l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
@@ -360,20 +390,14 @@ void OpsManager::RunDelete(const QueueItem& item,
             {}, false, false, {}, {}, cancelled);
         return;
     }
-    std::vector<std::wstring> physical, permanent_roots, recycle_roots;
+    std::vector<std::wstring> permanent_roots, recycle_roots;
     for (const auto& target : accepted->targets) {
         if (target.disposition != DeleteDisposition::Permanent &&
             target.disposition != DeleteDisposition::RecycleRequested) {
             finish(l10n::Get(l10n::StringId::DeleteUnknownStopped)); return;
         }
-        physical.insert(physical.end(), target.physical_paths.begin(), target.physical_paths.end());
         auto& group = target.disposition == DeleteDisposition::Permanent ? permanent_roots : recycle_roots;
         group.insert(group.end(), target.physical_paths.begin(), target.physical_paths.end());
-    }
-    QueueItem admitted = item;
-    admitted.req.sources = physical;
-    if (admitted.retry_source_references.empty()) {
-        for (const auto& root : physical) admitted.retry_source_references.push_back(FileObjectReference::Open(root));
     }
     const bool recycle = !recycle_roots.empty();
     admitted.req.type = recycle ? OpType::RecycleDelete : OpType::RealDelete; // Freeze empty-bin roots.
@@ -404,32 +428,18 @@ void OpsManager::RunDelete(const QueueItem& item,
         if (group.second.empty()) continue;
         if (!execution_token) { hr = static_cast<uint32_t>(E_UNEXPECTED); break; }
         std::vector<FileIdentity> expected_identities;
-        if (!item.retry_source_references.empty()) {
-            for (const auto& path : group.second) {
-                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), path);
-                const auto index = static_cast<size_t>(source - item.req.sources.begin());
-                auto current = FileObjectReference::Open(path);
-                if (index >= item.retry_source_references.size() ||
-                    !item.retry_source_references[index].Matches(current.Get())) {
-                    hr = static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_FILE_INVALID));
-                    error = l10n::Get(l10n::StringId::OperationFailedMessage); failed_path = path; break;
-                }
-                expected_identities.push_back(item.retry_source_references[index].identity);
+        for (const auto& path : group.second) {
+            const auto source = std::find(admitted.req.sources.begin(), admitted.req.sources.end(), path);
+            const auto index = static_cast<size_t>(source - admitted.req.sources.begin());
+            auto current = FileObjectReference::Open(path);
+            if (index >= admitted.retry_source_references.size() ||
+                !admitted.retry_source_references[index].Matches(current.Get())) {
+                hr = static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_FILE_INVALID));
+                error = l10n::Get(l10n::StringId::OperationFailedMessage); failed_path = path; break;
             }
-            if (FAILED(static_cast<HRESULT>(hr))) break;
-        } else if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
-            for (const auto& path : group.second) {
-                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), path);
-                if (source == item.req.sources.end()) break;
-                const size_t index = static_cast<size_t>(source - item.req.sources.begin());
-                if (index >= item.req.undo_produced_identities.size()) break;
-                expected_identities.push_back(item.req.undo_produced_identities[index]);
-            }
-            if (!ValidateProducedUndo(group.second, expected_identities, error, failed_path)) {
-                hr = static_cast<uint32_t>(E_ACCESSDENIED);
-                break;
-            }
+            expected_identities.push_back(admitted.retry_source_references[index].identity);
         }
+        if (FAILED(static_cast<HRESULT>(hr))) break;
         shell_activity_tick_ = GetTickCount64();
         auto& client = ipc::ShellClient::Instance();
         uint32_t id = 0;

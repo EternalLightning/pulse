@@ -1,0 +1,18 @@
+{
+  "completed_at": "2026-10-13T19:58:01.9991387+08:00",
+  "version": "1.1.2.0",
+  "target": "D:\\Applications\\Pulse",
+  "deployed_files": 40,
+  "deployed_hashes_verified": true,
+  "rollback_files_verified": 40,
+  "rollback": "E:\\Projects\\pulse\\build\\deployment-backups\\Pulse-before-1.1.2.0-20261013-181503-0068ce6ccd614deeb874646de92042c6",
+  "deployed_startup_exit": 0,
+  "service_state": "Running",
+  "service_configuration_unchanged": true,
+  "network_agent_running": true,
+  "cleanup_paths": 8.0,
+  "cleanup_files": 127.0,
+  "cleanup_bytes": 105042514.0,
+  "archive": "E:\\Projects\\pulse\\dist\\Pulse-1.1.2.0-portable-win-x64.zip",
+  "archive_sha256": "EBFF6F9D84DAB18311F29DEC3814BC2ED68D8BAF2A9BF656848C392CAC023060"
+}

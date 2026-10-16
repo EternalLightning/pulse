@@ -99,6 +99,14 @@ ShellIconCache::WorkerState::~WorkerState() {
     if (thread) CloseHandle(thread);
 }
 
+void ShellIconCache::WorkerState::RemovePixels(int index) {
+    const auto found = pixels.find(index);
+    if (found == pixels.end()) return;
+    for (const auto& icon : *found->second) pixel_bytes -= icon.pixels.size();
+    pixels.erase(found);
+    eviction_generation.fetch_add(1, std::memory_order_release);
+}
+
 ShellIconCache::ResourceUsage ShellIconCache::Resources() {
     auto& pool = Workers();
     std::lock_guard lock(pool.mutex);
@@ -156,6 +164,7 @@ void ShellIconCache::Reset() {
         pool.ReapLocked();
     }
     bitmaps_.clear();
+    bitmap_eviction_generation_ = 0;
 #ifdef PULSE_SHELL_ICONS_TESTING
     wic_.reset();
 #endif
@@ -276,19 +285,13 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
             if (state->stop) break;
             state->queued.erase(path);
             if (SUCCEEDED(result.error) && !result.icons.empty()) {
-                const auto remove_pixels = [&](int id) {
-                    const auto found = state->pixels.find(id);
-                    if (found == state->pixels.end()) return;
-                    for (const auto& icon : *found->second) state->pixel_bytes -= icon.pixels.size();
-                    state->pixels.erase(found);
-                };
                 const auto evict_exact = [&] {
                     const auto oldest = std::min_element(state->last_used.begin(), state->last_used.end(),
                         [](const auto& a, const auto& b) { return a.second < b.second; });
                     if (oldest == state->last_used.end()) return false;
                     const auto found = state->exact_index.find(oldest->first);
                     if (found != state->exact_index.end()) {
-                        remove_pixels(found->second);
+                        state->RemovePixels(found->second);
                         state->exact_index.erase(found);
                     }
                     state->last_used.erase(oldest);
@@ -301,7 +304,7 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
                     const auto victim = std::find_if(state->generic_index.begin(), state->generic_index.end(),
                         [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
                     if (victim == state->generic_index.end()) break;
-                    remove_pixels(victim->second);
+                    state->RemovePixels(victim->second);
                     state->generic_index.erase(victim);
                 }
                 const int index = state->next_index++;
@@ -313,7 +316,7 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
                         const auto victim = std::find_if(state->generic_index.begin(), state->generic_index.end(),
                             [](const auto& item) { return item.first != L"<dir>" && item.first != L"<file>"; });
                         if (victim != state->generic_index.end()) {
-                            remove_pixels(victim->second);
+                            state->RemovePixels(victim->second);
                             state->generic_index.erase(victim);
                         }
                     }
@@ -347,6 +350,18 @@ ComPtr<ID2D1Bitmap> ShellIconCache::BitmapFromIcon(HICON icon) {
     return bitmap;
 }
 #endif
+
+bool ShellIconCache::PruneStaleBitmaps() {
+    if (!worker_ || worker_->eviction_generation.load(std::memory_order_acquire) ==
+            bitmap_eviction_generation_) return false;
+    std::lock_guard lock(worker_->mutex);
+    // Index IDs are never reused: a removed CPU index cannot produce another hit.
+    std::erase_if(bitmaps_, [&](const auto& entry) {
+        return !worker_->pixels.contains(static_cast<int>(static_cast<uint32_t>(entry.first)));
+    });
+    bitmap_eviction_generation_ = worker_->eviction_generation.load(std::memory_order_relaxed);
+    return true;
+}
 
 ID2D1Bitmap* ShellIconCache::BitmapForIndex(int index, int list_id) {
     if (index < 0 || !dc_) return nullptr;
@@ -393,6 +408,7 @@ bool ShellIconCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
 
 ID2D1Bitmap* ShellIconCache::BitmapFor(const std::wstring& path, const std::wstring& name,
                                        bool is_dir, DWORD attrs, float desired_dips) {
+    PruneStaleBitmaps();
     int index = -1;
     const bool exact = NeedsExactIcon(name, is_dir, path) && !path.empty();
     if (exact && worker_) {

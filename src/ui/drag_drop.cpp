@@ -178,7 +178,9 @@ bool ExtractHDropPaths(IDataObject* obj, std::vector<std::wstring>& out) {
     if (!obj) return false;
     FORMATETC fmt{ CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM medium{};
-    if (FAILED(obj->GetData(&fmt, &medium)) || !medium.hGlobal) return false;
+    if (FAILED(obj->GetData(&fmt, &medium))) return false;
+    const std::unique_ptr<STGMEDIUM, decltype(&ReleaseStgMedium)> release(&medium, ReleaseStgMedium);
+    if (medium.tymed != TYMED_HGLOBAL || !medium.hGlobal) return false;
     HDROP hdrop = static_cast<HDROP>(medium.hGlobal);
     UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
     for (UINT i = 0; i < count; ++i) {
@@ -189,7 +191,6 @@ bool ExtractHDropPaths(IDataObject* obj, std::vector<std::wstring>& out) {
         path.resize(len);
         out.push_back(std::move(path));
     }
-    ReleaseStgMedium(&medium);
     return !out.empty();
 }
 

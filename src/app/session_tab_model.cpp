@@ -1,5 +1,6 @@
 #include "../common/path_utils.h"
 #include "session.h"
+#include "tab_group_id.h"
 
 #include <algorithm>
 #include <memory>
@@ -81,7 +82,6 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
     tab.panes.clear();
     tab.root.reset();
     for (const auto& saved : snapshot.panes) {
-        if (saved.path.empty()) continue;
         auto pane = std::make_unique<Pane>();
         pane->view.view_mode = saved.view;
         pane->view.details_column_dividers = saved.columns;
@@ -136,7 +136,7 @@ void RestoreWindowTabs(WindowTabs& tabs,
         tabs.tab_groups.push_back({saved.id, saved.name, saved.color_rgb, saved.collapsed});
         max_group = std::max(max_group, saved.id);
     }
-    tabs.next_tab_group_id = std::max(1, max_group + 1);
+    tabs.next_tab_group_id = NextTabGroupId(max_group);
     for (const auto& saved : layout_tabs) {
         // Loading can reuse requests from panes already registered in the window.
         tabs.items.push_back(std::make_unique<LayoutTab>());

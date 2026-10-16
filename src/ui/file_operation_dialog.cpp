@@ -45,14 +45,16 @@ struct TransferLabels {
     bool show_pause = true;
 };
 
-TransferLabels MakeTransferLabels(const ops::OpStatus& status, bool detailed) {
+TransferLabels MakeTransferLabels(const ops::OpStatus& status, bool detailed,
+                                  const FileOperationCallbacks& callbacks) {
     TransferLabels labels;
     labels.details = detailed ? l10n::Get(l10n::StringId::OpSummary)
                               : l10n::Get(l10n::StringId::OpDetails);
     labels.pause = status.phase == ops::OpPhase::Paused
         ? l10n::Get(l10n::StringId::OpResume) : l10n::Get(l10n::StringId::OpPause);
     const bool emptying = status.type == ops::OpType::EmptyRecycle;
-    labels.show_pause = !emptying && status.active;
+    labels.show_pause = !emptying && status.active && (status.phase == ops::OpPhase::Paused
+        ? static_cast<bool>(callbacks.resume) : static_cast<bool>(callbacks.pause));
     labels.cancel = status.active && !emptying
         ? l10n::Get(l10n::StringId::Cancel) : l10n::Get(l10n::StringId::Close);
     return labels;
@@ -262,7 +264,7 @@ public:
         if (conflict_.still_valid) SetTimer(hwnd_, 1, 100, nullptr);
 
         MSG message{};
-        while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
+        while (!done_ && GetModalMessage(message)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -326,15 +328,18 @@ private:
         state.hovered = hover_ == index + 1;
         state.pressed = pressed_ == index + 1;
         state.focused = focus_ == index;
-        D2D1_COLOR_F fill = dark_ ? HexColor(state.hovered ? 0x474747 : 0x3A3A3A, 0.92f)
+        const bool high_contrast = IsHighContrast();
+        D2D1_COLOR_F fill = high_contrast ? theme.fill_input : dark_ ? HexColor(state.hovered ? 0x474747 : 0x3A3A3A, 0.92f)
                                   : HexColor(state.hovered ? 0xE4E4E4 : 0xEEEEEE, 0.92f);
         painter_.FillRoundedRect(bounds, 10 * scale_, fill);
         painter_.StrokeRoundedRect(bounds, 10 * scale_,
-            state.focused ? WithAlpha(theme.accent, 0.35f) : theme.stroke_card,
+            high_contrast ? (state.focused || state.hovered ? theme.accent : theme.text) :
+                state.focused ? WithAlpha(theme.accent, 0.35f) : theme.stroke_card,
             state.focused ? 1.5f : 1.0f);
         const auto icon = Rect(scale_, 32, 133 + index * 66.0f, 34, 34);
-        painter_.FillRoundedRect(icon, 17 * scale_, icon_color);
-        painter_.DrawGlyph(glyph, icon, HexColor(0xFFFFFF));
+        painter_.FillRoundedRect(icon, 17 * scale_, high_contrast ? theme.fill_input : icon_color);
+        if (high_contrast) painter_.StrokeRoundedRect(icon, 17 * scale_, theme.text, scale_);
+        painter_.DrawGlyph(glyph, icon, high_contrast ? theme.text : HexColor(0xFFFFFF));
         painter_.DrawText(title, Rect(scale_, 78, 126 + index * 66.0f, 272, 25),
                           compositor_.TextFormat(), theme.text);
         painter_.DrawText(subtitle, Rect(scale_, 78, 150 + index * 66.0f, 300, 20),
@@ -616,7 +621,7 @@ public:
         if (spec_.still_valid) SetTimer(hwnd_, 1, 100, nullptr);
 
         MSG message{};
-        while (!done_ && GetMessageW(&message, nullptr, 0, 0) > 0) {
+        while (!done_ && GetModalMessage(message)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -1055,10 +1060,12 @@ private:
 FileOperationWindow::FileOperationWindow() : painter_(&compositor_) {}
 FileOperationWindow::~FileOperationWindow() { Destroy(); }
 
-bool FileOperationWindow::Create(HWND owner, FileOperationCallbacks callbacks) {
+bool FileOperationWindow::Create(HWND owner, FileOperationCallbacks callbacks,
+                                 FileOperationWindowOptions options) {
     if (hwnd_) return true;
     owner_ = owner;
     callbacks_ = std::move(callbacks);
+    options_ = options;
     dark_ = ShouldUseDarkMode(ThemeMode::Auto);
     accent_ = GetAccentColor();
 
@@ -1080,7 +1087,7 @@ bool FileOperationWindow::Create(HWND owner, FileOperationCallbacks callbacks) {
 }
 
 void FileOperationWindow::Destroy() {
-    if (hwnd_) { HideComposedDialog(hwnd_); DestroyWindow(hwnd_); }
+    if (hwnd_) { HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr); DestroyWindow(hwnd_); }
     hwnd_ = nullptr;
 }
 
@@ -1105,10 +1112,12 @@ void FileOperationWindow::Update(const ops::OpStatus& status) {
     if (new_task || detail_changed) failure_scroll_ = failure_scroll_max_ = 0.0f;
     if (entering_failure) detailed_ = true;
     if (new_task) {
+        cancel_requested_ = false;
         speed_history_.clear();
         speed_sample_tick_ = 0;
     }
     if (hwnd_) {
+        if (options_.use_summary_title) SetWindowTextW(hwnd_, status_.summary.c_str());
         if (entering_failure || detail_changed) ResizeForDetails(false);
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
@@ -1131,7 +1140,7 @@ void FileOperationWindow::Show(bool activate) {
 }
 
 void FileOperationWindow::Hide() {
-    if (hwnd_) HideComposedDialog(hwnd_);
+    if (hwnd_) HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr);
 }
 
 bool FileOperationWindow::IsVisible() const {
@@ -1172,7 +1181,7 @@ void FileOperationWindow::ResizeForDetails(bool preserve_center) {
 }
 
 int FileOperationWindow::HitTestControl(float x, float y) const {
-    const auto labels = MakeTransferLabels(status_, detailed_);
+    const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
     const auto chrome = MakeTransferChrome(scale_,
         static_cast<float>(compositor_.Width()), static_cast<float>(compositor_.Height()),
         painter_, labels);
@@ -1185,10 +1194,14 @@ int FileOperationWindow::HitTestControl(float x, float y) const {
 }
 
 void FileOperationWindow::RequestClose() {
+    if (status_.phase == ops::OpPhase::Cancelling || (cancel_requested_ && status_.active)) return;
     const bool emptying = status_.type == ops::OpType::EmptyRecycle;
     if (status_.active && status_.phase != ops::OpPhase::Completed &&
         status_.phase != ops::OpPhase::Failed && !emptying) {
-        if (callbacks_.cancel) callbacks_.cancel();
+        if (callbacks_.cancel) {
+            cancel_requested_ = true;
+            callbacks_.cancel();
+        }
         return;
     }
     if (callbacks_.dismiss) callbacks_.dismiss();
@@ -1210,10 +1223,11 @@ void FileOperationWindow::Render(bool present) {
     const float width = static_cast<float>(compositor_.Width());
     const float height = static_cast<float>(compositor_.Height());
     const float dip_w = width / std::max(scale_, 0.001f);
-    const auto labels = MakeTransferLabels(status_, detailed_);
+    const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
     const auto chrome = MakeTransferChrome(scale_, width, height, painter_, labels);
     const bool failed = status_.phase == ops::OpPhase::Failed;
     const bool cancelled = status_.phase == ops::OpPhase::Cancelled;
+    const bool cancelling = status_.phase == ops::OpPhase::Cancelling;
     const bool paused = status_.phase == ops::OpPhase::Paused;
     const bool waiting = status_.phase == ops::OpPhase::WaitingForConflict;
     const bool scanning = status_.phase == ops::OpPhase::Scanning;
@@ -1229,7 +1243,7 @@ void FileOperationWindow::Render(bool present) {
         : restoring ? L"\xE777" : (moving ? L"\xE7C2" : L"\xE8C8");
     painter_.DrawGlyph(operation_glyph, Rect(scale_, 14, 10, 16, 16), sky);
     std::wstring title;
-    if (cancelled) title = status_.summary;
+    if (options_.use_summary_title || cancelled) title = status_.summary;
     else if (emptying) {
         if (failed) title = l10n::Get(l10n::StringId::OpCannotEmpty);
         else if (completed) title = l10n::Get(l10n::StringId::OpEmptied);
@@ -1270,7 +1284,10 @@ void FileOperationWindow::Render(bool present) {
         status_.source_label.empty() ? l10n::Get(l10n::StringId::OpFilePath) : status_.source_label;
     const std::wstring dst = status_.destination_label.empty() ? l10n::Get(l10n::StringId::OpDestination).c_str() : status_.destination_label;
     std::wstring subtitle;
-    if (completed || failed || cancelled) {
+    if (options_.use_summary_title) {
+        subtitle = l10n::Get(l10n::StringId::OpFromPrefix) + src;
+        if (!status_.destination_label.empty()) subtitle += L" → " + dst;
+    } else if (completed || failed || cancelled) {
         subtitle = emptying ? title : src;
         if (!emptying && !status_.destination_label.empty()) subtitle += L" → " + dst;
     }
@@ -1304,11 +1321,11 @@ void FileOperationWindow::Render(bool present) {
         badge_text = l10n::Get(l10n::StringId::OpFailedBadge).c_str();
         badge_kind = fluent::BadgeKind::Danger;
     } else if (paused) {
-        file_line = l10n::Get(l10n::StringId::OpItemPrefix) + (status_.current_item.empty() ? src : status_.current_item);
+        file_line = status_.current_item.empty() ? src : l10n::Get(l10n::StringId::OpItemPrefix) + status_.current_item;
         badge_text = l10n::Get(l10n::StringId::OpPaused).c_str();
         badge_kind = fluent::BadgeKind::Warning;
     } else if (waiting) {
-        file_line = l10n::Get(l10n::StringId::OpItemPrefix) + (status_.current_item.empty() ? src : status_.current_item);
+        file_line = status_.current_item.empty() ? src : l10n::Get(l10n::StringId::OpItemPrefix) + status_.current_item;
         badge_text = l10n::Get(l10n::StringId::OpWaitingConflict).c_str();
         badge_kind = fluent::BadgeKind::Warning;
     } else if (completed) {
@@ -1324,9 +1341,8 @@ void FileOperationWindow::Render(bool present) {
         badge_text = l10n::Get(l10n::StringId::OpEmptying);
         badge_kind = fluent::BadgeKind::Warning;
     } else {
-        const std::wstring item = status_.current_item.empty() ? src : status_.current_item;
-        file_line = l10n::Get(l10n::StringId::OpItemPrefix).c_str() + item;
-        badge_text = deleting ? l10n::Get(l10n::StringId::OpDeleting).c_str() : moving ? l10n::Get(l10n::StringId::OpMoving).c_str() : l10n::Get(l10n::StringId::OpCopying).c_str();
+        file_line = status_.current_item.empty() ? src : l10n::Get(l10n::StringId::OpItemPrefix) + status_.current_item;
+        badge_text = options_.use_summary_title ? status_.summary : deleting ? l10n::Get(l10n::StringId::OpDeleting).c_str() : moving ? l10n::Get(l10n::StringId::OpMoving).c_str() : l10n::Get(l10n::StringId::OpCopying).c_str();
         badge_kind = fluent::BadgeKind::Success;
     }
     const float badge_w = std::max(48.0f, painter_.MeasureBadgeWidth(badge_text) / std::max(scale_, 0.001f));
@@ -1339,7 +1355,7 @@ void FileOperationWindow::Render(bool present) {
     const auto track = Rect(scale_, kPadX, 98, dip_w - kPadX * 2.0f, 10);
     painter_.FillRoundedRect(track, ScaleDip(scale_, 5.0f),
         dark_ ? HexColor(0xFFFFFF, 0.10f) : HexColor(0x000000, 0.10f));
-    const bool indeterminate = emptying && status_.active && !failed && !completed
+    const bool indeterminate = (emptying || scanning) && status_.active && !failed && !completed
         && status_.percent < 0.0f;
     if (indeterminate) {
         fluent::ProgressSpec bar;
@@ -1369,6 +1385,8 @@ void FileOperationWindow::Render(bool present) {
     const bool byte_transfer = status_.type == ops::OpType::Copy
         || status_.type == ops::OpType::Move;
     const std::wstring time_text = failed ? l10n::Get(l10n::StringId::OpIncomplete).c_str()
+        : cancelled ? l10n::Get(l10n::StringId::Cancel).c_str()
+        : cancelling ? l10n::Get(l10n::StringId::OpNoEstimate).c_str()
         : completed ? l10n::Get(l10n::StringId::OpCompleted).c_str()
         : paused ? l10n::Get(l10n::StringId::OpPaused).c_str()
         : waiting ? l10n::Get(l10n::StringId::OpWaiting).c_str()
@@ -1381,7 +1399,12 @@ void FileOperationWindow::Render(bool present) {
     const uint64_t remain_bytes = status_.total_bytes > status_.transferred_bytes
         ? status_.total_bytes - status_.transferred_bytes : 0;
     std::wstring items_text;
-    if (completed) items_text = l10n::Get(l10n::StringId::OpZeroItems).c_str();
+    if (!options_.item_progress_known) {
+        items_text = failed && status_.total_bytes == 0 ? L"—"
+            : status_.total_bytes == 0 && !completed ? l10n::Get(l10n::StringId::OpCalculating)
+            : (options_.estimated_bytes ? l10n::Get(l10n::StringId::OpApprox) : L"")
+                + pulse::format::ByteSize(remain_bytes);
+    } else if (completed) items_text = l10n::Get(l10n::StringId::OpZeroItems).c_str();
     else if (failed && status_.total_items == 0) items_text = L"—";
     else if (status_.total_items == 0) items_text = l10n::Get(l10n::StringId::OpCalculating).c_str();
     else if (byte_transfer && status_.total_bytes > 0)
@@ -1389,13 +1412,16 @@ void FileOperationWindow::Render(bool present) {
             + pulse::format::ByteSize(remain_bytes) + L")";
     else items_text = std::to_wstring(remain_items) + l10n::Get(l10n::StringId::OpCountSuffix).c_str();
     const std::wstring speed_text = emptying || !byte_transfer ? L"—"
-        : completed || failed || paused || waiting ? L"0 B/s"
+        : completed || failed || cancelled || cancelling || paused || waiting ? L"0 B/s"
         : status_.bytes_per_second <= 0.0 ? l10n::Get(l10n::StringId::OpEstimating).c_str()
-        : pulse::format::ByteSize(static_cast<uint64_t>(status_.bytes_per_second)) + L"/s";
+        : (options_.estimated_bytes ? l10n::Get(l10n::StringId::OpApprox) : L"")
+            + pulse::format::ByteSize(static_cast<uint64_t>(status_.bytes_per_second)) + L"/s";
+    const auto remaining_label = l10n::Get(options_.item_progress_known
+        ? l10n::StringId::OpRemainingItems : l10n::StringId::OpRemainingSize);
     const D2D1_COLOR_F time_color = failed ? theme.danger : theme.text;
     painter_.DrawText(l10n::Get(l10n::StringId::OpRemainingTime).c_str(), Rect(scale_, 32, 124, 120, 14),
                       compositor_.SmallFormat(), theme.text_secondary);
-    painter_.DrawText(l10n::Get(l10n::StringId::OpRemainingItems).c_str(), Rect(scale_, 176, 124, 140, 14),
+    painter_.DrawText(remaining_label, Rect(scale_, 176, 124, 140, 14),
                       compositor_.SmallFormat(), theme.text_secondary);
     painter_.DrawText(l10n::Get(l10n::StringId::OpCurrentSpeed).c_str(), Rect(scale_, 328, 124, 110, 14),
                       compositor_.SmallFormat(), theme.text_secondary);
@@ -1440,7 +1466,8 @@ void FileOperationWindow::Render(bool present) {
         painter_.DrawGlyph(L"\xE8F1", Rect(scale_, 30, 188, 14, 14), sky);
         painter_.DrawText(l10n::Get(l10n::StringId::OpSpeedHistory).c_str(), Rect(scale_, 48, 186, 220, 18),
                           compositor_.SmallFormat(), theme.text_secondary);
-        const std::wstring peak = l10n::Get(l10n::StringId::OpPeak).c_str() + pulse::format::ByteSize(
+        const std::wstring peak = l10n::Get(l10n::StringId::OpPeak)
+            + (options_.estimated_bytes ? l10n::Get(l10n::StringId::OpApprox) : L"") + pulse::format::ByteSize(
             static_cast<uint64_t>(status_.peak_bytes_per_second)) + L"/s";
         painter_.DrawText(peak, Rect(scale_, 280, 186, 156, 18),
                           compositor_.SmallFormat(), theme.text_secondary,
@@ -1449,6 +1476,9 @@ void FileOperationWindow::Render(bool present) {
         painter_.FillRoundedRect(plot, ScaleDip(scale_, 8.0f),
             dark_ ? HexColor(0x0F172A, 0.60f) : HexColor(0xFFFFFF, 0.50f));
         DrawSpeedGraph(compositor_.Dc(), plot, speed_history_, sky, scale_);
+#ifdef PULSE_UI_TEST_HOOKS
+        progress_inspection_.peak = peak;
+#endif
     }
 
     painter_.FillRoundedRect(D2D1::RectF(0, height - ScaleDip(scale_, kFooterH), width,
@@ -1466,7 +1496,7 @@ void FileOperationWindow::Render(bool present) {
         detailed_ ? L"\xE70E" : L"\xE70D", fluent::ButtonKind::Transparent, detail_state });
     if (labels.show_pause) {
         fluent::ControlState pause_state{};
-        pause_state.enabled = status_.active && !failed && status_.phase != ops::OpPhase::Cancelling
+        pause_state.enabled = status_.active && !cancel_requested_ && !failed && status_.phase != ops::OpPhase::Cancelling
             && status_.phase != ops::OpPhase::WaitingForConflict;
         pause_state.hovered = hover_ == 3;
         pause_state.pressed = pressed_ == 3;
@@ -1474,11 +1504,26 @@ void FileOperationWindow::Render(bool present) {
                               fluent::ButtonKind::Standard, pause_state });
     }
     fluent::ControlState cancel_state{};
-    cancel_state.enabled = status_.phase != ops::OpPhase::Cancelling;
+    cancel_state.enabled = status_.phase != ops::OpPhase::Cancelling && !(cancel_requested_ && status_.active);
     cancel_state.hovered = hover_ == 4;
     cancel_state.pressed = pressed_ == 4;
     painter_.DrawButton({ chrome.cancel, labels.cancel, {},
                           fluent::ButtonKind::Standard, cancel_state });
+#ifdef PULSE_UI_TEST_HOOKS
+    progress_inspection_.title = title;
+    progress_inspection_.subtitle = subtitle;
+    progress_inspection_.file_line = file_line;
+    progress_inspection_.percent = percent;
+    progress_inspection_.remaining_label = remaining_label;
+    progress_inspection_.remaining = items_text;
+    progress_inspection_.time = time_text;
+    progress_inspection_.speed = speed_text;
+    progress_inspection_.show_pause = labels.show_pause;
+    progress_inspection_.indeterminate = indeterminate;
+    progress_inspection_.details = chrome.details;
+    progress_inspection_.pause = chrome.pause;
+    progress_inspection_.cancel = chrome.cancel;
+#endif
     if (present) pulse::ui::EndSurface(compositor_);
     else {
         const HRESULT hr = compositor_.Dc()->EndDraw();
@@ -1520,7 +1565,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     case WM_NCCALCSIZE:
         return 0;
     case WM_NCHITTEST: {
-        const auto labels = MakeTransferLabels(status_, detailed_);
+        const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
         const auto chrome = MakeTransferChrome(scale_,
             static_cast<float>(compositor_.Width()), static_cast<float>(compositor_.Height()),
             painter_, labels);
@@ -1595,7 +1640,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
             if (hit == 1 || hit == 4) {
                 RequestClose();
             } else if (hit == 2) ShowWindow(hwnd_, SW_MINIMIZE);
-            else if (hit == 3 && status_.active &&
+            else if (hit == 3 && status_.active && !cancel_requested_ &&
                      status_.phase != ops::OpPhase::WaitingForConflict &&
                      status_.phase != ops::OpPhase::Cancelling) {
                 if (status_.phase == ops::OpPhase::Paused) {

@@ -109,7 +109,8 @@ struct Fixture {
         Cleanup();
     }
     bool Run(OpRequest request, const std::function<void()>& before_launch = {}, bool consent = false) {
-        OperationElevationAdapter::RunFixtureForTest(manager, request, SelfPath(), consent, before_launch);
+        const auto helper = consent ? (fs::path(SelfPath()).parent_path() / L"Pulse.Shell.exe").wstring() : SelfPath();
+        OperationElevationAdapter::RunFixtureForTest(manager, request, helper, consent, before_launch);
         const auto status = manager.Status();
         if (status.phase != OpPhase::Completed)
             std::wprintf(L"fixture phase=%u hr=0x%08lx path=%ls error=%ls\n",
@@ -122,6 +123,26 @@ struct Fixture {
 int RunNormal() {
     std::puts("Same-integrity adapter fixture: real operation engine and transport; no UAC or "
               "protected-system-directory claim.");
+    Check(OperationElevationAdapter::HelperPathChecksForTest(),
+          "production helper selection preserves spaces, long and UNC paths without a self fallback");
+    {
+        Fixture missing;
+        const auto original = missing.root / L"source" / L"retained.txt";
+        const auto helper = (missing.root / L"missing" / L"Pulse.Shell.exe").wstring();
+        WriteFile(original, "retained source");
+        OpRequest request;
+        request.type = OpType::Copy;
+        request.sources = {original.wstring()};
+        request.dest_dir = (missing.root / L"destination").wstring();
+        const auto undo_before = missing.manager.UndoToJson();
+        OperationElevationAdapter::RunFixtureForTest(missing.manager, request, helper, true);
+        const auto status = missing.manager.Status();
+        Check(status.phase == OpPhase::Failed && status.failure_hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) &&
+            status.failed_path == helper && !status.last_error.empty() &&
+            ReadFile(original) == "retained source" && !fs::exists(missing.root / L"destination" / L"retained.txt") &&
+            missing.manager.DrainCompletions().empty() && missing.manager.UndoToJson() == undo_before,
+            "missing Shell helper reports its path without elevation, mutation, self fallback or undo history");
+    }
     Check(OperationElevationAdapter::CodecChecksForTest(),
           "bounded codec rejects truncation, trailing bytes, enums, device paths and invalid identities");
     Fixture fixture;

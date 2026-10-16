@@ -1,14 +1,18 @@
 #include "archive_navigation.h"
 #include "archive_dialog.h"
+#include "archive_operation_ui.h"
 #include "app_state.h"
 #include "app_navigation.h"
 #include "app_runtime.h"
 #include "../ops/archive.h"
 #include "entry_sort.h"
 #include "../common/localization.h"
+#include "../ui/file_operation_dialog.h"
 #include <atomic>
+#include <algorithm>
 #include <filesystem>
 #include <map>
+#include <mutex>
 
 namespace pulse {
 namespace app {
@@ -77,6 +81,9 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
                    const std::wstring& member = {}) {
     struct Task {
         std::atomic_bool done{false}, cancel{false};
+        std::mutex progress_mutex;
+        ops::ArchiveProgress progress;
+        double peak_bytes_per_second = 0.0;
         std::unique_ptr<Result> result = std::make_unique<Result>();
     };
     auto task = std::make_shared<Task>();
@@ -84,7 +91,12 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
     if (!s.worker.EnqueueIo([task, file, destination, selected, password, member] {
         try {
             static_cast<ops::ArchiveOperationResult&>(*task->result) =
-                ops::ExtractArchive(file, destination, selected, password, &task->cancel);
+                ops::ExtractArchive(file, destination, selected, password, &task->cancel,
+                    [task](const ops::ArchiveProgress& progress) {
+                        std::lock_guard lock(task->progress_mutex);
+                        task->progress = progress;
+                        task->peak_bytes_per_second = (std::max)(task->peak_bytes_per_second, progress.bytes_per_second);
+                    });
             if (task->result->outcome == ops::ArchiveOutcome::Success && !member.empty())
                 task->result->open_path = (std::filesystem::path(destination) / member).wstring();
         } catch (...) {
@@ -96,7 +108,17 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
         task->result->error = l10n::Get(l10n::StringId::ArchiveWorkerUnavailable);
         task->done.store(true, std::memory_order_release);
     }
-    if (app::ShowArchiveProgressDialog(s.hwnd, s.darkMode, Accent(s), task->done, task->cancel))
+    if (app::ShowArchiveProgressWindow(s.hwnd, s.darkMode, Accent(s), task->done, task->cancel,
+        [task, file, destination] {
+            if (task->done.load(std::memory_order_acquire) &&
+                task->result->outcome != ops::ArchiveOutcome::Success &&
+                task->result->outcome != ops::ArchiveOutcome::Cancelled)
+                return app::ArchiveFailureStatus(*task->result, file, destination);
+            std::lock_guard lock(task->progress_mutex);
+            auto status = app::ArchiveOperationStatus(task->progress, file, destination, task->cancel.load());
+            status.peak_bytes_per_second = task->peak_bytes_per_second;
+            return status;
+        }))
         HandleArchiveResult(s, reinterpret_cast<LPARAM>(task->result.release()));
 }
 }
@@ -240,12 +262,9 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
     std::unique_ptr<Result> result(reinterpret_cast<Result*>(payload));
     if (!result) return;
     if (result->extraction) {
-        if (result->outcome == ops::ArchiveOutcome::Cancelled) return;
-        if (result->outcome != ops::ArchiveOutcome::Success) {
-            const auto error = result->error.empty() ? l10n::Get(l10n::StringId::ArchiveExtractFailed) : result->error;
-            MessageBoxW(s.hwnd, error.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
-        }
-        else if (!result->open_path.empty()) {
+        // Failed extraction already remains visible in the shared operation window.
+        if (result->outcome != ops::ArchiveOutcome::Success) return;
+        if (!result->open_path.empty()) {
             if (ops::IsArchivePath(result->open_path)) NavigateTo(s, ArchiveViewPath(result->open_path));
             else s.ops.OpenWith(result->open_path);
         }
@@ -260,9 +279,15 @@ void HandleArchiveResult(AppState& s, LPARAM payload) {
             bool retry_with_password = result->password_state == ops::ArchivePasswordState::Required;
             if (result->outcome == ops::ArchiveOutcome::Failed &&
                 result->password_state == ops::ArchivePasswordState::Unknown && ActiveTab(s) == &tab) {
-                const auto message = result->error + L"\n\n" + l10n::Get(l10n::StringId::ArchivePasswordUnknownRetry);
-                retry_with_password = MessageBoxW(s.hwnd, message.c_str(), L"Pulse",
-                    MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+                ui::ConfirmDialogSpec spec;
+                spec.title = l10n::Get(l10n::StringId::ArchiveOpenFailed);
+                spec.message = l10n::Get(l10n::StringId::ArchivePasswordUnknownRetry);
+                spec.confirm_text = l10n::Get(l10n::StringId::ArchiveEnterPassword);
+                spec.cancel_text = l10n::Get(l10n::StringId::Cancel);
+                spec.cancel_is_default = true;
+                spec.fit_to_work_area = true;
+                spec.rows = {{result->error, false, false}, {result->file, true, true}};
+                retry_with_password = ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor);
             }
             if (!browsable && retry_with_password && ActiveTab(s) == &tab) {
                 if (app::ShowArchivePasswordDialog(s.hwnd, s.darkMode, Accent(s), tab.archive_password)) {

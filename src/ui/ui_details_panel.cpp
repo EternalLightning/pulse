@@ -20,8 +20,9 @@
 namespace pulse::ui {
 
 D2D1_RECT_F MainRenderer::DetailsPanelRect(float w, float h) const {
-    if (DetailsPanelWidth(w) <= 0.0f) return D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
-    const float pw = details_width_ * scale_;
+    const float reserved = DetailsPanelWidth(w);
+    if (reserved <= 0.0f) return D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
+    const float pw = reserved - margin_;
     const float top = title_bar_height_ + toolbar_height_ + margin_;
     const float bottom = h - status_height_ - margin_;
     return D2D1::RectF(w - margin_ - pw, top, w - margin_, bottom);
@@ -692,10 +693,12 @@ float MainRenderer::DetailsContentHeightDip(const WindowViewModel& vm, float w, 
     const D2D1_RECT_F panel = DetailsPanelRect(w, h);
     if (panel.right - panel.left <= 1.0f) return 0.0f;
     DetailsHitRects hit;
+    const float preview_height = vm.details.preview_enabled
+        ? DetailsPreviewHeight(panel, scale_, vm.details.preview_expansion) : 0.0f;
     LayoutDetailsPanel(panel, scale_, vm.details,
                        compositor_ ? compositor_->DwriteFactory() : nullptr,
                        compositor_ ? compositor_->SmallFormat() : nullptr,
-                       compositor_, DetailsPreviewHeight(panel, scale_, vm.details.preview_expansion), hit);
+                       compositor_, preview_height, hit);
     return hit.content_height_dip;
 }
 

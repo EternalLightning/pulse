@@ -7,6 +7,9 @@
 #include <mutex>
 #include <vector>
 #include <array>
+#include <cstddef>
+#include <cstring>
+#include <aclapi.h>
 
 namespace pulse::storage {
 namespace {
@@ -17,6 +20,7 @@ std::wstring test_root;
 std::wstring test_locator_key;
 Locator cache;
 bool loaded = false;
+std::function<bool(const std::wstring&)> copy_hook;
 size_t Slot(Kind kind) { return kind == Kind::Configuration ? 0 : 1; }
 std::wstring Anchor() { return DefaultRoot() + L"\\storage-locations.json"; }
 std::wstring LocatorKey() {
@@ -152,27 +156,158 @@ bool Validate(const Locator& value, const std::wstring& target, std::wstring& er
 }
 struct File {
     HANDLE value = INVALID_HANDLE_VALUE;
-    ~File() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+    bool rollback = false;
+    fs::path path;
+    FILE_BASIC_INFO basic{};
+    explicit File(HANDLE handle) : value(handle) {}
+    File(const File&) = delete;
+    File& operator=(const File&) = delete;
+    File(File&& other) noexcept : value(other.value), rollback(other.rollback), path(std::move(other.path)), basic(other.basic) {
+        other.value = INVALID_HANDLE_VALUE;
+    }
+    ~File() {
+        if (value == INVALID_HANDLE_VALUE) return;
+        if (rollback) {
+            FILE_BASIC_INFO writable{};
+            writable.FileAttributes = FILE_ATTRIBUTE_NORMAL;
+            SetFileInformationByHandle(value, FileBasicInfo, &writable, sizeof(writable));
+            FILE_DISPOSITION_INFO disposition{TRUE};
+            SetFileInformationByHandle(value, FileDispositionInfo, &disposition, sizeof(disposition));
+        }
+        CloseHandle(value);
+    }
 };
-bool CopyVerified(const fs::path& input, const fs::path& output, std::vector<fs::path>& copied) {
+bool LeaseDirectories(const fs::path& path, std::vector<File>& leases) {
+    std::vector<fs::path> ancestors;
+    for (auto current = path; !current.empty(); current = current.parent_path()) {
+        ancestors.push_back(current);
+        if (current == current.parent_path()) break;
+    }
+    for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+        File directory{CreateFileW(it->c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (directory.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(directory.value, &info) ||
+            !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        leases.push_back(std::move(directory));
+    }
+    return true;
+}
+bool WriteText(HANDLE file, const std::wstring& text) {
+    std::vector<uint8_t> bytes;
+    LARGE_INTEGER begin{};
+    if (!EncodeUtf8Bytes(text, bytes) || !SetFilePointerEx(file, begin, nullptr, FILE_BEGIN)) return false;
+    size_t done = 0;
+    while (done < bytes.size()) {
+        DWORD written = 0;
+        const auto count = static_cast<DWORD>((std::min)(bytes.size() - done, size_t{65536}));
+        if (!WriteFile(file, bytes.data() + done, count, &written, nullptr) || !written) return false;
+        done += written;
+    }
+    return SetEndOfFile(file) && FlushFileBuffers(file);
+}
+// This migration writes a single data stream. Refuse metadata that it cannot preserve
+// before creating the destination instead of silently dropping streams or decrypting files.
+bool IsSupportedPlainFile(HANDLE source, FILE_BASIC_INFO& basic) {
+    constexpr DWORD supported = FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM |
+        FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | FILE_ATTRIBUTE_NORMAL;
+    if (!GetFileInformationByHandleEx(source, FileBasicInfo, &basic, sizeof(basic)) ||
+        (basic.FileAttributes & ~supported)) return false;
+    PACL resources = nullptr;
+    PSECURITY_DESCRIPTOR security = nullptr;
+    const DWORD security_status = GetSecurityInfo(source, SE_FILE_OBJECT, ATTRIBUTE_SECURITY_INFORMATION,
+        nullptr, nullptr, nullptr, &resources, &security);
+    const bool no_resources = security_status == ERROR_SUCCESS && (!resources || resources->AceCount == 0);
+    if (security) LocalFree(security);
+    if (!no_resources) return false;
+    void* context = nullptr;
+    std::array<BYTE, 65536> buffer{};
+    size_t offset = 0, available = 0;
+    auto read_header = [&](WIN32_STREAM_ID& stream, DWORD& bytes) {
+        bytes = 0;
+        constexpr DWORD header_size = static_cast<DWORD>(offsetof(WIN32_STREAM_ID, cStreamName));
+        while (bytes < header_size) {
+            if (offset == available) {
+                DWORD read = 0;
+                if (!BackupRead(source, buffer.data(), static_cast<DWORD>(buffer.size()), &read, FALSE, FALSE, &context)) return false;
+                offset = 0; available = read;
+                if (!read) break;
+            }
+            const auto count = (std::min)(available - offset, size_t{header_size - bytes});
+            std::memcpy(reinterpret_cast<BYTE*>(&stream) + bytes, buffer.data() + offset, count);
+            offset += count;
+            bytes += static_cast<DWORD>(count);
+        }
+        return bytes == 0 || bytes == header_size;
+    };
+    bool supported_streams = true;
+    for (;;) {
+        WIN32_STREAM_ID stream{};
+        DWORD read = 0;
+        if (!read_header(stream, read)) { supported_streams = false; break; }
+        if (!read) break;
+        if (stream.dwStreamId != BACKUP_DATA || stream.dwStreamNameSize || stream.Size.QuadPart < 0) {
+            supported_streams = false; break;
+        }
+        const auto buffered = (std::min)(static_cast<uint64_t>(available - offset), static_cast<uint64_t>(stream.Size.QuadPart));
+        offset += static_cast<size_t>(buffered);
+        ULARGE_INTEGER remaining{};
+        remaining.QuadPart = static_cast<uint64_t>(stream.Size.QuadPart) - buffered;
+        if (remaining.QuadPart) {
+            DWORD low = 0, high = 0;
+            if (!BackupSeek(source, remaining.LowPart, remaining.HighPart, &low, &high, &context) ||
+                low != remaining.LowPart || high != remaining.HighPart) {
+                supported_streams = false; break;
+            }
+        }
+    }
+    DWORD ignored = 0;
+    const bool released = BackupRead(source, nullptr, 0, &ignored, TRUE, FALSE, &context) != FALSE;
+    LARGE_INTEGER begin{};
+    return supported_streams && released && SetFilePointerEx(source, begin, nullptr, FILE_BEGIN);
+}
+bool CopyVerified(const fs::path& input, const fs::path& output, std::vector<File>& copied) {
     File source{CreateFileW(input.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
-    if (source.value == INVALID_HANDLE_VALUE || !CopyFileW(input.c_str(), output.c_str(), TRUE)) return false;
-    copied.push_back(output);
-    File destination{CreateFileW(output.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
-                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
-    if (destination.value == INVALID_HANDLE_VALUE || !FlushFileBuffers(destination.value)) return false;
-    LARGE_INTEGER a{}, b{};
-    if (!GetFileSizeEx(source.value, &a) || !GetFileSizeEx(destination.value, &b) || a.QuadPart != b.QuadPart) return false;
+                           OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (source.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(source.value, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return false;
+    FILE_BASIC_INFO basic{};
+    if (!IsSupportedPlainFile(source.value, basic)) return false;
+    File created{CreateFileW(output.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ,
+                            nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
+    if (created.value == INVALID_HANDLE_VALUE) return false;
+    created.rollback = true;
+    created.path = output;
+    created.basic = basic;
+    copied.push_back(std::move(created));
+    const HANDLE destination = copied.back().value;
     std::array<unsigned char, 65536> first{}, second{};
+    for (;;) {
+        DWORD read = 0;
+        if (!ReadFile(source.value, first.data(), static_cast<DWORD>(first.size()), &read, nullptr)) return false;
+        if (!read) break;
+        DWORD done = 0;
+        while (done < read) {
+            DWORD written = 0;
+            if (!WriteFile(destination, first.data() + done, read - done, &written, nullptr) || !written) return false;
+            done += written;
+        }
+    }
+    LARGE_INTEGER begin{}, a{}, b{};
+    if (!FlushFileBuffers(destination) || !GetFileSizeEx(source.value, &a) ||
+        !GetFileSizeEx(destination, &b) || a.QuadPart != b.QuadPart ||
+        !SetFilePointerEx(source.value, begin, nullptr, FILE_BEGIN) ||
+        !SetFilePointerEx(destination, begin, nullptr, FILE_BEGIN)) return false;
     for (;;) {
         DWORD source_bytes = 0, destination_bytes = 0;
         if (!ReadFile(source.value, first.data(), static_cast<DWORD>(first.size()), &source_bytes, nullptr) ||
-            !ReadFile(destination.value, second.data(), static_cast<DWORD>(second.size()), &destination_bytes, nullptr) ||
+            !ReadFile(destination, second.data(), static_cast<DWORD>(second.size()), &destination_bytes, nullptr) ||
             source_bytes != destination_bytes || !std::equal(first.begin(), first.begin() + source_bytes, second.begin())) return false;
         if (!source_bytes) return true;
     }
 }
+
 }
 std::wstring DefaultRoot() {
     std::lock_guard lock(gate);
@@ -186,6 +321,9 @@ std::wstring DefaultRoot() {
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)) || !local) return {};
     const std::wstring result = std::wstring(local) + L"\\Pulse";
     CoTaskMemFree(local); return result;
+}
+void SetConfigurationCopyHookForTesting(std::function<bool(const std::wstring&)> hook) {
+    std::lock_guard lock(gate); copy_hook = std::move(hook);
 }
 void OverrideDefaultRootForTesting(const std::wstring& root, const std::wstring& locator_registry_key) {
     std::lock_guard lock(gate); test_root = Normalize(root); test_locator_key = locator_registry_key;
@@ -231,13 +369,19 @@ bool ApplyConfiguration(std::wstring& error) {
     auto value = Read(); cache = value; loaded = true;
     const auto target = value.pending[0]; if (target.empty()) return true;
     const auto source = Root(value, 0);
-    std::vector<fs::path> copied;
+    std::vector<File> directories;
+    std::vector<File> copied;
     auto fail = [&]() {
-        for (auto it = copied.rbegin(); it != copied.rend(); ++it) DeleteFileW(it->c_str());
+        copied.clear();
         value.error[0] = error; std::wstring ignored; Save(value, ignored); return false;
     };
     try {
     if (!Validate(value, target, error) || !NoReparse(source, error)) return fail();
+    if (!LeaseDirectories(target, directories) || !LeaseDirectories(source, directories)) {
+        error = l10n::Get(l10n::StringId::StoragePlainFileRequired); return fail();
+    }
+    // Path-only validation must be repeated while ancestor leases prevent replacement.
+    if (!Validate(value, target, error)) return fail();
     const wchar_t* names[] = {L"app.json", L"session.json", L"places.json", L"tags.json", L"context_menu.json", L"saved_searches.json", L"search_history.json", L"folder_sizes.json", L"operations.json", L"network-index.json", L"content-index.config"};
     std::vector<fs::path> inputs;
     for (auto name : names) inputs.push_back(fs::path(source) / name);
@@ -263,11 +407,13 @@ bool ApplyConfiguration(std::wstring& error) {
         if ((attrs & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
             error = l10n::Get(l10n::StringId::StoragePlainFileRequired); return fail();
         }
-        if (!NoReparse(input.wstring(), error)) return fail();
+        if (!NoReparse(input.wstring(), error) || !LeaseDirectories(input.parent_path(), directories)) {
+            error = l10n::Get(l10n::StringId::StoragePlainFileRequired); return fail();
+        }
         const auto output_name = input.filename() == L"content-v1.sqlite.config" ?
             fs::path(L"content-index.config") : input.filename();
         const auto output = fs::path(target) / output_name;
-        if (!CopyVerified(input, output, copied)) { error = l10n::Get(l10n::StringId::StorageCopyVerifyFailed); return fail(); }
+        if (!CopyVerified(input, output, copied) || (copy_hook && !copy_hook(output.wstring()))) { error = l10n::Get(l10n::StringId::StorageCopyVerifyFailed); return fail(); }
     }
     const auto app = target + L"\\app.json";
     if (GetFileAttributesW(app.c_str()) != INVALID_FILE_ATTRIBUTES) {
@@ -282,13 +428,23 @@ bool ApplyConfiguration(std::wstring& error) {
                 std::wstring replacement = L"\"";
                 json::Escape((fs::path(target) / fs::path(wallpaper).filename()).wstring(), replacement);
                 replacement += L'"'; text.replace(begin, end - begin, replacement);
-                if (!WriteUtf8FileAtomic(app, text)) { error = l10n::Get(l10n::StringId::StorageWallpaperUpdateFailed); return fail(); }
+                const auto owned = std::find_if(copied.begin(), copied.end(), [&](const File& file) { return file.path == fs::path(app); });
+                if (owned == copied.end() || !WriteText(owned->value, text)) { error = l10n::Get(l10n::StringId::StorageWallpaperUpdateFailed); return fail(); }
+                owned->basic.LastWriteTime.QuadPart = 0;
+                owned->basic.ChangeTime.QuadPart = 0;
             }
+        }
+    }
+    for (auto& file : copied) {
+        if (!SetFileInformationByHandle(file.value, FileBasicInfo, &file.basic, sizeof(file.basic)) ||
+            !FlushFileBuffers(file.value)) {
+            error = l10n::Get(l10n::StringId::StorageCopyVerifyFailed); return fail();
         }
     }
     auto committed = value;
     committed.active[0] = target; committed.pending[0].clear(); committed.error[0].clear();
     if (!Save(committed, error)) return fail();
+    for (auto& file : copied) file.rollback = false;
     return true;
     } catch (const std::exception&) {
         error = l10n::Get(l10n::StringId::StorageMigrationFailed); return fail();

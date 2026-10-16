@@ -29,11 +29,18 @@ bool WriteAll(HANDLE h, const void* p, size_t n) {
     return true;
 }
 
-bool ReadAll(HANDLE h, void* p, size_t n) {
+bool ReadAll(HANDLE h, void* p, size_t n, DWORD* error = nullptr) {
     BYTE* b = static_cast<BYTE*>(p);
     while (n) {
         DWORD r = 0;
-        if (!ReadFile(h, b, static_cast<DWORD>(n), &r, nullptr) || r == 0) return false;
+        if (!ReadFile(h, b, static_cast<DWORD>(n), &r, nullptr)) {
+            if (error) *error = GetLastError();
+            return false;
+        }
+        if (r == 0) {
+            if (error) *error = ERROR_INVALID_DATA;
+            return false;
+        }
         b += r;
         n -= r;
     }
@@ -76,7 +83,6 @@ void DeltaLog::PutBytes(const void* p, size_t n) {
 bool DeltaLog::Open(const std::wstring& path, uint64_t base_built) {
     Close();
     path_ = path;
-    base_built_ = base_built;
     if (path_.empty()) return false;
     file_ = CreateFileW(path_.c_str(), GENERIC_READ | GENERIC_WRITE,
                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -136,10 +142,11 @@ bool DeltaLog::Reset(uint64_t base_built) {
     return Open(path, base_built);
 }
 
-void DeltaLog::QueueAdd(int32_t parent, uint8_t flags, uint32_t mtime, uint64_t size,
+void DeltaLog::QueueAdd(int32_t idx, int32_t parent, uint8_t flags, uint32_t mtime, uint64_t size,
                         std::wstring_view name, uint64_t frn) {
     const uint16_t nlen = static_cast<uint16_t>((std::min)(name.size(), static_cast<size_t>(65535)));
     PutU8(static_cast<uint8_t>(DeltaOp::Add));
+    PutI32(idx);
     PutI32(parent);
     PutU8(flags);
     PutBytes(&mtime, 4);
@@ -196,49 +203,72 @@ bool DeltaLog::Flush() {
     return true;
 }
 
-bool DeltaLog::Replay(const std::wstring& path, uint64_t expected_built, ReplayFn fn) {
+bool DeltaLog::Replay(const std::wstring& path, uint64_t expected_built, ReplayFn fn, DWORD* error) {
+    if (error) *error = ERROR_SUCCESS;
     if (path.empty() || !fn) return true;
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return true;
+    if (h == INVALID_HANDLE_VALUE) {
+        const DWORD code = GetLastError();
+        if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND) return true;
+        if (error) *error = code;
+        return false;
+    }
+    if (error) *error = ERROR_INVALID_DATA;
+    auto read = [&](void* data, size_t bytes) {
+        return ReadAll(h, data, bytes, error);
+    };
     DiskDeltaHeader hdr{};
-    if (!ReadAll(h, &hdr, sizeof(hdr)) || memcmp(hdr.magic, "PDLT", 4) != 0 ||
-        hdr.ver != kDeltaVer || hdr.base_built != expected_built) {
+    if (!read(&hdr, sizeof(hdr)) || memcmp(hdr.magic, "PDLT", 4) != 0 ||
+        hdr.base_built != expected_built) {
+        CloseHandle(h);
+        return false;
+    }
+    if (hdr.ver != kDeltaVer) {
+        if (error) *error = ERROR_REVISION_MISMATCH;
         CloseHandle(h);
         return false;
     }
     LARGE_INTEGER sz{};
-    GetFileSizeEx(h, &sz);
+    if (!GetFileSizeEx(h, &sz)) {
+        if (error) *error = GetLastError();
+        CloseHandle(h);
+        return false;
+    }
+    if (sz.QuadPart < static_cast<LONGLONG>(sizeof(hdr))) {
+        CloseHandle(h);
+        return false;
+    }
     const uint64_t total = static_cast<uint64_t>(sz.QuadPart);
     uint64_t pos = sizeof(hdr);
     std::vector<wchar_t> name;
     auto read_u8 = [&](uint8_t& v) {
         if (pos + 1 > total) return false;
-        if (!ReadAll(h, &v, 1)) return false;
+        if (!read(&v, 1)) return false;
         ++pos;
         return true;
     };
     auto read_u16 = [&](uint16_t& v) {
         if (pos + 2 > total) return false;
-        if (!ReadAll(h, &v, 2)) return false;
+        if (!read(&v, 2)) return false;
         pos += 2;
         return true;
     };
     auto read_i32 = [&](int32_t& v) {
         if (pos + 4 > total) return false;
-        if (!ReadAll(h, &v, 4)) return false;
+        if (!read(&v, 4)) return false;
         pos += 4;
         return true;
     };
     auto read_u32 = [&](uint32_t& v) {
         if (pos + 4 > total) return false;
-        if (!ReadAll(h, &v, 4)) return false;
+        if (!read(&v, 4)) return false;
         pos += 4;
         return true;
     };
     auto read_u64 = [&](uint64_t& v) {
         if (pos + 8 > total) return false;
-        if (!ReadAll(h, &v, 8)) return false;
+        if (!read(&v, 8)) return false;
         pos += 8;
         return true;
     };
@@ -254,16 +284,16 @@ bool DeltaLog::Replay(const std::wstring& path, uint64_t expected_built, ReplayF
         std::wstring_view nm;
         if (op == DeltaOp::Add) {
             uint16_t nlen = 0;
-            if (!read_i32(parent) || !read_u8(flags) || !read_u32(mtime) || !read_u64(size) ||
+            if (!read_i32(idx) || !read_i32(parent) || !read_u8(flags) || !read_u32(mtime) || !read_u64(size) ||
                 !read_u16(nlen)) { ok = false; break; }
             name.resize(nlen);
             if (nlen) {
-                if (pos + nlen * 2 > total || !ReadAll(h, name.data(), nlen * 2)) { ok = false; break; }
+                if (pos + nlen * 2 > total || !read(name.data(), nlen * 2)) { ok = false; break; }
                 pos += nlen * 2ull;
             }
             if (!read_u64(frn)) { ok = false; break; }
             nm = { name.data(), nlen };
-            fn(op, -1, parent, flags, 0, mtime, size, nm, frn, 0, 0);
+            fn(op, idx, parent, flags, 0, mtime, size, nm, frn, 0, 0);
         } else if (op == DeltaOp::Patch) {
             if (!read_i32(idx) || !read_u8(which)) { ok = false; break; }
             if (which & static_cast<uint8_t>(PatchBits::Meta)) {
@@ -277,7 +307,7 @@ bool DeltaLog::Replay(const std::wstring& path, uint64_t expected_built, ReplayF
                 if (!read_u16(nlen)) { ok = false; break; }
                 name.resize(nlen);
                 if (nlen) {
-                    if (pos + nlen * 2 > total || !ReadAll(h, name.data(), nlen * 2)) {
+                    if (pos + nlen * 2 > total || !read(name.data(), nlen * 2)) {
                         ok = false; break;
                     }
                     pos += nlen * 2ull;
@@ -297,6 +327,7 @@ bool DeltaLog::Replay(const std::wstring& path, uint64_t expected_built, ReplayF
         }
     }
     CloseHandle(h);
+    if (ok && error) *error = ERROR_SUCCESS;
     return ok;
 }
 

@@ -1,4 +1,5 @@
 #include "../app/session.h"
+#include "../app/tab_group_id.h"
 #include "../app/places.h"
 #include "../app/app_prefs.h"
 #include "../app/context_menu_prefs.h"
@@ -7,13 +8,61 @@
 #include "../common/utf8_file.h"
 #include <filesystem>
 #include <iostream>
+#include <string_view>
+#include "places_tag_loading_cases.h"
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--places-tags-load")
+        return RunPlacesTagLoadingCases();
     using namespace pulse;
     int failures = 0;
     auto check = [&](bool ok, const char* name) {
         std::cout << (ok ? "[PASS] " : "[FAIL] ") << name << '\n'; failures += !ok;
     };
+    {
+        app::LayoutTabSnapshot saved;
+        saved.panes.push_back({});
+        app::LayoutTab restored;
+        std::vector<std::wstring> requested;
+        const auto load = [&](app::Tab& tab, const std::wstring& path) {
+            requested.push_back(path);
+            tab.current_path = path;
+        };
+        app::RestoreLayoutTab(restored, saved, load);
+        check(restored.panes.size() == 1 && restored.panes[0]->view.current_path.empty() &&
+              requested == std::vector<std::wstring>{L""},
+              "session restore preserves This PC as an empty navigation path");
+        saved.layout = static_cast<int>(app::LayoutPreset::TwoVertical);
+        app::PaneFolderSnapshot folder;
+        folder.path = L"C:\\fixture";
+        saved.panes.push_back(folder);
+        saved.focused = 1;
+        requested.clear();
+        app::RestoreLayoutTab(restored, saved, load);
+        check(restored.panes.size() == 2 && restored.panes[0]->view.current_path.empty() &&
+              restored.panes[1]->view.current_path == folder.path && restored.focused_index == 1 &&
+              requested == std::vector<std::wstring>{L"", folder.path},
+              "session restore keeps This PC and folder panes in their original positions");
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--session-this-pc") return failures ? 1 : 0;
+    {
+        app::WindowTabs tabs;
+        const int maximum = (std::numeric_limits<int>::max)();
+        app::RestoreWindowTabs(tabs, {}, {{maximum, L"maximum", 0, false},
+                                        {1, L"first", 0, false}}, 0, {});
+        check(tabs.next_tab_group_id == 1 && app::AllocateTabGroupId(tabs) == 2,
+              "session INT_MAX group wraps without colliding with an existing group");
+        tabs.tab_groups.clear();
+        tabs.next_tab_group_id = maximum;
+        check(app::AllocateTabGroupId(tabs) == maximum && tabs.next_tab_group_id == 1 &&
+              app::AllocateTabGroupId(tabs) == 1,
+              "group allocation safely wraps after INT_MAX");
+        tabs.next_tab_group_id = -1;
+        tabs.tab_groups.push_back({1, L"first", 0, false});
+        check(app::AllocateTabGroupId(tabs) == 2,
+              "group allocation normalizes invalid counters and skips occupied IDs");
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--session-group-id") return failures ? 1 : 0;
     const auto parent = std::filesystem::current_path() / L"bench_data";
     const auto root = parent / (L"json-persistence-" + std::to_wstring(GetCurrentProcessId()) +
                                L"-" + std::to_wstring(GetTickCount64()));

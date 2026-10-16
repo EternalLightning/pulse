@@ -33,15 +33,13 @@ bool ParseIndexBytes(const BYTE* data, size_t size, RecycleItem& out) {
         memcpy(&nchars, data + 24, 4);
         if (nchars == 0 || nchars > 32768) return false;
         const size_t need = 28ull + static_cast<size_t>(nchars) * 2ull;
-        size_t bytes = static_cast<size_t>(nchars) * 2ull;
-        if (need > size) {
-            if (size <= 28) return false;
-            bytes = size - 28;
-            nchars = static_cast<uint32_t>(bytes / 2);
-        }
+        // A shortened name is not the original restore destination. Reject a
+        // truncated record rather than authorizing a different path.
+        if (need > size) return false;
         out.original_path.assign(reinterpret_cast<const wchar_t*>(data + 28), nchars);
         while (!out.original_path.empty() && out.original_path.back() == L'\0')
             out.original_path.pop_back();
+        if (out.original_path.find(L'\0') != std::wstring::npos) return false;
         out.size = file_size;
         out.deleted = deleted;
         out.name = FileNameOf(out.original_path);
@@ -50,7 +48,9 @@ bool ParseIndexBytes(const BYTE* data, size_t size, RecycleItem& out) {
     if (ver == 1) {
         const size_t maxn = (std::min)((size - 24) / 2, static_cast<size_t>(260));
         const wchar_t* p = reinterpret_cast<const wchar_t*>(data + 24);
-        out.original_path.assign(p, wcsnlen(p, maxn));
+        const size_t length = wcsnlen(p, maxn);
+        if (length == maxn) return false;
+        out.original_path.assign(p, length);
         uint64_t file_size = 0;
         memcpy(&file_size, data + 8, 8);
         memcpy(&out.deleted, data + 16, 8);

@@ -1,5 +1,6 @@
 #include "../common/path_utils.h"
 #include "tab_controller.h"
+#include "tab_group_id.h"
 
 #include "context_menu.h"
 #include "../common/localization.h"
@@ -96,7 +97,8 @@ void TabController::CreateGroupAndEdit(WindowTabs& tabs, int tab_index, POINT sc
                                        ui::FluentMenu& menu) {
     if (tab_index < 0 || tab_index >= static_cast<int>(tabs.items.size())) return;
     TabGroup group;
-    group.id = tabs.next_tab_group_id++;
+    group.id = AllocateTabGroupId(tabs);
+    if (group.id == 0) return;
     group.color_rgb = FirstUnusedColor(tabs);
     tabs.tab_groups.push_back(group);
     tabs.items[static_cast<size_t>(tab_index)]->tab_group = group.id;

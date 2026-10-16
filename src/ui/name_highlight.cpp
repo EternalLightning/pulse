@@ -51,19 +51,28 @@ std::vector<NameMatchRange> NameMatchRanges(std::wstring_view name, const std::v
     std::vector<bool> mask(name.size(), false);
     const auto folded = index::Fold(name);
     for (const auto& term : terms) {
-        if (!index::MatchName(name.data(), static_cast<uint32_t>(name.size()), term)) continue;
-        if (term.pinyin && term.name_how == index::NameHow::Substring &&
-            folded.find(term.name) == std::wstring::npos) {
-            const auto match = index::FindPinyinMatch(name, term.name);
-            if (match && match.start + match.length <= mask.size())
-                std::fill(mask.begin() + match.start, mask.begin() + match.start + match.length, true);
+        if (term.name.empty()) continue;
+        if (term.name_how == index::NameHow::Exact) {
+            if (folded == term.name) std::fill(mask.begin(), mask.end(), true);
+            continue;
         }
+        if (term.name_how != index::NameHow::Wildcard) {
+            size_t at = folded.find(term.name);
+            if (at == std::wstring::npos && term.pinyin && term.name_how == index::NameHow::Substring) {
+                const auto match = index::FindPinyinMatch(name, term.name);
+                if (match && match.start + match.length <= mask.size())
+                    std::fill(mask.begin() + match.start, mask.begin() + match.start + match.length, true);
+            }
+            for (; at != std::wstring::npos; at = folded.find(term.name, at + 1))
+                std::fill(mask.begin() + at, mask.begin() + at + term.name.size(), true);
+            continue;
+        }
+        if (!index::WildcardFolded(name.data(), static_cast<uint32_t>(name.size()), term.name)) continue;
+        const std::wstring_view pattern(term.name);
         for (size_t i = 0; i < term.name.size();) {
             const size_t start = i;
-            if (term.name_how == index::NameHow::Wildcard) {
-                while (i < term.name.size() && term.name[i] != L'*' && term.name[i] != L'?') ++i;
-            } else i = term.name.size();
-            const auto literal = term.name.substr(start, i - start);
+            while (i < term.name.size() && term.name[i] != L'*' && term.name[i] != L'?') ++i;
+            const auto literal = pattern.substr(start, i - start);
             if (!literal.empty()) for (size_t at = 0; (at = folded.find(literal, at)) != std::wstring::npos; ++at) {
                 std::fill(mask.begin() + at, mask.begin() + at + literal.size(), true);
             }

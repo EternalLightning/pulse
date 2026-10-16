@@ -14,6 +14,128 @@ inline std::wstring PipeName(std::wstring_view token) { return L"\\\\.\\pipe\\Pu
 inline ipc::MsgHeader Header(uint32_t type, uint32_t size) {
     ipc::MsgHeader h; h.magic = kMagic; h.type = type; h.payload_size = size; return h;
 }
+inline std::vector<uint8_t> SerializeSearchRequest(const ContentSearchRequest& request) {
+    ipc::PayloadWriter writer;
+    writer.PutU64(request.generation);
+    writer.PutU32(static_cast<uint32_t>(request.mode));
+    uint32_t flags = request.recursive ? 1u : 0u;
+    if (request.case_sensitive) flags |= 2u;
+    if (request.skip_system_locations) flags |= 4u;
+    if (request.whole_word) flags |= 8u;
+    writer.PutU32(flags);
+    writer.PutU64(request.maximum_file_bytes);
+    writer.PutU32(static_cast<uint32_t>(request.maximum_hits));
+    std::vector<std::wstring> roots = request.roots;
+    if (roots.empty() && !request.root.empty()) roots.push_back(request.root);
+    writer.PutString(roots.empty() ? std::wstring{} : roots.front());
+    writer.PutString(request.needle);
+    writer.PutU64(request.minimum_file_bytes);
+    const uint32_t extra = roots.size() > 1 ? static_cast<uint32_t>(roots.size() - 1) : 0;
+    writer.PutU32(extra);
+    for (uint32_t i = 0; i < extra; ++i) writer.PutString(roots[i + 1]);
+    writer.PutU32(static_cast<uint32_t>(request.match_mode));
+    writer.PutU32(static_cast<uint32_t>(request.needles.size()));
+    for (const auto& needle : request.needles) writer.PutString(needle);
+    writer.PutU32(static_cast<uint32_t>(request.excluded_needles.size()));
+    for (const auto& needle : request.excluded_needles) writer.PutString(needle);
+    writer.PutU32(static_cast<uint32_t>(request.candidate_paths.size()));
+    for (const auto& path : request.candidate_paths) writer.PutString(path);
+    if (request.mode == ContentSearchMode::Content) {
+        writer.PutString(request.filename_query);
+        writer.PutU32(static_cast<uint32_t>(request.sort)); writer.PutU32(request.sort_desc ? 1u : 0u);
+        writer.PutU32(1); writer.PutU64(request.session_id);
+        writer.PutU64(request.maximum_document_bytes);
+        writer.PutU32(request.task_scan ? 1u : 0u);
+    }
+    return writer.data();
+}
+
+inline bool ParseSearchRequest(const std::vector<uint8_t>& payload, ContentSearchRequest& request) {
+    ipc::PayloadReader reader(payload.data(), payload.size());
+    uint32_t mode = 0;
+    uint32_t flags = 0;
+    uint32_t maximum_hits = 0;
+    if (!reader.GetU64(request.generation) || !reader.GetU32(mode) ||
+        !reader.GetU32(flags) || !reader.GetU64(request.maximum_file_bytes) ||
+        !reader.GetU32(maximum_hits) || !reader.GetString(request.root) ||
+        !reader.GetString(request.needle)) return false;
+    if (mode > static_cast<uint32_t>(ContentSearchMode::Duplicates) ||
+        request.root.size() > 32768 || request.needle.size() > 4096 ||
+        request.maximum_file_bytes > 64ull * 1024ull * 1024ull ||
+        (mode == static_cast<uint32_t>(ContentSearchMode::Duplicates) && maximum_hits > 10000)) return false;
+    request.mode = static_cast<ContentSearchMode>(mode);
+    request.recursive = (flags & 1) != 0;
+    request.case_sensitive = (flags & 2) != 0;
+    request.skip_system_locations = (flags & 4) != 0;
+    request.whole_word = (flags & 8) != 0;
+    request.maximum_hits = maximum_hits;
+    if (reader.remaining() >= 12) {
+        uint32_t extra_roots = 0;
+        if (!reader.GetU64(request.minimum_file_bytes) || !reader.GetU32(extra_roots) ||
+            extra_roots > 32) return false;
+        std::vector<std::wstring> extras;
+        extras.reserve(extra_roots);
+        for (uint32_t i = 0; i < extra_roots; ++i) {
+            std::wstring extra;
+            if (!reader.GetString(extra) || extra.empty() || extra.size() > 32768) return false;
+            extras.push_back(std::move(extra));
+        }
+        if (!request.root.empty()) request.roots.push_back(request.root);
+        request.roots.insert(request.roots.end(), extras.begin(), extras.end());
+        if (reader.remaining() >= 12) {
+            uint32_t match_mode = 0;
+            uint32_t extra_needles = 0;
+            if (!reader.GetU32(match_mode) || !reader.GetU32(extra_needles) ||
+                extra_needles > 32 || match_mode > 2) return false;
+            request.match_mode = static_cast<ContentMatchMode>(match_mode);
+            request.needles.reserve(extra_needles);
+            for (uint32_t i = 0; i < extra_needles; ++i) {
+                std::wstring needle;
+                if (!reader.GetString(needle) || needle.size() > 4096) return false;
+                if (!needle.empty()) request.needles.push_back(std::move(needle));
+            }
+            uint32_t excluded = 0;
+            if (!reader.GetU32(excluded) || excluded > 32) return false;
+            request.excluded_needles.reserve(excluded);
+            for (uint32_t i = 0; i < excluded; ++i) {
+                std::wstring needle;
+                if (!reader.GetString(needle) || needle.size() > 4096) return false;
+                if (!needle.empty()) request.excluded_needles.push_back(std::move(needle));
+            }
+            uint32_t candidates = 0;
+            if (!reader.GetU32(candidates) || candidates > 10000) return false;
+            request.candidate_paths.reserve(candidates);
+            for (uint32_t i = 0; i < candidates; ++i) {
+                std::wstring path;
+                if (!reader.GetString(path) || path.empty() || path.size() > 32768) return false;
+                request.candidate_paths.push_back(std::move(path));
+            }
+        }
+    } else if (!request.root.empty()) {
+        request.roots.push_back(request.root);
+    }
+    if (reader.remaining() && !reader.GetString(request.filename_query)) return false;
+    if (reader.remaining()) {
+        uint32_t sort = 0, descending = 0;
+        if (!reader.GetU32(sort) || sort > 5 || !reader.GetU32(descending) || descending > 1) return false;
+        request.sort = static_cast<ContentResultSort>(sort); request.sort_desc = descending != 0;
+    }
+    if (request.mode == ContentSearchMode::Duplicates && request.roots.empty() && request.candidate_paths.empty()) return false;
+    if (request.root.empty() && !request.roots.empty()) request.root = request.roots.front();
+    if (reader.remaining()) {
+        uint32_t version = 0;
+        if (!reader.GetU32(version) || version != 1 || !reader.GetU64(request.session_id)) return false;
+    }
+    if (reader.remaining() && (!reader.GetU64(request.maximum_document_bytes) || !request.maximum_document_bytes ||
+        request.maximum_document_bytes > 512ull * 1024 * 1024)) return false;
+    if (reader.remaining()) {
+        uint32_t task_scan = 0;
+        if (!reader.GetU32(task_scan) || task_scan > 1) return false;
+        request.task_scan = task_scan != 0;
+    }
+    return reader.remaining() == 0;
+}
+
 inline void PutSubscriptionStatus(ipc::PayloadWriter& writer, const ContentSearchProgress& progress) {
     writer.PutU32(progress.subscription_error);
     writer.PutU32(static_cast<uint32_t>(progress.subscription_failure));

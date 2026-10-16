@@ -1,4 +1,5 @@
 #include "archive_navigation.h"
+#include "shell_registry_watch_context.h"
 #include "../ui/shortcut_help.h"
 // app_commands.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
@@ -293,7 +294,7 @@ void ShowCreateTagPicker(AppState& s, POINT screen_pt) {
     constexpr int kCreateTag = 29999;
     constexpr int kColorStrip = 30050;
     constexpr int kColorBase = 30060;
-    constexpr int kCustomColor = 30070;
+    constexpr int kCustomColor = 30051;
     uint32_t selected_rgb = TagColorPalette(s)[0];
     auto rebuild = [&](const std::wstring& query) {
         const std::vector<uint32_t>& palette = TagColorPalette(s);
@@ -362,9 +363,12 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
     if (!EnsureMenu(s)) return;
     const app::ColorTag* tag = s.places.FindTag(tag_id);
     if (!tag) return;
+    // Modal menus dispatch ADS discovery, which can reallocate the tag vector.
+    const std::wstring tag_name = tag->name;
+    const uint32_t tag_rgb = tag->rgb;
     constexpr int kRename = 31000;
     constexpr int kColorBase = 31100;
-    constexpr int kDelete = 31200;
+    constexpr int kDelete = 31001;
     const std::vector<uint32_t>& palette = TagColorPalette(s);
     std::vector<ui::FluentMenuItem> items;
     ui::FluentMenuItem rename;
@@ -391,7 +395,7 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
         }
         color.has_swatch = true;
         color.swatch_color = ui::HexColor(rgb);
-        color.checked = tag->rgb == rgb;
+        color.checked = tag_rgb == rgb;
         items.push_back(std::move(color));
     }
     items.back().separator_after = true;
@@ -412,7 +416,7 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
             item.enabled = !query.empty();
             return std::vector<ui::FluentMenuItem>{ std::move(item) };
         };
-        s.menu->SetFilterPlaceholder(tag->name);
+        s.menu->SetFilterPlaceholder(tag_name);
         s.menu->SetFilterMinWidth(300.0f);
         const int apply = s.menu->TrackPopup(screen_pt, rebuild(L""), rebuild);
         const std::wstring name = s.menu->LastFilterQuery();
@@ -436,8 +440,8 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
         confirm.cancel_text = l10n::Get(l10n::StringId::Cancel);
         confirm.danger = true;
         confirm.message = count == 0
-            ? TagLabel(l10n::StringId::TagDeleteConfirmFormat, tag->name)
-            : TagLabel(l10n::StringId::TagDeleteUsedFormat, tag->name, count);
+            ? TagLabel(l10n::StringId::TagDeleteConfirmFormat, tag_name)
+            : TagLabel(l10n::StringId::TagDeleteUsedFormat, tag_name, count);
         if (ui::ShowConfirmDialog(s.hwnd, confirm, s.darkMode, s.accentColor)) {
             std::vector<app::TagAdsUpdate> updates;
             s.places.DeleteTag(tag_id, &updates);
@@ -519,10 +523,8 @@ void DispatchMenuCommand(AppState& s, int cmd) {
             const std::wstring leaf =
                 slash == std::wstring::npos ? full : full.substr(slash + 1);
             if (!parent.empty() && !leaf.empty()) {
-                tab->pending_selected_name = leaf;
-                tab->pending_selected_names = { leaf };
-                tab->pending_ensure_selection_visible = true;
                 NavigateTo(s, parent);
+                SelectLaunchedFile(s, {parent, full, leaf});
             }
         }
         break;
@@ -810,18 +812,17 @@ std::wstring StaticVerbKey(const app::Tab& tab, const std::vector<int>& indices)
 // the reader posts WM_SHELL_VERBS back when done.
 void PrefetchStaticVerbs(AppState& s, const std::wstring& ext) {
     if (!s.context_menu.RequestStaticPrefetch(ext)) return;
-    HWND hwnd = s.hwnd;
-    std::thread([hwnd, ext] {
-        auto* result = new ShellVerbsResult{ ext, app::EnumerateStaticVerbs(ext) };
-        if (!PostMessageW(hwnd, WM_SHELL_VERBS, 0, reinterpret_cast<LPARAM>(result)))
-            delete result;
+    const auto mailbox = s.shell_verbs_mailbox;
+    if (!mailbox) return;
+    std::thread([mailbox, ext] {
+        mailbox->Publish(ShellVerbsResult{ ext, app::EnumerateStaticVerbs(ext) });
     }).detach();
 }
 
 DWORD WINAPI ShellRegistryWatch(LPVOID param) {
-    HWND hwnd = static_cast<HWND>(param);
-    HANDLE stop = g_shell_watch_stop;
-    if (!stop) return 0;
+    const std::unique_ptr<app::ShellRegistryWatchContext> context(
+        static_cast<app::ShellRegistryWatchContext*>(param));
+    const HANDLE stop = context->stop;
     struct Watch {
         HKEY key = nullptr;
         HANDLE event = nullptr;
@@ -842,9 +843,10 @@ DWORD WINAPI ShellRegistryWatch(LPVOID param) {
     DWORD count = 1;
     for (int i = 0; i < 3; ++i)
         if (watches[i].event) wait[count++] = watches[i].event;
-    while (WaitForMultipleObjects(count, wait, FALSE, INFINITE) != WAIT_OBJECT_0) {
-        if (!IsWindow(hwnd)) break;
-        PostMessageW(hwnd, WM_SHELL_CACHE_INVALIDATE, 0, 0);
+    for (;;) {
+        const DWORD result = WaitForMultipleObjects(count, wait, FALSE, INFINITE);
+        if (result == WAIT_OBJECT_0 || result == WAIT_FAILED) break;
+        if (!context->notifications || !context->notifications->Publish(true)) break;
         for (int i = 0; i < 3; ++i) {
             if (watches[i].key && watches[i].event)
                 RegNotifyChangeKeyValue(watches[i].key, TRUE,
@@ -859,23 +861,25 @@ DWORD WINAPI ShellRegistryWatch(LPVOID param) {
     return 0;
 }
 
-void StartShellRegistryWatch(HWND hwnd) {
+void StartShellRegistryWatch(AppState& s) {
     if (g_shell_watch_thread) return;
     g_shell_watch_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    g_shell_watch_thread = CreateThread(nullptr, 0, ShellRegistryWatch, hwnd, 0, nullptr);
-}
-
-void StopShellRegistryWatch() {
-    if (g_shell_watch_stop) SetEvent(g_shell_watch_stop);
-    if (g_shell_watch_thread) {
-        WaitForSingleObject(g_shell_watch_thread, 2000);
-        CloseHandle(g_shell_watch_thread);
-        g_shell_watch_thread = nullptr;
+    if (!g_shell_watch_stop) return;
+    auto context = std::make_unique<app::ShellRegistryWatchContext>();
+    context->notifications = s.shell_registry_mailbox;
+    // The worker retains its own handle if shutdown's bounded wait times out.
+    if (context->DuplicateStop(g_shell_watch_stop)) {
+        g_shell_watch_thread = CreateThread(nullptr, 0, ShellRegistryWatch, context.get(), 0, nullptr);
     }
-    if (g_shell_watch_stop) {
+    if (g_shell_watch_thread) context.release();
+    else {
         CloseHandle(g_shell_watch_stop);
         g_shell_watch_stop = nullptr;
     }
+}
+
+void StopShellRegistryWatch() {
+    app::StopShellRegistryWatchHandles(g_shell_watch_stop, g_shell_watch_thread);
 }
 
 void SeedShellVerbCache(AppState& s) {
@@ -885,14 +889,14 @@ void SeedShellVerbCache(AppState& s) {
     extensions.reserve(machine.size());
     for (const auto& [ext, verbs] : machine) extensions.push_back(ext);
     s.context_menu.MergeStaticCache(std::move(machine));
-    HWND hwnd = s.hwnd;
-    std::thread([hwnd, extensions = std::move(extensions)] {
+    const auto mailbox = s.shell_verbs_mailbox;
+    if (!mailbox) return;
+    std::thread([mailbox, extensions = std::move(extensions)] {
         size_t n = 0;
         for (const auto& ext : extensions) {
             if (n++ > 400) break;
-            auto* result = new ShellVerbsResult{ ext, app::EnumerateStaticVerbs(ext) };
-            if (!PostMessageW(hwnd, WM_SHELL_VERBS, 0, reinterpret_cast<LPARAM>(result)))
-                delete result;
+            if (!mailbox->Publish(ShellVerbsResult{ ext, app::EnumerateStaticVerbs(ext) }))
+                break;
         }
     }).detach();
 }

@@ -1,4 +1,5 @@
 #include "../index/content_index.h"
+#include "../index/content_agent.h"
 #include "../index/content_search_client.h"
 #include "../common/text_decode.h"
 #include "../index/document_reader.h"
@@ -16,6 +17,8 @@
 #include <tlhelp32.h>
 #include <fstream>
 #include <set>
+#include <exception>
+#include <string_view>
 #include "../../third_party/sqlite/sqlite3.h"
 using namespace pulse;
 namespace {
@@ -36,6 +39,82 @@ std::vector<index::ContentHit> Search(index::ContentIndex& db, index::ContentSea
 bool AwaitHit(index::ContentIndex& db, index::ContentSearchRequest r, size_t expected) {
     for (int i = 0; i < 100; ++i) { if (Search(db, r).size() == expected) return true; Sleep(100); } return false;
 }
+}
+
+namespace pulse::index {
+struct ContentClientLifecycleTestPeer {
+    static bool RetireCompletedQuery() {
+        ContentSearchClient client;
+        client.persistent_enabled_ = false;
+        client.mode_ = ContentAgentMode::Instant;
+        client.running_ = true;
+        auto query = std::make_shared<ContentSearchClient::ActiveQuery>();
+        query->generation = 7;
+        query->session_id = 9;
+        query->cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!query->cancel || !completed || !release) {
+            if (completed) CloseHandle(completed);
+            if (release) CloseHandle(release);
+            return false;
+        }
+        std::weak_ptr<ContentSearchClient::ActiveQuery> lifetime = query;
+        client.active_queries_[query->generation] = query;
+        query->thread = std::thread([query, completed, release] {
+            std::set_terminate([] { ExitProcess(91); });
+            query->done = true;
+            SetEvent(completed);
+            WaitForSingleObject(release, INFINITE);
+        });
+        HANDLE query_thread = nullptr;
+        DuplicateHandle(GetCurrentProcess(), query->thread.native_handle(), GetCurrentProcess(),
+            &query_thread, SYNCHRONIZE, FALSE, 0);
+        query.reset();
+        const bool done = WaitForSingleObject(completed, 5000) == WAIT_OBJECT_0;
+        // Cancel must return while the query thread is deliberately held open.
+        client.Cancel(9);
+        client.worker_ = std::thread([&client] { client.Worker(); });
+        bool retired = false;
+        const auto deadline = GetTickCount64() + 5000;
+        while (GetTickCount64() < deadline) {
+            { std::lock_guard lock(client.state_mu_); retired = client.active_queries_.empty(); }
+            if (retired) break;
+            Sleep(1);
+        }
+        // Exercise the interval after done/map removal but before capture release.
+        // With the old code only the lambda remains, then destroys itself below.
+        const auto ownership_deadline = GetTickCount64() + 500;
+        while (lifetime.use_count() > 1 && GetTickCount64() < ownership_deadline) Sleep(1);
+        const bool coordinator_owns = lifetime.use_count() > 1;
+        SetEvent(release);
+        client.Stop();
+        const bool query_exited = query_thread && WaitForSingleObject(query_thread, 5000) == WAIT_OBJECT_0;
+        if (query_thread) CloseHandle(query_thread);
+        CloseHandle(completed);
+        CloseHandle(release);
+        return done && retired && coordinator_owns && query_exited && lifetime.expired();
+    }
+};
+}
+
+int RunClientLifecycleTest(const wchar_t* module) {
+    std::wstring command = L"\"" + std::wstring(module) + L"\" --client-lifecycle-child";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    const bool started = CreateProcessW(module, command.data(), nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child) != FALSE;
+    Check(started, "client query retirement child starts");
+    if (!started) return 1;
+    CloseHandle(child.hThread);
+    const bool exited = WaitForSingleObject(child.hProcess, 10000) == WAIT_OBJECT_0;
+    DWORD code = STILL_ACTIVE;
+    GetExitCodeProcess(child.hProcess, &code);
+    if (!exited) { TerminateProcess(child.hProcess, ERROR_TIMEOUT); WaitForSingleObject(child.hProcess, 5000); }
+    CloseHandle(child.hProcess);
+    printf("client_lifecycle_child_exit=%lu\n", code);
+    Check(exited && code == 0, "cancel returns and completed query retires without self-join");
+    return failed ? 1 : 0;
 }
 
 int RunLatencyTest(const std::filesystem::path& base) {
@@ -1603,14 +1682,29 @@ int RunDeltaCacheTest(const std::filesystem::path& base) {
 
 int RunInstantLifecycleTests(const std::filesystem::path& base);
 int RunInstantGapTests(const std::filesystem::path& base);
-int wmain() {
+#include "content_contract_cases.h"
+#include "content_reconcile_capacity_cases.h"
+
+int wmain(int argc, wchar_t* argv[]) {
+    if (argc == 5 && std::wstring_view(argv[1]) == L"--capacity-agent-child")
+        return index::RunPersistentContentAgent(argv[2], wcstoul(argv[3], nullptr, 10), index::ContentAgentMode::LegacyWriter, argv[4]);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--client-lifecycle-child") {
+        std::set_terminate([] { ExitProcess(91); });
+        return index::ContentClientLifecycleTestPeer::RetireCompletedQuery() ? 0 : 1;
+    }
     wchar_t module[32768]{}; GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
+    if (GetEnvironmentVariableW(L"PULSE_TEST_CLIENT_LIFECYCLE", nullptr, 0)) return RunClientLifecycleTest(module);
     const auto base = std::filesystem::path(module).parent_path().parent_path() / L"bench_data" /
         (L"content-index-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     struct CleanupFixture {
         std::filesystem::path path;
         ~CleanupFixture() { std::error_code error; std::filesystem::remove_all(path, error); }
     } cleanup_fixture{base};
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--content-contract") return RunContentContractCases(base);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--root-errors") return RunContentRootErrorCases(base);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--content-config-errors") return RunContentConfigErrorCases(base);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--shared-retention") return RunContentSharedRetentionCases(base);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--agent-capacity") return RunContentCapacityCases(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_TASK_TEXT_BENCH_ROOT", nullptr, 0)) return RunTaskTextIoBenchmark(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_DELTA_CACHE", nullptr, 0)) return RunDeltaCacheTest(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_GAPS", nullptr, 0)) return RunInstantGapTests(base);

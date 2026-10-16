@@ -74,6 +74,10 @@ public:
 
     void ScheduleFolderRefresh(uint64_t now) noexcept;
     int ConsumeDueRefreshes(uint64_t now) noexcept;
+    uint64_t NextRefreshDeadline() const noexcept {
+        return !refresh_at_ ? refresh_again_at_ : !refresh_again_at_ ? refresh_at_
+            : (refresh_at_ < refresh_again_at_ ? refresh_at_ : refresh_again_at_);
+    }
 
 private:
     std::vector<ShellMenuEntry> ComposeEntries(ContextMenuPrefs& prefs,

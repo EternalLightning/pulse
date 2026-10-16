@@ -18,8 +18,8 @@ bool WildcardFolded(const wchar_t* s, uint32_t n, const std::wstring& pat);
 bool WordStartFolded(const wchar_t* s, uint32_t n, const std::wstring& needle);
 
 enum class NameHow : uint8_t { Any, Substring, Exact, Wildcard };
-enum class SizeHow : uint8_t { Any, Eq, Gt, Ge, Lt, Le, Range };
-enum class DateHow : uint8_t { Any, Range };
+enum class SizeHow : uint8_t { Any, Eq, Gt, Ge, Lt, Le, Range, Invalid };
+enum class DateHow : uint8_t { Any, Range, Invalid };
 enum class ContentMatchMode : uint8_t { AllWords, Phrase, AnyWord };
 
 struct Term {
@@ -75,6 +75,8 @@ bool QueryHasExtFilter(const CompiledQuery& q);
 bool QueryHasNameFilter(const CompiledQuery& q);
 bool QueryHasFolderFilter(const CompiledQuery& q);
 bool MatchName(const wchar_t* s, uint32_t n, const Term& t);
+bool MatchNameAndType(bool name_match, bool is_dir, const Term& t);
+bool MatchPath(std::wstring_view path, const Term& t);
 bool MatchExt(const wchar_t* s, uint32_t n, const Term& t);
 bool MatchSize(uint64_t bytes, const Term& t);
 bool MatchDate(uint64_t filetime, const Term& t);

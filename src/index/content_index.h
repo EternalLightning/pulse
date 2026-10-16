@@ -44,14 +44,23 @@ struct ContentIndexStatus {
     std::vector<ContentIndexRootStatus> root_status;
 };
 ContentIndexConfig LoadContentIndexConfig();
+// Failure preserves config; GetLastError describes unreadable/corrupt storage.
+bool LoadContentIndexConfig(ContentIndexConfig& config);
+bool LoadContentIndexConfig(const std::wstring& database_path, ContentIndexConfig& config);
 bool SaveInstantContentConfig(ContentIndexConfig& config);
 bool IsInternalContentPath(const std::wstring& path);
+// Immutable per-index scan hooks; callbacks execute on the indexing worker.
+struct ContentIndexScanHooks {
+    ContentSearchEnumerationHooks enumeration;
+    std::function<bool(const std::wstring&, WIN32_FILE_ATTRIBUTE_DATA&)> attributes;
+};
 // Bounded SSD/HDD-aware decoding and one transactional writer,
 // and independent read-only WAL connections for queries.
 class ContentIndex {
 public:
     explicit ContentIndex(std::wstring database_path = {}, bool read_only = false);
     ContentIndex(std::wstring database_path, ContentAgentMode mode);
+    ContentIndex(std::wstring database_path, ContentAgentMode mode, ContentIndexScanHooks hooks);
     ~ContentIndex();
     ContentIndex(const ContentIndex&) = delete;
     ContentIndex& operator=(const ContentIndex&) = delete;

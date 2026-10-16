@@ -124,7 +124,7 @@ struct Tab {
     std::shared_ptr<ContentSelectionRestore> content_selection_restore;
     uint64_t selection_revision = 0;
     std::shared_ptr<ContentSizeSummary> content_size_summary;
-    // Cached file-size summary of a snapshot selection (see SelectionSizeSummary).
+    // Cached aggregate of an immutable snapshot selection (see SelectionSizeSummary).
     struct SelectionSizeCache {
         uint64_t revision = UINT64_MAX;
         const void* snapshot = nullptr;
@@ -133,6 +133,8 @@ struct Tab {
         uint64_t bytes = 0;
         int files = 0;
         int folders = 0;
+        bool has_drive_root = false;
+        bool parent_is_drive_root = false;
     };
     mutable SelectionSizeCache selection_size_cache;
     std::wstring content_filter;
@@ -212,6 +214,7 @@ struct Tab {
     // selection revision + snapshot so the status bar stays O(1) per paint.
     // Not for content_results tabs (use ContentSelectionSize).
     void SelectionSizeSummary(uint64_t* bytes, int* files, int* folders) const;
+    bool SnapshotSelectionHasDriveRoot() const;
     void RemapSelection(const std::vector<std::wstring>& names, const std::wstring& focus_name);
 
     // Navigation helpers.
@@ -434,6 +437,7 @@ public:
     StagingTray(StagingTray&& other);
     StagingTray& operator=(StagingTray&& other);
     const std::vector<TrayBatch>& batches() const { return batches_; }
+    uint64_t AvailabilityRevision() const { return availability_revision_; }
 
     // Collect selected full paths. move_intent = true for Ctrl+X.
     void Collect(const std::vector<std::wstring>& paths, bool move_intent);
@@ -453,6 +457,8 @@ public:
 private:
     void ResetMetadataTickets();
     std::vector<TrayBatch> batches_;
+    uint64_t availability_revision_ = 0;
+    bool metadata_queries_exhausted_ = true;
 };
 
 // ---------------------------------------------------------------------------

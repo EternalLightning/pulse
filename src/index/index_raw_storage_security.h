@@ -4,6 +4,37 @@
 #include <deque>
 
 namespace pulse::index {
+// Protect an inventoried source artifact without changing its mixed-use parent
+// directory or propagating inheritable ACL changes to unrelated user files.
+inline bool ProtectIndexRawFile(const std::wstring& path) {
+    if (path.size() <= 3 || path[1] != L':' || path[2] != L'\\' ||
+        path.find(L'\0') != std::wstring::npos || path.find(L':', 2) != std::wstring::npos ||
+        path.find(L"\\..") != std::wstring::npos || path.find(L"\\.\\") != std::wstring::npos) return false;
+    for (size_t slash = path.find(L'\\', 3); slash != std::wstring::npos; slash = path.find(L'\\', slash + 1)) {
+        const auto attributes = GetFileAttributesW(path.substr(0, slash).c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    }
+    transport::Handle object(CreateFileW(path.c_str(), READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (object.get() == INVALID_HANDLE_VALUE) return false;
+    FILE_ATTRIBUTE_TAG_INFO tag{};
+    if (!GetFileInformationByHandleEx(object.get(), FileAttributeTagInfo, &tag, sizeof(tag)) ||
+        (tag.FileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) return false;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        L"O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)", SDDL_REVISION_1, &descriptor, nullptr)) return false;
+    PACL dacl = nullptr; BOOL present = FALSE, defaulted = FALSE;
+    PSID owner = nullptr; BOOL owner_defaulted = FALSE;
+    const bool ok = GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) && present &&
+        GetSecurityDescriptorOwner(descriptor, &owner, &owner_defaulted) &&
+        SetSecurityInfo(object.get(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION |
+            PROTECTED_DACL_SECURITY_INFORMATION, owner, nullptr, dacl, nullptr) == ERROR_SUCCESS;
+    LocalFree(descriptor);
+    return ok;
+}
+
 // Repair explicit as well as inherited legacy AU grants on every object. Never
 // follow reparse points while privileged, including at the selected raw root.
 inline bool ProtectIndexRawTree(const std::wstring& root) {

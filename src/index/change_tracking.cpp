@@ -96,7 +96,7 @@ ChangeRecord Relative(ChangeRecord e, const std::wstring& path) {
 }
 void Merge(ChangeRecord& into, const ChangeRecord& event) {
     const auto kind = into.kind == ChangeKind::Deleted && event.kind == ChangeKind::Created ? event.kind :
-        (Priority(into.kind) >= Priority(event.kind) ? into.kind : event.kind);
+        (Priority(into.kind) > Priority(event.kind) ? into.kind : event.kind);
     const auto time = (std::max)(into.time, event.time);
     const auto old_path = !event.old_path.empty() ? event.old_path : into.old_path;
     if (event.id >= into.id) into = event;

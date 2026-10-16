@@ -1,0 +1,25 @@
+{
+  "archive": "E:\\Projects\\pulse\\dist\\Pulse-1.1.1.0-antivirus-update-20261012.zip",
+  "bytes": 3976443,
+  "sha256": "D2CB5C28F767C668A8808420E4C252FF94AA55F9684AEDF6BB32C66E77456BEC",
+  "entries": [
+    {
+      "name": "Pulse.exe",
+      "bytes": 7218176,
+      "sha256": "AF45578D96F37089D2817326081F635BD233DCF258C800BC8847322C7970E93A"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "bytes": 1398784,
+      "sha256": "EE9E688FECD9866A89CEB1F35F121E3AC6504CA175B25ABE0090F060C899473A"
+    },
+    {
+      "name": "UPDATE.txt",
+      "bytes": 962,
+      "sha256": "63DA61DAAE273D8592725F45C3D4FD106093D8389F2634EDAE8B3386B3812BF5"
+    }
+  ],
+  "purpose": "Paired EXE update for an existing complete Pulse folder",
+  "installed": false,
+  "replaces_published_portable_zip": false
+}

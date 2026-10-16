@@ -1,6 +1,7 @@
 #pragma once
 
 #include "index_engine.h"
+#include "index_query.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -12,6 +13,22 @@
 #include <windows.h>
 
 namespace pulse::index {
+
+#ifdef PULSE_NETWORK_INDEX_TESTING
+namespace testing {
+struct NetworkIndexHooks {
+    decltype(&FindFirstFileExW) find_first = nullptr;
+    decltype(&FindNextFileW) find_next = nullptr;
+    decltype(&FindClose) find_close = nullptr;
+    DWORD (WINAPI* universal_name)(LPCWSTR, DWORD, LPVOID, LPDWORD) = nullptr;
+    std::wstring shard_base;
+    std::wstring config_path;
+};
+void SetNetworkIndexHooks(const NetworkIndexHooks* hooks);
+struct NetworkIndexAccess;
+bool MatchNetworkFilenameForTest(const Hit& hit, const CompiledQuery& query);
+}
+#endif
 
 struct NetworkRootInfo {
     std::wstring path;
@@ -26,8 +43,10 @@ struct NetworkRootInfo {
 
 std::wstring NormalizeNetworkRoot(std::wstring path);
 std::wstring NetworkConfigPath();
+enum class NetworkConfigLoadStatus { MissingFile, Empty, Loaded, MissingRoots, Invalid, IoError };
+
 bool LoadNetworkRootsFile(const std::wstring& path, std::vector<std::wstring>& roots,
-                          std::wstring* error = nullptr);
+                          std::wstring* error = nullptr, NetworkConfigLoadStatus* status = nullptr);
 bool SaveNetworkRootsFile(const std::wstring& path, const std::vector<std::wstring>& roots,
                           std::wstring* error = nullptr);
 bool LoadNetworkRoots(std::vector<std::wstring>& roots, std::wstring* error = nullptr);
@@ -49,6 +68,7 @@ public:
     bool TakeResult(uint32_t id, SearchResult& result);
 
     std::vector<NetworkRootInfo> Roots() const;
+    std::wstring ConfigurationError() const;
     bool AddRoot(const std::wstring& path, std::wstring* error = nullptr);
     bool RemoveRoot(const std::wstring& path, std::wstring* error = nullptr);
     void Rebuild(const std::wstring& path = {});
@@ -57,6 +77,9 @@ public:
     ChangeState ChangeCoverage(const std::wstring& path) const;
 
 private:
+#ifdef PULSE_NETWORK_INDEX_TESTING
+    friend struct testing::NetworkIndexAccess;
+#endif
     ChangeTracker changes_;
     std::mutex change_seed_mutex_;
     std::unordered_set<std::wstring> change_seed_owners_;
@@ -69,6 +92,8 @@ private:
         std::shared_ptr<Shard> shard;
     };
 
+    bool LoadConfiguration(std::vector<std::wstring>& configured);
+    std::wstring config_error_;
     void CrawlLoop();
     void WatchLoop();
     void SearchLoop();

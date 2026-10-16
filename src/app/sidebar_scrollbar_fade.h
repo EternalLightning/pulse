@@ -7,7 +7,7 @@ namespace pulse::app {
 
 class SidebarScrollbarFade {
 public:
-    bool Tick(uint64_t now, float scroll, bool hovered, bool dragging) {
+    bool Tick(double now, float scroll, bool hovered, bool dragging) {
         if (scroll != last_scroll_) {
             last_scroll_ = scroll;
             visible_until_ = now + 900;
@@ -15,23 +15,32 @@ public:
         const float target_opacity = hovered || dragging || now < visible_until_ ? 1.0f : 0.0f;
         const float target_expand = hovered || dragging ? 1.0f : 0.0f;
         const float elapsed = last_tick_ && now >= last_tick_
-            ? static_cast<float>(std::min<uint64_t>(now - last_tick_, 200)) : 16.0f;
+            ? static_cast<float>(std::min(now - last_tick_, 200.0)) : 0.0f;
         last_tick_ = now;
         const float before_opacity = opacity;
         const float before_expand = expand;
-        auto approach = [&](float& value, float target, float duration) {
-            const float amount = elapsed / duration;
+        auto approach = [&](float& value, float target, float previous_target, float duration) {
+            // A target change after an idle deadline must still animate from its current value.
+            const float amount = target == previous_target ? elapsed / duration : 0.0f;
             value += std::clamp(target - value, -amount, amount);
         };
-        approach(opacity, target_opacity, target_opacity > opacity ? 70.0f : 200.0f);
-        approach(expand, target_expand, 100.0f);
+        approach(opacity, target_opacity, target_opacity_, target_opacity > opacity ? 70.0f : 200.0f);
+        approach(expand, target_expand, target_expand_, 100.0f);
+        target_opacity_ = target_opacity;
+        target_expand_ = target_expand;
+        next_wake_ = !hovered && !dragging && now < visible_until_ ? visible_until_ : 0.0;
         return opacity != before_opacity || expand != before_expand;
     }
+    bool Pending() const { return opacity != target_opacity_ || expand != target_expand_; }
+    double NextWake() const { return next_wake_; }
     float opacity = 0.0f;
     float expand = 0.0f;
 private:
-    uint64_t visible_until_ = 0;
-    uint64_t last_tick_ = 0;
+    double visible_until_ = 0;
+    double last_tick_ = 0;
+    double next_wake_ = 0;
+    float target_opacity_ = 0.0f;
+    float target_expand_ = 0.0f;
     float last_scroll_ = 0.0f;
 };
 

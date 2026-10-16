@@ -25,22 +25,7 @@ struct Duration {
 };
 void AddDocument(DocumentReadMetrics& sum, const DocumentReadMetrics& metrics) noexcept {
     AddReaderMetrics(sum, metrics);
-    sum.package_us += metrics.package_us;
-    sum.enumerate_us += metrics.enumerate_us;
-    sum.part_open_us += metrics.part_open_us;
-    sum.parts_inclusive_us += metrics.parts_inclusive_us;
-    sum.stream_read_us += metrics.stream_read_us;
-    sum.stream_bytes += metrics.stream_bytes;
-    sum.stream_reads += metrics.stream_reads;
-    sum.filter_us += metrics.filter_us;
-    sum.cpu_us += metrics.cpu_us;
-    sum.pdf_load_us += metrics.pdf_load_us; sum.pdf_page_us += metrics.pdf_page_us;
-    sum.pdf_text_us += metrics.pdf_text_us; sum.pdf_pages += metrics.pdf_pages; sum.pdf_fallbacks += metrics.pdf_fallbacks;
-    sum.pdf_read_calls += metrics.pdf_read_calls; sum.pdf_requested_bytes += metrics.pdf_requested_bytes;
-    sum.pdf_reader_us += metrics.pdf_reader_us; sum.pdf_file_reads += metrics.pdf_file_reads;
-    sum.pdf_file_bytes += metrics.pdf_file_bytes; sum.pdf_file_io_us += metrics.pdf_file_io_us;
-    sum.pdf_cache_hits += metrics.pdf_cache_hits; sum.pdf_map_views += metrics.pdf_map_views;
-    sum.pdf_mapped_bytes += metrics.pdf_mapped_bytes; sum.pdf_map_fallbacks += metrics.pdf_map_fallbacks;
+    AddExtractionMetrics(sum, metrics);
 }
 
 struct Lane {

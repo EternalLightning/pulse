@@ -811,6 +811,12 @@ WindowMaterial::Recipe WindowMaterial::RecipeFor(WindowEffect effect, bool dark)
     return recipe;
 }
 
+SIZE WindowMaterial::LoadedSourceSize(const std::wstring& path) const noexcept {
+    if (!source_.get() || source_path_ != path) return {};
+    const auto size = source_->GetPixelSize();
+    return {static_cast<LONG>(size.width), static_cast<LONG>(size.height)};
+}
+
 ID2D1Bitmap* WindowMaterial::SourceBitmap(const std::wstring& path) {
     ID2D1DeviceContext* dc = compositor_ ? compositor_->Dc() : nullptr;
     TakeDecodeResult();

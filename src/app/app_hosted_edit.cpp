@@ -1,3 +1,4 @@
+#include "pane_animations.h"
 #include "../ui/edit_host.h"
 // app_hosted_edit.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
@@ -199,7 +200,7 @@ void HideAddressEditor(AppState& s, bool navigate) {
     ShowWindow(s.hwndAddressEdit, SW_HIDE);
     s.addressEditing = false;
     s.addressSearching = false;
-    s.addressAnimationTick = GetTickCount64();
+    s.addressAnimationTick = app::PaneAnimationTimeMs();
     if (s.hwnd) SetFocus(s.hwnd);
     s.addressIgnoreKillFocus = false;
     InvalidateRect(s.hwnd, nullptr, FALSE);

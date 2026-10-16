@@ -300,6 +300,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         const float bw=painter ? painter->MeasureButtonWidth(l10n::Get(l10n::StringId::ChooseImage)) : 120*scale;
         l.wallpaper_clear=D2D1::RectF(right-16*scale-cw,y-44*scale,right-16*scale,y-12*scale);
         l.wallpaper_choose=D2D1::RectF(l.wallpaper_clear.left-8*scale-bw,y-44*scale,l.wallpaper_clear.left-8*scale,y-12*scale);
+        y+=8*scale; l.wallpaper_fit_card=row(narrow ? 98.0f : 64.0f);
+        const float fit_width = painter ? painter->MeasureButtonWidth(l10n::Get(I::MatchWindowSize))/scale : 164.0f;
+        l.wallpaper_fit=choice(l.wallpaper_fit_card,fit_width);
         y+=8*scale; l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); l.wallpaper_look_value=choice(l.wallpaper_look_card,112);
         y+=8*scale; l.wallpaper_blur_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_blur_card,l.wallpaper_blur_row,3,282);
         y+=8*scale; l.tray_icon_card=row(narrow ? 98.0f : 64.0f); segments(l.tray_icon_card,l.tray_icon_row,3,282);

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 
 using namespace pulse;
 
@@ -71,7 +72,69 @@ std::string FirstJson(const std::filesystem::path& path) {
 
 } // namespace
 
+
+BOOL WINAPI FailFindNext(HANDLE find, LPWIN32_FIND_DATAW data) {
+    const std::wstring_view name(data->cFileName);
+    if ((name == L"." || name == L"..") && FindNextFileW(find, data)) return TRUE;
+    SetLastError(ERROR_READ_FAULT);
+    return FALSE;
+}
+int EnumerationErrorsTest() {
+    namespace fs = std::filesystem;
+    const auto root = fs::absolute(fs::path(L"bench_data") /
+        (L"diagnostic-enumeration-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    const auto source = root / L"source", destination = root / L"export";
+    const auto crashes = source / L"Diagnostics" / L"Crashes";
+    fs::create_directories(crashes);
+    fs::create_directories(destination);
+    std::ofstream(crashes / L"one.log") << "isolated log";
+    diagnostics::ExportOptions options{source.wstring(), destination.wstring()};
+    options.require_empty_destination = false;
+    diagnostics::SetFindNextForTesting(&FailFindNext);
+    std::wstring error;
+    Check(!diagnostics::Export(options, &error) && !error.empty(), L"export reports injected enumeration I/O failure");
+    Check(fs::exists(destination / L"Crashes" / L"one.log"), L"injected failure follows an actual artifact copy");
+    Check(!fs::exists(destination / L"diagnostics-manifest.json"), L"incomplete export never receives success manifest");
+    error.clear();
+    Check(!diagnostics::ClearCrashReports(source.wstring(), &error) && !error.empty(),
+        L"clear reports injected enumeration I/O failure");
+    const auto empty_destination = root / L"empty-export";
+    fs::create_directories(empty_destination);
+    options.destination = empty_destination.wstring();
+    options.require_empty_destination = true;
+    error.clear();
+    Check(!diagnostics::Export(options, &error) && !error.empty(), L"destination emptiness scan rejects enumeration failure");
+    diagnostics::SetFindNextForTesting(nullptr);
+    const auto complete_destination = root / L"complete-export";
+    fs::create_directories(complete_destination);
+    options.destination = complete_destination.wstring();
+    options.require_empty_destination = true;
+    Check(diagnostics::Export(options, &error) && fs::exists(complete_destination / L"diagnostics-manifest.json"),
+        L"complete enumeration produces a success manifest");
+    Check(diagnostics::ClearCrashReports(source.wstring(), &error), L"complete cleanup enumeration succeeds");
+    const auto absent_source = root / L"absent-crashes";
+    const auto absent_destination = root / L"absent-export";
+    fs::create_directories(absent_source);
+    fs::create_directories(absent_destination);
+    options.source_root = absent_source.wstring();
+    options.destination = absent_destination.wstring();
+    Check(diagnostics::Export(options, &error), L"missing optional crash directory remains valid empty export");
+    fs::create_directories(absent_source / L"Diagnostics");
+    std::ofstream(absent_source / L"Diagnostics" / L"Crashes") << "not a directory";
+    const auto invalid_destination = root / L"invalid-export";
+    fs::create_directories(invalid_destination);
+    options.destination = invalid_destination.wstring();
+    error.clear();
+    Check(!diagnostics::Export(options, &error) && !error.empty(), L"existing invalid crash directory is not treated as absent");
+    error.clear();
+    Check(!diagnostics::ClearCrashReports(absent_source.wstring(), &error) && !error.empty(),
+        L"clear reports invalid crash directory");
+    wprintf(L"%d passed, %d failed; isolated fixture retained\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--enumeration-errors") == 0) return EnumerationErrorsTest();
     if (argc >= 4 && wcscmp(argv[1], L"--child") == 0) {
         crash::Initialize({crash::ProcessRole::Test, false, argv[2]});
         crash::AddBreadcrumb(7, 11, 13);

@@ -1,4 +1,5 @@
 #include "index_config.h"
+#include "index_config_parse.h"
 #include "index_raw_storage_security.h"
 #include "../common/user_storage.h"
 #include "../common/json_utils.h"
@@ -113,46 +114,6 @@ std::wstring Win32Error(const wchar_t* operation) {
         out += L"：";
         out += message;
         LocalFree(message);
-    }
-    return out;
-}
-
-std::vector<std::wstring> ExtractStringArray(const std::wstring& json,
-                                             const std::wstring& key) {
-    std::vector<std::wstring> out;
-    const std::wstring marker = L"\"" + key + L"\"";
-    size_t p = json.find(marker);
-    if (p == std::wstring::npos) return out;
-    p = json.find(L'[', p + marker.size());
-    if (p == std::wstring::npos) return out;
-    ++p;
-    while (p < json.size()) {
-        while (p < json.size() && iswspace(json[p])) ++p;
-        if (p >= json.size() || json[p] == L']') break;
-        if (json[p] != L'\"') return {};
-        ++p;
-        std::wstring value;
-        while (p < json.size() && json[p] != L'\"') {
-            if (json[p] != L'\\') {
-                value.push_back(json[p++]);
-                continue;
-            }
-            if (++p >= json.size()) return {};
-            switch (json[p]) {
-            case L'\"': value.push_back(L'\"'); break;
-            case L'\\': value.push_back(L'\\'); break;
-            case L'n': value.push_back(L'\n'); break;
-            case L'r': value.push_back(L'\r'); break;
-            case L't': value.push_back(L'\t'); break;
-            default: value.push_back(json[p]); break;
-            }
-            ++p;
-        }
-        if (p >= json.size()) return {};
-        ++p;
-        out.push_back(std::move(value));
-        while (p < json.size() && iswspace(json[p])) ++p;
-        if (p < json.size() && json[p] == L',') ++p;
     }
     return out;
 }
@@ -274,31 +235,10 @@ bool LoadMachineConfig(IndexConfig& config, std::wstring* error) {
         SetError(error, L"无法读取索引配置");
         return false;
     }
-    if (json.empty() || json.find(L'{') == std::wstring::npos) {
-        SetError(error, L"索引配置为空或损坏");
+    if (!ParseMachineConfig(json, root + L"\\Index", config)) {
+        SetError(error, L"索引配置为空、损坏或包含无效值");
         return false;
     }
-    config.version = static_cast<uint32_t>((std::max)(1, pulse::json::ExtractInt(json, L"version", 1)));
-    config.generation = static_cast<uint64_t>((std::max)(1, pulse::json::ExtractInt(json, L"generation", 1)));
-    config.include_fixed_ntfs = pulse::json::ExtractBool(json, L"include_fixed_ntfs", true);
-    config.include_removable_ntfs = pulse::json::ExtractBool(json, L"include_removable_ntfs", true);
-    config.index_path = pulse::json::ExtractString(json, L"index_path", root + L"\\Index");
-    if (config.index_path.empty()) config.index_path = root + L"\\Index";
-    for (auto& id : ExtractStringArray(json, L"excluded_volume_ids"))
-        config.excluded_volume_ids.insert(NormalizeVolumeId(std::move(id)));
-    for (auto& path_value : ExtractStringArray(json, L"excluded_paths")) {
-        std::replace(path_value.begin(), path_value.end(), L'/', L'\\');
-        while (path_value.size() > 3 && path_value.back() == L'\\') path_value.pop_back();
-        if (!path_value.empty()) config.excluded_paths.push_back(std::move(path_value));
-    }
-    std::sort(config.excluded_paths.begin(), config.excluded_paths.end(),
-              [](const auto& a, const auto& b) {
-                  return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_LESS_THAN;
-              });
-    config.excluded_paths.erase(std::unique(config.excluded_paths.begin(), config.excluded_paths.end(),
-              [](const auto& a, const auto& b) {
-                  return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
-              }), config.excluded_paths.end());
     return true;
 }
 
@@ -333,7 +273,10 @@ bool ConfigureVolume(const std::wstring& id, bool enabled, std::wstring* error) 
     if (!LoadMachineConfig(config, error)) return false;
     if (enabled) config.excluded_volume_ids.erase(normalized);
     else config.excluded_volume_ids.insert(normalized);
-    ++config.generation;
+    if (!AdvanceMachineConfigGeneration(config)) {
+        SetError(error, L"索引配置版本计数已耗尽");
+        return false;
+    }
     return SaveMachineConfig(config, error);
 }
 
@@ -349,7 +292,10 @@ bool ConfigureIndexPath(const std::wstring& path, std::wstring* error) {
     IndexConfig config;
     if (!LoadMachineConfig(config, error)) return false;
     config.index_path = path;
-    ++config.generation;
+    if (!AdvanceMachineConfigGeneration(config)) {
+        SetError(error, L"索引配置版本计数已耗尽");
+        return false;
+    }
     return SaveMachineConfig(config, error);
 }
 
@@ -373,7 +319,10 @@ bool ConfigureExcludePath(const std::wstring& path, bool enabled, std::wstring* 
     } else if (it != config.excluded_paths.end()) {
         config.excluded_paths.erase(it);
     }
-    ++config.generation;
+    if (!AdvanceMachineConfigGeneration(config)) {
+        SetError(error, L"索引配置版本计数已耗尽");
+        return false;
+    }
     return SaveMachineConfig(config, error);
 }
 

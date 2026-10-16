@@ -21,6 +21,7 @@ public:
     static bool RunUndoFixtureForTest(OpsManager&, const std::wstring& helper);
     static bool UnknownRecoveryPersistenceForTest(const std::wstring& journal_path);
     static bool CodecChecksForTest();
+    static bool HelperPathChecksForTest();
 #endif
 private:
     static void RunParentImpl(OpsManager&, const OpsManager::QueueItem&, const std::wstring&, bool);

@@ -17,6 +17,68 @@
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
+    static bool CachePrune() {
+        bool ok = true;
+        const auto check = [&](bool passed, const char* name) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", name);
+            ok = passed && ok;
+        };
+        ComPtr<ID3D11Device> d3d;
+        ComPtr<IDXGIDevice> dxgi;
+        ComPtr<ID2D1Factory1> factory;
+        ComPtr<ID2D1Device> device;
+        ComPtr<ID2D1DeviceContext> context;
+        const bool graphics = SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP,
+            nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+            &d3d, nullptr, nullptr)) &&
+            SUCCEEDED(d3d->QueryInterface(IID_PPV_ARGS(&dxgi))) &&
+            SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->CreateDevice(dxgi.get(), &device)) &&
+            SUCCEEDED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &context));
+        check(graphics, "cache prune creates Direct2D software device");
+        if (!graphics) return false;
+        ShellIconCache cache;
+        cache.SetDeviceContext(context.get());
+        // No Shell requests: exercise the same CPU removal and UI bitmap paths deterministically.
+        cache.worker_ = std::make_shared<ShellIconCache::WorkerState>();
+        auto& state = *cache.worker_;
+        for (int index : {1, 2}) {
+            std::vector<ipc::ShellIconPixels> icons;
+            for (uint32_t list_id : {0u, 1u}) {
+                ipc::ShellIconPixels icon;
+                icon.list_id = list_id;
+                icon.width = icon.height = 1;
+                icon.stride = 4;
+                icon.pixels = {255, 255, 255, 255};
+                state.pixel_bytes += icon.pixels.size();
+                icons.push_back(std::move(icon));
+            }
+            state.pixels[index] = std::make_shared<const std::vector<ipc::ShellIconPixels>>(std::move(icons));
+        }
+        auto* live = cache.BitmapForIndex(2, 0);
+        check(live && cache.BitmapForIndex(1, 0) && cache.BitmapForIndex(1, 1),
+              "cache prune seeds live and stale bitmap variants");
+        check(!cache.PruneStaleBitmaps(), "no eviction skips bitmap scan");
+        {
+            std::lock_guard lock(state.mutex);
+            state.RemovePixels(1);
+        }
+        check(state.pixel_bytes == 8 && state.eviction_generation.load() == 1,
+              "CPU removal updates bytes and eviction generation");
+        check(cache.PruneStaleBitmaps() && cache.bitmaps_.size() == 1 &&
+              cache.bitmaps_.contains(2), "evicted index releases all cached bitmap variants");
+        check(cache.BitmapForIndex(2, 0) == live,
+              "valid bitmap retains identity and cache hit");
+        check(!cache.PruneStaleBitmaps(), "unchanged generation skips repeat scan");
+        {
+            std::lock_guard lock(state.mutex);
+            state.RemovePixels(1);
+        }
+        check(!cache.PruneStaleBitmaps(), "missing CPU index does not trigger a scan");
+        // This synthetic state owns no worker-pool slot.
+        cache.worker_.reset();
+        return ok;
+    }
     static bool SavePng(ShellIconCache& cache, IWICBitmapSource* source, const std::wstring& path) {
         ComPtr<IWICStream> stream;
         ComPtr<IWICBitmapEncoder> encoder;
@@ -526,6 +588,9 @@ int main(int argc, char** argv) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&controls);
     bool ok = false;
+    if (argc == 2 && std::strcmp(argv[1], "--cache-prune") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::CachePrune();
+    } else
     if (argc == 2 && (std::strcmp(argv[1], "--padded-icons") == 0 ||
                      std::strcmp(argv[1], "--archive-icons") == 0)) {
         ok = pulse::ui::ShellIconCacheTestAccess::PaddedIcons(std::strcmp(argv[1], "--archive-icons") == 0);
