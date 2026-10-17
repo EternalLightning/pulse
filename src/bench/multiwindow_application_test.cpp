@@ -270,9 +270,87 @@ app::LayoutTab* AddLoadedTab(AppState& state, const std::wstring& path) {
     if (state.pane) StartLoadingPath(state, state.pane->view, path, PathLoadReason::Navigate);
     return &layout;
 }
+
+int RunActivationChecks() {
+    HANDLE token = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        DWORD bytes = 0;
+        GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &bytes);
+        std::vector<BYTE> label(bytes);
+        if (GetTokenInformation(token, TokenIntegrityLevel, label.data(), bytes, &bytes)) {
+            const auto sid = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(label.data())->Label.Sid;
+            std::printf("[DIAG] test integrity=%lu\n", *GetSidSubAuthority(sid, *GetSidSubAuthorityCount(sid) - 1));
+        }
+        CloseHandle(token);
+    }
+    const auto root = std::filesystem::absolute(L"bench_data/taskbar-activation") /
+        std::to_wstring(GetCurrentProcessId());
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    AppState state;
+    state.isolatedTest = true;
+    state.open_path = (root / L"folder").wstring();
+    const HWND primary = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        wc.lpszClassName, L"Pulse activation fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+        -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+    Check(primary && Wait([&] { const auto* tab = ActiveTab(state); return tab && !tab->loading; }),
+        "activation fixture initializes a production window with an isolated profile");
+    if (!primary) return 1;
+    state.appPrefs.keep_running_on_close = true;
+    const auto tabs = state.window_tabs.items.size();
+    const auto* active = ActiveTab(state);
+    const auto sequence = state.external_open_issued_sequence;
+    for (const auto mode : {app::ExternalOpenMode::Tab, app::ExternalOpenMode::ReuseOpenedLocation,
+                            app::ExternalOpenMode::NewWindow}) {
+        state.appPrefs.external_open_mode = mode;
+        ShowWindow(primary, SW_SHOWNOACTIVATE);
+        SendMessageW(primary, WM_CLOSE, 0, 0);
+        Check(IsWindow(primary) && !IsWindowVisible(primary),
+            "close-to-background hides the existing window without destroying it");
+        Check(Forward(primary, L"") && IsWindowVisible(primary) && !IsIconic(primary),
+            "a pathless relaunch restores the hidden window in every external-open mode");
+        Check(state.core.windows.Count() == 1 && state.window_tabs.items.size() == tabs &&
+            ActiveTab(state) == active && state.external_open_issued_sequence == sequence,
+            "activation preserves tabs and does not enqueue navigation or create a window");
+    }
+    ShowWindow(primary, SW_MINIMIZE);
+    Check(Forward(primary, L"") && IsWindowVisible(primary) && !IsIconic(primary),
+        "a pathless relaunch restores a minimized window");
+    Check(Forward(primary, L"") && IsWindowVisible(primary) && state.window_tabs.items.size() == tabs,
+        "repeated activation leaves an already visible window open");
+
+    state.appPrefs.external_open_mode = app::ExternalOpenMode::Tab;
+    Check(Forward(primary, root.wstring()) && Wait([&] { return state.window_tabs.items.size() == tabs + 1; }),
+        "a launch with a folder still follows the external-open policy");
+    Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; });
+    auto* secondary = PostOpenFolderInNewWindow(state, state.open_path);
+    Check(secondary && state.core.windows.Count() == 2, "prepare a second window for activation routing");
+    if (secondary) {
+        ShowWindow(primary, SW_HIDE);
+        ShowWindow(secondary->hwnd, SW_HIDE);
+        state.core.windows.Touch(secondary->hwnd);
+        Check(Forward(primary, L"") && IsWindowVisible(secondary->hwnd) && !IsWindowVisible(primary),
+            "activation delivered to another window restores the most recently used window");
+        state.core.exiting = true;
+        Check(!Forward(primary, L""), "activation is rejected during application shutdown");
+        state.core.exiting = false;
+    }
+    RequestApplicationExit(state);
+    Check(Wait([&] { return state.core.windows.Count() == 0; }),
+        "activation fixture shuts down all of its own windows");
+    Pump();
+    std::printf("taskbar activation: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
     wchar_t executable_name[32768]{};
     const DWORD executable_length = GetModuleFileNameW(nullptr, executable_name, ARRAYSIZE(executable_name));
@@ -287,6 +365,11 @@ int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
+    if (argc == 2 && std::string(argv[1]) == "--activation-only") {
+        const int result = RunActivationChecks();
+        OleUninitialize();
+        return result;
+    }
     const auto root = std::filesystem::absolute(L"bench_data/release-1.1.3.0/multiwindow");
     std::filesystem::create_directories(root / L"first");
     std::filesystem::create_directories(root / L"second");

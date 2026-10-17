@@ -976,6 +976,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         std::wstring path;
         if (!s || !app::SingleInstanceCoordinator::DecodeOpenPath(cds, path)) return FALSE;
+        if (s->core.exiting) return FALSE;
+        if (path.empty()) {
+            AppState* recent = s->core.windows.MostRecent();
+            AppState& target = recent ? *recent : *s;
+            if (target.exit_requested) return FALSE;
+            RestoreAppWindow(target);
+            return TRUE;
+        }
         return RouteExternalFolderOpen(*s, path) ? TRUE : FALSE;
     }
 
