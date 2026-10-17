@@ -74,6 +74,8 @@ private:
     void ScrollFailureDetails(float delta);
     int HitTestControl(float x, float y) const;
     void RequestClose();
+    void RequestCancel();
+    bool NeedsAnimationFrame() const;
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;

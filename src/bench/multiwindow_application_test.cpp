@@ -7,6 +7,7 @@
 #include "../common/user_storage.h"
 #include "../common/windows_compat.h"
 #include "../ipc/shell_client.h"
+#include "../ui/file_operation_dialog.h"
 #include <tlhelp32.h>
 #include <winternl.h>
 #include <cwchar>
@@ -348,6 +349,140 @@ int RunActivationChecks() {
     std::printf("taskbar activation: %d failures\n", failures);
     return failures ? 1 : 0;
 }
+
+struct CloseDialogAutomation {
+    static inline CloseDialogAutomation* current = nullptr;
+    bool accept = false;
+    int confirmations = 0;
+    UINT_PTR timer = 0;
+    CloseDialogAutomation() {
+        current = this;
+        timer = SetTimer(nullptr, 0, 25, [](HWND, UINT, UINT_PTR, DWORD) {
+            EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
+                wchar_t name[64]{};
+                GetClassNameW(window, name, ARRAYSIZE(name));
+                if (wcscmp(name, L"PulseConfirmWindow") || !IsWindowVisible(window)) return TRUE;
+                ++current->confirmations;
+                if (current->accept) SendMessageW(window, WM_KEYDOWN, VK_TAB, 0);
+                SendMessageW(window, WM_KEYDOWN, current->accept ? VK_RETURN : VK_ESCAPE, 0);
+                return FALSE;
+            }, 0);
+        });
+    }
+    ~CloseDialogAutomation() { KillTimer(nullptr, timer); current = nullptr; }
+};
+
+std::optional<ops::ConflictItemInfo> StartBlockedCopy(AppState& state,
+    const std::filesystem::path& root, const wchar_t* name) {
+    const auto folder = root / name;
+    std::filesystem::create_directories(folder / L"source");
+    std::filesystem::create_directories(folder / L"destination");
+    { std::ofstream source(folder / L"source" / L"item.txt"); source << "new contents"; }
+    { std::ofstream destination(folder / L"destination" / L"item.txt"); destination << "old contents"; }
+    ops::OpRequest request;
+    request.type = ops::OpType::Copy;
+    request.sources = {(folder / L"source" / L"item.txt").wstring()};
+    request.dest_dir = (folder / L"destination").wstring();
+    state.ops.Submit(std::move(request));
+    // Hold the real transfer at a deterministic conflict before pumping its
+    // notification, then suppress only that fixture's modal conflict prompt.
+    const auto deadline = GetTickCount64() + 10000;
+    std::optional<ops::ConflictItemInfo> conflict;
+    while (!(conflict = state.ops.PendingConflict()) && GetTickCount64() < deadline) Sleep(10);
+    if (conflict) state.conflictUiToken = conflict->token;
+    return conflict;
+}
+
+int RunBackgroundChecks() {
+    const auto root = std::filesystem::absolute(L"bench_data/operation-background") /
+        std::to_wstring(GetCurrentProcessId());
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    AppState state;
+    state.isolatedTest = true;
+    state.open_path = (root / L"folder").wstring();
+    const HWND primary = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        wc.lpszClassName, L"Pulse background fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+        -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+    Check(primary && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+        "background fixture initializes a real window with an isolated profile");
+    if (!primary) return 1;
+    auto* secondary = PostOpenFolderInNewWindow(state, state.open_path);
+    Check(secondary && state.core.windows.Count() == 2, "background fixture registers two real windows");
+    if (!secondary) { RequestApplicationExit(state); Wait([&] { return !IsWindow(primary); }); return 1; }
+    CloseDialogAutomation automation;
+    const auto first = StartBlockedCopy(state, root, L"first");
+    const auto second = StartBlockedCopy(*secondary, root, L"second");
+    Check(first && second, "both windows own real transfers waiting at independent conflicts");
+    state.appPrefs.keep_running_on_close = true;
+    state.appPrefs.global_search_enabled = false;
+    ShowWindow(primary, SW_SHOWNOACTIVATE);
+    SendMessageW(primary, WM_CLOSE, 0, 0);
+    SendMessageW(secondary->hwnd, WM_NCLBUTTONDOWN, HTCLOSE, 0);
+    Pump();
+    std::printf("[DIAG] background close: confirmations=%d exits=%d/%d windows=%zu visible=%d/%d tray_owner=%p\n",
+        automation.confirmations, state.exit_requested, secondary->exit_requested, state.core.windows.Count(),
+        IsWindowVisible(primary) != FALSE, IsWindowVisible(secondary->hwnd) != FALSE,
+        static_cast<void*>(state.core.global_ui_owner));
+    Check(automation.confirmations == 0 && !state.exit_requested && !secondary->exit_requested &&
+        state.core.windows.Count() == 2 && !IsWindowVisible(primary) && !IsWindowVisible(secondary->hwnd),
+        "closing every background-enabled window hides its owner without prompting or shutdown");
+    Check(state.ops.HasPendingFileOperations() && secondary->ops.HasPendingFileOperations(),
+        "operations in both hidden windows retain their workers");
+    if (first) state.ops.ResolveConflict(first->token, ops::ConflictChoice::Replace, false);
+    if (second) secondary->ops.ResolveConflict(second->token, ops::ConflictChoice::Replace, false);
+    Check(Wait([&] { return !state.ops.HasPendingFileOperations() && !secondary->ops.HasPendingFileOperations(); }) &&
+        state.ops.Status().phase == ops::OpPhase::Completed && secondary->ops.Status().phase == ops::OpPhase::Completed,
+        "both real transfers finish while every main window is hidden");
+    for (const auto* name : {L"first", L"second"}) {
+        std::ifstream destination(root / name / L"destination" / L"item.txt");
+        std::string contents((std::istreambuf_iterator<char>(destination)), {});
+        Check(contents == "new contents", "hidden transfer writes the expected destination bytes");
+    }
+    Check(!state.operationWindow->IsVisible() && !secondary->operationWindow->IsVisible(),
+        "background transfer notifications keep routine progress popups hidden");
+
+    const auto archive_done = std::make_shared<std::atomic_bool>(false);
+    const auto archive_cancel = std::make_shared<std::atomic_bool>(false);
+    secondary->archive_operations.push_back({archive_done, archive_cancel});
+    RequestApplicationExit(state);
+    Check(automation.confirmations == 1 && !archive_cancel->load() && !state.core.exiting,
+        "an archive lifetime alone participates in application exit confirmation; decline preserves it");
+
+    const auto third = StartBlockedCopy(state, root, L"third");
+    Check(third.has_value(), "prepare pending work in the window being closed normally");
+    state.appPrefs.keep_running_on_close = false;
+    ShowWindow(primary, SW_SHOWNOACTIVATE);
+    ShowWindow(secondary->hwnd, SW_SHOWNOACTIVATE);
+    SendMessageW(primary, WM_CLOSE, 0, 0);
+    Check(!IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 1,
+        "a secondary close retains pending work without an interruption prompt when background preference is off");
+    SendMessageW(secondary->hwnd, WM_CLOSE, 0, 0);
+    Check(automation.confirmations == 2 && !state.core.exiting && !secondary->exit_requested &&
+        state.ops.HasPendingFileOperations(),
+        "closing the last visible window confirms exit across retained hidden operations; decline preserves them");
+    automation.accept = true;
+    RequestApplicationExit(*secondary);
+    Check(automation.confirmations == 3 && state.core.exiting && archive_cancel->load(),
+        "explicit application exit asks once for all hidden pending work");
+    Check(Wait([&] { return secondary->exit_stop_finished.load(std::memory_order_acquire); }) &&
+        IsWindow(secondary->hwnd) && !CompleteApplicationExit(*secondary),
+        "confirmed exit cancels archives while retaining their owner until the extraction scope unwinds");
+    archive_done->store(true);
+    secondary->archive_operations.clear();
+    PostMessageW(secondary->hwnd, WM_EXIT_READY, 0, 0);
+    Check(Wait([&] { return state.core.windows.Count() == 0; }),
+        "confirmed full exit cancels pending work and asynchronously destroys every retained window");
+    Pump();
+    std::printf("operation background: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
 }
 
 int main(int argc, char** argv) {
@@ -367,6 +502,11 @@ int main(int argc, char** argv) {
     if (FAILED(OleInitialize(nullptr))) return 2;
     if (argc == 2 && std::string(argv[1]) == "--activation-only") {
         const int result = RunActivationChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--background-only") {
+        const int result = RunBackgroundChecks();
         OleUninitialize();
         return result;
     }

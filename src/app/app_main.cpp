@@ -859,15 +859,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         if (wParam == HTCLOSE) {
-            if (s->core.windows.Count() > 1) {
-                RequestWindowClose(*s);
-                return 0;
-            }
-            if (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled) {
-                SuspendContentSearches(*s);
-                s->globalSearchWindow.Hide();
-                s->tray_controller.HideWindow();
-            } else RequestApplicationExit(*s);
+            RequestAppWindowClose(*s);
             return 0;
         }
         break;
@@ -882,17 +874,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
 
     case WM_CLOSE: {
-        if (s && (s->core.exiting || s->core.windows.Count() > 1)) {
-            RequestWindowClose(*s);
-            return 0;
-        }
-        if (s && (s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled)) {
-            SuspendContentSearches(*s);
-            s->globalSearchWindow.Hide();
-            s->tray_controller.HideWindow();
-            return 0;
-        }
-        if (s) { RequestApplicationExit(*s); return 0; }
+        if (s) { RequestAppWindowClose(*s); return 0; }
         break;
     }
 

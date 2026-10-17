@@ -119,6 +119,17 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
     }
     const HWND owner = s.hwnd;
     const AppState* expected_state = &s;
+    const std::shared_ptr<std::atomic_bool> operation_cancel(task, &task->cancel);
+    s.archive_operations.push_back({std::shared_ptr<std::atomic_bool>(task, &task->done), operation_cancel});
+    struct OperationScope {
+        AppState& state;
+        const std::shared_ptr<std::atomic_bool>& cancel;
+        ~OperationScope() {
+            std::erase_if(state.archive_operations,
+                [&](const AppState::ArchiveOperation& operation) { return operation.cancel == cancel; });
+            if (state.exit_requested) PostMessageW(state.hwnd, WM_EXIT_READY, 0, 0);
+        }
+    } operation_scope{s, operation_cancel};
     const bool progress_completed = app::ShowArchiveProgressWindow(owner, s.darkMode, Accent(s), task->done, task->cancel,
         [task, file, destination] {
             if (task->done.load(std::memory_order_acquire) &&
@@ -135,6 +146,7 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
         return;
     }
     if (!IsWindow(owner) || GetAppState(owner) != expected_state) return;
+    if (s.exit_requested) return;
     if (task->result->outcome == ops::ArchiveOutcome::Success &&
         (!progress_completed || task->cancel.load(std::memory_order_acquire))) return;
     HandleArchiveResult(s, reinterpret_cast<LPARAM>(task->result.release()));

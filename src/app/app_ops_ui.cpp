@@ -320,6 +320,11 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
         return;
     }
 
+    if (!IsWindowVisible(s.hwnd)) {
+        if (s.operationWindow->IsVisible()) s.operationWindow->Hide();
+        return;
+    }
+
     if (status.active) {
         if (status.phase == ops::OpPhase::WaitingForConflict ||
             status.phase == ops::OpPhase::WaitingForDeleteConfirmation) return;

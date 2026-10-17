@@ -9,6 +9,7 @@
 
 #include <windowsx.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <deque>
 #include <string>
@@ -31,7 +32,6 @@ constexpr float kGraphBlockH = 156.0f;
 using pulse::ui::ScaleDip;
 
 struct TransferChrome {
-    D2D1_RECT_F minimize{};
     D2D1_RECT_F close{};
     D2D1_RECT_F details{};
     D2D1_RECT_F pause{};
@@ -66,7 +66,6 @@ TransferChrome MakeTransferChrome(float scale, float width, float height,
     const float title = ScaleDip(scale, kTitleH);
     const float caption = ScaleDip(scale, 40.0f);
     chrome.close = D2D1::RectF(width - caption, 0, width, title);
-    chrome.minimize = D2D1::RectF(width - caption * 2.0f, 0, width - caption, title);
     const float footer_h = ScaleDip(scale, kFooterH);
     const float footer_top = height - footer_h;
     const float pad = ScaleDip(scale, kPadX);
@@ -162,9 +161,9 @@ void DrawSpeedGraph(ID2D1DeviceContext* dc, const D2D1_RECT_F& plot,
             / static_cast<float>(count - 1);
     };
 
-    ID2D1Factory* factory = nullptr;
+    ComPtr<ID2D1Factory> factory;
     dc->GetFactory(&factory);
-    if (factory) {
+    if (factory.get()) {
         ComPtr<ID2D1PathGeometry> geometry;
         if (SUCCEEDED(factory->CreatePathGeometry(&geometry))) {
             ComPtr<ID2D1GeometrySink> sink;
@@ -183,15 +182,29 @@ void DrawSpeedGraph(ID2D1DeviceContext* dc, const D2D1_RECT_F& plot,
                 dc->FillGeometry(geometry.get(), fill.get());
             }
         }
-        factory->Release();
+        ComPtr<ID2D1PathGeometry> curve;
+        ComPtr<ID2D1GeometrySink> curve_sink;
+        if (SUCCEEDED(factory->CreatePathGeometry(&curve)) && SUCCEEDED(curve->Open(&curve_sink))) {
+            curve_sink->BeginFigure(D2D1::Point2F(x_at(0), y_at(0)), D2D1_FIGURE_BEGIN_HOLLOW);
+            for (size_t i = 1; i < count; ++i)
+                curve_sink->AddLine(D2D1::Point2F(x_at(i), y_at(i)));
+            curve_sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            if (SUCCEEDED(curve_sink->Close())) {
+                ComPtr<ID2D1StrokeStyle> stroke;
+                auto style = D2D1::StrokeStyleProperties();
+                style.startCap = style.endCap = D2D1_CAP_STYLE_ROUND;
+                style.lineJoin = D2D1_LINE_JOIN_ROUND;
+                factory->CreateStrokeStyle(style, nullptr, 0, &stroke);
+                ComPtr<ID2D1SolidColorBrush> line;
+                dc->CreateSolidColorBrush(accent, &line);
+                // Draw joined segments together so sharp peaks cannot expose butt-cap seams.
+                dc->DrawGeometry(curve.get(), line.get(), 2.0f * scale, stroke.get());
+            }
+        }
     }
 
     ComPtr<ID2D1SolidColorBrush> line;
     dc->CreateSolidColorBrush(accent, &line);
-    for (size_t i = 1; i < count; ++i) {
-        dc->DrawLine(D2D1::Point2F(x_at(i - 1), y_at(i - 1)),
-                     D2D1::Point2F(x_at(i), y_at(i)), line.get(), 2.0f * scale);
-    }
     const float last_x = x_at(count - 1);
     const float last_y = y_at(count - 1);
     dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(last_x, last_y),
@@ -1080,7 +1093,7 @@ bool FileOperationWindow::Create(HWND owner, FileOperationCallbacks callbacks,
     const int width = MulDiv(static_cast<int>(kDlgW), owner_dpi, 96);
     const int height = MulDiv(static_cast<int>(kCollapsedH), owner_dpi, 96);
     hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, kTransferClass, l10n::Get(l10n::StringId::OpWindow).c_str(),
-        WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX,
+        WS_POPUP | WS_THICKFRAME | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, width, height, owner_, nullptr,
         wc.hInstance, this);
     return hwnd_ != nullptr;
@@ -1141,6 +1154,7 @@ void FileOperationWindow::Show(bool activate) {
 
 void FileOperationWindow::Hide() {
     if (hwnd_) HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr);
+    options_.modal_owner = false;
 }
 
 bool FileOperationWindow::IsVisible() const {
@@ -1186,7 +1200,6 @@ int FileOperationWindow::HitTestControl(float x, float y) const {
         static_cast<float>(compositor_.Width()), static_cast<float>(compositor_.Height()),
         painter_, labels);
     if (pulse::ui::ContainsRect(chrome.close, x, y)) return 1;
-    if (pulse::ui::ContainsRect(chrome.minimize, x, y)) return 2;
     if (pulse::ui::ContainsRect(chrome.pause, x, y)) return 3;
     if (pulse::ui::ContainsRect(chrome.cancel, x, y)) return 4;
     if (pulse::ui::ContainsRect(chrome.details, x, y)) return 5;
@@ -1194,6 +1207,12 @@ int FileOperationWindow::HitTestControl(float x, float y) const {
 }
 
 void FileOperationWindow::RequestClose() {
+    if (!IsVisible()) return;
+    if (callbacks_.dismiss) callbacks_.dismiss();
+    Hide();
+}
+
+void FileOperationWindow::RequestCancel() {
     if (status_.phase == ops::OpPhase::Cancelling || (cancel_requested_ && status_.active)) return;
     const bool emptying = status_.type == ops::OpType::EmptyRecycle;
     if (status_.active && status_.phase != ops::OpPhase::Completed &&
@@ -1204,8 +1223,16 @@ void FileOperationWindow::RequestClose() {
         }
         return;
     }
-    if (callbacks_.dismiss) callbacks_.dismiss();
-    Hide();
+    RequestClose();
+}
+
+bool FileOperationWindow::NeedsAnimationFrame() const {
+    BOOL animations = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+    return status_.active && status_.percent < 0.0f &&
+        (status_.phase == ops::OpPhase::Scanning || status_.type == ops::OpType::EmptyRecycle) &&
+        status_.phase != ops::OpPhase::Failed && status_.phase != ops::OpPhase::Completed &&
+        animations && !IsHighContrast();
 }
 
 void FileOperationWindow::Render(bool present) {
@@ -1265,14 +1292,10 @@ void FileOperationWindow::Render(bool present) {
               + std::to_wstring(count) + l10n::Get(l10n::StringId::OpItemsSuffix).c_str();
     }
     painter_.DrawText(title, D2D1::RectF(ScaleDip(scale_, 36.0f), 0,
-                                         chrome.minimize.left - ScaleDip(scale_, 8.0f),
+                                         chrome.close.left - ScaleDip(scale_, 8.0f),
                                          ScaleDip(scale_, kTitleH)),
                       compositor_.SmallFormat(), theme.text);
 
-    fluent::ControlState minimize{};
-    minimize.hovered = hover_ == 2;
-    minimize.pressed = pressed_ == 2;
-    painter_.DrawTitleBarButton(chrome.minimize, fluent::TitleBarButtonRole::Minimize, {}, minimize);
     fluent::ControlState close{};
     close.hovered = hover_ == 1;
     close.pressed = pressed_ == 1;
@@ -1361,8 +1384,10 @@ void FileOperationWindow::Render(bool present) {
         fluent::ProgressSpec bar;
         bar.bounds = track;
         bar.indeterminate = true;
-        bar.animation_progress = static_cast<float>(
-            std::fmod(static_cast<double>(GetTickCount64()), 1952.0) / 1952.0);
+        const double now_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        bar.animation_progress = NeedsAnimationFrame()
+            ? static_cast<float>(std::fmod(now_ms, 1952.0) / 1952.0) : 0.25f;
         painter_.DrawProgressBar(bar);
     } else {
         const float inner = ScaleDip(scale_, 2.0f);
@@ -1560,7 +1585,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         compositor_.RecreateTextFormats(scale_);
         painter_.SetCompositor(&compositor_);
         painter_.SetScale(scale_);
-        SetTimer(hwnd_, kRenderTimer, 33, nullptr);
+        SetTimer(hwnd_, kRenderTimer, 100, nullptr);
         return 0;
     case WM_NCCALCSIZE:
         return 0;
@@ -1570,7 +1595,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
             static_cast<float>(compositor_.Width()), static_cast<float>(compositor_.Height()),
             painter_, labels);
         return pulse::ui::BorderlessHitTest(hwnd_, lparam, ScaleDip(scale_, kTitleH),
-            D2D1::RectF(chrome.minimize.left, 0, chrome.close.right, chrome.close.bottom));
+            chrome.close);
     }
     case WM_SIZE:
         if (compositor_.Dc() && wparam != SIZE_MINIMIZED)
@@ -1595,7 +1620,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         return 0;
     }
     case WM_TIMER:
-        if (wparam == kRenderTimer && IsWindowVisible(hwnd_)) {
+        if (wparam == kRenderTimer && IsWindowVisible(hwnd_) && !IsIconic(hwnd_)) {
             if (status_.active) {
                 const ULONGLONG now = GetTickCount64();
                 if (speed_sample_tick_ == 0 || now - speed_sample_tick_ >= 250) {
@@ -1637,10 +1662,11 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         pressed_ = 0;
         ReleaseCapture();
         if (hit == pressed) {
-            if (hit == 1 || hit == 4) {
+            if (hit == 1) {
                 RequestClose();
-            } else if (hit == 2) ShowWindow(hwnd_, SW_MINIMIZE);
-            else if (hit == 3 && status_.active && !cancel_requested_ &&
+            } else if (hit == 4) {
+                RequestCancel();
+            } else if (hit == 3 && status_.active && !cancel_requested_ &&
                      status_.phase != ops::OpPhase::WaitingForConflict &&
                      status_.phase != ops::OpPhase::Cancelling) {
                 if (status_.phase == ops::OpPhase::Paused) {
@@ -1684,6 +1710,17 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         BeginPaint(hwnd_, &paint);
         Render();
         EndPaint(hwnd_, &paint);
+        if (NeedsAnimationFrame() && compositor_.CanScheduleAnimationFrame() &&
+            IsWindowVisible(hwnd_) && !IsIconic(hwnd_)) {
+            const HWND painted = hwnd_;
+            // Materialize due timers before queuing another paint, so continuous
+            // preparation animation cannot starve this UI thread's other timers.
+            MSG timer{};
+            PeekMessageW(&timer, nullptr, WM_TIMER, WM_TIMER, PM_NOREMOVE);
+            if (IsWindow(painted) && reinterpret_cast<FileOperationWindow*>(
+                    GetWindowLongPtrW(painted, GWLP_USERDATA)) == this)
+                InvalidateRect(painted, nullptr, FALSE);
+        }
         return 0;
     }
     case WM_ERASEBKGND:

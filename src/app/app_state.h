@@ -191,6 +191,12 @@ struct AppState : AppCoreOwner {
     bool exit_requested = false;
     std::atomic<bool> exit_stop_finished{false};
     std::thread exit_thread;
+    // Active extractions may keep pumping messages after their progress is hidden.
+    struct ArchiveOperation {
+        std::shared_ptr<std::atomic_bool> done;
+        std::shared_ptr<std::atomic_bool> cancel;
+    };
+    std::vector<ArchiveOperation> archive_operations;
     HWND hwnd = nullptr;
     std::shared_ptr<app::WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
     std::shared_ptr<app::WindowResultMailbox<bool>> shell_registry_mailbox;

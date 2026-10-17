@@ -7,9 +7,31 @@
 
 namespace pulse {
 namespace {
+bool HasPendingWindowOperations(const AppState& s) {
+    return s.ops.HasPendingFileOperations() || std::any_of(s.archive_operations.begin(),
+        s.archive_operations.end(), [](const AppState::ArchiveOperation& operation) {
+            return !operation.done->load(std::memory_order_acquire);
+        });
+}
+
+void HideAppWindow(AppState& s, bool require_tray) {
+    if (require_tray) {
+        AppState* owner = s.core.windows.Lookup(s.core.global_ui_owner);
+        if (!owner || (!owner->tray_controller.SetVisible(true) &&
+                FindWindowW(L"Shell_TrayWnd", nullptr))) return;
+    }
+    SuspendContentSearches(s);
+    s.globalSearchWindow.Hide();
+    s.quickPreview.Close();
+    if (s.operationWindow) s.operationWindow->Hide();
+    ShowWindow(s.hwnd, SW_HIDE);
+}
+
 void BeginWindowShutdown(AppState& s) {
     if (s.exit_requested || !s.hwnd) return;
     s.exit_requested = true;
+    for (const auto& operation : s.archive_operations)
+        operation.cancel->store(true, std::memory_order_release);
     SuspendContentSearches(s);
     s.globalSearchWindow.Hide();
     s.quickPreview.Close();
@@ -46,17 +68,34 @@ bool ConfirmWindowShutdown(AppState& s, bool pending) {
 }
 }
 
+void RequestAppWindowClose(AppState& s) {
+    if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
+    if (s.core.exiting) { RequestWindowClose(s); return; }
+    if (s.appPrefs.keep_running_on_close || s.appPrefs.global_search_enabled) {
+        HideAppWindow(s, true);
+        return;
+    }
+    bool another_visible_window = false;
+    s.core.windows.ForEach([&](HWND hwnd, AppState& window) {
+        if (hwnd != s.hwnd && !window.exit_requested && IsWindowVisible(hwnd))
+            another_visible_window = true;
+    });
+    if (!another_visible_window) { RequestApplicationExit(s); return; }
+    if (HasPendingWindowOperations(s)) HideAppWindow(s, false);
+    else RequestWindowClose(s);
+}
+
 void RequestWindowClose(AppState& s) {
     if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
-    if (!s.core.exiting && !ConfirmWindowShutdown(s, s.ops.HasPendingFileOperations())) return;
+    if (!s.core.exiting && !ConfirmWindowShutdown(s, HasPendingWindowOperations(s))) return;
     BeginWindowShutdown(s);
 }
 
 void RequestApplicationExit(AppState& s) {
     if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
-    bool pending = s.ops.HasPendingFileOperations();
+    bool pending = HasPendingWindowOperations(s);
     s.core.windows.ForEach([&](HWND, AppState& window) {
-        pending = pending || window.ops.HasPendingFileOperations();
+        pending = pending || HasPendingWindowOperations(window);
     });
     if (!ConfirmWindowShutdown(s, pending)) return;
     s.core.exiting = true;
@@ -68,6 +107,9 @@ void RequestApplicationExit(AppState& s) {
 
 bool CompleteApplicationExit(AppState& s) {
     if (!s.exit_requested || !s.exit_stop_finished.load(std::memory_order_acquire)) return false;
+    // Extraction owns a nested message loop. Let it observe cancellation and
+    // unwind before destroying its AppState or joining the general I/O worker.
+    if (!s.archive_operations.empty()) return false;
     if (s.exit_thread.joinable()) s.exit_thread.join();
     // Apply final metadata/clipboard completions before the teardown snapshot,
     // even when this check ran on a timer ahead of a queued operation notification.

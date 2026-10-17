@@ -262,9 +262,10 @@ void RunFocusCases(HWND owner, DWORD thread) {
                         mode == 1 ? VK_ESCAPE : 0, 0);
                 }
                 if (mode < 3) {
-                    Check(cancel.load(), "button/Escape/close requests cancellation");
-                    Check(IsWindow(dialog) && !IsWindowEnabled(owner),
-                        "owner remains disabled until cancelled worker terminates");
+                    Check(cancel.load() == (mode == 0), "only the Cancel button requests cancellation");
+                    Check(IsWindow(dialog) && (mode == 0 ? !IsWindowEnabled(owner)
+                        : IsWindowEnabled(owner) && !IsWindowVisible(dialog)),
+                        "cancel retains the modal owner while dismiss releases it for background work");
                 }
             }
             done.store(true, std::memory_order_release);
@@ -282,7 +283,7 @@ void RunFocusCases(HWND owner, DWORD thread) {
             static_cast<void*>(GetActiveWindow()), static_cast<void*>(GetFocus()),
             static_cast<void*>(GetForegroundWindow()));
         Check(IsWindowEnabled(owner), "owner re-enabled after extraction window closes");
-        Check(completed == (mode >= 3), "focus restoration preserves cancellation result");
+        Check(completed == (mode != 0), "focus restoration preserves cancellation result");
         if (mode == 4) {
             Check(GetActiveWindow() == other && GetFocus() == other,
                 "background completion preserves user's active unrelated window");
@@ -359,19 +360,34 @@ void RunProgressCases(HWND owner, DWORD thread, bool = false) {
         helper.join();
         Check(completed && !cancel.load() && IsWindowEnabled(owner), "shared window finishes and restores its owner");
     }
-    for (bool close : {false, true}) {
+    for (int action = 0; action < 3; ++action) {
         std::atomic_bool done = false, cancel = false;
         auto helper = Automate(thread, owner, [&](HWND dialog) {
-            SendMessageW(dialog, close ? WM_CLOSE : WM_KEYDOWN, close ? 0 : VK_ESCAPE, 0);
-            Check(cancel.load(std::memory_order_acquire), "shared close/Escape requests extraction cancellation");
+            if (action == 2) {
+                RECT bounds{};
+                GetClientRect(dialog, &bounds);
+                const auto dpi = compat::WindowDpi(dialog);
+                const LPARAM point = MAKELPARAM(bounds.right - MulDiv(35, dpi, 96),
+                    bounds.bottom - MulDiv(26, dpi, 96));
+                SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                SendMessageW(dialog, WM_LBUTTONUP, 0, point);
+            } else SendMessageW(dialog, action == 1 ? WM_CLOSE : WM_KEYDOWN, action == 1 ? 0 : VK_ESCAPE, 0);
+            Check(cancel.load(std::memory_order_acquire) == (action == 2),
+                "shared close/Escape keeps extraction running while explicit Cancel interrupts it");
             std::this_thread::sleep_for(std::chrono::milliseconds(180));
-            Check(IsWindow(dialog) && !IsWindowEnabled(owner), "shared window waits for worker termination after cancellation");
+            Check(IsWindow(dialog) && (action == 2 ? !IsWindowEnabled(owner)
+                : !IsWindowVisible(dialog) && IsWindowEnabled(owner)),
+                "dismiss releases the owner while Cancel retains it until the worker terminates");
+            if (action != 2) EnableWindow(owner, FALSE); // A later modal scope owns the disable now.
             done.store(true, std::memory_order_release);
         }, [&] { done.store(true); });
         const bool completed = app::ShowArchiveProgressWindow(owner, false, kAccent, done, cancel,
             [&] { return app::ArchiveOperationStatus(progress, L"archive.zip", L"output", cancel.load()); });
         helper.join();
-        Check(!completed && done.load() && cancel.load() && IsWindowEnabled(owner), "cancelled extraction releases the shared window safely");
+        Check(completed == (action != 2) && done.load() && cancel.load() == (action == 2) &&
+            (action == 2 ? IsWindowEnabled(owner) : !IsWindowEnabled(owner)),
+            "background completion respects a later modal owner; explicit cancellation restores its own owner");
+        EnableWindow(owner, TRUE);
     }
     {
         std::atomic_bool done = false, cancel = false;
@@ -448,6 +464,7 @@ void RunFailureCases(HWND owner, DWORD thread) {
 } // namespace
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     pulse::compat::EnableDpiAwareness();
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
@@ -458,6 +475,7 @@ int main(int argc, char** argv) {
         if (SUCCEEDED(com)) CoUninitialize();
         return 1;
     }
+    ShowWindow(owner, SW_SHOWNOACTIVATE);
     const DWORD thread = GetCurrentThreadId();
     const bool failure_only = argc == 2 && std::string_view(argv[1]) == "--failure-only";
     if (argc == 2 && std::string_view(argv[1]) == "--focus-only") {

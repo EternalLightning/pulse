@@ -3,11 +3,15 @@
 #include "../common/text_format.h"
 #include "../ops/operation_presentation.h"
 #include "../app/archive_operation_ui.h"
+#include "../app/exit_confirmation.h"
 #include "../ui/file_operation_dialog.h"
 #include <filesystem>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 
 namespace pulse::ui {
 struct FileOperationFailureProbe {
@@ -31,6 +35,12 @@ struct FileOperationFailureProbe {
         SendMessageW(window.hwnd_, WM_TIMER, 1, 0);
     }
     static size_t SpeedSamples(const FileOperationWindow& window) { return window.speed_history_.size(); }
+    static void SetZigzag(FileOperationWindow& window) {
+        window.speed_history_.clear();
+        for (int i = 0; i < 120; ++i) window.speed_history_.push_back(i % 2 ? 0.0 : 100.0);
+        window.detailed_ = true;
+        window.ResizeForDetails(false);
+    }
     static void Collapse(FileOperationWindow& window) {
         window.detailed_ = false;
         window.ResizeForDetails(false);
@@ -85,6 +95,136 @@ struct FileOperationFailureProbe {
             SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
     }
 };
+}
+
+static bool ZigzagPeaksConnected(const std::filesystem::path& path, float scale) {
+    using namespace pulse::ui;
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&wic))) ||
+        FAILED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
+            WICDecodeMetadataCacheOnLoad, &decoder)) || FAILED(decoder->GetFrame(0, &frame)) ||
+        FAILED(wic->CreateFormatConverter(&converter)) ||
+        FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) return false;
+    UINT width = 0, height = 0;
+    converter->GetSize(&width, &height);
+    std::vector<BYTE> pixels(static_cast<size_t>(width) * height * 4);
+    if (FAILED(converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(pixels.size()), pixels.data())))
+        return false;
+    // The outside of each sharp peak must be covered by the joined cyan stroke.
+    // Separate butt-ended segments leave this row above the vertex unpainted.
+    const UINT y = static_cast<UINT>(std::floor(214.0f * scale - 0.5f * scale));
+    for (UINT i = 2; i < 118; i += 2) {
+        const UINT x = static_cast<UINT>((30.0f + 400.0f * i / 119.0f) * scale);
+        if (x >= width || y >= height) return false;
+        const auto* pixel = pixels.data() + (static_cast<size_t>(y) * width + x) * 4;
+        if (static_cast<int>(pixel[0]) - pixel[2] < 50 ||
+            static_cast<int>(pixel[1]) - pixel[2] < 30) return false;
+    }
+    return true;
+}
+
+static int RunMotionTests(HWND owner) {
+    using namespace pulse;
+    using ui::FileOperationFailureProbe;
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label); failures += !ok;
+    };
+    const std::filesystem::path output = L"bench_data/operation-motion";
+    std::filesystem::create_directories(output);
+    ui::FileOperationWindow window;
+    check(window.Create(owner, {}), "motion fixture creates the actual progress window");
+    const HWND hwnd = FileOperationFailureProbe::Window(window);
+    if (!hwnd) return failures + 1;
+    check(!(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZEBOX),
+        "operation popup has no redundant minimize control");
+    window.Show(false);
+    ops::OpStatus status;
+    status.task_id = 1; status.type = ops::OpType::Copy; status.active = true;
+    status.phase = ops::OpPhase::Scanning; status.percent = -1;
+    window.Update(status);
+    BOOL animations = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+    if (animations && !ui::IsHighContrast()) {
+        SendMessageW(hwnd, WM_PAINT, 0, 0);
+        check(GetUpdateRect(hwnd, nullptr, FALSE) != FALSE,
+            "preparation queues the next presented frame without waiting for a timer");
+        std::vector<double> frames;
+        size_t timer_messages = 0;
+        const auto start = std::chrono::steady_clock::now();
+        const auto deadline = start + std::chrono::milliseconds(1500);
+        while (std::chrono::steady_clock::now() < deadline) {
+            MSG message{};
+            if (!PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { Sleep(1); continue; }
+            if (message.hwnd == hwnd && message.message == WM_PAINT)
+                frames.push_back(std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count());
+            if (message.hwnd == hwnd && message.message == WM_TIMER) ++timer_messages;
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
+        std::vector<double> gaps;
+        for (size_t i = 1; i < frames.size(); ++i) gaps.push_back(frames[i] - frames[i - 1]);
+        std::sort(gaps.begin(), gaps.end());
+        std::printf("[PERF] preparation: frames=%zu fps=%.1f median_gap_ms=%.2f p95_gap_ms=%.2f timers=%zu\n",
+            frames.size(), frames.size() / 1.5, gaps.empty() ? 0 : gaps[gaps.size() / 2],
+            gaps.empty() ? 0 : gaps[gaps.size() * 95 / 100], timer_messages);
+        check(frames.size() >= 2, "preparation produces successive display-paced frames");
+        check(timer_messages > 0, "continuous preparation does not starve timer delivery");
+    } else std::printf("[INFO] system motion policy disables animated frame scheduling\n");
+    status.phase = ops::OpPhase::Running; status.percent = 50;
+    window.Update(status);
+    SendMessageW(hwnd, WM_PAINT, 0, 0);
+    check(!GetUpdateRect(hwnd, nullptr, FALSE), "known progress stops the continuous animation loop");
+    for (const int dpi : {96, 168}) {
+        const float scale = dpi / 96.0f;
+        RECT rect{0, 0, static_cast<LONG>(460 * scale), static_cast<LONG>(424 * scale)};
+        SendMessageW(hwnd, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&rect));
+        for (const bool dark : {false, true}) {
+            window.SetTheme(dark, ui::HexColor(0x69CFFF));
+            FileOperationFailureProbe::SetZigzag(window);
+            const auto image = output / (std::wstring(L"rate-zigzag-") + (dark ? L"dark-" : L"light-") +
+                std::to_wstring(dpi) + L".png");
+            check(FileOperationFailureProbe::Capture(window, image) && ZigzagPeaksConnected(image, scale),
+                "dense sharp rate peaks remain connected in the actual rendered image");
+        }
+    }
+    status.phase = ops::OpPhase::Scanning; status.percent = -1;
+    window.Update(status); window.Hide();
+    SendMessageW(hwnd, WM_PAINT, 0, 0);
+    check(!GetUpdateRect(hwnd, nullptr, FALSE), "a hidden progress window does not continue the animation loop");
+    return failures;
+}
+
+static int PreviewExitConfirmation(HWND owner) {
+    using namespace pulse;
+    static std::wstring snapshot;
+    static bool captured = false;
+    const auto output = std::filesystem::absolute(L"bench_data/operation-progress/exit-confirmation.png");
+    std::filesystem::create_directories(output.parent_path());
+    snapshot = output.wstring();
+    captured = false;
+    const auto timer = SetTimer(nullptr, 0, 250, [](HWND, UINT, UINT_PTR id, DWORD) {
+        EnumThreadWindows(GetCurrentThreadId(), [](HWND dialog, LPARAM parameter) -> BOOL {
+            wchar_t name[64]{}; GetClassNameW(dialog, name, ARRAYSIZE(name));
+            if (std::wcscmp(name, L"PulseConfirmWindow") || !IsWindowVisible(dialog)) return TRUE;
+            KillTimer(nullptr, static_cast<UINT_PTR>(parameter));
+            captured = SendMessageW(dialog, ui::kConfirmSnapshotMessage, 0,
+                reinterpret_cast<LPARAM>(snapshot.c_str())) != 0;
+            SendMessageW(dialog, WM_KEYDOWN, VK_RETURN, 0);
+            return FALSE;
+        }, static_cast<LPARAM>(id));
+    });
+    if (!timer) return 1;
+    const bool accepted = ui::ShowConfirmDialog(owner, app::ExitConfirmationSpec(), true, ui::HexColor(0x69CFFF));
+    KillTimer(nullptr, timer);
+    std::printf("[%s] exit confirmation preview captured; Enter keeps tasks running\n",
+        captured && !accepted ? "PASS" : "FAIL");
+    return captured && !accepted ? 0 : 1;
 }
 
 static int RunProgressTests(HWND owner) {
@@ -186,15 +326,27 @@ static int RunProgressTests(HWND owner) {
                 status.total_bytes = 100 * 1024 * 1024; window.Update(status);
                 SendMessageW(hwnd, WM_CLOSE, 0, 0);
                 SendMessageW(hwnd, WM_CLOSE, 0, 0);
+                check(cancels == 0 && dismisses == 1 && !window.IsVisible() &&
+                    FileOperationFailureProbe::Status(window).active,
+                    "closing active progress hides it without cancelling the task");
+                window.Show(false);
+                inspection = FileOperationFailureProbe::Inspect(window);
+                FileOperationFailureProbe::Click(window, inspection.cancel);
+                FileOperationFailureProbe::Click(window, inspection.cancel);
                 status.phase = OpPhase::Cancelling;
                 status.summary = l10n::Get(l10n::StringId::ArchiveCancelling); window.Update(status);
-                SendMessageW(hwnd, WM_CLOSE, 0, 0);
-                SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 0);
                 inspection = FileOperationFailureProbe::Inspect(window);
-                check(cancels == 1 && dismisses == 0 && window.IsVisible() &&
+                check(cancels == 1 && dismisses == 1 && window.IsVisible() &&
                     inspection.speed == L"0 B/s" && inspection.time == l10n::Get(l10n::StringId::OpNoEstimate) &&
                     FileOperationFailureProbe::Capture(window, output / (L"cancelling-" + name)),
-                    "cancel waits visibly, ignores repeated close and stops active estimates");
+                    "explicit cancel waits visibly, ignores repeated clicks and stops active estimates");
+                SendMessageW(hwnd, WM_CLOSE, 0, 0);
+                check(cancels == 1 && dismisses == 2 && !window.IsVisible(),
+                    "closing during cancellation can hide the progress window");
+                window.Show(false);
+                SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 0);
+                check(cancels == 1 && dismisses == 3 && !window.IsVisible(),
+                    "Escape dismisses without sending another cancellation");
                 status.phase = OpPhase::Cancelled; status.active = false;
                 window.Update(status);
                 inspection = FileOperationFailureProbe::Inspect(window);
@@ -222,8 +374,10 @@ static int RunProgressTests(HWND owner) {
                 window.Update(status);
                 inspection = FileOperationFailureProbe::Inspect(window);
                 check(FileOperationFailureProbe::Detailed(window) && FileOperationFailureProbe::Fits(window) &&
-                    ops::OperationFailureDetails(FileOperationFailureProbe::Status(window)) == archive_failure.error &&
-                    inspection.title == l10n::Get(l10n::StringId::ArchiveExtractFailed) &&
+                    ops::OperationFailureDetails(FileOperationFailureProbe::Status(window)) ==
+                        l10n::Get(l10n::StringId::ArchivePasswordRetryHint) + L"\n\n" + archive_failure.error &&
+                    inspection.file_line.starts_with(l10n::Get(l10n::StringId::ArchivePasswordRetryHint)) &&
+                    inspection.title == l10n::Get(l10n::StringId::ArchivePasswordOrDataError) &&
                     FileOperationFailureProbe::Capture(window, output / (L"archive-password-failed-" + name)),
                     "archive password diagnostics use the shared failure layout without losing their member name");
                 status = previous_status;
@@ -232,12 +386,13 @@ static int RunProgressTests(HWND owner) {
                 status.summary = l10n::Get(l10n::StringId::ArchiveExtractComplete);
                 status.transferred_bytes = status.total_bytes;
                 window.Update(status);
+                window.Show(false);
                 inspection = FileOperationFailureProbe::Inspect(window);
                 check(inspection.percent == L"100%" && inspection.speed == L"0 B/s" &&
                     FileOperationFailureProbe::Capture(window, output / (L"completed-" + name)),
                     "completed extraction reaches 100 percent in shared window");
                 SendMessageW(hwnd, WM_CLOSE, 0, 0);
-                check(dismisses == 1 && !window.IsVisible(), "terminal close dismisses the shared dialog");
+                check(dismisses == 4 && !window.IsVisible(), "terminal close dismisses the shared dialog");
             }
         }
     }
@@ -261,6 +416,19 @@ int wmain(int argc, wchar_t** argv) {
     RegisterClassW(&wc);
     const HWND owner = CreateWindowExW(0, wc.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
         0, 0, 960, 720, nullptr, nullptr, wc.hInstance, nullptr);
+    if (argc == 2 && std::wcscmp(argv[1], L"--exit-preview") == 0) {
+        failures = PreviewExitConfirmation(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wcscmp(argv[1], L"--motion-only") == 0) {
+        failures = RunMotionTests(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        std::printf("[RESULT] failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wcscmp(argv[1], L"--progress-only") == 0) {
         failures = RunProgressTests(owner);
         DestroyWindow(owner);

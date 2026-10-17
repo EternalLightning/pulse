@@ -54,9 +54,18 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     std::atomic_bool& done, std::atomic_bool& cancel,
     const std::function<ops::OpStatus()>& read_status) {
     ui::FileOperationWindow window;
+    const bool owner_enabled = IsWindow(owner) && IsWindowEnabled(owner);
+    std::unique_ptr<ui::OwnerDimScope> owner_dim;
+    bool owner_released = false;
+    auto release_owner = [&] {
+        if (owner_released) return;
+        owner_released = true;
+        owner_dim.reset();
+        if (owner_enabled && IsWindow(owner)) EnableWindow(owner, TRUE);
+    };
     ui::FileOperationCallbacks callbacks;
     callbacks.cancel = [&] { cancel.store(true, std::memory_order_release); };
-    const bool owner_enabled = IsWindow(owner) && IsWindowEnabled(owner);
+    callbacks.dismiss = release_owner;
     const bool created = window.Create(owner, std::move(callbacks),
         {.use_summary_title = true, .estimated_bytes = true, .item_progress_known = false,
             .modal_owner = owner_enabled});
@@ -64,7 +73,7 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     window.SetTheme(dark, D2D1::ColorF(GetRValue(accent) / 255.0f,
         GetGValue(accent) / 255.0f, GetBValue(accent) / 255.0f));
     window.Update(read_status());
-    ui::OwnerDimScope owner_dim(created ? owner : nullptr);
+    if (created) owner_dim = std::make_unique<ui::OwnerDimScope>(owner);
     if (created && owner_enabled) EnableWindow(owner, FALSE);
     if (created) window.Show();
     bool quitting = false;
@@ -72,7 +81,11 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     auto pump_messages = [&] {
         MsgWaitForMultipleObjectsEx(0, nullptr, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         MSG message{};
-        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+        const auto deadline = GetTickCount64() + 16;
+        // Animated progress continuously invalidates itself. Return to status
+        // and completion polling even when rendering keeps the queue nonempty.
+        for (unsigned dispatched = 0; dispatched < 32 &&
+                PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++dispatched) {
             if (message.message == WM_QUIT) {
                 quitting = true;
                 quit_code = static_cast<int>(message.wParam);
@@ -81,6 +94,11 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+            if (GetTickCount64() >= deadline) break;
+        }
+        if (created && IsWindow(owner) && !IsWindowVisible(owner) && window.IsVisible()) {
+            window.Hide();
+            release_owner();
         }
     };
     while (!done.load(std::memory_order_acquire)) {
@@ -92,12 +110,12 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
         const auto final_status = read_status();
         if (final_status.phase == ops::OpPhase::Failed) {
             window.Update(final_status);
-            while (window.IsVisible() && IsWindow(owner) && !quitting)
+            while (window.IsVisible() && IsWindow(owner) && !quitting && !cancel.load(std::memory_order_acquire))
                 pump_messages();
         }
     }
     window.Destroy();
-    if (created && owner_enabled && IsWindow(owner)) EnableWindow(owner, TRUE);
+    if (created) release_owner();
     if (quitting) PostQuitMessage(quit_code);
     return created && !cancel.load(std::memory_order_acquire);
 }
