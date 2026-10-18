@@ -55,16 +55,18 @@ Release 构建产物上重新执行：
 
 ## 本地部署
 
-- 目标：`D:\Applications\Pulse\Pulse.exe`
-- 备份：`dist/rollback-1.1.3.2-20261018-115006/Pulse.exe`
-- 部署前 SHA256：`D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385`
-- 部署后 SHA256：`8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408`
-- `PulseIndex` 服务保持 Running。
-- 从部署目录执行 `--shot 1200x800 --test-instance` 成功，退出码 0；记录见 `dist/deploy-1.1.3.2.json`。
+用户结束 Pulse 相关进程并停止 `PulseIndex` 服务后，完整程序载荷已重新复制到 `D:\Applications\Pulse`。
+
+- 备份：`dist/rollback-1.1.3.2-full-20261018-115459/`
+- 已替换：`Pulse.exe`、`Pulse.Index.exe`、`Pulse.Document.exe`、`Pulse.Preview.exe`、`Pulse.Shell.exe`、`lumatext.dll`、`pdfium.dll`
+- 五个可执行文件版本均为 `1.1.3.2`
+- `Pulse.exe` SHA256：`8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408`
+- 从部署目录执行 `--shot 1200x800 --test-instance` 成功，退出码 0；记录见 `dist/deploy-1.1.3.2.json`
+- `PulseIndex` 当前为 Stopped；当前会话没有服务控制权限，无法自动启动，需要用户以管理员身份启动，或重新运行安装包时启用索引服务。
 
 ## 边界
 
-- 本次只替换本地部署的 `Pulse.exe`。`Pulse.Index.exe` 由正在运行的 `PulseIndex` 服务占用，当前会话无服务控制权限，未停止或替换；安装包和免安装包内五个二进制均为 `1.1.3.2`。
+- 完整程序载荷已复制，但 `PulseIndex` 服务未能由当前会话启动；启动服务需要管理员权限。
 - 未运行完整 `pulse.exe --selftest`、全部历史测试、真实任务栏点击录像或真实安装/卸载升级。
 - 动画通过等价的隐藏/恢复路径探针和慢速过渡验证，没有物理鼠标任务栏点击录屏。
 - `pulse_menu_text_test --acrylic`（非透明桌面曝光项）依赖当前桌面顶层窗口环境；本次未将其作为通过项。透明亚克力夹具和裁剪断言已通过。
