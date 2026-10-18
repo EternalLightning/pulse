@@ -276,7 +276,7 @@ std::wstring GetPulseDataDir() {
     return root;
 }
 
-static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap) {
+static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap, bool navigation = true) {
     std::wstring trayJson;
     snap.tray.ToJson(trayJson);
 
@@ -289,10 +289,12 @@ static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap) {
     f << L"  \"bottom\":" << snap.window_rect.bottom << L",\n";
     f << L"  \"maximized\":" << (snap.maximized ? L"true" : L"false") << L",\n";
     f << L"  \"dark\":" << (snap.dark ? L"true" : L"false") << L",\n";
-    f << L"  \"path\":\"";
-    std::wstring escaped;
-    pulse::json::Escape(snap.active_path, escaped);
-    f << escaped << L"\",\n";
+    if (navigation) {
+        f << L"  \"path\":\"";
+        std::wstring escaped;
+        pulse::json::Escape(snap.active_path, escaped);
+        f << escaped << L"\",\n";
+    }
     f << L"  \"sidebarCollapsed\":" << snap.sidebar_collapsed << L",\n";
     f << L"  \"sidebarHidden\":" << snap.sidebar_hidden << L",\n";
     f << L"  \"sidebarOrder\":\"";
@@ -311,15 +313,18 @@ static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap) {
     f << L"  \"detailsPreviewOnly\":" << (snap.details_preview_only ? L"true" : L"false") << L",\n";
     f << L"  \"detailsPreview\":" << (snap.details_preview ? L"true" : L"false") << L",\n";
     f << L"  \"tray\":" << trayJson << L",\n";
-    f << L"  \"undo\":" << (snap.undo_json.empty() ? L"[]" : snap.undo_json) << L",\n";
-    f << L"  \"activeTab\":" << snap.active_layout_tab << L",\n";
-    f << L"  \"tabGroups\":" << TabGroupsToJson(snap.tab_groups) << L",\n";
-    f << L"  \"layoutTabs\":" << LayoutTabsToJson(snap.layout_tabs) << L"\n";
+    f << L"  \"undo\":" << (snap.undo_json.empty() ? L"[]" : snap.undo_json);
+    if (navigation) {
+        f << L",\n  \"activeTab\":" << snap.active_layout_tab << L",\n";
+        f << L"  \"tabGroups\":" << TabGroupsToJson(snap.tab_groups) << L",\n";
+        f << L"  \"layoutTabs\":" << LayoutTabsToJson(snap.layout_tabs);
+    }
+    f << L"\n";
     f << L"}\n";
     return f.str();
 }
 
-static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapshot& snap) {
+static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapshot& snap, bool navigation = true) {
     const pulse::json::Document doc(json);
     if (!doc.Is(pulse::json::Kind::Object)) return false;
     snap = {};
@@ -330,7 +335,7 @@ static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapsh
     snap.window_rect.bottom = pulse::json::ExtractInt(doc, L"bottom");
     snap.maximized = pulse::json::ExtractBool(doc, L"maximized");
     snap.dark = pulse::json::ExtractBool(doc, L"dark");
-    snap.active_path = pulse::json::ExtractString(doc, L"path");
+    if (navigation) snap.active_path = pulse::json::ExtractString(doc, L"path");
     snap.sidebar_collapsed = pulse::json::ExtractInt(doc, L"sidebarCollapsed");
     snap.sidebar_hidden = pulse::json::ExtractInt(doc, L"sidebarHidden");
     // Section order travels as "0,1,2,6,3,4,5"; anything malformed falls back to
@@ -393,6 +398,7 @@ static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapsh
     if (!tray_json.empty()) snap.tray.FromJson(tray_json);
     snap.undo_json = pulse::json::ExtractRaw(doc, L"undo", pulse::json::Kind::Array);
 
+    if (!navigation) return true;
     snap.active_layout_tab = pulse::json::ExtractInt(doc, L"activeTab");
     snap.tab_groups.clear();
     std::wstring groupsBody;
@@ -462,6 +468,17 @@ bool LoadSession(SessionSnapshot& snap) {
     const auto dir = GetPulseDataDir();
     std::wstring json;
     return !dir.empty() && ReadUtf8File(dir + L"\\session.json", json) && ParseSessionJson(json, snap);
+}
+
+bool SaveSessionPreferences(const WindowSessionSnapshot& snap) {
+    const auto dir = GetPulseDataDir();
+    return !dir.empty() && WriteUtf8FileAtomic(dir + L"\\session.json", WindowSessionToJson(snap, false));
+}
+
+bool LoadSessionPreferences(WindowSessionSnapshot& snap) {
+    const auto dir = GetPulseDataDir();
+    std::wstring json;
+    return !dir.empty() && ReadUtf8File(dir + L"\\session.json", json) && ParseWindowSessionJson(json, snap, false);
 }
 
 } // namespace pulse::app

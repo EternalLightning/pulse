@@ -429,6 +429,17 @@ bool ApplyWindowEffect(HWND hwnd, WindowEffect effect, bool dark) noexcept {
     return WindowEffectUsesBackdrop(effect) && SUCCEEDED(hr);
 }
 
+bool DrawMenuAcrylicSample(ID2D1DeviceContext* dc, ID2D1Image* sample,
+                           const D2D1_RECT_F& source, const D2D1_RECT_F& dest,
+                           bool dark, float blur) {
+    MaterialGraph graph;
+    const auto tint = dark ? HexColor(0x202020) : HexColor(0xFCFCFC);
+    if (FAILED(BuildMaterialGraph(dc, sample, tint, blur,
+            dark ? 0.80f : 0.72f, dark ? 0.20f : 0.05f, graph))) return false;
+    dc->DrawImage(graph.color_blend.get(), D2D1::Point2F(dest.left, dest.top), source);
+    return true;
+}
+
 int RunMaterialSelfTest() {
     LogWindowMaterial("selftest begin");
 

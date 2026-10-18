@@ -198,7 +198,10 @@ void CollectSubmenuLeaves(IContextMenu* menu, IContextMenu2* menu2, IContextMenu
                           HMENU submenu, UINT pos, bool background, UINT id_first,
                           bool parent_enabled, bool native_new, int depth, ULONGLONG deadline,
                           std::vector<CtxItemOut>& kids) {
-    if (GetTickCount64() < deadline) InitMenuPopup(menu2, menu3, submenu, pos);
+    // The native New submenu starts empty and must receive its initialization
+    // message even when the handler's cold parent query used the flyout budget.
+    if ((native_new && depth == 0) || GetTickCount64() < deadline)
+        InitMenuPopup(menu2, menu3, submenu, pos);
     const int sub_count = GetMenuItemCount(submenu);
     for (int j = 0; j < sub_count && static_cast<int>(kids.size()) < kMaxSubmenuChildren; ++j) {
         MENUITEMINFOW sub{ sizeof(sub) };

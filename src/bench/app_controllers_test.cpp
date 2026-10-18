@@ -12,6 +12,7 @@
 #include "../index/index_client.h"
 #include "../index/network_agent_client.h"
 #include "../shell_host/ctx_handlers.h"
+#include "../ipc/ctx_menu_util.h"
 
 #include <cstdio>
 #include <cmath>
@@ -463,6 +464,49 @@ bool RunSessionLayoutTests() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--native-new") {
+        const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(initialized)) return 2;
+        const auto directory = std::filesystem::absolute(L"bench_data/native-new") /
+            std::to_wstring(GetCurrentProcessId());
+        std::filesystem::create_directories(directory);
+        bool passed = false;
+        {
+            pulse::shell::CtxBind bind;
+            const bool bound = pulse::shell::BindCtxSelection({directory.wstring()}, true, bind);
+            passed = Report("native New test binds its isolated directory", bound);
+            if (bound) {
+                pulse::shell::CtxHandlerDesc desc;
+                desc.clsid_text = L"{d969a300-e7ff-11d0-a93b-00a0c90f2719}";
+                desc.name = L"New";
+                CLSIDFromString(desc.clsid_text.c_str(), &desc.clsid);
+                pulse::shell::CtxHandlerSlot slot;
+                const auto hr = pulse::shell::QueryOneHandler(desc, bind, nullptr, 1,
+                    256, CMF_NORMAL, slot);
+                std::vector<pulse::shell::CtxItemOut> items;
+                pulse::shell::CollectHandlerItems(slot, true, items);
+                bool native = false, duplicate = false;
+                for (const auto& item : items) {
+                    if (!item.child) continue;
+                    native |= item.enabled && item.id != 0;
+                    duplicate |= pulse::ipc::IsPulseNewTemplateVerb(item.verb);
+                    char label[2048]{};
+                    WideCharToMultiByte(CP_UTF8, 0, item.text.c_str(), -1, label,
+                        sizeof(label), nullptr, nullptr);
+                    std::printf("[TEMPLATE] %s\n", label);
+                }
+                passed &= Report("native New handler exposes installed templates",
+                    SUCCEEDED(hr) && native);
+                passed &= Report("native Folder and Text templates are filtered", !duplicate);
+                pulse::shell::ReleaseHandlerSlot(slot);
+            }
+        }
+        std::error_code cleanup_error;
+        std::filesystem::remove_all(directory, cleanup_error);
+        passed &= Report("native New test removes only its isolated fixture", !cleanup_error);
+        CoUninitialize();
+        return passed ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--session-layout")
         return RunSessionLayoutTests() ? 0 : 1;
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-refresh") {

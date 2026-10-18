@@ -1345,12 +1345,13 @@ void Painter::DrawTab(const TabSpec& spec) {
     }
 }
 
-void Painter::DrawMenuSurface(const D2D1_RECT_F& bounds) {
+void Painter::DrawMenuSurface(const D2D1_RECT_F& bounds, bool acrylic) {
     if (!theme_) {
         return;
     }
-    const D2D1_COLOR_F fill = high_contrast_ ? theme_->surface_flyout
+    D2D1_COLOR_F fill = high_contrast_ ? theme_->surface_flyout
                               : dark_ ? HexColor(0x2B2B2B) : HexColor(0xF9F9F9);
+    if (acrylic && !high_contrast_) fill.a = 0.12f;
     const D2D1_COLOR_F border = high_contrast_ ? theme_->stroke_card
                                 : dark_ ? RgbaF(0xFFFFFF, 0.055f)
                                         : RgbaF(0x000000, 0.055f);

@@ -190,6 +190,10 @@ std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_und
     return items;
 }
 
+std::vector<ui::FluentMenuItem> BuildHomeBackgroundMenu() {
+    return {Item(CmdRefresh, l10n::Get(l10n::StringId::Refresh).c_str(), L"\xE72C", L"F5")};
+}
+
 std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive) {
     std::vector<ui::FluentMenuItem> items;
     items.push_back(Item(CmdOpenInNewTab, l10n::Get(l10n::StringId::OpenNewTab).c_str(), kGlyphOpenInNewTab));

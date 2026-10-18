@@ -1,10 +1,8 @@
 // fluent_menu.h — Fluent context menu / dropdown (ui.md §4 右键菜单/下拉, §6 动效).
 //
-// Rendering: an independent WS_EX_LAYERED popup with per-pixel alpha. The
-// menu surface and items are drawn with ui::fluent::Painter (DrawMenuSurface
-// / DrawMenuItem) into an offscreen D2D bitmap on the *main* compositor's
-// device, plus a CLSID_D2D1Shadow drop shadow, then pushed to the window via
-// UpdateLayeredWindow. Rounded 8px corners come from the alpha channel.
+// Rendering: a WS_EX_LAYERED popup with a sampled acrylic plate and an opaque
+// fallback. Painter draws the surface and items into an
+// offscreen D2D bitmap using the main compositor's device.
 //
 // Behavior: TrackPopup runs a nested modal loop (like TrackPopupMenu):
 // hover tracking, keyboard nav (Up/Down/Enter/Esc), click-outside dismiss,
@@ -15,6 +13,7 @@
 // FluentMenuModel is the windowless layout/hit-test half; the console
 // self-test drives it directly with a standalone DWrite factory.
 #pragma once
+#include "menu_backdrop.h"
 #include "fluent_components.h"
 
 #include <dwrite_3.h>
@@ -172,6 +171,7 @@ public:
 private:
     // ULW staging buffer (GDI DIB); the main menu and the flyout each own one.
     struct Surface {
+        MenuBackdrop backdrop;
         HDC mem_dc = nullptr;
         HBITMAP dib = nullptr;
         void* bits = nullptr;
@@ -226,6 +226,8 @@ private:
     fluent::Painter painter_;
     float scale_ = 1.0f;
     bool dark_ = false;
+    bool snapshot_ = false;
+    MenuBackdropSource backdrop_source_;
     D2D1_COLOR_F accent_{};
 
     FluentMenuModel model_;

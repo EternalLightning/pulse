@@ -1,6 +1,7 @@
 #include "tab_transfer.h"
 #include "app_runtime.h"
 #include "app_internal.h"
+#include "app_exit.h"
 
 namespace pulse {
 namespace {
@@ -97,7 +98,7 @@ bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
     BindCurrentLayout(destination);
     ReloadTransferredLayout(destination, *dst.Active());
     if (source_became_empty && close_empty_source && source.hwnd)
-        PostMessageW(source.hwnd, WM_CLOSE, 0, 0);
+        RequestWindowClose(source);
     InvalidateRect(source.hwnd, nullptr, FALSE);
     InvalidateRect(destination.hwnd, nullptr, FALSE);
     return true;
@@ -185,7 +186,7 @@ bool TransferLayoutTabIntoPaneArea(AppState& source, size_t index, AppState& des
     BindCurrentLayout(source);
     BindCurrentLayout(destination);
     ReloadTransferredLayout(destination, *target);
-    if (source_empty && source.hwnd) PostMessageW(source.hwnd, WM_CLOSE, 0, 0);
+    if (source_empty && source.hwnd) RequestWindowClose(source);
     InvalidateRect(source.hwnd, nullptr, FALSE);
     InvalidateRect(destination.hwnd, nullptr, FALSE);
     return true;
@@ -251,7 +252,7 @@ bool TryMergeWindowAtScreenPoint(AppState& source, POINT screen_point) {
             if (!TransferLayoutTab(source, 0, target, false)) return;
         }
         merged = true;
-        if (source.hwnd) PostMessageW(source.hwnd, WM_CLOSE, 0, 0);
+        if (source.hwnd) RequestWindowClose(source);
     });
     return merged;
 }

@@ -25,6 +25,7 @@ void HideAppWindow(AppState& s, bool require_tray) {
     s.quickPreview.Close();
     if (s.operationWindow) s.operationWindow->Hide();
     ShowWindow(s.hwnd, SW_HIDE);
+    s.core.windows.Touch(s.hwnd);
 }
 
 void BeginWindowShutdown(AppState& s) {

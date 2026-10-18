@@ -92,12 +92,13 @@ void TrayController::HandleTaskbarCreated() {
         RestoreWindow();
 }
 
-TrayController::CallbackResult TrayController::HandleCallback(LPARAM event) {
+TrayController::CallbackResult TrayController::HandleCallback(LPARAM event, const std::function<void()>& restore) {
     if (!hwnd_) return CallbackResult::NotHandled;
     switch (LOWORD(event)) {
     case WM_LBUTTONUP:
     case WM_LBUTTONDBLCLK:
-        RestoreWindow();
+        if (restore) restore();
+        else RestoreWindow();
         return CallbackResult::Handled;
     case WM_RBUTTONUP: {
         POINT point{};
@@ -112,7 +113,10 @@ TrayController::CallbackResult TrayController::HandleCallback(LPARAM event) {
             point.x, point.y, 0, hwnd_, nullptr);
         DestroyMenu(menu);
         PostMessageW(hwnd_, WM_NULL, 0, 0);
-        if (command == 1) RestoreWindow();
+        if (command == 1) {
+            if (restore) restore();
+            else RestoreWindow();
+        }
         return command == 2 ? CallbackResult::ExitRequested : CallbackResult::Handled;
     }
     default:

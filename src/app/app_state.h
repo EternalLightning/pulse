@@ -453,13 +453,9 @@ struct AppState : AppCoreOwner {
     static constexpr double kScrollResponseMs = 105.0;
 
     ShotRequest shot;
-    std::wstring open_path;   // folder to open as a new tab after session restore
+    std::wstring open_path;   // explicit launch target; an empty launch opens Home
     std::optional<ResolvedOpenTarget> initial_external_open_target;
     Timing timing;
-    std::wstring session_path;
-    std::vector<app::LayoutTabSnapshot> session_layout_tabs;
-    std::vector<app::GroupSessionSnapshot> session_tab_groups;
-    int session_active_layout_tab = 0;
     std::unordered_map<std::wstring, std::wstring> gitRoots;
 
     // 1B-2 GUI verification: render the context menu to a PNG, no interaction.

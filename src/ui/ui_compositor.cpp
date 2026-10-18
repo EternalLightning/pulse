@@ -61,6 +61,7 @@ void Compositor::Shutdown() {
     BindDialogComposition(hwnd_, nullptr, nullptr);
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
+    frame_copy_.reset();
     targetBitmap_.reset();
     if (dc_.get()) dc_->SetTarget(nullptr);
     if (compositionTarget_.get()) compositionTarget_->SetRoot(nullptr);
@@ -281,6 +282,7 @@ bool Compositor::CreateSwapChain() {
 void Compositor::ResizeSwapChain() {
     animation_frames_paused_ = true;
     if (!swapChain_.get() || width_ <= 0 || height_ <= 0) return;
+    frame_copy_.reset();
     targetBitmap_.reset();
     dc_->SetTarget(nullptr);
     HRESULT hr = swapChain_->ResizeBuffers(0, (UINT)width_, (UINT)height_,
@@ -342,11 +344,24 @@ bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     return true;
 }
 
+void Compositor::CopyFrame() {
+    if (!frame_copy_enabled_ || !dc_.get() || !targetBitmap_.get()) return;
+    const auto size = targetBitmap_->GetPixelSize();
+    if (!frame_copy_.get()) {
+        const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+            targetBitmap_->GetPixelFormat(), 96.0f, 96.0f);
+        if (FAILED(dc_->CreateBitmap(size, nullptr, 0, props, &frame_copy_))) return;
+    }
+    if (FAILED(frame_copy_->CopyFromBitmap(nullptr, targetBitmap_.get(), nullptr)))
+        frame_copy_.reset();
+}
+
 void Compositor::Present() {
     animation_frames_paused_ = true;
     if (device_lost_ || !swapChain_.get()) return;
     if (hwnd_) UpdateTextRenderingParams(
         MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
+    CopyFrame();
     HRESULT hr = swapChain_->Present(1, 0);
     if (FAILED(hr)) {
         if (IsDeviceLost(hr)) NotifyDeviceLost(hr);

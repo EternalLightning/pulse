@@ -260,11 +260,7 @@ bool Render(AppState& s) {
     return s.ui_schedule.animation_active;
 }
 
-static void RestoreWindowSessionState(AppState& state, const app::WindowSessionSnapshot& session) {
-    state.session_path = session.active_path;
-    state.session_layout_tabs = session.layout_tabs;
-    state.session_tab_groups = session.tab_groups;
-    state.session_active_layout_tab = session.active_layout_tab;
+static void RestoreWindowPreferences(AppState& state, const app::WindowSessionSnapshot& session) {
     state.darkMode = session.dark;
     state.sidebarCollapsedMask = static_cast<uint32_t>(session.sidebar_collapsed);
     state.sidebarHiddenMask = static_cast<uint32_t>(session.sidebar_hidden);
@@ -281,7 +277,7 @@ static void RestoreWindowSessionState(AppState& state, const app::WindowSessionS
     if (state.darkMode) state.themeOverride = ui::ThemeMode::Dark;
 }
 
-app::WindowSessionSnapshot CaptureWindowSession(AppState& s, HWND hwnd) {
+static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwnd) {
     app::WindowSessionSnapshot snap;
     WINDOWPLACEMENT wp{ sizeof(wp) };
     if (GetWindowPlacement(hwnd, &wp)) {
@@ -289,13 +285,6 @@ app::WindowSessionSnapshot CaptureWindowSession(AppState& s, HWND hwnd) {
         snap.maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
     }
     snap.dark = s.darkMode;
-    if (app::Tab* tab = ActiveTab(s)) snap.active_path = tab->current_path;
-    RememberLayoutFocus(s);
-    snap.active_layout_tab = static_cast<int>(s.window_tabs.active);
-    for (const auto& group : s.window_tabs.tab_groups)
-        snap.tab_groups.push_back({group.id, group.name, group.color_rgb, group.collapsed});
-    for (const auto& layout : s.window_tabs.items)
-        snap.layout_tabs.push_back(app::CaptureLayoutTab(*layout));
     snap.tray = s.tray;
     snap.undo_json = s.ops.UndoToJson();
     snap.sidebar_collapsed = static_cast<int>(s.sidebarCollapsedMask);
@@ -384,6 +373,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             MessageBoxW(hwnd, message.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
             return -1;
         }
+        s->compositor.EnableFrameCopy();
         s->compositor.RecreateTextFormats(s->scale);
         if (s->shot.active) {
             wchar_t toast_test[2]{};
@@ -668,40 +658,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             RegisterDragDrop(hwnd, s->dropTarget);
         }
 
-        if (!s->shot.active && !s->session_layout_tabs.empty()) {
-            s->pane = nullptr;
-            s->targetPane = nullptr;
-            app::RestoreWindowTabs(
-                s->window_tabs, s->session_layout_tabs, s->session_tab_groups,
-                s->session_active_layout_tab,
-                [s](app::Tab& tab, const std::wstring& path) {
-                    WarmupUnc(*s, path);
-                    StartLoadingPath(*s, tab, path, PathLoadReason::RestoreSession);
-                });
-            for (size_t i = 0; i < s->window_tabs.items.size(); ++i) {
-                app::RebuildLayoutRoot(*s->window_tabs.items[i]);
-                if (i < s->session_layout_tabs.size() &&
-                    s->window_tabs.items[i]->root &&
-                    !s->session_layout_tabs[i].split_ratios.empty()) {
-                    app::ApplySplitRatios(*s->window_tabs.items[i]->root,
-                                          s->session_layout_tabs[i].split_ratios);
-                }
-            }
-            BindCurrentLayout(*s);
-            if (!s->session_path.empty())
-                RememberPath(*s, s->session_path);
-            else if (app::Tab* t = ActiveTab(*s))
-                RememberPath(*s, t->current_path);
-        } else {
-        std::wstring startPath = s->shot.active ? s->shot.path : pulse::path::DefaultNavigationRoot();
+        std::wstring startPath = s->shot.active ? s->shot.path : app::MakeHomePath();
         ResolvedOpenTarget openTarget;
         const bool has_initial_external_target = s->initial_external_open_target.has_value();
         if (has_initial_external_target) {
             openTarget = std::move(*s->initial_external_open_target);
             s->initial_external_open_target.reset();
             startPath = openTarget.folder;
-        } else if (!s->shot.active && !s->session_path.empty()) startPath = s->session_path;
-        else if (!s->shot.active && !s->open_path.empty()) {
+        } else if (!s->shot.active && !s->open_path.empty()) {
             if (ops::IsArchivePath(s->open_path)) startPath = ArchiveViewPath(fs::NormalizePath(s->open_path));
             else {
                 openTarget = ResolveOpenTarget(s->open_path);
@@ -716,19 +680,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 s->pane->ActiveTab()->sort_direction = ui::SortDirection::Desc;
             }
         }
-        StartLoadingPath(*s, *s->pane->ActiveTab(), startPath,
-            !s->shot.active && !s->session_path.empty()
-                ? PathLoadReason::RestoreSession : PathLoadReason::Navigate);
+        StartLoadingPath(*s, *s->pane->ActiveTab(), startPath, PathLoadReason::Navigate);
         RememberPath(*s, startPath);
-        if (!s->shot.active && s->session_path.empty() &&
-            (has_initial_external_target || !s->open_path.empty()))
+        if (!s->shot.active && (has_initial_external_target || !s->open_path.empty()))
             SelectLaunchedFile(*s, openTarget);
-        }
-
-        if (!s->shot.active && !s->open_path.empty() &&
-            (!s->session_layout_tabs.empty() || !s->session_path.empty())) {
-            OpenFolderInNewTab(*s, s->open_path);
-        }
 
         if (s->core.global_ui_owner == hwnd) s->systemIntegration.Start(*s);
 
@@ -886,8 +841,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         std::unique_ptr<ResolvedOpenTarget> target(
             reinterpret_cast<ResolvedOpenTarget*>(lParam));
         if (!s || !target || s->exit_requested || s->core.exiting) return 0;
-        // Only synchronous startup restoration supplies this borrowed snapshot.
-        const auto* restore = reinterpret_cast<const app::WindowSessionSnapshot*>(wParam);
         if (s->core.windows.Count() >= kMaxTopLevelWindows) {
             s->notification_toast.ShowError(hwnd, l10n::Get(l10n::StringId::Open),
                 l10n::Get(l10n::StringId::OperationFailedMessage));
@@ -901,29 +854,17 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         child->contentIndexObserver = s->contentIndexObserver;
         child->open_path = target->folder;
         child->initial_external_open_target = std::move(*target);
-        if (restore) {
-            RestoreWindowSessionState(*child, *restore);
-            child->open_path.clear();
-            child->initial_external_open_target.reset();
-        }
+        child->sidebarCollapsedMask = s->sidebarCollapsedMask;
+        child->sidebarHiddenMask = s->sidebarHiddenMask;
+        child->sidebarQuickAccessHiddenMask = s->sidebarQuickAccessHiddenMask;
+        child->sidebarOrder = s->sidebarOrder;
+        child->starredExpanded = s->starredExpanded;
         s->core.owned_windows.push_back(child);
         RECT source{};
         if (!GetWindowRect(hwnd, &source)) source = RECT{0, 0, 1600, 960};
         int left = source.left + 32, top = source.top + 32;
         int width = (std::max)(640L, source.right - source.left);
         int height = (std::max)(480L, source.bottom - source.top);
-        if (restore && restore->window_rect.right - restore->window_rect.left >= 320 &&
-            restore->window_rect.bottom - restore->window_rect.top >= 420) {
-            const auto& saved = restore->window_rect;
-            left = saved.left; top = saved.top;
-            width = saved.right - saved.left; height = saved.bottom - saved.top;
-            if (!MonitorFromRect(&saved, MONITOR_DEFAULTTONULL)) {
-                MONITORINFO monitor{sizeof(monitor)};
-                if (GetMonitorInfoW(MonitorFromRect(&saved, MONITOR_DEFAULTTONEAREST), &monitor)) {
-                    left = monitor.rcWork.left; top = monitor.rcWork.top;
-                }
-            }
-        }
         HWND created = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP,
             app::SingleInstanceCoordinator::WindowClassName(), L"Pulse",
             WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
@@ -935,9 +876,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
         HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_PULSE));
         if (icon) SendMessageW(created, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
-        const bool hidden_restore = restore && !IsWindowVisible(hwnd);
-        ShowWindow(created, hidden_restore ? SW_HIDE : restore && restore->maximized
-            ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+        ShowWindow(created, SW_SHOWNORMAL);
         UpdateWindow(created);
         return reinterpret_cast<LRESULT>(child.get());
     }
@@ -977,7 +916,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case app::TrayController::kCallbackMessage: {
         if (!s) return 0;
-        const auto result = s->tray_controller.HandleCallback(lParam);
+        const auto result = s->tray_controller.HandleCallback(lParam, [s] {
+            AppState* recent = s->core.windows.MostRecent();
+            if (recent && !recent->exit_requested) RestoreAppWindow(*recent);
+        });
         if (result == app::TrayController::CallbackResult::ExitRequested)
             RequestApplicationExit(*s);
         return 0;
@@ -1866,25 +1808,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 DeleteObject(s->editBrush);
                 s->editBrush = nullptr;
             }
-            // Retain each closed window's state, then write one complete session
-            // only after the last top-level window closes.
+            // Keep UI preferences without recording open windows, tabs or folders.
             if (!s->shot.active && !s->menushot && !s->isolatedTest) {
-                if (last_window) {
-                    app::SessionSnapshot snap;
-                    if (s->core.exiting) {
-                        s->core.closed_window_sessions.push_back(
-                            CaptureWindowSession(*s, hwnd));
-                        snap.windows = std::move(s->core.closed_window_sessions);
-                    } else {
-                        snap.windows.push_back(CaptureWindowSession(*s, hwnd));
-                    }
-                    if (!snap.windows.empty())
-                        static_cast<app::WindowSessionSnapshot&>(snap) = snap.windows.front();
-                    app::SaveSession(snap);
-                } else if (s->core.exiting) {
-                    s->core.closed_window_sessions.push_back(
-                        CaptureWindowSession(*s, hwnd));
-                }
+                if (last_window) app::SaveSessionPreferences(CaptureWindowPreferences(*s, hwnd));
                 s->places.Save();
                 s->ctxMenuPrefs.Save();
                 s->appPrefs.Save();
@@ -2195,10 +2121,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         if (!migration_error.empty()) state.settings.SetError(std::move(migration_error));
     }
 
-    // Load previous session before parsing overrides.
-    app::SessionSnapshot session;
-    if (!state.isolatedTest && app::LoadSession(session)) {
-        RestoreWindowSessionState(state, session);
+    // Only appearance and retained user data survive a launch. Navigation starts fresh.
+    app::WindowSessionSnapshot session;
+    if (!state.isolatedTest && app::LoadSessionPreferences(session)) {
+        RestoreWindowPreferences(state, session);
         state.tray = session.tray;
     }
 
@@ -2358,15 +2284,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
     ShowWindow(hwnd, test_hidden || startup_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL : nCmdShow);
     UpdateWindow(hwnd);
-    if (!state.shot.active && !state.menushot && !state.colorpickshot) {
-        for (size_t i = 1; i < session.windows.size(); ++i) {
-            auto target = std::make_unique<ResolvedOpenTarget>();
-            target->folder = session.windows[i].active_path;
-            target->this_pc = target->folder.empty();
-            SendMessageW(hwnd, WM_NEW_WINDOW, reinterpret_cast<WPARAM>(&session.windows[i]),
-                reinterpret_cast<LPARAM>(target.release()));
-        }
-    }
 
     if (state.menushot) {
         // Render the built-in item menu to a PNG (GUI verification for 1B-2).

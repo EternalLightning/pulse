@@ -25,7 +25,7 @@ public:
     static UINT TaskbarCreatedMessage();
     void HandleTaskbarCreated();
     void SetBeforeRestore(std::function<void()> hook) { before_restore_ = std::move(hook); }
-    CallbackResult HandleCallback(LPARAM event);
+    CallbackResult HandleCallback(LPARAM event, const std::function<void()>& restore = {});
 
     bool IsVisible() const noexcept { return icon_added_; }
 

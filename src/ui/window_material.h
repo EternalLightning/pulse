@@ -23,6 +23,10 @@ const wchar_t* WindowEffectLabel(WindowEffect effect) noexcept;
 WindowEffect WindowEffectFromId(std::wstring_view id) noexcept;
 bool WindowEffectUsesBackdrop(WindowEffect effect) noexcept;
 bool ApplyWindowEffect(HWND hwnd, WindowEffect effect, bool dark) noexcept;
+// Uses the existing luminosity/color material graph for an opaque menu plate.
+bool DrawMenuAcrylicSample(ID2D1DeviceContext* dc, ID2D1Image* sample,
+                           const D2D1_RECT_F& source, const D2D1_RECT_F& dest,
+                           bool dark, float blur);
 
 int RunMaterialSelfTest();
 void LogWindowMaterial(const char* fmt, ...);

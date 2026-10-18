@@ -3,16 +3,20 @@
 #include "../app/app_input.h"
 #include "../app/tab_transfer.h"
 #include "../common/file_identity.h"
+#include "../common/json_utils.h"
+#include "../common/utf8_file.h"
 #include "../common/localization.h"
 #include "../common/user_storage.h"
 #include "../common/windows_compat.h"
 #include "../ipc/shell_client.h"
 #include "../ui/file_operation_dialog.h"
+#include "../ui/home_layout.h"
 #include <tlhelp32.h>
 #include <winternl.h>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <functional>
 #include <cstdio>
 #include <algorithm>
@@ -37,9 +41,35 @@ struct ShellLaunchClientTestProbe {
 };
 }
 
+namespace pulse::ui {
+struct FluentMenuTestPeer {
+    static std::vector<FluentMenuItem> Items(const FluentMenu& menu) {
+        std::vector<FluentMenuItem> items;
+        for (int i = 0; i < menu.model_.Count(); ++i) items.push_back(*menu.model_.At(i));
+        return items;
+    }
+    static bool ClickCommand(FluentMenu& menu, int command) {
+        for (int row = 0; row < menu.model_.Count(); ++row) {
+            const auto* item = menu.model_.At(row);
+            if (!item || item->command != command || !item->enabled) continue;
+            const int x = FluentMenu::kShadowMargin + menu.model_.WidthPx() / 2;
+            const int y = FluentMenu::kShadowMargin + static_cast<int>(menu.FilterHeaderPx() +
+                menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f - menu.scroll_y_);
+            SendMessageW(menu.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+            return true;
+        }
+        return false;
+    }
+};
+}
+
 namespace {
 using namespace pulse;
 int failures = 0;
+std::function<void()> menu_timer_action;
+VOID CALLBACK MenuTimer(HWND, UINT, UINT_PTR, DWORD) {
+    if (menu_timer_action) menu_timer_action();
+}
 void Check(bool passed, const char* label) {
     std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
     failures += !passed;
@@ -272,6 +302,233 @@ app::LayoutTab* AddLoadedTab(AppState& state, const std::wstring& path) {
     return &layout;
 }
 
+int RunHomeInteractionChecks() {
+    const auto root = std::filesystem::absolute(L"bench_data/home-interaction") /
+        std::to_wstring(GetCurrentProcessId());
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    AppState state;
+    state.isolatedTest = true;
+    const HWND primary = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        wc.lpszClassName, L"Pulse Home fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+        -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+    Check(primary && ActiveTab(state), "Home interaction fixture initializes a production window");
+    if (!primary || !ActiveTab(state)) return 1;
+    const auto folder = fs::NormalizePath((root / L"folder").wstring());
+    state.places.networks.push_back({L"Isolated card", folder});
+    for (const float scale : {1.0f, 1.5f, 2.0f}) {
+        SetWindowPos(primary, nullptr, 0, 0, static_cast<int>(1080 * scale),
+            static_cast<int>(760 * scale), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        NavigateTo(state, app::MakeHomePath());
+        auto* tab = ActiveTab(state);
+        tab->home_collapsed_mask = 3;
+        tab->scroll_y = 0;
+        state.scale = scale;
+        state.renderer.SetScale(scale);
+        auto vm = BuildVm(state, false);
+        bool clicked = false;
+        for (const auto& slot : vm.pane_slots) {
+            for (const auto& card : ui::MakeHomeLayout(slot.pane, slot.rect, scale).cards) {
+                if (slot.pane.home_cards[static_cast<size_t>(card.index)].path != folder) continue;
+                const int x = static_cast<int>((card.rect.left + card.rect.right) * 0.5f);
+                const int y = static_cast<int>((card.rect.top + card.rect.bottom) * 0.5f);
+                const LPARAM position = MAKELPARAM(x, y);
+                const auto hit = state.renderer.HitTest(vm,
+                    D2D1::RectF(0, 0, static_cast<float>(state.compositor.Width()),
+                        static_cast<float>(state.compositor.Height())), static_cast<float>(x), static_cast<float>(y));
+                Check(hit.region == ui::HitTestResult::HomeCard && hit.path == folder,
+                    "the click position hits the isolated Home card at the tested DPI");
+                SendMessageW(primary, WM_LBUTTONDOWN, MK_LBUTTON, position);
+                SendMessageW(primary, WM_LBUTTONUP, 0, position);
+                Check(ActiveTab(state)->current_path == app::MakeHomePath(),
+                    "a Home card single click stays on Home at the tested DPI");
+                SendMessageW(primary, WM_LBUTTONDBLCLK, MK_LBUTTON, position);
+                SendMessageW(primary, WM_LBUTTONUP, 0, position);
+                Check(ActiveTab(state)->current_path == folder,
+                    "a Home card double click opens its exact target at the tested DPI");
+                clicked = true;
+                break;
+            }
+            if (clicked) break;
+        }
+        Check(clicked, "isolated Home card is visible and hit-testable");
+    }
+    state.scale = 1.0f;
+    state.renderer.SetScale(state.scale);
+    NavigateTo(state, folder);
+    Check(Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+        "native New fixture loads its isolated destination");
+    ShowWindow(primary, SW_SHOWNOACTIVATE);
+    Pump();
+    wchar_t template_path[32768]{};
+    DWORD template_path_bytes = sizeof(template_path);
+    const auto template_value = RegGetValueW(HKEY_CLASSES_ROOT,
+        L".docx\\Word.Document.12\\ShellNew", L"FileName", RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+        nullptr, template_path, &template_path_bytes);
+    std::ifstream template_file(std::filesystem::path(template_path), std::ios::binary);
+    const bool template_opened = template_value == ERROR_SUCCESS && template_file.is_open();
+    const std::vector<char> template_contents{std::istreambuf_iterator<char>(template_file),
+        std::istreambuf_iterator<char>()};
+    const bool template_read = template_opened && !template_file.bad();
+    Check(template_read, "read the installed Word ShellNew template including an empty registered template");
+    std::vector<std::filesystem::path> original_documents;
+    for (const auto& entry : std::filesystem::directory_iterator(root / L"folder")) {
+        if (entry.path().extension() == L".docx") original_documents.push_back(entry.path());
+    }
+    state.context_menu.InvalidateCaches();
+    bool native_seen = false, word_seen = false, word_clicked = false;
+    auto deadline = GetTickCount64() + 12000;
+    menu_timer_action = [&] {
+        if (!state.menu || !state.menu->IsOpen()) return;
+        const auto items = ui::FluentMenuTestPeer::Items(*state.menu);
+        for (const auto& item : items) {
+            if (item.command < app::CmdShellComBase || !item.enabled) continue;
+            native_seen = true;
+            word_seen |= item.text.find(L"Word") != std::wstring::npos;
+            if (!word_clicked && item.text.find(L"Word") != std::wstring::npos) {
+                word_clicked = ui::FluentMenuTestPeer::ClickCommand(*state.menu, item.command);
+                return;
+            }
+        }
+        if (GetTickCount64() >= deadline) state.menu->Dismiss();
+    };
+    UINT_PTR timer = SetTimer(nullptr, 0, 50, MenuTimer);
+    Check(timer != 0, "start bounded native New observation");
+    if (timer) ShowNewDropdown(state);
+    KillTimer(nullptr, timer);
+    Check(native_seen, "real Shell New templates appear in a cold toolbar dropdown");
+    Check(word_seen, "installed Microsoft Word template appears in the real New dropdown");
+    Check(word_clicked, "select the real native Word row through the toolbar menu mouse path");
+    std::filesystem::path created_document;
+    const bool word_created = word_clicked && Wait([&] {
+        for (const auto& entry : std::filesystem::directory_iterator(root / L"folder")) {
+            if (entry.is_regular_file() && entry.path().extension() == L".docx" &&
+                std::find(original_documents.begin(), original_documents.end(), entry.path()) ==
+                    original_documents.end()) {
+                created_document = entry.path();
+                return true;
+            }
+        }
+        return false;
+    });
+    Check(word_created, "the native Word toolbar command creates a new DOCX in its isolated folder");
+    std::vector<char> created_contents;
+    const bool contents_match = template_read && word_created && Wait([&] {
+        std::ifstream created_file(created_document, std::ios::binary);
+        if (!created_file.is_open()) return false;
+        created_contents.assign(std::istreambuf_iterator<char>(created_file), std::istreambuf_iterator<char>());
+        return !created_file.bad() && created_contents == template_contents;
+    });
+    std::printf("[DIAG] native Word template bytes: expected=%zu actual=%zu, template_read=%d created=%d\n",
+        template_contents.size(), created_contents.size(), template_read ? 1 : 0, word_created ? 1 : 0);
+    Check(contents_match, "the created Word document matches the registered ShellNew template byte for byte");
+    NavigateTo(state, app::MakeHomePath());
+    bool home_menu = false;
+    menu_timer_action = [&] {
+        if (!state.menu || !state.menu->IsOpen()) return;
+        const auto items = ui::FluentMenuTestPeer::Items(*state.menu);
+        home_menu = items.size() == 1 && items.front().command == app::CmdRefresh;
+        state.menu->Dismiss();
+    };
+    timer = SetTimer(nullptr, 0, 50, MenuTimer);
+    if (timer) ShowBackgroundContextMenu(state, {100, 100});
+    KillTimer(nullptr, timer);
+    menu_timer_action = {};
+    Check(home_menu, "real Home background menu excludes New and prior folder Shell items");
+    RequestApplicationExit(state);
+    Check(Wait([&] { return state.core.windows.Count() == 0; }), "Home fixture closes normally");
+    std::printf("Home interaction: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
+
+int RunSessionChecks() {
+    const auto root = std::filesystem::absolute(L"bench_data/window-session") /
+        std::to_wstring(GetCurrentProcessId());
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+
+    app::SessionSnapshot legacy;
+    legacy.sidebar_hidden = 1 << static_cast<int>(app::SidebarSectionId::Tags);
+    legacy.quick_access_hidden = 5;
+    legacy.sidebar_collapsed = 2;
+    legacy.sidebar_order = app::DefaultSidebarOrder();
+    std::reverse(legacy.sidebar_order.begin(), legacy.sidebar_order.end());
+    legacy.active_path = (root / L"folder").wstring();
+    app::LayoutTabSnapshot old_tab;
+    old_tab.panes.push_back({legacy.active_path});
+    legacy.layout_tabs = {old_tab, old_tab};
+    legacy.windows.assign(3, legacy);
+    Check(app::SaveSession(legacy), "prepare an isolated legacy session with three windows and multiple tabs");
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        app::WindowSessionSnapshot preferences;
+        Check(app::LoadSessionPreferences(preferences) && preferences.active_path.empty() &&
+            preferences.layout_tabs.empty() && preferences.tab_groups.empty() &&
+            preferences.sidebar_hidden == legacy.sidebar_hidden &&
+            preferences.quick_access_hidden == legacy.quick_access_hidden,
+            "startup ignores saved navigation while retaining hidden sidebar sections and links");
+        AppState state;
+        state.isolatedTest = true;
+        state.sidebarHiddenMask = static_cast<uint32_t>(preferences.sidebar_hidden);
+        state.sidebarCollapsedMask = static_cast<uint32_t>(preferences.sidebar_collapsed);
+        state.sidebarQuickAccessHiddenMask = static_cast<uint32_t>(preferences.quick_access_hidden);
+        state.sidebarOrder = preferences.sidebar_order;
+        const HWND primary = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+            wc.lpszClassName, L"Pulse startup fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+            -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+        Check(primary && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+            "a default launch initializes a real window");
+        if (!primary) return 1;
+        Check(state.core.windows.Count() == 1 && state.window_tabs.items.size() == 1 &&
+            ActiveTab(state)->current_path == app::MakeHomePath(),
+            "each launch starts with exactly one Home window and one tab");
+        state.appPrefs.keep_running_on_close = true;
+        AddLoadedTab(state, (root / L"folder").wstring());
+        SendMessageW(primary, WM_DETACH_LAYOUT_TAB, state.window_tabs.active, 0);
+        auto* detached = state.core.windows.MostRecentExcept(primary);
+        Check(detached && detached->sidebarHiddenMask == state.sidebarHiddenMask &&
+            detached->sidebarCollapsedMask == state.sidebarCollapsedMask &&
+            detached->sidebarQuickAccessHiddenMask == state.sidebarQuickAccessHiddenMask &&
+            detached->sidebarOrder == state.sidebarOrder &&
+            Wait([&] { return ActiveTab(*detached) && !ActiveTab(*detached)->loading; }) &&
+            ActiveTab(*detached)->current_path == fs::NormalizePath((root / L"folder").wstring()),
+            "detached tabs retain their folder and inherit the sidebar preferences");
+        auto* external = PostOpenFolderInNewWindow(state, (root / L"folder").wstring());
+        Check(external && Wait([&] { return ActiveTab(*external) && !ActiveTab(*external)->loading; }) &&
+            ActiveTab(*external)->current_path == fs::NormalizePath((root / L"folder").wstring()),
+            "an explicit external folder still opens at the requested location");
+        state.core.windows.ForEach([](HWND, AppState& window) { window.isolatedTest = false; });
+        RequestApplicationExit(state);
+        Check(Wait([&] { return state.core.windows.Count() == 0; }),
+            "application exit closes all three windows");
+        std::wstring saved;
+        Check(ReadUtf8File((root / L"profile" / L"session.json").wstring(), saved),
+            "exit writes the isolated preferences file");
+        const json::Document doc(saved);
+        Check(doc.Is(json::Kind::Object) && !doc.Find(L"windows") && !doc.Find(L"layoutTabs") &&
+            !doc.Find(L"path") && !doc.Find(L"activeTab") && !doc.Find(L"tabGroups"),
+            "exit records no open windows, folders, tabs or groups");
+        Check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == legacy.sidebar_hidden &&
+            preferences.quick_access_hidden == legacy.quick_access_hidden &&
+            preferences.sidebar_order == legacy.sidebar_order,
+            "sidebar visibility and order survive exit and the next launch");
+        Pump();
+    }
+    std::printf("window startup: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
+
 int RunActivationChecks() {
     HANDLE token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -338,6 +595,23 @@ int RunActivationChecks() {
         state.core.windows.Touch(secondary->hwnd);
         Check(Forward(primary, L"") && IsWindowVisible(secondary->hwnd) && !IsWindowVisible(primary),
             "activation delivered to another window restores the most recently used window");
+        const auto* retained = ActiveTab(state);
+        const auto retained_tabs = state.window_tabs.items.size();
+        SendMessageW(secondary->hwnd, WM_CLOSE, 0, 0);
+        ShowWindow(primary, SW_SHOWNOACTIVATE);
+        SendMessageW(primary, WM_CLOSE, 0, 0);
+        Check(!IsWindowVisible(primary) && !IsWindowVisible(secondary->hwnd) &&
+            Forward(secondary->hwnd, L"") && IsWindowVisible(primary) &&
+            !IsWindowVisible(secondary->hwnd) && ActiveTab(state) == retained &&
+            state.window_tabs.items.size() == retained_tabs && state.core.windows.Count() == 2,
+            "a background relaunch restores the last closed window with its original folder and tabs");
+        SendMessageW(primary, WM_CLOSE, 0, 0);
+        ShowWindow(secondary->hwnd, SW_SHOWNOACTIVATE);
+        SendMessageW(secondary->hwnd, WM_CLOSE, 0, 0);
+        SendMessageW(primary, app::TrayController::kCallbackMessage, 0, WM_LBUTTONUP);
+        Check(IsWindowVisible(secondary->hwnd) && !IsWindowVisible(primary) &&
+            state.core.windows.Count() == 2,
+            "the tray icon also restores the last closed window rather than always its owner");
         state.core.exiting = true;
         Check(!Forward(primary, L""), "activation is rejected during application shutdown");
         state.core.exiting = false;
@@ -500,6 +774,16 @@ int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
+    if (argc == 2 && std::string(argv[1]) == "--home-only") {
+        const int result = RunHomeInteractionChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--session-only") {
+        const int result = RunSessionChecks();
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string(argv[1]) == "--activation-only") {
         const int result = RunActivationChecks();
         OleUninitialize();
@@ -640,29 +924,7 @@ int main(int argc, char** argv) {
             "closing extra windows releases their workers while the first pair remains usable");
         Check(!copy_error && OpenProbe(state, open_probe) && OpenProbe(*secondary, open_probe),
             "both original windows can still open files after other windows close");
-        app::WindowSessionSnapshot saved_window;
-        saved_window.window_rect = {60, 60, 960, 760};
-        saved_window.active_path = (root / L"second").wstring();
-        saved_window.layout_tabs.push_back(app::CaptureLayoutTab(*state.window_tabs.items.front()));
-        saved_window.layout_tabs.push_back(app::CaptureLayoutTab(*secondary->window_tabs.items.front()));
-        saved_window.active_layout_tab = 1;
-        saved_window.sidebar_hidden = 4;
         ShowWindow(primary, SW_HIDE);
-        auto restored_target = std::make_unique<ResolvedOpenTarget>();
-        restored_target->folder = saved_window.active_path;
-        auto* restored = reinterpret_cast<AppState*>(SendMessageW(primary, WM_NEW_WINDOW,
-            reinterpret_cast<WPARAM>(&saved_window), reinterpret_cast<LPARAM>(restored_target.release())));
-        RECT restored_rect{};
-        if (restored) GetWindowRect(restored->hwnd, &restored_rect);
-        Check(restored && restored->window_tabs.items.size() == 2 &&
-            restored->window_tabs.active == 1 && restored->sidebarHiddenMask == 4 &&
-            restored_rect.right - restored_rect.left == 900 &&
-            restored_rect.bottom - restored_rect.top == 700 && !IsWindowVisible(restored->hwnd) &&
-            Wait([&] { return ActiveTab(*restored) && !ActiveTab(*restored)->loading; }),
-            "the window factory restores tabs, active layout, sidebar and geometry from its session");
-        if (restored) RequestWindowClose(*restored);
-        Check(Wait([&] { return state.core.windows.Count() == 2; }),
-            "a restored window closes independently");
         const size_t source_tabs = state.window_tabs.items.size();
         const size_t destination_tabs = secondary->window_tabs.items.size();
         app::LayoutTab* moved_layout = state.window_tabs.items.back().get();

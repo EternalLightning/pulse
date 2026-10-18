@@ -1046,6 +1046,14 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     view_options.indexed_search = (kind == L"search" || kind == L"saved-search") && !tab->content_results;
     view_options.show_path = kind == L"search" || kind == L"saved-search" || kind == L"recycle";
     view_options.filesystem = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
+    if (kind == L"home") {
+        s.context_menu.Close();
+        auto items = app::FilterBuiltinMenuItems(app::BuildHomeBackgroundMenu(),
+                                                s.ctxMenuPrefs.builtin_hidden);
+        const int cmd = s.menu->TrackPopup(screen_pt, std::move(items));
+        if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
+        return;
+    }
     if (IsRecycleTab(tab)) {
         const bool can_empty = tab->snapshot && tab->EntryCount() != 0;
         const std::wstring undoLabel = s.ops.UndoLabel();

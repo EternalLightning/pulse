@@ -64,6 +64,9 @@ public:
     bool SaveSnapshot(const wchar_t* path);
 
     ID2D1DeviceContext* Dc() const { return dc_.get(); }
+    // Menus sample the last completed frame without a desktop capture/readback.
+    void EnableFrameCopy() { frame_copy_enabled_ = true; }
+    ID2D1Bitmap1* FrameCopy() const { return frame_copy_.get(); }
     IDWriteFactory2* DwriteFactory() const { return dwriteFactory_.get(); }
     HWND Hwnd() const { return hwnd_; }
 
@@ -101,6 +104,7 @@ private:
     bool InitD3D();
     bool CreateSwapChain();
     void ResizeSwapChain();
+    void CopyFrame();
     static bool IsDeviceLost(HRESULT hr);
 
     HWND hwnd_ = nullptr;
@@ -117,6 +121,7 @@ private:
     ComPtr<ID2D1Device> d2dDevice_;
     ComPtr<ID2D1DeviceContext> dc_;
     ComPtr<ID2D1Bitmap1> targetBitmap_;
+    ComPtr<ID2D1Bitmap1> frame_copy_;
     ComPtr<IDWriteFactory2> dwriteFactory_;
     ComPtr<IDWriteRenderingParams2> textRenderingParams_;
     ComPtr<IDWriteTextFormat> textFormat_;
@@ -131,6 +136,7 @@ private:
     bool transparentComposition_ = false;
     bool device_lost_ = false;
     bool animation_frames_paused_ = true;
+    bool frame_copy_enabled_ = false;
 };
 
 } // namespace pulse::ui

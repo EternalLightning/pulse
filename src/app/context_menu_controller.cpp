@@ -552,6 +552,33 @@ std::vector<ops::ShellMenuItem> ContextMenuController::DisplayedComItems() const
             }
         }
     }
+    // Native templates load lazily after the popup opens. Keep other Shell
+    // sections fixed, but admit new template rows through the live New menu.
+    if (background_ && com_items_current_) {
+        bool native_group = false;
+        for (const auto& live : com_items_) {
+            if (!live.child)
+                native_group = live.has_children && ipc::IsNativeNewMenuHandler(live.clsid);
+            if (!native_group) continue;
+            const bool present = std::any_of(displayed.begin(), displayed.end(), [&](const auto& row) {
+                return row.clsid == live.clsid && row.handler == live.handler &&
+                    row.verb == live.verb && row.text == live.text &&
+                    row.child == live.child && row.has_children == live.has_children;
+            });
+            if (present) continue;
+            if (!live.child) {
+                displayed.push_back(live);
+            } else {
+                auto parent = std::find_if(displayed.begin(), displayed.end(), [&](const auto& row) {
+                    return row.has_children && row.clsid == live.clsid && row.handler == live.handler;
+                });
+                if (parent == displayed.end()) continue;
+                auto end = std::next(parent);
+                while (end != displayed.end() && end->child) ++end;
+                displayed.insert(end, live);
+            }
+        }
+    }
     return displayed;
 }
 

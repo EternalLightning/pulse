@@ -2156,7 +2156,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             NavigateTo(*s, app::MakeHomePath());
         } else if (hit.region == ui::HitTestResult::HomeCard) {
             if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
-            NavigateTo(*s, hit.path);
         } else if (hit.region == ui::HitTestResult::HomeGroup && hit.index >= 0 && hit.index < 3) {
             if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
             if (auto* tab = ActiveTab(*s)) {
@@ -2800,7 +2799,10 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
-        if (hit.region == ui::HitTestResult::SidebarItem &&
+        if (hit.region == ui::HitTestResult::HomeCard && !hit.path.empty()) {
+            if (auto* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
+            NavigateTo(*s, hit.path);
+        } else if (hit.region == ui::HitTestResult::SidebarItem &&
             hit.path.starts_with(L"pulse:tag:")) {
             s->tagDragPending = false;
             s->tagDragActive = false;

@@ -792,6 +792,7 @@ target_link_libraries(pulse_ops_feedback_test PRIVATE
 
 add_executable(pulse_menu_text_test
     src/bench/menu_text_test.cpp src/bench/localization_test.rc
+    src/ui/window_material.cpp
     src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp
     src/ui/tab_shape.cpp src/ui/typography.cpp src/ui/edit_host.cpp)
 target_link_options(pulse_menu_text_test PRIVATE /MANIFEST:NO)

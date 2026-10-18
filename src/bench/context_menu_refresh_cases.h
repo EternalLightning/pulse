@@ -1,11 +1,73 @@
 #pragma once
 #include "../ipc/ctx_menu_util.h"
 
+class DelayedNativeNewMenu final : public IContextMenu3 {
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IContextMenu &&
+            iid != IID_IContextMenu2 && iid != IID_IContextMenu3) return E_NOINTERFACE;
+        *out = static_cast<IContextMenu3*>(this); AddRef(); return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const auto remaining = --references_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    HRESULT STDMETHODCALLTYPE QueryContextMenu(HMENU menu, UINT, UINT first, UINT, UINT) override {
+        submenu_ = CreatePopupMenu(); first_ = first;
+        MENUITEMINFOW row{sizeof(row)};
+        row.fMask = MIIM_ID | MIIM_STRING | MIIM_SUBMENU;
+        row.wID = first; row.dwTypeData = const_cast<wchar_t*>(L"New"); row.hSubMenu = submenu_;
+        return InsertMenuItemW(menu, 0, TRUE, &row) ? S_OK : E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE GetCommandString(UINT_PTR offset, UINT, UINT*, LPSTR out, UINT count) override {
+        const wchar_t* verb = L"";
+        if (offset == 0) { Sleep(120); verb = L"New"; }
+        else if (offset == 1) verb = L"New.docx";
+        else if (offset == 2) verb = L"NewFolder";
+        else if (offset == 3) verb = L"New.txt";
+        return wcscpy_s(reinterpret_cast<wchar_t*>(out), count, verb) == 0 ? S_OK : E_FAIL;
+    }
+    HRESULT STDMETHODCALLTYPE InvokeCommand(CMINVOKECOMMANDINFO*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE HandleMenuMsg(UINT message, WPARAM wparam, LPARAM) override {
+        if (message != WM_INITMENUPOPUP || reinterpret_cast<HMENU>(wparam) != submenu_) return S_OK;
+        initialized = true;
+        AppendMenuW(submenu_, MF_STRING, first_ + 1, L"Word document");
+        AppendMenuW(submenu_, MF_STRING, first_ + 2, L"Folder");
+        AppendMenuW(submenu_, MF_STRING, first_ + 3, L"Text document");
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE HandleMenuMsg2(UINT message, WPARAM wparam, LPARAM lparam, LRESULT*) override {
+        return HandleMenuMsg(message, wparam, lparam);
+    }
+    bool initialized = false;
+private:
+    ULONG references_ = 1;
+    HMENU submenu_ = nullptr;
+    UINT first_ = 1;
+};
+
 bool RunContextMenuRefreshTests() {
     using namespace pulse::app;
     bool passed = true;
     ContextMenuPrefs prefs;
     prefs.persist = false;
+    pulse::shell::CtxHandlerSlot delayed_slot;
+    auto* delayed_menu = new DelayedNativeNewMenu();
+    delayed_slot.menu = delayed_menu;
+    delayed_slot.menu3 = delayed_menu; delayed_menu->AddRef();
+    delayed_slot.clsid = L"{d969a300-e7ff-11d0-a93b-00a0c90f2719}";
+    delayed_slot.hmenu = CreatePopupMenu();
+    delayed_slot.id_first = 1; delayed_slot.id_last = 256;
+    delayed_menu->QueryContextMenu(delayed_slot.hmenu, 0, 1, 256, CMF_NORMAL);
+    std::vector<pulse::shell::CtxItemOut> delayed_items;
+    pulse::shell::CollectHandlerItems(delayed_slot, true, delayed_items);
+    passed &= Report("cold native New initializes after the generic flyout budget expires",
+        delayed_menu->initialized && delayed_items.size() == 2 && delayed_items.back().verb == L"New.docx");
+    pulse::shell::ReleaseHandlerSlot(delayed_slot);
     ContextMenuController controller;
     uint32_t next_token = 1, invoked_token = 0, invoked_id = 0, queries = 0, closes = 0;
     std::wstring executed_path, executed_verb;
@@ -39,10 +101,11 @@ bool RunContextMenuRefreshTests() {
     auto office = folder; office.id = 13; office.text = L"Office document"; office.verb = L"New.docx";
     controller.CompleteComQuery(1, {parent, folder, text, office}, GetTickCount64());
     auto live = controller.BuildDisplay(prefs, controller.base_items(), changed);
-    passed &= Report("late native templates cannot insert rows into the cold open menu",
-        live.size() == pending.size() && live.front().children.size() == 3 &&
-        !live.front().children.back().separator_after);
-    controller.NotePatchedDisplay(); controller.CloseMenu();
+    passed &= Report("cold background New admits late native templates without duplicating builtins",
+        live.size() == pending.size() && live.front().children.size() == 4 &&
+        live.front().children.back().text == office.text && live.front().children.back().enabled &&
+        live.front().children[2].separator_after);
+    controller.CloseMenu();
     controller.ExecuteShellCommand(CmdShellComBase + 13, {}, {});
     passed &= Report("a late undisplayed native command is never authorized", invoked_token == 0);
     next_token = 2;
@@ -136,8 +199,9 @@ bool RunContextMenuRefreshTests() {
     auto archive = office; archive.id = 64; archive.verb = L"New.zip"; archive.text = L"Archive template";
     controller.CompleteComQuery(6, {parent, folder, text, office, archive}, GetTickCount64());
     auto completed_dropdown = controller.BuildDisplay(prefs, controller.base_items(), changed);
-    passed &= Report("final replies cannot append a late template to an open toolbar menu",
-        completed_dropdown.size() == dropdown.size() && completed_dropdown.back().text == office.text);
+    passed &= Report("final replies append late templates to the open toolbar New menu",
+        completed_dropdown.size() == dropdown.size() + 1 && completed_dropdown.back().text == archive.text &&
+        completed_dropdown.back().enabled);
     controller.NotePatchedDisplay(); controller.CloseMenu();
     controller.ExecuteShellCommand(CmdNone, {}, {});
     controller.OpenMenu({create}, true);
@@ -162,10 +226,14 @@ bool RunContextMenuRefreshTests() {
     auto cold_dropdown = controller.BuildDisplay(prefs, controller.base_items(), changed);
     controller.CompleteComQuery(8, {parent, office}, GetTickCount64());
     auto late_dropdown = controller.BuildDisplay(prefs, controller.base_items(), changed);
-    passed &= Report("cold toolbar New retains exactly its three usable builtins after late loading",
-        cold_dropdown.size() == 3 && late_dropdown.size() == 3 &&
+    passed &= Report("cold toolbar New keeps builtins and appends the first late native template",
+        cold_dropdown.size() == 3 && late_dropdown.size() == 4 &&
         late_dropdown[0].enabled && late_dropdown[1].enabled && late_dropdown[2].enabled &&
-        !late_dropdown[2].separator_after);
+        late_dropdown[2].separator_after && late_dropdown.back().text == office.text && late_dropdown.back().enabled);
+    controller.NotePatchedDisplay();
+    controller.ExecuteShellCommand(CmdShellComBase + office.id, {}, {});
+    passed &= Report("a displayed late native template invokes the current session",
+        invoked_token == 8 && invoked_id == office.id);
     controller.CloseMenu(); controller.Close();
     passed &= Report("native new handler identity is case insensitive and never matched by caption",
         pulse::ipc::IsNativeNewMenuHandler(parent.clsid) && !pulse::ipc::IsNativeNewMenuHandler(L"NewMenu"));

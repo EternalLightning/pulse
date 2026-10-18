@@ -62,6 +62,11 @@ int wmain() {
           contains(app::BuildBreadcrumbMenu(true, false), app::CmdCopy),
           "home and breadcrumb drive menus forbid copy while folders keep it");
     const auto home = app::BuildBreadcrumbMenu(true, true);
+    const auto home_background = app::BuildHomeBackgroundMenu();
+    check(home_background.size() == 1 && contains(home_background, app::CmdRefresh) &&
+          !contains(home_background, app::CmdNewMenu) && !contains(home_background, app::CmdPaste) &&
+          !contains(home_background, app::CmdOpenTerminal) && !contains(home_background, app::CmdCopyPath),
+          "home background offers refresh without folder creation, paste or path commands");
     check(contains(home, app::CmdOpen) && contains(home, app::CmdOpenInNewTab) &&
           contains(home, app::CmdCopyPath) && contains(home, app::CmdProperties),
           "home drive cards have path commands");

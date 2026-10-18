@@ -312,6 +312,7 @@ bool FluentMenu::Create(HWND owner, Compositor* compositor, float scale) {
     owner_ = owner;
     compositor_ = compositor;
     scale_ = scale;
+    if (compositor_) compositor_->EnableFrameCopy();
     painter_.SetCompositor(compositor);
     painter_.SetScale(scale);
     return EnsureWindow();
@@ -572,9 +573,11 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
         }
     }
 
+    const POINT origin = main ? POINT{base_x_, base_y_} : POINT{sub_x_, sub_y_};
+    const bool acrylic = !snapshot_ && s.backdrop.Draw(*compositor_, backdrop_source_, drop, origin, dark_, scale_);
     if (painter_.BeginFrame(theme, IsHighContrast())) {
         if (drop.right > drop.left && drop.bottom > drop.top)
-            painter_.DrawMenuSurface(drop);
+            painter_.DrawMenuSurface(drop, acrylic);
         if (anchor_to_rect_ && header > 0) {
             fluent::ControlState bar;
             bar.focused = true;
@@ -1490,6 +1493,9 @@ int FluentMenu::RunModalLoop() {
     HideSubWindow();
     if (hwnd_ && IsWindow(hwnd_)) ShowWindow(hwnd_, SW_HIDE);
     HideFilterEdit();
+    backdrop_source_.Reset();
+    surf_.backdrop.Reset();
+    sub_surf_.backdrop.Reset();
     return result_;
 }
 
@@ -1510,6 +1516,8 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
         return 0;
     }
     HideSubWindow(); // stale flyout state from the previous invocation
+    surf_.backdrop.Reset();
+    sub_surf_.backdrop.Reset();
     filter_fn_ = std::move(filter);
     filter_query_ = initial_filter_text_;
     filter_committed_ = false;
@@ -1534,8 +1542,10 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     hover_swatch_ = -1;
     result_ = 0;
     animating_out_ = false;
+    backdrop_source_.Capture(*compositor_, screen_pt);
     LayoutWindow(screen_pt);
     if (!Render()) {
+        backdrop_source_.Reset();
         external_edit_ = nullptr;
         max_visible_rows_ = 0;
         ShowWindow(hwnd_, SW_HIDE);
@@ -1687,6 +1697,9 @@ void FluentMenu::Dismiss() {
     open_ = false;
     animating_out_ = false;
     if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
+    backdrop_source_.Reset();
+    surf_.backdrop.Reset();
+    sub_surf_.backdrop.Reset();
 }
 
 bool FluentMenu::SaveDebugSnapshot(const wchar_t* png_path,
@@ -1697,7 +1710,10 @@ bool FluentMenu::SaveDebugSnapshot(const wchar_t* png_path,
         ? static_cast<float>(dropdown_rect_.right - dropdown_rect_.left) : filter_min_width_ * scale_);
     hover_row_ = hover_row;
     hover_swatch_ = -1;
-    if (!Render()) return false;
+    snapshot_ = true;
+    const bool rendered = Render();
+    snapshot_ = false;
+    if (!rendered) return false;
 
     ComPtr<IWICImagingFactory> wic;
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,

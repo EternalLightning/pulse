@@ -44,9 +44,6 @@ struct AppCore {
     // unwinds; WM_NCDESTROY can run reentrantly from modal UI callbacks.
     std::vector<std::shared_ptr<AppState>> owned_windows;
     std::vector<std::shared_ptr<AppState>> retired_windows;
-    // Snapshots from windows that have already closed, used when the last
-    // window writes a complete multi-window session.
-    std::vector<app::WindowSessionSnapshot> closed_window_sessions;
 };
 
 struct AppCoreOwner {

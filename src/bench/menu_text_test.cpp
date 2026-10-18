@@ -11,11 +11,12 @@ struct FluentMenuTestPeer {
         menu.model_.SetItems(std::move(items));
         menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_);
         menu.base_x_ = 300; menu.base_y_ = 200;
+        menu.backdrop_source_.Capture(*menu.compositor_, {menu.base_x_, menu.base_y_});
         menu.open_ = true; menu.animating_out_ = false; menu.result_ = 0;
         menu.hover_row_ = -1; menu.hover_swatch_ = -1;
         menu.anim_start_ = std::chrono::steady_clock::now();
         if (!menu.Render()) return false;
-        SetWindowPos(menu.hwnd_, nullptr, menu.base_x_, menu.base_y_,
+        SetWindowPos(menu.hwnd_, menu.topmost_ ? HWND_TOPMOST : HWND_TOP, menu.base_x_, menu.base_y_,
             menu.surf_.w, menu.surf_.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         menu.Present(64, -8);
         return true;
@@ -30,12 +31,34 @@ struct FluentMenuTestPeer {
     static void PendingResult(FluentMenu& menu, int command) { menu.result_ = command; }
     static int Result(const FluentMenu& menu) { return menu.result_; }
     static void ChooseRow(FluentMenu& menu, int row) {
-        POINT point{FluentMenu::kShadowMargin + 40,
-            static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() +
+        const int margin = FluentMenu::kShadowMargin;
+        POINT point{margin + 40,
+            static_cast<LONG>(margin + menu.FilterHeaderPx() +
                 menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f)};
-        menu.OnMouse(point, true);
+        SendMessageW(menu.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+    }
+    static void ChooseSubRow(FluentMenu& menu, int row) {
+        const int margin = FluentMenu::kShadowMargin;
+        POINT point{margin + 40,
+            static_cast<LONG>(margin + menu.sub_model_.RowTopPx(row) +
+                menu.sub_model_.RowHeightPx() * 0.5f)};
+        SendMessageW(menu.sub_hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
     }
     static BYTE Alpha(const FluentMenu& menu) { return menu.present_alpha_; }
+    static void FullyVisible(FluentMenu& menu) { menu.Present(255, 0); }
+    static bool Acrylic(const FluentMenu& menu, bool submenu = false) {
+        const auto& surface = submenu ? menu.sub_surf_ : menu.surf_;
+        return surface.backdrop.Active();
+    }
+    static bool DesktopSample(const FluentMenu& menu) { return menu.backdrop_source_.Bitmap() != nullptr; }
+    static ID2D1Bitmap1* DesktopBitmap(const FluentMenu& menu) { return menu.backdrop_source_.Bitmap(); }
+    static bool SampleShowsThrough(const FluentMenu& menu) {
+        const auto& s = menu.surf_;
+        const auto* pixels = static_cast<const DWORD*>(s.bits);
+        const int y = s.h - FluentMenu::kShadowMargin - 4;
+        return pixels && pixels[y * s.w + FluentMenu::kShadowMargin + 15] !=
+            pixels[y * s.w + s.w - FluentMenu::kShadowMargin - 15];
+    }
     static int Offset(const FluentMenu& menu) { return menu.present_offset_; }
     static int SubY(const FluentMenu& menu) { return menu.sub_y_; }
     static HWND Window(const FluentMenu& menu) { return menu.hwnd_; }
@@ -53,15 +76,49 @@ void Check(bool ok, const char* label) {
     std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
     if (!ok) ++failures;
 }
+bool ForegroundBelongsToAnotherProcess() {
+    DWORD process = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &process);
+    // The user can switch external windows while this test is running.
+    return process != GetCurrentProcessId();
+}
 pulse::ui::FluentMenuItem Item(int command, const wchar_t* text) {
     pulse::ui::FluentMenuItem item;
     item.command = command;
     item.text = text;
     return item;
 }
+bool SaveScreen(const std::filesystem::path& path, RECT rect) {
+    using namespace pulse::ui;
+    HDC screen = GetDC(nullptr), memory = CreateCompatibleDC(screen);
+    HBITMAP bitmap = CreateCompatibleBitmap(screen, rect.right - rect.left, rect.bottom - rect.top);
+    HGDIOBJ old = SelectObject(memory, bitmap);
+    const bool copied = BitBlt(memory, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+        screen, rect.left, rect.top, SRCCOPY | CAPTUREBLT) != FALSE;
+    SelectObject(memory, old);
+    ComPtr<IWICImagingFactory> factory;
+    ComPtr<IWICBitmap> image;
+    ComPtr<IWICStream> stream;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    bool saved = copied && SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateBitmapFromHBITMAP(bitmap, nullptr, WICBitmapIgnoreAlpha, &image)) &&
+        SUCCEEDED(factory->CreateStream(&stream)) &&
+        SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+        SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+        SUCCEEDED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache)) &&
+        SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr));
+    if (saved) saved = SUCCEEDED(frame->WriteSource(image.get(), nullptr)) &&
+        SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+    DeleteObject(bitmap); DeleteDC(memory); ReleaseDC(nullptr, screen);
+    return saved;
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    SetProcessDPIAware();
     using namespace pulse::ui;
     if (argc == 2 && wcscmp(argv[1], L"--popup-placement") == 0) {
         const RECT work{-1920, -100, 0, 940};
@@ -135,13 +192,143 @@ int wmain(int argc, wchar_t** argv) {
     }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const HWND foreground = GetForegroundWindow();
-    HWND owner = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"", WS_POPUP,
+    WNDCLASSW fixture_class{};
+    fixture_class.hInstance = GetModuleHandleW(nullptr);
+    fixture_class.lpszClassName = L"PulseMenuMaterialFixture";
+    fixture_class.lpfnWndProc = [](HWND window, UINT message, WPARAM wp, LPARAM lp) -> LRESULT {
+        if (message == WM_ERASEBKGND) return 1;
+        if (message == WM_PAINT) {
+            PAINTSTRUCT paint{};
+            HDC dc = BeginPaint(window, &paint);
+            if (GetWindowLongPtrW(window, GWLP_USERDATA)) {
+                for (int x = 0; x < 1000; x += 100) {
+                    HBRUSH brush = CreateSolidBrush(x % 200 ? RGB(60, 170, 225) : RGB(220, 90, 160));
+                    RECT stripe{x, 0, x + 100, 520};
+                    FillRect(dc, &stripe, brush);
+                    DeleteObject(brush);
+                }
+            }
+            EndPaint(window, &paint);
+            return 0;
+        }
+        return DefWindowProcW(window, message, wp, lp);
+    };
+    RegisterClassW(&fixture_class);
+    HWND owner = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        fixture_class.lpszClassName, L"", WS_POPUP,
         -30000, -30000, 700, 400, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
-        if (argc == 2 && wcscmp(argv[1], L"--lifecycle") == 0) {
+        compositor.EnableFrameCopy();
+        if (argc == 3 && (wcscmp(argv[1], L"--acrylic") == 0 ||
+                         wcscmp(argv[1], L"--acrylic-transparent") == 0)) {
+            const bool transparent = wcscmp(argv[1], L"--acrylic-transparent") == 0;
+            HWND underlay = nullptr;
+            if (transparent) {
+                underlay = CreateWindowExW(WS_EX_NOACTIVATE, fixture_class.lpszClassName,
+                    L"", WS_POPUP, 270, 170, 1000, 520, nullptr, nullptr,
+                    GetModuleHandleW(nullptr), nullptr);
+                SetWindowLongPtrW(underlay, GWLP_USERDATA, 1);
+                SetWindowPos(underlay, HWND_TOPMOST, 270, 170, 1000, 520, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                UpdateWindow(underlay);
+            }
+            std::filesystem::create_directories(argv[2]);
+            Check(SetWindowPos(owner, HWND_TOPMOST, 270, 170, 1000, 520,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE, "position the material fixture");
+            UpdateWindow(owner);
+            DwmFlush();
+            RECT owner_rect{};
+            GetWindowRect(owner, &owner_rect);
+            compositor.Resize(1000, 520);
+            auto* background = compositor.Dc();
+            ComPtr<ID2D1SolidColorBrush> stripe_brush;
+            background->CreateSolidColorBrush(D2D1::ColorF(0), &stripe_brush);
+            background->BeginDraw();
+            background->Clear(D2D1::ColorF(0, transparent ? 0.0f : 1.0f));
+            for (int x = 0; !transparent && x < 1000; x += 100) {
+                stripe_brush->SetColor(D2D1::ColorF(x % 200 ? 0x3CAAE1 : 0xDC5AA0));
+                background->FillRectangle(D2D1::RectF(static_cast<float>(x), 0,
+                    static_cast<float>(x + 100), 520), stripe_brush.get());
+            }
+            Check(SUCCEEDED(background->EndDraw()), "draw the composition-backed background fixture");
+            compositor.Present();
+            DwmFlush();
+            if (transparent) {
+                ComPtr<ID2D1Bitmap1> readback;
+                const auto props = D2D1::BitmapProperties1(
+                    D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                    compositor.FrameCopy()->GetPixelFormat(), 96, 96);
+                D2D1_MAPPED_RECT mapped{};
+                const bool readable = SUCCEEDED(background->CreateBitmap(D2D1::SizeU(1, 1),
+                    nullptr, 0, props, &readback));
+                const D2D1_RECT_U pixel{500, 250, 501, 251};
+                const bool copied = readable && SUCCEEDED(readback->CopyFromBitmap(nullptr,
+                    compositor.FrameCopy(), &pixel)) && SUCCEEDED(readback->Map(D2D1_MAP_OPTIONS_READ, &mapped));
+                Check(copied && mapped.bits[3] == 0, "GPU frame omits the separately composed desktop background");
+                if (copied) readback->Unmap();
+            }
+            HDC screen = GetDC(nullptr);
+            COLORREF exposed = CLR_INVALID;
+            for (int attempt = 0; attempt < 50; ++attempt) {
+                DwmFlush();
+                exposed = GetPixel(screen, owner_rect.right - 10, owner_rect.bottom - 10);
+                if (exposed == RGB(60, 170, 225)) break;
+                Sleep(10);
+            }
+            if (exposed != RGB(60, 170, 225)) std::printf("fixture pixel: 0x%08lX\n", exposed);
+            Check(exposed == RGB(60, 170, 225),
+                "material fixture is exposed for screen capture");
+            ReleaseDC(nullptr, screen);
+            ValidateRect(owner, nullptr);
+            for (const float scale : {1.0f, 1.5f}) {
+                for (const bool dark : {false, true}) {
+                    FluentMenu menu;
+                    Check(menu.Create(owner, &compositor, scale), "create acrylic popup");
+                    menu.SetTopmost(true);
+                    menu.SetTheme(dark, D2D1::ColorF(0.0f, 0.47f, 0.83f));
+                    auto create = Item(186, L"新建"); create.live_update = true;
+                    create.children = {Item(30, L"文件夹"), Item(31, L"文本文档"),
+                        Item(8013, L"Microsoft Word 文档")};
+                    Check(FluentMenuTestPeer::Begin(menu, {create, Item(1, L"刷新"), Item(2, L"属性")}),
+                        "render acrylic foreground");
+                    FluentMenuTestPeer::FullyVisible(menu);
+                    FluentMenuTestPeer::Open(menu);
+                    const bool fallback = !MenuBackdropSource::Enabled();
+                    Check(FluentMenuTestPeer::Acrylic(menu) == !fallback &&
+                        FluentMenuTestPeer::Acrylic(menu, true) == !fallback,
+                        "parent and submenu use sampled acrylic or the requested opaque fallback");
+                    Check(FluentMenuTestPeer::DesktopSample(menu) == !fallback,
+                        "capture the composited background before showing either popup");
+                    Check(FluentMenuTestPeer::SampleShowsThrough(menu) == !fallback,
+                        "menu pixels retain background color variation only with acrylic");
+                    DwmFlush(); Sleep(200);
+                    HDC popup_screen = GetDC(nullptr);
+                    Check(GetPixel(popup_screen, 350, 250) != RGB(220, 90, 160),
+                        "the composited popup is visible above the patterned underlay");
+                    ReleaseDC(nullptr, popup_screen);
+                    const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                        std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                    Check(SaveScreen(std::filesystem::path(argv[2]) / name, owner_rect),
+                        "capture composited menu and submenu over a patterned desktop fixture");
+                    auto* captured = FluentMenuTestPeer::DesktopBitmap(menu);
+                    create.children.push_back(Item(8014, L"Microsoft Excel 工作表"));
+                    Check(menu.ReplaceItems({create, Item(1, L"刷新"), Item(2, L"属性")}) &&
+                        FluentMenuTestPeer::DesktopBitmap(menu) == captured &&
+                        FluentMenuTestPeer::SampleShowsThrough(menu) == !fallback,
+                        "live submenu growth reuses the clean background instead of capturing its own pixels");
+                    menu.Dismiss();
+                    Check(!FluentMenuTestPeer::DesktopSample(menu) && !FluentMenuTestPeer::Acrylic(menu),
+                        "dismissal releases desktop pixels and the cached plate");
+                }
+            }
+            ShowWindow(owner, SW_HIDE);
+            DestroyWindow(owner);
+            if (underlay) DestroyWindow(underlay);
+            Check(ForegroundBelongsToAnotherProcess(), "acrylic menus do not take foreground activation");
+            CoUninitialize();
+            return failures ? 1 : 0;
+        } else if (argc == 2 && wcscmp(argv[1], L"--lifecycle") == 0) {
             FluentMenu menu;
             Check(menu.Create(owner, &compositor, 1), "create animation and dismissal host");
             auto create = Item(186, L"New"); create.live_update = true;
@@ -193,8 +380,13 @@ int wmain(int argc, wchar_t** argv) {
             SendMessageW(FluentMenuTestPeer::Window(menu), WM_CANCELMODE, 0, 0);
             Check(FluentMenuTestPeer::Result(menu) == 0,
                 "external cancellation before invocation also clears a selection from an already hidden menu");
+            Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for submenu command selection");
+            FluentMenuTestPeer::Open(menu);
+            FluentMenuTestPeer::ChooseSubRow(menu, 1);
+            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 31,
+                "submenu window mouse coordinates select the expected command");
             DestroyWindow(owner);
-            Check(GetForegroundWindow() == foreground, "menu lifecycle tests preserve foreground activation");
+            Check(ForegroundBelongsToAnotherProcess(), "menu lifecycle does not take foreground activation");
             CoUninitialize();
             return failures ? 1 : 0;
         }
@@ -266,7 +458,7 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
     DestroyWindow(owner);
-    Check(GetForegroundWindow() == foreground, "tests preserve foreground activation");
+    Check(ForegroundBelongsToAnotherProcess(), "menu tests do not take foreground activation");
     CoUninitialize();
     return failures ? 1 : 0;
 }

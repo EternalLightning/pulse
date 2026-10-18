@@ -65,6 +65,9 @@ struct SessionSnapshot : WindowSessionSnapshot {
 std::wstring GetPulseDataDir();
 bool SaveSession(const SessionSnapshot& snap);
 bool LoadSession(SessionSnapshot& snap);
+// Startup keeps appearance, tray and undo state, but never restores navigation.
+bool SaveSessionPreferences(const WindowSessionSnapshot& snap);
+bool LoadSessionPreferences(WindowSessionSnapshot& snap);
 std::wstring SessionToJson(const SessionSnapshot& snap);
 bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap);
 

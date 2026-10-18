@@ -982,6 +982,12 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
             pulse::shell::CollectHandlerItems(w->slot, w->background, w->items);
         else
             pulse::shell::ReleaseHandlerSlot(w->slot);
+        if (pulse::ipc::IsNativeNewMenuHandler(w->desc.clsid_text)) {
+            wchar_t diagnostic[160]{};
+            swprintf_s(diagnostic, L"Native New query hr=0x%08X rows=%zu ids=%u..%u",
+                static_cast<unsigned>(hr), w->items.size(), w->id_first, w->id_last);
+            HostLog(diagnostic);
+        }
     }
     w->elapsed_ms = static_cast<uint32_t>(GetTickCount64() - t0);
     if (w->done_event) SetEvent(w->done_event);
