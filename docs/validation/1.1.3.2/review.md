@@ -1,0 +1,69 @@
+# Pulse 1.1.3.2 验证记录
+
+日期：2026-10-18。
+
+## 范围
+
+基线为本轮开始前提交的 `0e81e18`，优化提交为 `9f150fd` 与 `93af249`。版本号由 `1.1.3.0` 提升到 `1.1.3.2`。
+
+重点验证窗口显示过渡、菜单亚克力采样、输入/绘制路径、会话恢复和设置迁移失败反馈。未重新审查操作、索引和 Shell 的安全契约。
+
+## 实际改动
+
+- 恢复 `WS_CAPTION` 原生窗口过渡样式；隐藏窗口从任务栏固定图标、托盘或冷启动显示时，由 DirectComposition 在首个完整帧上启动 180ms 平滑淡入。系统关闭动画或高对比度时跳过。
+- 菜单亚克力采样只覆盖卡片、模糊边距和 120 DIP 增长余量；主菜单与子菜单各自持有采样，子菜单在显示前采样，避免把自身旧像素当背景。
+- 只读命中路径复用上一帧 ViewModel；`BuildVm(false)` 跳过操作/索引状态、选择大小遍历和剪贴板探测。窗口标题按变化更新，鼠标离开只注册一次，相同尺寸不重建 swap chain。
+- 会话恢复跳过空路径 pane；设置迁移失败刷新卷视图。
+- 合并非必要状态栏构建代码，菜单卡片的采样键改用专用结构。
+
+## 构建与打包
+
+`build_installer.bat` 完整 Release 构建和 Inno Setup 编译成功，退出码 0。
+
+| 产物 | 字节 | SHA256 |
+|---|---:|---|
+| `dist/PulseSetup-1.1.3.2.exe` | 9,945,918 | `692D78451DE45DB328303B8E28CA1CD036F159B93C57F5E04712FDB42134D607` |
+| `dist/Pulse-1.1.3.2-portable-win-x64.zip` | 12,173,967 | `8A96B487D3BED9AAA902E9362D25D48FAE864AB573C63BC303319A2110FD14B6` |
+
+Release 二进制版本均为 `1.1.3.2`：
+
+| 文件 | 字节 | SHA256 |
+|---|---:|---|
+| `Pulse.exe` | 7,395,328 | `D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385` |
+| `Pulse.Index.exe` | 3,406,848 | `528312469736842C1950803C3BB07BCB458F140018E7C58A7967688F26BC65F6` |
+| `Pulse.Document.exe` | 237,056 | `59BD7EC2C42600E466A6D75FFBA7AF2D9D88A0DF0AF71B27ED45491FD1B53110` |
+| `Pulse.Preview.exe` | 264,704 | `4614D9AE6CEA4494B6975E56280FCE24AB522B13BCC8B94EAC791F9EA3D03DC0` |
+| `Pulse.Shell.exe` | 1,418,240 | `6B1887ABA28470B7EC9D0A1C8EF05F703F7E992D05943FCFF20241D769731A69` |
+
+## 定向回归
+
+Release 构建产物上重新执行：
+
+- `pulse_app_controllers_test`：PASS（会话空 pane 恢复、滚动状态、迁移失败刷新）
+- `pulse_pane_animation_application_test`：PASS
+- `pulse_multiwindow_application_test`：0 failures
+- `pulse_clipboard_availability_test`：28 checks，0 failures
+- `pulse_session_windows_test`：0 failures
+- `pulse_titlebar_layout_test`：0 failures
+- `pulse_menu_text_test` 默认用例：PASS
+- `pulse_menu_text_test --acrylic-transparent`：PASS，包含“采样裁剪到弹窗和模糊边距”和“实时子菜单增长复用干净背景”
+- `pulse_sidebar_scrollbar_fade_test`：PASS（Debug/Ninja 构建阶段）
+
+`pulse.exe --shot 1200x800 --test-instance` 使用隔离数据目录渲染成功，退出码 0。
+
+## 本地部署
+
+- 目标：`D:\Applications\Pulse\Pulse.exe`
+- 备份：`dist/rollback-1.1.3.2-20261018-114528/Pulse.exe`
+- 部署前 SHA256：`D52CA82E7228E4D0E43084628BD0903E7555D94D0C5E2D87D5422DAE81394EFB`
+- 部署后 SHA256：`D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385`
+- `PulseIndex` 服务保持 Running。
+- 从部署目录执行 `--shot 1200x800 --test-instance` 成功，退出码 0；记录见 `dist/deploy-1.1.3.2.json`。
+
+## 边界
+
+- 本次只替换本地部署的 `Pulse.exe`。`Pulse.Index.exe` 由正在运行的 `PulseIndex` 服务占用，当前会话无服务控制权限，未停止或替换；安装包和免安装包内五个二进制均为 `1.1.3.2`。
+- 未运行完整 `pulse.exe --selftest`、全部历史测试、真实任务栏点击录像或真实安装/卸载升级。
+- 动画通过等价的隐藏/恢复路径探针和慢速过渡验证，没有物理鼠标任务栏点击录屏。
+- `pulse_menu_text_test --acrylic`（非透明桌面曝光项）依赖当前桌面顶层窗口环境；本次未将其作为通过项。透明亚克力夹具和裁剪断言已通过。
+- 未测量 GPU 帧时间、整机 CPU 或内存的净变化。
