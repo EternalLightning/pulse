@@ -4,8 +4,6 @@
 
 Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.3.0，面向 Windows 10 和 Windows 11 x64。
 
-1.1.3.0 已调整 Shell 工作进程的恢复日志状态初始化，修复后产物及安装文件通过本机卡巴斯基扫描。告警对照构建、扫描结果和验证边界见 [验证记录](docs/validation/1.1.3.0/review.md)。
-
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 
 源码采用 [Apache License 2.0](LICENSE)，发行版说明见 [NOTICE](NOTICE)。第三方组件遵循各自许可证，免安装包附带 `licenses` 目录。
@@ -20,6 +18,8 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 
 标签页可以拖出为独立窗口，也可以拖入其他窗口的标签栏或文件内容区；分栏窗格可以单独拖出，拖动窗口标题栏至另一窗口标签栏可合并窗口。在“设置 → 常规”中可选择从其他程序打开文件夹时使用新标签、新窗口，或优先显示已经打开的位置。粘贴支持 Windows Shell 虚拟文件，包括远程桌面、压缩包和 Outlook 提供的文件内容。
 
+![Pulse 外观](docs/images/appearance.png)
+
 ## 搜索与索引
 
 按文件名搜索，并使用路径、类型等条件筛选结果；也可搜索文件正文。索引服务可选装，用于后台全盘索引。文件名搜索支持中文全拼和拼音首字母。
@@ -32,7 +32,7 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 
 在文件管理器中预览支持的文件，使用浅色或深色主题，并可设置壁纸背景。界面采用多窗格布局，便于并排查看目录。
 
-![Pulse 外观设置与壁纸背景](docs/images/appearance.png)
+![Pulse 外观设置与壁纸背景](docs/images/settings.png)
 
 ![Pulse 多窗格文件管理](docs/images/panes.png)
 
@@ -53,7 +53,6 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 
 ```powershell
 pwsh ./scripts/build_release_ci.ps1 -Channel windows
-pwsh ./scripts/build_release_ci.ps1 -Channel win81 -BuildDir build-ci-win81
 ```
 
 发布脚本使用 Visual Studio 2022 v143，并校验仓库内固定版本的 LumaText 静态运行库 SDK。`cmake/lumatext-sdk.json` 固定 SDK 清单的 SHA-256，清单覆盖 DLL、导入库、头文件、CMake 导出和许可证。开发构建可通过 `LUMATEXT_SOURCE_DIR` 指定源码；未找到 LumaText 时使用 DirectWrite。
