@@ -310,7 +310,10 @@ void RestoreAppWindow(AppState& s) {
     if (s.core.global_ui_owner == s.hwnd) {
         s.tray_controller.RestoreWindow();
     } else if (s.hwnd) {
+        const bool was_hidden = !IsWindowVisible(s.hwnd);
+        if (was_hidden) s.compositor.QueueShowTransition();
         ShowWindow(s.hwnd, IsIconic(s.hwnd) ? SW_RESTORE : SW_SHOW);
+        if (was_hidden) InvalidateRect(s.hwnd, nullptr, FALSE);
         SetForegroundWindow(s.hwnd);
     }
 }
@@ -1428,8 +1431,9 @@ bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
     return changed;
 }
 
-bool CanPasteIntoCurrent(AppState& s) {
-    if (PumpClipboardAvailability(s, GetTickCount64())) InvalidateRect(s.hwnd, nullptr, FALSE);
+bool CanPasteIntoCurrent(AppState& s, bool refresh) {
+    if (refresh && PumpClipboardAvailability(s, GetTickCount64()))
+        InvalidateRect(s.hwnd, nullptr, FALSE);
     const auto* tab = ActiveTab(s);
     return tab && !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path) &&
         !tab->net_readonly && s.clipboard_availability.Available();
@@ -1441,11 +1445,10 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         const auto* active = s.window_tabs.Active();
         auto title = active ? app::LayoutTabTitle(*active) : std::wstring{};
         title = title.empty() ? L"Pulse" : title + L" - Pulse";
-        const int length = GetWindowTextLengthW(s.hwnd);
-        std::wstring current(static_cast<size_t>(length) + 1, L'\0');
-        GetWindowTextW(s.hwnd, current.data(), length + 1);
-        current.resize(static_cast<size_t>(length));
-        if (current != title) SetWindowTextW(s.hwnd, title.c_str());
+        if (s.windowTitleCache != title) {
+            SetWindowTextW(s.hwnd, title.c_str());
+            s.windowTitleCache = std::move(title);
+        }
     }
     if (!s.pane) return {};
     s.changes.visible_paths.clear();
@@ -1459,9 +1462,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     ui::WindowViewModel vm = app::BuildWindowViewModel(*s.pane, s.sidebar,
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
-        s.sidebarQuickAccessHiddenMask);
+        s.sidebarQuickAccessHiddenMask, probe_details);
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
-    vm.can_paste = CanPasteIntoCurrent(s);
+    vm.can_paste = CanPasteIntoCurrent(s, probe_details);
     if (const auto* tab = ActiveTab(s); tab && !IsArchiveView(tab->current_path)) {
         if (!tab->content_results) {
             vm.selection_has_drive_root = tab->SnapshotSelectionHasDriveRoot();
@@ -1496,67 +1499,69 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         vm.sidebar_pin_drag_index = s.pinDragRun;
         if (s.pinGapVisible) vm.sidebar_pin_gap_line_y = s.pinGapLineY;
     }
-    if (app::Tab* sel_tab = ActiveTab(s); sel_tab && sel_tab->content_results && sel_tab->SelectedCount() > 1) {
-        wchar_t count[64]{};
-        swprintf_s(count, l10n::Get(l10n::StringId::SelectedCountFormat).c_str(), sel_tab->SelectedCount());
-        const std::optional<uint64_t> bytes = ContentSelectionSize(*sel_tab);
-        vm.status.selection_text = std::wstring(count) + L"  \u00B7  " +
-            (bytes ? pulse::format::ByteSize(*bytes, true) : l10n::Get(l10n::StringId::LoadingEllipsis));
-    }
-    ops::OpStatus st = s.ops.Status();
-    if (st.active || !st.last_error.empty() || !st.summary.empty()) {
-        vm.status.task_text = st.last_error.empty() ? st.summary
-            : st.summary + L" — " + st.last_error;
-        vm.status.task_progress = st.active ? st.percent : -1.0f;
-        if(s.contentSelectionAction) vm.status.selection_text=l10n::Get(l10n::StringId::OpPreparingList);
-    }
-    {
-        std::wstring idx = s.index.Status();
-        app::Tab* active = ActiveTab(s);
-        std::wstring virtual_kind;
-        std::wstring virtual_rest;
-        const bool search_visible = active &&
-            app::ParsePulsePath(active->current_path, &virtual_kind, &virtual_rest) &&
-            virtual_kind == L"search";
-        if (!idx.empty() && !vm.status.query_active && (s.paletteSearching || search_visible)) {
-            if (!vm.status.status_text.empty()) vm.status.status_text += L"  ·  ";
-            vm.status.status_text += idx;
+    if (probe_details) {
+        if (app::Tab* sel_tab = ActiveTab(s); sel_tab && sel_tab->content_results && sel_tab->SelectedCount() > 1) {
+            wchar_t count[64]{};
+            swprintf_s(count, l10n::Get(l10n::StringId::SelectedCountFormat).c_str(), sel_tab->SelectedCount());
+            const std::optional<uint64_t> bytes = ContentSelectionSize(*sel_tab);
+            vm.status.selection_text = std::wstring(count) + L"  \u00B7  " +
+                (bytes ? pulse::format::ByteSize(*bytes, true) : l10n::Get(l10n::StringId::LoadingEllipsis));
         }
-    }
-    if (s.showFps) {
-        wchar_t perf[256];
-        swprintf_s(perf, l10n::Get(l10n::StringId::PerformanceFormat).c_str(),
-            s.lastFrameMs, s.lastFps, s.timing.enum_ms, s.timing.sort_ms,
-            s.processCpuPercent, s.workingSetMb);
-        wchar_t breakdown[96];
-        swprintf_s(breakdown, L"  \u00B7  D %.1f ms  \u00B7  P %.1f ms",
-            s.timing.draw_ms, s.timing.present_ms);
-        vm.status.performance_text = std::wstring(perf) + breakdown;
-        wchar_t lumaStatsEnabled[8]{};
-        const bool showLumaStats = GetEnvironmentVariableW(
-            L"PULSE_LUMATEXT_STATS", lumaStatsEnabled, ARRAYSIZE(lumaStatsEnabled)) > 0;
-        wchar_t compactPerf[160];
-        const auto* lumaStats = showLumaStats ? s.compositor.GetLumaTextStats() : nullptr;
-        if (lumaStats && s.compositor.LumaTextEnabled()) {
-            swprintf_s(compactPerf,
-                L"DEV %.1f ms \u00B7 D %.1f \u00B7 P %.1f \u00B7 %.0f FPS \u00B7 LT %llu/%llu E%llu \u00B7 %.0f MB",
-                s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms, s.lastFps,
-                static_cast<unsigned long long>(lumaStats->surface_cache_hits),
-                static_cast<unsigned long long>(lumaStats->surface_cache_misses),
-                static_cast<unsigned long long>(lumaStats->surface_cache_evictions),
-                s.workingSetMb);
+        ops::OpStatus st = s.ops.Status();
+        if (st.active || !st.last_error.empty() || !st.summary.empty()) {
+            vm.status.task_text = st.last_error.empty() ? st.summary
+                : st.summary + L" — " + st.last_error;
+            vm.status.task_progress = st.active ? st.percent : -1.0f;
+            if(s.contentSelectionAction) vm.status.selection_text=l10n::Get(l10n::StringId::OpPreparingList);
+        }
+        {
+            std::wstring idx = s.index.Status();
+            app::Tab* active = ActiveTab(s);
+            std::wstring virtual_kind;
+            std::wstring virtual_rest;
+            const bool search_visible = active &&
+                app::ParsePulsePath(active->current_path, &virtual_kind, &virtual_rest) &&
+                virtual_kind == L"search";
+            if (!idx.empty() && !vm.status.query_active && (s.paletteSearching || search_visible)) {
+                if (!vm.status.status_text.empty()) vm.status.status_text += L"  ·  ";
+                vm.status.status_text += idx;
+            }
+        }
+        if (s.showFps) {
+            wchar_t perf[256];
+            swprintf_s(perf, l10n::Get(l10n::StringId::PerformanceFormat).c_str(),
+                s.lastFrameMs, s.lastFps, s.timing.enum_ms, s.timing.sort_ms,
+                s.processCpuPercent, s.workingSetMb);
+            wchar_t breakdown[96];
+            swprintf_s(breakdown, L"  \u00B7  D %.1f ms  \u00B7  P %.1f ms",
+                s.timing.draw_ms, s.timing.present_ms);
+            vm.status.performance_text = std::wstring(perf) + breakdown;
+            wchar_t lumaStatsEnabled[8]{};
+            const bool showLumaStats = GetEnvironmentVariableW(
+                L"PULSE_LUMATEXT_STATS", lumaStatsEnabled, ARRAYSIZE(lumaStatsEnabled)) > 0;
+            wchar_t compactPerf[160];
+            const auto* lumaStats = showLumaStats ? s.compositor.GetLumaTextStats() : nullptr;
+            if (lumaStats && s.compositor.LumaTextEnabled()) {
+                swprintf_s(compactPerf,
+                    L"DEV %.1f ms \u00B7 D %.1f \u00B7 P %.1f \u00B7 %.0f FPS \u00B7 LT %llu/%llu E%llu \u00B7 %.0f MB",
+                    s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms, s.lastFps,
+                    static_cast<unsigned long long>(lumaStats->surface_cache_hits),
+                    static_cast<unsigned long long>(lumaStats->surface_cache_misses),
+                    static_cast<unsigned long long>(lumaStats->surface_cache_evictions),
+                    s.workingSetMb);
+            } else {
+                swprintf_s(compactPerf, L"DEV  %.1f ms  \u00B7  D %.1f  \u00B7  P %.1f  \u00B7  %.0f FPS  \u00B7  %.0f MB",
+                    s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms,
+                    s.lastFps, s.workingSetMb);
+            }
+            vm.status.performance_compact_text = compactPerf;
         } else {
-            swprintf_s(compactPerf, L"DEV  %.1f ms  \u00B7  D %.1f  \u00B7  P %.1f  \u00B7  %.0f FPS  \u00B7  %.0f MB",
-                s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms,
-                s.lastFps, s.workingSetMb);
+            const auto region = static_cast<ui::HitTestResult::Region>(s.hoverRegion);
+            if (HoverHintIsCommand(region))
+                vm.status.hint_text = TooltipForHover(s);
+            if (vm.status.hint_text.empty())
+                vm.status.hint_text = ContextStatusHint(ActiveTab(s));
         }
-        vm.status.performance_compact_text = compactPerf;
-    } else {
-        const auto region = static_cast<ui::HitTestResult::Region>(s.hoverRegion);
-        if (HoverHintIsCommand(region))
-            vm.status.hint_text = TooltipForHover(s);
-        if (vm.status.hint_text.empty())
-            vm.status.hint_text = ContextStatusHint(ActiveTab(s));
     }
     // 1B-2 overlays: cut rows, drag feedback, breadcrumb hover.
     if (!s.cutPaths.empty()) {
@@ -1925,6 +1930,18 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     vm.safe_mode = s.safeMode;
     vm.archive_view = ActiveTab(s) && IsArchiveView(ActiveTab(s)->current_path);
     return vm;
+}
+
+const ui::WindowViewModel& HitTestVm(AppState& s) {
+    const int width = s.compositor.Width();
+    const int height = s.compositor.Height();
+    if (!s.hitTestVmValid || s.hitTestVmWidth != width || s.hitTestVmHeight != height) {
+        s.hitTestVm = BuildVm(s, false);
+        s.hitTestVmWidth = width;
+        s.hitTestVmHeight = height;
+        s.hitTestVmValid = true;
+    }
+    return s.hitTestVm;
 }
 
 // True while the sidebar is collapsed to its icon rail: rows carry no text, so

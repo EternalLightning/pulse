@@ -7,7 +7,7 @@
 namespace pulse {
 
 bool PumpClipboardAvailability(AppState& s, ULONGLONG now);
-bool CanPasteIntoCurrent(AppState& s);
+bool CanPasteIntoCurrent(AppState& s, bool refresh = true);
 
 inline app::LayoutTab& LiveLayout(AppState& s) {
     s.window_tabs.EnsureDefault();
@@ -114,6 +114,9 @@ std::wstring DetailsAttributeText(DWORD attrs);
 double TrayAnimationNow();
 bool TickTrayDeck(AppState& s, double now = TrayAnimationNow());
 ui::WindowViewModel BuildVm(AppState& s, bool probe_details = true);
+// Displayed layout for pointer hit tests. Rebuilt on demand after a resize or
+// before the first frame; never used for state-changing clicks.
+const ui::WindowViewModel& HitTestVm(AppState& s);
 std::wstring TooltipForHover(AppState& s);
 // Records what the pointer is over. Both mouse-move paths (client and frame)
 // must call this, or a hover field silently stops updating.

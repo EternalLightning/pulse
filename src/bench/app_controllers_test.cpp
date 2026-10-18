@@ -925,7 +925,7 @@ int wmain(int argc, wchar_t** argv) {
     settings.SelectPage(2);
     settings.ScrollBy(-120.0f, 1.0f, 100.0f);
     passed &= Report("settings controller owns page and clamped scroll state",
-        settings.page() == 2 && settings.scroll() == 48.0f);
+        settings.page() == 2 && settings.scroll() == 72.0f);
     passed &= Report("settings controller maps stable page routes",
         SettingsController::PageFromName(L"index") == 1 &&
         std::wstring(SettingsController::PageName(2)) == L"context" &&

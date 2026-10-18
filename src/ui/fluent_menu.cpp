@@ -312,7 +312,6 @@ bool FluentMenu::Create(HWND owner, Compositor* compositor, float scale) {
     owner_ = owner;
     compositor_ = compositor;
     scale_ = scale;
-    if (compositor_) compositor_->EnableFrameCopy();
     painter_.SetCompositor(compositor);
     painter_.SetScale(scale);
     return EnsureWindow();
@@ -1543,6 +1542,9 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     result_ = 0;
     animating_out_ = false;
     backdrop_source_.Capture(*compositor_, screen_pt);
+    // The desktop sample above normally succeeds. Keep the renderer's frame as
+    // the fallback, but copy it once here instead of after every app frame.
+    if (compositor_ && !backdrop_source_.Bitmap()) compositor_->CaptureFrame();
     LayoutWindow(screen_pt);
     if (!Render()) {
         backdrop_source_.Reset();

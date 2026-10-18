@@ -54,6 +54,9 @@ public:
     void Shutdown();
     void Resize(int width, int height);
     void Present();
+    // A hidden window has no DWM open transition. Fade the composed visual in
+    // on its next presented frame instead of popping into view.
+    void QueueShowTransition();
     bool CanScheduleAnimationFrame() const {
         return !animation_frames_paused_ && !device_lost_ && swapChain_.get() &&
                targetBitmap_.get() && width_ > 0 && height_ > 0;
@@ -64,8 +67,9 @@ public:
     bool SaveSnapshot(const wchar_t* path);
 
     ID2D1DeviceContext* Dc() const { return dc_.get(); }
-    // Menus sample the last completed frame without a desktop capture/readback.
-    void EnableFrameCopy() { frame_copy_enabled_ = true; }
+    // Menus sample the rendered frame without a desktop capture or per-frame
+    // copy. Capture only when a menu is about to open, not after every Present.
+    bool CaptureFrame();
     ID2D1Bitmap1* FrameCopy() const { return frame_copy_.get(); }
     IDWriteFactory2* DwriteFactory() const { return dwriteFactory_.get(); }
     HWND Hwnd() const { return hwnd_; }
@@ -104,7 +108,6 @@ private:
     bool InitD3D();
     bool CreateSwapChain();
     void ResizeSwapChain();
-    void CopyFrame();
     static bool IsDeviceLost(HRESULT hr);
 
     HWND hwnd_ = nullptr;
@@ -117,6 +120,7 @@ private:
     ComPtr<IDCompositionDevice> compositionDevice_;
     ComPtr<IDCompositionTarget> compositionTarget_;
     ComPtr<IDCompositionVisual> compositionVisual_;
+    ComPtr<IDCompositionEffectGroup> opacityEffect_;
     ComPtr<ID2D1Factory1> d2dFactory_;
     ComPtr<ID2D1Device> d2dDevice_;
     ComPtr<ID2D1DeviceContext> dc_;
@@ -136,7 +140,7 @@ private:
     bool transparentComposition_ = false;
     bool device_lost_ = false;
     bool animation_frames_paused_ = true;
-    bool frame_copy_enabled_ = false;
+    bool show_transition_pending_ = false;
 };
 
 } // namespace pulse::ui

@@ -78,6 +78,12 @@ public:
     void Reset() { plate_.reset(); }
     bool Active() const { return plate_.get() != nullptr; }
 
+private:
+    // Screen rectangle of the baked plate. Kept separate from RECT because the
+    // width/height pair is compared as a key, not as left/top/right/bottom.
+    struct Key { LONG left, top, width, height; };
+
+public:
     bool Draw(Compositor& compositor, const MenuBackdropSource& source,
               const D2D1_RECT_F& card, POINT origin,
               bool dark, float scale) {
@@ -91,10 +97,11 @@ public:
         }
         const int width = static_cast<int>(std::ceil(card.right - card.left));
         const int height = static_cast<int>(std::ceil(card.bottom - card.top));
-        const RECT key{origin.x + static_cast<LONG>(card.left),
+        const Key key{origin.x + static_cast<LONG>(card.left),
             origin.y + static_cast<LONG>(card.top), width, height};
         if (width <= 0 || height <= 0) return false;
-        if (plate_.get() && (!EqualRect(&key_, &key) || dark_ != dark)) Reset();
+        if (plate_.get() && (key_.left != key.left || key_.top != key.top ||
+                key_.width != key.width || key_.height != key.height || dark_ != dark)) Reset();
         if (!plate_.get()) {
             POINT client = source.Bitmap() ? source.Origin() : POINT{};
             if (!source.Bitmap() && !ClientToScreen(owner, &client)) return false;
@@ -142,9 +149,9 @@ public:
         ComPtr<ID2D1Factory> factory;
         dc->GetFactory(&factory);
         ComPtr<ID2D1RoundedRectangleGeometry> clip;
+        const float radius = MakeTheme(dark, {}).radius_flyout * scale;
         if (FAILED(factory->CreateRoundedRectangleGeometry(
-                D2D1::RoundedRect(card, MakeTheme(dark, {}).radius_flyout * scale,
-                    MakeTheme(dark, {}).radius_flyout * scale), &clip))) return false;
+                D2D1::RoundedRect(card, radius, radius), &clip))) return false;
         dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), clip.get()), nullptr);
         dc->DrawBitmap(plate_.get(), card);
         dc->PopLayer();
@@ -153,7 +160,7 @@ public:
 
 private:
     ComPtr<ID2D1Bitmap1> plate_;
-    RECT key_{};
+    Key key_{};
     bool dark_ = false;
 };
 

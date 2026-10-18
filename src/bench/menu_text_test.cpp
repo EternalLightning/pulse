@@ -220,7 +220,6 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
-        compositor.EnableFrameCopy();
         if (argc == 3 && (wcscmp(argv[1], L"--acrylic") == 0 ||
                          wcscmp(argv[1], L"--acrylic-transparent") == 0)) {
             const bool transparent = wcscmp(argv[1], L"--acrylic-transparent") == 0;
@@ -253,6 +252,7 @@ int wmain(int argc, wchar_t** argv) {
             }
             Check(SUCCEEDED(background->EndDraw()), "draw the composition-backed background fixture");
             compositor.Present();
+            Check(compositor.CaptureFrame(), "capture the composed frame for the menu fallback");
             DwmFlush();
             if (transparent) {
                 ComPtr<ID2D1Bitmap1> readback;

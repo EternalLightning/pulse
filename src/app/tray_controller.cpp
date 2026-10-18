@@ -67,9 +67,13 @@ void TrayController::HideWindow() {
 
 void TrayController::RestoreWindow() {
     if (!hwnd_) return;
-    if (before_restore_ && !IsWindowVisible(hwnd_)) before_restore_();
+    const bool was_hidden = !IsWindowVisible(hwnd_);
+    if (before_restore_ && was_hidden) before_restore_();
     ShowWindow(hwnd_, IsIconic(hwnd_) ? SW_RESTORE : restore_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOW);
     restore_maximized_ = false;
+    // A hidden window can still have a valid client area; force the first
+    // frame that starts the composed show transition.
+    if (was_hidden) InvalidateRect(hwnd_, nullptr, FALSE);
     SetForegroundWindow(hwnd_);
 }
 

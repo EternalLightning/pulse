@@ -67,6 +67,7 @@ void Compositor::Shutdown() {
     if (compositionTarget_.get()) compositionTarget_->SetRoot(nullptr);
     if (compositionDevice_.get()) compositionDevice_->Commit();
     compositionVisual_.reset();
+    opacityEffect_.reset();
     compositionTarget_.reset();
     compositionDevice_.reset();
     swapChain_.reset();
@@ -89,6 +90,7 @@ void Compositor::Shutdown() {
     transparentComposition_ = false;
     hwnd_ = nullptr;
     device_lost_ = false;
+    show_transition_pending_ = false;
 }
 
 bool Compositor::InitD3D() {
@@ -256,6 +258,8 @@ bool Compositor::CreateSwapChain() {
     }
     if (SUCCEEDED(hr)) hr = compositionDevice_->CreateTargetForHwnd(hwnd_, FALSE, &compositionTarget_);
     if (SUCCEEDED(hr)) hr = compositionDevice_->CreateVisual(&compositionVisual_);
+    if (SUCCEEDED(hr)) hr = compositionDevice_->CreateEffectGroup(&opacityEffect_);
+    if (SUCCEEDED(hr)) hr = compositionVisual_->SetEffect(opacityEffect_.get());
     if (SUCCEEDED(hr)) hr = compositionVisual_->SetContent(swapChain_.get());
     if (SUCCEEDED(hr)) hr = compositionTarget_->SetRoot(compositionVisual_.get());
     if (SUCCEEDED(hr)) hr = compositionDevice_->Commit();
@@ -264,6 +268,7 @@ bool Compositor::CreateSwapChain() {
         transparentComposition_ = true;
     } else {
         compositionVisual_.reset();
+        opacityEffect_.reset();
         compositionTarget_.reset();
         compositionDevice_.reset();
         swapChain_.reset();
@@ -325,6 +330,21 @@ void Compositor::Resize(int width, int height) {
     if (swapChain_.get()) ResizeSwapChain();
 }
 
+void Compositor::QueueShowTransition() {
+    if (!opacityEffect_.get() || !compositionDevice_.get()) return;
+    BOOL animations = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) || !animations)
+        return;
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+        (contrast.dwFlags & HCF_HIGHCONTRASTON)) return;
+    // The window can become visible before its first paint. Keep the composed
+    // layer transparent until Present starts the animation from a full frame.
+    show_transition_pending_ = true;
+    opacityEffect_->SetOpacity(0.0f);
+    compositionDevice_->Commit();
+}
+
 bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     if (!dwriteFactory_.get() || !dc_.get()) return false;
     if (!monitor && hwnd_) monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
@@ -344,16 +364,20 @@ bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     return true;
 }
 
-void Compositor::CopyFrame() {
-    if (!frame_copy_enabled_ || !dc_.get() || !targetBitmap_.get()) return;
+bool Compositor::CaptureFrame() {
+    if (!dc_.get() || !targetBitmap_.get()) return false;
     const auto size = targetBitmap_->GetPixelSize();
-    if (!frame_copy_.get()) {
+    if (!frame_copy_.get() || frame_copy_->GetPixelSize() != size) {
+        frame_copy_.reset();
         const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
             targetBitmap_->GetPixelFormat(), 96.0f, 96.0f);
-        if (FAILED(dc_->CreateBitmap(size, nullptr, 0, props, &frame_copy_))) return;
+        if (FAILED(dc_->CreateBitmap(size, nullptr, 0, props, &frame_copy_))) return false;
     }
-    if (FAILED(frame_copy_->CopyFromBitmap(nullptr, targetBitmap_.get(), nullptr)))
+    if (FAILED(frame_copy_->CopyFromBitmap(nullptr, targetBitmap_.get(), nullptr))) {
         frame_copy_.reset();
+        return false;
+    }
+    return true;
 }
 
 void Compositor::Present() {
@@ -361,7 +385,6 @@ void Compositor::Present() {
     if (device_lost_ || !swapChain_.get()) return;
     if (hwnd_) UpdateTextRenderingParams(
         MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
-    CopyFrame();
     HRESULT hr = swapChain_->Present(1, 0);
     if (FAILED(hr)) {
         if (IsDeviceLost(hr)) NotifyDeviceLost(hr);
@@ -370,6 +393,24 @@ void Compositor::Present() {
     // OCCLUDED is a success status, but does not pace the animation loop.
     const bool presented = hr == S_OK;
     if (compositionDevice_.get()) {
+        if (show_transition_pending_ && opacityEffect_.get()) {
+            show_transition_pending_ = false;
+            constexpr double duration = 0.18;
+            ComPtr<IDCompositionAnimation> fade;
+            if (SUCCEEDED(compositionDevice_->CreateAnimation(&fade))) {
+                // Smoothstep keeps the first half of the fade visible; a cubic
+                // ease-out reaches near-opaque before the eye can register it.
+                fade->AddCubic(0.0, 0.0f, 0.0f,
+                    static_cast<float>(3.0 / (duration * duration)),
+                    static_cast<float>(-2.0 / (duration * duration * duration)));
+                fade->AddCubic(duration, 1.0f, 0.0f, 0.0f, 0.0f);
+                fade->End(duration, 1.0f);
+                if (FAILED(opacityEffect_->SetOpacity(fade.get())))
+                    opacityEffect_->SetOpacity(1.0f);
+            } else {
+                opacityEffect_->SetOpacity(1.0f);
+            }
+        }
         hr = compositionDevice_->Commit();
         if (FAILED(hr) && IsDeviceLost(hr)) NotifyDeviceLost(hr);
     }

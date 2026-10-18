@@ -201,6 +201,10 @@ bool Render(AppState& s) {
 
     D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s.compositor.Width(), (float)s.compositor.Height());
     s.renderer.Render(vm, rect, theme);
+    s.hitTestVm = std::move(vm);
+    s.hitTestVmWidth = s.compositor.Width();
+    s.hitTestVmHeight = s.compositor.Height();
+    s.hitTestVmValid = true;
     s.notification_toast.Draw(s.compositor, theme, s.scale, hc);
 
     const HRESULT end_hr = dc->EndDraw();
@@ -358,6 +362,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->dup_volume_cache_pending = false;
         s->tray_controller.SetBeforeRestore([s] {
             s->tray_controller.SetVisible(s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled);
+            s->compositor.QueueShowTransition();
         });
         if (s->core.global_ui_owner == hwnd) s->tray_controller.Attach(hwnd, cs->hInstance);
 
@@ -373,7 +378,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             MessageBoxW(hwnd, message.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
             return -1;
         }
-        s->compositor.EnableFrameCopy();
         s->compositor.RecreateTextFormats(s->scale);
         if (s->shot.active) {
             wchar_t toast_test[2]{};
@@ -724,7 +728,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (client.x >= s->compositor.Width() - 32.0f * s->scale) {
                 D2D1_RECT_F track{}, thumb{};
                 float maximum = 0.0f;
-                if (s->renderer.SettingsScrollbarGeometry(BuildVm(*s, false),
+                if (s->renderer.SettingsScrollbarGeometry(HitTestVm(*s),
                         static_cast<float>(s->compositor.Width()),
                         static_cast<float>(s->compositor.Height()), track, thumb, maximum) &&
                     client.x >= track.left && client.x < track.right &&
@@ -762,7 +766,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (y >= 0 && y < tbH) {
             D2D1_RECT_F bounds = D2D1::RectF(0, 0,
                 (float)s->compositor.Width(), (float)s->compositor.Height());
-            ui::HitTestResult hit = s->renderer.HitTest(BuildVm(*s, false), bounds, x, y);
+            ui::HitTestResult hit = s->renderer.HitTest(HitTestVm(*s), bounds, x, y);
             if (hit.region == ui::HitTestResult::Maximize) return HTMAXBUTTON;
             if (hit.region == ui::HitTestResult::Minimize) return HTMINBUTTON;
             if (hit.region == ui::HitTestResult::Close) return HTCLOSE;
@@ -778,7 +782,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         ScreenToClient(hwnd, &pt);
         D2D1_RECT_F bounds = D2D1::RectF(0, 0,
             (float)s->compositor.Width(), (float)s->compositor.Height());
-        ui::HitTestResult hit = s->renderer.HitTest(BuildVm(*s, false), bounds,
+        ui::HitTestResult hit = s->renderer.HitTest(HitTestVm(*s), bounds,
             (float)pt.x, (float)pt.y);
         s->hoverPoint = pt;
         const int region = static_cast<int>(hit.region);
@@ -867,7 +871,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         int height = (std::max)(480L, source.bottom - source.top);
         HWND created = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP,
             app::SingleInstanceCoordinator::WindowClassName(), L"Pulse",
-            WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+            WS_OVERLAPPEDWINDOW,
             left, top, width, height,
             nullptr, nullptr, instance, child.get());
         if (!created) {
@@ -876,6 +880,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
         HICON icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_PULSE));
         if (icon) SendMessageW(created, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+        child->compositor.QueueShowTransition();
         ShowWindow(created, SW_SHOWNORMAL);
         UpdateWindow(created);
         return reinterpret_cast<LRESULT>(child.get());
@@ -1108,7 +1113,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
             return TRUE;
         }
-        ui::WindowViewModel vm = BuildVm(*s, false);
+        const ui::WindowViewModel& vm = HitTestVm(*s);
         D2D1_RECT_F bounds = D2D1::RectF(0, 0,
             (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult hit = s->renderer.HitTest(vm, bounds, (float)pt.x, (float)pt.y);
@@ -2237,7 +2242,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_PULSE));
@@ -2265,9 +2270,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         WS_EX_NOREDIRECTIONBITMAP,
         wc.lpszClassName,
         L"Pulse",
-        // Keep resize, system menu and min/max behavior, but only Pulse draws
-        // the caption. DWM may otherwise overlay its own buttons on Windows 11.
-        WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+        // Keep an overlapped window for the native minimize/restore/open
+        // transitions. WM_NCCALCSIZE and WM_NCPAINT still leave the caption to
+        // Pulse's renderer.
+        WS_OVERLAPPEDWINDOW,
         x, y, w, h,
         nullptr, nullptr, hInstance, &state);
 
@@ -2282,6 +2288,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         hidden_shot[0] == L'1';
     const bool startup_hidden = startup_launch && state.appPrefs.start_to_tray &&
         state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
+    if (!test_hidden && !startup_hidden && !state.shot.active)
+        state.compositor.QueueShowTransition();
     ShowWindow(hwnd, test_hidden || startup_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL : nCmdShow);
     UpdateWindow(hwnd);
 

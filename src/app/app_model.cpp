@@ -1725,7 +1725,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                                          uint32_t sidebar_hidden_mask,
                                          bool starred_expanded,
                                          const std::vector<int>* sidebar_order,
-                                         uint32_t quick_access_hidden_mask) {
+                                         uint32_t quick_access_hidden_mask,
+                                         bool include_status) {
     ui::WindowViewModel vm;
     const Tab* tab = pane.ActiveTab();
     if (!tab) return vm;
@@ -1757,8 +1758,11 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
     FillPaneViewModel(vm.pane, pane, places);
     vm.pane.focused = focused;
 
-    vm.status.status_text = StatusText(*tab);
-    vm.status.selection_text = SelectionText(*tab);
+    if (include_status) {
+        vm.status.status_text = StatusText(*tab);
+        // Selection bytes walk the selected rows; hit-test view models skip it.
+        vm.status.selection_text = SelectionText(*tab);
+    }
     vm.status.query_active=tab->search_content_active;
     vm.status.query_cancellable = !tab->search_content_stopped &&
         (tab->search_input_content || tab->content_results || tab->search_content_active) &&

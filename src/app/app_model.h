@@ -549,7 +549,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                                          uint32_t sidebar_hidden_mask = 0,
                                          bool starred_expanded = true,
                                          const std::vector<int>* sidebar_order = nullptr,
-                                         uint32_t quick_access_hidden_mask = 0);
+                                         uint32_t quick_access_hidden_mask = 0,
+                                         bool include_status = true);
 
 // Sanitizes a stored section order: keeps only known ids, appends the missing
 // ones, drops duplicates. Returns DefaultSidebarOrder() when nothing survives.

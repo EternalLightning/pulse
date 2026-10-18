@@ -82,6 +82,9 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
     tab.panes.clear();
     tab.root.reset();
     for (const auto& saved : snapshot.panes) {
+        // Empty paths are placeholders from an interrupted save; a preset pane
+        // without a location cannot be restored and must not consume a slot.
+        if (saved.path.empty()) continue;
         auto pane = std::make_unique<Pane>();
         pane->view.view_mode = saved.view;
         pane->view.details_column_dividers = saved.columns;

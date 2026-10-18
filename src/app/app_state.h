@@ -566,6 +566,15 @@ struct AppState : AppCoreOwner {
     POINT hoverPoint{};
     std::wstring tooltipText;
     std::wstring hoverPath;
+    // Last caption text applied by BuildVm. Avoids a GetWindowText allocation
+    // and SetWindowText round trip on every hit-test/view-model build.
+    std::wstring windowTitleCache;
+    // Last rendered layout, reused by non-mutating hit tests (cursor, hit-test
+    // messages, hover) so a mouse move does not rebuild the full view model.
+    ui::WindowViewModel hitTestVm;
+    bool hitTestVmValid = false;
+    int hitTestVmWidth = 0;
+    int hitTestVmHeight = 0;
     // Name of the hovered sidebar row or section: the collapsed rail shows icons
     // only, so its tooltips read this.
     std::wstring hoverLabel;

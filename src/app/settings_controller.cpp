@@ -229,6 +229,9 @@ SettingsTaskEffect SettingsController::CompleteTask(const SettingsTaskResult& re
     } else {
         error_ = l10n::Get(l10n::StringId::SettingsOperationError).c_str();
     }
+    // A failed migration can still leave storage at a different location, so
+    // the volume view must reflect what is actually on disk.
+    if (result.task.kind == SettingsTaskKind::ConfigureIndexPath) effect.refresh_index = true;
     return effect;
 }
 

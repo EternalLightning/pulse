@@ -1084,7 +1084,9 @@ bool WindowMaterial::DrawBackdrop(ID2D1DeviceContext* dc, const D2D1_RECT_F& des
     }
     ID2D1Bitmap* sampled = EnsureSampled(dc, dest, effect, dark, path);
     if (!sampled) return false;
-    dc->DrawBitmap(sampled, dest, 1.0f, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+    // The sample is baked at (or very near) the destination size; cubic
+    // resampling every frame costs more than it can visibly improve.
+    dc->DrawBitmap(sampled, dest, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR,
                    nullptr, nullptr);
     return true;
 }
