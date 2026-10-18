@@ -14,7 +14,9 @@
 - 菜单亚克力采样只覆盖卡片、模糊边距和 120 DIP 增长余量；主菜单与子菜单各自持有采样，子菜单在显示前采样，避免把自身旧像素当背景。
 - 只读命中路径复用上一帧 ViewModel；`BuildVm(false)` 跳过操作/索引状态、选择大小遍历和剪贴板探测。窗口标题按变化更新，鼠标离开只注册一次，相同尺寸不重建 swap chain。
 - 会话恢复跳过空路径 pane；设置迁移失败刷新卷视图。
-- 合并非必要状态栏构建代码，菜单卡片的采样键改用专用结构。
+- 菜单卡片的采样键改用专用结构；子菜单渲染失败时立即隐藏，不再让后续 Present 显示旧表面。
+- 关闭系统动画或启用高对比度时，显式把已排队的窗口淡入恢复为不透明，避免遗留状态让窗口保持透明。
+- 合并非必要状态栏构建代码。
 
 ## 构建与打包
 
@@ -22,14 +24,14 @@
 
 | 产物 | 字节 | SHA256 |
 |---|---:|---|
-| `dist/PulseSetup-1.1.3.2.exe` | 9,945,918 | `692D78451DE45DB328303B8E28CA1CD036F159B93C57F5E04712FDB42134D607` |
-| `dist/Pulse-1.1.3.2-portable-win-x64.zip` | 12,173,967 | `8A96B487D3BED9AAA902E9362D25D48FAE864AB573C63BC303319A2110FD14B6` |
+| `dist/PulseSetup-1.1.3.2.exe` | 9,945,439 | `1373DDD0C10FCBE4AB2E3BEAA45C9C341B9D3DDE5F77A093C897E63EEA600D08` |
+| `dist/Pulse-1.1.3.2-portable-win-x64.zip` | 12,173,958 | `C8E5F9DEAFF8F7B57BCB56D059FDA33632434FD2FA39A911360A591A08054CC1` |
 
 Release 二进制版本均为 `1.1.3.2`：
 
 | 文件 | 字节 | SHA256 |
 |---|---:|---|
-| `Pulse.exe` | 7,395,328 | `D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385` |
+| `Pulse.exe` | 7,395,328 | `8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408` |
 | `Pulse.Index.exe` | 3,406,848 | `528312469736842C1950803C3BB07BCB458F140018E7C58A7967688F26BC65F6` |
 | `Pulse.Document.exe` | 237,056 | `59BD7EC2C42600E466A6D75FFBA7AF2D9D88A0DF0AF71B27ED45491FD1B53110` |
 | `Pulse.Preview.exe` | 264,704 | `4614D9AE6CEA4494B6975E56280FCE24AB522B13BCC8B94EAC791F9EA3D03DC0` |
@@ -54,9 +56,9 @@ Release 构建产物上重新执行：
 ## 本地部署
 
 - 目标：`D:\Applications\Pulse\Pulse.exe`
-- 备份：`dist/rollback-1.1.3.2-20261018-114528/Pulse.exe`
-- 部署前 SHA256：`D52CA82E7228E4D0E43084628BD0903E7555D94D0C5E2D87D5422DAE81394EFB`
-- 部署后 SHA256：`D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385`
+- 备份：`dist/rollback-1.1.3.2-20261018-115006/Pulse.exe`
+- 部署前 SHA256：`D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385`
+- 部署后 SHA256：`8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408`
 - `PulseIndex` 服务保持 Running。
 - 从部署目录执行 `--shot 1200x800 --test-instance` 成功，退出码 0；记录见 `dist/deploy-1.1.3.2.json`。
 

@@ -334,11 +334,18 @@ void Compositor::Resize(int width, int height) {
 void Compositor::QueueShowTransition() {
     if (!opacityEffect_.get() || !compositionDevice_.get()) return;
     BOOL animations = TRUE;
-    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) || !animations)
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) || !animations) {
+        opacityEffect_->SetOpacity(1.0f);
+        compositionDevice_->Commit();
         return;
+    }
     HIGHCONTRASTW contrast{sizeof(contrast)};
     if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
-        (contrast.dwFlags & HCF_HIGHCONTRASTON)) return;
+        (contrast.dwFlags & HCF_HIGHCONTRASTON)) {
+        opacityEffect_->SetOpacity(1.0f);
+        compositionDevice_->Commit();
+        return;
+    }
     // The window can become visible before its first paint. Keep the composed
     // layer transparent until Present starts the animation from a full frame.
     show_transition_pending_ = true;

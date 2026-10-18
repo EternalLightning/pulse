@@ -796,10 +796,13 @@ void FluentMenu::OpenSubmenu(int row) {
     // Render the flyout while it is still hidden, so its acrylic sample sees
     // the menu behind it rather than the flyout's own stale pixels.
     PositionSubmenu(false);
-    if (RenderSub()) {
-        PresentSub(present_alpha_);
-        PositionSubmenu(true);
+    if (!RenderSub()) {
+        HideSubWindow();
+        if (Render()) PresentCurrent();
+        return;
     }
+    PresentSub(present_alpha_);
+    PositionSubmenu(true);
     if (Render()) PresentCurrent(); // header row stays active
 }
 
