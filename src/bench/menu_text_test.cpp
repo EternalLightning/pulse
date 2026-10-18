@@ -11,7 +11,7 @@ struct FluentMenuTestPeer {
         menu.model_.SetItems(std::move(items));
         menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_);
         menu.base_x_ = 300; menu.base_y_ = 200;
-        menu.backdrop_source_.Capture(*menu.compositor_, {menu.base_x_, menu.base_y_});
+        menu.popup_pt_ = {menu.base_x_, menu.base_y_};
         menu.open_ = true; menu.animating_out_ = false; menu.result_ = 0;
         menu.hover_row_ = -1; menu.hover_swatch_ = -1;
         menu.anim_start_ = std::chrono::steady_clock::now();
@@ -51,6 +51,13 @@ struct FluentMenuTestPeer {
         return surface.backdrop.Active();
     }
     static bool DesktopSample(const FluentMenu& menu) { return menu.backdrop_source_.Bitmap() != nullptr; }
+    static bool CroppedSample(const FluentMenu& menu, float scale) {
+        const RECT bounds = menu.backdrop_source_.Bounds();
+        const int margin = static_cast<int>(std::ceil(16.0f * scale * 2.0f));
+        const int growth_pad = static_cast<int>(std::ceil(120.0f * scale));
+        return bounds.right - bounds.left <= menu.surf_.w + (margin + growth_pad) * 2 + 2 &&
+            bounds.bottom - bounds.top <= menu.surf_.h + (margin + growth_pad) * 2 + 2;
+    }
     static ID2D1Bitmap1* DesktopBitmap(const FluentMenu& menu) { return menu.backdrop_source_.Bitmap(); }
     static bool SampleShowsThrough(const FluentMenu& menu) {
         const auto& s = menu.surf_;
@@ -300,6 +307,8 @@ int wmain(int argc, wchar_t** argv) {
                         "parent and submenu use sampled acrylic or the requested opaque fallback");
                     Check(FluentMenuTestPeer::DesktopSample(menu) == !fallback,
                         "capture the composited background before showing either popup");
+                    Check(FluentMenuTestPeer::CroppedSample(menu, scale) == !fallback,
+                        "desktop sample is cropped to the popup and blur margin");
                     Check(FluentMenuTestPeer::SampleShowsThrough(menu) == !fallback,
                         "menu pixels retain background color variation only with acrylic");
                     DwmFlush(); Sleep(200);

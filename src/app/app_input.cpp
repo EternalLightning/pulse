@@ -1823,8 +1823,10 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             }
         }
 
-        TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
-        TrackMouseEvent(&tme);
+        if (!s->mouseLeaveTracked) {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+            s->mouseLeaveTracked = TrackMouseEvent(&tme) != FALSE;
+        }
 
         const ui::WindowViewModel& vm = HitTestVm(*s);
         D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
@@ -1879,6 +1881,7 @@ LRESULT HandleMouseLeave(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         (void)wParam;
         (void)lParam;
         if (s) {
+            s->mouseLeaveTracked = false;
             s->scrollbarHovered = false;
             s->hoverRow = -1;
             s->hoverPaneIndex = -1;

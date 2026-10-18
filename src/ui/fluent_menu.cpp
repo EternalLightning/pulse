@@ -573,7 +573,11 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
     }
 
     const POINT origin = main ? POINT{base_x_, base_y_} : POINT{sub_x_, sub_y_};
-    const bool acrylic = !snapshot_ && s.backdrop.Draw(*compositor_, backdrop_source_, drop, origin, dark_, scale_);
+    MenuBackdropSource& backdrop_source = main ? backdrop_source_ : sub_backdrop_source_;
+    const HWND popup = main ? hwnd_ : sub_hwnd_;
+    const bool allow_capture = popup && !IsWindowVisible(popup);
+    const bool acrylic = !snapshot_ && s.backdrop.Draw(*compositor_, backdrop_source, drop,
+        origin, dark_, scale_, allow_capture);
     if (painter_.BeginFrame(theme, IsHighContrast())) {
         if (drop.right > drop.left && drop.bottom > drop.top)
             painter_.DrawMenuSurface(drop, acrylic);
@@ -780,6 +784,8 @@ void FluentMenu::OpenSubmenu(int row) {
     if (!it || !it->enabled || it->children.empty() || !compositor_) return;
     if (row == sub_parent_row_) return; // already showing this row's children
     if (!EnsureSubWindow()) return;
+    // Switching flyout rows must not sample the previous flyout as background.
+    ShowWindow(sub_hwnd_, SW_HIDE);
     sub_model_.SetItems(it->children);
     sub_model_.Layout(compositor_->DwriteFactory(), scale_);
     sub_parent_row_ = row;
@@ -787,12 +793,17 @@ void FluentMenu::OpenSubmenu(int row) {
     sub_hover_swatch_ = -1;
     sub_pending_row_ = -1;
 
-    PositionSubmenu();
-    if (RenderSub()) PresentSub(present_alpha_);
+    // Render the flyout while it is still hidden, so its acrylic sample sees
+    // the menu behind it rather than the flyout's own stale pixels.
+    PositionSubmenu(false);
+    if (RenderSub()) {
+        PresentSub(present_alpha_);
+        PositionSubmenu(true);
+    }
     if (Render()) PresentCurrent(); // header row stays active
 }
 
-void FluentMenu::PositionSubmenu() {
+void FluentMenu::PositionSubmenu(bool show) {
     if (sub_parent_row_ < 0 || !sub_hwnd_) return;
     const int content_w = sub_model_.WidthPx();
     const int w = content_w + kShadowMargin * 2;
@@ -814,7 +825,7 @@ void FluentMenu::PositionSubmenu() {
     sub_x_ = x;
     sub_y_ = y;
     SetWindowPos(sub_hwnd_, topmost_ ? HWND_TOPMOST : HWND_TOP, x, y, w, h,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                 SWP_NOACTIVATE | (show ? SWP_SHOWWINDOW : SWP_NOZORDER));
 }
 
 void FluentMenu::CloseSubmenu() {
@@ -1493,6 +1504,7 @@ int FluentMenu::RunModalLoop() {
     if (hwnd_ && IsWindow(hwnd_)) ShowWindow(hwnd_, SW_HIDE);
     HideFilterEdit();
     backdrop_source_.Reset();
+    sub_backdrop_source_.Reset();
     surf_.backdrop.Reset();
     sub_surf_.backdrop.Reset();
     return result_;
@@ -1517,6 +1529,8 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     HideSubWindow(); // stale flyout state from the previous invocation
     surf_.backdrop.Reset();
     sub_surf_.backdrop.Reset();
+    backdrop_source_.Reset();
+    sub_backdrop_source_.Reset();
     filter_fn_ = std::move(filter);
     filter_query_ = initial_filter_text_;
     filter_committed_ = false;
@@ -1541,13 +1555,10 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     hover_swatch_ = -1;
     result_ = 0;
     animating_out_ = false;
-    backdrop_source_.Capture(*compositor_, screen_pt);
-    // The desktop sample above normally succeeds. Keep the renderer's frame as
-    // the fallback, but copy it once here instead of after every app frame.
-    if (compositor_ && !backdrop_source_.Bitmap()) compositor_->CaptureFrame();
     LayoutWindow(screen_pt);
     if (!Render()) {
         backdrop_source_.Reset();
+        sub_backdrop_source_.Reset();
         external_edit_ = nullptr;
         max_visible_rows_ = 0;
         ShowWindow(hwnd_, SW_HIDE);
@@ -1700,6 +1711,7 @@ void FluentMenu::Dismiss() {
     animating_out_ = false;
     if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
     backdrop_source_.Reset();
+    sub_backdrop_source_.Reset();
     surf_.backdrop.Reset();
     sub_surf_.backdrop.Reset();
 }

@@ -190,7 +190,7 @@ private:
     bool Render();                 // model_ -> dib_ (pixels), current hover state
     void Present(BYTE alpha, int y_offset_px);
     void PresentCurrent();
-    void PositionSubmenu();
+    void PositionSubmenu(bool show = true);
     // One-level flyout for FluentMenuItem::children.
     bool EnsureSubWindow();
     void OpenSubmenu(int row);
@@ -228,6 +228,7 @@ private:
     bool dark_ = false;
     bool snapshot_ = false;
     MenuBackdropSource backdrop_source_;
+    MenuBackdropSource sub_backdrop_source_;
     D2D1_COLOR_F accent_{};
 
     FluentMenuModel model_;

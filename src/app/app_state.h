@@ -575,6 +575,8 @@ struct AppState : AppCoreOwner {
     bool hitTestVmValid = false;
     int hitTestVmWidth = 0;
     int hitTestVmHeight = 0;
+    bool mouseLeaveTracked = false;
+    bool ncMouseLeaveTracked = false;
     // Name of the hovered sidebar row or section: the collapsed rail shows icons
     // only, so its tooltips read this.
     std::wstring hoverLabel;

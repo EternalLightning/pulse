@@ -325,6 +325,7 @@ void Compositor::ResizeSwapChain() {
 }
 
 void Compositor::Resize(int width, int height) {
+    if (width == width_ && height == height_ && targetBitmap_.get()) return;
     width_ = width;
     height_ = height;
     if (swapChain_.get()) ResizeSwapChain();

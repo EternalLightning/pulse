@@ -790,13 +790,16 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             ApplyHoverTarget(*s, hit);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
-        TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
-        TrackMouseEvent(&tme);
+        if (!s->ncMouseLeaveTracked) {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
+            s->ncMouseLeaveTracked = TrackMouseEvent(&tme) != FALSE;
+        }
         break;
     }
 
     case WM_NCMOUSELEAVE:
         if (s) {
+            s->ncMouseLeaveTracked = false;
             s->hoverRegion = 0;
             s->hoverControlIndex = -1;
             s->hoverSubIndex = -1;

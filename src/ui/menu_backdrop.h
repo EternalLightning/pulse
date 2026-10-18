@@ -8,14 +8,20 @@
 
 namespace pulse::ui {
 
-// Capture before either popup is shown: the swap chain alone omits the DWM
-// backdrop underneath transparent window pixels. Both popups reuse this sample
-// while their rows change, so a live update never captures the menu itself.
+// Capture only the desktop area a popup actually needs, immediately before it
+// is shown. The swap chain alone omits the DWM backdrop underneath transparent
+// window pixels, so a live update keeps its existing plate and never captures
+// the menu itself.
 class MenuBackdropSource {
 public:
     void Reset() { bitmap_.reset(); }
     ID2D1Bitmap1* Bitmap() const { return bitmap_.get(); }
     POINT Origin() const { return {bounds_.left, bounds_.top}; }
+    RECT Bounds() const { return bounds_; }
+    bool Covers(const RECT& rect) const {
+        return bitmap_.get() && bounds_.left <= rect.left && bounds_.top <= rect.top &&
+            bounds_.right >= rect.right && bounds_.bottom >= rect.bottom;
+    }
 
     static bool Enabled() {
         if (IsHighContrast() || !compat::ModernWindows()) return false;
@@ -27,11 +33,22 @@ public:
     }
 
     bool Capture(Compositor& compositor, POINT point) {
+        MONITORINFO monitor{sizeof(monitor)};
+        if (!GetMonitorInfoW(MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+        return CaptureRect(compositor, monitor.rcMonitor);
+    }
+
+    bool CaptureRect(Compositor& compositor, RECT requested) {
         Reset();
         if (!Enabled() || !compositor.Dc() || !IsWindowVisible(compositor.Hwnd())) return false;
         MONITORINFO monitor{sizeof(monitor)};
-        if (!GetMonitorInfoW(MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
-        const RECT bounds = monitor.rcMonitor;
+        if (!GetMonitorInfoW(MonitorFromRect(&requested, MONITOR_DEFAULTTONEAREST), &monitor))
+            return false;
+        RECT bounds = requested;
+        bounds.left = (std::max)(bounds.left, monitor.rcMonitor.left);
+        bounds.top = (std::max)(bounds.top, monitor.rcMonitor.top);
+        bounds.right = (std::min)(bounds.right, monitor.rcMonitor.right);
+        bounds.bottom = (std::min)(bounds.bottom, monitor.rcMonitor.bottom);
         const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
         if (width <= 0 || height <= 0) return false;
         HDC screen = GetDC(nullptr);
@@ -84,13 +101,12 @@ private:
     struct Key { LONG left, top, width, height; };
 
 public:
-    bool Draw(Compositor& compositor, const MenuBackdropSource& source,
+    bool Draw(Compositor& compositor, MenuBackdropSource& source,
               const D2D1_RECT_F& card, POINT origin,
-              bool dark, float scale) {
+              bool dark, float scale, bool allow_capture) {
         auto* dc = compositor.Dc();
-        auto* frame = source.Bitmap() ? source.Bitmap() : compositor.FrameCopy();
         const HWND owner = compositor.Hwnd();
-        if (!dc || !frame || !IsWindowVisible(owner) || IsIconic(owner) ||
+        if (!dc || !IsWindowVisible(owner) || IsIconic(owner) ||
             !MenuBackdropSource::Enabled()) {
             Reset();
             return false;
@@ -103,14 +119,33 @@ public:
         if (plate_.get() && (key_.left != key.left || key_.top != key.top ||
                 key_.width != key.width || key_.height != key.height || dark_ != dark)) Reset();
         if (!plate_.get()) {
-            POINT client = source.Bitmap() ? source.Origin() : POINT{};
-            if (!source.Bitmap() && !ClientToScreen(owner, &client)) return false;
+            const float blur = 16.0f * scale;
+            const int margin = static_cast<int>(std::ceil(blur * 2.0f));
+            // Live Shell rows can grow the popup after it is shown. Gather some
+            // spare desktop now so growth does not require sampling the popup.
+            const int growth_pad = static_cast<int>(std::ceil(120.0f * scale));
+            const RECT card_rect{key.left, key.top, key.left + width, key.top + height};
+            const RECT capture_rect{key.left - margin - growth_pad, key.top - margin - growth_pad,
+                key.left + width + margin + growth_pad, key.top + height + margin + growth_pad};
+            if (allow_capture && !source.Covers(card_rect))
+                source.CaptureRect(compositor, capture_rect);
+            POINT client{};
+            ID2D1Bitmap1* frame = nullptr;
+            if (source.Covers(card_rect)) {
+                frame = source.Bitmap();
+                client = source.Origin();
+            } else {
+                // The popup is already visible; the last app frame is the only
+                // clean sample left. It covers menus inside the owner window.
+                if (!compositor.FrameCopy()) compositor.CaptureFrame();
+                frame = compositor.FrameCopy();
+                if (!frame || !ClientToScreen(owner, &client)) return false;
+            }
+            if (!frame) return false;
             const auto frame_size = frame->GetPixelSize();
             if (key.left >= client.x + static_cast<LONG>(frame_size.width) ||
                 key.top >= client.y + static_cast<LONG>(frame_size.height) ||
                 key.left + width <= client.x || key.top + height <= client.y) return false;
-            const float blur = 16.0f * scale;
-            const int margin = static_cast<int>(std::ceil(blur * 2.0f));
             const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
             ComPtr<ID2D1Bitmap1> sample, plate;
