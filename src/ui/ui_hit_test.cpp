@@ -29,10 +29,8 @@ bool MainRenderer::TabItemRect(const WindowViewModel& vm, float window_w, int in
     if (!out || index < 0 || index >= static_cast<int>(vm.tabs.size())) return false;
     if (vm.tabs[static_cast<size_t>(index)].hidden) return false; // collapsed group
     const TabStripMetrics m = ComputeTabStrip(vm, window_w);
-    const float left = m.x0 + static_cast<float>(index) * m.pitch
-        + (index < static_cast<int>(m.extra.size()) ? m.extra[static_cast<size_t>(index)] : 0.0f);
-    const float w = vm.tabs[static_cast<size_t>(index)].pinned ? m.pinned_w : m.w;
-    *out = D2D1::RectF(left, m.y, left + w, m.y + m.h);
+    const auto& item = m.items[static_cast<size_t>(index)];
+    *out = D2D1::RectF(item.left, m.y, item.right, m.y + m.h);
     return true;
 }
 
@@ -119,12 +117,9 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         if (x < strip.viewport.left || x >= strip.viewport.right || y < strip.y) return r;
         auto hitTab = [&](int i) -> bool {
             if (vm.tabs[static_cast<size_t>(i)].hidden) return false;
-            const float tabW = vm.tabs[static_cast<size_t>(i)].pinned ? strip.pinned_w : strip.w;
-            const float extra = i < static_cast<int>(strip.extra.size())
-                ? strip.extra[static_cast<size_t>(i)] : 0.0f;
-            float tabLeft = strip.x0
-                + (static_cast<float>(i) + vm.tabs[static_cast<size_t>(i)].x_offset) * strip.pitch
-                + extra;
+            const auto& item = strip.items[static_cast<size_t>(i)];
+            const float tabW = item.right - item.left;
+            float tabLeft = item.left + vm.tabs[static_cast<size_t>(i)].x_offset * strip.pitch;
             if (vm.tab_drag_index >= 0 && i >= vm.tab_drag_index &&
                 i < vm.tab_drag_index + std::max(1, vm.tab_drag_count)) {
                 // Floating run: positions follow the drag cursor, skipping
@@ -215,6 +210,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             if(ContainsPt(lay.new_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=20;return r;}
             if(ContainsPt(lay.external_open_choice,x,y)) {r.region=HitTestResult::SettingsDropdown;r.index=2;return r;}
             if(ContainsPt(lay.performance_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=4;return r;}
+            if(ContainsPt(lay.text_compare_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=33;return r;}
             for(int list_row=0;list_row<3;++list_row)
                 if(ContainsPt(lay.list_style_row[list_row],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=17+list_row;return r;}
             const D2D1_RECT_F actions[]={lay.content_pause,lay.content_options,lay.content_rebuild};
@@ -225,10 +221,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 if(ContainsPt(lay.last_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=32;return r;}
                 if(!vm.settings_system_pending) {
                     if(ContainsPt(lay.startup_row[2],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=21;return r;}
-                    const int system_ids[]={3,22,23,24};
-                    for(int i=0;i<4;++i) if(ContainsPt(lay.default_manager_rows[i],x,y)) {
-                        r.region=HitTestResult::SettingsToggle;r.index=system_ids[i];return r;
-                    }
                 }
                 if (ContainsPt(lay.accent_picker,x,y) || ContainsPt(lay.accent_system,x,y)) {
                     r.region = HitTestResult::SettingsAccent;
@@ -282,7 +274,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 }
                 if (ContainsPt(lay.wallpaper_fit, x, y)) {
                     const auto size = material_.LoadedSourceSize(vm.background_image);
-                    if (size.cx > 0 && size.cy > 0) {
+                    if (!vm.settings_lock_window_size && size.cx > 0 && size.cy > 0) {
                         r.region = HitTestResult::SettingsWallpaper;
                         r.index = 2;
                     }
@@ -292,6 +284,9 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                     r.region = HitTestResult::SettingsWallpaperLook;
                     r.index = 0;
                     return r;
+                }
+                if (ContainsPt(lay.window_size_lock_row,x,y)) {
+                    r.region = HitTestResult::SettingsToggle; r.index = 34; return r;
                 }
                 for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.wallpaper_blur_row[i], x, y)) {

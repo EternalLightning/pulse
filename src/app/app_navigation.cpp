@@ -920,7 +920,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.filename_live_generation=0;
     tab.search_retaining_results = false;
     std::wstring normalized = fs::NormalizePath(path);
-    if (!IsArchiveView(normalized)) tab.archive_listing.reset();
+    if (!IsArchiveView(normalized)) tab.ClearArchiveView();
     bool downloads = false;
     for (const auto& entry : s.sidebar.quick_access) {
         if (entry.builtin == static_cast<int>(app::BuiltinQuickAccess::Downloads) &&
@@ -1874,8 +1874,17 @@ void CloseLayoutTab(AppState& s, size_t idx) {
         PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
         return;
     }
+    if (s.renderer.MotionEnabled() && !s.shot_high_contrast && !s.tabDragging &&
+        s.tabTracks.empty() && s.chipTracks.empty()) {
+        // Capture chrome only; closing must not rebuild the folder's file rows.
+        ui::WindowViewModel tabs;
+        app::FillWindowTabStrip(tabs, s.window_tabs);
+        tabs.show_pinned_tab_names = s.appPrefs.show_pinned_tab_names;
+        s.renderer.CaptureTabCloseLayout(tabs, static_cast<float>(s.compositor.Width()));
+    }
     RememberLayoutFocus(s);
     s.window_tabs.CloseTab(idx);
+    s.hitTestVmValid = false;
     BindCurrentLayout(s);
     RevalidateVisibleFolders(s);
     InvalidateRect(s.hwnd, nullptr, FALSE);

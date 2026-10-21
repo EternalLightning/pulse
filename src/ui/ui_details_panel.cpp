@@ -1,5 +1,6 @@
 // ui_details_panel.cpp — Details panel draw and content height.
 #include "ui_renderer.h"
+#include "animation_clock.h"
 #include "preview_footer_layout.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
@@ -45,6 +46,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         L"|" + std::to_wstring(d.size_value);
     if (identity != details_preview_identity_ || !d.has_selection) {
         details_preview_identity_ = identity;
+        details_content_reveal_.Reset();
         details_viewport_ = {};
         details_text_layout_.reset();
         details_layout_text_.clear();
@@ -56,6 +58,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         // preview is switched back on for another file.
         details_viewport_ = {};
         details_preview_ready_ = false;
+        details_content_reveal_.Reset();
     }
     // The inspector stays an independent right-hand card, with its own scroll
     // and splitter. File-pane opacity must not fade these controls.
@@ -207,13 +210,16 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         uint32_t bytesRead = 0;
         std::wstring previewError;
         PreviewDrawResult previewResult = PreviewDrawResult::Failed;
+        const uint64_t reveal_now = AnimationTimeMs();
+        details_content_reveal_.Sample(reveal_now, MotionEnabled());
+        const float content_opacity = MotionEnabled() ? details_content_reveal_.opacity : 1.0f;
         if (preview_on && !d.is_dir && d.multi_count <= 1) {
             std::vector<PreviewProperty> ignored;
             thumbnail_cache_.Properties(d.path, d.attrs, d.view_generation,
                                         d.modified_value, d.size_value, ignored);
             if (!handlerPreview) {
                 previewResult = thumbnail_cache_.Draw(dc, contentRc, d.path, d.attrs, 2048u,
-                    d.view_generation, d.modified_value, d.size_value, 1.0f,
+                    d.view_generation, d.modified_value, d.size_value, content_opacity,
                     &previewText, &truncated, &bytesRead, true, &previewError,
                     nullptr, nullptr, nullptr, nullptr, 0, nullptr, nullptr, nullptr,
                     nullptr, nullptr, nullptr, nullptr, &details_viewport_);
@@ -223,6 +229,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         details_preview_ready_ = !placeholderOnly && !handlerPreview &&
             (previewResult == PreviewDrawResult::Bitmap || previewResult == PreviewDrawResult::Text ||
              previewResult == PreviewDrawResult::Hex);
+        details_content_reveal_.Tick(details_preview_ready_, reveal_now, MotionEnabled());
+        details_content_animating_ = details_content_reveal_.pending;
         if (!details_preview_ready_) EndDetailsPreviewPan();
         preview_handler_.Sync(notify_hwnd_, overlayRc, d.path, d.attrs, d.view_generation,
                               d.modified_value, d.size_value, vm.dark, theme.bg, theme.text,
@@ -242,6 +250,9 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
 
         if (!handlerPreview && (previewResult == PreviewDrawResult::Text ||
             previewResult == PreviewDrawResult::Hex)) {
+            const bool content_layer = content_opacity < 1.0f;
+            if (content_layer) dc->PushLayer(D2D1::LayerParameters(contentRc, nullptr,
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), content_opacity), nullptr);
             if (!preview_mono_format_.get() && compositor_->DwriteFactory()) {
                 typography::CreateTextFormat(compositor_->DwriteFactory(),
                     {typography::FontRole::Monospace, 11.0f * s},
@@ -286,9 +297,12 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
             text(footer, D2D1::RectF(contentRc.left, contentRc.bottom - 18.0f * s,
                                      contentRc.right, contentRc.bottom),
                  compositor_->SmallFormat(), theme.text_secondary);
-        } else if (handlerPreview && handlerState == PreviewHandlerHost::State::Shown) {
+            if (content_layer) dc->PopLayer();
+        }
+        if (handlerPreview && handlerState == PreviewHandlerHost::State::Shown) {
             // System preview handler paints into the overlay HWND.
-        } else if (preview_on && previewResult != PreviewDrawResult::Bitmap) {
+        } else if (preview_on && previewResult != PreviewDrawResult::Bitmap &&
+                   previewResult != PreviewDrawResult::Text && previewResult != PreviewDrawResult::Hex) {
             const bool filePlaceholder = !d.is_dir && d.multi_count <= 1;
             std::wstring state;
             if (d.multi_count > 1)

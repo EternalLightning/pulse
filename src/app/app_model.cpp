@@ -535,12 +535,27 @@ std::wstring Tab::GoUp() {
     return current_path;
 }
 
+void Tab::ClearArchiveView() {
+    if (archive_cancel) archive_cancel->store(true);
+    archive_cancel.reset();
+    archive_listing.reset();
+    archive_file.clear();
+    archive_prefix.clear();
+    archive_password.clear();
+    archive_encrypted.clear();
+}
+
+Pane::~Pane() {
+    if (view.archive_cancel) view.archive_cancel->store(true);
+}
+
 void Pane::NewTab(const std::wstring& path) {
     const ui::ViewMode mode = view.view_mode;
     const auto columns = view.details_column_dividers;
     const auto search_columns = view.search_column_dividers;
     const bool column_layout = view.column_layout;
     auto column_widths = std::move(view.column_widths_dip);
+    view.ClearArchiveView();
     view = Tab{};
     view.view_mode = mode;
     view.details_column_dividers = columns;
@@ -1695,6 +1710,7 @@ void FillWindowTabStrip(ui::WindowViewModel& vm, const WindowTabs& tabs) {
     vm.tabs.reserve(tabs.items.size());
     for (size_t i = 0; i < tabs.items.size(); ++i) {
         ui::TabView tv;
+        tv.identity = tabs.items[i].get();
         tv.title = LayoutTabTitle(*tabs.items[i]);
         const Tab* active_folder = tabs.items[i]->ActiveFolder();
         tv.is_home = active_folder && active_folder->current_path == MakeHomePath();

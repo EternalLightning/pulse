@@ -23,6 +23,7 @@
 #include "app_notify_patch.h"
 #include "tray_metadata.h"
 #include "window_result_mailbox.h"
+#include "window_size_lock.h"
 #include "external_open.h"
 #include "clipboard_availability.h"
 #include "tag_discovery_cache.h"
@@ -33,6 +34,8 @@
 #include "context_menu_controller.h"
 #include "shell_verbs.h"
 #include "app_prefs.h"
+#include "text_compare_selection.h"
+#include "../ui/text_diff_window.h"
 #include "system_integration.h"
 #include "saved_search.h"
 #include "search_history.h"
@@ -211,6 +214,8 @@ struct AppState : AppCoreOwner {
     ui::NotificationToast notification_toast;
     ui::MainRenderer renderer;
     ui::QuickPreviewWindow quickPreview;
+    app::TextCompareSelection text_compare_selection;
+    std::unique_ptr<ui::TextDiffWindow> text_diff;
     // View row the quick preview was anchored to when Delete ran from inside
     // it; SyncQuickPreview re-anchors there once the listing drops the entry
     // so the preview steps to the neighbouring file instead of closing.
@@ -360,6 +365,7 @@ struct AppState : AppCoreOwner {
     D2D1_COLOR_F accentColor;
     float scale = 1.0f;
     bool maximized = false;
+    app::WindowSizeLock window_size_lock;
     bool backdropActive = true;
 
     bool showFps = false;

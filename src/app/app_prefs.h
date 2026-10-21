@@ -22,6 +22,7 @@ struct AppPrefs {
     bool experimental_explorer_takeover = false;
     bool verify_copies = false;
     bool show_status_performance = false;
+    bool text_compare_enabled = true;
     bool show_pinned_tab_names = true;
     bool new_tab_home = false;
     ExternalOpenMode external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
@@ -48,6 +49,7 @@ struct AppPrefs {
     // none / acrylic-material / mica / mica-alt  (legacy dwm-blur → acrylic)
     std::wstring window_effect = L"mica-alt";
     std::wstring background_image;
+    bool lock_window_size = false;
     int wallpaper_visibility = 50; // 0..100 percent of image visibility
     int wallpaper_blur = 1; // image mode blur: 0 off, 1 light, 2 strong
     int row_height = 34; // file-list row height in DIPs (24..48)

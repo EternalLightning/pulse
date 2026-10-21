@@ -735,7 +735,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             bool truncated = false;
             uint32_t bytesRead = 0;
             const bool isDirectory = (req.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            if (IsDirectImage(extension)) {
+            if (isDirectory) {
+                made = MakeShellThumbnail(path, req.attrs,
+                                          ipc::ClampPreviewPixelSize(req.pixel_size, false),
+                                          pixels, w, h, stride);
+                if (made) response.kind = ipc::PreviewContentKind::Bitmap;
+                else errorText = L"provider-failed";
+            } else if (IsDirectImage(extension)) {
                 uint32_t frame_count = 1, frame_delay = 0, loop_count = 0;
                 const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);
@@ -800,7 +806,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                         pixels, w, h, stride, source_w, source_h, &errorText);
                 }
                 if (made) response.kind = ipc::PreviewContentKind::Bitmap;
-            } else if (isDirectory || IsKnownShellPreview(extension)) {
+            } else if (IsKnownShellPreview(extension)) {
                 made = MakeShellThumbnail(path, req.attrs,
                                           ipc::ClampPreviewPixelSize(req.pixel_size, false),
                                           pixels, w, h, stride);

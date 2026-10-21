@@ -1094,6 +1094,7 @@ std::wstring TerminalCommandLine(const std::wstring& dir) {
 }
 
 void OpsManager::OpenTerminal(const std::wstring& dir) {
+    if (dir.empty() || fs::IsVirtualPath(dir)) return;
     QueueItem item;
     item.open_path = dir;
     item.open_file = L"wt.exe";

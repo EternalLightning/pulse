@@ -415,6 +415,21 @@ void SettingsController::ToggleUi(int index) {
             prefs_->close_last_tab_window = previous;
             error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
         } else error_.clear();
+    } else if (index == 34) {
+        prefs_->lock_window_size = !prefs_->lock_window_size;
+        if (!prefs_->Save()) {
+            prefs_->lock_window_size = !prefs_->lock_window_size;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else {
+            error_.clear();
+            Apply(SettingsEffect::WindowSizeLock);
+        }
+    } else if (index == 33) {
+        prefs_->text_compare_enabled = !prefs_->text_compare_enabled;
+        if (!prefs_->Save()) {
+            prefs_->text_compare_enabled = !prefs_->text_compare_enabled;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else error_.clear();
     } else if (index == 1) {
         if (!prefs_->ApplyLaunchOnStartup(!prefs_->launch_on_startup) || !prefs_->Save())
             error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
@@ -422,7 +437,7 @@ void SettingsController::ToggleUi(int index) {
     } else if (index == 2) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
-    } else if (index == 3 || (index >= 21 && index <= 24)) {
+    } else if (index == 21) {
         if (ui_.toggle_system_integration) ui_.toggle_system_integration(index);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;

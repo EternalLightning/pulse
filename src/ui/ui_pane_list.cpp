@@ -1368,6 +1368,9 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
     const auto [startIdx, endIdx] = layout.VisibleRange();
     const DetailsColumnLayout detailsColumns = DetailsColumns(viewport, vm);
     const bool detailsView = vm.view_mode == ViewMode::Details;
+    const bool iconGrid = vm.view_mode == ViewMode::ExtraLargeIcons ||
+                          vm.view_mode == ViewMode::LargeIcons ||
+                          vm.view_mode == ViewMode::MediumIcons;
     D2D1_COLOR_F zebraColor = theme.text;
     zebraColor.a = (theme.bg.r < 0.5f) ? 0.035f : 0.025f;
 
@@ -1444,6 +1447,13 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 const float indicator_h = std::min(18*scale_, std::max(0.0f, sel.bottom-sel.top-8*scale_));
                 FillRoundedRect(dc, brAccent_.get(), sel.left + scale_,
                     (sel.top+sel.bottom-indicator_h)*0.5f, 2*scale_, indicator_h, scale_);
+            } else if (iconGrid) {
+                const float indicator_w = std::min(48.0f * scale_,
+                    std::max(0.0f, sel.right - sel.left - 16.0f * scale_));
+                MakeBrush(dc, pane_focused ? theme.accent : WithAlpha(theme.accent, 0.55f), brAccent_);
+                FillRoundedRect(dc, brAccent_.get(), (sel.left + sel.right - indicator_w) * 0.5f,
+                    sel.bottom - 5.0f * scale_, indicator_w, 3.0f * scale_, 1.5f * scale_);
+                MakeBrush(dc, theme.accent, brAccent_);
             }
         }
         if (src == vm.drop_target_index) {
@@ -1454,9 +1464,6 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
                 brAccent_.get(), 2.0f * scale_);
         }
 
-        const bool iconGrid = vm.view_mode == ViewMode::ExtraLargeIcons ||
-                              vm.view_mode == ViewMode::LargeIcons ||
-                              vm.view_mode == ViewMode::MediumIcons;
         D2D1_RECT_F nameRc = layout.NameRect(i);
         const auto changeIt = vm.change_badges.find(src);
         const ChangeBadge* change = changeIt != vm.change_badges.end() && HasChangeBadge(changeIt->second) ? &changeIt->second : nullptr;

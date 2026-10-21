@@ -7,7 +7,7 @@ namespace pulse::app {
 
 class SidebarScrollbarFade {
 public:
-    bool Tick(double now, float scroll, bool hovered, bool dragging) {
+    bool Tick(double now, float scroll, bool hovered, bool dragging, bool animate = true) {
         if (scroll != last_scroll_) {
             last_scroll_ = scroll;
             visible_until_ = now + 900;
@@ -20,6 +20,10 @@ public:
         const float before_opacity = opacity;
         const float before_expand = expand;
         auto approach = [&](float& value, float target, float previous_target, float duration) {
+            if (!animate) {
+                value = target;
+                return;
+            }
             // A target change after an idle deadline must still animate from its current value.
             const float amount = target == previous_target ? elapsed / duration : 0.0f;
             value += std::clamp(target - value, -amount, amount);

@@ -77,6 +77,7 @@ void AppPrefs::ResetToDefaults() {
     experimental_explorer_takeover = false;
     verify_copies = false;
     show_status_performance = false;
+    text_compare_enabled = true;
     show_pinned_tab_names = true;
     new_tab_home = false;
     external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
@@ -98,6 +99,7 @@ void AppPrefs::ResetToDefaults() {
     language = L"system";
     window_effect = L"mica-alt";
     background_image.clear();
+    lock_window_size = false;
     wallpaper_visibility = 50;
     wallpaper_blur = 1;
     row_height = 34;
@@ -140,6 +142,8 @@ std::wstring AppPrefs::ToJson() const {
     out += verify_copies ? L"true" : L"false";
     out += L",\n  \"show_status_performance\":";
     out += show_status_performance ? L"true" : L"false";
+    out += L",\n  \"text_compare_enabled\":";
+    out += text_compare_enabled ? L"true" : L"false";
     out += L",\n  \"show_pinned_tab_names\":";
     out += show_pinned_tab_names ? L"true" : L"false";
     out += L",\n  \"new_tab_home\":";
@@ -178,7 +182,9 @@ std::wstring AppPrefs::ToJson() const {
     out += escaped_effect;
     out += L"\",\n  \"background_image\":\"";
     out += escaped_image;
-    out += L"\",\n  \"row_height\":";
+    out += L"\",\n  \"lock_window_size\":";
+    out += lock_window_size ? L"true" : L"false";
+    out += L",\n  \"row_height\":";
     out += std::to_wstring(row_height);
     out += L",\n  \"sidebar_width\":" + std::to_wstring(sidebar_width);
     out += L",\n  \"address_search_current\":" + std::to_wstring(address_search_current);
@@ -239,6 +245,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     experimental_explorer_takeover = pulse::json::ExtractBool(doc, L"experimental_explorer_takeover", false);
     verify_copies = pulse::json::ExtractBool(doc, L"verify_copies", false);
     show_status_performance = pulse::json::ExtractBool(doc, L"show_status_performance", false);
+    text_compare_enabled = pulse::json::ExtractBool(doc, L"text_compare_enabled", true);
     show_pinned_tab_names = pulse::json::ExtractBool(doc, L"show_pinned_tab_names", true);
     new_tab_home = pulse::json::ExtractBool(doc, L"new_tab_home", false);
     const int external_mode = pulse::json::ExtractInt(doc, L"external_open_mode", 0);
@@ -271,6 +278,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     if (window_effect == L"dwm-blur") window_effect = L"acrylic-material";
     else if (window_effect.empty()) window_effect = L"mica-alt";
     background_image = pulse::json::ExtractString(doc, L"background_image");
+    lock_window_size = pulse::json::ExtractBool(doc, L"lock_window_size", false);
     row_height = pulse::json::ExtractInt(doc, L"row_height", 34);
     sidebar_width = pulse::json::ExtractInt(doc, L"sidebar_width", 224);
     // The stored value is the user's intent; the window caps it while drawing.

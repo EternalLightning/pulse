@@ -190,7 +190,7 @@ bool Render(AppState& s) {
     for (auto& pane : Panes(s)) {
         const bool focused = pane.get() == s.pane;
         pane_animating |= app::TickPaneAnimations(*pane, focused,
-            s.filterEditing && focused, animation_now);
+            s.filterEditing && focused, animation_now, s.renderer.MotionEnabled() && !hc);
     }
     const bool visual_animating = TickVisualAnimations(s);
     const bool address_animating = TickAddressSearchAnimation(s, animation_now);
@@ -205,6 +205,7 @@ bool Render(AppState& s) {
     s.hitTestVmWidth = s.compositor.Width();
     s.hitTestVmHeight = s.compositor.Height();
     s.hitTestVmValid = true;
+    s.notification_toast.SetMotionEnabled(s.renderer.MotionEnabled());
     s.notification_toast.Draw(s.compositor, theme, s.scale, hc);
 
     const HRESULT end_hr = dc->EndDraw();
@@ -260,7 +261,8 @@ bool Render(AppState& s) {
         s.lastFps = 0;
     }
     s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating ||
-        address_animating || s.scrollAnimating;
+        address_animating || s.scrollAnimating || s.renderer.TabIndicatorAnimating() || s.renderer.TabCloseAnimating() ||
+        s.renderer.DetailsPreviewAnimating() || s.notification_toast.Animating();
     return s.ui_schedule.animation_active;
 }
 
@@ -700,6 +702,18 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_WINDOWPOSCHANGING:
+        if (s && lParam) {
+            s->window_size_lock.Constrain(hwnd, s->appPrefs.lock_window_size,
+                *reinterpret_cast<WINDOWPOS*>(lParam));
+            if (s->appPrefs.lock_window_size && !IsZoomed(hwnd) && !IsIconic(hwnd)) return 0;
+        }
+        break;
+
+    case WM_SYSCOMMAND:
+        if (s && s->appPrefs.lock_window_size && (wParam & 0xFFF0) == SC_SIZE) return 0;
+        break;
+
     case WM_GETMINMAXINFO: {
         // Arrives before WM_CREATE; GWLP_USERDATA is not set yet.
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
@@ -748,6 +762,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             const bool right = screenPt.x < wr.right && screenPt.x >= wr.right - frameX;
             const bool top = screenPt.y >= wr.top && screenPt.y < wr.top + frameY;
             const bool bottom = screenPt.y < wr.bottom && screenPt.y >= wr.bottom - frameY;
+            if (s && s->appPrefs.lock_window_size && (left || right || top || bottom)) return HTCLIENT;
             if (top && left) return HTTOPLEFT;
             if (top && right) return HTTOPRIGHT;
             if (bottom && left) return HTBOTTOMLEFT;
@@ -956,6 +971,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SETTINGCHANGE:
+        if (s) {
+            s->renderer.RefreshMotionPreferences();
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         if (s && (lParam == 0 ||
                   wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet") == 0 ||
                   wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"HighContrast") == 0)) {
@@ -1034,8 +1053,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         // Present throttles animations to the display. Queue the next low-priority
         // paint after EndPaint so high-refresh monitors are not capped by WM_TIMER.
         if (s && (s->scrollAnimating || animating) && s->compositor.CanScheduleAnimationFrame() &&
-            IsWindowVisible(hwnd) && !IsIconic(hwnd))
-            InvalidateRect(hwnd, nullptr, FALSE);
+            IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+            // Make due timers eligible before another low-priority paint is queued.
+            MSG timer{};
+            PeekMessageW(&timer, nullptr, WM_TIMER, WM_TIMER, PM_NOREMOVE);
+            if (IsWindow(hwnd) && reinterpret_cast<AppState*>(
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA)) == s)
+                InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return 0;
     }
 

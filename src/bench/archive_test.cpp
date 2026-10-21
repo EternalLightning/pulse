@@ -665,6 +665,14 @@ void ProcessTests() {
         "archive output limit terminates writer and fails explicitly");
     auto final = RunArchiveProcessForTest(fixture, {L"final"}, 1024);
     Check(final.outcome == ArchiveOutcome::Success && final.exit_code == 0u && final.output == L"final-output", "archive final output is drained after exit");
+    const auto streaming_started = GetTickCount64();
+    const auto streaming = RunArchiveProcessForTest(fixture, {L"stream"}, 16 * 1024 * 1024);
+    Check(streaming.outcome == ArchiveOutcome::Success && streaming.output.size() == 16 * 1024 * 1024 &&
+        streaming.output.front() == L'x' && streaming.output.back() == L'x',
+        "large archive listing output drains completely without losing bytes");
+    const auto streaming_ms = GetTickCount64() - streaming_started;
+    std::cout << "[INFO] archive_stream_16MiB_ms=" << streaming_ms << '\n';
+    Check(streaming_ms < 10000, "large listing output is not throttled by small-pipe polling stalls");
     const auto unavailable = RunArchiveProcessForTest(fixture + L".missing", {}, 1024);
     Check(unavailable.outcome == ArchiveOutcome::Failed && !unavailable.exit_code && !unavailable.output.empty(),
         "unstarted archive process does not fabricate an exit code 2");

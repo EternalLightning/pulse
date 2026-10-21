@@ -441,6 +441,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_scroll = s.settings.scroll();
             vm.settings_launch_on_startup = s.appPrefs.launch_on_startup;
             vm.settings_start_to_tray = s.appPrefs.start_to_tray;
+            vm.settings_text_compare = s.appPrefs.text_compare_enabled;
             vm.settings_close_last_tab_window = s.appPrefs.close_last_tab_window;
             vm.settings_keep_running = s.appPrefs.keep_running_on_close;
             vm.settings_show_hidden_files = s.appPrefs.show_hidden_files;
@@ -482,11 +483,15 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_open_folders = s.appPrefs.open_folders_in_pulse;
             vm.settings_take_over_win_e = s.appPrefs.take_over_win_e;
             vm.settings_take_over_this_pc = s.appPrefs.take_over_this_pc;
-            vm.settings_explorer_takeover = s.appPrefs.experimental_explorer_takeover;
             vm.settings_system_pending = s.systemIntegration.pending();
             vm.settings_system_status = vm.settings_system_pending
                 ? l10n::Get(l10n::StringId::SettingsSystemApplying) : s.systemIntegration.error();
+            if (!vm.settings_system_pending && vm.settings_system_status.empty() &&
+                (vm.settings_open_folders || vm.settings_take_over_win_e || vm.settings_take_over_this_pc) &&
+                !(vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc))
+                vm.settings_system_status = l10n::Get(l10n::StringId::SettingsDefaultManagerPartial);
             vm.settings_blank_click_go_back = s.appPrefs.blank_click_go_back;
+            vm.settings_lock_window_size = s.appPrefs.lock_window_size;
             vm.settings_new_tab_home = s.appPrefs.new_tab_home;
             vm.settings_external_open_mode = static_cast<int>(s.appPrefs.external_open_mode);
             vm.settings_change_tracking = s.appPrefs.change_tracking_enabled;
@@ -1205,11 +1210,16 @@ void MarkTrayExit(AppState& s, const std::vector<std::wstring>& paths, bool clea
 bool TickTrayDeck(AppState& s, double now) {
     using M = AppState::TrayMotion;
     using X = AppState::TrayExit;
+    const bool animate = s.renderer.MotionEnabled() && !s.shot_high_contrast;
     bool dirty = false;
     const float elapsed = s.trayLastTick
         ? static_cast<float>(std::clamp(now - s.trayLastTick, 0.0, 100.0)) : 16.0f;
     s.trayLastTick = now;
-    auto ease = [&dirty, elapsed](float& cur, float target, float k) {
+    auto ease = [&dirty, elapsed, animate](float& cur, float target, float k) {
+        if (!animate) {
+            cur = target;
+            return;
+        }
         const float timed_k = 1.0f - std::pow(1.0f - k, std::min(elapsed, 100.0f) / 16.0f);
         if (std::abs(target - cur) > 0.0015f) {
             cur += (target - cur) * timed_k;
@@ -1235,7 +1245,7 @@ bool TickTrayDeck(AppState& s, double now) {
     const bool stackHot = hovered >= 0 || s.trayDrag.active;
     // Preserve the stack's pose while its cards fade after clearing.
     if (total > 0) ease(s.traySpread, stackHot ? 1.0f : 0.0f, 0.20f);
-    else if (s.trayCards.empty()) s.traySpread = 0.0f;
+    else if (!animate || s.trayCards.empty()) s.traySpread = 0.0f;
 
     std::unordered_set<std::wstring> live;
     live.reserve(entries.size() * 2);
@@ -1276,6 +1286,10 @@ bool TickTrayDeck(AppState& s, double now) {
         a.cut = entry.batch >= 0 && entry.batch < static_cast<int>(s.tray.batches().size()) &&
                 s.tray.batches()[static_cast<size_t>(entry.batch)].move_intent;
         a.shrink = 1.0f;
+        if (!animate) {
+            a.motion = M::None;
+            a.fly = a.dx = a.dy = a.angle = 0.0f;
+        }
         if (s.trayDrag.active && s.trayDrag.path == item.path) {
             a.motion = M::None;
             a.fly = 0.0f;
@@ -1297,6 +1311,10 @@ bool TickTrayDeck(AppState& s, double now) {
     size_t ghosts = 0;
     for (auto it = s.trayCards.begin(); it != s.trayCards.end();) {
         if (live.count(it->first)) { ++it; continue; }
+        if (!animate) {
+            it = s.trayCards.erase(it);
+            continue;
+        }
         AppState::TrayCardAnim& a = it->second;
         if (!a.ghost) {
             a.ghost = true;
@@ -1357,6 +1375,12 @@ bool TickTrayDeck(AppState& s, double now) {
         else ++it;
     }
     s.trayExitHints.clear();
+
+    if (!animate) {
+        s.trayPuffs.clear();
+        s.trayLastTick = 0;
+        return false;
+    }
 
     const size_t puffs = s.trayPuffs.size();
     s.trayPuffs.erase(std::remove_if(s.trayPuffs.begin(), s.trayPuffs.end(),
@@ -2033,7 +2057,6 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsAccent:
         return text(s.hoverControlIndex == 0 ? I::TooltipFollowAccent : I::SettingsThemeColor);
     case R::SettingsToggle:
-        if (s.hoverControlIndex == 3) return text(I::SettingsOpenFolders);
         if (s.hoverControlIndex == 4) return text(I::SettingsShowPerformance);
         return L"";
     case R::SettingsIndexExcludeAction: return text(I::TooltipAddExclusion);

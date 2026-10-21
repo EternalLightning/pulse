@@ -3,11 +3,13 @@
 #include "../app/app_ui_schedule.h"
 #include "../app/app_visual_animation.h"
 #include "../common/localization.h"
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+bool RunContentRevealUiChecks(pulse::AppState& s, const std::filesystem::path& root);
 
 int main() {
     using namespace pulse;
@@ -201,6 +203,67 @@ int main() {
         check(s.compositor.SaveSnapshot(output.c_str()), "capture intermediate frame across themes, DPI and widths");
     }
     s.filterEditing = false;
+    check(RunContentRevealUiChecks(s, root), "content reveal uses production rendering and layout");
+
+    s.shot_high_contrast = true;
+    s.sidebarScrollbarFade = {};
+    s.sidebarScroll = 0;
+    const auto motion_now = app::PaneAnimationTimeMs();
+    s.sidebarFoldTracks[0] = {1, 0, motion_now};
+    s.detailsPreviewOnly = true;
+    s.detailsPreviewExpansion = 0.25f;
+    s.detailsPreviewFoldStart = motion_now;
+    s.tagTracks[L"motion fixture"] = {1, 180, std::chrono::steady_clock::now()};
+    s.tagOffsets[L"motion fixture"] = 1;
+    s.tagGapFrom = s.tagGapLineY = 10;
+    s.tagGapTo = 50;
+    s.tabTracks[s.window_tabs.Active()] = {1, 180, std::chrono::steady_clock::now()};
+    s.tabOffsets[s.window_tabs.Active()] = 1;
+    s.chipTracks[101] = {20, 180, std::chrono::steady_clock::now()};
+    s.chipOffsets[101] = 20;
+    s.filterEditing = true;
+    check(!Render(s) && !s.ui_schedule.animation_active && s.pane->filter_expand == 1 &&
+          s.sidebarFoldTracks.empty() && s.detailsPreviewExpansion == 1 && !s.detailsPreviewFoldStart &&
+          s.tagTracks.empty() && s.tagOffsets.empty() && s.tagGapLineY == 50 &&
+          s.tabTracks.empty() && s.tabOffsets.empty() && s.chipTracks.empty() && s.chipOffsets.empty(),
+          "high contrast settles pane, sidebar, details and reorder channels without another frame");
+    s.scrollbarHovered = true;
+    s.sidebarScroll = 40;
+    check(!TickVisualAnimations(s) && s.scrollbarHoverWidth ==
+          std::max(0.0f, s.renderer.Margin() * 1.5f - 6.0f * s.scale) &&
+          s.sidebarScrollbarFade.opacity == 1 && !s.sidebarScrollbarFade.Pending() &&
+          s.sidebarFadeDeadline > GetTickCount64(),
+          "disabled scrollbar motion snaps both channels and keeps only the auto-hide deadline");
+    s.scrollbarHovered = false;
+    s.sidebarCollapsedMask |= 1u;
+    StartSidebarFold(s, 0);
+    check(s.sidebarFoldTracks.empty(), "disabled motion starts no sidebar fold track");
+    s.tray.Collect({L"C:\\PulseMotionFixture\\a", L"C:\\PulseMotionFixture\\b"}, false);
+    check(!TickTrayDeck(s) && !s.trayCards.empty(), "disabled motion creates the tray directly at its final pose");
+    const auto top_card = TrayDeckEntries(s.tray, 0, 1).front().item->path;
+    s.trayDrag.active = true;
+    s.trayDrag.path = top_card;
+    s.trayDrag.dx = 45;
+    s.trayDrag.dy = 20;
+    check(!TickTrayDeck(s) && s.trayCards.at(top_card).dx == 45 &&
+          s.trayCards.at(top_card).dy == 7 && s.trayCards.at(top_card).angle > 0,
+          "disabled motion retains direct tray drag feedback without a frame loop");
+    ReleaseTrayDrag(s, false);
+    check(!TickTrayDeck(s) && s.trayCards.at(top_card).motion == AppState::TrayMotion::None &&
+          s.trayCards.at(top_card).dx == 0 && s.trayCards.at(top_card).dy == 0,
+          "disabled motion settles a released tray gesture without a spring");
+    ThrowTrayTop(s, 1, 0, 0);
+    check(!TickTrayDeck(s) && TrayStackTop(s) == 1 &&
+          std::all_of(s.trayCards.begin(), s.trayCards.end(), [](const auto& entry) {
+              return entry.second.motion == AppState::TrayMotion::None && entry.second.appear == 1 &&
+                  entry.second.opacity == 1 && entry.second.fly == 0;
+          }), "disabled motion preserves deck navigation without fly or reveal animation");
+    SpawnTrayPuffs(s);
+    s.tray.Clear();
+    check(!TickTrayDeck(s) && s.trayCards.empty() && s.trayPuffs.empty() && !s.trayLastTick,
+          "disabled motion removes tray ghosts and particles immediately and releases scheduling");
+    s.filterEditing = false;
+    s.shot_high_contrast = false;
     s.watches.Stop();
     DestroyWindow(s.hwnd);
     s.hwnd = nullptr;

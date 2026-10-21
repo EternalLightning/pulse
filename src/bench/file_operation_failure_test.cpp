@@ -5,6 +5,7 @@
 #include "../app/archive_operation_ui.h"
 #include "../app/exit_confirmation.h"
 #include "../ui/file_operation_dialog.h"
+#include "../ui/animation_clock.h"
 #include <filesystem>
 #include <cstdio>
 #include <cstring>
@@ -35,6 +36,22 @@ struct FileOperationFailureProbe {
         SendMessageW(window.hwnd_, WM_TIMER, 1, 0);
     }
     static size_t SpeedSamples(const FileOperationWindow& window) { return window.speed_history_.size(); }
+    static bool AnimationsEnabled(const FileOperationWindow& window) { return window.animations_enabled_; }
+    static bool NeedsFrame(const FileOperationWindow& window) { return window.NeedsAnimationFrame(); }
+    static float CompletionOpacity(const FileOperationWindow& window) { return window.completion_reveal_.opacity; }
+    static bool CompletionPending(const FileOperationWindow& window) { return window.completion_reveal_.pending; }
+    static void SetAnimationPolicy(FileOperationWindow& window, bool enabled) { window.animations_enabled_ = enabled; }
+    static void HoldCompletionStart(FileOperationWindow& window) {
+        window.completion_reveal_.Reset();
+        window.completion_reveal_.Tick(true, AnimationTimeMs() + 1000, true);
+    }
+    static void FinishCompletion(FileOperationWindow& window) {
+        window.completion_reveal_.Sample(AnimationTimeMs() + 1200, true);
+    }
+    static void StartCompletionHalfway(FileOperationWindow& window) {
+        window.completion_reveal_.Reset();
+        window.completion_reveal_.Tick(true, AnimationTimeMs() - 80, true);
+    }
     static void SetZigzag(FileOperationWindow& window) {
         window.speed_history_.clear();
         for (int i = 0; i < 120; ++i) window.speed_history_.push_back(i % 2 ? 0.0 : 100.0);
@@ -95,6 +112,179 @@ struct FileOperationFailureProbe {
             SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
     }
 };
+}
+
+static int RunResourceTests(HWND owner) {
+    using namespace pulse;
+    using ui::FileOperationFailureProbe;
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label); failures += !ok;
+    };
+    ui::FileOperationWindow window;
+    check(window.Create(owner, {}), "resource fixture creates the actual progress window");
+    const HWND hwnd = FileOperationFailureProbe::Window(window);
+    if (!hwnd) return failures + 1;
+    window.Show(false);
+    FileOperationFailureProbe::SetAnimationPolicy(window, false);
+    ops::OpStatus status;
+    status.task_id = 1; status.type = ops::OpType::Copy; status.percent = 50;
+    status.current_item = L"fixture.bin";
+    for (const auto phase : {ops::OpPhase::Completed, ops::OpPhase::Failed,
+        ops::OpPhase::Cancelled, ops::OpPhase::Paused, ops::OpPhase::WaitingForConflict,
+        ops::OpPhase::WaitingForDeleteConfirmation}) {
+        status.phase = phase;
+        status.active = phase == ops::OpPhase::Paused || phase == ops::OpPhase::WaitingForConflict ||
+            phase == ops::OpPhase::WaitingForDeleteConfirmation;
+        window.Update(status);
+        SendMessageW(hwnd, WM_PAINT, 0, 0);
+        ValidateRect(hwnd, nullptr);
+        const auto samples = FileOperationFailureProbe::SpeedSamples(window);
+        FileOperationFailureProbe::SampleSpeed(window);
+        check(!GetUpdateRect(hwnd, nullptr, FALSE) &&
+            FileOperationFailureProbe::SpeedSamples(window) == samples,
+            "settled, paused and waiting phases neither repaint nor append idle speed samples");
+        for (int i = 0; i < 20; ++i) window.Update(status);
+        check(!GetUpdateRect(hwnd, nullptr, FALSE),
+            "unchanged maintenance status notifications preserve a settled window");
+        status.current_item += L"x";
+        window.Update(status);
+        check(GetUpdateRect(hwnd, nullptr, FALSE) != FALSE,
+            "changed operation content still requests a repaint");
+    }
+    status.phase = ops::OpPhase::Running; status.active = true;
+    window.Update(status);
+    FileOperationFailureProbe::Collapse(window);
+    SendMessageW(hwnd, WM_PAINT, 0, 0);
+    ValidateRect(hwnd, nullptr);
+    const auto samples = FileOperationFailureProbe::SpeedSamples(window);
+    FileOperationFailureProbe::SampleSpeed(window);
+    check(FileOperationFailureProbe::SpeedSamples(window) == samples + 1 &&
+        !GetUpdateRect(hwnd, nullptr, FALSE),
+        "active transfer records statistics without repainting a collapsed unchanged view");
+    FileOperationFailureProbe::SetZigzag(window);
+    SendMessageW(hwnd, WM_PAINT, 0, 0);
+    ValidateRect(hwnd, nullptr);
+    FileOperationFailureProbe::SampleSpeed(window);
+    check(GetUpdateRect(hwnd, nullptr, FALSE) != FALSE,
+        "an expanded active speed graph repaints when a sample is recorded");
+    window.Hide();
+    ValidateRect(hwnd, nullptr);
+    FileOperationFailureProbe::SampleSpeed(window);
+    check(!GetUpdateRect(hwnd, nullptr, FALSE), "hidden transfer timer does not repaint");
+    return failures;
+}
+
+static int RunCompletionTests(HWND owner) {
+    using namespace pulse;
+    using ui::FileOperationFailureProbe;
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label); failures += !ok;
+    };
+    const std::filesystem::path output = L"bench_data/operation-completion";
+    std::filesystem::create_directories(output);
+    int dismisses = 0, cancels = 0;
+    ui::FileOperationWindow window;
+    check(window.Create(owner, {[&] { ++cancels; }, {}, {}, [&] { ++dismisses; }}),
+        "completion fixture creates the actual progress window");
+    const HWND hwnd = FileOperationFailureProbe::Window(window);
+    if (!hwnd) return failures + 1;
+    window.Show(false);
+    const bool system_animations = FileOperationFailureProbe::AnimationsEnabled(window);
+    ops::OpStatus status;
+    status.task_id = 1; status.type = ops::OpType::Copy;
+    status.source_label = L"fixture.bin"; status.destination_label = L"output";
+    status.total_items = status.completed_items = 4;
+    status.phase = ops::OpPhase::Completed; status.percent = 100;
+    window.Update(status);
+    auto inspection = FileOperationFailureProbe::Inspect(window);
+    check(inspection.percent == L"100%" && inspection.time == l10n::Get(l10n::StringId::OpCompleted) &&
+        inspection.speed == L"0 B/s" && !inspection.show_pause,
+        "completion preserves final progress, stable statistics and existing controls");
+    if (system_animations) {
+        FileOperationFailureProbe::HoldCompletionStart(window);
+        SendMessageW(hwnd, WM_PAINT, 0, 0);
+        check(FileOperationFailureProbe::CompletionOpacity(window) == 0 &&
+            FileOperationFailureProbe::NeedsFrame(window) && GetUpdateRect(hwnd, nullptr, FALSE),
+            "visible completion starts transparent and queues another presented frame");
+        FileOperationFailureProbe::StartCompletionHalfway(window);
+        window.Update(status);
+        FileOperationFailureProbe::Inspect(window);
+        check(FileOperationFailureProbe::CompletionOpacity(window) >= 0.875f,
+            "repeated completion status does not restart its reveal");
+        FileOperationFailureProbe::FinishCompletion(window);
+        SendMessageW(hwnd, WM_PAINT, 0, 0);
+        check(FileOperationFailureProbe::CompletionOpacity(window) == 1 &&
+            !FileOperationFailureProbe::CompletionPending(window) &&
+            !FileOperationFailureProbe::NeedsFrame(window) && !GetUpdateRect(hwnd, nullptr, FALSE),
+            "completion settles fully and stops the continuous animation loop");
+        ++status.task_id;
+        window.Update(status);
+        const ULONGLONG started = GetTickCount64();
+        size_t reveal_frames = 0;
+        while (GetTickCount64() - started < 220) {
+            MSG message{};
+            if (!PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { Sleep(1); continue; }
+            if (message.hwnd == hwnd && message.message == WM_PAINT) ++reveal_frames;
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
+        check(reveal_frames >= 2 && FileOperationFailureProbe::CompletionOpacity(window) == 1 &&
+            !FileOperationFailureProbe::CompletionPending(window) && !FileOperationFailureProbe::NeedsFrame(window),
+            "the real completion paint loop advances and settles within the short reveal interval");
+        for (const int dpi : {96, 168}) {
+            const float scale = dpi / 96.0f;
+            RECT rect{0, 0, static_cast<LONG>(460 * scale), static_cast<LONG>(268 * scale)};
+            SendMessageW(hwnd, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&rect));
+            for (const bool dark : {false, true}) {
+                window.SetTheme(dark, ui::HexColor(0x69CFFF));
+                const auto name = std::wstring(dark ? L"dark-" : L"light-") + std::to_wstring(dpi) + L".png";
+                FileOperationFailureProbe::HoldCompletionStart(window);
+                check(FileOperationFailureProbe::Capture(window, output / (L"start-" + name)) &&
+                    FileOperationFailureProbe::CompletionOpacity(window) == 0,
+                    "capture completed content at the start of its reveal");
+                FileOperationFailureProbe::FinishCompletion(window);
+                check(FileOperationFailureProbe::Capture(window, output / (L"settled-" + name)) &&
+                    FileOperationFailureProbe::CompletionOpacity(window) == 1,
+                    "capture completed content fully visible at the same layout");
+            }
+        }
+        FileOperationFailureProbe::HoldCompletionStart(window);
+        window.Hide();
+        SendMessageW(hwnd, WM_PAINT, 0, 0);
+        check(!FileOperationFailureProbe::CompletionPending(window) &&
+            !FileOperationFailureProbe::NeedsFrame(window) && !GetUpdateRect(hwnd, nullptr, FALSE),
+            "hiding settles the completion reveal and stops frame scheduling");
+        window.Show(false);
+        FileOperationFailureProbe::Inspect(window);
+        check(FileOperationFailureProbe::CompletionOpacity(window) == 1 &&
+            !FileOperationFailureProbe::CompletionPending(window),
+            "showing the same completed task preserves its settled content");
+        FileOperationFailureProbe::HoldCompletionStart(window);
+        FileOperationFailureProbe::SetAnimationPolicy(window, false);
+        FileOperationFailureProbe::Inspect(window);
+        check(FileOperationFailureProbe::CompletionOpacity(window) == 1 &&
+            !FileOperationFailureProbe::CompletionPending(window) && !FileOperationFailureProbe::NeedsFrame(window),
+            "disabling animation during completion shows final content immediately");
+    } else {
+        check(FileOperationFailureProbe::CompletionOpacity(window) == 1 &&
+            !FileOperationFailureProbe::CompletionPending(window) && !FileOperationFailureProbe::NeedsFrame(window),
+            "system reduced motion or high contrast shows completion immediately");
+    }
+    ++status.task_id; status.phase = ops::OpPhase::Running; status.active = true; status.percent = 20;
+    window.Update(status);
+    check(FileOperationFailureProbe::CompletionOpacity(window) == 0 &&
+        !FileOperationFailureProbe::CompletionPending(window),
+        "a new task clears completed content animation state");
+    SendMessageW(hwnd, WM_SETTINGCHANGE, SPI_SETCLIENTAREAANIMATION, 0);
+    check(FileOperationFailureProbe::AnimationsEnabled(window) == system_animations,
+        "settings notification refreshes the cached system motion policy");
+    status.phase = ops::OpPhase::Completed; status.active = false; status.percent = 100;
+    window.Update(status);
+    SendMessageW(hwnd, WM_CLOSE, 0, 0);
+    check(dismisses == 1 && cancels == 0 && !window.IsVisible(),
+        "completed close retains dismissal behavior without cancelling a task");
+    return failures;
 }
 
 static bool ZigzagPeaksConnected(const std::filesystem::path& path, float scale) {
@@ -424,6 +614,20 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc == 2 && std::wcscmp(argv[1], L"--motion-only") == 0) {
         failures = RunMotionTests(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        std::printf("[RESULT] failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wcscmp(argv[1], L"--resource-only") == 0) {
+        failures = RunResourceTests(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        std::printf("[RESULT] failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wcscmp(argv[1], L"--completion-only") == 0) {
+        failures = RunCompletionTests(owner);
         DestroyWindow(owner);
         CoUninitialize();
         std::printf("[RESULT] failures=%d\n", failures);

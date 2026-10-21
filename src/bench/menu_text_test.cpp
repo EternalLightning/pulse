@@ -1,9 +1,11 @@
 #include "../ui/fluent_menu.h"
+#include "../ui/animation_clock.h"
 #include "../ui/popup_origin.h"
 #include "../common/localization.h"
 #include <cstdio>
 #include <cmath>
 #include <filesystem>
+#include <commctrl.h>
 
 namespace pulse::ui {
 struct FluentMenuTestPeer {
@@ -14,7 +16,7 @@ struct FluentMenuTestPeer {
         menu.popup_pt_ = {menu.base_x_, menu.base_y_};
         menu.open_ = true; menu.animating_out_ = false; menu.result_ = 0;
         menu.hover_row_ = -1; menu.hover_swatch_ = -1;
-        menu.anim_start_ = std::chrono::steady_clock::now();
+        menu.anim_start_ = AnimationTimeMs();
         if (!menu.Render()) return false;
         SetWindowPos(menu.hwnd_, menu.topmost_ ? HWND_TOPMOST : HWND_TOP, menu.base_x_, menu.base_y_,
             menu.surf_.w, menu.surf_.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -37,6 +39,14 @@ struct FluentMenuTestPeer {
                 menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f)};
         SendMessageW(menu.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
     }
+    static void MoveToRow(FluentMenu& menu, int row) {
+        POINT point{FluentMenu::kShadowMargin + 40,
+            static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() +
+                menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f)};
+        // Exercise dwell scheduling without registering leave tracking against
+        // the user's real cursor outside this isolated popup.
+        menu.OnMouse(point, false);
+    }
     static void ChooseSubRow(FluentMenu& menu, int row) {
         const int margin = FluentMenu::kShadowMargin;
         POINT point{margin + 40,
@@ -45,6 +55,7 @@ struct FluentMenuTestPeer {
         SendMessageW(menu.sub_hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
     }
     static BYTE Alpha(const FluentMenu& menu) { return menu.present_alpha_; }
+    static uint64_t PresentCount(const FluentMenu& menu) { return menu.present_count_; }
     static void FullyVisible(FluentMenu& menu) { menu.Present(255, 0); }
     static bool Acrylic(const FluentMenu& menu, bool submenu = false) {
         const auto& surface = submenu ? menu.sub_surf_ : menu.surf_;
@@ -74,6 +85,22 @@ struct FluentMenuTestPeer {
     static bool Hidden(const FluentMenu& menu) { return !menu.open_ && !menu.animating_out_ &&
         !IsWindowVisible(menu.hwnd_) && !IsWindowVisible(menu.sub_hwnd_); }
     static bool HasChildren(const FluentMenu& menu, int count) { return menu.sub_model_.Count() == count; }
+    static void ChooseTrailing(FluentMenu& menu, int row) {
+        const POINT point{static_cast<LONG>(FluentMenu::kShadowMargin + menu.model_.WidthPx() - 20),
+            static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() +
+                menu.model_.RowTopPx(row) + menu.model_.RowHeightPx() * 0.5f - menu.scroll_y_)};
+        SendMessageW(menu.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+    }
+    static void HoverRow(FluentMenu& menu, int row) { menu.UpdateHover(row); }
+    static void Enter(FluentMenu& menu) { menu.HandleFilterKey(WM_KEYDOWN, VK_RETURN); }
+    static float ScrollOffset(const FluentMenu& menu) { return menu.scroll_y_; }
+    static int Count(const FluentMenu& menu) { return menu.model_.Count(); }
+    static int HoverRow(const FluentMenu& menu) { return menu.hover_row_; }
+    static auto AnimationStart(const FluentMenu& menu) { return menu.anim_start_; }
+    static void FinishAnimation(FluentMenu& menu) {
+        menu.anim_start_ = AnimationTimeMs() - 1000;
+        menu.Present(255, 0);
+    }
 };
 }
 
@@ -88,6 +115,97 @@ bool ForegroundBelongsToAnotherProcess() {
     GetWindowThreadProcessId(GetForegroundWindow(), &process);
     // The user can switch external windows while this test is running.
     return process != GetCurrentProcessId();
+}
+constexpr UINT kObserveToggleSubmenu = WM_APP + 93;
+constexpr UINT_PTR kToggleTimeout = 93;
+struct ToggleProbe {
+    pulse::ui::FluentMenu* menu = nullptr;
+    int owner_presses = 0;
+    bool saw_submenu = false;
+    bool timed_out = false;
+};
+constexpr UINT kHistoryInteraction = WM_APP + 94;
+struct HistoryProbe {
+    pulse::ui::FluentMenu* menu = nullptr;
+    std::function<void()> interact;
+    bool timed_out = false;
+};
+constexpr UINT_PTR kAnimationProbeTimer = 95;
+struct AnimationProbe {
+    pulse::ui::FluentMenu* menu = nullptr;
+    int stage = 0;
+    uint64_t settled_presents = 0;
+};
+LRESULT CALLBACK AnimationOwnerProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+                                    UINT_PTR, DWORD_PTR data) {
+    auto& probe = *reinterpret_cast<AnimationProbe*>(data);
+    using Peer = pulse::ui::FluentMenuTestPeer;
+    if (message == WM_TIMER && wp == kAnimationProbeTimer) {
+        KillTimer(window, kAnimationProbeTimer);
+        if (probe.stage == 0) {
+            Check(Peer::PresentCount(*probe.menu) > 1 && Peer::Alpha(*probe.menu) < 255,
+                "real modal loop presents intermediate entry animation frames");
+            SetTimer(window, kAnimationProbeTimer, 180, nullptr);
+        } else if (probe.stage == 1) {
+            Check(Peer::Alpha(*probe.menu) == 255 && Peer::Offset(*probe.menu) == 0,
+                "entry animation settles at full opacity and its final position");
+            probe.settled_presents = Peer::PresentCount(*probe.menu);
+            SetTimer(window, kAnimationProbeTimer, 300, nullptr);
+        } else if (probe.stage == 2) {
+            Check(Peer::PresentCount(*probe.menu) == probe.settled_presents,
+                "stationary popup submits no repeated layered-window presents for 300ms");
+            Peer::HoverRow(*probe.menu, 1);
+            Peer::MoveToRow(*probe.menu, 0);
+            Check(Peer::PresentCount(*probe.menu) > probe.settled_presents,
+                "hover still redraws the popup after its animation becomes idle");
+            SetTimer(window, kAnimationProbeTimer, 300, nullptr);
+        } else if (probe.stage == 3) {
+            Check(Peer::SubOpen(*probe.menu), "hover submenu dwell still opens during the idle modal loop");
+            probe.settled_presents = Peer::PresentCount(*probe.menu);
+            SetTimer(window, kAnimationProbeTimer, 300, nullptr);
+        } else {
+            Check(Peer::PresentCount(*probe.menu) == probe.settled_presents,
+                "stationary popup and open submenu submit no repeated presents for 300ms");
+            PostMessageW(Peer::Window(*probe.menu), WM_KEYDOWN, VK_ESCAPE, 0);
+            PostMessageW(Peer::Window(*probe.menu), WM_KEYDOWN, VK_ESCAPE, 0);
+        }
+        ++probe.stage;
+        return 0;
+    }
+    return DefSubclassProc(window, message, wp, lp);
+}
+LRESULT CALLBACK HistoryOwnerProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+                                  UINT_PTR, DWORD_PTR data) {
+    auto& probe = *reinterpret_cast<HistoryProbe*>(data);
+    if (message == kHistoryInteraction) {
+        probe.interact();
+        return 0;
+    }
+    if (message == WM_TIMER && wp == kHistoryInteraction) {
+        probe.timed_out = true;
+        probe.menu->Dismiss();
+        return 0;
+    }
+    return DefSubclassProc(window, message, wp, lp);
+}
+LRESULT CALLBACK ToggleOwnerProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+                                 UINT_PTR, DWORD_PTR data) {
+    auto& probe = *reinterpret_cast<ToggleProbe*>(data);
+    if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) {
+        ++probe.owner_presses;
+        return 0;
+    }
+    if (message == kObserveToggleSubmenu) {
+        probe.saw_submenu = pulse::ui::FluentMenuTestPeer::SubOpen(*probe.menu);
+        if (wp) pulse::ui::FluentMenuTestPeer::ChooseSubRow(*probe.menu, 1);
+        return 0;
+    }
+    if (message == WM_TIMER && wp == kToggleTimeout) {
+        probe.timed_out = true;
+        probe.menu->Dismiss();
+        return 0;
+    }
+    return DefSubclassProc(window, message, wp, lp);
 }
 pulse::ui::FluentMenuItem Item(int command, const wchar_t* text) {
     pulse::ui::FluentMenuItem item;
@@ -227,6 +345,190 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--animation-idle") == 0) {
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create idle animation popup");
+            auto create = Item(186, L"New");
+            create.children = {Item(30, L"Folder"), Item(31, L"File")};
+            AnimationProbe probe{&menu};
+            Check(SetWindowSubclass(owner, AnimationOwnerProc, kAnimationProbeTimer,
+                reinterpret_cast<DWORD_PTR>(&probe)) != FALSE, "observe timed real modal loop animation");
+            SetTimer(owner, kAnimationProbeTimer, 40, nullptr);
+            const int result = menu.TrackPopup({300, 200}, {create, Item(1, L"Open")});
+            KillTimer(owner, kAnimationProbeTimer);
+            Check(probe.stage == 5 && result == 0 && !menu.IsOpen() &&
+                !IsWindowVisible(FluentMenuTestPeer::Window(menu)) && !FluentMenuTestPeer::SubOpen(menu),
+                "Escape closes the submenu and completes the popup exit animation");
+            Check(FluentMenuTestPeer::PresentCount(menu) > probe.settled_presents + 1,
+                "exit animation resumes presentation after the stationary interval");
+            RemoveWindowSubclass(owner, AnimationOwnerProc, kAnimationProbeTimer);
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--history-refresh") == 0) {
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create search history popup");
+            HWND edit = CreateWindowExW(0, L"EDIT", L"saved draft", WS_CHILD | WS_VISIBLE,
+                20, 20, 400, 32, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+            Check(edit != nullptr, "create borrowed search editor");
+            HistoryProbe probe{&menu};
+            Check(SetWindowSubclass(owner, HistoryOwnerProc, 94, reinterpret_cast<DWORD_PTR>(&probe)) != FALSE,
+                "observe real popup interactions");
+            for (const int initial_count : {16, 1, 6, 3}) {
+                std::vector<std::wstring> entries;
+                for (int i = 0; i < initial_count; ++i) entries.push_back(L"Entry " + std::to_wstring(i));
+                std::wstring visible_filter;
+                const auto items_for = [&](const std::wstring& query = L"") {
+                    std::vector<FluentMenuItem> items{Item(0, L"Search history")};
+                    items.front().enabled = false;
+                    for (size_t i = 0; i < entries.size(); ++i) {
+                        if (!query.empty() && entries[i].find(query) == std::wstring::npos) continue;
+                        auto item = Item(100 + static_cast<int>(i), entries[i].c_str());
+                        item.trailing_command = 1000 + static_cast<int>(i);
+                        items.push_back(std::move(item));
+                    }
+                    if (items.size() == 1) {
+                        auto empty = Item(0, L"History empty");
+                        empty.enabled = false;
+                        items.push_back(std::move(empty));
+                    } else if (query.empty()) {
+                        items.push_back(Item(2, L"Clear history"));
+                    }
+                    return items;
+                };
+                int handled = 0;
+                bool refresh_succeeded = true;
+                const auto action = [&](int command) {
+                    if (command == 2) entries.clear();
+                    else if (command >= 1000 && command < 1000 + static_cast<int>(entries.size()))
+                        entries.erase(entries.begin() + command - 1000);
+                    else return false;
+                    ++handled;
+                    refresh_succeeded = menu.ReplaceFilterItems(items_for(visible_filter)) && refresh_succeeded;
+                    return true;
+                };
+                probe.interact = [&] {
+                    FluentMenuTestPeer::FinishAnimation(menu);
+                    if (initial_count == 6) SetWindowTextW(edit, L"Entry 1");
+                    const auto* expected_query = initial_count == 6 ? L"Entry 1" : L"saved draft";
+                    const int row = initial_count == 16 ? 5 : 1;
+                    FluentMenuTestPeer::HoverRow(menu, row);
+                    if (initial_count == 16) FluentMenuTestPeer::Scroll(menu, 96.0f);
+                    const auto scroll = FluentMenuTestPeer::ScrollOffset(menu);
+                    const auto animation = FluentMenuTestPeer::AnimationStart(menu);
+                    const HWND popup = FluentMenuTestPeer::Window(menu);
+                    const HWND focus = GetFocus();
+                    RECT before{}; GetWindowRect(popup, &before);
+                    SendMessageW(edit, EM_SETSEL, 1, 4);
+                    FluentMenuTestPeer::ChooseTrailing(menu, row);
+                    RECT after{}; GetWindowRect(popup, &after);
+                    DWORD first = 0, last = 0;
+                    SendMessageW(edit, EM_GETSEL, reinterpret_cast<WPARAM>(&first), reinterpret_cast<LPARAM>(&last));
+                    wchar_t text[64]{}; GetWindowTextW(edit, text, ARRAYSIZE(text));
+                    Check(handled == 1 && entries.size() == static_cast<size_t>(initial_count - 1) && refresh_succeeded,
+                        "trailing delete refreshes results inside the active modal invocation");
+                    Check(menu.IsOpen() && popup == FluentMenuTestPeer::Window(menu) && IsWindowVisible(popup) &&
+                        before.left == after.left && before.top == after.top && before.right == after.right,
+                        "deletion keeps the same visible popup at its original position and width");
+                    Check(FluentMenuTestPeer::Alpha(menu) == 255 && FluentMenuTestPeer::Offset(menu) == 0 &&
+                        FluentMenuTestPeer::AnimationStart(menu) == animation,
+                        "deletion does not replay the fade or slide animation");
+                    Check(menu.LastFilterQuery() == expected_query && wcscmp(text, expected_query) == 0 &&
+                        first == 1 && last == 4 && GetFocus() == focus,
+                        "deletion preserves the borrowed editor text selection and focus");
+                    if (initial_count == 16) {
+                        Check(FluentMenuTestPeer::ScrollOffset(menu) == scroll,
+                            "deletion preserves an existing results scroll offset");
+                        FluentMenuTestPeer::HoverRow(menu, FluentMenuTestPeer::Count(menu) - 1);
+                        FluentMenuTestPeer::Enter(menu);
+                        Check(handled == 2 && entries.empty() && menu.IsOpen() && IsWindowVisible(popup) &&
+                            FluentMenuTestPeer::Count(menu) == 2 && FluentMenuTestPeer::HoverRow(menu) == -1 &&
+                            FluentMenuTestPeer::ScrollOffset(menu) == 0,
+                            "keyboard clear retains the popup and clamps the empty-state scroll and hover");
+                    } else if (initial_count == 1 || initial_count == 6) {
+                        Check(FluentMenuTestPeer::Count(menu) == 2 && FluentMenuTestPeer::HoverRow(menu) == -1 &&
+                            FluentMenuTestPeer::ScrollOffset(menu) == 0,
+                            "deleting the last entry keeps the existing empty state visible");
+                        if (initial_count == 6) {
+                            Check(entries[1] == L"Entry 2" && visible_filter == L"Entry 1",
+                                "filtered deletion removes the original entry and retains the active filter");
+                        }
+                    } else {
+                        FluentMenuTestPeer::HoverRow(menu, 1);
+                        FluentMenuTestPeer::Enter(menu);
+                        return;
+                    }
+                    menu.Dismiss();
+                };
+                menu.SetExternalFilterEdit(edit);
+                SetWindowTextW(edit, L"saved draft");
+                menu.SetAnchorRect({320, 170, 720, 202});
+                menu.SetInitialFilterText(L"saved draft");
+                menu.SetMaxVisibleRows(9);
+                menu.SetFilterMinWidth(400);
+                menu.SetHoverFirstOnOpen(false);
+                SetTimer(owner, kHistoryInteraction, 1500, nullptr);
+                PostMessageW(owner, kHistoryInteraction, 0, 0);
+                const int result = menu.TrackPopup({320, 170}, items_for(),
+                    [&](const std::wstring& query) { visible_filter = query; return items_for(query); }, false, action);
+                KillTimer(owner, kHistoryInteraction);
+                Check(!probe.timed_out && result == (initial_count == 3 ? 100 : 0),
+                    "ordinary history selection still returns the updated command and closes the popup");
+            }
+            RemoveWindowSubclass(owner, HistoryOwnerProc, 94);
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--toggle") == 0) {
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create toggle popup");
+            ToggleProbe probe{&menu};
+            Check(SetWindowSubclass(owner, ToggleOwnerProc, 93, reinterpret_cast<DWORD_PTR>(&probe)) != FALSE,
+                "observe owner presses delivered by the real modal loop");
+            RECT anchor{10, 10, 60, 40};
+            MapWindowPoints(owner, nullptr, reinterpret_cast<POINT*>(&anchor), 2);
+            auto create = Item(186, L"New");
+            create.children = {Item(30, L"Folder"), Item(31, L"Text document")};
+            const std::vector<FluentMenuItem> items{create, Item(1, L"Refresh")};
+            auto track = [&](bool toggle = true) {
+                if (toggle) menu.SetToggleRect(anchor);
+                probe.timed_out = false;
+                SetTimer(owner, kToggleTimeout, 1500, nullptr);
+                const int result = menu.TrackPopup({300, 200}, items);
+                KillTimer(owner, kToggleTimeout);
+                Check(!probe.timed_out, "queued popup interaction completes without the watchdog");
+                return result;
+            };
+            PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 20));
+            Check(track() == 0 && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 0,
+                "second press on the originating control closes without dispatching a reopening press");
+            PostMessageW(owner, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(30, 20));
+            Check(track() == 0 && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 0,
+                "reopened popup also consumes a rapid second press delivered as double click");
+            PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(90, 20));
+            Check(track() == 0 && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 1,
+                "an outside press closes the popup and still reaches the other owner control");
+            probe.saw_submenu = false;
+            PostMessageW(FluentMenuTestPeer::Window(menu), WM_KEYDOWN, VK_RIGHT, 0);
+            PostMessageW(owner, kObserveToggleSubmenu, 0, 0);
+            PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 20));
+            Check(track() == 0 && probe.saw_submenu && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 1,
+                "pressing the originating control closes both the popup and its open submenu");
+            probe.saw_submenu = false;
+            PostMessageW(FluentMenuTestPeer::Window(menu), WM_KEYDOWN, VK_RIGHT, 0);
+            PostMessageW(owner, kObserveToggleSubmenu, 1, 0);
+            Check(track() == 31 && probe.saw_submenu && FluentMenuTestPeer::Hidden(menu),
+                "submenu mouse selection still returns its command after repeated toggling");
+            PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 20));
+            Check(track(false) == 0 && probe.owner_presses == 2,
+                "the toggle anchor is cleared before an unrelated popup reuses the menu");
+            RemoveWindowSubclass(owner, ToggleOwnerProc, 93);
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
         if (argc == 3 && (wcscmp(argv[1], L"--acrylic") == 0 ||
                          wcscmp(argv[1], L"--acrylic-transparent") == 0)) {
             const bool transparent = wcscmp(argv[1], L"--acrylic-transparent") == 0;

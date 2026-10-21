@@ -30,6 +30,7 @@ enum class SettingsEffect : uint32_t {
     GlobalSearch = 1u << 9,
     ListStyle = 1u << 10,
     FolderSort = 1u << 11,
+    WindowSizeLock = 1u << 12,
 };
 
 constexpr SettingsEffect operator|(SettingsEffect left, SettingsEffect right) noexcept {

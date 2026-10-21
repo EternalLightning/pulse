@@ -100,6 +100,8 @@ enum MenuCmd : int {
     CmdExtract = 184,
     CmdExtractAll = 185,
     CmdNewMenu = 186,
+    CmdSelectTextCompare = 187,
+    CmdCompareSelectedText = 188,
     CmdRecentBase = 200,
     CmdIndexBase = 1000,
     // Explorer integration (优化.md §7): registry static verbs bound to the
@@ -131,7 +133,11 @@ std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring&
 void RestrictDriveItemMenu(std::vector<ui::FluentMenuItem>& items, bool single_drive);
 
 struct Tab;
+std::wstring TextCompareMenuPath(const Tab& tab);
+void AppendTextCompareCommands(std::vector<ui::FluentMenuItem>& items,
+                               bool enabled, const std::wstring& path, bool has_source);
 // Uses snapshot metadata only; never probes the filesystem on the UI thread.
+std::wstring TerminalMenuPath(const Tab& tab, bool background);
 std::wstring RecentChangesMenuPath(const Tab& tab, bool background);
 void AppendRecentChangesCommand(std::vector<ui::FluentMenuItem>& items,
                                 const std::wstring& path);

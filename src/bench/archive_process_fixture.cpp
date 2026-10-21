@@ -25,10 +25,11 @@ int wmain(int argc, wchar_t** argv) {
         HANDLE event = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(std::stoull(argv[2])));
         return SetEvent(event) ? 1 : 0;
     }
-    if (mode == L"output") {
+    if (mode == L"output" || mode == L"stream") {
         char buffer[8192];
         for (char& byte : buffer) byte = 'x';
-        for (unsigned i = 0; i < 128; ++i) {
+        const unsigned blocks = mode == L"stream" ? 2048 : 128;
+        for (unsigned i = 0; i < blocks; ++i) {
             DWORD written = 0;
             if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, sizeof(buffer), &written, nullptr)) return 2;
         }

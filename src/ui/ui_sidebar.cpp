@@ -337,6 +337,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             fluent::SidebarItemSpec row;
             row.bounds = slot.rc;
             row.text = item.label;
+            row.section_title = item.path == L"pulse:starred";
             if (item.path == L"pulse:recycle") row.detail = item.detail;
             row.glyph = item.icon_glyph;
             row.badge_text = item.badge;

@@ -5,6 +5,7 @@
 #include "../app/directory_projection.h"
 #include "../app/app_column_view.h"
 #include "../app/folder_sizes_ui.h"
+#include "terminal_menu_cases.h"
 #include "../common/localization.h"
 #include <algorithm>
 #include <cstdio>
@@ -18,6 +19,8 @@ std::wstring NetCacheTestDirectory() { return {}; }
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--terminal-only")
+        return RunTerminalMenuChecks();
     const bool directory_projection_only = argc == 2 && std::string_view(argv[1]) == "--directory-projection-only";
     const bool drag_hints_only = argc == 2 && std::string_view(argv[1]) == "--drag-hints-only";
     const bool network_state_only = argc == 2 && std::string_view(argv[1]) == "--network-state-only";

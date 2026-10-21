@@ -729,14 +729,11 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SettingsLaunch: target=l.startup_row[0];break;
     case I::SettingsKeepRunning: target=l.startup_row[1];break;
     case I::SettingsDefaultManager: target=l.startup_row[2];break;
-    case I::SettingsOpenFolders: target=l.default_manager_rows[0];break;
-    case I::SettingsTakeoverWinE: target=l.default_manager_rows[1];break;
-    case I::ThisPc: target=l.default_manager_rows[2];break;
-    case I::SettingsExplorerTakeover: target=l.default_manager_rows[3];break;
     case I::StartToTray: target=l.startup_tray_row;break;
     case I::CloseLastTabWindow: target=l.last_tab_row;break;
     case I::SettingsRowHeight: target=l.density_card;break;
     case I::SettingsShowPerformance: target=l.performance_row;break;
+    case I::SettingsTextCompare: target=l.text_compare_row;break;
     case I::ListSmartDate: target=l.list_style_row[0];break;
     case I::ListZebraRows: target=l.list_style_row[1];break;
     case I::ListSizeBar: target=l.list_style_row[2];break;

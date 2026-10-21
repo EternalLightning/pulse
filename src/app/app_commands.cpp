@@ -452,8 +452,9 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
 }
 
 void DispatchMenuCommand(AppState& s, int cmd) {
-    const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab || cmd==app::CmdRename;
-    if(needs_files && DeferContentSelection(s,[cmd](AppState& v){DispatchMenuCommand(v,cmd);})) return;
+    const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab || cmd==app::CmdRename || cmd==app::CmdOpenTerminal;
+    if(needs_files && DeferContentSelection(s,[cmd](AppState& v){DispatchMenuCommand(v,cmd);},
+        cmd == app::CmdOpenTerminal)) return;
     if (cmd >= app::CmdViewBase && cmd < app::CmdViewBase + 8) {
         SetViewMode(s, ui::ViewModeFromIndex(cmd - app::CmdViewBase));
         return;
@@ -495,6 +496,20 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         s.settings.FolderSort(cmd - app::CmdFolderSortTop);
         break;
     case app::CmdOpen: OpenSelected(s); break;
+    case app::CmdSelectTextCompare:
+    case app::CmdCompareSelectedText: {
+        const auto* tab = ActiveTab(s);
+        if (!s.appPrefs.text_compare_enabled || !tab) break;
+        const auto path = app::TextCompareMenuPath(*tab);
+        if (path.empty()) break;
+        if (cmd == app::CmdSelectTextCompare) s.text_compare_selection.Select(path);
+        else if (s.text_compare_selection.ready()) {
+            if (!s.text_diff) s.text_diff = std::make_unique<ui::TextDiffWindow>();
+            s.text_diff->Show(s.hwnd, s.text_compare_selection.source(), path,
+                             s.darkMode, s.accentColor);
+        }
+        break;
+    }
     case app::CmdViewRecentChanges:
         if (const auto* tab = ActiveTab(s)) {
             const auto path = app::RecentChangesMenuPath(*tab, false);
@@ -587,8 +602,10 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         break;
     }
     case app::CmdOpenTerminal: {
-        app::Tab* tab = ActiveTab(s);
-        if (tab && !tab->current_path.empty()) s.ops.OpenTerminal(ClipboardPath(tab->current_path));
+        if (const auto* tab = ActiveTab(s); tab && !IsArchiveView(tab->current_path)) {
+            const auto path = app::TerminalMenuPath(*tab, false);
+            if (!path.empty()) s.ops.OpenTerminal(ClipboardPath(path));
+        }
         break;
     }
     case app::CmdCopyPath: {
@@ -720,6 +737,9 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         }
     }
     std::vector<ui::FluentMenuItem> items = app::BuildItemMenu(can_undo, undo_label, folder);
+    if (const auto* tab = ActiveTab(s))
+        app::AppendTextCompareCommands(items, s.appPrefs.text_compare_enabled,
+            app::TextCompareMenuPath(*tab), s.text_compare_selection.ready());
     if (const auto* tab = ActiveTab(s))
         app::AppendRecentChangesCommand(items, app::RecentChangesMenuPath(*tab, false));
     ApplyWorkspacePinLabel(items, s);
@@ -1073,7 +1093,10 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     std::wstring undoLabel = s.ops.UndoLabel();
     bool canPaste = CanPasteIntoCurrent(s);
     const auto recent_changes_path = app::RecentChangesMenuPath(*tab, true);
+    const auto terminal_path = app::TerminalMenuPath(*tab, true);
     auto base_items = app::BuildBackgroundMenu(canPaste, s.ops.CanUndo(), undoLabel);
+    if (terminal_path.empty())
+        std::erase_if(base_items, [](const auto& item) { return item.command == app::CmdOpenTerminal; });
     app::AppendRecentChangesCommand(base_items, recent_changes_path);
     app::AppendBackgroundViewCommands(base_items, view_options);
     ApplyWorkspacePinLabel(base_items, s);
@@ -1088,6 +1111,10 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     if (HandleShellMenuCommand(s, cmd)) return;
     if (HandleQuickAccessCommand(s, cmd, quick_paths)) return;
     if (cmd == app::CmdViewRecentChanges) { OpenChangeView(s, recent_changes_path); return; }
+    if (cmd == app::CmdOpenTerminal) {
+        if (!terminal_path.empty()) s.ops.OpenTerminal(ClipboardPath(terminal_path));
+        return;
+    }
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
 }
 
@@ -1924,6 +1951,8 @@ void SyncQuickPreview(AppState& s) {
 void EnsureEditVisuals(AppState& s);
 
 static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects) {
+    if (app::HasEffect(effects, app::SettingsEffect::WindowSizeLock))
+        s.window_size_lock.Sync(s.hwnd, s.appPrefs.lock_window_size);
     if (app::HasEffect(effects, app::SettingsEffect::FileVisibility)) {
         ForEachPane(s, [&](app::Pane& pane) {
             if (auto* tab = pane.ActiveTab()) {

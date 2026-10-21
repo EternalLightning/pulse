@@ -218,6 +218,7 @@ struct Tab {
     void RemapSelection(const std::vector<std::wstring>& names, const std::wstring& focus_name);
 
     // Navigation helpers.
+    void ClearArchiveView();
     // Returns false when already at the destination, preserving the view and history.
     bool NavigateTo(const std::wstring& path);
     bool CanGoBack() const { return !back_stack.empty(); }
@@ -290,6 +291,8 @@ struct Pane {
     float filter_animation_from = 0.0f;
     float filter_animation_target = 0.0f;
     uint64_t filter_animation_start = 0;
+
+    ~Pane();
 
     Tab* ActiveTab() { return &view; }
     const Tab* ActiveTab() const { return &view; }

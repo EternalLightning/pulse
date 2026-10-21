@@ -1,6 +1,7 @@
 // context_menu.cpp — See context_menu.h.
 #include "context_menu.h"
 #include "app_model.h"
+#include "text_compare_selection.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
 #include "../common/display_path.h"
@@ -108,6 +109,32 @@ void RestrictDriveItemMenu(std::vector<ui::FluentMenuItem>& items, bool single_d
     });
 }
 
+std::wstring TerminalMenuPath(const Tab& tab, bool background) {
+    if (tab.current_path.starts_with(L"pulse:archive:") ||
+        tab.current_path.starts_with(L"pulse:recycle")) return {};
+    const auto filesystem = [](const std::wstring& path) {
+        return !path.empty() && !fs::IsVirtualPath(path);
+    };
+    if (background || tab.SelectedCount() == 0)
+        return filesystem(tab.current_path) ? tab.current_path : std::wstring{};
+    const int index = tab.selected_index;
+    if (!tab.snapshot || index < 0 || static_cast<size_t>(index) >= tab.EntryCount() ||
+        !tab.IsSelected(index)) return {};
+    const auto entry = tab.EntryAt(static_cast<size_t>(index));
+    if (entry.change_record_only || !entry.recycle_path.empty()) return {};
+    const bool resolved_link = !entry.link_target.empty();
+    const bool directory = resolved_link ? entry.link_target_is_dir : entry.is_dir;
+    std::wstring path = resolved_link ? entry.link_target : entry.full_path;
+    if (path.empty()) {
+        if (!filesystem(tab.current_path)) return {};
+        path = tab.current_path;
+        if (!path.ends_with(L"\\")) path += L"\\";
+        path += entry.name;
+    }
+    if (!filesystem(path)) return {};
+    return directory ? path : fs::ParentPath(path);
+}
+
 std::wstring RecentChangesMenuPath(const Tab& tab, bool background) {
     auto filesystem = [](const std::wstring& path) { return !path.empty() && !fs::IsVirtualPath(path); };
     if (background) return filesystem(tab.current_path) ? tab.current_path : std::wstring{};
@@ -132,6 +159,34 @@ void AppendRecentChangesCommand(std::vector<ui::FluentMenuItem>& items,
     if (path.empty() || fs::IsVirtualPath(path)) return;
     auto item = Item(CmdViewRecentChanges, l10n::Get(l10n::StringId::ChangeView).c_str(), L"\xE81C");
     items.insert(items.begin() + (items.empty() ? 0 : 1), std::move(item));
+}
+
+std::wstring TextCompareMenuPath(const Tab& tab) {
+    if (!tab.snapshot || tab.current_path.starts_with(L"pulse:archive:") ||
+        tab.current_path.starts_with(L"pulse:recycle")) return {};
+    const auto indices = tab.SelectedIndices();
+    if (indices.size() != 1 || indices[0] < 0 ||
+        static_cast<size_t>(indices[0]) >= tab.EntryCount()) return {};
+    const auto entry = tab.EntryAt(static_cast<size_t>(indices[0]));
+    if (entry.is_dir || entry.change_record_only || !entry.recycle_path.empty()) return {};
+    std::wstring path = entry.full_path;
+    if (path.empty()) {
+        if (fs::IsVirtualPath(tab.current_path)) return {};
+        path = tab.current_path;
+        if (!path.ends_with(L"\\")) path += L"\\";
+        path += entry.name;
+    }
+    return IsTextCompareFile(path) ? path : std::wstring{};
+}
+
+void AppendTextCompareCommands(std::vector<ui::FluentMenuItem>& items,
+                               bool enabled, const std::wstring& path, bool has_source) {
+    if (!enabled || !IsTextCompareFile(path)) return;
+    auto where = items.begin() + (items.empty() ? 0 : 1);
+    where = items.insert(where, Item(CmdSelectTextCompare,
+        l10n::Get(l10n::StringId::TextCompareSelect).c_str(), L"\xE8A5"));
+    if (has_source) items.insert(where + 1, Item(CmdCompareSelectedText,
+        l10n::Get(l10n::StringId::TextCompareWithSelected).c_str(), L"\xE8AB"));
 }
 
 std::vector<ui::FluentMenuItem> BuildRecycleItemMenu(bool can_undo,

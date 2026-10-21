@@ -417,8 +417,7 @@ bool TickAddressSearchAnimation(AppState& s, uint64_t now) {
         s.addressAnimationTick = 0;
         return false;
     }
-    BOOL animate = TRUE;
-    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0);
+    const bool animate = s.renderer.MotionEnabled() && !s.shot_high_contrast;
     const float dt = s.addressAnimationTick ? static_cast<float>(now - s.addressAnimationTick) : 16.0f;
     s.addressAnimationTick = now;
     const float blend = animate ? 1.0f - std::exp(-std::min(dt, 100.0f) / 55.0f) : 1.0f;

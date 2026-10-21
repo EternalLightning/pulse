@@ -181,10 +181,6 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         toggle(lay.startup_row[2],I::SettingsDefaultManager,I::SettingsDefaultManagerDesc,L"\xE8B7",
             vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc,21);
         divider(lay.startup_row[2]);
-        toggle(lay.default_manager_rows[0],I::SettingsOpenFolders,I::SettingsOpenFoldersDesc,L"\xE8B7",vm.settings_open_folders,3);divider(lay.default_manager_rows[0]);
-        toggle(lay.default_manager_rows[1],I::SettingsTakeoverWinE,I::SettingsTakeoverWinEDesc,L"\xE765",vm.settings_take_over_win_e,22);divider(lay.default_manager_rows[1]);
-        toggle(lay.default_manager_rows[2],I::ThisPc,I::SettingsTakeoverThisPcDesc,L"\xE770",vm.settings_take_over_this_pc,23);divider(lay.default_manager_rows[2]);
-        toggle(lay.default_manager_rows[3],I::SettingsExplorerTakeover,I::SettingsExplorerTakeoverDesc,L"\xE946",vm.settings_explorer_takeover,24);divider(lay.default_manager_rows[3]);
         if(lay.system_status.bottom>lay.system_status.top) {
             const auto r=lay.system_status;
             DrawIconText(r.left+16*scale_,r.top+12*scale_,24*scale_,24*scale_,L"\xE946",L"",theme.text_secondary,0.85f);
@@ -200,6 +196,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
         toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);
+        toggle(lay.text_compare_row,I::SettingsTextCompare,I::SettingsTextCompareDesc,L"\xE8A5",vm.settings_text_compare,33);divider(lay.text_compare_row);
         toggle(lay.list_style_row[0],I::ListSmartDate,I::ListSmartDateDesc,L"\xE787",vm.settings_list_smart_date,17);divider(lay.list_style_row[0]);
         toggle(lay.list_style_row[1],I::ListZebraRows,I::ListZebraRowsDesc,L"\xE8FD",vm.settings_list_zebra_rows,18);divider(lay.list_style_row[1]);
         toggle(lay.list_style_row[2],I::ListSizeBar,I::ListSizeBarDesc,L"\xE9D2",vm.settings_list_size_bar,19);divider(lay.list_style_row[2]);
@@ -254,7 +251,9 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                     ? lay.wallpaper_fit_card.right-16*scale_ : lay.wallpaper_fit.left-12*scale_);
             const auto background_size = BackgroundImageSize(vm.background_image);
             button(lay.wallpaper_fit,l10n::Get(I::MatchWindowSize),H::SettingsWallpaper,2,false,
-                background_size.cx>0 && background_size.cy>0);
+                !vm.settings_lock_window_size && background_size.cx>0 && background_size.cy>0);
+            draw_card(lay.window_size_lock_row);
+            toggle(lay.window_size_lock_row,I::SettingsLockWindowSize,I::SettingsLockWindowSizeDesc,L"\xE72E",vm.settings_lock_window_size,34);
             const int levels[]={0,1,2};
             draw_card(lay.wallpaper_look_card);
             label(lay.wallpaper_look_card,l10n::Get(I::SettingsWallpaperLook),l10n::Get(I::SettingsWallpaperLookDesc),L"\xE8A4",

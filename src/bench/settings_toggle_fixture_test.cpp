@@ -1,4 +1,5 @@
 #include "../app/app_internal.h"
+#include "../app/builtin_menu_strings.h"
 #include "../ui/ui_renderer_internal.h"
 #include "../ui/lumatext_renderer.h"
 #include "../common/user_storage.h"
@@ -53,17 +54,13 @@ int main() {
         if(control==21) {
             const bool on=!(s.appPrefs.open_folders_in_pulse && s.appPrefs.take_over_win_e && s.appPrefs.take_over_this_pc);
             s.appPrefs.open_folders_in_pulse=s.appPrefs.take_over_win_e=s.appPrefs.take_over_this_pc=on;
-        } else if(control==3) s.appPrefs.open_folders_in_pulse=!s.appPrefs.open_folders_in_pulse;
-        else if(control==22) s.appPrefs.take_over_win_e=!s.appPrefs.take_over_win_e;
-        else if(control==23) s.appPrefs.take_over_this_pc=!s.appPrefs.take_over_this_pc;
-        else if(control==24) s.appPrefs.experimental_explorer_takeover=!s.appPrefs.experimental_explorer_takeover;
+        }
     };
     s.settings.BindUi(s.appPrefs,s.ctxMenuPrefs,s.index,s.networkIndex,std::move(callbacks));
     const auto get_row=[](const ui::SettingsLayout& l,int control) {
         switch(control) {
         case 1:return l.startup_row[0]; case 2:return l.startup_row[1]; case 31:return l.startup_tray_row;
-        case 32:return l.last_tab_row; case 21:return l.startup_row[2]; case 3:return l.default_manager_rows[0];
-        case 22:return l.default_manager_rows[1]; case 23:return l.default_manager_rows[2]; case 24:return l.default_manager_rows[3];
+        case 32:return l.last_tab_row; case 21:return l.startup_row[2];
         case 20:return l.new_tab_row; case 5:return l.hidden_files_row; default:return l.performance_row;
         }
     };
@@ -82,9 +79,8 @@ int main() {
             auto vm=BuildVm(s,false);
             auto l=ui::MakeSettingsLayout(vm,rect,scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);
             const I descriptions[]={I::SettingsLaunchDesc,I::SettingsKeepRunningDesc,I::StartToTrayDesc,I::CloseLastTabWindowDesc,
-                I::SettingsDefaultManagerDesc,I::SettingsOpenFoldersDesc,I::SettingsTakeoverWinEDesc,I::SettingsTakeoverThisPcDesc,
-                I::SettingsExplorerTakeoverDesc,I::SettingsNewTabHomeDesc};
-            const int controls[]={1,2,31,32,21,3,22,23,24,20};
+                I::SettingsDefaultManagerDesc,I::SettingsNewTabHomeDesc};
+            const int controls[]={1,2,31,32,21,20};
             for(size_t i=0;i<std::size(controls);++i) {
                 const auto row=get_row(l,controls[i]);
                 const auto bounds=ui::SettingsToggleBounds(row,l10n::Get(descriptions[i]),scale,&measuring);
@@ -95,6 +91,17 @@ int main() {
                 if(expected<=64*scale+0.5f)
                     Check(std::abs(row.bottom-row.top-64*scale)<0.5f,"short switch rows share the 64 DIP minimum without a blank line");
             }
+            auto partial_vm=vm;
+            partial_vm.settings_system_status=l10n::Get(I::SettingsDefaultManagerPartial);
+            const auto partial_layout=ui::MakeSettingsLayout(partial_vm,rect,scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);
+            Check(!partial_vm.settings_system_status.empty() &&
+                partial_layout.system_status.bottom>partial_layout.system_status.top &&
+                partial_layout.new_tab_row.top>=partial_layout.system_status.bottom &&
+                partial_layout.system_status.bottom-partial_layout.system_status.top>=
+                    ui::SettingsCaptionHeight(partial_vm.settings_system_status,
+                        partial_layout.system_status.right-partial_layout.system_status.left-70*scale,
+                        scale,&measuring)+2*ui::kSettingsRowPaddingDip*scale-0.5f,
+                "localized partial-association notice has sufficient space at each language, width and scale");
             vm.settings_system_pending=true; vm.settings_system_status=l10n::Get(I::SettingsSystemApplying);
             const auto pending=ui::MakeSettingsLayout(vm,rect,scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);
             Check(SameRect(l.new_tab_row,pending.new_tab_row) && SameRect(l.performance_row,pending.performance_row) &&
@@ -136,11 +143,10 @@ int main() {
         case 31:return s.appPrefs.start_to_tray; case 32:return s.appPrefs.close_last_tab_window;
         case 20:return s.appPrefs.new_tab_home; case 5:return s.appPrefs.show_hidden_files;
         case 21:return s.appPrefs.open_folders_in_pulse && s.appPrefs.take_over_win_e && s.appPrefs.take_over_this_pc;
-        case 3:return s.appPrefs.open_folders_in_pulse; case 22:return s.appPrefs.take_over_win_e;
-        case 23:return s.appPrefs.take_over_this_pc; default:return s.appPrefs.experimental_explorer_takeover;
+        default:return false;
         }
     };
-    for(int control:{2,1,31,32,20,5,21,3,22,23,24}) {
+    for(int control:{2,1,31,32,20,5,21}) {
         s.settings.SetScroll(0,100000);
         auto initial=BuildVm(s,false);
         auto layout=ui::MakeSettingsLayout(initial,rect,s.scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);
@@ -156,7 +162,7 @@ int main() {
         render(before,prefix+L"-cold"); render(before,prefix+L"-before");
         const auto generation=ui::typography::Generation();
         auto* const font=s.compositor.TextFormat();
-        if(control==21 || control==3 || control==22 || control==23 || control==24) {
+        if(control==21) {
             auto busy=before; busy.settings_system_pending=true; busy.settings_system_status=l10n::Get(I::SettingsSystemApplying);
             render(busy,prefix+L"-pending");
             const auto nohit=s.renderer.HitTest(busy,rect,x,y);
@@ -178,10 +184,28 @@ int main() {
     s.systemIntegration.Toggle(s,21);
     Check(!s.systemIntegration.pending() && s.appPrefs.ToJson()==options_before &&
         ui::typography::Generation()==pending_generation,"unstarted isolated SystemIntegration never accesses or changes registry/preferences");
-    Check(system_requests==5,"all system switches route to isolated completion callback without real worker");
-    Check(l10n::Get(I::SettingsOpenFolders).find(L"默认")==std::wstring::npos &&
-        l10n::Get(I::SettingsOpenFoldersDesc).find(L"Win+E")==std::wstring::npos,
-        "folder sub-option wording cannot contradict independent Win+E state");
+    Check(system_requests==1,"unified default manager switch routes to isolated completion callback without real worker");
+    const auto removed_options=s.appPrefs.ToJson();
+    for(int removed:{3,22,23,24}) s.settings.ToggleUi(removed);
+    Check(system_requests==1 && s.appPrefs.ToJson()==removed_options,
+        "removed sub-option controls cannot change preferences or dispatch system integration");
+    Check(l10n::Get(I::SettingsDefaultManagerDesc).find(L"Win+E")!=std::wstring::npos &&
+        l10n::Get(I::SettingsDefaultManagerDesc).find(L"分别调整")==std::wstring::npos,
+        "unified default manager description names its behavior without independent sub-options");
+    s.appPrefs.open_folders_in_pulse=true;
+    s.appPrefs.take_over_win_e=false;
+    s.appPrefs.take_over_this_pc=true;
+    const auto partial=BuildVm(s,false);
+    Check(!partial.settings_system_pending && !partial.settings_system_status.empty() &&
+        partial.settings_system_status==l10n::Get(I::SettingsDefaultManagerPartial),
+        "partial associations are explained beside the single default manager switch");
+    render(partial,L"control-21-partial");
+    s.appPrefs.take_over_win_e=true;
+    Check(BuildVm(s,false).settings_system_status.empty(),
+        "complete associations clear the partial-state notice");
+    s.appPrefs.open_folders_in_pulse=s.appPrefs.take_over_win_e=s.appPrefs.take_over_this_pc=false;
+    Check(BuildVm(s,false).settings_system_status.empty(),
+        "fully disabled associations have no partial-state notice");
     if(const auto* stats=s.compositor.GetLumaTextStats())
         std::printf("Luma draws=%llu hits=%llu fallbacks=%llu (diagnostic only; screenshots need visual review)\n",
             static_cast<unsigned long long>(stats->draw_calls),static_cast<unsigned long long>(stats->cache_hits),

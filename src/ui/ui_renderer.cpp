@@ -8,6 +8,7 @@
 #include "../common/display_path.h"
 #include "../common/known_folder_labels.h"
 #include "tab_shape.h"
+#include "animation_clock.h"
 #include "typography.h"
 #include "../model/places.h"
 #include "../common/resource_ids.h"
@@ -41,6 +42,7 @@ MainRenderer::~MainRenderer() {
 }
 
 void MainRenderer::SetCompositor(Compositor* comp) {
+    RefreshMotionPreferences();
     paneHeaderStroke_.reset();
     ClearTextWidthCache();
     name_layout_cache_.clear();
@@ -67,6 +69,13 @@ void MainRenderer::SetCompositor(Compositor* comp) {
         preview_mono_format_.reset();
     }
     else { icon_cache_.SetDeviceContext(comp->Dc()); thumbnail_cache_.SetDeviceContext(comp->Dc()); }
+}
+
+void MainRenderer::RefreshMotionPreferences() {
+    BOOL animations = TRUE;
+    motion_enabled_ =
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0) &&
+        animations && !IsHighContrast();
 }
 
 void MainRenderer::InvalidateTypography() {
@@ -309,6 +318,8 @@ void MainRenderer::DrawButton(const D2D1_RECT_F& rc, const Theme& theme, const D
 void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           const Theme& theme) {
     if (!compositor_ || !compositor_->Dc()) return;
+    details_content_animating_ = false;
+    if (vm.settings_open || !vm.details_visible) details_content_reveal_.Reset();
     ThumbnailCache::FrameScope thumbnail_frame(thumbnail_cache_);
     for (auto& names : painted_name_truncation_) names.clear();
     ID2D1DeviceContext* dc = compositor_->Dc();
@@ -460,7 +471,7 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     auto drawTab = [&](size_t i, float left, bool raised) {
         const bool active = vm.tabs[i].active;
         const bool pinned = vm.tabs[i].pinned;
-        const float tabW = pinned ? strip.pinned_w : strip.w;
+        const float tabW = strip.items[i].right - strip.items[i].left;
         if (tabW <= 0.0f || left + tabW <= strip.viewport.left || left >= strip.viewport.right) return;
         const bool hovered = IsHovered(vm, HitTestResult::Tab, static_cast<int>(i)) ||
                              IsHovered(vm, HitTestResult::TabClose, static_cast<int>(i));
@@ -509,12 +520,6 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             if (!active) line.a *= 0.55f;
             MakeBrush(dc, line, brAccent_);
             FillChromeTabAccent(dc, brAccent_.get(), tabRc, shape, 2.0f * scale_);
-        }
-        if (active) {
-            MakeBrush(dc, vm.tabs[i].color_rgb ? HexColor(vm.tabs[i].color_rgb) : theme.accent, brAccent_);
-            const float inset = pinned && !vm.show_pinned_tab_names ? 8.0f * scale_ : 16.0f * scale_;
-            FillRoundedRect(dc, brAccent_.get(), tabRc.left + inset, tabRc.bottom - 3*scale_,
-                (std::max)(0.0f, tabW - 2.0f * inset), 2*scale_, scale_);
         }
         if (pinned && !vm.show_pinned_tab_names) {
             // Chrome pinned tab: centered icon, no title, no close button.
@@ -620,16 +625,12 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             activeI = static_cast<int>(i);
             continue;
         }
-        const float extra = i < strip.extra.size() ? strip.extra[i] : 0.0f;
-        const float left = strip.x0
-            + (static_cast<float>(i) + vm.tabs[i].x_offset) * strip.pitch + extra;
+        const float left = strip.items[i].left + vm.tabs[i].x_offset * strip.pitch;
         drawTab(i, left, false);
     }
     if (activeI >= 0 && !inDragRun(activeI) && !vm.tabs[static_cast<size_t>(activeI)].hidden) {
         const size_t i = static_cast<size_t>(activeI);
-        const float extra = i < strip.extra.size() ? strip.extra[i] : 0.0f;
-        const float left = strip.x0
-            + (static_cast<float>(i) + vm.tabs[i].x_offset) * strip.pitch + extra;
+        const float left = strip.items[i].left + vm.tabs[i].x_offset * strip.pitch;
         drawTab(i, left, false);
     }
     // The dragged run floats as one block (browser group drag); collapsed
@@ -643,8 +644,6 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
     }
 
-    dc->PopAxisAlignedClip();
-
     auto tab_left_at = [&](int i) -> float {
         if (inDragRun(i)) {
             float left = vm.tab_drag_x;
@@ -652,15 +651,40 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
                 if (!vm.tabs[static_cast<size_t>(k)].hidden) left += strip.pitch;
             return left;
         }
-        const float extra = i < static_cast<int>(strip.extra.size())
-            ? strip.extra[static_cast<size_t>(i)] : 0.0f;
-        return strip.x0
-            + (static_cast<float>(i) + vm.tabs[static_cast<size_t>(i)].x_offset) * strip.pitch
-            + extra;
+        return strip.items[static_cast<size_t>(i)].left
+            + vm.tabs[static_cast<size_t>(i)].x_offset * strip.pitch;
     };
+    const auto active = std::find_if(vm.tabs.begin(), vm.tabs.end(),
+        [](const TabView& tab) { return tab.active && !tab.hidden; });
+    if (active != vm.tabs.end()) {
+        const int index = static_cast<int>(active - vm.tabs.begin());
+        const float width = strip.items[static_cast<size_t>(index)].right - strip.items[static_cast<size_t>(index)].left;
+        const float inset = active->pinned && !vm.show_pinned_tab_names ? 8.0f * scale_ : 16.0f * scale_;
+        const float left = tab_left_at(index);
+        const float viewport_width = strip.viewport.right - strip.viewport.left;
+        // Renderer-only fixtures may omit identity; production always supplies it.
+        const void* identity = active->identity ? active->identity :
+            reinterpret_cast<const void*>(static_cast<uintptr_t>(index) + 1);
+        const bool selection_changed = tab_indicator_.identity != identity;
+        const bool animate = motion_enabled_ && vm.tab_drag_index < 0 && !tab_close_.Pending() &&
+            tab_indicator_scale_ == scale_ && tab_indicator_window_width_ == rect.right &&
+            (selection_changed || (tab_indicator_viewport_width_ == viewport_width &&
+                                  tab_indicator_scroll_offset_ == strip.scroll_offset));
+        tab_indicator_.Tick(identity, left + std::min(inset, width * 0.5f),
+            left + std::max(width * 0.5f, width - inset), AnimationTimeMs(), animate);
+        tab_indicator_scale_ = scale_;
+        tab_indicator_window_width_ = rect.right;
+        tab_indicator_viewport_width_ = viewport_width;
+        tab_indicator_scroll_offset_ = strip.scroll_offset;
+    } else {
+        tab_indicator_.Reset();
+    }
+    dc->PopAxisAlignedClip();
+
     const int connected = dragI >= 0 ? dragI : activeI;
     if (connected >= 0 && connected < static_cast<int>(vm.tabs.size())) {
-        const float connW = vm.tabs[static_cast<size_t>(connected)].pinned ? strip.pinned_w : strip.w;
+        const auto& connected_item = strip.items[static_cast<size_t>(connected)];
+        const float connW = connected_item.right - connected_item.left;
         const float shoulder = 8.0f * scale_;
         const float cut_l = std::clamp(tab_left_at(connected) - shoulder,
             strip.viewport.left, strip.viewport.right);
@@ -672,6 +696,16 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             FillRect(dc, brStrokeDivider_.get(), cut_r, h - 1.0f, rect.right - cut_r, 1.0f);
     } else {
         FillRect(dc, brStrokeDivider_.get(), 0.0f, h - 1.0f, rect.right, 1.0f);
+    }
+
+    if (active != vm.tabs.end()) {
+        // Draw above the connection divider so the stretched bridge retains its full height.
+        dc->PushAxisAlignedClip(strip.viewport, D2D1_ANTIALIAS_MODE_ALIASED);
+        MakeBrush(dc, active->color_rgb ? HexColor(active->color_rgb) : theme.accent, brAccent_);
+        const float bottom = sheet_alpha_ < 1.0f ? std::round(h) : h + 1.0f;
+        FillRoundedRect(dc, brAccent_.get(), tab_indicator_.left, bottom - 3.0f * scale_,
+            tab_indicator_.right - tab_indicator_.left, 2.0f * scale_, scale_);
+        dc->PopAxisAlignedClip();
     }
 
     auto drawScroll = [&](const D2D1_RECT_F& bounds, bool left, bool enabled) {
@@ -955,7 +989,37 @@ MainRenderer::TabStripMetrics MainRenderer::ComputeTabStrip(
     for (auto& chip : m.chips) chip.left -= m.scroll_offset;
     m.end_x = overflow ? viewport_right + scroll_w + new_gap : m.x0 + content_w + new_gap;
     m.new_button = D2D1::RectF(m.end_x, m.y, m.end_x + new_w, m.y + m.h);
+    m.items.reserve(vm.tabs.size() + m.chips.size() + 1);
+    for (size_t i = 0; i < vm.tabs.size(); ++i) {
+        const float left = m.x0 + static_cast<float>(i) * m.pitch + m.extra[i];
+        const void* identity = vm.tabs[i].identity ? vm.tabs[i].identity :
+            reinterpret_cast<const void*>(static_cast<uintptr_t>(i) + 1);
+        m.items.push_back({identity, -1, left, left + (vm.tabs[i].pinned ? m.pinned_w : m.w)});
+    }
+    for (const auto& chip : m.chips) {
+        const int group_id = chip.group < static_cast<int>(vm.tab_groups.size())
+            ? vm.tab_groups[static_cast<size_t>(chip.group)].id : chip.group;
+        m.items.push_back({nullptr, group_id, chip.left, chip.left + chip.width});
+    }
+    m.items.push_back({nullptr, -1, m.new_button.left, m.new_button.right});
+    const bool reordering = vm.tab_drag_index >= 0 || std::any_of(vm.tabs.begin(), vm.tabs.end(),
+        [](const TabView& tab) { return tab.x_offset != 0; }) ||
+        std::any_of(vm.tab_groups.begin(), vm.tab_groups.end(),
+            [](const TabGroupView& group) { return group.x_offset != 0; });
+    tab_close_.Apply(m.items, AnimationTimeMs(), window_w, scale_, motion_enabled_ && !reordering);
+    for (size_t i = 0; i < m.chips.size(); ++i) {
+        const auto& item = m.items[vm.tabs.size() + i];
+        m.chips[i].left = item.left;
+        m.chips[i].width = item.right - item.left;
+    }
+    m.new_button.left = m.items.back().left;
+    m.new_button.right = m.items.back().right;
     return m;
+}
+
+void MainRenderer::CaptureTabCloseLayout(const WindowViewModel& vm, float window_w) {
+    auto strip = ComputeTabStrip(vm, window_w);
+    tab_close_.Capture(std::move(strip.items), window_w, scale_);
 }
 
 bool MainRenderer::ScrollTabStrip(const WindowViewModel& vm, float window_w, float steps) {

@@ -153,6 +153,7 @@ struct SidebarItemSpec {
     bool tag_dot = false;
     bool status_dot = false;
     bool suppress_text = false;
+    bool section_title = false; // Root rows share the section-header text style.
     bool skip_glyph = false;
     float trailing_reserve = 0.0f;
     D2D1_COLOR_F icon_color{};

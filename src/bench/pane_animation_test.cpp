@@ -1,5 +1,6 @@
 #include "../app/pane_animations.h"
 #include "../app/ui_schedule_state.h"
+#include "../app/sidebar_scrollbar_fade.h"
 #include <cstdio>
 
 namespace pulse::app {
@@ -51,6 +52,45 @@ int main() {
     check(!TickPaneAnimations(pane, true, true, 5000) && pane.header_animation.opacity == 1 &&
           pane.filter_expand == 1, "long interruption settles without replaying missed frames");
     check(!TickPaneAnimations(pane, true, true, 5004), "settled values request no additional frames");
+    Pane redirected;
+    TickPaneAnimations(redirected, false, false, 1000);
+    TickPaneAnimations(redirected, true, true, 1100);
+    Pane sampled;
+    TickPaneAnimations(sampled, false, false, 1000);
+    TickPaneAnimations(sampled, true, true, 1100);
+    TickPaneAnimations(sampled, true, true, 1170);
+    check(TickPaneAnimations(redirected, false, false, 1170) &&
+          redirected.header_animation.opacity > 0 && redirected.filter_expand > 0 &&
+          redirected.header_animation.opacity == sampled.header_animation.opacity &&
+          redirected.filter_expand == sampled.filter_expand,
+          "retarget between display frames samples the old tracks at the new timestamp");
+    TickPaneAnimations(redirected, false, false, 1180);
+    check(redirected.header_animation.opacity < sampled.header_animation.opacity &&
+          redirected.filter_expand < sampled.filter_expand,
+          "retargeted tracks move from the current sample toward the new endpoint");
+    TickPaneAnimations(redirected, true, true, 1300);
+    check(!TickPaneAnimations(redirected, true, true, 1320, false) &&
+          redirected.header_animation.opacity == 1 && redirected.filter_expand == 1 &&
+          !PaneAnimationsPending(redirected, true, true),
+          "turning off animation during a transition snaps both tracks and releases scheduling");
+    check(!TickPaneAnimations(redirected, false, false, 1321, false) &&
+          redirected.header_animation.opacity == 0 && redirected.filter_expand == 0,
+          "disabled motion applies focus and filter endpoints in the same frame");
+    check(!TickPaneAnimations(redirected, false, false, 1400),
+          "re-enabling motion never replays the completed transition");
+    redirected.view.filter_text = L"retained";
+    check(!TickPaneAnimations(redirected, false, false, 1410, false) && redirected.filter_expand == 1,
+          "disabled motion preserves a populated filter's open state");
+    SidebarScrollbarFade fade;
+    fade.Tick(1000, 40, false, false, false);
+    check(fade.opacity == 1 && fade.expand == 0 && !fade.Pending() && fade.NextWake() == 1900,
+          "disabled scrollbar motion shows immediately while retaining its auto-hide deadline");
+    fade.Tick(1900, 40, false, false, false);
+    check(fade.opacity == 0 && !fade.Pending() && !fade.NextWake(),
+          "disabled scrollbar motion hides at its deadline without starting frame scheduling");
+    fade.Tick(2000, 40, true, false, false);
+    check(fade.opacity == 1 && fade.expand == 1 && !fade.Pending(),
+          "disabled scrollbar motion preserves immediate hover feedback");
     for (uint64_t step : {4ull, 7ull, 16ull, 33ull}) {
         Pane sample;
         TickPaneAnimations(sample, false, false, 1000);

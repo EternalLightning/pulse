@@ -176,8 +176,8 @@ int main(int argc, char** argv) {
                     layout.last_tab_row.bottom <= layout.startup_row[2].top,
                     "new startup and last-tab option rows do not overlap");
                 check(layout.startup_tray_row.right > layout.startup_tray_row.left &&
-                    layout.default_manager_rows[3].bottom > layout.default_manager_rows[3].top,
-                    "startup and experimental manager settings remain reachable in narrow layout");
+                    layout.startup_row[2].bottom > layout.startup_row[2].top,
+                    "startup and unified default manager settings remain reachable in narrow layout");
             } else {
                 check(settings_vm.settings_items.size() >= app::kBuiltinMenuItemCount &&
                     layout.context_cards[5].bottom > layout.context_cards[5].top,

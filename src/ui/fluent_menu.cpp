@@ -2,6 +2,7 @@
 #include "../common/localization.h"
 // fluent_menu.cpp — See fluent_menu.h for the contract.
 #include "fluent_menu.h"
+#include "animation_clock.h"
 #include "FluentTokens.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
@@ -729,6 +730,7 @@ void FluentMenu::Present(BYTE alpha, int y_offset_px) {
     POINT src{ 0, 0 };
     SIZE sz{ surf_.w, surf_.h };
     BLENDFUNCTION blend{ AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
+    ++present_count_;
     UpdateLayeredWindow(hwnd_, nullptr, &dst, &sz, surf_.mem_dc, &src, 0, &blend, ULW_ALPHA);
     SelectObject(surf_.mem_dc, old);
     present_offset_ = y_offset_px;
@@ -752,6 +754,7 @@ void FluentMenu::PresentSub(BYTE alpha) {
     POINT src{ 0, 0 };
     SIZE sz{ sub_surf_.w, sub_surf_.h };
     BLENDFUNCTION blend{ AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
+    ++present_count_;
     UpdateLayeredWindow(sub_hwnd_, nullptr, &dst, &sz, sub_surf_.mem_dc, &src, 0,
                         &blend, ULW_ALPHA);
     SelectObject(sub_surf_.mem_dc, old);
@@ -849,8 +852,7 @@ void FluentMenu::OnSubMouse(POINT client_pt, bool button_up) {
     if (button_up) {
         const int command = InvokeAt(sub_model_, row, static_cast<float>(client_pt.x));
         if (command != 0) {
-            result_ = command;
-            Dismiss();
+            InvokeCommand(command);
         }
         return;
     }
@@ -877,8 +879,7 @@ void FluentMenu::OnMouse(POINT client_pt, bool button_up) {
         if (row >= 0) {
             int cmd = InvokeAt(row, static_cast<float>(client_pt.x));
             if (cmd != 0) {
-                result_ = cmd;
-                Dismiss();
+                InvokeCommand(cmd);
             }
         }
         return;
@@ -981,6 +982,12 @@ int FluentMenu::InvokeRow(int row) {
     const FluentMenuItem* it = model_.At(row);
     if (!it || !it->enabled) return 0;
     return it->command;
+}
+
+void FluentMenu::InvokeCommand(int command) {
+    if (command_fn_ && command_fn_(command)) return;
+    result_ = command;
+    Dismiss();
 }
 
 int FluentMenu::InvokeAt(int row, float client_x) const {
@@ -1289,7 +1296,7 @@ bool FluentMenu::HandleFilterKey(UINT msg, WPARAM wParam) {
         result_ = 0;
         HideFilterEdit();
         animating_out_ = true;
-        anim_start_ = std::chrono::steady_clock::now();
+        anim_start_ = AnimationTimeMs();
         return true;
     }
     if (wParam == VK_DOWN || wParam == VK_UP) {
@@ -1302,7 +1309,7 @@ bool FluentMenu::HandleFilterKey(UINT msg, WPARAM wParam) {
     if (wParam == VK_RETURN) {
         if (hover_row_ >= 0) {
             int cmd = InvokeRow(hover_row_);
-            if (cmd != 0) { result_ = cmd; Dismiss(); }
+            if (cmd != 0) InvokeCommand(cmd);
         } else {
             filter_committed_ = true;
             result_ = 0;
@@ -1329,10 +1336,11 @@ bool FluentMenu::HandleFilterKey(UINT msg, WPARAM wParam) {
 int FluentMenu::RunModalLoop() {
     MSG msg{};
     while (open_) {
+        bool animating = false;
         // Animation progress (fade + slide for open, fade for dismiss).
         if (hwnd_) {
-            double elapsed = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - anim_start_).count();
+            const uint64_t now = AnimationTimeMs();
+            const float elapsed = static_cast<float>(now >= anim_start_ ? now - anim_start_ : 0);
             if (animating_out_) {
                 const float kOutMs = 80.0f; // ui.md §6 菜单收起
                 float t = (float)(elapsed / kOutMs);
@@ -1341,16 +1349,18 @@ int FluentMenu::RunModalLoop() {
                     ShowWindow(hwnd_, SW_HIDE);
                     break;
                 }
+                animating = true;
                 Present((BYTE)(255 * (1.0f - t)), 0);
             } else {
                 // ui.md §6: 淡入 120ms + 下滑 8px OutQuad.
                 fluent::MotionSpec spec{ 120.0f, fluent::EasingCurve::OutQuad };
                 float t = fluent::EvaluateMotion(spec, (float)elapsed);
                 if (t < 1.0f) {
+                    animating = true;
                     const float dip = (anchor_to_rect_ && filter_fn_)
                         ? 0.0f : fluent::motion::MenuTravelDip * scale_;
                     Present((BYTE)(255 * t), (int)std::lround(-dip * (1.0f - t)));
-                } else {
+                } else if (present_alpha_ != 255 || present_offset_ != 0) {
                     Present(255, 0);
                 }
             }
@@ -1365,7 +1375,10 @@ int FluentMenu::RunModalLoop() {
                 if (r == hover_row_) OpenSubmenu(r);
             }
         }
-        DWORD wait = MsgWaitForMultipleObjects(0, nullptr, FALSE, 16, QS_ALLINPUT);
+        // Input wakes the loop immediately; only animation, submenu dwell and
+        // foreign topmost input tracking need the shorter polling interval.
+        const DWORD interval = animating || sub_pending_row_ >= 0 || topmost_ ? 16 : 100;
+        DWORD wait = MsgWaitForMultipleObjects(0, nullptr, FALSE, interval, QS_ALLINPUT);
         (void)wait;
         if (topmost_ && open_ && !animating_out_ &&
             ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000)) {
@@ -1408,7 +1421,7 @@ int FluentMenu::RunModalLoop() {
                         } else {
                             result_ = 0;
                             animating_out_ = true;
-                            anim_start_ = std::chrono::steady_clock::now();
+                            anim_start_ = AnimationTimeMs();
                         }
                         swallow = true;
                     } else if (!filter_fn_ && (msg.wParam == VK_DOWN || msg.wParam == VK_UP)) {
@@ -1438,8 +1451,7 @@ int FluentMenu::RunModalLoop() {
                         if (sub_parent_row_ >= 0) {
                             const FluentMenuItem* child = sub_model_.At(sub_hover_);
                             if (child && child->enabled && child->command != 0) {
-                                result_ = child->command;
-                                Dismiss();
+                                InvokeCommand(child->command);
                             }
                         } else if (hover_row_ >= 0) {
                             const FluentMenuItem* hov = model_.At(hover_row_);
@@ -1449,7 +1461,7 @@ int FluentMenu::RunModalLoop() {
                                 if (RenderSub()) PresentSub(present_alpha_);
                             } else {
                                 int cmd = InvokeRow(hover_row_);
-                                if (cmd != 0) { result_ = cmd; Dismiss(); }
+                                if (cmd != 0) InvokeCommand(cmd);
                             }
                         }
                         swallow = true;
@@ -1469,11 +1481,19 @@ int FluentMenu::RunModalLoop() {
                     if (!edit_ && !external_edit_ && HandleFilterKey(msg.message, msg.wParam)) swallow = true;
                     break;
                 case WM_LBUTTONDOWN:
+                case WM_LBUTTONDBLCLK:
                 case WM_RBUTTONDOWN:
                 case WM_MBUTTONDOWN:
                 case WM_NCLBUTTONDOWN:
                 case WM_NCRBUTTONDOWN:
                     if (!IsPaletteHwnd(msg.hwnd)) {
+                        if (msg.hwnd == owner_ &&
+                            (msg.message == WM_LBUTTONDOWN || msg.message == WM_LBUTTONDBLCLK)) {
+                            POINT point{GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam)};
+                            ClientToScreen(owner_, &point);
+                            swallow = PtInRect(&toggle_rect_, point) != FALSE;
+                        }
+                        toggle_rect_ = {};
                         result_ = 0;
                         open_ = false;
                         HideFilterEdit();
@@ -1522,8 +1542,9 @@ int FluentMenu::TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> ite
 }
 
 int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
-                           FilterFn filter, bool top_center) {
+                           FilterFn filter, bool top_center, CommandFn command) {
     if (!EnsureWindow()) {
+        toggle_rect_ = {};
         dropdown_ = false;
         external_edit_ = nullptr;
         max_visible_rows_ = 0;
@@ -1535,6 +1556,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     backdrop_source_.Reset();
     sub_backdrop_source_.Reset();
     filter_fn_ = std::move(filter);
+    command_fn_ = std::move(command);
     filter_query_ = initial_filter_text_;
     filter_committed_ = false;
     filter_composing_ = false;
@@ -1544,6 +1566,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     scroll_y_ = 0.0f;
     body_limit_px_ = 0.0f;
     if (items.empty() && !filter_fn_) {
+        toggle_rect_ = {};
         dropdown_ = false;
         external_edit_ = nullptr;
         max_visible_rows_ = 0;
@@ -1560,6 +1583,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     animating_out_ = false;
     LayoutWindow(screen_pt);
     if (!Render()) {
+        toggle_rect_ = {};
         backdrop_source_.Reset();
         sub_backdrop_source_.Reset();
         external_edit_ = nullptr;
@@ -1572,7 +1596,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
         return 0;
     }
     open_ = true;
-    anim_start_ = std::chrono::steady_clock::now();
+    anim_start_ = AnimationTimeMs();
     const int slide = (anchor_to_rect_ && filter_fn_)
         ? 0 : (int)std::lround(-fluent::motion::MenuTravelDip * scale_);
     Present(0, slide);
@@ -1594,6 +1618,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
         HideFilterEdit();
     }
     const int popup_result = RunModalLoop();
+    command_fn_ = nullptr;
     if (external_edit_) RemoveWindowSubclass(external_edit_, ExternalFilterEditProc, 2);
     external_edit_ = nullptr;
     UpdateTooltip(-1);
@@ -1603,6 +1628,7 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     scroll_y_ = 0.0f;
     anchor_to_rect_ = false;
     dropdown_ = false;
+    toggle_rect_ = {};
     hover_first_on_open_ = true;
     select_all_on_open_ = true;
     // Queue only after the modal loop has unwound, avoiding nested tab changes.
@@ -1634,6 +1660,36 @@ void FluentMenu::RefreshFilter() {
 
 void FluentMenu::RequestFilterRefresh() {
     if (hwnd_ && open_) PostMessageW(hwnd_, WM_APP, 0, 0);
+}
+
+bool FluentMenu::ReplaceFilterItems(std::vector<FluentMenuItem> items) {
+    if (!open_ || animating_out_ || !filter_fn_ || !compositor_ || items.empty()) return false;
+    const int previous_row = hover_row_;
+    const auto* previous = model_.At(previous_row);
+    const std::wstring text = previous ? previous->text : std::wstring{};
+    const std::wstring tooltip = previous ? previous->tooltip : std::wstring{};
+    const std::wstring shortcut = previous ? previous->shortcut : std::wstring{};
+    const float width = static_cast<float>(model_.WidthPx());
+    UpdateTooltip(-1);
+    HideSubWindow();
+    model_.SetItems(std::move(items));
+    model_.Layout(compositor_->DwriteFactory(), scale_, width);
+    scroll_y_ = std::clamp(scroll_y_, 0.0f,
+        std::max(0.0f, static_cast<float>(model_.HeightPx()) - BodyHeightPx()));
+    hover_row_ = -1;
+    hover_swatch_ = -1;
+    if (previous_row >= 0) {
+        for (int i = 0; i < model_.Count(); ++i) {
+            const auto* item = model_.At(i);
+            if (item->enabled && item->text == text && item->tooltip == tooltip && item->shortcut == shortcut) {
+                hover_row_ = i;
+                break;
+            }
+        }
+        if (hover_row_ < 0) hover_row_ = model_.NextEnabled(std::min(previous_row, model_.Count()) - 1, 1);
+    }
+    if (Render()) PresentCurrent();
+    return true;
 }
 
 bool FluentMenu::ReplaceItems(std::vector<FluentMenuItem> items) {

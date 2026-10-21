@@ -1,12 +1,11 @@
 #pragma once
 #include "filter_animation.h"
-#include <chrono>
+#include "../ui/animation_clock.h"
 
 namespace pulse::app {
 
 inline uint64_t PaneAnimationTimeMs() noexcept {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
+    return ui::AnimationTimeMs();
 }
 
 inline bool PaneAnimationsPending(const Pane& pane, bool focused, bool editing) noexcept {
@@ -18,9 +17,9 @@ inline bool PaneAnimationsPending(const Pane& pane, bool focused, bool editing) 
         pane.filter_animation_target != filter_target || pane.filter_expand != filter_target;
 }
 
-inline bool TickPaneAnimations(Pane& pane, bool focused, bool editing, uint64_t now) {
-    pane.header_animation.Tick(focused, now);
-    TickFilterAnimation(pane, editing, now);
+inline bool TickPaneAnimations(Pane& pane, bool focused, bool editing, uint64_t now, bool animate = true) {
+    pane.header_animation.Tick(focused, now, animate);
+    TickFilterAnimation(pane, editing, now, animate);
     // A newly started transition still needs another frame even when its first
     // sample has zero elapsed time and has not changed the visible value yet.
     return PaneAnimationsPending(pane, focused, editing);

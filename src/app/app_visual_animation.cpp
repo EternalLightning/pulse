@@ -50,6 +50,8 @@ void TickTagTransitions(AppState& s) {
 }
 
 void TickTabTransitions(AppState& s) {
+    if (s.tabTracks.empty() && s.tabOffsets.empty() &&
+        s.chipTracks.empty() && s.chipOffsets.empty()) return;
     std::unordered_set<const app::LayoutTab*> live;
     if (s.pane) {
         for (const auto& t : s.window_tabs.items) live.insert(t.get());
@@ -105,12 +107,13 @@ void TickTabTransitions(AppState& s) {
 } // namespace
 
 bool TickVisualAnimations(AppState& s) {
+    const bool animate = s.renderer.MotionEnabled() && !s.shot_high_contrast;
     const double now = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     const double previous_wake = s.sidebarScrollbarFade.NextWake();
     s.sidebarScrollbarFade.Tick(now, s.sidebarScroll,
         s.hoverRegion == static_cast<int>(ui::HitTestResult::Scrollbar) && s.hoverPaneIndex < 0,
-        s.scrollbarDragging && s.scrollbarSidebar);
+        s.scrollbarDragging && s.scrollbarSidebar, animate);
     const double wake = s.sidebarScrollbarFade.NextWake();
     if (!wake) s.sidebarFadeDeadline = 0;
     else if (wake != previous_wake) {
@@ -118,7 +121,20 @@ bool TickVisualAnimations(AppState& s) {
         s.sidebarFadeDeadline = GetTickCount64() +
             static_cast<uint64_t>(std::ceil(std::max(0.0, wake - now)));
     }
-    TickSidebarFolds(s, static_cast<ULONGLONG>(now));
+    if (!animate) {
+        s.sidebarFoldTracks.clear();
+        s.detailsPreviewExpansion = s.detailsPreviewExpansionFrom = s.detailsPreviewOnly ? 1.0f : 0.0f;
+        s.detailsPreviewFoldStart = 0;
+        s.tagTracks.clear();
+        s.tagOffsets.clear();
+        s.tagGapLineY = s.tagGapFrom = s.tagGapTo;
+        s.tabTracks.clear();
+        s.tabOffsets.clear();
+        s.chipTracks.clear();
+        s.chipOffsets.clear();
+    } else {
+        TickSidebarFolds(s, static_cast<ULONGLONG>(now));
+    }
     if (s.detailsPreviewFoldStart) {
         const float t = std::clamp(static_cast<float>(now - s.detailsPreviewFoldStart) / 150.0f, 0.0f, 1.0f);
         const float eased = t * t * (3.0f - 2.0f * t);
@@ -134,7 +150,7 @@ bool TickVisualAnimations(AppState& s) {
         ? std::clamp(now - s.visualAnimationSampleMs, 0.0, 200.0) : 0.0;
     s.visualAnimationSampleMs = now;
     s.scrollbarHoverTarget = target;
-    s.scrollbarHoverWidth = app::AdvanceScrollbarHover(s.scrollbarHoverWidth, target, elapsed);
+    s.scrollbarHoverWidth = animate ? app::AdvanceScrollbarHover(s.scrollbarHoverWidth, target, elapsed) : target;
     if (!s.tagTracks.empty() || s.tagGapFrom != s.tagGapTo) TickTagTransitions(s);
     if (!s.tabTracks.empty() || !s.chipTracks.empty()) TickTabTransitions(s);
     return s.sidebarScrollbarFade.Pending() || !s.sidebarFoldTracks.empty() ||

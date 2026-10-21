@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_EXTERNAL_OPEN_WINDOW;
+constexpr UINT kLastString = IDS_SETTINGS_LOCK_WINDOW_SIZE_DESC;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -21,6 +21,7 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::OpRemainingSize) <= kLastString &&
               static_cast<UINT>(StringId::MatchWindowSizeHint) <= kLastString &&
               static_cast<UINT>(StringId::ArchivePasswordOrDataError) <= kLastString &&
+              static_cast<UINT>(StringId::SettingsDefaultManagerPartial) <= kLastString &&
               static_cast<UINT>(StringId::ArchivePasswordRetryHint) <= kLastString);
 
 HINSTANCE g_module = nullptr;

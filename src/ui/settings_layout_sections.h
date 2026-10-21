@@ -274,10 +274,6 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     l.startup_row[0]=toggle_row(I::SettingsLaunchDesc); l.startup_tray_row=toggle_row(I::StartToTrayDesc);
     l.startup_row[1]=toggle_row(I::SettingsKeepRunningDesc); l.last_tab_row=toggle_row(I::CloseLastTabWindowDesc);
     l.startup_row[2]=toggle_row(I::SettingsDefaultManagerDesc);
-    const I manager_descriptions[] = {I::SettingsOpenFoldersDesc, I::SettingsTakeoverWinEDesc,
-        I::SettingsTakeoverThisPcDesc, I::SettingsExplorerTakeoverDesc};
-    for(size_t i=0;i<std::size(l.default_manager_rows);++i)
-        l.default_manager_rows[i]=toggle_row(manager_descriptions[i]);
     if(!vm.settings_system_pending && !vm.settings_system_status.empty())
         l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
             scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
@@ -288,6 +284,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     section(2);
     l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);
     l.performance_row=toggle_row(I::SettingsShowPerformanceDesc);
+    l.text_compare_row=toggle_row(I::SettingsTextCompareDesc);
     const I list_descriptions[] = {I::ListSmartDateDesc, I::ListZebraRowsDesc, I::ListSizeBarDesc};
     for(size_t i=0;i<std::size(l.list_style_row);++i) l.list_style_row[i]=toggle_row(list_descriptions[i]);
     l.folder_sort_card=row(narrow ? 98.0f : 64.0f); segments(l.folder_sort_card,l.folder_sort_row,3,282);
@@ -305,6 +302,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         y+=8*scale; l.wallpaper_fit_card=row(narrow ? 98.0f : 64.0f);
         const float fit_width = painter ? painter->MeasureButtonWidth(l10n::Get(I::MatchWindowSize))/scale : 164.0f;
         l.wallpaper_fit=choice(l.wallpaper_fit_card,fit_width);
+        y+=8*scale; l.window_size_lock_row=toggle_row(I::SettingsLockWindowSizeDesc);
         y+=8*scale; l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); l.wallpaper_look_value=choice(l.wallpaper_look_card,112);
         y+=8*scale; l.wallpaper_blur_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_blur_card,l.wallpaper_blur_row,3,282);
         y+=8*scale; l.tray_icon_card=row(narrow ? 98.0f : 64.0f); segments(l.tray_icon_card,l.tray_icon_row,3,282);

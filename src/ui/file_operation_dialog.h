@@ -3,6 +3,7 @@
 #include "FluentTokens.h"
 #include "fluent_components.h"
 #include "ui_compositor.h"
+#include "content_reveal_animation.h"
 #include "../ops/ops_manager.h"
 
 #include <deque>
@@ -75,6 +76,7 @@ private:
     int HitTestControl(float x, float y) const;
     void RequestClose();
     void RequestCancel();
+    void RefreshAnimationSettings();
     bool NeedsAnimationFrame() const;
 
     HWND hwnd_ = nullptr;
@@ -87,6 +89,7 @@ private:
     FileOperationProgressInspection progress_inspection_;
 #endif
     ops::OpStatus status_;
+    ContentRevealAnimation completion_reveal_;
     std::deque<double> speed_history_;
     ULONGLONG speed_sample_tick_ = 0;
     bool dark_ = false;
@@ -94,6 +97,7 @@ private:
     bool detailed_ = false;
     bool positioned_ = false;
     bool cancel_requested_ = false;
+    bool animations_enabled_ = false;
     float scale_ = 1.0f;
     float failure_scroll_ = 0.0f;
     float failure_scroll_max_ = 0.0f;

@@ -45,12 +45,12 @@ constexpr SettingDestination destinations[]={
     {I::SettingsLaunch,0,0},{I::SettingsKeepRunning,0,0},{I::SettingsRowHeight,0,0},{I::SettingsShowPerformance,0,0},
     {I::ListSmartDate,0,0},{I::ListZebraRows,0,0},{I::ListSizeBar,0,0},{I::SettingsFolderSort,0,0},
     {I::SettingsWallpaper,0,1},{I::SettingsMatchBackground,0,1},{I::SettingsWallpaperLook,0,1},{I::SettingsWallpaperBlur,0,1},{I::SettingsTrayIcon,0,1},{I::SettingsShowHidden,0,1},{I::SettingsShowProtected,0,1},{I::PinnedNames,0,1},
-    {I::SettingsBlankClickBack,0,1},{I::SettingsChangeTracking,0,1},
+    {I::SettingsBlankClickBack,0,1},{I::SettingsChangeTracking,0,1},{I::SettingsLockWindowSize,0,1},
     {I::ConfigurationLocation,0,0},
     {I::SettingsNewTabHome,0,0},
     {I::SettingsExternalOpen,0,0},
-    {I::SettingsDefaultManager,0,0},{I::SettingsOpenFolders,0,0},
-    {I::SettingsTakeoverWinE,0,0},{I::ThisPc,0,0},{I::SettingsExplorerTakeover,0,0},
+    {I::SettingsTextCompare,0,0},
+    {I::SettingsDefaultManager,0,0},
     {I::StartToTray,0,0},{I::CloseLastTabWindow,0,0},
     {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},{I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},
     {I::Exclusions,1,2},{I::ServerFolders,1,2},{I::SettingsContextMenu,2,0},{I::SettingsDuplicates,4,0},{I::SettingsAboutDiagnostics,3,0},
@@ -104,6 +104,7 @@ void ContentOptions(AppState& s) {
 }
 
 void MatchWindowToBackground(AppState& s) {
+    if (s.appPrefs.lock_window_size) return;
     const auto image = s.renderer.BackgroundImageSize(s.appPrefs.background_image);
     if (image.cx <= 0 || image.cy <= 0) return;
     MONITORINFO monitor{sizeof(monitor)};

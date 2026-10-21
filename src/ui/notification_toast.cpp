@@ -1,11 +1,10 @@
 #include "notification_toast.h"
+#include "animation_clock.h"
 #include <windowsx.h>
 #include <algorithm>
 
 namespace pulse::ui {
 namespace {
-constexpr ULONGLONG kAppearDurationMs = 90;
-
 bool Contains(const D2D1_RECT_F& rect, float x, float y) {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
@@ -20,8 +19,12 @@ void NotificationToast::Show(HWND owner, std::wstring title, std::wstring messag
     visible_ = true;
     hovered_ = pressed_close_ = pressed_card_ = false;
     born_ = last_tick_ = GetTickCount64();
+    reveal_.Reset();
+    reveal_.Tick(true, AnimationTimeMs(), motion_enabled_);
     remaining_ = 6000;
-    SetTimer(owner, timer, 16, nullptr);
+    // The owner schedules reveal frames; this timer only measures lifetime.
+    if (persistent_) KillTimer(owner, timer);
+    else SetTimer(owner, timer, 200, nullptr);
     InvalidateRect(owner, nullptr, FALSE);
 }
 void NotificationToast::ShowError(HWND owner, std::wstring title, std::wstring message) {
@@ -50,11 +53,6 @@ bool NotificationToast::HandleMessage(HWND owner, UINT message, WPARAM wparam, L
             if (!remaining_) { Dismiss(owner); return true; }
         }
         last_tick_ = now;
-        if (now - born_ >= kAppearDurationMs) {
-            if (persistent_) KillTimer(owner, timer);
-            else SetTimer(owner, timer, 200, nullptr);
-        }
-        InvalidateRect(owner, nullptr, FALSE);
         return true;
     }
     const float x = static_cast<float>(GET_X_LPARAM(lparam));
@@ -119,9 +117,9 @@ void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float s
     }
     const float height = std::min(std::max(72 * scale, body_height + 44 * scale),
         std::max(72 * scale, compositor.Height() - 110 * scale));
-    const float age = std::min(1.0f, static_cast<float>(GetTickCount64() - born_) /
-        static_cast<float>(kAppearDurationMs));
-    const float slide = high_contrast ? 0 : 12 * scale * (1 - age) * (1 - age);
+    reveal_.Sample(AnimationTimeMs(), motion_enabled_ && !high_contrast);
+    const float opacity = reveal_.opacity;
+    const float slide = 6 * scale * (1 - opacity);
     const float right = top_center_ ? (compositor.Width() + width) * 0.5f : compositor.Width() - margin;
     const float top = top_center_ ? 64 * scale - slide : compositor.Height() - 48 * scale + slide - height;
     card_ = D2D1::RectF(right - width, top, right, top + height);
@@ -139,6 +137,11 @@ void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float s
     POINT cursor{};
     if (GetCursorPos(&cursor) && ScreenToClient(compositor.Hwnd(), &cursor))
         spec.state.hovered = Contains(close_, static_cast<float>(cursor.x), static_cast<float>(cursor.y));
+    const bool fading = opacity < 1.0f;
+    auto* dc = compositor.Dc();
+    if (fading) dc->PushLayer(D2D1::LayerParameters(card_, nullptr,
+        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), opacity), nullptr);
     painter_.DrawInfoBar(spec);
+    if (fading) dc->PopLayer();
 }
 }

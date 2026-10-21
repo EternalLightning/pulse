@@ -5,6 +5,7 @@
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "pane_animations.h"
+#include "app_visual_animation.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
@@ -836,6 +837,10 @@ void UpdateSmoothScroll(AppState& s) {
 
 void StartSidebarFold(AppState& s, int section) {
     if (section < 0 || section >= app::kSidebarSectionCount) return;
+    if (!s.renderer.MotionEnabled() || s.shot_high_contrast) {
+        s.sidebarFoldTracks.erase(section);
+        return;
+    }
     const ULONGLONG now = app::PaneAnimationTimeMs();
     const float target = (s.sidebarCollapsedMask & (1u << section)) ? 0.0f : 1.0f;
     float current = 1.0f - target;
@@ -1997,9 +2002,16 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             return 0;
         }
         if (hit.region == ui::HitTestResult::DetailsPreviewToggle) {
+            // Sample a pending fold before switching direction between paints.
+            TickVisualAnimations(*s);
             s->detailsPreviewOnly = !s->detailsPreviewOnly;
             s->detailsPreviewExpansionFrom = s->detailsPreviewExpansion;
-            s->detailsPreviewFoldStart = app::PaneAnimationTimeMs();
+            if (s->renderer.MotionEnabled() && !s->shot_high_contrast) {
+                s->detailsPreviewFoldStart = app::PaneAnimationTimeMs();
+            } else {
+                s->detailsPreviewExpansion = s->detailsPreviewExpansionFrom = s->detailsPreviewOnly ? 1.0f : 0.0f;
+                s->detailsPreviewFoldStart = 0;
+            }
             s->detailsScroll = 0;
             s->dragPending = false;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2184,11 +2196,11 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             OpenSettingsTab(*s, hit.index);
         } else if (HandleSettingsControl(*s, hit)) {
         } else if (hit.region == ui::HitTestResult::SettingsToggle) {
-            if (hit.index == 3) s->settings.ClearError();
+            if (hit.index == 21) s->settings.ClearError();
             s->settings.ToggleUi(hit.index);
-            if (hit.index == 3 && !s->settings.error().empty())
+            if (hit.index == 21 && !s->settings.error().empty())
                 MessageBoxW(hwnd, s->settings.error().c_str(),
-                    l10n::Get(l10n::StringId::SettingsOpenFolders).c_str(), MB_OK | MB_ICONWARNING);
+                    l10n::Get(l10n::StringId::SettingsDefaultManager).c_str(), MB_OK | MB_ICONWARNING);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsAccent) {
             if (hit.index == 1) {
@@ -2342,7 +2354,17 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::NavRefresh) {
             RefreshActiveTab(*s);
         } else if (hit.region == ui::HitTestResult::NewButton) {
-            ShowNewDropdown(*s);
+            if (s->menu && s->menu->IsOpen()) {
+                s->menu->Dismiss();
+            } else if (EnsureMenu(*s)) {
+                const auto anchor = s->renderer.NewCommandRect(static_cast<float>(s->compositor.Width()));
+                RECT toggle{static_cast<LONG>(anchor.left), static_cast<LONG>(anchor.top),
+                    static_cast<LONG>(anchor.right), static_cast<LONG>(anchor.bottom)};
+                MapWindowPoints(hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+                s->menu->SetToggleRect(toggle);
+                ShowNewDropdown(*s);
+                s->menu->SetToggleRect({});
+            }
         } else if (hit.region == ui::HitTestResult::BreadcrumbSegment) {
             // Empty path is the This PC segment; NavigateTo handles it.
             NavigateTo(*s, hit.path);
@@ -2454,7 +2476,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 const int cmd = s->menu->TrackPopup(point, std::move(items));
                 if (cmd == app::CmdOpenTerminal) {
                     std::wstring p = vm.details.path;
-                    if (!p.empty() && !vm.details.is_dir) p = fs::ParentPath(p);
+                    if (fs::IsVirtualPath(p)) p.clear();
+                    else if (!p.empty() && !vm.details.is_dir) p = fs::ParentPath(p);
                     if (!p.empty()) s->ops.OpenTerminal(ClipboardPath(p));
                 } else if (cmd == app::CmdDetailsComputeSize) {
                     if (!vm.details.path.empty()) s->folderSizes.Calculate(vm.details.path);
@@ -2755,6 +2778,7 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
         if (hit.region == ui::HitTestResult::TrayPrev || hit.region == ui::HitTestResult::TrayNext ||
             hit.region == ui::HitTestResult::NavBack || hit.region == ui::HitTestResult::NavForward ||
             hit.region == ui::HitTestResult::NavUp || hit.region == ui::HitTestResult::NavRefresh ||
+            hit.region == ui::HitTestResult::NewButton ||
             hit.region == ui::HitTestResult::TabClose) {
             return HandleLButtonDown(s, hwnd, WM_LBUTTONDOWN, wParam, lParam);
         }
@@ -3372,6 +3396,11 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             } else {
                 ShowItemContextMenu(*s, sp);
             }
+            shown = true;
+        } else if ((hit.region == ui::HitTestResult::SidebarItem ||
+                    hit.region == ui::HitTestResult::SidebarItemExpand) &&
+                   hit.path == app::MakeStarredPath()) {
+            ShowSidebarSectionMenu(*s, static_cast<int>(app::SidebarSectionId::Starred), sp);
             shown = true;
         } else if (hit.region == ui::HitTestResult::SidebarItem &&
                    hit.path.starts_with(L"pulse:tag:")) {

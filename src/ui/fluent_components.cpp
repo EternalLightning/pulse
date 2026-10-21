@@ -1586,7 +1586,8 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     if (spec.drop_target) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));
     }
-    const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text : theme_->text_disabled;
+    const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : spec.section_title ? theme_->text_secondary : theme_->text;
     const float icon_slot = Px(16.0f);
     auto content = spec.bounds;
     content.left += Px(10.0f);

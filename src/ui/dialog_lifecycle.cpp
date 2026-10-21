@@ -1,4 +1,5 @@
 #include "dialog_lifecycle.h"
+#include "animation_clock.h"
 #include <dwmapi.h>
 #include <commctrl.h>
 #include <dcomp.h>
@@ -132,7 +133,7 @@ private:
 struct FadeState {
     HWND window;
     HWND dim;
-    ULONGLONG start = GetTickCount64();
+    uint64_t start = AnimationTimeMs();
     UINT_PTR timer = 0;
     LONG_PTR original_style;
     BYTE original_alpha = 255;
@@ -184,7 +185,7 @@ LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
     if (message == WM_NCDESTROY) CancelFade(window);
     else if (message == WM_TIMER && wp == state->timer) {
         const float t = std::min(1.0f,
-            static_cast<float>(GetTickCount64() - state->start) / (kFadeSeconds * 1000.0f));
+            static_cast<float>(AnimationTimeMs() - state->start) / (kFadeSeconds * 1000.0f));
         const float opacity = t * t * (3.0f - 2.0f * t);
         if (!state->effect)
             SetLayeredWindowAttributes(window, state->original_key,
@@ -242,7 +243,7 @@ void ShowFade(HWND window, int show_command) {
         show_immediately();
         return;
     }
-    state->start = GetTickCount64();
+    state->start = AnimationTimeMs();
     SetDimOpacity(dim, 0.0f);
     if (dim) ShowWindow(dim, SW_SHOWNOACTIVATE);
     ShowWindow(window, show_command);

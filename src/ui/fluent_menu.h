@@ -18,6 +18,7 @@
 
 #include <dwrite_3.h>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -118,8 +119,10 @@ public:
     // Modal; returns the invoked command id, or 0 when dismissed.
     // If filter is set, typing rebuilds the item list (Ctrl+K command palette).
     using FilterFn = std::function<std::vector<FluentMenuItem>(const std::wstring& query)>;
+    // Return true after handling a command to keep the same popup open.
+    using CommandFn = std::function<bool(int command)>;
     int TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
-                   FilterFn filter = nullptr, bool top_center = false);
+                   FilterFn filter = nullptr, bool top_center = false, CommandFn command = nullptr);
     int TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> items);
 
     // Renders the menu to a PNG without showing it (GUI verification helper).
@@ -132,6 +135,8 @@ public:
     // Safe from the owner window while TrackPopup's modal loop is running
     // (e.g. async index hits arrived). No-op if the menu is closed.
     void RequestFilterRefresh();
+    // Replace filtered results in place, preserving editor, animation and scroll.
+    bool ReplaceFilterItems(std::vector<FluentMenuItem> items);
     // Swap command ids while the menu is open if the visible structure matches.
     // Stable built-in rows keep their identity; async sections and flyout children
     // can refresh without closing the selected parent. Returns true on success.
@@ -151,6 +156,9 @@ public:
     void SetAnchorRect(RECT screen_rc) { anchor_rect_ = screen_rc; anchor_to_rect_ = true; }
     // Align an ordinary selection menu below its control; cleared after use.
     void SetDropdownRect(RECT screen_rc) { dropdown_rect_ = screen_rc; dropdown_ = true; }
+    // Consume a repeat left press on this popup's originating control without
+    // forwarding it back to the owner and immediately reopening the menu.
+    void SetToggleRect(RECT screen_rc) { toggle_rect_ = screen_rc; }
     // Override the filter-mode minimum width (dips) for the next TrackPopup;
     // <= 0 restores the palette default. Reset after each popup.
     void SetFilterMinWidth(float dips) { filter_min_width_ = dips; }
@@ -209,6 +217,7 @@ private:
     int HitTestSwatch(int row, float client_x) const;
     int HitTestSwatch(const FluentMenuModel& model, int row, float client_x) const;
     int InvokeRow(int row);        // returns command or 0
+    void InvokeCommand(int command);
     int InvokeAt(int row, float client_x) const;
     int InvokeAt(const FluentMenuModel& model, int row, float client_x) const;
     float FilterHeaderPx() const;
@@ -233,6 +242,7 @@ private:
 
     FluentMenuModel model_;
     FilterFn filter_fn_;
+    CommandFn command_fn_;
     std::wstring filter_query_;
     std::wstring filter_placeholder_;
     std::wstring initial_filter_text_;   // prefilled into the edit on open
@@ -246,6 +256,7 @@ private:
     bool anchor_to_rect_ = false;
     RECT dropdown_rect_{};
     bool dropdown_ = false;
+    RECT toggle_rect_{};
     POINT popup_pt_{};
     bool top_center_ = false;
     bool topmost_ = false;
@@ -255,6 +266,7 @@ private:
     HBRUSH edit_brush_ = nullptr;
     int present_offset_ = 0;
     BYTE present_alpha_ = 0;
+    uint64_t present_count_ = 0;
     int hover_row_ = -1;
     int hover_swatch_ = -1;
     int max_visible_rows_ = 0;
@@ -267,7 +279,7 @@ private:
     int result_ = 0;
     int base_x_ = 0;               // window position before slide animation
     int base_y_ = 0;
-    std::chrono::steady_clock::time_point anim_start_;
+    uint64_t anim_start_ = 0;
 
     Surface surf_;                 // main menu staging
 

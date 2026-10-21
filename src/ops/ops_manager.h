@@ -286,6 +286,7 @@ private:
     friend struct TransferIntegrationProbe;
     friend class OperationElevationAdapter;
     friend struct ShellCompletionTestProbe;
+    friend struct TerminalMenuTestProbe;
     friend struct UndoIdentityTestProbe;
     friend struct MutationUndoTestProbe;
     friend struct SourceContractTestProbe;

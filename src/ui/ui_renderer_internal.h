@@ -1426,7 +1426,7 @@ struct SettingsLayout {
     D2D1_RECT_F duplicate_options{};
     D2D1_RECT_F section[4]{}, group[3]{}, footer{};
     D2D1_RECT_F theme_row{}, theme_tile[3]{}, effect_choice{}, language_choice{};
-    D2D1_RECT_F performance_row{}, disclosure[2]{}, filename_status{};
+    D2D1_RECT_F performance_row{}, text_compare_row{}, disclosure[2]{}, filename_status{};
     D2D1_RECT_F content_header{}, content_types{}, content_pause{}, content_options{}, content_rebuild{}, content_empty{};
     D2D1_RECT_F body{};
     D2D1_RECT_F nav{};
@@ -1451,13 +1451,14 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_choose{};
     D2D1_RECT_F wallpaper_clear{};
     D2D1_RECT_F wallpaper_fit_card{}, wallpaper_fit{};
+    D2D1_RECT_F window_size_lock_row{};
     D2D1_RECT_F wallpaper_look_card{};
     D2D1_RECT_F wallpaper_look_value{};
     D2D1_RECT_F wallpaper_blur_card{};
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};
     D2D1_RECT_F startup_tray_row{}, last_tab_row{};
-    D2D1_RECT_F default_manager_rows[4]{}, system_status{};
+    D2D1_RECT_F system_status{};
     D2D1_RECT_F new_tab_row{};
     D2D1_RECT_F external_open_card{}, external_open_choice{};
     D2D1_RECT_F hidden_files_row{};

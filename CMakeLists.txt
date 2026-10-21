@@ -148,6 +148,13 @@ target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32 pulse_localiza
 
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
+add_executable(pulse_text_compare_test src/bench/text_compare_test.cpp src/app/text_diff.cpp)
+target_link_libraries(pulse_text_compare_test PRIVATE pulse_text)
+
+add_executable(pulse_tab_indicator_animation_test src/bench/tab_indicator_animation_test.cpp)
+target_compile_options(pulse_tab_indicator_animation_test PRIVATE /W4 /permissive- /utf-8)
+target_link_options(pulse_tab_indicator_animation_test PRIVATE /MANIFEST:NO)
+
 add_library(pulse_user_storage STATIC src/common/user_storage.cpp)
 target_link_libraries(pulse_user_storage PUBLIC shell32 ole32 advapi32 pulse_localization)
 add_executable(pulse_user_storage_test src/bench/user_storage_test.cpp)
@@ -697,6 +704,20 @@ foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold drive_view b
         pulse_sqlite pulse_localization pulse_text shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
 endforeach()
 target_sources(pulse_drive_view_test PRIVATE src/app/context_menu.cpp)
+
+get_target_property(text_compare_model_sources pulse_drive_view_test SOURCES)
+list(FILTER text_compare_model_sources EXCLUDE REGEX "drive_view_test\\.cpp$")
+target_sources(pulse_text_compare_test PRIVATE ${text_compare_model_sources})
+target_link_libraries(pulse_text_compare_test PRIVATE
+    pulse_sqlite pulse_localization shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+
+add_executable(pulse_text_diff_ui_test src/bench/text_diff_ui_test.cpp
+    src/bench/localization_test.rc src/app/text_diff.cpp src/ui/text_diff_window.cpp
+    src/ui/ui_compositor.cpp src/ui/fluent_components.cpp src/ui/typography.cpp
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp)
+target_link_libraries(pulse_text_diff_ui_test PRIVATE pulse_text pulse_localization
+    d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 windowscodecs user32 gdi32 comctl32)
+pulse_enable_lumatext(pulse_text_diff_ui_test)
 target_sources(pulse_breadcrumb_test PRIVATE src/ui/breadcrumb.cpp)
 target_sources(pulse_staging_tray_test PRIVATE src/app/tray_metadata.cpp src/app/app_worker.cpp
     src/app/link_resolve.cpp src/fs/fs_snapshot.cpp src/fs/fs_recycle.cpp src/fs/fs_net_cache.cpp)
@@ -733,6 +754,13 @@ target_compile_options(pulse_default_file_manager_test PRIVATE /W4 /permissive- 
 target_link_options(pulse_default_file_manager_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_default_file_manager_test PRIVATE
     advapi32 shell32 ole32 oleaut32 uuid propsys user32 shlwapi pulse_shell_query_client)
+
+add_executable(pulse_explorer_takeover_test
+    src/bench/explorer_takeover_test.cpp src/app/explorer_window_takeover.cpp
+    src/app/default_file_manager.cpp)
+target_link_options(pulse_explorer_takeover_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_explorer_takeover_test PRIVATE
+    advapi32 shell32 ole32 oleaut32 uuid user32 shlwapi)
 add_executable(pulse_shell_registry_ipc_test
     src/bench/shell_registry_ipc_test.cpp src/app/shell_window_registry.cpp)
 target_link_libraries(pulse_shell_registry_ipc_test PRIVATE
@@ -1018,12 +1046,15 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_permission_operation_prompt_ui_test
         src/bench/permission_operation_prompt_ui_test.cpp ${architecture_sources})
     add_executable(pulse_pane_animation_application_test
-        src/bench/pane_animation_application_test.cpp ${architecture_sources})
+        src/bench/pane_animation_application_test.cpp src/bench/content_reveal_ui_test.cpp ${architecture_sources})
+    add_executable(pulse_file_selection_ui_test
+        src/bench/file_selection_ui_test.cpp src/bench/sidebar_starred_ui_test.cpp
+        src/bench/window_size_lock_ui_test.cpp src/bench/tab_indicator_ui_test.cpp ${architecture_sources})
     set(global_search_fixture_sources ${architecture_sources})
     list(FILTER global_search_fixture_sources EXCLUDE REGEX "global_search_window\\.cpp$")
     add_executable(pulse_global_search_window_test
         src/bench/global_search_window_test.cpp ${global_search_fixture_sources})
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_ops_journal_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_ops_journal_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})

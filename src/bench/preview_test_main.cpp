@@ -352,6 +352,18 @@ int wmain(int argc, wchar_t** argv) {
                 response.response.width <= cap && response.response.height <= cap,
                 L"real bitmap responses fit validated dimensions and allocation budgets");
         }
+        for (const auto* name : {L"folder", L"folder.svg", L"folder.emf", L"folder.wmf"}) {
+            const auto directory = root + L"\\" + name;
+            const bool directory_created = CreateDirectoryW(directory.c_str(), nullptr) != FALSE;
+            Check(directory_created, L"create isolated directory with a preview-like suffix");
+            if (!directory_created) continue;
+            Result response;
+            Check(host.Request(directory, response, MAXDWORD, 128) && response.response.status == 0 &&
+                response.response.kind == ipc::PreviewContentKind::Bitmap && !response.pixels.empty() &&
+                response.response.width <= 128 && response.response.height <= 128,
+                L"directory attributes take precedence over image suffixes in real preview helper");
+            Check(RemoveDirectoryW(directory.c_str()) != FALSE, L"clean isolated directory suffix fixture");
+        }
         Result plain, hex, properties, unsupported;
         Check(host.Request(text, plain) && plain.response.status == 0 && plain.text == L"hello",
             L"real text response passes whole schema admission");

@@ -12,6 +12,9 @@
 #include "thumbnail_cache.h"
 #include "render_caches.h"
 #include "name_highlight.h"
+#include "tab_indicator_animation.h"
+#include "tab_close_animation.h"
+#include "content_reveal_animation.h"
 #include "preview_handler_host.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_snapshot.h"
@@ -48,6 +51,7 @@ struct TabView {
     bool pinned = false;    // narrow icon-only slot, left cluster, no close
     bool is_home = false;
     bool is_settings = false;
+    const void* identity = nullptr; // stable layout identity across reorder/view-model rebuilds
 };
 
 // A named, colored tab group shown as a chip at the start of its run.
@@ -596,6 +600,7 @@ struct WindowViewModel {
     float settings_scroll = 0.0f;
     bool settings_launch_on_startup = false;
     bool settings_start_to_tray = false;
+    bool settings_text_compare = false;
     bool settings_close_last_tab_window = false;
     bool settings_keep_running = false;
     bool settings_show_hidden_files = false;
@@ -608,10 +613,10 @@ struct WindowViewModel {
     bool settings_open_folders = false;
     bool settings_take_over_win_e = false;
     bool settings_take_over_this_pc = false;
-    bool settings_explorer_takeover = false;
     bool settings_system_pending = false;
     std::wstring settings_system_status;
     bool settings_blank_click_go_back = false;
+    bool settings_lock_window_size = false;
     bool settings_new_tab_home = false;
     int settings_external_open_mode = 0;
     bool settings_change_tracking = false;
@@ -824,6 +829,8 @@ class MainRenderer {
     friend struct PaneHeaderIconTest;
     friend struct FolderSizesUiTest;
     friend struct ColumnResizeUiTest;
+    friend struct ContentRevealUiTest;
+    friend struct TabIndicatorUiTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);
@@ -833,6 +840,8 @@ public:
 
     void SetScale(float scale);
     void SetCompositor(Compositor* comp);
+    void RefreshMotionPreferences();
+    bool MotionEnabled() const { return motion_enabled_; }
     // Returns only asynchronously decoded dimensions; never opens an image here.
     SIZE BackgroundImageSize(const std::wstring& path);
     void InvalidateTypography();
@@ -920,6 +929,7 @@ public:
     bool DetailsPreviewDragging() const { return details_preview_dragging_; }
     bool DetailsPreviewPointerActive() const { return details_preview_dragging_ || details_preview_drag_pending_; }
     bool CanDetailsPreviewPan() const { return details_preview_ready_; }
+    bool DetailsPreviewAnimating() const { return details_content_animating_; }
     bool TickDetailsPreview(ULONGLONG now) {
         if (details_zoom_label_until_ && now >= details_zoom_label_until_) {
             details_zoom_label_until_ = 0;
@@ -1087,6 +1097,9 @@ public:
     float TabPitchPx(const WindowViewModel& vm, float window_w) const;
     bool ScrollTabStrip(const WindowViewModel& vm, float window_w, float steps);
     D2D1_RECT_F TabStripViewportRect(const WindowViewModel& vm, float window_w) const;
+    bool TabIndicatorAnimating() const { return tab_indicator_.pending; }
+    void CaptureTabCloseLayout(const WindowViewModel& vm, float window_w);
+    bool TabCloseAnimating() const { return tab_close_.Pending(); }
     float SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;
     bool SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w, float window_h,
                                    D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maximum) const;
@@ -1112,6 +1125,7 @@ private:
         float scroll_offset = 0.0f;
         D2D1_RECT_F viewport{}, scroll_left{}, scroll_right{}, new_button{};
         std::vector<float> extra; // per tab: px shift from group chips before it
+        std::vector<TabCloseAnimation::Item> items; // tabs, chips, then plus button
         struct Chip {
             float left = 0.0f;
             float width = 0.0f;
@@ -1241,6 +1255,8 @@ private:
     float details_width_ = 340.0f;
     PreviewViewport details_viewport_;
     std::wstring details_preview_identity_;
+    ContentRevealAnimation details_content_reveal_;
+    bool details_content_animating_ = false;
     bool details_preview_ready_ = false;
     bool details_preview_dragging_ = false;
     bool details_preview_drag_pending_ = false;
@@ -1285,6 +1301,13 @@ private:
     std::unordered_map<int, ComPtr<ID2D1SvgDocument>> fluent_svgs_;
     std::unordered_set<int> fluent_svg_failed_;
     mutable TabStripScrollState tab_strip_scroll_;
+    mutable TabCloseAnimation tab_close_;
+    TabIndicatorAnimation tab_indicator_;
+    float tab_indicator_scale_ = 0.0f;
+    float tab_indicator_viewport_width_ = 0.0f;
+    float tab_indicator_scroll_offset_ = 0.0f;
+    float tab_indicator_window_width_ = 0.0f;
+    bool motion_enabled_ = false;
 
 };
 

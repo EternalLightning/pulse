@@ -75,10 +75,12 @@ ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool*
     if (!fs::exists(exe)) { result.output = L"找不到压缩包运行库 7zip/7z.exe。"; return result; }
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
     Handle read, write, input;
-    if (!CreatePipe(&read.value, &write.value, &security, 0)) { result.output = L"无法创建压缩包输出管道。"; return result; }
+    // Large listings must not stall the writer on a tiny pipe between cancellation polls.
+    constexpr DWORD pipe_buffer_bytes = 256 * 1024;
+    if (!CreatePipe(&read.value, &write.value, &security, pipe_buffer_bytes)) { result.output = L"无法创建压缩包输出管道。"; return result; }
     if (!SetHandleInformation(read.value, HANDLE_FLAG_INHERIT, 0)) { result.output = L"无法配置压缩包输出管道。"; return result; }
     Handle progress_read, progress_write;
-    if (progress && (!CreatePipe(&progress_read.value, &progress_write.value, &security, 0) ||
+    if (progress && (!CreatePipe(&progress_read.value, &progress_write.value, &security, pipe_buffer_bytes) ||
         !SetHandleInformation(progress_read.value, HANDLE_FLAG_INHERIT, 0))) {
         result.output = L"无法创建解压进度管道。"; return result;
     }
@@ -117,7 +119,7 @@ ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool*
     CloseHandle(write.value); write.value = INVALID_HANDLE_VALUE;
     if (progress) { CloseHandle(progress_write.value); progress_write.value = INVALID_HANDLE_VALUE; }
     std::string output;
-    char buffer[8192]; DWORD count = 0;
+    char buffer[64 * 1024]; DWORD count = 0;
     bool cancelled = false, output_limit = false;
     for (;;) {
         if (cancel && cancel->load()) { TerminateProcess(process.hProcess, 2); cancelled = true; break; }

@@ -6,6 +6,7 @@
 #include "typography.h"
 #include "window_helpers.h"
 #include "dialog_text_fit.h"
+#include "animation_clock.h"
 
 #include <windowsx.h>
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <cmath>
 #include <deque>
 #include <string>
+#include <tuple>
 
 namespace pulse::ui {
 namespace {
@@ -28,6 +30,25 @@ constexpr float kPadX = 20.0f;
 constexpr float kFooterH = 52.0f;
 constexpr float kCollapsedH = 268.0f;
 constexpr float kGraphBlockH = 156.0f;
+
+bool SameTransferPresentation(const ops::OpStatus& a, const ops::OpStatus& b) {
+    return std::tie(a.active, a.type, a.phase, a.task_id, a.percent, a.summary,
+        a.last_error, a.source_label, a.destination_label, a.current_item,
+        a.total_bytes, a.transferred_bytes, a.total_items, a.completed_items,
+        a.bytes_per_second, a.peak_bytes_per_second, a.eta_seconds, a.failed_path) ==
+        std::tie(b.active, b.type, b.phase, b.task_id, b.percent, b.summary,
+        b.last_error, b.source_label, b.destination_label, b.current_item,
+        b.total_bytes, b.transferred_bytes, b.total_items, b.completed_items,
+        b.bytes_per_second, b.peak_bytes_per_second, b.eta_seconds, b.failed_path);
+}
+
+bool TransferStatisticsActive(const ops::OpStatus& status) {
+    return status.active && status.phase != ops::OpPhase::Paused &&
+        status.phase != ops::OpPhase::WaitingForConflict &&
+        status.phase != ops::OpPhase::WaitingForDeleteConfirmation &&
+        status.phase != ops::OpPhase::Completed && status.phase != ops::OpPhase::Failed &&
+        status.phase != ops::OpPhase::Cancelled;
+}
 
 using pulse::ui::ScaleDip;
 
@@ -1116,11 +1137,14 @@ void FileOperationWindow::SetTheme(bool dark, D2D1_COLOR_F accent) {
 void FileOperationWindow::Update(const ops::OpStatus& status) {
     const bool new_task = status.task_id != status_.task_id;
     auto shown = ops::PresentOperationStatus(status);
+    const bool presentation_changed = !SameTransferPresentation(shown, status_);
+    const bool title_changed = shown.summary != status_.summary;
     const bool entering_failure = shown.phase == ops::OpPhase::Failed &&
         (new_task || status_.phase != ops::OpPhase::Failed);
     const bool detail_changed = shown.phase != status_.phase ||
         (shown.phase == ops::OpPhase::Failed && (shown.last_error != status_.last_error ||
             shown.failed_path != status_.failed_path));
+    if (new_task || shown.phase != ops::OpPhase::Completed) completion_reveal_.Reset();
     status_ = std::move(shown);
     if (new_task || detail_changed) failure_scroll_ = failure_scroll_max_ = 0.0f;
     if (entering_failure) detailed_ = true;
@@ -1130,9 +1154,9 @@ void FileOperationWindow::Update(const ops::OpStatus& status) {
         speed_sample_tick_ = 0;
     }
     if (hwnd_) {
-        if (options_.use_summary_title) SetWindowTextW(hwnd_, status_.summary.c_str());
+        if (options_.use_summary_title && title_changed) SetWindowTextW(hwnd_, status_.summary.c_str());
         if (entering_failure || detail_changed) ResizeForDetails(false);
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        if (presentation_changed) InvalidateRect(hwnd_, nullptr, FALSE);
     }
 }
 
@@ -1153,6 +1177,7 @@ void FileOperationWindow::Show(bool activate) {
 }
 
 void FileOperationWindow::Hide() {
+    completion_reveal_.Sample(AnimationTimeMs(), false);
     if (hwnd_) HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr);
     options_.modal_owner = false;
 }
@@ -1226,13 +1251,17 @@ void FileOperationWindow::RequestCancel() {
     RequestClose();
 }
 
-bool FileOperationWindow::NeedsAnimationFrame() const {
+void FileOperationWindow::RefreshAnimationSettings() {
     BOOL animations = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
-    return status_.active && status_.percent < 0.0f &&
-        (status_.phase == ops::OpPhase::Scanning || status_.type == ops::OpType::EmptyRecycle) &&
-        status_.phase != ops::OpPhase::Failed && status_.phase != ops::OpPhase::Completed &&
-        animations && !IsHighContrast();
+    animations_enabled_ = animations && !IsHighContrast();
+    completion_reveal_.Sample(AnimationTimeMs(), animations_enabled_);
+}
+
+bool FileOperationWindow::NeedsAnimationFrame() const {
+    if (!animations_enabled_ || !IsVisible() || IsIconic(hwnd_)) return false;
+    return completion_reveal_.pending || (TransferStatisticsActive(status_) && status_.percent < 0.0f &&
+        (status_.phase == ops::OpPhase::Scanning || status_.type == ops::OpType::EmptyRecycle));
 }
 
 void FileOperationWindow::Render(bool present) {
@@ -1259,6 +1288,8 @@ void FileOperationWindow::Render(bool present) {
     const bool waiting = status_.phase == ops::OpPhase::WaitingForConflict;
     const bool scanning = status_.phase == ops::OpPhase::Scanning;
     const bool completed = status_.phase == ops::OpPhase::Completed;
+    completion_reveal_.Tick(completed, AnimationTimeMs(),
+        animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
     const bool moving = status_.type == ops::OpType::Move;
     const bool deleting = status_.type == ops::OpType::RecycleDelete
                        || status_.type == ops::OpType::RealDelete;
@@ -1369,11 +1400,17 @@ void FileOperationWindow::Render(bool present) {
         badge_kind = fluent::BadgeKind::Success;
     }
     const float badge_w = std::max(48.0f, painter_.MeasureBadgeWidth(badge_text) / std::max(scale_, 0.001f));
+    const bool fading_completion = completed && completion_reveal_.opacity < 1.0f;
+    if (fading_completion) compositor_.Dc()->PushLayer(D2D1::LayerParameters(
+        Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f, 20), nullptr,
+        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(),
+        completion_reveal_.opacity), nullptr);
     DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
         Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f - badge_w - 12.0f, 20),
         file_line, theme.text);
     painter_.DrawBadge({ Rect(scale_, dip_w - kPadX - badge_w, 70, badge_w, 18),
                          badge_text, badge_kind });
+    if (fading_completion) compositor_.Dc()->PopLayer();
 
     const auto track = Rect(scale_, kPadX, 98, dip_w - kPadX * 2.0f, 10);
     painter_.FillRoundedRect(track, ScaleDip(scale_, 5.0f),
@@ -1580,6 +1617,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     switch (message) {
     case WM_CREATE:
         scale_ = static_cast<float>(pulse::compat::WindowDpi(hwnd_)) / 96.0f;
+        RefreshAnimationSettings();
         ApplyWindowTheme();
         if (!compositor_.Init(hwnd_)) return -1;
         compositor_.RecreateTextFormats(scale_);
@@ -1598,11 +1636,17 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
             chrome.close);
     }
     case WM_SIZE:
+        if (wparam == SIZE_MINIMIZED) completion_reveal_.Sample(AnimationTimeMs(), false);
         if (compositor_.Dc() && wparam != SIZE_MINIMIZED)
             compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
         if (wparam != SIZE_MINIMIZED && detailed_ && status_.phase == ops::OpPhase::Failed &&
             static_cast<float>(HIWORD(lparam)) < kCollapsedH * scale_ + DetailBlockHeight())
             ResizeForDetails(false);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+        RefreshAnimationSettings();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     case WM_MOVE:
@@ -1621,7 +1665,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     }
     case WM_TIMER:
         if (wparam == kRenderTimer && IsWindowVisible(hwnd_) && !IsIconic(hwnd_)) {
-            if (status_.active) {
+            bool dirty = NeedsAnimationFrame() || compositor_.NeedsRecovery();
+            if (TransferStatisticsActive(status_)) {
                 const ULONGLONG now = GetTickCount64();
                 if (speed_sample_tick_ == 0 || now - speed_sample_tick_ >= 250) {
                     speed_sample_tick_ = now;
@@ -1631,9 +1676,10 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
                     speed_history_.push_back(running && byte_transfer
                         ? (std::max)(0.0, status_.bytes_per_second) : 0.0);
                     while (speed_history_.size() > 120) speed_history_.pop_front();
+                    dirty |= detailed_;
                 }
             }
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            if (dirty) InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         break;

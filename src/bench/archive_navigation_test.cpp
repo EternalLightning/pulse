@@ -189,6 +189,111 @@ bool SameIdentity(const WIN32_FILE_ATTRIBUTE_DATA& a, const WIN32_FILE_ATTRIBUTE
     return a.nFileSizeHigh == b.nFileSizeHigh && a.nFileSizeLow == b.nFileSizeLow &&
         CompareFileTime(&a.ftLastWriteTime, &b.ftLastWriteTime) == 0;
 }
+
+int LifecycleTests(const std::wstring& external = {}) {
+    using namespace pulse;
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n';
+        failures += !ok;
+    };
+    const auto fixture = stdfs::absolute(stdfs::path(L"bench_data") /
+        (L"archive-lifecycle-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    std::error_code error;
+    stdfs::create_directories(fixture / L"source", error);
+    if (external.empty()) {
+        std::ofstream source(fixture / L"source" / L"compressed.bin", std::ios::binary);
+        const std::string block(1024 * 1024, 'x');
+        for (int i = 0; i < 16; ++i) source.write(block.data(), block.size());
+    }
+    const auto archive = external.empty() ? fixture / L"compressed.7z" : stdfs::path(external);
+    WIN32_FILE_ATTRIBUTE_DATA before{};
+    const bool packed = !error && (external.empty() ? MakeEncrypted7z(archive, fixture / L"source")
+        : GetFileAttributesExW(archive.c_str(), GetFileExInfoStandard, &before) != FALSE);
+    check(packed && (!external.empty() || stdfs::file_size(archive, error) < 16 * 1024),
+        external.empty() ? "create a real 7z with more than 1000:1 compression for metadata-only navigation"
+            : "open the original archive for a read-only navigation probe");
+    auto owned = std::make_unique<AppState>();
+    auto& state = *owned;
+    state.isolatedTest = true;
+    state.appPrefs.persist = state.places.persist = state.searchHistory.persist = state.ctxMenuPrefs.persist = false;
+    Probe probe; probe.state = &state;
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr); wc.lpfnWndProc = WindowProc;
+    wc.lpszClassName = L"PulseArchiveLifecycleFixture";
+    RegisterClassW(&wc);
+    state.hwnd = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, wc.hInstance, &state);
+    if (state.hwnd) SetPropW(state.hwnd, kProbeProperty, &probe);
+    state.window_tabs.NewTab(fixture.wstring());
+    state.pane = state.window_tabs.Active()->FocusedPane();
+    auto& tab = *ActiveTab(state);
+    const bool started = state.hwnd && state.worker.Start([](app::WorkResult) {});
+    check(started, "initialize isolated archive navigation worker and result window");
+    if (started && packed) {
+        const auto started_at = GetTickCount64();
+        StartLoadingPath(state, tab, ArchiveViewPath(archive.wstring()));
+        const bool listed = Wait([&] { return !tab.loading; }, 30000);
+        check(listed && tab.archive_listing && tab.EntryCount() > 0 && (!external.empty() ||
+            (tab.EntryCount() == 1 && tab.EntryAt(0).name == L"compressed.bin" &&
+                tab.EntryAt(0).size == 16 * 1024 * 1024)),
+            "production navigation lists highly compressed contents without extracting members");
+        std::cout << "[INFO] listing_ms=" << GetTickCount64() - started_at
+            << " root_entries=" << tab.EntryCount() << '\n';
+        if (!tab.archive_listing) std::wcerr << L"[DIAG] listing error=" << tab.banner_message << L'\n';
+        check(!stdfs::exists(fixture / L"compressed.bin"), "listing creates no extracted member beside the archive");
+        const auto cancelled = tab.archive_cancel;
+        tab.archive_password = L"cached-password";
+        StartLoadingPath(state, tab, fixture.wstring());
+        check(cancelled && cancelled->load() && !tab.archive_cancel && !tab.archive_listing &&
+            tab.archive_file.empty() && tab.archive_prefix.empty() && tab.archive_password.empty() &&
+            tab.archive_encrypted.empty(), "leaving an archive cancels its read and clears all archive-only state");
+        tab.HoldEntryRename(L"before.txt", L"after.txt");
+        check(!tab.held_renames.empty(), "returning to a filesystem folder restores ordinary rename tracking");
+        const auto delivered = probe.delivered;
+        StartLoadingPath(state, tab, ArchiveViewPath(archive.wstring()));
+        const auto in_flight = tab.archive_cancel;
+        Sleep(20);
+        const auto cancelled_at = GetTickCount64();
+        StartLoadingPath(state, tab, fixture.wstring());
+        auto available = std::make_shared<std::atomic_bool>(false);
+        const bool enqueued = state.worker.EnqueueIo([available] { available->store(true); });
+        check(in_flight && in_flight->load() && enqueued &&
+            Wait([&] { return available->load() && probe.delivered > delivered; }, 3000),
+            "leaving during listing cancels the read while subsequent worker tasks remain available");
+        std::cout << "[INFO] cancellation_followup_ms=" << GetTickCount64() - cancelled_at << '\n';
+        const auto closing = std::make_shared<std::atomic_bool>(false);
+        state.window_tabs.NewTab(ArchiveViewPath(archive.wstring()));
+        state.window_tabs.Active()->FocusedPane()->view.archive_cancel = closing;
+        state.window_tabs.CloseTab(state.window_tabs.active);
+        check(closing->load(), "closing an archive tab cancels its outstanding listing");
+        const auto replacing = std::make_shared<std::atomic_bool>(false);
+        app::Pane pane;
+        pane.view.archive_cancel = replacing;
+        pane.NewTab(fixture.wstring());
+        check(replacing->load() && !pane.view.archive_cancel,
+            "replacing a pane view cancels the previous archive listing");
+        const auto removing = std::make_shared<std::atomic_bool>(false);
+        {
+            app::Pane removed;
+            removed.view.archive_cancel = removing;
+        }
+        check(removing->load(), "removing an archive pane cancels its outstanding listing");
+    }
+    state.worker.Stop();
+    Pump();
+    if (state.hwnd) { DestroyWindow(state.hwnd); state.hwnd = nullptr; }
+    owned.reset();
+    if (!external.empty() && packed) {
+        WIN32_FILE_ATTRIBUTE_DATA after{};
+        check(GetFileAttributesExW(archive.c_str(), GetFileExInfoStandard, &after) && SameIdentity(before, after),
+            "original archive size and modification time remain unchanged");
+    }
+    const auto parent = stdfs::absolute(L"bench_data").lexically_normal();
+    if (fixture.lexically_normal().parent_path() == parent) stdfs::remove_all(fixture, error);
+    check(!error && !stdfs::exists(fixture), "remove only isolated archive lifecycle fixtures");
+    return failures ? 1 : 0;
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -200,10 +305,19 @@ int wmain(int argc, wchar_t** argv) {
         failures += !ok;
         return ok;
     };
-    if (argc > 2) { std::cerr << "usage: pulse_archive_navigation_test [read-only archive]\n"; return 2; }
+    const bool lifecycle_only = argc >= 2 && std::wstring_view(argv[1]) == L"--lifecycle-only";
+    if (argc > (lifecycle_only ? 3 : 2)) {
+        std::cerr << "usage: pulse_archive_navigation_test [read-only archive] | --lifecycle-only [read-only archive]\n";
+        return 2;
+    }
     const HRESULT ole = OleInitialize(nullptr);
     if (!check(SUCCEEDED(ole), "initialize fixture UI apartment")) return 1;
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (lifecycle_only) {
+        const int result = LifecycleTests(argc == 3 ? argv[2] : L"");
+        OleUninitialize();
+        return result;
+    }
     std::error_code error;
     const auto fixture = stdfs::absolute(stdfs::path(L"bench_data") /
         (L"archive-navigation-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));

@@ -47,11 +47,9 @@ void ShowAddressSearchHistory(AppState& s) {
     s.searchHistoryOpen = true;
     const bool previous_ignore = s.addressIgnoreKillFocus;
     s.addressIgnoreKillFocus = true;
-    bool repeat = true;
-    bool show_all = true;
-    while (repeat && s.addressSearching && ActiveTab(s) == tab && s.pane == pane) {
-        repeat = false;
-        const auto entries = s.searchHistory.entries;
+    do {
+        auto entries = s.searchHistory.entries;
+        std::wstring visible_filter;
         auto items_for = [&](const std::wstring& filter) {
             std::vector<ui::FluentMenuItem> items;
             for (size_t i = 0; i < entries.size(); ++i) {
@@ -115,17 +113,27 @@ void ShowAddressSearchHistory(AppState& s) {
             s.menu->SaveDebugSnapshot(debug_path, items_for(L""));
             break;
         }
+        const auto filter_items = [&](const std::wstring& filter) {
+            visible_filter = filter;
+            return items_for(filter);
+        };
+        const auto handle_command = [&](int command) {
+            if (!s.addressSearching || ActiveTab(s) != tab || s.pane != pane) return false;
+            if (command == 2) {
+                if (s.searchHistory.Clear()) SaveHistory(s);
+            } else if (command >= 1000 && command < 1000 + static_cast<int>(entries.size())) {
+                if (s.searchHistory.Remove(entries[static_cast<size_t>(command - 1000)].path)) SaveHistory(s);
+            } else {
+                return false;
+            }
+            entries = s.searchHistory.entries;
+            s.menu->ReplaceFilterItems(items_for(visible_filter));
+            return true;
+        };
         const int command = s.menu->TrackPopup({anchor.left, anchor.top},
-            items_for(show_all ? L"" : draft), items_for);
-        draft = s.menu->LastFilterQuery();
+            items_for(L""), filter_items, false, handle_command);
         if (!s.addressSearching || ActiveTab(s) != tab || s.pane != pane) break;
-        if (command == 2) {
-            if (s.searchHistory.Clear()) SaveHistory(s);
-            repeat = true;
-        } else if (command >= 1000 && command < 1000 + static_cast<int>(entries.size())) {
-            if (s.searchHistory.Remove(entries[static_cast<size_t>(command - 1000)].path)) SaveHistory(s);
-            repeat = true;
-        } else if (command >= 100 && command < 100 + static_cast<int>(entries.size())) {
+        if (command >= 100 && command < 100 + static_cast<int>(entries.size())) {
             const auto path = entries[static_cast<size_t>(command - 100)].path;
             s.addressLiveDue = s.addressHistoryDue = 0;
             HideAddressEditor(s, false);
@@ -136,8 +144,7 @@ void ShowAddressSearchHistory(AppState& s) {
             SaveAddressSearchDraft(s);
             if (s.menu->LastFilterCommitted()) SubmitAddressSearch(s);
         }
-        show_all = false;
-    }
+    } while (false);
     s.addressIgnoreKillFocus = previous_ignore;
     s.searchHistoryOpen = false;
     if (s.searchScopePending) {
