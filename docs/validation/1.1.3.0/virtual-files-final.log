@@ -1,6 +1,0 @@
-[PASS] shell drop materializes a virtual FileGroupDescriptor/FileContents item
-[PASS] copy drop leaves the virtual source data readable
-[PASS] unavailable virtual contents do not create a partial destination file
-[PASS] malformed virtual descriptor is rejected without creating a file
-[PASS] temporary destination fixture cleaned up
-5 checks, 0 failures

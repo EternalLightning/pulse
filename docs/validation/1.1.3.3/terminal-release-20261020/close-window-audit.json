@@ -1,0 +1,57 @@
+{
+  "enum_ok": true,
+  "processes": [
+    30748
+  ],
+  "windows": [
+    {
+      "hwnd": 920772,
+      "pid": 30748,
+      "class": "tooltips_class32",
+      "title": "",
+      "visible": false
+    },
+    {
+      "hwnd": 3542138,
+      "pid": 30748,
+      "class": "PulseFluentMenu",
+      "title": "PulseMenu",
+      "visible": false
+    },
+    {
+      "hwnd": 68508,
+      "pid": 30748,
+      "class": "PulseFileOperationWindow",
+      "title": "文件操作",
+      "visible": false
+    },
+    {
+      "hwnd": 2165600,
+      "pid": 30748,
+      "class": "Pulse.QuickPreview",
+      "title": "",
+      "visible": false
+    },
+    {
+      "hwnd": 592726,
+      "pid": 30748,
+      "class": "PulseMainWindow",
+      "title": "科技报告 - Pulse",
+      "visible": false
+    },
+    {
+      "hwnd": 68522,
+      "pid": 30748,
+      "class": "MSCTFIME UI",
+      "title": "MSCTFIME UI",
+      "visible": false
+    },
+    {
+      "hwnd": 920210,
+      "pid": 30748,
+      "class": "IME",
+      "title": "Default IME",
+      "visible": false
+    }
+  ]
+}

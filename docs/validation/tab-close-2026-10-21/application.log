@@ -1,0 +1,43 @@
+[PASS] production plus-button pointer messages create and select a tab
+[PASS] new tab animates from the existing underline instead of snapping after count changes
+[PASS] both edges advance during the real new-tab transition
+[PASS] save new-tab intermediate frame
+[PASS] new-tab transition releases frame scheduling at rest
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] switching across a scrolling tab strip keeps the transition
+[PASS] disabling motion settles a running transition
+[PASS] window resize snaps stale coordinates without chasing layout
+[PASS] DPI changes settle directly on current geometry
+[PASS] production pointer close removes the leftmost tab while retaining the active layout
+[PASS] pointer hit testing before the first paint cannot consume the close using stale cached tabs
+[PASS] close starts at displayed tab and plus-button positions
+[PASS] remaining tabs visibly move into the removed slot
+[PASS] hit testing follows the moving tab instead of the final slot
+[PASS] active underline follows the closing reflow without a second chase animation
+[PASS] save production close intermediate frame
+[PASS] a consecutive production close retargets the current reflow
+[PASS] closing releases the production frame loop at rest
+[PASS] closing the active tab also animates the remaining strip
+[PASS] disabling motion settles closing and underline together
+[PASS] a pinned tab retains its width and position while grouped members close
+[PASS] later group chips start at their displayed positions
+[PASS] closing the last group member removes its chip and settles the surviving group
+[PASS] overflow close keeps finite, reachable active-tab geometry
+[PASS] resizing cancels closing coordinates from the old window width
+[PASS] continuous production WM_PAINT delivers due timers without starving them
+[PERF] continuous tab transitions: paints=108 timers=13
+[PASS] toast lifetime timer cannot duplicate the owner's reveal frame scheduling
+[PASS] toast entrance joins display-paced frame scheduling
+[PASS] toast settles without a permanent render loop
+[PASS] hidden window does not queue animation frames

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Pulse-1.1.3.3-portable-win-x64.zip",
+    "bytes": 12184227,
+    "sha256": "831142711906C19C3FF7C04E4115F2EAF19AB7C60C47952FFBAC81D953BDAC54",
+    "signature": null
+  },
+  {
+    "name": "PulseSetup-1.1.3.3.exe",
+    "bytes": 9954993,
+    "sha256": "0E8D792D921C7943201519682A716E3D2CA682879FD45409D35A5F287FC01CD0",
+    "signature": "NotSigned"
+  }
+]

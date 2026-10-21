@@ -1,0 +1,374 @@
+[
+  {
+    "path": "bench_data/adapt_text_compare.py",
+    "files": 1,
+    "bytes": 3027,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-desktop.ps1",
+    "files": 1,
+    "bytes": 8491,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-followup-build.log",
+    "files": 1,
+    "bytes": 28424,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-followup-pane.log",
+    "files": 1,
+    "bytes": 5067,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-gifs.py",
+    "files": 1,
+    "bytes": 1240,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-preview-build.log",
+    "files": 1,
+    "bytes": 32787,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-preview-final-build.log",
+    "files": 1,
+    "bytes": 1405,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-reveal-fixture-build.log",
+    "files": 1,
+    "bytes": 646,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/animation-review-desktop.ps1",
+    "files": 1,
+    "bytes": 11292,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/antivirus-pe-evidence.ps1",
+    "files": 1,
+    "bytes": 1691,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/archive-shared-window-test.log",
+    "files": 1,
+    "bytes": 3508,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/build-selection-object.cmd",
+    "files": 1,
+    "bytes": 709,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/cleanup-current-package.ps1",
+    "files": 1,
+    "bytes": 4195,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/cleanup-inventory.json",
+    "files": 1,
+    "bytes": 13744,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/compositor_pacing_probe.cpp",
+    "files": 1,
+    "bytes": 2842,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/compositor_pacing_probe.exe",
+    "files": 1,
+    "bytes": 142336,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/compositor_pacing_probe.obj",
+    "files": 1,
+    "bytes": 8590,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/deploy-operation-ui.ps1",
+    "files": 1,
+    "bytes": 4336,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/deploy-taskbar-fix.ps1",
+    "files": 1,
+    "bytes": 4403,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/deploy-tested-pulse-result.json",
+    "files": 1,
+    "bytes": 218,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/deploy-tested-pulse.ps1",
+    "files": 1,
+    "bytes": 4482,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/file-compare-desktop.ps1",
+    "files": 1,
+    "bytes": 6210,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/file-selection-results.log",
+    "files": 1,
+    "bytes": 5715,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/motion-consistency-application.log",
+    "files": 1,
+    "bytes": 5067,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/native-new-probe.stderr.log",
+    "files": 1,
+    "bytes": 0,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/native-new-probe.stdout.log",
+    "files": 1,
+    "bytes": 0,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-final-archive-progress.txt",
+    "files": 1,
+    "bytes": 3437,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-final-background.txt",
+    "files": 1,
+    "bytes": 1434,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-final-progress.txt",
+    "files": 1,
+    "bytes": 8289,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-final-test-location.txt",
+    "files": 1,
+    "bytes": 72,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-shared-progress-test.log",
+    "files": 1,
+    "bytes": 5841,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/operation-ui-test-location.txt",
+    "files": 1,
+    "bytes": 69,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/package-current-paths.json",
+    "files": 1,
+    "bytes": 290,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/package-operation-ui.ps1",
+    "files": 1,
+    "bytes": 3052,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/Pulse.Index-deploy-backup-22a94e617b52483ebe2fb3e8bd56fb60.exe",
+    "files": 1,
+    "bytes": 3351040,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/refine_text_compare.py",
+    "files": 1,
+    "bytes": 2136,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/refresh-test-program.ps1",
+    "files": 1,
+    "bytes": 3820,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/runtime-waste-clipboard.log",
+    "files": 1,
+    "bytes": 1682,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/runtime-waste-tray.log",
+    "files": 1,
+    "bytes": 2353,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/runtime-waste-ui.log",
+    "files": 1,
+    "bytes": 2271,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/runtime-waste-worker.log",
+    "files": 1,
+    "bytes": 4955,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/sidebar-starred-build.log",
+    "files": 1,
+    "bytes": 20643,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/source-snapshot.py",
+    "files": 1,
+    "bytes": 1229,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/storage-medium-probe.ps1",
+    "files": 1,
+    "bytes": 4992,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-application.log",
+    "files": 1,
+    "bytes": 3152,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-build.log",
+    "files": 1,
+    "bytes": 17638,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-desktop.ps1",
+    "files": 1,
+    "bytes": 10846,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-final-build.log",
+    "files": 1,
+    "bytes": 2193,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-gif.py",
+    "files": 1,
+    "bytes": 1511,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-close-unit.log",
+    "files": 1,
+    "bytes": 3021,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-fixture-rebuild.log",
+    "files": 1,
+    "bytes": 617,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-indicator-followup-ui.log",
+    "files": 1,
+    "bytes": 1931,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-indicator-followup-unit.log",
+    "files": 1,
+    "bytes": 1687,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/tab-indicator-results.log",
+    "files": 1,
+    "bytes": 1301,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/test-program-deployment-2026-10-21.json",
+    "files": 1,
+    "bytes": 4158,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/test-program-smoke.png",
+    "files": 1,
+    "bytes": 179057,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/test-program-smoke.timing.txt",
+    "files": 1,
+    "bytes": 73,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/text-compare-results.log",
+    "files": 1,
+    "bytes": 1483,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/utf8_atomic_test.exe",
+    "files": 1,
+    "bytes": 280576,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/utf8_atomic_test.obj",
+    "files": 1,
+    "bytes": 512280,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/verify-current-package.ps1",
+    "files": 1,
+    "bytes": 3983,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  },
+  {
+    "path": "bench_data/verify-installed-taskbar.ps1",
+    "files": 1,
+    "bytes": 3348,
+    "reason": "Archived one-off local probe, old log or obsolete test binary"
+  }
+]

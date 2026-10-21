@@ -1,0 +1,151 @@
+Release payload check passed: no embedded selftest dispatcher.
+Staged 0 required x64 MSVC runtime DLLs:
+Inno Setup 6 Command-Line Compiler
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+Portions Copyright (C) 2001-2004 Alex Yackimoff. All rights reserved.
+https://www.innosetup.com
+
+Compiler engine version: Inno Setup 6.7.3
+Non-commercial use only
+
+Preprocessing
+   Reading file: C:\Users\EternalLightning\AppData\Local\Programs\Inno Setup 6\ISPPBuiltins.iss
+Parsing [Setup] section, line 22
+Parsing [Setup] section, line 23
+Parsing [Setup] section, line 24
+Parsing [Setup] section, line 28
+Parsing [Setup] section, line 30
+Parsing [Setup] section, line 31
+Parsing [Setup] section, line 35
+Parsing [Setup] section, line 36
+Parsing [Setup] section, line 37
+Parsing [Setup] section, line 38
+Parsing [Setup] section, line 42
+Parsing [Setup] section, line 44
+Parsing [Setup] section, line 45
+Parsing [Setup] section, line 47
+Parsing [Setup] section, line 48
+Parsing [Setup] section, line 52
+Parsing [Setup] section, line 54
+Parsing [Setup] section, line 55
+Parsing [Setup] section, line 56
+Parsing [Setup] section, line 57
+Parsing [Setup] section, line 61
+Parsing [Setup] section, line 62
+Parsing [Setup] section, line 63
+Parsing [Setup] section, line 64
+Reading file (WizardImageFile)
+Reading file (WizardSmallImageFile)
+Preparing Setup program executable
+   Verification successful
+   Updating icons (Setup.e32)
+   Updating version info (Setup.e32)
+Determining language code pages
+Parsing [Languages] section, line 69
+   Reading file: E:\Projects\pulse\installer\Languages\ChineseSimplified.isl
+Parsing [Languages] section, line 70
+   Reading file: C:\Users\EternalLightning\AppData\Local\Programs\Inno Setup 6\Default.isl
+   Messages in script file
+Reading default messages from Default.isl
+Parsing [Languages] section, line 69
+   Reading file: E:\Projects\pulse\installer\Languages\ChineseSimplified.isl
+Parsing [Languages] section, line 70
+   Reading file: C:\Users\EternalLightning\AppData\Local\Programs\Inno Setup 6\Default.isl
+Parsing [LangOptions], [Messages], and [CustomMessages] sections
+   Messages in script file
+Reading [Code] section
+Parsing [Tasks] section, line 73
+Parsing [Tasks] section, line 74
+Parsing [Tasks] section, line 75
+Parsing [Icons] section, line 114
+Parsing [Icons] section, line 115
+Parsing [Icons] section, line 116
+Parsing [Registry] section, line 119
+Parsing [Registry] section, line 120
+Parsing [Registry] section, line 121
+Parsing [Registry] section, line 122
+Parsing [Registry] section, line 123
+Parsing [Registry] section, line 124
+Parsing [Registry] section, line 127
+Parsing [InstallDelete] section, line 104
+Parsing [InstallDelete] section, line 107
+Parsing [InstallDelete] section, line 108
+Parsing [InstallDelete] section, line 109
+Parsing [InstallDelete] section, line 110
+Parsing [Run] section, line 131
+Parsing [Run] section, line 132
+Parsing [UninstallRun] section, line 136
+Parsing [UninstallRun] section, line 137
+Parsing [Files] section, line 78
+Parsing [Files] section, line 79
+Parsing [Files] section, line 80
+Parsing [Files] section, line 85
+Parsing [Files] section, line 86
+Parsing [Files] section, line 87
+Parsing [Files] section, line 88
+Parsing [Files] section, line 89
+Parsing [Files] section, line 90
+Parsing [Files] section, line 91
+Parsing [Files] section, line 92
+Parsing [Files] section, line 93
+Parsing [Files] section, line 94
+Parsing [Files] section, line 95
+Parsing [Files] section, line 96
+Parsing [Files] section, line 97
+Parsing [Files] section, line 98
+Parsing [Files] section, line 99
+Parsing [Files] section, line 100
+Compiling [Code] section
+Creating setup files
+   Verification successful
+   Updating icons (Setup.exe)
+   Compressing: E:\Projects\pulse\LICENSE
+   Compressing: E:\Projects\pulse\NOTICE
+   Compressing: E:\Projects\pulse\build\7zip\7z.dll
+   Compressing: E:\Projects\pulse\build\7zip\7z.exe
+   Compressing: E:\Projects\pulse\build\7zip\License.txt
+   Compressing: E:\Projects\pulse\build\7zip\README.md
+   Compressing: E:\Projects\pulse\build\Pulse.exe
+   Compressing: E:\Projects\pulse\build\lumatext.dll
+   Compressing: E:\Projects\pulse\build\pdfium.dll
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\abseil.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\agg23.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\binary-distribution.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\fast_float.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\freetype.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\icu.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\lcms.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\libjpeg_turbo.ijg
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\libjpeg_turbo.md
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\libopenjpeg.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\libpng.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\llvm-libc.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\pdfium.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\simdutf.txt
+   Compressing: E:\Projects\pulse\build\licenses\PDFium\zlib.txt
+   Compressing: E:\Projects\pulse\third_party\ib-pinyin-cpp\LICENSE.txt
+   Compressing: E:\Projects\pulse\third_party\files-icon\LICENSE-MIT.txt
+   Compressing: E:\Projects\pulse\third_party\files-icon\README.md
+   Compressing: E:\Projects\pulse\assets\microsoft_brand\LICENSE.pdf
+   Compressing: E:\Projects\pulse\assets\microsoft_brand\README.md
+   Compressing: E:\Projects\pulse\assets\fluent\LICENSE
+   Compressing: E:\Projects\pulse\assets\fluent\SOURCES.md
+   Compressing: E:\Projects\pulse\build\licenses\LumaText\FreeType.txt
+   Compressing: E:\Projects\pulse\build\licenses\LumaText\HarfBuzz.txt
+   Compressing: E:\Projects\pulse\build\licenses\LumaText\LICENSE
+   Compressing: E:\Projects\pulse\build\licenses\LumaText\Unicode.txt
+   Compressing: E:\Projects\pulse\build\Pulse.Index.exe
+   Compressing: E:\Projects\pulse\build\Pulse.Document.exe
+   Compressing: E:\Projects\pulse\build\Pulse.Preview.exe
+   Compressing: E:\Projects\pulse\build\Pulse.Shell.exe
+   Compressing Setup program executable
+   Updating version info (Setup.exe)
+   Updating manifest (Setup.exe)
+
+Warning: The [Setup] section directive "PrivilegesRequired" is set to "admin" but per-user areas (HKCU) are used by the script. Regardless of the version of Windows, if the installation is running in administrative install mode then you should be careful about making any per-user area changes: such changes may not achieve what you are intending. See the "UsedUserAreasWarning" topic in help file for more information.
+
+Successful compile (6.140 sec). Resulting Setup program filename is:
+E:\Projects\pulse\dist\PulseSetup-1.1.3.3.exe
+
+Installer written to dist\

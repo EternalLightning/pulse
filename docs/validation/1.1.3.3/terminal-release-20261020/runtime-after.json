@@ -1,0 +1,28 @@
+{
+  "service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "processes": [
+    {
+      "ProcessId": 32388,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": null,
+      "CommandLine": null
+    },
+    {
+      "ProcessId": 34740,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    },
+    {
+      "ProcessId": 35536,
+      "Name": "Pulse.exe",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.exe\" "
+    }
+  ],
+  "version": "1.1.3.3"
+}

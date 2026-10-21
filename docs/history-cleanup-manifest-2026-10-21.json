@@ -1,0 +1,2860 @@
+{
+  "date": "2026-10-21",
+  "scope": "docs only",
+  "summary": "docs/history-summary.md",
+  "recovery_snapshot": "dist/source-snapshot-before-cleanup-20261021.zip",
+  "files": [
+    {
+      "path": "docs/architecture-interface-review.md",
+      "bytes": 47745,
+      "sha256": "0B952C19C1A9744268BA186BC76004C586F63AF0C8371E6C862A762660AE686F",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/architecture-preserving-optimization.md",
+      "bytes": 6045,
+      "sha256": "CB9F4F45B6375870A01F807588001CE575285A27C6044EAE838292D84E15EE87",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/localization-resource-audit.md",
+      "bytes": 21221,
+      "sha256": "4A357F1E52BB11D867B9974CB3620BD7CEF314543B6379442574476C99B582D1",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/lumatext-size-optimization.md",
+      "bytes": 3013,
+      "sha256": "4E12E35A517CACE4FA3BED093A6F28D47926225800A5BE8B5A40079649090F34",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/portable_test_20261011.md",
+      "bytes": 10350,
+      "sha256": "3890AC224FD38D8A3259DA2BE47D698DFA28070DD9EE3CD1E47A337649A44792",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/pr-1-rename-verification.md",
+      "bytes": 5551,
+      "sha256": "D337A0E1051B4C48C1DD096942721C6A1BAC54255ECF2963FC0796739E104151",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/report-fix-status.md",
+      "bytes": 10554,
+      "sha256": "86AF6FB1B9471BA4138566848680DFD70EE25186109435FE67505254952B897F",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/report.md",
+      "bytes": 79766,
+      "sha256": "F58346ECFA57C476D914FFD4175077326F6459BE2B4D95DF77BE71D3A30A9DED",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/resource-decoupling-review.md",
+      "bytes": 13445,
+      "sha256": "621EBD86243D74979A75B120B089383DC96EC2C98A124889C2AEC3066CF14C3A",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/review-fixes-2026-10-09.md",
+      "bytes": 6903,
+      "sha256": "9120CF1DB44FB16D9074C2F66D4F74566E01B99F90619E20B6B23980CEDC28BF",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/actual-deletion-undo.log",
+      "bytes": 916,
+      "sha256": "38135DB89B195AE64E3CB5D69EA65C5B81CF04DD844CB7A6A98987AC1379AA28",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-detection.json",
+      "bytes": 2884,
+      "sha256": "CB452BFB985A160A751091679CBE30A8876BA05F3C94C4574066811DA198876B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/build-tool-signatures.json",
+      "bytes": 975,
+      "sha256": "E1797BA7380D8200729AC81C5371F1EBE4F80ECC4DCDB3247ECB2586F48EE406",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/clean-build-final-configure.yaml",
+      "bytes": 20900,
+      "sha256": "A20BBCF78D7D07BEBB7D421AC24264FB8BFF2CC1ACDAB16B07F074789DDE4068",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/clean-build-initial-configure.yaml",
+      "bytes": 8853,
+      "sha256": "DED9329174105D1E16E59E226C7A749C38FCB274FFB93EFE82CE83033E0A4CCD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/clean-build-ninja.log",
+      "bytes": 23817,
+      "sha256": "3C87632DAB18EF2E6BE5A60197B90F173027E65277282A5B457624023DC1017F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/clean-build-pe-comparison.json",
+      "bytes": 3124,
+      "sha256": "0E695EB14805F077BBF8070208D05188B9215C7123D7789B5E3011D7CA354B13",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/comparison-inputs.json",
+      "bytes": 888,
+      "sha256": "AA82468B01BF084944083602EF149BC529B7037A0C9FF4574B4AF3F9F8B4B91F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/embedded-manifest.xml",
+      "bytes": 1523,
+      "sha256": "70C9F0FF7C9B3E42DC41C1F7CBE63B0FF1FC56EA5D91098C4AEA84E6357620A7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-clean-build-comparison-console.txt",
+      "bytes": 539,
+      "sha256": "E7DEF56EC5484A1EAD76B01F63D3366BE53E49E12F2069FCCDA114A610A08DC5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-clean-build-comparison-exit.txt",
+      "bytes": 3,
+      "sha256": "DF4E26A04A444901B95AFEF44E4A96CFAE34690FFF2AD2C66389C70079CDFF2B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-clean-build-comparison.log",
+      "bytes": 1462,
+      "sha256": "9E27317DD984D96F4F0406DE3C83D11F644F5636B2CA9A3D803E2CCBA39052FB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-comparison-console.txt",
+      "bytes": 524,
+      "sha256": "E1B3AB37EBC0FEBB9622F36B082EA367236D2DEB25FD8FF75BA3679C103B1309",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-comparison-exit.txt",
+      "bytes": 3,
+      "sha256": "24BA1E99DC06B19351323AAE0D7370243D586475A634B7F6FF7927FBC72CFAED",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-comparison.log",
+      "bytes": 1474,
+      "sha256": "B71FC205AF1F4924DB2A3223A697C078E492D5BBA66E684B4E99298865EBBBBB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-manifest-build-console.txt",
+      "bytes": 474,
+      "sha256": "71C3A58B58D6034ED2DC219A03C764C6E6EC08913DADCE7205CD309A34979B8B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-manifest-build-exit.txt",
+      "bytes": 3,
+      "sha256": "DF4E26A04A444901B95AFEF44E4A96CFAE34690FFF2AD2C66389C70079CDFF2B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-manifest-build.log",
+      "bytes": 1054,
+      "sha256": "46E83CE467F1FA3D8735EB3BD6EA80DD373E51EC630FDB1007DD7F99AB3A83A3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-module-comparison-console.txt",
+      "bytes": 591,
+      "sha256": "E7ACAC71385BE97802D29D98BBC056C5994A8464CAE356D5E88D0E63BD4431BF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-module-comparison-exit.txt",
+      "bytes": 3,
+      "sha256": "24BA1E99DC06B19351323AAE0D7370243D586475A634B7F6FF7927FBC72CFAED",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-module-comparison.log",
+      "bytes": 1874,
+      "sha256": "FDD9D1981E8E976DC2FA34BC5AD66AED7ECEE85EC9344766294CE6248A2A88CE",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-original-after-update-console.txt",
+      "bytes": 474,
+      "sha256": "D8261201C857C2CEA191035C76C9A9183EB442EB0EE08A4D92895A09D5BA708D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-original-after-update-exit.txt",
+      "bytes": 3,
+      "sha256": "DF4E26A04A444901B95AFEF44E4A96CFAE34690FFF2AD2C66389C70079CDFF2B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-original-after-update.log",
+      "bytes": 1054,
+      "sha256": "3D38AE46110D694CB8C3B9B9F82DD0547A731EC01F3513E9E272032A64976A42",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-update-console.txt",
+      "bytes": 311,
+      "sha256": "0217EFF39B1DD640A2060CDA49942B86BDDCBA4C75F8C07989E548B502EC1A5A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-update-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/kaspersky-update.log",
+      "bytes": 8218,
+      "sha256": "4A680F1031094B248F224E68B4DCFB2B53732C32892F11EA91AF1DBCAF39BA98",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/manifest-build-input.json",
+      "bytes": 316,
+      "sha256": "6CD3254A5E2F7BF22C48B7CF433F42EF34161EA74C6B3AD517663C23C21D9D5C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/manifest-pe-comparison.json",
+      "bytes": 3114,
+      "sha256": "1CBA46DFCB867372A80042ACB49E80C42A317011BB2A4B3CBD487A938E2F2829",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/module-scan-inputs.json",
+      "bytes": 937,
+      "sha256": "53D21617A94758E7E37AECD4F50EACB38F41E47F710D926752C3277B1F74CBDD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/package-runtime-dependencies.txt",
+      "bytes": 2548,
+      "sha256": "65CB082B600719812A99E67B471CF2DA06D152578917B72ECFFDD361AB649391",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/research-and-options.md",
+      "bytes": 5369,
+      "sha256": "6398E24BFC6373B16E10C80D266CC704136BBC6103C83D0E529AA229934D154E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/review.md",
+      "bytes": 9602,
+      "sha256": "0218CE3D83EA69CCAB62B3620924855B7D0CAE36E941B293C3CCF0C1A73D3718",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/signing-availability.json",
+      "bytes": 374,
+      "sha256": "88DDCA5B73E9C816A94001F656654B8F42DCC62455518472092B82B24C8A0076",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/vendor-review-draft.md",
+      "bytes": 2232,
+      "sha256": "88D8DC60F9B6EBF13182D13EF78FDDFB322B1E13E99E4A031F8F65D588688CF4",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/baseline-inputs.json",
+      "bytes": 1061,
+      "sha256": "2DC8AFC4E9AFB25F29EA8FF118C7BCD73D7C3A4F550543AAB46D992521578B69",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/build-final.log",
+      "bytes": 727,
+      "sha256": "0C487F44AF910D4CC7E48A54B6D1B28481C8E699B8DFD2C5BF29B8DF8C547F2D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/build.log",
+      "bytes": 23618,
+      "sha256": "6388C364B9EB28AFD9E02911DD008BA3112A15B8008CF01ADD8E2A1D9DD77D88",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/inspect-production.bat",
+      "bytes": 910,
+      "sha256": "461F861A25C6E762C9E3262CA9D734F7A168CDACB16FF4886D5A3FD962730768",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/isolation-scan-inputs.json",
+      "bytes": 846,
+      "sha256": "5ED35E16D38C08A69A33A9980E2783010EC2512D88F14063D583AB1567B75A39",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-baseline-console.txt",
+      "bytes": 541,
+      "sha256": "7796831901E294E02409CDFCAA0E75B7E848177E9C25F821AEEA7D88F1287EF8",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-baseline-exit.txt",
+      "bytes": 3,
+      "sha256": "24BA1E99DC06B19351323AAE0D7370243D586475A634B7F6FF7927FBC72CFAED",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-baseline.log",
+      "bytes": 1565,
+      "sha256": "C0C4976DC1AB9F9C27A31DABB473A20DBA15CE96CF082B5B2870B9436FAA3A0B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-isolation-console.txt",
+      "bytes": 541,
+      "sha256": "62A9D50FC0CB1BC99314D1632414451EE6A9C2BC87807BEACCAEDFA5F734AE2A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-isolation-exit.txt",
+      "bytes": 3,
+      "sha256": "24BA1E99DC06B19351323AAE0D7370243D586475A634B7F6FF7927FBC72CFAED",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/kaspersky-isolation.log",
+      "bytes": 1471,
+      "sha256": "773B439D153FC507A16319CA6374FE8BA020767392ED0B50157E414311FC14DD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/main-dependents.txt",
+      "bytes": 871,
+      "sha256": "DC7FA2A0F89A0DB43ABAEBE2B5DE3363657973774ADBADE4424168B2FF499136",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/main-embedded-manifest.xml",
+      "bytes": 1523,
+      "sha256": "70C9F0FF7C9B3E42DC41C1F7CBE63B0FF1FC56EA5D91098C4AEA84E6357620A7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/main-pe-headers.txt",
+      "bytes": 6549,
+      "sha256": "7BAC94A200E0AA244952F4505054123AE2D331E2F2BC30F40815BC97F4676DC1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/manifest-verification.json",
+      "bytes": 250,
+      "sha256": "85B214AADFB6D9A329ED7CC96CEB34AC1E51AEA0605C1FF97D7D70D87C8C2685",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/medium-copy-integrity.log",
+      "bytes": 863,
+      "sha256": "18A2B2ECD4ECA7BDE26A0E7939C352779EF5B38C98EE2985929D23A07913E5BD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/medium-results.json",
+      "bytes": 2313,
+      "sha256": "C73811595C33095A0A1530744F1C50809DEC06C73D05B32460F7BF4479676450",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/medium-runner-groups.log",
+      "bytes": 3387,
+      "sha256": "5903B4B1691140D53F9D3E06C2BED782826E10DFEB9B27C3FA61272B6835C264",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/native-uac-errors.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/native-uac-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/native-uac-verification.json",
+      "bytes": 525,
+      "sha256": "AC2D9E389368DCB1403C4DB7E529340A4A7E512BF2394BEE81BC104759C4C64E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/native-uac.log",
+      "bytes": 515,
+      "sha256": "A1D610D32F7D409DAE624C66B36EE1E75C1B2B43AE82DBC94F854FA76F87F1C0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/production-worker-boundary.json",
+      "bytes": 597,
+      "sha256": "3F6CE5B00B464BD49F6AE337B9B2CF8F3E4C85EF164113DE49F243AF68BB1D27",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/pulse_operation_elevation_adapter_test-medium-errors.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/pulse_operation_elevation_adapter_test-medium.log",
+      "bytes": 3470,
+      "sha256": "ABFC38E7E8256C6C557F8B754E8E78DE61F9114561D08F66BF14AF75B9432E02",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/pulse_operation_elevation_transport_test-medium-errors.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/pulse_operation_elevation_transport_test-medium.log",
+      "bytes": 1256,
+      "sha256": "F18E8EF498DF46CBC755CC93FE3CE5F1F498D353FEBBF3E6B2B59960419FA161",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/review.md",
+      "bytes": 6682,
+      "sha256": "90E9A77449B3784D9D7FFBE12EB19F66BCD51AF18A86494F1AAF78F15287E9D9",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/run-medium-tests.ps1",
+      "bytes": 2056,
+      "sha256": "02DD105B26CACDA1DBECD5E38EE4A65BC6CDAF7D8B150E8DBCD2373FFF2AF909",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/shell-dependents.txt",
+      "bytes": 589,
+      "sha256": "53A24042A84A319C4A407ACAEBF9A469815B341B64FC51E1664FE7AB44AECB82",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/shell-embedded-manifest.xml",
+      "bytes": 406,
+      "sha256": "BE8918559280A2E74748BF8F6238B568ED7CBF75183B2180A6A8A979A1EBF243",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/shell-pe-headers.txt",
+      "bytes": 6114,
+      "sha256": "AFBC5108F859CFFF0542D594D7838B33A4BD50779766E4922E54F4700077A4E0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/transport-initial-sandbox-failed.log",
+      "bytes": 1460,
+      "sha256": "64D24BEFC204EBD55C7F67A44740B5D2BE38C6F9FF7C0EDA344DC2B19310017E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/update-package.json",
+      "bytes": 816,
+      "sha256": "AA51EDCF85759116888E3794C509DE9C36464609C0DEECEA6D6BD368309A5E3A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/UPDATE.txt",
+      "bytes": 962,
+      "sha256": "63DA61DAAE273D8592725F45C3D4FD106093D8389F2634EDAE8B3386B3812BF5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/vendor-submission-attempt.json",
+      "bytes": 565,
+      "sha256": "3D54A940E6D6C8BF7C9E76FADACC8D2256FB5F2777DFF4019DAEE7CCC0D1DA1C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-main-2026-10-12/worker-isolation/vendor-upload-response.json",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/antivirus-review.md",
+      "bytes": 5888,
+      "sha256": "32FA3AA720002B1F90A54B360A55FE49677D39D1C3A845AF0583F874752E3614",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/centralized-resources-initial.log",
+      "bytes": 420,
+      "sha256": "8ADC7209861497DEAC90790FDB7ED9C71A8DA8AD35B0633B965BC8BE81774176",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/centralized-resources.log",
+      "bytes": 420,
+      "sha256": "366E36D7EA0B2A04773DB3A8F2D7DB997330F96C49F30644A33F459E92D4E67B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/cleanup.json",
+      "bytes": 219996,
+      "sha256": "6D99E4978970F31D86C4EE7306CA7C65F9F167CBD267E575FF5BB829DE570A2C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/configure.log",
+      "bytes": 172,
+      "sha256": "0452002B106CAAE66CD7F808F2E03520E43DDF89522954EAC73FBD32CC352EEE",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/deployment.json",
+      "bytes": 781,
+      "sha256": "83B5EB2EBF8A2228D53AACCE917592A7082FF57D6D0DD7CE085E9119982FB40D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/embedded.manifest",
+      "bytes": 1263,
+      "sha256": "07CCF85162032A36F65F18160A4915FD6018C3C86F13B9730C1E09043D282B9B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/installed-startup.json",
+      "bytes": 319,
+      "sha256": "CC42FF28C8957E43C6C40770293D9F5EDDE9495C5826BE8A184141F5BD4966C3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/installed-startup.png",
+      "bytes": 58215,
+      "sha256": "28FC8008F4CF88881EA53F3F741361998ADC5E7E54EEE23AE61C808E74C5DB55",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/installed-startup.timing.txt",
+      "bytes": 129,
+      "sha256": "C13B7059F5C844506A026890B6570D8BEAE92EC77F36B342E0AE006A8DD7AB4D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/kaspersky-installed-preview-view-state.log",
+      "bytes": 966,
+      "sha256": "4AAF29241F777FCCA4ED518BDC48D236E0401749C72D7F764602F95DBFD4168C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/kaspersky-preview-comparison.log",
+      "bytes": 1386,
+      "sha256": "3E6193419AEB8C51F90E0B28E7A9B1A484031E0E690B245B3DFB0AE64BE8E850",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/kaspersky-preview-view-state.log",
+      "bytes": 970,
+      "sha256": "23A5E3903CFB5EB5289E746F5A2277284A42E1470567DA74DA2D0DB4DE0BD377",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/manual-restore.log",
+      "bytes": 2803,
+      "sha256": "B0D517EA19BF60EABBCB75E3DEB6EFDF7E560E281FA318F7B64108F049D4B187",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_dark_100_cold.png",
+      "bytes": 5136,
+      "sha256": "5D3ED2607BD6F56F08A8E003FFB39C241EE9FCF1836E168C3C4A44408701F0BE",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_dark_100_ready.png",
+      "bytes": 6905,
+      "sha256": "6EF8D857E3B9057E9DCDD9302A04207854AB1CDDE20C2D37C738D5F6ADBFF96E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_dark_150_cold.png",
+      "bytes": 8302,
+      "sha256": "696E3EB825C7EC26F3EFA706D63D5F0A6ADF1AB264C3247FB2C217359B805C5F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_dark_150_ready.png",
+      "bytes": 10996,
+      "sha256": "6E45A4BE7C166A5B283119F5C271FF4789E10608B75BF0A9CCC54DDBD9C9A645",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_light_100_cold.png",
+      "bytes": 5311,
+      "sha256": "E2B2C5A314E4AC06B4377896BBBBD43527398EDE8B91A4933BEF2D73D33BAEEA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_light_100_ready.png",
+      "bytes": 7133,
+      "sha256": "D0BC25092EE36485910C30B0CEB34CDBE5BDC2DE91D24645B1CA4498B9792B3E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_light_150_cold.png",
+      "bytes": 8529,
+      "sha256": "AACC216ABECDEDCEA06C539F3CC0B2F8A95E5AE3DA893EB9C8F7ECA836329A64",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/en_light_150_ready.png",
+      "bytes": 11313,
+      "sha256": "BC652C9E2A7753BF4F75105DB1606A8588FB103E6C48E3939F3C5A24D38E8401",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_dark_100_cold.png",
+      "bytes": 4429,
+      "sha256": "D233F85BB005637B6A1EBE9B3DD1D1EE5498B18997398FBAB6D347F0B10DD589",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_dark_100_ready.png",
+      "bytes": 6155,
+      "sha256": "C00AF5F914A33D9DF382453D8F9F2512F7D28C1383629D465A96ABC2DD218E6D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_dark_150_cold.png",
+      "bytes": 6850,
+      "sha256": "DE95E8D676D10DF3B2FA1358AB0437FA6373255E1D002451816BCF7B8A0ABC6B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_dark_150_ready.png",
+      "bytes": 9301,
+      "sha256": "3187C4AB3DDDD240D2E6EFFDB6238607DF294E6B29318CB12049621957A858FC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_light_100_cold.png",
+      "bytes": 4662,
+      "sha256": "09456DA88FCAD01C266ABE8DE74ECA6F743B3FEB33D27BC696B66FB6A9D98340",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_light_100_ready.png",
+      "bytes": 6471,
+      "sha256": "10326994D7C5B84E92BBF074CEFE0213AABA3FF1D34A974A5624B632A0BFE90D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_light_150_cold.png",
+      "bytes": 7032,
+      "sha256": "04D93FBDFD1EB4676FB4405E77ABE2085C2683D048ACF344ADC083302B83D292",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-screenshots/zh_light_150_ready.png",
+      "bytes": 9586,
+      "sha256": "34B2C9D05F2406F276959978031E81606E4DEF290F97151D84FEE0A0A98A9FC0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-com-fixture-build.log",
+      "bytes": 211,
+      "sha256": "0C467A44354AB0D6063A54E29AEE7334ED4F96342AA330DF6518F24273EFF8D6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-com-initial-test.log",
+      "bytes": 653,
+      "sha256": "D06309D1E69E1EA29433B979C2A33278BB6B4B68411F6AB77FC0775834CA2A58",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-com-test.log",
+      "bytes": 715,
+      "sha256": "D848761186BF5EB853E402123CBB57CB1B356913DDFCEF547BA8138F4C2EFA57",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-command-state-test.log",
+      "bytes": 237,
+      "sha256": "E81A6456D5CBD2A8E131389C46FF8E06AC0E8D799FC0557710D6E0B76EFCE8D9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-final-build.log",
+      "bytes": 3073,
+      "sha256": "EEADCCBA1E31D89E5BFFFFC304E761133B4994CC669EE4D4F6B34ABEA3827C11",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-lifecycle-test.log",
+      "bytes": 1141,
+      "sha256": "98896C5CF2DC919816122350BF5B3861F081147495C0B1AFE201F0B4398C810B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-line-counts.json",
+      "bytes": 1528,
+      "sha256": "0A44E02A6B2B08D5CA2865BCF959C7B1DB4726EDB042BB07328735A18DBB4C14",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-live-refresh-test.log",
+      "bytes": 219,
+      "sha256": "B78A1AECC8F778D899EA4EF7C51197277E1EA3BC12D37C1230CE6FF028A5924D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-refresh-test.log",
+      "bytes": 2106,
+      "sha256": "B76353F72611FD67CC5179C8A6E9D030ECFCB78DBDA1288943E0EC32A6E3AE3C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-safety-test.log",
+      "bytes": 2143,
+      "sha256": "2B83992C208E65628FA2455B8FEF2EA1499D2DE2DF1A8A6F5B03F4226597F364",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-ui-probe-build.log",
+      "bytes": 29,
+      "sha256": "22E801A49F9B36B9438650EA11DEDFEA7528EFFA9B6BD05738D12889DC8670E3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/menu-stability-visual-test.log",
+      "bytes": 3702,
+      "sha256": "FFB080ED406E1FD24A11614813C2E20F381E0365076DEC3B786F4C8C404E5E60",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/message-final-build.log",
+      "bytes": 1803,
+      "sha256": "6F17FFB4B27967C800BF02A8EA7972726022563ECFA36A5F1611EA42505DBB58",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/operation-labels.log",
+      "bytes": 3050,
+      "sha256": "5C64BE532184E9CD32B5BF08AF0CA668E9EF59781843CB80B0CDBC2573578CD7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/operation-resources.log",
+      "bytes": 1550,
+      "sha256": "95404C6C5F9F78F80B7C39DC7673B4CBE6D4E5C2ABF6B79655012F9EE032A087",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/payload-manifest.json",
+      "bytes": 7434,
+      "sha256": "2CD9674435B3093E45076638F8091E8D6D493403EDEA87D61CB68F539BFFDBEA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-build-commands.txt",
+      "bytes": 6453,
+      "sha256": "DC4EF4426CAFF86DDC80A08BE4EB93678A0097242C584C3F7834FD8919FCE513",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-build-dependencies.txt",
+      "bytes": 50120,
+      "sha256": "D7FAD967ACDAD3B342E82F787E8B56848226386E2076318240F86DCAE937F7D9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-pe-headers.txt",
+      "bytes": 6116,
+      "sha256": "2EDE6919E75CCD05BD145ACA5CF50303D6BB9EBDC010EA5FC940DBF8F7DD41C9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-pe-imports.txt",
+      "bytes": 8733,
+      "sha256": "D00E588A073D91E809024B9682618C2C9C4BEDE93D92E894D5EA85DEDADA4355",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-previous-headers.txt",
+      "bytes": 6163,
+      "sha256": "AC924225DD39DE806621B82EF3E0986365E7C58948DF777F30B18EEB0E68EE36",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-previous-imports.txt",
+      "bytes": 8780,
+      "sha256": "C9154F3535DDF04CA3547F98B7BA1884F7FFB4EE35023A3829E7C54EF0A98BA4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-response-after-view-state.log",
+      "bytes": 703,
+      "sha256": "768E1A8D4EE748A764068E0985906955CA8B85A8821D751E2C355DE232E9F1DA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-response-view-state-initial-environment-failure.log",
+      "bytes": 55,
+      "sha256": "4855751FD6DAEC59F1CAA520CE42C5150770013500941170F75DCDEB42833BEA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-section-comparison.json",
+      "bytes": 1686,
+      "sha256": "E417B7DA6B979E3214A53B1AE3BB332199B8FEB3B828108276EB023CF479D61D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-transport-after-view-state.log",
+      "bytes": 2468,
+      "sha256": "5CBD485E15478B86FD086B1FBAF9F5FFF21D899DC3D3A74C3AA6501E8BCED364",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-view-state-tests.json",
+      "bytes": 234,
+      "sha256": "AAA793A45E86C72CBAB06D2AF9D49B17B4725643DFA8346ECD73EEDA45429E01",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/preview-view-state-verification.json",
+      "bytes": 1021,
+      "sha256": "70B9FEE82ABBE3B902DE7F22227C8DCC09CE6FF533D50FB3B297AFB53B704C68",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/release-build-final.log",
+      "bytes": 21151,
+      "sha256": "1BB7B6A35E721DE52D3F2A8B2496B702DAD3D25BCE8A682086253A8C6E4E2220",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/release-build.log",
+      "bytes": 15582,
+      "sha256": "772FC6C753F4403DE43B85055F2AD94398A3C87384930B9DEB9AAC5E151E03BF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/release-previous-20261011.json",
+      "bytes": 7434,
+      "sha256": "2CD9674435B3093E45076638F8091E8D6D493403EDEA87D61CB68F539BFFDBEA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/runtime-messages.log",
+      "bytes": 588,
+      "sha256": "E52423CF1C76F0C739E25215883E8AD0F76C8D5E8F4F49C436CA0EED76E9DF16",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/session-layout.log",
+      "bytes": 325,
+      "sha256": "551D4218ACB309549C57453E1D5F49AA3ABC5634C127ADB8EDEC9F0150166486",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/shell-completion.log",
+      "bytes": 842,
+      "sha256": "1D3D949AAB5A958DA061BC514C1F179822E591C573FF9ACAD64910F97F32E84D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/shell-roundtrip.log",
+      "bytes": 207,
+      "sha256": "C2EFE648F572354EA194948A658BE77906E00FEF62E9C1F2BB4B0DBD66AF8DEF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/slimming-final-build.log",
+      "bytes": 9080,
+      "sha256": "03373813AD135207085EEB4E792DDC56323F4C8886F766B8C111C4E892EFAB0A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/slimming-line-counts.json",
+      "bytes": 5054,
+      "sha256": "EA715C1534749F859ED911EA03A8FA2E9ACECBC0D7DEE0B7A439792780F636E1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/slimming-tests.json",
+      "bytes": 1062,
+      "sha256": "B10A07D3E6ACB1845E301D651D6B5C7D0476FB23DDE53E9BC37AAD15E946A47B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/source_growth_audit_20261011.json",
+      "bytes": 322395,
+      "sha256": "ED76A3C4A43F71CADA232B9626A85BD970F32B8F24BE3AD1A2E37B76DEA7FBB6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/source_growth_audit_20261011.md",
+      "bytes": 5062,
+      "sha256": "F888AEAC4C564982492EC32053B4135EC40659E5E2FFD36DE6E013885589B503",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/storage.log",
+      "bytes": 1477,
+      "sha256": "4BD0DF5BCDB928A1A51F4AD5F5E3BA54ACF923494D256D82EC5CC8A4296FCE4B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/undo-identity-initial.log",
+      "bytes": 5985,
+      "sha256": "E238D5CF9A114C953E63466DC5921E42E6E294F5BF82DDA53CF63063E6C7AF1A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.1.0/undo-identity.log",
+      "bytes": 5988,
+      "sha256": "156A45C19D2DEE44D318C8A6EECA863EDE6F142A695A119B01FAFAB3EE2A2BD8",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/antivirus-verification.json",
+      "bytes": 402,
+      "sha256": "9802F7E751817F3D3F97283DD77498CAC43EFAAD6C864359553DCB642793CDCA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/after-exit.txt",
+      "bytes": 3,
+      "sha256": "F1B2F662800122BED0FF255693DF89C4487FBDCF453D3524A42D4EC20C3D9C04",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/after-initial-diagnostic.log",
+      "bytes": 3522,
+      "sha256": "6D442B8494CAFCD547EEF35091F9E350A8DAC092A6019EFAC2759246D4A15567",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/after.log",
+      "bytes": 2706,
+      "sha256": "717A6EA17C408A8256E0EABE439FC808033C4F7488E92D0603B58EF117C50B23",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/before-exit.txt",
+      "bytes": 3,
+      "sha256": "F1B2F662800122BED0FF255693DF89C4487FBDCF453D3524A42D4EC20C3D9C04",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/before.log",
+      "bytes": 2707,
+      "sha256": "76B701EA34B95DB5713F6AE47DD3CC337D30D999BFEEA2ED5EB9ADD242867154",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/build-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/build.log",
+      "bytes": 3842,
+      "sha256": "018DBC7F92A068BC26DDCADD395F02CF6CA5FEE8A40C3F4C39FE7FC5EEF66660",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/deploy.ps1",
+      "bytes": 4104,
+      "sha256": "56F1238C971FC5E8B80338871FB961321D4F5A802C959388741F6098798523C2",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/deployment.json",
+      "bytes": 564,
+      "sha256": "04C7AAF6F27C83F7D45C518C55EB1DE5921413D22832F373453CA3D7476F73D7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/fixture-path.txt",
+      "bytes": 100,
+      "sha256": "77D96B1C596CABA07858FDC88F582119E6737A3327E44FD4304913A74F155630",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-build-final-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-build-final.log",
+      "bytes": 592,
+      "sha256": "8C86FF6C7ADA4D81993AA57471B56F76A994B2AF590EA4BCC4B94956F79DE0B0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-build.log",
+      "bytes": 592,
+      "sha256": "BE24E9198A956A6C688B9FC457B1D58217590DBD32F21F783C32B12DA64E7D82",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-final-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-final.log",
+      "bytes": 4632,
+      "sha256": "A8C7EA4F9EBEF1A46EC13BF81B28C46C35782BAD002F05E3BB314234703B7E4F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-medium-exit.txt",
+      "bytes": 3,
+      "sha256": "F1B2F662800122BED0FF255693DF89C4487FBDCF453D3524A42D4EC20C3D9C04",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-medium-stderr.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/focus-medium.log",
+      "bytes": 3522,
+      "sha256": "3B7907054261D483030CC16B056E3E6D4D225FABA40F1F4EF17B94A1DDE384C9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/kaspersky-console.txt",
+      "bytes": 442,
+      "sha256": "CD1D2E7D60E9C775471368583E9F277C8289E39D3E593DA6F28CAB696A0FB67B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/kaspersky-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/kaspersky-sandbox-console.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/kaspersky.log",
+      "bytes": 894,
+      "sha256": "4E8AD0427F16A867A1583EA5CCD7B3C41E87FE5153E63FD53AB280F92AD399CA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/progress-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/progress.log",
+      "bytes": 2527,
+      "sha256": "30BD4C10AFD939686C0126F3D564B83E76D73ACA09AF412B88FB9F232E66FF6F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/archive-cancel-focus-20261012/review.md",
+      "bytes": 3692,
+      "sha256": "7C089DE5A6074B2FC43BB7E8297B153F0DAFBD8BA67D35499D7878444F6EF259",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/build-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/build-id.txt",
+      "bytes": 27,
+      "sha256": "26977087B3EF8798C04E9D121734FD0E760130D610904E007BD4E1F3E663BF8B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/build.log",
+      "bytes": 1385,
+      "sha256": "A99258AC5A9A78E070E709F589041CB0EF1DCFDC3C62BCFE7B9BBE9F2B6A3004",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/configure.log",
+      "bytes": 172,
+      "sha256": "EC82394C4C53A90887B150367693F7CE555F3262449673BF3CDD73B0FCB2E939",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/before-build.log",
+      "bytes": 205,
+      "sha256": "5EE279231311EC908DD5A35B6C4BB42C82E09D90404F43B0EA12875912B0C963",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/before-regression-exit.txt",
+      "bytes": 3,
+      "sha256": "F1B2F662800122BED0FF255693DF89C4487FBDCF453D3524A42D4EC20C3D9C04",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/before-regression-initial.log",
+      "bytes": 876,
+      "sha256": "FC4B229A8AD3EEC4064269A0BA1CD1D98FF3C9D354A6FA11369BCEF824FB0E29",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/before-regression.log",
+      "bytes": 877,
+      "sha256": "99427A257B238DBA70ECCE9C06F94BF0D11441B18415E1E68CBFABBD22B0E663",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/build-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/build.log",
+      "bytes": 1993,
+      "sha256": "FDA28ABE32D733B56B730AB755BABAF601A8D6E751B7E0A6D7B35A5E765CAC47",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/comparison.json",
+      "bytes": 600,
+      "sha256": "D174D729E190A50033791D6E52E95F3E462B84BCF77645533F72A8477AA59D4A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/deployment.json",
+      "bytes": 1408,
+      "sha256": "F21DA66E49E69E8F2607623FAC7D9CD2D56DE432C60F1CF12AA7E00144BA662B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/fixture-cleanup.json",
+      "bytes": 530,
+      "sha256": "F560B4296E361BAD76109C3E9215FD383130B37D451F19F97A634607DB08522C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/kaspersky-console.txt",
+      "bytes": 492,
+      "sha256": "764ED2D4D792ADB4CAB1A4D7C50BF087D077BEC0C428D49EA14BCFC8E82CE89E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/kaspersky-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/kaspersky.log",
+      "bytes": 1157,
+      "sha256": "44DB29D02BCEA4C6354C5DA3D906A36C30F601E7198A7F7F45CFB4E73130376E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-after-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-after.csv",
+      "bytes": 3623,
+      "sha256": "35F96318FED83C9E7F7596459CEDF283AB29014C0FE9BA6880C2E7A0818A16BD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-after.json",
+      "bytes": 328,
+      "sha256": "8869B086DDDC5E7C62F0236BA49ABD6113CA2F4CD0F1AE9FDCC9A3675AFC2DE0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-before-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-before.csv",
+      "bytes": 2790,
+      "sha256": "B90D4D4E04775CC2F221138C7961ACC7C4E3F019425B89885B581B83F30E8AE8",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/probe-before.json",
+      "bytes": 617,
+      "sha256": "6879F10B0E3C7FC77806D9E06731BE0E6F925EC97FA1A78D25F162139DFDE9C6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/regression-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/regression.log",
+      "bytes": 876,
+      "sha256": "045311837812338DDC11EAD947DB518EEB2419DE6C4BD9734CB3DD4A9EB4C838",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/review.md",
+      "bytes": 6387,
+      "sha256": "0432A57CCA1F020378B343F29A100CC8F433BC45CFBA089BD784A8AEAE24EB5B",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/transfer-control-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/copy-callback-20261012/transfer-control.log",
+      "bytes": 568,
+      "sha256": "AD95135F4AE221F718DD172F803CE125DE7CC8C5487ABC3CF6124720AEBC3E66",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deploy-with-service.ps1",
+      "bytes": 2365,
+      "sha256": "83D061F2C17B7521DB81B03C0B0C78DA8C4FBFF41F80EE6105B60A16FE44BAE5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deploy.ps1",
+      "bytes": 6592,
+      "sha256": "0CBF2183067D4290C838BC29449119D101BBD68B864F0B102B6520A2D2C9710E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deployment-20261014/cleanup.json",
+      "bytes": 2414765,
+      "sha256": "C6D4D3711CBBD43C140EE7FDCC01C606BD3301A8C4C8C0728E06A55B23E4C76D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deployment-20261014/release.json",
+      "bytes": 2041,
+      "sha256": "892B29980CCC452245D91DCE2ADD7237CBD602F837C1D33A3001007731EB8FF6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deployment-service.json",
+      "bytes": 414,
+      "sha256": "7290B96FB40A5EE7E86DCE6E18FBA78F403A3CFDEC0A3921B57A5FC2D81834A6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/deployment.json",
+      "bytes": 1237,
+      "sha256": "B22E886030726EE0A7603ED65085960AE00FD940A5C287FDE5B3518BC2C11A18",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/kaspersky-payload-console.txt",
+      "bytes": 1678,
+      "sha256": "1C00DC14CDB0E62DA120F72098833177A48B9A41CCBA1A3AA647FB036ED9A591",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/kaspersky-payload-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/kaspersky-payload.log",
+      "bytes": 11930,
+      "sha256": "E9560B44A9A61C86CE51520E7BDDCEB951F7D5EF0A8E41EB05B78E5B4AFBE780",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/main-embedded-manifest.xml",
+      "bytes": 1523,
+      "sha256": "92BB7FE16432CDAFF63296E8FA7BA76FD0771EA950AE8D1865C8ADB3A5E97463",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/manual-test-plan.md",
+      "bytes": 6123,
+      "sha256": "2EE63FEB73E5672288772E6C1848A7D16B9C777739E071CF041B831AE339296C",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/package-verification.json",
+      "bytes": 1321,
+      "sha256": "F90C5BE931398DAC3F845216FB346BCD1AD1315910A27F7422623016734BEC7B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/package.log",
+      "bytes": 123,
+      "sha256": "84F8D4E80F74B9582E0D38F003F9FF044625CD1BCEDFF7751259199C2BBB85BA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/payload-manifest.json",
+      "bytes": 6171,
+      "sha256": "BBE297E8C03A2C1CCD9814F924F934791811CE9AE76CB11E071C24C327D307BA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/payload-path.txt",
+      "bytes": 95,
+      "sha256": "15DBC80B2D36D0C3B1A3E0D85337B26071020A066468F04163A3B157861A9754",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/previous-build.json",
+      "bytes": 3496,
+      "sha256": "58E859A278221CE71274AB255F17D4AB0F249A7143D2BDF2FC14A67AE40D4150",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/Pulse-dependents.txt",
+      "bytes": 871,
+      "sha256": "DC7FA2A0F89A0DB43ABAEBE2B5DE3363657973774ADBADE4424168B2FF499136",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/Pulse.Document-dependents.txt",
+      "bytes": 477,
+      "sha256": "C71A664AF51B187485EDCA3B860E297DA81A49DAED9F40D2F32B6E0BE54249CB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/Pulse.Index-dependents.txt",
+      "bytes": 554,
+      "sha256": "32C500C99F90119E627BA292341288508AFDC3348857EEA3B630418F86602472",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/Pulse.Preview-dependents.txt",
+      "bytes": 541,
+      "sha256": "A9CD02C5133A5B976D7677C85742B8DB7D7EA77D418CBAD7765E3C8F31676725",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/Pulse.Shell-dependents.txt",
+      "bytes": 589,
+      "sha256": "53A24042A84A319C4A407ACAEBF9A469815B341B64FC51E1664FE7AB44AECB82",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/build-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/build-sandbox-stalled.log",
+      "bytes": 341,
+      "sha256": "CE078E9BE96FA6431745F79DF8A6FF1515B9F24E099F4EF7A012388988E8F252",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/build.log",
+      "bytes": 364,
+      "sha256": "2A9C4EE77782D1E0724138EA15E77827A35036305B999F54893562BB5C007C34",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup-inventory.json",
+      "bytes": 13937,
+      "sha256": "C8F209A138AA41C6737E1A65A1E5B62D89597C2898F1D67701179C23C7868971",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup-packages-inventory.json",
+      "bytes": 22562,
+      "sha256": "153A44CC2042C5880DCDD1D3033A5D7C30F6E3F3A7D8E6E3BC3B9D12C1811C15",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup-packages.json",
+      "bytes": 22584,
+      "sha256": "6EB6B6C5C21D30ABC75B4CF1BE202D7BB65BAF28145CAE411DEEF8557FC097B6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup-packages.ps1",
+      "bytes": 3994,
+      "sha256": "2195AE17E366A70FE714E6D898001FBB65DBB38F06CDAB5B91BF8855F8D01DEC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup.json",
+      "bytes": 13959,
+      "sha256": "1057C1D6D1D88FB3F0DA8044D21EFB57B4BACBAE2A982D87629BF8AA73F82B1B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/cleanup.ps1",
+      "bytes": 4013,
+      "sha256": "32CFD32C7E1A55D93A0CD4FFC34BABDC2B2EB7DCC57608CC6BD4FB711DA2E8E9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/completion.json",
+      "bytes": 751,
+      "sha256": "67120AE5D03EBBE956217A191FBBC777CE768D85F651860BC81C80F34200C678",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/dependencies.bat",
+      "bytes": 302,
+      "sha256": "E9F3218BC2DA387386084A01D1A4B1233BBBCDA0B9A888C40602431F4264BE98",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/dependencies.txt",
+      "bytes": 5070,
+      "sha256": "BCDD6EFD96FF1C5EBE10492F71D9F82E44C4F02AFA17A84FEBF5E0C368986051",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deploy-orchestrator.ps1",
+      "bytes": 2128,
+      "sha256": "6433A59FAE82B4FA5CF043647D4D2547AC2F9388DEC9CA0196A9DE76B96E7EA9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deploy-service.ps1",
+      "bytes": 2154,
+      "sha256": "2C69691390DF0F74A4596D90367FCD8644C01998BDD39990E832EA5C39AA16A1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deploy.ps1",
+      "bytes": 6592,
+      "sha256": "0CBF2183067D4290C838BC29449119D101BBD68B864F0B102B6520A2D2C9710E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deployed-smoke.json",
+      "bytes": 329,
+      "sha256": "44DD90FC06F6E3423EF6CEC04D2B6220F485D0400FB6494DF3D5A45AD92D2C11",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deployed-smoke.png",
+      "bytes": 68142,
+      "sha256": "59D98057CD7C5E87FFE21D1A7C32C6DD4B6281C7FF44EF06970592A13D397BA0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deployed-smoke.timing.txt",
+      "bytes": 113,
+      "sha256": "EB8AA66848E3F580C7BA5F4E93E52971949730F9D73074A37FF0E1B5E66C92CF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deployment-service.json",
+      "bytes": 414,
+      "sha256": "33A262EB3872A151FB9F9BAAC43EA9516D6E81A1D50827CB66849D961EC7674C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/deployment.json",
+      "bytes": 1275,
+      "sha256": "B8616B56AEC40E2A40C1D4B0364B945FADDF759738035771DD1DA5F76AF52482",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/final-runtime-state.json",
+      "bytes": 282,
+      "sha256": "ADE967A36C0972916483D2B755B6F9C69397CAE3BED3B989531227CABF5E3E2B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/git-status-before-completion.txt",
+      "bytes": 3558,
+      "sha256": "38FEEDEAD247BAFA1ADC34567985D0CB6EFA924C79EED19AD9F95761A8AEE0DA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/git-status-before.txt",
+      "bytes": 3558,
+      "sha256": "38FEEDEAD247BAFA1ADC34567985D0CB6EFA924C79EED19AD9F95761A8AEE0DA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/network-agent-restoration.json",
+      "bytes": 91,
+      "sha256": "D6B042162D98DD06B7FDB859AF1E1ED3199E5606AB311FBCBB71752201B23470",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/package-verification.json",
+      "bytes": 1325,
+      "sha256": "5C066E4CA39CF8DC6978C9AF673A7D842279C3947408BD0AFBF319DE8C55861D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/package.log",
+      "bytes": 123,
+      "sha256": "84F8D4E80F74B9582E0D38F003F9FF044625CD1BCEDFF7751259199C2BBB85BA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/payload-manifest.json",
+      "bytes": 6171,
+      "sha256": "805C614A6197A765E640CEC6B0045FC6AC14C21A8C0D1CCBE40F57BA55F3B2A6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/previous-package.json",
+      "bytes": 184,
+      "sha256": "E07C81CC536624FBEFC92DD11F175042C0785689E26CA457F3D380F4DFC1437B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/review.md",
+      "bytes": 2044,
+      "sha256": "1981649D1952509264D8F2F08D47844294C187335B113D174E86D61358B8F5DD",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/smoke.ps1",
+      "bytes": 1683,
+      "sha256": "44F903B2DC7AF76572753A6641F457DB817B4D42EE85356A5A0439E179B4F442",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/staged-smoke.json",
+      "bytes": 400,
+      "sha256": "FA1D7CB1D5180A6C8DE78E887F6374C1025196C5973E665B5562A3FFFC23EE94",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/staged-smoke.png",
+      "bytes": 67917,
+      "sha256": "1A36D5F6FE46C80DBED5430800D377434D7D7DC695A1608CCDA5B5678B62DACF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/staged-smoke.timing.txt",
+      "bytes": 113,
+      "sha256": "E0E8096CE5A98B6FC0913EF0C98D9CA5C22CFA3975A5B8630E0E2F528E6BC872",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/repackage-20261013/verify-package.ps1",
+      "bytes": 3247,
+      "sha256": "9612312D08A2AC046270397CC65ABCD7E9B5F58A8E5BAE47E96E8A145B50EB24",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/review.md",
+      "bytes": 5267,
+      "sha256": "B18EF14AB803E2EE6006E8F74B1FB24C7205BBAE11BC23D1BEA03989AAE382D5",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/shell-embedded-manifest.xml",
+      "bytes": 406,
+      "sha256": "BE8918559280A2E74748BF8F6238B568ED7CBF75183B2180A6A8A979A1EBF243",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-failure-ui-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-failure-ui.log",
+      "bytes": 2215,
+      "sha256": "E72A304B595C4F32BF8B37818437E71D38479A468343FC5E366D81D42E04F7AA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-progress-model-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-progress-model-missing-fixture.log",
+      "bytes": 1304,
+      "sha256": "769E87FCE90E18C0C27EB6AFA0981FC08952EDB28737EAE01F66EC7D8B875879",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-progress-model.log",
+      "bytes": 1304,
+      "sha256": "70197CBE0F7C7D2F0F65BE1079132B47776E45A9F68C18E13DFD5287EF46A217",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-progress-ui-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/archive-progress-ui.log",
+      "bytes": 2527,
+      "sha256": "30BD4C10AFD939686C0126F3D564B83E76D73ACA09AF412B88FB9F232E66FF6F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/build-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/build.log",
+      "bytes": 4714,
+      "sha256": "526FFDD7DD3A5DF3B72361A33C19F38BB653B9294742E431A839763D434961F5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/deployment.json",
+      "bytes": 1393,
+      "sha256": "3FC8F656EF44B5005708F5C65E0E938A49D6C3C710D93B41D5B57368FC8E463D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/kaspersky-console.txt",
+      "bytes": 492,
+      "sha256": "2E2A9DF9F326498B14740EDC745A446AE511D14ED9A2B0F01B6740F73F1C689E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/kaspersky-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/kaspersky.log",
+      "bytes": 1157,
+      "sha256": "848095F86BA12DB0A2C4C94D8966DF138DFCA7DA32B160F99216CAB8A142CA2E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/password-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/password.log",
+      "bytes": 1732,
+      "sha256": "D9E1182FEFD4B924F549EA2196C70BBAA8F6B600CEB932DD679AFEEF9E8C0CAC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/previous-binary-hashes.json",
+      "bytes": 249,
+      "sha256": "59A16C28385F15F77AC9AB94F954AF6ADEA43A6A1EAC89FB26605E22A2D3EF3F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/rate-results.md",
+      "bytes": 5021,
+      "sha256": "C78A10C8C842F53A2814D4EE4E703390C89C04FE749FD4C7D1C1D8D08FDF93CE",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/review.md",
+      "bytes": 5492,
+      "sha256": "58B3B57D06606F19EFA9A64B4DD6216524324CC76097ADA6B49EA9BCA2741E85",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-en-US-dark-168.png",
+      "bytes": 51008,
+      "sha256": "BD9EB11A2581B9A3D047BAFE56DFC5B9769332FEB4E0BF35ABD901F7BE6F7723",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-en-US-dark-96.png",
+      "bytes": 25611,
+      "sha256": "5AEED27E95F226F6B7B9286CF78F641DD6E95AAEA4FBD4B20D410A371403781C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-en-US-light-168.png",
+      "bytes": 54641,
+      "sha256": "2223528C503206FDED2728412AC295A6353E78C4168D8BCFF52ED39FA66EA760",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-en-US-light-96.png",
+      "bytes": 27714,
+      "sha256": "CB901053E0A6E2342FD8C3284B4F2EB905A82792F6173DD3761906FC4E465602",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-zh-CN-dark-168.png",
+      "bytes": 37964,
+      "sha256": "87277E7F29DA05A405C1CDEF394843C801B9D00560C35D624180BF2762A0047C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-zh-CN-dark-96.png",
+      "bytes": 21852,
+      "sha256": "C2C3FC43686A3A22916179E224F102F1210B3461FEA3649024B1F5D381283ED5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-zh-CN-light-168.png",
+      "bytes": 38998,
+      "sha256": "328E74A0E25DB26F5FEB4B406AFAC37A9C5B1CCCCA6C95581C0CFD3CD90FD669",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/screenshots/archive-password-failed-zh-CN-light-96.png",
+      "bytes": 23067,
+      "sha256": "BB358540ACC9D701F7ED5C1CD7BB6368A030232A2341F1CC07FAE1B288AE4A65",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/shared-failure-ui-exit.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/shared-failure-ui.log",
+      "bytes": 6641,
+      "sha256": "C5351C7C3D3A0C1DF2552D18EB19A0BD338DF69869440A1B34B9E116DD26B307",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/user-feedback-20261012/test-root.txt",
+      "bytes": 65,
+      "sha256": "7A38AFF356FF1859BF08C44596138C376E006D8B53608AE72E9827AC63BC9D14",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.2.0/verify-pe.bat",
+      "bytes": 547,
+      "sha256": "FAAE4BB22E9E38FDB0A8F4168A0B7CDB3BE1B844D62B45A23722C8A580FE3445",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/antivirus.md",
+      "bytes": 6041,
+      "sha256": "5247112537A34AC0FF1F3A5AA12156EB283C9013287E4DCC74D29E63067F74A8",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/archive-failure-dialog-source-final.log",
+      "bytes": 2775,
+      "sha256": "42C9822E5AD9EE9A70C797420A8A01C3D6B3F2E72C540D03780EC367CE9C1C19",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/archive-failure-dialog.log",
+      "bytes": 2775,
+      "sha256": "42C9822E5AD9EE9A70C797420A8A01C3D6B3F2E72C540D03780EC367CE9C1C19",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/archive-navigation-final.log",
+      "bytes": 2920,
+      "sha256": "2CAEBD809E4C238891979F2DA11139991ECFCE2D0F7B32D9F624DFDB643445BF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/clipboard-availability.log",
+      "bytes": 1933,
+      "sha256": "9CA4AA714E7A259FDF94AD0B5826A6D5B5B6E59C2765662BD821E8A8A45129C1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/deployment-service.json",
+      "bytes": 440,
+      "sha256": "AADB53080812D96CDF034B5DD41CDF634C0D73F31C55D7C8E9C169CB5B9C76EC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/deployment.json",
+      "bytes": 448,
+      "sha256": "421DCCE880FBBB8AAA5BB250227703899713523301034975753C6F987BB331D3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/elevation-adapter-lazy.log",
+      "bytes": 3622,
+      "sha256": "98CA269496C841DE61C5AE47257357AB605083A51E14F7BF991A9AA03AF65451",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/external-open-prefs.log",
+      "bytes": 594,
+      "sha256": "6EB1C70E9369DB6169D41F9BCD4FDB38230A347AB583C9B8C764E25E1F4D4406",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/installed-av-final.txt",
+      "bytes": 1052,
+      "sha256": "1C7EE8E07125D117ED64BA6A0BE5A3359C55F3C877408A99AF7DD11CC6F3C2CF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/installed-smoke.json",
+      "bytes": 312,
+      "sha256": "95B5F7591E591C62324D921F4E4326AC21332C8BB070FC47DBF3867BE9D532AF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/multiwindow-final.log",
+      "bytes": 2947,
+      "sha256": "18452E0276751C93C203D0421FA0171C83C14E492E938A77FAFE9C29F49B3B29",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/multiwindow-open-exe-real-run.log",
+      "bytes": 13219,
+      "sha256": "FC0568CD9E58C045133C76EE94E2312B6AEB52DE21B5EE04BD5930C800541F1A",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/open-workers-multiwindow.log",
+      "bytes": 317,
+      "sha256": "69D35B768440BC53E6A0DC5BEC82B8AA3AE07852337589132B876A3A05861BFF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/operation-journals.log",
+      "bytes": 1094,
+      "sha256": "3AFC808F228538B33CFC4999D84177FB5EA90583A78C1776C9BA7990FC713DB6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/package-verification.json",
+      "bytes": 1325,
+      "sha256": "FADA1351E48A85BB3ABBA458F3C30C030751AE383A14936AD25959A9CAD9C457",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/payload-av-final.txt",
+      "bytes": 11761,
+      "sha256": "0DC17E52B901074144D3C49FB492160CB7642444F3266A7ACE37BF54DAAC4602",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/payload-manifest.json",
+      "bytes": 6171,
+      "sha256": "BD066943F4FAEFFDB2411B4F88D10619762920306F319368259148B2A259A6FD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/review.md",
+      "bytes": 7660,
+      "sha256": "E21937A5FE65DB084FFEBB6EF9F98E57FC1A36311FE9FC05E9AC73EE0D323417",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/session-windows.log",
+      "bytes": 531,
+      "sha256": "0368B7002FCFB347E8911C9667F8E119544D8B0B03FDC5283942A8739B0EC00D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/settings-en-US-narrow.png",
+      "bytes": 96607,
+      "sha256": "8679F87807E1942D7F3A55258A30E6ACF4F781F1A7E6868C5EADC3910EA59ADD",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/settings-zh-CN-wide.png",
+      "bytes": 90548,
+      "sha256": "395382A7FE09F41D86B40EDBF8ED6D83FBB0B214DCB0050860718958F68E1445",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/shell-av-baseline.txt",
+      "bytes": 1496,
+      "sha256": "7E1B1AEAEFA035EC853A5938229068DE8475C36AAFCDF568316AA857DF9092C9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/shell-av-factors.txt",
+      "bytes": 2527,
+      "sha256": "3B7659FB988CEA8A107E1D0BE74D8798F59AAAECB4FC9C327454C3C890BAA85B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/shell-av-lazy.txt",
+      "bytes": 999,
+      "sha256": "4829D3C015816FC2C73D17C0918EFB92495106D28116D6E619B3FB190DF7F339",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/shell-client-routing-regression.log",
+      "bytes": 2334,
+      "sha256": "6D58F5087CA1C5CDFA987EBD9254651C2D6AA7452985D2CA35E74B7BF1364CE2",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/staged-final-smoke.json",
+      "bytes": 393,
+      "sha256": "84FC14D0EA7770CCB9FFBF08C65CB7C1514394951170030A6ED0EC90CE782E01",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/staged-final-smoke.png",
+      "bytes": 68111,
+      "sha256": "918412BDC5500F7D81187B29445FC947980F450AA563063FC2437BB382814862",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/virtual-files-final.log",
+      "bytes": 360,
+      "sha256": "375C0F1B702A117AAAB721CD41489EFA6B692D84F2664658D1E053DEC7B54AE5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-deployment.json",
+      "bytes": 554,
+      "sha256": "324E57376511EE12E49E3B1D526D2D4EB04E416486121C4C0CA006DED9BEB4B4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-installed-av.txt",
+      "bytes": 1052,
+      "sha256": "6162A9A00FEE42951FD58579B8A280FD1F1C18E7789390703745C3D6FDFA34CB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-installed-launch.json",
+      "bytes": 206,
+      "sha256": "1E81FF93DAB4C57E84871B9A20227E25EF2A553543DEE361515A9859933A623E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-installed-smoke.json",
+      "bytes": 334,
+      "sha256": "5C8E283191660194BD474D9C0D9CD8BAC30DE35B5A0CCE895ED50CBE117A9232",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-installed-smoke.png",
+      "bytes": 68176,
+      "sha256": "D9DF8DB18548E3C562672BC06709D9B9CD8E5827573AD4B81837B29852100A9D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-fix-payload-av-final.txt",
+      "bytes": 11354,
+      "sha256": "EBB0F6396E73FFB8D915DDBE9614186C5451B3A69D34DA610CF09860BA98E3E5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/window-open-regression.md",
+      "bytes": 5347,
+      "sha256": "AB5A66BED1F6C84E543B4C8A240BCCF67780FDCD996DAE48C4CE780733D3FC5E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/1.1.3.0/worker-lifecycle.log",
+      "bytes": 2756,
+      "sha256": "740714339A35992CA7C7789E1F78CBBB4AE02B08EB2B8121E81D38390BE640C6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/1.1.3.2/review.md",
+      "bytes": 4625,
+      "sha256": "3BF62E403A6FB308728EC49289AAF123C947EF5B66123DCB421D6F5BF9AE5E52",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/archive-retry-recovery-2026-10-15.md",
+      "bytes": 5047,
+      "sha256": "2DA20EC8CA8AE2E19AE5F82055876F942CC443B09357A0D5C960910C4912BF17",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/app_large_interaction_test.log",
+      "bytes": 3297,
+      "sha256": "422C397FDC1975E562D2790E895F0EAE5DB057E85893CE3519F6462DAFC4263E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-engine-query-diagnostic.log",
+      "bytes": 202,
+      "sha256": "B7282FD07FBAA754F6440BCC4AF6FA276744D5EA89B1F1744417C149B1E6CC0C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-engine-query-final.log",
+      "bytes": 202,
+      "sha256": "B7282FD07FBAA754F6440BCC4AF6FA276744D5EA89B1F1744417C149B1E6CC0C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-final.log",
+      "bytes": 13717,
+      "sha256": "72040C6FBD768FFC5E00AF945E9328BCF89504821EA75429C9F177BF22637FD6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-index-production-final.log",
+      "bytes": 65,
+      "sha256": "7716162F3CD3B99CF3B8A8DD6DECF324E08C7E941AAE7E730BABA5E4FC8C075B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-query-storage-final.log",
+      "bytes": 346,
+      "sha256": "888E2DF50D2FCF0F83EC8C43C13CEB39F325E25D9C4A6B0C94EC505B6C2236F3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-tests.log",
+      "bytes": 2904,
+      "sha256": "79B9605C2851C076D6E99F86DD0AC5980B3BB598FF04307F7D1138A9090A81AB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/build-ui-production.log",
+      "bytes": 18495,
+      "sha256": "50057F5843BB889B4F0A7F1B3113D3436E841BACA73F2B62DA7061277DBA8C43",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/diff-check.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_batch_rename_preview_test-default.log",
+      "bytes": 670,
+      "sha256": "4E2AC7E1EAFC1F28B3FCF1121FFC2BB50B33A85AD2FAE46F85C12B2C84B188C8",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_crash_test-enumeration-errors.log",
+      "bytes": 620,
+      "sha256": "BE2B7196792235F964703735C72B30F0E860A538C6549A6669D17B093562E060",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_host_config_test-content.log",
+      "bytes": 1244,
+      "sha256": "3541ADC065709EC0C25C97A36775F262FACB467B9435430B0512339FE5B08CD6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_host_config_test-machine.log",
+      "bytes": 1813,
+      "sha256": "B32774DFFFF944313EE249E564806EAA708FD2AEDAF088356AA9BB9155A095BC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_host_config_test-service.log",
+      "bytes": 268,
+      "sha256": "EBE670BA17705D23D1704F71F1BD78F30C878A879398B145ABA1358D3258B254",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-delta-replay-only.log",
+      "bytes": 1583,
+      "sha256": "3188F5F37E792BB659309511C74D9144ED9BEF98B329DC076CDBF083212627E3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-exclusions-concurrency-only.log",
+      "bytes": 427,
+      "sha256": "5C6F20A47A80BB310F61B789DC1557D3E13717B648B422AD54103536A23E1CD7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-mapped-validation-only.log",
+      "bytes": 1211,
+      "sha256": "7C3AB00DDD2F340E6FD3B2139516075249B4E1FAE0149BF187571F298DADC5A0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-outstanding-query-diagnostic.log",
+      "bytes": 1853,
+      "sha256": "2C6F73298A66DDE2F71D0769EC6C0353E763009DABA5D2AEB6E5C3DF0D436565",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-outstanding-query-final.log",
+      "bytes": 1443,
+      "sha256": "2E71C6C95662A094FA25B8D8441CBE979820F8670AD70617DD50825F934F0A98",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-outstanding-query-only.log",
+      "bytes": 1387,
+      "sha256": "90F98346072FBA353B8888ADBD9BBD4E7AF9BBE68A69C75B49F44A9C2B762B9B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-outstanding-structure-only.log",
+      "bytes": 6268,
+      "sha256": "147C16DB11DDB21DB479CCE77C0DA6987E1852218C3DF54E7D6C4FFDF0981E50",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_engine_test-parent-cycle-only.log",
+      "bytes": 656,
+      "sha256": "D1526AF10212637EE11A051ECDEF65C5264B93D3CE94AEC9815EA0DB295A5361",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_test-folder-kind-negation-final.log",
+      "bytes": 2270,
+      "sha256": "587A09F9AD9324EB2EE8446FA2E8D9B6BA543EC50C1B76547B8E5DF623CF2CEF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_test-folder-kind-negation.log",
+      "bytes": 2270,
+      "sha256": "587A09F9AD9324EB2EE8446FA2E8D9B6BA543EC50C1B76547B8E5DF623CF2CEF",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_test-network-config.log",
+      "bytes": 3973,
+      "sha256": "38EE47D59F79B38CDF68180A7B368A10A40941ADAC0645B48C8C6C576C099FC4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_test-query-boundaries-final.log",
+      "bytes": 3174,
+      "sha256": "4D476DBB1D956ED3AF17A0634736E230CFDACE8BD38828418096E8E368A23DBB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_index_test-query-boundaries.log",
+      "bytes": 633,
+      "sha256": "EC0685164D1A963A7B228A5F6E5A5F6D36A1B80C66ABCBCC68849AAB1DFD13F2",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_json_persistence_test-places-tags-load.log",
+      "bytes": 1373,
+      "sha256": "E8D49A76B3F509E1993998A11F2D07ED82BC521C82B9DFA4347113E19D5BC9A1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_menu_text_test-lifecycle.log",
+      "bytes": 1208,
+      "sha256": "015F0B920730181242C7668FA14FF60F2D1CE290AF1C44C34422088453799527",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_menu_text_test-popup-placement.log",
+      "bytes": 668,
+      "sha256": "B4CB37863BE84ADDD36318871F93309F335AC4467ADFF5EA389435F84EF00C75",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_ops_test-filter-directory-skip.log",
+      "bytes": 1228,
+      "sha256": "C7FA195F601421AA5B2FCA26DBE0A14BFCB61475762ACE356F84E709F37931D1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_preview_handler_probe-association-cache-test.log",
+      "bytes": 71,
+      "sha256": "5FB6B72CDEB52B494F1F92563C31511EA21B20C2C9534493AB76097F354EDDBC",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_recycle_backend_test-index-validation.log",
+      "bytes": 388,
+      "sha256": "F99AE391F94C35554041116B84F7A3A77AE99E2786C64D7633587C695D8069B7",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_shell_host_log_test.log",
+      "bytes": 223,
+      "sha256": "EC43BF961D08D6680A1C32DF09A2A57751D936C0D2C717ACB74692921DD78D4B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_shell_registry_watch_test-default.log",
+      "bytes": 476,
+      "sha256": "16A1320D87D513D4FA046EB59BA92D1D6E5FEBE873ADF59BC2D2F809A5D01D4E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_titlebar_layout_test-details-panel.log",
+      "bytes": 2884,
+      "sha256": "772B81A50823F76F87CF108D27E16911438E5D6BCA8D6F1E67501685706F226C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_titlebar_layout_test-preview-text-ranges.log",
+      "bytes": 303,
+      "sha256": "A1783C63D1B9A06BE115E079FF4ABAE7B361B92AB12E7863A9864CB4323F23C6",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-configuration-identity.log",
+      "bytes": 378,
+      "sha256": "6069C87068A100C14B958418C2A8E063B5E10EE5C274A4B847EF3BC9848FAF66",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-configuration-metadata-final.log",
+      "bytes": 1144,
+      "sha256": "D43448B9E3ED3B2CDE7F1EE11ADE0AF935E64079667033AEAD3C40E358FF96C5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-configuration-metadata.log",
+      "bytes": 971,
+      "sha256": "2D9C61B4A89B9B93A22781AC2CF55DDA6EA307D8B2AD08E4271ED64DB85BC317",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-local-temp.log",
+      "bytes": 2476,
+      "sha256": "7479309B0ABE0DA36AC5036C9F98D4E93C3F50EEFCD1A0F5EB5DD36CCE4B8B02",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-medium-copy.log",
+      "bytes": 2476,
+      "sha256": "7479309B0ABE0DA36AC5036C9F98D4E93C3F50EEFCD1A0F5EB5DD36CCE4B8B02",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-medium-label.log",
+      "bytes": 2476,
+      "sha256": "7479309B0ABE0DA36AC5036C9F98D4E93C3F50EEFCD1A0F5EB5DD36CCE4B8B02",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-medium-probe.ps1",
+      "bytes": 4992,
+      "sha256": "3990FCBB86D7B5F0053DD586CE42A9AC8BB2529E13CF9B605E975E7326CB21A2",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-medium-token8192-evidence.txt",
+      "bytes": 2405,
+      "sha256": "B0B744B295C921D379167813DDCAB47CCF770AA922AF32A87D90B91C6AE72D69",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default-medium-token8192.log",
+      "bytes": 1477,
+      "sha256": "4BD0DF5BCDB928A1A51F4AD5F5E3BA54ACF923494D256D82EC5CC8A4296FCE4B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/audit-closure-2026-10-16/pulse_user_storage_test-default.log",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/code-audit-app-2026-10-15.md",
+      "bytes": 6644,
+      "sha256": "257D542A49B39BB54B24A1487DB546DB40B72918E97C5F8506E6E74F4970C559",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-app-async-2026-10-16.md",
+      "bytes": 3918,
+      "sha256": "216CF7446BEBEC73DF231D786E820356EF506F98EEB00D914EC0DADE1B5AC28D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-app-closure-2026-10-16.md",
+      "bytes": 10972,
+      "sha256": "81D7F126E305C7612B54B7C7E171FDBA8D38A9ADF3334D6763B5B3EAA0205E8D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-app-continuation-2026-10-15.md",
+      "bytes": 4952,
+      "sha256": "546BEF6AC0104DFAC8F306C82FA70C7B5FCDC32A244253B37B0724CB13C8DFF0",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-app-coverage-2026-10-15.md",
+      "bytes": 10712,
+      "sha256": "DCEE785C96A44D14353A9D70359AEF1D6099D279C928999F5271A6A3F4B56726",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-app-large-closure-2026-10-16.md",
+      "bytes": 7048,
+      "sha256": "55B5F9FAB76F1D5F5A58DF3A40622DB17E7498F376D64337A66D2F79F9C345E9",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-cache-loading-2026-10-16.md",
+      "bytes": 3714,
+      "sha256": "935E8CA9259CFBA37DBA3CDF2256DD44DE571FA2075B9190770B6D92C88DE988",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-change-tracking-full-2026-10-16.md",
+      "bytes": 6047,
+      "sha256": "C38478700AB73935E6C053DDED0B07AA0BB0A1B3889FB0EC2A34DFBF69494707",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-closure-2026-10-16.md",
+      "bytes": 8164,
+      "sha256": "60CFED96A3B2E43662D5683733247583BA4A71F6C76BF13E465DF79C0C4501D0",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-content-client-lifecycle-2026-10-16.md",
+      "bytes": 3571,
+      "sha256": "39D5B255B8C9A32EA123A11F15076A5804F52FF446F82BCE5041B8D8B298FF46",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-content-closure-2026-10-16.md",
+      "bytes": 8234,
+      "sha256": "CD23A2219489C061B4D3C7FF5F9EF6B3A0A046CBC60421B98BF78E724205A47E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-content-full-2026-10-16.md",
+      "bytes": 14496,
+      "sha256": "759363315774E91CA5B5224F67EFEBBB656A2904608B524AA518C1077FAD7D56",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-content-index-full-2026-10-16.md",
+      "bytes": 1639,
+      "sha256": "3A315231AB2595114DBDFEE50A674CE6C1DE21443A561B804DB711280DEE9719",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-core-continuation-2026-10-15.md",
+      "bytes": 5208,
+      "sha256": "4743B5FA9AFBFA48270E4807E64AEC0EEE4E4F922EDBB6944723DD9E2350BA2E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-core-coverage-2026-10-15.md",
+      "bytes": 14249,
+      "sha256": "9F6FE272A43DCE5C9AF7E2AB3B32EF1842448E83B03C04A934FF6319FA680E7D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-core-full-round-2026-10-16.md",
+      "bytes": 5123,
+      "sha256": "8E7920F01FB0D75537A7932CDDF1EE7D04CA850AAA878D44F7E95F3A426CC155",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-document-full-2026-10-16.md",
+      "bytes": 5782,
+      "sha256": "542F2C14387AA0B2D6A5D5E6039A443754511877FD9DACF02BAAEEC4BA4D2822",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-drag-drop-2026-10-16.md",
+      "bytes": 3302,
+      "sha256": "8E1CA946FA67A75DADDD000D32410E3DEFE39A25AC2535616CF739D35BFD0CBF",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-engine-closure-2026-10-16.md",
+      "bytes": 4508,
+      "sha256": "965457A9EA5F2DA6E79DFD53AB544FB9F6793482B60078D017DF8CA7D2391B5E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-engine-full-2026-10-16.md",
+      "bytes": 13271,
+      "sha256": "08139E0AD3C1AAE1A7393664C1585D5E9CF324281D234B674CFF1C72AC67BEBF",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-folder-kind-negation-2026-10-16.md",
+      "bytes": 3688,
+      "sha256": "6FB92209F67C70E6956B41A9C6A8B3B08F85551677102582B83C794143779745",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-host-config-closure-2026-10-16.md",
+      "bytes": 8498,
+      "sha256": "9E26235E9040333B0B000DDD49228F48921C04B2C214CA8ACEB548418CFDF14D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-index-host-full-2026-10-16.md",
+      "bytes": 7969,
+      "sha256": "C5AF1C9FB92C73673C09EAE10ACC9330620F643AF542E7D6B14969D200D77DD2",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-network-closure-2026-10-16.md",
+      "bytes": 2905,
+      "sha256": "4FA544033003635C659C39F11DE3E3017299EFB71B9BA9BAE7FB8BED97BD5906",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-network-full-2026-10-16.md",
+      "bytes": 7104,
+      "sha256": "A2621502F29268BF2E5C35F09B16C612EC8EFBC55B46D1055EC978A6E7BCF5F8",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ops-2026-10-15.md",
+      "bytes": 7410,
+      "sha256": "987B94DB76FCBB39010C3F53710346F00FEE6BD324FB3F018E5B8B7875BC33AC",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ops-closure-2026-10-16.md",
+      "bytes": 14593,
+      "sha256": "F49C9EF872DD27CD7FBC5E465C6C78A1D3375ECD28DC4DFA833FF75023E97796",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ops-continuation-2026-10-15.md",
+      "bytes": 8106,
+      "sha256": "4554569784CAE8E2E05BE4E2FD93C2EA4605A796ADBBCF0177F499DF3FAF73A0",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-outstanding-2026-10-16.md",
+      "bytes": 19383,
+      "sha256": "E86110303789C1CA39459AE2A533D99DF5401C578591E72A7F2B9B45C1FD2404",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-query-closure-2026-10-16.md",
+      "bytes": 5440,
+      "sha256": "1FBE0DA11CC3641926D1688E81D9E60B8FB57FF19A02FFA1A587FF0FF412BDE0",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-query-full-2026-10-16.md",
+      "bytes": 9151,
+      "sha256": "0CA11A051EAB028ABED0D63F252B95BB2AF534F3189DABBAD082A91C110C15B8",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-resources-full-2026-10-16.md",
+      "bytes": 7145,
+      "sha256": "E26E4851C1C0F4E452E70DDBC3E1F1C7F43084E4C1E743EB02358930C4E1DFEA",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-round-2026-10-16.md",
+      "bytes": 3184,
+      "sha256": "35572AC39A9ABCF9B78096D8C61AEB4293D0F512D3085C2BD3246ADEEDA772E9",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-shard-io-rebuild-2026-10-16.md",
+      "bytes": 5251,
+      "sha256": "664C3C143B7B9AD90CC1449B58798A3BDDFD21443302C66880383F59CEEF0A08",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-shard-recovery-2026-10-16.md",
+      "bytes": 4774,
+      "sha256": "311715138D42927C777FD692C8527C007650169B0BAE3DE0F6F726F2C0CED2E7",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-shell-crash-full-2026-10-16.md",
+      "bytes": 7535,
+      "sha256": "269700560241BDDA10935B736BB7409884473D562E19B00123560A8FBE6C710E",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-batches-2-2026-10-16.md",
+      "bytes": 2069,
+      "sha256": "3C30ECF08862753F266F97C62BD65CD097AEA61E1167D986EF07DDD248FCC0BF",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-batches-2026-10-16.md",
+      "bytes": 4619,
+      "sha256": "EE8F02FE8F6B5154C6EE8C4C5439ED067DB58C89DC3CFE1FBA32B614C956A75F",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-common-2026-10-16.md",
+      "bytes": 2277,
+      "sha256": "A4DE332EFE278D83013891F3A93E82D69B4EAFAF99D96FB7E147CDFA3AF72095",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-configuration-2026-10-16.md",
+      "bytes": 4251,
+      "sha256": "F08732E0EE5AC2B1B148B9478D208997C67FB140393225014A6DC244A45B451D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-content-2026-10-16.md",
+      "bytes": 11421,
+      "sha256": "41E704434093897369C02F80CD7D7CB233EFB5DD2E3FAC5947B944A8D48CB28B",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-document-2026-10-16.md",
+      "bytes": 6893,
+      "sha256": "EFC4BC5513327FE023510D203B8CFEF875909D88FE8F55AAE256CB4579F7067F",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-folder-size-2026-10-16.md",
+      "bytes": 1730,
+      "sha256": "24183D237CD5543A9612969551C4D1187ECA597CCDAA6BAB796305D654FE592B",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-index-boundaries-2026-10-16.md",
+      "bytes": 1919,
+      "sha256": "A72FC85A25FB6991AE6301008141FE3F9953F9BA82950BC829B47BD8A7E23E40",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-index-helpers-2026-10-16.md",
+      "bytes": 12211,
+      "sha256": "A2534596D86B19586B7016B9BD4F0E1C29CB8A33042913C5C38D648D967D75D5",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-ipc-2026-10-16.md",
+      "bytes": 9394,
+      "sha256": "681E394CAEFF99CC967F4EB6AEDDFDF6F0BE4217A81CF8A54A4D6FE86F8EDE95",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-storage-probes-2026-10-16.md",
+      "bytes": 3876,
+      "sha256": "E46C4220AA4163804D0C5132E7389DD134FDBD14AA0C12448BD582F87EE31390",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-text-reader-2026-10-16.md",
+      "bytes": 1802,
+      "sha256": "6366ED16F274332D0840A4DC3ADAF82127F7E0CC90445B30353408E422E1E926",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-small-timing-2026-10-16.md",
+      "bytes": 4554,
+      "sha256": "338A059DFE3F0405BF7562DC09A4E7888D559F39E13F5E43E7157E8F156A7A09",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-storage-closure-2026-10-16.md",
+      "bytes": 9458,
+      "sha256": "04BDF83AB7EF2729561F7F6D2DDE49B303F09892A47E4ABAE2BD26FF4EDDE3C2",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ui-2026-10-15.md",
+      "bytes": 12083,
+      "sha256": "8B6C15BDC7A7AE8AE9A08D5918DF90F76302A7F2B45142203BBB63CA29A3AD3B",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ui-closure-2026-10-16.md",
+      "bytes": 11677,
+      "sha256": "6F5D1942FC006AD607C2F72C01A9915107EB04A45591FAD5888B3C2EE7304827",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/code-audit-ui-continuation-2026-10-15.md",
+      "bytes": 7014,
+      "sha256": "4101B572C8311BC775B1534FD97247F1FF01B485AE679BB80892FA3ADB53DE6D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/dead-code-cleanup-2026-10-14.md",
+      "bytes": 2030,
+      "sha256": "B4F00ED7E55247082A8EDB8E15A2485A962776AD1889CA675983FD0F4C9760BA",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/pane-animation-2026-10-13.md",
+      "bytes": 3075,
+      "sha256": "D2D47F16B1B5AEBA2FF6FE759529D638156923907D5D96EE69F52D74ACCF76B1",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/build-id.txt",
+      "bytes": 27,
+      "sha256": "964ADA69CC4F61B5CD12575E23CC41FB2954048F98FAD6D6DDB7D7C203956E38",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/build.log",
+      "bytes": 806,
+      "sha256": "8E9034FE28E01BBD1E3D6E4B9A8C36D7601DDABA4E18016A8D29AE946031555E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/cleanup-inventory.json",
+      "bytes": 10422,
+      "sha256": "F785F77D4D5312FD73AC1C61C8278816A61ED20B307643510817D538E342BE1D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/cleanup.json",
+      "bytes": 680,
+      "sha256": "8C198496459CD20CE29E840F1A017214FF67AD908020CE4CB2B5DC3F6D7C458E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/cleanup.ps1",
+      "bytes": 2434,
+      "sha256": "8324ACD273B10B777D85ADECE167A87560CCC52EB06229BF1623A8E92D91DC02",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/configure.log",
+      "bytes": 172,
+      "sha256": "64E48E9F31C2AF8E8ECF79637C1C1F3F503429C95159C7BEB10C56F25645E406",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deploy-orchestrator.ps1",
+      "bytes": 2016,
+      "sha256": "75FFCA422B6EDB30AA75E9CE80D209E97253AF811AD3AA0F11011231090712F1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deploy-service.ps1",
+      "bytes": 7486,
+      "sha256": "3C7FE3DA6F5062FECE800523F1BD20021419EF420A16E779B5BC4EE8A43B6735",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployed-smoke.json",
+      "bytes": 327,
+      "sha256": "BF270618890CAD3A139FABF333E0464DACA5D23404B377A6162FBF4A59484573",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployed-smoke.png",
+      "bytes": 68312,
+      "sha256": "DDF084721285CE9C620DE19EED6B24B173B0848BA4C6087F8F26E6C26BD7D63B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployed-smoke.timing.txt",
+      "bytes": 113,
+      "sha256": "C1FCB460B52AE52303B5340FBEF775570D1D78AC467C59FB794BF9D0A294CE7D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployment-plan.json",
+      "bytes": 9940,
+      "sha256": "EBCA079123E7A0CEA5125B9F5D3759FBAB372B53ABB08E84670095C0A19B3B69",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployment-service.json",
+      "bytes": 439,
+      "sha256": "8FCE1C2F34B9A617F29F47E04781E1413708D3F9EAD39AB35EFAE8E2FEAB3D8E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/deployment.json",
+      "bytes": 446,
+      "sha256": "38399D45FA9D6AC936F302A50564A7E35E0086C854C9453AD4A04D7A9589C51D",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/final-runtime-state.json",
+      "bytes": 466,
+      "sha256": "2EEC0F226DB7F4DB0D50A6F3C43F96C724499FBDEA4E4EC40467CD53FA595CA4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/network-agent-restoration.json",
+      "bytes": 91,
+      "sha256": "4A2C636094F001B516396388DB84CBAA0631FEE24CB8A226D1704A67C797762B",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/package-verification.json",
+      "bytes": 1325,
+      "sha256": "BC5C838E2C6DC85CB037243177562009C7C9837FC114C6C388FBFB4D384D8BE3",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/package.log",
+      "bytes": 123,
+      "sha256": "84F8D4E80F74B9582E0D38F003F9FF044625CD1BCEDFF7751259199C2BBB85BA",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/payload-manifest.json",
+      "bytes": 6171,
+      "sha256": "49286E3E84BCBA5F7C1D8A3EF96B70395C249B34B720C0B23D13CB211722C919",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/previous-package.json",
+      "bytes": 184,
+      "sha256": "AF45A04095B54C2C34A2AB852EAC91600C6EC21913916712CE4FB7395E0B73F5",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/Pulse-dependents.txt",
+      "bytes": 871,
+      "sha256": "17925C26EE774DDAF3DD79E53AC1BF0DD2D8817B6C448E6E8C1C66F0898969E0",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/Pulse.Document-dependents.txt",
+      "bytes": 477,
+      "sha256": "C71A664AF51B187485EDCA3B860E297DA81A49DAED9F40D2F32B6E0BE54249CB",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/Pulse.Index-dependents.txt",
+      "bytes": 554,
+      "sha256": "60364CF77F1ABE435B1CD0C995F4B3B296079B297365FFC12A9418980DB38AD1",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/Pulse.Preview-dependents.txt",
+      "bytes": 541,
+      "sha256": "A9CD02C5133A5B976D7677C85742B8DB7D7EA77D418CBAD7765E3C8F31676725",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/Pulse.Shell-dependents.txt",
+      "bytes": 589,
+      "sha256": "8A2D4239AFDD604CBBEF783481B5EB1472F04EAB483157966ED8603409203E9C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/review.md",
+      "bytes": 4879,
+      "sha256": "696A22797AED665FB7FF61433550C051612C1D024C349DC5C3CD000B565D23A6",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/smoke.ps1",
+      "bytes": 1683,
+      "sha256": "71AF28042E7979BCA5D20357C7F8FF09C0B860DCA3E6BAC674D9AA3B1D61E9E4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/staged-smoke.json",
+      "bytes": 398,
+      "sha256": "4951E90EB8C02FC0951057E0D3A20602FBC6E49F3FF1E01EDCD40413BD016CA4",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/staged-smoke.png",
+      "bytes": 68327,
+      "sha256": "60ADFD1C3364F3BCA7A4FFCAEA1EDCBF3548129D9BCE945B73EA6F7A63107C9F",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/staged-smoke.timing.txt",
+      "bytes": 113,
+      "sha256": "05D0673549BBD9322F77B3BD64D627D1CCCFB64B3926D9BF366CE2F71333E9B9",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/staged-whitespace.log",
+      "bytes": 21054,
+      "sha256": "853F95F9516757C9820B170F832E8F9E673D1E606A4E7B190163E420F119A615",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/started-at.txt",
+      "bytes": 35,
+      "sha256": "76891AA05F5B4018C204FD90793114DF9DAFD377B8EC4E20975FEE56D204BD0E",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/verify-package.ps1",
+      "bytes": 3247,
+      "sha256": "9612312D08A2AC046270397CC65ABCD7E9B5F58A8E5BAE47E96E8A145B50EB24",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/release-deploy-2026-10-16/worktree-before.txt",
+      "bytes": 12014,
+      "sha256": "9036F934C793CA10949589D38DC609EE305B4BA59556B97D9EF8A5B5BCAAB28C",
+      "reason": "Superseded verification attachment; historical result summarized and full original preserved in pre-cleanup snapshot"
+    },
+    {
+      "path": "docs/validation/resource-waste-2026-10-13.md",
+      "bytes": 3917,
+      "sha256": "30FBEED4E6A20A3DB9F56BD23B32D6F544DED300F7F20EA8961950B1FA8073C7",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/runtime-idle-work-2026-10-13.md",
+      "bytes": 3608,
+      "sha256": "AC44C431037CCAB9BEDF7576746CC7F87FD62A80D293C69AEE679BA852BAB597",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/search-ui-optimization-2026-10-13.md",
+      "bytes": 4178,
+      "sha256": "96EBAE75F4CB935C339D39A43C6A2736F8AC838E3ED29B3F619545226C4EC1F9",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/structure-cleanup-2026-10-13.md",
+      "bytes": 3989,
+      "sha256": "369E1B7D91B7660A28B27B68938E5ED54FAA9F5F4333A99684082503A3ACF22D",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    },
+    {
+      "path": "docs/validation/ui-scheduling-2026-10-13.md",
+      "bytes": 3669,
+      "sha256": "2B5742AF1DDA27BC9FEBC36DC63A6787D0CA1B253E6A7025395768AA33E37F41",
+      "reason": "Superseded historical report; important contracts, results and open boundaries retained in history-summary.md"
+    }
+  ],
+  "file_count": 475,
+  "bytes": 5575657.0
+}

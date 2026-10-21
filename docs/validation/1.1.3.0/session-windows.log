@@ -1,7 +1,0 @@
-[PASS] two windows round-trip independent geometry, maximization, layouts, panes, groups, columns, and active selection
-[PASS] an empty windows vector serializes the legacy base as one window
-[PASS] version 7 data restores as one window and keeps its quick access hidden bits
-[PASS] an invalid windows entry falls back to the valid top-level single-window state
-[PASS] a malformed windows array falls back to the valid top-level single-window state
-[PASS] session serialization caps restored windows at 32
-[INFO] failures=0

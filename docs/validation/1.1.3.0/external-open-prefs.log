@@ -1,9 +1,0 @@
-[PASS] external folder opens reuse an open location by default
-[PASS] external open choice survives a preferences round trip
-[PASS] external open choice survives a preferences round trip
-[PASS] external open choice survives a preferences round trip
-[PASS] missing or invalid external open preferences restore the default
-[PASS] missing or invalid external open preferences restore the default
-[PASS] missing or invalid external open preferences restore the default
-[PASS] missing or invalid external open preferences restore the default
-[PASS] reset restores the external open default

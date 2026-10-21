@@ -1,0 +1,2450 @@
+[
+  {
+    "path": "bench_data\\animation_audit_20261021",
+    "files": 4,
+    "bytes": 10260.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\animation-desktop",
+    "files": 129,
+    "bytes": 1750337.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\animation-review-desktop",
+    "files": 481,
+    "bytes": 7804727.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\aoa-probe",
+    "files": 4,
+    "bytes": 170.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\app_continuation",
+    "files": 3,
+    "bytes": 148430.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\app_review",
+    "files": 5,
+    "bytes": 1411916.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive_progress_temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive_ui",
+    "files": 30,
+    "bytes": 47844740.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-direct-30000-12756937",
+    "files": 15,
+    "bytes": 201327852.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-direct-35540-3154078",
+    "files": 14,
+    "bytes": 201327274.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-navigation-22340-26659281",
+    "files": 3,
+    "bytes": 345.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-navigation-36908-26858265",
+    "files": 3,
+    "bytes": 345.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-navigation-43248-26806609",
+    "files": 3,
+    "bytes": 345.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-overwrite-probe-a3fbd21210b5453dae0f6b88bccd4095",
+    "files": 4,
+    "bytes": 247.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-progress-32148",
+    "files": 4,
+    "bytes": 16800202.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-progress-34800",
+    "files": 4,
+    "bytes": 16800207.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-10584-3403562",
+    "files": 9,
+    "bytes": 671089373.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-10780-2996000",
+    "files": 6,
+    "bytes": 335544672.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-16060-3489000",
+    "files": 9,
+    "bytes": 671089373.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-17092-3338546",
+    "files": 9,
+    "bytes": 335545053.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-18852-24053312",
+    "files": 5,
+    "bytes": 335544663.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-25792-24128468",
+    "files": 5,
+    "bytes": 335544663.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-audit-36504-3119562",
+    "files": 6,
+    "bytes": 335544672.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-ownership-10584-3410359",
+    "files": 14,
+    "bytes": 5379.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-ownership-16060-3495578",
+    "files": 15,
+    "bytes": 6152.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-ownership-17092-3340843",
+    "files": 14,
+    "bytes": 5404.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-retry-ownership-36504-3122140",
+    "files": 11,
+    "bytes": 3826.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\archive-shell-probe",
+    "files": 15,
+    "bytes": 25112436.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\audit-closure-temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\audit-medium-ee159e3460384dcea2ee343d8aa2ca3e",
+    "files": 1,
+    "bytes": 458752.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\audit-stream-5a74966691ee49f99d000bd5b4a129ab",
+    "files": 2,
+    "bytes": 57344.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\background-window-fit",
+    "files": 19,
+    "bytes": 12248249.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\cache-resolution-10504-5498437",
+    "files": 13,
+    "bytes": 2636109.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\cache-resolution-14196-5564828",
+    "files": 13,
+    "bytes": 2636109.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\cache-resolution-39836-5346578",
+    "files": 10,
+    "bytes": 2108808.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\cache-resolution-9292-5459078",
+    "files": 9,
+    "bytes": 2108792.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\case_name_identity",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\change_tracking_temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\client-lifecycle-temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\config-equality-32620-5831531",
+    "files": 1,
+    "bytes": 126.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\config-equality-34380-5785453",
+    "files": 1,
+    "bytes": 122.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\configuration-identity-38644-13688062",
+    "files": 5,
+    "bytes": 311.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\configuration-identity-4624-14841406",
+    "files": 4,
+    "bytes": 308.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\configuration-metadata-40408-15274468",
+    "files": 19,
+    "bytes": 1569.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\configuration-metadata-40988-14842109",
+    "files": 15,
+    "bytes": 1249.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\content-audit-closure-2026-10-16",
+    "files": 9,
+    "bytes": 5076.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\content-task-enumeration-34880-10588484",
+    "files": 3,
+    "bytes": 3.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\created-item-reveal",
+    "files": 4,
+    "bytes": 351369.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\delete-progress-validation",
+    "files": 4,
+    "bytes": 12120576.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\deployments",
+    "files": 5,
+    "bytes": 25183.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\diagnostic-enumeration-33248-14847078",
+    "files": 4,
+    "bytes": 345.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\diagnostic-enumeration-40560-13766484",
+    "files": 7,
+    "bytes": 822.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\dialog_fade",
+    "files": 9,
+    "bytes": 705034.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\explorer-takeover-20261019",
+    "files": 92,
+    "bytes": 17329422.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\feedback-medium-9bd180d2a49a43feb153563ef4b670c1",
+    "files": 8,
+    "bytes": 6380875.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\file-compare-desktop",
+    "files": 6,
+    "bytes": 54024.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\file-selection-ui",
+    "files": 53,
+    "bytes": 1739261.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\home-interaction",
+    "files": 18,
+    "bytes": 7850.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\home-menu-validation-20261017",
+    "files": 17,
+    "bytes": 247997.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\integration-review-20261019",
+    "files": 48,
+    "bytes": 13052233.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\json-persistence-5760-20649046",
+    "files": 4,
+    "bytes": 1492.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-acrylic-20261017",
+    "files": 4,
+    "bytes": 120547.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-acrylic-check-20261017",
+    "files": 4,
+    "bytes": 163003.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-acrylic-fix-20261017",
+    "files": 48,
+    "bytes": 953447.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-acrylic-sampled-20261017",
+    "files": 161,
+    "bytes": 1544725.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-fix-20261017",
+    "files": 27,
+    "bytes": 7594282.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\menu-toggle-20261019",
+    "files": 46,
+    "bytes": 12907.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\native-new",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\network_test_temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-background",
+    "files": 42,
+    "bytes": 432.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-completion",
+    "files": 8,
+    "bytes": 145085.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-failure",
+    "files": 33,
+    "bytes": 4944731.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-medium",
+    "files": 4,
+    "bytes": 11368448.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-motion",
+    "files": 4,
+    "bytes": 235977.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\operation-progress",
+    "files": 52,
+    "bytes": 1990794.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\opstest-delete-progress-20712-19154921",
+    "files": 1501,
+    "bytes": 0.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\package-1.1.3.0-20261016",
+    "files": 5,
+    "bytes": 11050.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\pane_animation_ui",
+    "files": 12,
+    "bytes": 883041.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\patch_contract_audit_20261010",
+    "files": 4,
+    "bytes": 31466.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\portable-smoke-20261011",
+    "files": 3,
+    "bytes": 59.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\release-1.1.3.0",
+    "files": 899,
+    "bytes": 71281743.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\release-smoke-1.1.3.0",
+    "files": 6,
+    "bytes": 48.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\release-smoke-20261013",
+    "files": 5,
+    "bytes": 48.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\release-smoke-20261016",
+    "files": 4,
+    "bytes": 48.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\search_merge_optimization",
+    "files": 3,
+    "bytes": 665157.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\shell_audit_snapshot",
+    "files": 2,
+    "bytes": 30364.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\shell_audit_temp",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\sidebar-starred-ui",
+    "files": 8,
+    "bytes": 489162.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\sort_optimization",
+    "files": 8,
+    "bytes": 946399.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\structure_audit",
+    "files": 1,
+    "bytes": 2393.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\tab_indicator_validation",
+    "files": 2,
+    "bytes": 179795.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\tab-indicator-followup",
+    "files": 2,
+    "bytes": 134740.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\taskbar-activation",
+    "files": 8,
+    "bytes": 0.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\test-program-smoke-profile",
+    "files": 1,
+    "bytes": 0.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\text-diff-ui",
+    "files": 6,
+    "bytes": 97858.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\titlebar-layout",
+    "files": 36,
+    "bytes": 1530848.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\titlebar-layout-build",
+    "files": 8,
+    "bytes": 277271.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\upstream-preview-review.git",
+    "files": 26,
+    "bytes": 15922299.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\window-session",
+    "files": 21,
+    "bytes": 18192.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "bench_data\\window-size-lock-ui",
+    "files": 9,
+    "bytes": 596395.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\a22-line-count-evidence",
+    "files": 5,
+    "bytes": 97489.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\batch2-undo-validation-861ec1e1006d463481ac7451a7791ae5",
+    "files": 1,
+    "bytes": 6012.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\elevation-ui-evidence",
+    "files": 24,
+    "bytes": 563664.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\feedback-medium-validation",
+    "files": 1,
+    "bytes": 1058.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\feedback-refine-ui-evidence",
+    "files": 42,
+    "bytes": 912524.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\feedback-ui-evidence",
+    "files": 42,
+    "bytes": 1669410.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\menu-stability-ui-evidence",
+    "files": 16,
+    "bytes": 118111.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\mutation-undo-validation-722240e880e2461da37581a56e6784b3",
+    "files": 1,
+    "bytes": 6012.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\operation-failure-medium",
+    "files": 0,
+    "bytes": null,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\terminal-validation",
+    "files": 8,
+    "bytes": 8697530.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\app_large_interaction_test.exe",
+    "files": 1,
+    "bytes": 4707840.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\app_large_interaction_test.obj",
+    "files": 1,
+    "bytes": 4092268.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\ctx_handlers.obj",
+    "files": 1,
+    "bytes": 601030.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\native_new_probe.exe",
+    "files": 1,
+    "bytes": 229376.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\native_new_probe.obj",
+    "files": 1,
+    "bytes": 401960.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_activation_medium_test.exe",
+    "files": 1,
+    "bytes": 7333376.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_app_controllers_test.exe",
+    "files": 1,
+    "bytes": 1075200.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_buffer_diag_probe.exe",
+    "files": 1,
+    "bytes": 302592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_diag_probe.exe",
+    "files": 1,
+    "bytes": 302592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_dialog_test.exe",
+    "files": 1,
+    "bytes": 786944.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_fast_diag_probe.exe",
+    "files": 1,
+    "bytes": 302592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_large_buffer_diag_probe.exe",
+    "files": 1,
+    "bytes": 302592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_listing_probe.exe",
+    "files": 1,
+    "bytes": 302080.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_navigation_test.exe",
+    "files": 1,
+    "bytes": 4910592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_process_fixture.exe",
+    "files": 1,
+    "bytes": 124928.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_archive_test.exe",
+    "files": 1,
+    "bytes": 674816.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_batch_rename_preview_test.exe",
+    "files": 1,
+    "bytes": 253440.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_bench_enum.exe",
+    "files": 1,
+    "bytes": 347136.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_bench_mft.exe",
+    "files": 1,
+    "bytes": 303616.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_bench_shell.exe",
+    "files": 1,
+    "bytes": 330240.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_breadcrumb_test.exe",
+    "files": 1,
+    "bytes": 2120192.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_builtin_menu_items_test.exe",
+    "files": 1,
+    "bytes": 472576.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_change_feed_memory_test.exe",
+    "files": 1,
+    "bytes": 199680.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_change_tracking_client_test.exe",
+    "files": 1,
+    "bytes": 215552.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_change_tracking_memory_test.exe",
+    "files": 1,
+    "bytes": 398336.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_change_tracking_polling_test.exe",
+    "files": 1,
+    "bytes": 142848.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_change_tracking_test.exe",
+    "files": 1,
+    "bytes": 418816.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_child_edit_test.exe",
+    "files": 1,
+    "bytes": 370688.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_clipboard_availability_test.exe",
+    "files": 1,
+    "bytes": 282112.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_column_strip_test.exe",
+    "files": 1,
+    "bytes": 171008.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_command_icon_test.exe",
+    "files": 1,
+    "bytes": 220672.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_content_index_test.exe",
+    "files": 1,
+    "bytes": 3011072.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_content_paging_test.exe",
+    "files": 1,
+    "bytes": 2455040.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_content_search_test.exe",
+    "files": 1,
+    "bytes": 2323456.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_content_timing_test.exe",
+    "files": 1,
+    "bytes": 343040.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_context_session_test.exe",
+    "files": 1,
+    "bytes": 204800.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_context_worker_fixture.exe",
+    "files": 1,
+    "bytes": 508416.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_copy_progress_test.exe",
+    "files": 1,
+    "bytes": 169984.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_crash_test.exe",
+    "files": 1,
+    "bytes": 487936.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_d2d_list.exe",
+    "files": 1,
+    "bytes": 170496.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_date_group_layout_test.exe",
+    "files": 1,
+    "bytes": 168960.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_default_file_manager_test.exe",
+    "files": 1,
+    "bytes": 322560.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_delete_service_test.exe",
+    "files": 1,
+    "bytes": 327680.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_details_meta_test.exe",
+    "files": 1,
+    "bytes": 438272.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_dialog_close_test.exe",
+    "files": 1,
+    "bytes": 168448.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_dialog_edit_integration_test.exe",
+    "files": 1,
+    "bytes": 1079296.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_dialog_fade_test.exe",
+    "files": 1,
+    "bytes": 582656.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_dialog_text_fit_test.exe",
+    "files": 1,
+    "bytes": 183296.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_document_admission_test.exe",
+    "files": 1,
+    "bytes": 236544.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_document_failure_fixture.exe",
+    "files": 1,
+    "bytes": 126976.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_document_pool_bench.exe",
+    "files": 1,
+    "bytes": 338432.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_drag_drop_test.exe",
+    "files": 1,
+    "bytes": 304128.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_drive_view_test.exe",
+    "files": 1,
+    "bytes": 2082816.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_drop_staging_test.exe",
+    "files": 1,
+    "bytes": 324096.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_duplicate_scan_test.exe",
+    "files": 1,
+    "bytes": 232960.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_entry_order_hold_test.exe",
+    "files": 1,
+    "bytes": 2294784.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_explorer_takeover_test.exe",
+    "files": 1,
+    "bytes": 276480.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_file_lock_owner_test.exe",
+    "files": 1,
+    "bytes": 238080.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_file_operation_failure_test.exe",
+    "files": 1,
+    "bytes": 771072.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_file_selection_ui_test.exe",
+    "files": 1,
+    "bytes": 7516160.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_filename_pinyin_test.exe",
+    "files": 1,
+    "bytes": 480768.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_fluent_gallery.exe",
+    "files": 1,
+    "bytes": 578048.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_folder_sizes_scan_test.exe",
+    "files": 1,
+    "bytes": 430592.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_fs_enumeration_test.exe",
+    "files": 1,
+    "bytes": 376832.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_fs_watch_lifecycle_test.exe",
+    "files": 1,
+    "bytes": 227328.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_fs_worker_cancel_test.exe",
+    "files": 1,
+    "bytes": 723968.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_gif_decoder_test.exe",
+    "files": 1,
+    "bytes": 204800.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_global_search_hotkey_test.exe",
+    "files": 1,
+    "bytes": 155648.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_header_drop_effect_test.exe",
+    "files": 1,
+    "bytes": 216576.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_home_layout_test.exe",
+    "files": 1,
+    "bytes": 546816.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_host_config_test.exe",
+    "files": 1,
+    "bytes": 1835520.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_image_open_test.exe",
+    "files": 1,
+    "bytes": 222720.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_engine_test.exe",
+    "files": 1,
+    "bytes": 1522688.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_host_stress.exe",
+    "files": 1,
+    "bytes": 304128.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_migration_test.exe",
+    "files": 1,
+    "bytes": 353792.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_perf.exe",
+    "files": 1,
+    "bytes": 276480.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_pinyin_test.exe",
+    "files": 1,
+    "bytes": 907264.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_security_test.exe",
+    "files": 1,
+    "bytes": 429568.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_index_test.exe",
+    "files": 1,
+    "bytes": 901120.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_ipc_payload_test.exe",
+    "files": 1,
+    "bytes": 217600.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_json_persistence_test.exe",
+    "files": 1,
+    "bytes": 2402816.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_json_utils_test.exe",
+    "files": 1,
+    "bytes": 245760.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_known_folder_labels_test.exe",
+    "files": 1,
+    "bytes": 465920.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_link_confirmation_ui_test.exe",
+    "files": 1,
+    "bytes": 671232.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_link_query_test.exe",
+    "files": 1,
+    "bytes": 238080.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_localization_test.exe",
+    "files": 1,
+    "bytes": 442368.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_locked_item_prompt_ui_test.exe",
+    "files": 1,
+    "bytes": 664576.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_locked_operation_test.exe",
+    "files": 1,
+    "bytes": 1069056.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_material_test.exe",
+    "files": 1,
+    "bytes": 348672.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_menu_text_test.exe",
+    "files": 1,
+    "bytes": 730624.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_multiwindow_application_test.exe",
+    "files": 1,
+    "bytes": 7409664.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_net_cache_test.exe",
+    "files": 1,
+    "bytes": 357888.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_network_security_test.exe",
+    "files": 1,
+    "bytes": 236544.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_office_index_test.exe",
+    "files": 1,
+    "bytes": 2395648.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_office_ooxml_test.exe",
+    "files": 1,
+    "bytes": 338944.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_operation_elevation_adapter_test.exe",
+    "files": 1,
+    "bytes": 1325568.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_operation_elevation_transport_test.exe",
+    "files": 1,
+    "bytes": 331776.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_operation_presentation_test.exe",
+    "files": 1,
+    "bytes": 201728.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_ops_feedback_test.exe",
+    "files": 1,
+    "bytes": 1269760.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_ops_journal_test.exe",
+    "files": 1,
+    "bytes": 2612224.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_ops_test.exe",
+    "files": 1,
+    "bytes": 1574912.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_pane_animation_application_test.exe",
+    "files": 1,
+    "bytes": 7408640.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_pane_animation_test.exe",
+    "files": 1,
+    "bytes": 1943552.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_pane_filter_test.exe",
+    "files": 1,
+    "bytes": 2141184.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_pdf_bench.exe",
+    "files": 1,
+    "bytes": 315392.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_playback_controls_test.exe",
+    "files": 1,
+    "bytes": 218624.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_preview_handler_pan_test.exe",
+    "files": 1,
+    "bytes": 194048.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_preview_handler_probe.exe",
+    "files": 1,
+    "bytes": 300032.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_preview_test.exe",
+    "files": 1,
+    "bytes": 376320.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_quick_access_badges_test.exe",
+    "files": 1,
+    "bytes": 2422272.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_recycle_backend_test.exe",
+    "files": 1,
+    "bytes": 1283072.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_rename_locked_prompt_ui_test.exe",
+    "files": 1,
+    "bytes": 645120.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_rename_ops_test.exe",
+    "files": 1,
+    "bytes": 1102336.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_saved_search_test.exe",
+    "files": 1,
+    "bytes": 292864.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_search_client_routing_test.exe",
+    "files": 1,
+    "bytes": 658944.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_search_enhancement_ui_test.exe",
+    "files": 1,
+    "bytes": 585216.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_search_history_test.exe",
+    "files": 1,
+    "bytes": 204800.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_search_merge_test.exe",
+    "files": 1,
+    "bytes": 467968.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_search_query_test.exe",
+    "files": 1,
+    "bytes": 560128.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_session_windows_test.exe",
+    "files": 1,
+    "bytes": 2148864.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_host_log_test.exe",
+    "files": 1,
+    "bytes": 161280.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_icons_test.exe",
+    "files": 1,
+    "bytes": 304128.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_interaction_test.exe",
+    "files": 1,
+    "bytes": 358912.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_launch_client_test.exe",
+    "files": 1,
+    "bytes": 387072.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_launch_test.exe",
+    "files": 1,
+    "bytes": 393728.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_launch_worker_fixture.exe",
+    "files": 1,
+    "bytes": 509952.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_query_fixture.exe",
+    "files": 1,
+    "bytes": 504832.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_query_test.exe",
+    "files": 1,
+    "bytes": 381440.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_registry_ipc_test.exe",
+    "files": 1,
+    "bytes": 274944.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_shell_registry_watch_test.exe",
+    "files": 1,
+    "bytes": 191488.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_sidebar_scrollbar_fade_test.exe",
+    "files": 1,
+    "bytes": 231936.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_staging_tray_test.exe",
+    "files": 1,
+    "bytes": 2321408.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_startup_command_test.exe",
+    "files": 1,
+    "bytes": 160256.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_tab_indicator_animation_test.exe",
+    "files": 1,
+    "bytes": 173056.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_tag_discovery_cache_test.exe",
+    "files": 1,
+    "bytes": 165888.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_text_compare_test.exe",
+    "files": 1,
+    "bytes": 2147328.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_text_diff_ui_test.exe",
+    "files": 1,
+    "bytes": 769024.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_text_task_test.exe",
+    "files": 1,
+    "bytes": 273920.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_titlebar_layout_test.exe",
+    "files": 1,
+    "bytes": 3529216.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_transfer_rate_test.exe",
+    "files": 1,
+    "bytes": 275456.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_typography_cache_test.exe",
+    "files": 1,
+    "bytes": 243200.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_user_index_storage_test.exe",
+    "files": 1,
+    "bytes": 608768.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_user_storage_test.exe",
+    "files": 1,
+    "bytes": 464384.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_usn_packet_queue_test.exe",
+    "files": 1,
+    "bytes": 226304.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_utf8_atomic_test.exe",
+    "files": 1,
+    "bytes": 246272.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_virtual_clipboard_test.exe",
+    "files": 1,
+    "bytes": 290304.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_window_result_mailbox_test.exe",
+    "files": 1,
+    "bytes": 189952.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\pulse_worker_lifecycle_test.exe",
+    "files": 1,
+    "bytes": 655360.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\settings_toggle_fixture_test.exe",
+    "files": 1,
+    "bytes": 5638144.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\settings_toggle_fixture_test.obj",
+    "files": 1,
+    "bytes": 5265311.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\takeover_delivery_fixture_test.exe",
+    "files": 1,
+    "bytes": 3755520.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\takeover_delivery_fixture_test.obj",
+    "files": 1,
+    "bytes": 4253404.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\transfer_rate_before.exe",
+    "files": 1,
+    "bytes": 299008.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\transfer_rate_before.obj",
+    "files": 1,
+    "bytes": 384341.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_app_controllers_test.dir",
+    "files": 57,
+    "bytes": 14664846.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_archive_dialog_test.dir",
+    "files": 37,
+    "bytes": 5416768.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_archive_navigation_test.dir",
+    "files": 334,
+    "bytes": 118764658.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_archive_process_fixture.dir",
+    "files": 11,
+    "bytes": 68356.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_archive_test.dir",
+    "files": 13,
+    "bytes": 5143494.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_batch_rename_preview_test.dir",
+    "files": 15,
+    "bytes": 1564402.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_bench_enum.dir",
+    "files": 11,
+    "bytes": 892087.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_bench_mft.dir",
+    "files": 11,
+    "bytes": 383347.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_bench_shell.dir",
+    "files": 11,
+    "bytes": 764264.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_breadcrumb_test.dir",
+    "files": 43,
+    "bytes": 11988309.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_builtin_menu_items_test.dir",
+    "files": 19,
+    "bytes": 1859837.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_change_feed_memory_test.dir",
+    "files": 11,
+    "bytes": 494155.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_change_tracking_client_test.dir",
+    "files": 11,
+    "bytes": 722290.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_change_tracking_memory_test.dir",
+    "files": 11,
+    "bytes": 4421116.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_change_tracking_polling_test.dir",
+    "files": 11,
+    "bytes": 28919.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_change_tracking_test.dir",
+    "files": 13,
+    "bytes": 3718412.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_child_edit_test.dir",
+    "files": 23,
+    "bytes": 1701103.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_clipboard_availability_test.dir",
+    "files": 11,
+    "bytes": 643788.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_column_strip_test.dir",
+    "files": 13,
+    "bytes": 158937.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_command_icon_test.dir",
+    "files": 11,
+    "bytes": 226101.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_content_index_test.dir",
+    "files": 35,
+    "bytes": 16468365.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_content_paging_test.dir",
+    "files": 29,
+    "bytes": 9940406.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_content_search_test.dir",
+    "files": 29,
+    "bytes": 9920570.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_content_timing_test.dir",
+    "files": 13,
+    "bytes": 1155118.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_context_session_test.dir",
+    "files": 11,
+    "bytes": 524246.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_context_worker_fixture.dir",
+    "files": 33,
+    "bytes": 5332781.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_copy_progress_test.dir",
+    "files": 11,
+    "bytes": 179376.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_crash_test.dir",
+    "files": 11,
+    "bytes": 681531.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_d2d_list.dir",
+    "files": 11,
+    "bytes": 250762.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_date_group_layout_test.dir",
+    "files": 15,
+    "bytes": 346033.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_default_file_manager_test.dir",
+    "files": 17,
+    "bytes": 2376333.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_delete_service_test.dir",
+    "files": 13,
+    "bytes": 935623.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_details_meta_test.dir",
+    "files": 15,
+    "bytes": 483162.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_dialog_close_test.dir",
+    "files": 13,
+    "bytes": 160125.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_dialog_edit_integration_test.dir",
+    "files": 49,
+    "bytes": 6842932.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_dialog_fade_test.dir",
+    "files": 29,
+    "bytes": 3322662.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_dialog_text_fit_test.dir",
+    "files": 11,
+    "bytes": 210006.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_directory_contract_application_test.dir",
+    "files": 9,
+    "bytes": 542619.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_document_admission_test.dir",
+    "files": 11,
+    "bytes": 345637.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_document_failure_fixture.dir",
+    "files": 11,
+    "bytes": 80746.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_document_pool_bench.dir",
+    "files": 11,
+    "bytes": 632025.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_drag_drop_test.dir",
+    "files": 15,
+    "bytes": 1464711.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_drive_view_test.dir",
+    "files": 43,
+    "bytes": 12575777.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_drop_staging_test.dir",
+    "files": 13,
+    "bytes": 1059663.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_duplicate_scan_test.dir",
+    "files": 13,
+    "bytes": 1178658.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_entry_order_application_test.dir",
+    "files": 9,
+    "bytes": 516039.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_entry_order_hold_test.dir",
+    "files": 41,
+    "bytes": 12545263.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_explorer_takeover_test.dir",
+    "files": 15,
+    "bytes": 2361845.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_file_lock_owner_test.dir",
+    "files": 13,
+    "bytes": 1006517.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_file_operation_failure_test.dir",
+    "files": 35,
+    "bytes": 5431023.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_file_selection_ui_test.dir",
+    "files": 340,
+    "bytes": 132276282.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_filename_pinyin_test.dir",
+    "files": 17,
+    "bytes": 1141800.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_filename_search_application_test.dir",
+    "files": 9,
+    "bytes": 531051.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_fluent_gallery.dir",
+    "files": 25,
+    "bytes": 2668486.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_folder_sizes_scan_test.dir",
+    "files": 15,
+    "bytes": 3297078.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_fs_enumeration_test.dir",
+    "files": 13,
+    "bytes": 1618031.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_fs_watch_lifecycle_test.dir",
+    "files": 15,
+    "bytes": 1759857.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_fs_worker_cancel_test.dir",
+    "files": 25,
+    "bytes": 5418220.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_gif_decoder_test.dir",
+    "files": 11,
+    "bytes": 580273.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_global_search_hotkey_test.dir",
+    "files": 13,
+    "bytes": 44026.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_global_search_window_test.dir",
+    "files": 9,
+    "bytes": 501266.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_header_drop_effect_test.dir",
+    "files": 11,
+    "bytes": 155513.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_home_layout_test.dir",
+    "files": 15,
+    "bytes": 1185712.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_host_config_test.dir",
+    "files": 15,
+    "bytes": 2730276.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_image_open_test.dir",
+    "files": 11,
+    "bytes": 906935.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_engine_test.dir",
+    "files": 41,
+    "bytes": 16417327.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_host_stress.dir",
+    "files": 11,
+    "bytes": 561839.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_migration_test.dir",
+    "files": 13,
+    "bytes": 1985900.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_perf.dir",
+    "files": 11,
+    "bytes": 426067.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_pinyin_test.dir",
+    "files": 41,
+    "bytes": 13775845.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_security_test.dir",
+    "files": 13,
+    "bytes": 3889934.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_index_test.dir",
+    "files": 29,
+    "bytes": 8214756.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_ipc_payload_test.dir",
+    "files": 11,
+    "bytes": 521162.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_json_persistence_test.dir",
+    "files": 61,
+    "bytes": 18208677.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_json_utils_test.dir",
+    "files": 11,
+    "bytes": 385739.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_known_folder_labels_test.dir",
+    "files": 15,
+    "bytes": 553667.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_link_confirmation_ui_test.dir",
+    "files": 33,
+    "bytes": 4712388.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_link_query_test.dir",
+    "files": 15,
+    "bytes": 1070072.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_localization_test.dir",
+    "files": 13,
+    "bytes": 299604.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_locked_item_prompt_ui_test.dir",
+    "files": 33,
+    "bytes": 4822419.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_locked_operation_test.dir",
+    "files": 33,
+    "bytes": 16195783.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_material_test.dir",
+    "files": 21,
+    "bytes": 2039522.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_menu_text_test.dir",
+    "files": 31,
+    "bytes": 4204780.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_multiwindow_application_test.dir",
+    "files": 9,
+    "bytes": 515847.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_net_cache_test.dir",
+    "files": 15,
+    "bytes": 2491317.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_network_security_test.dir",
+    "files": 11,
+    "bytes": 354533.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_notify_patch_application_test.dir",
+    "files": 9,
+    "bytes": 519648.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_office_index_test.dir",
+    "files": 25,
+    "bytes": 8517547.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_office_ooxml_test.dir",
+    "files": 13,
+    "bytes": 1143298.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_operation_elevation_adapter_test.dir",
+    "files": 35,
+    "bytes": 16327038.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_operation_elevation_transport_test.dir",
+    "files": 13,
+    "bytes": 1096951.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_operation_presentation_test.dir",
+    "files": 11,
+    "bytes": 282222.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_ops_feedback_test.dir",
+    "files": 39,
+    "bytes": 16468606.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_ops_journal_test.dir",
+    "files": 9,
+    "bytes": 470355.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_ops_test.dir",
+    "files": 41,
+    "bytes": 19829019.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_pane_animation_application_test.dir",
+    "files": 336,
+    "bytes": 119044454.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_pane_animation_test.dir",
+    "files": 41,
+    "bytes": 11502042.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_pane_filter_test.dir",
+    "files": 41,
+    "bytes": 12276980.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_pdf_bench.dir",
+    "files": 11,
+    "bytes": 319278.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_permission_operation_prompt_ui_test.dir",
+    "files": 9,
+    "bytes": 542529.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_playback_controls_test.dir",
+    "files": 13,
+    "bytes": 675259.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_preview_handler_pan_test.dir",
+    "files": 11,
+    "bytes": 375214.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_preview_handler_probe.dir",
+    "files": 13,
+    "bytes": 1578835.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_preview_test.dir",
+    "files": 17,
+    "bytes": 2818709.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_quick_access_badges_test.dir",
+    "files": 41,
+    "bytes": 12546354.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_recycle_backend_test.dir",
+    "files": 37,
+    "bytes": 16304933.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_rename_enter_test.dir",
+    "files": 9,
+    "bytes": 474036.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_rename_locked_prompt_ui_test.dir",
+    "files": 33,
+    "bytes": 4706978.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_rename_ops_test.dir",
+    "files": 33,
+    "bytes": 15399567.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_saved_search_test.dir",
+    "files": 13,
+    "bytes": 517671.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_search_client_routing_test.dir",
+    "files": 23,
+    "bytes": 4864241.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_search_enhancement_ui_test.dir",
+    "files": 21,
+    "bytes": 2241697.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_search_history_test.dir",
+    "files": 13,
+    "bytes": 635397.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_search_merge_test.dir",
+    "files": 19,
+    "bytes": 1603250.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_search_query_test.dir",
+    "files": 19,
+    "bytes": 1636234.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_session_windows_test.dir",
+    "files": 61,
+    "bytes": 16850922.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_host_log_test.dir",
+    "files": 11,
+    "bytes": 96474.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_icons_test.dir",
+    "files": 15,
+    "bytes": 2783002.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_interaction_test.dir",
+    "files": 11,
+    "bytes": 838751.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_launch_client_test.dir",
+    "files": 13,
+    "bytes": 2698381.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_launch_test.dir",
+    "files": 11,
+    "bytes": 1267705.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_launch_worker_fixture.dir",
+    "files": 33,
+    "bytes": 5360427.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_query_fixture.dir",
+    "files": 33,
+    "bytes": 5311181.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_query_test.dir",
+    "files": 13,
+    "bytes": 1373699.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_registry_ipc_test.dir",
+    "files": 13,
+    "bytes": 1238168.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_shell_registry_watch_test.dir",
+    "files": 11,
+    "bytes": 337296.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_sidebar_scrollbar_fade_test.dir",
+    "files": 11,
+    "bytes": 137491.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_staging_tray_test.dir",
+    "files": 53,
+    "bytes": 14804566.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_startup_command_test.dir",
+    "files": 13,
+    "bytes": 136065.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_tab_indicator_animation_test.dir",
+    "files": 11,
+    "bytes": 152850.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_tag_discovery_cache_test.dir",
+    "files": 11,
+    "bytes": 350245.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_text_compare_test.dir",
+    "files": 45,
+    "bytes": 13549444.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_text_diff_ui_test.dir",
+    "files": 29,
+    "bytes": 4634506.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_text_task_test.dir",
+    "files": 13,
+    "bytes": 722928.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_titlebar_layout_test.dir",
+    "files": 9,
+    "bytes": 485439.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_transfer_rate_test.dir",
+    "files": 11,
+    "bytes": 341861.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_typography_cache_test.dir",
+    "files": 11,
+    "bytes": 503712.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_user_index_storage_test.dir",
+    "files": 15,
+    "bytes": 2183474.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_user_storage_test.dir",
+    "files": 11,
+    "bytes": 727596.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_usn_packet_queue_test.dir",
+    "files": 11,
+    "bytes": 419409.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_utf8_atomic_test.dir",
+    "files": 11,
+    "bytes": 467194.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_virtual_clipboard_test.dir",
+    "files": 13,
+    "bytes": 729923.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_window_result_mailbox_test.dir",
+    "files": 11,
+    "bytes": 244516.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  },
+  {
+    "path": "build\\CMakeFiles\\pulse_worker_lifecycle_test.dir",
+    "files": 25,
+    "bytes": 4630728.0,
+    "reason": "Obsolete generated test data, test build output, or diagnostic evidence; test sources retained"
+  }
+]

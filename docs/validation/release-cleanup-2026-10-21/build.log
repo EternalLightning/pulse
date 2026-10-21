@@ -1,0 +1,72 @@
+[ 12%] Built target pulse_text
+[ 12%] Built target pulse_localization
+[ 12%] Built target pulse_user_storage
+[ 12%] Building CXX object CMakeFiles/pulse_crash_reporter.dir/src/common/crash_reporter.cpp.obj
+crash_reporter.cpp
+[ 12%] Building CXX object CMakeFiles/pulse_crash_reporter.dir/src/common/diagnostics_exporter.cpp.obj
+diagnostics_exporter.cpp
+[ 12%] Linking CXX static library pulse_crash_reporter.lib
+[ 12%] Built target pulse_crash_reporter
+[ 12%] Built target pulse_sqlite
+[ 12%] Built target pulse_document_reader
+[ 12%] Building RC object CMakeFiles/pulse_document.dir/generated/pulse_document_version.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 12%] Linking CXX executable Pulse.Document.exe
+[ 25%] Built target pulse_document
+[ 25%] Built target pulse_fs_watch
+[ 25%] Built target pulse_content_task
+[ 25%] Building RC object CMakeFiles/pulse_index.dir/generated/pulse_index_version.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 25%] Building CXX object CMakeFiles/pulse_index.dir/src/index/filename_timing.cpp.obj
+filename_timing.cpp
+[ 25%] Linking CXX executable Pulse.Index.exe
+[ 37%] Built target pulse_index
+[ 37%] Building RC object CMakeFiles/pulse_shell.dir/generated/pulse_shell_version.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 37%] Linking CXX executable Pulse.Shell.exe
+[ 50%] Built target pulse_shell
+[ 50%] Building RC object CMakeFiles/pulse_preview.dir/generated/pulse_preview_version.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 50%] Linking CXX executable Pulse.Preview.exe
+[ 50%] Built target pulse_preview
+[ 50%] Building CXX object CMakeFiles/pulse.dir/src/app/about_info.cpp.obj
+about_info.cpp
+[ 50%] Building CXX object CMakeFiles/pulse.dir/src/app/app_main.cpp.obj
+app_main.cpp
+[ 50%] Building CXX object CMakeFiles/pulse.dir/src/app/app_runtime.cpp.obj
+app_runtime.cpp
+[ 50%] Building RC object CMakeFiles/pulse.dir/src/app/pulse.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 50%] Building RC object CMakeFiles/pulse.dir/generated/pulse_version.rc.res
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+[ 50%] Linking CXX executable Pulse.exe
+[100%] Built target pulse
+[ 33%] Built target pulse_text
+[ 33%] Built target pulse_localization
+[ 33%] Built target pulse_user_storage
+[ 33%] Built target pulse_crash_reporter
+[ 33%] Built target pulse_sqlite
+[ 33%] Built target pulse_document_reader
+[ 66%] Built target pulse_document
+[ 66%] Built target pulse_fs_watch
+[ 66%] Built target pulse_content_task
+[100%] Built target pulse_index
+[100%] Built target pulse_document
+Built target pulse_localization
+Built target pulse_crash_reporter
+Built target pulse_preview
+[  0%] Built target pulse_localization
+[  0%] Built target pulse_crash_reporter
+[100%] Built target pulse_shell

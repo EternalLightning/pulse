@@ -1,0 +1,2609 @@
+{
+  "targets": [
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-20261018-114528",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-20261018-115006",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-operation-ui-20261017-125504",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-taskbar-20261017-122115",
+      "directory": true
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.2.0-portable-win-x64.zip",
+      "directory": false
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.3.0-portable-win-x64.zip",
+      "directory": false
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.3.2-portable-win-x64.zip",
+      "directory": false
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.1.3.2.exe",
+      "directory": false
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31",
+      "directory": true
+    }
+  ],
+  "file_count": 502,
+  "removed_bytes": 433077269.0,
+  "retained_current_stage": "E:\\Projects\\pulse\\dist\\portable-stage-5968fa13071d4d7aa0dc0eaf368aeb71",
+  "retained_rollback": "E:\\Projects\\pulse\\dist\\rollback-before-1.1.3.3-20261020-165616",
+  "files": [
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7395840,
+      "sha256": "AD92C8A3D1F6A76C3F184D5D5A9AABFEFCAE9B24D398F896232498100E2D0BCC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1406976,
+      "sha256": "91653CD221D91720CC1A87E3544AD9C6A92D623CAB4CE0628F352D2C5482C840"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-12904b2bff16408e897fe842d2481182\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7395840,
+      "sha256": "FE2ABB9C8CA382AF2FEB86EF22959FD526329DA4CCEDB268512F530A184AC2B0"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1406976,
+      "sha256": "91653CD221D91720CC1A87E3544AD9C6A92D623CAB4CE0628F352D2C5482C840"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-18e2d4793766426b8945057c3dd1667e\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7411200,
+      "sha256": "C4225AAD36AE197264EE86368165C4766ED40E4E29CEB5467DA401CBA9500980"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1416704,
+      "sha256": "4F2A6B6606C3273ED323FD1A6DD896DB123DCBE83CF0A745CF6EEB2B950AF393"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-21435b47d9d44b27ba8305bb6a882caa\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7405056,
+      "sha256": "97B3198DB7287C45C71B13EE5791CD170B2051DE97C605EFD20E907502541589"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1416704,
+      "sha256": "4F2A6B6606C3273ED323FD1A6DD896DB123DCBE83CF0A745CF6EEB2B950AF393"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-377671197c18482fadcbf5c1eda85fe0\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7395840,
+      "sha256": "1519AB01F3F1804101A0708D4AEF0A6037A5E20A1F64A2FA1470655DF4B49E44"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1406976,
+      "sha256": "91653CD221D91720CC1A87E3544AD9C6A92D623CAB4CE0628F352D2C5482C840"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-3cf90b722cfc48d58dcd4f6fb87308fc\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "59BD7EC2C42600E466A6D75FFBA7AF2D9D88A0DF0AF71B27ED45491FD1B53110"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\Pulse.exe",
+      "bytes": 7395328,
+      "sha256": "D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "528312469736842C1950803C3BB07BCB458F140018E7C58A7967688F26BC65F6"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "4614D9AE6CEA4494B6975E56280FCE24AB522B13BCC8B94EAC791F9EA3D03DC0"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\Pulse.Shell.exe",
+      "bytes": 1418240,
+      "sha256": "6B1887ABA28470B7EC9D0A1C8EF05F703F7E992D05943FCFF20241D769731A69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "7563E6E25CF5378357ADCD0530FA85ABAD160DE1EA6970F61CA86FBAA11F36E1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-72989aa8ca4e459ab7fc64c9864c5b42\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "1C355329B44393BDF126E6EC76AA56832A86F0DA4DC10AD2AD0938425BA10376"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\Pulse.exe",
+      "bytes": 7315968,
+      "sha256": "8556467E6F720A6024E07CD9A740D1AEB9AF50F9401BD56D5E5C7D9EAF6B1CA8"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\Pulse.Index.exe",
+      "bytes": 3405824,
+      "sha256": "190A0908FB7A9E3D331812DD3BBECB8A11964450F28852E6E502B7D881044144"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "A7BD45D496E36A2E657F4287B4EC00CC42B81E7051958E502D3F478DD5852DEF"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\Pulse.Shell.exe",
+      "bytes": 1404416,
+      "sha256": "0C318B5507A8D4DD3A5D4D542A1C1E385F181E4D63CC7A828FD277CD29C32412"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "388DD5BC91D166280540BB3E01F997E09CB24D722E57B17EDA74C96894BC0BC7"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-7f54c51c0cce443f958cfd60e69cc123\\Pulse-1.1.2.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7405056,
+      "sha256": "F86895404BD802DAA4451B1BE5399AF6B3AC2DD13116D524FB93E69139F34FFE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1416704,
+      "sha256": "406605ACC0069AB25B86953D0F731EB4175FCB0DC1EAEBF4CEF2DFB0D6B77C5D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-888712140ede4ef98188beb904f696b5\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7405056,
+      "sha256": "56B77C6378A7AA08A7C2DFEBD40D0442EB30A706CC974CF39E5C7348EDF2E169"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1416704,
+      "sha256": "4F2A6B6606C3273ED323FD1A6DD896DB123DCBE83CF0A745CF6EEB2B950AF393"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-90dbdf4c428949d8ad83e96bcc1a86ba\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7394816,
+      "sha256": "A8122FA219E06CFD3CB63A1A825068939437736445411ED57A3D4845D3893610"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1405952,
+      "sha256": "DA19BB8EB5C077202DE605105B2A212AB4AAF2DAAAFB19FDF632CF5137909598"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-99776d67366846789a42d5c310a83f96\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "59BD7EC2C42600E466A6D75FFBA7AF2D9D88A0DF0AF71B27ED45491FD1B53110"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\Pulse.exe",
+      "bytes": 7395328,
+      "sha256": "8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "528312469736842C1950803C3BB07BCB458F140018E7C58A7967688F26BC65F6"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "4614D9AE6CEA4494B6975E56280FCE24AB522B13BCC8B94EAC791F9EA3D03DC0"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\Pulse.Shell.exe",
+      "bytes": 1418240,
+      "sha256": "6B1887ABA28470B7EC9D0A1C8EF05F703F7E992D05943FCFF20241D769731A69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "7563E6E25CF5378357ADCD0530FA85ABAD160DE1EA6970F61CA86FBAA11F36E1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-9aafb67167d640ee975af7374aab4871\\Pulse-1.1.3.2-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\LICENSE",
+      "bytes": 11358,
+      "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\NOTICE",
+      "bytes": 1139,
+      "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\Pulse.exe",
+      "bytes": 7394816,
+      "sha256": "A8122FA219E06CFD3CB63A1A825068939437736445411ED57A3D4845D3893610"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\Pulse.Shell.exe",
+      "bytes": 1405952,
+      "sha256": "DA19BB8EB5C077202DE605105B2A212AB4AAF2DAAAFB19FDF632CF5137909598"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\README.txt",
+      "bytes": 1668,
+      "sha256": "791E63E74162658DEDB5CC8540B31266C029AFF2AB438EB604EE94B7ACBD9D20"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\7zip\\7z.dll",
+      "bytes": 1906688,
+      "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\7zip\\7z.exe",
+      "bytes": 577536,
+      "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\7zip\\License.txt",
+      "bytes": 6031,
+      "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\7zip\\README.md",
+      "bytes": 956,
+      "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "bytes": 1103,
+      "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\FilesIcon\\README.md",
+      "bytes": 549,
+      "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\LICENSE",
+      "bytes": 1099,
+      "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\FluentSystemIcons\\SOURCES.md",
+      "bytes": 576,
+      "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\ib-pinyin\\LICENSE.txt",
+      "bytes": 1088,
+      "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\FreeType.txt",
+      "bytes": 6743,
+      "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\HarfBuzz.txt",
+      "bytes": 1570,
+      "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\LICENSE",
+      "bytes": 1079,
+      "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\LumaText\\Unicode.txt",
+      "bytes": 1995,
+      "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "bytes": 333685,
+      "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\MicrosoftBrand\\README.md",
+      "bytes": 897,
+      "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\abseil.txt",
+      "bytes": 11564,
+      "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\agg23.txt",
+      "bytes": 739,
+      "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\binary-distribution.txt",
+      "bytes": 1186,
+      "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\fast_float.txt",
+      "bytes": 1106,
+      "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\freetype.txt",
+      "bytes": 6910,
+      "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\icu.txt",
+      "bytes": 28286,
+      "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\lcms.txt",
+      "bytes": 1380,
+      "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.ijg",
+      "bytes": 13059,
+      "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libjpeg_turbo.md",
+      "bytes": 5755,
+      "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libopenjpeg.txt",
+      "bytes": 1826,
+      "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\libpng.txt",
+      "bytes": 5479,
+      "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\llvm-libc.txt",
+      "bytes": 15418,
+      "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\pdfium.txt",
+      "bytes": 13048,
+      "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\simdutf.txt",
+      "bytes": 1077,
+      "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\portable-stage-bfccceb7d0304f9e98ac811d804a2b09\\Pulse-1.1.3.0-portable\\licenses\\PDFium\\zlib.txt",
+      "bytes": 1361,
+      "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-20261018-114528\\Pulse.exe",
+      "bytes": 7394304,
+      "sha256": "D52CA82E7228E4D0E43084628BD0903E7555D94D0C5E2D87D5422DAE81394EFB"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-20261018-115006\\Pulse.exe",
+      "bytes": 7395328,
+      "sha256": "D94331A2C21B4FD7C13602DF4742BCA6F4AE762655BC69E0AE16388CB75BA385"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\lumatext.dll",
+      "bytes": 1811968,
+      "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\pdfium.dll",
+      "bytes": 7370752,
+      "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "38C35C55428353E79207304EABB8EAFF8D71AF8E3F0D8938A7FDFAA51DC32682"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\Pulse.exe",
+      "bytes": 7395328,
+      "sha256": "8B8C1E6710A75C951AEB26026389A11B9DF5EBA99B311EA00477669605AE0408"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\Pulse.Index.exe",
+      "bytes": 3406848,
+      "sha256": "2169558EC2B00D7C0D86DC12DDAC2962B79672E771DF78E4B3452C6041C7DD10"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "8DF20FF2196994715AE649E9FA6C0EC725C43607611E69C1A0654840DFC38051"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-1.1.3.2-full-20261018-115459\\Pulse.Shell.exe",
+      "bytes": 1416704,
+      "sha256": "E5D731B929227DA8E33F3B733BD65418BFBC54F63F54D8C5CA558CAE6E70CC1B"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-operation-ui-20261017-125504\\Pulse-1.1.3.0-portable-win-x64.zip",
+      "bytes": 12177858,
+      "sha256": "03430D5C3F3941CC189A1FAEF1D491737452995E0F0708BFFF57E721024A6958"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-operation-ui-20261017-125504\\Pulse.exe",
+      "bytes": 7405056,
+      "sha256": "56B77C6378A7AA08A7C2DFEBD40D0442EB30A706CC974CF39E5C7348EDF2E169"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-taskbar-20261017-122115\\Pulse-1.1.3.0-portable-win-x64.zip",
+      "bytes": 12177964,
+      "sha256": "A77C2854B2164D5C738ECC83A8A19F738CC4B0697CE507C98E5D6555E253A1BA"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\rollback-taskbar-20261017-122115\\Pulse.exe",
+      "bytes": 7405056,
+      "sha256": "97B3198DB7287C45C71B13EE5791CD170B2051DE97C605EFD20E907502541589"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.2.0-portable-win-x64.zip",
+      "bytes": 12133434,
+      "sha256": "C739C08EFF9E641E0F900E0886850B5E47D1C198FCB23628B5BBD65C8497D7FC"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.3.0-portable-win-x64.zip",
+      "bytes": 12182192,
+      "sha256": "F2767E6DBD89E5E74D9ABB939D21366AE282C9BA8B8F702A2A39A9B872417DBD"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.1.3.2-portable-win-x64.zip",
+      "bytes": 12173958,
+      "sha256": "C8E5F9DEAFF8F7B57BCB56D059FDA33632434FD2FA39A911360A591A08054CC1"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.1.3.2.exe",
+      "bytes": 9945439,
+      "sha256": "1373DDD0C10FCBE4AB2E3BEAA45C9C341B9D3DDE5F77A093C897E63EEA600D08"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31\\Pulse.Document.exe",
+      "bytes": 237056,
+      "sha256": "0F72217A730DCA183F90A1A4CE119A1A78C5CE8FFF6CB7A9307A149FE39AE3B2"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31\\Pulse.exe",
+      "bytes": 7218176,
+      "sha256": "AF45578D96F37089D2817326081F635BD233DCF258C800BC8847322C7970E93A"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31\\Pulse.Index.exe",
+      "bytes": 3351552,
+      "sha256": "0E283A8B1448D79165BBF106A5938F826BBBA51C21201F6B675544F6BB9A3608"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31\\Pulse.Preview.exe",
+      "bytes": 264704,
+      "sha256": "5B94E8D9A8AF4484163D69B1F427BA76F35416932F75F293D82873BDA5E6B45F"
+    },
+    {
+      "path": "E:\\Projects\\pulse\\build\\release-previous-1.1.1.0-16bc3a0cb3b04ea88c8e409efbbdea31\\Pulse.Shell.exe",
+      "bytes": 1398784,
+      "sha256": "EE9E688FECD9866A89CEB1F35F121E3AC6504CA175B25ABE0090F060C899473A"
+    }
+  ],
+  "completed": false
+}
