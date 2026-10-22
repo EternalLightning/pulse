@@ -1,0 +1,51 @@
+{
+  "Stage": "E:\\Projects\\pulse\\bench_data\\architecture-ops-20261022-201325-129\\bin",
+  "NetworkRoot": "Z:\\",
+  "Payload": [
+    {
+      "Name": "pulse_directory_contract_application_test.exe",
+      "SHA256": "A8F16BFC276379F6A688ABB6734035619030498C575A8BCAA6A6AFF584C7FB23"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "SHA256": "AE26CDAB9A6A68D6FEDFEC7AB44B21D1F955EE56C5D6FE3900ABC154EB253E04"
+    },
+    {
+      "Name": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "Name": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    }
+  ],
+  "Results": [
+    {
+      "Name": "view-preparation",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 23,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "shared-requests",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 10,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "details-worker",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 7,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    }
+  ]
+}

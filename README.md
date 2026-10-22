@@ -2,7 +2,7 @@
 
 **为 Windows 打造的文件管理器，让浏览、搜索和整理文件更顺手。**
 
-Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.4.0，面向 Windows 10 和 Windows 11 x64。
+Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.2.0.0，面向 Windows 10 和 Windows 11 x64。
 
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 

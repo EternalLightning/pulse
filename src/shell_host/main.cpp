@@ -467,15 +467,15 @@ void ExecuteRequest(Request* req) {
     }
 
     std::vector<std::unique_ptr<ProgressSink>> root_sinks;
+    std::vector<pulse::shell::DeletionReference> deletion_references(req->expected_identities.size());
     bool setup_failed = false;
     bool produced_identity_mismatch = false;
     if (SUCCEEDED(hr)) {
         for (const auto& src : req->sources) {
             if (!req->expected_identities.empty()) {
                 const size_t index = static_cast<size_t>(&src - req->sources.data());
-                pulse::FileIdentity current;
-                if (!pulse::ReadPathFileIdentity(src, current) || current != req->expected_identities[index]) {
-                    hr = E_ACCESSDENIED;
+                if (!deletion_references[index].Capture(src, req->expected_identities[index])) {
+                    hr = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
                     produced_identity_mismatch = true;
                     setup_failed = true;
                     sink.NoteSetupFailure(src);
@@ -487,7 +487,8 @@ void ExecuteRequest(Request* req) {
             if (SUCCEEDED(ihr)) {
                 PWSTR resolved = nullptr;
                 ihr = item->GetDisplayName(SIGDN_FILESYSPATH, &resolved);
-                if (SUCCEEDED(ihr) && (!resolved || !pulse::shell::IsSameDeletionItem(src, resolved))) ihr = E_ACCESSDENIED;
+                if (SUCCEEDED(ihr) && (!resolved || !pulse::shell::IsSameDeletionItem(src, resolved)))
+                    ihr = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
                 if (resolved) CoTaskMemFree(resolved);
                 if (FAILED(ihr)) { item->Release(); item = nullptr; }
             }
@@ -512,9 +513,8 @@ void ExecuteRequest(Request* req) {
     bool cancelled = false;
     if (SUCCEEDED(hr)) {
         for (size_t index = 0; index < req->expected_identities.size(); ++index) {
-            pulse::FileIdentity current;
-            if (!pulse::ReadPathFileIdentity(req->sources[index], current) || current != req->expected_identities[index]) {
-                hr = E_ACCESSDENIED;
+            if (!deletion_references[index].Matches(req->sources[index])) {
+                hr = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
                 produced_identity_mismatch = true;
                 setup_failed = true;
                 sink.NoteSetupFailure(req->sources[index]);
@@ -566,7 +566,7 @@ void ExecuteRequest(Request* req) {
 
     if (FAILED(hr) && !sink.delete_diagnostics().empty()) error += L"; " + sink.delete_diagnostics();
     if (produced_identity_mismatch)
-        error = L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + failed_path;
+        error = L"删除对象已改变或无法核对身份，操作已停止；不会删除当前同名项目。 | " + failed_path;
     if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
     std::vector<std::wstring> deleted, recycled, destinations;
     for (const auto& root_sink : root_sinks) {
@@ -574,6 +574,7 @@ void ExecuteRequest(Request* req) {
         recycled.insert(recycled.end(), root_sink->recycled_paths_.begin(), root_sink->recycled_paths_.end());
         destinations.insert(destinations.end(), root_sink->recycle_destinations_.begin(), root_sink->recycle_destinations_.end());
     }
+    deletion_references.clear();
     SendDeleteDone(req->id, hr, cancelled, error, deleted, recycled, destinations, failed_path);
     delete req;
 }

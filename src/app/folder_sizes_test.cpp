@@ -189,16 +189,16 @@ bool RunFolderSizesTest() {
         ui::ListEntryView e; e.name = L"empty"; e.path = empty; e.is_dir = true;
         slot.pane.entries.push_back(e);
         vm.pane_slots.push_back(slot);
-        FillFolderSizes(*state, vm);
+        PrepareFolderSizes(*state, vm);
         check(wait([&] { FillFolderSizes(*state, vm); return vm.pane_slots[0].pane.folder_size_labels[0].text == L"0 B"; }),
               "real view-model wiring requests and displays the last visible row, including a single-item folder");
         for (auto mode : {ui::ViewMode::MediumIcons, ui::ViewMode::LargeIcons, ui::ViewMode::ExtraLargeIcons, ui::ViewMode::Content}) {
             vm.pane_slots[0].pane.view_mode = mode;
-            FillFolderSizes(*state, vm);
+            PrepareFolderSizes(*state, vm);
             check(vm.pane_slots[0].pane.folder_size_labels[0].text == L"0 B", "grid/content view receives actual folder total");
         }
         vm.pane_slots[0].pane.view_mode = ui::ViewMode::Details;
-        FillFolderSizes(*state, vm);
+        PrepareFolderSizes(*state, vm);
         check(vm.pane_slots[0].pane.folder_size_labels.empty(), "unsupported layout removes size labels and requests");
         state->folderSizes.Stop();
     }

@@ -250,6 +250,23 @@ int RunPermanentFromBin() {
     return failures ? 1 : 0;
 }
 
+DWORD deletion_identity_query_error = ERROR_INVALID_PARAMETER;
+BOOL WINAPI DeletionIdentityQuery(HANDLE, FILE_INFO_BY_HANDLE_CLASS, LPVOID, DWORD) {
+    SetLastError(deletion_identity_query_error);
+    return FALSE;
+}
+BOOL WINAPI EmptyDeletionIdentityQuery(HANDLE, FILE_INFO_BY_HANDLE_CLASS, LPVOID data, DWORD size) {
+    ZeroMemory(data, size);
+    return TRUE;
+}
+bool transitioned_deletion_identity = false;
+BOOL WINAPI TransitionDeletionIdentityQuery(HANDLE handle, FILE_INFO_BY_HANDLE_CLASS info, LPVOID data, DWORD size) {
+    if (!GetFileInformationByHandleEx(handle, info, data, size)) return FALSE;
+    if (info == FileIdInfo && transitioned_deletion_identity)
+        static_cast<FILE_ID_INFO*>(data)->FileId.Identifier[15] ^= 0x40;
+    return TRUE;
+}
+
 int RunDeletionIdentity() {
     using pulse::shell::IsSameDeletionItem;
     const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
@@ -265,9 +282,41 @@ int RunDeletionIdentity() {
     const auto file = (root / L"item.txt").wstring();
     check(IsSameDeletionItem(L"\\\\?\\" + file, file), "extended prefix preserves the exact authorized path");
     check(IsSameDeletionItem(file, (root / L"ITEM.TXT").wstring()), "casing change resolves to the same file identity");
+    for (const DWORD unsupported : {ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
+            ERROR_INVALID_FUNCTION, ERROR_CALL_NOT_IMPLEMENTED}) {
+        deletion_identity_query_error = unsupported;
+        check(IsSameDeletionItem(file, (root / L"ITEM.TXT").wstring(), DeletionIdentityQuery),
+            "legacy-only provider accepts Shell casing normalization after identity validation");
+    }
+    deletion_identity_query_error = ERROR_ACCESS_DENIED;
+    check(!IsSameDeletionItem(file, (root / L"ITEM.TXT").wstring(), DeletionIdentityQuery),
+        "identity access denial is never bypassed with a legacy query");
+    check(!IsSameDeletionItem(file, (root / L"ITEM.TXT").wstring(), EmptyDeletionIdentityQuery),
+        "an empty provider file ID cannot authorize a casing change");
+    deletion_identity_query_error = ERROR_NOT_SUPPORTED;
     check(!IsSameDeletionItem(file, (root / L"other.txt").wstring()), "different path is rejected");
     check(!IsSameDeletionItem((root / L"missing.txt").wstring(), (root / L"MISSING.TXT").wstring()),
         "unverifiable casing change is rejected");
+    {
+        pulse::FileIdentity expected;
+        pulse::ReadPathFileIdentity(file, expected);
+        pulse::shell::DeletionReference reference;
+        check(reference.Capture(file, expected, TransitionDeletionIdentityQuery),
+            "deletion retains the exact admitted object before Shell parsing");
+        transitioned_deletion_identity = true;
+        check(reference.Matches(file, TransitionDeletionIdentityQuery),
+            "live object comparison accepts a provider index transition during Shell parsing");
+        const auto displaced = (root / L"displaced.txt").wstring();
+        check(MoveFileW(file.c_str(), displaced.c_str()) != FALSE,
+            "retain the original object while replacing the admitted name");
+        std::ofstream(file) << "replacement must survive";
+        check(!reference.Matches(file, TransitionDeletionIdentityQuery),
+            "provider index transition never authorizes a different same-name replacement");
+        deletion_identity_query_error = ERROR_ACCESS_DENIED;
+        check(!reference.Matches(file, DeletionIdentityQuery),
+            "failed identity queries still refuse deletion");
+        transitioned_deletion_identity = false;
+    }
     const auto sensitive = (root / L"sensitive").wstring();
     const HANDLE directory = CreateFileW(sensitive.c_str(), FILE_WRITE_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
@@ -282,11 +331,132 @@ int RunDeletionIdentity() {
         std::ofstream(lower) << "lower identity";
         std::ofstream(upper) << "upper identity";
         check(!IsSameDeletionItem(lower, upper), "distinct case-sensitive files cannot authorize each other");
+        check(!IsSameDeletionItem(lower, upper, DeletionIdentityQuery),
+            "legacy file identity rejects distinct case-sensitive files");
         check(IsSameDeletionItem(lower, lower), "exact case-sensitive file remains authorized");
     } else {
         std::cout << "[SKIP] case-sensitive directory unavailable, Win32 error=" << error << std::endl;
     }
     std::filesystem::remove_all(root);
+    return failures ? 1 : 0;
+}
+
+int RunNetworkRootDeletion(std::wstring drive_root) {
+    using namespace pulse;
+    if (drive_root.size() == 2 && drive_root[1] == L':') drive_root += L'\\';
+    if (drive_root.size() != 3 || drive_root[1] != L':' || drive_root[2] != L'\\' ||
+        GetDriveTypeW(drive_root.c_str()) != DRIVE_REMOTE) {
+        std::cerr << "[FAIL] --network-root requires a mapped remote drive root\n";
+        return 1;
+    }
+    const auto root = drive_root + L".pulse-delete-fixture-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64());
+    // CREATE_NEW/CreateDirectory isolate all mutation from pre-existing items.
+    if (!CreateDirectoryW(root.c_str(), nullptr)) {
+        std::cout << "[FAIL] fixture directory creation, Win32=" << GetLastError() << '\n';
+        return 1;
+    }
+    const auto selected = root + L"\\selected.txt", original = root + L"\\original.txt";
+    const auto folder = root + L"\\folder", child = folder + L"\\child.txt";
+    const auto create = [](const std::wstring& path) {
+        const HANDLE output = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (output == INVALID_HANDLE_VALUE) return false;
+        const char data[] = "Pulse isolated network deletion fixture";
+        DWORD written = 0;
+        const bool ok = WriteFile(output, data, sizeof(data), &written, nullptr) && written == sizeof(data);
+        CloseHandle(output);
+        return ok;
+    };
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << std::endl;
+        failures += !ok;
+    };
+    const auto exists = [](const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; };
+    const bool created = CreateDirectoryW(folder.c_str(), nullptr) && create(selected) && create(child);
+    check(created, "create only uniquely named remote file and directory fixtures");
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse mapped-drive deletion fixture", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    ops::OpsManager manager;
+    manager.SetUiWindow(owner);
+    manager.Start([] {});
+    const auto wait = [&](auto ready) {
+        const auto deadline = GetTickCount64() + 60000;
+        while (!ready() && GetTickCount64() < deadline) {
+            Sleep(10);
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
+        }
+        return ready();
+    };
+    if (created && owner) {
+        ops::OpRequest request;
+        request.type = ops::OpType::RecycleDelete;
+        request.sources = {selected, folder};
+        const auto task = manager.Submit(request);
+        std::optional<ops::DeleteConfirmation> pending;
+        bool awaiting = task && wait([&] {
+            pending = manager.PendingDeleteConfirmation();
+            return pending.has_value() || !manager.HasPendingFileOperations();
+        }) && pending.has_value();
+        check(awaiting && pending->plan.targets.size() == 2 &&
+            std::all_of(pending->plan.targets.begin(), pending->plan.targets.end(), [](const auto& target) {
+                return target.disposition == ops::DeleteDisposition::Permanent;
+            }), "mapped-drive deletion requests explicit permanent confirmation");
+        if (awaiting) {
+            manager.ResolveDeleteConfirmation(pending->token, false);
+            check(wait([&] { return !manager.HasPendingFileOperations(); }) &&
+                manager.Status().phase == ops::OpPhase::Cancelled && exists(selected) &&
+                exists(child) && manager.DrainCompletions().empty() && !manager.CanUndo(),
+                "cancelling mapped-drive deletion preserves the selected file and directory without success evidence");
+            pending.reset();
+            const auto retry_task = manager.Submit(request);
+            awaiting = retry_task && wait([&] {
+                pending = manager.PendingDeleteConfirmation();
+                return pending.has_value() || !manager.HasPendingFileOperations();
+            }) && pending.has_value();
+            check(awaiting, "a cancelled mapped-drive deletion can be submitted for fresh confirmation");
+        }
+        if (awaiting) {
+            const bool replaced = MoveFileW(selected.c_str(), original.c_str()) && create(selected);
+            check(replaced, "replace the selected fixture while confirmation is pending");
+            manager.ResolveDeleteConfirmation(pending->token, replaced);
+            check(wait([&] { return !manager.HasPendingFileOperations(); }) &&
+                manager.Status().phase == ops::OpPhase::Failed &&
+                manager.Status().failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
+                exists(selected) && exists(original) && exists(child) && manager.DrainCompletions().empty(),
+                "remote same-name replacement is refused and the entire batch survives");
+            if (replaced) {
+                request.sources = {selected, original, folder};
+                const auto fresh_task = manager.Submit(request);
+                pending.reset();
+                const bool fresh_awaiting = fresh_task && wait([&] {
+                    pending = manager.PendingDeleteConfirmation();
+                    return pending.has_value() || !manager.HasPendingFileOperations();
+                }) && pending.has_value();
+                check(fresh_awaiting, "a fresh remote deletion captures the current live identities");
+                if (fresh_awaiting) {
+                    manager.ResolveDeleteConfirmation(pending->token, true);
+                    const bool completed = wait([&] { return !manager.HasPendingFileOperations(); });
+                    check(completed && manager.Status().phase == ops::OpPhase::Completed &&
+                        !manager.Status().elevation_retry_available && !manager.CanUndo(),
+                        "confirmed remote file and directory deletion completes without an elevation retry");
+                    if (!completed || manager.Status().phase != ops::OpPhase::Completed) {
+                        std::cout << "[INFO] hr=0x" << std::hex << manager.Status().failure_hr << std::dec << '\n';
+                        std::cout << "[INFO] " << Utf8(manager.Status().last_error) << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    manager.CancelCurrent();
+    manager.Stop();
+    if (owner) DestroyWindow(owner);
+    check(!exists(selected) && !exists(original) && !exists(folder), "Shell deleted every confirmed remote physical root");
+    // Explicit owned paths only: never recursively clean a user-supplied root.
+    for (const auto& path : {selected, original, child}) if (exists(path)) DeleteFileW(path.c_str());
+    if (exists(folder)) RemoveDirectoryW(folder.c_str());
+    check(RemoveDirectoryW(root.c_str()) != FALSE, "remove the uniquely created remote fixture directory");
     return failures ? 1 : 0;
 }
 
@@ -480,6 +650,10 @@ int RunLockedError() {
 int main(int argc, char** argv) {
     using namespace pulse;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 3 && std::string_view(argv[1]) == "--network-root") {
+        const std::string argument(argv[2]);
+        return RunNetworkRootDeletion(std::wstring(argument.begin(), argument.end()));
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--confirmation-identity") return RunConfirmationIdentity();
     if (argc == 2 && std::string_view(argv[1]) == "--index-validation") return RunIndexValidation();
     if (argc == 2 && std::string_view(argv[1]) == "--locked-error") return RunLockedError();

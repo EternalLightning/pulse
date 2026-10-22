@@ -53,7 +53,7 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
         row.text = e.text;
         row.enabled = e.enabled;
         row.live_update = true;
-        // Software-owned submenu: keep the hierarchy as a one-level flyout.
+        // Keep software-owned submenus intact inside the overflow section.
         for (const auto& c : e.children) {
             if (c.text.empty() || c.command == 0 || native_quick_access(c) ||
                 !seen_commands.insert(c.command).second) continue;
@@ -260,14 +260,27 @@ std::vector<ui::FluentMenuItem> ContextMenuController::BuildDisplay(
         for (auto& child : children) child.live_update = true;
         return children;
     }
+    const size_t builtin_count = display.size();
     AppendShellSection(display, entries);
-    ui::FluentMenuItem manage;
-    manage.command = CmdSettingsContextMenu;
-    manage.live_update = true;
-    manage.text = pulse::l10n::Get(pulse::l10n::StringId::ManageContext);
-    manage.glyph = L"\xE713";
-    if (!display.empty()) display.back().separator_after = true;
-    display.push_back(std::move(manage));
+    std::vector<ui::FluentMenuItem> shell_items;
+    for (size_t i = builtin_count; i < display.size(); ++i)
+        shell_items.push_back(std::move(display[i]));
+    display.resize(builtin_count);
+    if (!shell_items.empty() || (token_ != 0 && !com_ready_)) {
+        ui::FluentMenuItem more;
+        more.text = pulse::l10n::Get(pulse::l10n::StringId::MenuMoreOptions);
+        more.glyph = L"\xE712";
+        more.live_update = true;
+        if (shell_items.empty()) {
+            ui::FluentMenuItem pending;
+            pending.text = pulse::l10n::Get(pulse::l10n::StringId::LoadingEllipsis);
+            pending.enabled = false;
+            shell_items.push_back(std::move(pending));
+        }
+        more.children = std::move(shell_items);
+        if (!display.empty()) display.back().separator_after = true;
+        display.push_back(std::move(more));
+    }
     return display;
 }
 
@@ -552,30 +565,31 @@ std::vector<ops::ShellMenuItem> ContextMenuController::DisplayedComItems() const
             }
         }
     }
-    // Native templates load lazily after the popup opens. Keep other Shell
-    // sections fixed, but admit new template rows through the live New menu.
-    if (background_ && com_items_current_) {
-        bool native_group = false;
+    // Shell handlers finish asynchronously. Admit late rows inside the live
+    // overflow/New flyouts while preserving existing rows and command identity.
+    if (com_items_current_) {
+        const ops::ShellMenuItem* live_parent = nullptr;
         for (const auto& live : com_items_) {
-            if (!live.child)
-                native_group = live.has_children && ipc::IsNativeNewMenuHandler(live.clsid);
-            if (!native_group) continue;
-            const bool present = std::any_of(displayed.begin(), displayed.end(), [&](const auto& row) {
+            if (!live.child) live_parent = live.has_children ? &live : nullptr;
+            const auto same_item = [&](const auto& row) {
                 return row.clsid == live.clsid && row.handler == live.handler &&
                     row.verb == live.verb && row.text == live.text &&
                     row.child == live.child && row.has_children == live.has_children;
-            });
-            if (present) continue;
+            };
             if (!live.child) {
-                displayed.push_back(live);
+                if (!std::any_of(displayed.begin(), displayed.end(), same_item))
+                    displayed.push_back(live);
             } else {
+                if (!live_parent) continue;
                 auto parent = std::find_if(displayed.begin(), displayed.end(), [&](const auto& row) {
-                    return row.has_children && row.clsid == live.clsid && row.handler == live.handler;
+                    return row.has_children && !row.child && row.clsid == live_parent->clsid &&
+                        row.handler == live_parent->handler && row.verb == live_parent->verb &&
+                        row.text == live_parent->text;
                 });
                 if (parent == displayed.end()) continue;
                 auto end = std::next(parent);
                 while (end != displayed.end() && end->child) ++end;
-                displayed.insert(end, live);
+                if (!std::any_of(std::next(parent), end, same_item)) displayed.insert(end, live);
             }
         }
     }

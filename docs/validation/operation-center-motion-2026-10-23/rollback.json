@@ -1,0 +1,336 @@
+{
+  "Root": "D:\\Applications\\Pulse",
+  "Backup": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.0.0-motion-20261023-012156",
+  "Files": [
+    {
+      "Path": "LICENSE",
+      "SHA256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+      "Length": 11358
+    },
+    {
+      "Path": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+      "Length": 1811968
+    },
+    {
+      "Path": "NOTICE",
+      "SHA256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA",
+      "Length": 1139
+    },
+    {
+      "Path": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+      "Length": 7370752
+    },
+    {
+      "Path": "Pulse.Document.exe",
+      "SHA256": "E735DC50751885864BFC6ACB116C80735DBBDE2D98BE832A339498DCCD3BE1CC",
+      "Length": 237056
+    },
+    {
+      "Path": "Pulse.exe",
+      "SHA256": "67EA861B6E80FBE730CC9D872BD874494C6F461F7E606E31AB72A2FA2A1025CA",
+      "Length": 7759872
+    },
+    {
+      "Path": "Pulse.Index.exe",
+      "SHA256": "C605FCB34D59DEF6E6FC57E478037FA57F56FB99D961C23CA03E6BF4BB492F70",
+      "Length": 3412480
+    },
+    {
+      "Path": "Pulse.Index.exe~RF19d2283.TMP",
+      "SHA256": "90444F276456809A2D68139E9E9C5C574930714A931C7C0B5AF19A21A05D82B8",
+      "Length": 3408896
+    },
+    {
+      "Path": "Pulse.Preview.exe",
+      "SHA256": "74126605C1DDC25F48507D74F6586C415B0782AA9E4724A0E627C7FE3AF8FAA1",
+      "Length": 264704
+    },
+    {
+      "Path": "Pulse.Shell.exe",
+      "SHA256": "C9933AA58944E1FDADB4BEBAC219BCBC8759B21D275FE0187ECC3903B31B435C",
+      "Length": 1469952
+    },
+    {
+      "Path": "README.txt",
+      "SHA256": "9399ECC16813732E74752C2A9A7A08E7B2B0214175C972F6CCB067736E0EC4B4",
+      "Length": 1668
+    },
+    {
+      "Path": ".rollback\\home-menu-20261017-191025\\deployment.json",
+      "SHA256": "B085E7BA071ACF34D1B14DA688448C4B6E0B7EA37E3D8626859828B09C8703DA",
+      "Length": 573
+    },
+    {
+      "Path": ".rollback\\home-menu-20261017-191025\\Pulse.exe",
+      "SHA256": "F3F9FDA0C5CDB48AED91695BA82D4F12B84C84C3AF5DB8615FED6B5F90A7CACD",
+      "Length": 7383552
+    },
+    {
+      "Path": ".rollback\\home-startup-20261017-174626\\deployment.json",
+      "SHA256": "61EBF2EC32C3FB52E4E147F295D08C8B761499AFD05F018513CBEFBE5726CA95",
+      "Length": 785
+    },
+    {
+      "Path": ".rollback\\home-startup-20261017-174626\\Pulse.exe",
+      "SHA256": "AE1E236487F6DF9B9825CB72E6660F49A5A5F43A4CDC6069943BDCFF73E66611",
+      "Length": 7411200
+    },
+    {
+      "Path": ".rollback\\window-session-20261017-164503\\deployment.json",
+      "SHA256": "0C31FA810DE498DAA3044B09E749119B595C202732E6685B252B65FECA1259DD",
+      "Length": 666
+    },
+    {
+      "Path": ".rollback\\window-session-20261017-164503\\Pulse.exe",
+      "SHA256": "C4225AAD36AE197264EE86368165C4766ED40E4E29CEB5467DA401CBA9500980",
+      "Length": 7411200
+    },
+    {
+      "Path": "7zip\\7z.dll",
+      "SHA256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D",
+      "Length": 1906688
+    },
+    {
+      "Path": "7zip\\7z.exe",
+      "SHA256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F",
+      "Length": 577536
+    },
+    {
+      "Path": "7zip\\License.txt",
+      "SHA256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D",
+      "Length": 6031
+    },
+    {
+      "Path": "7zip\\README.md",
+      "SHA256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D",
+      "Length": 956
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\backup-manifest.json",
+      "SHA256": "1037474CB64C6F10FAA07FC3FBD922B9E8CF2A7D42740D37CA079D02B81A80EB",
+      "Length": 1433
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\Pulse.Document.exe",
+      "SHA256": "1C355329B44393BDF126E6EC76AA56832A86F0DA4DC10AD2AD0938425BA10376",
+      "Length": 237056
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\Pulse.exe",
+      "SHA256": "8556467E6F720A6024E07CD9A740D1AEB9AF50F9401BD56D5E5C7D9EAF6B1CA8",
+      "Length": 7315968
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\Pulse.Index.exe",
+      "SHA256": "190A0908FB7A9E3D331812DD3BBECB8A11964450F28852E6E502B7D881044144",
+      "Length": 3405824
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\Pulse.Preview.exe",
+      "SHA256": "A7BD45D496E36A2E657F4287B4EC00CC42B81E7051958E502D3F478DD5852DEF",
+      "Length": 264704
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\Pulse.Shell.exe",
+      "SHA256": "0C318B5507A8D4DD3A5D4D542A1C1E385F181E4D63CC7A828FD277CD29C32412",
+      "Length": 1404416
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-223654\\README.txt",
+      "SHA256": "388DD5BC91D166280540BB3E01F997E09CB24D722E57B17EDA74C96894BC0BC7",
+      "Length": 1668
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-225558\\backup-manifest.json",
+      "SHA256": "EA9E24ED5F3FEB20EE52EBEB68BEEBB74891CE4BEC3BE391DB8C61C11B7F8441",
+      "Length": 415
+    },
+    {
+      "Path": "backups\\before-1.1.3.0-20261016-225558\\Pulse.exe",
+      "SHA256": "FE2ABB9C8CA382AF2FEB86EF22959FD526329DA4CCEDB268512F530A184AC2B0",
+      "Length": 7395840
+    },
+    {
+      "Path": "backups\\before-audit-20261016-193444\\backup-manifest.json",
+      "SHA256": "C8C59D29AFF2B87303C6723A35C25D9C5CB0E5E69DA16C876C190840FC36CB87",
+      "Length": 957
+    },
+    {
+      "Path": "backups\\before-audit-20261016-193444\\Pulse.exe",
+      "SHA256": "C7D2774C42B811DEE66B2382031B08A68D9051F5AED0D7CA16D9E5EBB9987BC1",
+      "Length": 7240704
+    },
+    {
+      "Path": "backups\\before-audit-20261016-193444\\Pulse.Index.exe",
+      "SHA256": "792ACC6B0CE29C026D00689135519C17F51BD4C9A5CA4145178A6F1FE453F1AA",
+      "Length": 3351552
+    },
+    {
+      "Path": "backups\\before-audit-20261016-193444\\Pulse.Preview.exe",
+      "SHA256": "51045A88088ADAF7B84D7F1EF30C3037A05483FEC211EBC599A4C3E9CB0475B9",
+      "Length": 264704
+    },
+    {
+      "Path": "backups\\before-audit-20261016-193444\\Pulse.Shell.exe",
+      "SHA256": "E5234910AA7519038B79C56A28C6AE98461BD1F92A63E3150E239411E2AD5199",
+      "Length": 1399296
+    },
+    {
+      "Path": "backups\\before-background-fit-20261015-143226\\Pulse.exe",
+      "SHA256": "8DA36850966F7C3579850F279C6B83EC936F59A268744D6E6B0F80489FED05BE",
+      "Length": 7237632
+    },
+    {
+      "Path": "backups\\before-background-fit-20261015-143226\\Pulse.Shell.exe",
+      "SHA256": "B73DABCF8D1E5D6A56CC6E3479FEBB7E706BC5A09B7520C2E49DCFE6B88BAE79",
+      "Length": 1399296
+    },
+    {
+      "Path": "backups\\before-window-open-fix-20261017-001404\\backup-manifest.json",
+      "SHA256": "36AABF3592973C6B0D8A57CD19D783E0941ECC383FA728AD26A008FA10BF761C",
+      "Length": 477
+    },
+    {
+      "Path": "backups\\before-window-open-fix-20261017-001404\\Pulse.exe",
+      "SHA256": "A8122FA219E06CFD3CB63A1A825068939437736445411ED57A3D4845D3893610",
+      "Length": 7394816
+    },
+    {
+      "Path": "backups\\before-window-open-fix-20261017-001404\\Pulse.Shell.exe",
+      "SHA256": "DA19BB8EB5C077202DE605105B2A212AB4AAF2DAAAFB19FDF632CF5137909598",
+      "Length": 1405952
+    },
+    {
+      "Path": "licenses\\FilesIcon\\LICENSE-MIT.txt",
+      "SHA256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69",
+      "Length": 1103
+    },
+    {
+      "Path": "licenses\\FilesIcon\\README.md",
+      "SHA256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB",
+      "Length": 549
+    },
+    {
+      "Path": "licenses\\FluentSystemIcons\\LICENSE",
+      "SHA256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381",
+      "Length": 1099
+    },
+    {
+      "Path": "licenses\\FluentSystemIcons\\SOURCES.md",
+      "SHA256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983",
+      "Length": 576
+    },
+    {
+      "Path": "licenses\\ib-pinyin\\LICENSE.txt",
+      "SHA256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9",
+      "Length": 1088
+    },
+    {
+      "Path": "licenses\\LumaText\\FreeType.txt",
+      "SHA256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1",
+      "Length": 6743
+    },
+    {
+      "Path": "licenses\\LumaText\\HarfBuzz.txt",
+      "SHA256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2",
+      "Length": 1570
+    },
+    {
+      "Path": "licenses\\LumaText\\LICENSE",
+      "SHA256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE",
+      "Length": 1079
+    },
+    {
+      "Path": "licenses\\LumaText\\Unicode.txt",
+      "SHA256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531",
+      "Length": 1995
+    },
+    {
+      "Path": "licenses\\MicrosoftBrand\\LICENSE.pdf",
+      "SHA256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C",
+      "Length": 333685
+    },
+    {
+      "Path": "licenses\\MicrosoftBrand\\README.md",
+      "SHA256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F",
+      "Length": 897
+    },
+    {
+      "Path": "licenses\\PDFium\\abseil.txt",
+      "SHA256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603",
+      "Length": 11564
+    },
+    {
+      "Path": "licenses\\PDFium\\agg23.txt",
+      "SHA256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11",
+      "Length": 739
+    },
+    {
+      "Path": "licenses\\PDFium\\binary-distribution.txt",
+      "SHA256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A",
+      "Length": 1186
+    },
+    {
+      "Path": "licenses\\PDFium\\fast_float.txt",
+      "SHA256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B",
+      "Length": 1106
+    },
+    {
+      "Path": "licenses\\PDFium\\freetype.txt",
+      "SHA256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC",
+      "Length": 6910
+    },
+    {
+      "Path": "licenses\\PDFium\\icu.txt",
+      "SHA256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A",
+      "Length": 28286
+    },
+    {
+      "Path": "licenses\\PDFium\\lcms.txt",
+      "SHA256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B",
+      "Length": 1380
+    },
+    {
+      "Path": "licenses\\PDFium\\libjpeg_turbo.ijg",
+      "SHA256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704",
+      "Length": 13059
+    },
+    {
+      "Path": "licenses\\PDFium\\libjpeg_turbo.md",
+      "SHA256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95",
+      "Length": 5755
+    },
+    {
+      "Path": "licenses\\PDFium\\libopenjpeg.txt",
+      "SHA256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A",
+      "Length": 1826
+    },
+    {
+      "Path": "licenses\\PDFium\\libpng.txt",
+      "SHA256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511",
+      "Length": 5479
+    },
+    {
+      "Path": "licenses\\PDFium\\llvm-libc.txt",
+      "SHA256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383",
+      "Length": 15418
+    },
+    {
+      "Path": "licenses\\PDFium\\pdfium.txt",
+      "SHA256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049",
+      "Length": 13048
+    },
+    {
+      "Path": "licenses\\PDFium\\simdutf.txt",
+      "SHA256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719",
+      "Length": 1077
+    },
+    {
+      "Path": "licenses\\PDFium\\zlib.txt",
+      "SHA256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539",
+      "Length": 1361
+    }
+  ]
+}

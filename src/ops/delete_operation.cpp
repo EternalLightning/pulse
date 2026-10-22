@@ -19,6 +19,14 @@ bool SamePath(const std::wstring& left, const std::wstring& right) {
     return fs::NormalizePath(left) == fs::NormalizePath(right);
 }
 
+bool WithinDeletedPath(const std::wstring& path, const std::wstring& deleted) {
+    const auto normalized = fs::NormalizePath(path);
+    auto root = fs::NormalizePath(deleted);
+    while (!root.empty() && root.back() == L'\\') root.pop_back();
+    return normalized == root || (normalized.size() > root.size() &&
+        normalized.starts_with(root) && normalized[root.size()] == L'\\');
+}
+
 bool IsNetworkDeletionPath(std::wstring_view path) {
     const auto parsed = pulse::path::StripExtendedPathPrefix(path);
     if (parsed.starts_with(L"\\\\")) return true;
@@ -186,6 +194,43 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
             else undo_.pop_back();
             ++undo_revision_;
         }
+        std::vector<FileIdentity> deleted_identities;
+        if (active_item_ && active_item_->seq == item.seq) {
+            const auto& active = *active_item_;
+            for (size_t i = 0; i < active.req.sources.size() && i < active.retry_source_references.size(); ++i) {
+                const auto& source = active.req.sources[i];
+                const bool removed = std::any_of(deleted_paths.begin(), deleted_paths.end(),
+                    [&](const auto& path) { return WithinDeletedPath(source, path); }) ||
+                    std::any_of(recycled_paths.begin(), recycled_paths.end(),
+                    [&](const auto& path) { return WithinDeletedPath(source, path); });
+                FileIdentity identity;
+                if (removed && ReadFileIdentity(active.retry_source_references[i].Get(), identity) && identity.Valid())
+                    deleted_identities.push_back(identity);
+            }
+        }
+        for (auto& entry : undo_) {
+            if (entry.produced_references.empty()) continue;
+            // Earlier history may still name the object before a later rename.
+            // Compare live handles: network providers can change their provisional IDs.
+            const bool retained_deleted_object = std::any_of(entry.produced_references.begin(),
+                entry.produced_references.end(), [&](const auto& reference) {
+                    FileIdentity current;
+                    return reference.Get() && ReadFileIdentity(reference.Get(), current) && current.Valid() &&
+                        std::find(deleted_identities.begin(), deleted_identities.end(), current) != deleted_identities.end();
+                });
+            const auto& paths = entry.destinations.empty() ? entry.sources : entry.destinations;
+            if (retained_deleted_object || std::any_of(paths.begin(), paths.end(), [&](const auto& path) {
+                return std::any_of(deleted_paths.begin(), deleted_paths.end(), [&](const auto& deleted) {
+                    return WithinDeletedPath(path, deleted);
+                }) || std::any_of(recycled_paths.begin(), recycled_paths.end(), [&](const auto& recycled) {
+                    return WithinDeletedPath(path, recycled);
+                });
+            })) {
+                entry.supported = false;
+                entry.produced_references.clear();
+                ++undo_revision_;
+            }
+        }
         delete_outcomes_.push_back({item.seq, !deleted_paths.empty() || !recycled_paths.empty(), uncertain});
         if (item.recovery_sequence != 0) {
             scheduled_recovery_.erase(item.recovery_sequence);
@@ -318,9 +363,20 @@ void OpsManager::RunDelete(const QueueItem& item,
     }
     auto plan = BuildDeletePlan(item.req, item.seq, error);
     if (!error.empty()) { finish(std::move(error)); return; }
+    bool network_copy_undo = false;
     if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
-        std::any_of(plan.targets.begin(), plan.targets.end(), [](const auto& target) {
-            return target.disposition == DeleteDisposition::Permanent;
+        item.req.type == OpType::RecycleDelete && item.req.delete_targets.empty()) {
+        std::lock_guard lock(mutex_);
+        network_copy_undo = item.req.undo_revision == undo_revision_ && !undo_.empty() &&
+            undo_.back().supported && undo_.back().type == OpType::Copy &&
+            undo_.back().destinations == item.req.sources &&
+            undo_.back().produced_identities == item.req.undo_produced_identities;
+    }
+    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+        std::any_of(plan.targets.begin(), plan.targets.end(), [&](const auto& target) {
+            return target.disposition == DeleteDisposition::Permanent &&
+                (!network_copy_undo || !std::all_of(target.physical_paths.begin(),
+                    target.physical_paths.end(), IsNetworkDeletionPath));
         })) {
         finish(L"此位置不支持安全的原生回收撤销；不会将撤销改为永久删除。", {}, false,
             false, {}, {}, false, {}, E_ACCESSDENIED);
@@ -545,6 +601,7 @@ void OpsManager::RunDelete(const QueueItem& item,
         }
     }
     InvalidateRecycleUndo(actual, backend_lost);
+    admitted.retry_source_references.clear();
     finish(std::move(error), logical, true, uncertain, logical_recycled, logical_destinations, cancelled, locks,
         static_cast<HRESULT>(hr), failed_path);
 }

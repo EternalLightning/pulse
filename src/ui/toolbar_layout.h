@@ -6,7 +6,7 @@
 namespace pulse::ui {
 struct ToolbarLayout {
     std::array<D2D1_RECT_F, 4> navigation{};
-    D2D1_RECT_F address{}, search{}, create{}, extract{}, extract_all{};
+    D2D1_RECT_F address{}, search{}, operations{}, create{}, extract{}, extract_all{};
     D2D1_RECT_F sort{}, filter{}, overflow{};
     std::array<D2D1_RECT_F, 9> commands{};
 };
@@ -22,7 +22,9 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
         x += nav_step;
     }
     const float search_width = std::clamp(available*0.27f, 140*scale, 360*scale);
-    out.search = {width-margin-search_width,top+4*scale,width-margin,top+40*scale};
+    out.operations = {width-margin-36*scale,top+4*scale,width-margin,top+40*scale};
+    const float search_right = out.operations.left-8*scale;
+    out.search = {search_right-search_width,top+4*scale,search_right,top+40*scale};
     out.address = {x+6*scale,top+4*scale,out.search.left-8*scale,top+40*scale};
     if (available < 480*scale) {
         out.search.left=out.search.right-32*scale;
@@ -30,7 +32,7 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
     out.address.right = out.search.left-8*scale;
     out.create = {left+margin,top+50*scale,left+margin+create_width,top+82*scale};
     const float sort_width = available >= 700*scale ? 88*scale : 32*scale;
-    const float filter_base = available >= 700*scale ? 88*scale : 32*scale;
+    const float filter_base = available >= 700*scale ? 76*scale : 32*scale;
     out.overflow = {width-margin-32*scale,top+50*scale,width-margin,top+82*scale};
     const float filter_right = out.overflow.left-8*scale;
     const float left_limit = filter_right-filter_base-6*scale-sort_width-8*scale;

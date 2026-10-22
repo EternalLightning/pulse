@@ -7,6 +7,7 @@
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
 #include "../ui/file_operation_dialog.h"
+#include "../ui/operation_center.h"
 #include "../ui/quick_preview_window.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
@@ -532,6 +533,23 @@ struct AppState : AppCoreOwner {
     std::wstring pending_undo_json; // loaded from session, imported in WM_CREATE
     uint64_t opsCompleted = 0;
     std::unique_ptr<ui::FileOperationWindow> operationWindow;
+    std::unique_ptr<ui::FileOperationWindow> operationHistoryWindow;
+    std::unique_ptr<ui::OperationCenter> operationCenter;
+    struct OperationCenterTaskSource {
+        AppState* window = nullptr;
+        HWND hwnd = nullptr;
+        uint64_t task_id = 0;
+        uint64_t display_id = 0;
+    };
+    std::vector<OperationCenterTaskSource> operationCenterSources;
+    uint64_t nextOperationCenterId = 1;
+    struct TrayTransferRecord {
+        bool move_intent = false;
+        bool can_restage = false;
+        bool recovery_consumed = false;
+        std::vector<std::wstring> remaining;
+    };
+    std::unordered_map<uint64_t, TrayTransferRecord> trayTransfers;
     uint64_t operationUiTaskId = 0;
     uint64_t operationDismissedTaskId = 0;
     uint64_t conflictUiToken = 0;

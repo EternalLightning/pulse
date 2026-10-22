@@ -90,8 +90,9 @@ bool RunContextMenuRefreshTests() {
     auto pending = controller.BuildDisplay(prefs, controller.base_items(), changed);
     passed &= Report("pending native templates leave every Pulse creation command usable", pending.front().enabled &&
         pending.front().children.size() == 3 && pending.front().children.front().enabled);
-    passed &= Report("cold background menu has no transient loading row", pending.size() == 2 &&
-        pending.back().command == CmdSettingsContextMenu);
+    passed &= Report("cold background menu reserves overflow and keeps loading inside its flyout", pending.size() == 2 &&
+        pending.back().command != CmdSettingsContextMenu && ShellSection(pending).size() == 1 &&
+        !ShellSection(pending).front().enabled);
     pulse::ops::ShellMenuItem parent;
     parent.has_children = true; parent.text = L"Native New"; parent.verb = L"New";
     parent.clsid = L"{D969A300-E7FF-11D0-A93B-00A0C90F2719}"; parent.handler = L"NewMenu";
@@ -102,7 +103,7 @@ bool RunContextMenuRefreshTests() {
     controller.CompleteComQuery(1, {parent, folder, text, office}, GetTickCount64());
     auto live = controller.BuildDisplay(prefs, controller.base_items(), changed);
     passed &= Report("cold background New admits late native templates without duplicating builtins",
-        live.size() == pending.size() && live.front().children.size() == 4 &&
+        live.size() == 1 && live.front().children.size() == 4 &&
         live.front().children.back().text == office.text && live.front().children.back().enabled &&
         live.front().children[2].separator_after);
     controller.CloseMenu();
@@ -114,7 +115,7 @@ bool RunContextMenuRefreshTests() {
     controller.OpenMenu({create});
     live = controller.BuildDisplay(prefs, controller.base_items(), changed);
     passed &= Report("native folder and text templates merge by semantic verb without duplicate New headers",
-        live.size() == 2 && live.front().children.size() == 4 &&
+        live.size() == 1 && live.front().children.size() == 4 &&
         live.front().children.back().text == office.text && live.front().children.back().enabled);
     passed &= Report("Pulse creation rows precede the remaining native templates", live.front().children[0].command == CmdNewFolder &&
         live.front().children[1].command == CmdNewFile && live.front().children[2].command == CmdNewTextFile &&
@@ -144,14 +145,16 @@ bool RunContextMenuRefreshTests() {
     controller.CompleteComQuery(4, {}, GetTickCount64()); controller.OpenMenu({});
     live = controller.BuildDisplay(prefs, {}, changed);
     passed &= Report("Open With retains one chooser entrance alongside registered applications",
-        live.size() == 3 && live[0].text == app.display && live[1].text == openas.display);
+        live.size() == 1 && ShellSection(live).size() == 2 &&
+        ShellSection(live)[0].text == app.display && ShellSection(live)[1].text == openas.display);
     StaticVerb replacement; replacement.verb = L"replacement"; replacement.display = L"New association";
     passed &= Report("registry refresh is cached without replacing open static command bindings",
         !controller.CompleteStaticVerbs(L".txt", {replacement, app, openas}));
     const auto static_live = controller.BuildDisplay(prefs, {}, changed);
     passed &= Report("late registry entries keep the current menu captions and row count",
-        static_live.size() == live.size() && static_live[0].text == live[0].text &&
-        static_live[1].text == live[1].text);
+        static_live.size() == live.size() && ShellSection(static_live).size() == ShellSection(live).size() &&
+        ShellSection(static_live)[0].text == ShellSection(live)[0].text &&
+        ShellSection(static_live)[1].text == ShellSection(live)[1].text);
     controller.CloseMenu(); controller.ExecuteShellCommand(CmdShellStaticBase + pulse::ipc::kStaticVerbStride, {}, {});
     passed &= Report("single chooser entrance delegates through the existing openas shell operation",
         executed_path == L"C:\\one.txt" && executed_verb == L"openas");
@@ -171,7 +174,7 @@ bool RunContextMenuRefreshTests() {
     controller.OpenMenu({create});
     live = controller.BuildDisplay(prefs, controller.base_items(), changed);
     passed &= Report("dismissed toolbar and background menus reuse the same prepared directory session",
-        queries == prepared_queries && closes == prepared_closes && live.size() == 2 &&
+        queries == prepared_queries && closes == prepared_closes && live.size() == 1 &&
         live.front().children.size() == dropdown.size() && live.front().children.back().enabled);
     controller.CloseMenu();
     controller.ExecuteShellCommand(CmdNewFolder, {}, {});

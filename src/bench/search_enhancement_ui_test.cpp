@@ -185,6 +185,18 @@ int main(int argc, char** argv) {
     Ranges(L"中国.txt", L"z", {}, "one Latin letter does not highlight pinyin");
     const auto pane_terms = ui::NameHighlightTerms(L"zgbg", {});
     Check(ui::NameMatchRanges(L"中国报告.txt", pane_terms).empty(), "pane filter keeps its literal semantics");
+    const auto combined_terms = ui::NameHighlightTerms(L"tag:\"设计 初稿\" 报告 ext:pdf size:>1MB -tag:归档", {});
+    Check(combined_terms.size() == 1 && combined_terms.front().name == L"报告" &&
+        SameRanges(ui::NameMatchRanges(L"年度报告.pdf", combined_terms), {{2, 2}}),
+        "combined pane filters highlight only the filename pattern");
+    Check(ui::NameHighlightTerms(L"tag:设计 ext:pdf size:>1MB", {}).empty(),
+        "metadata-only pane filters do not highlight names");
+    Check(ui::NameHighlightTerms(L"报告 size:broken", {}).empty(),
+        "invalid pane filters do not show misleading filename highlights");
+    const auto wildcard_terms = ui::NameHighlightTerms(L"tag:设计 *报告* ext:pdf", {});
+    Check(wildcard_terms.size() == 1 && wildcard_terms.front().name_how == index::NameHow::Wildcard &&
+        SameRanges(ui::NameMatchRanges(L"年度报告.pdf", wildcard_terms), {{2, 2}}),
+        "combined pane filters retain wildcard filename highlighting");
     const auto original_ranges = ui::NameMatchRanges(L"中国报告2026.txt", ui::NameHighlightTerms({}, L"zgbg"));
     const auto visible = ui::VisibleNameMatchRanges(L"中国报告2026.txt", L"中国…txt", original_ranges);
     Check(visible.size() == 1 && visible[0].start == 0 && visible[0].length == 2,

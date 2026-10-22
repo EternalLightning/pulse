@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <commctrl.h>
+#include <dwmapi.h>
 
 namespace pulse::ui {
 struct FluentMenuTestPeer {
@@ -47,18 +48,65 @@ struct FluentMenuTestPeer {
         // the user's real cursor outside this isolated popup.
         menu.OnMouse(point, false);
     }
-    static void ChooseSubRow(FluentMenu& menu, int row) {
+    static void ChooseSubRow(FluentMenu& menu, int row, int depth = 0) {
         const int margin = FluentMenu::kShadowMargin;
         POINT point{margin + 40,
-            static_cast<LONG>(margin + menu.sub_model_.RowTopPx(row) +
-                menu.sub_model_.RowHeightPx() * 0.5f)};
-        SendMessageW(menu.sub_hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+            static_cast<LONG>(margin + menu.flyouts_[depth]->model.RowTopPx(row) +
+                menu.flyouts_[depth]->model.RowHeightPx() * 0.5f - menu.flyouts_[depth]->scroll_y)};
+        SendMessageW(menu.flyouts_[depth]->hwnd, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+    }
+    static float FlyoutScroll(const FluentMenu& menu, int depth) { return menu.flyouts_[depth]->scroll_y; }
+    static int Depth(const FluentMenu& menu) { return menu.open_flyouts_; }
+    static void Key(FluentMenu& menu, WPARAM key) { menu.HandleMenuKey(key); }
+    static int FlyoutHover(const FluentMenu& menu, int depth) { return menu.flyouts_[depth]->hover; }
+    static void MoveSubRow(FluentMenu& menu, int row, int depth) {
+        const auto& flyout = *menu.flyouts_[depth];
+        POINT point{FluentMenu::kShadowMargin + 40,
+            static_cast<LONG>(FluentMenu::kShadowMargin + flyout.model.RowTopPx(row) +
+                flyout.model.RowHeightPx() * 0.5f - flyout.scroll_y)};
+        menu.OnSubMouse(point, false, depth);
+    }
+    static void ExpireDwell(FluentMenu& menu) {
+        if (menu.sub_pending_row_ < 0) return;
+        const int row = menu.sub_pending_row_, depth = menu.sub_pending_depth_;
+        menu.sub_pending_row_ = -1;
+        menu.OpenSubmenu(row, depth);
+    }
+    static bool CardsInWorkArea(const FluentMenu& menu) {
+        for (int depth = 0; depth < menu.open_flyouts_; ++depth) {
+            const auto& flyout = *menu.flyouts_[depth];
+            MONITORINFO info{sizeof(info)};
+            GetMonitorInfoW(MonitorFromWindow(flyout.hwnd, MONITOR_DEFAULTTONEAREST), &info);
+            if (flyout.x + FluentMenu::kShadowMargin < info.rcWork.left ||
+                flyout.y + FluentMenu::kShadowMargin < info.rcWork.top ||
+                flyout.x + FluentMenu::kShadowMargin + flyout.model.WidthPx() > info.rcWork.right ||
+                flyout.y + FluentMenu::kShadowMargin + flyout.body_height > info.rcWork.bottom) return false;
+        }
+        return true;
+    }
+    static void PlaceNearBottomRight(FluentMenu& menu) {
+        MONITORINFO info{sizeof(info)};
+        GetMonitorInfoW(MonitorFromWindow(menu.hwnd_, MONITOR_DEFAULTTONEAREST), &info);
+        menu.base_x_ = info.rcWork.right - menu.model_.WidthPx() - FluentMenu::kShadowMargin;
+        menu.base_y_ = info.rcWork.bottom - menu.model_.HeightPx() - FluentMenu::kShadowMargin;
+        menu.Present(255, 0);
+    }
+    static HWND FlyoutWindow(const FluentMenu& menu, int depth) { return menu.flyouts_[depth]->hwnd; }
+    static RECT Bounds(const FluentMenu& menu) {
+        RECT bounds{};
+        GetWindowRect(menu.hwnd_, &bounds);
+        for (int depth = 0; depth < menu.open_flyouts_; ++depth) {
+            RECT child{};
+            GetWindowRect(menu.flyouts_[depth]->hwnd, &child);
+            UnionRect(&bounds, &bounds, &child);
+        }
+        return bounds;
     }
     static BYTE Alpha(const FluentMenu& menu) { return menu.present_alpha_; }
     static uint64_t PresentCount(const FluentMenu& menu) { return menu.present_count_; }
     static void FullyVisible(FluentMenu& menu) { menu.Present(255, 0); }
     static bool Acrylic(const FluentMenu& menu, bool submenu = false) {
-        const auto& surface = submenu ? menu.sub_surf_ : menu.surf_;
+        const auto& surface = submenu ? menu.flyouts_[0]->surface : menu.surf_;
         return surface.backdrop.Active();
     }
     static bool DesktopSample(const FluentMenu& menu) { return menu.backdrop_source_.Bitmap() != nullptr; }
@@ -78,13 +126,13 @@ struct FluentMenuTestPeer {
             pixels[y * s.w + s.w - FluentMenu::kShadowMargin - 15];
     }
     static int Offset(const FluentMenu& menu) { return menu.present_offset_; }
-    static int SubY(const FluentMenu& menu) { return menu.sub_y_; }
+    static int SubY(const FluentMenu& menu) { return menu.flyouts_[0]->y; }
     static HWND Window(const FluentMenu& menu) { return menu.hwnd_; }
-    static HWND SubWindow(const FluentMenu& menu) { return menu.sub_hwnd_; }
-    static bool SubOpen(const FluentMenu& menu) { return menu.sub_parent_row_ == 0 && IsWindowVisible(menu.sub_hwnd_); }
+    static HWND SubWindow(const FluentMenu& menu) { return menu.flyouts_.empty() ? nullptr : menu.flyouts_[0]->hwnd; }
+    static bool SubOpen(const FluentMenu& menu) { return menu.open_flyouts_ > 0 && menu.flyouts_[0]->parent_row == 0 && IsWindowVisible(menu.flyouts_[0]->hwnd); }
     static bool Hidden(const FluentMenu& menu) { return !menu.open_ && !menu.animating_out_ &&
-        !IsWindowVisible(menu.hwnd_) && !IsWindowVisible(menu.sub_hwnd_); }
-    static bool HasChildren(const FluentMenu& menu, int count) { return menu.sub_model_.Count() == count; }
+        !IsWindowVisible(menu.hwnd_) && menu.open_flyouts_ == 0; }
+    static bool HasChildren(const FluentMenu& menu, int count) { return menu.flyouts_[0]->model.Count() == count; }
     static void ChooseTrailing(FluentMenu& menu, int row) {
         const POINT point{static_cast<LONG>(FluentMenu::kShadowMargin + menu.model_.WidthPx() - 20),
             static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() +
@@ -345,6 +393,165 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--nested") == 0) {
+            using Peer = FluentMenuTestPeer;
+            auto vendor = Item(900, L"7-Zip");
+            vendor.children = {Item(8101, L"Open archive"), Item(8102, L"Extract here")};
+            auto more = Item(901, L"More options"); more.live_update = true;
+            const auto stable = Item(1, L"Open");
+            auto loading = Item(0, L"Loading"); loading.enabled = false;
+            auto pending = more; pending.children = {loading};
+            more.children = {vendor, Item(8103, L"Other extension")};
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create nested menu popup");
+            Check(Peer::Begin(menu, {stable, pending}), "begin pending nested extension menu");
+            Peer::ChooseRow(menu, 1);
+            Peer::ChooseSubRow(menu, 0);
+            Check(menu.IsOpen() && Peer::Depth(menu) == 1 && Peer::Result(menu) == 0,
+                "disabled pending placeholder cannot execute or close its parent");
+            Check(menu.ReplaceItems({stable, more}) && Peer::Depth(menu) == 1,
+                "async placeholder becomes vendor groups while More options stays open");
+            Peer::ChooseSubRow(menu, 0);
+            Check(Peer::Depth(menu) == 2 && Peer::Result(menu) == 0,
+                "clicking nested vendor header opens a third menu without executing header ID");
+            Peer::ChooseSubRow(menu, 1, 1);
+            Check(Peer::Hidden(menu) && Peer::Result(menu) == 8102,
+                "third-level window mouse selection returns its leaf command");
+
+            Check(Peer::Begin(menu, {stable, more}), "begin nested async command refresh");
+            Peer::ChooseRow(menu, 1); Peer::ChooseSubRow(menu, 0);
+            vendor.children[0].command = 8201; vendor.children[1].command = 8202;
+            more.children[0] = vendor;
+            Check(menu.ReplaceItems({stable, more}) && Peer::Depth(menu) == 2,
+                "command ID refresh preserves both open flyouts");
+            Peer::ChooseSubRow(menu, 0, 1);
+            Check(Peer::Result(menu) == 8201, "third-level selection uses refreshed IDs instead of stale session IDs");
+
+            Check(Peer::Begin(menu, {stable, more}), "begin nested live enabled-state refresh");
+            Peer::ChooseRow(menu, 1); Peer::ChooseSubRow(menu, 0);
+            Check(menu.UpdateCommandState(8201, L"Preparing archive", false) && Peer::Depth(menu) == 2,
+                "live command state propagates through every open flyout copy");
+            Peer::ChooseSubRow(menu, 0, 1);
+            Check(menu.IsOpen() && Peer::Result(menu) == 0, "disabled refreshed nested command cannot execute its prior ID");
+            Check(menu.UpdateCommandState(900, L"7-Zip", false) && Peer::Depth(menu) == 1,
+                "disabling an open vendor closes its descendant while preserving More options");
+            Check(menu.UpdateCommandState(901, L"More options", false) && Peer::Depth(menu) == 0,
+                "disabling the extension header closes its complete descendant chain");
+            menu.Dismiss();
+
+            Check(Peer::Begin(menu, {stable, more}), "begin moved nested parent refresh");
+            Peer::ChooseRow(menu, 1); Peer::ChooseSubRow(menu, 0);
+            more.children.insert(more.children.begin(), Item(8300, L"Earlier extension"));
+            more.children[1].children[1].command = 8302;
+            Check(menu.ReplaceItems({stable, more}) && Peer::Depth(menu) == 2,
+                "async sibling insertion reanchors the open vendor by its identity");
+            Peer::ChooseSubRow(menu, 1, 1);
+            Check(Peer::Result(menu) == 8302, "reanchored third menu executes its current subtree");
+
+            Check(Peer::Begin(menu, {stable, more}), "begin nested hover and stepwise keyboard close");
+            Peer::ChooseRow(menu, 1);
+            Peer::MoveSubRow(menu, 1, 0); Peer::ExpireDwell(menu);
+            Check(Peer::Depth(menu) == 2, "nested header hover schedules and opens its own descendant");
+            Peer::Key(menu, VK_ESCAPE);
+            Check(menu.IsOpen() && Peer::Depth(menu) == 1, "Escape closes only the deepest flyout");
+            Peer::Key(menu, VK_RIGHT);
+            Check(Peer::Depth(menu) == 2, "Right reopens the selected nested header");
+            const HWND stale_child = Peer::FlyoutWindow(menu, 1);
+            Peer::MoveSubRow(menu, 2, 0);
+            Check(Peer::Depth(menu) == 1, "hovering a parent sibling closes its descendants");
+            SendMessageW(stale_child, WM_LBUTTONUP, 0, MAKELPARAM(60, 42));
+            Check(menu.IsOpen() && Peer::Result(menu) == 0, "queued input to a hidden descendant cannot invoke a root row");
+            Peer::Key(menu, VK_LEFT);
+            Check(menu.IsOpen() && Peer::Depth(menu) == 0, "Left returns from the remaining flyout to the root");
+            menu.Dismiss();
+
+            Check(Peer::Begin(menu, {stable, more}), "begin nested removal refresh");
+            Peer::ChooseRow(menu, 1); Peer::ChooseSubRow(menu, 1);
+            auto removed = more; removed.children = {Item(8401, L"Replacement extension")};
+            Check(menu.ReplaceItems({stable, removed}) && Peer::Depth(menu) == 1,
+                "removing an open vendor closes only its stale descendant");
+            Check(menu.ReplaceItems({stable}) && Peer::Depth(menu) == 0,
+                "removing the async extension section closes its complete flyout chain");
+            menu.Dismiss();
+
+            auto tall_vendor = vendor;
+            tall_vendor.children.clear();
+            for (int row = 0; row < 100; ++row)
+                tall_vendor.children.push_back(Item(8500 + row, (L"Command " + std::to_wstring(row)).c_str()));
+            auto tall_more = more; tall_more.children = {tall_vendor};
+            for (const float scale : {1.0f, 1.5f}) {
+                FluentMenu sized;
+                Check(sized.Create(owner, &compositor, scale) && Peer::Begin(sized, {stable, tall_more}),
+                    "create edge-positioned nested menu at requested scale");
+                Peer::PlaceNearBottomRight(sized);
+                Peer::ChooseRow(sized, 1); Peer::ChooseSubRow(sized, 0);
+                Check(Peer::Depth(sized) == 2 && Peer::CardsInWorkArea(sized),
+                    "nested cards flip and clamp inside monitor work area including tall child menus");
+                SendMessageW(Peer::FlyoutWindow(sized, 1), WM_MOUSEWHEEL,
+                    MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+                Check(Peer::FlyoutScroll(sized, 1) > 0.0f,
+                    "mouse wheel scrolls the targeted third-level popup");
+                Peer::Key(sized, VK_UP);
+                Check(Peer::FlyoutHover(sized, 1) == 0, "keyboard enters the first enabled tall-menu command");
+                Peer::Key(sized, VK_UP);
+                Check(Peer::FlyoutHover(sized, 1) == 99, "keyboard wraps to the last tall-menu row");
+                Peer::ChooseSubRow(sized, 99, 1);
+                Check(Peer::Result(sized) == 8599, "keyboard scrolling keeps the final tall-menu command mouse reachable");
+            }
+
+            more.children = {vendor, Item(8103, L"Other extension")};
+            const auto evidence = std::filesystem::path(L"bench_data/fluent_nested_20261022");
+            std::filesystem::create_directories(evidence);
+            for (const bool dark : {false, true}) {
+                FluentMenu visual;
+                Check(visual.Create(owner, &compositor, 1.5f), "create 150 percent nested visual fixture");
+                visual.SetTheme(dark, D2D1::ColorF(0.0f, 0.47f, 0.83f));
+                Check(Peer::Begin(visual, {stable, more}), "render nested visual fixture");
+                Peer::FullyVisible(visual);
+                Peer::ChooseRow(visual, 1); Peer::ChooseSubRow(visual, 0);
+                Peer::Key(visual, VK_DOWN);
+                DwmFlush();
+                Check(SaveScreen(evidence / (dark ? L"nested_150_dark.png" : L"nested_150_light.png"), Peer::Bounds(visual)),
+                    "capture three actual popup windows at 150 percent scale");
+                visual.Dismiss();
+                Check(Peer::Begin(visual, {stable, tall_more}), "render nested scroll visual fixture");
+                Peer::PlaceNearBottomRight(visual);
+                Peer::ChooseRow(visual, 1); Peer::ChooseSubRow(visual, 0);
+                Peer::Key(visual, VK_UP); Peer::Key(visual, VK_UP);
+                DwmFlush();
+                Check(SaveScreen(evidence / (dark ? L"nested_edge_scroll_150_dark.png" : L"nested_edge_scroll_150_light.png"), Peer::Bounds(visual)),
+                    "capture screen-edge cascade and keyboard-scrolled child popup");
+                visual.Dismiss();
+            }
+
+            HistoryProbe probe{&menu};
+            SetWindowSubclass(owner, HistoryOwnerProc, kHistoryInteraction, reinterpret_cast<DWORD_PTR>(&probe));
+            probe.interact = [&] {
+                for (WPARAM key : {VK_DOWN, VK_RIGHT, VK_RIGHT, VK_DOWN, VK_RETURN})
+                    PostMessageW(Peer::Window(menu), WM_KEYDOWN, key, 0);
+            };
+            SetTimer(owner, kHistoryInteraction, 3000, nullptr);
+            PostMessageW(owner, kHistoryInteraction, 0, 0);
+            const int key_result = menu.TrackPopup({300, 200}, {stable, more});
+            KillTimer(owner, kHistoryInteraction);
+            Check(!probe.timed_out && key_result == 8202,
+                "real modal loop routes Down Right Right Down Enter to the nested leaf");
+            probe.interact = [&] {
+                Peer::ChooseRow(menu, 1); Peer::ChooseSubRow(menu, 0);
+                PostMessageW(owner, WM_LBUTTONDOWN, 0, 0);
+            };
+            SetTimer(owner, kHistoryInteraction, 3000, nullptr);
+            PostMessageW(owner, kHistoryInteraction, 0, 0);
+            const int outside_result = menu.TrackPopup({300, 200}, {stable, more});
+            KillTimer(owner, kHistoryInteraction);
+            Check(!probe.timed_out && outside_result == 0 && Peer::Hidden(menu),
+                "outside click in real modal loop dismisses every nested window");
+            RemoveWindowSubclass(owner, HistoryOwnerProc, kHistoryInteraction);
+            DestroyWindow(owner);
+            Check(ForegroundBelongsToAnotherProcess(), "nested menu tests preserve foreground activation");
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
         if (argc == 2 && wcscmp(argv[1], L"--animation-idle") == 0) {
             FluentMenu menu;
             Check(menu.Create(owner, &compositor, 1), "create idle animation popup");

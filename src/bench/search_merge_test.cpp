@@ -1,9 +1,11 @@
 #include "../index/search_result_merge.h"
+#include "../index/index_query.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
 #include <limits>
+#include <windows.h>
 
 using namespace pulse::index;
 

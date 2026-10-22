@@ -1,0 +1,23 @@
+{
+  "Version": "1.2.0.0",
+  "Installed": "D:\\Applications\\Pulse",
+  "Backup": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.0.0-20261023-002440",
+  "Succeeded": true,
+  "Changed": [
+    "Pulse.Document.exe",
+    "Pulse.exe",
+    "Pulse.Index.exe",
+    "Pulse.Preview.exe",
+    "Pulse.Shell.exe",
+    "README.txt"
+  ],
+  "VerifiedPayloadFiles": 40,
+  "Error": null,
+  "RolledBack": false,
+  "Service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+    "ProcessId": 39832
+  }
+}

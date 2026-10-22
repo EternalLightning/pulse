@@ -210,7 +210,7 @@ void ApplyFilterCue(AppState& s) {
     if (!s.hwndFilterEdit) return;
     s.filterCue = l10n::Get(s.filterSelectMode
         ? l10n::StringId::SelectWildcardHint
-        : l10n::StringId::FilterPlaceholder);
+        : l10n::StringId::ItemFilterSyntax);
     SendMessageW(s.hwndFilterEdit, EM_SETCUEBANNER, TRUE,
                  reinterpret_cast<LPARAM>(s.filterCue.c_str()));
 }

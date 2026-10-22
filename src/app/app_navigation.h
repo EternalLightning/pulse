@@ -62,6 +62,8 @@ void CycleFocus(AppState& s);
 void MarkTargetPane(AppState& s);
 void SortBy(AppState& s, ui::SortColumn col);
 void SetSort(AppState& s, ui::SortColumn col, ui::SortDirection direction);
+void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction);
+void RememberFolderColumns(AppState& s, const app::Tab& tab);
 void OpenSelected(AppState& s);
 void GoUp(AppState& s);
 void GoBack(AppState& s);

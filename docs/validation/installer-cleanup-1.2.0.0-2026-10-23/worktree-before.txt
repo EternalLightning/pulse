@@ -1,0 +1,117 @@
+ M CMakeLists.txt
+ M assets/files_toolbar/delete_color_dark.svg
+ M src/app/app_commands.cpp
+ M src/app/app_commands.h
+ M src/app/app_hosted_edit.cpp
+ M src/app/app_input.cpp
+ M src/app/app_main.cpp
+ M src/app/app_model.cpp
+ M src/app/app_model.h
+ M src/app/app_navigation.cpp
+ M src/app/app_navigation.h
+ M src/app/app_ops_ui.cpp
+ M src/app/app_ops_ui.h
+ M src/app/app_runtime.cpp
+ M src/app/app_runtime.h
+ M src/app/app_state.h
+ M src/app/context_menu.cpp
+ M src/app/context_menu.h
+ M src/app/context_menu_controller.cpp
+ M src/app/date_groups.cpp
+ M src/app/date_groups.h
+ M src/app/folder_sizes_test.cpp
+ M src/app/folder_sizes_ui.cpp
+ M src/app/folder_sizes_ui.h
+ M src/app/folder_view_prefs.cpp
+ M src/app/folder_view_prefs.h
+ M src/app/pulse.rc
+ M src/app/selftest_1b2.cpp
+ M src/bench/app_controllers_test.cpp
+ M src/bench/context_menu_refresh_cases.h
+ M src/bench/directory_contract_application_test.cpp
+ M src/bench/drive_view_test.cpp
+ M src/bench/entry_order_application_fixture_test.cpp
+ M src/bench/file_selection_ui_test.cpp
+ M src/bench/localization_test.rc
+ M src/bench/menu_text_test.cpp
+ M src/bench/mutation_undo_cases.h
+ M src/bench/ops_test_main.cpp
+ M src/bench/pane_filter_test.cpp
+ M src/bench/presentation_state_cases.h
+ M src/bench/recycle_backend_test.cpp
+ M src/bench/rename_ops_test.cpp
+ M src/bench/search_enhancement_ui_test.cpp
+ M src/bench/search_merge_test.cpp
+ M src/bench/shell_completion_cases.h
+ M src/bench/source_contract_cases.h
+ M src/common/localization.cpp
+ M src/common/localization.h
+ M src/common/resource_ids.h
+ M src/common/string_ids.h
+ M src/common/strings.rcinc
+ M src/index/index_client.h
+ M src/index/index_engine.h
+ M src/index/index_protocol.h
+ M src/index/live_filename_search.h
+ M src/index/network_index.h
+ M src/index/search_result_merge.cpp
+ M src/index/search_result_merge.h
+ M src/ops/delete_operation.cpp
+ M src/ops/destination_guard.h
+ M src/ops/ops_manager.cpp
+ M src/ops/ops_manager.h
+ M src/shell_host/ctx_session_process.cpp
+ M src/shell_host/ctx_session_process.h
+ M src/shell_host/deletion_identity.cpp
+ M src/shell_host/deletion_identity.h
+ M src/shell_host/main.cpp
+ M src/ui/fluent_menu.cpp
+ M src/ui/fluent_menu.h
+ M src/ui/name_highlight.cpp
+ M src/ui/toolbar_layout.h
+ M src/ui/ui_details_panel.cpp
+ M src/ui/ui_fluent_svg.cpp
+ M src/ui/ui_hit_test.cpp
+ M src/ui/ui_pane_list.cpp
+ M src/ui/ui_renderer.cpp
+ M src/ui/ui_renderer.h
+ M src/ui/ui_toolbar.cpp
+ M src/ui/view_layout.h
+ M version.txt
+?? assets/files_toolbar/status_center.svg
+?? docs/architecture-review-2026-10-22.md
+?? docs/architecture-review-independent-2026-10-22.md
+?? docs/validation/1.2.0.0/
+?? docs/validation/architecture-ops-2026-10-22/
+?? docs/validation/context-menu-refinement-2026-10-23/
+?? docs/validation/context-menu-refinements-2026-10-23/
+?? docs/validation/operation-center-design-2026-10-22/
+?? docs/validation/operation-center-motion-2026-10-23/
+?? docs/validation/operation-center-refinement-2026-10-23/
+?? docs/validation/portable-1.2.0.0-2026-10-23/
+?? scripts/validate_architecture_ops.ps1
+?? src/app/command_catalog.cpp
+?? src/app/command_catalog.h
+?? src/app/operation_center_ui.cpp
+?? src/bench/batch_conflict_dialog_test.cpp
+?? src/bench/clipboard_isolation_cases.h
+?? src/bench/command_catalog_test.cpp
+?? src/bench/context_menu_loading_test.cpp
+?? src/bench/context_menu_overflow_cases.h
+?? src/bench/context_query_timeout_test.cpp
+?? src/bench/details_worker_cases.h
+?? src/bench/folder_grouping_test.cpp
+?? src/bench/item_filter_test.cpp
+?? src/bench/operation_center_application_test.cpp
+?? src/bench/operation_center_ui_test.cpp
+?? src/bench/operation_records_test.cpp
+?? src/bench/view_preparation_cases.h
+?? src/index/index_types.h
+?? src/model/item_filter.cpp
+?? src/model/item_filter.h
+?? src/ui/batch_conflict_dialog.cpp
+?? src/ui/batch_conflict_dialog.h
+?? src/ui/operation_center.cpp
+?? src/ui/operation_center.h
+?? src/ui/operation_center_animation.cpp
+?? src/ui/operation_center_layout.h

@@ -208,6 +208,23 @@ int main(int argc, char** argv) {
         return failures ? 1 : 0;
     }
     bool equivalent = true;
+    size_t mismatches = 0;
+    auto describe = [](std::wstring_view value) {
+        std::wstring escaped;
+        for (wchar_t c : value) {
+            if (c == L' ') escaped += L"<space>";
+            else if (c == L'\t') escaped += L"<tab>";
+            else if (c == L'\n') escaped += L"<newline>";
+            else if (c == L'\r') escaped += L"<return>";
+            else escaped.push_back(c);
+        }
+        const int bytes = WideCharToMultiByte(CP_UTF8, 0, escaped.data(), static_cast<int>(escaped.size()),
+                                              nullptr, 0, nullptr, nullptr);
+        std::string utf8(static_cast<size_t>(bytes), '\0');
+        if (bytes) WideCharToMultiByte(CP_UTF8, 0, escaped.data(), static_cast<int>(escaped.size()),
+                                      utf8.data(), bytes, nullptr, nullptr);
+        return utf8;
+    };
     for (bool hidden : {false, true}) for (bool system : {false, true}) {
         tab.show_hidden_files = hidden;
         tab.show_protected_os_files = system;
@@ -220,17 +237,39 @@ int main(int argc, char** argv) {
                 app::filter_reference::CollectFilterMatches(tab, catalog, expected);
                 app::CollectFilterMatches(tab, catalog, actual);
                 equivalent &= actual == expected;
+                if (actual != expected && ++mismatches <= 12) {
+                    const auto difference = std::mismatch(expected.begin(), expected.end(), actual.begin(), actual.end());
+                    const int expected_row = difference.first == expected.end() ? -1 : *difference.first;
+                    const int actual_row = difference.second == actual.end() ? -1 : *difference.second;
+                    std::printf("[DIAG] directory filter='%s' hidden=%d system=%d catalog=%d expected_count=%zu actual_count=%zu first_expected=%d first_actual=%d\n",
+                        describe(filter).c_str(), hidden, system, catalog != nullptr, expected.size(), actual.size(), expected_row, actual_row);
+                    for (int row : {expected_row, actual_row}) if (row >= 0 && static_cast<size_t>(row) < entries->size()) {
+                        const auto& entry = (*entries)[static_cast<size_t>(row)];
+                        std::printf("[DIAG] row=%d name='%s' full_path='%s'\n", row,
+                            describe(entry.name).c_str(), describe(entry.full_path).c_str());
+                    }
+                }
                 ++cases;
             }
             const auto expected = app::filter_reference::ContentFilter(filter, places);
             const auto actual = app::ContentFilter(filter, places);
             equivalent &= static_cast<bool>(actual) == static_cast<bool>(expected);
+            if (static_cast<bool>(actual) != static_cast<bool>(expected) && ++mismatches <= 12)
+                std::printf("[DIAG] content predicate presence filter='%s' expected=%d actual=%d\n",
+                    describe(filter).c_str(), static_cast<bool>(expected), static_cast<bool>(actual));
             if (actual && expected) for (const auto& entry : *entries) {
-                equivalent &= actual(entry) == expected(entry);
+                const bool expected_match = expected(entry);
+                const bool actual_match = actual(entry);
+                equivalent &= actual_match == expected_match;
+                if (actual_match != expected_match && ++mismatches <= 12)
+                    std::printf("[DIAG] content filter='%s' hidden=%d system=%d name='%s' full_path='%s' expected=%d actual=%d\n",
+                        describe(filter).c_str(), hidden, system, describe(entry.name).c_str(), describe(entry.full_path).c_str(),
+                        expected_match, actual_match);
                 ++cases;
             }
         }
     }
+    if (mismatches) std::printf("[DIAG] total mismatched filter cases: %zu (printed first 12)\n", mismatches);
     check(equivalent, "directory and content filters preserve names, tags, visibility, UNC and long paths");
     bool names_equivalent = true;
     for (const wchar_t* name : names) for (const wchar_t* pattern : {L"", L"*", L"?", L"REPORT", L"*.txt", L"*?*txt", L"报告"})

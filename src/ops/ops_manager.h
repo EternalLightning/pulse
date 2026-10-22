@@ -47,6 +47,25 @@ enum class OpPhase { Queued, Scanning, WaitingForConflict, Running, Paused,
                      Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation, Cancelled };
 enum class ConflictChoice { Cancel, Replace, Skip, KeepBoth, Continue };
 
+struct ConflictRowInfo {
+    uint64_t row_id = 0; // stable within this task's immutable transfer plan
+    std::wstring source;
+    std::wstring destination;
+    uint64_t source_size = 0;
+    uint64_t destination_size = 0;
+    FILETIME source_modified{};
+    FILETIME destination_modified{};
+    bool source_is_directory = false;
+    bool destination_is_directory = false;
+    bool source_is_reparse = false;
+    bool destination_is_reparse = false;
+};
+
+struct ConflictResolution {
+    uint64_t row_id = 0;
+    ConflictChoice choice = ConflictChoice::Skip;
+};
+
 struct ConflictItemInfo {
     uint64_t token = 0;
     uint64_t task_id = 0;
@@ -60,6 +79,7 @@ struct ConflictItemInfo {
     bool destination_is_directory = false;
     size_t remaining = 0;
     bool link_confirmation = false;
+    std::vector<ConflictRowInfo> rows; // ordinary conflicts only; worker-created immutable snapshot
     DestinationLinkImpact link_impact;
     std::function<bool()> still_valid; // status/token only; never filesystem work
 };
@@ -116,6 +136,8 @@ struct UndoEntry {
     bool recycle_verified = false; // worker-only cache; never trusted from persisted JSON
     std::vector<RecycleUndoIdentity> recycle_identities;
     std::vector<FileIdentity> produced_identities;
+    std::vector<FileObjectReference> produced_references; // retain virtual filesystem IDs for this session
+    bool session_only = false;
     std::vector<std::wstring> cleanup_directories; // known content already restored; only delete these empty directories
 };
 
@@ -172,6 +194,31 @@ struct CompletedOperation {
     std::optional<std::wstring> volume_label;
 };
 
+enum class TransferItemState { Completed, Skipped, Incomplete };
+
+struct TransferItemResult {
+    std::wstring source;
+    std::wstring destination;
+    bool directory = false;
+    bool reparse = false;
+    TransferItemState state = TransferItemState::Incomplete;
+    bool destination_committed = false; // confirmed output survived this task's rollback
+    bool source_removed = false; // identity-checked move cleanup or whole-directory rename
+};
+
+struct TransferOutcome {
+    uint64_t task_id = 0;
+    OpType type = OpType::Copy;
+    OpPhase phase = OpPhase::Failed;
+    HRESULT failure_hr = S_OK;
+    bool plan_complete = false;
+    bool can_restage = false;
+    bool can_resume = false; // frozen remaining plan is available through ResumeIncompleteTransfer
+    std::vector<TransferItemResult> items;
+    // Exact planned leaves and empty directories only; never a partially completed subtree root.
+    std::vector<std::wstring> remaining_sources;
+};
+
 struct RecoveryEntry {
     uint64_t sequence = 0;
     OpRequest request;
@@ -217,8 +264,16 @@ public:
     void CancelCurrent();
     void PauseCurrent();
     void ResumeCurrent();
+    // ID-checked controls apply only to the active in-process copy/move task.
+    bool CancelTask(uint64_t task_id);
+    bool PauseTask(uint64_t task_id);
+    bool ResumeTask(uint64_t task_id);
     std::optional<ConflictItemInfo> PendingConflict() const;
     void ResolveConflict(uint64_t token, ConflictChoice choice, bool apply_to_all);
+    bool ResolveConflicts(uint64_t token, const std::vector<ConflictResolution>& rows);
+    std::vector<TransferOutcome> DrainTransferOutcomes();
+    bool CanResumeTransfer(uint64_t task_id) const;
+    uint64_t ResumeIncompleteTransfer(uint64_t task_id);
     bool IsLockedFailureCurrent(uint64_t task_id) const;
     bool RetryLockedOperation(uint64_t task_id, bool end_owners);
     bool IsElevationFailureCurrent(uint64_t task_id) const;
@@ -275,6 +330,9 @@ public:
     void Undo();
 
     OpStatus Status() const;
+    // Session-only task snapshots; reading and clearing never touch the filesystem.
+    std::vector<OpStatus> TaskStatuses() const;
+    void ClearFinishedTasks();
     std::vector<CompletedOperation> DrainCompletions();
 
     // Session persistence of the undo stack (JSON, same style as StagingTray).
@@ -289,8 +347,11 @@ private:
     friend struct TerminalMenuTestProbe;
     friend struct UndoIdentityTestProbe;
     friend struct MutationUndoTestProbe;
+    friend struct NetworkUndoTestProbe;
     friend struct SourceContractTestProbe;
     friend struct OperationJournalProbe;
+    friend struct OperationRecordsTestProbe;
+    friend struct TransferBatchTestProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -303,6 +364,7 @@ private:
         uint64_t recovery_sequence = 0; // retained until deletion is admitted
         bool lock_retry = false;
         bool elevated_retry = false;
+        bool exact_transfer_resume = false;
         uint64_t retry_generation = 0;
         HRESULT retry_failure_hr = S_OK;
         std::wstring retry_failed_path;
@@ -335,6 +397,8 @@ private:
     ipc::ShellClient::Owner ShellOwner() const;
     void MenuThread();
     struct OpenMailbox {
+        // Launch callbacks own only this mailbox; the forwarding worker may
+        // outlive OpsManager after the bounded shutdown wait.
         ipc::ShellClient::Owner shell_owner;
         std::mutex mutex;
         std::condition_variable cv;
@@ -346,6 +410,9 @@ private:
         bool finished = false;
         std::function<void()> before_execute; // isolated regression gate, empty in production
     };
+    static void StartOpenShellClient(const std::shared_ptr<OpenMailbox>& mailbox,
+                                     std::function<void()> notify);
+    void ReleaseShellClients(const std::shared_ptr<OpenMailbox>& mailbox);
     static void OpenThread(std::shared_ptr<OpenMailbox> mailbox);
     // front = interactive dialog request (打开方式…, 属性): it jumps ahead of
     // queued opens so the dialog answers the click. Plain opens keep FIFO order.
@@ -389,8 +456,10 @@ private:
                      const std::vector<std::wstring>& prior_completed = {},
                      const std::vector<TransferPlanEntry>& prior_plan = {},
                      const std::shared_ptr<DestinationGuard>& prior_source_directories = {},
-                     const std::shared_ptr<DestinationGuard>& prior_destination_guard = {});
+                     const std::shared_ptr<DestinationGuard>& prior_destination_guard = {},
+                     bool exact_plan = false);
     void ExecuteFileOperation(QueueItem& item);
+    bool RefreshProducedUndoReferences(OpRequest& request);
     LockReport CaptureLockedFailure(const QueueItem& retry, HRESULT error,
                                    const std::wstring& failed_item, const LockCancelled& cancelled);
     static QueueItem RemainingDeleteRetry(const QueueItem& admitted, const DeletePlan& accepted,
@@ -398,12 +467,15 @@ private:
     bool PrepareLockRetry(QueueItem& item);
     bool CaptureElevationFailure(QueueItem retry, HRESULT error, const std::wstring& failed_item);
     void SetStatus(const std::function<void(OpStatus&)>& fn);
+    bool MatchesActiveTransferLocked(uint64_t task_id) const;
+    void RememberFinishedTaskLocked(bool allow_new);
     void RefreshElevationStatusLocked();
     void RefreshRecycleUndoValidity();
     void InvalidateRecycleUndo(const std::vector<std::wstring>& changed, bool uncertain = false);
     void PushUndo(const OpRequest& req,
                   const std::vector<std::wstring>* actual_destinations = nullptr,
-                  const std::vector<FileIdentity>* produced_identities = nullptr);
+                  const std::vector<FileIdentity>* produced_identities = nullptr,
+                  const std::vector<FileObjectReference>* produced_references = nullptr);
     void FinishMutationUndo(const OpRequest& req);
     bool FinishMutationUndoLocked(const OpRequest& req); // caller holds mutex_
     void LoadRecoveryJournal();
@@ -434,10 +506,14 @@ private:
     // Shell operation workers do not configure application recovery journals.
     std::unique_ptr<JournalState> journal_;
     OpStatus status_;
+    std::optional<OpStatus> dequeued_task_status_; // covers dequeue before first status publication
+    std::deque<OpStatus> finished_tasks_; // mutex_; bounded terminal snapshots, oldest first
     std::deque<UndoEntry> undo_;
     uint64_t undo_revision_ = 1;
     std::deque<CompletedOperation> completions_;
     std::deque<DeleteOutcome> delete_outcomes_;
+    std::deque<TransferOutcome> transfer_outcomes_; // mutex_; drained by the owning UI
+    std::deque<QueueItem> incomplete_transfers_; // mutex_; at most 16 frozen recovery plans
     std::set<uint64_t> scheduled_recovery_;
 
     std::thread thread_;
@@ -468,11 +544,17 @@ private:
     uint64_t resolved_conflict_token_ = 0;
     ConflictChoice resolved_conflict_choice_ = ConflictChoice::Cancel;
     bool resolved_conflict_apply_all_ = false;
+    std::vector<ConflictResolution> resolved_conflict_rows_;
 
     // Each request owns its terminal result, including deletion evidence.
     std::mutex done_mutex_;
     std::condition_variable done_cv_;
     std::map<uint32_t, ShellCompletion> done_results_;
+
+    // Menu/file-operation callbacks may capture this. Acquire before workers
+    // start; release after both workers join, waiting for in-flight callbacks.
+    // Opening has a separate owner in OpenMailbox and cannot extend this one.
+    ipc::ShellClient::Owner shell_owner_;
 
     // Context-menu forwarding thread + token <-> pipe-request-id bookkeeping.
     std::thread menu_thread_;

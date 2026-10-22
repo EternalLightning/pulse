@@ -52,6 +52,25 @@ int wmain() {
         return false;
     };
     auto items = app::BuildItemMenu(false, L"", true);
+    const auto position = [&](int command) {
+        return std::find_if(items.begin(), items.end(), [command](const auto& item) {
+            return item.command == command;
+        }) - items.begin();
+    };
+    app::AppendTextCompareCommands(items, true, L"C:\\fixture\\file.txt", true);
+    app::AppendRecentChangesCommand(items, L"C:\\fixture");
+    app::OrganizeItemMenu(items);
+    check(!items.front().quick_swatches.empty() && items.front().separator_after &&
+          position(app::CmdOpen) < position(app::CmdOpenInNewTab) &&
+          position(app::CmdOpenInNewTab) < position(app::CmdOpenTerminal) &&
+          position(app::CmdOpenTerminal) < position(app::CmdCopyPath),
+          "item menu keeps common buttons first and groups open and navigation ahead of file operations");
+    check(position(app::CmdCopyPath) < position(app::CmdSelectTextCompare) &&
+          position(app::CmdSelectTextCompare) < position(app::CmdCompareSelectedText) &&
+          position(app::CmdCompareSelectedText) < position(app::CmdViewRecentChanges) &&
+          position(app::CmdViewRecentChanges) < position(app::CmdPinWorkspace) &&
+          items.back().command == app::CmdProperties && !items.back().separator_after,
+          "injected comparison and recent changes actions remain grouped before organization and final properties");
     app::RestrictDriveItemMenu(items, true);
     check(!contains(items, app::CmdCut) && !contains(items, app::CmdCopy) &&
           !contains(items, app::CmdDelete) && contains(items, app::CmdRename),

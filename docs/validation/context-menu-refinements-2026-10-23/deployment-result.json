@@ -1,0 +1,10 @@
+{
+  "Version": "1.2.0.0",
+  "Changed": [
+    "Pulse.exe",
+    "Pulse.Shell.exe"
+  ],
+  "VerifiedPayloadFiles": 40,
+  "Backup": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.0.0-menu-fix-20261023-005312",
+  "ServiceUntouched": true
+}

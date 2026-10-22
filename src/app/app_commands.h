@@ -1,8 +1,10 @@
 // app_commands.h — Menus, omnibar, view/split, tags, settings chrome.
 #pragma once
 #include "app_runtime.h"
+#include "command_catalog.h"
 
 namespace pulse {
+app::CommandContext BuildCommandContext(AppState& s);
 bool EnsureMenu(AppState& s);
 void CopySelectedPath(AppState& s);
 void CreateNewItem(AppState& s, bool folder, bool arbitrary_file = false);

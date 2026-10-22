@@ -777,6 +777,7 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
         empty.bounds = bounds;
         empty.glyph = kIconSearch;
         empty.title = pulse::l10n::Get(pulse::l10n::StringId::NoMatches);
+        empty.message = pane.filter_error;
         painter_.DrawEmptyState(empty);
         return;
     }
@@ -1390,10 +1391,15 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
             swprintf_s(count, l10n::Get(group.count == 1
                 ? l10n::StringId::DateGroupOneFormat
                 : l10n::StringId::DateGroupCountFormat).c_str(), group.count);
-            const std::wstring title = l10n::Get(bucket_labels[std::min<size_t>(group.bucket, 5)]) + L"  " + count;
+            const auto label_id = group.mode == GroupMode::DateModified
+                ? bucket_labels[std::min<size_t>(group.bucket, 5)]
+                : group.bucket == 0 ? l10n::StringId::TypeFolder : l10n::StringId::TypeFile;
+            const std::wstring title = (group.label.empty() ? l10n::Get(label_id) : group.label) + L"  " + count;
             const D2D1_RECT_F text = D2D1::RectF(first.left + 8.0f * scale_,
                 top + 6.0f * scale_, first.right - 8.0f * scale_, first.top - 4.0f * scale_);
-            painter_.DrawText(title, text, compositor_->TextFormat(), theme.text);
+            MakeBrush(dc, theme.text, brText_);
+            DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->TextFormat(), brText_.get(),
+                title, text.left, text.top, std::max(0.0f, text.right - text.left), text.bottom - text.top);
             const float title_width = MeasureTextWidth(compositor_->DwriteFactory(),
                 compositor_->TextFormat(), title);
             MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);

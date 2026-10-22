@@ -2,6 +2,8 @@
 #include "network_state_cases.h"
 #include "drag_hint_application_cases.h"
 #include "directory_projection_cases.h"
+#include "view_preparation_cases.h"
+#include "details_worker_cases.h"
 #include "../app/directory_projection.h"
 #include "../app/app_column_view.h"
 #include "../app/folder_sizes_ui.h"
@@ -22,11 +24,13 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--terminal-only")
         return RunTerminalMenuChecks();
     const bool directory_projection_only = argc == 2 && std::string_view(argv[1]) == "--directory-projection-only";
+    const bool view_preparation_only = argc == 2 && std::string_view(argv[1]) == "--view-preparation-only";
+    const bool details_worker_only = argc == 2 && std::string_view(argv[1]) == "--details-worker-only";
     const bool drag_hints_only = argc == 2 && std::string_view(argv[1]) == "--drag-hints-only";
     const bool network_state_only = argc == 2 && std::string_view(argv[1]) == "--network-state-only";
     const bool shared_column_only = argc == 2 && std::string_view(argv[1]) == "--shared-column-cancel-only";
     const bool shared_requests_only = argc == 2 && std::string_view(argv[1]) == "--shared-requests-only";
-    if (argc != 1 && !shared_column_only && !shared_requests_only && !network_state_only && !directory_projection_only && !drag_hints_only) {
+    if (argc != 1 && !shared_column_only && !shared_requests_only && !network_state_only && !directory_projection_only && !drag_hints_only && !view_preparation_only && !details_worker_only) {
         std::fputs("Unknown directory-contract test selector\n", stderr);
         return 2;
     }
@@ -55,8 +59,10 @@ int main(int argc, char** argv) {
     s.renderer.SetCompositor(&s.compositor);
     s.window_tabs.EnsureDefault();
     s.pane = s.window_tabs.Active()->FocusedPane();
-    if (network_state_only || directory_projection_only || drag_hints_only) {
-        const int result = drag_hints_only ? RunDragHintApplicationCases(s)
+    if (network_state_only || directory_projection_only || drag_hints_only || view_preparation_only || details_worker_only) {
+        const int result = details_worker_only ? RunDetailsWorkerCases(s)
+            : view_preparation_only ? RunViewPreparationCases(s)
+            : drag_hints_only ? RunDragHintApplicationCases(s)
             : network_state_only ? RunNetworkStateCases(s) : RunDirectoryProjectionCases(s);
         DestroyWindow(s.hwnd); s.hwnd = nullptr;
         owned.reset(); OleUninitialize();
@@ -332,91 +338,7 @@ int main(int argc, char** argv) {
     stale.window_epoch = s.detailsWindowEpoch; stale.attrs_valid = true;
     check(ApplyDetailsMetaResult(s, stale) && s.detailsOwner == L"stale" && s.detailsSelValid,
           "matching window and request epochs apply details metadata normally");
-    {
-        wchar_t cwd[MAX_PATH]{};
-        GetCurrentDirectoryW(MAX_PATH, cwd);
-        const auto root = std::wstring(cwd) + L"\\bench_data\\shared-size-" +
-            std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
-        const auto file_path = root + L"\\data.bin";
-        const auto offline = root + L"\\offline";
-        const bool created = CreateDirectoryW(root.c_str(), nullptr) != FALSE;
-        HANDLE file = created ? CreateFileW(file_path.c_str(), GENERIC_WRITE, 0, nullptr,
-            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr) : INVALID_HANDLE_VALUE;
-        DWORD written = 0;
-        const bool wrote = file != INVALID_HANDLE_VALUE && WriteFile(file, "abc", 3, &written, nullptr) && written == 3;
-        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
-        check(wrote, "create isolated shared folder-size application fixture");
-        if (wrote) {
-            name_tab.current_path = fs::NormalizePath(root);
-            auto selected = std::make_shared<std::vector<fs::DirEntry>>(1);
-            selected->front().name = L"data.bin"; selected->front().size = 3;
-            selected->front().attrs = FILE_ATTRIBUTE_NORMAL;
-            name_tab.SetSnapshot(selected); name_tab.SelectOnly(0);
-            ++name_tab.applied_generation;
-            s.showDetailsPanel = true;
-            (void)BuildVm(s, true);
-            bool received_meta = false;
-            const auto meta_deadline = GetTickCount64() + 5000;
-            while (!received_meta && GetTickCount64() < meta_deadline) {
-                MSG message{};
-                if (PeekMessageW(&message, s.hwnd, WM_DETAILS_META, WM_DETAILS_META, PM_REMOVE)) {
-                    std::unique_ptr<DetailsMetaResult> meta(reinterpret_cast<DetailsMetaResult*>(message.lParam));
-                    received_meta = meta && ApplyDetailsMetaResult(s, *meta);
-                } else Sleep(10);
-            }
-            check(received_meta && s.detailsSelValid && !s.detailsTypeName.empty() && !s.detailsOwner.empty() &&
-                  !s.detailsPermissions.empty(),
-                  "actual COM-initialized details worker returns handle-backed metadata with matching epochs");
-            s.showDetailsPanel = false;
-            ui::WindowViewModel folders;
-            folders.details.path = root; folders.details.is_dir = true;
-            ui::PaneSlotView slot;
-            slot.rect = D2D1::RectF(240, 120, 900, 550); slot.focused = true;
-            slot.pane.path = std::wstring(cwd) + L"\\bench_data";
-            slot.pane.is_file_system = true; slot.pane.view_mode = ui::ViewMode::Tiles;
-            ui::ListEntryView entry; entry.name = L"shared-size"; entry.path = root; entry.is_dir = true;
-            slot.pane.entries.push_back(std::move(entry)); folders.pane_slots.push_back(std::move(slot));
-            const auto wait_size = [&](app::FolderSizeState expected) {
-                const auto deadline = GetTickCount64() + 5000;
-                do {
-                    FillFolderSizes(s, folders);
-                    if (s.folderSizes.Get(root).state == expected) return true;
-                    Sleep(10);
-                } while (GetTickCount64() < deadline);
-                return false;
-            };
-            const bool ready = wait_size(app::FolderSizeState::Ready);
-            check(ready && s.folderSizes.Get(root).bytes == 3 && s.folderSizes.Get(root).files == 1 &&
-                  !folders.details.size_pending && !folders.details.contains_text.empty() &&
-                  !folders.pane_slots[0].pane.folder_size_labels.at(0).text.empty(),
-                  "details and visible folder row consume one shared bytes-and-counts result");
-            const bool marked = CreateDirectoryW(offline.c_str(), nullptr) &&
-                SetFileAttributesW(offline.c_str(), FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_OFFLINE);
-            check(marked, "create unreadable-content boundary via isolated offline subtree");
-            if (marked) {
-                s.folderSizes.Invalidate(root);
-                const bool partial_size = wait_size(app::FolderSizeState::Partial);
-                const auto label = l10n::Get(l10n::StringId::FolderSizePartial);
-                check(partial_size && !folders.details.size_pending &&
-                      folders.details.size_text.find(label) != std::wstring::npos &&
-                      folders.details.contains_text.find(label) != std::wstring::npos &&
-                      folders.pane_slots[0].pane.folder_size_labels.at(0).text.find(label) != std::wstring::npos,
-                      "partial bytes and counts are explicitly labelled in details and folder rows");
-                auto refreshing = s.folderSizes.Get(root);
-                refreshing.state = app::FolderSizeState::Updating;
-                FillDetailsFolderSize(folders.details, refreshing);
-                check(folders.details.size_pending && refreshing.incomplete &&
-                      folders.details.contains_text.find(label) != std::wstring::npos,
-                      "an incomplete count keeps its partial label throughout a slow refresh");
-            }
-            s.folderSizes.Stop();
-            if (GetFileAttributesW(offline.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                SetFileAttributesW(offline.c_str(), FILE_ATTRIBUTE_DIRECTORY); RemoveDirectoryW(offline.c_str());
-            }
-        }
-        const bool cleaned_file = file == INVALID_HANDLE_VALUE || DeleteFileW(file_path.c_str());
-        check(cleaned_file && (!created || RemoveDirectoryW(root.c_str())), "shared size application fixture cleaned");
-    }
+    failures += RunDetailsWorkerCases(s);
     s.watches.Stop();
     DestroyWindow(s.hwnd); s.hwnd = nullptr;
     owned.reset(); OleUninitialize();

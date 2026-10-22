@@ -28,7 +28,8 @@ void FillDetailsFolderSize(ui::DetailsPanelView& details, const app::FolderSizeV
     }
 }
 
-void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
+namespace {
+void FillFolderSizesImpl(AppState& s, ui::WindowViewModel& vm, bool prepare_requests) {
     struct Row { ui::PaneViewModel* pane; int index; std::wstring path; };
     std::vector<Row> rows;
     std::vector<app::FolderSizeRequest> requests;
@@ -67,13 +68,15 @@ void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
         requests.push_back({details_path, true, true});
         roots.push_back(details_path);
     }
-    if (!s.isolatedTest && !s.shot.active)
-        s.folderSizes.SetCachePath([] {
-            const auto dir = app::GetPulseDataDir();
-            return dir.empty() ? std::wstring() : dir + L"\\folder_sizes.json";
-        });
-    s.folderSizes.SetIndexEnabled(!s.isolatedTest && !s.shot.active);
-    s.folderSizes.Sync(std::move(requests), std::move(roots));
+    if (prepare_requests) {
+        if (!s.isolatedTest && !s.shot.active)
+            s.folderSizes.SetCachePath([] {
+                const auto dir = app::GetPulseDataDir();
+                return dir.empty() ? std::wstring() : dir + L"\\folder_sizes.json";
+            });
+        s.folderSizes.SetIndexEnabled(!s.isolatedTest && !s.shot.active);
+        s.folderSizes.Sync(std::move(requests), std::move(roots));
+    }
     using S = app::FolderSizeState;
     using I = l10n::StringId;
     if (!details_path.empty()) {
@@ -105,5 +108,14 @@ void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
         vm.pane.folder_size_labels = slot.pane.folder_size_labels;
         vm.pane.folder_size_actions = slot.pane.folder_size_actions;
     }
+}
+} // namespace
+
+void PrepareFolderSizes(AppState& s, ui::WindowViewModel& vm) {
+    FillFolderSizesImpl(s, vm, true);
+}
+
+void FillFolderSizes(AppState& s, ui::WindowViewModel& vm) {
+    FillFolderSizesImpl(s, vm, false);
 }
 }

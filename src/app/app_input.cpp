@@ -50,6 +50,13 @@ namespace pulse {
 namespace {
 bool internal_file_drag = false;
 
+void SaveResizedColumns(AppState& s) {
+    if (!s.columnResizing) return;
+    const auto* pane = PaneAtSlot(s, s.columnResizePane);
+    const auto* tab = pane ? pane->ActiveTab() : nullptr;
+    if (tab) RememberFolderColumns(s, *tab);
+}
+
 DWORD FileDropEffect(const AppState& s, const std::vector<std::wstring>& sources,
                      const std::wstring& destination, DWORD keys, DWORD allowed, DWORD preferred) {
     if (sources.empty()) return DROPEFFECT_NONE;
@@ -904,6 +911,7 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
         if (s->columnResizing) {
             if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
+                SaveResizedColumns(*s);
                 s->columnResizing = false;
                 s->columnResizeIndex = -1;
                 s->columnResizePane = -1;
@@ -2560,6 +2568,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ShowSortDropdown(*s);
         } else if (hit.region == ui::HitTestResult::ToolbarMore) {
             ShowToolbarMore(*s);
+        } else if (hit.region == ui::HitTestResult::OperationCenter) {
+            ToggleOperationCenter(*s);
         } else if (hit.region == ui::HitTestResult::PaneViewButton) {
             ShowViewDropdown(*s, hit.pane_index);
         } else if (hit.region == ui::HitTestResult::FilterBox) {
@@ -2821,6 +2831,7 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
                         vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect),
                     fitTab->details_column_dividers, kind == L"search",
                     fitTab->search_column_dividers, hit.index);
+                RememberFolderColumns(*s, *fitTab);
                 if (s->renameIndex >= 0) LayoutRenameOverlay(*s);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -3207,6 +3218,7 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             s->scrollbarSidebar = false;
             s->splitterDragging = false;
             s->detailsPanelResizing = false;
+            SaveResizedColumns(*s);
             s->columnResizing = false;
             s->columnResizeIndex = -1;
             s->columnResizePane = -1;
@@ -3229,6 +3241,7 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
             s->paneDragPending = false;
             s->paneDragging = false;
             s->paneDragLayoutIndex = s->paneDragPaneIndex = -1;
+            SaveResizedColumns(*s);
             s->columnResizing = false;
             s->columnResizeIndex = -1;
             s->columnResizePane = -1;

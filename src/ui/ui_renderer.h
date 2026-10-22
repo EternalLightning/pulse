@@ -1,5 +1,6 @@
 // ui_renderer.h — Full-window Fluent renderer (title bar, toolbar, sidebar, pane, tray).
 #pragma once
+#include <optional>
 #include "../index/content_result_store.h"
 #include "ui_compositor.h"
 #include "window_material.h"
@@ -168,6 +169,7 @@ struct PaneViewModel {
     std::wstring change_time_label, change_type_label;
     bool change_has_more = false;
     std::wstring filter_text;
+    std::wstring filter_error;
     float filter_expand = 0.0f;
     float header_controls_opacity = 1.0f;
     std::wstring banner_title;
@@ -178,6 +180,7 @@ struct PaneViewModel {
     // 100k rows, so copying these containers for every animation frame is not
     // acceptable.
     std::shared_ptr<const FilterMap> filter_map;
+    std::shared_ptr<const FilterMap> source_to_view;
     std::shared_ptr<const std::vector<DateGroup>> date_groups;
     std::vector<ListEntryView> entries;
     // Real directory views retain the immutable filesystem snapshot and only
@@ -222,8 +225,9 @@ struct PaneViewModel {
     uint64_t view_generation = 1;
     SortColumn sort_column = SortColumn::Name;
     SortDirection sort_direction = SortDirection::Asc;
-    // Cumulative column divider positions in the details view, normalized to
-    // the usable header width. All zeroes select the responsive defaults.
+    GroupMode group_mode = GroupMode::Auto;
+    SortDirection group_direction = SortDirection::Desc;
+    // Individual column widths in DIPs; zero selects the responsive default.
     std::array<float, 3> details_column_dividers{};
     std::array<float, 4> search_column_dividers{};
     bool focused = true;
@@ -257,6 +261,8 @@ struct PaneViewModel {
 
     int ViewIndex(int source_index) const {
         if (source_index < 0) return -1;
+        if (source_to_view) return source_index < static_cast<int>(source_to_view->size())
+            ? (*source_to_view)[static_cast<size_t>(source_index)] : -1;
         if (content_results || (!filter_map && filter_text.empty())) return source_index;
         if (!filter_map) return -1;
         const auto it = std::lower_bound(filter_map->begin(), filter_map->end(), source_index);
@@ -500,6 +506,7 @@ struct DuplicateDriveView {
 struct WindowViewModel {
     bool can_paste = false;
     bool selection_has_drive_root = false;
+    std::optional<std::array<bool, 6>> toolbar_commands_enabled;
     bool archive_view = false;
     std::wstring window_title;
     std::vector<TabView> tabs;
@@ -520,6 +527,9 @@ struct WindowViewModel {
     bool details_visible = false;   // right details panel toggle (view menu)
     DetailsPanelView details;
     StatusBarView status;
+    bool operation_center_open = false;
+    int operation_count = 0;
+    bool operation_failed = false;
 
     // OLE drag feedback (1B-2). Indices follow HitTestResult indexing.
     int breadcrumb_hover = -1;    // placed segment under the mouse
@@ -698,6 +708,7 @@ struct HitTestResult {
         PaneDetails,
         ToolbarSort,
         ToolbarMore,
+        OperationCenter,
         AddressBar,
         AddressSearch,
         AddressSearchInput,

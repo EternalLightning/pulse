@@ -5,7 +5,6 @@
 #include "quick_access.h"
 #include "app_column_view.h"
 #include "../ui/toolbar_layout.h"
-#include "../ui/toolbar_command_state.h"
 #include "app_internal.h"
 #include "global_search_controller.h"
 #include "../ui/lumatext_renderer.h"
@@ -54,6 +53,48 @@ using namespace pulse;
 namespace pulse {
 HANDLE g_shell_watch_stop = nullptr;
 HANDLE g_shell_watch_thread = nullptr;
+
+app::CommandContext BuildCommandContext(AppState& s) {
+    app::CommandContext context;
+    const auto* tab = ActiveTab(s);
+    context.can_undo = s.ops.CanUndo();
+    context.can_view = tab != nullptr;
+    if (!tab) return context;
+    context.selected_count = tab->SelectedCount();
+    context.archive_view = IsArchiveView(tab->current_path);
+    context.read_only = tab->net_readonly;
+    context.filesystem_folder = !tab->current_path.empty() &&
+        !fs::IsVirtualPath(tab->current_path) && !context.archive_view;
+    context.has_entries = tab->EntryCount() > 0;
+    if (context.filesystem_folder && tab->snapshot && !tab->content_results) {
+        // Ordinary folder snapshots contain filesystem children; retain the
+        // cached selection summary when the toolbar rebuilds every frame.
+        context.selection_filesystem = context.selected_count > 0;
+        context.selection_has_drive_root = tab->SnapshotSelectionHasDriveRoot();
+    } else {
+        const auto paths = SelectedFullPaths(*tab);
+        context.selection_filesystem = !IsRecycleTab(tab) && context.selected_count > 0 &&
+            paths.size() == static_cast<size_t>(context.selected_count) &&
+            std::all_of(paths.begin(), paths.end(), [](const auto& path) {
+                return !path.empty() && !fs::IsVirtualPath(path) && !IsArchiveView(path);
+            });
+        context.selection_has_drive_root = std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath);
+    }
+    context.can_paste = CanPasteIntoCurrent(s, false);
+    context.has_target = s.targetPane && s.targetPane != s.pane;
+    if (context.has_target) {
+        const auto* target = s.targetPane->ActiveTab();
+        context.target_writable = target && !target->current_path.empty() &&
+            !fs::IsVirtualPath(target->current_path) && !IsArchiveView(target->current_path) &&
+            !target->net_readonly;
+    }
+    const auto pin_path = PinCandidate(s);
+    context.can_pin_workspace = !pin_path.empty() && !fs::IsVirtualPath(pin_path) && !IsArchiveView(pin_path);
+    context.terminal_available = !app::TerminalMenuPath(*tab, tab->SelectedCount() == 0).empty();
+    context.copy_path_available = context.selected_count > 0
+        ? context.selection_filesystem : context.filesystem_folder;
+    return context;
+}
 
 namespace {
 std::wstring TagLabel(l10n::StringId id, const std::wstring& name, size_t count = 0) {
@@ -460,6 +501,24 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         return;
     }
     switch (cmd) {
+    case app::CmdOperationCenter: ToggleOperationCenter(s); break;
+    case app::CmdGroupAuto:
+    case app::CmdGroupNone:
+    case app::CmdGroupDate:
+    case app::CmdGroupType:
+    case app::CmdGroupSize:
+        if (const auto* tab = ActiveTab(s)) {
+            constexpr ui::GroupMode modes[] = {ui::GroupMode::Auto, ui::GroupMode::None,
+                ui::GroupMode::DateModified, ui::GroupMode::Type, ui::GroupMode::Size};
+            SetGroup(s, modes[cmd - app::CmdGroupAuto], tab->group_direction);
+        }
+        break;
+    case app::CmdGroupDirection:
+        if (const auto* tab = ActiveTab(s); tab && tab->group_mode != ui::GroupMode::Auto &&
+            tab->group_mode != ui::GroupMode::None)
+            SetGroup(s, tab->group_mode, tab->group_direction == ui::SortDirection::Asc
+                ? ui::SortDirection::Desc : ui::SortDirection::Asc);
+        break;
     case app::CmdExtract: ExtractArchiveSelection(s, false); return;
     case app::CmdExtractAll: ExtractArchiveSelection(s, true); return;
     case app::CmdRefresh:
@@ -764,8 +823,8 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         return item.command == app::CmdTags;
     });
     if (!quick_tags.quick_swatches.empty()) items.insert(picker, std::move(quick_tags));
-    // Search results mix folders, so offer "reveal in containing folder"
-    // right after 打开 (item menus only; pointless in a real folder view).
+    // Search results mix folders, so keep "reveal in containing folder"
+    // with the other open/navigation commands in item menus.
     const app::Tab* tab = ActiveTab(s);
     std::wstring view_kind;
     if (tab && app::ParsePulsePath(tab->current_path, &view_kind, nullptr) &&
@@ -786,6 +845,7 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
     }
     if (std::any_of(paths.begin(), paths.end(), pulse::path::IsDriveRootPath))
         app::RestrictDriveItemMenu(items, paths.size() == 1);
+    app::OrganizeItemMenu(items);
     return app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
 }
 
@@ -1424,7 +1484,16 @@ void ShowSortDropdown(AppState& s) {
         s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left);
     POINT anchor{static_cast<LONG>(layout.sort.left),static_cast<LONG>(layout.sort.bottom)};
     ClientToScreen(s.hwnd,&anchor);
-    const int cmd = s.menu->TrackPopup(anchor,app::BuildSortMenu(options));
+    auto items = app::BuildSortMenu(options);
+    if (!items.empty()) items.back().separator_after = true;
+    ui::FluentMenuItem grouping;
+    grouping.text = l10n::Get(l10n::StringId::GroupBy);
+    grouping.glyph = L"\xE8FD";
+    grouping.enabled = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path) &&
+        !IsArchiveView(tab->current_path);
+    grouping.children = app::BuildGroupingMenu(tab->group_mode, tab->group_direction, grouping.enabled);
+    items.push_back(std::move(grouping));
+    const int cmd = s.menu->TrackPopup(anchor, items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s,cmd);
 }
 
@@ -1434,22 +1503,11 @@ void ShowToolbarMore(AppState& s) {
     if (!tab) return;
     std::vector<ui::FluentMenuItem> items;
     const int commands[]={app::CmdCut,app::CmdCopy,app::CmdPaste,app::CmdRename,app::CmdDelete,app::CmdProperties};
-    const l10n::StringId labels[]={l10n::StringId::Cut,l10n::StringId::Copy,l10n::StringId::Paste,
-        l10n::StringId::Rename,l10n::StringId::Delete,l10n::StringId::Properties};
-    const wchar_t* glyphs[]={L"\xE8C6",L"\xE8C8",L"\xE77F",L"\xE8AC",L"\xE74D",L"\xE946"};
-    const wchar_t* shortcuts[]={L"Ctrl+X",L"Ctrl+C",L"Ctrl+V",L"F2",L"Delete",L"Alt+Enter"};
     const float width=static_cast<float>(s.compositor.Width());
     const float left=s.renderer.EffectiveSidebarWidth(width);
-    const auto selected_paths = SelectedFullPaths(*tab);
-    const ui::ToolbarCommandState command_state{IsArchiveView(tab->current_path), tab->SelectedCount(),
-        std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath), CanPasteIntoCurrent(s)};
-    if (width-left < 540*s.scale) for (int i=0;i<6;++i) {
-        ui::FluentMenuItem item;
-        item.command=commands[i]; item.text=l10n::Get(labels[i]); item.glyph=glyphs[i];
-        item.shortcut=shortcuts[i];
-        item.enabled=command_state.Enabled(i);
-        items.push_back(std::move(item));
-    }
+    const auto command_context = BuildCommandContext(s);
+    if (width-left < 540*s.scale) for (const int command : commands)
+        items.push_back(app::BuildCommandMenuItem(command, command_context));
     if (!items.empty() && width-left < 540*s.scale) items.back().separator_after=true;
     if (IsArchiveView(tab->current_path)) {
         ui::FluentMenuItem extract;
@@ -1672,7 +1730,7 @@ void ShowOmnibar(AppState& s, OmnibarMode mode) {
         }
         const std::wstring current = ActiveTab(s) ? ActiveTab(s)->current_path : L"";
         auto items = app::BuildCommandPalette(query, s.places.RecentFolderPaths(), s.paletteHits,
-                                              project_only, s.paletteTotal, current);
+                                              project_only, s.paletteTotal, current, BuildCommandContext(s));
         if (s.paletteSearching) {
             ui::FluentMenuItem wait;
             wait.text = l10n::Get(l10n::StringId::Searching);
@@ -1759,6 +1817,7 @@ void ApplyAccentFromPrefs(AppState& s) {
         s.appPrefs.background_image, s.accentColor);
     if (s.menu) s.menu->SetTheme(s.darkMode, s.accentColor);
     if (s.operationWindow) s.operationWindow->SetTheme(s.darkMode, s.accentColor);
+    UpdateOperationCenterTheme(s);
 }
 
 namespace {
@@ -2059,6 +2118,7 @@ static void ApplyWindowThemeMode(AppState& s) {
     if (s.hwndTagRenameEdit) InvalidateRect(s.hwndTagRenameEdit, nullptr, TRUE);
     if (s.hwndFilterEdit) InvalidateRect(s.hwndFilterEdit, nullptr, TRUE);
     if (s.operationWindow) s.operationWindow->SetTheme(s.darkMode, s.accentColor);
+    UpdateOperationCenterTheme(s);
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 

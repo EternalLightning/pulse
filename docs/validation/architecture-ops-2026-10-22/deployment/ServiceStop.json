@@ -1,0 +1,7 @@
+{
+  "Name": "PulseIndex",
+  "State": "Stopped",
+  "StartMode": "Auto",
+  "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+  "ProcessId": 0
+}

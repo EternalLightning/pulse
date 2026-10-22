@@ -1,5 +1,7 @@
 #include "search_result_merge.h"
+#include "index_query.h"
 #include <algorithm>
+#include <windows.h>
 
 namespace pulse::index {
 namespace {

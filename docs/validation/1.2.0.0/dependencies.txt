@@ -1,0 +1,161 @@
+Microsoft (R) COFF/PE Dumper Version 14.44.35229.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file build\Pulse.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    d3d11.dll
+    d2d1.dll
+    DWrite.dll
+    dcomp.dll
+    dwmapi.dll
+    api-ms-win-shcore-scaling-l1-1-1.dll
+    ole32.dll
+    SHELL32.dll
+    COMCTL32.dll
+    ADVAPI32.dll
+    SHLWAPI.dll
+    VERSION.dll
+    GDI32.dll
+    NETAPI32.dll
+    MPR.dll
+    bcrypt.dll
+    Secur32.dll
+    PROPSYS.dll
+    OLEAUT32.dll
+    dbghelp.dll
+    USER32.dll
+    KERNEL32.dll
+    UxTheme.dll
+    RstrtMgr.DLL
+    IMM32.dll
+
+  Image has the following delay load dependencies:
+
+    lumatext.dll
+
+Dump of file build\Pulse.Index.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    ADVAPI32.dll
+    SHLWAPI.dll
+    ole32.dll
+    SHELL32.dll
+    NETAPI32.dll
+    MPR.dll
+    bcrypt.dll
+    USER32.dll
+    dbghelp.dll
+    KERNEL32.dll
+
+Dump of file build\Pulse.Document.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    ole32.dll
+    XmlLite.dll
+    SHLWAPI.dll
+    ADVAPI32.dll
+    KERNEL32.dll
+
+Dump of file build\Pulse.Preview.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    ole32.dll
+    SHELL32.dll
+    GDI32.dll
+    PROPSYS.dll
+    ADVAPI32.dll
+    gdiplus.dll
+    dbghelp.dll
+    USER32.dll
+    KERNEL32.dll
+
+Dump of file build\Pulse.Shell.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    ole32.dll
+    SHELL32.dll
+    ADVAPI32.dll
+    SHLWAPI.dll
+    VERSION.dll
+    COMCTL32.dll
+    bcrypt.dll
+    MPR.dll
+    RstrtMgr.DLL
+    USER32.dll
+    dbghelp.dll
+    KERNEL32.dll
+
+Dump of file build\lumatext.dll
+
+File Type: DLL
+
+  Image has the following dependencies:
+
+    DWrite.dll
+    KERNEL32.dll
+
+Dump of file build\pdfium.dll
+
+File Type: DLL
+
+  Image has the following dependencies:
+
+    KERNEL32.dll
+    ADVAPI32.dll
+    GDI32.dll
+    USER32.dll
+
+Dump of file build\7zip\7z.exe
+
+File Type: EXECUTABLE IMAGE
+
+  Image has the following dependencies:
+
+    OLEAUT32.dll
+    USER32.dll
+    ADVAPI32.dll
+    msvcrt.dll
+    KERNEL32.dll
+
+Dump of file build\7zip\7z.dll
+
+File Type: DLL
+
+  Image has the following dependencies:
+
+    OLEAUT32.dll
+    USER32.dll
+    ADVAPI32.dll
+    msvcrt.dll
+    KERNEL32.dll
+
+  Summary
+
+       BD000 .data
+        1000 .didat
+        7000 .fptable
+       9B000 .pdata
+      4E7000 .rdata
+       16000 .reloc
+       CB000 .rsrc
+     10CD000 .text
+        1000 .tls
+        2000 _RDATA
+        1000 malloc_h

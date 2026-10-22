@@ -1,0 +1,26 @@
+[
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\app.json",
+    "SHA256": "8492590A2ECC05A68AA80D501D23FBB8B17005F61034D2BA59E003E348CD4A24"
+  },
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\session.json",
+    "SHA256": "C2EB10ABAC67F8034625F33CD00391146AD4D9D48E0D609E04FE20AC18D68E3E"
+  },
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\places.json",
+    "SHA256": "C3C75D4671C2BFAE210DF97ECBE9F13C8989B3A99F63118ECC7028E790C0064A"
+  },
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\tags.json",
+    "SHA256": "BCA9D9B9BE0477A51FD51A663F753449D8FDC155DF8396BDE8AC4820D3FD201E"
+  },
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\context_menu.json",
+    "SHA256": "7CD34319CE302EA62AF868204DAEED9B1F9B4BB7389D97AF79D6F85C9AE9317C"
+  },
+  {
+    "Path": "C:\\Users\\EternalLightning\\AppData\\Local\\Pulse\\content-index.config",
+    "SHA256": "907CF2624A1C5C1EE6B7646D9B286FFCDBCCEAF46902A2AEB24697D2A503403B"
+  }
+]

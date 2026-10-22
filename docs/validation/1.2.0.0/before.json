@@ -1,0 +1,21 @@
+{
+  "Time": "2026-10-23T00:24:40.4935360+08:00",
+  "IsAdministrator": false,
+  "Service": {
+    "Name": "PulseIndex",
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+    "StartName": "LocalSystem",
+    "ProcessId": 32752
+  },
+  "Processes": [
+    {
+      "ProcessId": 32752,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": null,
+      "CommandLine": null
+    }
+  ],
+  "Uninstall": []
+}

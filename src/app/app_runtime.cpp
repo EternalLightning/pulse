@@ -630,7 +630,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.dup_scanning = s.duplicateScan.scanning;
             vm.dup_hint = l10n::Get(l10n::StringId::DupHint);
             if (vm.settings_page == 4) {
-            RequestDuplicateVolumeCache(s);
             const auto& volumes = s.dup_volume_cache;
             vm.dup_drives.clear();
             vm.dup_drives.reserve(volumes.size());
@@ -1528,8 +1527,8 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
     }
 }
 
-// probe_details=false keeps hit-test/input calls from starting detail probes.
-ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
+void PrepareViewState(AppState& s) {
+    s.hitTestVmValid = false;
     if (s.hwnd) {
         const auto* active = s.window_tabs.Active();
         auto title = active ? app::LayoutTabTitle(*active) : std::wstring{};
@@ -1539,8 +1538,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             s.windowTitleCache = std::move(title);
         }
     }
-    if (!s.pane) return {};
-    s.changes.visible_paths.clear();
+    if (!s.pane) return;
     ForEachPane(s, [&](app::Pane& pane) {
         if (auto* tab = pane.ActiveTab()) {
             tab->SetShowHiddenFiles(s.appPrefs.show_hidden_files);
@@ -1548,19 +1546,75 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         }
     });
     SyncColumnStrips(s);
+
+    const auto* tab = ActiveTab(s);
+    std::wstring kind, rest;
+    if (tab && app::ParsePulsePath(tab->current_path, &kind, &rest) &&
+        kind == L"settings" && app::SettingsController::PageFromName(rest) == 4)
+        RequestDuplicateVolumeCache(s);
+    if (!s.showDetailsPanel || !tab || tab->SelectedCount() != 1) {
+        if (!s.detailsSelPath.empty()) {
+            s.detailsSelPath.clear();
+            ++s.detailsRequestId;
+            s.detailsSelValid = false;
+            s.detailsMetaPath.clear();
+        }
+        return;
+    }
+    if (!tab->snapshot || tab->selected_index < 0 ||
+        tab->selected_index >= static_cast<int>(tab->EntryCount())) return;
+    const auto& entry = tab->EntryAt(static_cast<size_t>(tab->selected_index));
+    const bool penetrated = !entry.link_target.empty();
+    const auto path = penetrated ? entry.link_target : EntryFullPath(*tab, tab->selected_index);
+    if (path.empty()) return;
+    const auto& modified = penetrated ? entry.link_target_mtime : entry.mtime;
+    if (s.detailsSelPath == path &&
+        (modified.dwHighDateTime != 0 || modified.dwLowDateTime != 0))
+        s.detailsModified = modified;
+    if (ShouldRequestDetailsMeta(s, *tab, path)) {
+        const bool different_path = s.detailsSelPath != path;
+        s.detailsSelPath = path;
+        ++s.detailsRequestId;
+        s.detailsProbeGeneration = tab->applied_generation;
+        s.detailsProbeViewGeneration = tab->view_generation;
+        s.detailsProbeSnapshot = tab->snapshot;
+        s.detailsProbeTick = GetTickCount64();
+        if (different_path) s.detailsScroll = 0.0f;
+        // Drop old facts before the worker publishes the next request version.
+        s.detailsSelValid = false;
+        s.detailsTypeName.clear();
+        s.detailsMetaPath.clear();
+        s.detailsOwner.clear();
+        s.detailsPermissions.clear();
+        s.detailsDrive.clear();
+        s.detailsFileSystem.clear();
+        s.detailsFreeSpace.clear();
+        if (!fs::IsVirtualPath(path))
+            GetDetailsMetaWorker().Submit(s.hwnd, path, s.detailsWindowEpoch, s.detailsRequestId);
+    }
+    s.detailsStarred = s.places.IsStarred(path);
+}
+
+ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
+    if (!s.pane) return {};
+    s.changes.visible_paths.clear();
     ui::WindowViewModel vm = app::BuildWindowViewModel(*s.pane, s.sidebar,
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
-        s.sidebarQuickAccessHiddenMask, probe_details);
+        s.sidebarQuickAccessHiddenMask, include_status);
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
-    vm.can_paste = CanPasteIntoCurrent(s, false);
-    if (const auto* tab = ActiveTab(s); tab && !IsArchiveView(tab->current_path)) {
-        if (!tab->content_results) {
-            vm.selection_has_drive_root = tab->SnapshotSelectionHasDriveRoot();
-        } else {
-            const auto selected_paths = SelectedFullPaths(*tab);
-            vm.selection_has_drive_root = std::any_of(selected_paths.begin(), selected_paths.end(), path::IsDriveRootPath);
-        }
+    const auto command_context = BuildCommandContext(s);
+    vm.can_paste = command_context.can_paste;
+    vm.selection_has_drive_root = command_context.selection_has_drive_root;
+    constexpr int toolbar_commands[] = {app::CmdCut, app::CmdCopy, app::CmdPaste,
+        app::CmdRename, app::CmdDelete, app::CmdProperties};
+    auto& toolbar_enabled = vm.toolbar_commands_enabled.emplace();
+    for (size_t i = 0; i < toolbar_enabled.size(); ++i)
+        toolbar_enabled[i] = app::IsCommandEnabled(toolbar_commands[i], command_context);
+    vm.operation_center_open = s.operationCenter && s.operationCenter->IsVisible();
+    for (const auto& task : CollectOperationCenterTasks(s)) {
+        if (task.active || task.phase == ops::OpPhase::Queued) ++vm.operation_count;
+        else if (task.phase == ops::OpPhase::Failed) vm.operation_failed = true;
     }
     const ULONGLONG fold_now = app::PaneAnimationTimeMs();
     for (auto& group : vm.sidebar) {
@@ -1588,7 +1642,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
         vm.sidebar_pin_drag_index = s.pinDragRun;
         if (s.pinGapVisible) vm.sidebar_pin_gap_line_y = s.pinGapLineY;
     }
-    if (probe_details) FillStatusVm(s, vm);
+    if (include_status) FillStatusVm(s, vm);
     // 1B-2 overlays: cut rows, drag feedback, breadcrumb hover.
     if (!s.cutPaths.empty()) {
         app::Tab* tab = ActiveTab(s);
@@ -1780,10 +1834,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
     }
     // The tray (including exiting cards) determines the sidebar viewport.
     // Clamp only after it is populated, using the same model as draw/hit-test.
-    s.sidebarScroll = std::clamp(s.sidebarScroll, 0.0f, s.renderer.SidebarMaxScroll(
+    vm.sidebar_scroll = std::clamp(s.sidebarScroll, 0.0f, s.renderer.SidebarMaxScroll(
         vm, static_cast<float>(s.compositor.Width()),
         static_cast<float>(s.compositor.Height())));
-    vm.sidebar_scroll = s.sidebarScroll;
     // Right details panel: selection info + size walk + tag chips.
     vm.details_visible = s.showDetailsPanel;
     if (s.showDetailsPanel) {
@@ -1815,15 +1868,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             dv.view_generation = tab->view_generation;
             dv.path = penetrated ? e.link_target
                                  : EntryFullPath(*tab, tab->selected_index);
-            // Directory refreshes replace the snapshot while the selected
-            // path stays the same. Keep the details panel's cached metadata
-            // aligned with the refreshed entry instead of showing its old
-            // modification time indefinitely. For shortcuts, compare the
-            // resolved target path shown in the details panel.
-            if (s.detailsSelPath == dv.path &&
-                (shown_mtime.dwHighDateTime != 0 || shown_mtime.dwLowDateTime != 0)) {
-                s.detailsModified = shown_mtime;
-            }
         }
         if (dv.has_selection && selCount > 1 && tab->snapshot) {
             uint64_t knownSize = 0;
@@ -1851,30 +1895,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
                 : TrayDisplayPath(tab->current_path);
         }
         if (dv.has_selection && dv.multi_count == 1 && !dv.path.empty()) {
-            if (probe_details && ShouldRequestDetailsMeta(s, *tab, dv.path)) {
-                const bool different_path = s.detailsSelPath != dv.path;
-                s.detailsSelPath = dv.path;
-                ++s.detailsRequestId;
-                s.detailsProbeGeneration = tab->applied_generation;
-                s.detailsProbeViewGeneration = tab->view_generation;
-                s.detailsProbeSnapshot = tab->snapshot;
-                s.detailsProbeTick = GetTickCount64();
-                if (different_path) { s.detailsScroll = 0.0f; dv.scroll_y = 0.0f; }
-                // Clear stale facts immediately; GetFileAttributesEx /
-                // Shell queries / security APIs run off-thread (WM_DETAILS_META).
-                s.detailsSelValid = false;
-                s.detailsTypeName.clear();
-                s.detailsMetaPath.clear();
-                s.detailsOwner.clear();
-                s.detailsPermissions.clear();
-                s.detailsDrive.clear();
-                s.detailsFileSystem.clear();
-                s.detailsFreeSpace.clear();
-                if (!fs::IsVirtualPath(dv.path))
-                    GetDetailsMetaWorker().Submit(s.hwnd, dv.path, s.detailsWindowEpoch, s.detailsRequestId);
-            }
-            s.detailsStarred = s.places.IsStarred(dv.path);
-            dv.starred = s.detailsStarred;
+            dv.starred = s.places.IsStarred(dv.path);
             if (s.detailsSelValid) {
                 dv.created_text = pulse::format::LocalFileTime(s.detailsCreated);
                 dv.modified_text = pulse::format::LocalFileTime(s.detailsModified);
@@ -1911,13 +1932,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool probe_details) {
             }
 
         }
-    }
-    if (probe_details && (!vm.details.has_selection || vm.details.multi_count != 1) &&
-        !s.detailsSelPath.empty()) {
-        s.detailsSelPath.clear();
-        ++s.detailsRequestId;
-        s.detailsSelValid = false;
-        s.detailsMetaPath.clear();
     }
     vm.tray_drop = s.dropTray;
     vm.drag_badge = s.dropBadge;
@@ -2089,6 +2103,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::PaneDetails: return text(I::ViewDetails);
     case R::ToolbarSort: return text(I::SortBy);
     case R::ToolbarMore: return text(I::More);
+    case R::OperationCenter: return text(I::OperationCenter);
     case R::PaneColumnLayout: return text(I::ColumnLayout);
     case R::PaneViewButton: return text(I::More);
     case R::FilterBox: return text(I::FilterCurrent);

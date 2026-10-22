@@ -1,5 +1,6 @@
 #include "name_highlight.h"
 #include "../index/filename_pinyin.h"
+#include "../model/item_filter.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -19,22 +20,11 @@ std::vector<NameMatchRange> RangesFromMask(const std::vector<bool>& mask) {
 
 std::vector<index::Term> NameHighlightTerms(std::wstring_view filter, std::wstring_view search) {
     std::vector<index::Term> terms;
-    // Pane filters join non-tag tokens into one filename pattern, unlike search's AND tokens.
-    std::wstring filter_name;
-    for (size_t i = 0; i < filter.size();) {
-        while (i < filter.size() && std::iswspace(filter[i])) ++i;
-        const size_t start = i;
-        while (i < filter.size() && !std::iswspace(filter[i])) ++i;
-        const auto token = filter.substr(start, i - start);
-        if (token.empty() || (token.front() == L'#' && token.size() > 1)) continue;
-        if (!filter_name.empty()) filter_name += L' ';
-        filter_name += token;
-    }
-    if (!filter_name.empty()) {
+    const auto compiled_filter = model::CompileItemFilter(filter);
+    if (compiled_filter.Valid() && !compiled_filter.name.empty()) {
         index::Term term;
-        term.name = index::Fold(filter_name);
-        term.name_how = filter_name.find_first_of(L"*?") == std::wstring::npos
-            ? index::NameHow::Substring : index::NameHow::Wildcard;
+        term.name = compiled_filter.name;
+        term.name_how = compiled_filter.wildcard ? index::NameHow::Wildcard : index::NameHow::Substring;
         terms.push_back(std::move(term));
     }
     const auto query = index::ParseQuery(search);

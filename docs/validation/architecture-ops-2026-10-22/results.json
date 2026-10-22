@@ -1,0 +1,120 @@
+{
+  "Stage": "E:\\Projects\\pulse\\bench_data\\architecture-ops-20261022-191722-277\\bin",
+  "NetworkRoot": "Z:\\",
+  "Payload": [
+    {
+      "Name": "pulse_ops_test.exe",
+      "SHA256": "FE41FD000E17727DE87DB0296DDB58B1535E7B817136A36F25F6991615C95576"
+    },
+    {
+      "Name": "pulse_rename_ops_test.exe",
+      "SHA256": "6B8017974CADD5E0B367E0F7A9B7AC610E25BA13578C1A25D44046BE6D285094"
+    },
+    {
+      "Name": "pulse_recycle_backend_test.exe",
+      "SHA256": "458C778B0AB3AEB9FE751475A1AF6F0D54E59A5B6AE8844BA37FE3E4B2F3F934"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "SHA256": "0C04603F22A7E1D983E0938210D05576747B074D273227682AA66F0F772A805D"
+    }
+  ],
+  "Results": [
+    {
+      "Name": "shell-completion",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 14,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "open-workers",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 3,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "clipboard-isolated",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 0,
+      "Failed": 1,
+      "Skipped": 0
+    },
+    {
+      "Name": "mutation-undo",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 177,
+      "Failed": 3,
+      "Skipped": 0
+    },
+    {
+      "Name": "undo-identity",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 61,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "source-contract",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 112,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "local-rename",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 53,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "delete-confirmation",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 5,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "delete-locked",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 5,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "network-transfer",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 21,
+      "Failed": 2,
+      "Skipped": 0
+    },
+    {
+      "Name": "network-undo",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 35,
+      "Failed": 2,
+      "Skipped": 0
+    },
+    {
+      "Name": "network-delete",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 8,
+      "Failed": 0,
+      "Skipped": 0
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 #include "../common/windows_compat.h"
 #include "quick_access.h"
 #include "pane_animations.h"
+#include "folder_sizes_ui.h"
 #include "app_visual_animation.h"
 #include "app_ui_schedule.h"
 #include "sidebar_resize.h"
@@ -195,7 +196,10 @@ bool Render(AppState& s) {
     const bool visual_animating = TickVisualAnimations(s);
     const bool address_animating = TickAddressSearchAnimation(s, animation_now);
     if (s.showFps) UpdateProcessMetrics(s);
+    PrepareViewState(s);
     ui::WindowViewModel vm = BuildVm(s);
+    PrepareFolderSizes(s, vm);
+    s.sidebarScroll = vm.sidebar_scroll;
     vm.backdrop_enabled = !hc && s.compositor.UsesTransparentComposition() && s.backdropActive;
     vm.pane.hover_index = s.hoverRow;
 
@@ -643,6 +647,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         };
         s->operationWindow->Create(hwnd, std::move(operation_callbacks));
         s->operationWindow->SetTheme(s->darkMode, s->accentColor);
+        InitializeOperationCenter(*s);
 
         // OLE drop target: list rows, pane headers, breadcrumbs, sidebar, tray.
         {
@@ -1009,11 +1014,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s && LOWORD(wParam) != WA_INACTIVE) s->core.windows.Touch(hwnd);
         if (s && s->menu && LOWORD(wParam) == WA_INACTIVE)
             s->menu->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
+        if (s && s->operationCenter && LOWORD(wParam) == WA_INACTIVE)
+            s->operationCenter->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
         if (s) s->renderer.NotifyPreviewActivate(LOWORD(wParam) != WA_INACTIVE);
         break;
 
     case WM_ACTIVATEAPP:
         if (s && !wParam) {
+            if (s->operationCenter) s->operationCenter->Hide(false);
             if (s->menu) s->menu->DismissForDeactivation(nullptr);
             s->detailsPreviewPanning = false;
             s->renderer.EndDetailsPreviewPan();
@@ -1024,6 +1032,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_MOVE:
         if (s) {
+            if (s->operationCenter) s->operationCenter->Hide(false);
             s->compositor.UpdateTextRenderingParams(
                 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
             s->renderer.NotifyPreviewOwnerMoved();
@@ -1033,6 +1042,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZE: {
         if (s) {
+            if (s->operationCenter) s->operationCenter->Hide(false);
             s->compositor.Resize(LOWORD(lParam), HIWORD(lParam));
             s->maximized = (wParam == SIZE_MAXIMIZED);
             if (wParam != SIZE_MINIMIZED && IsWindowVisible(hwnd)) SyncUiScheduling(*s);
@@ -1480,6 +1490,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
             PumpPermissionOperationPrompt(*s);
             if (!s->permissionOperationPromptActive) PumpLockedOperationPrompt(*s);
+            SyncOperationCenters(*s);
             RefreshOpenCtxMenu(*s);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -1781,6 +1792,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->exit_thread.joinable()) s->exit_thread.join();
             s->systemIntegration.Stop();
             s->ops.Stop();
+            if (auto* remaining = s->core.windows.MostRecent()) SyncOperationCenters(*remaining);
             ShutdownGlobalSearch(*s);
             if (was_global_owner || last_window) {
                 StopShellRegistryWatch();
@@ -1816,6 +1828,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 s->dropTarget = nullptr;
             }
             s->menu.reset();
+            s->operationCenter.reset();
+            s->operationHistoryWindow.reset();
             s->operationWindow.reset();
             if (s->hwndAddressEdit) {
                 DestroyWindow(s->hwndAddressEdit);
@@ -1924,6 +1938,7 @@ void StageTagShotStates(AppState& state) {
     if (state.shot_tag_drag && state.places.tags.size() >= 4) {
         // Stage a mid-drag frame at slot 0 (the regression case): the third
         // tag floats at the list top; the first slides down mid-flight.
+        PrepareViewState(state);
         ui::WindowViewModel vm0 = BuildVm(state);
         int g0 = -1;
         for (int g = 0; g < static_cast<int>(vm0.sidebar.size()); ++g) {
@@ -2347,14 +2362,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
                 if (item.quick_swatches.size() > 1) item.quick_swatches[1].mixed = true;
                 break;
             }
-            // Sample Explorer section: a flat verb plus a software-owned
-            // flyout group (renders the › chevron in the shortcut column).
-            app::ShellMenuEntry group;
-            group.text = L"Bandizip";
-            group.children = { { app::CmdShellComBase + 1, L"压缩为 zip", true },
-                               { app::CmdShellComBase + 2, L"用 Bandizip 打开", true } };
-            app::AppendShellSection(debug_items,
-                { { app::CmdShellStaticBase + 0, L"打印", true }, group });
+            // Exercise the production overflow composition with isolated verbs.
+            app::ContextMenuController debug_controller;
+            app::ContextMenuPrefs debug_prefs;
+            debug_prefs.persist = false;
+            app::StaticVerb print;
+            print.verb = L"print"; print.display = L"打印";
+            app::StaticVerb group;
+            group.display = L"Bandizip";
+            group.children = {{L"fixture.zip", L"压缩为 zip", L""},
+                              {L"fixture.open", L"用 Bandizip 打开", L""}};
+            debug_controller.CompleteStaticVerbs(L".fixture", {print, group});
+            debug_controller.StartQuery(debug_prefs, nullptr, {L"fixture"}, false,
+                L".fixture", false, {}, {});
+            bool debug_prefs_changed = false;
+            debug_items = debug_controller.BuildDisplay(debug_prefs, debug_items, debug_prefs_changed);
             ok = m.SaveDebugSnapshot(state.menushot_out.c_str(), std::move(debug_items));
         }
         DestroyWindow(hwnd);
@@ -2393,6 +2415,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         if (state.isolatedTest && GetEnvironmentVariableW(L"PULSE_TEST_SETTINGS_EXPANDED",settings_fixture,ARRAYSIZE(settings_fixture)))
             state.settingsExpanded=static_cast<unsigned>(wcstoul(settings_fixture,nullptr,10)) & 0x1f03u;
         if (state.isolatedTest && GetEnvironmentVariableW(L"PULSE_TEST_SETTINGS_SCROLL",settings_fixture,ARRAYSIZE(settings_fixture))) {
+            PrepareViewState(state);
             auto vm=BuildVm(state,false);
             state.settings.SetScroll(static_cast<float>(_wtof(settings_fixture))*state.scale,
                 state.renderer.SettingsMaxScroll(vm,static_cast<float>(state.compositor.Width()),static_cast<float>(state.compositor.Height())));

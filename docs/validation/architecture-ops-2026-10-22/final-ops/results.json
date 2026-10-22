@@ -1,0 +1,158 @@
+{
+  "Stage": "E:\\Projects\\pulse\\bench_data\\architecture-ops-20261022-201512-414\\bin",
+  "NetworkRoot": "Z:\\",
+  "Payload": [
+    {
+      "Name": "pulse_ops_test.exe",
+      "SHA256": "C4ABB0016F6350EB6DE9211544DF1B1740D4753C2DABCADDBB832F854F9E595D"
+    },
+    {
+      "Name": "pulse_recycle_backend_test.exe",
+      "SHA256": "B235A934E78D310C51E821A2C6CA9660FC303F1B5F09AAFBCFEB27764B40114E"
+    },
+    {
+      "Name": "pulse_rename_ops_test.exe",
+      "SHA256": "8A67D5EA064139C9FBCA6B181CEB39F1EF7B41B8FE3C43568C620077169E913D"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "SHA256": "AE26CDAB9A6A68D6FEDFEC7AB44B21D1F955EE56C5D6FE3900ABC154EB253E04"
+    },
+    {
+      "Name": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "Name": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    }
+  ],
+  "Results": [
+    {
+      "Name": "shell-completion",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 14,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "open-workers",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 3,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "clipboard-isolated",
+      "ExitCode": 77,
+      "TimedOut": false,
+      "Passed": 0,
+      "Failed": 0,
+      "Skipped": 1,
+      "Unavailable": true
+    },
+    {
+      "Name": "mutation-undo",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 180,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "undo-identity",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 61,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "source-contract",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 125,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "local-rename",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 53,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "delete-confirmation",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 5,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "delete-locked",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 5,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "network-transfer",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 23,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "network-undo",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 37,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "network-delete",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 10,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "transfer-control",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 11,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    },
+    {
+      "Name": "directory-skip",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 17,
+      "Failed": 0,
+      "Skipped": 0,
+      "Unavailable": false
+    }
+  ]
+}

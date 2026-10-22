@@ -1,0 +1,9 @@
+{
+  "Version": "1.2.0.0",
+  "Changed": [
+    "Pulse.exe"
+  ],
+  "VerifiedPayloadFiles": 40,
+  "Backup": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.0.0-motion-20261023-012156",
+  "ServiceUntouched": true
+}

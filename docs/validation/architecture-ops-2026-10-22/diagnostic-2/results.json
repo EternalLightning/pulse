@@ -1,0 +1,60 @@
+{
+  "Stage": "E:\\Projects\\pulse\\bench_data\\architecture-ops-20261022-193128-564\\bin",
+  "NetworkRoot": "Z:\\",
+  "Payload": [
+    {
+      "Name": "pulse_ops_test.exe",
+      "SHA256": "716384FF1246B4C0A9E4C1B800B4D466AA80C6E92EA4C79909205C6745763231"
+    },
+    {
+      "Name": "pulse_rename_ops_test.exe",
+      "SHA256": "9F140E3400979B8EC0D2587244F3E524029CB8ED7403CDA00A05CB511AD668C2"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "SHA256": "226A94D1058ABD5003FF9484DDA4A9981160C57D5BE762F7DC3964FAAE6F86C3"
+    },
+    {
+      "Name": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "Name": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    }
+  ],
+  "Results": [
+    {
+      "Name": "clipboard-isolated",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 0,
+      "Failed": 1,
+      "Skipped": 0
+    },
+    {
+      "Name": "mutation-undo",
+      "ExitCode": 0,
+      "TimedOut": false,
+      "Passed": 180,
+      "Failed": 0,
+      "Skipped": 0
+    },
+    {
+      "Name": "network-transfer",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 21,
+      "Failed": 2,
+      "Skipped": 0
+    },
+    {
+      "Name": "network-undo",
+      "ExitCode": 1,
+      "TimedOut": false,
+      "Passed": 35,
+      "Failed": 2,
+      "Skipped": 0
+    }
+  ]
+}

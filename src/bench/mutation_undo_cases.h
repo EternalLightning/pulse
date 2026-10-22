@@ -1,5 +1,6 @@
 #pragma once
 #include "../ops/ops_manager.h"
+#include "../common/localization.h"
 #include <algorithm>
 #include <cstdio>
 #include <cwchar>
@@ -320,11 +321,13 @@ inline int RunMutationUndoRegressions(const std::wstring& fixture_root) {
         MutationUndoTestProbe::Recover(restored, recovery);
         const bool accepted = restored.RetryRecovery();
         const auto pending = restored.PendingRecovery();
+        const auto& reservation_error = l10n::Get(l10n::StringId::OperationUndoReservationMissing);
         check(!accepted && !restored.HasPendingFileOperations() && pending.entries.size() == 1 &&
             pending.entries.front().sequence == recovery.sequence &&
             pending.entries.front().request.type == recovery.request.type &&
             pending.entries.front().request.is_undo && pending.entries.front().request.sources == recovery.request.sources &&
-            restored.Status().phase == OpPhase::Failed && restored.Status().last_error.find(L"历史预约") != std::wstring::npos &&
+            restored.Status().phase == OpPhase::Failed && !reservation_error.empty() &&
+            restored.Status().last_error == reservation_error &&
             same_mapping(history, MutationUndoTestProbe::History(restored)) && restored.CanUndo() &&
             !exists(original) && read(product) == original_bytes && identity(product) == product_id,
             L"recovered mutation inverse without live reservation is rejected before enqueue and retains recovery plus historical objects");

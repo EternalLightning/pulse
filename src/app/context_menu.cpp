@@ -34,7 +34,6 @@ constexpr const wchar_t* kGlyphFolder = L"\xE8B7";
 constexpr const wchar_t* kGlyphOpenInNewTab = L"\xE8A7";
 constexpr const wchar_t* kGlyphSearch = L"\xE721";
 constexpr const wchar_t* kGlyphTag = L"\xE8EC";
-constexpr const wchar_t* kGlyphSettings = L"\xE713";
 constexpr const wchar_t* kGlyphRecycle = L"\xE75C";
 constexpr const wchar_t* kGlyphSelectAll = L"\xE8B3";
 constexpr const wchar_t* kGlyphInvert = L"\xE7A1";
@@ -61,6 +60,40 @@ ui::FluentMenuItem UndoItem(bool can_undo, const std::wstring& undo_label) {
 }
 
 } // namespace
+
+void OrganizeItemMenu(std::vector<ui::FluentMenuItem>& items) {
+    const auto rank = [](const ui::FluentMenuItem& item) {
+        if (item.command == CmdNone && !item.quick_swatches.empty() &&
+            std::all_of(item.quick_swatches.begin(), item.quick_swatches.end(), [](const auto& swatch) {
+                return swatch.command == CmdCut || swatch.command == CmdCopy ||
+                    swatch.command == CmdDelete || swatch.command == CmdRename;
+            })) return 0;
+        switch (item.command) {
+        case CmdOpen: return 10;
+        case CmdOpenInNewTab: return 11;
+        case CmdOpenPath: return 12;
+        case CmdOpenTerminal: return 13;
+        case CmdBatchRename: return 20;
+        case CmdCopyPath: return 21;
+        case CmdUndo: return 22;
+        case CmdSelectTextCompare: return 30;
+        case CmdCompareSelectedText: return 31;
+        case CmdViewRecentChanges: return 32;
+        case CmdPinQuickAccess: case CmdUnpinQuickAccess: return 40;
+        case CmdPinWorkspace: return 41;
+        case CmdPinNetwork: return 42;
+        case CmdTags: return item.quick_swatches.empty() ? 44 : 43;
+        case CmdProperties: return 60;
+        default: return 50;
+        }
+    };
+    std::stable_sort(items.begin(), items.end(), [&](const auto& a, const auto& b) {
+        return rank(a) < rank(b);
+    });
+    for (size_t index = 0; index < items.size(); ++index)
+        items[index].separator_after = index + 1 < items.size() &&
+            rank(items[index]) / 10 != rank(items[index + 1]) / 10;
+}
 
 std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring& undo_label,
                                               bool folder) {
@@ -94,6 +127,7 @@ std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring&
     items.push_back(Item(CmdTags, l10n::Get(l10n::StringId::TagsEllipsis).c_str(), kGlyphTag));
     items.back().separator_after = true;
     items.push_back(UndoItem(can_undo, undo_label));
+    OrganizeItemMenu(items);
     return items;
 }
 
@@ -369,6 +403,28 @@ std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset) {
     return items;
 }
 
+std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
+                                                ui::SortDirection direction, bool enabled) {
+    static constexpr l10n::StringId labels[] = {l10n::StringId::GroupAuto, l10n::StringId::GroupNone,
+        l10n::StringId::GroupDate, l10n::StringId::GroupType, l10n::StringId::GroupSize};
+    static constexpr ui::GroupMode modes[] = {ui::GroupMode::Auto, ui::GroupMode::None,
+        ui::GroupMode::DateModified, ui::GroupMode::Type, ui::GroupMode::Size};
+    std::vector<ui::FluentMenuItem> items;
+    for (int i = 0; i < 5; ++i) {
+        auto item = Item(CmdGroupAuto + i, l10n::Get(labels[i]).c_str(), L"", nullptr, enabled);
+        item.radio_group = true;
+        item.radio = modes[i] == mode;
+        items.push_back(std::move(item));
+    }
+    items.back().separator_after = true;
+    auto order = Item(CmdGroupDirection, l10n::Get(l10n::StringId::GroupDirection).c_str(), L"\xE8CB",
+        l10n::Get(direction == ui::SortDirection::Asc ? l10n::StringId::GroupAscending
+            : l10n::StringId::GroupDescending).c_str(), enabled && mode != ui::GroupMode::Auto &&
+                mode != ui::GroupMode::None);
+    items.push_back(std::move(order));
+    return items;
+}
+
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode, bool details_panel) {
     static constexpr l10n::StringId labels[] = {
         l10n::StringId::ViewExtraLarge, l10n::StringId::ViewLarge,
@@ -473,7 +529,8 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
                                                     const std::vector<index::Hit>& hits,
                                                     bool project_only,
                                                     size_t total,
-                                                    const std::wstring& current_path) {
+                                                    const std::wstring& current_path,
+                                                    const CommandContext& context) {
     std::vector<ui::FluentMenuItem> items;
     const OmnibarQuery parsed = ParseOmnibarQuery(query, project_only);
     const std::wstring& needle = parsed.needle;
@@ -481,29 +538,11 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
     const bool search_mode = parsed.kind == OmnibarQuery::Kind::Search;
     const bool path_like = parsed.kind == OmnibarQuery::Kind::Mixed &&
                            LooksLikeFilesystemPath(needle);
-    auto add_cmd = [&](int cmd, const wchar_t* text, const wchar_t* glyph, const wchar_t* shortcut,
-                       ui::fluent::MenuPictogram pictogram = ui::fluent::MenuPictogram::None) {
-        if (!ContainsI(text, needle)) return;
-        items.push_back(Item(cmd, text, glyph, shortcut));
-        items.back().pictogram = pictogram;
-    };
     if (!project_only && !search_mode && !path_like) {
-        add_cmd(CmdLayoutTwoVertical, l10n::Get(l10n::StringId::LayoutVertical).c_str(), L"", L"Ctrl+2",
-                ui::fluent::MenuPictogram::LayoutSideBySide);
-        add_cmd(CmdLayoutFourGrid, l10n::Get(l10n::StringId::LayoutFour).c_str(), L"", L"Ctrl+4",
-                ui::fluent::MenuPictogram::LayoutFour);
-        add_cmd(CmdCopyToTarget, l10n::Get(l10n::StringId::CopyToTarget).c_str(), kGlyphCopy, L"Ctrl+Alt+C");
-        add_cmd(CmdNewFolder, l10n::Get(l10n::StringId::NewFolder).c_str(), kGlyphNewFolder, L"F7");
-        add_cmd(CmdPinWorkspace, l10n::Get(l10n::StringId::PinWorkspace).c_str(), kGlyphFolder, nullptr);
-        add_cmd(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink, L"Ctrl+Shift+C");
-        add_cmd(CmdInstallFullIndex, l10n::Get(l10n::StringId::EnableFullIndex).c_str(), kGlyphSearch, nullptr);
-        add_cmd(CmdSettings, l10n::Get(l10n::StringId::Settings).c_str(), kGlyphSettings, nullptr);
-        add_cmd(CmdOpenRecycle, l10n::Get(l10n::StringId::RecycleBin).c_str(), kGlyphRecycle, nullptr);
-        add_cmd(CmdBatchRename, l10n::Get(l10n::StringId::BatchRename).c_str(), kGlyphRename, L"Ctrl+Shift+R");
-        add_cmd(CmdAdvancedSearch, l10n::Get(l10n::StringId::AdvancedSearch).c_str(), kGlyphSearch, L"Ctrl+Shift+F");
-        add_cmd(CmdSelectAll, l10n::Get(l10n::StringId::SelectAll).c_str(), kGlyphSelectAll, L"Ctrl+A");
-        add_cmd(CmdInvertSelection, l10n::Get(l10n::StringId::InvertSelection).c_str(), kGlyphInvert, L"Ctrl+I");
-        add_cmd(CmdSelectWildcard, l10n::Get(l10n::StringId::SelectWildcard).c_str(), kGlyphWildcard, L"Ctrl+Shift+A");
+        for (const auto& descriptor : GetCommandCatalog()) {
+            auto item = BuildCommandMenuItem(descriptor.command, context);
+            if (ContainsI(item.text, needle)) items.push_back(std::move(item));
+        }
     }
     std::unordered_set<std::wstring> seen_paths;
     const bool has_content = index::QueryHasContent(index::ParseQuery(needle));

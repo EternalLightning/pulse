@@ -1,10 +1,14 @@
 #pragma once
 
-#include "index_engine.h"
+#include "index_query.h"
+#include "index_types.h"
 #include "search_result_merge.h"
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <string_view>
+#include <utility>
+#include <windows.h>
 
 namespace pulse::index {
 

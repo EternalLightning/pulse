@@ -229,7 +229,7 @@ inline int RunPresentationStateCases(AppState& s) {
         folder.path = L"\\\\presentation-fixture.invalid\\share\\manual";
         slot.pane.entries.push_back(folder);
         folders.pane_slots.push_back(std::move(slot));
-        FillFolderSizes(s, folders);
+        PrepareFolderSizes(s, folders);
         const auto label = folders.pane_slots[0].pane.folder_size_labels.find(0);
         check(label != folders.pane_slots[0].pane.folder_size_labels.end() && label->second.manual &&
             folders.pane.folder_size_labels[0].manual, "folder size producer and focused pane retain manual machine flag");
@@ -243,7 +243,7 @@ inline int RunPresentationStateCases(AppState& s) {
             capture(folders, english ? L"icons_en.png" : L"icons_zh.png", !english);
         }
         folders.pane_slots[0].pane.view_mode = ui::ViewMode::Details;
-        FillFolderSizes(s, folders);
+        PrepareFolderSizes(s, folders);
         check(folders.pane_slots[0].pane.folder_size_labels.empty() && folders.pane.folder_size_labels.empty(),
             "unsupported layout clears manual metadata together with labels");
     }

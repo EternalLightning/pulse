@@ -9,6 +9,7 @@
 #include "../common/display_path.h"
 #include "../common/known_folder_labels.h"
 #include "../common/text_format.h"
+#include "../model/item_filter.h"
 #include <commctrl.h>
 #include <prsht.h>
 #include <shlobj.h>
@@ -163,6 +164,8 @@ void Tab::SetSnapshot(fs::SnapshotPtr value) {
     view_filter_map.reset();
     view_date_groups.reset();
     view_date_filter.reset();
+    view_group_order.reset();
+    view_group_reverse.reset();
     view_tag_dots.reset();
     snapshot_path = snapshot ? current_path : L"";
     if(content_results) { directory_count=0; file_count=content_results->Count(); return; }
@@ -280,6 +283,26 @@ void Tab::SelectRange(int from, int to) {
     to = std::clamp(to, 0, n - 1);
     all_selected = false;
     selected.clear();
+    const auto effective_group = group_mode == ui::GroupMode::Auto
+        ? (sort_column == ui::SortColumn::Mtime ? ui::GroupMode::DateModified : ui::GroupMode::None)
+        : group_mode;
+    const auto effective_direction = group_mode == ui::GroupMode::Auto ? sort_direction : group_direction;
+    if (view_mode == ui::ViewMode::Details && !content_results &&
+        !current_path.empty() && !fs::IsVirtualPath(current_path) &&
+        snapshot && effective_group != ui::GroupMode::None && view_group_mode == effective_group &&
+        view_group_direction == effective_direction && view_cache_snapshot == snapshot &&
+        view_group_order && view_group_reverse && view_group_reverse->size() == snapshot->size()) {
+        int first = (*view_group_reverse)[static_cast<size_t>(from)];
+        const int last = (*view_group_reverse)[static_cast<size_t>(to)];
+        if (last >= 0) {
+            if (first < 0) first = last;
+            for (int row = std::min(first, last); row <= std::max(first, last); ++row)
+                selected.insert((*view_group_order)[static_cast<size_t>(row)]);
+            selected_index = to;
+            if (selection_anchor < 0) selection_anchor = from;
+            return;
+        }
+    }
     const int lo = std::min(from, to);
     const int hi = std::max(from, to);
     selected.reserve(static_cast<size_t>(hi - lo + 1));
@@ -1451,49 +1474,45 @@ bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle) {
         folded_pat.find_first_of(L"*?") != std::wstring::npos);
 }
 
-static void ParseFilterText(const std::wstring& text, std::wstring& name_needle,
-                            std::vector<std::wstring>& tag_needles) {
-    name_needle.clear();
-    tag_needles.clear();
-    size_t i = 0;
-    while (i < text.size()) {
-        while (i < text.size() && std::iswspace(text[i])) ++i;
-        if (i >= text.size()) break;
-        const size_t start = i;
-        while (i < text.size() && !std::iswspace(text[i])) ++i;
-        std::wstring tok = text.substr(start, i - start);
-        if (!tok.empty() && tok[0] == L'#' && tok.size() > 1) {
-            tag_needles.push_back(ToLowerCopy(tok.substr(1)));
-        } else if (!tok.empty()) {
-            if (!name_needle.empty()) name_needle += L' ';
-            name_needle += tok;
+static model::CompiledItemFilter CompileViewFilter(const std::wstring& text, const PlacesCatalog* places) {
+    return model::CompileItemFilter(text, [places](std::wstring_view needle, bool fuzzy) {
+        std::vector<int> matches;
+        if (places) for (size_t id = 0; id < places->tags.size(); ++id) {
+            if (model::ItemFilterTagNameMatches(places->tags[id].name, static_cast<int>(id), needle, fuzzy))
+                matches.push_back(static_cast<int>(id));
         }
-    }
-    name_needle = ToLowerCopy(name_needle);
-}
-
-static bool TagMatchesNeedle(const ColorTag& tag, int index, const std::wstring& needle) {
-    if (needle.empty()) return true;
-    if (ToLowerCopy(tag.name).find(needle) != std::wstring::npos) return true;
-    static const wchar_t* kNicks[] = { L"红", L"橙", L"绿", L"青", L"紫", L"蓝", L"灰" };
-    if (index >= 0 && index < 7 && needle == kNicks[index]) return true;
-    if (index == 1 && needle == L"黄") return true;
-    return false;
+        return matches;
+    });
 }
 
 index::ContentResultStore::Filter ContentFilter(const std::wstring& text, const PlacesCatalog& places) {
-    if(text.empty()) return {};
-    std::wstring name; std::vector<std::wstring> tags;
-    ParseFilterText(text,name,tags);
-    if(name.empty() && tags.empty()) name=ToLowerCopy(text);
-    std::unordered_set<std::wstring> paths;
-    for(size_t id=0;id<places.tags.size();++id) for(const auto& needle:tags) {
-        if(TagMatchesNeedle(places.tags[id],static_cast<int>(id),needle))
-            for(const auto& path:places.tags[id].paths) paths.insert(ToLowerCopy(path));
+    if (text.empty()) return {};
+    auto filter = CompileViewFilter(text, &places);
+    if (!filter.Valid()) return [](const fs::DirEntry&) { return false; };
+    model::ItemFilterTagLookup lookup;
+    if (filter.HasTagConditions()) {
+        std::vector<int> relevant_tags;
+        for (const auto& clause : filter.tags)
+            relevant_tags.insert(relevant_tags.end(), clause.alternatives.begin(), clause.alternatives.end());
+        std::sort(relevant_tags.begin(), relevant_tags.end());
+        relevant_tags.erase(std::unique(relevant_tags.begin(), relevant_tags.end()), relevant_tags.end());
+        using Assignments = std::unordered_map<std::wstring, std::vector<int>>;
+        auto paths = std::make_shared<Assignments>();
+        for (int id : relevant_tags) {
+            if (id < 0 || static_cast<size_t>(id) >= places.tags.size()) continue;
+            for (const auto& path : places.tags[static_cast<size_t>(id)].paths)
+                (*paths)[index::Fold(fs::NormalizePath(path))].push_back(id);
+        }
+        // ContentResultStore invokes this predicate on its worker thread. Hold
+        // only the assignments captured here, never the mutable PlacesCatalog.
+        std::shared_ptr<const Assignments> snapshot = std::move(paths);
+        lookup = [snapshot = std::move(snapshot)](const std::wstring& full) -> const std::vector<int>* {
+            const auto it = snapshot->find(index::Fold(fs::NormalizePath(full)));
+            return it == snapshot->end() ? nullptr : &it->second;
+        };
     }
-    const bool wildcard = name.find_first_of(L"*?") != std::wstring::npos;
-    return [name=std::move(name),wildcard,has_tags=!tags.empty(),paths=std::move(paths)](const fs::DirEntry& entry) {
-        return NameMatchesFoldedPattern(entry.name,name,wildcard) && (!has_tags || paths.contains(ToLowerCopy(entry.full_path)));
+    return [filter = std::move(filter), lookup = std::move(lookup)](const fs::DirEntry& entry) {
+        return filter.Matches(entry, entry.full_path, lookup);
     };
 }
 
@@ -1508,29 +1527,13 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
         for (int i = 0; i < n; ++i) if (tab.EntryVisible(i)) out.push_back(i);
         return;
     }
-    std::wstring name_needle;
-    std::vector<std::wstring> tag_needles;
-    ParseFilterText(tab.filter_text, name_needle, tag_needles);
-    if (name_needle.empty() && tag_needles.empty())
-        name_needle = ToLowerCopy(tab.filter_text);
-    const bool wildcard = name_needle.find_first_of(L"*?") != std::wstring::npos;
-    std::vector<bool> matching_tags;
-    if (!tag_needles.empty()) {
-        if (!places) return;
-        // Tiny directories must not scan a much larger tag catalog up front.
-        if (places->tags.size() <= static_cast<size_t>(n)) {
-            matching_tags.resize(places->tags.size());
-            for (size_t id = 0; id < places->tags.size(); ++id) {
-                for (const auto& needle : tag_needles) {
-                    if (TagMatchesNeedle(places->tags[id], static_cast<int>(id), needle)) {
-                        matching_tags[id] = true;
-                        break;
-                    }
-                }
-            }
-            if (std::none_of(matching_tags.begin(), matching_tags.end(), [](bool match) { return match; })) return;
-        }
-    }
+    const auto filter = CompileViewFilter(tab.filter_text, places);
+    if (!filter.Valid()) return;
+    const model::ItemFilterTagLookup lookup = [places](const std::wstring& full) {
+        return places ? places->TagIndicesForPath(full) : nullptr;
+    };
+    const bool needs_path = filter.HasTagConditions() ||
+        std::any_of(filter.metadata.begin(), filter.metadata.end(), [](const auto& term) { return term.name_in_path; });
     out.reserve(static_cast<size_t>(n));
     const fs::DirEntry empty_entry;
     for (int i = 0; i < n; ++i) {
@@ -1538,25 +1541,7 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
         // Content-backed rows returned above; borrow immutable snapshot rows here.
         const auto& e = static_cast<size_t>(i) < tab.snapshot->size()
             ? (*tab.snapshot)[static_cast<size_t>(i)] : empty_entry;
-        if (!NameMatchesFoldedPattern(e.name, name_needle, wildcard)) continue;
-        bool tag_ok = tag_needles.empty();
-        if (!tag_ok && places) {
-            const std::wstring full = EntryPathOf(tab, e);
-            if (const auto* ids = places->TagIndicesForPath(full)) {
-                for (int id : *ids) {
-                    if (id < 0 || static_cast<size_t>(id) >= places->tags.size()) continue;
-                    const bool matches = matching_tags.empty()
-                        ? std::any_of(tag_needles.begin(), tag_needles.end(), [&](const auto& needle) {
-                            return TagMatchesNeedle(places->tags[id], id, needle);
-                        }) : matching_tags[id];
-                    if (matches) {
-                        tag_ok = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (tag_ok) out.push_back(i);
+        if (filter.Matches(e, needs_path ? EntryPathOf(tab, e) : std::wstring{}, lookup)) out.push_back(i);
     }
 }
 
@@ -1566,6 +1551,12 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.path = tab->virtual_title.empty() ? DisplayPath(tab->current_path) : tab->virtual_title;
     out.header_text = PaneHeaderText(*tab);
     out.filter_text = tab->filter_text;
+    out.filter_error.clear();
+    if (!tab->filter_text.empty()) {
+        const auto compiled = model::CompileItemFilter(tab->filter_text);
+        if (!compiled.Valid()) out.filter_error = l10n::Get(l10n::StringId::ItemFilterInvalid) +
+            L": " + compiled.error_token;
+    }
     out.filter_expand = pane.filter_expand;
     out.header_controls_opacity = pane.header_animation.opacity;
     out.banner_title = tab->banner_title;
@@ -1573,6 +1564,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.network_search_root = tab->network_search_root;
     out.banner_kind = tab->net_readonly ? 2 : 0;
     out.filter_map.reset();
+    out.source_to_view.reset();
     out.date_groups.reset();
     out.tag_dots.reset();
     out.loading = tab->loading;
@@ -1628,6 +1620,8 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.view_generation = tab->view_generation;
     out.sort_column = tab->sort_column;
     out.sort_direction = tab->sort_direction;
+    out.group_mode = tab->group_mode;
+    out.group_direction = tab->group_direction;
     out.details_column_dividers = tab->details_column_dividers;
     out.search_column_dividers = tab->search_column_dividers;
     FillColumnStripView(out.column_strip, *tab);
@@ -1664,20 +1658,33 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
         }
         out.filter_map = tab->view_filter_map;
     }
+    const auto group_mode = tab->group_mode == ui::GroupMode::Auto
+        ? (tab->sort_column == ui::SortColumn::Mtime ? ui::GroupMode::DateModified : ui::GroupMode::None)
+        : tab->group_mode;
+    const auto group_direction = tab->group_mode == ui::GroupMode::Auto
+        ? tab->sort_direction : tab->group_direction;
     if (out.view_mode == ui::ViewMode::Details && out.is_file_system &&
-        out.sort_column == ui::SortColumn::Mtime && out.snapshot && out.EntryCount()) {
+        group_mode != ui::GroupMode::None && !tab->content_results && out.snapshot && out.EntryCount()) {
         SYSTEMTIME today{};
         GetLocalTime(&today);
         const unsigned day_key = today.wYear * 10000u + today.wMonth * 100u + today.wDay;
-        if (!tab->view_date_groups || source_changed ||
+        if (!tab->view_date_groups || !tab->view_group_order || source_changed ||
             tab->view_date_filter.get() != out.filter_map.get() ||
+            tab->view_group_mode != group_mode || tab->view_group_direction != group_direction ||
             tab->view_date_day != day_key) {
+            auto grouped = BuildGroupedView(out.snapshot, out.filter_map.get(), group_mode, group_direction, today);
             tab->view_date_groups = std::make_shared<const std::vector<ui::DateGroup>>(
-                BuildDateGroups(out.snapshot, out.filter_map.get(), today));
+                std::move(grouped.groups));
+            tab->view_group_order = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.indices));
+            tab->view_group_reverse = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.source_to_view));
             tab->view_date_filter = out.filter_map;
             tab->view_date_day = day_key;
+            tab->view_group_mode = group_mode;
+            tab->view_group_direction = group_direction;
         }
         out.date_groups = tab->view_date_groups;
+        out.filter_map = tab->view_group_order;
+        out.source_to_view = tab->view_group_reverse;
     }
 }
 

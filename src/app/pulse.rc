@@ -52,3 +52,4 @@ IDR_FILES_DELETE_COLOR_DARK_SVG RCDATA "../../assets/files_toolbar/delete_color_
 IDR_FILES_PROPERTIES_COLOR_DARK_SVG RCDATA "../../assets/files_toolbar/properties_color_dark.svg"
 IDR_FLUENT_HOME_SVG RCDATA "../../assets/fluent/home_24_color.svg"
 IDR_ONEDRIVE_SVG RCDATA "../../assets/microsoft_brand/onedrive.svg"
+IDR_FILES_STATUS_CENTER_SVG RCDATA "../../assets/files_toolbar/status_center.svg"

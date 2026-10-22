@@ -4,6 +4,7 @@
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
 #include "../ui/file_operation_dialog.h"
+#include "../ui/batch_conflict_dialog.h"
 #include "../ui/batch_rename_dialog.h"
 #include "../ui/quick_preview_window.h"
 #include "../ui/typography.h"
@@ -122,13 +123,19 @@ void ReleaseTrayBatch(AppState& s, size_t idx) {
     ops::OpRequest req;
     req.type = b.move_intent ? ops::OpType::Move : ops::OpType::Copy;
     req.dest_dir = tab->current_path;
-    for (const auto& it : b.items) {
-        if (it.exists) req.sources.push_back(it.path);
+    std::vector<size_t> submitted;
+    for (size_t i = 0; i < b.items.size(); ++i) {
+        if (b.items[i].exists) {
+            req.sources.push_back(b.items[i].path);
+            submitted.push_back(i);
+        }
     }
     if (req.sources.empty()) return;
-    if (!SubmitWithConflictResolution(s, std::move(req))) return;
-    // Cut batches are consumed by release; copy batches too (default per ui.md §7.4).
-    s.tray.RemoveBatch(idx);
+    const bool move_intent = b.move_intent;
+    const auto task = s.ops.Submit(std::move(req));
+    if (!task) return;
+    s.trayTransfers[task].move_intent = move_intent;
+    for (auto it = submitted.rbegin(); it != submitted.rend(); ++it) s.tray.RemoveItem(idx, *it);
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 
@@ -283,6 +290,7 @@ void ShowBatchRename(AppState& s) {
     s.ops.Submit(std::move(req));
 }
 void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
+    UpdateOperationCenter(s);
     if (allow_conflict_dialog) PresentDeleteConfirmation(s);
     if (!s.operationWindow) return;
     const auto now = std::chrono::steady_clock::now();
@@ -308,9 +316,30 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
         if (const auto conflict = s.ops.PendingConflict();
             conflict && conflict->token != s.conflictUiToken) {
             s.conflictUiToken = conflict->token;
-            const ui::ConflictDialogResult result = ui::ShowFileConflictDialog(
-                s.hwnd, *conflict, s.darkMode, s.accentColor);
-            s.ops.ResolveConflict(conflict->token, result.choice, result.apply_to_all);
+            if (conflict->rows.size() > 1 && !conflict->link_confirmation) {
+                using I = l10n::StringId;
+                ui::BatchConflictLabels labels;
+                labels.title = l10n::Get(I::OpConflictTitle);
+                labels.instruction = l10n::Get(I::BatchConflictInstruction);
+                labels.source = l10n::Get(I::BatchConflictSource);
+                labels.destination = l10n::Get(I::BatchConflictDestination);
+                labels.replace = l10n::Get(I::OpReplaceFile);
+                labels.skip = l10n::Get(I::OpSkipFile);
+                labels.keep_both = l10n::Get(I::OpKeepBoth);
+                labels.apply_all = l10n::Get(I::BatchConflictApplyAll);
+                labels.confirm = l10n::Get(I::BatchConflictContinue);
+                labels.cancel = l10n::Get(I::Cancel);
+                labels.folder = l10n::Get(I::TypeFolder);
+                labels.reparse = l10n::Get(I::BatchConflictLink);
+                labels.unknown = l10n::Get(I::BatchConflictUnknown);
+                const auto result = ui::ShowBatchFileConflictDialog(s.hwnd, *conflict, labels, s.darkMode, s.accentColor);
+                if (result) s.ops.ResolveConflicts(conflict->token, *result);
+                else s.ops.ResolveConflict(conflict->token, ops::ConflictChoice::Cancel, false);
+            } else {
+                const ui::ConflictDialogResult result = ui::ShowFileConflictDialog(
+                    s.hwnd, *conflict, s.darkMode, s.accentColor);
+                s.ops.ResolveConflict(conflict->token, result.choice, result.apply_to_all);
+            }
         }
     }
 

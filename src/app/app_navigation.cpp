@@ -908,6 +908,8 @@ static void CancelUnsharedListing(AppState& s, const app::Tab& tab) {
 }
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    if (reason == PathLoadReason::Navigate && !s.shot.active &&
+        !tab.snapshot_path.empty() && tab.snapshot_path == tab.current_path) RememberFolderColumns(s, tab);
     CancelUnsharedListing(s, tab);
     tab.ClearEntryRenameHints();
     tab.pending_created_name.clear();
@@ -996,6 +998,14 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
                                  downloads ? ui::SortDirection::Desc : ui::SortDirection::Asc});
         tab.sort_column = sort.column;
         tab.sort_direction = sort.direction;
+        const auto group = s.appPrefs.folder_views.FindGroup(normalized).value_or(app::FolderGroupPrefs{});
+        tab.group_mode = group.mode;
+        tab.group_direction = group.direction;
+        const auto columns = s.appPrefs.folder_views.FindColumns(normalized);
+        if (columns) tab.details_column_dividers = *columns;
+        else if (reason == PathLoadReason::RestoreSession)
+            s.appPrefs.folder_views.SetColumns(normalized, tab.details_column_dividers);
+        else tab.details_column_dividers = {};
         const auto saved = s.appPrefs.folder_views.Find(normalized);
         const auto mode = saved.value_or(reason == PathLoadReason::RestoreSession
             ? tab.view_mode : ui::ViewMode::Details);
@@ -1675,6 +1685,30 @@ void SortBy(AppState& s, ui::SortColumn col) {
         ? ui::SortDirection::Desc : ui::SortDirection::Asc;
     SetSort(s, col, direction);
 }
+void RememberFolderColumns(AppState& s, const app::Tab& tab) {
+    if (s.appPrefs.folder_views.SetColumns(tab.current_path, tab.details_column_dividers)) s.appPrefs.Save();
+}
+
+void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
+    app::Tab* tab = ActiveTab(s);
+    if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) ||
+        static_cast<unsigned>(mode) > static_cast<unsigned>(ui::GroupMode::Size) ||
+        (direction != ui::SortDirection::Asc && direction != ui::SortDirection::Desc)) return;
+    if (s.appPrefs.folder_views.SetGroup(tab->current_path, mode, direction)) s.appPrefs.Save();
+    if (tab->group_mode == mode && tab->group_direction == direction) return;
+    tab->group_mode = mode;
+    tab->group_direction = direction;
+    ++tab->view_generation;
+    tab->scroll_y = 0.0f;
+    s.scrollTargetY = 0.0f;
+    s.scrollAnimating = false;
+    if (tab->selected_index >= 0) {
+        EnsureRowVisible(s, *tab, tab->selected_index);
+        s.scrollTargetY = tab->scroll_y;
+    }
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+
 void SetSort(AppState& s, ui::SortColumn col, ui::SortDirection direction) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;

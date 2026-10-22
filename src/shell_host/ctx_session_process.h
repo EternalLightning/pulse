@@ -37,6 +37,7 @@ class ContextSessionProcesses {
 public:
     using Reply = std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)>;
     static constexpr size_t kProcessLimit = 4;
+    static constexpr DWORD kQueryTimeoutMs = 8000;
     static constexpr DWORD kSessionLifetimeMs = ipc::kContextMenuSessionLifetimeMs;
 
     ContextSessionProcesses(std::wstring executable, Reply reply);

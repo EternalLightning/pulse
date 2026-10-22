@@ -45,6 +45,15 @@ bool Report(const char* name, bool passed) {
     return passed;
 }
 
+const std::vector<pulse::ui::FluentMenuItem>& ShellSection(
+    const std::vector<pulse::ui::FluentMenuItem>& items) {
+    for (const auto& item : items)
+        if (item.glyph == L"\xE712" && item.live_update &&
+            item.text == pulse::l10n::Get(pulse::l10n::StringId::MenuMoreOptions)) return item.children;
+    static const std::vector<pulse::ui::FluentMenuItem> empty;
+    return empty;
+}
+
 bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
     using namespace pulse::app;
     bool passed = true;
@@ -101,7 +110,7 @@ bool RunContextMenuComTests(pulse::app::ContextMenuPrefs& context) {
     bool prefs_changed = false;
     const auto display = context_menu.BuildDisplay(context, { base_item }, prefs_changed);
     passed &= Report("context menu composes cached static and live COM rows",
-        display.size() >= 4 && prefs_changed);
+        display.size() == 2 && ShellSection(display).size() >= 2 && prefs_changed);
     context_menu.InvalidateCaches();
     passed &= Report("cache invalidation retires the old active COM session",
         !context_menu.CompleteComQuery(17, {com_item}, GetTickCount64()).accepted);
@@ -364,11 +373,13 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
     subset_controller.SeedComItemsFromCache();
     subset_controller.OpenMenu({});
     bool subset_prefs_changed = false;
-    const auto cached_layout = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    const auto cached_display = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    const auto cached_layout = ShellSection(cached_display);
     subset_controller.CompleteComQuery(2, {ready}, GetTickCount64(), true);
-    const auto ready_layout = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    const auto ready_display = subset_controller.BuildDisplay(context, {}, subset_prefs_changed);
+    const auto ready_layout = ShellSection(ready_display);
     passed &= Report("ready partial subset enables its matching cached row while preserving pending rows and geometry",
-        cached_layout.size() == ready_layout.size() && ready_layout.size() >= 3 &&
+        cached_layout.size() == ready_layout.size() && ready_layout.size() >= 2 &&
         cached_layout[0].text == ready_layout[0].text && cached_layout[1].text == ready_layout[1].text &&
         !cached_layout[0].enabled && !cached_layout[1].enabled && ready_layout[0].enabled &&
         !ready_layout[1].enabled && ready_layout[0].command == CmdShellComBase + static_cast<int>(ready.id) &&
@@ -405,6 +416,7 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
 } // namespace
 
 #include "context_menu_refresh_cases.h"
+#include "context_menu_overflow_cases.h"
 
 bool RunSessionLayoutTests() {
     bool passed = true;
@@ -464,6 +476,10 @@ bool RunSessionLayoutTests() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-overflow") {
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        return RunContextMenuOverflowTests() ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--native-new") {
         const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         if (FAILED(initialized)) return 2;

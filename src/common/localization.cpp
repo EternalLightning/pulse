@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_SETTINGS_LOCK_WINDOW_SIZE_DESC;
+constexpr UINT kLastString = IDS_RESUME_INCOMPLETE_TRANSFER;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -22,7 +22,8 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::MatchWindowSizeHint) <= kLastString &&
               static_cast<UINT>(StringId::ArchivePasswordOrDataError) <= kLastString &&
               static_cast<UINT>(StringId::SettingsDefaultManagerPartial) <= kLastString &&
-              static_cast<UINT>(StringId::ArchivePasswordRetryHint) <= kLastString);
+              static_cast<UINT>(StringId::ArchivePasswordRetryHint) <= kLastString &&
+              static_cast<UINT>(StringId::OperationCenterRecycle) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

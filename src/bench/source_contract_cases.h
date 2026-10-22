@@ -1,11 +1,13 @@
 #pragma once
 #include "../ops/ops_manager.h"
+#include "../ops/destination_guard.h"
 #include <winioctl.h>
 #include <array>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 namespace pulse::ops {
 
@@ -39,9 +41,30 @@ struct SourceContractTestProbe {
         manager.ExecuteFileOperation(item);
         return true;
     }
+    static bool RetainLatestUndoReference(OpsManager& manager, const std::wstring& path) {
+        auto reference = FileObjectReference::Open(path);
+        std::lock_guard lock(manager.mutex_);
+        if (!reference.Get() || manager.undo_.empty()) return false;
+        auto& history = manager.undo_.back();
+        history.session_only = true;
+        history.produced_references = {std::move(reference)};
+        return true;
+    }
+    static uint64_t LatestIncompleteTask(OpsManager& manager) {
+        std::lock_guard lock(manager.mutex_);
+        return manager.incomplete_transfers_.empty() ? 0 : manager.incomplete_transfers_.back().seq;
+    }
 };
 
 namespace source_contract_cases {
+
+inline unsigned char identity_epoch = 0;
+inline BOOL WINAPI ChangingIdentityQuery(HANDLE handle, FILE_INFO_BY_HANDLE_CLASS kind, LPVOID data, DWORD size) {
+    if (!GetFileInformationByHandleEx(handle, kind, data, size)) return FALSE;
+    if (kind == FileIdInfo)
+        static_cast<FILE_ID_INFO*>(data)->FileId.Identifier[15] ^= identity_epoch;
+    return TRUE;
+}
 
 inline bool Exists(const std::wstring& path) {
     return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -135,6 +158,78 @@ inline int RunSourceContractRegressions(const std::wstring& fixture_root) {
     const std::string original = "original authorized source bytes";
     const std::string foreign = "outside bytes must stay untouched";
     if (!Mkdir(fixture_root)) return 2;
+
+    {
+        const auto target = fixture_root + L"\\changing-directory-id";
+        DestinationGuard guard(ChangingIdentityQuery);
+        std::wstring error;
+        identity_epoch = 0;
+        check(guard.Capture(target, error) && guard.EnsureDirectories(target, error),
+            L"create directory under an anchored provider identity");
+        identity_epoch = 1;
+        FileObjectReference reference;
+        check(guard.Check(target, error) && guard.CapturedReference(target, reference) &&
+            reference.Matches(reference.Get(), ChangingIdentityQuery),
+            L"directory Undo proof follows the live retained object after its provider ID changes");
+        guard.ReleaseDirectories();
+        const auto displaced = target + L"-displaced";
+        const bool moved = MoveFileW(target.c_str(), displaced.c_str()) != FALSE;
+        const DWORD move_error = moved ? ERROR_SUCCESS : GetLastError();
+        check(moved, L"displace the captured directory after releasing mutation leases");
+        const bool replaced = moved && CreateDirectoryW(target.c_str(), nullptr);
+        const DWORD create_error = replaced ? ERROR_SUCCESS : GetLastError();
+        check(replaced, L"create a different directory at the captured pathname");
+        const bool rejected = moved && replaced && !guard.Check(target, error);
+        if (!rejected)
+            wprintf(L"[diagnostic] changing directory ID moved=%d move_error=%lu replaced=%d create_error=%lu error=%s\n",
+                moved, move_error, replaced, create_error, error.c_str());
+        check(rejected, L"changing provider IDs still reject a same-name replacement directory");
+        identity_epoch = 0;
+    }
+    {
+        const auto dir = fixture_root + L"\\retained-replacement", source = dir + L"\\payload.txt";
+        const auto target = dir + L"\\dst", product = target + L"\\payload.txt";
+        check(Mkdir(target) && Write(source, original), L"create replacement with a retained network-style Undo proof");
+        OpsManager manager;
+        SourceContractTestProbe::Execute(manager, Request(OpType::Copy, source, target));
+        check(manager.Status().phase == OpPhase::Completed &&
+            SourceContractTestProbe::RetainLatestUndoReference(manager, product),
+            L"retain the first copy object exactly as session-only network Undo does");
+        check(DeleteFileW(source.c_str()) && Write(source, foreign), L"prepare accepted replacement bytes");
+        uint64_t cancelled_task = 0;
+        for (const auto choice : {ConflictChoice::Cancel, ConflictChoice::Skip}) {
+            auto pending = Request(OpType::Copy, source, target);
+            pending.collision_policy = CollisionPolicy::System;
+            const auto before = manager.Status().completed_ops;
+            std::thread worker([&] { SourceContractTestProbe::Execute(manager, pending); });
+            const auto deadline = GetTickCount64() + 10000;
+            bool answered = false;
+            while (manager.Status().completed_ops == before && GetTickCount64() < deadline) {
+                if (const auto conflict = manager.PendingConflict()) {
+                    manager.ResolveConflict(conflict->token, choice, false);
+                    answered = true;
+                }
+                Sleep(1);
+            }
+            if (manager.Status().completed_ops == before) manager.CancelCurrent();
+            worker.join();
+            check(answered && Read(product) == original && manager.Status().phase ==
+                (choice == ConflictChoice::Cancel ? OpPhase::Cancelled : OpPhase::Completed),
+                L"cancelled and skipped conflicts retain original bytes before replacement");
+            if (choice == ConflictChoice::Cancel) cancelled_task = SourceContractTestProbe::LatestIncompleteTask(manager);
+        }
+        check(cancelled_task != 0 && manager.CanResumeTransfer(cancelled_task),
+            L"cancelled conflict retains an exact resume plan and destination proof");
+        SourceContractTestProbe::Execute(manager, Request(OpType::Copy, source, target));
+        bool backup_exists = false;
+        for (const auto& entry : std::filesystem::directory_iterator(target))
+            backup_exists = backup_exists || entry.path().filename().wstring().find(L".pulse-backup-") != std::wstring::npos;
+        check(manager.Status().phase == OpPhase::Completed && Read(product) == foreign && !backup_exists,
+            L"replacement releases only obsolete Undo proof and removes its backup without delete-pending residue");
+        check(manager.ResumeIncompleteTransfer(cancelled_task) != 0 && SourceContractTestProbe::ExecuteQueued(manager) &&
+            manager.Status().phase == OpPhase::Failed && Read(product) == foreign,
+            L"retired conflict proof refuses resume against the replacement object without modifying its bytes");
+    }
 
     // Each gate runs after metadata admission and before the first cursor read.
     for (const auto type : {OpType::Copy, OpType::Move}) {

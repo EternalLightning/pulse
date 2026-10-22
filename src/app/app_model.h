@@ -58,6 +58,8 @@ struct Tab {
     uint64_t view_generation = 1;
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
+    ui::GroupMode group_mode = ui::GroupMode::Auto;
+    ui::SortDirection group_direction = ui::SortDirection::Desc;
     bool downloads_auto_sort = false;
     ui::SortColumn sort_before_downloads = ui::SortColumn::Name;
     ui::SortDirection direction_before_downloads = ui::SortDirection::Asc;
@@ -185,6 +187,10 @@ struct Tab {
     mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_filter_map;
     mutable std::shared_ptr<const std::vector<ui::DateGroup>> view_date_groups;
     mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_date_filter;
+    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_group_order;
+    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_group_reverse;
+    mutable ui::GroupMode view_group_mode = ui::GroupMode::Auto;
+    mutable ui::SortDirection view_group_direction = ui::SortDirection::Desc;
     mutable unsigned view_date_day = 0;
     mutable std::shared_ptr<const ui::PaneViewModel::TagDots> view_tag_dots;
     mutable std::shared_ptr<ui::RowPresentationCache> view_row_cache;

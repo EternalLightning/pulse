@@ -113,7 +113,12 @@ bool ToggleStarred(AppState& s, const std::wstring& target,
 std::wstring DetailsAttributeText(DWORD attrs);
 double TrayAnimationNow();
 bool TickTrayDeck(AppState& s, double now = TrayAnimationNow());
-ui::WindowViewModel BuildVm(AppState& s, bool probe_details = true);
+// Apply model preferences, synchronize the title/columns and advance details
+// requests before drawing. This also covers programmatic selection and snapshots.
+void PrepareViewState(AppState& s);
+// Reads prepared business state; false skips the more expensive status text.
+// Presentation caches and visible-item registration may still be populated.
+ui::WindowViewModel BuildVm(AppState& s, bool include_status = true);
 // Displayed layout for pointer hit tests. Rebuilt on demand after a resize or
 // before the first frame; never used for state-changing clicks.
 const ui::WindowViewModel& HitTestVm(AppState& s);

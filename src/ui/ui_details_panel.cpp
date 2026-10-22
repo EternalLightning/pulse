@@ -63,7 +63,13 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     // The inspector stays an independent right-hand card, with its own scroll
     // and splitter. File-pane opacity must not fade these controls.
     const float cardRadius = theme.radius_control * s;
-    // Share the sidebar sheet so both sides retain the same transparency.
+    // Match the file pane's reading surface without fading the panel contents.
+    const D2D1_COLOR_F panel_fill = vm.dark && !IsHighContrast()
+        ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
+        : WithAlpha(theme.surface_card, card_alpha_);
+    MakeBrush(dc, panel_fill, brFillHover_);
+    FillRoundedRect(dc, brFillHover_.get(), panel.left, panel.top,
+                    panel.right - panel.left, panel.bottom - panel.top, cardRadius);
     MakeBrush(dc, theme.stroke_card, brStrokeCard_);
     dc->DrawRoundedRectangle(D2D1::RoundedRect(
         D2D1::RectF(panel.left + 0.5f * s, panel.top + 0.5f * s,

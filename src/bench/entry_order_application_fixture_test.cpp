@@ -41,7 +41,7 @@ void TransferAndTitleCases(pulse::AppState& s, pulse::app::Tab& tab, const std::
     using namespace pulse;
     const auto title_is = [&](const std::wstring& expected) {
         wchar_t title[512]{};
-        BuildVm(s, false);
+        PrepareViewState(s);
         GetWindowTextW(s.hwnd, title, static_cast<int>(std::size(title)));
         return title == expected;
     };

@@ -496,6 +496,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         if (!searchOverlay)
             for (int i=0; i<4; ++i) if (RectContains(toolbar.navigation[i],x,y)) {r.region=nav[i]; return r;}
         const auto searchBounds=searchOverlay ? SearchBarRect(rect.right) : toolbar.search;
+        if (RectContains(toolbar.operations,x,y)) {r.region=HitTestResult::OperationCenter; return r;}
         if (RectContains(searchBounds,x,y)) {
             r.region = HitTestResult::AddressSearch;
             if (vm.address_searching) {
@@ -543,7 +544,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         const ToolbarCommandState command_state{vm.archive_view, vm.pane.selected_count,
             vm.selection_has_drive_root, vm.can_paste};
         for(int i=0;i<9;++i) if(RectContains(toolbar.commands[i],x,y)) {
-            if (command_state.Enabled(i)) r.region=commands[i];
+            if (i < 6 && vm.toolbar_commands_enabled ? (*vm.toolbar_commands_enabled)[i] : command_state.Enabled(i)) r.region=commands[i];
             return r;
         }
         return r;

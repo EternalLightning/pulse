@@ -1,0 +1,223 @@
+[PASS] empty state renders offscreen without activation
+[PASS] empty state has no stale actions
+[PASS] single queued task initially fits its content without a full-height empty panel
+[PASS] multiple tasks respect the opening height and monitor limits and retain scrolling
+[PASS] save expanded panel before clearing
+[PASS] clearing finished rows retargets the visible popup to its default empty height and resets scrolling
+[PASS] clear begins from the displayed height or settles immediately when motion is disabled
+[PASS] repeated status updates do not restart the same height transition
+[PASS] height passes through an intermediate frame while shrinking
+[PASS] save intermediate height transition
+[PASS] new work reverses the transition continuously from the displayed height
+[PASS] clear settles at the default height with no stale card actions
+[PASS] resizing retains the monitor work area bounds
+[PASS] save the compact empty panel after clearing
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] mixed tasks render at narrow width, theme and DPI
+[PASS] current then queued FIFO then newest recent tasks
+[PASS] actions stay inside cards and only active transfers get controls
+[PASS] details shares the title row on the right without overlapping the title at each width and DPI
+[PASS] every footer action row is right aligned including wrapped rows at each width and DPI
+[PASS] queued cards do not open a progress dialog with incompatible state semantics
+[PASS] buttons wrap without overlap at narrow width
+[PASS] routes stats and footer keep separate space and completed cards omit transient progress
+[PASS] cards share the title and section inset with equal margins on both sides at every width and DPI
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] single task state renders for visual review
+[PASS] mixed task list requires scrolling
+[PASS] wheel scroll clamps at the final card
+[PASS] reverse wheel clamps at start
+[PASS] Shift Tab starts at last action and reveals it
+[PASS] Tab wraps to header action
+[PASS] Enter activates the focused action through the popup message handler
+[PASS] pause resume and cancel callbacks carry exact task IDs
+[PASS] failed task opens explicit details without automatic retry
+[PASS] destination callback carries the validated absolute path
+[PASS] clear finished callback dispatches once
+[PASS] running transfer supplies a pause button for update-during-click regression
+[PASS] progress update preserves a held button and keyboard focus by task ID and action
+[PASS] mouse release after a progress update invokes the held action exactly once
+[PASS] only terminal snapshots with a current safe recovery offer expose recovery buttons
+[PASS] active and queued tasks never expose terminal recovery even when capability predicates return true
+[PASS] nested unfinished items expose continue only and tray recovery takes priority when both offers are eligible
+[PASS] a previously rendered tray button rechecks live eligibility before dispatch
+[PASS] a previously rendered continue button cannot dispatch after its offer is revoked
+[PASS] recovery labels render at narrow width and DPI without activation
+[PASS] long tray and continue actions wrap inside their cards without overlapping other controls
+[PASS] recovery labels render at narrow width and DPI without activation
+[PASS] long tray and continue actions wrap inside their cards without overlapping other controls
+[PASS] one tray invocation refreshes the consumed offer away and carries the exact task ID
+[PASS] consumed tray recovery cannot be invoked a second time from the refreshed panel
+[PASS] one nested continuation refreshes its consumed offer away and carries the exact task ID
+[PASS] consumed nested continuation cannot be invoked a second time from the refreshed panel
+[PASS] Shell task has no transfer controls or meaningless destination action
+[PASS] a header-only details action adds no footer action row
+[PASS] recent terminal history is bounded to the newest 64 entries
+[PASS] disabled material uses the production solid fallback
+[PASS] material fixture stays wholly outside every monitor
+[PASS] material source is the fixture's own patterned GPU frame captured before Present
+[PASS] production acrylic branch uses only the fixture FrameCopy
+[PASS] save real sampled acrylic evidence without snapshot solid override
+[PASS] light card preserves the sampled background through its fill
+[PASS] save translucent task card evidence
+[PASS] dark card preserves the sampled background through its fill
+[PASS] save translucent task card evidence
+[PASS] offscreen material fixture preserves the user's foreground window
+[PASS] opening uses eased opacity or settles immediately when system motion is disabled
+[PASS] opening settles fully visible
+[PASS] closing uses eased opacity or dismisses immediately when system motion is disabled
+[PASS] closing completes without a residual popup
+[PASS] rapid reversal preserves continuous opacity or respects disabled motion
+[PASS] cancel mode dismisses synchronously
+[PASS] returning activation to owner starts the closing animation
+[PASS] origin click consumed after deactivation keeps closing without reopening or skipping the animation
+[PASS] Escape dismisses through the popup message handler
+[PASS] render two real cards before removal
+[PASS] removed card retains only its image and loses all actions and held input immediately
+[PASS] surviving card starts at its displayed position instead of jumping to the new layout
+[PASS] ordinary task updates do not restart card removal
+[PASS] removal fades through intermediate frames and the remaining card and panel settle together
+[PASS] remaining buttons stay fully visible and the shared section heading does not jump during removal
+[PASS] live card actions follow the animated layout
+[PASS] a task that returns during removal cannot retain a duplicate fading image
+[PASS] disabled motion removes cards and settles panel height immediately
+[PASS] render two real cards before removal
+[PASS] removed card retains only its image and loses all actions and held input immediately
+[PASS] surviving card starts at its displayed position instead of jumping to the new layout
+[PASS] ordinary task updates do not restart card removal
+[PASS] removal fades through intermediate frames and the remaining card and panel settle together
+[PASS] remaining buttons stay fully visible and the shared section heading does not jump during removal
+[PASS] live card actions follow the animated layout
+[PASS] a task that returns during removal cannot retain a duplicate fading image
+[PASS] disabled motion removes cards and settles panel height immediately
+[PASS] render two real cards before removal
+[PASS] removed card retains only its image and loses all actions and held input immediately
+[PASS] surviving card starts at its displayed position instead of jumping to the new layout
+[PASS] ordinary task updates do not restart card removal
+[PASS] removal fades through intermediate frames and the remaining card and panel settle together
+[PASS] remaining buttons stay fully visible and the shared section heading does not jump during removal
+[PASS] live card actions follow the animated layout
+[PASS] a task that returns during removal cannot retain a duplicate fading image
+[PASS] disabled motion removes cards and settles panel height immediately
+[PASS] render two real cards before removal
+[PASS] removed card retains only its image and loses all actions and held input immediately
+[PASS] surviving card starts at its displayed position instead of jumping to the new layout
+[PASS] ordinary task updates do not restart card removal
+[PASS] removal fades through intermediate frames and the remaining card and panel settle together
+[PASS] remaining buttons stay fully visible and the shared section heading does not jump during removal
+[PASS] live card actions follow the animated layout
+[PASS] a task that returns during removal cannot retain a duplicate fading image
+[PASS] disabled motion removes cards and settles panel height immediately
+[PASS] closing mid-open continues from the current opacity and immediately disables interaction
+[PASS] reopening a closing panel starts from the currently displayed opacity
+[PASS] disabling motion during opening settles the popup immediately
+[PASS] disabled motion also closes the popup immediately
+[PASS] localized active and completed cards render with production Chinese labels
+[PASS] localized active and completed cards render with production Chinese labels
+Operation center UI: 0 failure(s)

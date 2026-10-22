@@ -3,5 +3,6 @@
 
 #include "../common/resource_ids.h"
 IDR_FILES_RENAME_SVG RCDATA "../../assets/files_toolbar/rename.svg"
+IDR_FILES_STATUS_CENTER_SVG RCDATA "../../assets/files_toolbar/status_center.svg"
 IDR_FILES_RENAME_COLOR_SVG RCDATA "../../assets/files_toolbar/rename_color.svg"
 IDR_FILES_RENAME_COLOR_DARK_SVG RCDATA "../../assets/files_toolbar/rename_color_dark.svg"

@@ -166,7 +166,7 @@ D2D1_RECT_F MainRenderer::AddressBarRect(float w) const {
 D2D1_RECT_F MainRenderer::SearchBarRect(float w) const {
     if (w-EffectiveSidebarWidth(w)<480*scale_)
         return D2D1::RectF(EffectiveSidebarWidth(w)+margin_,title_bar_height_+4*scale_,
-            w-margin_,title_bar_height_+40*scale_);
+            w-margin_-44*scale_,title_bar_height_+40*scale_);
     return MakeToolbarLayout(w,scale_,title_bar_height_,margin_,NewButtonWidthPx(w-EffectiveSidebarWidth(w)<600*scale_),EffectiveSidebarWidth(w)).search;
 }
 D2D1_RECT_F MainRenderer::NewCommandRect(float w) const {

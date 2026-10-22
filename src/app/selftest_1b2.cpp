@@ -165,17 +165,20 @@ struct FluentMenuTestPeer {
         FluentMenuItem clear;
         clear.command = 120;
         clear.text = L"No color dot";
-        menu.sub_model_.SetItems({strip, clear});
-        menu.sub_model_.Layout(nullptr, scale);
+        menu.flyouts_.push_back(std::make_unique<FluentMenu::Flyout>());
+        auto& flyout = *menu.flyouts_[0];
+        flyout.model.SetItems({strip, clear});
+        flyout.model.Layout(nullptr, scale);
+        flyout.body_height = static_cast<float>(flyout.model.HeightPx());
         // Deliberately different parent width: submenu hits must use its own geometry.
         menu.model_.SetItems({clear});
         menu.model_.Layout(nullptr, scale, 800.0f);
         const int y = menu.kShadowMargin + static_cast<int>(
-            menu.sub_model_.RowTopPx(0) + menu.sub_model_.RowHeightPx() * 0.5f);
+            flyout.model.RowTopPx(0) + flyout.model.RowHeightPx() * 0.5f);
         for (int i = 0; i < 8; ++i) {
             int x = -1;
-            for (int candidate = 0; candidate < menu.sub_model_.WidthPx() + menu.kShadowMargin; ++candidate) {
-                if (menu.HitTestSwatch(menu.sub_model_, 0, static_cast<float>(candidate)) == i) {
+            for (int candidate = 0; candidate < flyout.model.WidthPx() + menu.kShadowMargin; ++candidate) {
+                if (menu.HitTestSwatch(flyout.model, 0, static_cast<float>(candidate)) == i) {
                     x = candidate;
                     break;
                 }
@@ -183,18 +186,20 @@ struct FluentMenuTestPeer {
             if (x < 0) return false;
             menu.open_ = true;
             menu.animating_out_ = false;
-            menu.sub_parent_row_ = 0;
+            menu.open_flyouts_ = 1;
+            flyout.parent_row = 0;
             menu.OnSubMouse(POINT{x, y}, false);
-            if (menu.sub_hover_swatch_ != i) return false;
+            if (flyout.hover_swatch != i) return false;
             menu.OnSubMouse(POINT{x, y}, true);
             if (menu.result_ != 90 + i) return false;
         }
         menu.open_ = true;
         menu.animating_out_ = false;
-        menu.sub_parent_row_ = 0;
+        menu.open_flyouts_ = 1;
+        flyout.parent_row = 0;
         menu.OnSubMouse(POINT{menu.kShadowMargin + 10,
-            menu.kShadowMargin + static_cast<int>(menu.sub_model_.RowTopPx(1) +
-                menu.sub_model_.RowHeightPx() * 0.5f)}, true);
+            menu.kShadowMargin + static_cast<int>(flyout.model.RowTopPx(1) +
+                flyout.model.RowHeightPx() * 0.5f)}, true);
         return menu.result_ == 120;
     }
 };
@@ -1775,37 +1780,39 @@ void TestMenuModel() {
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory2),
                         reinterpret_cast<IUnknown**>(&dwrite));
 
-    // Item menu: 打开 + icon strip (cut/copy/delete/rename) + verbs + undo.
+    // Item menu: common buttons, navigation, operations, organization, properties.
     auto items = BuildItemMenu(false, L"");
-    Check(items.size() == 9, L"menu: item menu is 打开+图标条+verbs+undo");
+    Check(items.size() == 9, L"menu: item menu retains common buttons and all built-in verbs");
     // Command-id ranges must not overlap: CmdTabJoinGroupBase once collided
     // with CmdTabCloseOthers and "join group" closed every other tab.
     static_assert(CmdTabJoinGroupBase > CmdTabCloseRight &&
                   CmdTabJoinGroupBase + 32 <= CmdRecentBase,
                   "join-group ids must sit between tab commands and recents");
-    std::vector<int> want{ CmdOpen, CmdNone, CmdCopyPath, CmdOpenTerminal, CmdProperties,
-                           CmdPinWorkspace, CmdPinNetwork, CmdTags, CmdUndo };
+    std::vector<int> want{ CmdNone, CmdOpen, CmdOpenTerminal, CmdCopyPath, CmdUndo,
+                           CmdPinWorkspace, CmdPinNetwork, CmdTags, CmdProperties };
     bool ids_ok = items.size() >= want.size();
     for (size_t i = 0; i < want.size() && i < items.size(); ++i)
         if (items[i].command != want[i]) ids_ok = false;
     Check(ids_ok, L"menu: verb order and ids");
-    Check(items.size() > 1 && items[1].quick_swatches.size() == 4 &&
-          items[1].quick_swatches[0].command == CmdCut &&
-          items[1].quick_swatches[1].command == CmdCopy &&
-          items[1].quick_swatches[2].command == CmdDelete &&
-          items[1].quick_swatches[3].command == CmdRename &&
-          !items[1].quick_swatches[0].glyph.empty(),
+    Check(!items.empty() && items[0].quick_swatches.size() == 4 &&
+          items[0].quick_swatches[0].command == CmdCut &&
+          items[0].quick_swatches[1].command == CmdCopy &&
+          items[0].quick_swatches[2].command == CmdDelete &&
+          items[0].quick_swatches[3].command == CmdRename &&
+          !items[0].quick_swatches[0].glyph.empty(),
           L"menu: icon strip carries 剪切/复制/删除/重命名");
-    Check(items.size() > 2 && items[2].shortcut == L"Ctrl+Shift+C",
+    Check(items.size() > 3 && items[3].shortcut == L"Ctrl+Shift+C",
           L"menu: 复制路径 carries Ctrl+Shift+C");
     auto folder_items = BuildItemMenu(false, L"", true);
     Check(folder_items.size() == 10, L"menu: folder item menu adds 在新标签打开");
-    Check(folder_items.size() > 3 &&
+    Check(folder_items.size() > 4 &&
           folder_items[2].command == CmdOpenInNewTab &&
           folder_items[2].text == L"在新标签打开" &&
-          folder_items[3].command == CmdCopyPath,
+          folder_items[3].command == CmdOpenTerminal &&
+          folder_items[4].command == CmdCopyPath,
           L"menu: 在新标签打开 sits before 复制路径");
-    Check(!items.back().enabled, L"menu: undo disabled without a stack");
+    Check(items.size() > 4 && items[4].command == CmdUndo && !items[4].enabled,
+          L"menu: undo disabled without a stack");
 
     auto recycle_items = BuildRecycleItemMenu(false, L"");
     Check(!recycle_items.empty() && recycle_items[0].command == CmdRestoreRecycle &&

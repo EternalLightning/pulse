@@ -81,7 +81,9 @@ struct ContextSessionProcesses::Core : std::enable_shared_from_this<Core> {
         pipe.value = INVALID_HANDLE_VALUE;
         const auto stop = [&] { return WaitForSingleObject(session->stop.value, 0) != WAIT_TIMEOUT; };
         bool sent_query = false, invoke_done = false;
-        bool query_responded = false;
+        std::vector<uint8_t> partial_items;
+        uint32_t partial_count = 0;
+        bool query_timed_out = false;
         ULONGLONG invoke_finished_at = 0;
         std::wstring command = L"\"" + executable + L"\" --context-worker " +
             std::to_wstring(GetCurrentProcessId()) + L" " + std::to_wstring(id);
@@ -111,12 +113,22 @@ struct ContextSessionProcesses::Core : std::enable_shared_from_this<Core> {
             if (pipe.value != INVALID_HANDLE_VALUE && !stop())
                 sent_query = Write(pipe.value, ipc::REQ_CTX_QUERY, id, query, session->stop.value);
             const auto deadline = GetTickCount64() + kSessionLifetimeMs;
-            const auto query_deadline = GetTickCount64() + 8000;
+            const auto query_deadline = GetTickCount64() + kQueryTimeoutMs;
             ULONGLONG window_check_tick = 0;
             bool visible = false;
             while (sent_query && !stop()) {
                 const auto now = GetTickCount64();
-                if ((invoke_done || now >= deadline || (!query_responded && now >= query_deadline)) &&
+                if (!session->query_completed && !session->invoked && now >= query_deadline) {
+                    if (partial_items.empty() || !partial_count) break;
+                    // Finish the UI query even when another extension never
+                    // returns. Keep ready handlers alive for exact invocation.
+                    const uint32_t final_flags = 0;
+                    std::memcpy(partial_items.data() + sizeof(uint32_t), &final_flags, sizeof(final_flags));
+                    Send(ipc::RSP_CTX_ITEMS, id, partial_items);
+                    session->query_completed = true;
+                    query_timed_out = true;
+                }
+                if ((invoke_done || now >= deadline) &&
                     now >= window_check_tick) {
                     visible = ContextProcessHasVisibleWindows(process.dwProcessId);
                     window_check_tick = now + 100;
@@ -133,7 +145,6 @@ struct ContextSessionProcesses::Core : std::enable_shared_from_this<Core> {
                     }
                 }
                 if (invoke && !Write(pipe.value, ipc::REQ_CTX_INVOKE, invoke, payload, session->stop.value)) break;
-                if (!query_responded && now >= query_deadline && !visible) break;
                 DWORD available = 0;
                 if (!PeekNamedPipe(pipe.value, nullptr, 0, nullptr, &available, nullptr)) break;
                 if (available < sizeof(ipc::MsgHeader)) {
@@ -151,10 +162,12 @@ struct ContextSessionProcesses::Core : std::enable_shared_from_this<Core> {
                 if (!ipc::PipeRead(pipe.value, payload.data(), header.payload_size, options)) break;
                 if (header.type == ipc::RSP_CTX_ITEMS && header.request_id == id) {
                     ipc::PayloadReader reader(payload.data(), payload.size());
-                    uint32_t session_id = 0, flags = 0;
-                    if (!reader.GetU32(session_id) || session_id != id || !reader.GetU32(flags)) break;
+                    uint32_t session_id = 0, flags = 0, count = 0;
+                    if (!reader.GetU32(session_id) || session_id != id || !reader.GetU32(flags) ||
+                        !reader.GetU32(count)) break;
+                    if (query_timed_out) continue;
                     session->query_completed = !(flags & ipc::CTX_ITEMS_PARTIAL);
-                    query_responded = true;
+                    if (!session->query_completed) { partial_items = payload; partial_count = count; }
                     Send(header.type, id, payload);
                 } else if (header.type == ipc::RSP_DONE) {
                     { std::lock_guard lock(session->mutex); invoke = session->invoke; }

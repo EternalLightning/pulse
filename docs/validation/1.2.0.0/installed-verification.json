@@ -1,0 +1,51 @@
+{
+  "InstalledExe": "D:\\Applications\\Pulse\\Pulse.exe",
+  "Version": "1.2.0.0",
+  "SmokeExitCode": 0,
+  "Screenshot": "E:\\Projects\\pulse\\docs\\validation\\1.2.0.0\\installed-smoke.png",
+  "VerifiedPayloadFiles": 40,
+  "PreferencesUnchanged": 6,
+  "Service": {
+    "Name": "PulseIndex",
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+    "ProcessId": 39832
+  },
+  "RemainingProcesses": [
+    {
+      "ProcessId": 39832,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": null,
+      "CommandLine": null
+    }
+  ],
+  "FixtureNetworkAgentCleaned": 32112,
+  "InstalledVersions": [
+    {
+      "Name": "Pulse.exe",
+      "FileVersion": "1.2.0.0",
+      "ProductVersion": "1.2.0.0"
+    },
+    {
+      "Name": "Pulse.Index.exe",
+      "FileVersion": "1.2.0.0",
+      "ProductVersion": "1.2.0.0"
+    },
+    {
+      "Name": "Pulse.Document.exe",
+      "FileVersion": "1.2.0.0",
+      "ProductVersion": "1.2.0.0"
+    },
+    {
+      "Name": "Pulse.Preview.exe",
+      "FileVersion": "1.2.0.0",
+      "ProductVersion": "1.2.0.0"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "FileVersion": "1.2.0.0",
+      "ProductVersion": "1.2.0.0"
+    }
+  ]
+}

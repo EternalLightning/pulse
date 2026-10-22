@@ -1,0 +1,47 @@
+{
+  "BuildExitCode": 0,
+  "Targets": [
+    "pulse_ops_test",
+    "pulse_rename_ops_test",
+    "pulse_recycle_backend_test",
+    "pulse",
+    "pulse_directory_contract_application_test"
+  ],
+  "Payload": [
+    {
+      "Name": "Pulse.exe",
+      "Length": 7725568,
+      "SHA256": "A6BE1F80573FA15D740766F2C408C6A6E3C72CC843D01360524FB8D3864B5A4A"
+    },
+    {
+      "Name": "Pulse.Index.exe",
+      "Length": 3412480,
+      "SHA256": "9097A5FB5B1601A05AFEA9B3C8BAFAB5F268107E3DA6846DFBFD0E85319454CF"
+    },
+    {
+      "Name": "Pulse.Shell.exe",
+      "Length": 1468928,
+      "SHA256": "AE26CDAB9A6A68D6FEDFEC7AB44B21D1F955EE56C5D6FE3900ABC154EB253E04"
+    },
+    {
+      "Name": "pulse_ops_test.exe",
+      "Length": 1641984,
+      "SHA256": "C4ABB0016F6350EB6DE9211544DF1B1740D4753C2DABCADDBB832F854F9E595D"
+    },
+    {
+      "Name": "pulse_rename_ops_test.exe",
+      "Length": 1196544,
+      "SHA256": "8A67D5EA064139C9FBCA6B181CEB39F1EF7B41B8FE3C43568C620077169E913D"
+    },
+    {
+      "Name": "pulse_recycle_backend_test.exe",
+      "Length": 1348608,
+      "SHA256": "B235A934E78D310C51E821A2C6CA9660FC303F1B5F09AAFBCFEB27764B40114E"
+    },
+    {
+      "Name": "pulse_directory_contract_application_test.exe",
+      "Length": 7702016,
+      "SHA256": "B954E0097BC82AEF56EA50E0DBCC3204870B1CEBD2D8AC35C48530941AA64A43"
+    }
+  ]
+}

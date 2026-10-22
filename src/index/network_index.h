@@ -1,7 +1,8 @@
 #pragma once
 
-#include "index_engine.h"
+#include "change_tracking.h"
 #include "index_query.h"
+#include "index_types.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>

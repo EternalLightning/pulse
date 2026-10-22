@@ -10,6 +10,42 @@ namespace pulse::ops {
 
 struct ShellCompletionTestProbe {
     using Completion = OpsManager::ShellCompletion;
+    using Mailbox = std::shared_ptr<OpsManager::OpenMailbox>;
+
+    static void StartCallbacks(OpsManager& manager) {
+        // Acquire real callback owners without starting the reader/helper.
+        // Final-owner release restores the idle transport through normal Stop.
+        ipc::ShellClient::Instance().running_.store(true);
+        manager.StartShellClient();
+    }
+    static ipc::ShellClient::Owner Owner(const OpsManager& manager) {
+        return manager.ShellOwner();
+    }
+    static ipc::ShellClient::Owner OpenOwner(const OpsManager& manager) {
+        return manager.open_mailbox_->shell_owner;
+    }
+    static bool SeparateOwners(const OpsManager& manager) {
+        const auto operations = Owner(manager);
+        const auto opens = OpenOwner(manager);
+        return operations && opens && operations != opens &&
+            operations->callbacks.done && operations->callbacks.progress && operations->callbacks.ctx_items &&
+            !operations->callbacks.launch_done && opens->callbacks.launch_done &&
+            !opens->callbacks.done && !opens->callbacks.progress && !opens->callbacks.ctx_items;
+    }
+    static Mailbox DetachOpenMailbox(OpsManager& manager) {
+        std::lock_guard lock(manager.open_mutex_);
+        return std::move(manager.open_mailbox_);
+    }
+    static void DispatchDone(const ipc::ShellClient::Owner& owner, uint32_t id) {
+        auto& client = ipc::ShellClient::Instance();
+        client.BindOwner(id, owner);
+        client.FireDone(id, static_cast<uint32_t>(E_ACCESSDENIED), false, L"owner completion");
+    }
+    static void DispatchLaunchError(const ipc::ShellClient::Owner& owner, uint32_t id) {
+        auto& client = ipc::ShellClient::Instance();
+        client.BindOwner(id, owner);
+        client.FireRequestDone(ipc::REQ_SHELL_LAUNCH, id, static_cast<uint32_t>(E_FAIL), false, L"owner launch error");
+    }
 
     static void Done(OpsManager& manager, uint32_t id, Completion result) {
         manager.OnShellDone(id, std::move(result));
@@ -97,6 +133,45 @@ inline int RunShellCompletionRegressions() {
     const bool idle = Probe::TransportIdle();
     check(idle, "completion fixture starts with no active global shell transport");
     if (!idle) return 1;
+    {
+        OpsManager first, second;
+        Probe::StartCallbacks(first);
+        Probe::StartCallbacks(second);
+        check(Probe::SeparateOwners(first) && Probe::SeparateOwners(second),
+              "launch callbacks have independent mailbox owners without manager callbacks");
+        const auto retired_owner = Probe::Owner(first);
+        const auto survivor_owner = Probe::Owner(second);
+        const auto survivor_open_owner = Probe::OpenOwner(second);
+        auto detached_mailbox = Probe::DetachOpenMailbox(first);
+        ipc::ShellClient::Instance().Release(detached_mailbox->shell_owner);
+        detached_mailbox.reset();
+        size_t menu_callbacks = 0;
+        first.SetShellMenuCallback([&](uint32_t token, auto items, bool partial, auto slow) {
+            if (token == 91 && items.empty() && !partial && slow.empty()) ++menu_callbacks;
+        });
+        Probe::RegisterInvoke(first, 502);
+        Probe::RegisterQuery(first, 91, 503);
+        Probe::DispatchDone(retired_owner, 501);
+        Probe::DispatchDone(retired_owner, 502);
+        Probe::DispatchDone(retired_owner, 503);
+        Completion actual;
+        check(Probe::Owner(first) == retired_owner && Probe::Pending(first) == 1 &&
+              first.TakeCtxInvokeDone() && menu_callbacks == 1 && !Probe::Registered(first, 91, 503) &&
+              Probe::Wait(first, 501, actual) && actual.hr == static_cast<uint32_t>(E_ACCESSDENIED),
+              "file and menu callbacks survive mailbox retirement and retain completion routing");
+        first.Stop();
+        Probe::DispatchDone(retired_owner, 504);
+        Probe::DispatchDone(survivor_owner, 505);
+        Probe::DispatchLaunchError(survivor_open_owner, 506);
+        const auto errors = second.DrainShellLaunchErrors();
+        check(Probe::Pending(first) == 0 && Probe::Pending(second) == 1 && errors.size() == 1 &&
+              errors.front() == L"owner launch error" && Probe::Wait(second, 505, actual),
+              "closing one manager suppresses late callbacks while another window retains both owners");
+        second.Stop();
+        Probe::DispatchLaunchError(survivor_open_owner, 507);
+        check(second.DrainShellLaunchErrors().empty() && Probe::TransportIdle(),
+              "final shutdown retires both callback owners without launching a helper");
+    }
     {
         OpsManager manager;
         const auto first = evidence(L"first", static_cast<uint32_t>(E_ACCESSDENIED), false);

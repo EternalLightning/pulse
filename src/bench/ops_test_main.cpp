@@ -13,6 +13,7 @@
 #include "mutation_undo_cases.h"
 #include "source_contract_cases.h"
 #include "delete_progress_cases.h"
+#include "clipboard_isolation_cases.h"
 #include "../common/path_utils.h"
 #include "../ipc/shell_client.h"
 #include <windows.h>
@@ -1188,9 +1189,15 @@ int wmain(int argc, wchar_t** argv) {
         return RunJsonUndoParserRegressions();
     if (argc == 3 && std::wstring_view(argv[1]) == L"--network-fixture") {
         setvbuf(stdout, nullptr, _IONBF, 0);
+        const auto drive = std::filesystem::path(argv[2]).root_path().wstring();
+        if (drive.empty() || GetDriveTypeW(drive.c_str()) != DRIVE_REMOTE) {
+            fprintf(stderr, "[FAIL] --network-fixture requires an existing remote volume\n");
+            return 2;
+        }
         const auto suffix = std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
         const auto local = SandboxRoot() + L"-network-" + suffix;
         const auto remote = std::wstring(argv[2]) + L"\\pulse-transfer-fixture-" + suffix;
+        wprintf(L"[INFO] network fixture root=%s\n", remote.c_str());
         std::error_code error;
         std::filesystem::create_directories(local, error);
         if (error || !CreateDirectoryW(remote.c_str(), nullptr)) return 2;
@@ -1204,6 +1211,19 @@ int wmain(int argc, wchar_t** argv) {
         if (!status.last_error.empty()) wprintf(L"copy error: %s\n", status.last_error.c_str());
         Check(status.phase == ops::OpPhase::Completed && Exists(target) && FileHash(source) == FileHash(target),
             L"real network copy completes final rename and byte verification");
+        const auto original_hash = FileHash(target);
+        const char replacement[] = "Replacement contents must not be written before conflict acceptance.\n";
+        Check(MakeFile(source, replacement, sizeof(replacement) - 1), L"prepare different bytes for a real network conflict");
+        size_t conflicts = 0;
+        status = RunConflictOp(SimpleOp(ops::OpType::Copy, {source.c_str()}, remote.c_str()),
+            ops::ConflictChoice::Cancel, false, &conflicts);
+        Check(conflicts == 1 && status.phase == ops::OpPhase::Cancelled &&
+            FileHash(target) == original_hash && FileHash(source) != original_hash,
+            L"cancelled network paste conflict preserves both original byte streams");
+        status = RunConflictOp(SimpleOp(ops::OpType::Copy, {source.c_str()}, remote.c_str()),
+            ops::ConflictChoice::Skip, true, &conflicts);
+        Check(conflicts == 1 && status.phase == ops::OpPhase::Completed && FileHash(target) == original_hash,
+            L"skipping a network paste conflict leaves destination contents unchanged");
         auto replace = SimpleOp(ops::OpType::Copy, {source.c_str()}, remote.c_str());
         replace.collision_policy = ops::CollisionPolicy::Replace;
         status = RunOp(std::move(replace));
@@ -1212,13 +1232,34 @@ int wmain(int argc, wchar_t** argv) {
             L"real network replacement completes identity checks and backup cleanup");
         status = RunOp(SimpleOp(ops::OpType::Copy, {empty.c_str()}, remote.c_str()));
         if (!status.last_error.empty()) wprintf(L"empty error: %s\n", status.last_error.c_str());
-        Check(status.phase == ops::OpPhase::Completed && Exists(remote + L"\\empty.txt"),
+        Check(status.phase == ops::OpPhase::Completed && FileSize(remote + L"\\empty.txt") == 0,
             L"real network empty file copy completes");
+        const auto moving_hash = FileHash(moving);
         status = RunOp(SimpleOp(ops::OpType::Move, {moving.c_str()}, remote.c_str()));
         if (!status.last_error.empty()) wprintf(L"move error: %s\n", status.last_error.c_str());
-        Check(status.phase == ops::OpPhase::Completed && !Exists(moving) && Exists(remote + L"\\moving.txt"),
+        Check(status.phase == ops::OpPhase::Completed && !Exists(moving) &&
+            Exists(remote + L"\\moving.txt") && FileHash(remote + L"\\moving.txt") == moving_hash && g_ops.CanUndo(),
             L"real cross-volume network move commits before deleting isolated source");
+        const auto before_undo = g_ops.Status().completed_ops;
+        g_ops.Undo();
+        Check(WaitOpDone(before_undo) && g_ops.Status().phase == ops::OpPhase::Completed &&
+            Exists(moving) && FileHash(moving) == moving_hash && !Exists(remote + L"\\moving.txt"),
+            L"cross-volume cut Undo restores the exact local bytes and removes the remote product");
+        const auto return_dir = local + L"\\returned";
+        MakeDir(return_dir);
+        status = RunOp(SimpleOp(ops::OpType::Copy, {target.c_str()}, return_dir.c_str()));
+        Check(status.phase == ops::OpPhase::Completed && Exists(return_dir + L"\\payload.txt") &&
+            FileHash(return_dir + L"\\payload.txt") == FileHash(source),
+            L"remote-to-local paste preserves the accepted replacement bytes");
+        const auto unicode = local + L"\\中文 空格.txt";
+        Check(MakeFile(unicode, payload, sizeof(payload) - 1), L"create a Unicode path fixture");
+        status = RunOp(SimpleOp(ops::OpType::Copy, {unicode.c_str()}, remote.c_str()));
+        Check(status.phase == ops::OpPhase::Completed && Exists(remote + L"\\中文 空格.txt") &&
+            FileHash(remote + L"\\中文 空格.txt") == FileHash(unicode),
+            L"network copy preserves Unicode and space-containing names and contents");
         g_ops.Stop();
+        g_ops.UndoFromJson(L"[]");
+        g_ops.ClearFinishedTasks();
         {
             const auto race = remote + L"\\race.txt";
             Check(MakeFile(race, payload, sizeof(payload) - 1), L"network replacement identity fixture created");
@@ -1230,9 +1271,14 @@ int wmain(int argc, wchar_t** argv) {
                 MakeFile(race, payload, sizeof(payload) - 1), L"replace isolated network file at same pathname");
             Check(!guard.Check(race, guard_error), L"real network anchored snapshot still refuses a replaced object");
         }
-        for (const auto& entry : std::filesystem::directory_iterator(remote))
-            Check(DeleteFileW(entry.path().c_str()) != FALSE, L"remove own network fixture leaf");
-        Check(RemoveDirectoryW(remote.c_str()) != FALSE, L"remove own unique network fixture directory");
+        for (const auto* name : {L"payload.txt", L"empty.txt", L"moving.txt", L"中文 空格.txt", L"race.txt", L"race-old.txt"}) {
+            const auto leaf = remote + L"\\" + name;
+            if (Exists(leaf)) Check(DeleteFileW(leaf.c_str()) != FALSE, L"remove own network fixture leaf");
+        }
+        const bool removed = RemoveDirectoryW(remote.c_str()) != FALSE;
+        if (!removed)
+            wprintf(L"[diagnostic] network fixture RemoveDirectory path=%s error=%lu\n", remote.c_str(), GetLastError());
+        Check(removed, L"remove own unique network fixture directory");
         std::filesystem::remove_all(local, error);
         Check(!error, L"isolated local network fixture cleaned");
         wprintf(L"== real network: %d passed, %d failed ==\n", g_pass, g_fail);
@@ -1249,6 +1295,7 @@ int wmain(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
         if (filter == L"open-workers") return RunMultiwindowOpenWorkers();
+        if (filter == L"clipboard-isolated") return ops::RunClipboardIsolationRegressions();
         if (filter == L"delete-progress") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunDeleteProgressRegressions(SandboxRoot() + L"-delete-progress-" +

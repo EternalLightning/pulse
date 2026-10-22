@@ -1,0 +1,18 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.41
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+[  0%] Built target pulse_localization
+[  0%] Built target pulse_crash_reporter
+[  0%] Built target pulse_text
+[  0%] Built target pulse_user_storage
+[  0%] Built target pulse_sqlite
+[  0%] Built target pulse_document_reader
+[ 14%] Built target pulse_document
+[ 14%] Built target pulse_content_task
+[ 14%] Built target pulse_fs_watch
+[ 14%] Built target pulse_index
+[ 28%] Built target pulse_shell
+[ 42%] Built target pulse_preview
+[100%] Built target pulse

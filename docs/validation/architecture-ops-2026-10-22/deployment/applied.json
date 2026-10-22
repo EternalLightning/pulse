@@ -1,0 +1,37 @@
+{
+  "Success": true,
+  "Failure": null,
+  "RolledBack": false,
+  "Changed": [
+    "Pulse.exe",
+    "Pulse.Index.exe",
+    "Pulse.Document.exe",
+    "Pulse.Preview.exe",
+    "Pulse.Shell.exe"
+  ],
+  "BackupFiles": 66,
+  "VerifiedPayloadFiles": 7,
+  "VerifiedUnchangedFiles": 61,
+  "Rollback": "E:\\Projects\\pulse\\dist\\rollback-before-architecture-20261022-205703-465",
+  "Service": {
+    "Name": "PulseIndex",
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+    "ProcessId": 32752
+  },
+  "Processes": [
+    {
+      "ProcessId": 32752,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": null,
+      "CommandLine": null
+    },
+    {
+      "ProcessId": 51328,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ]
+}

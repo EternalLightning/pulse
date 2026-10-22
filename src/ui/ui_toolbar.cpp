@@ -68,6 +68,32 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         dc->PopAxisAlignedClip();
     }
     DrawAddressSearchChrome(vm, rect.right, theme);
+    const auto operation_color = vm.operation_count > 0 || vm.operation_center_open
+        ? theme.accent : theme.text_secondary;
+    DrawButton(layout.operations,theme,
+        IsHovered(vm,HitTestResult::OperationCenter) ? theme.fill_hover :
+        vm.operation_center_open ? theme.fill_selected : kTransparent,
+        L"",L"",operation_color,true,true);
+    const float operation_x = (layout.operations.left+layout.operations.right)*0.5f;
+    const float operation_y = (layout.operations.top+layout.operations.bottom)*0.5f;
+    DrawFluentSvg(IDR_FILES_STATUS_CENTER_SVG,
+        D2D1::RectF(operation_x-8*scale_,operation_y-8*scale_,
+                    operation_x+8*scale_,operation_y+8*scale_),1.0f,&operation_color);
+    if (vm.operation_count > 0) {
+        const auto badge = D2D1::RectF(layout.operations.right-17*scale_,
+            layout.operations.top,layout.operations.right+2*scale_,layout.operations.top+14*scale_);
+        MakeBrush(dc,theme.accent,brAccent_);
+        FillRoundedRect(dc,brAccent_.get(),badge.left,badge.top,badge.right-badge.left,
+            badge.bottom-badge.top,7*scale_);
+        const auto count = vm.operation_count > 9 ? L"9+" : std::to_wstring(vm.operation_count);
+        painter_.DrawText(count,badge,compositor_->SmallFormat(),theme.accent_text,
+            fluent::HorizontalAlignment::Center);
+    } else if (vm.operation_failed) {
+        ComPtr<ID2D1SolidColorBrush> badge;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(theme.danger,&badge)))
+            dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(layout.operations.right-5*scale_,
+                layout.operations.top+6*scale_),3*scale_,3*scale_),badge.get());
+    }
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),left+margin_,title_bar_height_+44*scale_,rect.right-left-2*margin_,scale_);
     const std::wstring label=l10n::Get(l10n::StringId::New);
@@ -123,7 +149,8 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         vm.selection_has_drive_root, vm.can_paste};
     for(int i=0;i<9;++i) {
         if (layout.commands[i].right <= layout.commands[i].left) continue;
-        const bool enabled=command_state.Enabled(i);
+        const bool enabled = i < 6 && vm.toolbar_commands_enabled
+            ? (*vm.toolbar_commands_enabled)[i] : command_state.Enabled(i);
         const bool selected=(i==6 && vm.pane_slots.size()>1) || (i==7 && vm.details_visible) ||
             (i==8 && vm.pane.column_strip.enabled);
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :

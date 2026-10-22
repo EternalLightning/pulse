@@ -19,6 +19,8 @@ bool ShowsColumnHeader(ViewMode mode) noexcept;
 bool UsesThumbnails(ViewMode mode) noexcept;
 bool ShowsFolderSize(ViewMode mode) noexcept;
 
+enum class GroupMode { Auto, None, DateModified, Type, Size };
+
 // Reserve a marquee gutter before the name and before the scrollbar.
 D2D1_RECT_F DetailsContentRect(D2D1_RECT_F bounds, float scale) noexcept;
 
@@ -35,6 +37,8 @@ struct DateGroup {
     int first = 0;
     int count = 0;
     unsigned char bucket = 0;
+    std::wstring label; // Empty labels use the localized date/folder/file bucket.
+    GroupMode mode = GroupMode::DateModified;
 };
 
 constexpr float kDateGroupHeaderDip = 36.0f;

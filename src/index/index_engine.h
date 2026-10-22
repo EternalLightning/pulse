@@ -12,6 +12,7 @@
 #include "folder_size_protocol.h"
 #include "index_config.h"
 #include "index_query.h"
+#include "index_types.h"
 #include "index_delta.h"
 #include "change_tracking.h"
 #include "change_feed_history.h"
@@ -35,41 +36,6 @@
 #include <winioctl.h>
 
 namespace pulse::index {
-
-inline constexpr size_t kSearchPageCap = 100000;
-inline constexpr size_t kSearchUiPageSize = 2048;
-
-struct Hit {
-    std::wstring path;
-    std::wstring name;
-    bool is_dir = false;
-    uint64_t size = 0;
-    uint64_t mtime = 0; // FILETIME as u64
-};
-
-enum class ResultSort : uint8_t { Index, Name, Size, Mtime };
-
-struct Query {
-    uint64_t session_id = 0;
-    bool subscribe = false;
-    std::wstring needle;
-    std::wstring path_prefix;
-    bool folders_only = false;
-    size_t offset = 0;
-    size_t limit = 48;
-    bool rank = true;
-    ResultSort sort = ResultSort::Index;
-    bool sort_desc = false;
-};
-
-struct SearchResult {
-    uint64_t revision = 0;
-    std::vector<Hit> hits;
-    size_t total = 0;
-    bool incomplete = false;
-    bool scanning = false; // UI-side recursive enumeration is still running.
-    uint32_t error = 0;
-};
 
 #pragma pack(push, 1)
 struct Node {

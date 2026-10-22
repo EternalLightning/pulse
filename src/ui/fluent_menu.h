@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -54,9 +55,8 @@ struct FluentMenuItem {
     fluent::MenuPictogram pictogram = fluent::MenuPictogram::None;
     D2D1_COLOR_F swatch_color{};
     std::vector<FluentMenuSwatch> quick_swatches;
-    // Non-empty => the row is a one-level flyout header (software-owned
-    // Explorer submenu). Hover/click/→ opens the flyout; the row itself never
-    // returns a command. Children may not nest further.
+    // Non-empty => a flyout header. Hover/click/→ opens its children;
+    // the header itself never returns a command. Children may nest.
     std::vector<FluentMenuItem> children;
     float glyph_scale = 1.0f;      // Per-item visual scale inside the fixed icon slot.
     bool shortcut_inline = false; // Search paths follow a shared, compact filename column.
@@ -177,7 +177,7 @@ public:
     static constexpr int kShadowMargin = 20; // px of transparent border around the card
 
 private:
-    // ULW staging buffer (GDI DIB); the main menu and the flyout each own one.
+    // ULW staging buffer (GDI DIB); the main menu and every flyout own one.
     struct Surface {
         MenuBackdrop backdrop;
         HDC mem_dc = nullptr;
@@ -198,22 +198,26 @@ private:
     bool Render();                 // model_ -> dib_ (pixels), current hover state
     void Present(BYTE alpha, int y_offset_px);
     void PresentCurrent();
-    void PositionSubmenu(bool show = true);
-    // One-level flyout for FluentMenuItem::children.
-    bool EnsureSubWindow();
-    void OpenSubmenu(int row);
-    void CloseSubmenu();
-    void OnSubMouse(POINT client_pt, bool button_up);
-    bool RenderSub();
-    void PresentSub(BYTE alpha);
-    void HideSubWindow();
+    void PositionSubmenu(bool show = true, int depth = 0);
+    bool EnsureSubWindow(int depth);
+    void OpenSubmenu(int row, int depth = 0);
+    void CloseSubmenu(int depth = 0);
+    void OnSubMouse(POINT client_pt, bool button_up, int depth = 0);
+    bool RenderSub(int depth = 0);
+    void PresentSub(BYTE alpha, int depth = 0);
+    void HideSubWindow(int depth = 0);
+    int SubmenuDepth(HWND window) const;
+    void ScheduleSubmenu(int row, int depth);
+    bool HandleMenuKey(WPARAM key);
+    void RevealSubRow(int depth);
+    void RefreshSubmenus();
     void LayoutWindow(POINT screen_pt);
     void RefreshFilter();
     int RunModalLoop();
     void OnMouse(POINT client_pt, bool button_up);
     void UpdateHover(int row, int swatch = -1);
     float BodyHeightPx() const;
-    void UpdateTooltip(int row, bool submenu = false);
+    void UpdateTooltip(int row, int depth = -1);
     int HitTestSwatch(int row, float client_x) const;
     int HitTestSwatch(const FluentMenuModel& model, int row, float client_x) const;
     int InvokeRow(int row);        // returns command or 0
@@ -237,7 +241,6 @@ private:
     bool dark_ = false;
     bool snapshot_ = false;
     MenuBackdropSource backdrop_source_;
-    MenuBackdropSource sub_backdrop_source_;
     D2D1_COLOR_F accent_{};
 
     FluentMenuModel model_;
@@ -283,17 +286,27 @@ private:
 
     Surface surf_;                 // main menu staging
 
-    // Flyout (one level, FluentMenuItem::children).
-    HWND sub_hwnd_ = nullptr;
-    Surface sub_surf_;
-    FluentMenuModel sub_model_;
-    int sub_parent_row_ = -1;      // row in model_ whose children are shown
-    int sub_hover_ = -1;
-    int sub_hover_swatch_ = -1;
+    struct Flyout {
+        ~Flyout();
+        HWND hwnd = nullptr;
+        Surface surface;
+        MenuBackdropSource backdrop_source;
+        FluentMenuModel model;
+        int parent_row = -1;
+        std::wstring parent_text;
+        int hover = -1;
+        int hover_swatch = -1;
+        float scroll_y = 0.0f;
+        float body_height = 0.0f;
+        int x = 0;
+        int y = 0;
+    };
+    // Stable allocations: opening a descendant must not invalidate its parent.
+    std::vector<std::unique_ptr<Flyout>> flyouts_;
+    int open_flyouts_ = 0;
     int sub_pending_row_ = -1;     // hover-to-open delay target
+    int sub_pending_depth_ = 0;
     std::chrono::steady_clock::time_point sub_pending_since_;
-    int sub_x_ = 0;                // flyout window origin (screen px)
-    int sub_y_ = 0;
 };
 
 } // namespace pulse::ui

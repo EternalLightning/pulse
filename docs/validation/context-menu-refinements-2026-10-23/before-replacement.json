@@ -1,0 +1,24 @@
+{
+  "Service": {
+    "Name": "PulseIndex",
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service",
+    "ProcessId": 39832
+  },
+  "Processes": [
+    {
+      "ProcessId": 39832,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": null,
+      "CommandLine": null
+    },
+    {
+      "ProcessId": 31296,
+      "Name": "Pulse.Index.exe",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "Time": "2026-10-23T00:53:12.3364172+08:00"
+}

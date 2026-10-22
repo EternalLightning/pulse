@@ -14,6 +14,8 @@
 LRESULT CALLBACK WndProcImpl(HWND, UINT, WPARAM, LPARAM);
 int RunTabIndicatorUiTest();
 int RunStatusBarUiTest();
+int RunOperationCenterApplicationTest();
+int RunOperationCenterMultiwindowTest();
 int RunArchivePresentationUiTest();
 
 namespace {
@@ -183,6 +185,16 @@ int main(int argc, char** argv) {
     OleInitialize(nullptr);
     compat::EnableDpiAwareness();
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::string_view(argv[1]) == "--operation-center-multiwindow") {
+        const int result = RunOperationCenterMultiwindowTest();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--operation-center-only") {
+        const int result = RunOperationCenterApplicationTest();
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--archive-presentation-only") {
         const int result = RunArchivePresentationUiTest();
         OleUninitialize();

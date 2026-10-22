@@ -9,7 +9,8 @@
 #include "../ui/view_layout.h"
 #include "../ui/ui_renderer.h"
 #include "context_menu_prefs.h"
-#include "../index/index_engine.h"
+#include "command_catalog.h"
+#include "../index/index_types.h"
 #include <string>
 
 namespace pulse::app {
@@ -102,6 +103,13 @@ enum MenuCmd : int {
     CmdNewMenu = 186,
     CmdSelectTextCompare = 187,
     CmdCompareSelectedText = 188,
+    CmdOperationCenter = 189,
+    CmdGroupAuto = 190,
+    CmdGroupNone,
+    CmdGroupDate,
+    CmdGroupType,
+    CmdGroupSize,
+    CmdGroupDirection,
     CmdRecentBase = 200,
     CmdIndexBase = 1000,
     // Explorer integration (优化.md §7): registry static verbs bound to the
@@ -125,11 +133,12 @@ struct ShellMenuEntry {
     std::wstring handler;   // handler display name for the settings catalog
 };
 
-// Context menu for a selected entry: 打开 + icon strip (cut/copy/delete/
-// rename) + built-in verbs + undo. Explorer rows are appended afterwards via
-// AppendShellSection (they grow the menu downward so open rows never move).
+// Context menu for a selected entry: common actions, navigation, file
+// operations, tools, organization, properties. The controller collects Explorer rows
+// into a live More options flyout after the built-in commands.
 std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring& undo_label,
                                               bool folder = false);
+void OrganizeItemMenu(std::vector<ui::FluentMenuItem>& items);
 void RestrictDriveItemMenu(std::vector<ui::FluentMenuItem>& items, bool single_drive);
 
 struct Tab;
@@ -144,9 +153,9 @@ void AppendRecentChangesCommand(std::vector<ui::FluentMenuItem>& items,
 
 // Appends the merged Explorer section at the very bottom: separator, then one
 // row per entry. Software submenus become one-level flyout headers (children
-// on FluentMenuItem); other rows stay flat. Drops entries whose text
-// duplicates an existing row (case-insensitive). Hard safety cap is 48; the
-// user-facing default (32) is applied earlier by ApplyExplorerPrefs.
+// on FluentMenuItem); other rows stay flat. Drops duplicate command ids and
+// known native Quick Access equivalents. Hard safety cap is 48; user prefs
+// are applied earlier by ApplyExplorerPrefs.
 void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
                         const std::vector<ShellMenuEntry>& entries);
 
@@ -190,6 +199,8 @@ std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive 
 std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset);
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode,
                                               bool details_panel = false);
+std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
+                                                ui::SortDirection direction, bool enabled);
 
 // Ctrl+K / address omnibar: verbs + index hits + recent folders at the end.
 struct OmnibarQuery {
@@ -208,7 +219,8 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
                                                     const std::vector<index::Hit>& hits,
                                                     bool project_only,
                                                     size_t total = 0,
-                                                    const std::wstring& current_path = {});
+                                                    const std::wstring& current_path = {},
+                                                    const CommandContext& context = {});
 
 // "base.ext", "base (2).ext", ... — first name not colliding under dir.
 std::wstring UniqueChildName(const std::wstring& dir, const std::wstring& base,

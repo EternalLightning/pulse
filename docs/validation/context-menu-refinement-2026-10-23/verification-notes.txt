@@ -1,0 +1,50 @@
+Context menu completion verification (2026-10-23)
+
+Before removing ManageContext, the normal real Shell folder item/background queries completed in 2.09s and 2.33s. The user's exact indefinite-loading provider was not reproduced.
+
+After removing ManageContext, before fixing FluentMenuModel::ReplaceLiveItems:
+.\build\pulse_context_menu_loading_test.exe
+Exit 1; 6 PASS, 3 FAIL.
+FAIL empty final reply publishes removal of the pending overflow
+FAIL empty final reply closes the actual loading flyout
+FAIL failed final query never restores Loading after a partial reply
+Cause: the last stable builtin loses its separator when the empty More options suffix disappears; strict stable-row equality rejects the whole display update.
+
+After renderer fix:
+.\build\pulse_context_menu_loading_test.exe
+Exit 0; 9 PASS, 0 FAIL.
+
+Actual Shell and actual popup modal message dispatch:
+.\build\pulse_context_menu_loading_test.exe --real-shell
+Run outside sandbox for named-pipe access; exit 0; 51 PASS, 0 FAIL.
+Item directory: 21 raw Shell rows, 22 accepted publications, final 2219ms, actual open loading flyout cleared.
+Background directory: 29 raw Shell rows, 21 accepted publications, final 2312ms, actual open loading flyout cleared.
+Test creates and removes an isolated empty directory in bench_data/context-menu-loading. It never invokes Shell commands or saves user preferences.
+Sandbox-only initial trial was not accepted as real Shell validation: ShellClient returned named-pipe access denied. Fixture now marks such failures as failures.
+
+Old host source timeout regression:
+The isolated test linked git HEAD:src/shell_host/ctx_session_process.cpp with the new context_query_timeout_test.cpp.
+.\bench_data\context-menu-timeout-baseline\context_timeout_baseline.exe
+Exit 1; 4 PASS, 2 FAIL; elapsed 10218ms.
+FAIL initial and partial query hangs receive bounded final completion
+FAIL empty hung workers are reclaimed while ready and completed sessions remain alive
+Partial ready commands and normally completed commands remained invokable; all test workers exited on cleanup.
+
+Production dispatch trace inspected:
+app_main.cpp sets OpsManager::SetShellMenuCallback -> PostMessageW(WM_SHELLCTX_ITEMS, token, owned payload).
+WM_SHELLCTX_ITEMS -> CompleteComQuery -> RefreshOpenCtxMenu -> FluentMenu::ReplaceItems -> NotePatchedDisplay.
+WM_OPS_NOTIFY separately refreshes operation/undo state; it is not the Shell query response channel.
+FluentMenu::RunModalLoop dispatches messages for the owner HWND. The real Shell fixture exercises this PostMessage + modal-loop publication path.
+
+Current host source timeout regression:
+.\bench_data\context-menu-timeout-current\context_timeout_current.exe
+Compiled with /std:c++20 /EHsc /O2 /MT /utf-8 /W4 against the production source.
+Exit 0; 6 PASS, 0 FAIL; bounded completion 8171ms.
+Empty initial/partial hung workers physically exited; ready partial snapshot kept exact command7; both timed-out ready and normal completed sessions invoked after the eight-second deadline; all isolated workers exited on cleanup.
+
+Related filtered checks (all exit0):
+pulse_app_controllers_test --context-menu-overflow:16 PASS
+pulse_app_controllers_test --context-menu-refresh:29 PASS
+pulse_app_controllers_test --context-menu-com:12 PASS
+pulse_menu_text_test --live-refresh:3 PASS
+No full controller suite or full application selftest was run.

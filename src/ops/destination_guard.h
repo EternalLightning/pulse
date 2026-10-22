@@ -1,6 +1,7 @@
 #pragma once
 
 #include "file_identity.h"
+#include "file_object_reference.h"
 #include "../common/file_create.h"
 
 #include <windows.h>
@@ -148,7 +149,45 @@ public:
         const auto found = snapshots_.find(parts.back());
         if (found == snapshots_.end() || !found->second.exists) return false;
         identity = found->second.id;
+        if (found->second.reference && !ReadFileIdentity(found->second.reference.get(), identity, identity_query_)) {
+            identity = {};
+            return false;
+        }
         return true;
+    }
+
+    bool CapturedReference(const std::wstring& path, FileObjectReference& reference) const {
+        reference = {};
+        const auto parts = Components(path);
+        if (parts.empty()) return false;
+        const auto found = snapshots_.find(parts.back());
+        std::wstring error;
+        if (found == snapshots_.end() || !found->second.exists || !found->second.reference ||
+            !Check(path, error)) return false;
+        HANDLE duplicate = nullptr;
+        if (!DuplicateHandle(GetCurrentProcess(), found->second.reference.get(), GetCurrentProcess(),
+                &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) return false;
+        reference.handle = std::make_shared<FileObjectReference::Lease>(duplicate);
+        if (!ReadFileIdentity(duplicate, reference.identity, identity_query_)) {
+            reference = {};
+            return false;
+        }
+        return true;
+    }
+
+    void RetireObjectReference(const FileIdentity& removed) {
+        for (auto& entry : snapshots_) {
+            auto& snapshot = entry.second;
+            const auto retire = [&](std::shared_ptr<void>& reference, FileIdentity& captured) {
+                FileIdentity live;
+                if (reference && ReadFileIdentity(reference.get(), live, identity_query_) && live == removed) {
+                    reference.reset();
+                    captured = {}; // Preserve a refusal; never readmit the pathname on retry.
+                }
+            };
+            retire(snapshot.reference, snapshot.id);
+            retire(snapshot.resolved_reference, snapshot.resolved_id);
+        }
     }
 
     bool PinPlainDirectory(const std::wstring& path, const FileIdentity& identity, std::wstring& error) {
@@ -214,7 +253,11 @@ public:
             Snapshot created;
             if (!handle || !Read(part, created, handle.get()) || !created.directory ||
                 !created.reparse.empty()) return Fail(part, error);
-            found->second = std::move(created);
+            // Keep a permissively shared reference while the creation lease
+            // proves the path. Virtual providers may update its ID after writes.
+            Snapshot current;
+            if (!Read(part, current) || !Same(created, current)) return Fail(part, error);
+            found->second = std::move(current);
             leases_->handles.emplace(part, std::move(handle));
             created_directories_.insert(part);
         }
