@@ -1,5 +1,4 @@
 // ui_settings_view.cpp — Settings page layout and painting.
-#include "../common/windows_compat.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"

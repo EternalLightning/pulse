@@ -46,10 +46,6 @@ public:
     void ForEach(F&& fn) const {
         for (const Entry& entry : entries_) fn(entry.hwnd, *entry.window);
     }
-    bool IsLastWindow(HWND hwnd) const {
-        return std::none_of(entries_.begin(), entries_.end(),
-            [hwnd](const Entry& entry) { return entry.hwnd != hwnd; });
-    }
 
 private:
     auto Find(HWND hwnd) {

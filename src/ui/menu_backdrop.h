@@ -1,7 +1,6 @@
 #pragma once
 #include "ui_compositor.h"
 #include "window_material.h"
-#include "../common/windows_compat.h"
 #include <d2d1effects.h>
 #include <algorithm>
 #include <cmath>
@@ -24,7 +23,7 @@ public:
     }
 
     static bool Enabled() {
-        if (IsHighContrast() || !compat::ModernWindows()) return false;
+        if (IsHighContrast()) return false;
         DWORD transparency = 1, bytes = sizeof(transparency);
         RegGetValueW(HKEY_CURRENT_USER,
             L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",

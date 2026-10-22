@@ -81,8 +81,6 @@ struct ListEntryView {
     bool starred = false;
     std::wstring badge;
     D2D1_COLOR_F badge_color{};
-    D2D1_COLOR_F tag_dots[3]{};
-    int tag_dot_count = 0;
     std::wstring snippet;
 };
 
@@ -851,7 +849,6 @@ public:
 
     // Layout metrics (DIPs).
     float TitleBarHeight() const { return title_bar_height_; }
-    float ToolbarHeight() const { return toolbar_height_; }
     float EffectiveSidebarWidth(float window_width) const;
     void SetSidebarWidthDip(float width) {
         sidebar_width_dip_ = std::clamp(width, kSidebarMinWidthDip, kPanelWidthMaxDip);
@@ -870,7 +867,6 @@ public:
     }
     // Staging-tray deck icon edge preference (DIPs); single-item decks add 8.
     void SetTrayIconDip(float dip) { tray_icon_dip_ = std::clamp(dip, 32.0f, 64.0f); }
-    float TrayIconDip() const { return tray_icon_dip_; }
     float Margin() const { return margin_; }
 
     // Right details panel: toggled from the view menu; ContentRect shrinks.
@@ -886,7 +882,6 @@ public:
     // Splitter drag limits in DIPs for the current window size.
     float SidebarMaxWidthDip(float window_w) const;
     float DetailsMaxWidthDip(float window_w) const;
-    float SidebarWidthDip() const { return sidebar_width_dip_; }
     // Unclipped content height (DIPs) of the details panel, for wheel clamping.
     float DetailsContentHeightDip(const WindowViewModel& vm, float w, float h);
     bool CachedPreviewProperties(const std::wstring& path, uint64_t modified, uint64_t size,

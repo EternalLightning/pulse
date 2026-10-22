@@ -973,6 +973,13 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.search_content_stopped = false;
     tab.search_snippets.reset();
     if (IsArchiveView(normalized)) {
+        if (!s.shot.active) {
+            if (reason != PathLoadReason::RestoreSession && tab.view_mode != ui::ViewMode::Details) {
+                tab.view_mode = ui::ViewMode::Details;
+                ++tab.view_generation;
+            }
+            tab.scroll_x = 0.0f;
+        }
         LoadArchiveView(s, tab);
         SyncVisibleWatches(s);
         return;

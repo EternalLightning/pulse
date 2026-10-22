@@ -1,0 +1,735 @@
+===== Tab animation model =====
+[PASS] leading edge builds acceleration gradually from rest in either direction
+[PASS] leading edge eases acceleration back to rest before its stretch ends
+[PASS] leading edge starts and stops more slowly than its moving middle
+[PASS] leading edge builds acceleration gradually from rest in either direction
+[PASS] leading edge eases acceleration back to rest before its stretch ends
+[PASS] leading edge starts and stops more slowly than its moving middle
+[PASS] first tab appears immediately without requesting frames
+[PASS] switch begins at the currently displayed underline
+[PASS] rightward switch extends the leading edge while holding the trailing edge
+[PASS] both edges overlap in motion while the underline remains stretched
+[PASS] the former phase boundary has no all-edge pause
+[PASS] contraction catches up after the leading edge arrives
+[PASS] switch finishes exactly at the target and stops requesting frames
+[PASS] leftward switch extends the left edge first
+[PASS] rapid reversal preserves the sampled span without a jump
+[PASS] reversal contracts immediately when the target is already inside the span
+[PASS] reversal settles at the requested tab
+[PASS] retargeting to a narrow pinned tab preserves both displayed edges
+[PASS] high-refresh samples stay bounded and settle on a narrower target
+[PASS] disabling animations during a transition snaps to its final underline
+[PASS] disabled animation switches immediately without requesting frames
+[PASS] layout changes follow the active tab immediately instead of chasing stale geometry
+[PASS] new visible strip starts at current DPI geometry without stale motion
+[PASS] non-increasing timestamps cannot underflow or invert the span
+[PASS] long idle or minimized intervals settle instead of replaying old frames
+[PASS] display-paced samples advance continuously and stop exactly at the target
+[PASS] display-paced samples advance continuously and stop exactly at the target
+[PASS] display-paced samples advance continuously and stop exactly at the target
+[PASS] display-paced samples advance continuously and stop exactly at the target
+[PASS] closing a left tab preserves surviving spans and the plus button on the first frame
+[PASS] closing interpolates tab positions, widths and plus button together
+[PASS] a consecutive close retargets from the displayed positions without jumping
+[PASS] closing settles exactly after elapsed time and stops requesting frames
+[PASS] close timing is independent of sampling frequency
+[PASS] close timing is independent of sampling frequency
+[PASS] close timing is independent of sampling frequency
+[PASS] close timing is independent of sampling frequency
+[PASS] resize, DPI, disabled motion or unrelated layout changes discard stale close coordinates
+[PASS] resize, DPI, disabled motion or unrelated layout changes discard stale close coordinates
+[PASS] resize, DPI, disabled motion or unrelated layout changes discard stale close coordinates
+[PASS] resize, DPI, disabled motion or unrelated layout changes discard stale close coordinates
+[PASS] resize, DPI, disabled motion or unrelated layout changes discard stale close coordinates
+[PASS] non-increasing close timestamps cannot underflow
+[PASS] a hidden or idle interval settles the close without replaying frames
+[PASS] pinned tabs and stable group chips retain their own geometry while members close
+[PASS] an unchanged strip cannot start an empty animation loop
+46 checks, 0 failures
+
+===== Centered status bar =====
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] save production status bar evidence
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] save production status bar evidence
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] actual blue text pixels are centered within the measured operation bounds
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] operation text and optional progress track center on the window when they fit
+[PASS] narrow operation content stays within its available area and clear of trailing hints
+[PASS] centered operation retains its details hit target
+[PASS] status bar production renderer completes
+[PASS] idle status bar leaves no operation hit area
+[PASS] search progress and cancel button keep their existing centered group
+192 checks, 0 failures
+
+===== Tab UI =====
+[PASS] production plus-button pointer messages create and select a tab
+[PASS] new tab animates from the existing underline instead of snapping after count changes
+[PASS] both edges advance during the real new-tab transition
+[PASS] save new-tab intermediate frame
+[PASS] new-tab transition releases frame scheduling at rest
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] new tab retains its previous visible span while tabs shrink or enter overflow
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] overflow revealing a new tab at the same visible span avoids a pointless frame loop
+[PASS] switching across a scrolling tab strip keeps the transition
+[PASS] disabling motion settles a running transition
+[PASS] window resize snaps stale coordinates without chasing layout
+[PASS] DPI changes settle directly on current geometry
+[PASS] production pointer close removes the leftmost tab while retaining the active layout
+[PASS] pointer hit testing before the first paint cannot consume the close using stale cached tabs
+[PASS] close starts at displayed tab and plus-button positions
+[PASS] remaining tabs visibly move into the removed slot
+[PASS] hit testing follows the moving tab instead of the final slot
+[FRAME] close render=23387140..23387143 later=23387144 line=624.641 before=624.641 after=620.357 later=618.925 pending=0
+[PASS] active underline follows the closing reflow without a second chase animation
+[PASS] save production close intermediate frame
+[PASS] a consecutive production close retargets the current reflow
+[PASS] closing releases the production frame loop at rest
+[PASS] closing the active tab also animates the remaining strip
+[PASS] disabling motion settles closing and underline together
+[PASS] a pinned tab retains its width and position while grouped members close
+[PASS] later group chips start at their displayed positions
+[PASS] closing the last group member removes its chip and settles the surviving group
+[PASS] overflow close keeps finite, reachable active-tab geometry
+[PASS] resizing cancels closing coordinates from the old window width
+[PASS] continuous production WM_PAINT delivers due timers without starving them
+[PERF] continuous tab transitions: paints=108 timers=13
+[PASS] toast lifetime timer cannot duplicate the owner's reveal frame scheduling
+[PASS] toast entrance joins display-paced frame scheduling
+[PASS] toast settles without a permanent render loop
+[PASS] hidden window does not queue animation frames
+
+===== Archive presentation =====
+[PASS] create isolated ZIP with long file, long folder and trailing short file
+[PASS] initialize isolated production renderer
+[PASS] opening ZIP from another folder starts in default Details instead of inheriting the parent mode or scroll
+[PASS] production archive navigation lists all three ZIP entries
+[PASS] opening ZIP from another folder starts in default Details instead of inheriting the parent mode or scroll
+[PASS] production archive navigation lists all three ZIP entries
+[PASS] opening ZIP from another folder starts in default Details instead of inheriting the parent mode or scroll
+[PASS] production archive navigation lists all three ZIP entries
+[PASS] ZIP snapshot retains full names and renders the short file after the long file
+[PASS] refreshing an archive preserves its manually chosen icon view
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] pathless archive entries retain independent long-name and short-name truncation records
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] archive icon frame renders successfully
+[PASS] save actual archive filename popup evidence
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] production pointer handling reaches the requested archive icon
+[PASS] hover deadline shows complete truncated file or folder name and suppresses a fully visible short name
+[PASS] entering a nested archive folder starts in default Details and loads its child
+[PASS] returning to the filesystem parent restores its own saved view
+[PASS] explicit session restore keeps the archive view selected in that session
+[PASS] ordinary filesystem icon frame renders successfully
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+[PASS] ordinary filesystem icon frame renders successfully
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+[PASS] ordinary filesystem paths keep independent long-name and short-name truncation records
+[PASS] ordinary filesystem icons show only the full names that were actually truncated
+147 checks, 0 failures
+
+===== Materials =====
+[PASS] create bitmap fixtures
+[PASS] initialize off-screen compositor
+[INFO] first SourceBitmap call 0.009 ms
+[PASS] first request is asynchronous
+[PASS] decode completion invalidates the render window
+[PASS] decoded pixels upload on render thread
+[PASS] rapid switches discard stale decode
+[PASS] device reset reuses decoded CPU pixels
+[PASS] decode failures are cached
+[INFO] destructor during 1500 ms stall 103.073 ms
+[PASS] destructor is bounded during stalled decode
+All material tests passed.
+
+===== Menu lifecycle =====
+[PASS] create menu rendering host
+[PASS] create animation and dismissal host
+[PASS] start partial-alpha menu frame
+[PASS] hover redraw preserves the fade and slide state
+[PASS] opening a flyout during fade-in does not force an opaque parent
+[PASS] flyout follows the parent slide without losing its anchor
+[PASS] flyout follows its visible parent row after menu scrolling
+[PASS] late templates refresh an open flyout without closing it or restarting opacity
+[PASS] owner and menu-internal focus transfers preserve popup and pending selection
+[PASS] external deactivation immediately hides both windows and discards pending selection
+[PASS] reopen menu for cancellation message
+[PASS] sent WM_CANCELMODE immediately hides both windows and rejects stale selection
+[PASS] reopen menu for application deactivation
+[PASS] sent application deactivation immediately discards pending selection
+[PASS] reopen menu for successful command selection
+[PASS] internal command selection dismisses immediately while preserving its returned command
+[PASS] external cancellation before invocation also clears a selection from an already hidden menu
+[PASS] reopen menu for submenu command selection
+[PASS] submenu window mouse coordinates select the expected command
+[PASS] menu lifecycle does not take foreground activation
+
+===== Settings DPI dialog =====
+[PASS] create isolated E-drive output directory
+[PASS] modal owner is disabled
+[PASS] main client area has a nonactivating dim overlay at its final opacity
+[PASS] custom themed caption replaces native chrome and close is excluded from Tab order
+[PASS] custom title retains window dragging hit test
+[PASS] caption and content controls stay inside the client bounds
+[PASS] input initially owns focus
+[PASS] Enter defaults to Apply
+[PASS] PrintWindow caption pixels match the actual light/dark title token
+[PASS] PrintWindow input pixels match the actual light/dark input token
+[PASS] capture native settings prompt with PrintWindow and WIC
+[INFO] composed desktop prompt capture: saved
+[PASS] Tab moves from input to Apply
+[PASS] Enter accepts while Escape and caption close cancel through dialog navigation
+[PASS] cancel never changes caller value
+[PASS] owner is reenabled after dismissal
+[PASS] owner dim overlay is removed after prompt dismissal
+[PASS] DPI change preserves input while updating caption and controls
+[PASS] modal owner is disabled
+[PASS] main client area has a nonactivating dim overlay at its final opacity
+[PASS] custom themed caption replaces native chrome and close is excluded from Tab order
+[PASS] custom title retains window dragging hit test
+[PASS] caption and content controls stay inside the client bounds
+[PASS] input initially owns focus
+[PASS] Enter defaults to Apply
+[PASS] PrintWindow caption pixels match the actual light/dark title token
+[PASS] PrintWindow input pixels match the actual light/dark input token
+[PASS] capture native settings prompt with PrintWindow and WIC
+[INFO] composed desktop prompt capture: saved
+[PASS] Tab moves from input to Apply
+[PASS] Enter accepts while Escape and caption close cancel through dialog navigation
+[PASS] cancel never changes caller value
+[PASS] owner is reenabled after dismissal
+[PASS] owner dim overlay is removed after prompt dismissal
+[PASS] DPI change preserves input while updating caption and controls
+[PASS] modal owner is disabled
+[PASS] main client area has a nonactivating dim overlay at its final opacity
+[PASS] custom themed caption replaces native chrome and close is excluded from Tab order
+[PASS] custom title retains window dragging hit test
+[PASS] caption and content controls stay inside the client bounds
+[PASS] input initially owns focus
+[PASS] Enter defaults to Apply
+[PASS] PrintWindow caption pixels match the actual light/dark title token
+[PASS] PrintWindow input pixels match the actual light/dark input token
+[PASS] capture native settings prompt with PrintWindow and WIC
+[INFO] composed desktop prompt capture: saved
+[PASS] Tab moves from input to Apply
+[PASS] Enter accepts while Escape and caption close cancel through dialog navigation
+[PASS] cancel never changes caller value
+[PASS] owner is reenabled after dismissal
+[PASS] owner dim overlay is removed after prompt dismissal
+
+===== Shell launch and DPI =====
+[PASS] launch payload round-trips
+[PASS] unknown launch version rejected
+[PASS] launch trailing bytes rejected
+[PASS] launch path containing embedded NUL rejected
+[PASS] all launch string fields reject embedded NUL
+[PASS] Shell manifest enables per-monitor DPI awareness before broker startup
+[DIAG] request=100 HRESULT=0x80070057 cancelled=0 error=Malformed Shell launch request; no launch occurred.
+[PASS] broker rejects malformed launch without losing transport
+[DIAG] request=101 HRESULT=0x80070057 cancelled=0 error=Malformed Shell launch request; no launch occurred.
+[PASS] broker rejects malformed launch without losing transport
+[DIAG] request=102 HRESULT=0x80070057 cancelled=0 error=Malformed Shell launch request; no launch occurred.
+[PASS] broker rejects malformed launch without losing transport
+[DIAG] request=200 HRESULT=0x00000000 cancelled=0 error=worker PID 11884
+[PASS] successful launch executes outside broker and UI process
+[DIAG] request=201 HRESULT=0x80040202 cancelled=0 error=Shell launch worker stopped; launch outcome is unknown. The request was not replayed.
+[PASS] worker crash reports unknown outcome and preserves broker
+[DIAG] request=202 HRESULT=0x00000000 cancelled=0 error=worker PID 36384
+[PASS] launch after worker crash completes successfully
+[DIAG] request=203 HRESULT=0x00000000 cancelled=0 error=worker PID 24952
+[PASS] visible modeless session survives completion and idle grace
+[PASS] fixture enters a permanently hung launch in a live worker
+[PASS] hung launch leaves broker ping responsive
+[DIAG] request=301 HRESULT=0x00000000 cancelled=0 error=
+[PASS] hung launch does not block independent file creation
+[DIAG] request=204 HRESULT=0x80040202 cancelled=1 error=Shell launch worker stopped; launch outcome is unknown. The request was not replayed.
+[PASS] cancellation reclaims only the dispatched launch and reports unknown outcome
+[PASS] launch cancellation preserves broker, another launch session and created file
+[PASS] closing modeless window releases its launch worker
+[DIAG] request=302 HRESULT=0x00000000 cancelled=0 error=
+[DIAG] request=205 HRESULT=0x00000000 cancelled=0 error=worker PID 10828
+[PASS] concurrent file creation and launch both complete independently
+[PASS] create isolated command directory containing spaces
+[DIAG] request=400 HRESULT=0x00000000 cancelled=0 error=worker PID 8928
+[PASS] real command preserves quoted executable and arguments in expanded command line
+[DIAG] command child PID=8940 CWD=D:\AppData\Temp\PulseShellLaunchTest-7416-1519000\command working directory expected=D:\AppData\Temp\PulseShellLaunchTest-7416-1519000\command working directory
+[PASS] real command child runs outside broker and UI with requested working directory
+[DIAG] request=401 HRESULT=0x80070002 cancelled=0 error=Shell launch failed (0x80070002) for D:\AppData\Temp\PulseShellLaunchTest-7416-1519000\missing-launch-target.pulse-launch-test: [PASS] real execute missing path reports failing HRESULT and path without interactive error UI
+[PASS] broker remains responsive after real execute failure
+[PASS] create isolated empty real properties fixtures
+[DIAG] real single-file properties request=403 worker PID=37596 visible windows=1
+[DIAG] properties HWND=000000000003119A class=#32770 title=single properties.txt [PASS] single-file properties opens one visible sheet in its launch worker
+[DIAG] request=403 HRESULT=0x00000000 cancelled=0 error=worker PID 37596
+[PASS] closing single-file properties releases its successful launch worker
+[PASS] real properties preserves all isolated empty files
+[DIAG] real multi-file properties request=404 worker PID=37196 visible windows=1
+[DIAG] properties HWND=00000000000A0FDE class=#32770 title=single properties.txt, ... [PASS] multi-file properties opens one shared sheet in its launch worker
+[DIAG] request=404 HRESULT=0x00000000 cancelled=0 error=worker PID 37196
+[PASS] closing multi-file properties releases its successful launch worker
+[PASS] real properties preserves all isolated empty files
+[DIAG] request=206 HRESULT=0x00000000 cancelled=0 error=worker PID 8848; child PID 37068
+[PASS] launched application survives physical launch worker retirement
+[DIAG] request=500 HRESULT=0x00000000 cancelled=0 error=worker PID 35080
+[DIAG] request=501 HRESULT=0x00000000 cancelled=0 error=worker PID 3200
+[DIAG] request=502 HRESULT=0x00000000 cancelled=0 error=worker PID 36624
+[DIAG] request=503 HRESULT=0x00000000 cancelled=0 error=worker PID 7532
+[DIAG] request=504 HRESULT=0x00000000 cancelled=0 error=worker PID 28492
+[DIAG] request=505 HRESULT=0x00000000 cancelled=0 error=worker PID 37464
+[DIAG] request=506 HRESULT=0x00000000 cancelled=0 error=worker PID 36704
+[DIAG] request=507 HRESULT=0x00000000 cancelled=0 error=worker PID 36308
+[DIAG] eight-launch burst elapsed=3172 ms distinct workers=8
+[PASS] eight queued launches all succeed in distinct workers within fifteen seconds
+[DIAG] request=510 HRESULT=0x00000000 cancelled=0 error=worker PID 37092
+[DIAG] request=511 HRESULT=0x00000000 cancelled=0 error=worker PID 10860
+[DIAG] request=512 HRESULT=0x00000000 cancelled=0 error=worker PID 36180
+[DIAG] request=513 HRESULT=0x00000000 cancelled=0 error=worker PID 36752
+[PASS] four visible modeless launch sessions hold every active worker slot
+[PASS] fifth launch remains queued without spawning a worker while broker ping completes
+[DIAG] request=520 HRESULT=0x800704C7 cancelled=1 error=Shell launch cancelled while queued; no launch occurred.
+[PASS] queued launch cancellation reports known pre-dispatch cancellation
+[PASS] queued cancellation preserves all four active launch sessions
+[PASS] closing all four held windows physically reclaims their launch workers
+[PASS] launched application survives broker shutdown
+[PASS] owned persistent fixture child cleaned
+[PASS] isolated launch fixture files cleaned
+
+===== Shell context processes =====
+[DIAG] runner integrity RID=8192, file-operation host RID=8192
+[PASS] hung handler does not block the first ready commands
+[PASS] partial response retains ready commands while another handler never returns
+[PASS] a slower normal handler is published later instead of being discarded by a query deadline
+[PASS] ready handler invokes successfully despite the hung sibling
+[PASS] completed menu physically terminates its worker including the permanently blocked thread
+[PASS] second menu starts after physical worker reclamation
+[PASS] closing a menu physically terminates its blocked query worker
+[PASS] invoke hang fixture publishes ready commands
+[PASS] production dispatch enters a permanently blocked InvokeCommand fixture
+[PASS] close reclaims a blocked invocation and reports failure
+[PASS] modeless command fixture publishes ready commands
+[PASS] InvokeCommand completion preserves a visible modeless window and its STA
+[PASS] closing the modeless window allows physical worker reclamation
+[PASS] application launch fixture publishes ready commands
+[PASS] context command launches an isolated child application
+[PASS] menu worker reclamation preserves applications launched by the command
+[PASS] isolated launched application cleaned
+[PASS] admitted menu publishes ready commands
+[PASS] admitted menu publishes ready commands
+[PASS] admitted menu publishes ready commands
+[PASS] admitted menu publishes ready commands
+[PASS] process admission limit rejects a fifth live menu without spawning more workers
+[PASS] all admitted blocked workers physically exit on close
+[PASS] file-operation host still creates an isolated directory after menu process termination
+[PASS] isolated fixture directory cleaned
+[PASS] terminating context workers preserves the file-operation host and its pipe
+[PASS] parent exit fixture reaches ready state
+[PASS] file-operation host exit kills outstanding menu workers through its job
+
+===== Production Shell startup =====
+[PASS] launch payload round-trips
+[PASS] unknown launch version rejected
+[PASS] launch trailing bytes rejected
+[PASS] launch path containing embedded NUL rejected
+[PASS] all launch string fields reject embedded NUL
+[PASS] Shell manifest enables per-monitor DPI awareness before broker startup
+[PASS] production Shell broker responds to authenticated ping
+[DIAG] request=2 HRESULT=0x00000000 cancelled=0 error=
+[PASS] production Shell creates an isolated folder through its real operation handler
+[PASS] production Shell exits after broker shutdown
+[PASS] production Shell startup fixture is cleaned
+
+===== Installed Shell startup =====
+[PASS] launch payload round-trips
+[PASS] unknown launch version rejected
+[PASS] launch trailing bytes rejected
+[PASS] launch path containing embedded NUL rejected
+[PASS] all launch string fields reject embedded NUL
+[PASS] Shell manifest enables per-monitor DPI awareness before broker startup
+[PASS] production Shell broker responds to authenticated ping
+[DIAG] request=2 HRESULT=0x00000000 cancelled=0 error=
+[PASS] production Shell creates an isolated folder through its real operation handler
+[PASS] production Shell exits after broker shutdown
+[PASS] production Shell startup fixture is cleaned
+
+===== Localization (includes one known failure) =====
+[PASS] new item dialog prompt and action follow display language
+[PASS] new item dialog prompt and action follow display language
+[PASS] language switch preserves strings held by worker tasks
+[PASS] worker localization remains valid during language switches
+[PASS] audited menus dialogs and status strings are present
+[PASS] search enhancement strings are present
+[PASS] tag and badge menus follow display language
+[PASS] tag deletion preserves user names and association count
+[PASS] tab menu TabNewRight follows display language
+[PASS] tab menu TabDuplicate follows display language
+[PASS] tab menu TabPin follows display language
+[PASS] tab menu TabUnpin follows display language
+[PASS] tab menu TabCreateGroup follows display language
+[PASS] tab menu TabNewGroup follows display language
+[PASS] tab menu TabJoinGroup follows display language
+[PASS] tab menu TabUnnamedGroup follows display language
+[PASS] tab menu TabRemoveGroup follows display language
+[PASS] tab menu TabClose follows display language
+[PASS] tab menu TabCloseOthers follows display language
+[PASS] tab menu TabCloseRight follows display language
+[PASS] tab menu TabGroupName follows display language
+[PASS] tab menu TabGroupNew follows display language
+[PASS] tab menu TabUngroup follows display language
+[PASS] tab menu TabGroupClose follows display language
+[PASS] tab menu TabMenuSearch follows display language
+[PASS] tab identity menu and settings labels are translated
+[PASS] audited menus dialogs and status strings are present
+[PASS] search enhancement strings are present
+[PASS] tag and badge menus follow display language
+[PASS] tag deletion preserves user names and association count
+[PASS] tab menu TabNewRight follows display language
+[PASS] tab menu TabDuplicate follows display language
+[PASS] tab menu TabPin follows display language
+[PASS] tab menu TabUnpin follows display language
+[PASS] tab menu TabCreateGroup follows display language
+[PASS] tab menu TabNewGroup follows display language
+[PASS] tab menu TabJoinGroup follows display language
+[PASS] tab menu TabUnnamedGroup follows display language
+[PASS] tab menu TabRemoveGroup follows display language
+[PASS] tab menu TabClose follows display language
+[PASS] tab menu TabCloseOthers follows display language
+[PASS] tab menu TabCloseRight follows display language
+[PASS] tab menu TabGroupName follows display language
+[PASS] tab menu TabGroupNew follows display language
+[PASS] tab menu TabUngroup follows display language
+[PASS] tab menu TabGroupClose follows display language
+[PASS] tab menu TabMenuSearch follows display language
+[PASS] tab identity menu and settings labels are translated
+[PASS] zh-CN quick access resources
+[PASS] zh-CN sorting commands
+[FAIL] zh-CN resource selection
+[PASS] en-US quick access resources
+[PASS] en-US sorting commands
+[PASS] en-US resource selection
+[PASS] en-US main shell resources
+[PASS] en-US command resources
+[PASS] en-US recycle and batch rename
+[PASS] stable language identifiers
+[PASS] system language resolves to a shipped locale
+
+== localization tests: FAIL ==
+
+===== Runtime localization fallback =====
+[PASS] runtime errors remain readable without executable resources
+[PASS] runtime messages are embedded in both resource languages
+[PASS] cache ages follow display language at unit boundaries
+[PASS] localized errors preserve a complete path containing percent signs
+[PASS] localized numeric errors preserve the system code
+[PASS] runtime messages are embedded in both resource languages
+[PASS] cache ages follow display language at unit boundaries
+[PASS] localized errors preserve a complete path containing percent signs
+[PASS] localized numeric errors preserve the system code

@@ -1,7 +1,3 @@
-// Keep MF header feature gates consistent with the Windows 8.1 app target.
-// The project NTDDI value is newer than WINVER in current Windows SDK headers.
-#undef NTDDI_VERSION
-#define NTDDI_VERSION 0x06030000
 #include "video_preview.h"
 #include "../common/path_utils.h"
 #include <mfplay.h>

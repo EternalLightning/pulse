@@ -1,7 +1,6 @@
 // Unified command geometry, with the existing SVG loader retained for artwork.
 #include "ui_renderer.h"
 #include "command_icons.h"
-#include "../common/windows_compat.h"
 #include "../common/resource_ids.h"
 #include <d2d1svg.h>
 #include <shlwapi.h>
@@ -173,7 +172,6 @@ bool CreateSvgFromBytes(ID2D1DeviceContext5* dc, const void* bytes, DWORD byte_c
 bool MainRenderer::EnsureFluentSvg(int resource_id, bool colorful) {
     if (!colorful && CommandIconForResource(resource_id) != command_icons::Icon::None)
         return compositor_ && compositor_->Dc();
-    if (compat::LegacyMode()) return false;
     if (fluent_svg_failed_.count(resource_id)) return false;
     if (const auto it = fluent_svgs_.find(resource_id);
         it != fluent_svgs_.end() && it->second.get() && empty_state_svg_dc_.get()) {

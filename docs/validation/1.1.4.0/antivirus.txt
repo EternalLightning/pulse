@@ -1,0 +1,166 @@
+===== shell-av-baseline-report.txt =====
+; --- Settings ---
+; Action on detect:	Report only
+; Scan objects:	All objects
+; Use iChecker:	No
+; Use iSwift:	No
+; Try disinfect:	No
+; Try delete:	No
+; Try delete container:	No
+; Scan archives:	No
+; Exclude by mask:	No
+; Include by mask:	No
+; Objects to scan:
+; 	"E:\Projects\pulse\dist\rollback-before-1.1.4.0-20261022-005854\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-4b1d6b7040da4d959b671d5593c7cc89\Pulse-1.1.4.0-portable\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; ------------------
+2026-10-22 09:55:33	Scan_Objects$12121                         starting   1
+2026-10-22 09:55:34	E:\Projects\pulse\dist\rollback-before-1.1.4.0-20261022-005854\Pulse.Shell.exe//#	ok
+2026-10-22 09:55:34	Scan_Objects$12121                         running    1
+2026-10-22 09:55:34	E:\Projects\pulse\dist\rollback-before-1.1.4.0-20261022-005854\Pulse.Shell.exe	ok
+2026-10-22 09:55:34	E:\Projects\pulse\dist\portable-stage-4b1d6b7040da4d959b671d5593c7cc89\Pulse-1.1.4.0-portable\Pulse.Shell.exe//#	ok
+2026-10-22 09:55:34	E:\Projects\pulse\dist\portable-stage-4b1d6b7040da4d959b671d5593c7cc89\Pulse-1.1.4.0-portable\Pulse.Shell.exe	ok
+2026-10-22 09:55:34	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe//#	ok
+2026-10-22 09:55:34	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	ok
+2026-10-22 09:55:38 	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	suspicion	not-a-virus:VHO:AdWare.Win32.ShouQu.gen
+2026-10-22 09:55:38	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	skipped
+2026-10-22 09:55:38	Scan_Objects$12121                         completed
+;  --- Statistics ---
+; Time Start:	2026-10-22 09:55:33
+; Time Finish:	2026-10-22 09:55:38
+; Processed objects:	6
+; Total OK:	5
+; Total detected:	1
+; Suspicions:	0
+; Total skipped:	0
+; Password protected:	0
+; Corrupted:	0
+; Errors:	0
+;  ------------------
+
+===== shell-av-fixed-report.txt =====
+; --- Settings ---
+; Action on detect:	Report only
+; Scan objects:	All objects
+; Use iChecker:	No
+; Use iSwift:	No
+; Try disinfect:	No
+; Try delete:	No
+; Try delete container:	No
+; Scan archives:	No
+; Exclude by mask:	No
+; Include by mask:	No
+; Objects to scan:
+; 	"E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\bench_data\ui-motion-build\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; ------------------
+2026-10-22 10:02:33	Scan_Objects$12123                         starting   1
+2026-10-22 10:02:33	Scan_Objects$12123                         running    1
+2026-10-22 10:02:33	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe//#	ok
+2026-10-22 10:02:33	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	ok
+2026-10-22 10:02:33	E:\Projects\pulse\bench_data\ui-motion-build\Pulse.Shell.exe//#	ok
+2026-10-22 10:02:33	E:\Projects\pulse\bench_data\ui-motion-build\Pulse.Shell.exe	ok
+2026-10-22 10:02:36 	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	suspicion	not-a-virus:VHO:AdWare.Win32.ShouQu.gen
+2026-10-22 10:02:36	E:\Projects\pulse\dist\portable-stage-d35ed6159ca4413f87f33e6e6cf5907f\Pulse-1.1.4.0-portable\Pulse.Shell.exe	skipped
+2026-10-22 10:02:36	Scan_Objects$12123                         completed
+;  --- Statistics ---
+; Time Start:	2026-10-22 10:02:33
+; Time Finish:	2026-10-22 10:02:36
+; Processed objects:	4
+; Total OK:	3
+; Total detected:	1
+; Suspicions:	0
+; Total skipped:	0
+; Password protected:	0
+; Corrupted:	0
+; Errors:	0
+;  ------------------
+
+===== release-av-fixed-report.txt =====
+; --- Settings ---
+; Action on detect:	Report only
+; Scan objects:	All objects
+; Use iChecker:	No
+; Use iSwift:	No
+; Try disinfect:	No
+; Try delete:	No
+; Try delete container:	No
+; Scan archives:	No
+; Exclude by mask:	No
+; Include by mask:	No
+; Objects to scan:
+; 	"E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Index.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Document.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Preview.exe"	Enable = Yes	Recursive = No
+; 	"E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; ------------------
+2026-10-22 10:04:37	Scan_Objects$12127                         starting   1
+2026-10-22 10:04:38	Scan_Objects$12127                         running    1
+2026-10-22 10:04:38	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.exe	ok
+2026-10-22 10:04:38	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Index.exe//#	ok
+2026-10-22 10:04:38	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Index.exe//#	ok
+2026-10-22 10:04:38	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Index.exe//#	ok
+2026-10-22 10:04:38	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Index.exe	ok
+2026-10-22 10:04:39	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Document.exe	ok
+2026-10-22 10:04:39	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Preview.exe	ok
+2026-10-22 10:04:39	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Shell.exe//#	ok
+2026-10-22 10:04:39	E:\Projects\pulse\dist\portable-stage-55f1e67a626941b6bd09076c1666fadc\Pulse-1.1.4.0-portable\Pulse.Shell.exe	ok
+2026-10-22 10:04:42	Scan_Objects$12127                         completed
+;  --- Statistics ---
+; Time Start:	2026-10-22 10:04:37
+; Time Finish:	2026-10-22 10:04:42
+; Processed objects:	9
+; Total OK:	9
+; Total detected:	0
+; Suspicions:	0
+; Total skipped:	0
+; Password protected:	0
+; Corrupted:	0
+; Errors:	0
+;  ------------------
+
+===== installed-av-fixed-report.txt =====
+; --- Settings ---
+; Action on detect:	Report only
+; Scan objects:	All objects
+; Use iChecker:	No
+; Use iSwift:	No
+; Try disinfect:	No
+; Try delete:	No
+; Try delete container:	No
+; Scan archives:	No
+; Exclude by mask:	No
+; Include by mask:	No
+; Objects to scan:
+; 	"D:\Applications\Pulse\Pulse.exe"	Enable = Yes	Recursive = No
+; 	"D:\Applications\Pulse\Pulse.Index.exe"	Enable = Yes	Recursive = No
+; 	"D:\Applications\Pulse\Pulse.Document.exe"	Enable = Yes	Recursive = No
+; 	"D:\Applications\Pulse\Pulse.Preview.exe"	Enable = Yes	Recursive = No
+; 	"D:\Applications\Pulse\Pulse.Shell.exe"	Enable = Yes	Recursive = No
+; ------------------
+2026-10-22 10:05:43	Scan_Objects$12129                         starting   1
+2026-10-22 10:05:44	Scan_Objects$12129                         running    1
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.exe	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Index.exe//#	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Index.exe//#	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Index.exe//#	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Index.exe	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Document.exe	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Preview.exe	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Shell.exe//#	ok
+2026-10-22 10:05:44	D:\Applications\Pulse\Pulse.Shell.exe	ok
+2026-10-22 10:05:44	Scan_Objects$12129                         completed
+;  --- Statistics ---
+; Time Start:	2026-10-22 10:05:43
+; Time Finish:	2026-10-22 10:05:44
+; Processed objects:	9
+; Total OK:	9
+; Total detected:	0
+; Suspicions:	0
+; Total skipped:	0
+; Password protected:	0
+; Corrupted:	0
+; Errors:	0
+;  ------------------

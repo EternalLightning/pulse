@@ -790,14 +790,14 @@ void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& r
     // Sits on the shared sheet painted by Render(); no own fill or top rule.
     MakeBrush(dc, theme.text_secondary, brTextSecondary_);
     const float gap = 16.0f * scale_;
-    const float statusLimit = centered_progress ? std::min(rect.right * 0.30f, sb.task.left - gap) : rect.right * 0.30f;
+    const bool hasTask = vm.status.query_active || !vm.status.task_text.empty() || vm.status.task_progress >= 0.0f;
+    const float statusLimit = hasTask ? std::min(rect.right * 0.30f, sb.task.left - gap) : rect.right * 0.30f;
     const std::wstring status_text = path::FriendlyPathText(vm.status.status_text);
     const float statusWidth = std::min(std::max(0.0f, statusLimit - sb.pad),
         MeasureTextWidth(factory, small_fmt, status_text));
     DrawTextEndEllipsis(dc, factory, small_fmt, brTextSecondary_.get(), status_text,
         sb.pad, y, statusWidth, status_height_);
     const float selectionLeft = sb.pad + statusWidth + gap;
-    const bool hasTask = vm.status.query_active || !vm.status.task_text.empty() || vm.status.task_progress >= 0.0f;
     const float selectionRight = hasTask ? sb.task.left - gap : rect.right - sb.right_reserved - gap;
     DrawTextEndEllipsis(dc, factory, small_fmt, brTextSecondary_.get(), vm.status.selection_text,
         selectionLeft, y, std::max(0.0f, selectionRight - selectionLeft), status_height_);
@@ -850,17 +850,25 @@ void MainRenderer::DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& r
         progress.animation_progress=static_cast<float>(GetTickCount64()%1952)/1952.0f;
         painter_.DrawProgressBar(progress);
     } else if (!vm.status.task_text.empty() || vm.status.task_progress >= 0.0f) {
-        float barW = (vm.status.task_progress >= 0.0f) ? (100 * scale_ + margin_ * 2) : 0.0f;
+        const float taskWidth = std::max(0.0f, taskRight - taskX);
+        const float trackWidth = vm.status.task_progress >= 0.0f ? std::min(100 * scale_, taskWidth) : 0.0f;
+        const float barW = trackWidth > 0.0f ? trackWidth + std::min(8 * scale_, taskWidth - trackWidth) : 0.0f;
+        const float textWidth = std::max(0.0f, taskWidth - barW);
         MakeBrush(dc, theme.accent, brAccentText_);
-        DrawTextRect(dc, small_fmt, brAccentText_.get(), vm.status.task_text,
-            taskX, y, std::max(0.0f, taskRight - taskX - barW), status_height_);
+        if (MeasureTextWidth(factory, small_fmt, vm.status.task_text) <= textWidth) {
+            DrawTextRect(dc, small_fmt, brAccentText_.get(), vm.status.task_text,
+                taskX, y, textWidth, status_height_);
+        } else {
+            DrawTextEndEllipsis(dc, factory, small_fmt, brAccentText_.get(), vm.status.task_text,
+                taskX, y, textWidth, status_height_);
+        }
         if (barW > 0.0f) {
             float trackH = 4 * scale_;
-            float trackX = taskRight - 100 * scale_;
+            float trackX = taskRight - trackWidth;
             float trackY = y + (status_height_ - trackH) * 0.5f;
             MakeBrush(dc, theme.stroke_card, brStrokeCard_);
-            FillRoundedRect(dc, brStrokeCard_.get(), trackX, trackY, 100 * scale_, trackH, trackH * 0.5f);
-            float fillW = 100 * scale_ * std::clamp(vm.status.task_progress / 100.0f, 0.0f, 1.0f);
+            FillRoundedRect(dc, brStrokeCard_.get(), trackX, trackY, trackWidth, trackH, trackH * 0.5f);
+            float fillW = trackWidth * std::clamp(vm.status.task_progress / 100.0f, 0.0f, 1.0f);
             if (fillW > trackH) {
                 MakeBrush(dc, theme.accent, brAccent_);
                 FillRoundedRect(dc, brAccent_.get(), trackX, trackY, fillW, trackH, trackH * 0.5f);

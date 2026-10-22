@@ -1,0 +1,70 @@
+{
+  "verified_payload_files": 40,
+  "verified_installed_files": 65,
+  "verified_backup_files": 65,
+  "versions": [
+    {
+      "name": "Pulse.exe",
+      "file_version": "1.1.4.0",
+      "product_version": "1.1.4.0",
+      "original_filename": "Pulse.exe",
+      "sha256": "97C9775991C236601E5A8A893CED9EA65294D45D99614D5AD20E62751F4DBEA0"
+    },
+    {
+      "name": "Pulse.Index.exe",
+      "file_version": "1.1.4.0",
+      "product_version": "1.1.4.0",
+      "original_filename": "Pulse.Index.exe",
+      "sha256": "C8CB1DD1B88A60B646777C322B2B8D7D3FA4754BABAA91C4929964A28E4A7468"
+    },
+    {
+      "name": "Pulse.Document.exe",
+      "file_version": "1.1.4.0",
+      "product_version": "1.1.4.0",
+      "original_filename": "Pulse.Document.exe",
+      "sha256": "9DEB40AF5B8E6B85E5EFDFA850CB675D3BE418D24AD372F60EE21FE0D19BE95E"
+    },
+    {
+      "name": "Pulse.Preview.exe",
+      "file_version": "1.1.4.0",
+      "product_version": "1.1.4.0",
+      "original_filename": "Pulse.Preview.exe",
+      "sha256": "6B252CC0A85145D9994CA374DD9A1EF1BA6E7CB1BC97765B57D8912566AB96BE"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "file_version": "1.1.4.0",
+      "product_version": "1.1.4.0",
+      "original_filename": "Pulse.Shell.exe",
+      "sha256": "334A10AC9B24D31DB57C22B846943DBBCE5B859424BE3FAC09D59C570DE6ADF2"
+    }
+  ],
+  "service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "remaining_ui": [],
+  "network_agents": [],
+  "installer_sha256": "2BA5268B9BE6C317FEB76F5E4137CCE727A87C40B9850E36D9D8F6EC78CD181A",
+  "portable_sha256": "2EACD5D3ADA34D261B4E4AADB8445E4E56077C07CAF1E74029611AB278C37F95",
+  "shell_md5": "FC9FB2F59E1D21CA88E3B717096A2B68",
+  "smoke_network_agent_cleaned": 17316,
+  "resource_audit": {
+    "resource_contents_unchanged": true,
+    "mapping_entries": 2164,
+    "entries_per_language": 1082,
+    "stringtables_before": 50,
+    "languages": 2,
+    "compiled_mapping_sha256": "C0B1A1F7A8C99B123442FAF6F430878E3710095054BD8ED5B48E30C76D78A4F1",
+    "stringtables_after": 2,
+    "compiled_resource_records": 164
+  },
+  "cleanup": {
+    "removed_files": 900.0,
+    "audit": "dist/cleanup-1.1.4.0-20261022.json",
+    "removed_bytes": 256565708.0,
+    "preserved_stage": "dist\\portable-stage-55f1e67a626941b6bd09076c1666fadc",
+    "preserved_backup": "dist\\rollback-before-1.1.4.0-20261022-005854"
+  }
+}

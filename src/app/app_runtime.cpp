@@ -2189,7 +2189,10 @@ std::wstring TooltipForHover(AppState& s) {
                 starred && !starred->badge.empty()) {
                 tooltip += pulse::l10n::Get(pulse::l10n::StringId::TooltipBadge).c_str() + starred->badge;
             }
-            return tooltip == name_only && !s.renderer.NameWasTruncated(full, std::max(0, s.hoverPaneIndex)) ? L"" : tooltip;
+            // Ordinary rows without full_path are drawn from the displayed parent path.
+            const std::wstring truncation_key = full.empty() ? entry.name :
+                (entry.full_path.empty() ? pulse::path::FriendlyPathText(full) : full);
+            return tooltip == name_only && !s.renderer.NameWasTruncated(truncation_key, std::max(0, s.hoverPaneIndex)) ? L"" : tooltip;
         }
         return L"";
     }

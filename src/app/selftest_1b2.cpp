@@ -3947,12 +3947,6 @@ void TestQuickAccess() {
     cat.persist = false;
     Check(compat::WindowDpi(GetDesktopWindow()) > 0 &&
           compat::SystemMetricsForDpi(SM_CXSIZEFRAME, 144) > 0, L"compat: current DPI path");
-    wchar_t previous_compat[16]{};
-    GetEnvironmentVariableW(L"PULSE_COMPAT_81", previous_compat, ARRAYSIZE(previous_compat));
-    SetEnvironmentVariableW(L"PULSE_COMPAT_81", L"1");
-    Check(!compat::ModernWindows() && compat::WindowDpi(GetDesktopWindow()) > 0 &&
-          compat::SystemMetricsForDpi(SM_CXSIZEFRAME, 144) > 0, L"compat: legacy DPI path");
-    SetEnvironmentVariableW(L"PULSE_COMPAT_81", previous_compat[0] ? previous_compat : nullptr);
 }
 
 void TestPlacesAndIndex() {

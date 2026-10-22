@@ -1,5 +1,5 @@
 #pragma once
-#include "../common/windows_compat.h"
+#include <windows.h>
 #include <delayimp.h>
 
 namespace pulse::ui {
@@ -13,7 +13,6 @@ inline bool ResolveLumaImports() noexcept {
 }
 
 inline bool LoadOptionalLumaText() noexcept {
-    if (!compat::ModernWindows()) return false;
     static const bool available = [] {
         wchar_t path[32768]{};
         const DWORD length = GetModuleFileNameW(nullptr, path, ARRAYSIZE(path));

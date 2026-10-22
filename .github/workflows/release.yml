@@ -16,10 +16,6 @@ jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        channel: [windows, win81]
     steps:
       - uses: actions/checkout@v4
       - name: Validate release tag
@@ -28,23 +24,22 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: |
           $version = (Get-Content version.txt -Raw).Trim()
-          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $env:RELEASE_REF -ne "refs/tags/v$version") {
-            throw 'Push or select a version tag matching version.txt, for example v1.0.3.'
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$' -or $env:RELEASE_REF -ne "refs/tags/v$version") {
+            throw 'Push or select a version tag matching version.txt, for example v1.1.4.0.'
           }
       - name: Build, test and package
         shell: pwsh
-        run: ./scripts/build_release_ci.ps1 -Channel '${{ matrix.channel }}'
+        run: ./scripts/build_release_ci.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ matrix.channel }}
+          name: installer-windows
           path: dist/PulseSetup-*.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: diagnostics-${{ matrix.channel }}
+          name: diagnostics-windows
           path: |
-            bench_data/win81_imports.json
             bench_data/selftest_1b2_last.log
             build-ci/*.log
           if-no-files-found: ignore
@@ -64,7 +59,7 @@ jobs:
           pattern: installer-*
           path: dist
           merge-multiple: true
-      - name: Publish both installers
+      - name: Publish installer and portable archive
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,6 +1,5 @@
 #include "dialog_lifecycle.h"
 #include "ui_compositor.h"
-#include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
@@ -240,8 +239,7 @@ bool Compositor::CreateSwapChain() {
     desc.SampleDesc.Count = 1;
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.BufferCount = 2;
-    desc.SwapEffect = compat::ModernWindows()
-        ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
 

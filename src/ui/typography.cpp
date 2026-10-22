@@ -1,6 +1,5 @@
 #include "typography.h"
 #include "ui_compositor.h"
-#include "../common/windows_compat.h"
 
 #include "../common/localization.h"
 
@@ -164,7 +163,7 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
     }
 
     IDWriteFactory3* modern = nullptr;
-    if (!compat::LegacyMode() && SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&modern)))) {
+    if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&modern)))) {
         IDWriteRenderingParams3* modern_params = nullptr;
         result = modern->CreateCustomRenderingParams(
             base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,

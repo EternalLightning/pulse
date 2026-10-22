@@ -1,18 +1,17 @@
 #pragma once
 #include "typography.h"
-#include "../common/windows_compat.h"
 #include <d2d1_1.h>
 #include <algorithm>
 #include <cmath>
 
 namespace pulse::ui {
-// Font-independent outlines for the PUA icons used by Pulse on pre-MDL2 Windows.
+// Font-independent outlines for PUA icons when the system icon fonts are unavailable.
 inline bool DrawLegacyIcon(ID2D1DeviceContext* dc, IDWriteFactory2* factory,
                            std::wstring_view glyph, const D2D1_RECT_F& bounds,
                            ID2D1Brush* brush, float nominal_size = 16.0f) {
     if (!dc || !factory || !brush || glyph.size() != 1 ||
         glyph[0] < 0xE000 || glyph[0] > 0xEFFF) return false;
-    if (!compat::LegacyMode() && typography::HasIconFont(factory)) return false;
+    if (typography::HasIconFont(factory)) return false;
     const float size = std::min(nominal_size,
         std::min(bounds.right - bounds.left, bounds.bottom - bounds.top) * 0.72f);
     if (size <= 0) return true;

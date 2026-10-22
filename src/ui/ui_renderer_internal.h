@@ -3,6 +3,7 @@
 #include "ui_renderer.h"
 #include "empty_state_layout.h"
 #include "../common/localization.h"
+#include "../common/display_path.h"
 #include "typography.h"
 #include "name_highlight.h"
 #include "dialog_text_fit.h"
@@ -1272,9 +1273,22 @@ StatusBarMetrics MakeStatusBarMetrics(const WindowViewModel& vm, const D2D1_RECT
         m.right_reserved += width + 8.0f * scale;
     }
     const bool has_task = vm.status.query_active || !vm.status.task_text.empty() || vm.status.task_progress >= 0.0f;
-    if (has_task) {
-        m.task = D2D1::RectF(rect.right * (vm.status.query_cancellable ? 0.40f : 0.48f), m.bar.top,
-                             rect.right - m.right_reserved, m.bar.bottom);
+    if (has_task && !centered_progress) {
+        const float window_width = rect.right - rect.left;
+        const float gap = 16.0f * scale;
+        const float status_width = std::min(std::max(0.0f, window_width * 0.30f - m.pad),
+            MeasureTextWidth(factory, small_format, path::FriendlyPathText(vm.status.status_text)));
+        const float selection_width = vm.status.selection_text.empty() ? 0.0f :
+            MeasureTextWidth(factory, small_format, vm.status.selection_text) + gap;
+        const float available_right = std::max(rect.left + m.pad, rect.right - m.right_reserved - gap);
+        const float available_left = std::min(available_right, std::min(rect.left + window_width * 0.40f,
+            rect.left + m.pad + status_width + gap + selection_width));
+        const float progress_width = vm.status.task_progress >= 0.0f ? 108.0f * scale : 0.0f;
+        const float width = std::min(available_right - available_left,
+            MeasureTextWidth(factory, small_format, vm.status.task_text) + progress_width);
+        const float left = std::clamp((rect.left + rect.right - width) * 0.5f,
+            available_left, available_right - width);
+        m.task = D2D1::RectF(left, m.bar.top, left + width, m.bar.bottom);
     }
     if (centered_progress) {
         const float cancel_width = vm.status.query_cancellable ? 30.0f * scale : 0.0f;

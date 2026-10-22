@@ -1313,6 +1313,9 @@ bool MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
     layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    // The format already trims characters; measure the complete wrapped name first.
+    DWRITE_TRIMMING untrimmed_options{DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
+    layout->SetTrimming(&untrimmed_options, nullptr);
     DWRITE_TEXT_METRICS untrimmed{};
     layout->GetMetrics(&untrimmed);
     const bool truncated = untrimmed.height > height + 0.5f ||
@@ -1563,12 +1566,13 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
         } else {
             D2D1_COLOR_F nameColor = cut || ghosted ? WithAlpha(theme.text, theme.text.a * 0.55f) : theme.text;
             MakeBrush(dc, nameColor, brText_);
+            const std::wstring& truncation_key = e.path.empty() ? e.name : e.path;
             if (iconGrid && tagDotCount == 0) {
-                painted_name_truncation_[painted_name_pane_][e.path] = DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);
+                painted_name_truncation_[painted_name_pane_][truncation_key] = DrawCenteredIconName(display_name, nameRc, nameColor, theme, name_matches);
             } else {
                 Theme name_theme = theme;
                 name_theme.text = nameColor;
-                painted_name_truncation_[painted_name_pane_][e.path] = DrawTruncatedName(display_name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
+                painted_name_truncation_[painted_name_pane_][truncation_key] = DrawTruncatedName(display_name, trail.name_x, textY, trail.name_w, textH, name_theme, selected, name_matches,
                                   detailsView && !e.is_dir);
             }
             if (change && !iconGrid) DrawChangeBadge(compositor_, painter_, *change, trail.badge, theme, scale_);

@@ -15,6 +15,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <dwmapi.h>
+#include <shellscalingapi.h>
 #include <commctrl.h>
 #include <windowsx.h>
 #include <wrl/client.h>
@@ -22,6 +23,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
+
+#pragma comment(lib, "shcore.lib")
 
 namespace pulse {
 namespace {
@@ -611,13 +614,9 @@ struct GlobalSearchWindow::Impl {
         POINT cursor{}; GetCursorPos(&cursor);
         const HMONITOR active_monitor = foreground && foreground != hwnd ? MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST) :
             MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-        using MonitorDpi = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
-        if (const HMODULE shcore = LoadLibraryW(L"shcore.dll")) {
-            const auto dpi = reinterpret_cast<MonitorDpi>(GetProcAddress(shcore, "GetDpiForMonitor"));
-            UINT x = 96, y = 96;
-            if (dpi && SUCCEEDED(dpi(active_monitor, 0, &x, &y))) scale = static_cast<float>(x) / 96.0f;
-            FreeLibrary(shcore);
-        }
+        UINT x = 96, y = 96;
+        if (SUCCEEDED(GetDpiForMonitor(active_monitor, MDT_EFFECTIVE_DPI, &x, &y)))
+            scale = static_cast<float>(x) / 96.0f;
         (void)owner;
         current_folder = folder;
         current_folder_tip = path::StripExtendedPathPrefix(folder);

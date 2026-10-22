@@ -18,16 +18,11 @@ if(NOT MSVC)
     message(FATAL_ERROR "Pulse requires MSVC (Windows SDK / D2D / NT API)")
 endif()
 
-option(PULSE_WIN81_CANDIDATE "Require a Windows 8.1-capable release toolset" OFF)
-if(PULSE_WIN81_CANDIDATE AND MSVC_VERSION GREATER_EQUAL 1950)
-    message(FATAL_ERROR "Windows 8.1 candidate builds require VS 2022 v143, not VS 2026")
-endif()
-
 add_compile_options(/utf-8 /permissive- /W4 /EHsc)
 add_compile_options(/guard:cf)
 add_link_options(/guard:cf /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT)
 # Expose optional SDK COM interfaces; runtime calls are capability-checked.
-add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0603 WINVER=0x0603 _WIN32_IE=0x0A00 NTDDI_VERSION=NTDDI_WIN10_NI)
+add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00 _WIN32_IE=0x0A00 NTDDI_VERSION=NTDDI_WIN10_NI)
 
 option(PULSE_WITH_LUMATEXT "Use LumaText for Pulse-owned single-line text" ON)
 set(LUMATEXT_SOURCE_DIR "" CACHE PATH
@@ -475,7 +470,8 @@ target_link_libraries(pulse_rename_ops_test PRIVATE ole32 shell32 uuid bcrypt)
 add_executable(pulse_recycle_backend_test src/bench/recycle_backend_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp src/shell_host/deletion_identity.cpp
     src/bench/localization_test.rc)
-set_source_files_properties(src/app/pulse.rc src/bench/localization_test.rc PROPERTIES
+set_source_files_properties(src/app/pulse.rc src/bench/localization_test.rc
+    src/shell_host/operation_worker.rc PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h;${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.inc")
 set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_BINARY_DIR}/generated/pulse_app.manifest")
@@ -539,6 +535,13 @@ if(PULSE_SHELL_SOURCES)
         src/shell_host/shell_query_metadata.cpp)
     target_link_libraries(pulse_shell_query_test PRIVATE ole32 shell32 uuid advapi32 user32 shlwapi)
     add_dependencies(pulse_shell_query_test pulse_shell_query_fixture)
+    foreach(shell_host_target pulse_shell pulse_context_worker_fixture
+            pulse_shell_launch_worker_fixture pulse_shell_query_fixture)
+        target_sources(${shell_host_target} PRIVATE src/shell_host/shell_host.rc)
+        target_link_options(${shell_host_target} PRIVATE /MANIFEST:NO)
+    endforeach()
+    set_property(SOURCE src/shell_host/shell_host.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shell_host/shell_host.manifest")
 endif()
 
 # ---- Pulse.Preview.exe: thumbnail decoding / Shell provider isolation ----
@@ -592,6 +595,12 @@ target_link_libraries(pulse_material_test PRIVATE
     d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 windowscodecs user32 gdi32
     comctl32 pulse_localization)
 pulse_enable_lumatext(pulse_material_test)
+
+add_executable(pulse_settings_value_ui_test
+    src/bench/settings_value_ui_test.cpp src/bench/localization_test.rc
+    src/app/settings_value_dialog.cpp src/ui/dialog_lifecycle.cpp)
+target_link_libraries(pulse_settings_value_ui_test PRIVATE
+    pulse_localization user32 gdi32 comctl32 uxtheme dwmapi dcomp ole32 windowscodecs shcore)
 
 add_executable(pulse_image_open_test src/bench/image_open_test.cpp)
 target_link_libraries(pulse_image_open_test PRIVATE
@@ -1049,7 +1058,8 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/pane_animation_application_test.cpp src/bench/content_reveal_ui_test.cpp ${architecture_sources})
     add_executable(pulse_file_selection_ui_test
         src/bench/file_selection_ui_test.cpp src/bench/sidebar_starred_ui_test.cpp
-        src/bench/window_size_lock_ui_test.cpp src/bench/tab_indicator_ui_test.cpp ${architecture_sources})
+        src/bench/window_size_lock_ui_test.cpp src/bench/tab_indicator_ui_test.cpp
+        src/bench/status_bar_ui_test.cpp src/bench/archive_presentation_ui_test.cpp ${architecture_sources})
     set(global_search_fixture_sources ${architecture_sources})
     list(FILTER global_search_fixture_sources EXCLUDE REGEX "global_search_window\\.cpp$")
     add_executable(pulse_global_search_window_test

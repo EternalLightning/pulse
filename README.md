@@ -2,7 +2,7 @@
 
 **为 Windows 打造的文件管理器，让浏览、搜索和整理文件更顺手。**
 
-Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.3.0，面向 Windows 10 和 Windows 11 x64。
+Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.1.4.0，面向 Windows 10 和 Windows 11 x64。
 
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 
@@ -52,7 +52,7 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 生成与正式发布相同的安装包，并运行回归检查：
 
 ```powershell
-pwsh ./scripts/build_release_ci.ps1 -Channel windows
+pwsh ./scripts/build_release_ci.ps1
 ```
 
 发布脚本使用 Visual Studio 2022 v143，并校验仓库内固定版本的 LumaText 静态运行库 SDK。`cmake/lumatext-sdk.json` 固定 SDK 清单的 SHA-256，清单覆盖 DLL、导入库、头文件、CMake 导出和许可证。开发构建可通过 `LUMATEXT_SOURCE_DIR` 指定源码；未找到 LumaText 时使用 DirectWrite。

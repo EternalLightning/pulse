@@ -5,8 +5,8 @@
 
 namespace pulse::index::document {
 inline constexpr unsigned kProcessSlots = 4;
-// The project keeps Win8.1 SDK declarations. Probe the Win10 JOB_LIST
-// attribute at runtime; unsupported systems fail before creating a parser.
+// Verify JOB_LIST support before creating a parser so admission fails closed
+// when the process attribute is unavailable.
 inline constexpr DWORD_PTR kJobListAttribute = ProcThreadAttributeValue(13, FALSE, TRUE, FALSE);
 
 class AdmissionHandle {

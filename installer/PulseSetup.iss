@@ -22,11 +22,7 @@
 AppId={{A3F47C2E-9D1B-4E58-8C6A-2B5D0F9E1734}
 AppName=Pulse
 AppVersion={#AppVersion}
-#ifdef Win81Candidate
-AppVerName=Pulse {#AppVersion} (Windows 8.1 x64)
-#else
 AppVerName=Pulse {#AppVersion}
-#endif
 DefaultDirName={code:DefaultPulseDirectory}
 DefaultGroupName=Pulse
 ; Reuse the existing installation directory and task selections when this is
@@ -36,21 +32,13 @@ UsePreviousAppDir=yes
 UsePreviousTasks=yes
 UsePreviousGroup=yes
 PrivilegesRequired=admin
-#ifdef Win81Candidate
-MinVersion=6.3
-#else
 MinVersion=10.0
-#endif
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Sources are referenced relative to the project root (this script's parent).
 SourceDir=..
 OutputDir=dist
-#ifdef Win81Candidate
-OutputBaseFilename=PulseSetup-{#AppVersion}-win81
-#else
 OutputBaseFilename=PulseSetup-{#AppVersion}
-#endif
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
@@ -79,7 +67,7 @@ Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Flags: ignoreversion recursesubdirs createallsubdirs
 #ifdef AppLocalRuntime
-; Local MD builds bundle the matching CRT; the static Win81 CI path is unchanged.
+; Local MD builds bundle the matching CRT; CI uses the static runtime.
 Source: "{#BuildDir}\msvc-runtime\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 #endif
 Source: "{#BuildDir}\Pulse.exe"; DestDir: "{app}"; Flags: ignoreversion

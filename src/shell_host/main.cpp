@@ -1,4 +1,3 @@
-#include "../common/windows_compat.h"
 #include "../common/file_operation_error.h"
 #include "../common/progress_percent.h"
 #include "host_log_line.h"
@@ -1468,11 +1467,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
         return pulse::ops::OperationElevationAdapter::RunWorker(__argc, __wargv);
 #endif
-    // IFileOperation creates its conflict/confirmation UI in this process.
-    // Declare PMv2 before COM or any HWND exists so Windows does not bitmap-scale
-    // those dialogs on high-DPI displays.
-    pulse::compat::EnableDpiAwareness();
-
     if (__argc == 4 && wcscmp(__wargv[1], L"--query-worker") == 0) {
         const DWORD parent = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
         const uint32_t session = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));

@@ -150,7 +150,13 @@ struct TabIndicatorUiTest {
             std::abs(close_strip.items[0].left - four_strip.items[1].left) < 3 &&
             std::abs(close_strip.new_button.left - four_strip.new_button.left) < 3,
             "close starts at displayed tab and plus-button positions");
-        Sleep(85); Render(s);
+        Sleep(85);
+        D2D1_RECT_F frame_before{}, frame_after{};
+        s.renderer.TabItemRect(close_vm, 1100, 2, &frame_before);
+        const auto render_start = AnimationTimeMs();
+        Render(s);
+        const auto render_end = AnimationTimeMs();
+        s.renderer.TabItemRect(close_vm, 1100, 2, &frame_after);
         close_strip = s.renderer.ComputeTabStrip(close_vm, 1100);
         const float middle_left = close_strip.items[0].left;
         Check(middle_left > 12 && middle_left < four_strip.items[1].left,
@@ -163,7 +169,16 @@ struct TabIndicatorUiTest {
             "hit testing follows the moving tab instead of the final slot");
         D2D1_RECT_F active_rect{};
         s.renderer.TabItemRect(close_vm, 1100, 2, &active_rect);
-        Check(!line.pending && std::abs(line.left - active_rect.left - 16) < 5,
+        std::printf("[FRAME] close render=%llu..%llu later=%llu line=%.3f before=%.3f after=%.3f later=%.3f pending=%d\n",
+            static_cast<unsigned long long>(render_start), static_cast<unsigned long long>(render_end),
+            static_cast<unsigned long long>(AnimationTimeMs()), line.left, frame_before.left + 16,
+            frame_after.left + 16, active_rect.left + 16, line.pending);
+        // The rendered line and a later hit-test layout use different clock samples.
+        Check(!line.pending &&
+            line.left >= std::min(frame_before.left, frame_after.left) + 16 - 0.01f &&
+            line.left <= std::max(frame_before.left, frame_after.left) + 16 + 0.01f &&
+            line.right >= std::min(frame_before.right, frame_after.right) - 16 - 0.01f &&
+            line.right <= std::max(frame_before.right, frame_after.right) - 16 + 0.01f,
             "active underline follows the closing reflow without a second chase animation");
         Check(s.compositor.SaveSnapshot((output / L"close-left-middle.png").c_str()),
             "save production close intermediate frame");

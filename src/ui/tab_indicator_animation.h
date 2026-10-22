@@ -55,7 +55,8 @@ private:
         pending = false;
     }
 
-    static float Ease(float t) noexcept { return t * t * (3.0f - 2.0f * t); }
+    // Zero velocity and acceleration at both ends, including the delayed edge.
+    static float Ease(float t) noexcept { return t * t * t * (t * (6.0f * t - 15.0f) + 10.0f); }
 
     void Sample(uint64_t now) noexcept {
         if (!pending) return;

@@ -28,7 +28,6 @@ public:
 
     bool CanCloseTab(const WindowTabs& tabs, size_t index) const;
     void CloseTab(WindowTabs& tabs, size_t index) const;
-    static constexpr size_t PaletteSize() noexcept { return 8; }
 
 private:
     TabGroup* FindGroup(WindowTabs& tabs, int id) const;

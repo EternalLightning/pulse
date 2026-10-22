@@ -1,31 +1,40 @@
-﻿// Shared by Windows resources and the fallback used before UI initialization.
-PULSE_LOCALIZED_MESSAGE(IDS_INVALID_NAME, "无效名称", "Invalid name")
-PULSE_LOCALIZED_MESSAGE(IDS_RENAME_TARGET_EXISTS, "此文件夹中已存在同名项目，请换一个名称。", "An item with this name already exists in this folder. Choose a different name.")
-PULSE_LOCALIZED_MESSAGE(IDS_OP_PAUSED, "已暂停", "Paused")
-PULSE_LOCALIZED_MESSAGE(IDS_OP_FAILED_BADGE, "失败", "Failed")
-PULSE_LOCALIZED_MESSAGE(IDS_OP_COMPLETED, "已完成", "Completed")
-PULSE_LOCALIZED_MESSAGE(IDS_COPY, "复制", "Copy")
-PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_MOVE, "移动", "Move")
-PULSE_LOCALIZED_MESSAGE(IDS_DELETE, "删除", "Delete")
-PULSE_LOCALIZED_MESSAGE(IDS_PERMANENT_DELETE, "永久删除", "Delete permanently")
-PULSE_LOCALIZED_MESSAGE(IDS_RENAME, "重命名", "Rename")
+﻿// Single source for RC string tables and the C++ fallback before UI initialization.
+// Define PULSE_LOCALIZED_MESSAGE(id, zh, en) before including this file.
+
+// Common operation commands and state
 PULSE_LOCALIZED_MESSAGE(IDS_NEW_FOLDER, "新建文件夹", "New folder")
-PULSE_LOCALIZED_MESSAGE(IDS_NEW_TEXT_DOCUMENT, "新建文本文档", "New text document")
 PULSE_LOCALIZED_MESSAGE(IDS_RESTORE, "还原", "Restore")
+PULSE_LOCALIZED_MESSAGE(IDS_RENAME, "重命名", "Rename")
+PULSE_LOCALIZED_MESSAGE(IDS_COPY, "复制", "Copy")
+PULSE_LOCALIZED_MESSAGE(IDS_DELETE, "删除", "Delete")
+PULSE_LOCALIZED_MESSAGE(IDS_NEW_TEXT_DOCUMENT, "新建文本文档", "New text document")
 PULSE_LOCALIZED_MESSAGE(IDS_EMPTY_RECYCLE_BIN, "清空回收站", "Empty Recycle Bin")
 PULSE_LOCALIZED_MESSAGE(IDS_BATCH_RENAME, "批量重命名", "Batch rename")
+PULSE_LOCALIZED_MESSAGE(IDS_INVALID_NAME, "无效名称", "Invalid name")
+PULSE_LOCALIZED_MESSAGE(IDS_PERMANENT_DELETE, "永久删除", "Delete permanently")
+PULSE_LOCALIZED_MESSAGE(IDS_OP_FAILED_BADGE, "失败", "Failed")
+PULSE_LOCALIZED_MESSAGE(IDS_OP_PAUSED, "已暂停", "Paused")
+PULSE_LOCALIZED_MESSAGE(IDS_OP_COMPLETED, "已完成", "Completed")
 PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_FAILED_MESSAGE, "操作失败。", "The operation failed.")
+PULSE_LOCALIZED_MESSAGE(IDS_RENAME_TARGET_EXISTS, "此文件夹中已存在同名项目，请换一个名称。", "An item with this name already exists in this folder. Choose a different name.")
+PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_MOVE, "移动", "Move")
+
+// Cache relative times
 PULSE_LOCALIZED_MESSAGE(IDS_CACHE_JUST_NOW, "刚才", "Just now")
 PULSE_LOCALIZED_MESSAGE(IDS_CACHE_SECONDS_AGO_FORMAT, "%llu 秒前", "%llu s ago")
 PULSE_LOCALIZED_MESSAGE(IDS_CACHE_MINUTES_AGO_FORMAT, "%llu 分钟前", "%llu min ago")
 PULSE_LOCALIZED_MESSAGE(IDS_CACHE_HOURS_AGO_FORMAT, "%llu 小时前", "%llu h ago")
 PULSE_LOCALIZED_MESSAGE(IDS_CACHE_DAYS_AGO_FORMAT, "%llu 天前", "%llu d ago")
+
+// Diagnostics export
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_ROOTS_UNAVAILABLE, "诊断源目录或目标目录不可用。", "The diagnostics source or destination directory is unavailable.")
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_DESTINATION_NOT_EMPTY, "诊断导出目标必须为空目录。", "The diagnostics export destination must be an empty directory.")
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_COPY_CRASHES_FAILED, "无法复制崩溃诊断文件。", "Could not copy crash diagnostics.")
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_COPY_LOG_FAILED, "无法复制诊断日志。", "Could not copy the diagnostics log.")
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_MANIFEST_FAILED, "无法写入诊断清单。", "Could not write the diagnostics manifest.")
 PULSE_LOCALIZED_MESSAGE(IDS_DIAGNOSTICS_DELETE_FAILED, "部分诊断文件无法删除。", "Some diagnostics files could not be deleted.")
+
+// Storage configuration and migration
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_REPARSE_NOT_ALLOWED, "目录不能包含符号链接或联接点。", "The directory must not contain symbolic links or junctions.")
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_DEFAULT_UNAVAILABLE, "无法确定默认存储目录。", "Could not determine the default storage directory.")
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_SAVE_FAILED_FORMAT, "无法保存存储位置设置（系统错误 %lu）。", "Could not save storage location settings (system error %lu).")
@@ -46,6 +55,8 @@ PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_COPY_VERIFY_FAILED, "无法复制或验证�
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_COPIED_APP_READ_FAILED, "无法读取已复制的应用配置。", "Could not read the copied application configuration.")
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_WALLPAPER_UPDATE_FAILED, "无法更新壁纸位置。", "Could not update the wallpaper location.")
 PULSE_LOCALIZED_MESSAGE(IDS_STORAGE_MIGRATION_FAILED, "配置迁移失败，原配置已保留。", "Configuration migration failed; the original configuration was preserved.")
+
+// Operation outcomes and safety errors
 PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_SOURCE_IDENTITY_CHANGED, "原操作产物或重试来源身份已变化，操作已停止", "The original operation result or retry source identity changed; the operation was stopped")
 PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_RENAME_FAILED_FORMAT, "重命名失败（错误 %lu）", "Rename failed (error %lu)")
 PULSE_LOCALIZED_MESSAGE(IDS_OPERATION_FILE_FAILED, "文件操作失败", "File operation failed")

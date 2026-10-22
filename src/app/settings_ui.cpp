@@ -1,5 +1,4 @@
 #include "app_internal.h"
-#include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "about_info.h"
 #include "background_window_fit.h"
@@ -173,7 +172,7 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
             const I labels[]={I::EffectNone,I::EffectAcrylic,I::EffectMica,I::EffectMicaAlt};
             for(int i=0;i<ui::kWindowEffectCount;++i) {
                 auto item=Item(i+1,labels[i],s.appPrefs.window_effect==ui::WindowEffectId(static_cast<ui::WindowEffect>(i)));
-                item.enabled=i==0 || compat::ModernWindows();items.push_back(std::move(item));
+                items.push_back(std::move(item));
             }
             int command=Dropdown(s,hit.index,std::move(items));if(command>=1 && command<=ui::kWindowEffectCount) s.settings.WindowEffect(ui::WindowEffectId(static_cast<ui::WindowEffect>(command-1)));
         } else {

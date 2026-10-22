@@ -239,7 +239,7 @@ bool PromptSettingsValue(HWND owner, const std::wstring& title,
     if (state.high_contrast) {
         using AdjustForDpi = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
         const auto adjust = reinterpret_cast<AdjustForDpi>(compat::UserApi("AdjustWindowRectExForDpi"));
-        if (!compat::LegacyMode() && adjust) adjust(&bounds, style, FALSE, ex_style, state.dpi);
+        if (adjust) adjust(&bounds, style, FALSE, ex_style, state.dpi);
         else AdjustWindowRectEx(&bounds, style, FALSE, ex_style);
     }
     const int width = bounds.right - bounds.left;

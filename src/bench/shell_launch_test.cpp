@@ -1,6 +1,7 @@
 #include "../ipc/shell_launch_protocol.h"
 #include "../ipc/file_identity_protocol.h"
 #include <tlhelp32.h>
+#include <shellscalingapi.h>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,8 @@
 #include <set>
 
 using namespace pulse::ipc;
+
+#pragma comment(lib, "shcore.lib")
 
 namespace {
 int failures = 0;
@@ -532,7 +535,8 @@ void CheckProtocol(const std::vector<std::vector<uint8_t>>& malformed) {
 int wmain(int argc, wchar_t** argv) {
     const bool protocol_only = argc == 3 && std::wstring_view(argv[2]) == L"--protocol";
     const bool interaction_only = argc == 3 && std::wstring_view(argv[2]) == L"--interactions";
-    if (argc != 2 && !protocol_only && !interaction_only) {
+    const bool startup_only = argc == 3 && std::wstring_view(argv[2]) == L"--startup-only";
+    if (argc != 2 && !protocol_only && !interaction_only && !startup_only) {
         std::printf("Requires isolated shell-launch worker fixture executable\n");
         return 2;
     }
@@ -543,6 +547,25 @@ int wmain(int argc, wchar_t** argv) {
     if (!temp.Create()) { Check(false, "create isolated fixture directory"); return 1; }
     Fixture fixture;
     if (!fixture.Start(argv[1])) { Check(false, "start authenticated launch broker fixture"); return 1; }
+    PROCESS_DPI_AWARENESS awareness = PROCESS_DPI_UNAWARE;
+    Check(SUCCEEDED(GetProcessDpiAwareness(fixture.process.value, &awareness)) &&
+        awareness == PROCESS_PER_MONITOR_DPI_AWARE,
+        "Shell manifest enables per-monitor DPI awareness before broker startup");
+    if (startup_only) {
+        Check(fixture.Send(REQ_PING, 1) && fixture.Wait(RSP_PONG, 1),
+            "production Shell broker responds to authenticated ping");
+        const auto folder = temp.path / L"created by production Shell";
+        PayloadWriter create;
+        create.PutString(folder.wstring());
+        Completion completion;
+        Check(fixture.Send(REQ_NEW_FOLDER, 2, create.data()) &&
+            fixture.Done(RSP_DONE, 2, completion) && SUCCEEDED(completion.result) &&
+            !completion.cancelled && std::filesystem::is_directory(folder),
+            "production Shell creates an isolated folder through its real operation handler");
+        Check(fixture.Shutdown(), "production Shell exits after broker shutdown");
+        Check(temp.Clean(), "production Shell startup fixture is cleaned");
+        return failures ? 1 : 0;
+    }
     if (interaction_only) {
         CheckInteractionIsolation(fixture, temp.path);
         Check(fixture.Shutdown(), "interaction fixture broker exits and reclaims workers");

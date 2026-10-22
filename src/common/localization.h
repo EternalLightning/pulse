@@ -225,7 +225,6 @@ enum class StringId : UINT {
 
     PinQuickAccess = IDS_PIN_QUICK_ACCESS,
     UnpinQuickAccess = IDS_UNPIN_QUICK_ACCESS,
-    EffectUnavailable = IDS_EFFECT_UNAVAILABLE,
     IndexMigrating = IDS_INDEX_MIGRATING,
     IndexMigratingShort = IDS_INDEX_MIGRATING_SHORT,
     SettingsShowHidden = IDS_SETTINGS_SHOW_HIDDEN,

@@ -16,6 +16,23 @@ void Check(bool condition, const char* message) {
 int main() {
     using pulse::ui::TabIndicatorAnimation;
     int tab_a = 0, tab_b = 0, tab_c = 0;
+    for (const bool rightward : {false, true}) {
+        auto leading = [&](uint64_t elapsed) {
+            TabIndicatorAnimation sample;
+            sample.Tick(&tab_a, rightward ? 16.0f : 616.0f, rightward ? 184.0f : 784.0f, 1000, true);
+            sample.Tick(&tab_b, rightward ? 616.0f : 16.0f, rightward ? 784.0f : 184.0f, 1100, true);
+            sample.Tick(&tab_b, rightward ? 616.0f : 16.0f, rightward ? 784.0f : 184.0f, 1100 + elapsed, true);
+            return rightward ? sample.right : -sample.left;
+        };
+        const float moving_acceleration = std::abs(leading(44) - 2 * leading(42) + leading(40));
+        Check(std::abs(leading(4) - 2 * leading(2) + leading(0)) < moving_acceleration * 0.25f,
+            "leading edge builds acceleration gradually from rest in either direction");
+        Check(std::abs(leading(178) - 2 * leading(176) + leading(174)) < moving_acceleration * 0.25f,
+            "leading edge eases acceleration back to rest before its stretch ends");
+        Check(leading(4) - leading(0) < leading(44) - leading(40) &&
+              leading(178) - leading(174) < leading(44) - leading(40),
+            "leading edge starts and stops more slowly than its moving middle");
+    }
     TabIndicatorAnimation line;
     line.Tick(&tab_a, 16, 184, 1000, true);
     Check(!line.pending && line.left == 16 && line.right == 184,

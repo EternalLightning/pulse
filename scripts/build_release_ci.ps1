@@ -1,6 +1,5 @@
 #requires -Version 7.2
 param(
-    [ValidateSet('windows', 'win81')][string]$Channel = 'windows',
     [string]$BuildDir = 'build-ci'
 )
 $ErrorActionPreference = 'Stop'
@@ -12,25 +11,10 @@ if (-not $build.StartsWith($repo + [IO.Path]::DirectorySeparatorChar, [StringCom
 }
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-$toolsetEnvironment = ''
-$compilerArguments = ''
-if (-not $vs) {
-    # A local extracted v143 toolset can share the installed Windows SDK.
-    $toolset = Join-Path $repo 'tools/win81-toolchain/VC/Tools/MSVC/14.44.35207'
-    if (-not (Test-Path "$toolset/bin/Hostx64/x64/cl.exe")) { throw 'Visual Studio 2022 C++ tools are required' }
-    $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $vs) { throw 'An installed Windows SDK developer environment is required' }
-    $toolsetEnvironment = @"
-set "PATH=$toolset\bin\Hostx64\x64;%PATH%"
-set "INCLUDE=$toolset\include;%WindowsSdkDir%Include\%WindowsSDKVersion%ucrt;%WindowsSdkDir%Include\%WindowsSDKVersion%shared;%WindowsSdkDir%Include\%WindowsSDKVersion%um;%WindowsSdkDir%Include\%WindowsSDKVersion%winrt"
-set "LIB=$toolset\lib\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%ucrt\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%um\x64"
-"@
-    $compilerArguments = "-DCMAKE_C_COMPILER=`"$toolset/bin/Hostx64/x64/cl.exe`" -DCMAKE_CXX_COMPILER=`"$toolset/bin/Hostx64/x64/cl.exe`" -DCMAKE_LINKER=`"$toolset/bin/Hostx64/x64/link.exe`""
-}
+if (-not $vs) { throw 'Visual Studio 2022 C++ tools are required' }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 # The release tag pins the complete SDK; CI verifies it before configuring CMake.
 $sdkRoot = & (Join-Path $PSScriptRoot 'verify_lumatext_sdk.ps1')
-$candidate = if ($Channel -eq 'win81') { 'ON' } else { 'OFF' }
 New-Item -ItemType Directory -Path $build -Force | Out-Null
 # Release verification is scoped to the changes being shipped. pulse already
 # depends on all three packaged hosts; standalone tests need explicit targets.
@@ -48,8 +32,7 @@ call "$vcvars"
 if errorlevel 1 exit /b 1
 chcp 65001 >nul
 set "VSLANG=1033"
-$toolsetEnvironment
-cmake -S "$repo" -B "$build" -G Ninja $compilerArguments -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WIN81_CANDIDATE=$candidate -DPULSE_WITH_SELFTEST=ON -DPULSE_BUILD_PROGRESS_UI_TESTS=ON -DPULSE_WITH_LUMATEXT=ON -DLUMATEXT_SOURCE_DIR= -DCMAKE_PREFIX_PATH="$sdkRoot"
+cmake -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WITH_SELFTEST=ON -DPULSE_BUILD_PROGRESS_UI_TESTS=ON -DPULSE_WITH_LUMATEXT=ON -DLUMATEXT_SOURCE_DIR= -DCMAKE_PREFIX_PATH="$sdkRoot"
 if errorlevel 1 exit /b 1
 cmake --build "$build" --parallel 4 --target $testTargets
 exit /b %errorlevel%
@@ -135,10 +118,6 @@ Remove-Item Env:PULSE_LUMATEXT
 & $batch
 if ($LASTEXITCODE -ne 0) { throw 'Production compilation failed' }
 & (Join-Path $repo 'scripts/check_release_payload.ps1') -BuildDir $build
-if ($Channel -eq 'win81') {
-    python tools/audit_win81_imports.py $build
-    if ($LASTEXITCODE -ne 0) { throw 'Windows 8.1 startup import guard failed' }
-}
 $licenses = Join-Path $build 'licenses/LumaText'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
 Copy-Item -Path (Join-Path $sdkRoot 'share/LumaText/licenses/*') -Destination $licenses
@@ -147,6 +126,5 @@ $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\I
 if (-not $iscc) { throw 'Inno Setup 6 is required' }
 $version = (Get-Content version.txt -Raw).Trim()
 $arguments = @("/DAppVersion=$version", "/DBuildDir=$build")
-if ($Channel -eq 'win81') { $arguments += '/DWin81Candidate=1' }
 & $iscc @arguments installer/PulseSetup.iss
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }

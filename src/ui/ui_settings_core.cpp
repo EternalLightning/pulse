@@ -1,4 +1,3 @@
-#include "../common/windows_compat.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
@@ -127,16 +126,14 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             control.state.hovered=IsHovered(vm,H::SettingsDropdown,id);
             painter_.DrawButton(control);
         };
-        label(lay.effect_card,l10n::Get(I::SettingsWindowEffect),l10n::Get(compat::ModernWindows() ? I::SettingsWindowEffectDesc : I::EffectUnavailable),L"\xE790",lay.effect_card.right-16*scale_);
+        label(lay.effect_card,l10n::Get(I::SettingsWindowEffect),l10n::Get(I::SettingsWindowEffectDesc),L"\xE790",lay.effect_card.right-16*scale_);
         for(int i=0;i<kWindowEffectCount;++i) {
             const auto r=lay.effect_row[i];
             auto preview=r;preview.bottom-=22*scale_;
-            const bool enabled=i==0 || compat::ModernWindows();
-            const bool selected=i==static_cast<int>(compat::ModernWindows() ? vm.window_effect : WindowEffect::None);
-            const bool hovered=enabled && IsHovered(vm,H::SettingsEffect,i);
+            const bool selected=i==static_cast<int>(vm.window_effect);
+            const bool hovered=IsHovered(vm,H::SettingsEffect,i);
             const float tint[]={0.0f,0.22f,0.065f,0.16f};
             auto background=BlendOver(WithAlpha(theme.accent,tint[i]),theme.surface_title);
-            if(!enabled) background=BlendOver(WithAlpha(theme.surface_sheet,0.6f),background);
             MakeBrush(dc,background,brFillHover_);
             dc->FillRoundedRectangle(D2D1::RoundedRect(preview,6*scale_,6*scale_),brFillHover_.get());
             // A small window silhouette explains the material, not a fake DWM surface.
@@ -169,7 +166,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                     L"\xE73E",L"",theme.accent_text,0.6f);
             }
             painter_.DrawText(l10n::Get(effects[i]),D2D1::RectF(r.left,preview.bottom+3*scale_,r.right,r.bottom),
-                compositor_->SmallFormat(),!enabled ? theme.text_disabled : selected ? theme.accent : theme.text_secondary,
+                compositor_->SmallFormat(),selected ? theme.accent : theme.text_secondary,
                 fluent::HorizontalAlignment::Center);
         }
         divider(lay.effect_card);

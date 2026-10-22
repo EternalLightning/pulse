@@ -207,10 +207,9 @@ int main(int argc, char** argv) {
             !Get(StringId::TabColor).empty() && !Get(StringId::TabColorNone).empty());
     }
     SetLanguage(L"zh-CN");
-    passed &= Report("zh-CN quick access and compatibility resources",
+    passed &= Report("zh-CN quick access resources",
         Get(StringId::PinQuickAccess) == L"固定到快速访问" &&
-        Get(StringId::UnpinQuickAccess) == L"从快速访问取消固定" &&
-        !Get(StringId::EffectUnavailable).empty());
+        Get(StringId::UnpinQuickAccess) == L"从快速访问取消固定");
     passed &= Report("zh-CN sorting commands", Get(StringId::SortBy) == L"排序方式" &&
         Get(StringId::SortAscending) == L"升序" && Get(StringId::SortDescending) == L"降序");
     passed &= Report("zh-CN resource selection",
@@ -235,10 +234,9 @@ int main(int argc, char** argv) {
                      Get(StringId::SettingsShowPerformance) ==
                          L"\u5728\u72b6\u6001\u680f\u663e\u793a\u6027\u80fd");
     SetLanguage(L"en-US");
-    passed &= Report("en-US quick access and compatibility resources",
+    passed &= Report("en-US quick access resources",
         Get(StringId::PinQuickAccess) == L"Pin to Quick access" &&
-        Get(StringId::UnpinQuickAccess) == L"Unpin from Quick access" &&
-        !Get(StringId::EffectUnavailable).empty());
+        Get(StringId::UnpinQuickAccess) == L"Unpin from Quick access");
     passed &= Report("en-US sorting commands", Get(StringId::SortBy) == L"Sort by" &&
         Get(StringId::SortAscending) == L"Ascending" && Get(StringId::SortDescending) == L"Descending");
     passed &= Report("en-US resource selection",

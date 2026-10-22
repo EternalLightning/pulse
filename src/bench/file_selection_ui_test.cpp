@@ -13,6 +13,8 @@
 
 LRESULT CALLBACK WndProcImpl(HWND, UINT, WPARAM, LPARAM);
 int RunTabIndicatorUiTest();
+int RunStatusBarUiTest();
+int RunArchivePresentationUiTest();
 
 namespace {
 int failures = 0;
@@ -181,6 +183,16 @@ int main(int argc, char** argv) {
     OleInitialize(nullptr);
     compat::EnableDpiAwareness();
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::string_view(argv[1]) == "--archive-presentation-only") {
+        const int result = RunArchivePresentationUiTest();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--status-bar-only") {
+        const int result = RunStatusBarUiTest();
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--tab-indicator-only") {
         const int result = RunTabIndicatorUiTest();
         OleUninitialize();
