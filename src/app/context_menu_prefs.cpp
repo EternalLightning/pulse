@@ -38,7 +38,7 @@ void ContextMenuPrefs::ResetToDefaults() {
     builtin_hidden = 0;
     item_enabled.clear();
     seen.clear();
-    slow_ext.clear();
+    disabled_com.clear();
 }
 
 bool ContextMenuPrefs::CategoryEnabled(ipc::CtxMenuCategory c) const {
@@ -129,9 +129,9 @@ std::vector<std::wstring> ContextMenuPrefs::DisabledHandlerClsids() const {
         if (!kv.second && ipc::IsHandlerCatalogKey(kv.first))
             add(ipc::HandlerClsidFromKey(kv.first));
     }
-    for (const auto& kv : slow_ext) {
-        if (kv.second.disabled && ipc::IsHandlerCatalogKey(kv.first))
-            add(ipc::HandlerClsidFromKey(kv.first));
+    for (const auto& key : disabled_com) {
+        if (ipc::IsHandlerCatalogKey(key))
+            add(ipc::HandlerClsidFromKey(key));
     }
     return out;
 }
@@ -152,46 +152,19 @@ bool ContextMenuPrefs::RecordSeen(const std::wstring& key, const std::wstring& t
     return true;
 }
 
-bool ContextMenuPrefs::RecordComTiming(const std::wstring& key, uint32_t elapsed_ms) {
-    if (key.empty()) return false;
-    SlowComExt& st = slow_ext[key];
-    st.last_ms = elapsed_ms;
-    bool changed = false;
-    if (elapsed_ms >= 1000) {
-        ++st.timeout_hits;
-        changed = true;
-        if (st.timeout_hits >= 3 && !st.disabled) {
-            st.disabled = true;
-            st.deferred = true;
-        }
-    } else if (elapsed_ms >= 500) {
-        ++st.slow_hits;
-        changed = true;
-        if (st.slow_hits >= 3 && !st.deferred) st.deferred = true;
-    }
-    return changed;
-}
-
-bool ContextMenuPrefs::ComDeferred(const std::wstring& key) const {
-    auto it = slow_ext.find(key);
-    return it != slow_ext.end() && (it->second.deferred || it->second.disabled);
-}
-
 bool ContextMenuPrefs::ComDisabled(const std::wstring& key) const {
-    auto it = slow_ext.find(key);
-    return it != slow_ext.end() && it->second.disabled;
+    return disabled_com.contains(key);
 }
 
 void ContextMenuPrefs::SetComDisabled(const std::wstring& key, bool on) {
     if (key.empty()) return;
-    SlowComExt& st = slow_ext[key];
-    st.disabled = on;
-    if (!on) st.timeout_hits = 0;
+    if (on) disabled_com.insert(key);
+    else disabled_com.erase(key);
 }
 
 std::wstring ContextMenuPrefs::ToJson() const {
     std::wstring out;
-    out += L"{\n  \"version\":1,\n";
+    out += L"{\n  \"version\":2,\n";
     out += L"  \"explorer_cap\":";
     out += std::to_wstring(explorer_cap);
     out += L",\n  \"open_with_mru\":";
@@ -255,24 +228,15 @@ std::wstring ContextMenuPrefs::ToJson() const {
     }
     out += L"  ],\n  \"slow_ext\":{\n";
     size_t se = 0;
-    for (const auto& kv : slow_ext) {
+    // Retain the legacy container name for explicit-disable compatibility.
+    for (const auto& disabled : disabled_com) {
         std::wstring key;
-        pulse::json::Escape(kv.first, key);
+        pulse::json::Escape(disabled, key);
         out += L"    \"";
         out += key;
-        out += L"\":{\"ms\":";
-        out += std::to_wstring(kv.second.last_ms);
-        out += L",\"slow\":";
-        out += std::to_wstring(kv.second.slow_hits);
-        out += L",\"timeout\":";
-        out += std::to_wstring(kv.second.timeout_hits);
-        out += L",\"deferred\":";
-        out += kv.second.deferred ? L"true" : L"false";
-        out += L",\"disabled\":";
-        out += kv.second.disabled ? L"true" : L"false";
-        out += L"}";
+        out += L"\":{\"disabled\":true}";
         ++se;
-        out += (se == slow_ext.size()) ? L"\n" : L",\n";
+        out += (se == disabled_com.size()) ? L"\n" : L",\n";
     }
     out += L"  }\n}\n";
     return out;
@@ -281,6 +245,7 @@ std::wstring ContextMenuPrefs::ToJson() const {
 bool ContextMenuPrefs::FromJson(const std::wstring& json) {
     const pulse::json::Document doc(json);
     if (!doc.Is(pulse::json::Kind::Object)) return false;
+    const auto version = pulse::json::ExtractInt(doc, L"version", 1);
     builtin_hidden = 0;
     const auto builtin = ExtractObject(doc, L"pulse_items");
     const pulse::json::Document builtin_doc(builtin);
@@ -329,21 +294,16 @@ bool ContextMenuPrefs::FromJson(const std::wstring& json) {
     MigrateSeenKeys();
     CoalesceCompressCatalog();
 
-    slow_ext.clear();
+    disabled_com.clear();
     if (const auto* slow = doc.Find(L"slow_ext"); slow && slow->kind == pulse::json::Kind::Object) {
         for (const auto& item : slow->children) {
             if (item.kind != pulse::json::Kind::Object || item.name.empty()) continue;
-            SlowComExt st;
-            const auto counter = [&](const wchar_t* key) {
-                const uint64_t value = pulse::json::Unsigned(item.Find(key));
-                return value <= UINT32_MAX ? static_cast<uint32_t>(value) : 0;
-            };
-            st.last_ms = counter(L"ms");
-            st.slow_hits = counter(L"slow");
-            st.timeout_hits = counter(L"timeout");
-            st.deferred = pulse::json::Bool(item.Find(L"deferred"));
-            st.disabled = pulse::json::Bool(item.Find(L"disabled"));
-            slow_ext[item.name] = st;
+            const bool disabled = pulse::json::Bool(item.Find(L"disabled"));
+            // Version 1 treated successful replies over one second as timeouts.
+            // Recover those automatic skips; explicit item overrides still apply.
+            const uint64_t timeout_hits = pulse::json::Unsigned(item.Find(L"timeout"));
+            if (version < 2 && timeout_hits >= 3 && timeout_hits <= UINT32_MAX) continue;
+            if (disabled) disabled_com.insert(item.name);
         }
     }
     return true;

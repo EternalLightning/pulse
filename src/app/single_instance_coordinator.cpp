@@ -1,4 +1,5 @@
 #include "single_instance_coordinator.h"
+#include "default_file_manager.h"
 
 #include <limits>
 
@@ -40,6 +41,8 @@ void SingleInstanceCoordinator::Release() {
 
 bool SingleInstanceCoordinator::ForwardOpenPath(const std::wstring& path,
                                                 DWORD timeout_ms) const {
+    std::wstring prepared;
+    if (!PrepareOpenPath(path, prepared)) return false;
     HWND hwnd = nullptr;
     for (int i = 0; i < 50 && !hwnd; ++i) {
         hwnd = FindWindowW(kWindowClass, nullptr);
@@ -50,18 +53,38 @@ bool SingleInstanceCoordinator::ForwardOpenPath(const std::wstring& path,
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (pid) AllowSetForegroundWindow(pid);
-    if (path.size() >= kMaxForwardedPathChars ||
-        path.size() > ((std::numeric_limits<DWORD>::max)() / sizeof(wchar_t)) - 1) {
+    if (prepared.size() >= kMaxForwardedPathChars ||
+        prepared.size() > ((std::numeric_limits<DWORD>::max)() / sizeof(wchar_t)) - 1) {
         return false;
     }
     COPYDATASTRUCT data{};
     data.dwData = kOpenPathMessage;
-    data.cbData = static_cast<DWORD>((path.size() + 1) * sizeof(wchar_t));
-    data.lpData = const_cast<wchar_t*>(path.c_str());
+    data.cbData = static_cast<DWORD>((prepared.size() + 1) * sizeof(wchar_t));
+    data.lpData = prepared.data();
     DWORD_PTR result = 0;
     return SendMessageTimeoutW(hwnd, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data),
                                SMTO_ABORTIFHUNG | SMTO_BLOCK, timeout_ms, &result) != 0 &&
            result != FALSE;
+}
+
+bool SingleInstanceCoordinator::PrepareOpenPath(const std::wstring& path,
+                                               std::wstring& prepared) {
+    prepared.clear();
+    if (path.size() >= kMaxForwardedPathChars || path.find(L'\0') != std::wstring::npos)
+        return false;
+    if (path.empty() || IsThisPcArgument(path) || path.starts_with(L"pulse:")) {
+        prepared = path;
+        return true;
+    }
+    // Resolve relative and drive-relative names before IPC loses the caller's CWD.
+    std::wstring unquoted = path;
+    if (unquoted.size() >= 2 && unquoted.front() == L'"' && unquoted.back() == L'"')
+        unquoted = unquoted.substr(1, unquoted.size() - 2);
+    wchar_t full[kMaxForwardedPathChars]{};
+    const DWORD length = GetFullPathNameW(unquoted.c_str(), ARRAYSIZE(full), full, nullptr);
+    if (!length || length >= ARRAYSIZE(full)) return false;
+    prepared.assign(full, length);
+    return true;
 }
 
 bool SingleInstanceCoordinator::DecodeOpenPath(const COPYDATASTRUCT* data,

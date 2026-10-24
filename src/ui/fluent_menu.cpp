@@ -35,7 +35,7 @@ float MeasureWidth(IDWriteFactory2* dwrite, IDWriteTextFormat* format,
                    const std::wstring& text) {
     if (!dwrite || !format || text.empty()) return 0.0f;
     ComPtr<IDWriteTextLayout> layout;
-    dwrite->CreateTextLayout(text.c_str(), (UINT32)text.size(), format,
+    typography::CreateTextLayout(dwrite, text.c_str(), (UINT32)text.size(), format,
                              10000.0f, 100.0f, &layout);
     if (!layout.get()) return 0.0f;
     DWRITE_TEXT_METRICS m{};
@@ -356,6 +356,7 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (!self) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    if (self->animating_out_ && msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) return 0;
     const int depth = self->SubmenuDepth(hwnd);
     const bool is_sub = depth >= 0;
     if (is_sub && depth >= self->open_flyouts_ &&
@@ -1077,9 +1078,10 @@ int FluentMenu::InvokeRow(int row) {
 }
 
 void FluentMenu::InvokeCommand(int command) {
+    if (!open_ || animating_out_) return;
     if (command_fn_ && command_fn_(command)) return;
     result_ = command;
-    Dismiss();
+    BeginDismiss();
 }
 
 int FluentMenu::InvokeAt(int row, float client_x) const {
@@ -1133,7 +1135,7 @@ bool FluentMenu::EnsureFilterEdit() {
     edit_ = CreateChildEdit(hwnd_);
     if (!edit_) return false;
     SetWindowTheme(edit_, L"", L"");
-    if (!compositor_ || !compositor_->LumaTextEnabled())
+    if (!compositor_ || !compositor_->CustomEditEnabled())
         SetLayeredWindowAttributes(edit_, 0, 255, LWA_ALPHA);
     SendMessageW(edit_, WM_SETFONT, (WPARAM)edit_font_, TRUE);
     SendMessageW(edit_, EM_SETCUEBANNER, TRUE,
@@ -1219,129 +1221,35 @@ LRESULT CALLBACK FluentMenu::FilterEditProc(HWND hwnd, UINT msg, WPARAM wParam, 
                                             UINT_PTR, DWORD_PTR dwRefData) {
     auto* self = reinterpret_cast<FluentMenu*>(dwRefData);
     if (!self) return DefSubclassProc(hwnd, msg, wParam, lParam);
+    // Menu-specific: IME state, navigation keys and live filtering.
     if (msg == WM_IME_STARTCOMPOSITION) self->filter_composing_ = true;
     if (msg == WM_IME_ENDCOMPOSITION) self->filter_composing_ = false;
-    switch (msg) {
-    case WM_LBUTTONDOWN:
-    case WM_LBUTTONDBLCLK:
-    case WM_LBUTTONUP:
-    case WM_MOUSEMOVE:
-    case WM_CAPTURECHANGED:
-        if (self->compositor_ && self->compositor_->LumaTextEnabled()) {
-            const LRESULT result = self->compositor_->CallLumaEditMouse(
-                hwnd, msg, wParam, lParam, self->compositor_->TextFormat());
-            if (msg != WM_MOUSEMOVE || GetCapture() == hwnd) {
-                const D2D1_COLOR_F fg = self->dark_
-                    ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                    : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
-                const D2D1_COLOR_F bg = self->dark_
-                    ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                    : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-                self->compositor_->PresentLumaEdit(hwnd, self->compositor_->TextFormat(),
-                                                   fg, bg);
-            }
-            return result;
-        }
-        break;
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN:
-        if (!self->filter_composing_ && (wParam == VK_ESCAPE || wParam == VK_UP || wParam == VK_DOWN || wParam == VK_RETURN)) {
-            self->HandleFilterKey(msg, wParam);
-            return 0;
-        }
-        break;
-    case WM_CHAR:
-        if (wParam == VK_RETURN || wParam == VK_ESCAPE) return 0;
-        {
-            LRESULT lr = DefSubclassProc(hwnd, msg, wParam, lParam);
-            self->SyncFilterFromEdit();
-            return lr;
-        }
-    case WM_PASTE:
-    case WM_CUT:
-        {
-            LRESULT lr = DefSubclassProc(hwnd, msg, wParam, lParam);
-            self->SyncFilterFromEdit();
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return lr;
-        }
-    case WM_PAINT: {
-        if (!self->compositor_ || !self->compositor_->LumaTextEnabled()) break;
-        HideCaret(hwnd);
-        const D2D1_COLOR_F fg = self->dark_
-            ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-            : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
-        const D2D1_COLOR_F bg = self->dark_
-            ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-            : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-        if (!self->compositor_->PresentLumaEdit(hwnd, self->compositor_->TextFormat(),
-                                                fg, bg)) {
-            PAINTSTRUCT ps{};
-            HDC hdc = BeginPaint(hwnd, &ps);
-            RECT rc{};
-            GetClientRect(hwnd, &rc);
-            if (!self->edit_brush_) {
-                self->edit_brush_ = CreateSolidBrush(
-                    self->dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
-            }
-            FillRect(hdc, &rc, self->edit_brush_);
-            EndPaint(hwnd, &ps);
-        }
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !self->filter_composing_ &&
+        (wParam == VK_ESCAPE || wParam == VK_UP || wParam == VK_DOWN || wParam == VK_RETURN)) {
+        self->HandleFilterKey(msg, wParam);
         return 0;
     }
-    case WM_SETFOCUS: {
-        LRESULT lr = DefSubclassProc(hwnd, msg, wParam, lParam);
-        if (self->compositor_ && self->compositor_->LumaTextEnabled()) {
-            HideCaret(hwnd);
-            SetTimer(hwnd, 71, GetCaretBlinkTime(), nullptr);
-            const D2D1_COLOR_F fg = self->dark_
-                ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
-            const D2D1_COLOR_F bg = self->dark_
-                ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-            self->compositor_->PresentLumaEdit(hwnd, self->compositor_->TextFormat(),
-                                               fg, bg);
-        } else {
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        return lr;
-    }
-    case WM_KILLFOCUS:
-        KillTimer(hwnd, 71);
-        break;
-    case WM_TIMER:
-        if (wParam == 71) {
-            if (GetCapture() != hwnd && self->compositor_ &&
-                self->compositor_->LumaTextEnabled()) {
-                const D2D1_COLOR_F fg = self->dark_
-                    ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                    : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
-                const D2D1_COLOR_F bg = self->dark_
-                    ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                    : D2D1::ColorF(1.0f, 1.0f, 1.0f);
-                self->compositor_->PresentLumaEdit(hwnd, self->compositor_->TextFormat(),
-                                                   fg, bg);
-            } else if (GetCapture() != hwnd) {
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-            return 0;
-        }
-        break;
-    case WM_ERASEBKGND:
-        if (self->compositor_ && self->compositor_->LumaTextEnabled()) return 1;
-        {
-            RECT rc{};
-            GetClientRect(hwnd, &rc);
-            if (!self->edit_brush_) {
-                self->edit_brush_ = CreateSolidBrush(
-                    self->dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
-            }
-            FillRect(reinterpret_cast<HDC>(wParam), &rc, self->edit_brush_);
-            return 1;
+    if (msg == WM_CHAR && (wParam == VK_RETURN || wParam == VK_ESCAPE)) return 0;
+    // Share selection, caret presentation and native fallback with other editors.
+    LRESULT result = 0;
+    if (!self->compositor_) {
+        result = DefSubclassProc(hwnd, msg, wParam, lParam);
+    } else {
+        const D2D1_COLOR_F fg = ChildEditColor(ChildEditTextColor(self->dark_));
+        const D2D1_COLOR_F bg = ChildEditColor(ChildEditBackColor(self->dark_));
+        IDWriteTextFormat* format = self->compositor_->TextFormat();
+        if (!HandleChildEditMessage(*self->compositor_, format, fg, bg, ChildEditBackBrush(self->edit_brush_),
+                                    hwnd, msg, wParam, lParam, result)) {
+            result = DefPresentedChildEditProc(*self->compositor_, format, fg, bg, hwnd, msg, wParam, lParam);
         }
     }
-    return DefSubclassProc(hwnd, msg, wParam, lParam);
+    // Delete has no WM_CHAR; every message that can change the text resyncs
+    // (SyncFilterFromEdit returns early when nothing changed).
+    if (!self->filter_composing_ &&
+        (msg == WM_CHAR || msg == WM_KEYDOWN || msg == WM_PASTE || msg == WM_CUT || msg == WM_CLEAR ||
+         msg == WM_UNDO || msg == WM_SETTEXT || msg == WM_IME_ENDCOMPOSITION))
+        self->SyncFilterFromEdit();
+    return result;
 }
 
 bool FluentMenu::AppendFilterChar(wchar_t ch) {
@@ -1376,20 +1284,13 @@ bool FluentMenu::HandleFilterKey(UINT msg, WPARAM wParam) {
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     if (ctrl && wParam == VK_TAB) {
         result_ = 0;
-        open_ = false;
         forward_tab_key_ = true;
-        UpdateTooltip(-1);
-        HideFilterEdit();
-        HideSubWindow();
-        if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
+        BeginDismiss();
         return true;
     }
     if (wParam == VK_ESCAPE) {
-        UpdateTooltip(-1);
         result_ = 0;
-        HideFilterEdit();
-        animating_out_ = true;
-        anim_start_ = AnimationTimeMs();
+        BeginDismiss();
         return true;
     }
     if (wParam == VK_DOWN || wParam == VK_UP) {
@@ -1406,7 +1307,7 @@ bool FluentMenu::HandleFilterKey(UINT msg, WPARAM wParam) {
         } else {
             filter_committed_ = true;
             result_ = 0;
-            Dismiss();
+            BeginDismiss();
         }
         return true;
     }
@@ -1451,8 +1352,7 @@ bool FluentMenu::HandleMenuKey(WPARAM key) {
         if (depth >= 0) CloseSubmenu(depth);
         else {
             result_ = 0;
-            animating_out_ = true;
-            anim_start_ = AnimationTimeMs();
+            BeginDismiss();
         }
         return true;
     }
@@ -1491,38 +1391,57 @@ bool FluentMenu::HandleMenuKey(WPARAM key) {
     return true;
 }
 
+bool FluentMenu::AnimationsEnabled() const {
+    if (motion_override_ >= 0) return motion_override_ != 0;
+    BOOL enabled = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+    return enabled && !IsHighContrast();
+}
+
+void FluentMenu::BeginDismiss() {
+    if (!open_ || animating_out_) return;
+    UpdateTooltip(-1);
+    HideFilterEdit();
+    sub_pending_row_ = -1;
+    if (!AnimationsEnabled()) { Dismiss(); return; }
+    dismiss_alpha_ = present_alpha_;
+    dismiss_offset_ = present_offset_;
+    animating_out_ = true;
+    anim_start_ = AnimationTimeMs();
+}
+
+bool FluentMenu::TickAnimation() {
+    if (!open_ || !hwnd_) return false;
+    if (!AnimationsEnabled()) {
+        if (animating_out_) Dismiss();
+        else if (present_alpha_ != 255 || present_offset_ != 0) Present(255, 0);
+        return false;
+    }
+    const uint64_t now = AnimationTimeMs();
+    const float elapsed = static_cast<float>(now >= anim_start_ ? now - anim_start_ : 0);
+    if (animating_out_) {
+        const float t = std::clamp(elapsed / 140.0f, 0.0f, 1.0f);
+        if (t >= 1) { Dismiss(); return false; }
+        Present(static_cast<BYTE>(std::lround(dismiss_alpha_ * (1 - t * t))), dismiss_offset_);
+        return true;
+    }
+    const float t = std::clamp(elapsed / 200.0f, 0.0f, 1.0f);
+    const float eased = 1 - (1 - t) * (1 - t) * (1 - t);
+    if (t < 1) {
+        const float travel = (anchor_to_rect_ && filter_fn_) ? 0.0f : fluent::motion::MenuTravelDip * scale_;
+        Present(static_cast<BYTE>(std::lround(255 * eased)),
+            static_cast<int>(std::lround(-travel * (1 - eased))));
+        return true;
+    }
+    if (present_alpha_ != 255 || present_offset_ != 0) Present(255, 0);
+    return false;
+}
+
 int FluentMenu::RunModalLoop() {
     MSG msg{};
     while (open_) {
-        bool animating = false;
-        // Animation progress (fade + slide for open, fade for dismiss).
-        if (hwnd_) {
-            const uint64_t now = AnimationTimeMs();
-            const float elapsed = static_cast<float>(now >= anim_start_ ? now - anim_start_ : 0);
-            if (animating_out_) {
-                const float kOutMs = 80.0f; // ui.md §6 菜单收起
-                float t = (float)(elapsed / kOutMs);
-                if (t >= 1.0f) {
-                    open_ = false;
-                    ShowWindow(hwnd_, SW_HIDE);
-                    break;
-                }
-                animating = true;
-                Present((BYTE)(255 * (1.0f - t)), 0);
-            } else {
-                // ui.md §6: 淡入 120ms + 下滑 8px OutQuad.
-                fluent::MotionSpec spec{ 120.0f, fluent::EasingCurve::OutQuad };
-                float t = fluent::EvaluateMotion(spec, (float)elapsed);
-                if (t < 1.0f) {
-                    animating = true;
-                    const float dip = (anchor_to_rect_ && filter_fn_)
-                        ? 0.0f : fluent::motion::MenuTravelDip * scale_;
-                    Present((BYTE)(255 * t), (int)std::lround(-dip * (1.0f - t)));
-                } else if (present_alpha_ != 255 || present_offset_ != 0) {
-                    Present(255, 0);
-                }
-            }
-        }
+        const bool animating = TickAnimation();
+        if (!open_) break;
         // Hover-to-open flyout delay (like native menus).
         if (open_ && !animating_out_ && sub_pending_row_ >= 0) {
             const double dwell = std::chrono::duration<double, std::milli>(
@@ -1564,6 +1483,15 @@ int FluentMenu::RunModalLoop() {
                 break;
             }
             bool swallow = false;
+            // Replay outside clicks only after TrackPopup has unwound. Opening
+            // another toolbar menu from this loop would reuse its live state.
+            if (animating_out_ &&
+                ((msg.message >= WM_MOUSEFIRST && msg.message <= WM_MOUSELAST) ||
+                 (msg.message >= WM_NCMOUSEMOVE && msg.message <= WM_NCMBUTTONDBLCLK))) {
+                if (!IsPaletteHwnd(msg.hwnd)) deferred_clicks_.push_back(msg);
+                continue;
+            }
+            if (animating_out_ && msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST) continue;
             if (open_ && !animating_out_) {
                 switch (msg.message) {
                 case WM_MOUSEWHEEL:
@@ -1608,10 +1536,9 @@ int FluentMenu::RunModalLoop() {
                         }
                         toggle_rect_ = {};
                         result_ = 0;
-                        open_ = false;
-                        HideFilterEdit();
-                        HideSubWindow();
-                        ShowWindow(hwnd_, SW_HIDE);
+                        if (!swallow) deferred_clicks_.push_back(msg);
+                        swallow = true;
+                        BeginDismiss();
                     }
                     break;
                 case WM_ACTIVATE:
@@ -1654,6 +1581,8 @@ int FluentMenu::TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> ite
 
 int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
                            FilterFn filter, bool top_center, CommandFn command) {
+    if (open_) return 0;
+    deferred_clicks_.clear();
     if (!EnsureWindow()) {
         toggle_rect_ = {};
         dropdown_ = false;
@@ -1705,9 +1634,9 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     }
     open_ = true;
     anim_start_ = AnimationTimeMs();
-    const int slide = (anchor_to_rect_ && filter_fn_)
+    const int slide = !AnimationsEnabled() || (anchor_to_rect_ && filter_fn_)
         ? 0 : (int)std::lround(-fluent::motion::MenuTravelDip * scale_);
-    Present(0, slide);
+    Present(AnimationsEnabled() ? 0 : 255, slide);
     if (external_edit_) {
         HideFilterEdit();
         SetWindowSubclass(external_edit_, ExternalFilterEditProc, 2, reinterpret_cast<DWORD_PTR>(this));
@@ -1741,6 +1670,10 @@ int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
     select_all_on_open_ = true;
     // Queue only after the modal loop has unwound, avoiding nested tab changes.
     if (forward_tab_key_ && owner_) PostMessageW(owner_, WM_KEYDOWN, VK_TAB, 0);
+    auto deferred_clicks = std::move(deferred_clicks_);
+    deferred_clicks_.clear();
+    for (const auto& click : deferred_clicks)
+        if (IsWindow(click.hwnd)) PostMessageW(click.hwnd, click.message, click.wParam, click.lParam);
     return popup_result;
 }
 

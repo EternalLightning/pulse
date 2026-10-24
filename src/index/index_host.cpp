@@ -73,7 +73,7 @@ struct Client {
     std::shared_ptr<transport::Handle> caller;
     std::atomic<bool> alive{true};
     std::atomic<uint32_t> latest_search{0};
-    struct Subscription { uint32_t id = 0; Query query; std::shared_ptr<std::atomic<uint32_t>> latest = std::make_shared<std::atomic<uint32_t>>(0); uint32_t sent_id = 0; uint64_t sent_hash = 0; std::shared_ptr<transport::Handle> caller; };
+    struct Subscription { uint32_t id = 0; Query query; std::shared_ptr<std::atomic<uint32_t>> latest = std::make_shared<std::atomic<uint32_t>>(0); uint32_t sent_id = 0; uint64_t sent_hash = 0; };
     std::mutex subscriptions_mu;
     std::map<uint64_t, Subscription> subscriptions;
     std::atomic<bool> thread_done{false};
@@ -89,7 +89,6 @@ struct SearchTask {
     uint32_t id = 0;
     Query query;
     std::shared_ptr<std::atomic<uint32_t>> latest;
-    std::shared_ptr<transport::Handle> caller;
     size_t charge = 0;
 };
 
@@ -400,8 +399,7 @@ void QueueSearch(std::shared_ptr<Client> c, uint32_t id, Query query, bool refre
         if (!overloaded) {
             auto& subscription = c->subscriptions[query.session_id];
             subscription.id = id; subscription.query = query; *subscription.latest = id;
-            if (!refresh) subscription.caller = c->caller;
-            g.search_queue.push_back({c, id, std::move(query), subscription.latest, subscription.caller, charge});
+            g.search_queue.push_back({c, id, std::move(query), subscription.latest, charge});
             g.search_cv.notify_one();
         }
     }
@@ -413,6 +411,7 @@ void QueueSearch(std::shared_ptr<Client> c, uint32_t id, Query query, bool refre
 }
 
 void SearchThread() {
+    static const bool trace_enabled = GetEnvironmentVariableW(L"PULSE_SEARCH_TRACE", nullptr, 0) > 1;
     for (;;) {
         SearchTask task;
         {
@@ -427,21 +426,27 @@ void SearchThread() {
         auto& c = task.client;
         if (!c || !c->alive || task.latest->load() != task.id) continue;
         TraceSearch("filename_query_begin", g.engine.Revision());
-        CallerVisibility visibility(task.caller ? task.caller->get() : nullptr, 2000, true);
-        const auto authorize = g.as_service ? std::function<bool(const std::wstring&)>([&](const auto& path) { return visibility.Visible(path); })
-            : std::function<bool(const std::wstring&)>{};
-        SearchResult sr = g.engine.Search(task.query, task.latest.get(), task.id, authorize);
-        sr.incomplete = g.as_service && visibility.Incomplete();
-        if (g.as_service && !visibility.ValidateDirectories()) {
-            sr.hits.clear(); sr.total = 0; sr.incomplete = true;
-        }
-        // Recheck rows with fresh descriptors immediately before enqueueing.
-        if (g.as_service) {
-            CallerVisibility final_visibility(task.caller ? task.caller->get() : nullptr);
-            const auto removed = std::erase_if(sr.hits, [&](const auto& hit) { return !final_visibility.Visible(hit.path); });
-            if (removed) { sr.total = sr.hits.size(); sr.incomplete = true; }
-        }
+        SearchDiagnostics diagnostics;
+        // Filename discovery uses indexed metadata, including names the caller
+        // cannot open. Windows enforces access when the caller operates on a hit.
+        SearchResult sr = g.engine.Search(task.query, task.latest.get(), task.id, {}, {},
+            trace_enabled ? &diagnostics : nullptr);
         sr.revision = g.engine.Revision();
+        if (trace_enabled) {
+            TraceSearch("filename_search_query_wait_us", diagnostics.query_wait_us);
+            TraceSearch("filename_search_index_wait_us", diagnostics.index_wait_us);
+            TraceSearch("filename_search_match_us", diagnostics.match_us);
+            TraceSearch("filename_search_path_us", diagnostics.path_us);
+            TraceSearch("filename_search_authorize_us", diagnostics.authorize_us);
+            TraceSearch("filename_search_page_us", diagnostics.page_us);
+            TraceSearch("filename_search_emit_us", diagnostics.emit_us);
+            TraceSearch("filename_search_engine_us", diagnostics.total_us);
+            TraceSearch("filename_search_raw_candidates", diagnostics.raw_candidates);
+            TraceSearch("filename_search_examined", diagnostics.examined);
+            TraceSearch("filename_search_authorized", diagnostics.authorized);
+            TraceSearch("filename_search_cache_hit", diagnostics.cache_hit ? 1 : 0);
+            TraceSearch("filename_search_incomplete", sr.incomplete ? 1 : 0);
+        }
         TraceSearch("filename_query_done", sr.revision);
         if (!c->alive || task.latest->load() != task.id) continue;
         auto out = SearchPayload(sr);

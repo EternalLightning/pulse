@@ -103,6 +103,7 @@ void AppPrefs::ResetToDefaults() {
     wallpaper_visibility = 50;
     wallpaper_blur = 1;
     row_height = 34;
+    text_render = 0;
     sidebar_width = 224;
     address_search_current = false;
     address_search_content = false;
@@ -186,6 +187,8 @@ std::wstring AppPrefs::ToJson() const {
     out += lock_window_size ? L"true" : L"false";
     out += L",\n  \"row_height\":";
     out += std::to_wstring(row_height);
+    out += L",\n  \"text_render\":";
+    out += std::to_wstring(text_render >= 0 && text_render <= 2 ? text_render : 0);
     out += L",\n  \"sidebar_width\":" + std::to_wstring(sidebar_width);
     out += L",\n  \"address_search_current\":" + std::to_wstring(address_search_current);
     out += L",\n  \"address_search_content\":" + std::to_wstring(address_search_content);
@@ -280,6 +283,8 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     background_image = pulse::json::ExtractString(doc, L"background_image");
     lock_window_size = pulse::json::ExtractBool(doc, L"lock_window_size", false);
     row_height = pulse::json::ExtractInt(doc, L"row_height", 34);
+    text_render = pulse::json::ExtractInt(doc, L"text_render", 0);
+    if (text_render < 0 || text_render > 2) text_render = 0;
     sidebar_width = pulse::json::ExtractInt(doc, L"sidebar_width", 224);
     // The stored value is the user's intent; the window caps it while drawing.
     if (sidebar_width < static_cast<int>(ui::kSidebarMinWidthDip) ||

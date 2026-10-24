@@ -45,11 +45,7 @@ bool TagRenameCell(AppState& s, const app::TagId& tag_id, D2D1_RECT_F& cell);
 void LayoutTagRenameOverlay(AppState& s);
 void ShowTagRenameOverlay(AppState& s, const app::TagId& tag_id);
 void HideTagRenameOverlay(AppState& s, bool commit);
-D2D1_COLOR_F HostedEditForeground(const AppState& s);
-D2D1_COLOR_F HostedEditBackground(const AppState& s);
-IDWriteTextFormat* HostedEditFormat(AppState& s, HWND hwnd);
-bool HandleHostedEditMessage(AppState& s, HWND hwnd, UINT msg, WPARAM wParam,
-                                    LPARAM lParam, LRESULT& result);
+bool HandleHostedEditShortcut(AppState& s, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                         UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData);
 LRESULT CALLBACK FilterEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,

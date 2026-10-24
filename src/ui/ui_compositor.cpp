@@ -2,7 +2,9 @@
 #include "ui_compositor.h"
 #include "../common/localization.h"
 #include "lumatext_renderer.h"
+#include "edit_composition.h"
 #include "typography.h"
+#include "FluentTokens.h"
 #include <commctrl.h>
 #include <prsht.h>
 #include <shellscalingapi.h>
@@ -50,6 +52,11 @@ bool Compositor::Init(HWND hwnd) {
     width_ = std::max(1L, rc.right - rc.left);
     height_ = std::max(1L, rc.bottom - rc.top);
     if (!CreateSwapChain()) return false;
+    if (transparentComposition_) {
+        editComposition_ = std::make_unique<EditComposition>(hwnd_, compositionDevice_.get(),
+            d2dDevice_.get(), opacityEffect_.get());
+        if (!editComposition_->Available()) editComposition_.reset();
+    }
     ResizeSwapChain();
     BindDialogComposition(hwnd_, compositionDevice_.get(), compositionVisual_.get());
     return targetBitmap_.get() != nullptr;
@@ -60,6 +67,7 @@ void Compositor::Shutdown() {
     BindDialogComposition(hwnd_, nullptr, nullptr);
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
+    editComposition_.reset();
     frame_copy_.reset();
     targetBitmap_.reset();
     if (dc_.get()) dc_->SetTarget(nullptr);
@@ -78,6 +86,7 @@ void Compositor::Shutdown() {
     dwriteFactory_.reset();
     textRenderingParams_.reset();
     text_params_monitor_ = nullptr;
+    text_params_mode_ = -1;
     typography::InvalidateCaches();
     textFormat_.reset();
     fileNameFormat_.reset();
@@ -187,7 +196,7 @@ bool Compositor::MeasureLumaText(std::wstring_view text, IDWriteTextFormat* form
 bool Compositor::PaintLumaEdit(HWND hwnd, HDC hdc, IDWriteTextFormat* format,
                                const D2D1_COLOR_F& foreground,
                                const D2D1_COLOR_F& background) {
-    if (!lumaText_ || !lumaText_->Enabled()) return false;
+    if (!CustomEditEnabled()) return false;
     return lumaText_->PaintEdit(hwnd, hdc, format, foreground, background);
 }
 
@@ -195,6 +204,14 @@ bool Compositor::PresentLumaEdit(HWND hwnd, IDWriteTextFormat* format,
                                  const D2D1_COLOR_F& foreground,
                                  const D2D1_COLOR_F& background) {
     if (!hwnd) return false;
+    if (UsesComposedEdits(hwnd)) {
+        if (!CustomEditEnabled()) return false;
+        ComPtr<ID2D1Bitmap1> pixels;
+        const bool ok = lumaText_->PaintEditBitmap(hwnd, format, foreground, background, &pixels) &&
+            editComposition_->Present(hwnd, pixels.get());
+        ValidateRect(hwnd, nullptr);
+        return ok;
+    }
     // LWA_ALPHA children use Windows' redirected surface. Mixing that mode
     // with UpdateLayeredWindow fails; paint our bitmap into their DC instead.
     DWORD layered_flags = 0;
@@ -207,19 +224,37 @@ bool Compositor::PresentLumaEdit(HWND hwnd, IDWriteTextFormat* format,
     return ok;
 }
 
+bool Compositor::UsesComposedEdits(HWND edit) const {
+    return editComposition_ && GetParent(edit) == hwnd_;
+}
+void Compositor::SynchronizeEditSurface(HWND edit) {
+    if (editComposition_) editComposition_->Synchronize(edit);
+}
+void Compositor::RemoveEditSurface(HWND edit) {
+    if (editComposition_) editComposition_->Remove(edit);
+}
+
 LRESULT Compositor::CallLumaEditMouse(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                       IDWriteTextFormat* format) {
-    if (lumaText_ && lumaText_->Enabled())
+    if (CustomEditEnabled())
         return lumaText_->CallEditDefaultMouse(hwnd, msg, wParam, lParam, format);
-    SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
-    const LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
-    SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
-    HideCaret(hwnd);
-    return result;
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+bool Compositor::LumaTextAvailable() const noexcept {
+    return lumaText_ && lumaText_->Enabled();
+}
+
+void Compositor::SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (lumaText_) lumaText_->SynchronizeEditSelection(hwnd, msg, wParam, lParam);
 }
 
 bool Compositor::LumaTextEnabled() const noexcept {
-    return lumaText_ && lumaText_->Enabled();
+    return LumaTextAvailable() && typography::UseLumaTextForUi() && !IsHighContrast();
+}
+
+bool Compositor::CustomEditEnabled() const noexcept {
+    return LumaTextAvailable() && !IsHighContrast();
 }
 
 const LumaTextStats* Compositor::GetLumaTextStats() const noexcept {
@@ -354,7 +389,8 @@ void Compositor::QueueShowTransition() {
 bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     if (!dwriteFactory_.get() || !dc_.get()) return false;
     if (!monitor && hwnd_) monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
-    if (textRenderingParams_.get() && monitor == text_params_monitor_) return true;
+    const int mode = static_cast<int>(typography::CurrentTextRenderMode());
+    if (textRenderingParams_.get() && monitor == text_params_monitor_ && mode == text_params_mode_) return true;
 
     ComPtr<IDWriteRenderingParams2> next;
     if (FAILED(typography::CreateRenderingParams(dwriteFactory_.get(), monitor, &next)) ||
@@ -364,6 +400,7 @@ bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     const bool monitor_changed = text_params_monitor_ && text_params_monitor_ != monitor;
     textRenderingParams_ = std::move(next);
     text_params_monitor_ = monitor;
+    text_params_mode_ = mode;
     dc_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     dc_->SetTextRenderingParams(textRenderingParams_.get());
     if (monitor_changed && hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
@@ -522,6 +559,7 @@ static void CreateFormat(IDWriteFactory2* factory, float size, DWRITE_FONT_WEIGH
 }
 
 void Compositor::RecreateTextFormats(float scale) {
+    typography::ClearMeasurementCache();
     UpdateTextRenderingParams(hwnd_
         ? MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST) : nullptr);
     textFormat_.reset();

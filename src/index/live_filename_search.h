@@ -3,6 +3,7 @@
 #include "index_query.h"
 #include "index_types.h"
 #include "search_result_merge.h"
+#include "persistent_index_policy.h"
 #include <algorithm>
 #include <atomic>
 #include <functional>
@@ -25,6 +26,11 @@ inline bool FilenameSearchCovered(std::wstring_view path, std::wstring_view root
     return path.size() >= root.size() &&
         CompareStringOrdinal(path.data(), static_cast<int>(root.size()), root.data(), static_cast<int>(root.size()), TRUE) == CSTR_EQUAL &&
         (path.size() == root.size() || path[root.size()] == L'\\');
+}
+
+inline std::wstring TransientFilenameSearchRoot(const std::wstring& path) {
+    auto root = FilenameSearchRoot(path);
+    return !root.empty() ? root : CachedTransientLocalSearch(path) ? LocalDevicePath(path) : std::wstring{};
 }
 
 inline bool MatchLiveFilename(const Hit& hit, const CompiledQuery& query, bool folders_only) {
@@ -60,6 +66,13 @@ inline void ScanLiveFilenames(const Query& query, const std::wstring& root,
     SearchResult result;
     result.scanning = true;
     publish(result);
+    if (root.empty()) {
+        result.scanning = false;
+        result.incomplete = true;
+        result.error = ERROR_PATH_NOT_FOUND;
+        publish(result);
+        return;
+    }
     std::vector<std::wstring> pending{root};
     ULONGLONG last_publish = GetTickCount64();
     auto flush = [&] {
@@ -72,7 +85,8 @@ inline void ScanLiveFilenames(const Query& query, const std::wstring& root,
         std::wstring pattern = directory;
         if (pattern.rfind(L"\\\\?\\", 0) != 0) pattern = pattern.rfind(L"\\\\", 0) == 0
             ? L"\\\\?\\UNC\\" + pattern.substr(2) : L"\\\\?\\" + pattern;
-        pattern += L"\\*";
+        if (pattern.back() != L'\\') pattern += L'\\';
+        pattern += L'*';
         WIN32_FIND_DATAW data{};
         HANDLE find = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0);
         if (find == INVALID_HANDLE_VALUE) {
@@ -91,7 +105,8 @@ inline void ScanLiveFilenames(const Query& query, const std::wstring& root,
         while (more && !cancelled.load()) {
             if (wcscmp(data.cFileName, L".") && wcscmp(data.cFileName, L"..")) {
                 Hit hit;
-                hit.name = data.cFileName; hit.path = directory + L"\\" + hit.name;
+                hit.name = data.cFileName;
+                hit.path = directory + (directory.back() == L'\\' ? L"" : L"\\") + hit.name;
                 hit.is_dir = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 hit.size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
                 hit.mtime = (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;

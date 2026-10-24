@@ -274,6 +274,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     l.startup_row[0]=toggle_row(I::SettingsLaunchDesc); l.startup_tray_row=toggle_row(I::StartToTrayDesc);
     l.startup_row[1]=toggle_row(I::SettingsKeepRunningDesc); l.last_tab_row=toggle_row(I::CloseLastTabWindowDesc);
     l.startup_row[2]=toggle_row(I::SettingsDefaultManagerDesc);
+    l.explorer_takeover_row=toggle_row(I::SettingsExplorerTakeoverDesc);
     if(!vm.settings_system_pending && !vm.settings_system_status.empty())
         l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
             scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
@@ -283,6 +284,12 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     l.group[1]=D2D1::RectF(left,l.startup_row[0].top,right,y);
     section(2);
     l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);
+    const float text_render_width = right - left - (narrow ? 70.0f : 364.0f) * scale;
+    const float text_render_caption = SettingsCaptionHeight(l10n::Get(I::SettingsTextRenderDesc),
+        text_render_width, scale, painter);
+    const float text_render_height = 35.0f + text_render_caption / scale + (narrow ? 56.0f : 10.0f);
+    l.text_render_card=row(std::max(narrow ? 98.0f : 64.0f,text_render_height));
+    segments(l.text_render_card,l.text_render_row,3,282);
     l.performance_row=toggle_row(I::SettingsShowPerformanceDesc);
     l.text_compare_row=toggle_row(I::SettingsTextCompareDesc);
     const I list_descriptions[] = {I::ListSmartDateDesc, I::ListZebraRowsDesc, I::ListSizeBarDesc};

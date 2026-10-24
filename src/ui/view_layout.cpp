@@ -218,7 +218,14 @@ int ViewLayout::HitTest(float x, float y) const noexcept {
     const int index = metrics_.column_major
         ? col * metrics_.rows_per_column + row
         : row * metrics_.columns + col;
-    return index >= 0 && static_cast<size_t>(index) < count_ ? index : -1;
+    if (index < 0 || static_cast<size_t>(index) >= count_) return -1;
+    if (mode_ == ViewMode::MediumIcons || mode_ == ViewMode::LargeIcons) {
+        const auto cell = ItemRect(index);
+        const float gutter = 4.0f * scale_;
+        if (x < cell.left + gutter || x >= cell.right - gutter ||
+            y < cell.top + gutter || y >= cell.bottom - gutter) return -1;
+    }
+    return index;
 }
 
 std::pair<int, int> ViewLayout::VisibleRange() const noexcept {

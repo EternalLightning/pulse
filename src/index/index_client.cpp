@@ -1,6 +1,7 @@
 // index_client.cpp — Connect to Pulse.Index (service or spawned helper).
 #include "../common/command_line.h"
 #include "index_client.h"
+#include "persistent_index_policy.h"
 #include "index_server_auth.h"
 #include "index_search_response.h"
 #include "search_trace.h"
@@ -270,6 +271,8 @@ void IndexClient::HandleVolumes(const uint8_t* p, size_t n) {
         }
     }
     if (r.remaining()) return;
+    // The receiver thread resolves mount aliases; UI search only reads the cache.
+    CacheSearchDevices(volumes, EnumerateSearchDeviceMounts(volumes));
     {
         std::lock_guard<std::mutex> lock(mu_);
         service_mode_ = service != 0;

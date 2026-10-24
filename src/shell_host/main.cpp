@@ -93,6 +93,7 @@ struct HostState {
 } g;
 
 bool g_context_worker = false;
+std::atomic<bool> g_context_worker_healthy{true};
 std::unique_ptr<pulse::shell::ContextSessionProcesses> g_context_processes;
 std::unique_ptr<pulse::shell::ShellLaunchProcesses> g_launch_processes;
 std::unique_ptr<pulse::shell::ShellLaunchProcesses> g_interaction_processes;
@@ -931,9 +932,16 @@ bool SessionCloseRequested(uint32_t sid) {
     return it == g_ctx_sessions.end() || it->second.close_requested;
 }
 
+struct HandlerStartGate {
+    HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    ~HandlerStartGate() { if (event) CloseHandle(event); }
+};
+
 struct HandlerWorker : pulse::shell::CtxWorkerHandles {
     ~HandlerWorker() { Stop(); }
     pulse::shell::CtxHandlerDesc desc;
+    std::shared_ptr<const pulse::shell::CtxParsedSelection> selection;
+    std::shared_ptr<HandlerStartGate> start_gate;
     std::vector<std::wstring> paths;
     bool background = false;
     HWND owner = nullptr;
@@ -948,6 +956,11 @@ struct HandlerWorker : pulse::shell::CtxWorkerHandles {
 
 DWORD HandlerWorkerThreadImpl(LPVOID param) {
     auto* w = static_cast<HandlerWorker*>(param);
+    const HANDLE start_waits[]{w->exit_event, w->start_gate->event};
+    if (WaitForMultipleObjects(2, start_waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) {
+        if (w->done_event) SetEvent(w->done_event);
+        return 0;
+    }
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         if (w->done_event) SetEvent(w->done_event);
         return 0;
@@ -957,36 +970,40 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
     w->thread_id = GetCurrentThreadId();
 
     const ULONGLONG t0 = GetTickCount64();
-    pulse::shell::CtxBind bind;
 #ifdef PULSE_CONTEXT_PROCESS_TESTING
     const bool fixture = w->paths.size() == 1 && w->paths.front() == L":pulse-context-process-test:";
-    if (fixture && w->desc.name == L"fixture-hang") Sleep(INFINITE);
-    if (fixture && w->desc.name == L"fixture-slow") Sleep(400);
-    if (fixture) {
-        CtxItemOut item;
-        item.id = w->id_first; item.verb = L"fixture-ready";
-        item.text = std::to_wstring(GetCurrentProcessId());
-        w->items.push_back(item);
-        item.id++; item.verb = L"fixture-invoke-hang";
-        w->items.push_back(item);
-        item.id++; item.verb = L"fixture-modeless";
-        w->items.push_back(item);
-        item.id++; item.verb = L"fixture-launch-child";
-        w->items.push_back(item);
-    } else
 #endif
-    if (pulse::shell::BindCtxSelection(w->paths, w->background, bind)) {
-        const HRESULT hr = pulse::shell::QueryOneHandler(
-            w->desc, bind, w->owner, w->id_first, w->id_last, w->qcm_flags, w->slot);
-        if (SUCCEEDED(hr) && w->slot.menu)
-            pulse::shell::CollectHandlerItems(w->slot, w->background, w->items);
-        else
-            pulse::shell::ReleaseHandlerSlot(w->slot);
-        if (pulse::ipc::IsNativeNewMenuHandler(w->desc.clsid_text)) {
-            wchar_t diagnostic[160]{};
-            swprintf_s(diagnostic, L"Native New query hr=0x%08X rows=%zu ids=%u..%u",
-                static_cast<unsigned>(hr), w->items.size(), w->id_first, w->id_last);
-            HostLog(diagnostic);
+    {
+        pulse::shell::CtxBind bind;
+#ifdef PULSE_CONTEXT_PROCESS_TESTING
+        if (fixture && w->desc.name == L"fixture-hang") Sleep(INFINITE);
+        if (fixture && w->desc.name == L"fixture-slow") Sleep(400);
+        if (fixture) {
+            CtxItemOut item;
+            item.id = w->id_first; item.verb = L"fixture-ready";
+            item.text = std::to_wstring(GetCurrentProcessId());
+            w->items.push_back(item);
+            item.id++; item.verb = L"fixture-invoke-hang";
+            w->items.push_back(item);
+            item.id++; item.verb = L"fixture-modeless";
+            w->items.push_back(item);
+            item.id++; item.verb = L"fixture-launch-child";
+            w->items.push_back(item);
+        } else
+#endif
+        if (pulse::shell::BindCtxSelection(w->paths, w->background, bind, w->selection.get())) {
+            const HRESULT hr = pulse::shell::QueryOneHandler(
+                w->desc, bind, w->owner, w->id_first, w->id_last, w->qcm_flags, w->slot);
+            if (SUCCEEDED(hr) && w->slot.menu)
+                pulse::shell::CollectHandlerItems(w->slot, w->background, w->items);
+            else
+                pulse::shell::ReleaseHandlerSlot(w->slot);
+            if (pulse::ipc::IsNativeNewMenuHandler(w->desc.clsid_text)) {
+                wchar_t diagnostic[160]{};
+                swprintf_s(diagnostic, L"Native New query hr=0x%08X rows=%zu ids=%u..%u",
+                    static_cast<unsigned>(hr), w->items.size(), w->id_first, w->id_last);
+                HostLog(diagnostic);
+            }
         }
     }
     w->elapsed_ms = static_cast<uint32_t>(GetTickCount64() - t0);
@@ -1074,6 +1091,7 @@ DWORD WINAPI HandlerWorkerThread(LPVOID param) {
     __try {
         return HandlerWorkerThreadImpl(param);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_context_worker_healthy.store(false);
         if (w && w->done_event) SetEvent(w->done_event);
         return 0;
     }
@@ -1150,11 +1168,21 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
     if (handlers.size() > MAXIMUM_WAIT_OBJECTS)
         handlers.resize(MAXIMUM_WAIT_OBJECTS);
 
+    // PIDLs are immutable values. Parse once per session, while each handler
+    // still creates and retains its own COM objects on its own STA.
+    auto selection = std::make_shared<pulse::shell::CtxParsedSelection>();
+    if (!handlers.empty()) {
+        pulse::shell::ParseCtxSelection(data->paths, data->background, *selection);
+    }
+    auto start_gate = std::make_shared<HandlerStartGate>();
     UINT next_id = kCtxIdFirst;
     for (const auto& handler : handlers) {
+        if (!start_gate->event) break;
         if (next_id + kIdsPerHandler > kCtxIdLast) break;
         auto worker = std::make_unique<HandlerWorker>();
         worker->desc = handler;
+        worker->selection = selection;
+        worker->start_gate = start_gate;
         worker->paths = data->paths;
         worker->background = data->background;
         worker->owner = data->owner;
@@ -1165,6 +1193,9 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
         if (!worker->Start(HandlerWorkerThread, worker.get())) continue;
         workers.push_back(std::move(worker));
     }
+    // Finish creating the STA threads before extension DLLs can run their
+    // process/thread initialization while another worker is being created.
+    if (start_gate->event) SetEvent(start_gate->event);
 
     auto worker_done = [](const HandlerWorker& w) {
         return w.done_event && WaitForSingleObject(w.done_event, 0) == WAIT_OBJECT_0;
@@ -1336,12 +1367,20 @@ void CtxCrashCleanup(uint32_t sid) {
     g_ctx_sessions.erase(sid);
 }
 
+void AcknowledgeCtxRelease(uint32_t sid) {
+    // Private worker acknowledgement: all session STAs have exited and
+    // released their COM/menu state before the broker may reuse this process.
+    if (g_context_worker && g_context_worker_healthy.load()) SendMsg(RSP_PONG, sid, {});
+}
+
 DWORD WINAPI CtxSessionThread(LPVOID param) {
     // Grab the session id up front: on a crash we still answer the query with
     // an empty item list so the UI process is not left waiting for RSP_CTX_ITEMS.
     const uint32_t sid = static_cast<CtxSessionData*>(param)->session_id;
     __try {
-        return CtxSessionThreadImpl(param);
+        const DWORD result = CtxSessionThreadImpl(param);
+        AcknowledgeCtxRelease(sid);
+        return result;
     } __except (CtxCrashFilter(GetExceptionInformation())) {
         CtxCrashCleanup(sid);
         return 0;

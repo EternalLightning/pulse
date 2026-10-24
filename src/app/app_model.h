@@ -36,16 +36,21 @@ enum class BannerType { None, Other, ContentIndex, SearchIncomplete, ContentScan
 struct ArchiveListing;
 
 struct Tab {
+    struct NavigationViewport { float x = 0.0f; float y = 0.0f; };
+    struct HistoryEntry {
+        std::wstring path;
+        // Older/path-only history has no search or viewport metadata.
+        std::optional<std::wstring> search_origin;
+        std::optional<NavigationViewport> viewport;
+    };
+
     std::wstring current_path;
     std::wstring archive_file, archive_prefix, archive_password;
     std::shared_ptr<std::atomic_bool> archive_cancel;
     std::shared_ptr<const ArchiveListing> archive_listing;
     std::unordered_set<std::wstring> archive_encrypted;
-    std::stack<std::wstring> back_stack;
-    std::stack<std::wstring> forward_stack;
-    // Search origins belong to history entries, not to query strings.
-    std::stack<std::optional<std::wstring>> back_search_origins;
-    std::stack<std::optional<std::wstring>> forward_search_origins;
+    std::stack<HistoryEntry> back_stack;
+    std::stack<HistoryEntry> forward_stack;
 
     int selected_index = -1;
     int selection_anchor = -1;
@@ -240,6 +245,8 @@ struct Tab {
     fs::SnapshotPtr PrepareEntrySnapshot(fs::SnapshotPtr fresh,
                                         std::vector<std::wstring>& selected_names,
                                         std::wstring& focus_name);
+
+    std::optional<NavigationViewport> pending_history_viewport;
 };
 
 bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle);

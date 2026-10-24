@@ -20,6 +20,7 @@ public:
     bool ForwardOpenPath(const std::wstring& path, DWORD timeout_ms = 2000) const;
 
     static bool DecodeOpenPath(const COPYDATASTRUCT* data, std::wstring& path);
+    static bool PrepareOpenPath(const std::wstring& path, std::wstring& prepared);
     static ULONG_PTR OpenPathMessageId() noexcept;
     static const wchar_t* WindowClassName() noexcept;
 

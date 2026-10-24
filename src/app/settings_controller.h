@@ -31,6 +31,7 @@ enum class SettingsEffect : uint32_t {
     ListStyle = 1u << 10,
     FolderSort = 1u << 11,
     WindowSizeLock = 1u << 12,
+    TextRendering = 1u << 13,
 };
 
 constexpr SettingsEffect operator|(SettingsEffect left, SettingsEffect right) noexcept {
@@ -136,6 +137,7 @@ public:
     void WindowEffect(std::wstring_view effect_id);
     void AccentChoice(bool system_choice, uint32_t rgb);
     void RowHeight(int index);
+    void TextRendering(int index);
     void FolderSort(int index);
     void TrayIconSize(int index);
     void WallpaperVisibility(int percent);

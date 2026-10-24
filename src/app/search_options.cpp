@@ -1,6 +1,7 @@
 #include "app_internal.h"
 #include "search_query.h"
 #include "../index/content_index.h"
+#include "../index/persistent_index_policy.h"
 #include "../ui/address_search_layout.h"
 #include "../common/localization.h"
 #include <algorithm>
@@ -63,6 +64,7 @@ void StartIndexedContentSearch(AppState& s, app::Tab& tab, const std::wstring& r
     tab.content_scan_error = ERROR_SUCCESS;
     if (!tab.search_session_id) tab.search_session_id = ++s.nextIndexReq;
     const auto split = app::SplitSearchQueryText(rest);
+    scan = scan || index::CachedTransientLocalSearch(split.path_prefix);
     const auto config = s.contentSearch.GetConfig();
     tab.search_awaiting_content = false;
     tab.search_content_active = false;

@@ -33,7 +33,7 @@ inline ContentIndexConfig SharedContentScope(const ContentIndexConfig& previous,
     config.excluded_directories.clear();
     config.excluded_paths = excluded;
     for (const auto& volume : volumes) {
-        if (!volume.enabled || !volume.supported || volume.mount_point.empty()) continue;
+        if (!volume.enabled || !volume.supported || volume.kind != VolumeKind::Fixed || volume.mount_point.empty()) continue;
         ContentIndexRoot root{ContentScopeKey(volume.mount_point), config.default_encoding};
         for (const auto& old : previous.roots)
             if (ContentScopeKey(old.path) == root.path) root.encoding = old.encoding;

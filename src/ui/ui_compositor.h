@@ -27,6 +27,7 @@
 namespace pulse::ui {
 
 class LumaTextRenderer;
+class EditComposition;
 struct LumaTextStats;
 
 template <typename T>
@@ -96,6 +97,12 @@ public:
     LRESULT CallLumaEditMouse(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                               IDWriteTextFormat* format);
     bool LumaTextEnabled() const noexcept;
+    bool LumaTextAvailable() const noexcept;
+    bool CustomEditEnabled() const noexcept;
+    bool UsesComposedEdits(HWND edit) const;
+    void SynchronizeEditSurface(HWND edit);
+    void RemoveEditSurface(HWND edit);
+    void SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     const LumaTextStats* GetLumaTextStats() const noexcept;
 
     int Width() const { return width_; }
@@ -136,7 +143,9 @@ private:
     ComPtr<IDWriteTextFormat> addressFormat_;
     ComPtr<IDWriteTextFormat> iconFormat_;
     std::unique_ptr<LumaTextRenderer> lumaText_;
+    std::unique_ptr<EditComposition> editComposition_;
     HMONITOR text_params_monitor_ = nullptr;
+    int text_params_mode_ = -1;
     bool transparentComposition_ = false;
     bool device_lost_ = false;
     bool animation_frames_paused_ = true;

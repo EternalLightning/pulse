@@ -1,8 +1,8 @@
 // index_engine.h — Filename index: mmap base + heap delta (优化.md R1).
 //
-// V11 uses the V9 aggregate snapshot layout with corrected attribute replay. The base is read-only;
-// USN/RDCW mutations append to a small heap delta. Search takes a shared lock
-// and never waits on Status()/Count(). V7-V10 snapshots remain readable and
+// V12 compresses filename postings with bucket-local delta varints. The base is read-only;
+// USN/RDCW mutations append to a small heap delta. Search holds one shared snapshot through authorization
+// and never waits on Status()/Count(). V7-V11 snapshots remain readable and
 // trigger a background rebuild to repair visibility and disconnected parent links.
 #pragma once
 #include "usn_stream.h"
@@ -67,7 +67,7 @@ struct DiskHeader {
     uint64_t name_order_off;   // 0 = absent (v8+)
     uint64_t size_order_off;   // 0 = absent
     uint64_t mtime_order_off;  // 0 = absent
-    uint64_t prefix1_off;      // 65537 u32 starts + posting_count i32 ids
+    uint64_t prefix1_off;      // 65537 u32 starts + IDs; V12 starts are byte offsets into delta varints
     uint64_t prefix2_off;
 };
 struct DiskVol {
@@ -93,6 +93,22 @@ static_assert(sizeof(Node) == 16, "v6 node is 16 bytes");
 static_assert(sizeof(Attr) == 12, "v6 attr is 12 bytes");
 static_assert(sizeof(DiskHeader) == 128, "v8 header fills the 128-byte prefix");
 
+// Optional, response-local diagnostics; never serialized to the search protocol.
+struct SearchDiagnostics {
+    uint64_t query_wait_us = 0;
+    uint64_t index_wait_us = 0;
+    uint64_t match_us = 0;
+    uint64_t path_us = 0;
+    uint64_t authorize_us = 0;
+    uint64_t page_us = 0;
+    uint64_t emit_us = 0;
+    uint64_t total_us = 0;
+    size_t raw_candidates = 0;
+    size_t examined = 0;
+    size_t authorized = 0;
+    bool cache_hit = false;
+};
+
 class Engine {
 public:
     Engine() = default;
@@ -105,9 +121,12 @@ public:
     void RequestStop() { running_ = false; if (change_signal_) SetEvent(change_signal_); }
     void Stop();
 
+    // should_stop ends authorization traversal; a denied candidate alone never stops it.
     SearchResult Search(const Query& q, const std::atomic<uint32_t>* latest = nullptr,
                         uint32_t expected = 0,
-                        const std::function<bool(const std::wstring&)>& authorize = {}) const;
+                        const std::function<bool(const std::wstring&)>& authorize = {},
+                        const std::function<bool()>& should_stop = {},
+                        SearchDiagnostics* diagnostics = nullptr) const;
     size_t Count() const { return indexed_.load(); }
     bool Ready() const { return ready_.load(); }
     bool PinyinReady() const { return pinyin_ready_.load(); }
@@ -182,6 +201,8 @@ private:
         bool prefix1_all_chars = false;
         const uint32_t* prefix2_start = nullptr;
         const int32_t* prefix2_ids = nullptr;
+        const uint8_t* prefix1_bytes = nullptr;
+        const uint8_t* prefix2_bytes = nullptr;
         void Close();
         ~MappedFile() { Close(); }
         MappedFile() = default;
@@ -189,12 +210,15 @@ private:
         MappedFile& operator=(const MappedFile&) = delete;
     };
 
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     struct QueryShard {
         std::wstring volume_id;
         int32_t first = 0;
         int32_t last = 0;
         std::unique_ptr<MappedFile> mapped;
     };
+
+#endif
 
     struct VolState {
         std::unordered_map<uint64_t, std::wstring> tracking_paths;
@@ -251,6 +275,21 @@ private:
                 }
             }
         }
+        template <class Fn>
+        void ForEachWhile(Fn fn) const {
+            if (!dense) {
+                for (int32_t id : ids) if (!fn(id)) return;
+                return;
+            }
+            for (size_t w = 0; w < bits.size(); ++w) {
+                uint64_t x = bits[w];
+                while (x) {
+                    const unsigned b = static_cast<unsigned>(std::countr_zero(x));
+                    if (!fn(static_cast<int32_t>(w * 64 + b))) return;
+                    x &= x - 1;
+                }
+            }
+        }
     };
 
     void Worker();
@@ -280,18 +319,20 @@ private:
     void ReplayDeltasLocked();
     DeltaLog* DeltaFor(wchar_t letter);
     void FullRebuild(const char* reason = "requested_or_watch_gap");
-    void PreserveOfflineVolumesLocked(const std::vector<VolumeInfo>& active,
-                                      const IndexConfig& config);
     bool IndexVolumeMft(const VolumeInfo& volume);
     bool RebuildVolumeMft(const VolumeInfo& volume);
     void WalkTree(int32_t parent, const std::wstring& dir, int depth);
     bool FlattenLocked(Store& out, std::vector<VolState>& vols_out) const;
     bool WriteIndexFile(const std::wstring& path, const Store& s,
                         const std::vector<VolState>& vols, uint64_t built_unix) const;
+    bool WriteBuildIndexFile(const std::wstring& path, uint64_t built_unix);
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     void WriteVolumeShards(const Store& aggregate, const std::vector<VolState>& vols,
                            uint64_t built_unix) const;
+#endif
     bool MapIndexFile(const std::wstring& path, std::unique_ptr<MappedFile>& out) const;
     void AdoptMappedLocked(std::unique_ptr<MappedFile> mapped);
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     void RefreshQueryShardsLocked();
     const QueryShard* QueryShardForLocked(int32_t id) const;
     Node QueryNodeAtLocked(int32_t id) const;
@@ -300,6 +341,16 @@ private:
     std::wstring BuildQueryPathLocked(int32_t id) const;
     bool MatchQueryNodeLocked(int32_t id, const CompiledQuery& query, int32_t prefix_node,
                               bool folders_only, bool use_attrs) const;
+#else
+    Node QueryNodeAtLocked(int32_t id) const { return NodeAt(id); }
+    Attr QueryAttrAtLocked(int32_t id) const { return AttrAt(id); }
+    std::wstring_view QueryNameOfLocked(int32_t id) const { return NameOf(id); }
+    std::wstring BuildQueryPathLocked(int32_t id) const { return BuildPathLocked(id); }
+    bool MatchQueryNodeLocked(int32_t id, const CompiledQuery& query, int32_t prefix_node,
+                              bool folders_only, bool use_attrs) const {
+        return MatchNodeLocked(id, query, prefix_node, folders_only, use_attrs);
+    }
+#endif
     void RebuildChildMapLocked();
     bool CommitMappedFile(const std::wstring& path);
 
@@ -376,8 +427,12 @@ private:
     std::wstring status_;
 
     std::unique_ptr<MappedFile> map_;
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
+    // Legacy duplicate snapshots exist only in the isolated storage comparison target.
     std::vector<QueryShard> query_shards_;
     bool query_shards_ready_ = false;
+    bool use_volume_query_shards_ = false;
+#endif
     Store live_;  // tests: full store; after mmap: delta only
     Store build_;
     std::vector<VolState> vols_;
@@ -433,9 +488,7 @@ private:
     mutable std::wstring cache_raw_;
     mutable std::wstring cache_path_prefix_;
     mutable bool cache_folders_only_ = false;
-    mutable bool cache_ranked_ = false;
-    mutable ResultSort cache_sort_ = ResultSort::Index;
-    mutable bool cache_sort_desc_ = false;
+    // Raw candidates only: every response must authorize them again for its caller.
     mutable MatchSet cache_set_;
 };
 

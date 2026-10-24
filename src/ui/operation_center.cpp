@@ -401,7 +401,7 @@ void OperationCenter::Text(const std::wstring& text, D2D1_RECT_F rect, D2D1_COLO
     auto* factory = compositor_->DwriteFactory();
     ComPtr<IDWriteTextLayout> layout;
     const auto value = SingleLine(text);
-    if (FAILED(factory->CreateTextLayout(value.c_str(), static_cast<UINT32>(value.size()),
+    if (FAILED(typography::CreateTextLayout(factory, value.c_str(), static_cast<UINT32>(value.size()),
         small_text ? compositor_->SmallFormat() : compositor_->TextFormat(), rect.right - rect.left,
         rect.bottom - rect.top, &layout))) return;
     layout->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -410,6 +410,8 @@ void OperationCenter::Text(const std::wstring& text, D2D1_RECT_F rect, D2D1_COLO
     ComPtr<IDWriteInlineObject> ellipsis;
     factory->CreateEllipsisTrimmingSign(small_text ? compositor_->SmallFormat() : compositor_->TextFormat(), &ellipsis);
     layout->SetTrimming(&trim, ellipsis.get());
+    if (small_text && !wrap && compositor_->DrawLumaText(
+            value, layout.get(), rect, color, MakeTheme(dark_, accent_).bg)) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (SUCCEEDED(compositor_->Dc()->CreateSolidColorBrush(color, &brush)))
         compositor_->Dc()->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);

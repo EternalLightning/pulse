@@ -135,6 +135,8 @@ struct FolderSizes::Impl {
     std::set<std::wstring> manual, blocked_auto;
     std::set<std::wstring> require_counts;
     std::vector<std::wstring> roots;
+    std::vector<FolderSizeRequest> last_requests;
+    std::vector<std::wstring> last_roots;
     std::function<std::wstring()> cache_path;
     std::thread worker;
     std::atomic<bool> stopping{false}, changed{false};
@@ -143,6 +145,7 @@ struct FolderSizes::Impl {
     HANDLE index_cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 #ifdef PULSE_FOLDER_SIZES_TESTING
     std::function<void(const std::wstring&)> scan_hook;
+    unsigned sync_revision = 0;
 #endif
     ~Impl() { if (index_cancel) CloseHandle(index_cancel); }
 
@@ -372,10 +375,23 @@ void FolderSizes::SetIndexEnabled(bool enabled) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->worker.joinable()) impl_->index_enabled = enabled;
 }
+bool FolderSizes::NeedsWorker() const {
+    std::lock_guard lock(impl_->mutex);
+    return !impl_->stopping && !impl_->worker.joinable() &&
+        !impl_->wanted.empty() && live_workers.load() < kWorkerLimit;
+}
 void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> roots) {
     auto& s = *impl_;
     std::lock_guard lock(s.mutex);
     if (s.stopping) return;
+    // A refused worker must still be retried when another window releases a
+    // worker slot. Otherwise identical interests have no state to synchronize.
+    if (s.worker.joinable() && visible == s.last_requests && roots == s.last_roots) return;
+    s.last_requests = visible;
+    s.last_roots = roots;
+#ifdef PULSE_FOLDER_SIZES_TESTING
+    ++s.sync_revision;
+#endif
     std::map<std::wstring, bool> wanted;
     std::set<std::wstring> require_counts;
     for (const auto& request : visible) {
@@ -485,5 +501,9 @@ void FolderSizes::SetScanHookForTest(std::function<void(const std::wstring&)> ho
     if (!impl_->worker.joinable()) impl_->scan_hook = std::move(hook);
 }
 unsigned FolderSizes::LiveWorkersForTest() { return live_workers.load(); }
+unsigned FolderSizes::SyncRevisionForTest() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->sync_revision;
+}
 #endif
 }

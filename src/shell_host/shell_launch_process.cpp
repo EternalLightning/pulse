@@ -1,5 +1,6 @@
 #include "shell_launch_process.h"
 #include "ctx_session_process.h"
+#include "process_retirement.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -16,13 +17,11 @@ struct Handle {
 };
 
 struct WorkerProcess : Handle {
-    void Reap() {
-        if (value && WaitForSingleObject(value, 0) == WAIT_TIMEOUT) {
-            TerminateProcess(value, ERROR_CANCELLED);
-            // Admission remains occupied until the kernel confirms retirement.
-            while (WaitForSingleObject(value, 100) == WAIT_TIMEOUT) {}
-        }
-    }
+    ProcessRetirements<ShellLaunchProcesses::kProcessLimit>& retirements;
+    bool& pending;
+    WorkerProcess(ProcessRetirements<ShellLaunchProcesses::kProcessLimit>& owner, bool& retirement_pending)
+        : retirements(owner), pending(retirement_pending) {}
+    void Reap() { if (value) pending = !retirements.Retire(value); }
     ~WorkerProcess() { Reap(); }
 };
 
@@ -61,6 +60,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
         std::atomic<bool> dispatched{false};
         std::atomic<bool> completed{false};
         bool active = false; // protected by Core::mutex
+        bool retirement_pending = false; // written only by this session's runner
         Session() { stop.value = CreateEventW(nullptr, TRUE, FALSE, nullptr); }
     };
     struct Work {
@@ -83,7 +83,10 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
     std::deque<Work> waiting;
     std::map<uint32_t, std::shared_ptr<Session>> sessions;
     size_t active_count = 0;
+    ProcessRetirements<kProcessLimit> retirements;
     bool stopping = false;
+
+    void ReapLocked() { active_count -= retirements.Reap(); }
 
     Core(std::wstring file, Reply callback) : executable(std::move(file)), reply(std::move(callback)) {
         job.value = CreateJobObjectW(nullptr, nullptr);
@@ -114,7 +117,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
         // Consent runs on a separate desktop. Preserve waiting for the user's
         // answer; process death, explicit cancellation and shutdown still end it.
         const DWORD idle_timeout = request.kind == ipc::ShellLaunchKind::ElevatedWait ? INFINITE : kNoWindowTimeoutMs;
-        WorkerProcess process;
+        WorkerProcess process(retirements, session->retirement_pending);
         Handle pipe;
         pipe.value = INVALID_HANDLE_VALUE;
         bool dispatched = false, completed = false;
@@ -205,7 +208,12 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
             Work work;
             {
                 std::unique_lock lock(mutex);
-                work_available.wait(lock, [&] { return stopping || !waiting.empty(); });
+                for (;;) {
+                    ReapLocked();
+                    if (stopping || (!waiting.empty() && active_count < kProcessLimit)) break;
+                    if (waiting.empty()) work_available.wait(lock);
+                    else work_available.wait_for(lock, std::chrono::milliseconds(100));
+                }
                 if (stopping) return;
                 work = std::move(waiting.front());
                 waiting.pop_front();
@@ -230,7 +238,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
             {
                 std::lock_guard lock(mutex);
                 sessions.erase(work.id);
-                --active_count;
+                if (!work.session->retirement_pending) --active_count;
             }
         }
     }
@@ -330,6 +338,7 @@ void ShellLaunchProcesses::Stop() {
 
 size_t ShellLaunchProcesses::ActiveProcesses() const {
     std::lock_guard lock(core_->mutex);
+    core_->ReapLocked();
     return core_->active_count;
 }
 } // namespace pulse::shell

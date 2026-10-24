@@ -508,6 +508,8 @@ struct WindowViewModel {
     bool selection_has_drive_root = false;
     std::optional<std::array<bool, 6>> toolbar_commands_enabled;
     bool archive_view = false;
+    bool can_empty_recycle = false;
+    bool can_group = false;
     std::wstring window_title;
     std::vector<TabView> tabs;
     std::vector<TabGroupView> tab_groups;
@@ -621,6 +623,7 @@ struct WindowViewModel {
     bool settings_open_folders = false;
     bool settings_take_over_win_e = false;
     bool settings_take_over_this_pc = false;
+    bool settings_explorer_takeover = false;
     bool settings_system_pending = false;
     std::wstring settings_system_status;
     bool settings_blank_click_go_back = false;
@@ -630,6 +633,7 @@ struct WindowViewModel {
     bool settings_change_tracking = false;
     int settings_change_days = 3;
     int settings_row_height = 34; // current row-height pref (DIPs) for density radios
+    int settings_text_render = 0; // 0 auto, 1 sharp, 2 smooth
     int settings_tray_icon = 48;  // current tray-deck icon pref (DIPs) for size radios
     int settings_language = 0;    // 0 system, 1 zh-CN, 2 en-US
     bool settings_group_on[6] = { true, true, false, false, true, true };
@@ -701,12 +705,14 @@ struct HitTestResult {
         Properties,
         Extract,
         ExtractAll,
+        EmptyRecycle,
         SplitButton,
         DetailsToggle,
         PaneMediumIcons,
         PaneViewButton,
         PaneDetails,
         ToolbarSort,
+        ToolbarGroup,
         ToolbarMore,
         OperationCenter,
         AddressBar,
@@ -783,6 +789,7 @@ struct HitTestResult {
         SettingsEffect,
         SettingsWallpaper,
         SettingsDensity,
+        SettingsTextRender,
         SettingsFolderSort,
         SettingsTrayIcon,
         SettingsLanguage,
@@ -855,6 +862,7 @@ public:
     SIZE BackgroundImageSize(const std::wstring& path);
     void InvalidateTypography();
     void SetIconNotifyWindow(HWND hwnd);
+    void InvalidateShellIcon(const std::wstring& path) { icon_cache_.Invalidate(path); }
     void NotifyPreviewActivate(bool active) { preview_handler_.NotifyAppActivate(active); }
     void NotifyPreviewOwnerMoved() { preview_handler_.Reposition(); }
 
@@ -962,7 +970,7 @@ public:
 
         float DividerX(int index) const {
             float x = left;
-            for (int i = 0; i <= index && i < count - 1; ++i)
+            for (int i = 0; i <= index && i < count; ++i)
                 x += widths[static_cast<size_t>(i)];
             return x;
         }

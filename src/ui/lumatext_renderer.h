@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace pulse::ui {
 
@@ -18,15 +19,23 @@ struct LumaTextStats {
     std::uint64_t surface_cache_misses = 0;
     std::uint64_t surface_cache_evictions = 0;
     std::uint64_t fallback_draws = 0;
+    std::uint64_t end_ellipsis_repairs = 0;
+    std::uint32_t last_ellipsis_prefix_length = 0;
+    std::uint64_t edit_directwrite_draws = 0;
+    std::uint64_t edit_directwrite_hits = 0;
+    std::uint64_t edit_layout_builds = 0;
+    std::uint64_t edit_layout_cache_hits = 0;
+    DWRITE_RENDERING_MODE edit_rendering_mode = DWRITE_RENDERING_MODE_DEFAULT;
 };
 
 class LumaTextRenderer {
 public:
     // Run the EDIT's default mouse handler without letting it paint, then the
-    // caller presents LumaText. Pass the same format used by PaintEdit so
-    // click-to-caret uses LumaText cluster positions, not GDI.
+    // caller presents DirectWrite. Pass the same format used by PaintEdit so
+    // click-to-caret uses the same cluster positions as the displayed text.
     LRESULT CallEditDefaultMouse(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-                                 IDWriteTextFormat* format = nullptr);
+                                   IDWriteTextFormat* format = nullptr);
+    void SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     LumaTextRenderer();
     ~LumaTextRenderer();
     LumaTextRenderer(const LumaTextRenderer&) = delete;
@@ -44,11 +53,19 @@ public:
                  float& width, float* height = nullptr);
     bool PaintEdit(HWND hwnd, HDC hdc, IDWriteTextFormat* format,
                    const D2D1_COLOR_F& foreground, const D2D1_COLOR_F& background);
+    bool PaintEditBitmap(HWND hwnd, IDWriteTextFormat* format,
+                         const D2D1_COLOR_F& foreground, const D2D1_COLOR_F& background,
+                         ID2D1Bitmap1** bitmap);
 
     const LumaTextStats& Stats() const noexcept;
     void RecordFallback() noexcept;
 
 private:
+    void TrackEdit(HWND hwnd);
+    void SyncEditSelection(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+    static LRESULT CALLBACK EditSelectionProc(HWND hwnd, UINT message, WPARAM wparam,
+                                              LPARAM lparam, UINT_PTR id, DWORD_PTR data);
+    std::vector<HWND> tracked_edits_;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

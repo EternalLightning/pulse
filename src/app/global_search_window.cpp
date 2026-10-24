@@ -267,7 +267,7 @@ struct GlobalSearchWindow::Impl {
         const HRGN edit_region = CreateRoundRectRgn(0, 0, Px(edit_width) + 1, Px(35) + 1,
             Px(kEditCornerRadius * 2), Px(kEditCornerRadius * 2));
         if (edit_region && !SetWindowRgn(edit, edit_region, TRUE)) DeleteObject(edit_region);
-        if (compositor.LumaTextEnabled() && edit_format)
+        if (compositor.CustomEditEnabled() && edit_format)
             compositor.PresentLumaEdit(edit, edit_format.Get(), Theme().text, EditBackground());
         ClampSelection(); Invalidate();
     }
@@ -305,8 +305,8 @@ struct GlobalSearchWindow::Impl {
         if (SUCCEEDED(write_factory->CreateEllipsisTrimmingSign(format.Get(), &ellipsis))) format->SetTrimming(&trim, ellipsis.Get());
         brush->SetColor(Color(color));
         ComPtr<IDWriteTextLayout> layout;
-        if (highlight && !query.empty() && SUCCEEDED(write_factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), format.Get(),
-            std::max(0.0f, rect.right - rect.left), std::max(0.0f, rect.bottom - rect.top), &layout))) {
+        if (highlight && !query.empty() && SUCCEEDED(ui::typography::CreateTextLayout(write_factory.Get(), text.data(), static_cast<UINT32>(text.size()), format.Get(),
+            std::max(0.0f, rect.right - rect.left), std::max(0.0f, rect.bottom - rect.top), &layout, scale))) {
             ComPtr<ID2D1SolidColorBrush> accent;
             if (SUCCEEDED(target->CreateSolidColorBrush(Theme().accent, &accent))) {
                 for (size_t start = 0; start + query.size() <= text.size(); ++start) {
@@ -315,7 +315,7 @@ struct GlobalSearchWindow::Impl {
                 }
             }
             target->DrawTextLayout({rect.left, rect.top}, layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        } else target->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format.Get(), rect, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        } else target->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format.Get(), rect, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP, ui::typography::MeasuringMode());
     }
     void DrawLogo() {
         if (logo_target != target.Get()) { logo.Reset(); logo_target = target.Get(); }
@@ -344,7 +344,7 @@ struct GlobalSearchWindow::Impl {
         DWRITE_TEXT_METRICS metrics{};
         if (SUCCEEDED(write_factory->CreateTextFormat(L"Segoe UI", nullptr, bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, l10n::LocaleName(), &format)) &&
-            SUCCEEDED(write_factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), format.Get(), 2000, 40, &layout)))
+            SUCCEEDED(ui::typography::CreateTextLayout(write_factory.Get(), text.data(), static_cast<UINT32>(text.size()), format.Get(), 2000, 40, &layout, scale)))
             layout->GetMetrics(&metrics);
         return std::ceil(metrics.widthIncludingTrailingWhitespace);
     }
@@ -374,7 +374,7 @@ struct GlobalSearchWindow::Impl {
         if (FAILED(ui::typography::CreateTextFormat(compositor.DwriteFactory(),
             {ui::typography::FontRole::Text, 12 * scale}, &format))) return;
         ComPtr<IDWriteTextLayout> layout;
-        if (FAILED(write_factory->CreateTextLayout(current_folder_tip.data(),
+        if (FAILED(ui::typography::CreateTextLayout(write_factory.Get(), current_folder_tip.data(),
             static_cast<UINT32>(current_folder_tip.size()), format.Get(),
             std::max(1.0f, (width - 32) * scale), 10000, &layout))) return;
         DWRITE_TEXT_METRICS metrics{};
@@ -495,6 +495,11 @@ struct GlobalSearchWindow::Impl {
         EndPaint(hwnd, &paint);
     }
     LRESULT Message(UINT message, WPARAM wp, LPARAM lp) {
+        if (message == ui::typography::TextBackendChangedMessage()) {
+            compositor.UpdateTextRenderingParams(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
+            Invalidate();
+            return 0;
+        }
         switch (message) {
         case WM_PAINT: Paint(); return 0;
         case WM_ERASEBKGND: return 1;

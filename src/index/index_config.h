@@ -34,7 +34,7 @@ struct IndexConfig {
     uint32_t version = 1;
     uint64_t generation = 1;
     bool include_fixed_ntfs = true;
-    bool include_removable_ntfs = true;
+    bool include_removable_ntfs = false;
     std::wstring index_path;
     std::unordered_set<std::wstring> excluded_volume_ids;
     std::vector<std::wstring> excluded_paths;
@@ -45,6 +45,8 @@ struct IndexConfig {
 
 std::wstring NormalizeVolumeId(std::wstring id);
 std::vector<VolumeInfo> EnumerateLocalVolumes(const IndexConfig& config);
+// Background search routing only; includes directory mount aliases and volumes without drive letters.
+std::vector<VolumeInfo> EnumerateSearchDeviceMounts(const std::vector<VolumeInfo>& known = {});
 
 std::wstring MachineDataRoot();
 std::wstring MachineIndexRoot();

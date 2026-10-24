@@ -34,12 +34,6 @@ constexpr std::wstring_view kSuccess = L"\xE73E";
 constexpr std::wstring_view kWarning = L"\xE7BA";
 constexpr std::wstring_view kError = L"\xEA39";
 
-bool ContainsHan(std::wstring_view text) noexcept {
-    return std::any_of(text.begin(), text.end(), [](wchar_t c) {
-        return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF);
-    });
-}
-
 float Clamp01(float value) noexcept {
     return std::clamp(value, 0.0f, 1.0f);
 }
@@ -156,7 +150,7 @@ IDWriteTextLayout* GetTextLayout(Compositor* compositor, IDWriteTextFormat* form
     }
 
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(compositor->DwriteFactory()->CreateTextLayout(
+    if (FAILED(typography::CreateTextLayout(compositor->DwriteFactory(),
             text.data(), static_cast<UINT32>(text.size()), format,
             width, height, &layout)) || !layout.get()) return nullptr;
     layout->SetTextAlignment(alignment);
@@ -187,7 +181,7 @@ IDWriteTextLayout* GetWrappedTextLayout(Compositor* compositor, IDWriteTextForma
         return found->second.get();
     }
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(compositor->DwriteFactory()->CreateTextLayout(
+    if (FAILED(typography::CreateTextLayout(compositor->DwriteFactory(),
             text.data(), static_cast<UINT32>(text.size()), format,
             width, 100000.0f, &layout)) || !layout.get()) return nullptr;
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
@@ -503,7 +497,7 @@ void Painter::DrawText(std::wstring_view text, const D2D1_RECT_F& bounds,
     } else if (alignment == HorizontalAlignment::Right) {
         text_alignment = DWRITE_TEXT_ALIGNMENT_TRAILING;
     }
-    if (!high_contrast_ && !ContainsHan(text) && compositor_->DrawLumaText(
+    if (!high_contrast_ && compositor_->DrawLumaText(
             text, format, snapped, color, background, text_alignment)) {
         return;
     }
@@ -553,7 +547,7 @@ void Painter::DrawTextWithBrush(std::wstring_view text, const D2D1_RECT_F& bound
             : DWRITE_TEXT_ALIGNMENT_LEADING;
     ID2D1SolidColorBrush* text_brush = Brush(brush);
     if (DrawLegacyIcon(dc_, compositor_->DwriteFactory(), text, bounds, text_brush, format->GetFontSize())) return;
-    if (!high_contrast_ && !ContainsHan(text) && theme_ && text_brush && compositor_->DrawLumaText(
+    if (!high_contrast_ && theme_ && text_brush && compositor_->DrawLumaText(
             text, format, snapped, text_brush->GetColor(), theme_->bg, text_alignment)) {
         return;
     }
@@ -1421,7 +1415,7 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
         ComPtr<IDWriteTextLayout> glyphLayout;
         IDWriteTextFormat* iconFormat = compositor_->IconFormat();
         const UINT32 length = static_cast<UINT32>(spec.glyph.size());
-        if (iconFormat && SUCCEEDED(compositor_->DwriteFactory()->CreateTextLayout(
+        if (iconFormat && SUCCEEDED(typography::CreateTextLayout(compositor_->DwriteFactory(),
                 spec.glyph.data(), length, iconFormat,
                 icon_bounds.right - icon_bounds.left,
                 icon_bounds.bottom - icon_bounds.top, &glyphLayout)) && glyphLayout.get()) {
@@ -1632,7 +1626,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     } else if (spec.show_count || spec.badge_count > 0) {
         const auto count = std::to_wstring(std::min(spec.badge_count, 99));
         const float count_width = Px(spec.badge_count > 9 ? 22.0f : 14.0f);
-        DrawTextNative(count,
+        DrawText(count,
                  D2D1::RectF(content.right - count_width, content.top, content.right,
                             content.bottom),
                  CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -1642,15 +1636,15 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
         return;
     }
     if (spec.detail.empty()) {
-        DrawTextNative(spec.text, content, NavFormat(), foreground);
+        DrawText(spec.text, content, NavFormat(), foreground);
     } else {
         const float detail_width = MeasureTextWidth(compositor_->DwriteFactory(),
                                                     CaptionFormat(), spec.detail) + Px(8.0f);
-        DrawTextNative(spec.text,
+        DrawText(spec.text,
                  D2D1::RectF(content.left, content.top, content.right - detail_width,
                             content.bottom),
                  NavFormat(), foreground);
-        DrawTextNative(spec.detail,
+        DrawText(spec.detail,
                  D2D1::RectF(content.right - detail_width, content.top, content.right,
                             content.bottom),
                  CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -2281,7 +2275,7 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
                                      : spec.bounds.left + Px(10.0f);
     // Disclosure chevron sits at the trailing edge and mirrors collapsed state.
     const float chevron_slot = Px(14.0f);
-    DrawTextNative(spec.text,
+    DrawText(spec.text,
              D2D1::RectF(text_left, spec.bounds.top,
                         spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.bottom),
              NavFormat(), foreground);
@@ -2325,11 +2319,19 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     const float text_left = content.left + icon_slot + Px(8.0f);
     const float detail_width = MeasureTextWidth(compositor_->DwriteFactory(),
                                                 CaptionFormat(), spec.detail) + Px(6.0f);
-    DrawTextNative(spec.name,
-             D2D1::RectF(text_left, content.top, content.right - detail_width,
-                        content.top + text_row),
-             NavFormat(), foreground);
-    DrawTextNative(spec.detail,
+    const auto name_bounds = typography::SnapVerticalBounds(D2D1::RectF(
+        text_left, content.top, content.right - detail_width, content.top + text_row));
+    const bool luma_name = !high_contrast_ && compositor_->DrawLumaText(
+        spec.name, NavFormat(), name_bounds, foreground, theme_->bg);
+    if (auto* layout = luma_name ? nullptr : GetTextLayout(compositor_, NavFormat(), spec.name,
+            Width(name_bounds), Height(name_bounds), DWRITE_TEXT_ALIGNMENT_LEADING)) {
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        layout->SetTrimming(&trimming, ellipsis_sign_.get());
+        dc_->DrawTextLayout(D2D1::Point2F(name_bounds.left, name_bounds.top), layout,
+            ScratchBrush(foreground), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    DrawText(spec.detail,
              D2D1::RectF(content.right - detail_width, content.top, content.right,
                         content.top + text_row),
              CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
@@ -2693,7 +2695,7 @@ void Painter::DrawInfoBar(const InfoBarSpec& spec) {
         DrawText(spec.title, D2D1::RectF(text_bounds.left, text_bounds.top + Px(10.0f),
                  text_bounds.right, text_bounds.top + Px(30.0f)), BodyFormat(), theme_->text);
         ComPtr<IDWriteTextLayout> layout;
-        if (compositor_ && compositor_->DwriteFactory() && SUCCEEDED(compositor_->DwriteFactory()->CreateTextLayout(
+        if (compositor_ && compositor_->DwriteFactory() && SUCCEEDED(typography::CreateTextLayout(compositor_->DwriteFactory(),
                 spec.message.data(), static_cast<UINT32>(spec.message.size()), CaptionFormat(),
                 Width(text_bounds), Height(text_bounds) - Px(36.0f), &layout))) {
             layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);

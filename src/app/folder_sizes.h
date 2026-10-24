@@ -20,6 +20,7 @@ struct FolderSizeRequest {
     std::wstring path;
     bool automatic = true;
     bool require_counts = false;
+    bool operator==(const FolderSizeRequest&) const = default;
 };
 
 // Window-thread methods only exchange in-memory state. Enumeration, watches and
@@ -33,6 +34,7 @@ public:
     void SetCachePath(std::function<std::wstring()> path);
     void SetIndexEnabled(bool enabled);
     void Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> watch_roots);
+    bool NeedsWorker() const;
     void Calculate(const std::wstring& path);
     FolderSizeValue Get(const std::wstring& path) const;
     void Invalidate(const std::wstring& path);
@@ -41,6 +43,7 @@ public:
 #ifdef PULSE_FOLDER_SIZES_TESTING
     void SetScanHookForTest(std::function<void(const std::wstring&)> hook);
     static unsigned LiveWorkersForTest();
+    unsigned SyncRevisionForTest() const;
 #endif
 private:
     struct Impl;

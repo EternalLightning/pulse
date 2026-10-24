@@ -1,4 +1,4 @@
-﻿#include "string_ids.h"
+#include "string_ids.h"
 
 // UI resources are grouped by language, then feature. Keep IDs and wording stable.
 // Runtime messages stay in runtime_messages.inc: RC and C++ share that source.
@@ -44,6 +44,7 @@ BEGIN
     IDS_CANCEL                                 "取消"
     IDS_APP_DESCRIPTION                        "文件管理器"
     IDS_TOOLBAR_SORT                           "排序"
+    IDS_TOOLBAR_GROUP                          "分组"
     IDS_TOOLBAR_FILTER                         "筛选"
 
     // Settings: appearance and behavior
@@ -62,6 +63,11 @@ BEGIN
     IDS_EFFECT_MICA_ALT                        "Mica Alt"
     IDS_SETTINGS_ROW_HEIGHT                    "列表行高"
     IDS_SETTINGS_ROW_HEIGHT_DESC               "调整文件列表每一行的高度，立即生效"
+    IDS_SETTINGS_TEXT_RENDER                   "文字渲染"
+    IDS_SETTINGS_TEXT_RENDER_DESC              "文字发虚时选“清晰”，笔画对齐像素；立即生效"
+    IDS_TEXT_RENDER_AUTO                       "自动"
+    IDS_TEXT_RENDER_SHARP                      "清晰"
+    IDS_TEXT_RENDER_SMOOTH                     "平滑"
     IDS_DENSITY_COMPACT                        "紧凑（28 像素）"
     IDS_DENSITY_STANDARD                       "标准（34 像素）"
     IDS_DENSITY_COMFORTABLE                    "舒适（40 像素）"
@@ -171,6 +177,10 @@ BEGIN
     IDS_CLOSE_LAST_TAB_WINDOW_DESC             "遵循关闭到托盘设置；有任务运行时将提示退出确认。"
     IDS_SETTINGS_DEFAULT_MANAGER               "默认文件管理器"
     IDS_SETTINGS_DEFAULT_MANAGER_DESC          "使用 Pulse 打开文件夹、磁盘和“此电脑”，并接管 Win+E"
+    IDS_SETTINGS_EXPLORER_TAKEOVER              "接管 Explorer 窗口（实验性）"
+    IDS_SETTINGS_EXPLORER_TAKEOVER_DESC         "将第三方应用新开的单标签文件夹窗口迁入 Pulse，并保留文件选择；按住 Shift 可跳过。"
+    IDS_INDEX_REMOVABLE_EXCLUDED                "不建立索引"
+    IDS_INDEX_DEVICE_UNAVAILABLE                "设备不可用"
     IDS_SETTINGS_SYSTEM_APPLYING               "正在更新系统集成…"
     IDS_SETTINGS_SYSTEM_EXTERNAL_CHANGE        "检测到其他应用的文件关联更改，已保留其设置"
     IDS_SETTINGS_SYSTEM_APPLY_SAVE_ERROR       "系统设置已更新，但无法保存偏好设置"
@@ -1125,6 +1135,7 @@ BEGIN
     IDS_CANCEL                                 "Cancel"
     IDS_APP_DESCRIPTION                        "File Manager"
     IDS_TOOLBAR_SORT                           "Sort"
+    IDS_TOOLBAR_GROUP                          "Group"
     IDS_TOOLBAR_FILTER                         "Filter"
 
     // Settings: appearance and behavior
@@ -1143,6 +1154,11 @@ BEGIN
     IDS_EFFECT_MICA_ALT                        "Mica Alt"
     IDS_SETTINGS_ROW_HEIGHT                    "List row height"
     IDS_SETTINGS_ROW_HEIGHT_DESC               "Changes file-list density immediately"
+    IDS_SETTINGS_TEXT_RENDER                   "Text rendering"
+    IDS_SETTINGS_TEXT_RENDER_DESC              "Choose Sharp if text looks blurry; strokes snap to pixels. Applies immediately"
+    IDS_TEXT_RENDER_AUTO                       "Auto"
+    IDS_TEXT_RENDER_SHARP                      "Sharp"
+    IDS_TEXT_RENDER_SMOOTH                     "Smooth"
     IDS_DENSITY_COMPACT                        "Compact (28 pixels)"
     IDS_DENSITY_STANDARD                       "Standard (34 pixels)"
     IDS_DENSITY_COMFORTABLE                    "Comfortable (40 pixels)"
@@ -1252,6 +1268,10 @@ BEGIN
     IDS_CLOSE_LAST_TAB_WINDOW_DESC             "Follows close-to-tray settings and confirms exit when tasks are running."
     IDS_SETTINGS_DEFAULT_MANAGER               "Default file manager"
     IDS_SETTINGS_DEFAULT_MANAGER_DESC          "Use Pulse for folders, drives, This PC and Win+E"
+    IDS_SETTINGS_EXPLORER_TAKEOVER              "Take over Explorer windows (experimental)"
+    IDS_SETTINGS_EXPLORER_TAKEOVER_DESC         "Transfer new single-tab folder windows opened by other apps to Pulse, keeping their selection. Hold Shift to bypass."
+    IDS_INDEX_REMOVABLE_EXCLUDED                "Not indexed"
+    IDS_INDEX_DEVICE_UNAVAILABLE                "Device unavailable"
     IDS_SETTINGS_SYSTEM_APPLYING               "Updating system integration…"
     IDS_SETTINGS_SYSTEM_EXTERNAL_CHANGE        "Another app changed file associations; its settings were preserved"
     IDS_SETTINGS_SYSTEM_APPLY_SAVE_ERROR       "System settings were updated, but preferences could not be saved"

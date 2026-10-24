@@ -101,7 +101,7 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
         MakeBrush(compositor_->Dc(),theme.text_secondary,brTextSecondary_);
         const float text_left=field.left+36*scale_;
         const float text_right=field.right-14*scale_-painter_.MeasureBadgeWidth(search.trailing_keycap);
-        DrawTextEndEllipsis(compositor_->Dc(),compositor_->DwriteFactory(),compositor_->TextFormat(),
+        DrawTextEndEllipsis(compositor_, theme.bg, compositor_->Dc(),compositor_->DwriteFactory(),compositor_->TextFormat(),
             brTextSecondary_.get(),std::wstring(search.placeholder),text_left,field.top,
             std::max(0.0f,text_right-text_left),field.bottom-field.top);
     }

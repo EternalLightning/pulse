@@ -443,7 +443,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     }
     DrawIconText(settings.left + 8.0f * scale_, settings.top, 24.0f * scale_,
         settings.bottom - settings.top, kIconSettings, L"", theme.text_secondary, 0.78f);
-    painter_.DrawTextNative(l10n::Get(l10n::StringId::Settings),
+    painter_.DrawText(l10n::Get(l10n::StringId::Settings),
         D2D1::RectF(settings.left + 42.0f * scale_, settings.top,
             settings.right - 8.0f * scale_, settings.bottom),
         compositor_->TextFormat(), theme.text);
@@ -627,7 +627,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
             else badgeW = 0.0f;
         }
         const float nameInk = std::min(nameW, factory ? MeasureTextWidth(factory, nameFmt, card.name) : nameW);
-        DrawTextEndEllipsis(dc, factory, nameFmt,
+        DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, nameFmt,
             color(card.missing ? theme.text_disabled : nameColor), card.name, tx, ty, nameW, lineName);
         if (badgeW > 0.0f) {
             const float bx = tx + nameInk + 6.0f * scale_;
@@ -636,7 +636,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
             FillRoundedRect(dc, color(vm.dark ? rgba(0xFFAA3C, 0.18f) : rgba(0xD67800, 0.12f)),
                             bx, by, badgeW, bh, 4.0f * scale_);
             ComPtr<IDWriteTextLayout> bl;
-            if (factory && SUCCEEDED(factory->CreateTextLayout(cutLabel.c_str(),
+            if (factory && SUCCEEDED(typography::CreateTextLayout(factory, cutLabel.c_str(),
                     static_cast<UINT32>(cutLabel.size()), folderFmt, badgeW, bh, &bl)) && bl.get()) {
                 bl->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 bl->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -654,12 +654,12 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
                 sub = pulse::format::ByteSize(card.size, true) + L" \xB7 ";
             sub += FormatListType(card.name, card.is_dir);
         }
-        DrawTextEndEllipsis(dc, factory, subFmt, color(subColor), sub, tx, ty, tw, lineSub);
+        DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, subFmt, color(subColor), sub, tx, ty, tw, lineSub);
         ty += lineSub;
         if (!card.folder.empty() && factory) {
             auto measure = [&](const std::wstring& s) { return MeasureTextWidth(factory, folderFmt, s); };
             const auto [head, last] = MiddleEllipsisPath(card.folder, tw, measure);
-            DrawTextEndEllipsis(dc, factory, folderFmt, color(folderColor), head + last,
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, folderFmt, color(folderColor), head + last,
                                 tx, ty, tw, lineDir);
         }
 

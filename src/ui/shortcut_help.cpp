@@ -1,3 +1,4 @@
+#include "typography.h"
 #include "dialog_lifecycle.h"
 #include "shortcut_help.h"
 #include "../common/windows_compat.h"
@@ -49,9 +50,10 @@ void DrawShortcutHelp(Compositor& compositor, bool dark, D2D1_COLOR_F accent,
             bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size*scale, L"", &format);
         if (!format.get()) return;
+        if (compositor.DrawLumaText(value, format.get(), r, color, surface)) return;
         brush->SetColor(color);
         dc->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format.get(), r,
-                      brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                      brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     };
     auto rect = [&](float x, float y, float w, float h) {
         return D2D1::RectF(x, y, x+w*scale, y+h*scale);

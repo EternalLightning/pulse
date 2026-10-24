@@ -81,13 +81,14 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                                 : pulse::l10n::StringId::SettingsAboutDiagnostics;
     MakeBrush(dc, theme.text, brText_);
     const auto& title = l10n::Get(page_title_id);
-    ComPtr<IDWriteTextLayout> title_layout;
-    compositor_->DwriteFactory()->CreateTextLayout(title.c_str(), static_cast<UINT32>(title.size()),
-        compositor_->HeaderFormat(), lay.content.right-lay.content.left-pad*2, 40*scale_, &title_layout);
-    if (title_layout.get()) {
-        title_layout->SetFontSize(26*scale_, {0,static_cast<UINT32>(title.size())});
-        title_layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, {0,static_cast<UINT32>(title.size())});
-        dc->DrawTextLayout(D2D1::Point2F(lay.content.left+pad,origin+pad),title_layout.get(),brText_.get());
+    ComPtr<IDWriteTextFormat> title_format;
+    typography::CreateTextFormat(compositor_->DwriteFactory(),
+        {typography::FontRole::Display, 26*scale_, DWRITE_FONT_WEIGHT_SEMI_BOLD}, &title_format);
+    if (title_format.get()) {
+        title_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        title_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        painter_.DrawText(title, D2D1::RectF(lay.content.left+pad,origin+pad,
+            lay.content.right-pad,origin+pad+40*scale_),title_format.get(),theme.text);
     }
     if (vm.settings_page == 0 || vm.settings_page == 1)
         painter_.DrawText(l10n::Get(vm.settings_page == 0 ? l10n::StringId::SettingsGeneralIntro : l10n::StringId::SettingsSearchIntro),
@@ -556,7 +557,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             const std::wstring folder = vm.dup_folder.empty()
                 ? pulse::l10n::Get(pulse::l10n::StringId::DupFolderPlaceholder)
                 : vm.dup_folder;
-            DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(), brText_.get(), folder,
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(), brText_.get(), folder,
                          lay.dup_target_summary.left, lay.dup_target_summary.top,
                          lay.dup_target_summary.right - lay.dup_target_summary.left,
                          lay.dup_target_summary.bottom - lay.dup_target_summary.top);
@@ -658,13 +659,13 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 painter_.DrawRadioButton(keep_rc,
                     pulse::l10n::Get(pulse::l10n::StringId::DupKeep), radio);
                 MakeBrush(dc, theme.text, brText_);
-                DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
+                DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                     brText_.get(), file.name, open_rc.left, open_rc.top,
                     open_rc.right - open_rc.left, 18 * scale_);
                 const bool open_hovered = IsHovered(vm, HitTestResult::SettingsDupOpen,
                     static_cast<int>(g), f);
                 MakeBrush(dc, open_hovered ? theme.accent : theme.text_secondary, brTextSecondary_);
-                DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
+                DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                     brTextSecondary_.get(), file.detail, open_rc.left, open_rc.top + 18 * scale_,
                     open_rc.right - open_rc.left, 18 * scale_);
             }

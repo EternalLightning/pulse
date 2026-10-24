@@ -1,5 +1,6 @@
 #pragma once
 #include "content_search_protocol.h"
+#include "persistent_index_policy.h"
 #include "../common/current_user_security.h"
 #include "../common/user_storage.h"
 #include <algorithm>
@@ -94,10 +95,12 @@ inline bool ReadConfigFile(const std::wstring& path, ContentIndexConfig& config)
     ipc::PayloadReader r(bytes.data() + 8, bytes.size() - 8);
     ContentIndexConfig parsed;
     if (!content::GetConfig(r, parsed) || r.remaining() != 0) { SetLastError(ERROR_INVALID_DATA); return false; }
+    FilterKnownRemovableRoots(parsed, WorkerPersistentDeviceFacts);
     config = std::move(parsed);
     return true;
 }
 inline bool WriteConfigFile(const std::wstring& path, const ContentIndexConfig& config) {
+    if (!PersistentRootsAllowed(config, ProbePersistentDevice)) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
     HANDLE mutex = NamedMutex(path, L"config");
     if (!mutex) return false;
     const DWORD wait = WaitForSingleObject(mutex, 1000);
@@ -114,8 +117,9 @@ inline bool LoadOrCreateConfig(const std::wstring& path, const ContentIndexConfi
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) { CloseHandle(mutex); return false; }
     bool ok = ReadConfigFile(path, actual);
     if (!ok && (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND)) {
-        ipc::PayloadWriter w; content::PutConfig(w, fallback); ok = WriteSidecar(ConfigurationPath(path), 1, w.data());
-        if (ok) actual = fallback;
+        actual = fallback;
+        FilterKnownRemovableRoots(actual, ProbePersistentDevice);
+        ipc::PayloadWriter w; content::PutConfig(w, actual); ok = WriteSidecar(ConfigurationPath(path), 1, w.data());
     }
     const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
     ReleaseMutex(mutex); CloseHandle(mutex); SetLastError(error); return ok;

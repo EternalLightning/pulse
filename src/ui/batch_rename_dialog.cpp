@@ -158,7 +158,7 @@ private:
         HWND edit = CreateChildEdit(hwnd_, text.c_str(), number ? ES_NUMBER : 0);
         if (!edit) return nullptr;
         SetWindowTheme(edit, L"", L"");
-        if (!compositor_.LumaTextEnabled())
+        if (!compositor_.CustomEditEnabled())
             SetLayeredWindowAttributes(edit, 0, 255, LWA_ALPHA);
         if (font_) SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
         SetWindowSubclass(edit, EditProc, static_cast<UINT_PTR>(id),

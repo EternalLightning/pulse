@@ -179,6 +179,31 @@ void ShellIconCache::Reset() {
     device_binding_.Bind(nullptr);
 }
 
+void ShellIconCache::Invalidate(const std::wstring& path) {
+    if (path.empty() || !worker_) return;
+    std::wstring root = ShellPath(path);
+    if (root.empty()) return;
+    while (root.size() > 3 && (root.back() == L'\\' || root.back() == L'/')) root.pop_back();
+    const auto matches = [&](const std::wstring& candidate) {
+        const auto key = ShellPath(candidate);
+        if (key.size() < root.size() || CompareStringOrdinal(key.data(), static_cast<int>(root.size()),
+            root.data(), static_cast<int>(root.size()), TRUE) != CSTR_EQUAL) return false;
+        return key.size() == root.size() || root.back() == L'\\' || root.back() == L'/' ||
+            key[root.size()] == L'\\' || key[root.size()] == L'/';
+    };
+    std::lock_guard lock(worker_->mutex);
+    std::erase_if(worker_->exact_index, [&](const auto& item) {
+        if (!matches(item.first)) return false;
+        worker_->RemovePixels(item.second);
+        worker_->last_used.erase(item.first);
+        return true;
+    });
+    std::erase_if(worker_->retry_after, [&](const auto& item) { return matches(item.first); });
+    // Removing the ticket also rejects an in-flight result. A later draw can
+    // enqueue the changed file immediately, without waiting for the old query.
+    std::erase_if(worker_->queued, [&](const auto& item) { return matches(item.first); });
+}
+
 #ifdef PULSE_SHELL_ICONS_TESTING
 void ShellIconCache::SetQueryHookForTest(std::function<int(const std::wstring&)> hook) {
     std::lock_guard lock(g_hook_mutex);
@@ -234,13 +259,16 @@ void ShellIconCache::RequestExact(const std::wstring& path) {
         }
         if (state->queued.contains(path)) return;
         if (state->queue.size() >= kExactIndexLimit) {
-            state->queued.erase(state->queue.front());
+            const auto& old = state->queue.front();
+            if (const auto ticket = state->queued.find(old.path);
+                ticket != state->queued.end() && ticket->second == old.id) state->queued.erase(ticket);
             state->queue.pop();
         }
         if (const auto retry = state->retry_after.find(path);
             retry != state->retry_after.end() && GetTickCount64() < retry->second) return;
-        state->queued.insert(path);
-        state->queue.push(path);
+        const uint64_t id = ++state->next_request_id;
+        state->queued.emplace(path, id);
+        state->queue.push({path, id});
     }
     state->cv.notify_one();
 }
@@ -252,12 +280,16 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
     const std::wstring prefix = std::wstring(1, L'\x1f') + L"GEN:";
     for (;;) {
         std::wstring path;
+        uint64_t request_id = 0;
         {
             std::unique_lock lock(state->mutex);
             state->cv.wait(lock, [&] { return state->stop || !state->queue.empty(); });
             if (state->stop) break;
-            path = std::move(state->queue.front());
+            path = std::move(state->queue.front().path);
+            request_id = state->queue.front().id;
             state->queue.pop();
+            const auto ticket = state->queued.find(path);
+            if (ticket == state->queued.end() || ticket->second != request_id) continue;
         }
         ipc::ShellQueryRequest request;
         request.kind = ipc::ShellQueryKind::Icon;
@@ -291,7 +323,9 @@ DWORD WINAPI ShellIconCache::WorkerMain(void* parameter) {
             // A late Shell result cannot populate a replacement cache or notify
             // a destroyed/reused window. Reset takes this same short gate.
             if (state->stop) break;
-            state->queued.erase(path);
+            const auto ticket = state->queued.find(path);
+            if (ticket == state->queued.end() || ticket->second != request_id) continue;
+            state->queued.erase(ticket);
             if (SUCCEEDED(result.error) && !result.icons.empty()) {
                 const auto evict_exact = [&] {
                     const auto oldest = std::min_element(state->last_used.begin(), state->last_used.end(),

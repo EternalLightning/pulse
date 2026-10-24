@@ -5,8 +5,8 @@
 
 namespace pulse::index {
 
-// The V9 layout is unchanged. V11 rebuilds parent links damaged by old WAL replay.
-inline constexpr uint32_t kIndexSnapshotVersion = 11;
+// V12 stores bucket-local delta varints instead of raw filename posting IDs.
+inline constexpr uint32_t kIndexSnapshotVersion = 12;
 
 struct ShardPaths {
     std::wstring directory;

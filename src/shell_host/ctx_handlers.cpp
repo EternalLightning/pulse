@@ -292,13 +292,36 @@ std::vector<CtxHandlerDesc> EnumerateCtxHandlers(
     return out;
 }
 
+CtxParsedSelection::~CtxParsedSelection() {
+    for (auto pidl : pidls) CoTaskMemFree(pidl);
+}
+
+bool ParseCtxSelection(const std::vector<std::wstring>& paths, bool background,
+                       CtxParsedSelection& out) {
+    if (!out.pidls.empty()) return false;
+    const size_t count = background ? (std::min)(paths.size(), size_t{1}) : paths.size();
+    out.pidls.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        PIDLIST_ABSOLUTE pidl = nullptr;
+        if (SUCCEEDED(SHParseDisplayName(ToParsingPath(paths[i]).c_str(), nullptr,
+                &pidl, 0, nullptr)) && pidl)
+            out.pidls.push_back(pidl);
+    }
+    return !out.pidls.empty();
+}
+
 bool BindCtxSelection(const std::vector<std::wstring>& paths, bool background,
-                      CtxBind& out) {
+                      CtxBind& out, const CtxParsedSelection* parsed) {
     if (paths.empty()) return false;
+    CtxParsedSelection local;
+    if (!parsed) {
+        if (!ParseCtxSelection(paths, background, local)) return false;
+        parsed = &local;
+    }
+    if (parsed->pidls.empty()) return false;
     if (background) {
-        if (FAILED(SHParseDisplayName(ToParsingPath(paths.front()).c_str(), nullptr,
-                                      &out.folder, 0, nullptr)) || !out.folder)
-            return false;
+        out.folder = ILCloneFull(parsed->pidls.front());
+        if (!out.folder) return false;
         IShellItem* folder = nullptr;
         if (SUCCEEDED(SHCreateItemFromIDList(out.folder, IID_PPV_ARGS(&folder))) && folder) {
             folder->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(&out.data));
@@ -308,15 +331,7 @@ bool BindCtxSelection(const std::vector<std::wstring>& paths, bool background,
         return true;
     }
 
-    std::vector<PIDLIST_ABSOLUTE> pidls;
-    pidls.reserve(paths.size());
-    for (const auto& p : paths) {
-        PIDLIST_ABSOLUTE pidl = nullptr;
-        if (SUCCEEDED(SHParseDisplayName(ToParsingPath(p).c_str(), nullptr, &pidl, 0,
-                                         nullptr)) && pidl)
-            pidls.push_back(pidl);
-    }
-    if (pidls.empty()) return false;
+    const auto& pidls = parsed->pidls;
     IShellItemArray* array = nullptr;
     HRESULT hr = SHCreateShellItemArrayFromIDLists(
         static_cast<UINT>(pidls.size()),
@@ -334,7 +349,6 @@ bool BindCtxSelection(const std::vector<std::wstring>& paths, bool background,
         }
         array->Release();
     }
-    for (auto pidl : pidls) CoTaskMemFree(pidl);
     const std::wstring ext = ExtensionOf(paths.front());
     const std::wstring progid = ProgIdForExt(ext);
     if (!progid.empty())

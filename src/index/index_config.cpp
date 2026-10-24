@@ -1,4 +1,5 @@
 #include "index_config.h"
+#include "persistent_index_policy.h"
 #include "index_config_parse.h"
 #include "index_raw_storage_security.h"
 #include "../common/user_storage.h"
@@ -271,6 +272,16 @@ bool ConfigureVolume(const std::wstring& id, bool enabled, std::wstring* error) 
     }
     IndexConfig config;
     if (!LoadMachineConfig(config, error)) return false;
+    if (enabled) {
+        const auto volumes = EnumerateLocalVolumes(config);
+        const auto found = std::find_if(volumes.begin(), volumes.end(), [&](const auto& volume) {
+            return NormalizeVolumeId(volume.id) == normalized;
+        });
+        if (found == volumes.end() || found->kind != VolumeKind::Fixed || !found->supported) {
+            SetError(error, L"该设备不支持持久索引");
+            return false;
+        }
+    }
     if (enabled) config.excluded_volume_ids.erase(normalized);
     else config.excluded_volume_ids.insert(normalized);
     if (!AdvanceMachineConfigGeneration(config)) {
@@ -326,6 +337,42 @@ bool ConfigureExcludePath(const std::wstring& path, bool enabled, std::wstring* 
     return SaveMachineConfig(config, error);
 }
 
+std::vector<VolumeInfo> EnumerateSearchDeviceMounts(const std::vector<VolumeInfo>& known) {
+    std::vector<VolumeInfo> out;
+    wchar_t name[MAX_PATH]{};
+    HANDLE find = FindFirstVolumeW(name, ARRAYSIZE(name));
+    if (find == INVALID_HANDLE_VALUE) return out;
+    struct CloseSearch { HANDLE handle; ~CloseSearch() { FindVolumeClose(handle); } } close{find};
+    do {
+        DWORD needed = 0;
+        GetVolumePathNamesForVolumeNameW(name, nullptr, 0, &needed);
+        if (!needed) continue;
+        std::vector<wchar_t> paths(needed);
+        if (!GetVolumePathNamesForVolumeNameW(name, paths.data(), static_cast<DWORD>(paths.size()), &needed)) continue;
+        if (!paths.front()) continue;
+        const auto id = NormalizeVolumeId(name);
+        const auto existing = std::find_if(known.begin(), known.end(), [&](const auto& volume) {
+            return NormalizeVolumeId(volume.id) == id;
+        });
+        VolumeInfo device;
+        device.id = id;
+        if (existing != known.end()) {
+            device.kind = existing->kind;
+            device.online = existing->online;
+        } else {
+            const auto facts = ProbePersistentDevice(paths.data());
+            device.online = facts.online;
+            device.kind = KnownRemovableDevice(facts) ? VolumeKind::Removable : VolumeKind::Other;
+        }
+        for (const wchar_t* path = paths.data(); *path; path += wcslen(path) + 1) {
+            VolumeInfo volume = device;
+            volume.mount_point = path;
+            out.push_back(std::move(volume));
+        }
+    } while (FindNextVolumeW(find, name, ARRAYSIZE(name)));
+    return out;
+}
+
 std::vector<VolumeInfo> EnumerateLocalVolumes(const IndexConfig& config) {
     std::vector<VolumeInfo> out;
     wchar_t drives[512]{};
@@ -351,9 +398,11 @@ std::vector<VolumeInfo> EnumerateLocalVolumes(const IndexConfig& config) {
             info.label = label;
             info.file_system = fs;
         }
-        info.supported = info.online && IsNtfs(info.file_system);
-        const bool auto_include = info.kind == VolumeKind::Fixed
-            ? config.include_fixed_ntfs : config.include_removable_ntfs;
+        const auto device = ProbePersistentDevice(info.mount_point);
+        if (device.removable_bus) info.kind = VolumeKind::Removable;
+        else if (info.kind == VolumeKind::Fixed && !AllowsPersistentIndex(device)) info.kind = VolumeKind::Other;
+        info.supported = info.online && IsNtfs(info.file_system) && AllowsPersistentIndex(device);
+        const bool auto_include = info.kind == VolumeKind::Fixed && config.include_fixed_ntfs;
         info.enabled = info.supported && auto_include && !config.IsExcluded(info.id);
         info.state = !info.online ? L"离线" : !info.supported ? L"非 NTFS" :
                      info.enabled ? L"等待索引" : L"已排除";

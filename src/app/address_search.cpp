@@ -19,7 +19,7 @@ static std::wstring SearchOrigin(const app::Tab& tab) {
     if (tab.search_origin_valid) return tab.search_origin_path;
     auto history = tab.back_stack;
     while (!history.empty()) {
-        const auto path = history.top();
+        const auto path = history.top().path;
         history.pop();
         std::wstring kind;
         if (!app::ParsePulsePath(path, &kind, nullptr) || kind != L"search") return path;
@@ -184,33 +184,12 @@ void SubmitAddressSearch(AppState& s, bool live) {
     s.addressLiveDue = 0;
     if (s.addressSearchComposing) return;
     if (first == std::wstring::npos) {
-        if ((!live || !IsAddressSearchResults(tab)) && !s.addressSearchContent) return;
-        query.clear();
+        s.addressHistoryDue = 0;
+        s.addressHistoryPath.clear();
+        if (IsAddressSearchResults(tab)) ExitAddressSearch(s);
+        return;
     } else query = query.substr(first, query.find_last_not_of(L" \t\r\n") - first + 1);
     const bool continuing = IsAddressSearchResults(tab);
-    if (s.addressSearchContent && query.empty()) {
-        if (tab->search_session_id) s.contentSearch.Cancel(tab->search_session_id);
-        tab->search_live_generation = 0;
-        if (continuing) {
-            tab->pending_generation = 0;
-            tab->loading = tab->search_content_active = tab->search_awaiting_content = false;
-            tab->search_input_content = true;
-            tab->search_content_empty = true;
-            tab->search_input_text.clear();
-            CancelContentSelection(s,*tab);
-            tab->content_results.reset();
-            tab->content_count_final=false;
-            tab->content_selection_restore.reset();
-            tab->search_entries = std::make_shared<std::vector<fs::DirEntry>>();
-            tab->search_snippets = std::make_shared<std::vector<std::wstring>>();
-            tab->search_total = 0;
-            tab->SetSnapshot(tab->search_entries);
-            tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentIndexNoQuery));
-            tab->banner_message.clear();
-            InvalidateRect(s.hwnd, nullptr, FALSE);
-        }
-        return;
-    }
     const bool restore_empty_content = tab->search_content_empty;
     tab->search_content_empty = false;
     std::wstring previous_query;

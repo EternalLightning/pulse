@@ -1,3 +1,4 @@
+#include "typography.h"
 #include "notification_toast.h"
 #include "animation_clock.h"
 #include <windowsx.h>
@@ -108,7 +109,7 @@ void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float s
     float body_height = 40.0f * scale;
     const float close_inset = top_center_ ? 12.0f : 2.0f;
     ComPtr<IDWriteTextLayout> layout;
-    if (SUCCEEDED(compositor.DwriteFactory()->CreateTextLayout(message_.c_str(),
+    if (SUCCEEDED(typography::CreateTextLayout(compositor.DwriteFactory(), message_.c_str(),
             static_cast<UINT32>(message_.size()), compositor.SmallFormat(),
             width - (82 + close_inset) * scale, 400 * scale, &layout))) {
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);

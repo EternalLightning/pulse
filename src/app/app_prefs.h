@@ -53,6 +53,7 @@ struct AppPrefs {
     int wallpaper_visibility = 50; // 0..100 percent of image visibility
     int wallpaper_blur = 1; // image mode blur: 0 off, 1 light, 2 strong
     int row_height = 34; // file-list row height in DIPs (24..48)
+    int text_render = 0; // 0 auto, 1 sharp, 2 smooth
     int sidebar_width = 224; // DIPs
     bool address_search_current = false;
     bool address_search_content = false;

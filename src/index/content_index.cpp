@@ -527,6 +527,7 @@ struct ContentIndex::Impl {
     }
     ReadResult Read(ReadJob job) {
         ReadResult result; result.job = std::move(job);
+        if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(result.job.root.path))) { result.error = ERROR_NOT_READY; return result; }
         const auto native = LongPath(result.job.path);
         for (int attempt = 0; attempt < 3 && ContinueIndexing(); ++attempt) {
             WIN32_FILE_ATTRIBUTE_DATA before{}, after{};
@@ -562,6 +563,7 @@ struct ContentIndex::Impl {
     }
     void Store(sqlite3* db, ReadResult result) {
         if (!ContinueIndexing()) return;
+        if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(result.job.root.path))) return;
         if (result.error) {
             if (result.error == ERROR_SHARING_VIOLATION || result.error == ERROR_LOCK_VIOLATION || result.error == ERROR_RETRY) {
                 std::lock_guard lock(mu);
@@ -624,6 +626,7 @@ struct ContentIndex::Impl {
     }
     void IndexFile(sqlite3* db, const ContentIndexRoot& root, const std::wstring& p,
                    const WIN32_FIND_DATAW& data, const ContentIndexConfig& c, bool realtime = false) {
+        if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path))) return;
         const uint64_t size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
         const auto dot = p.find_last_of(L'.');
         std::wstring ext = dot == std::wstring::npos ? L"" : p.substr(dot);
@@ -701,6 +704,7 @@ struct ContentIndex::Impl {
         cv.notify_all();
         for (const auto& [file, change] : batch) {
             if (!ContinueIndexing()) break;
+            if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(change.root.path))) continue;
             if (std::none_of(c.roots.begin(), c.roots.end(), [&](const auto& r) { return Same(r.path, change.root.path); })) continue;
             if (!change.old_path.empty()) {
                 Statement move(db, "UPDATE OR REPLACE documents SET path=?2||substr(path,length(?1)+1),root=?3 WHERE path=?1 OR substr(path,1,length(?1)+1)=?1||'\\'");
@@ -790,8 +794,9 @@ struct ContentIndex::Impl {
         };
         for (const auto& root : c.roots) {
             auto cursor = std::make_unique<Cursor>();
-            cursor->available = Accessible(root.path);
-            const DWORD root_error = cursor->available ? 0 : GetLastError();
+            const bool device_allowed = AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path));
+            cursor->available = device_allowed && Accessible(root.path);
+            const DWORD root_error = cursor->available ? 0 : device_allowed ? GetLastError() : ERROR_NOT_READY;
             ContentIndexRootStatus state;
             state.path = root.path; state.available = cursor->available;
             state.indexing = cursor->available; state.error = root_error;
@@ -815,6 +820,9 @@ struct ContentIndex::Impl {
             for (size_t i = 0; i < c.roots.size() && ContinueIndexing(); ++i) {
                 auto& cursor = *cursors[i]; const auto& root = c.roots[i];
                 if (cursor.finished) continue;
+                if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path))) {
+                    cursor.available = false; cursor.complete = false; cursor.finished = true; continue;
+                }
                 unfinished = true;
                 { std::lock_guard lock(mu); status.current_root = root.path; }
                 reader_limit = DiskReaders(root.path);
@@ -861,7 +869,7 @@ struct ContentIndex::Impl {
         while (outstanding) { if (ContinueIndexing()) ProcessChanges(db,c); Drain(db,true); }
         for (size_t i = 0; i < c.roots.size(); ++i) {
             auto& cursor = *cursors[i]; const auto& root = c.roots[i];
-            if (cursor.available && cursor.finished && cursor.complete && ContinueIndexing()) {
+            if (cursor.available && cursor.finished && cursor.complete && ContinueIndexing() && PersistentIndexPathAllowed(root.path)) {
                 Statement prune(db,"DELETE FROM documents WHERE root=?1 AND epoch<>?2"); prune.Text(1,root.path); prune.Int(2,epoch);
                 if (!prune.Done()) Error(ERROR_WRITE_FAULT); else if (sqlite3_changes(db)) Changed();
             }
@@ -950,6 +958,9 @@ struct ContentIndex::Impl {
                 const size_t i = (first_root + turn) % c.roots.size();
                 if(completed[i]) continue;
                 const auto& root=c.roots[i];
+                if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path))) {
+                    scan_errors[i] = ERROR_NOT_READY; completed[i] = true; --remaining; continue;
+                }
                 auto& page = pages[i];
                 if(!loaded[i] && (!source.Request(false,root.path,source_epoch,cursors[i],page) || page.gap || !page.ready)) {
                     std::lock_guard lock(mu);dirty=true;status.indexing=false;status.pending_files=1;
@@ -1004,8 +1015,10 @@ struct ContentIndex::Impl {
         }
         while(outstanding) {if(ContinueIndexing()) ProcessChanges(db,c);Drain(db,true);PublishScanProgress(db);}
         for(size_t i=0;i<c.roots.size();++i) {
-            const auto& root=c.roots[i];const bool available=Accessible(root.path);
-            const DWORD error=available ? scan_errors[i] : GetLastError();
+            const auto& root=c.roots[i];
+            const bool device_allowed = AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path));
+            const bool available = device_allowed && Accessible(root.path);
+            const DWORD error=available ? scan_errors[i] : device_allowed ? GetLastError() : ERROR_NOT_READY;
             Statement state(db,"UPDATE roots SET available=?2 WHERE path=?1");state.Text(1,root.path);state.Int(2,available);state.Done();
             // The source snapshot is authoritative only after the corresponding
             // change stream remains continuous through the last page.
@@ -1035,6 +1048,7 @@ struct ContentIndex::Impl {
             feed_thread=std::thread([this,c]{WatchFeed(c);});return;
         }
         for (const auto& root : c.roots) {
+            if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(root.path))) continue;
             auto watch = std::make_unique<fs::DirWatch>();
             watch->Start(root.path, [this, root, c](bool overflow, std::vector<fs::DirNotifyEvent> events) {
                 std::lock_guard lock(mu);
@@ -1182,6 +1196,7 @@ bool ContentIndex::Configure(const ContentIndexConfig& input) {
     for (auto& root : config.roots) {
         root.path = Canonical(root.path);
         if (root.path.empty() || static_cast<uint32_t>(root.encoding) > 3) return false;
+        if (!PersistentIndexPathAllowed(root.path)) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
     }
     for (size_t i = 0; i < config.roots.size(); ++i) {
         for (size_t j = i + 1; j < config.roots.size();) {
@@ -1272,6 +1287,7 @@ bool ContentIndex::SearchCached(const ContentSearchRequest& r, const std::atomic
             };
             if ((r.roots.empty() && !overlaps(r.root)) || (!r.roots.empty() &&
                 std::none_of(r.roots.begin(), r.roots.end(), overlaps))) continue;
+            if (!PersistentIndexPathAllowed(path)) continue;
             if (Accessible(path)) {
                 live_roots.push_back(std::move(path));
             } else {
@@ -1453,7 +1469,8 @@ bool ContentIndex::SearchTask(const ContentSearchRequest& request, const std::at
     if (request.after_revision || request.mode != ContentSearchMode::Content) return Search(request, cancel, std::move(callback));
     ContentTiming timing(request.generation);
     const auto cache_started = ContentTiming::NowMicros();
-    const auto config = Configuration();
+    auto config = Configuration();
+    FilterPersistentRoots(config, WorkerPersistentDeviceFacts);
     struct Version { uint64_t size = 0, modified = 0; std::wstring value; };
     std::map<std::wstring, Version> versions;
     std::mutex versions_mutex;

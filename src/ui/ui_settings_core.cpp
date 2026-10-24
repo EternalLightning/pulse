@@ -1,3 +1,4 @@
+#include "typography.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
@@ -30,7 +31,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             if(description_height<=21.0f) text(desc,bounds,true);
             else {
                 ComPtr<IDWriteTextLayout> description;
-                if(SUCCEEDED(compositor_->DwriteFactory()->CreateTextLayout(desc.c_str(),static_cast<UINT32>(desc.size()),
+                if(SUCCEEDED(typography::CreateTextLayout(compositor_->DwriteFactory(), desc.c_str(),static_cast<UINT32>(desc.size()),
                     compositor_->SmallFormat(),bounds.right-bounds.left,bounds.bottom-bounds.top,&description))) {
                     description->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
                     description->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
@@ -75,9 +76,9 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             (vm.settings_expanded&(1u<<id)) ? L"\xE70D" : L"\xE76C",L"",theme.text_secondary,0.75f);
     };
     auto section=[&](int i,I title) { text(l10n::Get(title),lay.section[i]); };
-    auto segmented=[&](D2D1_RECT_F card,D2D1_RECT_F const* choices,const I* labels,const int* values,int current,H::Region hit,I title,I desc) {
+    auto segmented=[&](D2D1_RECT_F card,D2D1_RECT_F const* choices,const I* labels,const int* values,int current,H::Region hit,I title,I desc,float description_height=21.0f) {
         const bool stacked=choices[0].left<card.left+100*scale_;
-        label(card,l10n::Get(title),l10n::Get(desc),L"\xE8A4",stacked ? card.right-16*scale_ : choices[0].left-12*scale_);
+        label(card,l10n::Get(title),l10n::Get(desc),L"\xE8A4",stacked ? card.right-16*scale_ : choices[0].left-12*scale_,description_height);
         painter_.DrawSegmentedTrack(D2D1::RectF(choices[0].left,choices[0].top,choices[2].right,choices[2].bottom));
         for(int i=0;i<3;++i) {
             fluent::SegmentedItemSpec item{};item.bounds=choices[i];item.text=l10n::Get(labels[i]);
@@ -178,6 +179,9 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         toggle(lay.startup_row[2],I::SettingsDefaultManager,I::SettingsDefaultManagerDesc,L"\xE8B7",
             vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc,21);
         divider(lay.startup_row[2]);
+        toggle(lay.explorer_takeover_row,I::SettingsExplorerTakeover,I::SettingsExplorerTakeoverDesc,
+            L"\xE8B7",vm.settings_explorer_takeover,24);
+        divider(lay.explorer_takeover_row);
         if(lay.system_status.bottom>lay.system_status.top) {
             const auto r=lay.system_status;
             DrawIconText(r.left+16*scale_,r.top+12*scale_,24*scale_,24*scale_,L"\xE946",L"",theme.text_secondary,0.85f);
@@ -192,6 +196,12 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             l10n::Get(external_modes[std::clamp(vm.settings_external_open_mode,0,2)]),2);
         const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
         segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
+        const I text_render[]={I::TextRenderAuto,I::TextRenderSharp,I::TextRenderSmooth};const int text_render_values[]={0,1,2};
+        const bool text_render_stacked=lay.text_render_row[0].left<lay.text_render_card.left+100*scale_;
+        const float text_render_right=text_render_stacked ? lay.text_render_card.right-16*scale_ : lay.text_render_row[0].left-12*scale_;
+        const float text_render_caption=SettingsCaptionHeight(l10n::Get(I::SettingsTextRenderDesc),
+            text_render_right-lay.text_render_card.left-54*scale_,scale_,&painter_)/scale_;
+        segmented(lay.text_render_card,lay.text_render_row,text_render,text_render_values,vm.settings_text_render,H::SettingsTextRender,I::SettingsTextRender,I::SettingsTextRenderDesc,std::max(22.0f,text_render_caption));divider(lay.text_render_card);
         toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);
         toggle(lay.text_compare_row,I::SettingsTextCompare,I::SettingsTextCompareDesc,L"\xE8A5",vm.settings_text_compare,33);divider(lay.text_compare_row);
         toggle(lay.list_style_row[0],I::ListSmartDate,I::ListSmartDateDesc,L"\xE787",vm.settings_list_smart_date,17);divider(lay.list_style_row[0]);

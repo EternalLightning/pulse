@@ -56,6 +56,7 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
 void SetViewMode(AppState& s, ui::ViewMode mode);
 void ShowViewDropdown(AppState& s, int pane_index);
 void ShowSortDropdown(AppState& s);
+void ShowGroupDropdown(AppState& s);
 void ShowToolbarMore(AppState& s);
 void ShowOmnibar(AppState& s, OmnibarMode mode);
 void ShowAdvancedSearch(AppState& s, bool require_scope = false);

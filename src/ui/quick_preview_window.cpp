@@ -34,7 +34,6 @@ constexpr float kCloseGlyphSize = 16.0f * 0.66f;
 constexpr float kFindBarHeight = 44.0f;
 constexpr float kHudHeight = 28.0f;
 constexpr UINT_PTR kAnimationTimer = 7;
-constexpr UINT_PTR kFindEditCaretTimer = 71;
 constexpr float kMaxDecodedZoom = 4.0f;
 constexpr size_t kFindQueryLimit = 256;
 constexpr wchar_t kSearchGlyph[] = L"\xE721";
@@ -508,9 +507,11 @@ void QuickPreviewWindow::DrawHud(ID2D1DeviceContext* dc, const D2D1_RECT_F& cont
     if (format) {
         format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        dc->DrawTextW(line.data(), static_cast<UINT32>(line.size()), format,
-                      D2D1::RectF(hud.left + pad, hud.top, hud.right - pad, hud.bottom),
-                      text_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        const auto text_rect = D2D1::RectF(hud.left + pad, hud.top, hud.right - pad, hud.bottom);
+        if (!compositor_.DrawLumaText(line, format, text_rect, text_brush->GetColor(),
+                dark_ ? D2D1::ColorF(0x151515) : D2D1::ColorF(0xF7F7F7), DWRITE_TEXT_ALIGNMENT_CENTER))
+            dc->DrawTextW(line.data(), static_cast<UINT32>(line.size()), format,
+                          text_rect, text_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
         format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
@@ -528,7 +529,7 @@ void QuickPreviewWindow::EnsureTextLayout(const std::wstring& text, bool hex, fl
     text_layout_.reset();
     preview_text_format_->SetWordWrapping(
         hex ? DWRITE_WORD_WRAPPING_NO_WRAP : DWRITE_WORD_WRAPPING_WRAP);
-    compositor_.DwriteFactory()->CreateTextLayout(
+    typography::CreateTextLayout(compositor_.DwriteFactory(),
         text.data(), static_cast<UINT32>(text.size()), preview_text_format_.get(),
         (std::max)(1.0f, width), 100000.0f, &text_layout_);
     text_layout_width_ = width;
@@ -595,7 +596,7 @@ void QuickPreviewWindow::OpenFind() {
     SetForegroundWindow(GetAncestor(find_edit_, GA_ROOT));
     SetFocus(find_edit_);
     SendMessageW(find_edit_, EM_SETSEL, 0, -1);
-    if (compositor_.LumaTextEnabled())
+    if (compositor_.CustomEditEnabled())
         PaintFindEditLuma(find_edit_, nullptr);
 }
 
@@ -621,7 +622,7 @@ bool QuickPreviewWindow::EnsureFindEdit() {
     find_edit_ = CreateChildEdit(hwnd_);
     if (!find_edit_) return false;
     SetWindowTheme(find_edit_, L"", L"");
-    if (!compositor_.LumaTextEnabled())
+    if (!compositor_.CustomEditEnabled())
         SetLayeredWindowAttributes(find_edit_, 0, 255, LWA_ALPHA);
     if (find_edit_font_)
         SendMessageW(find_edit_, WM_SETFONT, reinterpret_cast<WPARAM>(find_edit_font_), TRUE);
@@ -663,7 +664,7 @@ void QuickPreviewWindow::LayoutFindEdit() {
     UINT flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
     if (!moved) flags |= SWP_NOMOVE | SWP_NOSIZE | SWP_NOREDRAW;
     SetWindowPos(find_edit_, HWND_TOP, pt.x, y, w, line_h, flags);
-    if (moved && compositor_.LumaTextEnabled())
+    if (moved && compositor_.CustomEditEnabled())
         PaintFindEditLuma(find_edit_, nullptr);
 }
 
@@ -682,41 +683,18 @@ void QuickPreviewWindow::SyncFindFromEdit() {
 }
 
 void QuickPreviewWindow::PaintFindEditLuma(HWND hwnd, HDC hdc) {
-    if (!hwnd || !compositor_.LumaTextEnabled()) return;
-    HideCaret(hwnd);
+    (void)hdc;
     IDWriteTextFormat* format = compositor_.AddressFormat();
     if (!format) format = compositor_.TextFormat();
-    if (format && compositor_.PresentLumaEdit(hwnd, format, FindEditFg(dark_),
-                                              FindEditBg(dark_)))
-        return;
-    if (!hdc) return;
-    RECT rc{};
-    GetClientRect(hwnd, &rc);
-    if (!find_edit_brush_)
-        find_edit_brush_ = CreateSolidBrush(FindEditBgColor(dark_));
-    FillRect(hdc, &rc, find_edit_brush_);
+    PresentChildEdit(compositor_, format, FindEditFg(dark_), FindEditBg(dark_), hwnd);
 }
 
 LRESULT QuickPreviewWindow::ForwardFindEditKeepLuma(HWND hwnd, UINT message,
                                                     WPARAM wparam, LPARAM lparam) {
-    const bool mouse = message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK ||
-        message == WM_LBUTTONUP || message == WM_MOUSEMOVE || message == WM_CAPTURECHANGED;
-    LRESULT result;
-    if (mouse) {
-        result = compositor_.CallLumaEditMouse(
-            hwnd, message, wparam, lparam,
-            compositor_.AddressFormat() ? compositor_.AddressFormat()
-                                        : compositor_.TextFormat());
-        if (message != WM_MOUSEMOVE || GetCapture() == hwnd)
-            PaintFindEditLuma(hwnd, nullptr);
-    } else {
-        SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
-        result = DefSubclassProc(hwnd, message, wparam, lparam);
-        HideCaret(hwnd);
-        PaintFindEditLuma(hwnd, nullptr);
-        SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
-    }
-    return result;
+    IDWriteTextFormat* format = compositor_.AddressFormat();
+    if (!format) format = compositor_.TextFormat();
+    return DefPresentedChildEditProc(compositor_, format, FindEditFg(dark_),
+        FindEditBg(dark_), hwnd, message, wparam, lparam);
 }
 
 void QuickPreviewWindow::DestroyFindEdit() {
@@ -741,11 +719,6 @@ LRESULT CALLBACK QuickPreviewWindow::FindEditProc(HWND hwnd, UINT message, WPARA
                                                   LPARAM lparam, UINT_PTR, DWORD_PTR data) {
     auto* self = reinterpret_cast<QuickPreviewWindow*>(data);
     if (!self) return DefSubclassProc(hwnd, message, wparam, lparam);
-    const bool luma = self->compositor_.LumaTextEnabled();
-    if (luma && (message == WM_PRINT || message == WM_PRINTCLIENT ||
-                 message == WM_NCPAINT)) {
-        return 0;
-    }
     switch (message) {
     case WM_GETDLGCODE:
         return DLGC_WANTCHARS | DLGC_WANTARROWS | DLGC_WANTALLKEYS;
@@ -759,83 +732,26 @@ LRESULT CALLBACK QuickPreviewWindow::FindEditProc(HWND hwnd, UINT message, WPARA
             self->FindNext(shift ? -1 : 1);
             return 0;
         }
-        if (luma) return self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam);
         break;
     case WM_CHAR:
         if (wparam == VK_RETURN || wparam == VK_ESCAPE) return 0;
-        if (luma) {
-            const LRESULT result = self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam);
-            self->SyncFindFromEdit();
-            return result;
-        }
-        {
-            const LRESULT result = DefSubclassProc(hwnd, message, wparam, lparam);
-            self->SyncFindFromEdit();
-            return result;
-        }
-    case WM_PASTE:
-    case WM_CUT: {
-        const LRESULT result = luma
-            ? self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam)
-            : DefSubclassProc(hwnd, message, wparam, lparam);
+        break;
+    }
+    IDWriteTextFormat* format = self->compositor_.AddressFormat();
+    if (!format) format = self->compositor_.TextFormat();
+    LRESULT result = 0;
+    if (!HandleChildEditMessage(self->compositor_, format, FindEditFg(self->dark_),
+        FindEditBg(self->dark_), ChildEditBackBrush(self->find_edit_brush_),
+        hwnd, message, wparam, lparam, result))
+        result = self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam);
+    if (message == WM_CHAR || message == WM_KEYDOWN || message == WM_SETTEXT ||
+        message == EM_REPLACESEL || message == WM_PASTE || message == WM_CUT ||
+        message == WM_CLEAR || message == WM_UNDO || message == EM_UNDO ||
+        message == WM_IME_COMPOSITION || message == WM_IME_ENDCOMPOSITION || message == WM_IME_CHAR)
         self->SyncFindFromEdit();
-        return result;
-    }
-    case WM_LBUTTONDOWN:
-    case WM_LBUTTONDBLCLK:
-    case WM_LBUTTONUP:
-    case WM_RBUTTONDOWN:
-    case WM_MBUTTONDOWN:
-    case WM_MOUSEMOVE:
-    case WM_CAPTURECHANGED:
-        if (luma) return self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam);
-        break;
-    case WM_IME_COMPOSITION:
-    case WM_IME_CHAR:
-        if (luma) {
-            const LRESULT result = self->ForwardFindEditKeepLuma(hwnd, message, wparam, lparam);
-            self->SyncFindFromEdit();
-            return result;
-        }
-        break;
-    case WM_PAINT: {
-        if (!luma) break;
-        self->PaintFindEditLuma(hwnd, nullptr);
-        return 0;
-    }
-    case WM_SETFOCUS: {
-        const LRESULT result = DefSubclassProc(hwnd, message, wparam, lparam);
-        if (luma) {
-            HideCaret(hwnd);
-            SetTimer(hwnd, kFindEditCaretTimer, GetCaretBlinkTime(), nullptr);
-            self->PaintFindEditLuma(hwnd, nullptr);
-        }
-        if (self->hwnd_) InvalidateRect(self->hwnd_, nullptr, FALSE);
-        return result;
-    }
-    case WM_KILLFOCUS:
-        KillTimer(hwnd, kFindEditCaretTimer);
-        if (self->hwnd_) InvalidateRect(self->hwnd_, nullptr, FALSE);
-        break;
-    case WM_TIMER:
-        if (wparam == kFindEditCaretTimer) {
-            if (GetCapture() != hwnd)
-                self->PaintFindEditLuma(hwnd, nullptr);
-            return 0;
-        }
-        break;
-    case WM_ERASEBKGND:
-        if (luma) return 1;
-        {
-            RECT rc{};
-            GetClientRect(hwnd, &rc);
-            if (!self->find_edit_brush_)
-                self->find_edit_brush_ = CreateSolidBrush(FindEditBgColor(self->dark_));
-            FillRect(reinterpret_cast<HDC>(wparam), &rc, self->find_edit_brush_);
-            return 1;
-        }
-    }
-    return DefSubclassProc(hwnd, message, wparam, lparam);
+    if ((message == WM_SETFOCUS || message == WM_KILLFOCUS) && self->hwnd_)
+        InvalidateRect(self->hwnd_, nullptr, FALSE);
+    return result;
 }
 
 void QuickPreviewWindow::ShowContextMenu(POINT screen) {
@@ -1071,7 +987,7 @@ void QuickPreviewWindow::DrawChromeButtons(ID2D1DeviceContext* dc,
             dc->DrawTextW(spec.glyph, 1,
                       close_format_.get() ? close_format_.get() : compositor_.IconFormat(), rect,
                       text_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP,
-                      DWRITE_MEASURING_MODE_NATURAL);
+                      typography::MeasuringMode());
     }
 }
 
@@ -1113,9 +1029,10 @@ void QuickPreviewWindow::Render() {
     const D2D1_RECT_F title_rect = typography::SnapVerticalBounds(D2D1::RectF(
         pad, 8.0f * scale_,
         width - (kCloseButtonWidth + kChromeButtonWidth * 3.0f + 8.0f) * scale_, header));
-    dc->DrawTextW(item_.name.data(), static_cast<UINT32>(item_.name.size()),
-                  compositor_.HeaderFormat(), title_rect, text_brush.get(),
-                  D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+    if (!compositor_.DrawLumaText(item_.name, compositor_.HeaderFormat(), title_rect, foreground, background))
+        dc->DrawTextW(item_.name.data(), static_cast<UINT32>(item_.name.size()),
+                      compositor_.HeaderFormat(), title_rect, text_brush.get(),
+                      D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     const D2D1_RECT_F close_rect = D2D1::RectF(width - kCloseButtonWidth * scale_, 0,
                                                width, header);
     if (close_hover_) {
@@ -1133,7 +1050,7 @@ void QuickPreviewWindow::Render() {
         dc->DrawTextW(close_glyph, 1,
                   close_format_.get() ? close_format_.get() : compositor_.IconFormat(), close_rect,
                   close_brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP,
-                  DWRITE_MEASURING_MODE_NATURAL);
+                  typography::MeasuringMode());
     DrawChromeButtons(dc, text_brush.get());
     const D2D1_RECT_F full_content = D2D1::RectF(0, header, width, height);
     const bool offline = OfflinePlaceholder();
@@ -1245,10 +1162,11 @@ void QuickPreviewWindow::Render() {
             if (small_format) {
                 small_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
                 small_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-                dc->DrawTextW(footer.data(), static_cast<UINT32>(footer.size()), small_format,
-                    D2D1::RectF(pad, content.bottom - 18.0f * scale_, width - pad,
-                                content.bottom - 2.0f * scale_),
-                    secondary_brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                const auto footer_rect = D2D1::RectF(pad, content.bottom - 18.0f * scale_, width - pad,
+                                                    content.bottom - 2.0f * scale_);
+                if (!compositor_.DrawLumaText(footer, small_format, footer_rect, secondary, background))
+                    dc->DrawTextW(footer.data(), static_cast<UINT32>(footer.size()), small_format,
+                        footer_rect, secondary_brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
             }
         } else if (result == PreviewDrawResult::Pending && !animation_started_) {
             native_kind_ = NativeKind::None;
@@ -1268,8 +1186,10 @@ void QuickPreviewWindow::Render() {
     if (!status.empty()) {
         compositor_.TextFormat()->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         compositor_.TextFormat()->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        dc->DrawTextW(status.data(), static_cast<UINT32>(status.size()),
-            compositor_.TextFormat(), ContentRect(), secondary_brush.get());
+        if (!compositor_.DrawLumaText(status, compositor_.TextFormat(), ContentRect(), secondary, background,
+                DWRITE_TEXT_ALIGNMENT_CENTER))
+            dc->DrawTextW(status.data(), static_cast<UINT32>(status.size()),
+                compositor_.TextFormat(), ContentRect(), secondary_brush.get(), D2D1_DRAW_TEXT_OPTIONS_NONE, typography::MeasuringMode());
         compositor_.TextFormat()->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         compositor_.TextFormat()->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
@@ -1297,6 +1217,12 @@ LRESULT CALLBACK QuickPreviewWindow::WndProc(HWND hwnd, UINT message,
 }
 
 LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == typography::TextBackendChangedMessage()) {
+        compositor_.RecreateTextFormats(scale_);
+        RecreateFormats();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
     switch (message) {
     case WM_NCCALCSIZE:
         if (wparam) return 0;

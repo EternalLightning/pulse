@@ -9,6 +9,7 @@
 #endif
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <wrl/client.h>
 #include <cstdio>
 #include <iterator>
@@ -120,6 +121,69 @@ HRESULT MultiProperties(const std::vector<std::wstring>& paths, ComPtr<IDataObje
     return FAILED(result) ? result : SHMultiFileProperties(data.Get(), 0);
 }
 
+std::wstring OpenWorkingDirectory(const std::wstring& path) {
+    const auto plain = pulse::path::StripExtendedPathPrefix(path);
+    if (plain.empty()) return {};
+    const auto colon = plain.find(L':');
+    if (colon != std::wstring::npos && colon != 1) return {};
+    if (plain.starts_with(L"\\\\")) {
+        const auto share = plain.find(L'\\', 2);
+        if (share == std::wstring::npos || share + 1 == plain.size()) return {};
+    }
+    const DWORD capacity = GetFullPathNameW(plain.c_str(), 0, nullptr, nullptr);
+    if (!capacity) return {};
+    std::wstring full(capacity, L'\0');
+    const DWORD length = GetFullPathNameW(plain.c_str(), capacity, full.data(), nullptr);
+    if (!length || length >= capacity) return {};
+    full.resize(length);
+    if (PathIsRootW(full.c_str()) || plain.back() == L'\\' || plain.back() == L'/') return full;
+    const auto separator = full.find_last_of(L"\\/");
+    if (separator == std::wstring::npos) return {};
+    return full.substr(0, separator == 2 && full[1] == L':' ? 3 : separator);
+}
+
+bool SplitLaunchCommand(const std::wstring& command, std::wstring& executable,
+                         std::wstring& parameters) {
+    const auto begin = command.find_first_not_of(L" \t");
+    if (begin == std::wstring::npos) return false;
+    size_t end = begin;
+    if (command[begin] == L'"') {
+        end = command.find(L'"', begin + 1);
+        if (end == std::wstring::npos || end == begin + 1 ||
+            (end + 1 < command.size() && command[end + 1] != L' ' && command[end + 1] != L'\t'))
+            return false;
+        executable = command.substr(begin + 1, end - begin - 1);
+        ++end;
+    } else {
+        // CreateProcess also accepts unquoted executable paths containing spaces.
+        // Resolve candidates in its prefix order before separating the raw arguments.
+        for (;;) {
+            end = command.find_first_of(L" \t", end);
+            const auto candidate = command.substr(begin, end == std::wstring::npos
+                ? std::wstring::npos : end - begin);
+            const DWORD capacity = SearchPathW(nullptr, candidate.c_str(), L".exe", 0, nullptr, nullptr);
+            if (capacity) {
+                std::wstring resolved(capacity, L'\0');
+                const DWORD length = SearchPathW(nullptr, candidate.c_str(), L".exe", capacity,
+                    resolved.data(), nullptr);
+                if (length && length < capacity) {
+                    resolved.resize(length);
+                    const DWORD attributes = GetFileAttributesW(resolved.c_str());
+                    if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                        executable = std::move(resolved);
+                        break;
+                    }
+                }
+            }
+            if (end == std::wstring::npos) return false;
+            ++end;
+        }
+    }
+    const auto arguments = end == std::wstring::npos ? end : command.find_first_not_of(L" \t", end);
+    parameters = arguments == std::wstring::npos ? L"" : command.substr(arguments);
+    return true;
+}
+
 HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IDataObject>& data,
                 std::vector<std::unique_ptr<ops::ImageOpenSession>>& image_sessions,
                 std::wstring& detail, const std::function<bool()>& heartbeat) {
@@ -130,13 +194,27 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
         // Registry verbs carry a complete expanded command line, including its own quoting.
         std::wstring command = request.executable;
         if (!request.parameters.empty()) command += L" " + request.parameters;
+        auto process_command = command;
         STARTUPINFOW startup{sizeof(startup)};
         startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
         startup.wShowWindow = SW_SHOWNORMAL;
         PROCESS_INFORMATION child{};
-        if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
-                0, nullptr, request.directory.empty() ? nullptr : request.directory.c_str(), &startup, &child))
-            return ShellError();
+        if (!CreateProcessW(nullptr, process_command.data(), nullptr, nullptr, FALSE,
+                0, nullptr, request.directory.empty() ? nullptr : request.directory.c_str(), &startup, &child)) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_ELEVATION_REQUIRED) return HRESULT_FROM_WIN32(error ? error : ERROR_GEN_FAILURE);
+            std::wstring executable, parameters;
+            if (!SplitLaunchCommand(command, executable, parameters)) return HRESULT_FROM_WIN32(error);
+            SHELLEXECUTEINFOW elevated{sizeof(elevated)};
+            elevated.hwnd = owner;
+            elevated.lpVerb = L"runas";
+            elevated.lpFile = executable.c_str();
+            elevated.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
+            elevated.lpDirectory = request.directory.empty() ? nullptr : request.directory.c_str();
+            elevated.nShow = SW_SHOWNORMAL;
+            elevated.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+            return ShellExecuteExW(&elevated) ? S_OK : ShellError();
+        }
         CloseHandle(child.hThread);
         CloseHandle(child.hProcess);
         return S_OK;
@@ -158,6 +236,8 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
     const auto paths = request.executable.empty() ? request.paths : std::vector<std::wstring>{request.executable};
     for (const auto& original : paths) {
         const auto path = pulse::path::StripExtendedPathPrefix(original);
+        const auto directory = request.directory.empty() && request.executable.empty()
+            ? OpenWorkingDirectory(path) : request.directory;
         if (_wcsicmp(request.verb.c_str(), L"openas") == 0 || _wcsicmp(request.verb.c_str(), L"openwith") == 0) {
             SHELLEXECUTEINFOW chooser{sizeof(chooser)};
             chooser.hwnd = owner;
@@ -185,7 +265,7 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
             : request.verb.empty() ? L"open" : request.verb.c_str();
         shell.lpFile = path.c_str();
         shell.lpParameters = request.parameters.empty() ? nullptr : request.parameters.c_str();
-        shell.lpDirectory = request.directory.empty() ? nullptr : request.directory.c_str();
+        shell.lpDirectory = directory.empty() ? nullptr : directory.c_str();
         shell.nShow = SW_SHOWNORMAL;
         shell.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | (properties ? SEE_MASK_INVOKEIDLIST : 0);
         if (!ShellExecuteExW(&shell)) return ShellError();

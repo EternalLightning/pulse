@@ -300,6 +300,12 @@ void SettingsController::FolderSort(int index) {
         SaveAndApply(SettingsEffect::FolderSort);
 }
 
+void SettingsController::TextRendering(int index) {
+    static constexpr int values[] = {0, 1, 2};
+    if (prefs_ && SelectValue(index, values, prefs_->text_render))
+        SaveAndApply(SettingsEffect::TextRendering);
+}
+
 void SettingsController::TrayIconSize(int index) {
     static constexpr int values[] = {40, 48, 56};
     if (prefs_ && SelectValue(index, values, prefs_->tray_icon_size))
@@ -435,7 +441,7 @@ void SettingsController::ToggleUi(int index) {
     } else if (index == 2) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
-    } else if (index == 21) {
+    } else if (index == 21 || index == 24) {
         if (ui_.toggle_system_integration) ui_.toggle_system_integration(index);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;
@@ -514,7 +520,7 @@ void SettingsController::ToggleVolume(int position) {
     const auto volumes = index_->Volumes();
     if (position < 0 || position >= static_cast<int>(volumes.size())) return;
     const auto& volume = volumes[static_cast<size_t>(position)];
-    if (!index_->ServiceMode() || !volume.supported) return;
+    if (!index_->ServiceMode() || !volume.supported || volume.kind != index::VolumeKind::Fixed) return;
     ClearError();
     SettingsTask task{SettingsTaskKind::Volume};
     task.key = volume.id;

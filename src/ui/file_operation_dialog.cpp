@@ -109,15 +109,16 @@ TransferChrome MakeTransferChrome(float scale, float width, float height,
 
 void DrawEllipsizedText(Compositor& compositor, IDWriteTextFormat* format,
                         const D2D1_RECT_F& bounds, const std::wstring& text,
-                        const D2D1_COLOR_F& color) {
+                        const D2D1_COLOR_F& color, const D2D1_COLOR_F& background) {
     auto* factory = compositor.DwriteFactory();
     auto* dc = compositor.Dc();
     if (!factory || !dc || !format || text.empty()) return;
     const float width = bounds.right - bounds.left;
     const float height = bounds.bottom - bounds.top;
     if (width <= 0.0f || height <= 0.0f) return;
+    if (compositor.DrawLumaText(text, format, bounds, color, background)) return;
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()),
+    if (FAILED(typography::CreateTextLayout(factory, text.c_str(), static_cast<UINT32>(text.size()),
                                          format, width, height, &layout))) return;
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -142,7 +143,7 @@ void DrawWrappedText(Compositor& compositor, IDWriteTextFormat* format,
     const float height = bounds.bottom - bounds.top;
     if (width <= 0.0f || height <= 0.0f) return;
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory->CreateTextLayout(text.c_str(), static_cast<UINT32>(text.size()),
+    if (FAILED(typography::CreateTextLayout(factory, text.c_str(), static_cast<UINT32>(text.size()),
                                          format, width, height, &layout)) || !layout.get())
         return;
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
@@ -859,7 +860,7 @@ private:
             if (row.is_path) {
                 const auto fitted = FitPathMiddle(row.text, text_bounds.right - text_bounds.left,
                     [&](const std::wstring& value) { return typography::MeasureLine(&compositor_, compositor_.TextFormat(), value); });
-                DrawEllipsizedText(compositor_, compositor_.TextFormat(), text_bounds, fitted, theme.text);
+                DrawEllipsizedText(compositor_, compositor_.TextFormat(), text_bounds, fitted, theme.text, theme.bg);
             } else DrawWrappedText(compositor_, compositor_.TextFormat(), text_bounds, row.text, theme.text);
             content_y += height + ScaleDip(scale_, 4.0f);
         }
@@ -1355,7 +1356,7 @@ void FileOperationWindow::Render(bool present) {
             return typography::MeasureLine(&compositor_, compositor_.SmallFormat(), value);
         });
     DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
-        Rect(scale_, kPadX, 48, dip_w - kPadX * 2.0f - 72.0f, 18), subtitle, theme.text);
+        Rect(scale_, kPadX, 48, dip_w - kPadX * 2.0f - 72.0f, 18), subtitle, theme.text, theme.bg);
     wchar_t percent[32];
     if (status_.percent < 0.0f) percent[0] = 0;
     else swprintf_s(percent, L"%.0f%%", std::clamp(status_.percent, 0.0f, 100.0f));
@@ -1407,7 +1408,7 @@ void FileOperationWindow::Render(bool present) {
         completion_reveal_.opacity), nullptr);
     DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
         Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f - badge_w - 12.0f, 20),
-        file_line, theme.text);
+        file_line, theme.text, theme.bg);
     painter_.DrawBadge({ Rect(scale_, dip_w - kPadX - badge_w, 70, badge_w, 18),
                          badge_text, badge_kind });
     if (fading_completion) compositor_.Dc()->PopLayer();

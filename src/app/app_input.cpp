@@ -50,6 +50,28 @@ namespace pulse {
 namespace {
 bool internal_file_drag = false;
 
+void ShowPinnedNetworkMenu(AppState& s, const std::wstring& path, POINT point) {
+    if (!EnsureMenu(s)) return;
+    ui::FluentMenuItem open;
+    open.command = 1;
+    open.text = l10n::Get(l10n::StringId::Open);
+    open.glyph = L"\xE8B7";
+    ui::FluentMenuItem remove;
+    remove.command = 2;
+    remove.text = l10n::Get(l10n::StringId::Unpin);
+    remove.glyph = L"\xE77A";
+    const int command = s.menu->TrackPopup(point, {open, remove});
+    if (command == 1) NavigateTo(s, path);
+    else if (command == 2) {
+        const int index = s.places.FindNetwork(path);
+        if (index >= 0) {
+            s.places.networks.erase(s.places.networks.begin() + index);
+            s.places.Save();
+            InvalidateRect(s.hwnd, nullptr, FALSE);
+        }
+    }
+}
+
 void SaveResizedColumns(AppState& s) {
     if (!s.columnResizing) return;
     const auto* pane = PaneAtSlot(s, s.columnResizePane);
@@ -476,7 +498,7 @@ void StartDragOut(AppState& s) {
     s.clickCollapseIndex = -1;
     CancelScrollAnimation(s); // DoDragDrop's modal loop coexists with on-demand render
     internal_file_drag = true;
-    DWORD effect = ui::DoFileDragDrop(paths, DROPEFFECT_COPY | DROPEFFECT_MOVE,
+    DWORD effect = ui::DoFileDragDrop(paths, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK,
         [&s] { return s.springEntered; }); // Esc = 退回 when spring-entered
     internal_file_drag = false;
     s.springEntered = false;
@@ -932,18 +954,24 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 app::Pane* resizePane = PaneAtSlot(*s, s->columnResizePane);
                 app::Tab* resizeTab = resizePane ? resizePane->ActiveTab() : nullptr;
                 if (resizeTab) {
-                    std::wstring kind;
-                    app::ParsePulsePath(resizeTab->current_path, &kind, nullptr);
-                    if (kind == L"search") {
+                    const auto& paneVm = s->columnResizePane >= 0 &&
+                        s->columnResizePane < static_cast<int>(resizeVm.pane_slots.size())
+                        ? resizeVm.pane_slots[static_cast<size_t>(s->columnResizePane)].pane : resizeVm.pane;
+                    const auto columns = s->renderer.DetailsColumns(paneRect, paneVm);
+                    const float cursor = s->columnResizeIndex == columns.count - 1
+                        ? columns.right + static_cast<float>(mx) - s->columnResizeLastX
+                        : static_cast<float>(mx);
+                    s->columnResizeLastX = static_cast<float>(mx);
+                    if (paneVm.is_search) {
                         resizeTab->search_column_dividers =
                             s->renderer.ResizeSearchColumnDivider(
                                 paneRect, resizeTab->search_column_dividers,
-                                s->columnResizeIndex, static_cast<float>(mx));
+                                s->columnResizeIndex, cursor);
                     } else {
                         resizeTab->details_column_dividers =
                             s->renderer.ResizeDetailsColumnDivider(
                                 paneRect, resizeTab->details_column_dividers,
-                                s->columnResizeIndex, static_cast<float>(mx));
+                                s->columnResizeIndex, cursor);
                     }
                 }
                 s->hoverRegion = static_cast<int>(ui::HitTestResult::ColumnDivider);
@@ -2053,6 +2081,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
             s->columnResizeIndex = hit.index;
             s->columnResizePane = hit.pane_index;
+            s->columnResizeLastX = static_cast<float>(mx);
             s->hoverRegion = static_cast<int>(ui::HitTestResult::ColumnDivider);
             s->hoverControlIndex = hit.index;
             s->hoverPaneIndex = hit.pane_index;
@@ -2237,6 +2266,9 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SettingsDensity) {
             s->settings.RowHeight(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (hit.region == ui::HitTestResult::SettingsTextRender) {
+            s->settings.TextRendering(hit.index);
+            InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsFolderSort) {
             s->settings.FolderSort(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2390,6 +2422,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ExtractArchiveSelection(*s, false);
         } else if (hit.region == ui::HitTestResult::ExtractAll) {
             ExtractArchiveSelection(*s, true);
+        } else if (hit.region == ui::HitTestResult::EmptyRecycle) {
+            EmptyRecycleBin(*s);
         } else if (hit.region == ui::HitTestResult::Properties) {
             DispatchMenuCommand(*s, app::CmdProperties);
         } else if (hit.region == ui::HitTestResult::TrayRelease) {
@@ -2566,6 +2600,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             SetViewMode(*s, ui::ViewMode::Details);
         } else if (hit.region == ui::HitTestResult::ToolbarSort) {
             ShowSortDropdown(*s);
+        } else if (hit.region == ui::HitTestResult::ToolbarGroup) {
+            ShowGroupDropdown(*s);
         } else if (hit.region == ui::HitTestResult::ToolbarMore) {
             ShowToolbarMore(*s);
         } else if (hit.region == ui::HitTestResult::OperationCenter) {
@@ -2824,12 +2860,11 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
             app::Tab* fitTab = fitPane ? fitPane->ActiveTab() : nullptr;
             if (fitTab && hit.pane_index >= 0 &&
                 hit.pane_index < static_cast<int>(vm.pane_slots.size())) {
-                std::wstring kind;
-                app::ParsePulsePath(fitTab->current_path, &kind, nullptr);
                 s->renderer.AutoFitColumnDivider(
                     s->renderer.PaneBodyBounds(vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane,
                         vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect),
-                    fitTab->details_column_dividers, kind == L"search",
+                    fitTab->details_column_dividers,
+                    vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane.is_search,
                     fitTab->search_column_dividers, hit.index);
                 RememberFolderColumns(*s, *fitTab);
                 if (s->renameIndex >= 0) LayoutRenameOverlay(*s);
@@ -3427,6 +3462,11 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             ShowRecyclePlaceMenu(*s, sp);
             shown = true;
         } else if (hit.region == ui::HitTestResult::SidebarItem) {
+            if (s->places.FindNetwork(hit.path) >= 0) {
+                ShowPinnedNetworkMenu(*s, hit.path, sp);
+                s->context_menu.Close();
+                return 0;
+            }
             if (s->places.IsQuickAccessPinned(hit.path)) {
                 ShowQuickAccessMenu(*s, hit.path, sp);
                 s->context_menu.Close();

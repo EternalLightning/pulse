@@ -229,7 +229,7 @@ void NetworkAgentClient::SearchAsync(const Query& query, uint32_t id, HWND reply
                     if (!state->cancelled && current != session_requests_.end() && current->second == id)
                         PublishResult(id, std::move(result));
                 };
-                try { ScanLiveFilenames(query, FilenameSearchRoot(query.path_prefix), state->cancelled, publish); }
+                try { ScanLiveFilenames(query, TransientFilenameSearchRoot(query.path_prefix), state->cancelled, publish); }
                 catch (...) { publish(SearchFailure(ERROR_NOT_ENOUGH_MEMORY)); }
                 state->done = true;
             });
@@ -366,6 +366,7 @@ std::vector<NetworkRootInfo> NetworkAgentClient::Roots() const {
 }
 
 bool NetworkAgentClient::UsesLiveSearch(const std::wstring& path) const {
+    if (CachedTransientLocalSearch(path)) return true;
     const auto root = FilenameSearchRoot(path);
     if (root.empty()) return false;
     std::lock_guard lock(mu_);

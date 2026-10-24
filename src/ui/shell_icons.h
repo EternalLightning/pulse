@@ -38,6 +38,8 @@ public:
     // Cancels the isolated query without joining. Old CPU-only state remains owned
     // until actual thread exit; device resources are never used by that worker.
     void Reset();
+    // Invalidate a changed path and its descendants without blocking on Shell.
+    void Invalidate(const std::wstring& path);
 
     struct ResourceUsage {
         uint32_t live = 0;
@@ -65,8 +67,10 @@ private:
         void RemovePixels(int index);
         std::mutex mutex;
         std::condition_variable cv;
-        std::queue<std::wstring> queue;
-        std::unordered_set<std::wstring> queued;
+        struct Request { std::wstring path; uint64_t id; };
+        std::queue<Request> queue;
+        std::unordered_map<std::wstring, uint64_t> queued;
+        uint64_t next_request_id = 0;
         std::unordered_map<std::wstring, int> generic_index;
         std::unordered_map<std::wstring, int> exact_index;
         std::unordered_map<std::wstring, ULONGLONG> retry_after;

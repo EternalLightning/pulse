@@ -125,7 +125,7 @@ bool LoadContentIndexConfig(const std::wstring& path, ContentIndexConfig& output
     if (ok) { ok = NormalizeConfig(config); if (!ok) error = ERROR_INVALID_DATA; }
     if (db) { sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr); sqlite3_close(db); }
     SetLastError(ok ? ERROR_SUCCESS : error);
-    if (ok) output = std::move(config);
+    if (ok) { FilterKnownRemovableRoots(config, ProbePersistentDevice); output = std::move(config); }
     return ok;
 }
 bool LoadContentIndexConfig(ContentIndexConfig& output) {

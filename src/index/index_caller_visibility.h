@@ -17,6 +17,11 @@ public:
     explicit CallerVisibility(HANDLE token, DWORD budget_ms = 2000, bool directory_snapshot = false)
         : token_(token), deadline_(GetTickCount64() + budget_ms), directory_snapshot_(directory_snapshot) {}
     bool Incomplete() const { return incomplete_; }
+    bool StopRequested() {
+        if (GetTickCount64() < deadline_) return false;
+        incomplete_ = true;
+        return true;
+    }
     bool ValidateDirectories() {
         // A cached parent is an authorization snapshot, not a timeless allow.
         // Revalidate all snapshots before publishing total/page/aggregate; a
@@ -39,7 +44,7 @@ public:
         if (!token_ || path.size() < 3 || path.size() > 32767 || path[1] != L':' || path[2] != L'\\' ||
             !((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) ||
             path.find(L'\0') != std::wstring::npos || path.find(L':', 2) != std::wstring::npos) return false;
-        if (GetTickCount64() >= deadline_) { incomplete_ = true; return false; }
+        if (StopRequested()) return false;
         size_t start = 3;
         if (!Access(path.substr(0, 3), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, true)) return false;
         while (start < path.size()) {
@@ -80,7 +85,7 @@ private:
         LocalFree(security); return true;
     }
     bool Access(const std::wstring& path, DWORD desired, bool directory) {
-        if (GetTickCount64() >= deadline_) { incomplete_ = true; return false; }
+        if (StopRequested()) return false;
         Descriptor descriptor;
         auto cached = directories_.find(path);
         if (cached != directories_.end()) {

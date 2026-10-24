@@ -189,8 +189,9 @@ void WorkerPool::Stop() {
         state->directories.clear();
     }
     state->cv.notify_all();
-    for (auto& thread : state->threads)
-        if (thread.joinable()) CancelSynchronousIo(thread.native_handle());
+    // Cancellation can itself block inside a filesystem driver. Workers own
+    // their state and retain their budget until they return, so shutdown only
+    // revokes publication and waits for the bounded grace period below.
     {
         std::unique_lock lock(g_worker_budget_mutex);
         g_worker_budget_changed.wait_for(lock, std::chrono::milliseconds(100), [&] { return state->live == 0; });

@@ -550,7 +550,7 @@ void ClearTextWidthCache() {
         }
         if (text.empty()) return 0.0f;
         if (!compositor || !compositor->DwriteFactory()) return 36 * scale;
-        if (FAILED(compositor->DwriteFactory()->CreateTextLayout(text.c_str(),
+        if (FAILED(typography::CreateTextLayout(compositor->DwriteFactory(), text.c_str(),
             static_cast<UINT32>(text.size()), compositor->SmallFormat(),
             std::max(1.0f, width - 32 * scale), 10000 * scale, &layout))) return 36 * scale;
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
@@ -1320,21 +1320,24 @@ std::wstring FolderOf(const std::wstring& path) {
 }
 
 // Single-line text with end ellipsis (character granularity) when too wide.
-void DrawTextEndEllipsis(ID2D1DeviceContext* dc, IDWriteFactory2* factory,
+void DrawTextEndEllipsis(Compositor* compositor, const D2D1_COLOR_F& background,
+    ID2D1DeviceContext* dc, IDWriteFactory2* factory,
     IDWriteTextFormat* fmt, ID2D1SolidColorBrush* br, const std::wstring& text,
     float x, float y, float w, float h) {
     if (!dc || !fmt || text.empty() || w <= 1.0f || h <= 0.0f) return;
     const D2D1_RECT_F rc = D2D1::RectF(x, y, x + w, y + h);
+    if (compositor && br && compositor->DrawLumaText(
+            text, fmt, rc, br->GetColor(), background, fmt->GetTextAlignment())) return;
     if (!factory || MeasureTextWidth(factory, fmt, text) <= w) {
         dc->DrawText(text.c_str(), (UINT32)text.size(), fmt, &rc, br,
-                     D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
         return;
     }
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt,
+    if (FAILED(typography::CreateTextLayout(factory, text.c_str(), (UINT32)text.size(), fmt,
                                          w, h, &layout)) || !layout.get()) {
         dc->DrawText(text.c_str(), (UINT32)text.size(), fmt, &rc, br,
-                     D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
         return;
     }
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -1346,27 +1349,32 @@ void DrawTextEndEllipsis(ID2D1DeviceContext* dc, IDWriteFactory2* factory,
     dc->DrawTextLayout(D2D1::Point2F(x, y), layout.get(), br, D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
-void DrawTabTitle(ID2D1DeviceContext* dc, IDWriteFactory2* factory,
+void DrawTabTitle(Compositor* compositor, const D2D1_COLOR_F& background,
+                         ID2D1DeviceContext* dc, IDWriteFactory2* factory,
                          IDWriteTextFormat* fmt, ID2D1SolidColorBrush* br,
                          const std::wstring& text, float x, float y, float w, float h,
                          float scale) {
     if (!dc || !fmt || text.empty() || w <= 1.0f || h <= 1.0f) return;
     const D2D1_RECT_F rc = D2D1::RectF(x, y, x + w, y + h);
-    const float fullW = MeasureTextWidth(factory, fmt, text);
+    const float fullW = MeasureLayoutText(compositor, factory, fmt, text);
     if (fullW <= w) {
+        if (compositor && br && compositor->DrawLumaText(
+                text, fmt, rc, br->GetColor(), background, fmt->GetTextAlignment())) return;
         dc->DrawText(text.c_str(), (UINT32)text.size(), fmt, &rc, br,
-                     D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
         return;
     }
 
     auto draw_ellipsis = [&](const std::wstring& s, float left, float width) {
         if (!factory || width <= 1.0f) return;
+        const D2D1_RECT_F clip = D2D1::RectF(left, y, left + width, y + h);
+        if (compositor && br && compositor->DrawLumaText(
+                s, fmt, clip, br->GetColor(), background, fmt->GetTextAlignment())) return;
         ComPtr<IDWriteTextLayout> layout;
-        if (FAILED(factory->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt,
+        if (FAILED(typography::CreateTextLayout(factory, s.c_str(), (UINT32)s.size(), fmt,
                                              width, h, &layout)) || !layout.get()) {
-            const D2D1_RECT_F clip = D2D1::RectF(left, y, left + width, y + h);
             dc->DrawText(s.c_str(), (UINT32)s.size(), fmt, &clip, br,
-                         D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                         D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
             return;
         }
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -1388,12 +1396,14 @@ void DrawTabTitle(ID2D1DeviceContext* dc, IDWriteFactory2* factory,
         ext = text.substr(dot);
         stem = text.substr(0, dot);
     }
-    const float extW = MeasureTextWidth(factory, fmt, ext);
+    const float extW = MeasureLayoutText(compositor, factory, fmt, ext);
     if (!ext.empty() && extW + 20.0f * scale < w) {
         draw_ellipsis(stem, x, w - extW);
         const D2D1_RECT_F ext_rc = D2D1::RectF(x + w - extW, y, x + w, y + h);
-        dc->DrawText(ext.c_str(), (UINT32)ext.size(), fmt, &ext_rc, br,
-                     D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+        if (!compositor || !br || !compositor->DrawLumaText(
+                ext, fmt, ext_rc, br->GetColor(), background, fmt->GetTextAlignment()))
+            dc->DrawText(ext.c_str(), (UINT32)ext.size(), fmt, &ext_rc, br,
+                         D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
         return;
     }
     draw_ellipsis(text, x, w);
@@ -1454,6 +1464,8 @@ struct SettingsLayout {
     D2D1_RECT_F density_card{};
     D2D1_RECT_F list_style_row[3]{};
     D2D1_RECT_F density_row[3]{};
+    D2D1_RECT_F text_render_card{};
+    D2D1_RECT_F text_render_row[3]{};
     D2D1_RECT_F folder_sort_card{};
     D2D1_RECT_F folder_sort_row[3]{};
     D2D1_RECT_F tray_icon_card{};
@@ -1471,6 +1483,7 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_blur_card{};
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};
+    D2D1_RECT_F explorer_takeover_row{};
     D2D1_RECT_F startup_tray_row{}, last_tab_row{};
     D2D1_RECT_F system_status{};
     D2D1_RECT_F new_tab_row{};
@@ -2115,7 +2128,7 @@ void DrawChangeBadge(Compositor* compositor, fluent::Painter&, const ChangeBadge
     auto text = rc; text.left += 23 * scale;
     if (badge.has_deleted) text.right -= 14 * scale;
     brush->SetColor(color);
-    DrawTextEndEllipsis(dc, compositor->DwriteFactory(), compositor->SmallFormat(), brush.get(),
+    DrawTextEndEllipsis(compositor, theme.bg, dc, compositor->DwriteFactory(), compositor->SmallFormat(), brush.get(),
         badge.label, text.left, text.top, std::max(0.0f, text.right - text.left), text.bottom - text.top);
     if (badge.has_deleted) {
         brush->SetColor(badge.status == 2 ? theme.text_secondary : D2D1::ColorF(0xC58A38));

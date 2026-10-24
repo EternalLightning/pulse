@@ -280,7 +280,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                     details_text_layout_.reset();
                     details_layout_text_ = previewText;
                     details_layout_scale_ = s;
-                    compositor_->DwriteFactory()->CreateTextLayout(previewText.data(),
+                    typography::CreateTextLayout(compositor_->DwriteFactory(), previewText.data(),
                         static_cast<UINT32>(previewText.size()), preview_mono_format_.get(),
                         std::max(1.0f, clipRc.right - clipRc.left), 1000000.0f, &details_text_layout_);
                 }
@@ -384,7 +384,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     dc->DrawLine(D2D1::Point2F(cx, cy + direction * 2 * s),
         D2D1::Point2F(cx + 4 * s, cy - direction * 2 * s), brText_.get(), 1.4f * s);
     if (d.preview_only) {
-        DrawTextEndEllipsis(dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
+        DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
             brText_.get(), d.name, footer.caption.left, footer.caption.top,
             footer.caption.right - footer.caption.left, footer.caption.bottom - footer.caption.top);
     }
@@ -489,9 +489,13 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
             // mutated; narrow cells ellipsize (hover tooltip keeps full text).
             const float textW = rc.right - rc.left - 4.0f * s;
             const float textH = rc.bottom - rc.top - 28.0f * s;
+            const auto label_bounds = D2D1::RectF(rc.left + 2.0f * s, rc.top + 26.0f * s,
+                rc.left + 2.0f * s + textW, rc.top + 26.0f * s + textH);
+            if (compositor_->DrawLumaText(label, fmt, label_bounds, fg, theme.bg,
+                    DWRITE_TEXT_ALIGNMENT_CENTER)) return;
             ComPtr<IDWriteTextLayout> tl;
             if (compositor_->DwriteFactory() &&
-                SUCCEEDED(compositor_->DwriteFactory()->CreateTextLayout(
+                SUCCEEDED(typography::CreateTextLayout(compositor_->DwriteFactory(),
                     label, static_cast<UINT32>(wcslen(label)), fmt,
                     textW, textH, &tl)) && tl.get()) {
                 tl->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);

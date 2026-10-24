@@ -5,7 +5,6 @@
 #include "tab_shortcuts.h"
 #include "drive_label_rename.h"
 #include "../ui/address_search_layout.h"
-#include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
 #include "../ui/file_operation_dialog.h"
@@ -64,15 +63,6 @@ LRESULT CALLBACK FilterEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                        UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData);
 void EnsureEditVisuals(AppState& s);
 
-static bool EraseHostedEditBackground(HWND hwnd, WPARAM wParam, AppState* s) {
-    if (!s) return false;
-    EnsureEditVisuals(*s);
-    RECT rc{};
-    GetClientRect(hwnd, &rc);
-    FillRect(reinterpret_cast<HDC>(wParam), &rc, s->editBrush);
-    return true;
-}
-
 void PlaceHostedEdit(HWND hwnd, HWND owner, const D2D1_RECT_F& cell, float scale,
                             int left_margin_dip, int right_margin_dip) {
     POINT pt{ static_cast<int>(std::lround(cell.left)),
@@ -96,8 +86,7 @@ void PlaceHostedEdit(HWND hwnd, HWND owner, const D2D1_RECT_F& cell, float scale
     const int left = std::max(0, static_cast<int>(std::lround(static_cast<float>(left_margin_dip) * scale)));
     const int right = std::max(0, static_cast<int>(std::lround(static_cast<float>(right_margin_dip) * scale)));
     const LPARAM margins=MAKELPARAM(left,right);
-    // Layout runs after every parent frame. Reapplying identical margins enters
-    // the LumaText redraw guard, briefly hiding the redirected edit surface.
+    // Reapplying native margins each parent frame can redraw and scroll the edit.
     if (SendMessageW(hwnd,EM_GETMARGINS,0,0)!=margins)
         SendMessageW(hwnd,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,margins);
     SetWindowPos(hwnd, HWND_TOP, pt.x, y, w, lineH, SWP_NOACTIVATE);
@@ -105,13 +94,11 @@ void PlaceHostedEdit(HWND hwnd, HWND owner, const D2D1_RECT_F& cell, float scale
 
 HWND CreateHostedEdit(AppState& s, SUBCLASSPROC proc) {
     EnsureEditVisuals(s);
-    HWND hwnd = ui::CreateChildEdit(s.hwnd);
+    HWND hwnd = ui::CreateRedirectedChildEdit(s.hwnd);
     if (!hwnd) return nullptr;
     SetWindowTheme(hwnd, L"", L"");
-    // All hosted editors use redirected surfaces: uploaded
-    // layered bitmaps can disappear under the main composition surface.
-    // Their procedures suppress native drawing and present LumaText to the DC.
-    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    // Redirected child surfaces remain visible under the parent composition.
+    // Native EDIT owns editing and IME; custom painting owns the final bitmap.
     SendMessageW(hwnd, WM_SETFONT, (WPARAM)s.editFont, TRUE);
     SetWindowSubclass(hwnd, proc, 1, reinterpret_cast<DWORD_PTR>(&s));
     return hwnd;
@@ -134,18 +121,7 @@ void LayoutAddressEditor(AppState& s) {
 }
 
 void EnsureEditVisuals(AppState& s) {
-    if (!s.editFont) {
-        const int height = -std::max(1, static_cast<int>(std::lround(14.0f * s.scale)));
-        const wchar_t* family = ui::typography::PreferredTextFamily();
-        s.editFont = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE, family);
-        if (!s.editFont) {
-            s.editFont = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        }
-    }
+    if (!s.editFont) s.editFont = ui::typography::CreateEditFont(s.scale);
     if (!s.editBrush) {
         s.editBrush = CreateSolidBrush(s.darkMode ? RGB(30, 30, 30) : RGB(255, 255, 255));
     }
@@ -521,13 +497,11 @@ void HideTagRenameOverlay(AppState& s, bool commit) {
 
 
 D2D1_COLOR_F HostedEditForeground(const AppState& s) {
-    return s.darkMode ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
-                      : D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f);
+    return ui::ChildEditColor(ui::ChildEditTextColor(s.darkMode));
 }
 
 D2D1_COLOR_F HostedEditBackground(const AppState& s) {
-    return s.darkMode ? D2D1::ColorF(30.0f / 255.0f, 30.0f / 255.0f, 30.0f / 255.0f)
-                      : D2D1::ColorF(1.0f, 1.0f, 1.0f);
+    return ui::ChildEditColor(ui::ChildEditBackColor(s.darkMode));
 }
 
 IDWriteTextFormat* HostedEditFormat(AppState& s, HWND hwnd) {
@@ -537,18 +511,13 @@ IDWriteTextFormat* HostedEditFormat(AppState& s, HWND hwnd) {
 
 bool HandleHostedEditMessage(AppState& s, HWND hwnd, UINT msg, WPARAM wParam,
                                     LPARAM lParam, LRESULT& result) {
-    if ((msg == WM_KEYDOWN || msg == WM_CHAR) &&
-        app::IsTabShortcut(static_cast<UINT>(wParam),
-                           (GetKeyState(VK_CONTROL) & 0x8000) != 0,
-                           (GetKeyState(VK_SHIFT) & 0x8000) != 0,
-                           (GetKeyState(VK_MENU) & 0x8000) != 0)) {
-        if (msg == WM_KEYDOWN) HandleKeyDown(&s, s.hwnd, msg, wParam, lParam);
+    if (HandleHostedEditShortcut(s, msg, wParam, lParam)) {
         result = 0;
         return true;
     }
     EnsureEditVisuals(s);
     return ui::HandleChildEditMessage(s.compositor, HostedEditFormat(s, hwnd),
-        HostedEditForeground(s), HostedEditBackground(s), s.editBrush,
+        HostedEditForeground(s), HostedEditBackground(s), ui::ChildEditBackBrush(s.editBrush),
         hwnd, msg, wParam, lParam, result);
 }
 
@@ -556,6 +525,17 @@ static LRESULT DefPresentedHostedEditProc(AppState* s, HWND hwnd, UINT msg, WPAR
     if (!s) return DefSubclassProc(hwnd, msg, wParam, lParam);
     return ui::DefPresentedChildEditProc(s->compositor, HostedEditFormat(*s, hwnd),
         HostedEditForeground(*s), HostedEditBackground(*s), hwnd, msg, wParam, lParam);
+}
+bool HandleHostedEditShortcut(AppState& s, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if ((msg == WM_KEYDOWN || msg == WM_CHAR) &&
+        app::IsTabShortcut(static_cast<UINT>(wParam),
+                           (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+                           (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+                           (GetKeyState(VK_MENU) & 0x8000) != 0)) {
+        if (msg == WM_KEYDOWN) HandleKeyDown(&s, s.hwnd, msg, wParam, lParam);
+        return true;
+    }
+    return false;
 }
 LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                         UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData) {
@@ -614,9 +594,6 @@ LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         if (s->addressSearching && reinterpret_cast<HWND>(wParam) == s->hwnd) break;
         if (!s->addressIgnoreKillFocus) HideAddressEditor(*s, false);
         break;
-    case WM_ERASEBKGND: {
-        return EraseHostedEditBackground(hwnd, wParam, s) ? 1 : 0;
-    }
     }
     return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
 }
@@ -634,18 +611,15 @@ LRESULT CALLBACK FilterEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         break;
     case WM_CHAR:
-        if (wParam != VK_RETURN && wParam != VK_ESCAPE) {
+        if (wParam == VK_RETURN || wParam == VK_ESCAPE) return 0;
+        {
             LRESULT lr = DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
             SyncFilterEditor(*s);
             return lr;
         }
-        break;
     case WM_KILLFOCUS:
         if (!s->filterIgnoreKillFocus) HideFilterEditor(*s, true);
         break;
-    case WM_ERASEBKGND: {
-        return EraseHostedEditBackground(hwnd, wParam, s) ? 1 : 0;
-    }
     }
     return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
 }
@@ -673,9 +647,6 @@ LRESULT CALLBACK RenameEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_KILLFOCUS:
         if (!s->renameIgnoreKillFocus) HideRenameOverlay(*s, true);
         break;
-    case WM_ERASEBKGND: {
-        return EraseHostedEditBackground(hwnd, wParam, s) ? 1 : 0;
-    }
     }
     return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
 }
@@ -699,9 +670,6 @@ LRESULT CALLBACK TagRenameEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     case WM_KILLFOCUS:
         if (!s->tagRenameIgnoreKillFocus) HideTagRenameOverlay(*s, true);
         break;
-    case WM_ERASEBKGND: {
-        return EraseHostedEditBackground(hwnd, wParam, s) ? 1 : 0;
-    }
     }
     return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
 }

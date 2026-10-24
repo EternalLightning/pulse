@@ -160,7 +160,7 @@ void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneVi
 
     MakeBrush(dc, theme.text_secondary, brTextSecondary_);
     const std::wstring title = column.title.empty() ? LeafName(column.path) : column.title;
-    DrawTextEndEllipsis(dc, factory, compositor_->SmallFormat(), brTextSecondary_.get(), title,
+    DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, compositor_->SmallFormat(), brTextSecondary_.get(), title,
                         rc.left + pad + 6.0f * scale_, rc.top, rc.right - rc.left - 2.0f * pad - 12.0f * scale_,
                         caption);
 
@@ -170,7 +170,7 @@ void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneVi
         if (column.error) note = l10n::Get(l10n::StringId::CannotOpen);
         else if (!column.loading && column.snapshot) note = l10n::Get(l10n::StringId::FolderEmpty);
         if (!note.empty()) {
-            DrawTextEndEllipsis(dc, factory, compositor_->SmallFormat(), brTextSecondary_.get(), note,
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, compositor_->SmallFormat(), brTextSecondary_.get(), note,
                                 rc.left + pad + 6.0f * scale_, list_top,
                                 rc.right - rc.left - 2.0f * pad - 12.0f * scale_, row_height_);
         }
@@ -233,7 +233,7 @@ void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneVi
         MakeBrush(dc, dim ? WithAlpha(theme.text, theme.text.a * 0.55f) : theme.text, brText_);
         const float tx = ix + icon + 8.0f * scale_;
         const float chevron_w = entry.is_dir ? 18.0f * scale_ : 0.0f;
-        DrawTextEndEllipsis(dc, factory, compositor_->FileNameFormat(), brText_.get(), entry.name,
+        DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, compositor_->FileNameFormat(), brText_.get(), entry.name,
                             tx, top, std::max(0.0f, cell.right - tx - chevron_w - 4.0f * scale_),
                             row_height_);
         if (entry.is_dir) {

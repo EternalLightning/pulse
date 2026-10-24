@@ -483,6 +483,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_open_folders = s.appPrefs.open_folders_in_pulse;
             vm.settings_take_over_win_e = s.appPrefs.take_over_win_e;
             vm.settings_take_over_this_pc = s.appPrefs.take_over_this_pc;
+            vm.settings_explorer_takeover = s.appPrefs.experimental_explorer_takeover;
             vm.settings_system_pending = s.systemIntegration.pending();
             vm.settings_system_status = vm.settings_system_pending
                 ? l10n::Get(l10n::StringId::SettingsSystemApplying) : s.systemIntegration.error();
@@ -497,6 +498,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_change_tracking = s.appPrefs.change_tracking_enabled;
             vm.settings_change_days = s.appPrefs.change_tracking_days;
             vm.settings_row_height = s.appPrefs.row_height;
+            vm.settings_text_render = s.appPrefs.text_render;
             vm.settings_tray_icon = s.appPrefs.tray_icon_size;
             vm.settings_language = s.appPrefs.language == L"zh-CN" ? 1
                 : s.appPrefs.language == L"en-US" ? 2 : 0;
@@ -544,12 +546,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_index_excluded_paths = s.index.ExcludedPaths();
             vm.settings_network_roots.clear();
             auto index_volumes = s.index.Volumes();
-            if (s.shot.active && vm.settings_page == 1 && index_volumes.empty()) {
-                index::IndexConfig defaults;
-                index_volumes = index::EnumerateLocalVolumes(defaults);
-                if (!vm.settings_index_installed) vm.settings_index_service = true;
-                vm.settings_index_path = L"C:\\ProgramData\\Pulse\\Index";
-            }
             for (const auto& volume : index_volumes) {
                 ui::IndexVolumeRowView row;
                 row.id = volume.id;
@@ -561,19 +557,22 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 row.detail = volume.file_system.empty() ? L"NTFS" : volume.file_system;
                 row.detail += L" · " + l10n::Get(volume.kind == index::VolumeKind::Removable
                     ? l10n::StringId::RemovableDisk : l10n::StringId::FixedDisk);
-                if (volume.indexed_items) {
+                const bool policy_excluded = volume.kind != index::VolumeKind::Fixed;
+                if (volume.indexed_items && volume.enabled && !policy_excluded) {
                     wchar_t count[64]{};
                     swprintf_s(count, l10n::Get(l10n::StringId::ItemsCountFormat).c_str(),
                                static_cast<int>(volume.indexed_items));
                     row.detail += L" · ";
                     row.detail += count;
                 }
-                row.state = volume.state;
-                row.badge_kind = app::IndexVolumeBadgeKind(volume);
-                row.checked = volume.enabled;
-                row.enabled = vm.settings_index_service && volume.supported;
+                row.state = volume.kind == index::VolumeKind::Removable
+                    ? l10n::Get(l10n::StringId::IndexRemovableExcluded) : volume.kind == index::VolumeKind::Other
+                    ? l10n::Get(l10n::StringId::IndexDeviceUnavailable) : volume.state;
+                row.badge_kind = policy_excluded ? ui::fluent::BadgeKind::Neutral : app::IndexVolumeBadgeKind(volume);
+                row.checked = volume.enabled && !policy_excluded;
+                row.enabled = vm.settings_index_service && volume.supported && !policy_excluded;
                 row.pending = s.settings.VolumePending(volume.id);
-                row.progress = volume.progress;
+                row.progress = policy_excluded ? 0 : volume.progress;
                 vm.settings_index_volumes.push_back(std::move(row));
             }
             const auto network_roots = s.networkIndex.Roots();
@@ -1969,6 +1968,11 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.wallpaper_blur = s.appPrefs.wallpaper_blur;
     vm.safe_mode = s.safeMode;
     vm.archive_view = ActiveTab(s) && IsArchiveView(ActiveTab(s)->current_path);
+    const auto* group_tab = ActiveTab(s);
+    vm.can_group = group_tab && !group_tab->current_path.empty() &&
+        !fs::IsVirtualPath(group_tab->current_path) && !vm.archive_view;
+    vm.can_empty_recycle = vm.pane.is_recycle && !vm.pane.loading &&
+        (!s.recycle_info.valid || s.recycle_info.items > 0);
     return vm;
 }
 
@@ -2096,12 +2100,14 @@ std::wstring TooltipForHover(AppState& s) {
     case R::Paste: return text(I::PasteShortcut);
     case R::Rename: return text(I::RenameShortcut);
     case R::Delete: return text(I::DeleteShortcut);
+    case R::EmptyRecycle: return text(I::EmptyRecycleBin);
     case R::Properties: return text(I::Properties);
     case R::SplitButton: return text(I::SplitLayout);
     case R::DetailsToggle: return text(s.showDetailsPanel ? I::CollapseDetails : I::ExpandDetails);
     case R::PaneMediumIcons: return text(I::MediumIcons);
     case R::PaneDetails: return text(I::ViewDetails);
     case R::ToolbarSort: return text(I::SortBy);
+    case R::ToolbarGroup: return text(I::GroupBy);
     case R::ToolbarMore: return text(I::More);
     case R::OperationCenter: return text(I::OperationCenter);
     case R::PaneColumnLayout: return text(I::ColumnLayout);

@@ -14,4 +14,13 @@ bool StartupCommandNeedsRepair(const std::wstring& command, const std::wstring& 
         legacy.data(), static_cast<int>(legacy.size()), TRUE) == CSTR_EQUAL;
 }
 
+void CaptureStartupOpenPath(std::wstring_view argument, bool last, std::wstring& path) {
+    if (argument.empty() || argument.front() == L'-' ||
+        CompareStringOrdinal(argument.data(), static_cast<int>(argument.size()),
+            L"/Embedding", -1, TRUE) == CSTR_EQUAL ||
+        CompareStringOrdinal(argument.data(), static_cast<int>(argument.size()),
+            L"/Automation", -1, TRUE) == CSTR_EQUAL) return;
+    if (last || path.empty()) path.assign(argument);
+}
+
 } // namespace pulse::app

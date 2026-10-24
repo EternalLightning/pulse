@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
+# Compiler detection and every later dependency scan must use the same language.
+set(ENV{VSLANG} "1033")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" PULSE_VERSION LIMIT_COUNT 1)
 project(Pulse VERSION ${PULSE_VERSION} LANGUAGES C CXX)
 if(NOT DEFINED PROJECT_VERSION_TWEAK OR PROJECT_VERSION_TWEAK STREQUAL "")
@@ -17,6 +19,20 @@ endif()
 if(NOT MSVC)
     message(FATAL_ERROR "Pulse requires MSVC (Windows SDK / D2D / NT API)")
 endif()
+foreach(language C CXX)
+    string(STRIP "${CMAKE_${language}_CL_SHOWINCLUDES_PREFIX}" includes_prefix)
+    if(CMAKE_GENERATOR MATCHES "NMake" AND includes_prefix MATCHES "[^ -~]")
+        message(FATAL_ERROR
+            "Localized MSVC include diagnostics are unsafe in this NMake build directory. "
+            "Configure a fresh Ninja build directory with scripts/vcvars.bat; "
+            "do not reuse objects with missing header dependencies.")
+    endif()
+    set(compiler_launcher cmd.exe /d /c call "${CMAKE_CURRENT_SOURCE_DIR}/scripts/msvc_compile.bat")
+    if(CMAKE_${language}_COMPILER_LAUNCHER)
+        list(APPEND compiler_launcher ${CMAKE_${language}_COMPILER_LAUNCHER})
+    endif()
+    set(CMAKE_${language}_COMPILER_LAUNCHER ${compiler_launcher})
+endforeach()
 
 add_compile_options(/utf-8 /permissive- /W4 /EHsc)
 add_compile_options(/guard:cf)
@@ -74,7 +90,7 @@ if(PULSE_WITH_LUMATEXT)
 endif()
 
 function(pulse_enable_lumatext target)
-    target_sources(${target} PRIVATE src/ui/lumatext_renderer.cpp)
+    target_sources(${target} PRIVATE src/ui/lumatext_renderer.cpp src/ui/edit_composition.cpp)
     if(PULSE_LUMATEXT_TARGET)
         target_compile_definitions(${target} PRIVATE PULSE_HAS_LUMATEXT=1)
         target_link_libraries(${target} PRIVATE ${PULSE_LUMATEXT_TARGET} delayimp)
@@ -375,6 +391,7 @@ if(PULSE_APP_SOURCES)
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/apps_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/panel_right_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/files_toolbar/delete_color_dark.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/files_toolbar/group.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/panel_right_contract_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/pc_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/tag_24_color.svg")

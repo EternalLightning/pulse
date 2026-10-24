@@ -218,6 +218,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
 
             if (vm.settings_page == 0) {
                 if(ContainsPt(lay.startup_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=31;return r;}
+                if(ContainsPt(lay.explorer_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=24;return r;}
                 if(ContainsPt(lay.last_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=32;return r;}
                 if(!vm.settings_system_pending) {
                     if(ContainsPt(lay.startup_row[2],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=21;return r;}
@@ -230,6 +231,11 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.density_row[i], x, y)) {
                         r.region = HitTestResult::SettingsDensity;
+                        r.index = i;
+                        return r;
+                    }
+                    if (ContainsPt(lay.text_render_row[i], x, y)) {
+                        r.region = HitTestResult::SettingsTextRender;
                         r.index = i;
                         return r;
                     }
@@ -489,7 +495,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     // Drawing and hit testing share both toolbar rows.
     if (x >= EffectiveSidebarWidth(rect.right) && y < title_bar_height_ + toolbar_height_) {
         const auto toolbar = MakeToolbarLayout(rect.right, scale_, title_bar_height_, margin_,
-            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand, vm.archive_view);
+            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand, vm.archive_view, vm.pane.is_recycle);
         const HitTestResult::Region nav[] = {HitTestResult::NavBack, HitTestResult::NavForward,
             HitTestResult::NavUp, HitTestResult::NavRefresh};
         const bool searchOverlay=vm.address_searching && rect.right-EffectiveSidebarWidth(rect.right)<480*scale_;
@@ -526,7 +532,15 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         }
         if (vm.archive_view && RectContains(toolbar.extract,x,y)) {r.region=HitTestResult::Extract; return r;}
         if (vm.archive_view && RectContains(toolbar.extract_all,x,y)) {r.region=HitTestResult::ExtractAll; return r;}
+        if (vm.pane.is_recycle && RectContains(toolbar.empty_recycle,x,y)) {
+            if (vm.can_empty_recycle) r.region=HitTestResult::EmptyRecycle;
+            return r;
+        }
         if (RectContains(toolbar.sort,x,y)) {r.region=HitTestResult::ToolbarSort; return r;}
+        if (RectContains(toolbar.group,x,y)) {
+            if (vm.can_group) r.region=HitTestResult::ToolbarGroup;
+            return r;
+        }
         if (RectContains(toolbar.overflow,x,y)) {r.region=HitTestResult::ToolbarMore; return r;}
         if (RectContains(toolbar.filter,x,y)) {
             r.region = !vm.pane.filter_text.empty() && vm.pane.filter_expand >= 0.985f &&
@@ -885,7 +899,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 return out;
             }
             const DetailsColumnLayout columns = DetailsColumns(paneRc, paneVm);
-            for (int divider = 0; divider < columns.count - 1; ++divider) {
+            for (int divider = 0; divider < columns.count; ++divider) {
                 if (std::abs(x - columns.DividerX(divider)) <= 4.0f * scale_) {
                     out.region = HitTestResult::ColumnDivider;
                     out.index = divider;

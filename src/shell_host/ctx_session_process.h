@@ -32,15 +32,21 @@ inline bool ContextProcessHasVisibleWindows(DWORD process, bool responsive = fal
     return search.found;
 }
 
-// One killable process per displayed menu. File-operation requests never use it.
+// One killable process per displayed menu. Only fully released, uninvoked
+// sessions may leave one bounded idle process for the next menu.
 class ContextSessionProcesses {
 public:
     using Reply = std::function<void(uint32_t, uint32_t, const std::vector<uint8_t>&)>;
     static constexpr size_t kProcessLimit = 4;
     static constexpr DWORD kQueryTimeoutMs = 8000;
     static constexpr DWORD kSessionLifetimeMs = ipc::kContextMenuSessionLifetimeMs;
+    struct ReusePolicy {
+        DWORD idle_timeout_ms = 30000;
+        uint32_t max_queries = 8;
+    };
 
     ContextSessionProcesses(std::wstring executable, Reply reply);
+    ContextSessionProcesses(std::wstring executable, Reply reply, ReusePolicy reuse);
     ~ContextSessionProcesses();
     ContextSessionProcesses(const ContextSessionProcesses&) = delete;
     ContextSessionProcesses& operator=(const ContextSessionProcesses&) = delete;
@@ -49,6 +55,7 @@ public:
     void Close(uint32_t session);
     void Stop();
     size_t ActiveProcesses() const;
+    size_t IdleProcesses() const;
 
 private:
     struct Core;

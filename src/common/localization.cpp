@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_RESUME_INCOMPLETE_TRANSFER;
+constexpr UINT kLastString = IDS_TEXT_RENDER_SMOOTH;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -23,7 +23,11 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::ArchivePasswordOrDataError) <= kLastString &&
               static_cast<UINT>(StringId::SettingsDefaultManagerPartial) <= kLastString &&
               static_cast<UINT>(StringId::ArchivePasswordRetryHint) <= kLastString &&
-              static_cast<UINT>(StringId::OperationCenterRecycle) <= kLastString);
+              static_cast<UINT>(StringId::OperationCenterRecycle) <= kLastString &&
+              static_cast<UINT>(StringId::SettingsExplorerTakeoverDesc) <= kLastString &&
+              static_cast<UINT>(StringId::IndexRemovableExcluded) <= kLastString &&
+              static_cast<UINT>(StringId::IndexDeviceUnavailable) <= kLastString &&
+              static_cast<UINT>(StringId::TextRenderSmooth) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

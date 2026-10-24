@@ -4,7 +4,9 @@
 #include "search_trace.h"
 #include "index_parent_chain.h"
 #include "index_name_pool.h"
+#include "index_postings.h"
 #include "index_config.h"
+#include "persistent_index_policy.h"
 #include "index_query.h"
 #include "index_mft.h"
 #include "index_paths.h"
@@ -16,6 +18,7 @@
 #include <shlwapi.h>
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <cwctype>
@@ -352,6 +355,7 @@ void Engine::MappedFile::Close() {
     child_order = name_order = size_order = mtime_order = nullptr;
     prefix1_start = prefix2_start = nullptr;
     prefix1_ids = prefix2_ids = nullptr;
+    prefix1_bytes = prefix2_bytes = nullptr;
     prefix1_all_chars = false;
     n = nvol = nfrn = 0;
     size = 0;
@@ -375,7 +379,9 @@ void Engine::CaptureMemoryState() {
     retained.feed_page_capacity_bytes = feed_changes_.PageCapacityBytes();
     retained.aggregate_mapped_file_bytes = map_ ? map_->size : 0;
     retained.shard_mapped_file_bytes = 0;
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     for (const auto& shard : query_shards_) if (shard.mapped) retained.shard_mapped_file_bytes += shard.mapped->size;
+#endif
     retained.overlay_nodes = live_.nodes.size();
     retained.overlay_patches = patches_.size();
     // Stream ownership is worker-only; producers touch only their own queue.
@@ -408,6 +414,13 @@ FileFeedPage Engine::ReadFeed(bool changes, const std::wstring& root, uint64_t e
         page.next=cursor;
         feed_changes_.ReadAfter(cursor, 512, page.records);
         if (!page.records.empty()) page.next = page.records.back().id;
+        std::erase_if(page.records, [&](const ChangeRecord& record) {
+            if (record.path.size() < 2 || record.path[1] != L':') return false;
+            return std::any_of(vols_.begin(), vols_.end(), [&](const VolState& volume) {
+                return towupper(record.path[0]) == towupper(volume.letter) &&
+                    std::find(inactive_volume_roots_.begin(), inactive_volume_roots_.end(), volume.root_idx) != inactive_volume_roots_.end();
+            });
+        });
         page.done=page.next==feed_sequence_;return page;
     }
     const auto count=static_cast<uint64_t>(LiveCount());
@@ -415,6 +428,8 @@ FileFeedPage Engine::ReadFeed(bool changes, const std::wstring& root, uint64_t e
     for(;scan<count && scan<cursor+8192 && page.records.size()<512;++scan) {
         const auto id=static_cast<int32_t>(scan);
         if(IsTomb(id) || (NodeAt(id).flags & (kFlagHidden|kFlagDir))) continue;
+        if (std::any_of(inactive_volume_roots_.begin(), inactive_volume_roots_.end(),
+            [&](int32_t inactive) { return InSubtreeLocked(id, inactive); })) continue;
         const auto path=BuildPathLocked(id);
         if(IsExcludedPath(path) || (!root.empty() && !(path.size()>=root.size() &&
             CompareStringOrdinal(path.data(),static_cast<int>(root.size()),root.data(),static_cast<int>(root.size()),TRUE)==CSTR_EQUAL &&
@@ -471,7 +486,7 @@ std::vector<VolumeInfo> Engine::Volumes() const {
                 return NormalizeVolumeId(state.volume_id) == NormalizeVolumeId(volume.id);
             return volume.mount_point.size() >= 2 && state.letter == towupper(volume.mount_point[0]);
         });
-        if (it != vols_.end()) {
+        if (it != vols_.end() && volume.enabled) {
             volume.indexed_items = it->item_count;
             volume.progress = 100;
             volume.state = volume.online ? L"已就绪" : L"离线 · 仍可搜索";
@@ -482,24 +497,6 @@ std::vector<VolumeInfo> Engine::Volumes() const {
             volume.state = L"索引失败";
             volume.error = L"无法读取该磁盘的文件变更记录";
         }
-    }
-    for (const auto& state : vols_) {
-        const bool present = std::any_of(result.begin(), result.end(), [&](const VolumeInfo& volume) {
-            return !state.volume_id.empty() &&
-                   NormalizeVolumeId(volume.id) == NormalizeVolumeId(state.volume_id);
-        });
-        if (present || state.kind != VolumeKind::Removable) continue;
-        VolumeInfo offline;
-        offline.id = state.volume_id;
-        offline.mount_point = std::wstring(1, state.letter) + L":\\";
-        offline.kind = state.kind;
-        offline.supported = true;
-        offline.online = false;
-        offline.enabled = !config.IsExcluded(offline.id);
-        offline.indexed_items = state.item_count;
-        offline.progress = 100;
-        offline.state = L"离线 · 仍可搜索";
-        result.push_back(std::move(offline));
     }
     return result;
 }
@@ -591,8 +588,10 @@ void Engine::Stop() {
     FlushDeltas();
     CloseDeltas();
     std::unique_lock<std::shared_mutex> lock(mutex_);
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     query_shards_.clear();
     query_shards_ready_ = false;
+#endif
     if (map_) map_->Close();
     map_.reset();
 }
@@ -973,13 +972,21 @@ void Engine::CollectMatchesLocked(const CompiledQuery& cq, int32_t prefix_node,
             inactive_volume_roots_.empty();
         auto collect_table = [&](const MappedFile& mapped, int32_t global_first) {
             const uint32_t* starts = single_char ? mapped.prefix1_start : mapped.prefix2_start;
-            const int32_t* postings = single_char ? mapped.prefix1_ids : mapped.prefix2_ids;
-            if (!starts || !postings || (single_char && !mapped.prefix1_all_chars)) return;
+            const int32_t* raw_ids = single_char ? mapped.prefix1_ids : mapped.prefix2_ids;
+            const uint8_t* encoded = single_char ? mapped.prefix1_bytes : mapped.prefix2_bytes;
+            if (!starts || (!raw_ids && !encoded) || (single_char && !mapped.prefix1_all_chars)) return;
             const uint32_t first = starts[bucket];
             const uint32_t last = starts[bucket + 1];
-            for (uint32_t p = first; p < last; ++p) {
-                if ((p & 0x3ffu) == 0 && latest && latest->load() != expected) return;
-                const int32_t local_id = postings[p];
+            uint32_t previous = 0, visited = 0;
+            for (uint32_t p = first; p < last;) {
+                if ((visited++ & 0x3ffu) == 0 && latest && latest->load() != expected) return;
+                int32_t local_id;
+                if (encoded) {
+                    if (!postings::Next({encoded, last}, p, previous)) return;
+                    local_id = static_cast<int32_t>(previous);
+                } else {
+                    local_id = raw_ids[p++];
+                }
                 if (local_id < 0 || local_id >= static_cast<int32_t>(mapped.n)) continue;
                 const int32_t id = global_first + local_id;
                 if (id < 0 || id >= BaseCount()) continue;
@@ -994,10 +1001,13 @@ void Engine::CollectMatchesLocked(const CompiledQuery& cq, int32_t prefix_node,
                 }
             }
         };
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
         if (query_shards_ready_) {
             for (const auto& shard : query_shards_)
                 collect_table(*shard.mapped, shard.first);
-        } else {
+        } else
+#endif
+        {
             collect_table(*map_, 0);
         }
         if (term.pinyin && pinyin_ready_.load() && pinyin_snapshot_ == map_.get() &&
@@ -1117,12 +1127,12 @@ void Engine::NarrowMatchesLocked(const CompiledQuery& cq, int32_t prefix_node,
                                  const MatchSet& prev, MatchSet& out,
                                  const std::atomic<uint32_t>* latest, uint32_t expected) const {
     out.Begin(LiveCount());
-    int32_t seen = 0;
-    prev.ForEach([&](int32_t i) {
-        if ((++seen & 0x3ff) == 0 && latest && latest->load() != expected) return;
-        if (i < 0 || i >= LiveCount()) return;
+    prev.ForEachWhile([&](int32_t i) {
+        if (latest && latest->load() != expected) return false;
+        if (i < 0 || i >= LiveCount()) return true;
         if (MatchQueryNodeLocked(i, cq, prefix_node, folders_only, use_attrs))
             out.Add(i);
+        return true;
     });
 }
 
@@ -1131,6 +1141,7 @@ void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc
         if (desc && sort == ResultSort::Index) std::reverse(ids.begin(), ids.end());
         return;
     }
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     if (query_shards_ready_ && live_.nodes.empty() && patches_.empty() &&
         tombstones_.empty()) {
         std::vector<uint8_t> selected(static_cast<size_t>(BaseCount()), 0);
@@ -1200,6 +1211,7 @@ void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc
             return;
         }
     }
+#endif
     if (map_) {
         const int32_t* order = sort == ResultSort::Name ? map_->name_order :
                                sort == ResultSort::Size ? map_->size_order : map_->mtime_order;
@@ -1331,12 +1343,33 @@ void Engine::PartialSortPage(std::vector<int32_t>& ids, size_t offset, size_t li
 
 SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
                             uint32_t expected,
-                            const std::function<bool(const std::wstring&)>& authorize) const {
+                            const std::function<bool(const std::wstring&)>& authorize,
+                            const std::function<bool()>& should_stop,
+                            SearchDiagnostics* diagnostics) const {
+    const auto now_us = [diagnostics]() -> uint64_t {
+        return diagnostics ? static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count()) : 0;
+    };
+    if (diagnostics) *diagnostics = {};
+    const auto began = now_us();
+    struct FinishTiming {
+        SearchDiagnostics* diagnostics;
+        uint64_t began;
+        ~FinishTiming() {
+            if (diagnostics) diagnostics->total_us = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count()) - began;
+        }
+    } finish{diagnostics, began};
     SearchResult out;
-    std::lock_guard<std::mutex> query_guard(query_mu_);
+    std::unique_lock<std::mutex> query_guard(query_mu_);
+    if (diagnostics) diagnostics->query_wait_us = now_us() - began;
     if (latest && latest->load() != expected) return out;
     CompiledQuery cq = ParseQuery(q.needle);
+    const auto index_wait_began = now_us();
     std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (diagnostics) diagnostics->index_wait_us = now_us() - index_wait_began;
+    const auto match_began = now_us();
     int32_t prefix_node = -1;
     const std::wstring& prefix = !q.path_prefix.empty() ? q.path_prefix : cq.path_prefix;
     if (!prefix.empty()) {
@@ -1364,39 +1397,46 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
         CollectMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, matches, latest, expected);
     }
     if (latest && latest->load() != expected) return out;
-    if (authorize) {
-        MatchSet visible; visible.Begin(LiveCount());
-        matches.ForEach([&](int32_t id) {
-            if ((!latest || latest->load() == expected) && authorize(BuildQueryPathLocked(id))) visible.Add(id);
-        });
-        matches = std::move(visible);
-    }
-    out.total = matches.total;
-    if (cap == 0 || matches.total == 0) {
-        if (!authorize) {
-            cache_raw_ = q.needle;
-            cache_path_prefix_ = prefix;
-            cache_folders_only_ = q.folders_only;
-            cache_ranked_ = q.rank;
-            cache_sort_ = q.sort;
-            cache_sort_desc_ = q.sort_desc;
-            cache_set_ = matches;
-            cache_epoch_ = filter_epoch_;
-        }
-        return out;
-    }
-
-    if (!authorize) {
+    if (!exact_cached_page) {
         cache_raw_ = q.needle;
         cache_path_prefix_ = prefix;
         cache_folders_only_ = q.folders_only;
-        cache_ranked_ = q.rank;
-        cache_sort_ = q.rank ? ResultSort::Index : q.sort;
-        cache_sort_desc_ = q.rank ? false : q.sort_desc;
         cache_set_ = matches;
         cache_epoch_ = filter_epoch_;
     }
+    query_guard.unlock();
+    if (diagnostics) {
+        diagnostics->match_us = now_us() - match_began;
+        diagnostics->raw_candidates = matches.total;
+        diagnostics->cache_hit = exact_cached_page;
+    }
+    if (authorize) {
+        MatchSet visible; visible.Begin(LiveCount());
+        matches.ForEachWhile([&](int32_t id) {
+            if (latest && latest->load() != expected) return false;
+            if (should_stop && should_stop()) { out.incomplete = true; return false; }
+            const auto path_began = now_us();
+            const auto path = BuildQueryPathLocked(id);
+            if (diagnostics) diagnostics->path_us += now_us() - path_began;
+            // Keep the snapshot stable through authorization and page materialization.
+            // Ordinary USN updates must not turn a valid response into an empty page.
+            const auto authorize_began = now_us();
+            const bool allowed = authorize(path);
+            if (diagnostics) {
+                diagnostics->authorize_us += now_us() - authorize_began;
+                ++diagnostics->examined;
+                if (allowed) ++diagnostics->authorized;
+            }
+            if (allowed) visible.Add(id);
+            return true;
+        });
+        matches = std::move(visible);
+    }
+    if (latest && latest->load() != expected) return out;
+    out.total = matches.total;
+    if (cap == 0 || matches.total == 0) return out;
 
+    const auto page_began = now_us();
     const size_t start = (std::min)(q.offset, matches.total);
     const size_t want = cap;
     std::vector<int32_t> chosen;
@@ -1468,8 +1508,11 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
         for (size_t k = start; k < end; ++k) chosen.push_back(ids[k]);
     }
 
+    if (diagnostics) diagnostics->page_us = now_us() - page_began;
+    const auto emit_began = now_us();
     out.hits.reserve(chosen.size());
     for (size_t k = 0; k < chosen.size(); ++k) {
+        if (latest && latest->load() != expected) return SearchResult{};
         const Node n = QueryNodeAtLocked(chosen[k]);
         const Attr a = QueryAttrAtLocked(chosen[k]);
         Hit h;
@@ -1480,7 +1523,16 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
         h.mtime = UnixToFt(a.mtime);
         out.hits.push_back(std::move(h));
     }
+    if (diagnostics) diagnostics->emit_us = now_us() - emit_began;
     return out;
+}
+
+bool Engine::WriteBuildIndexFile(const std::wstring& path, uint64_t built_unix) {
+    // build_ is worker-private here. Commit the compact pool only after all
+    // allocations succeed, before serializing the same unchanged node IDs.
+    const DWORD error = InternSnapshotNamePool(build_.pool, build_.nodes);
+    if (error != ERROR_SUCCESS) { SetLastError(error); return false; }
+    return WriteIndexFile(path, build_, build_vols_, built_unix);
 }
 
 bool Engine::WriteIndexFile(const std::wstring& path, const Store& s,
@@ -1535,8 +1587,19 @@ bool Engine::WriteIndexFile(const std::wstring& path, const Store& s,
             visit(name_of(i), [&](uint32_t bucket) { ids[cursor[bucket]++] = i; });
         return std::make_pair(std::move(start), std::move(ids));
     };
-    const auto prefix1 = build_prefix(false);
-    const auto prefix2 = build_prefix(true);
+    postings::Encoded prefix1, prefix2;
+    {
+        const auto raw = build_prefix(false);
+        if (!postings::Encode(raw.first, raw.second, prefix1)) {
+            CloseHandle(h); DeleteFileW(tmp.c_str()); return false;
+        }
+    }
+    {
+        const auto raw = build_prefix(true);
+        if (!postings::Encode(raw.first, raw.second, prefix2)) {
+            CloseHandle(h); DeleteFileW(tmp.c_str()); return false;
+        }
+    }
 
     uint64_t off = 128;
     DiskHeader hdr{};
@@ -1562,11 +1625,9 @@ bool Engine::WriteIndexFile(const std::wstring& path, const Store& s,
     hdr.mtime_order_off = 0;
     const uint64_t prefix1_position = off;
     hdr.prefix1_off = prefix1_position | kPrefixAllCharsFlag;
-    off = AlignUp(off + prefix1.first.size() * sizeof(uint32_t) +
-                         prefix1.second.size() * sizeof(int32_t), 16);
+    off = AlignUp(off + prefix1.starts.size() * sizeof(uint32_t) + prefix1.bytes.size(), 16);
     hdr.prefix2_off = off;
-    off = AlignUp(off + prefix2.first.size() * sizeof(uint32_t) +
-                         prefix2.second.size() * sizeof(int32_t), 16);
+    off = AlignUp(off + prefix2.starts.size() * sizeof(uint32_t) + prefix2.bytes.size(), 16);
     hdr.vols_off = off;
     off = AlignUp(off + sizeof(DiskVol) * vols.size(), 16);
     hdr.frn_off = off;
@@ -1613,17 +1674,16 @@ bool Engine::WriteIndexFile(const std::wstring& path, const Store& s,
         if (ok && !order.empty()) ok = WriteAll(h, order.data(), order.size() * sizeof(int32_t));
     };
     write_order(hdr.child_order_off, child_order);
-    auto write_prefix = [&](uint64_t position, const std::vector<uint32_t>& start,
-                            const std::vector<int32_t>& ids) {
+    auto write_prefix = [&](uint64_t position, const postings::Encoded& table) {
         if (!ok) return;
         LARGE_INTEGER pos{};
         pos.QuadPart = static_cast<LONGLONG>(position);
         ok = SetFilePointerEx(h, pos, nullptr, FILE_BEGIN) != 0;
-        if (ok) ok = WriteAll(h, start.data(), start.size() * sizeof(uint32_t));
-        if (ok && !ids.empty()) ok = WriteAll(h, ids.data(), ids.size() * sizeof(int32_t));
+        if (ok) ok = WriteAll(h, table.starts.data(), table.starts.size() * sizeof(uint32_t));
+        if (ok && !table.bytes.empty()) ok = WriteAll(h, table.bytes.data(), table.bytes.size());
     };
-    write_prefix(prefix1_position, prefix1.first, prefix1.second);
-    write_prefix(hdr.prefix2_off, prefix2.first, prefix2.second);
+    write_prefix(prefix1_position, prefix1);
+    write_prefix(hdr.prefix2_off, prefix2);
     if (ok) {
         LARGE_INTEGER pos{};
         pos.QuadPart = static_cast<LONGLONG>(hdr.vols_off);
@@ -1718,9 +1778,10 @@ bool Engine::CommitMappedFile(const std::wstring& path) {
     return true;
 }
 
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
 void Engine::WriteVolumeShards(const Store& aggregate, const std::vector<VolState>& vols,
                                uint64_t built_unix) const {
-    if (!MachineIndexScope() || aggregate.nodes.empty()) return;
+    if (!use_volume_query_shards_ || !MachineIndexScope() || aggregate.nodes.empty()) return;
     const std::wstring root = DataDir() + L"\\v9\\volumes";
     for (const auto& source : vols) {
         if (source.volume_id.empty() || source.item_count == 0) continue;
@@ -1771,6 +1832,8 @@ void Engine::WriteVolumeShards(const Store& aggregate, const std::vector<VolStat
     }
 }
 
+#endif
+
 bool Engine::MapIndexFile(const std::wstring& path, std::unique_ptr<MappedFile>& out) const {
     auto fail = [&](const char* stage, DWORD error) {
         TraceSearch(stage, error, path);
@@ -1810,28 +1873,39 @@ bool Engine::MapIndexFile(const std::wstring& path, std::unique_ptr<MappedFile>&
     if (m->hdr->mtime_order_off &&
         !in_range(m->hdr->mtime_order_off, sizeof(int32_t) * m->hdr->node_count)) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
     const uint64_t prefix_start_bytes = (kPrefixBuckets + 1ull) * sizeof(uint32_t);
-    auto prefix_in_range = [&](uint64_t raw_off, bool allow_all_chars_flag,
-                               const uint32_t*& starts, const int32_t*& ids,
+    auto prefix_in_range = [&](uint64_t raw_off, uint64_t section_end, bool allow_all_chars_flag,
+                               const uint32_t*& starts, const int32_t*& ids, const uint8_t*& bytes,
                                bool& all_chars) {
         if (!allow_all_chars_flag && (raw_off & kPrefixAllCharsFlag)) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
         all_chars = allow_all_chars_flag && (raw_off & kPrefixAllCharsFlag) != 0;
         const uint64_t off = raw_off & ~kPrefixAllCharsFlag;
-        if (!off || !in_range(off, prefix_start_bytes)) return !off;
+        if (!off || !in_range(off, prefix_start_bytes)) return !off && m->hdr->ver < 12;
+        if (m->hdr->ver >= 12 && (section_end > m->size || off > section_end ||
+            prefix_start_bytes > section_end - off)) return false;
         starts = reinterpret_cast<const uint32_t*>(m->view + off);
         const uint32_t count = starts[kPrefixBuckets];
         if (starts[0] != 0) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
         for (uint32_t bucket = 0; bucket < kPrefixBuckets; ++bucket)
             if (starts[bucket] > starts[bucket + 1])
                 return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
-        if (!in_range(off + prefix_start_bytes,
-                      static_cast<uint64_t>(count) * sizeof(int32_t))) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
-        ids = reinterpret_cast<const int32_t*>(m->view + off + prefix_start_bytes);
+        if (m->hdr->ver >= 12) {
+            if (count > section_end - off - prefix_start_bytes) return false;
+            bytes = m->view + off + prefix_start_bytes;
+            if (!postings::Validate({starts, kPrefixBuckets + 1}, {bytes, count}, m->hdr->node_count))
+                return false;
+        } else {
+            if (!in_range(off + prefix_start_bytes,
+                          static_cast<uint64_t>(count) * sizeof(int32_t))) return false;
+            ids = reinterpret_cast<const int32_t*>(m->view + off + prefix_start_bytes);
+        }
         return true;
     };
-    if (!prefix_in_range(m->hdr->prefix1_off, true, m->prefix1_start, m->prefix1_ids,
+    if (!prefix_in_range(m->hdr->prefix1_off, m->hdr->prefix2_off, true,
+                         m->prefix1_start, m->prefix1_ids, m->prefix1_bytes,
                          m->prefix1_all_chars)) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
     bool unused_prefix_flag = false;
-    if (!prefix_in_range(m->hdr->prefix2_off, false, m->prefix2_start, m->prefix2_ids,
+    if (!prefix_in_range(m->hdr->prefix2_off, m->hdr->vols_off, false,
+                         m->prefix2_start, m->prefix2_ids, m->prefix2_bytes,
                          unused_prefix_flag)) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
     if (!in_range(m->hdr->vols_off, sizeof(DiskVol) * m->hdr->vol_count)) return fail("filename_map_validation_failed", ERROR_INVALID_DATA);
     if (m->hdr->frn_off > m->size || m->hdr->frn_count > UINT32_MAX ||
@@ -1899,8 +1973,10 @@ void Engine::AdoptMappedLocked(std::unique_ptr<MappedFile> mapped) {
     pinyin_version_ = 0;
     pinyin_chinese_ids_.clear();
     pinyin_pair_ids_.clear();
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     query_shards_.clear();
     query_shards_ready_ = false;
+#endif
     map_ = std::move(mapped);
     delta_replay_failed_ = false;
     base_parent_changed_ = false;
@@ -1936,15 +2012,18 @@ void Engine::AdoptMappedLocked(std::unique_ptr<MappedFile> mapped) {
     }
     RebuildChildMapLocked();
     indexed_.store(static_cast<size_t>(LiveCount()));
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     RefreshQueryShardsLocked();
+#endif
     InvalidateFilterLocked();
     RequestPinyinBuildLocked();
 }
 
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
 void Engine::RefreshQueryShardsLocked() {
     query_shards_.clear();
     query_shards_ready_ = false;
-    if (!MachineIndexScope() || !map_ || vols_.empty()) return;
+    if (!use_volume_query_shards_ || !MachineIndexScope() || !map_ || vols_.empty()) return;
     const std::wstring root = DataDir() + L"\\v9\\volumes";
     std::vector<QueryShard> loaded;
     loaded.reserve(vols_.size());
@@ -2068,63 +2147,10 @@ bool Engine::MatchQueryNodeLocked(int32_t id, const CompiledQuery& query,
     return query.groups.empty();
 }
 
-void Engine::PreserveOfflineVolumesLocked(const std::vector<VolumeInfo>& active,
-                                          const IndexConfig& config) {
-    const int32_t n = LiveCount();
-    if (n <= 0) return;
-    std::vector<int32_t> parent_order;
-    if (!ValidParentForest(n, [&](int32_t i) { return NodeAt(i).parent; }, &parent_order)) return;
-    std::vector<int32_t> remap(static_cast<size_t>(n), -1);
-    for (const auto& old : vols_) {
-        if (old.kind != VolumeKind::Removable || config.IsExcluded(old.volume_id)) continue;
-        const bool online = std::any_of(active.begin(), active.end(), [&](const VolumeInfo& volume) {
-            return NormalizeVolumeId(volume.id) == NormalizeVolumeId(old.volume_id);
-        });
-        if (online || old.root_idx < 0) continue;
-        std::fill(remap.begin(), remap.end(), -1);
-        VolState kept = old;
-        kept.frn_base = nullptr;
-        kept.frn_base_n = 0;
-        kept.frn_new.clear();
-        kept.frn_build.clear();
-        kept.item_count = 0;
-        for (int32_t i : parent_order) {
-            if (IsTomb(i) || !IsUnderLocked(i, old.root_idx)) continue;
-            const Node source = NodeAt(i);
-            if (source.parent >= n || (source.parent >= 0 && remap[static_cast<size_t>(source.parent)] < 0)) continue;
-            Node node = source;
-            const std::wstring_view name = NameOf(i);
-            node.parent = source.parent < 0 ? -1 : remap[static_cast<size_t>(source.parent)];
-            node.off = static_cast<uint32_t>(build_.pool.size());
-            node.len = static_cast<uint16_t>((std::min)(name.size(), static_cast<size_t>(65535)));
-            node.pad = 0;
-            node.unused = 0;
-            const bool excluded_parent = source.parent >= 0 && source.parent != old.root_idx &&
-                (build_.nodes[static_cast<size_t>(node.parent)].flags & kFlagHidden) != 0;
-            node.flags &= static_cast<uint8_t>(~kFlagHidden);
-            if (i == old.root_idx || excluded_parent || ShouldSkipName(name) ||
-                IsExcludedPath(BuildPathLocked(i))) node.flags |= kFlagHidden;
-            build_.pool.insert(build_.pool.end(), name.begin(), name.begin() + node.len);
-            remap[static_cast<size_t>(i)] = static_cast<int32_t>(build_.nodes.size());
-            build_.nodes.push_back(node);
-            build_.attrs.push_back(AttrAt(i));
-            ++kept.item_count;
-        }
-        if (old.root_idx >= n || remap[static_cast<size_t>(old.root_idx)] < 0) continue;
-        kept.root_idx = remap[static_cast<size_t>(old.root_idx)];
-        auto keep_frn = [&](uint64_t frn, int32_t idx) {
-            if (idx >= 0 && idx < n && remap[static_cast<size_t>(idx)] >= 0)
-                kept.frn_build.emplace_back(frn, remap[static_cast<size_t>(idx)]);
-        };
-        for (uint32_t i = 0; i < old.frn_base_n; ++i)
-            keep_frn(old.frn_base[i].frn, old.frn_base[i].idx);
-        for (const auto& entry : old.frn_new) keep_frn(entry.frn, entry.idx);
-        for (const auto& entry : old.frn_build) keep_frn(entry.first, entry.second);
-        build_vols_.push_back(std::move(kept));
-    }
-}
+#endif
 
 bool Engine::FlattenLocked(Store& out, std::vector<VolState>& vols_out) const {
+    if (&out == &live_ || &out == &build_) return false;
     const int32_t n = LiveCount();
     if (!ValidParentForest(n, [&](int32_t i) { return NodeAt(i).parent; })) return false;
     std::vector<int32_t> remap(static_cast<size_t>(n), -1);
@@ -2132,6 +2158,9 @@ bool Engine::FlattenLocked(Store& out, std::vector<VolState>& vols_out) const {
     out.nodes.reserve(static_cast<size_t>(n));
     out.attrs.reserve(static_cast<size_t>(n));
     out.pool.reserve(static_cast<size_t>(n) * 12);
+    // Keys reference the locked source mmap/overlay, never the growing output
+    // pool. Exact UTF-16 preserves case, embedded NULs and all code units.
+    SnapshotNameInterner names(out.pool);
 
     std::vector<uint32_t> child_count(static_cast<size_t>(n), 0);
     for (int32_t i = 0; i < n; ++i) {
@@ -2166,11 +2195,10 @@ bool Engine::FlattenLocked(Store& out, std::vector<VolState>& vols_out) const {
         const std::wstring_view name = NameOf(src);
         Node nn = node;
         nn.parent = node.parent < 0 ? -1 : remap[static_cast<size_t>(node.parent)];
-        nn.off = static_cast<uint32_t>(out.pool.size());
+        nn.off = names.Add(name);
         nn.len = static_cast<uint16_t>(name.size());
         nn.pad = 0;
         nn.unused = 0;
-        out.pool.insert(out.pool.end(), name.begin(), name.end());
         const int32_t dst = static_cast<int32_t>(out.nodes.size());
         remap[static_cast<size_t>(src)] = dst;
         out.nodes.push_back(nn);
@@ -2586,11 +2614,13 @@ void Engine::MergeBase(bool force, const char* reason) {
             built_unix_ = previous_built;
         }
     }
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     if (committed && MachineIndexScope()) {
         WriteVolumeShards(snap, vols, built);
         std::unique_lock<std::shared_mutex> lock(mutex_);
         RefreshQueryShardsLocked();
     }
+#endif
     merge_retry_after_tick_ = committed ? 0 : GetTickCount64() + kMergeFailureRetryMs;
     TraceSearch(committed ? "filename_merge_done" : "filename_merge_failed", revision_.load());
     filename_timing_.End(FilenameStage::Merge, timing, pending,
@@ -2909,6 +2939,7 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
 }
 
 bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
+    if (!PersistentIndexPathAllowed(std::wstring(1, v.letter) + L":\\")) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
     const auto timing = FilenameTiming::Begin();
     const auto stream = journal_streams_.find(v.volume_id);
     uint64_t journal_id = 0;
@@ -3028,6 +3059,10 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
 }
 
 bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
+    if (volume.kind != VolumeKind::Fixed || !volume.enabled || !PersistentIndexPathAllowed(volume.mount_point)) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
     if (volume.mount_point.size() < 2) return false;
     const wchar_t letter = towupper(volume.mount_point[0]);
     HANDLE h = OpenVolume(letter);
@@ -3229,6 +3264,7 @@ bool Engine::BuildMftTree(VolState vol, uint64_t root_frn, std::vector<FrnNode> 
 }
 
 bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
+    if (volume.kind != VolumeKind::Fixed || !volume.enabled || !PersistentIndexPathAllowed(volume.mount_point)) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
     if (!MachineIndexScope() || volume.id.empty()) return false;
 
     // Flatten the current live view first. This gives the replacement build a
@@ -3324,7 +3360,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
     }
     const uint64_t built = static_cast<uint64_t>(std::time(nullptr));
     const std::wstring path = CacheWritePath();
-    const bool wrote = !path.empty() && WriteIndexFile(path, build_, build_vols_, built);
+    const bool wrote = !path.empty() && WriteBuildIndexFile(path, built);
     if (!wrote) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         build_.Clear();
@@ -3341,10 +3377,12 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
         building_ = false;
         return false;
     }
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
     if (MachineIndexScope()) {
         WriteVolumeShards(build_, build_vols_, built);
         RefreshQueryShardsLocked();
     }
+#endif
     build_.Clear();
     build_.Shrink();
     build_vols_.clear();
@@ -3421,7 +3459,6 @@ void Engine::FullRebuild(const char* reason) {
         build_.nodes.reserve(1u << 16);
         building_ = true;
         build_vols_.clear();
-        if (MachineIndexScope()) PreserveOfflineVolumesLocked(configured_volumes, config);
     }
     if (indexed_.load() == 0) SetStatus(L"正在建立索引…");
     else SetStatus(L"已索引 " + std::to_wstring(indexed_.load()) + L" 项，正在重建…");
@@ -3453,6 +3490,7 @@ void Engine::FullRebuild(const char* reason) {
     if (!used_mft && running_ && !MachineIndexScope()) {
         walk_roots_.clear();
         auto walk_root = [this](const std::wstring& path) {
+            if (!PersistentIndexPathAllowed(path)) return;
             walk_roots_.push_back(path);
             int32_t parent = EnsureChainLocked(build_, path, true, false);
             if (parent >= 0) WalkTree(parent, path, 0);
@@ -3467,7 +3505,7 @@ void Engine::FullRebuild(const char* reason) {
     if (running_) {
         const uint64_t built = static_cast<uint64_t>(std::time(nullptr));
         const std::wstring path = CacheWritePath();
-        const bool wrote = !path.empty() && WriteIndexFile(path, build_, build_vols_, built);
+        const bool wrote = !path.empty() && WriteBuildIndexFile(path, built);
         if (!wrote) build_error = GetLastError() ? GetLastError() : ERROR_WRITE_FAULT;
         bool committed = false;
         {
@@ -3496,9 +3534,11 @@ void Engine::FullRebuild(const char* reason) {
         }
         if (committed && MachineIndexScope()) {
             PingNotify(true);
+#if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)
             WriteVolumeShards(build_, build_vols_, built);
             std::unique_lock<std::shared_mutex> lock(mutex_);
             RefreshQueryShardsLocked();
+#endif
         }
         {
             std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -3533,7 +3573,8 @@ void Engine::FullRebuild(const char* reason) {
 }
 
 bool Engine::NeedsSearchRebuildLocked() const {
-    return delta_replay_failed_ || (map_ && (map_->hdr->ver < kIndexVer || !map_->prefix1_all_chars));
+    // V12 changes only the posting representation; valid V11 data needs no rescan.
+    return delta_replay_failed_ || (map_ && (map_->hdr->ver < 11 || !map_->prefix1_all_chars));
 }
 
 void Engine::StartJournalStreams() {
@@ -3598,7 +3639,11 @@ void Engine::Worker() {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         excluded_paths_ = startup_config.excluded_paths;
     }
-    const bool have_cache = TryLoadCache();
+    wchar_t startup_profile[MAX_PATH]{};
+    const bool user_root_allowed = MachineIndexScope() || (!fixture_root_.empty()
+        ? PersistentIndexPathAllowed(fixture_root_)
+        : SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, startup_profile)) && PersistentIndexPathAllowed(startup_profile));
+    const bool have_cache = user_root_allowed && TryLoadCache();
     const auto initial_drives = ConfiguredVolumes(startup_config);
     bool needs_search_rebuild = false;
     {
@@ -3825,7 +3870,7 @@ void Engine::StartWalkWatches(const std::vector<std::wstring>& roots) {
     // completes. Reserve and construct in place before arming any watch.
     watches_.reserve(roots.size());
     for (const auto& path : roots) {
-        if (path.empty()) continue;
+        if (path.empty() || !PersistentIndexPathAllowed(path)) continue;
         watches_.emplace_back();
         auto& w = watches_.back();
         w.path = path;

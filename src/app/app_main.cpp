@@ -16,6 +16,7 @@
 // app_main.cpp — Pulse UI process entry point, window, input, shot mode.
 #include "../ui/ui_compositor.h"
 #include "../ui/lumatext_renderer.h"
+#include "../ui/edit_host.h"
 #include "../ui/ui_renderer.h"
 #include "../ui/preview_grab_cursor.h"
 #include "../ui/fluent_menu.h"
@@ -51,6 +52,8 @@
 #include "search_query.h"
 #include "settings_controller.h"
 #include "single_instance_coordinator.h"
+#include "startup_launch.h"
+#include "window_placement.h"
 #include "tray_controller.h"
 #include "global_search_controller.h"
 #include "tab_controller.h"
@@ -311,6 +314,15 @@ static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwn
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     AppState* s = GetAppState(hwnd);
+    if (s && msg == ui::typography::TextBackendChangedMessage()) {
+        if (!s->exit_requested) {
+            s->compositor.UpdateTextRenderingParams(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
+            s->compositor.RecreateTextFormats(s->scale);
+            s->renderer.InvalidateTypography();
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
     if (s && msg == app::TrayController::TaskbarCreatedMessage()) {
         if (!s->exit_requested) s->tray_controller.HandleTaskbarCreated();
         return 0;
@@ -438,6 +450,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->shot.language != L"system")
             s->appPrefs.language = s->shot.language;
         l10n::Initialize(cs->hInstance, s->appPrefs.language);
+        ui::typography::SetTextRenderMode(static_cast<ui::typography::TextRenderMode>(s->appPrefs.text_render));
+        s->compositor.UpdateTextRenderingParams(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
         RefreshSidebarModel(*s);
         ui::typography::InvalidateCaches();
         s->compositor.RecreateTextFormats(s->scale);
@@ -969,6 +983,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s->hwndAddressEdit) SendMessageW(s->hwndAddressEdit, WM_SETFONT, (WPARAM)s->editFont, TRUE);
         if (s->hwndRenameEdit) SendMessageW(s->hwndRenameEdit, WM_SETFONT, (WPARAM)s->editFont, TRUE);
         if (s->hwndTagRenameEdit) SendMessageW(s->hwndTagRenameEdit, WM_SETFONT, (WPARAM)s->editFont, TRUE);
+        if (s->hwndFilterEdit) SendMessageW(s->hwndFilterEdit, WM_SETFONT, (WPARAM)s->editFont, TRUE);
         if (s->addressEditing) LayoutAddressEditor(*s);
         if (!s->tagRenameId.empty()) LayoutTagRenameOverlay(*s);
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -1081,10 +1096,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (!s) break;
         EnsureEditVisuals(*s);
         HDC hdc = reinterpret_cast<HDC>(wParam);
-        SetTextColor(hdc, s->darkMode ? RGB(255, 255, 255) : RGB(26, 26, 26));
-        SetBkColor(hdc, s->darkMode ? RGB(30, 30, 30) : RGB(255, 255, 255));
+        SetTextColor(hdc, ui::ChildEditTextColor(s->darkMode));
+        SetBkColor(hdc, ui::ChildEditBackColor(s->darkMode));
         SetBkMode(hdc, OPAQUE);
-        return reinterpret_cast<LRESULT>(s->editBrush);
+        return reinterpret_cast<LRESULT>(ui::ChildEditBackBrush(s->editBrush));
     }
 
     case WM_TIMER: {
@@ -1104,7 +1119,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             bool dirty = false;
             if (s->systemIntegration.Tick(*s)) dirty = true;
             if (TickChangeTracking(*s)) dirty = true;
-            if (s->folderSizes.TakeChanged()) dirty = true;
+            if (s->folderSizes.TakeChanged()) {
+                QueueFolderSizeSort(*s);
+                dirty = true;
+            }
+            if (ApplyFolderSizeSort(*s)) dirty = true;
             DrainDirNotifies(*s);
             const ULONGLONG now = GetTickCount64();
             if (RunUiDeadlines(*s, now)) dirty = true;
@@ -1504,19 +1523,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             const auto completed = s->context_menu.CompleteComQuery(
                 token, std::move(payload->items), GetTickCount64(), payload->partial);
             if (completed.accepted) {
-                bool prefs_changed = false;
-                if (!completed.partial &&
-                    s->ctxMenuPrefs.RecordComTiming(completed.cache_key,
-                                                    completed.elapsed_ms))
-                    prefs_changed = true;
-                if (!completed.partial) {
-                    for (const auto& clsid : payload->slow_clsids) {
-                        if (s->ctxMenuPrefs.RecordComTiming(
-                                ipc::HandlerCatalogKey(clsid), 1000))
-                            prefs_changed = true;
-                    }
-                }
-                if (prefs_changed) s->ctxMenuPrefs.Save();
                 RefreshOpenCtxMenu(*s);
             } else if (!payload->partial) {
                 s->ops.CloseShellMenu(token);
@@ -2257,10 +2263,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
                 state.shot.width = std::max(320, requestedWidth);
                 state.shot.height = std::max(240, requestedHeight);
             }
-        } else if (i == __argc - 1) {
-            state.shot.path = __wargv[i];
-        } else if (__wargv[i][0] != L'-' && state.shot.path.empty()) {
-            state.shot.path = __wargv[i]; // tolerate path not being the last argument
+        } else {
+            app::CaptureStartupOpenPath(__wargv[i], i == __argc - 1, state.shot.path);
         }
     }
     if (state.shot.active && state.shot.path.empty()) {
@@ -2298,11 +2302,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     RegisterClassExW(&wc);
 
     int x = CW_USEDEFAULT, y = CW_USEDEFAULT, w = (int)(1600 * state.scale), h = (int)(960 * state.scale);
-    if (session.window_rect.right > session.window_rect.left) {
-        x = session.window_rect.left;
-        y = session.window_rect.top;
-        w = session.window_rect.right - session.window_rect.left;
-        h = session.window_rect.bottom - session.window_rect.top;
+    if (session.window_rect.right > session.window_rect.left &&
+        session.window_rect.bottom > session.window_rect.top) {
+        const RECT restored = app::ConstrainRestoredWindowRect(session.window_rect);
+        x = restored.left;
+        y = restored.top;
+        w = restored.right - restored.left;
+        h = restored.bottom - restored.top;
     }
     if (state.shot.active && state.shot.width > 0 && state.shot.height > 0) {
         w = state.shot.width;

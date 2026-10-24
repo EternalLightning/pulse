@@ -223,7 +223,7 @@ private:
             : id == 2 ? l10n::StringId::AdvSearchContent
             : id == 3 ? l10n::StringId::AdvSearchExclude : l10n::StringId::AdvSearchName);
         SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(cue.c_str()));
-        if (!compositor_.LumaTextEnabled())
+        if (!compositor_.CustomEditEnabled())
             SetLayeredWindowAttributes(edit, 0, 255, LWA_ALPHA);
         if (font_) SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
         SetWindowSubclass(edit, EditProc, static_cast<UINT_PTR>(id), reinterpret_cast<DWORD_PTR>(this));

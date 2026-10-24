@@ -53,7 +53,7 @@ void QueueSizePatch(AppState& s, const std::wstring& path, const std::wstring& n
                            ULONGLONG due);
 void DrainDirNotifies(AppState& s);
 void RestoreNavigationReturnSelection(AppState& s, app::Tab& tab,
-                                             const std::wstring& childName);
+                                             const std::wstring& childName, bool ensure_visible = true);
 void NavigateTo(AppState& s, const std::wstring& path);
 void FocusPane(AppState& s, app::Pane* p);
 void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset);

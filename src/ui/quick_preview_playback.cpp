@@ -1,3 +1,4 @@
+#include "typography.h"
 #include "quick_preview_window.h"
 #include "playback_timeline.h"
 #include "../common/localization.h"
@@ -218,6 +219,7 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
     const bool enabled = !video || (state.ready && SUCCEEDED(state.error));
     const bool playing = video ? state.playing : animation_active_;
     const auto original = brush->GetColor();
+    const auto text_background = dark_ ? D2D1::ColorF(0x151515) : D2D1::ColorF(0xF7F7F7);
     auto color = original;
     color.a = 0.12f;
     brush->SetColor(color);
@@ -238,8 +240,9 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
         dc->FillRoundedRectangle(D2D1::RoundedRect(rect, 4 * scale_, 4 * scale_), brush);
         color = original; color.a = available ? 1.0f : 0.4f;
         brush->SetColor(color);
-        dc->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format, rect, brush,
-            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        if (!compositor_.DrawLumaText(text, format, rect, color, text_background, DWRITE_TEXT_ALIGNMENT_CENTER))
+            dc->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format, rect, brush,
+                D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     }
     const auto track = PlaybackTrackRect();
     const float y = (track.top + track.bottom) * 0.5f;
@@ -253,9 +256,10 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
     dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(thumb, y), 5 * scale_, 5 * scale_), brush);
     const std::wstring info = PlaybackInfo(state);
     format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    dc->DrawTextW(info.data(), static_cast<UINT32>(info.size()), format,
-        D2D1::RectF(12 * scale_, bar.top + 40 * scale_, bar.right - 12 * scale_, bar.bottom - 8 * scale_),
-        brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    const auto info_rect = D2D1::RectF(12 * scale_, bar.top + 40 * scale_, bar.right - 12 * scale_, bar.bottom - 8 * scale_);
+    if (!compositor_.DrawLumaText(info, format, info_rect, original, text_background))
+        dc->DrawTextW(info.data(), static_cast<UINT32>(info.size()), format, info_rect,
+            brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     brush->SetColor(original);
 }
 std::wstring QuickPreviewWindow::PlaybackInfo(const VideoPreview::State& state) const {

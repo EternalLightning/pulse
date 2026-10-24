@@ -9,6 +9,7 @@
 #include "builtin_menu_items.h"
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pulse::app {
@@ -19,14 +20,6 @@ struct SeenMenuItem {
     bool flyout = false;
     bool from_com = false;
     ipc::CtxMenuCategory category = ipc::CtxMenuCategory::Software;
-};
-
-struct SlowComExt {
-    uint32_t last_ms = 0;
-    uint32_t slow_hits = 0;   // times >= 500ms
-    uint32_t timeout_hits = 0; // times >= 1000ms
-    bool deferred = false;     // still query async, never block first frame
-    bool disabled = false;     // skip COM query entirely
 };
 
 struct ContextMenuPrefs {
@@ -56,7 +49,7 @@ struct ContextMenuPrefs {
 
     std::unordered_map<std::wstring, bool> item_enabled;
     std::vector<SeenMenuItem> seen;
-    std::unordered_map<std::wstring, SlowComExt> slow_ext;
+    std::unordered_set<std::wstring> disabled_com;
 
     void ResetToDefaults();
     // Re-keys the seen catalog through CatalogKey and carries the per-item
@@ -71,9 +64,6 @@ struct ContextMenuPrefs {
     std::vector<std::wstring> DisabledHandlerClsids() const;
     bool RecordSeen(const std::wstring& key, const std::wstring& text, bool flyout,
                     ipc::CtxMenuCategory category, bool from_com = false);
-    // key: ".dwg" / ":folder" / ":drive" / ":bg" / ":file". Returns true if prefs changed.
-    bool RecordComTiming(const std::wstring& key, uint32_t elapsed_ms);
-    bool ComDeferred(const std::wstring& key) const;
     bool ComDisabled(const std::wstring& key) const;
     void SetComDisabled(const std::wstring& key, bool on);
 

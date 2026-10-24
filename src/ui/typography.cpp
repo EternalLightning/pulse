@@ -18,6 +18,7 @@ std::mutex g_fallback_mutex;
 IDWriteFactory2* g_fallback_factory = nullptr;
 IDWriteFontFallback* g_fallback = nullptr;
 std::atomic_uint64_t g_generation{1};
+std::atomic_int g_text_render_mode{0};
 
 template <typename T>
 void Release(T*& value) noexcept {
@@ -162,13 +163,15 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
         base3->Release();
     }
 
+    const bool sharp = CurrentTextRenderMode() == TextRenderMode::Sharp;
     IDWriteFactory3* modern = nullptr;
     if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&modern)))) {
         IDWriteRenderingParams3* modern_params = nullptr;
         result = modern->CreateCustomRenderingParams(
             base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
             base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
-            DWRITE_RENDERING_MODE1_NATURAL, DWRITE_GRID_FIT_MODE_ENABLED,
+            sharp ? DWRITE_RENDERING_MODE1_GDI_CLASSIC : DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC,
+            sharp ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED,
             &modern_params);
         modern->Release();
         if (SUCCEEDED(result) && modern_params) {
@@ -180,10 +183,67 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
     result = factory->CreateCustomRenderingParams(
         base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
         base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
-        DWRITE_RENDERING_MODE_NATURAL,
-        DWRITE_GRID_FIT_MODE_ENABLED, params);
+        sharp ? DWRITE_RENDERING_MODE_GDI_CLASSIC : DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+        sharp ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED, params);
     base->Release();
     return result;
+}
+
+void SetTextRenderMode(TextRenderMode mode) noexcept {
+    const int value = std::clamp(static_cast<int>(mode), 0, 2);
+    if (g_text_render_mode.exchange(value, std::memory_order_relaxed) == value) return;
+    g_generation.fetch_add(1, std::memory_order_relaxed);
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
+        SendMessageW(window, TextBackendChangedMessage(), 0, 0);
+        EnumChildWindows(window, [](HWND child, LPARAM) -> BOOL {
+            SendMessageW(child, TextBackendChangedMessage(), 0, 0);
+            return TRUE;
+        }, 0);
+        InvalidateRect(window, nullptr, FALSE);
+        return TRUE;
+    }, 0);
+}
+
+TextRenderMode CurrentTextRenderMode() noexcept {
+    return static_cast<TextRenderMode>(g_text_render_mode.load(std::memory_order_relaxed));
+}
+
+UINT TextBackendChangedMessage() noexcept {
+    static const UINT message = RegisterWindowMessageW(L"Pulse.TextBackendChanged");
+    return message;
+}
+
+DWRITE_MEASURING_MODE MeasuringMode() noexcept {
+    return CurrentTextRenderMode() == TextRenderMode::Sharp
+        ? DWRITE_MEASURING_MODE_GDI_CLASSIC : DWRITE_MEASURING_MODE_NATURAL;
+}
+
+HRESULT CreateTextLayout(IDWriteFactory* factory, const wchar_t* text, UINT32 length,
+                         IDWriteTextFormat* format, float width, float height,
+                         IDWriteTextLayout** layout, float pixels_per_dip) {
+    if (!layout) return E_POINTER;
+    *layout = nullptr;
+    if (!factory) return E_INVALIDARG;
+    if (MeasuringMode() == DWRITE_MEASURING_MODE_GDI_CLASSIC) {
+        return factory->CreateGdiCompatibleTextLayout(text, length, format, width, height,
+            pixels_per_dip, nullptr, FALSE, layout);
+    }
+    return factory->CreateTextLayout(text, length, format, width, height, layout);
+}
+
+int EditFontPixels(float scale, float dip) noexcept {
+    return std::max(1, static_cast<int>(std::lround(dip * std::max(0.25f, scale))));
+}
+
+HFONT CreateEditFont(float scale, float dip) {
+    const int height = -EditFontPixels(scale, dip);
+    HFONT font = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE, PreferredTextFamily());
+    if (!font) font = CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    return font;
 }
 
 void InvalidateCaches() {
@@ -207,8 +267,7 @@ D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept {
 }
 
 bool UsesLumaText(const Compositor* compositor, IDWriteTextFormat* format) noexcept {
-    return compositor && format && format != compositor->FileNameFormat() &&
-        compositor->LumaTextEnabled();
+    return compositor && format && compositor->LumaTextEnabled();
 }
 
 float InkPad(IDWriteTextFormat* format) noexcept {
@@ -224,7 +283,7 @@ float MeasureAdvanceUncached(IDWriteFactory2* factory, IDWriteTextFormat* format
     if (!factory || !format || text.empty()) return 0.0f;
     const float fallback = format->GetFontSize() * static_cast<float>(text.size());
     IDWriteTextLayout* layout = nullptr;
-    if (FAILED(factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+    if (FAILED(CreateTextLayout(factory, text.data(), static_cast<UINT32>(text.size()),
                                          format, 10000.0f, 100.0f, &layout)) || !layout) {
         return fallback;
     }
@@ -374,7 +433,7 @@ float MeasureWrapped(IDWriteFactory2* factory, IDWriteTextFormat* format,
                      std::wstring_view text, float width) {
     if (!factory || !format || text.empty() || width <= 0.0f) return 0.0f;
     IDWriteTextLayout* layout = nullptr;
-    if (FAILED(factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+    if (FAILED(CreateTextLayout(factory, text.data(), static_cast<UINT32>(text.size()),
                                          format, width, 4096.0f, &layout)) || !layout) {
         return format->GetFontSize() * 1.4f;
     }

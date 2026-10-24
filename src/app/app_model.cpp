@@ -62,17 +62,17 @@ std::optional<std::wstring> CurrentSearchOrigin(const Tab& tab) {
         ? std::optional<std::wstring>(tab.search_origin_path) : std::nullopt;
 }
 
-void AlignHistoryOrigins(const std::stack<std::wstring>& paths,
-                         std::stack<std::optional<std::wstring>>& origins) {
-    if (origins.size() == paths.size()) return;
-    // Restored/older history can have paths without source metadata.
-    origins = {};
-    for (size_t i = 0; i < paths.size(); ++i) origins.push(std::nullopt);
+Tab::HistoryEntry CurrentHistoryEntry(const Tab& tab) {
+    return {tab.current_path, CurrentSearchOrigin(tab), Tab::NavigationViewport{tab.scroll_x, tab.scroll_y}};
 }
 
-void RestoreHistoryOrigin(Tab& tab, const std::optional<std::wstring>& origin) {
-    tab.search_origin_valid = IsSearchPath(tab.current_path) && origin.has_value();
-    tab.search_origin_path = tab.search_origin_valid ? *origin : std::wstring{};
+void RestoreHistoryEntry(Tab& tab, Tab::HistoryEntry entry) {
+    tab.current_path = std::move(entry.path);
+    tab.search_origin_valid = IsSearchPath(tab.current_path) && entry.search_origin.has_value();
+    tab.search_origin_path = tab.search_origin_valid ? std::move(*entry.search_origin) : std::wstring{};
+    tab.pending_history_viewport = entry.viewport;
+    tab.scroll_x = entry.viewport ? entry.viewport->x : 0.0f;
+    tab.scroll_y = entry.viewport ? entry.viewport->y : 0.0f;
 }
 }
 
@@ -86,12 +86,10 @@ bool Tab::NavigateTo(const std::wstring& path) {
     ClearEntryRenameHints();
     ++view_generation;
     if (!current_path.empty()) {
-        AlignHistoryOrigins(back_stack, back_search_origins);
-        back_stack.push(current_path);
-        back_search_origins.push(CurrentSearchOrigin(*this));
+        back_stack.push(CurrentHistoryEntry(*this));
     }
     forward_stack = {};
-    forward_search_origins = {};
+    pending_history_viewport.reset();
     if (IsSearchPath(path) && !IsSearchPath(current_path)) {
         search_origin_path = current_path;
         search_origin_valid = true;
@@ -512,18 +510,12 @@ void Tab::RemapSelection(const std::vector<std::wstring>& names, const std::wstr
 std::wstring Tab::GoBack() {
     if (back_stack.empty()) return current_path;
     ClearEntryRenameHints();
-    AlignHistoryOrigins(back_stack, back_search_origins);
-    AlignHistoryOrigins(forward_stack, forward_search_origins);
-    forward_stack.push(current_path);
-    forward_search_origins.push(CurrentSearchOrigin(*this));
+    forward_stack.push(CurrentHistoryEntry(*this));
     ++view_generation;
-    current_path = back_stack.top();
-    RestoreHistoryOrigin(*this, back_search_origins.top());
+    auto entry = std::move(back_stack.top());
     back_stack.pop();
-    back_search_origins.pop();
     ClearSelection();
-    scroll_y = 0.0f;
-    scroll_x = 0.0f;
+    RestoreHistoryEntry(*this, std::move(entry));
     filter_text.clear();
     virtual_title.clear();
     loading = true;
@@ -533,18 +525,12 @@ std::wstring Tab::GoBack() {
 std::wstring Tab::GoForward() {
     if (forward_stack.empty()) return current_path;
     ClearEntryRenameHints();
-    AlignHistoryOrigins(forward_stack, forward_search_origins);
-    AlignHistoryOrigins(back_stack, back_search_origins);
-    back_stack.push(current_path);
-    back_search_origins.push(CurrentSearchOrigin(*this));
+    back_stack.push(CurrentHistoryEntry(*this));
     ++view_generation;
-    current_path = forward_stack.top();
-    RestoreHistoryOrigin(*this, forward_search_origins.top());
+    auto entry = std::move(forward_stack.top());
     forward_stack.pop();
-    forward_search_origins.pop();
     ClearSelection();
-    scroll_y = 0.0f;
-    scroll_x = 0.0f;
+    RestoreHistoryEntry(*this, std::move(entry));
     filter_text.clear();
     virtual_title.clear();
     loading = true;

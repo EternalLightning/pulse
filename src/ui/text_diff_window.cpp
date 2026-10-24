@@ -444,7 +444,7 @@ float TextDiffWindow::Measure(std::wstring_view text, IDWriteTextFormat* format)
     auto* factory = compositor_.DwriteFactory();
     if (!factory || !format || text.empty()) return 0.0f;
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), format,
+    if (FAILED(typography::CreateTextLayout(factory, text.data(), static_cast<UINT32>(text.size()), format,
                                          100000.0f, 1000.0f, &layout)) || !layout.get())
         return 0.0f;
     DWRITE_TEXT_METRICS metrics{};
@@ -766,9 +766,11 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
     auto text_at = [&](std::wstring_view text, const D2D1_RECT_F& rc, IDWriteTextFormat* format,
                        const D2D1_COLOR_F& color) {
         if (!format || text.empty()) return;
+        if (!hc && compositor_.DrawLumaText(text, format, rc, color, pal.body,
+                format->GetTextAlignment())) return;
         brush_->SetColor(color);
         dc->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format, rc, brush_.get(),
-                      D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+                      D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     };
     auto hline = [&](float y, float x0, float x1) {
         fill(D2D1::RectF(x0, y, x1, y + (std::max)(1.0f, std::floor(s))), theme.stroke_divider);
@@ -945,7 +947,7 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
             dc->PushAxisAlignedClip(D2D1::RectF(clip_left, y, clip_right, y + row_h),
                                     D2D1_ANTIALIAS_MODE_ALIASED);
             ComPtr<IDWriteTextLayout> layout;
-            if (SUCCEEDED(factory->CreateTextLayout(line.data(), len, mono_.get(), 1.0e6f, row_h,
+            if (SUCCEEDED(typography::CreateTextLayout(factory, line.data(), len, mono_.get(), 1.0e6f, row_h,
                                                     &layout)) && layout.get()) {
                 const float ox = text_left - scroll_x_;
                 if (spans) {
@@ -1166,6 +1168,12 @@ LRESULT CALLBACK TextDiffWindow::WndProc(HWND hwnd, UINT message, WPARAM wparam,
 }
 
 LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == typography::TextBackendChangedMessage()) {
+        compositor_.RecreateTextFormats(scale_);
+        RecreateFormats();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
     switch (message) {
     case WM_CREATE:
         scale_ = static_cast<float>(pulse::compat::WindowDpi(hwnd_)) / 96.0f;

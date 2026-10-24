@@ -1,5 +1,5 @@
 #requires -Version 7.2
-param([string]$BuildDir = 'build')
+param([string]$BuildDir = 'build-release')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $build = (Resolve-Path -LiteralPath $BuildDir).Path

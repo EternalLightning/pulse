@@ -2,6 +2,8 @@
 rem Build Release binaries, then compile dist\PulseSetup-<version>.exe.
 setlocal
 cd /d "%~dp0"
+set "PULSE_BUILD_DIR=%~2"
+if not defined PULSE_BUILD_DIR set "PULSE_BUILD_DIR=build-release"
 
 set /p PULSE_VERSION=<version.txt
 if not defined PULSE_VERSION (
@@ -10,14 +12,14 @@ if not defined PULSE_VERSION (
 )
 
 if /i "%~1"=="/skipbuild" goto after_release_build
-call "%~dp0build_release.bat" || exit /b 1
+call "%~dp0build_release.bat" "" "%PULSE_BUILD_DIR%" || exit /b 1
 :after_release_build
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\check_release_payload.ps1" -BuildDir "%~dp0build" || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\check_release_payload.ps1" -BuildDir "%PULSE_BUILD_DIR%" || exit /b 1
 
-for %%F in (build\Pulse.exe build\Pulse.Index.exe build\Pulse.Document.exe build\Pulse.Preview.exe build\Pulse.Shell.exe build\lumatext.dll) do (
-    if not exist "%%F" (
-        echo Missing build output: %%F
+for %%F in (Pulse.exe Pulse.Index.exe Pulse.Document.exe Pulse.Preview.exe Pulse.Shell.exe lumatext.dll) do (
+    if not exist "%PULSE_BUILD_DIR%\%%F" (
+        echo Missing build output: %PULSE_BUILD_DIR%\%%F
         exit /b 1
     )
 )
@@ -32,8 +34,8 @@ if not defined ISCC (
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage_installer_runtime.ps1" -BuildDir "%~dp0build" -RequireStaticRuntime || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage_installer_runtime.ps1" -BuildDir "%PULSE_BUILD_DIR%" -RequireStaticRuntime || exit /b 1
 
-"%ISCC%" /DAppVersion=%PULSE_VERSION% installer\PulseSetup.iss || exit /b 1
+"%ISCC%" /DAppVersion=%PULSE_VERSION% "/DBuildDir=%PULSE_BUILD_DIR%" installer\PulseSetup.iss || exit /b 1
 echo.
 echo Installer written to dist\

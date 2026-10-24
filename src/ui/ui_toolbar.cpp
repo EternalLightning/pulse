@@ -9,7 +9,7 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     auto* dc = compositor_->Dc();
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
-    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view);
+    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle);
     const bool searchOverlay=vm.address_searching && rect.right-left<480*scale_;
     if (!searchOverlay) {
         const wchar_t* nav_glyphs[] = {kIconBack,kIconForward,kIconUp,kIconRefresh};
@@ -55,14 +55,14 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                 // so the trailing glyph is not shaved by the clip rect.
                 DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), seg.text,
                     seg.rc.left + 8 * scale_, seg.rc.top, seg.rc.right - seg.rc.left - 8 * scale_,
-                    seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP, true);
+                    seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
             if (placed.empty() && !vm.pane.path.empty()) {
                 MakeBrush(dc, theme.text, brText_);
                 DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), vm.pane.path,
                     addrRc.left + 12.0f * scale_, addrRc.top,
                     addrRc.right - addrRc.left - 18.0f * scale_,
-                    addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP, true);
+                    addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
         }
         dc->PopAxisAlignedClip();
@@ -171,26 +171,30 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent : theme.text_secondary);
         if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent : theme.text_secondary);
     }
+    const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
+                                       const wchar_t* text, bool enabled) {
+        if (bounds.right <= bounds.left) return;
+        fluent::ButtonSpec button;
+        button.bounds=bounds; button.text=text;
+        button.kind=fluent::ButtonKind::Transparent; button.bordered=false;
+        button.state.hovered=enabled && IsHovered(vm,hit);
+        button.state.enabled=enabled;
+        painter_.DrawButton(button);
+    };
     if (vm.archive_view) {
-        const auto extract_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
-                                        const wchar_t* text, bool enabled) {
-            if (bounds.right <= bounds.left) return;
-            fluent::ButtonSpec button;
-            button.bounds=bounds; button.text=text;
-            button.kind=fluent::ButtonKind::Transparent; button.bordered=false;
-            button.state.hovered=enabled && IsHovered(vm,hit);
-            button.state.enabled=enabled;
-            painter_.DrawButton(button);
-        };
-        extract_button(layout.extract,HitTestResult::Extract,l10n::Get(l10n::StringId::ArchiveExtract).c_str(),vm.pane.selected_count>0);
-        extract_button(layout.extract_all,HitTestResult::ExtractAll,l10n::Get(l10n::StringId::ArchiveExtractAll).c_str(),!vm.pane.loading);
+        contextual_button(layout.extract,HitTestResult::Extract,l10n::Get(l10n::StringId::ArchiveExtract).c_str(),vm.pane.selected_count>0);
+        contextual_button(layout.extract_all,HitTestResult::ExtractAll,l10n::Get(l10n::StringId::ArchiveExtractAll).c_str(),!vm.pane.loading);
+    }
+    if (vm.pane.is_recycle) {
+        contextual_button(layout.empty_recycle,HitTestResult::EmptyRecycle,
+            l10n::Get(l10n::StringId::EmptyRecycleBin).c_str(),vm.can_empty_recycle);
     }
     if (layout.overflow.right > layout.overflow.left) {
         DrawButton(layout.overflow,theme,IsHovered(vm,HitTestResult::ToolbarMore) ? theme.fill_hover : kTransparent,
             L"\xE712",L"",theme.text_secondary,true,true);
     }
     const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, int files_icon,
-                             l10n::StringId label, HitTestResult::Region region, bool dropdown) {
+                             l10n::StringId label, HitTestResult::Region region, bool dropdown, bool enabled = true) {
         fluent::ButtonSpec button;
         button.bounds=bounds;
         button.glyph=glyph;
@@ -200,19 +204,22 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         button.bordered=false;
         button.drop_down=dropdown && !button.icon_only;
         button.skip_glyph=true;
-        button.state.hovered=IsHovered(vm,region);
+        button.state.hovered=enabled && IsHovered(vm,region);
+        button.state.enabled=enabled;
         painter_.DrawButton(button);
         const float cx=button.icon_only ? (bounds.left+bounds.right)*0.5f : bounds.left+18*scale_;
         const float cy=(bounds.top+bounds.bottom)*0.5f;
-        if (!DrawFluentSvg(files_icon,icon_bounds(cx,cy),1.0f,&theme.text)) {
+        const auto foreground=enabled ? theme.text : theme.text_disabled;
+        if (!DrawFluentSvg(files_icon,icon_bounds(cx,cy),1.0f,&foreground)) {
             const auto icon=icon_bounds(cx,cy);
             DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-                glyph,L"",theme.text_secondary,0.82f);
+                glyph,L"",enabled ? theme.text_secondary : theme.text_disabled,0.82f);
         }
     };
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),layout.sort.left-6*scale_,layout.sort.top+7*scale_,scale_,18*scale_);
     command(layout.sort,L"\xE8CB",IDR_FILES_SORT_SVG,l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
+    command(layout.group,L"\xE8FD",IDR_FILES_GROUP_SVG,l10n::StringId::ToolbarGroup,HitTestResult::ToolbarGroup,true,vm.can_group);
     if (vm.pane.filter_expand <= 0.015f && !vm.filter_editing) {
         command(layout.filter,kIconFilter,IDR_FILES_FILTER_SVG,l10n::StringId::ToolbarFilter,HitTestResult::FilterBox,false);
     } else {

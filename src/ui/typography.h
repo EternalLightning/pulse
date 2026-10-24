@@ -35,6 +35,22 @@ HRESULT CreateTextFormat(IDWriteFactory2* factory, const TextFormatSpec& spec,
 HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
                               IDWriteRenderingParams2** params);
 
+enum class TextRenderMode : int { Auto = 0, Sharp = 1, Smooth = 2 };
+void SetTextRenderMode(TextRenderMode mode) noexcept;
+TextRenderMode CurrentTextRenderMode() noexcept;
+UINT TextBackendChangedMessage() noexcept;
+inline bool UseLumaTextForUi() noexcept { return CurrentTextRenderMode() == TextRenderMode::Auto; }
+
+// Pulse targets use physical pixels at 96 DPI. Sharp layout and drawing must
+// share GDI-compatible advances; mixing natural advances with classic hinting
+// makes short Latin letter pairs appear unevenly spaced.
+DWRITE_MEASURING_MODE MeasuringMode() noexcept;
+HRESULT CreateTextLayout(IDWriteFactory* factory, const wchar_t* text, UINT32 length,
+                         IDWriteTextFormat* format, float width, float height,
+                         IDWriteTextLayout** layout, float pixels_per_dip = 1.0f);
+int EditFontPixels(float scale, float dip = 14.0f) noexcept;
+HFONT CreateEditFont(float scale, float dip = 14.0f);
+
 // Invalidate language-dependent fallback and measurement caches.
 void InvalidateCaches();
 std::uint64_t Generation() noexcept;
@@ -42,7 +58,7 @@ std::uint64_t Generation() noexcept;
 void ClearMeasurementCache() noexcept;
 
 // Pulse lays out in physical pixels on a 96-DPI D2D target. Keep vertical
-// text boxes stable while preserving DirectWrite's natural horizontal spacing.
+// text boxes stable while preserving the selected mode's horizontal metrics.
 D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept;
 
 // Dest rects clip ink, not advance. Leave room for glyph overhang beyond
@@ -54,7 +70,7 @@ float InkPad(IDWriteTextFormat* format) noexcept;
 float MeasureAdvance(IDWriteFactory2* factory, IDWriteTextFormat* format,
                      std::wstring_view text);
 
-// File names stay on DirectWrite; other formats may use the enabled Luma renderer.
+// Auto uses the enabled Luma renderer; explicit modes use DirectWrite.
 bool UsesLumaText(const Compositor* compositor, IDWriteTextFormat* format) noexcept;
 
 // max(DWrite, Luma) plus InkPad so a size-to-content box does not shave

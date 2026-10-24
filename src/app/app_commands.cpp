@@ -1481,19 +1481,35 @@ void ShowSortDropdown(AppState& s) {
     const float width = static_cast<float>(s.compositor.Width());
     const float left = s.renderer.EffectiveSidebarWidth(width);
     const auto layout = ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
-        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left);
+        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f),
+        IsArchiveView(tab->current_path),IsRecycleTab(tab));
     POINT anchor{static_cast<LONG>(layout.sort.left),static_cast<LONG>(layout.sort.bottom)};
     ClientToScreen(s.hwnd,&anchor);
     auto items = app::BuildSortMenu(options);
-    if (!items.empty()) items.back().separator_after = true;
-    ui::FluentMenuItem grouping;
-    grouping.text = l10n::Get(l10n::StringId::GroupBy);
-    grouping.glyph = L"\xE8FD";
-    grouping.enabled = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path) &&
-        !IsArchiveView(tab->current_path);
-    grouping.children = app::BuildGroupingMenu(tab->group_mode, tab->group_direction, grouping.enabled);
-    items.push_back(std::move(grouping));
+    RECT toggle{static_cast<LONG>(layout.sort.left), static_cast<LONG>(layout.sort.top),
+        static_cast<LONG>(layout.sort.right), static_cast<LONG>(layout.sort.bottom)};
+    MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+    s.menu->SetToggleRect(toggle);
     const int cmd = s.menu->TrackPopup(anchor, items);
+    if (cmd != app::CmdNone) DispatchMenuCommand(s,cmd);
+}
+
+void ShowGroupDropdown(AppState& s) {
+    auto* tab = ActiveTab(s);
+    if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) ||
+        IsArchiveView(tab->current_path) || !EnsureMenu(s)) return;
+    const float width = static_cast<float>(s.compositor.Width());
+    const float left = s.renderer.EffectiveSidebarWidth(width);
+    const auto layout = ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
+        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f));
+    POINT anchor{static_cast<LONG>(layout.group.left),static_cast<LONG>(layout.group.bottom)};
+    ClientToScreen(s.hwnd,&anchor);
+    const auto items = app::BuildGroupingMenu(tab->group_mode,tab->group_direction,true);
+    RECT toggle{static_cast<LONG>(layout.group.left), static_cast<LONG>(layout.group.top),
+        static_cast<LONG>(layout.group.right), static_cast<LONG>(layout.group.bottom)};
+    MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+    s.menu->SetToggleRect(toggle);
+    const int cmd = s.menu->TrackPopup(anchor,items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s,cmd);
 }
 
@@ -1515,6 +1531,11 @@ void ShowToolbarMore(AppState& s) {
         items.push_back(extract);
         extract.command=app::CmdExtractAll; extract.text=l10n::Get(l10n::StringId::ArchiveExtractAll); extract.enabled=!tab->loading;
         items.push_back(extract);
+    }
+    if (IsRecycleTab(tab)) {
+        const bool can_empty = !tab->loading && (!s.recycle_info.valid || s.recycle_info.items > 0);
+        auto recycle_items = app::BuildRecycleBackgroundMenu(false, {}, can_empty);
+        items.push_back(std::move(recycle_items.front()));
     }
     ui::FluentMenuItem split;
     split.text=l10n::Get(l10n::StringId::SplitLayout);
@@ -2067,6 +2088,8 @@ static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects)
             SendMessageW(s.hwndRenameEdit, WM_SETFONT, reinterpret_cast<WPARAM>(s.editFont), TRUE);
         if (s.hwndTagRenameEdit)
             SendMessageW(s.hwndTagRenameEdit, WM_SETFONT, reinterpret_cast<WPARAM>(s.editFont), TRUE);
+        if (s.hwndFilterEdit)
+            SendMessageW(s.hwndFilterEdit, WM_SETFONT, reinterpret_cast<WPARAM>(s.editFont), TRUE);
         if (s.pane) {
             ForEachPane(s, [&](app::Pane& pane) {
                 if (IsSettingsTab(pane.ActiveTab()))
@@ -2078,6 +2101,8 @@ static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects)
 }
 
 void ApplySettingsEffects(AppState& s, app::SettingsEffect effects) {
+    if (app::HasEffect(effects, app::SettingsEffect::TextRendering))
+        ui::typography::SetTextRenderMode(static_cast<ui::typography::TextRenderMode>(s.appPrefs.text_render));
     if (app::HasEffect(effects, app::SettingsEffect::Language)) {
         l10n::SetLanguage(s.appPrefs.language);
         ui::typography::InvalidateCaches();

@@ -107,7 +107,8 @@ std::vector<ShellMenuEntry> ApplyExplorerPrefs(const ContextMenuPrefs& prefs,
         // "is a flyout" keeps the 发送到 submenu from jumping above the software
         // section now that the share group defaults to on.
         int rank = 4;
-        if (cat == ipc::CtxMenuCategory::Software) rank = flyout ? 0 : 1;
+        if (!flyout && ipc::ToLowerVerb(e.verb) == L"runas") rank = -1;
+        else if (cat == ipc::CtxMenuCategory::Software) rank = flyout ? 0 : 1;
         else if (cat == ipc::CtxMenuCategory::OpenWith) rank = 2;
         else if (cat == ipc::CtxMenuCategory::Print) rank = 3;
         if (flyout && ipc::IsCompressVendorFlyout(e.text))
@@ -260,12 +261,63 @@ std::vector<ui::FluentMenuItem> ContextMenuController::BuildDisplay(
         for (auto& child : children) child.live_update = true;
         return children;
     }
+    const auto promote = [&](std::wstring_view verb, const wchar_t* glyph, bool allow_com) {
+        const auto matches = [&](const ShellMenuEntry& entry) {
+            return (allow_com || !entry.from_com) && entry.children.empty() && entry.command &&
+                ipc::ToLowerVerb(entry.verb) == verb;
+        };
+        const auto can_promote = [&](const ShellMenuEntry& entry) {
+            if (!matches(entry)) return false;
+            if (!entry.from_com || !menu_open_) return true;
+            // A late COM row must stay in the live suffix until the next open;
+            // inserting it here would move the stable built-in commands.
+            return std::any_of(menu_layout_com_items_.begin(), menu_layout_com_items_.end(),
+                [&](const auto& initial) {
+                    return !initial.child && !initial.has_children && initial.clsid == entry.clsid &&
+                        initial.handler == entry.handler && initial.verb == entry.verb &&
+                        initial.text == entry.text;
+                });
+        };
+        auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) {
+            return entry.enabled && can_promote(entry);
+        });
+        if (it == entries.end()) it = std::find_if(entries.begin(), entries.end(), can_promote);
+        if (it == entries.end()) return;
+        ui::FluentMenuItem chooser;
+        chooser.command = it->command;
+        chooser.text = it->text;
+        chooser.glyph = glyph;
+        chooser.enabled = it->enabled;
+        chooser.live_update = it->from_com;
+        const auto open = std::find_if(display.begin(), display.end(), [](const auto& row) {
+            return row.command == CmdOpen;
+        });
+        auto position = display.begin();
+        if (open != display.end()) {
+            chooser.separator_after = open->separator_after;
+            open->separator_after = false;
+            position = open + 1;
+        }
+        display.insert(position, std::move(chooser));
+        if (allow_com) std::erase_if(entries, matches);
+        else entries.erase(it);
+    };
+    promote(L"openas", L"\xE8E5", false);
+    if (!background_) promote(L"runas", L"\xE83D", true);
     const size_t builtin_count = display.size();
     AppendShellSection(display, entries);
     std::vector<ui::FluentMenuItem> shell_items;
-    for (size_t i = builtin_count; i < display.size(); ++i)
-        shell_items.push_back(std::move(display[i]));
+    std::vector<ui::FluentMenuItem> archive_items;
+    for (size_t i = builtin_count; i < display.size(); ++i) {
+        const auto& row = display[i];
+        const bool seven_zip = !background_ && !row.children.empty() &&
+            (ipc::MenuTextContainsI(row.text, L"7-zip") || ipc::MenuTextContainsI(row.text, L"7zip"));
+        if (seven_zip) archive_items.push_back(std::move(display[i]));
+        else shell_items.push_back(std::move(display[i]));
+    }
     display.resize(builtin_count);
+    // Keep late Shell entries in the live suffix so open built-in rows stay fixed.
+    for (auto& row : archive_items) display.push_back(std::move(row));
     if (!shell_items.empty() || (token_ != 0 && !com_ready_)) {
         ui::FluentMenuItem more;
         more.text = pulse::l10n::Get(pulse::l10n::StringId::MenuMoreOptions);
@@ -400,8 +452,9 @@ ContextMenuController::QueryCompletion ContextMenuController::CompleteComQuery(
     result.accepted = true;
     result.partial = partial;
     result.cache_key = CacheKey(background_, extension_, extended_);
-    com_cache_[result.cache_key] = com_items_;
     if (!partial) {
+        // Fast snapshots serve this session; only a complete answer can seed the next one.
+        com_cache_[result.cache_key] = com_items_;
         com_ready_ = true;
         if (query_started_at_ != 0 && completed_at >= query_started_at_) {
             result.elapsed_ms = static_cast<uint32_t>(std::min<uint64_t>(

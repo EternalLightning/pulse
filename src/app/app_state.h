@@ -69,6 +69,7 @@
 #include <vector>
 
 namespace pulse {
+struct FolderSizesUiCache;
 
 constexpr UINT WM_WORKER_RESULT = WM_APP + 1;
 constexpr UINT WM_OPS_NOTIFY = WM_APP + 2;
@@ -809,6 +810,11 @@ struct AppState : AppCoreOwner {
 
     // After a "new folder/file" op lands, select it and start renaming.
     std::wstring pendingRenameName;
+
+    float columnResizeLastX = 0.0f;
+    bool folder_size_sort_pending = false;
+    ULONGLONG folder_size_sort_due = 0;
+    std::shared_ptr<FolderSizesUiCache> folder_sizes_ui_cache;
 
 };
 

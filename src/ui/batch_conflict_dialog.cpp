@@ -1,3 +1,4 @@
+#include "typography.h"
 #include "batch_conflict_dialog.h"
 #include "../common/text_format.h"
 #include <windowsx.h>
@@ -154,7 +155,7 @@ void BatchConflictDialog::Text(const std::wstring& text, const D2D1_RECT_F& boun
     const auto value = OneLine(text);
     auto* format = heading ? compositor_.TextFormat() : compositor_.SmallFormat();
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(compositor_.DwriteFactory()->CreateTextLayout(value.c_str(), static_cast<UINT32>(value.size()), format,
+    if (FAILED(typography::CreateTextLayout(compositor_.DwriteFactory(), value.c_str(), static_cast<UINT32>(value.size()), format,
         bounds.right - bounds.left, bounds.bottom - bounds.top, &layout))) return;
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     if (!heading && bounds.bottom - bounds.top > 28 * scale_) layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
@@ -163,6 +164,8 @@ void BatchConflictDialog::Text(const std::wstring& text, const D2D1_RECT_F& boun
     compositor_.DwriteFactory()->CreateEllipsisTrimmingSign(format, &ellipsis);
     DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
     layout->SetTrimming(&trim, ellipsis.get());
+    if (layout->GetWordWrapping() == DWRITE_WORD_WRAPPING_NO_WRAP && compositor_.DrawLumaText(
+            value, layout.get(), bounds, color, MakeTheme(dark_, accent_).bg)) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (SUCCEEDED(compositor_.Dc()->CreateSolidColorBrush(color, &brush)))
         compositor_.Dc()->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);

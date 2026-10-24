@@ -49,6 +49,14 @@ struct CtxBind {
     CtxBind& operator=(const CtxBind&) = delete;
 };
 
+struct CtxParsedSelection {
+    std::vector<PIDLIST_ABSOLUTE> pidls;
+    ~CtxParsedSelection();
+    CtxParsedSelection() = default;
+    CtxParsedSelection(const CtxParsedSelection&) = delete;
+    CtxParsedSelection& operator=(const CtxParsedSelection&) = delete;
+};
+
 struct CtxWorkerHandles {
     HANDLE done_event = nullptr;
     HANDLE exit_event = nullptr;
@@ -70,8 +78,11 @@ std::vector<CtxHandlerDesc> EnumerateCtxHandlers(
     bool background, const std::wstring& path,
     const std::vector<std::wstring>& disabled_clsids);
 
+bool ParseCtxSelection(const std::vector<std::wstring>& paths, bool background,
+                       CtxParsedSelection& out);
+
 bool BindCtxSelection(const std::vector<std::wstring>& paths, bool background,
-                      CtxBind& out);
+                      CtxBind& out, const CtxParsedSelection* parsed = nullptr);
 
 HRESULT QueryOneHandler(const CtxHandlerDesc& handler, const CtxBind& bind,
                         HWND owner, UINT id_first, UINT id_last, UINT qcm_flags,

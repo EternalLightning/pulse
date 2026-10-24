@@ -6,7 +6,8 @@
 //
 // Behavior: TrackPopup runs a nested modal loop (like TrackPopupMenu):
 // hover tracking, keyboard nav (Up/Down/Enter/Esc), click-outside dismiss,
-// 120ms OutQuad fade-in + 8px slide (motion::MenuTravelDip), 80ms fade-out.
+// 200ms OutCubic fade-in + 8px slide, 140ms InQuad fade-out, matching
+// the operation center and respecting Windows' reduced-motion preference.
 // The same component serves the right-click menu and the toolbar "新建▾"
 // dropdown.
 //
@@ -214,6 +215,9 @@ private:
     void LayoutWindow(POINT screen_pt);
     void RefreshFilter();
     int RunModalLoop();
+    bool AnimationsEnabled() const;
+    void BeginDismiss();
+    bool TickAnimation();
     void OnMouse(POINT client_pt, bool button_up);
     void UpdateHover(int row, int swatch = -1);
     float BodyHeightPx() const;
@@ -283,6 +287,10 @@ private:
     int base_x_ = 0;               // window position before slide animation
     int base_y_ = 0;
     uint64_t anim_start_ = 0;
+    BYTE dismiss_alpha_ = 0;
+    int dismiss_offset_ = 0;
+    int motion_override_ = -1; // Isolated fixture override; production follows Windows.
+    std::vector<MSG> deferred_clicks_;
 
     Surface surf_;                 // main menu staging
 
