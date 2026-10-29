@@ -1,0 +1,14 @@
+{
+  "Agents": [
+    {
+      "ProcessId": 56604,
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "Service": {
+    "State": "Stopped",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  }
+}

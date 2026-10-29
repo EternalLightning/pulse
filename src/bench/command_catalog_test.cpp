@@ -21,28 +21,34 @@ void Check(bool value, const char* description) {
 bool Has(const std::vector<ui::FluentMenuItem>& items, int command) {
     return std::any_of(items.begin(), items.end(), [=](const auto& item) { return item.command == command; });
 }
-void CheckPalette(const wchar_t* language) {
+void CheckGrouping(const wchar_t* language) {
     l10n::SetLanguage(language);
     constexpr ui::GroupMode modes[] = {ui::GroupMode::Auto, ui::GroupMode::None,
         ui::GroupMode::DateModified, ui::GroupMode::Type, ui::GroupMode::Size};
     for (int mode = 0; mode < 5; ++mode) {
         const auto grouping = BuildGroupingMenu(modes[mode], ui::SortDirection::Desc, true);
-        Check(grouping.size() == 6 && grouping[static_cast<size_t>(mode)].radio &&
-            std::count_if(grouping.begin(), grouping.end(), [](const auto& item) { return item.radio; }) == 1 &&
+        Check(grouping.size() == 7 && grouping[static_cast<size_t>(mode)].radio &&
+            std::count_if(grouping.begin(), grouping.begin() + 5, [](const auto& item) { return item.radio; }) == 1 &&
             grouping[static_cast<size_t>(mode)].command == CmdGroupAuto + mode,
             "grouping menu preserves selected mode and stable command IDs");
-        Check(grouping.back().enabled == (modes[mode] != ui::GroupMode::Auto &&
-                modes[mode] != ui::GroupMode::None) &&
-            grouping.back().shortcut == l10n::Get(l10n::StringId::GroupDescending) &&
-            grouping.back().text == l10n::Get(l10n::StringId::GroupDirection) && !grouping.back().text.empty(),
-            "group order has localized direction and is disabled for automatic or no grouping");
+        const bool order_enabled = modes[mode] != ui::GroupMode::Auto && modes[mode] != ui::GroupMode::None;
+        Check(grouping[5].command == CmdGroupAscending && grouping[6].command == CmdGroupDescending &&
+            grouping[5].text == l10n::Get(l10n::StringId::GroupAscending) &&
+            grouping[6].text == l10n::Get(l10n::StringId::GroupDescending) &&
+            grouping[5].enabled == order_enabled && grouping[6].enabled == order_enabled &&
+            !grouping[5].radio && grouping[6].radio && grouping[5].radio_group && grouping[6].radio_group &&
+            grouping[5].shortcut.empty() && grouping[6].shortcut.empty(),
+            "group order offers explicit localized ascending and descending choices with one selected direction");
     }
     const auto ascending = BuildGroupingMenu(ui::GroupMode::Type, ui::SortDirection::Asc, true);
-    Check(ascending.back().shortcut == l10n::Get(l10n::StringId::GroupAscending),
-        "ascending group direction is displayed accurately");
+    Check(ascending[5].radio && !ascending[6].radio,
+        "ascending group direction selects only the ascending choice");
     const auto disabled_groups = BuildGroupingMenu(ui::GroupMode::Auto, ui::SortDirection::Desc, false);
     Check(std::none_of(disabled_groups.begin(), disabled_groups.end(), [](const auto& item) { return item.enabled; }),
         "unsupported virtual locations cannot dispatch grouping actions");
+}
+void CheckPalette(const wchar_t* language) {
+    CheckGrouping(language);
     CommandContext context;
     const auto commands = BuildCommandPalette(L">", {}, {}, false, 0, {}, context);
     Check(commands.size() == GetCommandCatalog().size(), "palette includes each catalog command once");
@@ -63,8 +69,14 @@ void CheckPalette(const wchar_t* language) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::string_view(argv[1]) == "--group-order-only") {
+        CheckGrouping(L"zh-CN");
+        CheckGrouping(L"en-US");
+        std::printf("%d PASS, %d FAIL\n", passed, failed);
+        return failed ? 1 : 0;
+    }
     std::set<int> ids;
     for (const auto& descriptor : GetCommandCatalog()) {
         Check(ids.insert(descriptor.command).second, "catalog command IDs are unique");

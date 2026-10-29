@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-23",
+  "scope": [
+    "Rename filename flicker while holding the mouse button and dragging a text selection",
+    "Ctrl+F filter Escape error-beep path"
+  ],
+  "status": "completed",
+  "baseline": {
+    "log": "bench_data/issue-followup-ui/before.log",
+    "pass": 17,
+    "fail": 5,
+    "exit_code": 1,
+    "drag_moves": 16,
+    "drag_redraw_off": 16,
+    "drag_redraw_on": 16,
+    "drag_visible_style_losses": 16,
+    "drag_native_selection_updates": 16,
+    "expected_failures": [
+      "Repeated native redraw toggles during drag",
+      "Repeated native child visibility losses during drag",
+      "Mouse capture remains held after a move without MK_LBUTTON",
+      "Queued filter Escape WM_CHAR reaches the native default path",
+      "Queued filter Enter WM_CHAR reaches the native default path"
+    ]
+  },
+  "after_preliminary": {
+    "log": "bench_data/issue-followup-ui/after-preliminary.log",
+    "pass": 22,
+    "fail": 0,
+    "exit_code": 0,
+    "drag_moves": 16,
+    "drag_redraw_off": 0,
+    "drag_redraw_on": 0,
+    "drag_visible_style_losses": 0,
+    "drag_native_selection_updates": 16
+  },
+  "fixture": {
+    "source": "bench_data/issue-followup-ui/probe.cpp",
+    "build_script": "bench_data/issue-followup-ui/build.py",
+    "baseline_build": "python bench_data/issue-followup-ui/build.py --before; cmd /c bench_data\\issue-followup-ui\\build.cmd",
+    "after_build": "python bench_data/issue-followup-ui/build.py --unified; cmd /c bench_data\\issue-followup-ui\\build.cmd",
+    "method": "Baseline and preliminary runs privately compile the three relevant production translation units. The final --unified run compiles only probe.cpp privately and links every production object from the completed pulse build, installs production hosted RenameEditProc/FilterEditProc, and exercises local window messages against native EDIT and production LumaText rendering.",
+    "native_observer": "A subclass below the production subclass counts native EM_SETSEL, WM_SETREDRAW, WS_VISIBLE losses and queued control characters. It consumes forwarded Enter/Escape only at the bottom to avoid deliberately playing the old error beep.",
+    "environment": "Offscreen visible nonactivating owner, 220x30 rename edit, 194-character filename, light theme, 100 percent scale; LumaText enabled.",
+    "side_effects": "Isolated AppState with persistence disabled; no real file operation, user preference change or global input injection."
+  },
+  "changes": [
+    {
+      "id": "rename-drag-flicker",
+      "files": [
+        "src/ui/edit_host.h",
+        "src/ui/edit_host.cpp",
+        "src/ui/lumatext_renderer.cpp"
+      ],
+      "before": "Each ApplyMouseSelection sends a live EM_SETSEL; DefPresentedChildEditProc surrounds each native selection update with WM_SETREDRAW FALSE/TRUE. Native EDIT removes WS_VISIBLE on FALSE, producing repeated observable surface visibility churn.",
+      "fix": "Use one native redraw-suppression transaction for the captured mouse selection while retaining WS_VISIBLE. Continue updating the native selection on every drag move, and present once through the outer mouse handler. End the transaction on mouse-up, capture loss, buttonless move or presentation fallback; preserve externally hidden state and remove the property on destruction.",
+      "compatibility": "No deferred native selection, struct layout change or ABI change. edit_host.h adds two helper function declarations. Prior F18 viewport retention is preserved.",
+      "checks": [
+        "Every drag move updates native selection; forward and backward movement cross the anchor",
+        "No redraw toggles or visibility loss during the 16 captured drag moves",
+        "Production LumaText paints the selection while held and after release",
+        "Mouse-up retains native selection and releases capture",
+        "Native WM_CHAR keyboard editing works while mouse capture is held",
+        "Capture loss and a move without MK_LBUTTON clear the transaction",
+        "Repeated same-point long-name clicks preserve the F18 viewport",
+        "Capture cleanup preserves an externally hidden editor",
+        "Destroying a captured editor safely clears capture"
+      ]
+    },
+    {
+      "id": "filter-escape-beep",
+      "files": [
+        "src/app/app_hosted_edit.cpp"
+      ],
+      "before": "FilterEditProc consumes Enter/Escape WM_KEYDOWN and closes the editor, but the already queued WM_CHAR falls through to the native EDIT default handler.",
+      "fix": "Consume Enter/Escape WM_CHAR immediately while retaining ordinary character editing and filter synchronization.",
+      "checks": [
+        "Production filter Escape closes the editor and its queued WM_CHAR never reaches the native default path",
+        "Production filter Enter closes the editor and its queued WM_CHAR never reaches the native default path"
+      ]
+    }
+  ],
+  "visuals": {
+    "held_selection": "bench_data/issue-followup-ui/after-drag-selection.bmp",
+    "released_selection": "bench_data/issue-followup-ui/after-released-selection.bmp",
+    "preliminary_review": "Both 220x30 production-rendered captures were visually inspected: blue selection remains visible and the long filename ending is rendered.",
+    "final_review": "Both final 220x30 production-rendered held/released captures were inspected: blue selection remains visible and the long filename ending is rendered."
+  },
+  "limits": [
+    "The flicker evidence measures child surface visibility churn; no physical display flicker video was recorded.",
+    "Local synthetic window messages exercise real production handlers, native EDIT and LumaText; no physical mouse drag or physical Ctrl+F sequence was injected.",
+    "Native keyboard editing during capture was verified; real IME composition and accessibility client interaction were not exercised.",
+    "The beep path is verified by preventing queued WM_CHAR from reaching the native default sink; actual system audio was not played or listened to.",
+    "No full regression suite, installed copy replacement or actual rename operation was performed."
+  ],
+  "after": {
+    "log": "bench_data/issue-followup-ui/after.log",
+    "pass": 22,
+    "fail": 0,
+    "exit_code": 0,
+    "drag_moves": 16,
+    "drag_redraw_off": 0,
+    "drag_redraw_on": 0,
+    "drag_visible_style_losses": 0,
+    "drag_native_selection_updates": 16,
+    "linked_production_objects": "All pulse production objects from the completed unified build; only probe.cpp is compiled privately in final --unified mode."
+  },
+  "source_sha256": {
+    "src/app/app_hosted_edit.cpp": "0d44f6c54f93a1e6e41e962cb0d342d711f95da2edc6a4f3a7cddc87ae3be0db",
+    "src/ui/edit_host.cpp": "736d3e663d82b7fa480e687b31c1c11c45375ae94eef09c45d5eeaf76b6373f4",
+    "src/ui/edit_host.h": "7d11fad32631840dc77e51a21c87161da2f8c8ff5e96c25680dcee30d968b33d",
+    "src/ui/lumatext_renderer.cpp": "e18d722e615665542a621192d32a6e32ac8cbcae92798634c41fe9bdcd81ec94"
+  },
+  "linked_editor_object_sha256": {
+    "build/CMakeFiles/pulse.dir/src/app/app_hosted_edit.cpp.obj": "a4b5546ae8e43166658a7b1d4dabd3a6e4e48947966189dc613fa580a9892b20",
+    "build/CMakeFiles/pulse.dir/src/ui/edit_host.cpp.obj": "a0ce8bc2c87f4f6df613ea87ff7c378faf3fd4aa769b472037fcf0f231b9f90b",
+    "build/CMakeFiles/pulse.dir/src/ui/lumatext_renderer.cpp.obj": "b92c83dfeab6c2321abd4c5df2e6eae1da3124ec4c1ea862a0c60f9d08be97cf"
+  },
+  "final_fixture_sha256": "9255eb23914ff7ad9219db00cc33c01403c20e689a512c0a78e5627f9deead25",
+  "final_link_response_sha256": "9ee1d1edcd595373d85bd32bd17a51ebb2dafef31fd37c902914d84e6eb899f4",
+  "pulse_sha256_at_ui_verification": "e4d476f9f7cf35febfaafa7e423ea5fce0346a6a8c4c3edab8b4b9766c4227b9",
+  "unified_build_log": "bench_data/issue-followup-main/build-final-clean.log",
+  "subsequent_index_build_note": "Parent announced a later index-cache boundary correction and index library/pulse relink, outside this UI package. This record identifies the exact UI verification executable and editor objects; it does not claim that later index rebuild was exercised by the UI fixture."
+}

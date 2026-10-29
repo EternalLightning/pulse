@@ -1,0 +1,14 @@
+[
+  {
+    "Name": "child-auto",
+    "ExitCode": 0,
+    "Pass": 153,
+    "Fail": 0
+  },
+  {
+    "Name": "child-sharp",
+    "ExitCode": 1,
+    "Pass": 152,
+    "Fail": 1
+  }
+]

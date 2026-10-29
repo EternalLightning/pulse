@@ -1,0 +1,15 @@
+{
+  "number": 283,
+  "title": "使用bug",
+  "body": "1、重命名输入框长度是固定的，很短，无法调整；2、复制文件会在临时暂存托盘，文件管理器内部使用没有问题，如果先复制其他软件的文件到文件夹，还是优先使用临时暂存托盘已复制的文件，且该功能无法关闭；3、无法删除U盘内文件（应该是无法放入回收站，然后管理器跳不上这个提示窗口，直接失败）",
+  "url": "https://github.com/jimmgreen/pulse/issues/283",
+  "captured_at": "2026-10-23T03:10:07.142118+00:00",
+  "updated_at": "2026-10-17T00:15:02Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoUc1tugBqzMzNDkzNDA4MDA0",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoUc2R3ABqzMzNDkzNDMyMjQ4"
+  }
+}

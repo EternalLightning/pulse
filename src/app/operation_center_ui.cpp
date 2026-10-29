@@ -99,6 +99,7 @@ void UpdateOperationCenter(AppState& s) {
 }
 
 void InitializeOperationCenter(AppState& s) {
+    if (s.operationCenter || s.exit_requested || s.ui_schedule.stopped || !s.hwnd) return;
     s.operationCenter = std::make_unique<ui::OperationCenter>();
     if (!s.operationCenter->Create(s.hwnd, &s.compositor)) {
         s.operationCenter.reset();
@@ -212,6 +213,7 @@ void InitializeOperationCenter(AppState& s) {
 }
 
 void ToggleOperationCenter(AppState& s) {
+    InitializeOperationCenter(s);
     if (!s.operationCenter) return;
     const float width = static_cast<float>(s.compositor.Width());
     const auto layout = ui::MakeToolbarLayout(width, s.scale, s.renderer.TitleBarHeight(),
@@ -219,8 +221,10 @@ void ToggleOperationCenter(AppState& s) {
     POINT points[]{{static_cast<LONG>(layout.operations.left), static_cast<LONG>(layout.operations.top)},
         {static_cast<LONG>(layout.operations.right), static_cast<LONG>(layout.operations.bottom)}};
     MapWindowPoints(s.hwnd, nullptr, points, 2);
-    UpdateOperationCenterTheme(s);
-    UpdateOperationCenter(s);
+    if (!s.operationCenter->IsVisible()) {
+        UpdateOperationCenterTheme(s);
+        UpdateOperationCenter(s);
+    }
     s.operationCenter->Toggle({points[0].x, points[0].y, points[1].x, points[1].y});
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }

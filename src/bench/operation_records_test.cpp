@@ -1,4 +1,5 @@
 #include "../ops/ops_manager.h"
+#include "../ops/operation_presentation.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstddef>
@@ -49,6 +50,37 @@ struct OperationRecordsTestProbe {
     static bool Cancelled(const OpsManager& manager) { return manager.transfer_cancel_.load(); }
     static void Republish(OpsManager& manager) {
         manager.SetStatus([](OpStatus& status) { status.elevation_retry_available = false; });
+    }
+    static void FailForElevation(OpsManager& manager, uint64_t id) {
+        manager.queue_.clear();
+        OpsManager::QueueItem retry;
+        retry.seq = id; retry.req.type = OpType::RealDelete;
+        retry.req.sources = {L"remaining-recycle-item"};
+        retry.retry_generation = manager.lock_retry_generation_.load();
+        manager.elevation_retry_ = retry;
+        manager.SetStatus([&](OpStatus& status) {
+            status.task_id = id; status.type = OpType::EmptyRecycle;
+            status.phase = OpPhase::Failed; status.active = false;
+            status.total_items = 30; status.completed_items = 11;
+            status.source_label = L"original-recycle-batch";
+            status.failure_hr = E_ACCESSDENIED; status.last_error = L"denied";
+            ++status.completed_ops;
+        });
+        manager.status_.source_label.clear(); // empty-bin raw status can omit the frozen plan's path
+    }
+    static void PublishElevation(OpsManager& manager, OpPhase phase, uint64_t completed) {
+        if (!manager.queue_.empty()) {
+            manager.active_item_ = std::move(manager.queue_.front());
+            manager.queue_.pop_front();
+        }
+        OpStatus snapshot;
+        snapshot.task_id = manager.active_item_->seq; snapshot.type = OpType::RealDelete;
+        snapshot.phase = phase; snapshot.active = phase == OpPhase::Running;
+        snapshot.total_items = 19; snapshot.completed_items = completed;
+        snapshot.source_label = L"remaining-recycle-item";
+        ApplyOperationContinuation(snapshot, *manager.active_item_->retry_batch_status);
+        manager.SetStatus([&](OpStatus& status) { status = snapshot; });
+        if (!snapshot.active) manager.active_item_.reset();
     }
 };
 
@@ -432,7 +464,64 @@ void BatchAndOutcomeFixtures() {
 }
 }
 
-int main() {
+void ElevationBatchFixtures() {
+    using namespace pulse::ops;
+    using Probe = OperationRecordsTestProbe;
+    for (const auto phase : {OpPhase::Completed, OpPhase::Cancelled, OpPhase::Failed}) {
+        OpsManager manager;
+        Probe::Initialize(manager);
+        OpRequest request;
+        request.type = OpType::EmptyRecycle;
+        const auto id = manager.Submit(request);
+        Probe::FailForElevation(manager, id);
+        Check(manager.TaskStatuses().size() == 1 && manager.IsElevationFailureCurrent(id),
+            "permission failure retains the original batch before consent");
+        Check(manager.RetryElevatedOperation(id) && !manager.RetryElevatedOperation(id),
+            "elevation queues the batch once and rejects repeated consent");
+        auto tasks = manager.TaskStatuses();
+        Check(tasks.size() == 1 && tasks.front().task_id == id && tasks.front().phase == OpPhase::Queued &&
+            tasks.front().type == OpType::EmptyRecycle && tasks.front().completed_items == 11 &&
+            tasks.front().total_items == 30 && tasks.front().last_error.empty(),
+            "queued elevation replaces the failed card and preserves batch identity, name and counts");
+        Probe::PublishElevation(manager, OpPhase::Running, 3);
+        tasks = manager.TaskStatuses();
+        Check(tasks.size() == 1 && tasks.front().task_id == id && tasks.front().active &&
+            tasks.front().type == OpType::EmptyRecycle && tasks.front().completed_items == 14 &&
+            tasks.front().total_items == 30 && tasks.front().source_label == L"original-recycle-batch",
+            "active elevation keeps one card with cumulative progress and the original path");
+        if (phase == OpPhase::Cancelled) {
+            manager.ClearFinishedTasks();
+            Check(manager.TaskStatuses().size() == 1, "clearing results preserves the continuing batch");
+        }
+        Probe::PublishElevation(manager, phase, phase == OpPhase::Completed ? 19 : 3);
+        tasks = manager.TaskStatuses();
+        Check(tasks.size() == 1 && tasks.front().task_id == id && tasks.front().phase == phase &&
+            tasks.front().type == OpType::EmptyRecycle && tasks.front().total_items == 30 &&
+            tasks.front().completed_items == (phase == OpPhase::Completed ? 30u : 14u) &&
+            tasks.front().source_label == L"original-recycle-batch",
+            "success, cancellation and failure replace the original result without a second card");
+        Check(manager.Submit(request) == id + 1, "an elevation continuation does not consume another task ID");
+    }
+    OpsManager cancelled;
+    Probe::Initialize(cancelled);
+    OpRequest request;
+    request.type = OpType::EmptyRecycle;
+    const auto id = cancelled.Submit(request);
+    Probe::FailForElevation(cancelled, id);
+    Check(cancelled.RetryElevatedOperation(id), "queue an elevation continuation for cancellation");
+    cancelled.CancelCurrent();
+    const auto retained = cancelled.TaskStatuses();
+    Check(retained.size() == 1 && retained.front().task_id == id && retained.front().phase == OpPhase::Failed,
+        "cancelling before elevation starts retains the original batch result");
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--elevation-batch") == 0) {
+        ElevationBatchFixtures();
+        std::printf("%d failure(s)\n", failures);
+        return failures ? 1 : 0;
+    }
+    ElevationBatchFixtures();
     using namespace pulse::ops;
     using Probe = OperationRecordsTestProbe;
     OpsManager manager;
@@ -506,7 +595,7 @@ int main() {
     tasks = manager.TaskStatuses();
     Check(tasks.size() == 1 && tasks.front().task_id == still_queued && tasks.front().phase == OpPhase::Queued,
         "clearing bounded history never consumes pending work");
-    try { BatchAndOutcomeFixtures(); }
+    try { if (argc <= 1 || std::strcmp(argv[1], "--task-status") != 0) BatchAndOutcomeFixtures(); }
     catch (const std::exception& error) { std::printf("[FAIL] fixture exception: %s\n", error.what()); ++failures; }
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;

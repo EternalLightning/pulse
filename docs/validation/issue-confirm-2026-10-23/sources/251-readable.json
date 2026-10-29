@@ -1,0 +1,42 @@
+{
+  "number": 251,
+  "title": "打开后，无法退出移动硬盘，桌面的文件夹也没有办法在桌面上删除",
+  "body": "",
+  "url": "https://github.com/jimmgreen/pulse/issues/251",
+  "captured_at": "2026-10-23T03:10:07.173869+00:00",
+  "updated_at": "2026-10-22T06:29:03Z",
+  "comments": [
+    {
+      "body": "感谢反馈，这两个问题都已定位：\n\n**1. 打开 Pulse 后无法安全弹出移动硬盘**\n\n原因：Pulse 对移动硬盘保持着两类句柄，而且都没有响应 Windows 在弹出前发出的\"设备即将移除\"通知，所以系统一直提示\"设备正在使用中\"：\n- 正在浏览的文件夹有一个变更监视句柄，用于实时刷新列表；\n- 索引服务对已索引的 NTFS 卷持有卷句柄，用于读取 USN 变更日志（移动硬盘默认也会被索引）。\n\n修复：两类句柄现在都会注册设备移除通知。收到\"即将移除\"时立即关闭句柄，弹出可以正常进行。如果弹出被取消，句柄会马上恢复，索引从原来的位置继续读取，不需要重建。设备拔出后再插回，也会自动恢复。\n\n**2. 桌面上的文件夹无法删除**\n\n原因：同样和文件夹监视句柄有关。Pulse 正在浏览某个文件夹的子文件夹时，把它的上层文件夹删除到回收站会失败（提示\"此系统上不支持该功能\"）。\n\n修复：其他程序需要重命名、移动或删除上层文件夹时，监视句柄会自动让位。这部分修复是在 v1.0.53 发布之后合入的，所以当前版本仍可复现。\n\n两项修复都将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈，这两个问题都已定位：</p>\n<p dir=\"auto\"><strong>1. 打开 Pulse 后无法安全弹出移动硬盘</strong></p>\n<p dir=\"auto\">原因：Pulse 对移动硬盘保持着两类句柄，而且都没有响应 Windows 在弹出前发出的\"设备即将移除\"通知，所以系统一直提示\"设备正在使用中\"：</p>\n<ul dir=\"auto\">\n<li>正在浏览的文件夹有一个变更监视句柄，用于实时刷新列表；</li>\n<li>索引服务对已索引的 NTFS 卷持有卷句柄，用于读取 USN 变更日志（移动硬盘默认也会被索引）。</li>\n</ul>\n<p dir=\"auto\">修复：两类句柄现在都会注册设备移除通知。收到\"即将移除\"时立即关闭句柄，弹出可以正常进行。如果弹出被取消，句柄会马上恢复，索引从原来的位置继续读取，不需要重建。设备拔出后再插回，也会自动恢复。</p>\n<p dir=\"auto\"><strong>2. 桌面上的文件夹无法删除</strong></p>\n<p dir=\"auto\">原因：同样和文件夹监视句柄有关。Pulse 正在浏览某个文件夹的子文件夹时，把它的上层文件夹删除到回收站会失败（提示\"此系统上不支持该功能\"）。</p>\n<p dir=\"auto\">修复：其他程序需要重命名、移动或删除上层文件夹时，监视句柄会自动让位。这部分修复是在 v1.0.53 发布之后合入的，所以当前版本仍可复现。</p>\n<p dir=\"auto\">两项修复都将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/251#issuecomment-6182535964"
+    },
+    {
+      "body": "1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。\n",
+      "bodyHTML": "<p dir=\"auto\">1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/251#issuecomment-6334333531"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoT1AWjAAqjYxODI1MzU5NjQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJMf5gBqzMzOTIwODM5NDAy"
+  }
+}

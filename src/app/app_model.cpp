@@ -1,5 +1,7 @@
 // app_model.cpp
 #include "app_model.h"
+#include "cloud_root_catalog.h"
+#include "network_sidebar.h"
 #include "search_query.h"
 #include "date_groups.h"
 #include "shell_path.h"
@@ -85,9 +87,7 @@ bool Tab::NavigateTo(const std::wstring& path) {
     }
     ClearEntryRenameHints();
     ++view_generation;
-    if (!current_path.empty()) {
-        back_stack.push(CurrentHistoryEntry(*this));
-    }
+    back_stack.push(CurrentHistoryEntry(*this));
     forward_stack = {};
     pending_history_viewport.reset();
     if (IsSearchPath(path) && !IsSearchPath(current_path)) {
@@ -658,6 +658,7 @@ LayoutTab& WindowTabs::NewTabAt(size_t index, const std::wstring& path) {
 void WindowTabs::CloseTab(size_t idx) {
     if (idx >= items.size() || items.size() <= 1) return;
     if (items[idx]->pinned) return;
+    if (before_close) before_close(*items[idx]);
     items.erase(items.begin() + static_cast<ptrdiff_t>(idx));
     if (active >= items.size()) active = items.size() - 1;
     else if (idx < active) --active;
@@ -1288,6 +1289,15 @@ SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
             ui::HexColor(0x2B88D8), L"OneDrive");
         if (!onedrive.path.empty()) m.cloud.push_back(std::move(onedrive));
     }
+    std::vector<CloudRoot> cloud_seeds;
+    for (const auto& entry : m.cloud)
+        cloud_seeds.push_back({entry.path, entry.label, {}, CloudRootSource::Seed, 0x42, true});
+    SortCloudRoots(cloud_seeds);
+    RequestCloudRootRefresh(cloud_seeds);
+    const auto roots = CloudRootCatalog();
+    m.cloud.clear();
+    for (const auto& root : roots ? *roots : cloud_seeds)
+        m.cloud.push_back(BuildCloudSidebarEntry(root));
     SidebarEntry recycle_bin;
     recycle_bin.glyph = L"\xE75C";
     recycle_bin.fallback = L"Bin";
@@ -1382,6 +1392,21 @@ static std::wstring SelectionText(const Tab& tab) {
     return std::wstring(buf) + L"  \u00B7  " + pulse::format::ByteSize(bytes, true);
 }
 
+SidebarEntry BuildCloudSidebarEntry(const CloudRoot& root) {
+    SidebarEntry entry;
+    entry.path = root.path;
+    entry.label = root.label;
+    entry.glyph = IsOneDriveCloudRoot(root) ? L"\xE753" : L"\xE8B7";
+    entry.fallback = L"Cloud";
+    entry.color = ui::HexColor(CloudRootColor(root));
+    if (!IsOneDriveCloudRoot(root)) {
+        // Query the provider's registered namespace icon on the Shell worker.
+        entry.icon_path = root.source == CloudRootSource::NavigationPane &&
+            !root.id.empty() && root.id.front() == L'{' ? L"::" + root.id : root.path;
+    }
+    return entry;
+}
+
 static ui::SidebarGroup ConvertGroup(const std::wstring& header, const std::vector<SidebarEntry>& src,
                                      bool collapsed) {
     ui::SidebarGroup g;
@@ -1396,6 +1421,8 @@ static ui::SidebarGroup ConvertGroup(const std::wstring& header, const std::vect
         it.icon_color = e.color;
         it.danger = e.danger;
         it.path = e.path;
+        it.icon_path = e.icon_path;
+        it.use_path_icon = !e.icon_path.empty();
         it.is_drive = e.is_drive;
         it.used_ratio = e.used_ratio;
         it.badge = e.badge;
@@ -1534,7 +1561,10 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
 void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCatalog* places) {
     const Tab* tab = pane.ActiveTab();
     if (!tab) return;
-    out.path = tab->virtual_title.empty() ? DisplayPath(tab->current_path) : tab->virtual_title;
+    // Navigation identity is independent of localized or user-defined titles.
+    // In particular, the empty address is the valid This PC destination.
+    out.path = fs::IsVirtualPath(tab->current_path)
+        ? tab->current_path : pulse::path::FriendlyPathText(tab->current_path);
     out.header_text = PaneHeaderText(*tab);
     out.filter_text = tab->filter_text;
     out.filter_error.clear();
@@ -1549,6 +1579,14 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.banner_message = tab->banner_message;
     out.network_search_root = tab->network_search_root;
     out.banner_kind = tab->net_readonly ? 2 : 0;
+    out.banner_expansion = -1.0f;
+    if (const auto& banner = tab->banner_animation; banner.MatchesPath(tab->current_path)) {
+        out.banner_title = banner.title;
+        out.banner_message = banner.message;
+        out.network_search_root = banner.network_search_root;
+        out.banner_kind = banner.kind;
+        out.banner_expansion = banner.expansion.value;
+    }
     out.filter_map.reset();
     out.source_to_view.reset();
     out.date_groups.reset();
@@ -1559,16 +1597,18 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.can_go_forward = tab->CanGoForward();
     std::wstring virtual_kind;
     ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
-    // Archive titles are labels, not filesystem paths. Breadcrumb clicks need
-    // the full virtual address instead of resolving the title against the CWD.
-    if (virtual_kind == L"archive") out.path = tab->current_path;
     out.is_home = virtual_kind == L"home";
     out.home_collapsed_mask = tab->home_collapsed_mask;
+    for (size_t group = 0; group < tab->home_group_transitions.size(); ++group) {
+        const auto& transition = tab->home_group_transitions[group];
+        out.home_expansion[group] = transition.initialized ? transition.value : -1.0f;
+    }
     out.can_go_up = (virtual_kind == L"recycle" || virtual_kind == L"archive")
         ? true
-        : (fs::IsVirtualPath(tab->current_path) ? tab->CanGoBack() : !tab->current_path.empty());
+        : (fs::IsVirtualPath(tab->current_path) ? tab->CanGoBack() || virtual_kind == L"device" : !tab->current_path.empty());
     if (out.is_home) out.can_go_up = false;
     out.is_file_system = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
+    out.cloud_status_column = out.is_file_system && IsUnderCloudFilesRoot(tab->current_path);
     out.can_create = out.is_file_system && !tab->net_readonly;
     out.curated_order = virtual_kind == L"starred" || virtual_kind == L"recent" || virtual_kind == L"changes";
     out.is_starred = virtual_kind == L"starred";
@@ -1582,15 +1622,12 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
         ParsePulsePath(tab->current_path, nullptr, &rest);
         out.search_query = rest;
         out.is_content_search = SplitSearchQueryText(rest).content.present();
-        // Keep pulse:search:... so the address bar is one segment, not C:\ splits.
-        out.path = tab->current_path;
     }
     out.content_results = tab->content_results;
     out.search_snippets = tab->search_snippets;
     out.recent_filter = tab->recent_filter;
     out.recent_total = out.is_recent && places ? places->recent_items.size() : 0;
     if (virtual_kind == L"recycle") {
-        out.path = MakeRecyclePath();
         out.date_column_label = l10n::Get(l10n::StringId::ColumnDeleted);
     } else {
         out.date_column_label = l10n::Get(out.is_recent
@@ -1603,6 +1640,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.scroll_y = tab->scroll_y;
     out.scroll_x = tab->scroll_x;
     out.view_mode = tab->view_mode;
+    out.view_mode_direct = tab->view_mode_direct;
     out.view_generation = tab->view_generation;
     out.sort_column = tab->sort_column;
     out.sort_direction = tab->sort_direction;
@@ -1792,6 +1830,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
     }
 
     workspaces.header = l10n::Get(l10n::StringId::SidebarWorkspaces);
+    workspaces.show_when_empty = true;
+    const int current_workspace = places ? places->FindWorkspaceForPath(tab->current_path) : -1;
     if (places) {
         for (int i = 0; i < static_cast<int>(places->workspaces.size()); ++i) {
             const auto& w = places->workspaces[static_cast<size_t>(i)];
@@ -1804,7 +1844,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             it.fallback_text = L"WS";
             it.icon_color = ui::HexColor(unc ? 0x38BDF8 : 0x34D399);
             if (unc) it.badge = l10n::Get(l10n::StringId::Server);
-            if (i == places->active_workspace)
+            if (i == current_workspace)
                 it.badge = l10n::Get(unc ? l10n::StringId::CurrentServer
                                          : l10n::StringId::Current);
             workspaces.items.push_back(std::move(it));
@@ -1950,6 +1990,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             nets.items.push_back(std::move(it));
         }
     }
+    AppendSystemNetworkLocations(nets, sidebar.system_networks);
     // Emit the sections in the user's order. Ids and the collapse/hide bits are
     // re-applied here because ConvertGroup builds fresh groups.
     vm.sidebar.reserve(sections.size());
@@ -1960,7 +2001,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
         // section, so a header above them would just repeat their own name.
         if (IsHeaderlessSection(static_cast<SidebarSectionId>(id))) section.header.clear();
         section.collapsed = ((sidebar_collapsed_mask >> id) & 1u) != 0;
-        section.hidden = ((sidebar_hidden_mask >> id) & 1u) != 0;
+        section.hidden = !IsSidebarSectionAvailable(static_cast<SidebarSectionId>(id)) ||
+            ((sidebar_hidden_mask >> id) & 1u) != 0;
         vm.sidebar.push_back(std::move(section));
     }
 

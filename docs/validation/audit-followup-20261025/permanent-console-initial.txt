@@ -1,0 +1,23 @@
+[PASS] prepare read-only file and directory descendants
+[PASS] capture original permanent-delete identity
+[PASS] same-name replacement after authorization fails closed and preserves both objects
+[PASS] capture the preceding root identity
+[PASS] a later root identity mismatch rejects the whole batch before any root mutation
+[PASS] capture the replacement for its own authorized delete
+[PASS] freeze the authorized deletion handle
+[PASS] frozen object prevents rename before its mutation
+[FAIL] frozen object rejects a same-name replacement and preserves both objects
+[PASS] permanent deletion acts through the captured handle
+[PASS] capture the nonempty directory identity
+[PASS] native permanent delete removes a nonempty directory and read-only descendants
+[PASS] prepare a read-only disposition failure
+[FAIL] failed disposition preserves bytes and restores the original read-only attribute
+[PASS] capture cancellation fixture identities
+[PASS] cancellation before capture leaves the authorized root intact
+[PASS] cancellation after all roots are captured leaves both roots intact
+[PASS] progress names the completed captured root
+[PASS] cancellation after one root reports only the completed root and preserves the next root
+[PASS] native deletion rejects a drive root before enumeration
+[SKIP] directory symlink fixture unavailable, Win32=1314
+[PASS] remove the isolated permanent-delete fixture
+19 PASS / 2 FAIL

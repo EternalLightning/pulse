@@ -1,0 +1,51 @@
+{
+  "deployment": {
+    "RecoveryError": null,
+    "Utc": "2026-10-23T13:30:24.3075974Z",
+    "NewHash": "C313945F5827CB72741484413BA2D4A114F4BF7D807CC6330878206CC7E536E1",
+    "Error": null,
+    "Phase": "complete",
+    "Success": true,
+    "Backup": "E:\\Projects\\pulse\\dist\\hosted-edit-flicker-20261023-213021",
+    "BackupFiles": 69,
+    "Deferred": null
+  },
+  "checks": {
+    "stability": 313,
+    "native": 85,
+    "rename": 22
+  },
+  "unresolved": [
+    "physical address drag reproduction",
+    "other animation visual capture"
+  ],
+  "markdown_lines": [
+    "用户报告路径栏拖选与此前重命名相似的闪烁。本轮修复了共用原生编辑更新期间的短暂隐藏缺陷，并已安装；尚不能证明它是用户现场路径栏闪烁的全部原因，也未录制真实鼠标连续拖动的视频。",
+    "",
+    "### 已确认与修改",
+    "",
+    "- `DefPresentedChildEditProc` 在尺寸、选区、键盘等消息前后直接发送 WM_SETREDRAW FALSE/TRUE。原生 EDIT 会去掉 WS_VISIBLE；此前只有鼠标拖选事务重新保留可见样式，其他原生更新仍能短暂丢失子框表面。真实父绘制下，筛选展开动画也进入此路径。",
+    "- 现在这些短更新复用已有的保留可见样式事务，继续抑制原生绘制，由 LumaText 完成最终呈现。捕获期间不嵌套重置事务；保留外部隐藏、焦点、选区、原生回退和销毁清理。未更改动画时长或强制关闭动画。",
+    "- 覆盖路径栏、地址搜索、筛选、文件重命名、标签重命名，以及使用同一 ChildEdit helper 的输入框。路径栏拖选加父绘制的隔离用例在修复前已经通过，故不能把本次共同缺陷夸大为已复现路径栏拖选本身。",
+    "",
+    "### 定向验证与保留的失败",
+    "",
+    "- 新夹具连接生产对象、真实 HWND/EDIT 与 LumaText，五种编辑角色 × 深浅主题 × 100/150/200% 缩放，包含展开帧、稳定帧、拖选、真实尺寸改变、原生选区与键盘消息。最终 313 PASS / 0 FAIL。",
+    "- 私有基线仅还原本次两行产品修改，其余对象和断言相同：原生尺寸消息隐藏 30 项、选区/键盘隐藏 30 项、展开帧隐藏 6 项失败；另有全局前台窗口相等断言 1 项失败，合计 246 PASS / 67 FAIL。全局前台窗口可在长测试中由用户改变，最终夹具改为记录初末窗口及 PID，检查没有测试窗口留在前台。原始失败日志保留，没有将该前台变化归为产品缺陷。",
+    "- 首次夹具旁缺少 lumatext.dll，实际进入原生回退，保留 attempt-native-fallback.log；补齐与生产同哈希运行库后继续。早期只调用布局的 223 项通过，证明不能仅凭重复 SetWindowPos 源码就认定它是可见闪烁根因。",
+    "- 原生输入/回退定向目标 85 PASS；原有重命名拖选、捕获清理、长文件名和 Filter Enter/Esc 回归 22 PASS。检查实际渲染的 held-selection 位图：选区、文字均可见，未裁切；这是静态渲染证据，不能当作物理显示连续帧验收。",
+    "- 只构建 pulse 与 pulse_child_edit_test，主程序仅重编 edit_host.cpp；未全量回归。载荷检查、git diff --check 通过。",
+    "",
+    "### 扩查其他动画",
+    "",
+    "- 主窗口续帧使用不擦背景的失效方式；DirectComposition target 在 native 子框之后；操作中心以整张离屏位图呈现。未发现与本次相同的反复隐藏路径，但不代表全部动画视觉验收通过。",
+    "- 菜单搜索框每帧定位、弹窗淡入与独立子框透明度不同步、设置数值弹窗父区域擦除是代码疑点，均未取得可见闪烁的运行证据，未凭疑点修改。快速预览的查找框已有几何不变抑制重绘；全局搜索主要在窗口大小/DPI变化时布局。",
+    "- 仍需在真实显示器确认：用户路径栏长按拖选、弹窗前 150 ms 淡入、设置数值弹窗跨 DPI 的连续显示效果。本轮没有注入全局鼠标或更改用户设置。",
+    "",
+    "### 安装状态",
+    "",
+    "- 新 Pulse.exe SHA256：`C313945F5827CB72741484413BA2D4A114F4BF7D807CC6330878206CC7E536E1`；完整安装备份 `E:\\Projects\\pulse\\dist\\hosted-edit-flicker-20261023-213021`，69 个原有文件核验，包含上一轮仍驻留映像的恢复副本。只替换主程序，索引服务 PID 1100 全程保持 Running / Auto。",
+    "- 首次维护因主程序仍驻留而安全停止，未覆盖任何程序。普通权限未看到真实窗口；随后管理员枚举实际进程，通过已有托盘 Exit 处理器正常退出，成功更新后用普通用户重新打开。未强杀主程序或服务。",
+    "- [最终定向验证](../bench_data/hosted-edit-flicker-20261023/verified.log)、[修复前对照](../bench_data/hosted-edit-flicker-20261023/exact-before.log)、[安装结果](../bench_data/hosted-edit-flicker-20261023/deployment-result.json)、[原重命名回归](../bench_data/hosted-edit-flicker-20261023/rename-regression.log)。"
+  ]
+}

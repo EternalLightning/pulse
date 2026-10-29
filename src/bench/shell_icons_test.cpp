@@ -1,6 +1,10 @@
 #include "../ui/shell_icons.h"
+#include "../fs/cloud_state.h"
 #include "../shell_host/shell_query_icons.h"
 #include "../common/windows_compat.h"
+#include "../common/shell_id.h"
+#include "../ipc/shell_query_client.h"
+#include "snapshot_output.h"
 #include <wincodec.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -17,6 +21,213 @@
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
+    static bool CloudPlaceholders() {
+        std::atomic<int> exact_queries = 0;
+        ShellIconCache::SetQueryHookForTest([&](const std::wstring& path) {
+            if (!path.starts_with(std::wstring(1, L'\x1f') + L"GEN:")) ++exact_queries;
+            return 7;
+        });
+        bool ok = true;
+        {
+            ShellIconCache cache;
+            for (const DWORD attrs : std::initializer_list<DWORD>{FILE_ATTRIBUTE_OFFLINE, fs::kAttrRecallOnOpen,
+                    fs::kAttrRecallOnDataAccess, fs::kAttrPinned | fs::kAttrRecallOnDataAccess}) {
+                for (const auto* name : {L"online.lnk", L"online.exe", L"online.txt"})
+                    cache.BitmapFor(std::wstring(L"C:\\fixture\\") + name, name, false, attrs, 16);
+                cache.BitmapFor(L"C:\\fixture\\folder", L"folder", true, attrs | FILE_ATTRIBUTE_DIRECTORY, 16);
+                ok &= Wait(cache) && exact_queries.load() == 0;
+            }
+            std::printf("[%s] online files and folders only query type icons for all recall flags\n", ok ? "PASS" : "FAIL");
+            cache.BitmapFor(L"C:\\fixture\\local.lnk", L"local.lnk", false, FILE_ATTRIBUTE_ARCHIVE, 16);
+            const bool local = Wait(cache) && exact_queries.load() == 1;
+            std::printf("[%s] local shortcuts retain their exact Shell icon query\n", local ? "PASS" : "FAIL");
+            ok &= local;
+        }
+        ShellIconCache::SetQueryHookForTest({});
+        return ok;
+    }
+    static bool DeviceIcons(bool connected) {
+        ShellIconCache cache;
+        bool ok = true;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            ok &= passed;
+        };
+        cache.GenericIndex(L"", true, FILE_ATTRIBUTE_DIRECTORY);
+        cache.GenericIndex(L"deviceId.txt", false, FILE_ATTRIBUTE_NORMAL);
+        check(Wait(cache), "device fallback icon queries complete");
+        SHSTOCKICONINFO folder{sizeof(folder)};
+        check(SUCCEEDED(SHGetStockIconInfo(SIID_FOLDER, SHGSI_SYSICONINDEX, &folder)),
+            "resolve stock folder reference");
+        const auto generic = std::wstring(1, L'\x1f') + L"GEN:<dir>";
+        {
+            std::lock_guard lock(cache.worker_->mutex);
+            if (const auto found = cache.worker_->generic_index.find(L"<dir>");
+                found != cache.worker_->generic_index.end()) cache.worker_->exact_index[generic] = found->second;
+        }
+        check(NativePixelsMatch(cache, generic, folder.iSysImageIndex),
+            "generic device folder matches Windows stock folder in all four sizes");
+        SHFILEINFOW text_info{};
+        const bool text_resolved = SHGetFileInfoW(L"dummy.txt", FILE_ATTRIBUTE_NORMAL,
+            &text_info, sizeof(text_info), SHGFI_USEFILEATTRIBUTES | SHGFI_SYSICONINDEX | SHGFI_SMALLICON) != 0;
+        const auto text_key = std::wstring(1, L'\x1f') + L"GEN:.txt";
+        {
+            std::lock_guard lock(cache.worker_->mutex);
+            if (const auto found = cache.worker_->generic_index.find(L".txt");
+                found != cache.worker_->generic_index.end()) cache.worker_->exact_index[text_key] = found->second;
+        }
+        check(text_resolved && NativePixelsMatch(cache, text_key, text_info.iIcon),
+            "device file fallback preserves the extension association in all four sizes");
+        const auto verify = [&](IShellItem* item) {
+            const auto id = shell_id::FromItem(item);
+            cache.RequestExact(id);
+            const bool completed = Wait(cache);
+            PIDLIST_ABSOLUTE pidl = nullptr;
+            SHFILEINFOW info{};
+            const bool resolved = SUCCEEDED(SHGetIDListFromObject(item, &pidl)) &&
+                SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl), 0, &info, sizeof(info),
+                    SHGFI_PIDL | SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
+            CoTaskMemFree(pidl);
+            check(completed && resolved && NativePixelsMatch(cache, id, info.iIcon),
+                "encoded item PIDL resolves native Shell icon pixels in all four sizes");
+            if (connected && cache.EnsureWic()) {
+                std::lock_guard lock(cache.worker_->mutex);
+                const auto found = cache.worker_->exact_index.find(id);
+                if (found == cache.worker_->exact_index.end()) return;
+                for (const auto& pixels : *cache.worker_->pixels.at(found->second)) {
+                    if (pixels.list_id != 4) continue;
+                    ComPtr<IWICBitmap> image;
+                    SFGAOF attrs = 0;
+                    item->GetAttributes(SFGAO_FOLDER, &attrs);
+                    CreateDirectoryW(L"bench_data\\shell_icon_fixture", nullptr);
+                    const wchar_t* output = attrs & SFGAO_FOLDER
+                        ? L"bench_data\\shell_icon_fixture\\device-folder.png"
+                        : L"bench_data\\shell_icon_fixture\\device-file.png";
+                    if (bench::StreamSnapshots()) {
+                        check(bench::EmitSnapshot(output, pixels.width, pixels.height, pixels.stride,
+                            const_cast<BYTE*>(pixels.pixels.data())), "export icon for visual inspection");
+                    } else if (SUCCEEDED(cache.wic_->CreateBitmapFromMemory(pixels.width, pixels.height,
+                            GUID_WICPixelFormat32bppPBGRA, pixels.stride, static_cast<UINT>(pixels.pixels.size()),
+                            const_cast<BYTE*>(pixels.pixels.data()), &image)))
+                        check(SavePng(cache, image.get(), output), "export icon for visual inspection");
+                }
+            }
+        };
+        ComPtr<IShellItem> windows;
+        wchar_t directory[MAX_PATH]{};
+        GetWindowsDirectoryW(directory, MAX_PATH);
+        if (SUCCEEDED(SHCreateItemFromParsingName(directory, nullptr, IID_PPV_ARGS(&windows))))
+            verify(windows.get());
+        else check(false, "resolve local PIDL fixture");
+        ipc::ShellQueryRequest invalid;
+        invalid.kind = ipc::ShellQueryKind::Icon;
+        invalid.path = L"::pidl:030009";
+        ipc::ShellQueryResult result;
+        ipc::QueryShell(invalid, result);
+        check(FAILED(result.error) && result.icons.empty(), "malformed icon PIDL is rejected");
+        if (connected) {
+            const auto children = [](IShellItem* parent) {
+                std::vector<ComPtr<IShellItem>> items;
+                ComPtr<IEnumShellItems> enumerator;
+                if (SUCCEEDED(parent->BindToHandler(nullptr, BHID_EnumItems, IID_PPV_ARGS(&enumerator)))) {
+                    for (;;) {
+                        ComPtr<IShellItem> item;
+                        if (enumerator->Next(1, &item, nullptr) != S_OK) break;
+                        items.push_back(std::move(item));
+                    }
+                }
+                return items;
+            };
+            ComPtr<IShellItem> computer;
+            size_t folders = 0, files = 0;
+            if (SUCCEEDED(SHGetKnownFolderItem(FOLDERID_ComputerFolder, KF_FLAG_DEFAULT, nullptr,
+                    IID_PPV_ARGS(&computer)))) {
+                for (auto& device : children(computer.get())) {
+                    PWSTR name = nullptr;
+                    device->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &name);
+                    const bool portable = name && (wcsstr(name, L"usb#") || wcsstr(name, L"wpdbusenum"));
+                    CoTaskMemFree(name);
+                    if (!portable) continue;
+                    for (auto& storage : children(device.get())) {
+                        for (auto& item : children(storage.get())) {
+                            SFGAOF attrs = 0;
+                            if (FAILED(item->GetAttributes(SFGAO_FOLDER, &attrs))) continue;
+                            const bool dir = (attrs & SFGAO_FOLDER) != 0;
+                            if ((dir && folders) || (!dir && files)) continue;
+                            verify(item.get());
+                            if (dir) ++folders; else ++files;
+                            if (folders && files) break;
+                        }
+                        if (folders && files) break;
+                    }
+                    if (folders && files) break;
+                }
+            }
+            check(folders && files, "connected phone folder and file icons exercised without modifying device files");
+        }
+        return ok;
+    }
+    static bool Invalidation() {
+        bool ok = true;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            ok &= passed;
+        };
+        HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::atomic<int> calls{0};
+        ShellIconCache::SetQueryHookForTest([&](const std::wstring&) {
+            if (calls.fetch_add(1) == 0) {
+                SetEvent(entered);
+                WaitForSingleObject(release, 5000);
+            }
+            return 1;
+        });
+        {
+            ShellIconCache cache;
+            const std::wstring path = L"C:\\pulse-icon-fixture\\mutable.exe";
+            cache.RequestExact(path);
+            check(WaitForSingleObject(entered, 3000) == WAIT_OBJECT_0,
+                "#229 old icon request reaches the production worker");
+            cache.Invalidate(L"c:\\PULSE-icon-fixture");
+            cache.RequestExact(path);
+            SetEvent(release);
+            check(Wait(cache), "#229 invalidated in-flight request and replacement settle");
+            int first = -1;
+            {
+                std::lock_guard lock(cache.worker_->mutex);
+                if (const auto found = cache.worker_->exact_index.find(path);
+                    found != cache.worker_->exact_index.end()) first = found->second;
+                check(calls == 2 && first == 1 && cache.worker_->pixels.size() == 1,
+                    "#229 stale worker result is rejected before allocating a cache index");
+            }
+            cache.Invalidate(L"C:\\pulse-icon-fixture-other");
+            {
+                std::lock_guard lock(cache.worker_->mutex);
+                check(cache.worker_->exact_index.contains(path),
+                    "#229 sibling with shared textual prefix remains cached");
+            }
+            cache.Invalidate(path);
+            {
+                std::lock_guard lock(cache.worker_->mutex);
+                check(!cache.worker_->exact_index.contains(path) && cache.worker_->pixels.empty() &&
+                    cache.worker_->pixel_bytes == 0,
+                    "#229 changed path loses cached pixels and byte ownership");
+            }
+            cache.RequestExact(path);
+            check(Wait(cache), "#229 changed path queries the production worker again");
+            {
+                std::lock_guard lock(cache.worker_->mutex);
+                check(calls == 3 && cache.worker_->exact_index.contains(path) &&
+                    cache.worker_->exact_index.at(path) != first,
+                    "#229 replacement icon receives a new index instead of a stale cache hit");
+            }
+        }
+        ShellIconCache::SetQueryHookForTest({});
+        CloseHandle(entered);
+        CloseHandle(release);
+        return ok;
+    }
     static bool SharedWindows() {
         bool ok = true;
         const auto check = [&](bool passed, const char* label) {
@@ -663,6 +874,16 @@ int main(int argc, char** argv) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&controls);
     bool ok = false;
+    if (argc == 2 && std::strcmp(argv[1], "--cloud-placeholders") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::CloudPlaceholders();
+    } else
+    if (argc == 2 && (std::strcmp(argv[1], "--device-icons") == 0 ||
+                     std::strcmp(argv[1], "--connected-device-icons") == 0)) {
+        ok = pulse::ui::ShellIconCacheTestAccess::DeviceIcons(std::strcmp(argv[1], "--connected-device-icons") == 0);
+    } else
+    if (argc == 2 && std::strcmp(argv[1], "--invalidation") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::Invalidation();
+    } else
     if (argc == 2 && std::strcmp(argv[1], "--shared-windows") == 0) {
         ok = pulse::ui::ShellIconCacheTestAccess::SharedWindows();
     } else

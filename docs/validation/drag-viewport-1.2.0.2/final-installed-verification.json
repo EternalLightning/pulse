@@ -1,0 +1,71 @@
+{
+  "Utc": "2026-10-24T05:08:18.3666487Z",
+  "IndexHosts": [
+    {
+      "ProcessId": 26804,
+      "CreationDate": "2026-10-24T11:34:56.044912+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "UI": [
+    {
+      "ProcessId": 35916,
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "IntegrityRid": 8192,
+      "CreationDate": "2026-10-24T13:08:16.082601+08:00"
+    }
+  ],
+  "Success": true,
+  "Service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "ProcessId": 15896,
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "Version": "1.2.0.2",
+  "Files": [
+    {
+      "Version": "1.2.0.2",
+      "Relative": "Pulse.exe",
+      "SHA256": "B1C95DDA6BE3104874592BB7C0735C050D5F5910D3FA73EE88AC459B18D7D385",
+      "Match": true
+    },
+    {
+      "Version": "1.2.0.2",
+      "Relative": "Pulse.Index.exe",
+      "SHA256": "A534619957CEFB404B7A836CCE5870B8E0A069C000121944FEC1BDD29036A5D9",
+      "Match": true
+    },
+    {
+      "Version": "1.2.0.2",
+      "Relative": "Pulse.Shell.exe",
+      "SHA256": "11C04BD5726A25AAFF282CCBCB0BADAEE4ADDB55EBB2AFCC1CD8C81256E0AB8E",
+      "Match": true
+    },
+    {
+      "Version": "1.2.0.2",
+      "Relative": "Pulse.Preview.exe",
+      "SHA256": "CE922BABB19F1B0D404F2D75A66BEC852DC59531E0333A5B8B11550133C697B3",
+      "Match": true
+    },
+    {
+      "Version": "1.2.0.2",
+      "Relative": "Pulse.Document.exe",
+      "SHA256": "0C35EE7D9A23EB9FC344D06EA9E6F831BB5AAA2CD56EDC0D92EC9D685105F48A",
+      "Match": true
+    },
+    {
+      "Version": null,
+      "Relative": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+      "Match": true
+    },
+    {
+      "Version": "155.0.8044.0",
+      "Relative": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+      "Match": true
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+[
+  {
+    "Log": "jpeg-embedded-test.log",
+    "Pass": 42,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "image-thumbnail-only-desktop.log",
+    "Pass": 8,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "thumbnail-transport-only-desktop.log",
+    "Pass": 32,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "thumbnail-failures-only-desktop.log",
+    "Pass": 11,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "thumbnail-pipeline-desktop.log",
+    "Pass": 21,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "startup-idle-policy.log",
+    "Pass": 9,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "startup-idle-application-final.log",
+    "Pass": 20,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "permanent-default-desktop.log",
+    "Pass": 26,
+    "Fail": 0,
+    "Skip": 1
+  },
+  {
+    "Log": "permanent-parallel-desktop.log",
+    "Pass": 12,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "transfer-pipeline-desktop.log",
+    "Pass": 18,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "operation-records-desktop.log",
+    "Pass": 34,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "cloud-roots-dedup.log",
+    "Pass": 8,
+    "Fail": 0,
+    "Skip": 0
+  },
+  {
+    "Log": "cloud-roots-system.log",
+    "Pass": 2,
+    "Fail": 0,
+    "Skip": 0
+  }
+]

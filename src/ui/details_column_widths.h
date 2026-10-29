@@ -8,12 +8,16 @@ namespace pulse::ui {
 // Reserve readable name/path space, then give metadata its measured width.
 // Long type descriptions yield first on narrow panes, preserving complete
 // dates and sizes whenever possible.
-inline void FitDetailsMetadata(std::array<float, 5>& widths, int count,
-                               const std::array<float, 3>& measured, float scale) {
+template<size_t N>
+inline void FitDetailsMetadata(std::array<float, N>& widths, int count,
+                               const std::array<float, 3>& measured, float scale,
+                               float cloud_width = 0.0f) {
     const int first = count - 3;
+    const int flexible_count = first - (cloud_width > 0.0f ? 1 : 0);
     float total = 0.0f;
     for (int i = 0; i < count; ++i) total += widths[i];
-    const float flexible_minimum = (first == 2 ? 190.0f : 80.0f) * scale;
+    total -= cloud_width;
+    const float flexible_minimum = (flexible_count == 2 ? 190.0f : 80.0f) * scale;
     const float reserved = std::min(flexible_minimum, total * 0.45f);
     const float desired = measured[0] + measured[1] + measured[2];
     const float available = std::max(0.0f, total - reserved);
@@ -29,10 +33,10 @@ inline void FitDetailsMetadata(std::array<float, 5>& widths, int count,
         }
     }
     const float remaining = total - fitted[0] - fitted[1] - fitted[2];
-    const float name_share = first == 2 && widths[0] + widths[1] > 0.0f
+    const float name_share = flexible_count == 2 && widths[0] + widths[1] > 0.0f
         ? widths[0] / (widths[0] + widths[1]) : 1.0f;
     widths[0] = remaining * name_share;
-    if (first == 2) {
+    if (flexible_count == 2) {
         widths[0] = remaining >= flexible_minimum
             ? std::clamp(widths[0], 80.0f * scale, remaining - 110.0f * scale)
             : remaining * (80.0f / 190.0f);

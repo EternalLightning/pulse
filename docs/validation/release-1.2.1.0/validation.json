@@ -1,0 +1,195 @@
+{
+  "DefaultComposed": true,
+  "PrototypeFlagRequired": false,
+  "UserAcceptance": "User approved composition prototype and authorized release 1.2.1.0",
+  "DesktopCases": [
+    {
+      "label": "release-m0-address",
+      "kind": "address",
+      "pid": 30840,
+      "samples": 136,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 417,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 0,
+      "long_text": false,
+      "theme": 2,
+      "endpoint_ink_pixels": [
+        580,
+        580
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    },
+    {
+      "label": "release-m0-rename",
+      "kind": "rename",
+      "pid": 3260,
+      "samples": 143,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 376,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 0,
+      "long_text": true,
+      "theme": 1,
+      "endpoint_ink_pixels": [
+        1788,
+        1787
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    },
+    {
+      "label": "release-m1-address",
+      "kind": "address",
+      "pid": 43216,
+      "samples": 135,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 417,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 1,
+      "long_text": false,
+      "theme": 2,
+      "endpoint_ink_pixels": [
+        495,
+        495
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    },
+    {
+      "label": "release-m1-rename",
+      "kind": "rename",
+      "pid": 43928,
+      "samples": 140,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 380,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 1,
+      "long_text": true,
+      "theme": 1,
+      "endpoint_ink_pixels": [
+        1494,
+        1499
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    },
+    {
+      "label": "release-m2-address",
+      "kind": "address",
+      "pid": 12620,
+      "samples": 137,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 417,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 2,
+      "long_text": false,
+      "theme": 2,
+      "endpoint_ink_pixels": [
+        580,
+        580
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    },
+    {
+      "label": "release-m2-rename",
+      "kind": "rename",
+      "pid": 34504,
+      "samples": 142,
+      "unexpected": 0,
+      "worst_difference": 16,
+      "width": 376,
+      "height": 20,
+      "presentation": "current",
+      "composed_verified": true,
+      "mode": 2,
+      "long_text": true,
+      "theme": 1,
+      "endpoint_ink_pixels": [
+        1788,
+        1787
+      ],
+      "text_visible": true,
+      "accepted": true,
+      "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+    }
+  ],
+  "DesktopSamples": 833.0,
+  "BehaviorTests": [
+    {
+      "Name": "child-auto",
+      "ExitCode": 0,
+      "Pass": 153,
+      "Fail": 0
+    },
+    {
+      "Name": "child-sharp",
+      "ExitCode": 0,
+      "Pass": 153,
+      "Fail": 0
+    },
+    {
+      "Name": "child-smooth",
+      "ExitCode": 0,
+      "Pass": 153,
+      "Fail": 0
+    },
+    {
+      "Name": "dialog-auto",
+      "ExitCode": 0,
+      "Pass": 425,
+      "Fail": 0
+    },
+    {
+      "Name": "dialog-sharp",
+      "ExitCode": 0,
+      "Pass": 425,
+      "Fail": 0
+    },
+    {
+      "Name": "dialog-smooth",
+      "ExitCode": 0,
+      "Pass": 425,
+      "Fail": 0
+    }
+  ],
+  "SettingsTest": {
+    "Name": "settings",
+    "ExitCode": 0,
+    "Pass": 493,
+    "Fail": 0
+  },
+  "HistoricalGdiFixture": {
+    "Accepted": false,
+    "Reason": "Pixels() captures GetDC(edit) with BitBlt. Composed edits deliberately cover immediate native GDI drawing using a separate topmost DComposition target. GDI backing pixels do not represent the visible composed text. Original failures retained; no assertions weakened. Real desktop cases verify visible default-channel output separately.",
+    "Fail": 48,
+    "Pass": 505
+  },
+  "Limits": [
+    "Desktop samples use synchronous key messages; do not cover all physical input or IMEs.",
+    "No full historical regression or installation wizard run."
+  ],
+  "Utc": "2026-10-24T09:24:08.4419230Z"
+}

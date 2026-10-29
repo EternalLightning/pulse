@@ -1,0 +1,148 @@
+{
+  "recorded_date": "2026-10-23",
+  "status": "latest cache and FullRebuild name preparation verified 48/0; original name-pool fixture verified independently 60/0 after its normal target hit unrelated historical compilation failures; repaired shell-token probe rebuilt and frozen for interactive administrator validation",
+  "scope": "Continue the existing raw-candidate filename cache work without changing wire payloads, caching caller allow decisions, or changing user configuration/permissions.",
+  "changes": [
+    "Release query_mu_ after copying/updating the complete raw candidate cache. Concurrent searches no longer queue behind another response's ACL I/O.",
+    "Keep the engine shared snapshot through permission callbacks and page materialization. The attempted unlock/recheck optimization was reverted because unrelated USN/filter-epoch changes could repeatedly clear otherwise valid search responses. Writers queue until this response releases its snapshot.",
+    "Keep all-candidate authorization for complete totals, rank, sorting and pagination. Denial continues traversal; cancellation and explicit deadline stop retain their earlier distinct behavior.",
+    "Preserve Engine::Search incomplete at the host instead of overwriting it with visibility.Incomplete alone.",
+    "Add optional response-local SearchDiagnostics for query/index lock wait, candidate matching, path construction, permission callbacks, page selection, materialization, total engine time and aggregate counts. Host traces these only when PULSE_SEARCH_TRACE is enabled; no path or name is included in the new stages and nothing is added to the wire response.",
+    "FlattenLocked interns exact UTF-16 basenames across parents by sharing Node.off. Hash keys reference the locked source mmap/overlay rather than the growing output pool. Node order, parent/identity relationships and metadata remain independent; the on-disk layout is unchanged.",
+    "FullRebuild and RebuildVolumeMft now prepare build_ through the shared WriteBuildIndexFile boundary, using the same exact UTF-16 SnapshotNameInterner before WriteIndexFile. InternSnapshotNamePool validates every reference and completes allocations before committing offsets. Full-build heap fallback maintenance also accepts valid shared-name offsets. The targeted write-boundary, idempotence, heap fallback and invalid-reference cases passed in the latest 48/0 run.",
+    "Add explicit --intern conversion to pulse_index_compaction_test. It preserves IDs/order, reconstructs only the name pool and offsets, verifies every raw UTF-16 name and all non-offset Node bytes plus attributes/order/FRN/volume/postings/query results before publishing a previously absent output. Existing --convert retains byte-preservation checks.",
+    "Replace the copied/instrumented ACL policy in the standalone stage probe with the real CallerVisibility plus SearchDiagnostics. A staged token repair obtains the actual Windows Explorer primary token via GetShellWindow, verifies Medium/no elevation and the current authorized user's SID, paired logon AuthenticationId, Logon SID and session, duplicates it only to SecurityImpersonation, and rechecks the copied identity. LinkedToken is only queried as the current user's paired Medium logon reference. Direct snapshot mapping starts no sidecar workers. Failures have explicit stage, Win32 error and exit code; output creation refuses an existing file."
+  ],
+  "verified": {
+    "diff_check": "git diff --check -- src/index/index_engine.cpp src/index/index_engine.h src/index/index_host.cpp src/bench/index_compaction_test.cpp passed",
+    "historical_cache_test": {
+      "validation_status": "Preserved historical 43 PASS / 0 FAIL before the shared-snapshot reliability rollback; superseded by stable_snapshot_cache_test. Its measurements do not establish current implementation performance.",
+      "command": ".\\build\\pulse_index_search_cache_test.exe",
+      "log": "bench_data/finish-all-20261023/search-cache.log",
+      "passed": 43,
+      "failed": 0,
+      "cases": [
+        "Earlier raw-candidate cache isolation, narrowing, scope/attribute epoch invalidation, paging, cancellation and dense/sparse stop cases remain covered",
+        "Another query completes during authorization",
+        "Superseded after reliability review: the original test expected epoch invalidation to clear the response. It has been replaced with continuous unrelated metadata updates that must queue behind the response snapshot and leave all five authorized matches intact",
+        "Optional diagnostics count every freshly examined/authorized candidate on cache hits",
+        "Shared basename offsets remain independent across parents, preserve case/Unicode normalization distinctions, embedded NULs and unpaired UTF-16 surrogates, survive output-pool growth and roundtrip through the mapper",
+        "Updating or renaming one shared-name node preserves the other node and later flattening"
+      ],
+      "single_synthetic_measurements": {
+        "dense_70000_cold_three_checks_us": 1878,
+        "dense_70000_cached_three_checks_us": 4,
+        "dense_70000_complete_denials_us": 10072,
+        "concurrent_query_authorization_us": 1423,
+        "concurrent_query_index_wait_us": 0,
+        "concurrent_query_total_us": 1441
+      }
+    },
+    "stable_snapshot_cache_test": {
+      "command": ".\\build\\pulse_index_search_cache_test.exe",
+      "log": "bench_data/finish-all-20261023/search-cache-stable.log",
+      "passed": 44,
+      "failed": 0,
+      "cases": [
+        "Concurrent searches can complete during another response's authorization because query_mu_ is released",
+        "Continuous unrelated metadata writes queue behind the search snapshot and cannot clear five valid authorized matching rows",
+        "The writer completes after the response and its entry is visible to later queries",
+        "Existing cache, cancellation, diagnostics, exact-name interning and mapper roundtrip assertions continue to pass"
+      ],
+      "limit": "This earlier 44/0 run predates FullRebuild preparation; latest_cache_test includes the four added assertions."
+    },
+    "latest_cache_test": {
+      "command": ".\\build\\pulse_index_search_cache_test.exe",
+      "log": "bench_data/finish-all-20261023/search-cache-final.log",
+      "passed": 48,
+      "failed": 0,
+      "added_cases": [
+        "WriteBuildIndexFile roundtrip preserves every node ID, order, non-offset Node byte, size/mtime and exact UTF-16 name while reducing pool size",
+        "Repeated full-build preparation is byte-idempotent",
+        "Valid shared full-build names survive heap fallback compaction",
+        "Invalid build name references fail with ERROR_INVALID_DATA before changing the original pool/offsets or opening a snapshot .tmp"
+      ]
+    },
+    "name_pool_fixture": {
+      "normal_target": "pulse_index_engine_test",
+      "normal_target_status": "Compilation blocked by existing references to absent Engine::PreserveOfflineVolumesLocked in index_engine_test.cpp lines 39/601 and index_engine_outstanding_cases.h line 84. These cases were neither removed nor weakened.",
+      "preserved_failure_log": "bench_data/finish-all-20261023/build-intern-all-paths.log",
+      "targeted_alternative": "bench_data/search-latency-20261023/namepool-driver.exe",
+      "generation": "prepare-namepool-driver.py extracts exact original Build/Save/Load/Usn helper methods and includes src/bench/index_name_pool_fixture.h directly, preserving every original fixture assertion. It enables the same PULSE_INDEX_DIAGNOSTICS=1 as the original --name-pool-only entry. It links latest uniformly rebuilt cache-test engine objects and runs only NamePoolFixture.",
+      "build_log": "bench_data/finish-all-20261023/build-namepool-driver.log",
+      "runtime_log": "bench_data/finish-all-20261023/namepool-driver-final.log",
+      "original_fixture_sha256": "25a6913e65a9170cceff618c5f425f63f4b3d9694f41cac277e950b10855642d",
+      "passed": 60,
+      "failed": 0,
+      "exit_code": 0,
+      "limit": "This verifies only the original NamePoolFixture and its direct dependency. The normal engine-test target remains compile-blocked; no claim is made that its complete suite built or passed."
+    },
+    "metadata_acl_test": {
+      "command": ".\\build\\pulse_index_security_test.exe --metadata-acl-only",
+      "log": "bench_data/finish-all-20261023/metadata-acl.log",
+      "caller_integrity": "S-1-16-8192",
+      "passed": 24,
+      "failed": 0
+    },
+    "coordinated_build": {
+      "log": "bench_data/finish-all-20261023/build-final-retry.log",
+      "completed_targets": ["pulse", "pulse_index_search_cache_test", "pulse_index_security_test", "pulse_index_compaction_test"],
+      "converter_build_log": "bench_data/finish-all-20261023/build-compaction-final.log",
+      "probe_build_log": "bench_data/finish-all-20261023/build-stage-probe.log",
+      "converter": "Exact rebuild completed after --intern addition. A prior converter link with an old index_folder_sizes object referenced the previous Search signature; rebuilding the affected objects resolved the link failure.",
+      "full_build_preparation_log": "bench_data/finish-all-20261023/build-intern-all-paths.log",
+      "current_product_status": "pulse_index, pulse_index_search_cache_test and pulse_index_compaction_test built successfully with latest FullRebuild preparation and common interner. The targeted cache suite passed 48/0. pulse_index_engine_test failed on unrelated existing missing-method references; its original NamePoolFixture passed separately 60/0 against the current engine objects."
+    }
+  },
+  "preserved_live_probe_failure": {
+    "file": "bench_data/finish-all-20261023/search-stages-live.json",
+    "stage": "duplicate_linked_token",
+    "win32": 1346,
+    "exit_code": 6,
+    "success": false,
+    "disposition": "Preserve this file and its logs. The repaired probe requires a new output filename and reports shell-token identity checks without printing SID strings, names or private paths."
+  },
+  "repaired_probe": {
+    "executable": "bench_data/search-latency-20261023/probe-shell.exe",
+    "build": "Private compile and link against latest cache engine objects completed without warnings after FullRebuild preparation. Executable frozen and handed to the main agent for its hash plan and administrator maintenance execution.",
+    "build_log": "bench_data/finish-all-20261023/build-stage-probe-shell-final.log",
+    "local_token_check": {
+      "file": "bench_data/finish-all-20261023/token-shell-local-20261023-200156-624.json",
+      "success": false,
+      "stage": "interactive_shell_window",
+      "win32": 1168,
+      "exit_code": 6,
+      "limit": "GetShellWindow found no interactive desktop Shell in this execution environment. Actual administrator desktop token validation remains pending."
+    },
+    "administrator_wrapper": "bench_data/search-latency-20261023/run-probe-admin.ps1",
+    "wrapper_behavior": "Optional standalone helper, syntax-parsed only and not executed. Uses an already elevated caller without triggering UAC. Runs --token-only first and starts read-only snapshot sampling only after success with integrity RID 8192. Captures each process exit code and separate stdout/stderr logs; creates timestamp/PID/random-suffix outputs and refuses overwriting existing results. Wrapper records only leaf names, stage and error type.",
+    "coordinated_execution": "The main agent will run token-only then, on success, 36 read-only aggregate stage samples in its final-pass maintenance process. Do not run the optional wrapper concurrently. Prior failure JSON files remain preserved."
+  },
+  "reliability_rollback": {
+    "trigger": "Installed single-sample diagnostics reported empty incomplete report/pdf and abc searches during live indexing. These samples alone do not establish causality, but clearing on every filter_epoch change is independently unsafe under unrelated metadata churn.",
+    "decision": "Restore the previous one-shared-snapshot authorization semantics. Keep raw candidate cache, explicit stop, query_mu_ short scope, optional diagnostics and name interning.",
+    "new_regression": "A background writer continuously updates C:\\outside\\unrelated.bin. It starts during the first authorization callback and queues behind the stable search snapshot. All five matching candidates must be freshly authorized and returned complete; after search returns, the writer must complete and the unrelated entry must be visible to later queries."
+  },
+  "remaining_commands": [
+    ".\\build\\pulse_index_compaction_test.exe --intern <absolute input snapshot> <absolute previously absent output>",
+    "Main-agent final-pass administrator maintenance: probe-shell.exe --token-only <absolute new token-final.json>; on verified success run probe-shell.exe <absolute actual base snapshot> <absolute new aggregate JSON>. Executables are frozen for its hash plan."
+  ],
+  "acceptance": [
+    "The modified production and targeted test targets build with no new warnings",
+    "The updated cache/name/concurrency suite, including the continuous unrelated-writer regression, and the 24 Medium-token metadata ACL assertions pass; no security requirement is weakened",
+    "--intern verifies every name and every preserved structural/metadata field, then its query matrix, before publishing an explicit new output; source snapshots and manifests remain unchanged",
+    "Stage probe output is valid JSON with exit_code and caller_integrity_rid=8192; every incomplete/error response is reported distinctly, including cold and candidate-cache reuse samples",
+    "Any installed deployment, A/B migration and service-state/hash verification is coordinated separately by the main agent; this file does not claim they occurred"
+  ],
+  "limits_and_decisions": [
+    "Two seconds still starts before Engine::Search, so lock waiting and matching consume the existing authorization budget. Extending it silently is not a latency optimization and was not done.",
+    "A ranked first page with an exact authorized total still requires inspecting all relevant candidates. Stopping after 48 allows would corrupt totals/rank/page semantics unless the product/protocol explicitly supports partial counts and later completion; no such redesign is included.",
+    "ACL reads, impersonated opens, directory snapshot validation and final page rechecks remain fresh for every response. They can dominate local storage latency and are not eliminated by the raw candidate cache or shorter locks.",
+    "The attempted per-candidate shared-lock reacquisition and epoch-triggered empty response have been reverted. The stable shared snapshot can delay index writers during ACL I/O, preserving the prior complete-count and page semantics instead of introducing empty results under ordinary USN churn. The earlier 10.072 ms synthetic denial measurement applies to the superseded implementation.",
+    "Reducing engine lock hold across ACL I/O requires a stable snapshot or more precise identity/generation contract with deterministic writer-churn validation. No new version of that optimization is enabled in the current product.",
+    "Filename interning adds a transient hash node/view/offset per unique basename. Views do not duplicate name payloads, and the converter destroys the dictionary before the writer; actual real-snapshot working/private memory still needs measurement. Stage samples and PeakWorkingSetSize are not an exact dictionary allocation count.",
+    "The previous FullRebuild direct-write gap has been patched through WriteBuildIndexFile and the common interner. Targeted assertions for exact node/metadata preservation, byte-idempotent preparation, heap-fallback maintenance and invalid-reference nonmutation passed in the latest 48/0 suite; the original dependent NamePoolFixture passed separately 60/0. These isolated results do not yet establish that a production FullRebuild retains the reduced size. Explicit --intern still creates an independent converted snapshot for reviewed migration.",
+    "The standalone probe maps the base only and excludes WAL replay, active topology/configuration, live maintenance, UI/pipe scheduling and online concurrency. Its results explain aggregate computational/ACL stages, not full installed service latency.",
+    "No deployment, user-setting update or permission change was performed by this subtask."
+  ]
+}

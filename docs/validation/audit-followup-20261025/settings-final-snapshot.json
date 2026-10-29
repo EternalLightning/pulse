@@ -1,0 +1,32 @@
+[
+  {
+    "Path": "src/app/system_ctx_model.cpp",
+    "Hash": "248A7A7473CB5EF034957665B4499D7B4DC2AB37977FF9618CD55848A6072896",
+    "LastWriteUtc": "2026-10-25T05:15:42.4977276Z"
+  },
+  {
+    "Path": "src/app/system_ctx_registry.cpp",
+    "Hash": "14B1EC2C9393C1FFDEDA26D8B6EAA99F6CE0AED60C7BDFAA896FF3BED5F2CC92",
+    "LastWriteUtc": "2026-10-25T05:30:50.0981507Z"
+  },
+  {
+    "Path": "src/app/system_ctx_registry.h",
+    "Hash": "D6430F4F6FE11F53B3D1AC4644FEBDBDEBEA7A3B210F6998230E54E704EBD45B",
+    "LastWriteUtc": "2026-10-25T05:00:33.5098145Z"
+  },
+  {
+    "Path": "src/app/settings_controller.cpp",
+    "Hash": "60B9172A586FC80E531F22137F452A1CACDF3D6AC773DE2FF5CAAC24048A0F56",
+    "LastWriteUtc": "2026-10-25T05:02:41.8358609Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_test.cpp",
+    "Hash": "83E7B3C97C86600E3AEF14FAC1E2F12739F9066F2E2D04C047B1E7E4E8827E5C",
+    "LastWriteUtc": "2026-10-25T05:27:41.6337424Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_model_test.cpp",
+    "Hash": "05186244C225BE89A31904313E44D2B016D8087650701C0E9C97B2E11F3A95BC",
+    "LastWriteUtc": "2026-10-25T05:18:53.1999020Z"
+  }
+]

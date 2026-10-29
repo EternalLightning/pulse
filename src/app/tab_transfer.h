@@ -2,6 +2,15 @@
 #include "app_state.h"
 
 namespace pulse {
+bool IsWindowTransferDesktopSurface(HWND hwnd);
+// A covered point has a real top-level window above the desktop, even when
+// that window is not a Pulse transfer target.
+AppState* WindowTransferTargetAtPoint(AppState& source, POINT screen_point, bool& covered,
+                                       bool ignore_source = false);
+bool CancelWindowTransferDrag(AppState& state);
+void BeginWindowCaptionTransfer(HWND hwnd);
+bool EndWindowCaptionTransfer(HWND hwnd);
+void CancelWindowCaptionTransfer(HWND hwnd);
 bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
                        bool close_empty_source = true,
                        bool replace_destination_starter = false);

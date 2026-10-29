@@ -1,0 +1,1778 @@
+[
+  {
+    "path": "E:\\Projects\\pulse\\build",
+    "status": "removed",
+    "bytes": 763835233.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build_release_clean",
+    "status": "removed",
+    "bytes": 715517495.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\docs\\Pulse_标签页一体化优化方案.html",
+    "status": "removed",
+    "bytes": 326171.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\docs\\Pulse_激活分栏与多选标识方案.html",
+    "status": "removed",
+    "bytes": 12043.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.3.exe",
+    "status": "removed",
+    "bytes": 10075804.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.2.exe",
+    "status": "removed",
+    "bytes": 10076101.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.1.exe",
+    "status": "removed",
+    "bytes": 10073545.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.0.exe",
+    "status": "removed",
+    "bytes": 10048303.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build_audit_followup_20261025",
+    "status": "removed",
+    "bytes": 426111.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\probe.exe",
+    "status": "removed",
+    "bytes": 449024.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\probe.obj",
+    "status": "removed",
+    "bytes": 800112.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.0.exe.sha256",
+    "status": "removed",
+    "bytes": 90.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\probe.obj",
+    "status": "removed",
+    "bytes": 4456330.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\timing.exe",
+    "status": "removed",
+    "bytes": 355840.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\timing.obj",
+    "status": "removed",
+    "bytes": 491663.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\probe.exe",
+    "status": "removed",
+    "bytes": 5672960.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\recycle-toolbar-runner.cpp",
+    "status": "removed",
+    "bytes": 316.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\probe.exe",
+    "status": "removed",
+    "bytes": 4905472.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\probe.obj",
+    "status": "removed",
+    "bytes": 3866992.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.2-portable-win-x64.zip",
+    "status": "removed",
+    "bytes": 12405203.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.1-portable-win-x64.zip",
+    "status": "removed",
+    "bytes": 12405127.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.0-portable-win-x64.zip",
+    "status": "removed",
+    "bytes": 12376743.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.3-portable-win-x64.zip",
+    "status": "removed",
+    "bytes": 12404794.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-ui\\confirm.exe",
+    "status": "removed",
+    "bytes": 4658688.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-ui\\confirm.obj",
+    "status": "removed",
+    "bytes": 4260740.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-fs\\fs_probe.obj",
+    "status": "removed",
+    "bytes": 4669443.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\composition.exe",
+    "status": "removed",
+    "bytes": 460800.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\composition.obj",
+    "status": "removed",
+    "bytes": 916756.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-fs\\fs_probe.exe",
+    "status": "removed",
+    "bytes": 5771776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1477632.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-reuse-20261023\\probe.exe",
+    "status": "removed",
+    "bytes": 314368.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-ui\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\base.exe",
+    "status": "removed",
+    "bytes": 108032.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\base.obj",
+    "status": "removed",
+    "bytes": 622.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\shell_client.obj",
+    "status": "removed",
+    "bytes": 1200596.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\main.obj",
+    "status": "removed",
+    "bytes": 1216024.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\ctx_handlers.obj",
+    "status": "removed",
+    "bytes": 501138.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\probe.obj",
+    "status": "removed",
+    "bytes": 815576.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\probe.exe",
+    "status": "removed",
+    "bytes": 449536.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\probe.obj",
+    "status": "removed",
+    "bytes": 527545.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-33688-6653796",
+    "status": "removed",
+    "bytes": 88866519.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-33988-5727750",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-34964-5821218",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-32452-2667218",
+    "status": "removed",
+    "bytes": 160766345.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-17860-1076281",
+    "status": "removed",
+    "bytes": 80275781.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\probe.obj",
+    "status": "removed",
+    "bytes": 3872891.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\app_input.cpp.obj",
+    "status": "removed",
+    "bytes": 2610487.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\probe.exe",
+    "status": "removed",
+    "bytes": 3881984.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sharp-spacing-20261024\\probe.exe",
+    "status": "removed",
+    "bytes": 314880.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sharp-spacing-20261024\\probe.obj",
+    "status": "removed",
+    "bytes": 508217.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\app_model.cpp.obj",
+    "status": "removed",
+    "bytes": 3876986.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\confirm.obj",
+    "status": "removed",
+    "bytes": 5641008.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\confirm.exe",
+    "status": "removed",
+    "bytes": 3211776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\recycle-toolbar-fixture-check.obj",
+    "status": "removed",
+    "bytes": 4092673.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-main\\recycle-test.obj",
+    "status": "removed",
+    "bytes": 4115881.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-main\\recycle-test.exe",
+    "status": "removed",
+    "bytes": 5848064.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\mutable.exe",
+    "status": "removed",
+    "bytes": 112640.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\probe.exe",
+    "status": "removed",
+    "bytes": 772096.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\probe.obj",
+    "status": "removed",
+    "bytes": 1524590.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-upstream-ab-20261024\\upstream",
+    "status": "removed",
+    "bytes": 24995688.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-main\\settings-test.exe",
+    "status": "removed",
+    "bytes": 4813312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\ui_hit_test.cpp.obj",
+    "status": "removed",
+    "bytes": 968476.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-main\\settings-test.obj",
+    "status": "removed",
+    "bytes": 4389376.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\view_layout.cpp.obj",
+    "status": "removed",
+    "bytes": 67350.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.0-portable-win-x64.zip.sha256",
+    "status": "removed",
+    "bytes": 102.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\probe.exe",
+    "status": "removed",
+    "bytes": 619008.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\probe.obj",
+    "status": "removed",
+    "bytes": 1689172.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\image.obj",
+    "status": "removed",
+    "bytes": 757852.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\edit_host.cpp.obj",
+    "status": "removed",
+    "bytes": 15074.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\fixture\\c.zip",
+    "status": "removed",
+    "bytes": 22.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\ui_pane_list.cpp.obj",
+    "status": "removed",
+    "bytes": 1630160.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-size-ui-cache-40980-25235453",
+    "status": "removed",
+    "bytes": 1010.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-size-ui-cache-33488-25091296",
+    "status": "removed",
+    "bytes": 1010.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\prefs.obj",
+    "status": "removed",
+    "bytes": 969231.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-reuse-20261023\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1482752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\index_query.obj",
+    "status": "removed",
+    "bytes": 422672.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\builtin_menu_items.obj",
+    "status": "removed",
+    "bytes": 39930.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\fresh-blue.exe",
+    "status": "removed",
+    "bytes": 112640.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\kaspersky-latency-20261023\\probe.exe",
+    "status": "removed",
+    "bytes": 371200.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\kaspersky-latency-20261023\\probe.obj",
+    "status": "removed",
+    "bytes": 623233.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\context_menu_prefs.obj",
+    "status": "removed",
+    "bytes": 969249.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\alpha.obj",
+    "status": "removed",
+    "bytes": 72379.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\icons.exe",
+    "status": "removed",
+    "bytes": 304640.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\index_query.obj",
+    "status": "removed",
+    "bytes": 422672.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\alpha.exe",
+    "status": "removed",
+    "bytes": 159232.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1469952.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1478144.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\folder_sizes.obj",
+    "status": "removed",
+    "bytes": 1714094.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\graceful_exit.obj",
+    "status": "removed",
+    "bytes": 10926.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\search_kinds.obj",
+    "status": "removed",
+    "bytes": 106958.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\fixes.exe",
+    "status": "removed",
+    "bytes": 3241984.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\fixes.obj",
+    "status": "removed",
+    "bytes": 5173871.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\index_config.obj",
+    "status": "removed",
+    "bytes": 908949.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\graceful_exit.exe",
+    "status": "removed",
+    "bytes": 141824.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\search_kinds.obj",
+    "status": "removed",
+    "bytes": 106958.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\before\\probe.exe",
+    "status": "removed",
+    "bytes": 452096.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\hosted-edit-flicker-20261023\\probe.obj",
+    "status": "removed",
+    "bytes": 4066822.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\shell-shutdown-20261024\\live_probe.obj",
+    "status": "removed",
+    "bytes": 7410.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\network_index.obj",
+    "status": "removed",
+    "bytes": 1293685.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\shell_client.obj",
+    "status": "removed",
+    "bytes": 1200604.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\shell-shutdown-20261024\\live_probe.exe",
+    "status": "removed",
+    "bytes": 152064.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\ctx_handlers.obj",
+    "status": "removed",
+    "bytes": 505165.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\hosted-edit-flicker-20261023\\probe.exe",
+    "status": "removed",
+    "bytes": 5479936.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\probe-shell.exe",
+    "status": "removed",
+    "bytes": 788480.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\probe-shell.obj",
+    "status": "removed",
+    "bytes": 1664644.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\pdfium.dll",
+    "status": "removed",
+    "bytes": 7370752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\Pulse.Preview.exe",
+    "status": "removed",
+    "bytes": 264704.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\manager.obj",
+    "status": "removed",
+    "bytes": 846166.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\manager.exe",
+    "status": "removed",
+    "bytes": 3341824.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\refresh.exe",
+    "status": "removed",
+    "bytes": 347136.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\app_model.cpp.obj",
+    "status": "removed",
+    "bytes": 3806978.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\delivery.obj",
+    "status": "removed",
+    "bytes": 4317739.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\delivery.exe",
+    "status": "removed",
+    "bytes": 3833344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview\\confirm-direct.exe",
+    "status": "removed",
+    "bytes": 3211776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\kaspersky-latency-20261023\\apartment.exe",
+    "status": "removed",
+    "bytes": 282624.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\inspect_snapshot.exe",
+    "status": "removed",
+    "bytes": 332288.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\controller.obj",
+    "status": "removed",
+    "bytes": 1691005.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\inspect_snapshot.obj",
+    "status": "removed",
+    "bytes": 729457.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\interned-fixture.bin",
+    "status": "removed",
+    "bytes": 7243536.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\kaspersky-latency-20261023\\apartment.obj",
+    "status": "removed",
+    "bytes": 433541.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\Pulse.exe",
+    "status": "removed",
+    "bytes": 7841792.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\folder_sizes_ui.obj",
+    "status": "removed",
+    "bytes": 934046.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\change_tracking.obj",
+    "status": "removed",
+    "bytes": 2505046.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\session_tab_model.cpp.obj",
+    "status": "removed",
+    "bytes": 719309.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\lumatext_renderer.cpp.obj",
+    "status": "removed",
+    "bytes": 1058571.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-ui\\fluent_components.cpp.obj",
+    "status": "removed",
+    "bytes": 810311.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\filename_pinyin.obj",
+    "status": "removed",
+    "bytes": 359746.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-1220f19c201c49aba95c0da79aa6e209",
+    "status": "removed",
+    "bytes": 25377778.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-2b1edacbabf6492fb933251d0d61e955",
+    "status": "removed",
+    "bytes": 25351666.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-6d0e80fcf4be4590af32f722e86b360b",
+    "status": "removed",
+    "bytes": 25352178.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-00adb19cd03f407d889c3a76d5947fd6",
+    "status": "removed",
+    "bytes": 25352178.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-9dc14f6d811b4704acf199fd6286e260",
+    "status": "removed",
+    "bytes": 25351666.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-be55d0b53fd7461a9c62b80800e21a1d",
+    "status": "removed",
+    "bytes": 25354226.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\dist\\portable-stage-c81251696e46401ea524b91c1d1fad76",
+    "status": "removed",
+    "bytes": 25297906.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\interaction.obj",
+    "status": "removed",
+    "bytes": 98682.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\context_menu_controller.obj",
+    "status": "removed",
+    "bytes": 1736042.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\pdfium.dll",
+    "status": "removed",
+    "bytes": 7370752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\everything-size-20261023\\Everything64.dll",
+    "status": "removed",
+    "bytes": 91304.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\app_hosted_edit.cpp.obj",
+    "status": "removed",
+    "bytes": 674596.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\hosted-edit-flicker-20261023\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\filename_pinyin.obj",
+    "status": "removed",
+    "bytes": 359746.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\app_runtime.cpp.obj",
+    "status": "removed",
+    "bytes": 3731813.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\boundaries.obj",
+    "status": "removed",
+    "bytes": 532154.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\boundaries.exe",
+    "status": "removed",
+    "bytes": 1886208.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\ui_hit_test.cpp.obj",
+    "status": "removed",
+    "bytes": 968194.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\index_query.obj",
+    "status": "removed",
+    "bytes": 422680.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-reuse-20261023\\ctx_session_process.obj",
+    "status": "removed",
+    "bytes": 433031.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-live-cleanup-20261023\\index_shard.obj",
+    "status": "removed",
+    "bytes": 287191.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-external\\ui_pane_list.cpp.obj",
+    "status": "removed",
+    "bytes": 1624949.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1482752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-device-test.exe",
+    "status": "removed",
+    "bytes": 2263552.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\everything-size-20261023\\Everything-SDK.zip",
+    "status": "removed",
+    "bytes": 238231.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\namepool-driver.exe",
+    "status": "removed",
+    "bytes": 1125888.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\dep-probe\\probe.obj",
+    "status": "removed",
+    "bytes": 533.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\search-latency-20261023\\namepool-driver.obj",
+    "status": "removed",
+    "bytes": 2464382.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\kaspersky-latency-20261023\\ctx_handlers.obj",
+    "status": "removed",
+    "bytes": 504216.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-ui\\lumatext_renderer.cpp.obj",
+    "status": "removed",
+    "bytes": 1059462.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-1\\corrupt.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\corrupt.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1476608.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\builtin_menu_items.obj",
+    "status": "removed",
+    "bytes": 39938.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\before\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1477632.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\index_query.obj",
+    "status": "removed",
+    "bytes": 422680.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\context_menu_prefs.obj",
+    "status": "removed",
+    "bytes": 969257.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\policy-test.exe",
+    "status": "removed",
+    "bytes": 757248.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\search_kinds.obj",
+    "status": "removed",
+    "bytes": 106966.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\delete-confirm-probe.exe",
+    "status": "removed",
+    "bytes": 2916352.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\search_kinds.obj",
+    "status": "removed",
+    "bytes": 106966.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\delete-confirm-probe.obj",
+    "status": "removed",
+    "bytes": 862908.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\search_result_merge.obj",
+    "status": "removed",
+    "bytes": 307034.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\ctx_session_process.obj",
+    "status": "removed",
+    "bytes": 408697.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\index_config.obj",
+    "status": "removed",
+    "bytes": 960977.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\sparse-recycle.obj",
+    "status": "removed",
+    "bytes": 702884.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\compressed.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\Pulse.exe",
+    "status": "removed",
+    "bytes": 7817728.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-1\\compressed.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\network-overlap-probe.exe",
+    "status": "removed",
+    "bytes": 762880.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\network-overlap-probe.obj",
+    "status": "removed",
+    "bytes": 895652.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\shell_client_injected.obj",
+    "status": "removed",
+    "bytes": 1283706.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\hosted-edit-flicker-20261023\\baseline-edit.obj",
+    "status": "removed",
+    "bytes": 15082.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\Pulse.exe",
+    "status": "removed",
+    "bytes": 7817216.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1483776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\recycle_fileop.obj",
+    "status": "removed",
+    "bytes": 198634.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\Pulse.Index.exe",
+    "status": "removed",
+    "bytes": 3403776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\sparse-recycle.exe",
+    "status": "removed",
+    "bytes": 297472.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\startup_launch.obj",
+    "status": "removed",
+    "bytes": 70323.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\private-shards\\child-0.bin",
+    "status": "removed",
+    "bytes": 152.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\folder_sizes_scan_test.obj",
+    "status": "removed",
+    "bytes": 946642.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\pdfium.dll",
+    "status": "removed",
+    "bytes": 7370752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\filename_pinyin.obj",
+    "status": "removed",
+    "bytes": 359754.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\pdfium.dll",
+    "status": "removed",
+    "bytes": 7370752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\refresh\\refresh.obj",
+    "status": "removed",
+    "bytes": 678828.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-navigation\\window_placement_test.obj",
+    "status": "removed",
+    "bytes": 254538.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-navigation\\window_placement_test.exe",
+    "status": "removed",
+    "bytes": 265728.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-live-cleanup-20261023\\inspect_snapshot.obj",
+    "status": "removed",
+    "bytes": 726780.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-live-cleanup-20261023\\inspect_snapshot.exe",
+    "status": "removed",
+    "bytes": 331776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-followup-index\\private-shards\\parent-0.bin",
+    "status": "removed",
+    "bytes": 242.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\final-pass\\graceful_exit.exe",
+    "status": "removed",
+    "bytes": 141824.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-reuse-20261023\\context_menu_reuse_probe.obj",
+    "status": "removed",
+    "bytes": 524729.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\Pulse.Preview.exe",
+    "status": "removed",
+    "bytes": 264704.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\filename_pinyin.obj",
+    "status": "removed",
+    "bytes": 359754.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-navigation\\navigation_return_test.obj",
+    "status": "removed",
+    "bytes": 4441686.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\Pulse.Document.exe",
+    "status": "removed",
+    "bytes": 237056.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-navigation\\navigation_return_test.exe",
+    "status": "removed",
+    "bytes": 5051392.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell_pipe_probe.obj",
+    "status": "removed",
+    "bytes": 117959.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell_pipe_probe.exe",
+    "status": "removed",
+    "bytes": 173056.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\icons\\shell_icons.obj",
+    "status": "removed",
+    "bytes": 1303214.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\deletion_identity.obj",
+    "status": "removed",
+    "bytes": 132754.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\upstream-edit-review-20261024\\upstream-c4fe01e.zip",
+    "status": "removed",
+    "bytes": 15855381.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\shared-build-check\\probe.exe",
+    "status": "removed",
+    "bytes": 449536.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\pulse_text.lib",
+    "status": "removed",
+    "bytes": 116256.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\refresh\\shell_icons.obj",
+    "status": "removed",
+    "bytes": 1239589.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\index_query.obj",
+    "status": "removed",
+    "bytes": 422688.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\search_result_merge.obj",
+    "status": "removed",
+    "bytes": 307042.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\filename-index-only-20261023\\host_stress_driver.obj",
+    "status": "removed",
+    "bytes": 527038.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\folder_sizes_ui_cache_test.obj",
+    "status": "removed",
+    "bytes": 5149235.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\final-pass\\inspect_snapshot.exe",
+    "status": "removed",
+    "bytes": 332288.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\Pulse.Index.exe",
+    "status": "removed",
+    "bytes": 3403264.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\content_result_store.obj",
+    "status": "removed",
+    "bytes": 1168517.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\search_kinds.obj",
+    "status": "removed",
+    "bytes": 106974.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\search_result_merge.obj",
+    "status": "removed",
+    "bytes": 307042.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\pulse_sqlite.lib",
+    "status": "removed",
+    "bytes": 4050404.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\default_file_manager.obj",
+    "status": "removed",
+    "bytes": 337638.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\Pulse.Index.exe",
+    "status": "removed",
+    "bytes": 3403264.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1482752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1482752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_index_policy_test.obj",
+    "status": "removed",
+    "bytes": 1380318.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_index_policy_test.exe",
+    "status": "removed",
+    "bytes": 653312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\pulse_folder_sizes_scan_test.exe",
+    "status": "removed",
+    "bytes": 432640.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\Pulse.Preview.exe",
+    "status": "removed",
+    "bytes": 264704.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\content_search.obj",
+    "status": "removed",
+    "bytes": 997959.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\Pulse.Preview.exe",
+    "status": "removed",
+    "bytes": 264704.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\recycle-toolbar-dependency-backup\\app_commands.cpp.obj",
+    "status": "removed",
+    "bytes": 2491941.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\Pulse.exe",
+    "status": "removed",
+    "bytes": 7817216.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\content_search_session.obj",
+    "status": "removed",
+    "bytes": 227395.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\icons\\shell_icons_test.obj",
+    "status": "removed",
+    "bytes": 1107537.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_content_cache_test.obj",
+    "status": "removed",
+    "bytes": 682677.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_content_cache_test.exe",
+    "status": "removed",
+    "bytes": 2830848.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\filename_pinyin.obj",
+    "status": "removed",
+    "bytes": 359762.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\pdfium.dll",
+    "status": "removed",
+    "bytes": 7370752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_search_routing_test.obj",
+    "status": "removed",
+    "bytes": 4361147.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\removable_search_routing_test.exe",
+    "status": "removed",
+    "bytes": 4305408.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\payload\\Pulse.Document.exe",
+    "status": "removed",
+    "bytes": 237056.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\Pulse.Document.exe",
+    "status": "removed",
+    "bytes": 237056.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\icons\\shell_query_icons.obj",
+    "status": "removed",
+    "bytes": 151776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\menu-latency-20261023\\shared-build-check\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1479168.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\failed-candidate-roundtrip.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\lumatext.dll",
+    "status": "removed",
+    "bytes": 1811968.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\folder-sizes-quality\\pulse_folder_sizes_ui_cache_test.exe",
+    "status": "removed",
+    "bytes": 3237888.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-preview-fixes\\refresh\\shell_query_icons.obj",
+    "status": "removed",
+    "bytes": 151776.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\pulse_user_storage.lib",
+    "status": "removed",
+    "bytes": 944940.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\pulse_localization.lib",
+    "status": "removed",
+    "bytes": 551576.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-upstream-ab-20261024\\Pulse-1.0.56-portable-win-x64.zip",
+    "status": "removed",
+    "bytes": 12530146.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\search_result_merge.obj",
+    "status": "removed",
+    "bytes": 307050.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-live-cleanup-20261023\\atomic-private-check\\target.bin",
+    "status": "removed",
+    "bytes": 4.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-live-cleanup-20261023\\atomic-private-check\\backup.bin",
+    "status": "removed",
+    "bytes": 3.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\integration-finish-20261023\\single_instance_coordinator.obj",
+    "status": "removed",
+    "bytes": 73157.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\content_result_store.obj",
+    "status": "removed",
+    "bytes": 1168525.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\Pulse.Index.exe",
+    "status": "removed",
+    "bytes": 3403264.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\Pulse.Shell.exe",
+    "status": "removed",
+    "bytes": 1482752.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-quality-fixes-20261023\\removable_index_policy_test.obj",
+    "status": "removed",
+    "bytes": 1434624.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\pulse_document_reader.lib",
+    "status": "removed",
+    "bytes": 631618.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\Pulse.Preview.exe",
+    "status": "removed",
+    "bytes": 264704.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\drag-viewport-1.2.0.2\\medium-payload\\pulse_child_edit_test.exe",
+    "status": "removed",
+    "bytes": 384512.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-confirm-shell-fixes\\run-37544\\executable with spaces.exe",
+    "status": "removed",
+    "bytes": 607744.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\content_search_session.obj",
+    "status": "removed",
+    "bytes": 227403.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\Pulse.Document.exe",
+    "status": "removed",
+    "bytes": 237056.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\fixture-b114e2077ebc4320b6c4fa2e6873ae2b\\tiny.zip",
+    "status": "removed",
+    "bytes": 156.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\pulse_index_perf.exe",
+    "status": "removed",
+    "bytes": 285696.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\pulse_hosted_edit_stability_test.exe",
+    "status": "removed",
+    "bytes": 7717376.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\edit-surface-20261024\\medium\\pulse_address_edit_stability_test.exe",
+    "status": "removed",
+    "bytes": 5507584.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\pulse_text_render_settings_test.exe",
+    "status": "removed",
+    "bytes": 7751168.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\corrupt.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\issue-fixes-removable\\exfat-private\\removable_exfat_device_test.obj",
+    "status": "removed",
+    "bytes": 1894554.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\release-1.2.1.0-medium\\payload\\pulse_hosted_edit_stability_test.exe",
+    "status": "removed",
+    "bytes": 7747584.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\compressed.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\wal-old\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 15865312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\medium-smoke-payload\\pulse_child_edit_test.exe",
+    "status": "removed",
+    "bytes": 384000.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\mixed-AB\\v9\\9ACBEFD40DDAC9E8\\base-b.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\mixed-AB\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 15865312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\upstream-edit-review-20261024\\pulse-c4fe01ed82fe091f495f531972a854aa32caac2b",
+    "status": "removed",
+    "bytes": 40555283.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\wal-compressed\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\wal-old\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 15865312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\mixed-AB\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 15865312.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\mixed-AB\\v9\\9ACBEFD40DDAC9E8\\base-b.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  },
+  {
+    "path": "E:\\Projects\\pulse\\bench_data\\quality-release-1.2.0.1\\compaction-validation-20261024\\wal-compressed\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "status": "removed",
+    "bytes": 8675344.0,
+    "error": null
+  }
+]

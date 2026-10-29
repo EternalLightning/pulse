@@ -1,0 +1,15 @@
+{
+  "number": 277,
+  "title": "FileMenuTools菜单异常",
+  "body": "这是Pulse中的菜单<img width=\"202\" height=\"528\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/53f4a94f-0495-45d6-8401-71b76c7a68ae\" />\n而这是系统资源管理器中的菜单\n<img width=\"253\" height=\"305\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8b5a8b73-e83a-4cbb-99d4-59994a7ef3cf\" />\n菜单中是有一些子菜单的，而在Pulse中子菜单全部显示到了上一级，而且显示不完整。\nOnCommander以及其它各大资源管理器中都正常",
+  "url": "https://github.com/jimmgreen/pulse/issues/277",
+  "captured_at": "2026-10-23T03:55:29.686901+00:00",
+  "updated_at": "2026-10-16T12:00:53Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

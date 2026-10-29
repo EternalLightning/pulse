@@ -1,0 +1,42 @@
+{
+  "number": 49,
+  "title": "[BUG] 双击 bat 一闪而过、没有真正执行：打开时没有把条目所在文件夹作为工作目录",
+  "body": "[软件版本] 1.0.42（d30bd3a）\n\n[系统版本] Windows 11 x64\n\n[问题表现]\n双击 bat 文件时，黑色控制台窗口一闪就没了，bat 没有真正执行完。同一个 bat 在资源管理器里双击正常。Pulse 本身没有崩溃，进程一直在、界面正常。\n\n[复现]\n新建目录，放三个文件（bat 用相对路径引用旁边的文件，这是最常见的写法）：\n\n`hello.bat`\n```bat\n@echo off\necho CWD      = %CD% > \"%~dp0result.txt\"\nif exist \"data.txt\" (echo RELATIVE_FILE = FOUND >> \"%~dp0result.txt\") else (echo RELATIVE_FILE = MISSING >> \"%~dp0result.txt\")\ncall \".\\helper.bat\" >> \"%~dp0result.txt\" 2>&1\necho EXITCODE_AFTER_HELPER = %ERRORLEVEL% >> \"%~dp0result.txt\"\n```\n\n`helper.bat` → 一行 `@echo HELPER_RAN_OK`\n`data.txt`  → 随便写点内容\n\n然后在 Pulse 里进入该目录，双击 `hello.bat`，看 `result.txt`：\n`CWD` 是 pulse.exe 的目录（不是 bat 所在目录），`RELATIVE_FILE = MISSING`，\n并且报 `'\".\\helper.bat\"' 不是内部或外部命令`。用资源管理器双击同一个 bat 则三项都正常。\n\n[根因]\n`ShellExecuteExW` 的 `lpDirectory` 传了 `nullptr`，子进程继承了 pulse.exe 的工作目录。\n资源管理器会把**条目自己所在的文件夹**作为子进程的工作目录，Pulse 没有。\n\n`src/ops/ops_manager.cpp` → `OpsManager::OpenThread()`：\n\n```cpp\nSHELLEXECUTEINFOW sei{ sizeof(sei) };\nsei.hwnd = dialog_owner;\nsei.lpVerb = item.open_verb.empty() ? L\"open\" : item.open_verb.c_str();\nsei.lpFile = item.open_file.empty() ? item.open_path.c_str() : item.open_file.c_str();\nsei.lpParameters = item.open_args.empty() ? nullptr : item.open_args.c_str();\nsei.lpDirectory = item.open_file.empty() ? nullptr : item.open_path.c_str();\n//                                       ^^^^^^^^^ 普通打开（双击）时是 nullptr\nsei.nShow = SW_SHOWNORMAL;\nsei.fMask = SEE_MASK_FLAG_NO_UI;\nShellExecuteExW(&sei);\n```\n\n于是 bat 在 pulse.exe 的当前目录里执行。bat 里只要用相对路径引用旁边的文件或脚本就失败，\ncmd 报错后立即退出，窗口一闪而过，后面的语句也不再执行。\n\n[实测证据]\n同一个 bat，只改启动进程的工作目录（`ShellExecuteExW` 的参数与上面完全一致）：\n\n```\n启动者目录 C:\\（现行为）:\n  CWD      = C:\\\n  RELATIVE_FILE = MISSING\n  '\".\\helper.bat\"' is not recognized as an internal or external command,\n  operable program or batch file.\n  EXITCODE_AFTER_HELPER = 1\n\n启动者目录 = bat 所在文件夹（资源管理器的行为 / 修复后）:\n  CWD      = <bat 所在文件夹>\n  RELATIVE_FILE = FOUND\n  HELPER_RAN_OK\n  EXITCODE_AFTER_HELPER = 0\n```\n\n[建议改法]\n普通打开（没有指定程序）时，把条目自己所在的文件夹作为 `lpDirectory`：\n\n```cpp\n// src/ops/ops_manager.cpp（匿名命名空间内）\n// 资源管理器用条目自己的文件夹作为子进程的工作目录；否则 .bat/.cmd 里\n// 相对路径引用邻居（\".\\helper.bat\"、\"data.txt\"）会失败，窗口一闪就关。\nstd::wstring OpenWorkingDirectory(const std::wstring& item_path) {\n    const std::wstring plain = pulse::path::StripExtendedPathPrefix(item_path);\n    if (plain.empty()) return {};\n    wchar_t full[MAX_PATH * 2]{};\n    const DWORD n = GetFullPathNameW(plain.c_str(), ARRAYSIZE(full), full, nullptr);\n    std::wstring absolute = (n > 0 && n < ARRAYSIZE(full)) ? std::wstring(full) : plain;\n    // GetFullPathName 会保留结尾分隔符，ParentOf 不希望有；盘根要保留自己。\n    const bool had_trailing = absolute.size() > 1 &&\n        (absolute.back() == L'\\\\' || absolute.back() == L'/');\n    while (absolute.size() > 3 && (absolute.back() == L'\\\\' || absolute.back() == L'/'))\n        absolute.pop_back();\n    if (had_trailing && absolute.size() > 2) return absolute;    // 已经是文件夹\n    if (absolute.size() == 3 && absolute[1] == L':') return absolute;   // 盘根\n    const std::wstring parent = ParentOf(absolute);\n    return parent.empty() ? absolute : parent;\n}\n```\n\n调用处：\n\n```cpp\nstd::wstring working_dir;\nif (item.open_file.empty()) {\n    working_dir = OpenWorkingDirectory(item.open_path);\n    if (working_dir.empty() || _wcsicmp(working_dir.c_str(), item.open_path.c_str()) == 0)\n        working_dir.clear();\n} else {\n    working_dir = item.open_path;   // 显式程序：本来就是文件父目录，行为不变\n}\nsei.lpDirectory = working_dir.empty() ? nullptr : working_dir.c_str();\n```\n\n`OpenWorkingDirectory` 需要处理的边界：`\\\\?\\` 前缀、相对路径、盘根（`C:\\`）、\n结尾分隔符（`C:\\dir\\`）。上面实现都有对应处理，并配了 6 条回归用例。\n\n[影响范围]\n所有依赖「自己所在目录」的打开方式：\n\n- `.bat` / `.cmd`（最明显）\n- `.lnk` 快捷方式里写的相对目标\n- 任何「脚本 + 同目录资源」的启动器\n- 用相对路径读配置/输入文件的程序\n\n从搜索结果、快速访问、托盘等任何入口打开都一样，因为都走 `OpsManager::OpenWith()`。\n\n[验证结果]\n按上述改法实现后（本机实测）：\n\n| 场景 | 修复前 | 修复后 |\n| --- | --- | --- |\n| bat 相对路径 | `MISSING` + 报错，退出码 1 | `FOUND` + `HELPER_RAN_OK`，退出码 0 |\n\n已跑通，含新增 6 条回归用例。需要的话我可以提供补丁和最小复现工程。\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/49",
+  "captured_at": "2026-10-23T03:55:28.159089+00:00",
+  "updated_at": "2026-10-03T14:50:52Z",
+  "comments": [
+    {
+      "body": "感谢定位得这么准确！原因正如你所说：打开文件时没有把条目所在的文件夹设为工作目录，bat 继承了 Pulse 自己的目录。已修复：现在和资源管理器一样，从文件所在文件夹启动，并加了端到端回归测试（bat 用相对路径写文件，验证写入位置）。下一版发布。",
+      "bodyHTML": "<p dir=\"auto\">感谢定位得这么准确！原因正如你所说：打开文件时没有把条目所在的文件夹设为工作目录，bat 继承了 Pulse 自己的目录。已修复：现在和资源管理器一样，从文件所在文件夹启动，并加了端到端回归测试（bat 用相对路径写文件，验证写入位置）。下一版发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/49#issuecomment-5919889301"
+    },
+    {
+      "body": "核对完毕，关闭。已在 v1.0.46 发布（d89ecbf）：打开文件时以条目所在的文件夹作为工作目录，和资源管理器一致。\n\n验证：`pulse_ops_test` 中的端到端用例 “double-click open runs a batch file in its own folder” 会在测试目录里双击一个 bat，bat 用相对路径写文件，测试检查文件写到了 bat 所在的目录。今天的运行中，bat 确实在正确的目录里执行了；只是测试机 CPU 负载很高，cmd 启动用了约 15 秒，超过了用例的等待时间。",
+      "bodyHTML": "<p dir=\"auto\">核对完毕，关闭。已在 v1.0.46 发布（d89ecbf）：打开文件时以条目所在的文件夹作为工作目录，和资源管理器一致。</p>\n<p dir=\"auto\">验证：<code class=\"notranslate\">pulse_ops_test</code> 中的端到端用例 “double-click open runs a batch file in its own folder” 会在测试目录里双击一个 bat，bat 用相对路径写文件，测试检查文件写到了 bat 所在的目录。今天的运行中，bat 确实在正确的目录里执行了；只是测试机 CPU 负载很高，cmd 启动用了约 15 秒，超过了用例的等待时间。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/49#issuecomment-5970276556"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPQoPWgBqzMyMjAxNTA4NzI5",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQI_HMgBqzMyNDAxMzkzOTgz"
+  }
+}

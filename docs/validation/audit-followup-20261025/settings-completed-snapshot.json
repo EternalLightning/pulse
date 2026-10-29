@@ -1,0 +1,62 @@
+[
+  {
+    "Path": "CMakeLists.txt",
+    "Hash": "26536024F11E78C7B03878418D936B886597A05F03080B79343CA7C05BB1E693",
+    "LastWriteUtc": "2026-10-25T07:42:46.7166711Z"
+  },
+  {
+    "Path": "src/app/system_ctx_registry.cpp",
+    "Hash": "41B621C023EE0C6A64A92450177ECBE57E671909AFB42CB2D487BF49A749B23A",
+    "LastWriteUtc": "2026-10-25T07:32:12.3666000Z"
+  },
+  {
+    "Path": "src/app/system_ctx_registry.h",
+    "Hash": "B3639C90145FD88544E6404B89AB6B784448E7C17FB59AEDD2A7436A7400C9A0",
+    "LastWriteUtc": "2026-10-25T07:41:23.4984107Z"
+  },
+  {
+    "Path": "src/app/system_ctx_exchange.h",
+    "Hash": "BCD4597AB46561ED00CBC82E884C0F59BB192D414FE1F0D8AA4745C83F35A09A",
+    "LastWriteUtc": "2026-10-25T07:41:23.3284642Z"
+  },
+  {
+    "Path": "src/app/system_ctx_model.cpp",
+    "Hash": "6BD49273095CAFD73FA992D37C8F7852C41E4B68706125F537261DB3AF68459E",
+    "LastWriteUtc": "2026-10-25T07:35:26.7747293Z"
+  },
+  {
+    "Path": "src/app/system_ctx_model.h",
+    "Hash": "704535D25CFEE35814E6432D0A99A7C7C747B5180CADE0E20A4F753DA75B6123",
+    "LastWriteUtc": "2026-10-25T07:34:04.2154345Z"
+  },
+  {
+    "Path": "src/integration_host/main.cpp",
+    "Hash": "B349E880495795AC8F45ABE40C090141947DFDF8686984D2C317A1FEC4CEC7DB",
+    "LastWriteUtc": "2026-10-25T07:32:12.0507377Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_test.cpp",
+    "Hash": "6EE5BD5C2DD8DEBCA4FC82DACF94AB0D23097CED0F9EBF93D125BF89CDEF3158",
+    "LastWriteUtc": "2026-10-25T07:34:18.9220262Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_model_test.cpp",
+    "Hash": "C46E27CBDF2B8A55575B601BD979CC12035B21BB941D86235F3360C9B522C716",
+    "LastWriteUtc": "2026-10-25T07:38:01.4770350Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_exchange_test.cpp",
+    "Hash": "7FC381AEBD5B3E5028780210201BC7AC20505466F1780BDB07E1A4FC510A07E9",
+    "LastWriteUtc": "2026-10-25T07:44:44.2969568Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_transaction_console_test.cpp",
+    "Hash": "CD68E8A5977CDE13AE7B80D972681618C32B39B71AA82F50F2DB0D9D2FC45951",
+    "LastWriteUtc": "2026-10-25T07:43:05.2678997Z"
+  },
+  {
+    "Path": "src/app/settings_controller.cpp",
+    "Hash": "60B9172A586FC80E531F22137F452A1CACDF3D6AC773DE2FF5CAAC24048A0F56",
+    "LastWriteUtc": "2026-10-25T05:02:41.8358609Z"
+  }
+]

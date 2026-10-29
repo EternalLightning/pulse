@@ -1,9 +1,16 @@
 #include "archive_navigation.h"
+#include "context_menu_settings_drag.h"
+#include "system_ctx_preview_drag.h"
 // app_input.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
+#include "sidebar_pin_menu.h"
 #include "tab_shortcuts.h"
+#include "tab_transfer.h"
 #include "app_internal.h"
+#include "app_network_locations.h"
 #include "app_column_view.h"
+#include "app_surface_scroll.h"
+#include "../ui/animation_clock.h"
 #include "pane_animations.h"
 #include "app_visual_animation.h"
 #include "../ui/lumatext_renderer.h"
@@ -25,6 +32,7 @@
 #include "blank_pane_click.h"
 #include "link_resolve.h"
 #include "header_drop_effect.h"
+#include "app_drop_shortcuts.h"
 #include "settings_value_dialog.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
@@ -82,7 +90,12 @@ void SaveResizedColumns(AppState& s) {
 DWORD FileDropEffect(const AppState& s, const std::vector<std::wstring>& sources,
                      const std::wstring& destination, DWORD keys, DWORD allowed, DWORD preferred) {
     if (sources.empty()) return DROPEFFECT_NONE;
-    DWORD effect = ui::ComputeDropEffect(keys, sources.front(), destination, allowed, preferred);
+    if (app::ShortcutDropRequested(keys)) {
+        if (!app::CanCreateDropShortcuts(sources, destination)) return DROPEFFECT_NONE;
+        if (allowed & DROPEFFECT_LINK) return DROPEFFECT_LINK;
+    }
+    DWORD effect = ui::ComputeDropEffect(keys, sources.front(), destination,
+        allowed & (DROPEFFECT_COPY | DROPEFFECT_MOVE), preferred);
     if (effect != DROPEFFECT_MOVE || internal_file_drag || s.trayDrag.active ||
         !(allowed & DROPEFFECT_COPY) || (keys & MK_SHIFT) || preferred == DROPEFFECT_MOVE) return effect;
     const auto temp = ops::TempDirectory();
@@ -358,7 +371,7 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
                PointOnPaneHeader(s, vm, hit.pane_index,
                                  static_cast<float>(pt.x), static_cast<float>(pt.y))) {
         // Drag a folder onto a pane title bar (path + nav/view) to open it there.
-        const std::wstring folder = HeaderDropHint(s, sources);
+        const std::wstring folder = app::ShortcutDropRequested(key_state) ? std::wstring() : HeaderDropHint(s, sources);
         if (!folder.empty()) {
             s.dropHeader = true;
             s.dropPaneIndex = hit.pane_index;
@@ -409,7 +422,10 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
     }
 
     DWORD effect = FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
-    s.dropBadge = (effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() : l10n::Get(l10n::StringId::DropCopy).c_str()) + destName;
+    if (effect == DROPEFFECT_NONE) s.dropBadge.clear();
+    else s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
+        effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() :
+        l10n::Get(l10n::StringId::DropCopy).c_str()) + destName;
     s.dropBadgeX = (float)pt.x;
     s.dropBadgeY = (float)pt.y;
     InvalidateRect(s.hwnd, nullptr, FALSE);
@@ -441,11 +457,25 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
     }
 
     if (tray) {
-        std::vector<std::wstring> paths;
-        for (auto& p : sources) paths.push_back(fs::NormalizePath(p));
         const bool move = ops::PreferredEffectIsCut(preferred);
-        s.tray.Collect(paths, move);
-        ops::WriteClipboard(sources, move);
+        const auto collect = [&](const std::vector<std::wstring>& prepared) {
+            std::vector<std::wstring> paths;
+            for (const auto& path : prepared) paths.push_back(fs::NormalizePath(path));
+            s.tray.Collect(paths, move);
+            ops::WriteClipboard(prepared, move);
+        };
+        const auto temp = !internal_file_drag && !s.trayDrag.active ? ops::TempDirectory() : std::wstring();
+        if (temp.empty()) collect(sources);
+        else {
+            const auto staged = ops::SubmitStagedDrop(sources, temp, ops::DropStageRoot(), collect, s.hwnd);
+            if (staged.error) {
+                wchar_t error[128]{};
+                swprintf_s(error, l10n::Get(l10n::StringId::ErrorCodeFormat).c_str(), staged.error);
+                s.notification_toast.Show(s.hwnd, l10n::Get(l10n::StringId::OpCopyFailed),
+                    staged.source + L"\n" + error, false);
+                return DROPEFFECT_NONE;
+            }
+        }
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_COPY;
     }
@@ -458,6 +488,9 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
         QueueTagAds(s, std::move(ads_updates));
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_COPY;
+    }
+    if (effect == DROPEFFECT_LINK && (allowed & DROPEFFECT_LINK)) {
+        return QueueDropShortcuts(s, sources, dest) ? DROPEFFECT_LINK : DROPEFFECT_NONE;
     }
     if (dest.empty() || fs::IsVirtualPath(dest) || !(effect & allowed) ||
         (effect != DROPEFFECT_COPY && effect != DROPEFFECT_MOVE)) return DROPEFFECT_NONE;
@@ -810,6 +843,12 @@ void StartSmoothScroll(AppState& s, float delta) {
     const float maxScroll = SmoothScrollMaximum(s);
     const float offset = std::clamp(settings ? s.settings.scroll() : tab->scroll_y, 0.0f, maxScroll);
     SetSmoothScrollOffset(s, *tab, offset, maxScroll);
+    if (!s.renderer.MotionEnabled() || s.shot_high_contrast) {
+        CancelScrollAnimation(s);
+        SetSmoothScrollOffset(s, *tab, std::clamp(offset + delta, 0.0f, maxScroll), maxScroll);
+        s.scrollTargetY = settings ? s.settings.scroll() : tab->scroll_y;
+        return;
+    }
     if (!s.scrollAnimating) {
         s.scrollVelocityY = 0.0f;
         s.scrollLastUpdateTime = std::chrono::steady_clock::now() -
@@ -846,7 +885,8 @@ void UpdateSmoothScroll(AppState& s) {
     float offset = std::clamp(IsSettingsTab(tab) ? s.settings.scroll() : tab->scroll_y,
         0.0f, maxScroll);
     s.scrollTargetY = std::clamp(s.scrollTargetY, 0.0f, maxScroll);
-    const float decay = static_cast<float>(std::exp(-elapsed / AppState::kScrollResponseMs));
+    const float decay = s.renderer.MotionEnabled() && !s.shot_high_contrast
+        ? static_cast<float>(std::exp(-elapsed / AppState::kScrollResponseMs)) : 0.0f;
     const float travel = s.scrollVelocityY *
         static_cast<float>(AppState::kScrollResponseMs) * (1.0f - decay);
     const float next = std::clamp(offset + travel, 0.0f, maxScroll);
@@ -895,6 +935,8 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         int mx = GET_X_LPARAM(lParam);
         int my = GET_Y_LPARAM(lParam);
         s->hoverPoint = POINT{ mx, my };
+        if (SysCtxPreviewDragMove(*s, mx, my, wParam) ||
+            PulseMenuPreviewDragMove(*s, mx, my, wParam)) return 0;
 
         // Press-and-hold on the top staging-tray card: the card follows the
         // pointer; releasing decides between a fling to the back and a spring.
@@ -966,12 +1008,12 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                         resizeTab->search_column_dividers =
                             s->renderer.ResizeSearchColumnDivider(
                                 paneRect, resizeTab->search_column_dividers,
-                                s->columnResizeIndex, cursor);
+                                s->columnResizeIndex, cursor, paneVm.cloud_status_column);
                     } else {
                         resizeTab->details_column_dividers =
                             s->renderer.ResizeDetailsColumnDivider(
                                 paneRect, resizeTab->details_column_dividers,
-                                s->columnResizeIndex, cursor);
+                                s->columnResizeIndex, cursor, paneVm.cloud_status_column);
                     }
                 }
                 s->hoverRegion = static_cast<int>(ui::HitTestResult::ColumnDivider);
@@ -1899,17 +1941,9 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             s->breadcrumbHover = newCrumb;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
-        D2D1_RECT_F content = s->renderer.ContentRect((float)s->compositor.Width(), (float)s->compositor.Height());
-        float extra = 0.0f;
-        if (app::Tab* tab = ActiveTab(*s); tab) {
-            if (!tab->banner_message.empty()) extra = 36.0f * s->scale;
-            std::wstring kind;
-            if (app::ParsePulsePath(tab->current_path, &kind, nullptr) && kind == L"recent")
-                extra += 40.0f * s->scale;
-        }
-        float listTop = content.top + s->renderer.PaneHeaderHeight() + extra + s->renderer.ColumnHeaderHeight();
-        bool sbHit = (mx >= content.right - 14 * s->scale && mx < content.right &&
-                      my >= listTop && my < content.bottom);
+        const D2D1_RECT_F list = ListRect(*s);
+        bool sbHit = (mx >= list.right - 14 * s->scale && mx < list.right &&
+                      my >= list.top && my < list.bottom);
         if (sbHit != s->scrollbarHovered) {
             s->scrollbarHovered = sbHit;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2028,6 +2062,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         }
         if (hit.region == ui::HitTestResult::DetailsPreviewEnable) {
             s->detailsPreviewEnabled = !s->detailsPreviewEnabled;
+            s->detailsScrollMotion.Reset();
             s->detailsScroll = 0;
             if (!s->detailsPreviewEnabled) {
                 s->detailsPreviewPanning = false;
@@ -2048,6 +2083,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 s->detailsPreviewExpansion = s->detailsPreviewExpansionFrom = s->detailsPreviewOnly ? 1.0f : 0.0f;
                 s->detailsPreviewFoldStart = 0;
             }
+            s->detailsScrollMotion.Reset();
             s->detailsScroll = 0;
             s->dragPending = false;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2069,7 +2105,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                     using K = ui::MainRenderer::ColumnKind;
                     for (int i = 0; i < columns.count; ++i) {
                         const K kind = columns.kinds[i];
-                        const int stored = kind == K::Date ? 0 : kind == K::Type ? 1 : kind == K::Size ? 2 : -1;
+                        const int stored = kind == K::Date ? 0 : kind == K::Type ? 1 : kind == K::Size ? 2 : kind == K::Cloud ? 3 : -1;
                         if (stored >= 0) {
                             if (slot.pane.is_search) tab->search_column_dividers[stored + 1] = columns.widths[i] / s->scale;
                             else tab->details_column_dividers[stored] = columns.widths[i] / s->scale;
@@ -2101,6 +2137,9 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::Scrollbar) {
             s->dragPending = false;
+            CancelScrollAnimation(*s);
+            s->sidebarScrollMotion.Reset();
+            s->horizontalScrollMotion.Reset();
             D2D1_RECT_F track{}, thumb{};
             float maxScroll = 0.0f;
             app::Tab* tab = ActiveTab(*s);
@@ -2206,13 +2245,19 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::HomeButton) {
             NavigateTo(*s, app::MakeHomePath());
+        } else if (hit.region == ui::HitTestResult::HomeNetworkSettings) {
+            OpenNetworkSettings(s->hwnd);
         } else if (hit.region == ui::HitTestResult::HomeCard) {
             if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
         } else if (hit.region == ui::HitTestResult::HomeGroup && hit.index >= 0 && hit.index < 3) {
             if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
             if (auto* tab = ActiveTab(*s)) {
                 CancelScrollAnimation(*s);
+                const auto now = app::PaneAnimationTimeMs();
+                const bool animate = s->renderer.MotionEnabled() && !s->shot_high_contrast;
+                app::TickHomeGroupAnimations(*tab, now, animate);
                 tab->home_collapsed_mask ^= 1u << hit.index;
+                app::TickHomeGroupAnimations(*tab, now, animate);
                 tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, MaxScrollForActivePane(*s));
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -2395,7 +2440,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             RefreshActiveTab(*s);
         } else if (hit.region == ui::HitTestResult::NewButton) {
             if (s->menu && s->menu->IsOpen()) {
-                s->menu->Dismiss();
+                s->menu->RequestDismiss();
             } else if (EnsureMenu(*s)) {
                 const auto anchor = s->renderer.NewCommandRect(static_cast<float>(s->compositor.Width()));
                 RECT toggle{static_cast<LONG>(anchor.left), static_cast<LONG>(anchor.top),
@@ -2675,7 +2720,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             SortBy(*s, hit.column);
         } else if (hit.region == ui::HitTestResult::SidebarHeaderAction) {
             if (hit.sidebar_action == ui::SidebarAddAction::AddNetwork) {
-                s->settings.NetworkAction(0, true);
+                ShowConnectServer(*s);
             } else if (hit.sidebar_action == ui::SidebarAddAction::CreateTag) {
                 POINT point{ mx, my };
                 ClientToScreen(hwnd, &point);
@@ -2694,11 +2739,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 s->groupGapLineY = 0.0f;
                 SetCapture(hwnd);
             }
-        } else if (hit.region == ui::HitTestResult::SidebarItemAction) {
-            std::wstring kind, rest;
-            if (app::ParsePulsePath(hit.path, &kind, &rest) && kind == L"workspace")
-                s->places.UnpinWorkspace(_wtoi(rest.c_str()));
-            InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SidebarItemExpand) {
             if (hit.path == app::MakeStarredPath()) {
                 s->starredExpanded = !s->starredExpanded;
@@ -2865,7 +2905,8 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
                         vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect),
                     fitTab->details_column_dividers,
                     vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane.is_search,
-                    fitTab->search_column_dividers, hit.index);
+                    fitTab->search_column_dividers, hit.index,
+                    vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane.cloud_status_column);
                 RememberFolderColumns(*s, *fitTab);
                 if (s->renameIndex >= 0) LayoutRenameOverlay(*s);
             }
@@ -2900,6 +2941,8 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         (void)msg;
         (void)wParam;
         if (s) {
+            if (SysCtxPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) ||
+                PulseMenuPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
             if (s->trayDrag.pending || s->trayDrag.active) {
                 ReleaseTrayDrag(*s, true);
                 if (GetCapture() == hwnd) ReleaseCapture();
@@ -3273,6 +3316,8 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
         (void)wParam;
         (void)lParam;
         if (s) {
+            SysCtxPreviewDragCancel(*s);
+            PulseMenuPreviewDragCancel(*s);
             s->paneDragPending = false;
             s->paneDragging = false;
             s->paneDragLayoutIndex = s->paneDragPaneIndex = -1;
@@ -3467,8 +3512,7 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 s->context_menu.Close();
                 return 0;
             }
-            if (s->places.IsQuickAccessPinned(hit.path)) {
-                ShowQuickAccessMenu(*s, hit.path, sp);
+            if (ShowSidebarPinMenu(*s, hit.path, sp)) {
                 s->context_menu.Close();
                 return 0;
             }
@@ -3519,7 +3563,8 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         ui::HitTestResult wheelHit = s->renderer.HitTest(wheelVm, wheelRect, (float)pt.x, (float)pt.y);
         if (pt.x >= 0 && pt.x < wheelRect.right - 138.0f * s->scale &&
             pt.y >= 0 && pt.y < s->renderer.TitleBarHeight()) {
-            const float steps = -static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / WHEEL_DELTA;
+            const float steps = (msg == WM_MOUSEHWHEEL ? 1.0f : -1.0f) *
+                static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / WHEEL_DELTA;
             if (s->renderer.ScrollTabStrip(wheelVm, wheelRect.right, steps)) {
                 ApplyHoverTarget(*s, s->renderer.HitTest(wheelVm, wheelRect,
                     static_cast<float>(pt.x), static_cast<float>(pt.y)));
@@ -3527,19 +3572,13 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             }
             return 0;
         }
-        if (IsSettingsTab(ActiveTab(*s))) {
-            const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-            StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 72.0f * s->scale);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return 0;
-        }
-        if (HandleColumnStripWheel(*s, wheelVm, wheelHit, GET_WHEEL_DELTA_WPARAM(wParam))) return 0;
+        if (HandleColumnStripWheel(*s, wheelVm, wheelHit, GET_WHEEL_DELTA_WPARAM(wParam), msg == WM_MOUSEHWHEEL)) return 0;
         const D2D1_RECT_F sidebarRc = s->renderer.SidebarRect(wheelRect.right, wheelRect.bottom);
         // Tray stack first: the panel lives inside the sidebar rect, so the
         // sidebar branch below would swallow every wheel event over it.
         // Wheel down sends the top card to the back, wheel up brings the
         // last one back on top (cyclic).
-        if (TrayItemTotalCount(s->tray) > 1) {
+        if (msg == WM_MOUSEWHEEL && TrayItemTotalCount(s->tray) > 1) {
             const D2D1_RECT_F tray_rc = s->renderer.StagingTrayRect(
                 wheelVm, wheelRect.right, wheelRect.bottom);
             if (pt.x >= tray_rc.left && pt.x < tray_rc.right &&
@@ -3561,8 +3600,17 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                 wheelVm, wheelRect.right, wheelRect.bottom);
             const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
                                 static_cast<float>(WHEEL_DELTA);
-            s->sidebarScroll = std::clamp(
-                s->sidebarScroll - steps * 48.0f * s->scale, 0.0f, max_scroll);
+            if (msg == WM_MOUSEHWHEEL) return 0;
+            s->sidebarScrollMotion.ScrollBy(s->sidebarScroll, -steps * 48.0f * s->scale,
+                max_scroll, sidebarRc.bottom - sidebarRc.top, ui::AnimationTimeMs(),
+                s->renderer.MotionEnabled() && !s->shot_high_contrast);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
+        if (IsSettingsTab(ActiveTab(*s))) {
+            if (msg == WM_MOUSEHWHEEL) return 0;
+            const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            StartSmoothScroll(*s, -static_cast<float>(delta) / WHEEL_DELTA * 72.0f * s->scale);
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
@@ -3575,13 +3623,15 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             if (wheelVm.details.multi_count <= 1 && !wheelVm.details.is_dir &&
                 wheelHit.region == ui::HitTestResult::DetailsPreview) {
                 s->renderer.ScrollDetailsPreview(steps, static_cast<float>(pt.x),
-                    static_cast<float>(pt.y));
+                    static_cast<float>(pt.y), msg == WM_MOUSEHWHEEL);
             } else {
                 const float visibleDip = (detailsRc.bottom - detailsRc.top) / s->scale;
                 const float contentDip = s->renderer.DetailsContentHeightDip(
                     wheelVm, wheelRect.right, wheelRect.bottom);
-                s->detailsScroll = std::clamp(s->detailsScroll - steps * 48.0f,
-                    0.0f, std::max(0.0f, contentDip - visibleDip));
+                if (msg == WM_MOUSEHWHEEL) return 0;
+                s->detailsScrollMotion.ScrollBy(s->detailsScroll, -steps * 48.0f,
+                    std::max(0.0f, contentDip - visibleDip), visibleDip, ui::AnimationTimeMs(),
+                    s->renderer.MotionEnabled() && !s->shot_high_contrast);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
@@ -3593,21 +3643,23 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         }
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
         app::Tab* wheelTab = ActiveTab(*s);
-        if ((GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0) {
+        if (msg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0) {
             if (wheelTab) {
                 const int direction = delta > 0 ? -1 : 1;
                 const int next = std::clamp(ui::ViewModeIndex(wheelTab->view_mode) + direction, 0, 7);
-                SetViewMode(*s, ui::ViewModeFromIndex(next));
+                SetViewMode(*s, ui::ViewModeFromIndex(next), true);
             }
             return 0;
         }
-        if (wheelTab && wheelTab->view_mode == ui::ViewMode::List) {
+        if (wheelTab && (wheelTab->view_mode == ui::ViewMode::List || msg == WM_MOUSEHWHEEL ||
+            (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT) != 0)) {
             ui::PaneViewModel pane;
             app::FillPaneViewModel(pane, *s->pane, &s->places);
             const float maxX = s->renderer.MaxScrollXForPane(pane, FocusedPaneRect(*s));
-            wheelTab->scroll_x = std::clamp(wheelTab->scroll_x -
+            const auto bounds = FocusedPaneRect(*s);
+            StartHorizontalSmoothScroll(*s, (msg == WM_MOUSEHWHEEL ? 1.0f : -1.0f) *
                 (static_cast<float>(delta) / WHEEL_DELTA) * 220.0f * s->scale,
-                0.0f, maxX);
+                maxX, bounds.right - bounds.left, ui::AnimationTimeMs());
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
@@ -3628,6 +3680,8 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (wParam == VK_ESCAPE && (SysCtxPreviewDragCancel(*s) || PulseMenuPreviewDragCancel(*s))) return 0;
+        if (wParam == VK_ESCAPE && CancelWindowTransferDrag(*s)) return 0;
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
         app::Tab* tab = ActiveTab(*s);

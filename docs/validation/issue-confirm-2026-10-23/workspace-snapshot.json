@@ -1,0 +1,3829 @@
+{
+  "captured_at": "2026-10-23T03:09:47.043128+00:00",
+  "head": "45fdd54920eb23b1bcca3759bf33a161422327d4",
+  "status": " M CMakeLists.txt\n M src/app/app_commands.cpp\n M src/app/app_commands.h\n M src/app/app_input.cpp\n M src/app/app_runtime.cpp\n M src/app/pulse.rc\n M src/bench/file_selection_ui_test.cpp\n M src/bench/localization_test.rc\n M src/common/localization.h\n M src/common/resource_ids.h\n M src/common/string_ids.h\n M src/common/strings.rcinc\n M src/ui/toolbar_layout.h\n M src/ui/ui_fluent_svg.cpp\n M src/ui/ui_hit_test.cpp\n M src/ui/ui_renderer.h\n M src/ui/ui_toolbar.cpp\n?? assets/files_toolbar/group.svg\n?? docs/issue-bug-audit-2026-10-23.md\n?? docs/validation/group-toolbar-2026-10-23/\n?? docs/validation/issue-bug-audit-2026-10-23/\n?? docs/validation/issue-confirm-2026-10-23/\n?? src/bench/group_toolbar_ui_test.cpp\n?? src/bench/recycle_toolbar_ui_test.cpp\n",
+  "pulse_exe_sha256": "6e6a626d17072d483dbb84b2161957ce64ce6a01a32f49ff577a6a36078a87b5",
+  "source_files": [
+    {
+      "path": "src/app/about_info.cpp",
+      "bytes": 5244,
+      "mtime_ns": 1791622499266813100,
+      "sha256": "13d9a9af69eb306d9e9a7a7c51abab7c2ef2ac31f70d881c20f232ea0826f092"
+    },
+    {
+      "path": "src/app/about_info.h",
+      "bytes": 774,
+      "mtime_ns": 1791622499002770800,
+      "sha256": "7b7aee16eb98a0bf98a6e9751f7f1ff13637fa74abd18026f5a8397e6c2ff9fa"
+    },
+    {
+      "path": "src/app/address_search.cpp",
+      "bytes": 19848,
+      "mtime_ns": 1792580484735734000,
+      "sha256": "71b26c4915395142e0facfdfbce1ade5415f01725c9a86f7996c18b27b1e4d4a"
+    },
+    {
+      "path": "src/app/address_search_history.cpp",
+      "bytes": 7499,
+      "mtime_ns": 1792580218408195100,
+      "sha256": "a9b6e9652f395bcd94706e50f68107e463a60910d35c25248cdfe26ec439d0f8"
+    },
+    {
+      "path": "src/app/app_change_tracking.cpp",
+      "bytes": 18752,
+      "mtime_ns": 1791170383828036700,
+      "sha256": "3f6a0731a79ee2d1aa65b6f0384d56046325e3f41347e9ddfc712fd63fb1f67d"
+    },
+    {
+      "path": "src/app/app_change_tracking.h",
+      "bytes": 1842,
+      "mtime_ns": 1791170383988596700,
+      "sha256": "e36ea4d369eece720b67fe7f3b35b1ad384e38b285bcd72cb6daf8751b866c87"
+    },
+    {
+      "path": "src/app/app_column_view.cpp",
+      "bytes": 23363,
+      "mtime_ns": 1791680727695770900,
+      "sha256": "9b42c321824e8467435ead84024eee3de68182977a3dea337968812e918725e5"
+    },
+    {
+      "path": "src/app/app_column_view.h",
+      "bytes": 1959,
+      "mtime_ns": 1791512635551026700,
+      "sha256": "ec659cddcd78cf8a7229c85b73af90f7d5d074c69e2b79e51124df9bf9b19571"
+    },
+    {
+      "path": "src/app/app_commands.cpp",
+      "bytes": 100773,
+      "mtime_ns": 1792721776977571500,
+      "sha256": "da3da0f881354e1820effdb8be9d59d84345bbc7ad076a178a0f22992a959793"
+    },
+    {
+      "path": "src/app/app_commands.h",
+      "bytes": 5387,
+      "mtime_ns": 1792721448342658000,
+      "sha256": "0ec3c3efd8ce88c78818a34013fe5e980edb6b291442e474bdc5708626983845"
+    },
+    {
+      "path": "src/app/app_core.h",
+      "bytes": 1953,
+      "mtime_ns": 1792226962723678600,
+      "sha256": "3775a7bbbea572ffc9f280e0eba0dca4de4e129056b7e4720cced16ace7de50e"
+    },
+    {
+      "path": "src/app/app_drag_hint.cpp",
+      "bytes": 2323,
+      "mtime_ns": 1791681566238662200,
+      "sha256": "a6e120705b5addcef55979afc99b0a42367e56661a82b6b1eda0fa17de75592b"
+    },
+    {
+      "path": "src/app/app_exit.cpp",
+      "bytes": 4884,
+      "mtime_ns": 1792230159012458400,
+      "sha256": "0625b6f25acc2b11f1e1cbb29a5a722e9fbaf02bb60d2be3fc18a0fb1481fd98"
+    },
+    {
+      "path": "src/app/app_exit.h",
+      "bytes": 231,
+      "mtime_ns": 1792211925859413100,
+      "sha256": "405c02a69e60a9aa94042700dced0d383d74275ec632809ad3f434824f42b9b3"
+    },
+    {
+      "path": "src/app/app_hosted_edit.cpp",
+      "bytes": 29070,
+      "mtime_ns": 1792656774053904100,
+      "sha256": "ea5cabfe10cda6638f7506186010803287014de5c6885a264c87b06d9d0b7b5b"
+    },
+    {
+      "path": "src/app/app_hosted_edit.h",
+      "bytes": 3387,
+      "mtime_ns": 1791881786631444200,
+      "sha256": "5bdac2d642f4d3af612d3abcc1ac689ef73702673d32b57e9d5d1f7bb152290e"
+    },
+    {
+      "path": "src/app/app_input.cpp",
+      "bytes": 204365,
+      "mtime_ns": 1792721448323606600,
+      "sha256": "2151df71d53411c691170b033f2a6688807e1c27676186ceb32f8c32f7cd47e2"
+    },
+    {
+      "path": "src/app/app_input.h",
+      "bytes": 2784,
+      "mtime_ns": 1791982985544576600,
+      "sha256": "624533134d1be2b2edb25c2718e72d1b0b88fe53141b409bb799b8a4e695e2cd"
+    },
+    {
+      "path": "src/app/app_internal.h",
+      "bytes": 558,
+      "mtime_ns": 1791881756195150900,
+      "sha256": "cb719bb423a6c4f53ac5412f8b7e9c008a11ba30195be03929d07be5570f3919"
+    },
+    {
+      "path": "src/app/app_main.cpp",
+      "bytes": 119633,
+      "mtime_ns": 1792679990570881100,
+      "sha256": "a79a1c1be3b1e37393c7a87005977e1cafe4c3da0321e5467b2e0ad461ea8416"
+    },
+    {
+      "path": "src/app/app_model.cpp",
+      "bytes": 82388,
+      "mtime_ns": 1792656773517826900,
+      "sha256": "88dc20910b85cdf72db041b0ddda748e5e3373f118c0fe716ccd4be0fea2f171"
+    },
+    {
+      "path": "src/app/app_model.h",
+      "bytes": 24146,
+      "mtime_ns": 1792656212344923800,
+      "sha256": "7749df15bbc571e64cb0cc1fb3cb794be3c87679920157c651e7f7b8ac310224"
+    },
+    {
+      "path": "src/app/app_navigation.cpp",
+      "bytes": 86303,
+      "mtime_ns": 1792656544723732300,
+      "sha256": "40e6ad04fd4e7ae611a5964b9e453731b3f46f918b38364d1d9ca39b532274a5"
+    },
+    {
+      "path": "src/app/app_navigation.h",
+      "bytes": 4449,
+      "mtime_ns": 1792656212871902200,
+      "sha256": "2355cf26a53f5a1daf0b5b7ffe5070869ae8a4fc4f6f44538602cbd1bf8b10c4"
+    },
+    {
+      "path": "src/app/app_notify_patch.cpp",
+      "bytes": 8472,
+      "mtime_ns": 1791682186155573200,
+      "sha256": "3c74651d7bdffb9e380ab9cf6e4b296e5c135079481b9a0aef5ed0d4292e5060"
+    },
+    {
+      "path": "src/app/app_notify_patch.h",
+      "bytes": 1745,
+      "mtime_ns": 1791650782352791000,
+      "sha256": "cba3b0f3b89c4dc4f8851ee66d0184d65eb14dfcf8232f3ae2ac6fa4e0708d07"
+    },
+    {
+      "path": "src/app/app_ops_ui.cpp",
+      "bytes": 19078,
+      "mtime_ns": 1792656772997702200,
+      "sha256": "1308a17836e74a6980f16c1f88bd2d46a0955c5d42ac6c0fef3b4baad744b75e"
+    },
+    {
+      "path": "src/app/app_ops_ui.h",
+      "bytes": 1356,
+      "mtime_ns": 1792679750492576700,
+      "sha256": "fb95ae4941c0c895367ae430add98d0f515bc5265a5e748a08dc1110fd1bc9c5"
+    },
+    {
+      "path": "src/app/app_prefs.cpp",
+      "bytes": 21386,
+      "mtime_ns": 1792577287087245100,
+      "sha256": "43c64d4c473faff081a668ecdd8f96097516a7d1c4deded3bd90c00af715e3bf"
+    },
+    {
+      "path": "src/app/app_prefs.h",
+      "bytes": 3869,
+      "mtime_ns": 1792577286848522800,
+      "sha256": "411bcbb7af9068bb7ef24d8a261d9ca855974ea0e7a5f13891fc83f9bda1c8f7"
+    },
+    {
+      "path": "src/app/app_preview_input.cpp",
+      "bytes": 1683,
+      "mtime_ns": 1790608248968061200,
+      "sha256": "7bd24623f38f8ef1ac1bdc11a9dbdbbe0917263dfd57dcd1ddd3e230bfebe831"
+    },
+    {
+      "path": "src/app/app_render.h",
+      "bytes": 161,
+      "mtime_ns": 1791881756193639800,
+      "sha256": "d0b77d8abb485b94a8aa58ce76f149aa3e857310d4e24ab1a3a22ddbe52489ef"
+    },
+    {
+      "path": "src/app/app_runtime.cpp",
+      "bytes": 114780,
+      "mtime_ns": 1792722938246819700,
+      "sha256": "cc25f701981e26025c853545e8fb43d1fd77145162b79452ebc1922e4050b0c2"
+    },
+    {
+      "path": "src/app/app_runtime.h",
+      "bytes": 6384,
+      "mtime_ns": 1792667629183266500,
+      "sha256": "3af8a17e5e230accaabe868f01592330b3801893ff803e542afad528227c4cbb"
+    },
+    {
+      "path": "src/app/app_state.h",
+      "bytes": 35681,
+      "mtime_ns": 1792679750316842500,
+      "sha256": "b549c404c2a884d022f6e01cc3af40df341e279e8611ca7ce8276e196f371dbc"
+    },
+    {
+      "path": "src/app/app_ui_schedule.cpp",
+      "bytes": 4229,
+      "mtime_ns": 1791881756530100500,
+      "sha256": "6e075fdb9fffe41444685028e47aabe1f5718452d8f1ec6a31d564dfa0cc1f6c"
+    },
+    {
+      "path": "src/app/app_ui_schedule.h",
+      "bytes": 229,
+      "mtime_ns": 1791878447635652600,
+      "sha256": "e68740e006b8bb5357af79e76567c41559b9b9d6310dc0358ab5b05963b943cf"
+    },
+    {
+      "path": "src/app/app_visual_animation.cpp",
+      "bytes": 6984,
+      "mtime_ns": 1792580501784882500,
+      "sha256": "5c3f46f7002a2ea20992a71482ee6d3c6a7c3c65c77f6bdcdcc66119b9ee4fa9"
+    },
+    {
+      "path": "src/app/app_visual_animation.h",
+      "bytes": 425,
+      "mtime_ns": 1791881756541109300,
+      "sha256": "9b302fd8881fddee5778407d024ba28de05ece6caa78a096d15d6929f3fd5aa4"
+    },
+    {
+      "path": "src/app/app_worker.cpp",
+      "bytes": 35282,
+      "mtime_ns": 1792157985760318500,
+      "sha256": "eebd15b976608637c5f47ab9de2f08b312a21d90ac332c62f2aa201fca937186"
+    },
+    {
+      "path": "src/app/app_worker.h",
+      "bytes": 5174,
+      "mtime_ns": 1792157985506268900,
+      "sha256": "23e7b306d1bc2c9fc7b8cea78f9ed571b01f857ead1c8fca829d633aaf1bed18"
+    },
+    {
+      "path": "src/app/archive_dialog.cpp",
+      "bytes": 16343,
+      "mtime_ns": 1791782937976937600,
+      "sha256": "2f2ab5c12ae96182a9007d3987462fa6b151635f134f7d1043233070283d3e00"
+    },
+    {
+      "path": "src/app/archive_dialog.h",
+      "bytes": 562,
+      "mtime_ns": 1791782730612960600,
+      "sha256": "ad1e7cc686e75da4284909719a0359815503597bf696df98abc501f326237028"
+    },
+    {
+      "path": "src/app/archive_navigation.cpp",
+      "bytes": 20914,
+      "mtime_ns": 1792211970872503600,
+      "sha256": "ab94853606b63d3fca526556cd4a8a400bf14bcc807f32bee8289ef2f8faaa80"
+    },
+    {
+      "path": "src/app/archive_navigation.h",
+      "bytes": 890,
+      "mtime_ns": 1792156189133892100,
+      "sha256": "0dd214fece0a5cc7d89d084d48c664712f706fd0bdee4ed1088714ccc15f830a"
+    },
+    {
+      "path": "src/app/archive_operation_ui.cpp",
+      "bytes": 5844,
+      "mtime_ns": 1792212399131199900,
+      "sha256": "bcbb4268ec695d7c82d4eb3938cf9f73da530be564e193f33f99366ece653e1c"
+    },
+    {
+      "path": "src/app/archive_operation_ui.h",
+      "bytes": 734,
+      "mtime_ns": 1792156133647846700,
+      "sha256": "fd5a60e5124b14b8eb5499dd3aa863d4a42b454653243efe0d112bc36133d60b"
+    },
+    {
+      "path": "src/app/background_window_fit.h",
+      "bytes": 1343,
+      "mtime_ns": 1792045216828662100,
+      "sha256": "37564dd61540fe88031ca523841d5f8b3e4171d4931618034c0dca9844f20c30"
+    },
+    {
+      "path": "src/app/batch_rename.h",
+      "bytes": 358,
+      "mtime_ns": 1791170585959606700,
+      "sha256": "245d9356d8c799c4ea243042f2019ee588e783a56e436e76881ef3242bb84f2b"
+    },
+    {
+      "path": "src/app/blank_pane_click.h",
+      "bytes": 880,
+      "mtime_ns": 1790608248983593500,
+      "sha256": "6b4e3b2f6322590f6fe0fd18612e2b18c897f1f316fda670a841784d19a0802e"
+    },
+    {
+      "path": "src/app/breadcrumb_menu.cpp",
+      "bytes": 1448,
+      "mtime_ns": 1791084109993823600,
+      "sha256": "93c9e43580d540489b8c74ba4b8bb1b73b5184c00a83a352c578b863bc02b6cd"
+    },
+    {
+      "path": "src/app/builtin_menu_items.cpp",
+      "bytes": 2376,
+      "mtime_ns": 1791170585965595700,
+      "sha256": "26b39438c5bc44d8e1c81612e7846f69c317d2fef092bd050db115700a35b4c6"
+    },
+    {
+      "path": "src/app/builtin_menu_items.h",
+      "bytes": 623,
+      "mtime_ns": 1791170585963076400,
+      "sha256": "a47b7e326238f93b574462254ef5ce904c42850d3014bd32339888c31ca8f932"
+    },
+    {
+      "path": "src/app/builtin_menu_strings.h",
+      "bytes": 152,
+      "mtime_ns": 1791170585961117300,
+      "sha256": "8c31914f7c39409dd692dd189fbb3c6bb24ebc81cabcd00f41aae91e098fc5c9"
+    },
+    {
+      "path": "src/app/change_time.h",
+      "bytes": 1425,
+      "mtime_ns": 1790608248986595100,
+      "sha256": "949a701a7a6bd23b60fdddfea4bf45e102d7feca1a66a796b316bc336d845f89"
+    },
+    {
+      "path": "src/app/change_tracking_app_test.cpp",
+      "bytes": 10707,
+      "mtime_ns": 1791170543081698100,
+      "sha256": "9818f7d0da88d6cb9029e5fac2d576c6279e914691cece50e338b77ea6ba50a8"
+    },
+    {
+      "path": "src/app/change_tracking_app_test.h",
+      "bytes": 73,
+      "mtime_ns": 1790608248988671100,
+      "sha256": "c25cb1a12fe84923a264a6e6ba9b147e45de778637dc323bfd39894d343216fd"
+    },
+    {
+      "path": "src/app/change_tracking_polling.h",
+      "bytes": 189,
+      "mtime_ns": 1790608248989675500,
+      "sha256": "14adea364250d00ea788fb6ea1194c457bf1a58298371e0ec9c64c4c5803b445"
+    },
+    {
+      "path": "src/app/change_tracking_ui_test.cpp",
+      "bytes": 17486,
+      "mtime_ns": 1790608248990675300,
+      "sha256": "22fc512b4105c7cc2e172aa418f8cabe4009d028442678b59c4b7e193ddfbd61"
+    },
+    {
+      "path": "src/app/change_tracking_ui_test.h",
+      "bytes": 72,
+      "mtime_ns": 1790608248991675600,
+      "sha256": "49bc5fea5dc5376c1747ddc65ce175bee1da7889da506372af9efe87d0ebe4d3"
+    },
+    {
+      "path": "src/app/clipboard_availability.h",
+      "bytes": 5514,
+      "mtime_ns": 1792156698872571600,
+      "sha256": "3265ff0f9b98f6fd374d6e7298b145a6de5183fa19f289913425ae0be87506ae"
+    },
+    {
+      "path": "src/app/column_resize_test.cpp",
+      "bytes": 4467,
+      "mtime_ns": 1790608248992676500,
+      "sha256": "4797b711d5265186e465a558f544ad4274a434106ee35e7308c397d1916a74ca"
+    },
+    {
+      "path": "src/app/column_view_model.cpp",
+      "bytes": 1555,
+      "mtime_ns": 1790608248993675800,
+      "sha256": "be7c981263f141af2f102e37dc6ef50ac763dcfe75762de1122fa7d16c5e8f4a"
+    },
+    {
+      "path": "src/app/column_view_model.h",
+      "bytes": 2103,
+      "mtime_ns": 1791450091668244700,
+      "sha256": "180483cf214d51066358d031c5db90e54bd5713c3ac45af3b8e05fe58dbd8a82"
+    },
+    {
+      "path": "src/app/command_catalog.cpp",
+      "bytes": 6733,
+      "mtime_ns": 1792656152162109300,
+      "sha256": "e7002f8e08334f5b26475da89e4ac5e40f8014cf23d9fb68b84475c6184a2b4f"
+    },
+    {
+      "path": "src/app/command_catalog.h",
+      "bytes": 1932,
+      "mtime_ns": 1792656151871824700,
+      "sha256": "b71a682a508fcce466536cd27f921bfa21542d48b2bceacac1237512f64ea8d2"
+    },
+    {
+      "path": "src/app/content_lifecycle.cpp",
+      "bytes": 859,
+      "mtime_ns": 1791163396565970700,
+      "sha256": "94e797985515c62fe359aa987c9ef96ecee122533f594f6358d19c72bb07f2bd"
+    },
+    {
+      "path": "src/app/content_results_ui.cpp",
+      "bytes": 11973,
+      "mtime_ns": 1791163396554958100,
+      "sha256": "e91b35d98b85f6fe9798370c954d2e05af94179649418d16a26d08648334d900"
+    },
+    {
+      "path": "src/app/content_results_ui.h",
+      "bytes": 616,
+      "mtime_ns": 1790608248996675500,
+      "sha256": "3fa4ae5b2622401d1d55a5c29603cc0f9cad95c4d51f1c4b6619a4f90a7f8c7e"
+    },
+    {
+      "path": "src/app/context_menu.cpp",
+      "bytes": 30024,
+      "mtime_ns": 1792687093523476700,
+      "sha256": "7348c17372457ab952b9558d56646cdf718a615e79e8f1df720fd891f4c03f44"
+    },
+    {
+      "path": "src/app/context_menu.h",
+      "bytes": 10279,
+      "mtime_ns": 1792687093279938400,
+      "sha256": "c1348408166632d74cc778a80cb7e21ded750009e54f53a6d8541e5024407004"
+    },
+    {
+      "path": "src/app/context_menu_controller.cpp",
+      "bytes": 27317,
+      "mtime_ns": 1792687324495609600,
+      "sha256": "4748230456b0b55b183bf172b03aadf9d34219d1a3f8de412015495bf5ad449a"
+    },
+    {
+      "path": "src/app/context_menu_controller.h",
+      "bytes": 5310,
+      "mtime_ns": 1791878448597876300,
+      "sha256": "716190b06bfe2012ba10f3ac19079c23bd461d928ebd7697f21eea9a45c6aa0a"
+    },
+    {
+      "path": "src/app/context_menu_prefs.cpp",
+      "bytes": 16995,
+      "mtime_ns": 1791425517604137900,
+      "sha256": "d20dd08bfa4aca78ae7b3984646baf8ca0a65adebfbc05cc041e8f641a227ef4"
+    },
+    {
+      "path": "src/app/context_menu_prefs.h",
+      "bytes": 3541,
+      "mtime_ns": 1790997064401864700,
+      "sha256": "02596e1b3dabea8174d6de6d3f089e043c625c5bf133b7aa2bbb65c5daaaa3f1"
+    },
+    {
+      "path": "src/app/date_groups.cpp",
+      "bytes": 6127,
+      "mtime_ns": 1792656240599474000,
+      "sha256": "0a155f0c3eff966a49b1a6f593da5377df8e39eb07bb72ce4666f7e2da613520"
+    },
+    {
+      "path": "src/app/date_groups.h",
+      "bytes": 871,
+      "mtime_ns": 1792656123057075700,
+      "sha256": "f66e81fa0f85e8aaedb2d43a6adec4c7b11a2a15dfdee562d87c5da2abc45b24"
+    },
+    {
+      "path": "src/app/default_file_manager.cpp",
+      "bytes": 14528,
+      "mtime_ns": 1791029243046086300,
+      "sha256": "143768f3e4f8c0c35f5363ee131051851bc1c6b7cd6b624ccd306ccab73e29fb"
+    },
+    {
+      "path": "src/app/default_file_manager.h",
+      "bytes": 2348,
+      "mtime_ns": 1790996451074540200,
+      "sha256": "89b9d13c567eadd0e659bce5312b31af4bd70d6cc04970af8de0caae595dcb6f"
+    },
+    {
+      "path": "src/app/delete_confirmation_ui.cpp",
+      "bytes": 3376,
+      "mtime_ns": 1791002163236945800,
+      "sha256": "cde77d6115507e5ce733733b44df2eb523f23cc1cbe946328742302a2d7d719b"
+    },
+    {
+      "path": "src/app/details_meta.cpp",
+      "bytes": 6391,
+      "mtime_ns": 1791441424729605400,
+      "sha256": "2e918aa6e8cb9c834f4b69887b631bf82ad441e460e98b923dd7d4a821f0bf59"
+    },
+    {
+      "path": "src/app/details_meta.h",
+      "bytes": 1180,
+      "mtime_ns": 1791441424522913200,
+      "sha256": "a7142bb03513236b5dba960e6f9a63d2bf0b02ee5e9fe13dab9f42c2c0461bc6"
+    },
+    {
+      "path": "src/app/directory_projection.h",
+      "bytes": 1118,
+      "mtime_ns": 1791650782336727600,
+      "sha256": "26394c3867ea80cd97e435c0b03b36f556fe0bb9d1d321ef5d6578f104894b27"
+    },
+    {
+      "path": "src/app/drive_label_rename.cpp",
+      "bytes": 1137,
+      "mtime_ns": 1791170585980182800,
+      "sha256": "4a1563ee70e4416467102b372f2cd67e27f61e3ce16db11679e6a2653ea410dd"
+    },
+    {
+      "path": "src/app/drive_label_rename.h",
+      "bytes": 301,
+      "mtime_ns": 1791170585969655500,
+      "sha256": "7fed062b6771215db77a7b722ae1a0c5c07ee75a7b901014392a839f6ff9c6d1"
+    },
+    {
+      "path": "src/app/duplicate_scan.cpp",
+      "bytes": 10466,
+      "mtime_ns": 1791533867349367500,
+      "sha256": "e9c51a630764af71ca6067d74ae70fa343380b20a94c0ee3530e7e83ec285cd1"
+    },
+    {
+      "path": "src/app/duplicate_scan.h",
+      "bytes": 3161,
+      "mtime_ns": 1791533867088764500,
+      "sha256": "96011fd349fa0c5fb0e160873da12f2ee1cc834b368a7b51182e75c309454ea1"
+    },
+    {
+      "path": "src/app/duplicate_scan_ui.cpp",
+      "bytes": 4546,
+      "mtime_ns": 1792080132900745800,
+      "sha256": "5e0cf8258d44007c8ba49c6e5100bee9130f626851df359d9d4d675624c4e87c"
+    },
+    {
+      "path": "src/app/entry_order_hold.cpp",
+      "bytes": 2876,
+      "mtime_ns": 1791679246755209100,
+      "sha256": "4d516c63ec62f46a341313822dc1fb95554bd57e3c11ef724fe7ecd9ed6ac90a"
+    },
+    {
+      "path": "src/app/entry_order_hold.h",
+      "bytes": 625,
+      "mtime_ns": 1791679246767043100,
+      "sha256": "0862e5176d20360725cd52132d287d08b731a3cbae954112535ce172ccc63c87"
+    },
+    {
+      "path": "src/app/entry_sort.cpp",
+      "bytes": 4405,
+      "mtime_ns": 1791865421854795200,
+      "sha256": "81d1fc35de6cb4556998325429ea5abddc437bdc3194007071b03564fb98bc90"
+    },
+    {
+      "path": "src/app/entry_sort.h",
+      "bytes": 1175,
+      "mtime_ns": 1791170254545555200,
+      "sha256": "f402146345edca6eb4ab3a0bbc1b66c81f402ec3020062b40fce1fb9fb9ff34b"
+    },
+    {
+      "path": "src/app/exit_confirmation.h",
+      "bytes": 575,
+      "mtime_ns": 1791116611102528000,
+      "sha256": "8b6545b32ebf0085d6f60486ef0e81571b9d63821972348df2124dc7cb8028c9"
+    },
+    {
+      "path": "src/app/explorer_takeover_policy.h",
+      "bytes": 2577,
+      "mtime_ns": 1792419240393796600,
+      "sha256": "ad6765a98476e021d3febc524e03bbe69ca2beb58b2b26db2f4a57b93d1da20d"
+    },
+    {
+      "path": "src/app/explorer_window_takeover.cpp",
+      "bytes": 34595,
+      "mtime_ns": 1792465389948842800,
+      "sha256": "e0e0328de642fb4f516058030e6916c6141cf8f273fb648e4aa72a6b975f99ea"
+    },
+    {
+      "path": "src/app/explorer_window_takeover.h",
+      "bytes": 2147,
+      "mtime_ns": 1792465390237246800,
+      "sha256": "8a51ed9fdba69d44330ea8ed71b7712abe78d0ed37c7c73774cae9dc2e9ec09b"
+    },
+    {
+      "path": "src/app/external_open.cpp",
+      "bytes": 6659,
+      "mtime_ns": 1792159676653216700,
+      "sha256": "39421b432797c1e49c15632e649feb952dba440ae5bdb2e33c7dbc165d787e86"
+    },
+    {
+      "path": "src/app/external_open.h",
+      "bytes": 673,
+      "mtime_ns": 1792158413461595000,
+      "sha256": "21f3ba1564888dad19399ec0cca05202b1eaa47dac0197d19495acf93eb6763c"
+    },
+    {
+      "path": "src/app/filename_render_test.cpp",
+      "bytes": 9361,
+      "mtime_ns": 1790608249016309400,
+      "sha256": "47e1e2f3b6e328ec0b2b50f7d12768c8bd761cbb64376f5473dc62ed2e77209f"
+    },
+    {
+      "path": "src/app/filter_animation.h",
+      "bytes": 1286,
+      "mtime_ns": 1792578544391208600,
+      "sha256": "8ef6baa8c0310378514a5e449cb9300eb5edcd8a37e649ba9b1583749271357e"
+    },
+    {
+      "path": "src/app/folder_sizes.cpp",
+      "bytes": 23564,
+      "mtime_ns": 1791441629670113300,
+      "sha256": "664810b0548ebdd4168eb63529c8be42dbbfc3247cdf52788ed0d0ccaea1b7e8"
+    },
+    {
+      "path": "src/app/folder_sizes.h",
+      "bytes": 1577,
+      "mtime_ns": 1791441425168721500,
+      "sha256": "2a4b18d72071a6990df11964c93403a51bc2f326717ac8a4bc8b396f0f6e0868"
+    },
+    {
+      "path": "src/app/folder_sizes_index_test.cpp",
+      "bytes": 7599,
+      "mtime_ns": 1790608249020804200,
+      "sha256": "69294b035f03f843d1690396c7fe353a7906e9b48d3f0442221a1511dbf93196"
+    },
+    {
+      "path": "src/app/folder_sizes_test.cpp",
+      "bytes": 13120,
+      "mtime_ns": 1792667653455366900,
+      "sha256": "59f38049282d6267a9f8bc1779b5945a931baaea164789ec773d35ed879a6a0a"
+    },
+    {
+      "path": "src/app/folder_sizes_ui.cpp",
+      "bytes": 5811,
+      "mtime_ns": 1792667651993311500,
+      "sha256": "5987914da7c7c918dc676fdca4eff758e38bead15bcae918ad3f73640ec2fba0"
+    },
+    {
+      "path": "src/app/folder_sizes_ui.h",
+      "bytes": 550,
+      "mtime_ns": 1792667651697517600,
+      "sha256": "e1b5b62a514bfef38ab068a23990f6b4badcd52e396ae1ce4d72be1eb495a093"
+    },
+    {
+      "path": "src/app/folder_view_prefs.cpp",
+      "bytes": 9684,
+      "mtime_ns": 1792656167598730400,
+      "sha256": "91fa91674fee164526049c9d9de6ca838d7c5cd78c4858b28a0934218ec47c74"
+    },
+    {
+      "path": "src/app/folder_view_prefs.h",
+      "bytes": 1898,
+      "mtime_ns": 1792656167353698900,
+      "sha256": "d5ca99c6f0ea0df3500642af8e66a5621a1bd3c1b5747de4d8ce38bb71c492ca"
+    },
+    {
+      "path": "src/app/global_search_controller.cpp",
+      "bytes": 2911,
+      "mtime_ns": 1792157404339420400,
+      "sha256": "e0998cf1ad665b02fb1a75fa8e047b12fc03fad13a767b6d8bed00075128fe6b"
+    },
+    {
+      "path": "src/app/global_search_controller.h",
+      "bytes": 246,
+      "mtime_ns": 1790608249082034800,
+      "sha256": "ec0976bd276b2d17a004ba57aeec841f7f2f782a465a4fe95aee107d30fe3f51"
+    },
+    {
+      "path": "src/app/global_search_hotkey.cpp",
+      "bytes": 906,
+      "mtime_ns": 1790608249084048900,
+      "sha256": "48caeeffaa13298ef0f6f55c2a611266d94848958b592d8e7c1b4919b1ef2991"
+    },
+    {
+      "path": "src/app/global_search_hotkey.h",
+      "bytes": 679,
+      "mtime_ns": 1790608249085053500,
+      "sha256": "1a15f4303363d885ec524da7827c47267bcf69e679d8154f854336d4ae8c6081"
+    },
+    {
+      "path": "src/app/global_search_window.cpp",
+      "bytes": 42375,
+      "mtime_ns": 1792602220355000600,
+      "sha256": "5a3f522eba213c397477e0c500b5017a88312a2b267c1537fc50a59f2e136e9b"
+    },
+    {
+      "path": "src/app/global_search_window.h",
+      "bytes": 1269,
+      "mtime_ns": 1791554536344520500,
+      "sha256": "bdcaea1c0184c38c52b85a6bce42f3c18c32707d1afd36d4b946b9234a5aefba"
+    },
+    {
+      "path": "src/app/header_drop_effect.h",
+      "bytes": 824,
+      "mtime_ns": 1791563986355853000,
+      "sha256": "03f6725f57fc29b975fc7239a10ceb6d9413870e3ce89df492a38126b7654970"
+    },
+    {
+      "path": "src/app/home_catalog.cpp",
+      "bytes": 6647,
+      "mtime_ns": 1791563468070359400,
+      "sha256": "b021b29ea383179e9a55530858d1a3d8f2d8006bf45c402c3ba90ac8e8163e09"
+    },
+    {
+      "path": "src/app/home_catalog.h",
+      "bytes": 753,
+      "mtime_ns": 1791171308498039800,
+      "sha256": "84e6b4c69c2133d633b64f5ac2bb13a79ab841e4f734dde459a0a78ff83e1fe7"
+    },
+    {
+      "path": "src/app/index_volume_badge.h",
+      "bytes": 494,
+      "mtime_ns": 1791163528198374600,
+      "sha256": "a8731a7d671dcea5dd2c1083e0bb1702e9eab92032b9b7d311a87d24aea90544"
+    },
+    {
+      "path": "src/app/link_resolve.cpp",
+      "bytes": 2011,
+      "mtime_ns": 1791563467833879800,
+      "sha256": "e1915e71701aa42dba2d1f8e7680542e02568f8da0116dcda31cf84f983eb80c"
+    },
+    {
+      "path": "src/app/link_resolve.h",
+      "bytes": 1056,
+      "mtime_ns": 1791563467610116400,
+      "sha256": "a6022a4ce68278bafa2ff3c7f0e0a9fb3651d9594c31f2b8319289c8b4770fb9"
+    },
+    {
+      "path": "src/app/locked_operation_prompt.cpp",
+      "bytes": 2891,
+      "mtime_ns": 1791448026893868000,
+      "sha256": "0f9040f78f7e9f84b6f8dfdc0a7db1673fef8a82441185365986f32e0a69dd39"
+    },
+    {
+      "path": "src/app/locked_operation_prompt.h",
+      "bytes": 99,
+      "mtime_ns": 1790997186328729000,
+      "sha256": "e0dce5a0d176199b43e1438f315068433908fe4f10a4fd2743d5e712dc8a63bf"
+    },
+    {
+      "path": "src/app/name_highlight_ui_test.cpp",
+      "bytes": 13161,
+      "mtime_ns": 1790608249092798700,
+      "sha256": "fabeeb47adf11184600bffdc40d287ef151205116f2e883075f18bd80a5915df"
+    },
+    {
+      "path": "src/app/name_highlight_ui_test.h",
+      "bytes": 127,
+      "mtime_ns": 1790608249093798900,
+      "sha256": "1957c18dc8810dd0de594ff821feb1680cbdeef1a00beac80840d96a316aa6ca"
+    },
+    {
+      "path": "src/app/net_cache_presentation.h",
+      "bytes": 1047,
+      "mtime_ns": 1791711212818265900,
+      "sha256": "2ac8346becf62e72b3197e33f7137325ee269ed83e3a5cf4025df0db947f2e3a"
+    },
+    {
+      "path": "src/app/new_item_dialog.cpp",
+      "bytes": 15012,
+      "mtime_ns": 1791621763061030700,
+      "sha256": "873d92bb54807854ae5bc7398bb04904aa5a51841ce1d944070bafc7e83cd1c5"
+    },
+    {
+      "path": "src/app/new_item_dialog.h",
+      "bytes": 239,
+      "mtime_ns": 1790674358148794100,
+      "sha256": "7e572e6066881226ec60d5e74e6ea6b4da80bb0786ee837981cca8d4f22051e1"
+    },
+    {
+      "path": "src/app/operation_center_ui.cpp",
+      "bytes": 11634,
+      "mtime_ns": 1792680716329301100,
+      "sha256": "d4e9149b3f2193512e4666b229fa4e09a3fce4c05be953132c63a1c3d7150b24"
+    },
+    {
+      "path": "src/app/operation_toast_test.cpp",
+      "bytes": 7887,
+      "mtime_ns": 1790608249093798900,
+      "sha256": "8c236458d399e76ee161f9c769733e805b2b36c9a0ca4917bfbca34cd5955136"
+    },
+    {
+      "path": "src/app/operation_toast_test.h",
+      "bytes": 72,
+      "mtime_ns": 1790608249096825100,
+      "sha256": "192bbe068d979f49e743d5aae94c76511034ab5ede573cdcf29bd92e52cd9908"
+    },
+    {
+      "path": "src/app/pane_animations.h",
+      "bytes": 1148,
+      "mtime_ns": 1792582315390941400,
+      "sha256": "bc388ed9dc3bdec6fc0f7198fbd163934d4c6ec29a2a3e494c0e80494e86f542"
+    },
+    {
+      "path": "src/app/pane_header_animation.h",
+      "bytes": 1165,
+      "mtime_ns": 1792578544146084700,
+      "sha256": "07cdb23e8518c539b1a358eb7560d71b12ec14e79e598fbdfddbd3186607a819"
+    },
+    {
+      "path": "src/app/pane_header_icon_test.cpp",
+      "bytes": 14637,
+      "mtime_ns": 1790670531211675700,
+      "sha256": "f4d487408b2f3e39635ff95d0039c4b4f5ef5e0630751a79c09e1a20b5317bc2"
+    },
+    {
+      "path": "src/app/permission_operation_prompt.cpp",
+      "bytes": 2899,
+      "mtime_ns": 1791697600857870400,
+      "sha256": "c2eda41efa7059e95ee8cd4ef6922c3a70663b2f6b06c6653faebcc96fae65bb"
+    },
+    {
+      "path": "src/app/permission_operation_prompt.h",
+      "bytes": 240,
+      "mtime_ns": 1791692426837396900,
+      "sha256": "6b84548546474e55ab2ab1a0e05369429e9fccaf79f537a6aa220f85f1e63e3e"
+    },
+    {
+      "path": "src/app/places.cpp",
+      "bytes": 65097,
+      "mtime_ns": 1792148316391689700,
+      "sha256": "bdeb74d047521c15b804cb7e8ea406c4f86045c2b8f323615fa80e628ab27f7c"
+    },
+    {
+      "path": "src/app/places.h",
+      "bytes": 811,
+      "mtime_ns": 1791170585927262200,
+      "sha256": "293b5a435895a78a539cc87b9874bfce15b6167f13d630365488b452518025e0"
+    },
+    {
+      "path": "src/app/quick_access.cpp",
+      "bytes": 3264,
+      "mtime_ns": 1791441119920881900,
+      "sha256": "4f1c5976c78dacfb17fddb3f7209e50d65890798845427c3ecd4b5e060edd689"
+    },
+    {
+      "path": "src/app/quick_access.h",
+      "bytes": 513,
+      "mtime_ns": 1790608249113174200,
+      "sha256": "1940e21f0cfe4035983afd4e13d22dd037852bed316a0d39a49140a803b83bdb"
+    },
+    {
+      "path": "src/app/rename_editor_test.cpp",
+      "bytes": 28012,
+      "mtime_ns": 1790766601953201200,
+      "sha256": "f00bc01faff62008f0b29d50601241148665a8a761c0fad25c549812be3cad3c"
+    },
+    {
+      "path": "src/app/rename_editor_test.h",
+      "bytes": 100,
+      "mtime_ns": 1790608249115696000,
+      "sha256": "4d2c7572975765f8e478e5f9c19f544bb6a49278e73d8ed99e1a17e3e57e2add"
+    },
+    {
+      "path": "src/app/resource.h",
+      "bytes": 49,
+      "mtime_ns": 1791170585967606700,
+      "sha256": "6bb2f45bf5a5c51c31e029dde9ef3286c1e984e81904c290e4257a2afb1c9a8b"
+    },
+    {
+      "path": "src/app/saved_search.cpp",
+      "bytes": 4801,
+      "mtime_ns": 1791425305708665200,
+      "sha256": "a40659b4e871f26b20a8ba79f1def20ec3530de8bda3714c08d803adbe8b99ae"
+    },
+    {
+      "path": "src/app/saved_search.h",
+      "bytes": 805,
+      "mtime_ns": 1790608249118780700,
+      "sha256": "e82b1debae7e44ddaa045b13e760f0c9372ed49dea85c0b818dac169e77da3e1"
+    },
+    {
+      "path": "src/app/search_flow_test.cpp",
+      "bytes": 50974,
+      "mtime_ns": 1791881756209167700,
+      "sha256": "92073615ae81e4d9d9a2c277369dba4509274a2d37ce1c3a766c7740ec565807"
+    },
+    {
+      "path": "src/app/search_history.cpp",
+      "bytes": 7743,
+      "mtime_ns": 1791425305704062900,
+      "sha256": "68c77c2d6b24fa25636865b52249849838093d6f6996e1d6675ef616b1d5afff"
+    },
+    {
+      "path": "src/app/search_history.h",
+      "bytes": 1468,
+      "mtime_ns": 1790608249125268100,
+      "sha256": "7405c2cf7086b8eab95881e1e7309085d2234a6b6d464577d6173ee14497bf7d"
+    },
+    {
+      "path": "src/app/search_options.cpp",
+      "bytes": 10837,
+      "mtime_ns": 1791163396552466000,
+      "sha256": "d7f4ce379553c0a0dab0e448a48ba2164c79dffc332e22a7a176c704f4ea57fd"
+    },
+    {
+      "path": "src/app/search_query.h",
+      "bytes": 544,
+      "mtime_ns": 1791170585959606700,
+      "sha256": "c999cfd7ca77e34bcfb770ddaf032f82e4a49f69df2d869cd80437cab8de9df4"
+    },
+    {
+      "path": "src/app/search_refresh_log.h",
+      "bytes": 4982,
+      "mtime_ns": 1790608249129438300,
+      "sha256": "dc0ce868ce8236b954533ed06c303ebe548e456caccbfc1f9226f57245ac2337"
+    },
+    {
+      "path": "src/app/selftest_1b2.cpp",
+      "bytes": 340836,
+      "mtime_ns": 1792687265468626500,
+      "sha256": "24410f2d50e63ac2140d6e1d9d74920861c408bf9a4a0c8287dda1c7f427934a"
+    },
+    {
+      "path": "src/app/selftest_1b2.h",
+      "bytes": 386,
+      "mtime_ns": 1790608249133429200,
+      "sha256": "28653c327048455bc55c31ed648fcf352f53fad7d77d624254592d44c65916e2"
+    },
+    {
+      "path": "src/app/session.cpp",
+      "bytes": 21505,
+      "mtime_ns": 1792226962421955900,
+      "sha256": "2420a69c665bc616e89af2d05d5fb6aea5aa95b5d1019903386fd16fe0d076f1"
+    },
+    {
+      "path": "src/app/session.h",
+      "bytes": 3559,
+      "mtime_ns": 1792226962167553500,
+      "sha256": "080ce82b577cc86ea845717a35d6db60418d785ad3e3cf4e061f58768d449d46"
+    },
+    {
+      "path": "src/app/session_tab_model.cpp",
+      "bytes": 6652,
+      "mtime_ns": 1792291972276022800,
+      "sha256": "ab464eadf474ce5ad0f7ccf0648cb6e2c092e6697bff4284590d31c88505907d"
+    },
+    {
+      "path": "src/app/settings_controller.cpp",
+      "bytes": 28043,
+      "mtime_ns": 1792602203607145100,
+      "sha256": "32592bc7bae4febde02d57e02f035c51488d8192a0548a1b2203a0346ef0762c"
+    },
+    {
+      "path": "src/app/settings_controller.h",
+      "bytes": 7986,
+      "mtime_ns": 1792577636069406800,
+      "sha256": "c407f53af2266749c2dee6885c6d8eed7fc6832a9e7a9f63f7214df29fcae026"
+    },
+    {
+      "path": "src/app/settings_flow_test.cpp",
+      "bytes": 43504,
+      "mtime_ns": 1791881756235751800,
+      "sha256": "4e39463afe30d0910e05556028db7853f22f79e3b26e213053b1287773b8cb5d"
+    },
+    {
+      "path": "src/app/settings_interaction_test.cpp",
+      "bytes": 5272,
+      "mtime_ns": 1791881756274190500,
+      "sha256": "86d39cb38cfb47460ce1e90be641815335f0848632dc537e8fd24b494b374fc2"
+    },
+    {
+      "path": "src/app/settings_ui.cpp",
+      "bytes": 11294,
+      "mtime_ns": 1792602203607145100,
+      "sha256": "0fa10b6ac85fc71d500fe7bdaedbc7fab5a95701226da63568a5b36fdd693193"
+    },
+    {
+      "path": "src/app/settings_value_dialog.cpp",
+      "bytes": 13624,
+      "mtime_ns": 1792602203608146400,
+      "sha256": "1eb905262f1d7dbd3afa47304ed40f70ac83a99be483f38d2b42d54f4bef7ca2"
+    },
+    {
+      "path": "src/app/settings_value_dialog.h",
+      "bytes": 475,
+      "mtime_ns": 1790902262974987200,
+      "sha256": "61739d1dd5161dde7ffb14fe94f2d391805839c904a8b9852f3a1486eb1be5e9"
+    },
+    {
+      "path": "src/app/shell_path.h",
+      "bytes": 1407,
+      "mtime_ns": 1791001650188467400,
+      "sha256": "2a73861ba765376597fe4c53c087e57d16723d1e02e7c1d2772b2dfc2c835d32"
+    },
+    {
+      "path": "src/app/shell_registry_watch_context.h",
+      "bytes": 1030,
+      "mtime_ns": 1792148273482309100,
+      "sha256": "fb05d42ca75fa117452f97334baa4114602cab924a739f202203cf50c4bcf7a2"
+    },
+    {
+      "path": "src/app/shell_selection.h",
+      "bytes": 2810,
+      "mtime_ns": 1791003924808812400,
+      "sha256": "32d41dbad960300c97e5fb6a7113508b4a8bc4a239602f9e2e9f819328fa1269"
+    },
+    {
+      "path": "src/app/shell_verbs.cpp",
+      "bytes": 21537,
+      "mtime_ns": 1790608249161371200,
+      "sha256": "e4ab9c172299e5cc317b68c26c831b90d5b646c47e28c17b1e4ac569a050f23a"
+    },
+    {
+      "path": "src/app/shell_verbs.h",
+      "bytes": 2185,
+      "mtime_ns": 1790608249162375700,
+      "sha256": "10ca3c4189369fdd636a4c10e9a91b214ebe8b297df441c5a79db00a4e300f30"
+    },
+    {
+      "path": "src/app/shell_window_registry.cpp",
+      "bytes": 16837,
+      "mtime_ns": 1791600187650575700,
+      "sha256": "d5fc883eb8c915f39e59032a7aa1049e28fd1ab669fab3af919457cb939b0ff1"
+    },
+    {
+      "path": "src/app/shell_window_registry.h",
+      "bytes": 1261,
+      "mtime_ns": 1791029242728900000,
+      "sha256": "805d85ba097e4d0e2b7cefece538549911bb812eeb812bbe44e9a56133fb1a23"
+    },
+    {
+      "path": "src/app/sidebar_resize.h",
+      "bytes": 1746,
+      "mtime_ns": 1790608249164372500,
+      "sha256": "7a7a04c98b48940836f5477b7aff4fe4ef223d2336a4d4329d35535e180f0876"
+    },
+    {
+      "path": "src/app/sidebar_scrollbar_fade.h",
+      "bytes": 2057,
+      "mtime_ns": 1792578750146185500,
+      "sha256": "eb37d24216305b0fa1a5e330e81c7fcc58fda741344779906033e9f1af9e853c"
+    },
+    {
+      "path": "src/app/sidebar_sections.cpp",
+      "bytes": 7188,
+      "mtime_ns": 1790608826167643800,
+      "sha256": "827b8f7adf81df94a53adc51652d74a3c655feaf0a6d5f61cae2acccb9ef051b"
+    },
+    {
+      "path": "src/app/single_instance_coordinator.cpp",
+      "bytes": 3129,
+      "mtime_ns": 1790608249166565200,
+      "sha256": "21436995896430f00e2ab1b61c68debbe9c0a9cc7475b21c420880bf0b4ca7ac"
+    },
+    {
+      "path": "src/app/single_instance_coordinator.h",
+      "bytes": 891,
+      "mtime_ns": 1790608249167565300,
+      "sha256": "1f34c8bce72db4c71e85ad68ff50f97565ea96c536e2500874f19ff55caef6c9"
+    },
+    {
+      "path": "src/app/snapshot_patch.cpp",
+      "bytes": 4854,
+      "mtime_ns": 1791679532765948100,
+      "sha256": "6a624c0aa545911b748566a546468d5d2f81ea662bf7db4e9603dd8454cf6602"
+    },
+    {
+      "path": "src/app/snapshot_patch.h",
+      "bytes": 1125,
+      "mtime_ns": 1791679246707510700,
+      "sha256": "2b9e894ea272daf496ec7ea53543516ebe5b4d55231945a3bd662fcc4c945411"
+    },
+    {
+      "path": "src/app/startup_launch.cpp",
+      "bytes": 643,
+      "mtime_ns": 1791001570371121500,
+      "sha256": "af6c3e924df9622a33c1004482457b91b735fdafd5be08b535125f7f7fc313a3"
+    },
+    {
+      "path": "src/app/startup_launch.h",
+      "bytes": 301,
+      "mtime_ns": 1791001558394039700,
+      "sha256": "7f4e0ad399c34d0087c9ab7865fca40863f837a6ffc0c3892f93b149da3ddef0"
+    },
+    {
+      "path": "src/app/system_integration.cpp",
+      "bytes": 21854,
+      "mtime_ns": 1792419401627674300,
+      "sha256": "6fe6cf0d7e835970d06747dba31e169ea275e3b45d98877896dae511b359ff65"
+    },
+    {
+      "path": "src/app/system_integration.h",
+      "bytes": 1658,
+      "mtime_ns": 1792419380226518000,
+      "sha256": "693d73e2a54e4223bc92f784d30e46d30794e7f7ea4c7a71259690bc40bc1d1b"
+    },
+    {
+      "path": "src/app/tab_controller.cpp",
+      "bytes": 15587,
+      "mtime_ns": 1792050070248708000,
+      "sha256": "2a702ea4949ec5ffd7ec1241f93c0a56551d8749a6f9654f5b885ec6e2a3eba2"
+    },
+    {
+      "path": "src/app/tab_controller.h",
+      "bytes": 1759,
+      "mtime_ns": 1792601575536738400,
+      "sha256": "d03b78b96d95fb582ad9bb5337eefee5d6c9d7c77fd94338a403b28ddbb8edcb"
+    },
+    {
+      "path": "src/app/tab_group_id.h",
+      "bytes": 782,
+      "mtime_ns": 1792050029536754400,
+      "sha256": "8ad7911604783bdd31978ae77c3ff9c2b63433d0b53aaf93c4ae26957ebcd8ef"
+    },
+    {
+      "path": "src/app/tab_group_model.cpp",
+      "bytes": 3960,
+      "mtime_ns": 1790608249172589300,
+      "sha256": "125068b3f38c128d2ee46ce71f1eddddc27927fb5c77af3d28a30ed54425eff4"
+    },
+    {
+      "path": "src/app/tab_shortcuts.h",
+      "bytes": 1142,
+      "mtime_ns": 1790608249172589300,
+      "sha256": "40fa943473964f9f2bb24dce67c2efc6682d913589af8260d599fa9e4e446b68"
+    },
+    {
+      "path": "src/app/tab_transfer.cpp",
+      "bytes": 13663,
+      "mtime_ns": 1792227062172401500,
+      "sha256": "eac10651cf8eecf8c5bc19d5744406859cec373164908f2487dea40415c2355f"
+    },
+    {
+      "path": "src/app/tab_transfer.h",
+      "bytes": 887,
+      "mtime_ns": 1792158653930475500,
+      "sha256": "ec3dd98e4a5f4fa88bf3b80158c3812acf74e87738d6fac0226383200d511fa2"
+    },
+    {
+      "path": "src/app/tag_discovery_cache.h",
+      "bytes": 1766,
+      "mtime_ns": 1790957184853509500,
+      "sha256": "b73b26fdf45de85d1db80c184aeeaff1cb94c53c82649e8b1341c55fba404c55"
+    },
+    {
+      "path": "src/app/text_compare_selection.h",
+      "bytes": 1313,
+      "mtime_ns": 1792570821877921600,
+      "sha256": "87f65ff46a54941e5f7285418a24754550d4ec96bc36ec94e8140d22eb389579"
+    },
+    {
+      "path": "src/app/text_diff.cpp",
+      "bytes": 13357,
+      "mtime_ns": 1792571119245913600,
+      "sha256": "679bf70165329ef7422487ae6c59117beb53a5d90c7890205315b103cd8dc4a1"
+    },
+    {
+      "path": "src/app/text_diff.h",
+      "bytes": 2369,
+      "mtime_ns": 1792571118976123000,
+      "sha256": "5898c9d7c0e87173369835d07fcb65d619787fca82c3772196dda2ca6e6b4f19"
+    },
+    {
+      "path": "src/app/tray_controller.cpp",
+      "bytes": 4273,
+      "mtime_ns": 1792291886616116600,
+      "sha256": "8898d5acc9d118a2662244bbb28d124c5ff630e84f55e3f3501bd1f93bbbbcbc"
+    },
+    {
+      "path": "src/app/tray_controller.h",
+      "bytes": 1285,
+      "mtime_ns": 1792230159286267900,
+      "sha256": "319098b2fc0686ee1eaba4fde5b6c38b2d4ee26b21401c3ce637a8dc9f9558f2"
+    },
+    {
+      "path": "src/app/tray_metadata.cpp",
+      "bytes": 1874,
+      "mtime_ns": 1791450194630578100,
+      "sha256": "12a5b0be0a09e359630247ccc10cb5444dad0e48ff8227a0426f89b11b0ff06e"
+    },
+    {
+      "path": "src/app/tray_metadata.h",
+      "bytes": 665,
+      "mtime_ns": 1791450194629580600,
+      "sha256": "036de73aed0c7ffd191d2d2575e3d670739002dd012c8a3c7f2a8fcecbd482d8"
+    },
+    {
+      "path": "src/app/ui_schedule_state.h",
+      "bytes": 714,
+      "mtime_ns": 1791879783905776800,
+      "sha256": "a465594e78e0373f447fb894adc44443b676320e7b4a33f5be3f1f11a8e83d1c"
+    },
+    {
+      "path": "src/app/unc_probe_scheduler.h",
+      "bytes": 1936,
+      "mtime_ns": 1791648998921971000,
+      "sha256": "c78fa5ca38188bec61422de37bed00c171f1b06821ace6710dbf02df009ce06a"
+    },
+    {
+      "path": "src/app/window_registry.h",
+      "bytes": 1907,
+      "mtime_ns": 1792601575696290900,
+      "sha256": "c1ffde202531ab1f6b526a004e6f8c2b26d75938afa13a50b8170ec380b15b79"
+    },
+    {
+      "path": "src/app/window_result_mailbox.h",
+      "bytes": 1300,
+      "mtime_ns": 1792080131195967100,
+      "sha256": "050a6cbd4e1c0bb3bd45118bd0297ccbf671c47c7c130573fb0cd987c7de1705"
+    },
+    {
+      "path": "src/app/window_size_lock.h",
+      "bytes": 1280,
+      "mtime_ns": 1792577635819808900,
+      "sha256": "91104fb68d4f36ed55392d82ecb982567d7db6029007f299bbc22e5667b5d66d"
+    },
+    {
+      "path": "src/ui/address_search_layout.h",
+      "bytes": 1744,
+      "mtime_ns": 1790608249601608400,
+      "sha256": "3abdb87fdc7ef7cf0e213ccd9c40d4bbd94555ea880bde4b19da1dfc3413485f"
+    },
+    {
+      "path": "src/ui/advanced_search_dialog.cpp",
+      "bytes": 33464,
+      "mtime_ns": 1792148500521389700,
+      "sha256": "dee3c689a9f4e2e6118f8a82d819c507d6ccdfc9bfa28dd04ca266922b72a786"
+    },
+    {
+      "path": "src/ui/advanced_search_dialog.h",
+      "bytes": 618,
+      "mtime_ns": 1791170585995840300,
+      "sha256": "352fd0607f36f2f0c8f67bdf97deccbdfc491c6c94800be8f667fa2002bf9c5d"
+    },
+    {
+      "path": "src/ui/animation_clock.h",
+      "bytes": 306,
+      "mtime_ns": 1792580327900877100,
+      "sha256": "3806a9984afe119e60daba8980f2d96a9039dd0e617cd080fc85e6e9915dcb0a"
+    },
+    {
+      "path": "src/ui/batch_conflict_dialog.cpp",
+      "bytes": 21277,
+      "mtime_ns": 1792658692674127500,
+      "sha256": "dd447ad672757d36e0c1f6170c18629affb3f246bf0171249d33442b9d331cfa"
+    },
+    {
+      "path": "src/ui/batch_conflict_dialog.h",
+      "bytes": 2999,
+      "mtime_ns": 1792656173029162300,
+      "sha256": "d3abdcc9c9c9ddfe25b5346fab936efdc2c74abfd38ef90cccd18b5a630724dc"
+    },
+    {
+      "path": "src/ui/batch_rename_dialog.cpp",
+      "bytes": 29579,
+      "mtime_ns": 1792148033281216300,
+      "sha256": "5be6f36bf6e8bc4b7efab11280e8deed22f566cf01981e1fa001759755631978"
+    },
+    {
+      "path": "src/ui/batch_rename_dialog.h",
+      "bytes": 672,
+      "mtime_ns": 1791170585996840200,
+      "sha256": "759d56d4d0460f3496e4c22ec6a954c081fda25ee9b698b94f5f0964f5d61a89"
+    },
+    {
+      "path": "src/ui/breadcrumb.cpp",
+      "bytes": 5216,
+      "mtime_ns": 1791370260404768000,
+      "sha256": "ddb35cfc4f3f96f07c84b8076dbfe93327221dc0bd6dcb34f1560f69eb563ea3"
+    },
+    {
+      "path": "src/ui/color_picker.cpp",
+      "bytes": 57687,
+      "mtime_ns": 1792148878724180100,
+      "sha256": "9fd18f406f449949f7fd99d58bd2bad388c49a1778a9d970b568c1b41af49bde"
+    },
+    {
+      "path": "src/ui/color_picker.h",
+      "bytes": 2177,
+      "mtime_ns": 1790608249615650500,
+      "sha256": "d73d6b033d2092536f79512a3614a2b56ce1a8ebb0d5096661e753534eefeaa7"
+    },
+    {
+      "path": "src/ui/column_strip_layout.cpp",
+      "bytes": 3548,
+      "mtime_ns": 1790608249616657700,
+      "sha256": "c889ae2bce7e3c25070b458609e608db83c5d370f97e8ca48b13394e6267a1d5"
+    },
+    {
+      "path": "src/ui/column_strip_layout.h",
+      "bytes": 2558,
+      "mtime_ns": 1790608249619161600,
+      "sha256": "30f02a1fbf0bd1783df59f63e5254402928230442fa27b4ea588031670f23f03"
+    },
+    {
+      "path": "src/ui/command_icons.h",
+      "bytes": 19660,
+      "mtime_ns": 1790608249620206400,
+      "sha256": "27c5cc0af31230c7cea8ca094d047157bee07e0f459dbeebbcfb890509676c12"
+    },
+    {
+      "path": "src/ui/content_reveal_animation.h",
+      "bytes": 1126,
+      "mtime_ns": 1792578520841798600,
+      "sha256": "c759d5ab43b47a0cfa803ecd476b4c637406d1862cf10e323826e0d587d27ca3"
+    },
+    {
+      "path": "src/ui/d2d_device_binding.h",
+      "bytes": 661,
+      "mtime_ns": 1792156712800924400,
+      "sha256": "4fed5c3ee24c7e9a7c26134bd90cac973da4662188a7529a75b6499fe2282ef9"
+    },
+    {
+      "path": "src/ui/details_column_widths.h",
+      "bytes": 1870,
+      "mtime_ns": 1790608249621355200,
+      "sha256": "2e09473e0cfef5496f2ed7bd0a75867b09b663371215258f1d547ba233b28294"
+    },
+    {
+      "path": "src/ui/dialog_lifecycle.cpp",
+      "bytes": 14543,
+      "mtime_ns": 1792582005792877000,
+      "sha256": "4a88e7a30ff3bf9f86afd150b34d024846e810377d21f8dd6a5c50dd8f3c855b"
+    },
+    {
+      "path": "src/ui/dialog_lifecycle.h",
+      "bytes": 1704,
+      "mtime_ns": 1792046419815255700,
+      "sha256": "8e0bdb84e0ba96a066199544c69210147879bdd8ad4c7c511403246ef3787c4c"
+    },
+    {
+      "path": "src/ui/dialog_text_fit.h",
+      "bytes": 2924,
+      "mtime_ns": 1791001970824712500,
+      "sha256": "04489f831862ae3e210270c24194ce6fd7e29a280c3cc08b1a216ee32853e564"
+    },
+    {
+      "path": "src/ui/drag_drop.cpp",
+      "bytes": 26783,
+      "mtime_ns": 1792080216905757600,
+      "sha256": "274fc0e94f665e6af7b4f95d0bb6ce9c0d178540036d1404f9c89c60879e9317"
+    },
+    {
+      "path": "src/ui/drag_drop.h",
+      "bytes": 7647,
+      "mtime_ns": 1791681286076923100,
+      "sha256": "2e6d32e87151c208cf208824eb7624ea30e4c0b0792bbb71ff0af95b549d1ab0"
+    },
+    {
+      "path": "src/ui/edit_host.cpp",
+      "bytes": 5206,
+      "mtime_ns": 1790995160308434200,
+      "sha256": "63fdb472bc64f7f61cab8743a573f9c5fe8a4f8ba809c4bdd734e0bc067954f6"
+    },
+    {
+      "path": "src/ui/edit_host.h",
+      "bytes": 1520,
+      "mtime_ns": 1790995251619192200,
+      "sha256": "3d6f556f2317353b533d6ecc629b9cb0f35a741cf091fd89462972835e615ac2"
+    },
+    {
+      "path": "src/ui/empty_state_layout.h",
+      "bytes": 2586,
+      "mtime_ns": 1790608249630188600,
+      "sha256": "166b99dcba00220f83b9e979e8b7aee86d374f1b70da6a7caa9ce4bbf1355a20"
+    },
+    {
+      "path": "src/ui/file_operation_dialog.cpp",
+      "bytes": 95830,
+      "mtime_ns": 1792580459429905500,
+      "sha256": "550c0525aac4e853946d37eafedd9ed4870e9d3140a8d6312b2a726ac8677ec1"
+    },
+    {
+      "path": "src/ui/file_operation_dialog.h",
+      "bytes": 5262,
+      "mtime_ns": 1792578585593218800,
+      "sha256": "50f6a3e4d5861393d5ba012ce6e1c4f843f07ef922177e51481462eaf9870378"
+    },
+    {
+      "path": "src/ui/FluentTokens.h",
+      "bytes": 15119,
+      "mtime_ns": 1792047085245706400,
+      "sha256": "b0184fcd39d77b4e4e98e4244539f2d29acbe5eef1aaa2480c357e03f95781bb"
+    },
+    {
+      "path": "src/ui/fluent_components.cpp",
+      "bytes": 131522,
+      "mtime_ns": 1792572415648632900,
+      "sha256": "607bf5832430e74e82b804770b03dd25574284f8e97d33c69ce473cf0626095f"
+    },
+    {
+      "path": "src/ui/fluent_components.h",
+      "bytes": 18967,
+      "mtime_ns": 1792572487079840200,
+      "sha256": "4737c02b96de4e79203398c7544c5ebc322103c82fb7ad85fac427a40978d544"
+    },
+    {
+      "path": "src/ui/fluent_menu.cpp",
+      "bytes": 83860,
+      "mtime_ns": 1792687387581122400,
+      "sha256": "205586af5795a9f067807d1a77aa0851dab8b71a508152a1560f42c6bd116d62"
+    },
+    {
+      "path": "src/ui/fluent_menu.h",
+      "bytes": 14310,
+      "mtime_ns": 1792664484421975300,
+      "sha256": "50de56dbae4508f70ca44c905b39f80d8768faa13e3cf0100545837635e39130"
+    },
+    {
+      "path": "src/ui/home_layout.h",
+      "bytes": 2951,
+      "mtime_ns": 1790842277106463100,
+      "sha256": "fe6eb362e66f9541eb2a9778e44c7434a854dfdacddc25241302e78f4c72c6b9"
+    },
+    {
+      "path": "src/ui/legacy_icons.h",
+      "bytes": 6952,
+      "mtime_ns": 1792602203600428200,
+      "sha256": "68cf27ff9f8f2e0b4b04a078588db8c65948e7b8959e52ec584a7ad450724a79"
+    },
+    {
+      "path": "src/ui/lumatext_renderer.cpp",
+      "bytes": 50718,
+      "mtime_ns": 1791381482831212300,
+      "sha256": "88acaaf32ab8a52baf3e3e31929c1cd055638344e5ff59532667954b669913e1"
+    },
+    {
+      "path": "src/ui/lumatext_renderer.h",
+      "bytes": 1946,
+      "mtime_ns": 1790608249643894900,
+      "sha256": "ed0215eec211a7350439f2151b69a8d3a71e4d8a4d55094710465e4ee19a19dc"
+    },
+    {
+      "path": "src/ui/menu_backdrop.h",
+      "bytes": 9941,
+      "mtime_ns": 1792602203599427600,
+      "sha256": "8d382e5a4f99ca9bf23ef2fbc1b8d53e798a640629880f9035448c0311a6d7cb"
+    },
+    {
+      "path": "src/ui/name_highlight.cpp",
+      "bytes": 7818,
+      "mtime_ns": 1792658530523485300,
+      "sha256": "d849c8ce21b1f980eb0091d0fc92ef90110502a93b6bf7db3827267fd38bdeb0"
+    },
+    {
+      "path": "src/ui/name_highlight.h",
+      "bytes": 1091,
+      "mtime_ns": 1790608249646958800,
+      "sha256": "f9e8829c39e0e8942a4e5c51523f7c1c619417d4db7d77156cc0bcba8b440abf"
+    },
+    {
+      "path": "src/ui/notification_toast.cpp",
+      "bytes": 6643,
+      "mtime_ns": 1792582008391828800,
+      "sha256": "cc029ffcd9cd011c18c318bbc86b0dbfd3f25e95ead387215ec006973663ede8"
+    },
+    {
+      "path": "src/ui/notification_toast.h",
+      "bytes": 1358,
+      "mtime_ns": 1792580328895481500,
+      "sha256": "ea4022c90cbcaa4beb98ac5923f3cd7199c725564c25491e3306f43e3d9759fe"
+    },
+    {
+      "path": "src/ui/operation_center.cpp",
+      "bytes": 45632,
+      "mtime_ns": 1792689151684711100,
+      "sha256": "5e0869838e89d1c2475ac9781f6690fa5e82b6b82e6b56097c6006517a712f16"
+    },
+    {
+      "path": "src/ui/operation_center.h",
+      "bytes": 6236,
+      "mtime_ns": 1792688897542319400,
+      "sha256": "399ead1f239bd58b8f360709d5efa77efe3671117121c2b09219f26a1020d78a"
+    },
+    {
+      "path": "src/ui/operation_center_animation.cpp",
+      "bytes": 5917,
+      "mtime_ns": 1792689151912984500,
+      "sha256": "609025be54b5db3999b4f16f385f05e4f2a72dd8c44b9de91515e79db3825302"
+    },
+    {
+      "path": "src/ui/operation_center_layout.h",
+      "bytes": 137,
+      "mtime_ns": 1792689151462773800,
+      "sha256": "0b83428a40951f2c9fe71d3eddf4b38a8ae8d480dc7f724e3ef97aba0c7a57dd"
+    },
+    {
+      "path": "src/ui/optional_lumatext.h",
+      "bytes": 1479,
+      "mtime_ns": 1792602203600428200,
+      "sha256": "1932836a5e0a37ddbab277f98b81693a5d9d703196ab080cde96cb8a9f082725"
+    },
+    {
+      "path": "src/ui/panel_metrics.h",
+      "bytes": 2997,
+      "mtime_ns": 1790608249651991600,
+      "sha256": "8ee4997c7f7dbbc1d0431e95a6c683b3bfcee6e94b7fa3849326af0d9cee762a"
+    },
+    {
+      "path": "src/ui/pane_header_icons.h",
+      "bytes": 141,
+      "mtime_ns": 1790608249650993300,
+      "sha256": "ae3436b0ea974f5e4c6e4fa9211d9d1b02c20a413eb1a2a765d5a8b6127ad8b8"
+    },
+    {
+      "path": "src/ui/playback_timeline.h",
+      "bytes": 832,
+      "mtime_ns": 1790608249654498900,
+      "sha256": "449ff44963d5a8b2e5f5fe633b89e7c25951d54c16682ca91fcf5135f34ed927"
+    },
+    {
+      "path": "src/ui/popup_origin.h",
+      "bytes": 940,
+      "mtime_ns": 1792148500738981500,
+      "sha256": "3664cd3ec35c1f36180c089734b42e74ffadd59dab60f825ad5b3f6223b76b4f"
+    },
+    {
+      "path": "src/ui/preview_footer_layout.h",
+      "bytes": 934,
+      "mtime_ns": 1790608249655505800,
+      "sha256": "6b7cfcbf770c666cc7d30a26935d408e990c00e8eef442b90aa19b1cf5cb9c05"
+    },
+    {
+      "path": "src/ui/preview_grab_cursor.h",
+      "bytes": 3566,
+      "mtime_ns": 1790608249656504900,
+      "sha256": "f45a48adc2629b57b48f920ed46865358c748552ec6b07503c5b6eaa33669b7f"
+    },
+    {
+      "path": "src/ui/preview_handler_host.cpp",
+      "bytes": 47985,
+      "mtime_ns": 1792148763428701000,
+      "sha256": "03d41d91d3f302a1ed21b78c3f2e20fb0970ffc80ab4df75d9b90b700956932b"
+    },
+    {
+      "path": "src/ui/preview_handler_host.h",
+      "bytes": 3994,
+      "mtime_ns": 1792148764289726100,
+      "sha256": "a35ec251d850221fd4ed8f9a60776179a5ff3a2436fd9be43b18d9b52319769c"
+    },
+    {
+      "path": "src/ui/preview_handler_pan.h",
+      "bytes": 16356,
+      "mtime_ns": 1792050126298232400,
+      "sha256": "db50ce469304565865c2459eebe36cded884d9e1a9ff2addffc898a59d66d62c"
+    },
+    {
+      "path": "src/ui/preview_viewport.h",
+      "bytes": 2308,
+      "mtime_ns": 1790608249660666000,
+      "sha256": "3180de998ce399ed41a8e028ebead18b671e9d7cbad6f6ea34529b91c82c7f5f"
+    },
+    {
+      "path": "src/ui/quick_preview_playback.cpp",
+      "bytes": 13337,
+      "mtime_ns": 1791116897310767900,
+      "sha256": "adaf3185e4f14fe69b993274b83cfe79f932801910e1381b6b4ad7fddb004cf7"
+    },
+    {
+      "path": "src/ui/quick_preview_window.cpp",
+      "bytes": 77046,
+      "mtime_ns": 1792148842483934000,
+      "sha256": "43e8f6915972f34c6a6527eb94aba6353ebe44b8476beb23a5be7785cbc694b9"
+    },
+    {
+      "path": "src/ui/quick_preview_window.h",
+      "bytes": 7717,
+      "mtime_ns": 1791170714841217100,
+      "sha256": "c1c899cae3eb1656ba68183c5e86b17d46e4140a669e32ff8502a513dcfbc4ac"
+    },
+    {
+      "path": "src/ui/render_caches.h",
+      "bytes": 271,
+      "mtime_ns": 1792156219835244700,
+      "sha256": "d5f756e20100f522e3ff99fc6e45aa37f69fd4135f3f9b2ca7656d36a452581c"
+    },
+    {
+      "path": "src/ui/repaint_targets.h",
+      "bytes": 1083,
+      "mtime_ns": 1792156219499789200,
+      "sha256": "07ffe3d7117a16c15d9cb6c31ed9608a4f6a9e7081eeaa9a75e240cecdc83c9c"
+    },
+    {
+      "path": "src/ui/search_banner_layout.h",
+      "bytes": 289,
+      "mtime_ns": 1791447827554040600,
+      "sha256": "0f1149ed8243d5bb5669f247f8044c325ccd7f67976ca19918692f908959c46d"
+    },
+    {
+      "path": "src/ui/settings_layout_sections.h",
+      "bytes": 21236,
+      "mtime_ns": 1792577289043613200,
+      "sha256": "f9601f760264a164c274a3d9210102a80967641adc40869daeb54dbd67edb8d5"
+    },
+    {
+      "path": "src/ui/shell_icons.cpp",
+      "bytes": 16843,
+      "mtime_ns": 1792156220208354200,
+      "sha256": "b74de068c88eef26a548aa1d68e19b3ee5099a1e62615eec78977abde56dbaf3"
+    },
+    {
+      "path": "src/ui/shell_icons.h",
+      "bytes": 4042,
+      "mtime_ns": 1792156220027407200,
+      "sha256": "6129fb28bf3f08ff42fa692aee7d37ab7efddebbe17a2c8d4ce25db9a0dd2edf"
+    },
+    {
+      "path": "src/ui/shortcut_help.cpp",
+      "bytes": 10335,
+      "mtime_ns": 1791116611854969800,
+      "sha256": "1d6c8c91ff820b9a7e8b59542d79addcf943512397df959ec822150345e180e2"
+    },
+    {
+      "path": "src/ui/shortcut_help.h",
+      "bytes": 533,
+      "mtime_ns": 1790608249672718700,
+      "sha256": "b11308659e26491b37edc4ffbe1d7513702bd624889f26cb9c9e541c2bccbf8b"
+    },
+    {
+      "path": "src/ui/sort_types.h",
+      "bytes": 147,
+      "mtime_ns": 1791170585900253400,
+      "sha256": "b6a7cc79ab922f0eafb5bb999473b71a981486f7718b8103503d809c703e6e35"
+    },
+    {
+      "path": "src/ui/svg_bitmap.cpp",
+      "bytes": 3192,
+      "mtime_ns": 1790608249673719800,
+      "sha256": "19ad857e7967092c44a49223a453b18838a51ba7cf6c36b4867a4fb5e0a7b40d"
+    },
+    {
+      "path": "src/ui/svg_bitmap.h",
+      "bytes": 314,
+      "mtime_ns": 1790608249674889900,
+      "sha256": "09130d02e4df99018fe5a95baa66ab36fa54d3b5102aa3b8ed40743891cd81cf"
+    },
+    {
+      "path": "src/ui/tab_close_animation.h",
+      "bytes": 2809,
+      "mtime_ns": 1792581962624575500,
+      "sha256": "21151dbc397a04e16e75d0fddc09b9707b70cb58799b37fee515b01fc0758836"
+    },
+    {
+      "path": "src/ui/tab_indicator_animation.h",
+      "bytes": 2920,
+      "mtime_ns": 1792598673457678900,
+      "sha256": "7565bde9a96ed8e1473d40e56689bc0811cc86cdb5632bf4af712bb0a3d0ee33"
+    },
+    {
+      "path": "src/ui/tab_shape.cpp",
+      "bytes": 5678,
+      "mtime_ns": 1790608249675890200,
+      "sha256": "fc2c9699ed2ca69bc2944d6ed3284bc286fbced00ed57dfc55aca89796a3cc5c"
+    },
+    {
+      "path": "src/ui/tab_shape.h",
+      "bytes": 1261,
+      "mtime_ns": 1790608249676891000,
+      "sha256": "f8cc0a4e58e97e568273f8109156a58a885545b2ebe651d7c8b60b1aa0aadb58"
+    },
+    {
+      "path": "src/ui/text_diff_window.cpp",
+      "bytes": 60824,
+      "mtime_ns": 1792571263091892000,
+      "sha256": "231aaaac991fbcd32f354c10b1af91288614c5746291534654f89ded782fe4ac"
+    },
+    {
+      "path": "src/ui/text_diff_window.h",
+      "bytes": 5209,
+      "mtime_ns": 1792571262832411800,
+      "sha256": "c3eba8b8f11f5978f36ed9295be8168c5d4acb71df40a79c5e9d7d7fc3638d14"
+    },
+    {
+      "path": "src/ui/text_hit_ranges.h",
+      "bytes": 889,
+      "mtime_ns": 1792148969705348000,
+      "sha256": "5a53a86189f20823fb5830b103fccdb0074ef4a83dd2469a9faf840741032944"
+    },
+    {
+      "path": "src/ui/thumbnail_cache.cpp",
+      "bytes": 27440,
+      "mtime_ns": 1791647969137291800,
+      "sha256": "f598aafa4edf2c171a0526854393756976eb3feb0411007cd19ee62af41f07fa"
+    },
+    {
+      "path": "src/ui/thumbnail_cache.h",
+      "bytes": 6579,
+      "mtime_ns": 1791647091375100500,
+      "sha256": "96701f26a2ee87beaed2d8d613ccbdc22ce48492e67031622dd94f7e1f28bbab"
+    },
+    {
+      "path": "src/ui/toolbar_command_state.h",
+      "bytes": 711,
+      "mtime_ns": 1791085834220170900,
+      "sha256": "dc136c79272da1cb6719b01cfc49a706fa6dfd6fcc5baf4472f023f5431588d2"
+    },
+    {
+      "path": "src/ui/toolbar_layout.h",
+      "bytes": 3587,
+      "mtime_ns": 1792722934380755300,
+      "sha256": "0d2d1e183fe1255dc28245d20eebd2e5709e805897b8373860ee322a01c35168"
+    },
+    {
+      "path": "src/ui/typography.cpp",
+      "bytes": 15631,
+      "mtime_ns": 1792602203603144500,
+      "sha256": "6653fc7778db47cd50d9dd482ef4eff229bc0226370a986728a16493515fd0c5"
+    },
+    {
+      "path": "src/ui/typography.h",
+      "bytes": 2649,
+      "mtime_ns": 1791681089404547900,
+      "sha256": "567175f3db053a44f7eab51a035830d6c06567671c942fdfab1e50e815f6bbc0"
+    },
+    {
+      "path": "src/ui/ui_address_search.cpp",
+      "bytes": 6904,
+      "mtime_ns": 1791711818603259600,
+      "sha256": "ff5a83568a055789132a5367074b0d5e40419dfdeec0ed6b6e5701dc84a55666"
+    },
+    {
+      "path": "src/ui/ui_column_strip.cpp",
+      "bytes": 16465,
+      "mtime_ns": 1791042686910352200,
+      "sha256": "5b3401844c4325ad0518f6e86a9705e50f7218687e574f5f8545fe458f8f53ee"
+    },
+    {
+      "path": "src/ui/ui_compositor.cpp",
+      "bytes": 23359,
+      "mtime_ns": 1792602203602139500,
+      "sha256": "ba7ab6d7bb7718179ef881ec518181591a14e6e1e2c094ecbb486da69e6eee79"
+    },
+    {
+      "path": "src/ui/ui_compositor.h",
+      "bytes": 5931,
+      "mtime_ns": 1792290475046024900,
+      "sha256": "f8c093d1a7a66a4e020a68d95c9c85be80aee0d09bea25c11cf23ddc224e3288"
+    },
+    {
+      "path": "src/ui/ui_details_panel.cpp",
+      "bytes": 41085,
+      "mtime_ns": 1792639941927420400,
+      "sha256": "70916e5cf236e4fe5fd05a8c91bc2fcf1ce7b038e3a0b7f2dabd3f2b7629e59d"
+    },
+    {
+      "path": "src/ui/ui_fluent_svg.cpp",
+      "bytes": 12623,
+      "mtime_ns": 1792721448354578500,
+      "sha256": "7fbfaf8074451521b2595cc340f31583818359b960aad9fd7413955c5a494fe3"
+    },
+    {
+      "path": "src/ui/ui_hit_test.cpp",
+      "bytes": 56558,
+      "mtime_ns": 1792721448341646900,
+      "sha256": "c8b4c184f4a267a266f6fa46437337e2fa4edb27248759bbb79eaae31110e016"
+    },
+    {
+      "path": "src/ui/ui_home.cpp",
+      "bytes": 5290,
+      "mtime_ns": 1791563468594676800,
+      "sha256": "74f2fa87d544b6dbfa44c4071372632ee0f47c190602582add9dd5bfa4d90efe"
+    },
+    {
+      "path": "src/ui/ui_pane_header_icons.cpp",
+      "bytes": 1302,
+      "mtime_ns": 1790608249695466400,
+      "sha256": "e7bb248ca6f2a5b4eee63fe18790ad1dda1bdc9629ec80c629d046d842b055b5"
+    },
+    {
+      "path": "src/ui/ui_pane_list.cpp",
+      "bytes": 112680,
+      "mtime_ns": 1792656773790902100,
+      "sha256": "1df9a18eff3fdb93f2e1b58b0a1ec6775c6aeaa101969bb9797b28c080e484b6"
+    },
+    {
+      "path": "src/ui/ui_renderer.cpp",
+      "bytes": 55608,
+      "mtime_ns": 1792640136262018500,
+      "sha256": "95c677a476b6dd4aea6d774fb1de9762985e4db71c0f2795f463f4d00c93ef1b"
+    },
+    {
+      "path": "src/ui/ui_renderer.h",
+      "bytes": 60251,
+      "mtime_ns": 1792721448305788100,
+      "sha256": "dd9dece9fa691ee93f1782f646f56c548d380dc58dc97898df27f0534bb5718e"
+    },
+    {
+      "path": "src/ui/ui_renderer_internal.h",
+      "bytes": 110159,
+      "mtime_ns": 1792599039715785600,
+      "sha256": "dc3a9e8666ad51fc7ef860d76bf10d40e875fac41d541f1556b3b0c35251d390"
+    },
+    {
+      "path": "src/ui/ui_settings_context.cpp",
+      "bytes": 4197,
+      "mtime_ns": 1791170586010712100,
+      "sha256": "eb714dea1b62fd784caf3d48cf8d8ad124c21a28d35f367c44911c6fa7764b46"
+    },
+    {
+      "path": "src/ui/ui_settings_core.cpp",
+      "bytes": 26985,
+      "mtime_ns": 1792602675492939300,
+      "sha256": "6345fc649aa3d9876f126c2a2443d8997451bbfcfcac4a54956a5322fa6f6c40"
+    },
+    {
+      "path": "src/ui/ui_settings_view.cpp",
+      "bytes": 48453,
+      "mtime_ns": 1792602277255211800,
+      "sha256": "482bde2e774b82d6812e4e956b46603551e37b9043ce5792fbddf54033e87cb2"
+    },
+    {
+      "path": "src/ui/ui_sidebar.cpp",
+      "bytes": 44461,
+      "mtime_ns": 1792572415890712200,
+      "sha256": "524a4628a57eef85552e495cb559d14d6e17ed0156c4f4a13454ff5339e2cf34"
+    },
+    {
+      "path": "src/ui/ui_toolbar.cpp",
+      "bytes": 15825,
+      "mtime_ns": 1792721448348163600,
+      "sha256": "4dfacd101ebdc0cfd15b16931d944e41527ef440777d3df3255f026845bf2768"
+    },
+    {
+      "path": "src/ui/video_preview.cpp",
+      "bytes": 19366,
+      "mtime_ns": 1792602203605145600,
+      "sha256": "5d58cee0ce2cd0aa3d87a7caf6a7d5e3666532bf933e43998d1441a97baf48a7"
+    },
+    {
+      "path": "src/ui/video_preview.h",
+      "bytes": 2106,
+      "mtime_ns": 1791424635834980400,
+      "sha256": "b0e2f06579f26bc20e13f68ba3b2c2d8a6a23166e861f41ec06e7fc62045dbaa"
+    },
+    {
+      "path": "src/ui/view_layout.cpp",
+      "bytes": 12597,
+      "mtime_ns": 1792047159958570400,
+      "sha256": "44f952c06b67f097f7c9a73f7c143f5a111a77cc05abaafc59ffd076fd202406"
+    },
+    {
+      "path": "src/ui/view_layout.h",
+      "bytes": 2850,
+      "mtime_ns": 1792656408151664600,
+      "sha256": "7b367ebff9a7edd5636c1b3d7716fe36969b720d283833125393cd2a9f191e4b"
+    },
+    {
+      "path": "src/ui/window_helpers.cpp",
+      "bytes": 5645,
+      "mtime_ns": 1790949392306195000,
+      "sha256": "222f0fe951c76270d3e49e112a22ac8b92ebd031fdf94248b14b786899341a7a"
+    },
+    {
+      "path": "src/ui/window_helpers.h",
+      "bytes": 965,
+      "mtime_ns": 1790608249720657900,
+      "sha256": "fd6a479bef3c8f7006579f8c118458184b64caa12ec2b4c1cef1efbff4649755"
+    },
+    {
+      "path": "src/ui/window_material.cpp",
+      "bytes": 42981,
+      "mtime_ns": 1792602203606145600,
+      "sha256": "00fa74d1171fbdcbfe1616c988042b74de778a368f88a18314f236e78813f140"
+    },
+    {
+      "path": "src/ui/window_material.h",
+      "bytes": 4197,
+      "mtime_ns": 1792235881036717500,
+      "sha256": "1fc801b6818d819993fdf783bc0666f84060b0f3a76fcfa993375cc181f5f553"
+    },
+    {
+      "path": "src/fs/fs_enum.cpp",
+      "bytes": 23523,
+      "mtime_ns": 1791681302940135900,
+      "sha256": "3c6a876b0eb43645ed4cba27a742620a14082c4df0f6082e5d3bca4a2bb95f19"
+    },
+    {
+      "path": "src/fs/fs_enum.h",
+      "bytes": 4003,
+      "mtime_ns": 1791681171478700900,
+      "sha256": "2c8a62a9d16d0aa5cfd2f2943a191bc9864ba9f223d30a5d195c720fe8c224d6"
+    },
+    {
+      "path": "src/fs/fs_net_cache.cpp",
+      "bytes": 14267,
+      "mtime_ns": 1791711212743723600,
+      "sha256": "ace4782fd05ca1010086be89f1781e28ae5930dd6cefc39e8e4d730710974f9c"
+    },
+    {
+      "path": "src/fs/fs_net_cache.h",
+      "bytes": 2322,
+      "mtime_ns": 1791711212755730700,
+      "sha256": "81af39ac875380d74153b8b463871df53d044875715332aa0469863792dac8e3"
+    },
+    {
+      "path": "src/fs/fs_recycle.cpp",
+      "bytes": 7766,
+      "mtime_ns": 1792148278053469800,
+      "sha256": "bd2a0383154326f213a42845a8d45f469a3b26b6937173bdc4f1bfb53e2ce788"
+    },
+    {
+      "path": "src/fs/fs_recycle.h",
+      "bytes": 1215,
+      "mtime_ns": 1790608249342074900,
+      "sha256": "76e8182602476bc0687da6ef62ea517da9cc2b6e155901e9f27ea5091ba55f93"
+    },
+    {
+      "path": "src/fs/fs_snapshot.cpp",
+      "bytes": 8097,
+      "mtime_ns": 1790608249344076400,
+      "sha256": "44fca14dfbcd9e9db7cc91f589aa30eae5b45798830c21caa1420b0251e3f560"
+    },
+    {
+      "path": "src/fs/fs_snapshot.h",
+      "bytes": 3013,
+      "mtime_ns": 1790608249345029700,
+      "sha256": "96b23d82198b31b25603e1a2151b0a1da114b9dd5166dfb7e3d790534a179e18"
+    },
+    {
+      "path": "src/fs/fs_watch.cpp",
+      "bytes": 16334,
+      "mtime_ns": 1791383352416688500,
+      "sha256": "fd36ea0d8ab049324fdb1751c9057f174b3821fe89a137b845864e7d504c4843"
+    },
+    {
+      "path": "src/fs/fs_watch.h",
+      "bytes": 2494,
+      "mtime_ns": 1791383352158541000,
+      "sha256": "2510a25bedd85e71a8f0c96b5a903b629d6ced6f298f9dd7d9817834e42763a0"
+    },
+    {
+      "path": "src/fs/path_error.h",
+      "bytes": 996,
+      "mtime_ns": 1791648956211585700,
+      "sha256": "8e744aa85eb466cce49c4832dd417b9e8b9fa83216ac8172fd98fcf40ef6e943"
+    },
+    {
+      "path": "src/index/change_feed_history.h",
+      "bytes": 4822,
+      "mtime_ns": 1790608249347033400,
+      "sha256": "996c3fd0c52259c2164c5cbbec4c241db7c1e44cf47381f8742844e22faeecf9"
+    },
+    {
+      "path": "src/index/change_journal_writer.h",
+      "bytes": 1691,
+      "mtime_ns": 1790608249349031500,
+      "sha256": "9d0846a3099aa519c95997ccdac7a430450c537054117af5b216d79d3d7b2379"
+    },
+    {
+      "path": "src/index/change_summary_accumulator.h",
+      "bytes": 2145,
+      "mtime_ns": 1790608249349534300,
+      "sha256": "82586cf687f44b306f690a22cfc6685dbef4e785a82d56538793ec9502f998f8"
+    },
+    {
+      "path": "src/index/change_tracking.cpp",
+      "bytes": 23753,
+      "mtime_ns": 1792143815210538900,
+      "sha256": "9c1ab665078b28b5c9298a6cd009ded55dc93cc2c075bf1a90fa40d455cf9b16"
+    },
+    {
+      "path": "src/index/change_tracking.h",
+      "bytes": 2995,
+      "mtime_ns": 1790957963107853900,
+      "sha256": "f2cadab69f5e87ab29c545cdab6acee11aed43ace7e33528b5771461784f5857"
+    },
+    {
+      "path": "src/index/change_tracking_client.cpp",
+      "bytes": 15895,
+      "mtime_ns": 1790959104948347300,
+      "sha256": "816251ec931f751eb01748fdde40dd7ff69cee3a604001d4c5f9e0cdb1a2ef05"
+    },
+    {
+      "path": "src/index/change_tracking_client.h",
+      "bytes": 1363,
+      "mtime_ns": 1790608249357548300,
+      "sha256": "c19a2d3e9df33601549accdfeae3d7eee4227694a155fc84c7e4b6530f6a86de"
+    },
+    {
+      "path": "src/index/content_agent.cpp",
+      "bytes": 12887,
+      "mtime_ns": 1792148537953294500,
+      "sha256": "872e7acc26013f21b6207a7d532ee43878b95360ccc52aacd1fa1f599466761f"
+    },
+    {
+      "path": "src/index/content_agent.h",
+      "bytes": 467,
+      "mtime_ns": 1792148537734339400,
+      "sha256": "3357a053e5eea76fc6b98eca585f15ee21b29e0dcf3c76bf3f22c3d779253d5a"
+    },
+    {
+      "path": "src/index/content_configuration.cpp",
+      "bytes": 7370,
+      "mtime_ns": 1792148332166271100,
+      "sha256": "b11b8237fc3a52dfd50e7b12529d8bb63a1d265dd50ffa4a0123ca2f778964d3"
+    },
+    {
+      "path": "src/index/content_config_storage.h",
+      "bytes": 7725,
+      "mtime_ns": 1792147965371525100,
+      "sha256": "8b0e766d72ee6746c7a77f0d2efd1d3426ab97277d939eba1bf5f25134087a6f"
+    },
+    {
+      "path": "src/index/content_hit_aliases.cpp",
+      "bytes": 8173,
+      "mtime_ns": 1790608249364505900,
+      "sha256": "43fab3a6269906c2c79f6b6bd48678fab4b61418bba8faa4e7a99860c2c834f3"
+    },
+    {
+      "path": "src/index/content_hit_aliases.h",
+      "bytes": 857,
+      "mtime_ns": 1790608249365009700,
+      "sha256": "437f6aa26df2d097460c2422ae9ca64cfca2ea0e17ec942092e4f14b0138490b"
+    },
+    {
+      "path": "src/index/content_index.cpp",
+      "bytes": 99963,
+      "mtime_ns": 1792148310150123200,
+      "sha256": "2aad7085089438b163d05012a4936440be99c1bc968aaebef5ea08dcefa4fb39"
+    },
+    {
+      "path": "src/index/content_index.h",
+      "bytes": 3781,
+      "mtime_ns": 1792148290490921500,
+      "sha256": "a5b3e88a6ef8f4686e389fe63070af41d3183b5f0724ff4504ba3af7f011c56e"
+    },
+    {
+      "path": "src/index/content_instant_session.cpp",
+      "bytes": 16404,
+      "mtime_ns": 1792083363270870000,
+      "sha256": "c5bff87f5b6170ca8033f4727d746c514babd679b91613b44d004565e62c8625"
+    },
+    {
+      "path": "src/index/content_instant_session.h",
+      "bytes": 881,
+      "mtime_ns": 1790608249370034200,
+      "sha256": "2f1997aad08bf096635614a1e8b880a3d53552c4a7ebc50dfa565350bd30d7ba"
+    },
+    {
+      "path": "src/index/content_result_store.cpp",
+      "bytes": 29691,
+      "mtime_ns": 1792076917949411400,
+      "sha256": "43e4d5e900a20135f0e43d8816b2471d7c93f567074ca984d278593d986ac9c3"
+    },
+    {
+      "path": "src/index/content_result_store.h",
+      "bytes": 2242,
+      "mtime_ns": 1790608249371637200,
+      "sha256": "1f6da9e95840d010e3666bc406e4515cfd374bd5a9f68454c362a21313fe04a5"
+    },
+    {
+      "path": "src/index/content_scope.h",
+      "bytes": 2436,
+      "mtime_ns": 1790608249373787900,
+      "sha256": "274a804593327189ff070d34dbe6bab3349678c4c90291609a64206350963341"
+    },
+    {
+      "path": "src/index/content_search.cpp",
+      "bytes": 29935,
+      "mtime_ns": 1792147730344882700,
+      "sha256": "ed0e46d54f7bc9cf30369a89d614e230af6d11a7becaa6682a9fbc0d7ee84208"
+    },
+    {
+      "path": "src/index/content_search.h",
+      "bytes": 3695,
+      "mtime_ns": 1792148110322680300,
+      "sha256": "fc5879b4f0fd7196751a2de28a61fce23395cf9a294656f9d739e53ba9afc878"
+    },
+    {
+      "path": "src/index/content_search_client.cpp",
+      "bytes": 24714,
+      "mtime_ns": 1792147828553305200,
+      "sha256": "cfe38cfaa0c997536566dff110410737fae9eeb42a6731071b6396d9fb915b1c"
+    },
+    {
+      "path": "src/index/content_search_client.h",
+      "bytes": 3544,
+      "mtime_ns": 1792143725667562300,
+      "sha256": "e6f88753d07d81180776201faf9bcd4803acb9717de9876595dafde6c4c704a1"
+    },
+    {
+      "path": "src/index/content_search_protocol.h",
+      "bytes": 12989,
+      "mtime_ns": 1792147754856861200,
+      "sha256": "6f2e46fb4e8c507b422a21687610cd3d3331c37d3ddab1bda41d1057ce78250d"
+    },
+    {
+      "path": "src/index/content_search_session.cpp",
+      "bytes": 2878,
+      "mtime_ns": 1790608249380813000,
+      "sha256": "8e02438e9ececc975b5ea6bc8d1a01ff3e707dc40e71b67a95dc2f255314ea39"
+    },
+    {
+      "path": "src/index/content_search_session.h",
+      "bytes": 1180,
+      "mtime_ns": 1790608249381812500,
+      "sha256": "a72429589a860770d7f30516227897895e071ee4fb10a5e846c60623da5de726"
+    },
+    {
+      "path": "src/index/content_sort_sql.h",
+      "bytes": 1607,
+      "mtime_ns": 1790608249382811000,
+      "sha256": "7a7e71066a7d7b999d35e0421bf679622bf7f68575ccf53f22e192a50e1087fb"
+    },
+    {
+      "path": "src/index/content_task_search.cpp",
+      "bytes": 35868,
+      "mtime_ns": 1792147676552231200,
+      "sha256": "36374c379c8e86a6b6959da23b72ab1357ef8fb21c7458dade9c768cf95ea8f8"
+    },
+    {
+      "path": "src/index/content_task_search.h",
+      "bytes": 1437,
+      "mtime_ns": 1792144081747645300,
+      "sha256": "bcf5c901d502e4e1e85b2093bf19ea02f0fcd8d6b912e23be1e3df64370b7cb6"
+    },
+    {
+      "path": "src/index/content_timing.cpp",
+      "bytes": 27988,
+      "mtime_ns": 1792122194421125900,
+      "sha256": "7d4df8b74a6ca9d57c9d98eff81ddb10b4c88d27097ba04b63d6b4894b0bfb64"
+    },
+    {
+      "path": "src/index/content_timing.h",
+      "bytes": 2596,
+      "mtime_ns": 1790608249409933300,
+      "sha256": "5d27e979c973432ace6e2a05b141dd1895032880e52ea078aa8876835a57b0f0"
+    },
+    {
+      "path": "src/index/document_admission.h",
+      "bytes": 3045,
+      "mtime_ns": 1792602294331564100,
+      "sha256": "92cca7614528ceb4de2098ed661bb0a32862fc45481739e5ce3a7c220af63a3b"
+    },
+    {
+      "path": "src/index/document_file_version.h",
+      "bytes": 1007,
+      "mtime_ns": 1790608249412512500,
+      "sha256": "85bd3447e6762e76622d70166169243f5da5ed1bbe22a4091fc09cf529d4b46b"
+    },
+    {
+      "path": "src/index/document_filter.cpp",
+      "bytes": 4958,
+      "mtime_ns": 1790608249413509700,
+      "sha256": "41ac9cef8d7e5052a5ef92b9cfd869acbd32be922f5793bb986d35a7071157f7"
+    },
+    {
+      "path": "src/index/document_filter.h",
+      "bytes": 281,
+      "mtime_ns": 1790608249414510300,
+      "sha256": "7a79b466469e9e79ec8087fb99fcbc02b778e44afa94ebefa99a3a22b078dbc6"
+    },
+    {
+      "path": "src/index/document_host_main.cpp",
+      "bytes": 9617,
+      "mtime_ns": 1791170380278083100,
+      "sha256": "9258c51fced4bc172ef14351ad72a1c6ff3d383c560657d5d5749d4452a74133"
+    },
+    {
+      "path": "src/index/document_literal_match.h",
+      "bytes": 1408,
+      "mtime_ns": 1790608249416510300,
+      "sha256": "0491b1b717a36872fcaa2c66eb244fb82c7a4c08bdc73bfa08f82c7234f34a82"
+    },
+    {
+      "path": "src/index/document_memory_trace.h",
+      "bytes": 3886,
+      "mtime_ns": 1790608249417521100,
+      "sha256": "78f1bc84da78da6f8f5add10c4578562225f20f45c462a1001896b9a4e7b2785"
+    },
+    {
+      "path": "src/index/document_metrics.h",
+      "bytes": 5530,
+      "mtime_ns": 1790608249419538300,
+      "sha256": "1f48696c6472234dc09d7f6b63d49fc16012f9284b69dffded007f34e4b24e38"
+    },
+    {
+      "path": "src/index/document_protocol.h",
+      "bytes": 2211,
+      "mtime_ns": 1791170451575536400,
+      "sha256": "b4a4817387c66274c1fd49fbd1165cf56a4da4d6d4f1e11b84c2814b51cf61c3"
+    },
+    {
+      "path": "src/index/document_reader.cpp",
+      "bytes": 29121,
+      "mtime_ns": 1790608249445497500,
+      "sha256": "fee37d3f9db31d98697b40b5f13a113f4dbcb6820c53f63a26ea5046b06c498b"
+    },
+    {
+      "path": "src/index/document_reader.h",
+      "bytes": 1629,
+      "mtime_ns": 1790608249446498800,
+      "sha256": "5852d32e4447bc575025d4b60340c09c8f22388f30743a3017cbf5badd2a6d6f"
+    },
+    {
+      "path": "src/index/filename_pinyin.cpp",
+      "bytes": 6574,
+      "mtime_ns": 1790752696863496500,
+      "sha256": "946da71a45b846fae5c5a20cf5388a1efd5c7a082672b9f1fc743da6dc1ebbce"
+    },
+    {
+      "path": "src/index/filename_pinyin.h",
+      "bytes": 831,
+      "mtime_ns": 1790608249448501900,
+      "sha256": "dc432104336f8c64df01611aa64a5e5e881d39d66edf74c1b0fbe8a20e2a81aa"
+    },
+    {
+      "path": "src/index/filename_timing.cpp",
+      "bytes": 4850,
+      "mtime_ns": 1790608249449595900,
+      "sha256": "52dcc336d05b0a418189e971b3e8e6dac19a31143614025e701aa0b6c5295e52"
+    },
+    {
+      "path": "src/index/filename_timing.h",
+      "bytes": 1530,
+      "mtime_ns": 1790608249449595900,
+      "sha256": "47dc9dabf779b5935fea822ab8127e2fc09bc580b06671a1cde49420bb7dfe41"
+    },
+    {
+      "path": "src/index/folder_size_index.h",
+      "bytes": 3737,
+      "mtime_ns": 1790608249452110900,
+      "sha256": "02da275b30548fe7083eec157c32c42aa4a6f11f757cd05aa1036707dcc80ea9"
+    },
+    {
+      "path": "src/index/folder_size_protocol.h",
+      "bytes": 1235,
+      "mtime_ns": 1790608249455110200,
+      "sha256": "3131c00d8410f6c4b7de52d9927026d5df80f6a865714c08cbe88ce72d57cd6a"
+    },
+    {
+      "path": "src/index/index_caller_visibility.h",
+      "bytes": 7661,
+      "mtime_ns": 1791029901833644200,
+      "sha256": "79412192b7092768c9899c3e6680692b0870f698cab1a89f9b75871bf524db17"
+    },
+    {
+      "path": "src/index/index_client.cpp",
+      "bytes": 23026,
+      "mtime_ns": 1791711818700311700,
+      "sha256": "5d22ce138e76982cbe1ea16beb8c54cb51427fc834bf442325523fdac94ddd8c"
+    },
+    {
+      "path": "src/index/index_client.h",
+      "bytes": 4915,
+      "mtime_ns": 1792667558861430600,
+      "sha256": "07a5defa282e5d7ae6a823ff8a3ef8a3d6c5bbf60f8d710b949c75ac96151203"
+    },
+    {
+      "path": "src/index/index_config.cpp",
+      "bytes": 15515,
+      "mtime_ns": 1792147949843219000,
+      "sha256": "9e14d9261f68aeb18f07ece597807e0726aba01933129ee0051ca4330b4ebb9f"
+    },
+    {
+      "path": "src/index/index_config.h",
+      "bytes": 1781,
+      "mtime_ns": 1791163362854427300,
+      "sha256": "09e7bdbfb9c0f2cf1c6d75bc5192753fda0db87a69a93732668185bd6ae89860"
+    },
+    {
+      "path": "src/index/index_config_parse.h",
+      "bytes": 3300,
+      "mtime_ns": 1792147945185644000,
+      "sha256": "86d932d3e3fa6fb9ca6cd0d1ff27c1d68dcf3631a1bac267e574c9729412fae5"
+    },
+    {
+      "path": "src/index/index_delta.cpp",
+      "bytes": 11674,
+      "mtime_ns": 1792147993673791800,
+      "sha256": "7b1b51ec5ed070a0a90477bce8b09ba1d3b0ab542e7d74ca555368959432d5f6"
+    },
+    {
+      "path": "src/index/index_delta.h",
+      "bytes": 2945,
+      "mtime_ns": 1792147993443316300,
+      "sha256": "b8f5433d2d1726a564e3d731df07dc03d36fc08a58d65654a1f0a98c72abb8fa"
+    },
+    {
+      "path": "src/index/index_diagnostics.h",
+      "bytes": 479,
+      "mtime_ns": 1790608249463141900,
+      "sha256": "2db9f000dd8cdc53e699da01b6d79831bd2e5b6544d4e0f93d7c712bdab0cc99"
+    },
+    {
+      "path": "src/index/index_engine.cpp",
+      "bytes": 183955,
+      "mtime_ns": 1792148934635183800,
+      "sha256": "a50fb4d013fc2afec819eabefd756229fca57f88537dca2db156caf46d10b50b"
+    },
+    {
+      "path": "src/index/index_engine.h",
+      "bytes": 17976,
+      "mtime_ns": 1792667558241370900,
+      "sha256": "6db54d2cf978a55955e96045c84e1470c6357fe8184813f991d29097d07ad980"
+    },
+    {
+      "path": "src/index/index_engine_pinyin.cpp",
+      "bytes": 7899,
+      "mtime_ns": 1790608249467142200,
+      "sha256": "b1f0026cfc6b9512c6219c396db7e140170039be28722535c403aae6d319ee0c"
+    },
+    {
+      "path": "src/index/index_feed.h",
+      "bytes": 7441,
+      "mtime_ns": 1790959105123933800,
+      "sha256": "010a74f11fbd7dd7ab5252e4f5e343d43558df6ebf1f3a9815864f970f3c2130"
+    },
+    {
+      "path": "src/index/index_folder_sizes.cpp",
+      "bytes": 2730,
+      "mtime_ns": 1790960514848292700,
+      "sha256": "7700972257e8cc41e3729d88c53ad570106c3690b22ed777f43bc812cf270b2c"
+    },
+    {
+      "path": "src/index/index_host.cpp",
+      "bytes": 56387,
+      "mtime_ns": 1792148546460534700,
+      "sha256": "4860330f473e086f869c8daa4c8ea97baea1708cb0c6bae2b03482ab24265084"
+    },
+    {
+      "path": "src/index/index_machine_config_actions.h",
+      "bytes": 477,
+      "mtime_ns": 1792148546149466400,
+      "sha256": "d3436e15daeb469ff1ca08f4773fe16bea6ff835efd07a75ae7ae910d0fa9589"
+    },
+    {
+      "path": "src/index/index_maintenance_probe.h",
+      "bytes": 3251,
+      "mtime_ns": 1790608249474642900,
+      "sha256": "7fb14288824639a114e7d75d9442d2ac604aeb95674a0763390d14859103361e"
+    },
+    {
+      "path": "src/index/index_memory_probe.h",
+      "bytes": 5298,
+      "mtime_ns": 1790608249475641900,
+      "sha256": "f5145aed28f5ec85e582da1e6d85024a85a0459d7a7c33e12da9aa539dfd610e"
+    },
+    {
+      "path": "src/index/index_mft.cpp",
+      "bytes": 15396,
+      "mtime_ns": 1792144995946859700,
+      "sha256": "8df57e297d5798746d5677d6675feda2024d9a9fd51f85859d942140d0bcf07c"
+    },
+    {
+      "path": "src/index/index_mft.h",
+      "bytes": 1439,
+      "mtime_ns": 1791382083219528200,
+      "sha256": "d34a2ced6583c52bec1b2ad0466865400d18cb6fc03db66027c5ebfe91e29aee"
+    },
+    {
+      "path": "src/index/index_migration.cpp",
+      "bytes": 19355,
+      "mtime_ns": 1792083476819259300,
+      "sha256": "6890c555c78447db6d68628e24f621e8d839d904dfa767e78309cb64cf096a34"
+    },
+    {
+      "path": "src/index/index_migration.h",
+      "bytes": 1415,
+      "mtime_ns": 1792083116449317700,
+      "sha256": "bea65ef39acfe21c5002352dbf745605c8d6b0a480af6be1f938aec60b94ad00"
+    },
+    {
+      "path": "src/index/index_name_pool.h",
+      "bytes": 1810,
+      "mtime_ns": 1790608249481153100,
+      "sha256": "840215fa570ce9980f309815d3c22aa76cb6fa315717f4ad72038da8a3d832c4"
+    },
+    {
+      "path": "src/index/index_parent_chain.h",
+      "bytes": 1786,
+      "mtime_ns": 1792148826058733800,
+      "sha256": "eddcb15648950214ac31aec188fb894f0ca980395c714ba5f73315c6f8f95dca"
+    },
+    {
+      "path": "src/index/index_paths.cpp",
+      "bytes": 1330,
+      "mtime_ns": 1792148546720688400,
+      "sha256": "7b1b186d9c61343b76dad7ae9c0f01646e9cc7a5c056709b5f3f55a7df9ad0ea"
+    },
+    {
+      "path": "src/index/index_paths.h",
+      "bytes": 452,
+      "mtime_ns": 1790608249487154800,
+      "sha256": "5222fce622ea9d5696e84df8c413ae6264bd35c9844703ba3e6699ebcf7a47a8"
+    },
+    {
+      "path": "src/index/index_path_service.cpp",
+      "bytes": 5279,
+      "mtime_ns": 1792083218668834700,
+      "sha256": "a12b11dfe58b92e3d4818ba12e5317248589d5c087e8dd02f4da24642ed10f0f"
+    },
+    {
+      "path": "src/index/index_path_service.h",
+      "bytes": 195,
+      "mtime_ns": 1790608249486154100,
+      "sha256": "c5885d1fbc6fad559ef2d583ddc74cfdd4faaefb9717a8473fbbb81bf47881d9"
+    },
+    {
+      "path": "src/index/index_protocol.h",
+      "bytes": 1300,
+      "mtime_ns": 1792667558548257100,
+      "sha256": "89afbf99416b9caf753abacc25ae520b16a79572dd7e1708687630ee0c39670b"
+    },
+    {
+      "path": "src/index/index_query.cpp",
+      "bytes": 31151,
+      "mtime_ns": 1792147822438206000,
+      "sha256": "720d9380c7fb0a9ab6161f4d29856e901722acc9d2a175d427dc08559617ce90"
+    },
+    {
+      "path": "src/index/index_query.h",
+      "bytes": 3234,
+      "mtime_ns": 1792147681142853700,
+      "sha256": "ca4fa7aea588e1c72f347d86bde8d6d612dc9517da6d408af66be7c686602c41"
+    },
+    {
+      "path": "src/index/index_raw_storage_security.h",
+      "bytes": 5794,
+      "mtime_ns": 1792083116965666900,
+      "sha256": "1239eda00e34105f99fbf395f695b9674a5609dcfc1d1d4c22f0e203eea3ad04"
+    },
+    {
+      "path": "src/index/index_request_limits.h",
+      "bytes": 1401,
+      "mtime_ns": 1791029886506195800,
+      "sha256": "79b4c91e2507c6a38ecd2f636d902457b8f6495f811ddb71e27248e1568f654a"
+    },
+    {
+      "path": "src/index/index_search_response.h",
+      "bytes": 2452,
+      "mtime_ns": 1791381506504514900,
+      "sha256": "3eacb2607182f6d0d80bb46a62f211be52db418fd59c6f7a8b46a13806aa53ff"
+    },
+    {
+      "path": "src/index/index_server_auth.h",
+      "bytes": 2667,
+      "mtime_ns": 1791537509659234800,
+      "sha256": "a7940b2f8c0c364b0db5c906e2df85e1f06892365d915dfa531316aab50aebcc"
+    },
+    {
+      "path": "src/index/index_service_reload.h",
+      "bytes": 1399,
+      "mtime_ns": 1792147711586509400,
+      "sha256": "fb0cb0b81cf869c434ca78700d8edced2fd3a0f7e45e30eb528de6f7767abe13"
+    },
+    {
+      "path": "src/index/index_service_start.h",
+      "bytes": 1717,
+      "mtime_ns": 1790608249493330100,
+      "sha256": "23c8de8335f0781e9834eb5cbf0501a658dd807ac6e10df22bdc1278f1f390f3"
+    },
+    {
+      "path": "src/index/index_shard.cpp",
+      "bytes": 20076,
+      "mtime_ns": 1792081683882801000,
+      "sha256": "2147743e5398c9e154402ff0f1c5f7e35d841a10181efe6292695fa49577bce7"
+    },
+    {
+      "path": "src/index/index_shard.h",
+      "bytes": 2369,
+      "mtime_ns": 1792081322960069600,
+      "sha256": "49f6c5cdc04829a44ff57a9ac8bc6d314d998d1b2fc82f92a32b4b791fc54709"
+    },
+    {
+      "path": "src/index/index_transport_security.h",
+      "bytes": 9569,
+      "mtime_ns": 1791381610399525000,
+      "sha256": "8deed6514d26bb033fda1541a8071bb67b8e799181e157f398b89b1bb04d326d"
+    },
+    {
+      "path": "src/index/index_types.h",
+      "bytes": 991,
+      "mtime_ns": 1792667557957705100,
+      "sha256": "b44ce707e082eefa5415675a47678ff471c3edb0a73a051f80f03d0c9061c888"
+    },
+    {
+      "path": "src/index/index_visibility.cpp",
+      "bytes": 3081,
+      "mtime_ns": 1790608249540068300,
+      "sha256": "c0fcb05315821ef39463e6fdcae8f7e8dd5130bfcc539cc2b1be45d9e810ac44"
+    },
+    {
+      "path": "src/index/live_filename_search.h",
+      "bytes": 5566,
+      "mtime_ns": 1792667559451340700,
+      "sha256": "afe3505fc463ad3ae4a02a6582fef86150ada01345e3114b2872258f20f7f482"
+    },
+    {
+      "path": "src/index/network_agent_client.cpp",
+      "bytes": 18136,
+      "mtime_ns": 1791447827564982100,
+      "sha256": "24b63c792e41c75bb82018feda9f6360c331c160e6eb8f616fd5e89d1baa168e"
+    },
+    {
+      "path": "src/index/network_agent_client.h",
+      "bytes": 3602,
+      "mtime_ns": 1791443989286430300,
+      "sha256": "2920b422284fcc37106aeaa6f91053e700ca18193062bb34edfd449a6f159e98"
+    },
+    {
+      "path": "src/index/network_agent_host.h",
+      "bytes": 404,
+      "mtime_ns": 1790959606365030300,
+      "sha256": "e2a1180f961074d4c190b0d3d7706ddbd63f710526db87435fa0c7fdd440ab3f"
+    },
+    {
+      "path": "src/index/network_agent_main.cpp",
+      "bytes": 17075,
+      "mtime_ns": 1791381688291207300,
+      "sha256": "12bd5df599209b8247d5d410af3edf81aa4f9cb924ef829d92e2bc0cc9bdc5fa"
+    },
+    {
+      "path": "src/index/network_agent_protocol.h",
+      "bytes": 1353,
+      "mtime_ns": 1790957029816319500,
+      "sha256": "c535fd3cac84c93fa391cc0e550175b180be1d9fb7fef748f6a184ead25feebe"
+    },
+    {
+      "path": "src/index/network_index.cpp",
+      "bytes": 53476,
+      "mtime_ns": 1792147724840412800,
+      "sha256": "29bab452602f82d7269241a4ba4ea6d740459a938f5ff4213a762b743c3168a2"
+    },
+    {
+      "path": "src/index/network_index.h",
+      "bytes": 4544,
+      "mtime_ns": 1792667559140061200,
+      "sha256": "c0f0e5ea83e826fb9093d13e563c48c7851c314a2d7a0cb04860c83f36e4b1f5"
+    },
+    {
+      "path": "src/index/office_ooxml.cpp",
+      "bytes": 16220,
+      "mtime_ns": 1790608249551143900,
+      "sha256": "54e1a3dd01f259cc61737c98e10ff0c5bacbb71dc81167acae20b2612b42378a"
+    },
+    {
+      "path": "src/index/office_ooxml.h",
+      "bytes": 483,
+      "mtime_ns": 1790608249552140300,
+      "sha256": "2f2919140eb57db6d3b424baff19b2484519db9bebc93229cdee9291b7bbd4b2"
+    },
+    {
+      "path": "src/index/pdfium_text.cpp",
+      "bytes": 8306,
+      "mtime_ns": 1790608249553138400,
+      "sha256": "d55a2e22c47418f07b41955a9c08031ac9be35175ce930c8ad4ff163ddfd6894"
+    },
+    {
+      "path": "src/index/pdfium_text.h",
+      "bytes": 379,
+      "mtime_ns": 1790608249554138000,
+      "sha256": "7b4db3bfc9f24a0189e93e3b8d76fdf5470dd3d387ba375eda159198c1752a5b"
+    },
+    {
+      "path": "src/index/search_kinds.cpp",
+      "bytes": 3674,
+      "mtime_ns": 1790608249555136500,
+      "sha256": "525cdb1764c281257cefa62d2094e743b7729f1d2af705fc165e8f28e8625771"
+    },
+    {
+      "path": "src/index/search_kinds.h",
+      "bytes": 688,
+      "mtime_ns": 1790608249557138100,
+      "sha256": "701490215aa87b284e6496bd6c22594325e4a6d121de0de7c8b142d797e50445"
+    },
+    {
+      "path": "src/index/search_result_merge.cpp",
+      "bytes": 3418,
+      "mtime_ns": 1792667560052373000,
+      "sha256": "0bd69c079b1c0f2df8f410fbf27ceaebe087b4347022db1cbdceaf22abee5bf5"
+    },
+    {
+      "path": "src/index/search_result_merge.h",
+      "bytes": 235,
+      "mtime_ns": 1792667559742559900,
+      "sha256": "8401be1494cefad825b08d2066dfca3c7de29b8c48b1e8278ee8fa3e0bd1efb3"
+    },
+    {
+      "path": "src/index/search_trace.h",
+      "bytes": 1797,
+      "mtime_ns": 1790608249557138100,
+      "sha256": "b6d79fe460c6e700d8a26240af0ed7abbe240d0a782fc7dc836b18226567ebf4"
+    },
+    {
+      "path": "src/index/text_task_reader.cpp",
+      "bytes": 14910,
+      "mtime_ns": 1790608249558671400,
+      "sha256": "ea13545f86ccab48ca44d6d89adc4a00e472d2b12705e3e0915f8dbc57463528"
+    },
+    {
+      "path": "src/index/text_task_reader.h",
+      "bytes": 2092,
+      "mtime_ns": 1790608249559676500,
+      "sha256": "46d0e0241e5012fa304608403f6721d851b7fdec128260e599739a134a8ed309"
+    },
+    {
+      "path": "src/index/user_index_storage.cpp",
+      "bytes": 3106,
+      "mtime_ns": 1790959111621264800,
+      "sha256": "a89ce2c1380b583fddefbfa77fe24fc93bde9d926029564f2dd495d7121c63a0"
+    },
+    {
+      "path": "src/index/user_index_storage.h",
+      "bytes": 336,
+      "mtime_ns": 1790821791155716100,
+      "sha256": "0d1ad8b60e09ac5fc665a7072dc754d1d60864e8acc3d4dd4a74617d5eaf6e08"
+    },
+    {
+      "path": "src/index/usn_packet_queue.h",
+      "bytes": 4055,
+      "mtime_ns": 1790608249563677100,
+      "sha256": "822a7082f97dce9444ea1d81b82e4a699b46e4d731d56f80c2345876930abc70"
+    },
+    {
+      "path": "src/index/usn_read_wait.h",
+      "bytes": 1149,
+      "mtime_ns": 1790608249566675900,
+      "sha256": "a924fd93c13469adccd81bd6003e954aa2b952618fd6ddba0860c0efae0499ed"
+    },
+    {
+      "path": "src/index/usn_stream.h",
+      "bytes": 3800,
+      "mtime_ns": 1790608249566675900,
+      "sha256": "ff46e900459f674aaa84c196529b5bcb1f3524878e3382f23f089b95095a07dd"
+    },
+    {
+      "path": "src/ops/archive.cpp",
+      "bytes": 35107,
+      "mtime_ns": 1792573520758036200,
+      "sha256": "8a21aa75f5a7345117366f4660edae99ff839e7519ca5ecbf92ed1fe1f97cba1"
+    },
+    {
+      "path": "src/ops/archive.h",
+      "bytes": 3368,
+      "mtime_ns": 1792079393150310700,
+      "sha256": "63eef590d7b4fdd85b4f2e45b91ff976f8de7831d4226edc8924c996958ded09"
+    },
+    {
+      "path": "src/ops/archive_progress.h",
+      "bytes": 3316,
+      "mtime_ns": 1791781349580489200,
+      "sha256": "f31b0706ff8cbe868c4a213c78ca3034202d69e675a2c5e5ee97d64d70e5d72b"
+    },
+    {
+      "path": "src/ops/archive_retry.h",
+      "bytes": 12062,
+      "mtime_ns": 1792079609988797100,
+      "sha256": "da0134d69224be7aaeebc2dc6b1daed5f421c25d3e2c35a348b414a741b81abb"
+    },
+    {
+      "path": "src/ops/clipboard.cpp",
+      "bytes": 9403,
+      "mtime_ns": 1792156589574844500,
+      "sha256": "febde3d554a2aa4fb09acf3a81c6fb7a4b952a8d5e2cb43eea83daecd7c7e0e4"
+    },
+    {
+      "path": "src/ops/clipboard.h",
+      "bytes": 2085,
+      "mtime_ns": 1792156820894105700,
+      "sha256": "81aaa21a379fdf2a43a108ba618a821cce43f957af01c8ac5a6d2ae056bd2916"
+    },
+    {
+      "path": "src/ops/copy_progress_report.h",
+      "bytes": 1466,
+      "mtime_ns": 1791811017905979700,
+      "sha256": "e6688faf2a620194e90a23f7ae9e7638c1ee191e21fb79ba2eac2e887fb6e688"
+    },
+    {
+      "path": "src/ops/delete_operation.cpp",
+      "bytes": 34221,
+      "mtime_ns": 1792677076260292800,
+      "sha256": "051ddedfa45f407ace2922f050bee6c07f724c15e368c931adfeeaeb66bf2eb4"
+    },
+    {
+      "path": "src/ops/delete_operation.h",
+      "bytes": 667,
+      "mtime_ns": 1791163460888336300,
+      "sha256": "671a062c4aeb1783504fb571158070da3259814861fc472b15a4322697d7202c"
+    },
+    {
+      "path": "src/ops/delete_service.cpp",
+      "bytes": 4142,
+      "mtime_ns": 1790943411290542400,
+      "sha256": "a7e2d0b5c9f6e0eadf130445aed277351517b9cf8d1e0df2cb83e8fb9f73cb79"
+    },
+    {
+      "path": "src/ops/delete_service.h",
+      "bytes": 2608,
+      "mtime_ns": 1791022805702479300,
+      "sha256": "ec61028405fb517d850e4711952890b00bacba2a2cfd9637c3760094b81afe0b"
+    },
+    {
+      "path": "src/ops/destination_guard.h",
+      "bytes": 28594,
+      "mtime_ns": 1792671059339693600,
+      "sha256": "129322d682bf9cc3f275c0e0133b2590bad5896c1a7f933851d129fbe7e2cbd7"
+    },
+    {
+      "path": "src/ops/drop_staging.cpp",
+      "bytes": 12259,
+      "mtime_ns": 1791444190881613800,
+      "sha256": "e764ec933e5595ac916a9f9da101202a4fc936745b91ee588d8311e9f4681be6"
+    },
+    {
+      "path": "src/ops/drop_staging.h",
+      "bytes": 3155,
+      "mtime_ns": 1791444028044310000,
+      "sha256": "232ea4accb46fc2b858457553ecea548772f590c4600797051e70c379b99c197"
+    },
+    {
+      "path": "src/ops/file_identity.h",
+      "bytes": 176,
+      "mtime_ns": 1791382920771722900,
+      "sha256": "39549d916f8ba642920abb9087d98b598b3102c60d0512d5818e492985673aba"
+    },
+    {
+      "path": "src/ops/file_lock_owner.cpp",
+      "bytes": 12699,
+      "mtime_ns": 1791697557213803000,
+      "sha256": "aaf760f04c0a8c659e41a768d4d84454ff2239b8b93cf854f01f36a953c78a7b"
+    },
+    {
+      "path": "src/ops/file_lock_owner.h",
+      "bytes": 1518,
+      "mtime_ns": 1791697557225583300,
+      "sha256": "092754dfd3f10f497254d0ad0bc712cd633cefc5a09c331193d470c9519076cf"
+    },
+    {
+      "path": "src/ops/file_object_reference.h",
+      "bytes": 3188,
+      "mtime_ns": 1791382164275563600,
+      "sha256": "a919d49c4cf185ef738a0a9705b48b68d19e6cd9c88bba97516f55a813dfda05"
+    },
+    {
+      "path": "src/ops/image_open.cpp",
+      "bytes": 27979,
+      "mtime_ns": 1791973461999619400,
+      "sha256": "eb1f59e703b6d78b61ce6fda84567e5c35932c17a9d90b8e551906714a5ecc09"
+    },
+    {
+      "path": "src/ops/image_open.h",
+      "bytes": 938,
+      "mtime_ns": 1791561846930726700,
+      "sha256": "4e8fada4d035d2e7fadaf3c602cb1ec6573734b8780ab92372b6c6f4bad4c834"
+    },
+    {
+      "path": "src/ops/operation_elevation_adapter.cpp",
+      "bytes": 76189,
+      "mtime_ns": 1791803379413053400,
+      "sha256": "03358edfeebe29c6dc0220f198b06e2d3d1b365ddd4b83142e74c6f94b2a6c61"
+    },
+    {
+      "path": "src/ops/operation_elevation_adapter.h",
+      "bytes": 1711,
+      "mtime_ns": 1791803141608586100,
+      "sha256": "9e42d8a3dd7dcf52aa7681a6745bdeb36055583b1c30daab08dd7af5d106a3ca"
+    },
+    {
+      "path": "src/ops/operation_elevation_transport.cpp",
+      "bytes": 29895,
+      "mtime_ns": 1791803197895305100,
+      "sha256": "a2a2893042f485f0edad85422c2b9cfa1284d747de60e966f591b2cf5dd77322"
+    },
+    {
+      "path": "src/ops/operation_elevation_transport.h",
+      "bytes": 2508,
+      "mtime_ns": 1791803142085925300,
+      "sha256": "ed2b4838e5cba2b94e5095752bb010baf519d83078e355f2b822765609bdb619"
+    },
+    {
+      "path": "src/ops/operation_journal_paths.cpp",
+      "bytes": 2959,
+      "mtime_ns": 1792159528673457400,
+      "sha256": "d5c1ddc45b3aafe06efea1e55f14841bfa42304cf97474cb263d03de28e26bbf"
+    },
+    {
+      "path": "src/ops/operation_journal_paths.h",
+      "bytes": 558,
+      "mtime_ns": 1792159468810721700,
+      "sha256": "526bf16f805e9b35f6229c90e8ef3e9108f02046dccec40ff26fbbbe3aa49c36"
+    },
+    {
+      "path": "src/ops/operation_permission.cpp",
+      "bytes": 9550,
+      "mtime_ns": 1791697905384025300,
+      "sha256": "9bcb0eca64f073fb3facf31e816393c9e4fea6ffa1633cbbd16651ee4d8bf50e"
+    },
+    {
+      "path": "src/ops/operation_presentation.h",
+      "bytes": 2222,
+      "mtime_ns": 1792045117633208900,
+      "sha256": "4d380ac98faf117727c780d89a7d508e072797701295517eda921747bdfa751d"
+    },
+    {
+      "path": "src/ops/ops_manager.cpp",
+      "bytes": 214887,
+      "mtime_ns": 1792671059593391900,
+      "sha256": "738a12bbeb698c24a4d1a93ae66f6a826f7bad0a4b7b57acfac042b078ad598d"
+    },
+    {
+      "path": "src/ops/ops_manager.h",
+      "bytes": 27196,
+      "mtime_ns": 1792667555088211000,
+      "sha256": "18486d4807427de7f24ce77bc5435931648808909c5fca7aedc2f9083a530780"
+    },
+    {
+      "path": "src/ops/produced_undo.h",
+      "bytes": 2432,
+      "mtime_ns": 1791712165112743900,
+      "sha256": "6b57f0c35b9dc2e93edb05e636be09ac9d38e963ee6f22b842881596c8b26341"
+    },
+    {
+      "path": "src/ops/recycle_undo_validation.cpp",
+      "bytes": 5374,
+      "mtime_ns": 1791694930037821800,
+      "sha256": "9671bc7e81c4fdc6aed63d7fc9fc97cff6e3a4fc2f5d212b94013958dcc5e17f"
+    },
+    {
+      "path": "src/ops/recycle_undo_validation.h",
+      "bytes": 1108,
+      "mtime_ns": 1791694930025804800,
+      "sha256": "2aa75427c84382a8fe33a29302928e5dc3a7ab6af987202ebcbb6e511589f7ee"
+    },
+    {
+      "path": "src/ops/transfer_rate.h",
+      "bytes": 2938,
+      "mtime_ns": 1791809162937148400,
+      "sha256": "b9dbe897c4991a48928077277df082c245a641810fa04e33d7873cf5ea70f5d1"
+    },
+    {
+      "path": "src/shell_host/ctx_handlers.cpp",
+      "bytes": 20519,
+      "mtime_ns": 1792237289483695400,
+      "sha256": "e0eed0506cbe225c92aaeec50d14c218a2ca09ad8cc5fd5e161c158c8c5e9137"
+    },
+    {
+      "path": "src/shell_host/ctx_handlers.h",
+      "bytes": 2556,
+      "mtime_ns": 1791381695037439900,
+      "sha256": "ed5fb47b72f15cd6250bc03fa79eeb01857d91d865e581716f4769b3965cdf39"
+    },
+    {
+      "path": "src/shell_host/ctx_session_process.cpp",
+      "bytes": 12435,
+      "mtime_ns": 1792687452513663000,
+      "sha256": "037c9af6a15f6316c262f483a86ad9626f59ca5c413da3f32ffcb1ab792f2b4d"
+    },
+    {
+      "path": "src/shell_host/ctx_session_process.h",
+      "bytes": 2034,
+      "mtime_ns": 1792687452225877600,
+      "sha256": "61d666a404f92d2d0b9dfd7155f5d21cc1df4c9bef8e3448fbf8f79c2139e922"
+    },
+    {
+      "path": "src/shell_host/delete_fileop.h",
+      "bytes": 1227,
+      "mtime_ns": 1791020502073989700,
+      "sha256": "3d2a634805f8f93ef77f0572f74472e77bfcca6e10c3b9ef01a84f940d9a5793"
+    },
+    {
+      "path": "src/shell_host/deletion_identity.cpp",
+      "bytes": 3437,
+      "mtime_ns": 1792658617275968000,
+      "sha256": "591fcaf11d50b552bb5c576471e2cbaf38626c89362920e1117b4db03f9a31a6"
+    },
+    {
+      "path": "src/shell_host/deletion_identity.h",
+      "bytes": 682,
+      "mtime_ns": 1792658616931624900,
+      "sha256": "6c24b71e7cbda8e5ea7bbb95da50c4aa172f5d72d2b4902219bae95f5e34ab4c"
+    },
+    {
+      "path": "src/shell_host/host_log_line.h",
+      "bytes": 537,
+      "mtime_ns": 1792147993960393200,
+      "sha256": "5fc707dee01df21ae052376ddab14be707258411c52a76d372e46ddb5e22f14d"
+    },
+    {
+      "path": "src/shell_host/main.cpp",
+      "bytes": 68615,
+      "mtime_ns": 1792659420653119800,
+      "sha256": "89fefc6175aed2869620675241e0f9bc06e55973191baac0515297766efeaa1f"
+    },
+    {
+      "path": "src/shell_host/recycle_fileop.cpp",
+      "bytes": 10791,
+      "mtime_ns": 1791456314278384100,
+      "sha256": "5aa9500a05d3bf8145a07757a5dc93d5c8b419e18844159ba1b18a9e365797d6"
+    },
+    {
+      "path": "src/shell_host/recycle_fileop.h",
+      "bytes": 924,
+      "mtime_ns": 1791456314278384100,
+      "sha256": "1750c897fba32c03af5d15633834b099575857a2995da11520f21143332d25aa"
+    },
+    {
+      "path": "src/shell_host/shell_interaction_worker.cpp",
+      "bytes": 3231,
+      "mtime_ns": 1791600233281795000,
+      "sha256": "ca5f9acd028cfc3450f74d0e577ebcd44a79f6b1f5aa8f3860451ee34ab9b34c"
+    },
+    {
+      "path": "src/shell_host/shell_interaction_worker.h",
+      "bytes": 350,
+      "mtime_ns": 1791599536712065500,
+      "sha256": "d7f286c64e05f2120d7e00bfa02e3266843b64072a476dc2779d7fa06336e01f"
+    },
+    {
+      "path": "src/shell_host/shell_launch_process.cpp",
+      "bytes": 15370,
+      "mtime_ns": 1791601081201054300,
+      "sha256": "bfe5823c089146947e0375c231c96b7655f50e8c96db3987151365a2e7ae96dd"
+    },
+    {
+      "path": "src/shell_host/shell_launch_process.h",
+      "bytes": 1370,
+      "mtime_ns": 1791555904895120900,
+      "sha256": "53135613b5d03f1f9f2d7ef3b66b72f62346f76b55d0ff7219597917e52a1063"
+    },
+    {
+      "path": "src/shell_host/shell_launch_worker.cpp",
+      "bytes": 18060,
+      "mtime_ns": 1791690735429702100,
+      "sha256": "7ff13b7e3bb0c44cd80d5f860ff9ad36ecf75b51cefa04b8419345b33cb6da47"
+    },
+    {
+      "path": "src/shell_host/shell_query_icons.cpp",
+      "bytes": 6148,
+      "mtime_ns": 1791598481466690000,
+      "sha256": "4e6018ce9af11c9293fbad22df43ee1a1d31c1f4d782cbfdda84ecff4be7564b"
+    },
+    {
+      "path": "src/shell_host/shell_query_icons.h",
+      "bytes": 560,
+      "mtime_ns": 1791598437482267400,
+      "sha256": "6013c110e8e0ba502d8db961f6141c612d3e62fb69d0e996fe859a0b0794c14f"
+    },
+    {
+      "path": "src/shell_host/shell_query_metadata.cpp",
+      "bytes": 7018,
+      "mtime_ns": 1791600328218272100,
+      "sha256": "dfa483109c5021bdaeb203677084fc38af1f5c71c611e32fa10b1d06a0940c6c"
+    },
+    {
+      "path": "src/shell_host/shell_query_metadata.h",
+      "bytes": 567,
+      "mtime_ns": 1791599836693075100,
+      "sha256": "3eb46a47491e8c496c3db1d2e8da33378e5e32c47abe7203b4f4e5e315c5470f"
+    },
+    {
+      "path": "src/shell_host/shell_query_worker.cpp",
+      "bytes": 6364,
+      "mtime_ns": 1791623043057269000,
+      "sha256": "dd9722a4afd7a686fcff9286a1f831ead0ef8e9b7ed18c00520a1f89a9e93c3a"
+    },
+    {
+      "path": "src/shell_host/shell_query_worker.h",
+      "bytes": 142,
+      "mtime_ns": 1791564043038924700,
+      "sha256": "9861cba64defef6cfc410f073d9b3c00893e468333d7875e50a1e74ab812dddd"
+    },
+    {
+      "path": "src/preview_host/main.cpp",
+      "bytes": 43708,
+      "mtime_ns": 1792578570805559400,
+      "sha256": "afed411f0870cfea245b03f0bc6219e6a247bb81cc5a317b0cd482ee441b4f15"
+    },
+    {
+      "path": "src/preview_host/metafile_raster.cpp",
+      "bytes": 5071,
+      "mtime_ns": 1790608249588280500,
+      "sha256": "7e69d675c516abd639c01c7e6d6b586e123d2daa36832578fca5004aff003a49"
+    },
+    {
+      "path": "src/preview_host/metafile_raster.h",
+      "bytes": 969,
+      "mtime_ns": 1790608249588280500,
+      "sha256": "4528297731de3c613b9b9a658175f2410a103127f9c1277a0344503be2cfd88b"
+    },
+    {
+      "path": "src/preview_host/svg_raster.cpp",
+      "bytes": 13237,
+      "mtime_ns": 1790752430430971200,
+      "sha256": "9da8a1b3bd0da93273bded04391e32aca588fce1ce812360f33099e9a8ab31c5"
+    },
+    {
+      "path": "src/preview_host/svg_raster.h",
+      "bytes": 998,
+      "mtime_ns": 1790608249591061800,
+      "sha256": "f9400222e8bc9fd3c9c02c9d7899bbd600d8a15671f15b37cd6b70ed16be3e81"
+    },
+    {
+      "path": "src/preview_host/video_codec.cpp",
+      "bytes": 2149,
+      "mtime_ns": 1790608249593063900,
+      "sha256": "ea780f75156b22a1edd9f7197bbb6c8d898412a31a460e1764d9f904b8fa8cd9"
+    },
+    {
+      "path": "src/preview_host/video_codec.h",
+      "bytes": 262,
+      "mtime_ns": 1790608249594063900,
+      "sha256": "e3f822b5616032a8b5cfa7de2f46d1619cbbf9bd3e52f5134dd29a592a4fb025"
+    }
+  ],
+  "production_objects": [
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/about_info.cpp.obj",
+      "bytes": 286210,
+      "mtime_ns": 1792721677174336400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/address_search.cpp.obj",
+      "bytes": 685437,
+      "mtime_ns": 1792721681136404900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/address_search_history.cpp.obj",
+      "bytes": 300705,
+      "mtime_ns": 1792721684770854200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_change_tracking.cpp.obj",
+      "bytes": 1025256,
+      "mtime_ns": 1792721688659070300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_column_view.cpp.obj",
+      "bytes": 432124,
+      "mtime_ns": 1792721692572847200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_commands.cpp.obj",
+      "bytes": 2491941,
+      "mtime_ns": 1792722956354446700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_drag_hint.cpp.obj",
+      "bytes": 257864,
+      "mtime_ns": 1792722671603711100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_exit.cpp.obj",
+      "bytes": 163670,
+      "mtime_ns": 1792722671560771200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_hosted_edit.cpp.obj",
+      "bytes": 674610,
+      "mtime_ns": 1792722672929359600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_input.cpp.obj",
+      "bytes": 2544540,
+      "mtime_ns": 1792722683912242900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_main.cpp.obj",
+      "bytes": 5900072,
+      "mtime_ns": 1792722692111888700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_model.cpp.obj",
+      "bytes": 3806978,
+      "mtime_ns": 1792721860310295000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_navigation.cpp.obj",
+      "bytes": 3251400,
+      "mtime_ns": 1792721870712662500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_notify_patch.cpp.obj",
+      "bytes": 960307,
+      "mtime_ns": 1792721876409974100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_ops_ui.cpp.obj",
+      "bytes": 1118199,
+      "mtime_ns": 1792721882024650400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_prefs.cpp.obj",
+      "bytes": 472791,
+      "mtime_ns": 1792721885077432000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_preview_input.cpp.obj",
+      "bytes": 362613,
+      "mtime_ns": 1792721889989478200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_runtime.cpp.obj",
+      "bytes": 3731817,
+      "mtime_ns": 1792722965205014000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_ui_schedule.cpp.obj",
+      "bytes": 26192,
+      "mtime_ns": 1792721907314502200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_visual_animation.cpp.obj",
+      "bytes": 738625,
+      "mtime_ns": 1792721913101253500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_worker.cpp.obj",
+      "bytes": 1633288,
+      "mtime_ns": 1792721916711075600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/archive_dialog.cpp.obj",
+      "bytes": 157659,
+      "mtime_ns": 1792721918685981100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/archive_navigation.cpp.obj",
+      "bytes": 1613774,
+      "mtime_ns": 1792721925450003900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/archive_operation_ui.cpp.obj",
+      "bytes": 148233,
+      "mtime_ns": 1792721927896600200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/breadcrumb_menu.cpp.obj",
+      "bytes": 131627,
+      "mtime_ns": 1792721932798804400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/builtin_menu_items.cpp.obj",
+      "bytes": 116868,
+      "mtime_ns": 1792721935258313300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/column_view_model.cpp.obj",
+      "bytes": 128584,
+      "mtime_ns": 1792721937112701700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/command_catalog.cpp.obj",
+      "bytes": 123241,
+      "mtime_ns": 1792721939543427900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/content_lifecycle.cpp.obj",
+      "bytes": 46055,
+      "mtime_ns": 1792721944417100700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/content_results_ui.cpp.obj",
+      "bytes": 440414,
+      "mtime_ns": 1792721950358188800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/context_menu.cpp.obj",
+      "bytes": 885140,
+      "mtime_ns": 1792721953347189500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/context_menu_controller.cpp.obj",
+      "bytes": 1680882,
+      "mtime_ns": 1792721958439203400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/context_menu_prefs.cpp.obj",
+      "bytes": 969618,
+      "mtime_ns": 1792721961011736100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/date_groups.cpp.obj",
+      "bytes": 371387,
+      "mtime_ns": 1792657330969844600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/default_file_manager.cpp.obj",
+      "bytes": 338199,
+      "mtime_ns": 1792640811494050300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/delete_confirmation_ui.cpp.obj",
+      "bytes": 253583,
+      "mtime_ns": 1792721965274758300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/details_meta.cpp.obj",
+      "bytes": 116358,
+      "mtime_ns": 1792721966212499600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/drive_label_rename.cpp.obj",
+      "bytes": 172403,
+      "mtime_ns": 1792721971524820000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/duplicate_scan.cpp.obj",
+      "bytes": 711135,
+      "mtime_ns": 1792640819913647700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/duplicate_scan_ui.cpp.obj",
+      "bytes": 328658,
+      "mtime_ns": 1792721977130366600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/entry_order_hold.cpp.obj",
+      "bytes": 582739,
+      "mtime_ns": 1792640823884268800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/entry_sort.cpp.obj",
+      "bytes": 134891,
+      "mtime_ns": 1792721978588995200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/explorer_window_takeover.cpp.obj",
+      "bytes": 1163978,
+      "mtime_ns": 1792640826564139600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/external_open.cpp.obj",
+      "bytes": 394559,
+      "mtime_ns": 1792721984349613700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/folder_sizes.cpp.obj",
+      "bytes": 1666320,
+      "mtime_ns": 1792640832028692300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/folder_sizes_ui.cpp.obj",
+      "bytes": 433404,
+      "mtime_ns": 1792721990451426800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/folder_view_prefs.cpp.obj",
+      "bytes": 635758,
+      "mtime_ns": 1792657352391261500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/global_search_controller.cpp.obj",
+      "bytes": 54764,
+      "mtime_ns": 1792721995589236700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/global_search_hotkey.cpp.obj",
+      "bytes": 2062,
+      "mtime_ns": 1792640839526248000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/global_search_window.cpp.obj",
+      "bytes": 893087,
+      "mtime_ns": 1792721998237792100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/home_catalog.cpp.obj",
+      "bytes": 390317,
+      "mtime_ns": 1792722000445903100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/link_resolve.cpp.obj",
+      "bytes": 87477,
+      "mtime_ns": 1792640843621190300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/locked_operation_prompt.cpp.obj",
+      "bytes": 87746,
+      "mtime_ns": 1792722005599074200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/new_item_dialog.cpp.obj",
+      "bytes": 81758,
+      "mtime_ns": 1792722006676844800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/operation_center_ui.cpp.obj",
+      "bytes": 1086095,
+      "mtime_ns": 1792722970639185700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/permission_operation_prompt.cpp.obj",
+      "bytes": 157862,
+      "mtime_ns": 1792722018962706800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/places.cpp.obj",
+      "bytes": 2776185,
+      "mtime_ns": 1792722025014860400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/quick_access.cpp.obj",
+      "bytes": 325167,
+      "mtime_ns": 1792722030484589900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/saved_search.cpp.obj",
+      "bytes": 382561,
+      "mtime_ns": 1792640878061638100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/search_history.cpp.obj",
+      "bytes": 364460,
+      "mtime_ns": 1792722032909272900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/search_options.cpp.obj",
+      "bytes": 320876,
+      "mtime_ns": 1792722038704529600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/session.cpp.obj",
+      "bytes": 1183237,
+      "mtime_ns": 1792722042752754000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/session_tab_model.cpp.obj",
+      "bytes": 698065,
+      "mtime_ns": 1792722045340130400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/settings_controller.cpp.obj",
+      "bytes": 483700,
+      "mtime_ns": 1792722047199872800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/settings_ui.cpp.obj",
+      "bytes": 550856,
+      "mtime_ns": 1792722052794534000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/settings_value_dialog.cpp.obj",
+      "bytes": 104577,
+      "mtime_ns": 1792722053958357800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/shell_verbs.cpp.obj",
+      "bytes": 813008,
+      "mtime_ns": 1792722055915163100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/shell_window_registry.cpp.obj",
+      "bytes": 554631,
+      "mtime_ns": 1792640895113821700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/sidebar_sections.cpp.obj",
+      "bytes": 132862,
+      "mtime_ns": 1792722061554206700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/single_instance_coordinator.cpp.obj",
+      "bytes": 58071,
+      "mtime_ns": 1792640898747089700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/snapshot_patch.cpp.obj",
+      "bytes": 490620,
+      "mtime_ns": 1792640899607609300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/startup_launch.cpp.obj",
+      "bytes": 56481,
+      "mtime_ns": 1792640900169221300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/system_integration.cpp.obj",
+      "bytes": 955899,
+      "mtime_ns": 1792722068466094600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/tab_controller.cpp.obj",
+      "bytes": 354476,
+      "mtime_ns": 1792722071509891400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/tab_group_model.cpp.obj",
+      "bytes": 223492,
+      "mtime_ns": 1792722073532270700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/tab_transfer.cpp.obj",
+      "bytes": 886774,
+      "mtime_ns": 1792722079318076500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/text_diff.cpp.obj",
+      "bytes": 624597,
+      "mtime_ns": 1792640911813334400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/tray_controller.cpp.obj",
+      "bytes": 19196,
+      "mtime_ns": 1792722080160571900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/tray_metadata.cpp.obj",
+      "bytes": 171888,
+      "mtime_ns": 1792722082170149600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/fs/fs_enum.cpp.obj",
+      "bytes": 593683,
+      "mtime_ns": 1792640914851413900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/fs/fs_net_cache.cpp.obj",
+      "bytes": 730688,
+      "mtime_ns": 1792640916383998600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/fs/fs_recycle.cpp.obj",
+      "bytes": 154686,
+      "mtime_ns": 1792640917181786300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/fs/fs_snapshot.cpp.obj",
+      "bytes": 378313,
+      "mtime_ns": 1792640917964270600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/fs/fs_watch.cpp.obj",
+      "bytes": 682179,
+      "mtime_ns": 1792640919047027600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/change_tracking.cpp.obj",
+      "bytes": 2510995,
+      "mtime_ns": 1792640921212026900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/change_tracking_client.cpp.obj",
+      "bytes": 597913,
+      "mtime_ns": 1792668089803714600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/content_configuration.cpp.obj",
+      "bytes": 409711,
+      "mtime_ns": 1792640924167580800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/content_result_store.cpp.obj",
+      "bytes": 1167581,
+      "mtime_ns": 1792640925507230400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/content_search_client.cpp.obj",
+      "bytes": 1149718,
+      "mtime_ns": 1792640927500026400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/content_search_session.cpp.obj",
+      "bytes": 228536,
+      "mtime_ns": 1792640928302685600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/filename_pinyin.cpp.obj",
+      "bytes": 360129,
+      "mtime_ns": 1792640928878491000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_client.cpp.obj",
+      "bytes": 1022200,
+      "mtime_ns": 1792668091730994100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_config.cpp.obj",
+      "bytes": 909627,
+      "mtime_ns": 1792640932448018900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_migration.cpp.obj",
+      "bytes": 1017373,
+      "mtime_ns": 1792640934339643600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_path_service.cpp.obj",
+      "bytes": 255905,
+      "mtime_ns": 1792640935271358200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_query.cpp.obj",
+      "bytes": 423368,
+      "mtime_ns": 1792640936765277700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/index_shard.cpp.obj",
+      "bytes": 287520,
+      "mtime_ns": 1792640937805472700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/network_agent_client.cpp.obj",
+      "bytes": 1080977,
+      "mtime_ns": 1792668093676153500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/search_kinds.cpp.obj",
+      "bytes": 107341,
+      "mtime_ns": 1792640940447264100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/search_result_merge.cpp.obj",
+      "bytes": 307417,
+      "mtime_ns": 1792668094407688700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/index/user_index_storage.cpp.obj",
+      "bytes": 97635,
+      "mtime_ns": 1792668095138096900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ipc/shell_client.cpp.obj",
+      "bytes": 1215889,
+      "mtime_ns": 1792640943970177100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ipc/shell_interaction_client.cpp.obj",
+      "bytes": 232719,
+      "mtime_ns": 1792640944738716800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ipc/shell_query_client.cpp.obj",
+      "bytes": 286488,
+      "mtime_ns": 1792640946035965800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/model/batch_rename.cpp.obj",
+      "bytes": 383696,
+      "mtime_ns": 1792640946975040800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/model/builtin_menu_items.cpp.obj",
+      "bytes": 40275,
+      "mtime_ns": 1792722082974141500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/model/item_filter.cpp.obj",
+      "bytes": 363404,
+      "mtime_ns": 1792658994046355100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/model/search_query.cpp.obj",
+      "bytes": 298789,
+      "mtime_ns": 1792640948261936900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/archive.cpp.obj",
+      "bytes": 2140118,
+      "mtime_ns": 1792671417569263100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/clipboard.cpp.obj",
+      "bytes": 125997,
+      "mtime_ns": 1792640951581006700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/delete_operation.cpp.obj",
+      "bytes": 1390775,
+      "mtime_ns": 1792722087378991900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/delete_service.cpp.obj",
+      "bytes": 157104,
+      "mtime_ns": 1792640954764797700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/drop_staging.cpp.obj",
+      "bytes": 338941,
+      "mtime_ns": 1792640955638598700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/file_lock_owner.cpp.obj",
+      "bytes": 548455,
+      "mtime_ns": 1792640957241343500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/operation_elevation_adapter.cpp.obj",
+      "bytes": 2684893,
+      "mtime_ns": 1792722093824962800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/operation_elevation_transport.cpp.obj",
+      "bytes": 372067,
+      "mtime_ns": 1792640961420101800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/operation_journal_paths.cpp.obj",
+      "bytes": 158334,
+      "mtime_ns": 1792640962129245600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/operation_permission.cpp.obj",
+      "bytes": 1009172,
+      "mtime_ns": 1792671426041803800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/ops_manager.cpp.obj",
+      "bytes": 6573921,
+      "mtime_ns": 1792722109049196100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ops/recycle_undo_validation.cpp.obj",
+      "bytes": 588435,
+      "mtime_ns": 1792671435182874700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/advanced_search_dialog.cpp.obj",
+      "bytes": 313983,
+      "mtime_ns": 1792722111349286100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/batch_conflict_dialog.cpp.obj",
+      "bytes": 447342,
+      "mtime_ns": 1792671437375037700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/batch_rename_dialog.cpp.obj",
+      "bytes": 511393,
+      "mtime_ns": 1792722112982946200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/breadcrumb.cpp.obj",
+      "bytes": 194162,
+      "mtime_ns": 1792722115233231200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/color_picker.cpp.obj",
+      "bytes": 302564,
+      "mtime_ns": 1792664692250149600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/column_strip_layout.cpp.obj",
+      "bytes": 54966,
+      "mtime_ns": 1792640977804407300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/dialog_lifecycle.cpp.obj",
+      "bytes": 102199,
+      "mtime_ns": 1792640978952972600
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/drag_drop.cpp.obj",
+      "bytes": 510261,
+      "mtime_ns": 1792640980040713400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/edit_host.cpp.obj",
+      "bytes": 11627,
+      "mtime_ns": 1792640980754273500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/file_operation_dialog.cpp.obj",
+      "bytes": 883729,
+      "mtime_ns": 1792722119735040900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/fluent_components.cpp.obj",
+      "bytes": 811293,
+      "mtime_ns": 1792722121643126700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/fluent_menu.cpp.obj",
+      "bytes": 564189,
+      "mtime_ns": 1792722123956160400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/lumatext_renderer.cpp.obj",
+      "bytes": 893756,
+      "mtime_ns": 1792641040240419100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/name_highlight.cpp.obj",
+      "bytes": 314515,
+      "mtime_ns": 1792659060160866800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/notification_toast.cpp.obj",
+      "bytes": 38788,
+      "mtime_ns": 1792640988789746200
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/operation_center.cpp.obj",
+      "bytes": 657635,
+      "mtime_ns": 1792689177580849100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/operation_center_animation.cpp.obj",
+      "bytes": 207932,
+      "mtime_ns": 1792689180415274300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/preview_handler_host.cpp.obj",
+      "bytes": 1242696,
+      "mtime_ns": 1792640992951196900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/quick_preview_playback.cpp.obj",
+      "bytes": 120358,
+      "mtime_ns": 1792722125797477000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/quick_preview_window.cpp.obj",
+      "bytes": 462912,
+      "mtime_ns": 1792722128476084700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/shell_icons.cpp.obj",
+      "bytes": 1308581,
+      "mtime_ns": 1792640997966858900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/shortcut_help.cpp.obj",
+      "bytes": 116195,
+      "mtime_ns": 1792722129906059700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/svg_bitmap.cpp.obj",
+      "bytes": 69390,
+      "mtime_ns": 1792640999306895400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/tab_shape.cpp.obj",
+      "bytes": 29409,
+      "mtime_ns": 1792641000085817800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/text_diff_window.cpp.obj",
+      "bytes": 788624,
+      "mtime_ns": 1792722132238882500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/thumbnail_cache.cpp.obj",
+      "bytes": 1128202,
+      "mtime_ns": 1792641003730306500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/typography.cpp.obj",
+      "bytes": 250841,
+      "mtime_ns": 1792722133517976700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_address_search.cpp.obj",
+      "bytes": 81620,
+      "mtime_ns": 1792722135516115500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_column_strip.cpp.obj",
+      "bytes": 124870,
+      "mtime_ns": 1792722137589785300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_compositor.cpp.obj",
+      "bytes": 177623,
+      "mtime_ns": 1792722138875903800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_details_panel.cpp.obj",
+      "bytes": 300124,
+      "mtime_ns": 1792722142144903100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_fluent_svg.cpp.obj",
+      "bytes": 591515,
+      "mtime_ns": 1792722144453388500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_hit_test.cpp.obj",
+      "bytes": 968194,
+      "mtime_ns": 1792722974691825900
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_home.cpp.obj",
+      "bytes": 86941,
+      "mtime_ns": 1792722151171915400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_pane_header_icons.cpp.obj",
+      "bytes": 96925,
+      "mtime_ns": 1792722153467499100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_pane_list.cpp.obj",
+      "bytes": 1624949,
+      "mtime_ns": 1792722978694001400
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_renderer.cpp.obj",
+      "bytes": 1226461,
+      "mtime_ns": 1792722981987435000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_settings_context.cpp.obj",
+      "bytes": 313571,
+      "mtime_ns": 1792721451729826800
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_settings_core.cpp.obj",
+      "bytes": 392378,
+      "mtime_ns": 1792721455304366300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_settings_view.cpp.obj",
+      "bytes": 393372,
+      "mtime_ns": 1792721460402717700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_sidebar.cpp.obj",
+      "bytes": 578839,
+      "mtime_ns": 1792721464161589100
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/ui_toolbar.cpp.obj",
+      "bytes": 116506,
+      "mtime_ns": 1792722984064816700
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/video_preview.cpp.obj",
+      "bytes": 355157,
+      "mtime_ns": 1792641035639350300
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/view_layout.cpp.obj",
+      "bytes": 68023,
+      "mtime_ns": 1792659116838713500
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/window_helpers.cpp.obj",
+      "bytes": 19904,
+      "mtime_ns": 1792641037037490000
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/window_material.cpp.obj",
+      "bytes": 316047,
+      "mtime_ns": 1792641038086134800
+    }
+  ],
+  "note": "Source hashes identify review snapshot. Object mtimes alone do not prove all headers match; fixture reports state actual build coverage."
+}

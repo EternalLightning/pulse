@@ -1,0 +1,246 @@
+{
+  "captured_at": "2026-10-23T03:20:45.355Z",
+  "scope": "25 filesystem/navigation/index/storage-related issues; no product source or CMake modification",
+  "sources": "docs/validation/issue-confirm-2026-10-23/sources/<issue>-readable.json",
+  "environment": "bench_data/issue-confirm-environment/environment.json",
+  "runtime": {
+    "fixture": "bench_data/issue-confirm-fs/fs_probe.cpp",
+    "build": "bench_data/issue-confirm-fs/build-probe.cmd",
+    "log": "bench_data/issue-confirm-fs/run.log",
+    "exit_code": 0,
+    "passed": 20,
+    "failed": 0,
+    "production_rebuild": false,
+    "link_input": "build/CMakeFiles/pulse.dir/objects1.rsp",
+    "object_manifest": "bench_data/issue-confirm-fs/object-manifest.json",
+    "limits": "Existing production objects plus private console main; hidden real HWND/compositor; no full selftest, no foreground human mouse or real touch/SMB/exFAT/removable drive."
+  },
+  "issues": [
+    {
+      "issue": 377,
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "src/common/user_storage.cpp:311 DefaultRoot 使用 FOLDERID_LocalAppData + \\\\Pulse；免安装启动没有自动把配置放到 exe 旁的分支。",
+        "原文说应在当前用户应用数据目录，但所举 C:\\\\Users\\\\lyx\\\\AppData\\\\Local\\\\Pulse 正是该目录；没有提供 exe 旁存储的既有承诺。"
+      ],
+      "remaining": "确认报告者真正预期（当前用户隔离还是随 exe 便携）；本次未更改配置位置，也未将默认存储行为计作 bug。"
+    },
+    {
+      "issue": 372,
+      "status": "运行复现",
+      "evidence": [
+        "fs_probe.cpp / run.log：1000×700、100% 缩放、真实隐藏 HWND 与生产 compositor；240 项铺满网格。MediumIcons/LargeIcons 在列表范围每 3px 采样，blank 分别 0/0；Row 34253/36029。",
+        "实际生产 HandleLButtonDown 在单元左上边缘均得到 marqueePending=0、dragPending=1。app_input.cpp:2744 仅 Pane/None 启动框选，ui_hit_test.cpp:1025 把整个命中单元返回 Row。"
+      ],
+      "remaining": "只确认 MediumIcons/LargeIcons 满铺时缺起点；ExtraLargeIcons 同一尺寸有 10432 个空白采样点，不能扩大为所有网格模式。未进行前台人工拖动或 DPI 全排列。"
+    },
+    {
+      "issue": 339,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_model.cpp:1142 MakeKnownEntry 调用 SHGetKnownFolderPath；1292 Downloads 使用 FOLDERID_Downloads，并非硬编码用户目录。",
+        "刷新原文评论：作者建议通过快速访问标题右键隐藏内置项，报告者致谢；这不证明重定向 KnownFolder 路径错误已解决。"
+      ],
+      "remaining": "需要报告者已迁移 Downloads 的 KnownFolder 实际返回值、目标路径、侧栏缓存与隐藏状态；未迁移本机 KnownFolder 或偏好进行试验。"
+    },
+    {
+      "issue": 321,
+      "status": "缺少条件",
+      "evidence": [
+        "src 中未检出 WM_TOUCH/WM_GESTURE/WM_POINTER 或 RegisterTouchWindow 专用处理；鼠标路径有文件拖动分支。",
+        "未把普通鼠标事件合成测试当成真实触摸拖动复现。"
+      ],
+      "remaining": "需要真实触摸硬件/驱动与文件区手势输入，记录是否触发鼠标提升及 OLE 拖动；未改变系统输入设置。"
+    },
+    {
+      "issue": 320,
+      "status": "定向未复现",
+      "evidence": [
+        "run.log：私有 NTFS 目录 a/b/c 文件 10/20/30 字节，选 b 后外部写成 100 字节；真实 DirWatch 的 MODIFIED 事件，经 QueueNotifiesToVisible → BuildNotifyProjections → DrainNotifyPatches/PublishNotifyPatch。",
+        "大小升序重排后 b 从索引 1 到 2，selected_index=2，选中身份仍为 b.txt、size=100。src/app/app_notify_patch.cpp:74 捕获名称，101 重新映射选择。"
+      ],
+      "remaining": "仅覆盖普通目录、单选和大小重排；mtime/分组/多选/内容搜索等其他路径未验证。原报告没有给出确切排序与入口，不据此宣布所有情形修复。"
+    },
+    {
+      "issue": 318,
+      "status": "缺少条件",
+      "evidence": [
+        "run.log：生产 DirWatch → notify publish 对私有 NTFS 文件 FILE_ATTRIBUTE_HIDDEN 设置/清除都收到 action=3；隐藏后过滤、取消隐藏后立即可见，无需手动刷新。",
+        "src/fs/fs_watch.cpp:230 订阅 ATTRIBUTES。"
+      ],
+      "remaining": "原报告指定 Hide Folders；本次没有该产品/过滤驱动及版本，普通 SetFileAttributes 通过不能替代 Hide Folders 的真实事件行为验证。"
+    },
+    {
+      "issue": 314,
+      "status": "缺少条件",
+      "evidence": [
+        "environment.json：可见卷为 NTFS，未提供 exFAT 可移动卷。",
+        "src/index/live_filename_search.h 的实时文件名 fallback 以 UNC 为边界；本地非 NTFS 不会自动走这条 UNC 路径。"
+      ],
+      "remaining": "需要可写 exFAT 卷、隔离索引配置和可追溯计数来源，分别检查卷根添加、子目录添加与搜索；本次未创建/格式化卷或更改真实索引服务。"
+    },
+    {
+      "issue": 308,
+      "status": "缺少条件",
+      "evidence": [
+        "与 #314 是同一 exFAT 情境的英文报告；保留为独立 issue 记录，未重复算成独立已复现故障。",
+        "本机 inventory 无 exFAT；UNC fallback 源码边界并不能解释报告中索引计数的具体来源。"
+      ],
+      "remaining": "需要 #314 同样的 exFAT 卷、根配置和查询/计数日志，不能用 NTFS 搜索结果替代。"
+    },
+    {
+      "issue": 302,
+      "status": "缺少条件",
+      "evidence": [
+        "原文仅给出 878≈532+345、1.7GB 与其他产品容量对比，没有可复测相同数据集、数据库清单或容量构成。",
+        "没有读取/删除用户索引来人为重建数据；计数相加和文件体积本身不足以证实重复索引。"
+      ],
+      "remaining": "需要同一文件集合、名字/内容索引配置、各数据库文件大小与表/分片去重统计。"
+    },
+    {
+      "issue": 290,
+      "status": "缺少条件",
+      "evidence": [
+        "原文称下载文件夹或曾打开的某个标签稳定崩溃，但未给目录内容、标签状态、dump 或崩溃栈。",
+        "本次隐藏模型 fixture 的普通导航不承担这些目录内容，也不能反证报告者的崩溃。"
+      ],
+      "remaining": "需要触发目录的隔离样本/会话状态与崩溃转储，再对原入口复测；不猜测缩略图、Shell 或索引为根因。"
+    },
+    {
+      "issue": 279,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/settings_controller.cpp:598 NetworkAction 调用 pick_folder；src/index/network_index.cpp:745 对不能规范化为网络根的位置返回明确 UNC 提示。",
+        "刷新原文作者评论谈本地目录误选与选择框记忆；当前代码存在拒绝本地目录的边界，但没有实际操作原目录选择框。"
+      ],
+      "remaining": "需要隔离配置下的真实服务器共享/映射网络盘，实测选择框最近位置、确认后能否继续添加；不能把本地目录被拒绝等同于原循环弹框已复现。"
+    },
+    {
+      "issue": 275,
+      "status": "缺少条件",
+      "evidence": [
+        "原文指定 Sangfor 通过 subst 挂载占位盘；错误 5/LocalSystem 权限解释来自报告中的 AI 推测。",
+        "当前 inventory 不提供该占位盘与服务账户可见性对照，本次未创建盘符或修改服务配置。"
+      ],
+      "remaining": "需要 Sangfor/对应 subst 盘、普通用户与索引服务账户 QueryDosDevice/卷枚举和配置错误码；未接受权限推测为根因。"
+    },
+    {
+      "issue": 263,
+      "status": "静态确认",
+      "evidence": [
+        "src/app/app_main.cpp:2280 将原始 open_path 直接 ForwardOpenPath；single_instance_coordinator.cpp:57 的 COPYDATA 只序列化路径、不携带发送者 cwd；external_open.cpp:28 在接收进程解释相对路径。",
+        "run.log：生产 DecodeOpenPath 保留 '.'；在私有接收进程 cwd 下调用生产 ResolveOpenTarget('.') 得到接收进程目录。未与用户正在运行的单实例通信。",
+        "app_main.cpp:2260 对最后一个未加引号空格路径片段覆盖 shot.path；未重演 Listary 具体命令行。"
+      ],
+      "remaining": "确认相对路径跨既有实例缺少调用方 cwd 的静态链；运行仅为生产解码/解析边界，未真正启动两个实例或 Listary。空格参数需保留原始命令行及引号情形区分调用方配置。"
+    },
+    {
+      "issue": 260,
+      "status": "定向未复现",
+      "evidence": [
+        "run.log：停用私有 watcher 后外部创建 manual-refresh.txt；调用生产 RefreshActiveTab(Explicit)，经 WorkerPool listing 与 ProcessPendingResults 后新文件出现且 loading=false。",
+        "src/app/app_navigation.cpp:1349 显式刷新派发当前路径，目录缓存/选择捕获均走生产代码。"
+      ],
+      "remaining": "原文仅“点击刷新没有反应”，缺具体视图/目录/失败类型；本次覆盖普通 NTFS 目录刷新函数入口，未把函数入口等同于所有按钮命中和虚拟视图验证。"
+    },
+    {
+      "issue": 251,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_main.cpp:995 仅对 DEVICEARRIVAL/DEVICEREMOVECOMPLETE 刷新侧栏；src/fs/src/index/src/app 未检出 DBT_DEVICEQUERYREMOVE/RegisterDeviceNotification 的预释放实现。",
+        "刷新评论虽声称后续修复，不能代替本地设备实测；本次没有可移动盘，也未执行真实回收站或桌面删除。"
+      ],
+      "remaining": "安全弹出需真实可移动设备、句柄/索引状态与取消移除恢复流程；桌面问题需隔离 Shell 回收删除原父子目录场景。仅保留预释放实现缺口，不从缺分支直接断言设备必然不可弹出。"
+    },
+    {
+      "issue": 236,
+      "status": "运行复现",
+      "evidence": [
+        "run.log：非持久化 PlacesCatalog 加入虚构、未连接的 UNC 项，生产 BuildVm/HitTest 找到网络侧栏行，再实际调用 HandleRButtonUp；s.menu 仍为空，无菜单。",
+        "src/app/app_input.cpp:3431 SidebarItem 只为 QuickAccess/Starred/内置快捷项显示菜单；places.cpp:706 只有 PinNetwork，未见对应取消钉住方法。settings_controller.cpp:622 删除网络索引 root，不移除 places.networks。"
+      ],
+      "remaining": "只确认已钉网络项右键/移除入口缺失，不包括局域网自动发现功能诉求；虚构 UNC 未做任何网络访问，实际 SMB 连接不影响此菜单分支。"
+    },
+    {
+      "issue": 226,
+      "status": "缺少条件",
+      "evidence": [
+        "原报告要求服务器离线时弹用户名/密码；src/app/app_navigation.cpp:154 只有 UNC 后台探测，src 未检出生产 CredUI/WNetAddConnection 交互认证流程（测试文件的 WNetAddConnection 不计）。",
+        "没有对用户既有 Z: 网络映射尝试重连、断开、改凭据或复用报告中的服务器。"
+      ],
+      "remaining": "需要可控的要求认证 SMB 服务器、全新凭据会话、UNC 状态与错误码；未把缺交互入口静态迹象扩大成已复现全部服务器访问失败。"
+    },
+    {
+      "issue": 220,
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "src/index/index_client.cpp:63 SpawnHelper 在没有安装服务时允许启动同目录 Pulse.Index.exe 用户进程，这是已有用户级索引路径。",
+        "原文正文为空，作者评论提到总开关；本次没有改变索引设置、停止用户现有进程或启动真实 helper。"
+      ],
+      "remaining": "没安装 Windows 服务不等于禁止用户级索引进程。需用户确认预期及索引总开关的实际状态/版本/命令行；未验证关闭总开关后仍重启的独立故障。"
+    },
+    {
+      "issue": 200,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_commands.cpp:137 CreateNewItem 先用 PromptNewItemName 获取最终名称，再提交创建；不是必然先创建再弹行内改名。",
+        "src/app/app_ops_ui.cpp:43 RevealPendingCreatedItem 有待创建名称及 RemapSelection 的选择/可见恢复机制。原 issue 正文为空。"
+      ],
+      "remaining": "需要报告者实际入口（新建按钮/菜单/Shell 模板）、文件类型与期望命名时序；本次未操作新建对话框，不能把 UI 设计差异判成选择失效。"
+    },
+    {
+      "issue": 199,
+      "status": "缺少条件",
+      "evidence": [
+        "本轮已读 sources/199-readable.json；报告为从 1.0.51 更新失败并卡顿，评论称跳过后仍是旧版本。",
+        "没有在用户安装目录运行更新、替换文件或终止进程。"
+      ],
+      "remaining": "需要失败时下载/替换日志、旧版本原始包、占用文件与可写权限，在隔离更新目录复测卡顿和失败；不从当前版本号推测原因。"
+    },
+    {
+      "issue": 169,
+      "status": "运行复现",
+      "evidence": [
+        "原文明确“打开文件夹，再返回，文件夹位置不是原来的位置”。生产 Tab::NavigateTo→GoBack 清 scroll，RestoreNavigationReturnSelection 只恢复子目录并 EnsureRowVisible。",
+        "run.log：LargeIcons、240 项，父目录选择索引75，进入子目录前 scroll=1800；返回后选择仍75，scroll=1592。"
+      ],
+      "remaining": "确认原视口偏移不保留；没有声称返回时丢失选择或排序次序变化。只覆盖一组 100%/1000×700 网格几何，未按截图尺寸逐像素复刻。"
+    },
+    {
+      "issue": 129,
+      "status": "运行复现",
+      "evidence": [
+        "原文要求“父文件夹位置不在打开前的位置”，并提到铺满窗口时滚到底。与 #169 共用生产导航/返回定位 fixture。",
+        "选中恢复75成功，但同一目录返回 scroll 1800→1592，证实原位置不恢复；app_model.cpp:512 GoBack 清偏移，app_navigation.cpp:1547 仅保证子目录可见。"
+      ],
+      "remaining": "只复现视口位置变化，未复现字面上的“滚到整个目录最底部”；不能据该偏移变化宣称最后一行跳转已重现。"
+    },
+    {
+      "issue": 122,
+      "status": "缺少条件",
+      "evidence": [
+        "已读本轮正文和全部缓存评论：1.0.53 升级后拒绝访问、管理员重装仍失败，也有用户报告等待连接/结束进程后恢复。",
+        "本次未安装/卸载/停止索引服务，未杀用户进程，未用当前环境的正常状态否定历史升级故障。"
+      ],
+      "remaining": "需要原版本/升级残留、服务账户和权限、端点/进程版本与安装错误码，在隔离可回滚环境复现；拒绝访问原因目前未定。"
+    },
+    {
+      "issue": 87,
+      "status": "运行复现",
+      "evidence": [
+        "原文后续评论明确已找到网络项添加方法，但“已添加网络位置右键没有反应、如何删除”。",
+        "与 #236 同一生产右键 fixture：非持久化 pinned UNC 行可命中，HandleRButtonUp 不创建菜单；设置的 RemoveNetwork 仅作用索引 roots。"
+      ],
+      "remaining": "只计入右键/取消钉住故障；不把继承 Explorer 网络发现/WPS 云盘展示等新增能力诉求算 bug。"
+    },
+    {
+      "issue": 58,
+      "status": "静态确认",
+      "evidence": [
+        "run.log：私有目录 a-large 含1000字节文件，b-small 含10字节文件；生产 EnumerateDirectory 的目录 entry.size 均0，生产 EntryLess(Size,Asc) 结果 a-large 在 b-small 前。",
+        "src/app/entry_sort.cpp:87 直接比较 DirEntry.size；folder_sizes_ui.cpp:41 的统计仅为支持显示的视图准备请求，102 只写 folder_size_labels，未把 FolderSizes 的已统计 bytes 投影回排序。"
+      ],
+      "remaining": "这是目录枚举运行边界加统计未接排序的静态确认；未运行“等待真实 FolderSizes 全部完成后 UI 仍错误”的端到端试验，也未覆盖网络手动统计/三种文件夹排序策略。"
+    }
+  ]
+}

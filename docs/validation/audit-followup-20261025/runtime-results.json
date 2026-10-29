@@ -1,0 +1,167 @@
+[
+  {
+    "Name": "index-ingest",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_index_engine_test.exe",
+    "Arguments": [
+      "--ingest-boundary-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\index-ingest.txt"
+  },
+  {
+    "Name": "index-usn",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_index_engine_test.exe",
+    "Arguments": [
+      "--usn-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\index-usn.txt"
+  },
+  {
+    "Name": "index-notify",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_index_engine_test.exe",
+    "Arguments": [
+      "--notify-modified-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\index-notify.txt"
+  },
+  {
+    "Name": "metafile-native",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_metafile_input_test.exe",
+    "Arguments": [],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\metafile-native.txt"
+  },
+  {
+    "Name": "shell-commands",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_launch_regression_test.exe",
+    "Arguments": [
+      "--commands-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell-commands.txt"
+  },
+  {
+    "Name": "shell-launch",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_launch_test.exe",
+    "Arguments": [
+      "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_launch_worker_fixture.exe",
+      "--commands-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell-launch.txt"
+  },
+  {
+    "Name": "shell-namespace",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_query_test.exe",
+    "Arguments": [
+      "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_query_fixture.exe",
+      "--namespace"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell-namespace.txt"
+  },
+  {
+    "Name": "shell-preview-item",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_query_test.exe",
+    "Arguments": [
+      "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_query_fixture.exe",
+      "--preview-item"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell-preview-item.txt"
+  },
+  {
+    "Name": "shell-malformed-result",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_shell_launch_client_test.exe",
+    "Arguments": [
+      "--malformed-results"
+    ],
+    "ExitCode": 1,
+    "OutputLines": 1,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\shell-malformed-result.txt"
+  },
+  {
+    "Name": "context-reuse",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_context_query_timeout_test.exe",
+    "Arguments": [
+      "--reuse"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\context-reuse.txt"
+  },
+  {
+    "Name": "context-timeout",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_context_query_timeout_test.exe",
+    "Arguments": [],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\context-timeout.txt"
+  },
+  {
+    "Name": "ops-followup",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_audit_ops_followup_test.exe",
+    "Arguments": [],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\ops-followup.txt"
+  },
+  {
+    "Name": "session-this-pc",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_json_persistence_test.exe",
+    "Arguments": [
+      "--session-this-pc"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\session-this-pc.txt"
+  },
+  {
+    "Name": "session-preferences",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_json_persistence_test.exe",
+    "Arguments": [
+      "--session-preferences"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\session-preferences.txt"
+  },
+  {
+    "Name": "session-windows",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_session_windows_test.exe",
+    "Arguments": [],
+    "ExitCode": 0,
+    "OutputLines": 14,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\session-windows.txt"
+  },
+  {
+    "Name": "app-lifecycle",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_multiwindow_application_test.exe",
+    "Arguments": [
+      "--app-lifecycle-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\app-lifecycle.txt"
+  },
+  {
+    "Name": "app-session",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_multiwindow_application_test.exe",
+    "Arguments": [
+      "--session-only"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\app-session.txt"
+  }
+]

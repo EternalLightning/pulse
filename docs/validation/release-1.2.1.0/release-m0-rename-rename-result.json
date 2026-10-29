@@ -1,0 +1,10 @@
+{
+  "label": "release-m0-rename",
+  "kind": "rename",
+  "pid": 3260,
+  "samples": 143,
+  "unexpected": 0,
+  "worst_difference": 16,
+  "width": 376,
+  "height": 20
+}

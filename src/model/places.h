@@ -29,6 +29,7 @@ struct Workspace {
     std::vector<std::wstring> pane_paths;
     std::vector<ViewMode> pane_views;
     std::vector<std::pair<std::wstring, int>> frequent; // path, visit count
+    int focused_pane = 0; // Index in the visible split-tree order.
 };
 
 struct ColorTag {
@@ -100,15 +101,19 @@ public:
     void EnsureDefaults();
     bool Load();
     bool Save() const;
+    std::wstring ToJson() const;
 
     int FindWorkspace(const std::wstring& root) const;
+    // Most specific pinned root containing this filesystem path; -1 for virtual/outside paths.
+    int FindWorkspaceForPath(const std::wstring& path) const;
     int PinWorkspace(const std::wstring& root, const std::wstring& name, int layout,
                      const std::vector<std::wstring>& pane_paths,
-                     const std::vector<ViewMode>& pane_views = {});
+                     const std::vector<ViewMode>& pane_views = {}, int focused_pane = 0);
+    bool RenameWorkspace(const std::wstring& root, const std::wstring& name);
     bool UnpinWorkspace(int index);
     bool UnpinWorkspace(const std::wstring& root);
     void UpdateWorkspaceSnapshot(int index, int layout, const std::vector<std::wstring>& pane_paths,
-                                 const std::vector<ViewMode>& pane_views = {});
+                                 const std::vector<ViewMode>& pane_views = {}, int focused_pane = 0);
 
     int FindNetwork(const std::wstring& unc) const;
     int PinNetwork(const std::wstring& unc, const std::wstring& name);
@@ -205,6 +210,7 @@ private:
     void StopTagWriter();
     SaveSnapshot CaptureSaveSnapshot() const;
     static bool SaveSnapshotFile(const SaveSnapshot& snapshot);
+    static std::wstring SnapshotJson(const SaveSnapshot& snapshot);
     void QueuePlacesSave() const;
     void StopPlacesWriter();
     void MarkPlacesDirty() const;

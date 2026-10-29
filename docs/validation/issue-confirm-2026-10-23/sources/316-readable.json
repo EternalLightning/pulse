@@ -1,0 +1,42 @@
+{
+  "number": 316,
+  "title": "文件名重全名光标串位",
+  "body": "windows 11，无法是输入新文件名的数字部分还是中文部分，都会出现光标回退至倒数第二位前的错误，数字时非常频繁，中文时偶而出现。",
+  "url": "https://github.com/jimmgreen/pulse/issues/316",
+  "captured_at": "2026-10-23T03:10:07.136516+00:00",
+  "updated_at": "2026-10-22T06:47:31Z",
+  "comments": [
+    {
+      "body": "是的，这是一个严重的问题。根源是对输入法的支持。",
+      "bodyHTML": "<p dir=\"auto\">是的，这是一个严重的问题。根源是对输入法的支持。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOFIX7tA",
+        "login": "shayoo-chn",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/344325044?v=4",
+        "profileUrl": "https://github.com/shayoo-chn",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/316#issuecomment-6258823791"
+    },
+    {
+      "body": "感谢反馈，已定位并修复。\n\n**原因**：Pulse 的输入框是自己绘制的，处理输入时会暂时关掉系统重绘，这期间系统不会把光标的新位置告诉输入法。输入法拿着旧位置，下一次上屏后就把光标放回旧位置，后面的字于是插到了前面：\n- 有时退到上一个字之前，打数字时尤其明显；\n- 有时直接跳到开头，比如「我的收藏文档」变成「文档收藏我的」。\n\n10 月中旬的修复只处理了「第一次输入替换选中的文件名」这一种情况，所以 1.0.56 里还会出现。\n\n**修复**：每次输入后，都把光标的实际位置报告给输入法。已用微软拼音实机验证：连续输入中文词组、在中文模式下连续输入数字，顺序和光标位置都正确。\n\n将在下个版本发布。如果更新后你那边还出现，请告诉我用的是哪个输入法。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈，已定位并修复。</p>\n<p dir=\"auto\"><strong>原因</strong>：Pulse 的输入框是自己绘制的，处理输入时会暂时关掉系统重绘，这期间系统不会把光标的新位置告诉输入法。输入法拿着旧位置，下一次上屏后就把光标放回旧位置，后面的字于是插到了前面：</p>\n<ul dir=\"auto\">\n<li>有时退到上一个字之前，打数字时尤其明显；</li>\n<li>有时直接跳到开头，比如「我的收藏文档」变成「文档收藏我的」。</li>\n</ul>\n<p dir=\"auto\">10 月中旬的修复只处理了「第一次输入替换选中的文件名」这一种情况，所以 1.0.56 里还会出现。</p>\n<p dir=\"auto\"><strong>修复</strong>：每次输入后，都把光标的实际位置报告给输入法。已用微软拼音实机验证：连续输入中文词组、在中文模式下连续输入数字，顺序和光标位置都正确。</p>\n<p dir=\"auto\">将在下个版本发布。如果更新后你那边还出现，请告诉我用的是哪个输入法。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/316#issuecomment-6334608130"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVIkzVAAqjYyNTg4MjM3OTE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJdZ7gAqjYzMzQ2MDgxMzA="
+  }
+}

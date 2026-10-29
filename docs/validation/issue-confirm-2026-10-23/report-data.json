@@ -1,0 +1,2318 @@
+{
+  "scope": "Unified evidence from initial audit and targeted verification; one authoritative Markdown report.",
+  "source_summary": {
+    "captured_at": "2026-10-23T10:25:50.4204705+08:00",
+    "repository": "jimmgreen/pulse",
+    "local_head": "45fdd54920eb23b1bcca3759bf33a161422327d4",
+    "index_total": 333,
+    "index_open": 251,
+    "index_closed": 82,
+    "selected_candidates": 168,
+    "comments_read": 193,
+    "comments_total": 197,
+    "audited_bug_reports": 150,
+    "classification_counts": {
+      "targeted_implementation_present": 27,
+      "excluded": 18,
+      "unconfirmed": 102,
+      "static_present": 21
+    }
+  },
+  "review_head": "45fdd54920eb23b1bcca3759bf33a161422327d4",
+  "entries": [
+    {
+      "issue": 377,
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "src/common/user_storage.cpp:311 DefaultRoot 使用 FOLDERID_LocalAppData + \\\\Pulse；免安装启动没有自动把配置放到 exe 旁的分支。",
+        "原文说应在当前用户应用数据目录，但所举 C:\\\\Users\\\\lyx\\\\AppData\\\\Local\\\\Pulse 正是该目录；没有提供 exe 旁存储的既有承诺。"
+      ],
+      "remaining": "确认报告者真正预期（当前用户隔离还是随 exe 便携）；本次未更改配置位置，也未将默认存储行为计作 bug。",
+      "group": "filesystem",
+      "detail_status": "行为已确认但缺陷未定",
+      "title": "便携版的配置保存在c盘，疑似bug",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 375,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 374,
+      "status": "已有针对实现（静态）",
+      "evidence": "E04",
+      "remaining": "有回收拒绝后再次确认永久删除的实现；未实测超出回收站配额的大目录。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "windows大文件夹无法删除"
+    },
+    {
+      "issue": 373,
+      "status": "缺少条件",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:71,162-170：openas 通过验证后的 owner 调用 ShellExecuteEx；未发现仅凭 owner 就能保证前台的证据。",
+        "已读取 sources/373-readable.json；原现象是应用选择器后台打开并闪任务栏。"
+      ],
+      "remaining": "需用户桌面上的应用选择器实测及前台窗口/进程记录；本次禁止执行真实 Shell 动作，未打开选择器。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "Windows系统下“选择其他应用”窗口不在前台显示",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 372,
+      "status": "运行复现",
+      "evidence": [
+        "fs_probe.cpp / run.log：1000×700、100% 缩放、真实隐藏 HWND 与生产 compositor；240 项铺满网格。MediumIcons/LargeIcons 在列表范围每 3px 采样，blank 分别 0/0；Row 34253/36029。",
+        "实际生产 HandleLButtonDown 在单元左上边缘均得到 marqueePending=0、dragPending=1。app_input.cpp:2744 仅 Pane/None 启动框选，ui_hit_test.cpp:1025 把整个命中单元返回 Row。"
+      ],
+      "remaining": "只确认 MediumIcons/LargeIcons 满铺时缺起点；ExtraLargeIcons 同一尺寸有 10432 个空白采样点，不能扩大为所有网格模式。未进行前台人工拖动或 DPI 全排列。",
+      "group": "filesystem",
+      "detail_status": "运行复现",
+      "title": "鼠标左键无法在网格布局下多文件布满窗口长摁框选",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 370,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/370-readable.json 明确是 Windows Terminal 1.24.11911.0 的系统 Open in Terminal 扩展，而不是 Pulse 内置入口。",
+        "src/ops/ops_manager.cpp:1140 为内置 wt.exe 入口，不能替代原入口验收；环境只确认 wt.exe alias 存在。"
+      ],
+      "remaining": "需同版本系统终端扩展、真实菜单调用与前台焦点轨迹；本次未执行终端命令。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "”在终端中打开“功能无法自动聚焦到终端窗口",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 368,
+      "title": "在文字渲染选择清晰时，英文会有明显的横向位移问题，导致字母间距有明显偏差",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/typography.cpp:148",
+        "src/ui/ui_compositor.cpp:354",
+        "当前源码检索无“文字渲染-清晰”选择项；本次只渲染默认文本策略。"
+      ],
+      "remaining": "需原字体、12px参数、清晰选项对应上游实现与同场参考截图；默认渲染图不能验证该模式。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\368-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 367,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 362,
+      "status": "已有针对实现（静态）",
+      "evidence": "E02",
+      "remaining": "显式 runas 不再直接运行注册表 command；管理员完整性级别未实测。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "bat 文件以管理员打开不可用"
+    },
+    {
+      "issue": 361,
+      "status": "缺少条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:275-287 当前会由 .exe 扩展解析 ProgID 并枚举其 ContextMenuHandlers，不能照搬旧版完全漏扫 exefile 的归因。",
+        "私有夹具仅枚举 .exe 静态动词：runas/openas；它没有查询完整 COM 菜单。"
+      ],
+      "remaining": "需对同一未固定 exe 比较原生/Pulse COM 菜单及个人固定状态；静态动词无 Pin 不足以确认缺项。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "对于.exe文件，右键添加到开始始终不显示",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 360,
+      "status": "静态确认",
+      "evidence": "F11",
+      "remaining": "WSL UNC 未从后台索引/钉住探测排除；Stopping 后果未复现。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "[Bug] 使用 Pulse 网络位置功能导致 WSL 进程卡在 Stopping 状态无法关闭"
+    },
+    {
+      "issue": 359,
+      "title": "[Bug] 重命名：移动光标，文字不移动，超出看不到",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "bench_data/issue-confirm-ui/rename-start.bmp",
+        "bench_data/issue-confirm-ui/rename-end.bmp",
+        "bench_data/issue-confirm-ui/rename-return.bmp",
+        "194字符、220px编辑区，调用生产 PaintLumaEdit；EM_SETSEL到末尾后END.txt出现，返回0后BEGIN出现。"
+      ],
+      "remaining": "仅单行编辑器横向滚动；本地未实现评论里的六行折行浮卡，未覆盖真实F2图标视图/键盘自动重复/IME。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\359-readable.json",
+      "group": "ui",
+      "detail_status": "定向未复现",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 354,
+      "status": "定向未复现",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "run-direct.log: 256x256 folder icon, red_bounds=[104,104,152,152], artwork48x48 centered",
+        "src/shell_host/shell_query_icons.cpp:24,90 NormalizeJumbo"
+      ],
+      "remaining": [
+        "原问题的具体图标与实际Large/ExtraLarge UI截图",
+        "本例只出现小图案，未复现左下角偏移"
+      ],
+      "group": "preview",
+      "detail_status": "定向未复现原问题",
+      "title": "超大、大图标模式一些图标很小在左下角",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 348,
+      "title": "程序内图标和任务栏图标不一样",
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_main.cpp:2291",
+        "src/app/pulse.rc:6",
+        "原正文空；唯一评论称又一样了。"
+      ],
+      "remaining": "缺少具体两处图标及原始版本/缓存条件；未操控任务栏或图标缓存。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\348-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 345,
+      "status": "已有针对实现（静态）",
+      "evidence": "E03",
+      "remaining": "接管读取并稳定文件选中项；未实测微信“在文件夹中显示”和重复 Explorer 窗口。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "Bug: 微信中打开文件时只打开对应文件夹"
+    },
+    {
+      "issue": 343,
+      "status": "定向未复现",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "desktop.ini custom red icon with non-folder.txt preserved: red_pixels=2304",
+        "src/preview_host/main.cpp:661-668 SIIGBF_ICONONLY"
+      ],
+      "remaining": [
+        "真实IPC/UI及原自定义provider未验收",
+        "未逐像素对照原附件"
+      ],
+      "group": "preview",
+      "detail_status": "定向未复现",
+      "title": "[BUG] 自定义的文件夹图标也会重绘",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 340,
+      "title": "名字太长的重命名显示有问题",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.h:26",
+        "src/ui/ui_pane_list.cpp:1334",
+        "上游评论的多行六行浮卡与本地单行实现不同。"
+      ],
+      "remaining": "原故障主要为图片，没有等价文字步骤；单行首尾滚动已测，未获得原图标布局触发条件。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\340-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 339,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_model.cpp:1142 MakeKnownEntry 调用 SHGetKnownFolderPath；1292 Downloads 使用 FOLDERID_Downloads，并非硬编码用户目录。",
+        "刷新原文评论：作者建议通过快速访问标题右键隐藏内置项，报告者致谢；这不证明重定向 KnownFolder 路径错误已解决。"
+      ],
+      "remaining": "需要报告者已迁移 Downloads 的 KnownFolder 实际返回值、目标路径、侧栏缓存与隐藏状态；未迁移本机 KnownFolder 或偏好进行试验。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "我的下载文件夹已更改路径，Pulse不支持",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 338,
+      "status": "缺少条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:275-287 已有 ProgID 路径；sources/338-readable.json 的旧版评论未作为当前根因。",
+        "src/shell_host/ctx_handlers.cpp:197-218,424-429 的 Send to 子菜单预算/层级仍有风险，但未查询本机完整菜单。"
+      ],
+      "remaining": "需 exe 是否已固定的状态、完整 COM 菜单及 Send to 子菜单；原评论中出现的是取消固定，不能混同固定项缺失。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键菜单不生效，右键EXE没有固定到开始菜单",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 334,
+      "title": "侧边栏只显示部分盘符",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/drive-narrow-wide.png",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/fluent_components.cpp:2328",
+        "生产DrawDriveSidebarItem，同名External Applications (E:)在184px宽只显示External且无省略号；320px可见完整(E:)。"
+      ],
+      "remaining": "复现长卷标裁切和缺省略提示；未改变真实卷标，也未把裁切说成磁盘枚举丢失。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\334-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 333,
+      "title": "win10 Pulse-1.0.56-portable版本的窗口效果切换无效",
+      "status": "缺少条件",
+      "evidence": [
+        "bench_data/issue-confirm-environment/environment.json",
+        "原文上传失败；评论有同版本Win10未复现反馈。"
+      ],
+      "remaining": "环境为26300/26H2，非Windows10；需真实Win10材质切换。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\333-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 331,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 330,
+      "title": "BUG：Windows系统重命名光标会跳到首位",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\330-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 327,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/context_menu_controller.cpp:393-404 把 partial 结果写入 com_cache；启用设置不能证明 handler 生成条目。",
+        "原文只有设置与实际菜单截图，未列具体扩展版本。"
+      ],
+      "remaining": "需具体勾选扩展、目标文件类型和一次菜单 query 的返回/partial 日志；未把共性缓存风险认定为本条根因。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "修改系统右键后，不能正常展示",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 324,
+      "status": "已有针对实现（静态）",
+      "evidence": "E07",
+      "remaining": "FilterEditProc 已处理 VK_ESCAPE 隐藏筛选编辑器；未运行键盘验收。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "我按ctrl+F打开了搜索栏，输入内容之后不能点ESC关闭，只能鼠标去点X关闭，效率很低，是否可以增加按ESC关闭搜索栏？"
+    },
+    {
+      "issue": 321,
+      "status": "缺少条件",
+      "evidence": [
+        "src 中未检出 WM_TOUCH/WM_GESTURE/WM_POINTER 或 RegisterTouchWindow 专用处理；鼠标路径有文件拖动分支。",
+        "未把普通鼠标事件合成测试当成真实触摸拖动复现。"
+      ],
+      "remaining": "需要真实触摸硬件/驱动与文件区手势输入，记录是否触发鼠标提升及 OLE 拖动；未改变系统输入设置。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "触摸适配不太好",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 320,
+      "status": "定向未复现",
+      "evidence": [
+        "run.log：私有 NTFS 目录 a/b/c 文件 10/20/30 字节，选 b 后外部写成 100 字节；真实 DirWatch 的 MODIFIED 事件，经 QueueNotifiesToVisible → BuildNotifyProjections → DrainNotifyPatches/PublishNotifyPatch。",
+        "大小升序重排后 b 从索引 1 到 2，selected_index=2，选中身份仍为 b.txt、size=100。src/app/app_notify_patch.cpp:74 捕获名称，101 重新映射选择。"
+      ],
+      "remaining": "仅覆盖普通目录、单选和大小重排；mtime/分组/多选/内容搜索等其他路径未验证。原报告没有给出确切排序与入口，不据此宣布所有情形修复。",
+      "group": "filesystem",
+      "detail_status": "定向未复现",
+      "title": "[bug] 选中的文件被修改后，选中状态会变成其他文件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 319,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/319-readable.json 要求 Win10 三块不同分辨率屏、笔记本屏居中设主屏并启用用 Pulse 打开文件夹。",
+        "bench_data/issue-confirm-environment/environment.json 只见单块 3440x1440 屏；本次没有改变系统接管。"
+      ],
+      "remaining": "缺三屏拓扑、原 Win10 环境和桌面实际命中/z-order 记录；不能用单屏隐藏窗口替代。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "三屏情况下，桌面有的地方点击不了。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 318,
+      "status": "缺少条件",
+      "evidence": [
+        "run.log：生产 DirWatch → notify publish 对私有 NTFS 文件 FILE_ATTRIBUTE_HIDDEN 设置/清除都收到 action=3；隐藏后过滤、取消隐藏后立即可见，无需手动刷新。",
+        "src/fs/fs_watch.cpp:230 订阅 ATTRIBUTES。"
+      ],
+      "remaining": "原报告指定 Hide Folders；本次没有该产品/过滤驱动及版本，普通 SetFileAttributes 通过不能替代 Hide Folders 的真实事件行为验证。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "好像没有自动刷新呢",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 317,
+      "title": "命名文件文字顺序错乱！",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\317-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 316,
+      "title": "文件名重全名光标串位",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\316-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 314,
+      "status": "缺少条件",
+      "evidence": [
+        "environment.json：可见卷为 NTFS，未提供 exFAT 可移动卷。",
+        "src/index/live_filename_search.h 的实时文件名 fallback 以 UNC 为边界；本地非 NTFS 不会自动走这条 UNC 路径。"
+      ],
+      "remaining": "需要可写 exFAT 卷、隔离索引配置和可追溯计数来源，分别检查卷根添加、子目录添加与搜索；本次未创建/格式化卷或更改真实索引服务。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "exFAT 分区显示索引数量增加，但搜索不到任何文件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 312,
+      "title": "深色模式下，状态栏字体颜色显示异常",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/layout-1600-200-dark.png",
+        "bench_data/issue-confirm-ui/layout-1600-200-light.png",
+        "src/ui/ui_renderer.cpp:790",
+        "200%深色状态栏4 items、Nothing selected、快捷键提示均为可读浅灰色。"
+      ],
+      "remaining": "离屏生产渲染、默认主题/强调色；未复现用户整机材质、原3000px窗口与完整索引/搜索状态。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\312-readable.json",
+      "group": "ui",
+      "detail_status": "定向未复现",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 308,
+      "status": "缺少条件",
+      "evidence": [
+        "与 #314 是同一 exFAT 情境的英文报告；保留为独立 issue 记录，未重复算成独立已复现故障。",
+        "本机 inventory 无 exFAT；UNC fallback 源码边界并不能解释报告中索引计数的具体来源。"
+      ],
+      "remaining": "需要 #314 同样的 exFAT 卷、根配置和查询/计数日志，不能用 NTFS 搜索结果替代。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "exFAT volume shows index count increase but search returns no results",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 304,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：Details+Type 为2组；LargeIcons、MediumIcons、ExtraLargeIcons 保留 Type 选项而 group_count 均为0。",
+        "src/app/app_model.cpp:1666 仍明确以 ViewMode::Details 为分组生成条件；相关模块已从当前源码私有重编译。",
+        "本机静态 folder 动词可见 MiDropExtMenu，但未执行它。"
+      ],
+      "remaining": "仅确认图标分组部分；小米互传报无法启动需真实扩展调用，未确认。没有把模型复现称为完整图标界面视觉验收。",
+      "group": "external",
+      "detail_status": "运行复现",
+      "title": "两个问题：右键【使用小米互传发送】显示【无法启动此菜单命令】；【排序方式】【分组依据】和查看中的【大图标】无法同时生效",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 302,
+      "status": "缺少条件",
+      "evidence": [
+        "原文仅给出 878≈532+345、1.7GB 与其他产品容量对比，没有可复测相同数据集、数据库清单或容量构成。",
+        "没有读取/删除用户索引来人为重建数据；计数相加和文件体积本身不足以证实重复索引。"
+      ],
+      "remaining": "需要同一文件集合、名字/内容索引配置、各数据库文件大小与表/分片去重统计。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "索引文件太大，1.7GB，Everything 索引才 136MB，另一个包括内容索引才 50MB",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 298,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/298-readable.json 混合上传文件对话框诉求与快捷图标缺固定到开始；本次只审计后者。",
+        "私有夹具 .lnk 静态枚举只有 openas；该结果不包含 COM 菜单。"
+      ],
+      "remaining": "需真实 .lnk 的目标/关联/固定状态和完整菜单；上传文件对话框接管不纳入本次 bug 结论。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "第三方软件无法换醒",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 296,
+      "status": "已有针对实现（静态）",
+      "evidence": "E02",
+      "remaining": "runas 有专用动词分支；未实测对应 exe/bat 的 UAC 与完整性级别。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "以管理员身份运行无效"
+    },
+    {
+      "issue": 293,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 292,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/292-readable.json 指定 Win10、Light Image Resizer 7.6.5.176，文件正常而文件夹缺项且多选项丢失。",
+        "src/shell_host/ctx_handlers.cpp:197-218 会压平一层并跳过更深子菜单，这只是相关风险。"
+      ],
+      "remaining": "未建立该扩展版本安装条件；需同文件/文件夹菜单对照及层级返回，不能仅由通用裁剪风险断定同因。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键文件夹不显示 Light Image Resizer（文件正常）",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 290,
+      "status": "缺少条件",
+      "evidence": [
+        "原文称下载文件夹或曾打开的某个标签稳定崩溃，但未给目录内容、标签状态、dump 或崩溃栈。",
+        "本次隐藏模型 fixture 的普通导航不承担这些目录内容，也不能反证报告者的崩溃。"
+      ],
+      "remaining": "需要触发目录的隔离样本/会话状态与崩溃转储，再对原入口复测；不猜测缩略图、Shell 或索引为根因。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "选择某一个文件夹标签的时候就闪退",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 288,
+      "status": "静态确认",
+      "evidence": "F13",
+      "remaining": "有传统 handler 时 MSIX-only 扩展缺激活路径，和报告机制同类；Beyond Compare 5.2.2 未实装验证。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "pulse中右键菜单中没有beyond compare"
+    },
+    {
+      "issue": 286,
+      "status": "已有针对实现（静态）",
+      "evidence": "E17",
+      "remaining": "已有默认图片邻图会话；Win10 照片应用的下一张按钮未操作验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "查看图片bug"
+    },
+    {
+      "issue": 283,
+      "title": "使用bug",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/ui_pane_list.cpp:1334",
+        "src/ui/edit_host.h:26",
+        "重命名框随名称列/图标单元格分配宽度；没有按输入内容增长或用户独立调整输入框宽度。"
+      ],
+      "remaining": "第1项固定宽度仅为行为事实，不足以确认缺陷；第2项外部复制和暂存托盘优先级、第3项真实U盘删除未在UI组运行验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\283-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 280,
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：默认隔离 folder 菜单含 enabled CmdPinQuickAccess。",
+        "src/app/quick_access.cpp:26-47 生成该条目；src/app/app_commands.cpp:805,1164 为文件项/背景菜单接入点。"
+      ],
+      "remaining": "仅验证默认内存设置下的菜单构建，没有打开真实菜单、执行固定或写入偏好；原报告个人 item_enabled 和选择对象仍未复测。",
+      "group": "external",
+      "detail_status": "定向未复现",
+      "title": "[BUG] 右键菜单无法显示固定到快速访问",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 279,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/settings_controller.cpp:598 NetworkAction 调用 pick_folder；src/index/network_index.cpp:745 对不能规范化为网络根的位置返回明确 UNC 提示。",
+        "刷新原文作者评论谈本地目录误选与选择框记忆；当前代码存在拒绝本地目录的边界，但没有实际操作原目录选择框。"
+      ],
+      "remaining": "需要隔离配置下的真实服务器共享/映射网络盘，实测选择框最近位置、确认后能否继续添加；不能把本地目录被拒绝等同于原循环弹框已复现。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "[BUG] 添加网络位置时 即使选择好了搜索索引文件夹 任弹出并无法添加网络位置",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 278,
+      "status": "缺少条件",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:162-170 有 openas/owner 调用；与 #373 同类前台现象。",
+        "sources/278-readable.json 主要为截图，缺应用关联与交互时序。"
+      ],
+      "remaining": "需原系统应用选择器、实际 foreground owner 和任务栏状态；本次未执行真实 Shell 打开方式动作。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "打开方式选择其他应用的选择框没在前台打开",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 277,
+      "status": "静态确认",
+      "evidence": "F10",
+      "remaining": "子菜单被压平且更深层被跳过；未安装 FileMenuTools 验证菜单全貌。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "FileMenuTools菜单异常"
+    },
+    {
+      "issue": 276,
+      "status": "已有针对实现（静态）",
+      "evidence": "E04",
+      "remaining": "回收站不接受时已有再次确认永久删除分支；附件场景未复现。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "文件夹内容过大导致删除失败"
+    },
+    {
+      "issue": 275,
+      "status": "缺少条件",
+      "evidence": [
+        "原文指定 Sangfor 通过 subst 挂载占位盘；错误 5/LocalSystem 权限解释来自报告中的 AI 推测。",
+        "当前 inventory 不提供该占位盘与服务账户可见性对照，本次未创建盘符或修改服务配置。"
+      ],
+      "remaining": "需要 Sangfor/对应 subst 盘、普通用户与索引服务账户 QueryDosDevice/卷枚举和配置错误码；未接受权限推测为根因。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "占位盘符影响索引生成",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 274,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/274-readable.json 为 Git Commit 偶发长延迟，环境 Windows 11 26300.9711、125% 缩放。",
+        "src/app/context_menu_controller.cpp:289-299 调用 operations_.invoke；并非仅菜单枚举慢这一种原因。"
+      ],
+      "remaining": "需相同 Git Shell 扩展版本、仓库状态及 query/invoke/进程就绪分段计时；本次不调用 Git Commit。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键项目文件夹，选择Git Commit后，会卡很长时间才能出现git提交窗口",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 273,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 272,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读正文视频描述",
+        "QuickPreviewWindow存在Show/Update/Close和动画重置路径"
+      ],
+      "remaining": [
+        "原视频逐帧对照",
+        "可复现的预览开关顺序和动画捕获"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "预览动画存在异常",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 270,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/270-readable.json 为启用接管后已有 Pulse 窗口时 Win+E/任务栏 Explorer 仍弹忙碌提示。",
+        "src/app/explorer_window_takeover.cpp:140-154 和 explorer_takeover_policy.h 有支持过滤与稳定期，不能据此证明真实启动路径正常。"
+      ],
+      "remaining": "需已授权的系统接管、Win+E 与 Explorer 启动进程/窗口时间线；本次没有改变接管或发送系统打开动作。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "pulse接管后，在打开pulse窗口的情况下，点击任务栏的资源管理器和Win+E还是会忙碌弹窗，而不是直接切到pulse。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 266,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读正文截图与失效描述",
+        "存在失败重试和RetireStalledApartment机制"
+      ],
+      "remaining": [
+        "原文件类型、HRESULT、宿主及provider前后状态",
+        "本轮私有IPC失败不能代替原问题复现"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "预览经常失效",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 265,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/265-readable.json 指定上次标签+关闭最后标签时关闭窗口，再 Ctrl+W/Win+E 会恢复多窗口。",
+        "src/app/session.cpp:421-457 支持多窗口序列化；src/app/app_main.cpp:1858-1860 另有退出偏好保存路径。"
+      ],
+      "remaining": "需受控的多窗口会话文件、启动偏好及完整关闭/重新打开步骤；本次不读写用户会话或改变启动偏好。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "【bug】关闭窗口后win+E再打开会显示多窗口",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 263,
+      "status": "静态确认",
+      "evidence": [
+        "src/app/app_main.cpp:2280 将原始 open_path 直接 ForwardOpenPath；single_instance_coordinator.cpp:57 的 COPYDATA 只序列化路径、不携带发送者 cwd；external_open.cpp:28 在接收进程解释相对路径。",
+        "run.log：生产 DecodeOpenPath 保留 '.'；在私有接收进程 cwd 下调用生产 ResolveOpenTarget('.') 得到接收进程目录。未与用户正在运行的单实例通信。",
+        "app_main.cpp:2260 对最后一个未加引号空格路径片段覆盖 shot.path；未重演 Listary 具体命令行。"
+      ],
+      "remaining": "确认相对路径跨既有实例缺少调用方 cwd 的静态链；运行仅为生产解码/解析边界，未真正启动两个实例或 Listary。空格参数需保留原始命令行及引号情形区分调用方配置。",
+      "group": "filesystem",
+      "detail_status": "静态确认",
+      "title": "[Bug] 命令行参数解析有问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 262,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读原文宿主不可用提问",
+        "本轮私有宿主管道超时另见run-ipc.log"
+      ],
+      "remaining": [
+        "原安装布局和宿主版本/文件",
+        "错误码和安全软件信息",
+        "本轮环境失败不判定为产品缺陷"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "小问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 260,
+      "status": "定向未复现",
+      "evidence": [
+        "run.log：停用私有 watcher 后外部创建 manual-refresh.txt；调用生产 RefreshActiveTab(Explicit)，经 WorkerPool listing 与 ProcessPendingResults 后新文件出现且 loading=false。",
+        "src/app/app_navigation.cpp:1349 显式刷新派发当前路径，目录缓存/选择捕获均走生产代码。"
+      ],
+      "remaining": "原文仅“点击刷新没有反应”，缺具体视图/目录/失败类型；本次覆盖普通 NTFS 目录刷新函数入口，未把函数入口等同于所有按钮命中和虚拟视图验证。",
+      "group": "filesystem",
+      "detail_status": "定向未复现",
+      "title": "点击刷新没有反应",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 259,
+      "title": "重命名的问题",
+      "status": "排除",
+      "evidence": [
+        "原文仅希望重命名输入框随名称变长动态增加宽度，属于交互建议。"
+      ],
+      "remaining": "仅保留编号对账，不计故障；不展开建议。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\259-readable.json",
+      "group": "ui",
+      "detail_status": "排除（交互建议）",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 251,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_main.cpp:995 仅对 DEVICEARRIVAL/DEVICEREMOVECOMPLETE 刷新侧栏；src/fs/src/index/src/app 未检出 DBT_DEVICEQUERYREMOVE/RegisterDeviceNotification 的预释放实现。",
+        "刷新评论虽声称后续修复，不能代替本地设备实测；本次没有可移动盘，也未执行真实回收站或桌面删除。"
+      ],
+      "remaining": "安全弹出需真实可移动设备、句柄/索引状态与取消移除恢复流程；桌面问题需隔离 Shell 回收删除原父子目录场景。仅保留预释放实现缺口，不从缺分支直接断言设备必然不可弹出。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "打开后，无法退出移动硬盘，桌面的文件夹也没有办法在桌面上删除",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 250,
+      "status": "静态确认",
+      "evidence": "F02",
+      "remaining": "最终参数分支仍把 -Embedding 等作为目录。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "app: last command-line argument is treated as a folder path without a '-' filter (OLE switches become folders)"
+    },
+    {
+      "issue": 249,
+      "status": "已有针对实现（静态）",
+      "evidence": "E03",
+      "remaining": "明确过滤非文件系统 namespace；手机窗口本次未实际连接验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "Takeover takes over shell-namespace windows it cannot render (phone over MTP)"
+    },
+    {
+      "issue": 248,
+      "status": "静态确认",
+      "evidence": "F02",
+      "remaining": "仅确认 OLE 参数误解析；采用评论更正，Control Panel 触发来源是第三方残留。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "Control Panel launches Pulse with -Embedding, which is parsed as a folder path (system32\\-Embedding)"
+    },
+    {
+      "issue": 246,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/context_menu_prefs.cpp:139-151 保存 seen 项，352-390 合并旧键；旧版评论声称迁移到实时系统列表不自动构成本地运行证据。",
+        "本次没有 Avira 卸载前后目录/注册残留或 Notepad++ 版本对照。"
+      ],
+      "remaining": "需卸载前后实际扩展注册/设置目录快照及 Notepad++ 安装类型；未将保留 seen 机制直接认定为当前 UI 一定残留。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键菜单问题",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 245,
+      "status": "静态确认",
+      "evidence": [
+        "src/fs/fs_enum.cpp:468-488 的 This PC 只按 GetLogicalDrives 生成盘符项；525-556 目录路径只走 NT/Win32 枚举。",
+        "src/app/app_model.cpp:1322 设备列表仍为逻辑盘；对 src/app、src/fs 检索未找到 PortableDevice/WPD/MTP/EnumObjects 枚举后端。",
+        "src/app/explorer_window_takeover.cpp:140-154 拒绝非文件系统 namespace；过滤接管并未实现手机浏览。"
+      ],
+      "remaining": "确认当前缺标准 MTP namespace 枚举/浏览能力；未连接 Android 手机复现空目录，不能扩大为所有 USB 盘模式都不支持。上游将发布支持的评论不是本地实现证据。",
+      "group": "external",
+      "detail_status": "静态确认",
+      "title": "安卓手机通过数据线接入电脑后，Pulse读取有问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 241,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/241-readable.json 未提供 Listary 版本/配置；评论对适配责任有不同判断。",
+        "没有通过改注册表、伪装窗口类或启动外部软件来猜测兼容。"
+      ],
+      "remaining": "需 Listary 的实际版本、跳转入口/适配配置和当前窗口识别记录；现有材料不能判断 Pulse 或 Listary 谁负责。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "Listary不会自动跳转的问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 240,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 237,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/237-readable.json 只说明 NAS 映射盘复制进去后无法删除，缺设备、协议和返回码。",
+        "环境虽有 Z: Network/NTFS，但不能据此认定与报告相同 NAS。src/ops/delete_operation.cpp:575 有回收失败后的永久删除授权流程。"
+      ],
+      "remaining": "需相同 NAS 设备/映射协议/权限及隔离测试文件的删除返回；本次未删除网络映射盘数据。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "nas映射的磁盘，文件无法删除",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 236,
+      "status": "运行复现",
+      "evidence": [
+        "run.log：非持久化 PlacesCatalog 加入虚构、未连接的 UNC 项，生产 BuildVm/HitTest 找到网络侧栏行，再实际调用 HandleRButtonUp；s.menu 仍为空，无菜单。",
+        "src/app/app_input.cpp:3431 SidebarItem 只为 QuickAccess/Starred/内置快捷项显示菜单；places.cpp:706 只有 PinNetwork，未见对应取消钉住方法。settings_controller.cpp:622 删除网络索引 root，不移除 places.networks。"
+      ],
+      "remaining": "只确认已钉网络项右键/移除入口缺失，不包括局域网自动发现功能诉求；虚构 UNC 未做任何网络访问，实际 SMB 连接不影响此菜单分支。",
+      "group": "filesystem",
+      "detail_status": "运行复现",
+      "title": "对局域网网络文件夹支持不是很友好",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 235,
+      "status": "静态确认",
+      "evidence": "F04",
+      "remaining": "主窗口外拖没有允许 LINK，LINK-only 目标无可接受效果。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "将PDF文件拖放到外部应用时无反应"
+    },
+    {
+      "issue": 234,
+      "title": "重命名鼠标跳转问题",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "原文“鼠标跳转”含义不明；评论按输入光标解读。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。 实际鼠标指针本身是否跳动仍需明确步骤。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\234-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 230,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/230-readable.json 的标题/评论明确 Windows 预览版 26340.9616 升级后 Win+E 回到 Explorer。",
+        "当前环境 inventory 为26300.9457，与原 OS build 不同。src/app/default_file_manager.cpp:73-76 有独立 Directory/WinE 项。"
+      ],
+      "remaining": "需26340.9616及实际接管注册/Win+E链路；本次未更改注册表或系统接管，不能确认是否为 OS 回归。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "用 Pulse 代替文件资源管理器的开关都打开了了，win+E打开的是Windows资源管理器，不知道是不是Windows预览版的原因，26340.9616",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 229,
+      "status": "运行复现",
+      "category": "runtime_reproduced",
+      "evidence": [
+        "同路径EXE红蓝资源实际变更；生产ConvertShellIconPixels转像素",
+        "friend Seed注入红缓存后，生产RequestExact仍返回相同index/hash11229969851736765315",
+        "从当前蓝资源新建独立cache hash11291544229467526019",
+        "src/ui/shell_icons.cpp:231-233,424-427只按path命中；全src未找到文件变化后调用图标缓存按路径失效/Clear/Reset"
+      ],
+      "remaining": [
+        "Seed绕过worker和IPC",
+        "没有端到端验证CSC/外部更新/监视通知/UI",
+        "本组运行复现限定生产缓存命中逻辑"
+      ],
+      "group": "preview",
+      "detail_status": "缓存命中边界运行复现；静态确认失效缺口",
+      "title": "C#编译的程序修改图标后不变",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 228,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/228-readable.json 提供 Explorer→VSLauncher→devenv 和禁用 AnyCode 后转 Git GUI 的原环境轨迹，作者自己仍称根因未定。",
+        "src/app/default_file_manager.cpp:73 的 Directory 组及112-221备份/冲突保护路径需要结合原注册状态判断。"
+      ],
+      "remaining": "需原 HKCU/HKLM Directory 默认动作、隐藏标记、关联合并和 Procmon 重放；本次未临时禁用 AnyCode、修改注册表或启动桌面默认动作。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "[Bug] 设置为默认文件管理器后，桌面双击文件夹错误触发第三方程序",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 226,
+      "status": "缺少条件",
+      "evidence": [
+        "原报告要求服务器离线时弹用户名/密码；src/app/app_navigation.cpp:154 只有 UNC 后台探测，src 未检出生产 CredUI/WNetAddConnection 交互认证流程（测试文件的 WNetAddConnection 不计）。",
+        "没有对用户既有 Z: 网络映射尝试重连、断开、改凭据或复用报告中的服务器。"
+      ],
+      "remaining": "需要可控的要求认证 SMB 服务器、全新凭据会话、UNC 状态与错误码；未把缺交互入口静态迹象扩大成已复现全部服务器访问失败。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "无法访问服务器",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 225,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：普通文件夹选择能得到规范化文件路径；切换同一 snapshot 到 ArchiveViewPath 后 SelectedCount=1 但 EntryFullPath/SelectedFullPaths 都为空。",
+        "src/app/app_runtime.cpp:2242,2254-2263 清空压缩包来源；src/app/app_input.cpp:472-473 在 OLE 之前对空路径返回。"
+      ],
+      "remaining": "确认内置压缩包视图直接拖出的阻断；没有真实 DoDragDrop/解压写盘，也没有验证第三方压缩软件虚拟 IDataObject 拖入。原文另外两项建议不纳入故障结论。",
+      "group": "external",
+      "detail_status": "运行复现",
+      "title": "三个问题，希望能快速处理",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 222,
+      "status": "已有针对实现（静态）",
+      "evidence": "E03",
+      "remaining": "已有接管文件选中状态和稳定等待；浏览器实际调用链未验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "不能自动定位到文件"
+    },
+    {
+      "issue": 220,
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "src/index/index_client.cpp:63 SpawnHelper 在没有安装服务时允许启动同目录 Pulse.Index.exe 用户进程，这是已有用户级索引路径。",
+        "原文正文为空，作者评论提到总开关；本次没有改变索引设置、停止用户现有进程或启动真实 helper。"
+      ],
+      "remaining": "没安装 Windows 服务不等于禁止用户级索引进程。需用户确认预期及索引总开关的实际状态/版本/命令行；未验证关闭总开关后仍重启的独立故障。",
+      "group": "filesystem",
+      "detail_status": "行为已确认但缺陷未定",
+      "title": "绿色版没安装索引服务但也会启动pulse.index.exe",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 218,
+      "status": "已有针对实现（静态）",
+      "evidence": "E13",
+      "remaining": "报告中的每请求 Deadline 短命线程已经不在；原泄漏因果存在争议，未做句柄时间序列。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "[稳定性/资源泄漏] NetworkAgentClient 每秒轮询导致 Timer 与 Semaphore 内核句柄持续泄漏"
+    },
+    {
+      "issue": 214,
+      "status": "缺少条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:253-292 枚举传统 handlers；src/shell_host/main.cpp:1141 起逐 handler 路径存在特定包扩展覆盖风险。",
+        "sources/214-readable.json 的修复声明用 Bandizip 代测，评论也说未装 WinRAR/7-Zip；不能用它验收原软件。"
+      ],
+      "remaining": "需报告者 WinRAR/7-Zip 实际版本、传统/MSIX安装类型和文件夹菜单；本次未安装或调用压缩扩展。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键还是没有winrar",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 213,
+      "status": "静态确认",
+      "evidence": "F08",
+      "remaining": "alpha 类型仍被丢弃；7Z 小图标与 PSD 失效不统一认定为同因。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "文件图标和缩略图错误"
+    },
+    {
+      "issue": 212,
+      "title": "手势软件功能失效",
+      "status": "缺少条件",
+      "evidence": [
+        "docs/validation/issue-confirm-2026-10-23/sources/212-readable.json"
+      ],
+      "remaining": "需Wgestures实际版本和真实手势注入环境；未安装/修改软件或用模拟消息声称兼容。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\212-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 211,
+      "title": "重命名文件的时候，录入文字的过程中，光标会自动往前跳",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "维护者早期修复评论与后续同族报告均已阅读；评论不是本次验收证据。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\211-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 209,
+      "status": "静态确认",
+      "evidence": [
+        "与 #245 同源：src/fs/fs_enum.cpp:468-488,525-556 只支持逻辑盘/NT/Win32 路径，src/app/app_model.cpp:1322 同为逻辑盘。",
+        "sources/209-readable.json 的手机支持评论属于上游将发布声明；当前没有该后端/设备分组实现。"
+      ],
+      "remaining": "确认标准 Android MTP 设备不能由当前枚举路径提供；未用实体手机复现，评论另提 Send to 仍需完整菜单检查。",
+      "group": "external",
+      "detail_status": "静态确认",
+      "title": "电脑接入Android手机无法正常识别",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 208,
+      "status": "已有针对实现（静态）",
+      "evidence": "E16",
+      "remaining": "本地存在独立 drive_label_rename 模块；网络映射盘显示名重命名未实测。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "此电脑中，网络磁盘的磁盘名称无法修改"
+    },
+    {
+      "issue": 205,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/205-readable.json 为 Bandizip 菜单缺失，原文只有截图、未注明版本；维护者测试机的修复声明不是当前安装证据。",
+        "传统 handler 枚举路径存在，包扩展则有原审计 F13 的条件性风险。"
+      ],
+      "remaining": "需 Bandizip 具体版本/安装类型、目标文件类型及完整原生/Pulse菜单对照；未执行扩展动作。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "对 Bandzip 右键菜单不支持",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 200,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_commands.cpp:137 CreateNewItem 先用 PromptNewItemName 获取最终名称，再提交创建；不是必然先创建再弹行内改名。",
+        "src/app/app_ops_ui.cpp:43 RevealPendingCreatedItem 有待创建名称及 RemapSelection 的选择/可见恢复机制。原 issue 正文为空。"
+      ],
+      "remaining": "需要报告者实际入口（新建按钮/菜单/Shell 模板）、文件类型与期望命名时序；本次未操作新建对话框，不能把 UI 设计差异判成选择失效。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "新建文件(夹)后不能自动选中重命名",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 199,
+      "status": "缺少条件",
+      "evidence": [
+        "本轮已读 sources/199-readable.json；报告为从 1.0.51 更新失败并卡顿，评论称跳过后仍是旧版本。",
+        "没有在用户安装目录运行更新、替换文件或终止进程。"
+      ],
+      "remaining": "需要失败时下载/替换日志、旧版本原始包、占用文件与可写权限，在隔离更新目录复测卡顿和失败；不从当前版本号推测原因。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "关于无论咋样都更新不了新版本的问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 197,
+      "status": "静态确认",
+      "evidence": "F09",
+      "remaining": "会话窗口坐标未按当前显示器约束。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "应用窗口位置bug"
+    },
+    {
+      "issue": 196,
+      "status": "已有针对实现（静态）",
+      "evidence": "E10",
+      "remaining": "有 settings scrollbar 命中及拖动计算分支；未视觉操作。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "设置页的滚动条存在异常，只能通过滚轮滚动无法通过左键拉动"
+    },
+    {
+      "issue": 194,
+      "title": "小窗模式下，会出现顶部标签页与设置、明暗按钮的UI重叠",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/visual-manifest.json",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/ui_renderer_internal.h:1418",
+        "19标签，320/420/600/800 DIP，100%/200%，深浅16帧；48个最小化/最大化/关闭命中检查全部为1。标题栏设置/主题宽度为0，设置在侧栏。"
+      ],
+      "remaining": "当前生产自绘布局未见原述标签与顶部设置/主题重叠；离屏测试未替代真实窗口原生非客户区验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\194-readable.json",
+      "group": "ui",
+      "detail_status": "定向未复现",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 193,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 192,
+      "status": "静态确认",
+      "evidence": "F06",
+      "remaining": "发送到初始化/空目标失效条件仍在；桌面目标本机未验证。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "没有右键：发送到桌面快捷方式的选项"
+    },
+    {
+      "issue": 188,
+      "title": "反馈几个bug和建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\188-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 187,
+      "title": "反馈几个bug和建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\187-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 186,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\186-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 185,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\185-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 184,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "PreviewHandlerHost使用WS_POPUP overlay和条件HWND_TOPMOST",
+        ".srt未列入原生文本白名单"
+      ],
+      "remaining": [
+        "真实srt关联provider",
+        "打开交互面板后的重叠和输入验证",
+        "不能由overlay设计单独推出原故障"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "[BUG反馈] 选中 .srt 文件时右侧详细信息侧边栏异常遮挡其他界面元素",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 183,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\183-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 181,
+      "status": "静态确认",
+      "category": "static_confirmed_behavior",
+      "evidence": [
+        "src/app/app_main.cpp:1013-1030传递激活状态",
+        "src/ui/preview_handler_host.cpp:545-550显式SWP_HIDEWINDOW",
+        "src/ui/preview_handler_host.cpp:863-873,1097-1103状态发布与同identity重放位置"
+      ],
+      "remaining": [
+        "真实provider切焦未运行",
+        "显式隐藏为overlay置顶策略，不等于provider失效",
+        "是否符合产品预期仍待决定；不泛化到原生预览"
+      ],
+      "group": "preview",
+      "detail_status": "静态确认同类失焦隐藏行为（限IPreviewHandler overlay）",
+      "title": "[bug] 预览文件在窗口焦点切出pulse后不显示",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 179,
+      "status": "已有针对实现（静态）",
+      "evidence": "E05",
+      "remaining": "普通 HDROP 和虚拟 Shell 文件均有路径；桌面剪切粘贴尚未实操。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "【BUG反馈】在桌面剪切复制文件，没办法粘贴到pulse文件夹里"
+    },
+    {
+      "issue": 176,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/176-readable.json 为设置开关与实际菜单不同；评论称实时目录重构，不能代替本地菜单返回验证。",
+        "src/app/context_menu_controller.cpp:393-404 的 partial 缓存和 context_menu_prefs.cpp:139-151 的 seen 项均需实际配置才可归因。"
+      ],
+      "remaining": "需具体勾选项目、handler注册、返回菜单与设置数据的同一时点快照；本次只读源码，没有改用户配置。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键菜单设置与实际显示不一致",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 175,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/175-readable.json 描述 Git 菜单经常自动关闭，未提供事件步骤/扩展版本。",
+        "src/ui/fluent_menu.cpp:365-373,1880 有失活关闭路径，不能仅凭存在关闭逻辑认定异常。"
+      ],
+      "remaining": "需菜单打开到关闭的激活/焦点/异步完成时间线和 Git 扩展状态；本次未打开真实 Git 菜单或模拟系统失焦。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "右键git菜单经常被自动关掉",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 174,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 173,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：普通Details共4列，Size右外缘x=1062命中ColumnHeader(56)，内部Type/Size分界命中ColumnDivider(57)。",
+        "src/ui/ui_hit_test.cpp:896 只检查count-1个内部边；src/ui/ui_pane_list.cpp:567 拒绝末列外缘索引，私有调用返回原始宽度数组。"
+      ],
+      "remaining": "确认末列右外缘不能向左拖；未对原截图1411x753进行像素复现，也没有物理鼠标拖动或安装版验收。",
+      "group": "external",
+      "detail_status": "运行复现",
+      "title": "列宽问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 172,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 171,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 170,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 169,
+      "status": "运行复现",
+      "evidence": [
+        "原文明确“打开文件夹，再返回，文件夹位置不是原来的位置”。生产 Tab::NavigateTo→GoBack 清 scroll，RestoreNavigationReturnSelection 只恢复子目录并 EnsureRowVisible。",
+        "run.log：LargeIcons、240 项，父目录选择索引75，进入子目录前 scroll=1800；返回后选择仍75，scroll=1592。"
+      ],
+      "remaining": "确认原视口偏移不保留；没有声称返回时丢失选择或排序次序变化。只覆盖一组 100%/1000×700 网格几何，未按截图尺寸逐像素复刻。",
+      "group": "filesystem",
+      "detail_status": "运行复现",
+      "title": "文件夹位置问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 166,
+      "status": "已有针对实现（静态）",
+      "evidence": "E10",
+      "remaining": "设置滚动条已有拖动分支；远程触摸拖文件另属触摸验证范围。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "设置的滚动条不能拖动"
+    },
+    {
+      "issue": 165,
+      "status": "缺少条件",
+      "evidence": [
+        "src/ops/ops_manager.cpp:1140-1148 的内置入口使用 wt.exe -d；环境能找到 WindowsApps/wt.exe alias。",
+        "sources/165-readable.json 评论里作者说命令行可运行，不能简单归因为未安装Terminal。"
+      ],
+      "remaining": "需原会话环境、内置菜单实际启动错误/HRESULT与alias可执行行为；本次未打开终端，不把alias存在当启动成功。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "我的还是不能右键打开终端呀,可以用自带的,不能使用pulse的",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 162,
+      "title": "[BUG]重命名时首次输入时输入焦点丢失且选词后光标移动到最左侧；[建议]预览文件时按照真实文件头进行判定。",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "原文34MB GIF无本地原样本；按实际文件头判定的建议单独排除。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。 大GIF失败需原样本和预览宿主验证，UI组未宣称修复。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\162-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 154,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/154-readable.json 的评论确认截图关联为 NanaZip；原报告要求zip解压菜单。",
+        "私有静态 .zip 枚举只有 openwith/openas，不包含 COM；传统/包扩展覆盖差异仍需具体安装。"
+      ],
+      "remaining": "需 NanaZip版本及zip完整菜单，不能用本机静态动词缺 Extract 或维护者Bandizip测试宣称复现/解决。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "新版本中，zip文件右键时找不到解压缩选项",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 151,
+      "title": "快捷方式显示为*.lnk",
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "bench_data/issue-confirm-ui/layout-1600-200-dark.png",
+        "src/ui/ui_renderer_internal.h:169",
+        "生产展示模型有意保留on-disk .lnk；隔离DirEntry名称Example shortcut.lnk在截图中保留后缀。"
+      ],
+      "remaining": "只确认显示层现象；产品约定未定，不计新增bug。未创建/打开真实Shell快捷方式或修改隐藏扩展名偏好。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\151-readable.json",
+      "group": "ui",
+      "detail_status": "行为已确认但缺陷未定",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 150,
+      "status": "已有针对实现（静态）",
+      "evidence": "E16",
+      "remaining": "tags_loaded 区分空列表与从未保存，已删除默认标签不会因空而自动恢复。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "[bug]关于标签问题"
+    },
+    {
+      "issue": 147,
+      "status": "定向未复现",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "生产SelectedQuickPreviewItem返回含空格绝对路径",
+        "生产CollectFilterMatches对两项仅保留匹配项",
+        "src/app/app_input.cpp:3693-3694空格调用ToggleQuickPreview"
+      ],
+      "remaining": [
+        "未实发空格或打开实际预览",
+        "搜索框输入路由、焦点、流式结果、内容分页未验收"
+      ],
+      "group": "preview",
+      "detail_status": "定向未复现模型/路径部分",
+      "title": "搜索结果中没有过滤掉不符合要求的文件，以及搜索出来的文件无法空格预览。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 146,
+      "status": "已有针对实现（静态）",
+      "evidence": "E21",
+      "remaining": "空路径 ParentPath 安全返回，未发现报告所述非法路径异常；未真实点击回归。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] 此电脑/磁盘根目录点击顶部「向上一级」按钮，程序崩溃退出（附崩溃转储，1.0.53 必现）"
+    },
+    {
+      "issue": 142,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "src/preview_host/main.cpp:304,753-778存在WIC及图片回退路径"
+      ],
+      "remaining": [
+        "原图尺寸/编码/位深",
+        "解码错误、内存和延迟测量",
+        "未用普通小图片代替原件"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "图片预览有卡顿，且大图片预览不显示",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 140,
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/shell_verbs.cpp:77 有print显示名称；私有静态 .png 枚举5项没有print。",
+        "该夹具没有构造原生或Pulse COM菜单，因此没有证实最终图片菜单缺打印。"
+      ],
+      "remaining": "需原图片关联、png/报告图片类型以及完整COM菜单对照；本次未调用打印。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "对图片文件右键没有打印按钮",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 138,
+      "title": "暗色设置单选按钮选中文字看不清",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/ui_settings_core.cpp",
+        "bench_data/issue-confirm-environment/environment.json"
+      ],
+      "remaining": "原文指定Win10暗色单选框；当前非Win10环境，普通深色目录截图不代替设置单选控件验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\138-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 136,
+      "title": "建议优化重命名功能的位置定位，降低灵敏度和取消自动回正",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/rename-end.bmp",
+        "bench_data/issue-confirm-ui/rename-click-middle.bmp",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/lumatext_renderer.cpp:833",
+        "生产CallLumaEditMouse处理编辑器中部单击：caret由194转182，重绘后尾部_END.txt消失；EditScrollX按每次caret从0重新算偏移，已有横向位置不保持。"
+      ],
+      "remaining": "仅长名鼠标点选后视口跳动子步骤；未复现原中文文件名整段拖动和灵敏度，没有真实桌面全局输入。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\136-readable.json",
+      "group": "ui",
+      "detail_status": "运行复现",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 135,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "src/ui/video_preview.cpp:328 MFPlay播放路径",
+        "已将TF删除与视频卡顿分开记录"
+      ],
+      "remaining": [
+        "TF介质与删除原错误码",
+        "原卡顿视频及播放测量",
+        "本组未做TF删除"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "删除文件BUG及空格预览视频文件bug",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 129,
+      "status": "运行复现",
+      "evidence": [
+        "原文要求“父文件夹位置不在打开前的位置”，并提到铺满窗口时滚到底。与 #169 共用生产导航/返回定位 fixture。",
+        "选中恢复75成功，但同一目录返回 scroll 1800→1592，证实原位置不恢复；app_model.cpp:512 GoBack 清偏移，app_navigation.cpp:1547 仅保证子目录可见。"
+      ],
+      "remaining": "只复现视口位置变化，未复现字面上的“滚到整个目录最底部”；不能据该偏移变化宣称最后一行跳转已重现。",
+      "group": "filesystem",
+      "detail_status": "运行复现",
+      "title": "文件位置问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 128,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 126,
+      "status": "已有针对实现（静态）",
+      "evidence": "E05",
+      "remaining": "外部较新剪贴板与托盘批次有序号决策；未重现“单击就进入托盘”现象。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "临时暂存托盘已经影响复制，剪切了！求关掉"
+    },
+    {
+      "issue": 124,
+      "status": "静态确认",
+      "evidence": "F12",
+      "remaining": "外部移动且未浏览新目录时，标签仍从旧路径账本枚举。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "【BUG 描述】文件移动后原有标签检索提示文件不可用"
+    },
+    {
+      "issue": 122,
+      "status": "缺少条件",
+      "evidence": [
+        "已读本轮正文和全部缓存评论：1.0.53 升级后拒绝访问、管理员重装仍失败，也有用户报告等待连接/结束进程后恢复。",
+        "本次未安装/卸载/停止索引服务，未杀用户进程，未用当前环境的正常状态否定历史升级故障。"
+      ],
+      "remaining": "需要原版本/升级残留、服务账户和权限、端点/进程版本与安装错误码，在隔离可回滚环境复现；拒绝访问原因目前未定。",
+      "group": "filesystem",
+      "detail_status": "缺少条件",
+      "title": "索引服务无法安装",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 116,
+      "title": "使用中文重命名文件时，光标会出现在最前面，导致输入的字符顺序有问题。",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "已读评论中“初次修复后后续词组仍偶发”的反馈；不能仅验证首次选区。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\116-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 115,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/115-readable.json 为 WPS 打开文件位置提示访问被拒，未提供文件路径/权限/具体WPS版本。",
+        "系统集成/默认动作与路径权限均可能参与，静态代码不能独立归因。"
+      ],
+      "remaining": "需同版本WPS、原路径与 Shell调用/权限记录；本次未启动WPS或改变系统关联。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "wps打开文件位置功能不工作，提示“Windows无法访问指定设备、路径或文件。你可能没有适当的权限访问该项目。”",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 111,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 109,
+      "status": "已有针对实现（静态）",
+      "evidence": "E05",
+      "remaining": "虚拟剪贴板 Shell 粘贴有实现；真实远程桌面/Smart Data Link 未验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "从windows 遠端桌面(Remote desktop) 复制档案，无法在pulse 中贴上"
+    },
+    {
+      "issue": 108,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 106,
+      "status": "静态确认",
+      "evidence": "F05",
+      "remaining": "回收站绘制和拖动/适配使用不同列宽数组。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "open",
+      "title": "Recycle Bin: column widths cannot be dragged or refitted"
+    },
+    {
+      "issue": 94,
+      "status": "静态确认",
+      "evidence": [
+        "src/app/app_input.cpp:2140-2143 仅左键行点击设置dragPending；1604-1617要求VK_LBUTTON才启动StartDragOut。",
+        "同文件3321-3358的HandleRButtonDown只预取上下文菜单；ui/drag_drop.cpp:549虽接受MK_RBUTTON释放但没有右键启动调用点。"
+      ],
+      "remaining": "仅确认右键拖拽选择复制/移动/快捷方式的入口缺失；创建快捷方式菜单及FastCopy/Send to仍需具体完整菜单验证，未统一认定都缺失。",
+      "group": "external",
+      "detail_status": "静态确认",
+      "title": "右键菜单没有创建快捷方式？还有原文件管理器的右键拖拽可选处理方式功能也没有。",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 92,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读四点正文与评论",
+        "生产路径仍MFPlay，全src未找到FFmpeg播放增强包实现"
+      ],
+      "remaining": [
+        "Ogg内部编码与实际文件、系统codec",
+        "播放与磁盘容量刷新运行验证",
+        "不将评论修复宣称当成本地实现"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件（bug部分）",
+      "title": "OGG格式无法预览，及音乐相关问题",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 88,
+      "status": "静态确认",
+      "evidence": "F07",
+      "remaining": "目录类型直接显示文件夹，未区分 symlink/junction 或解析其目标。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "符号链接与 junction 被当作普通文件夹显示（无类型与图标区分）"
+    },
+    {
+      "issue": 87,
+      "status": "运行复现",
+      "evidence": [
+        "原文后续评论明确已找到网络项添加方法，但“已添加网络位置右键没有反应、如何删除”。",
+        "与 #236 同一生产右键 fixture：非持久化 pinned UNC 行可命中，HandleRButtonUp 不创建菜单；设置的 RemoveNetwork 仅作用索引 roots。"
+      ],
+      "remaining": "只计入右键/取消钉住故障；不把继承 Explorer 网络发现/WPS 云盘展示等新增能力诉求算 bug。",
+      "group": "filesystem",
+      "detail_status": "运行复现",
+      "title": "网络位置如何添加？",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 86,
+      "status": "静态确认",
+      "evidence": "F14",
+      "remaining": "需要提权的第三方 command 仍可能在 CreateProcess 返回 740 后直接失败。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "右键菜单无法启动第三方卸载软件"
+    },
+    {
+      "issue": 81,
+      "status": "缺少条件",
+      "evidence": [
+        "sources/81-readable.json 后续明确是This PC点盘符失败，侧树仍可用；不能只按最初默认管理器还原标题判断。",
+        "src/app/default_file_manager.cpp:188-221,279 有旧版本迁移/备份还原流程，未检验原注册初值。"
+      ],
+      "remaining": "需开启/取消前后的用户关联快照、This PC盘符默认动作和真实Shell失败信息；本次不修改系统接管/注册表。",
+      "group": "external",
+      "detail_status": "缺条件",
+      "title": "设为默认文件资源管理器后的问题",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 79,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 77,
+      "status": "静态确认",
+      "evidence": "F06",
+      "remaining": "共享截止时间、普通占位/空子菜单与慢扩展机制仍有同类缺口。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG反馈] 右键菜单中的“发送到”没有二级子菜单且点击无反应"
+    },
+    {
+      "issue": 74,
+      "status": "已有针对实现（静态）",
+      "evidence": "E14",
+      "remaining": "未覆盖 UNC 可走后台实时文件名遍历；实际 SMB 搜索未验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG反馈] 网络位置/SMB共享路径下搜索无结果"
+    },
+    {
+      "issue": 73,
+      "status": "已有针对实现（静态）",
+      "evidence": "E01",
+      "remaining": "native New 顶层初始化已豁免预算；冷缓存菜单原位插入仍需实际验证。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[bug反馈] 在文件夹空白处右键菜单不显示新建菜单"
+    },
+    {
+      "issue": 72,
+      "status": "静态确认",
+      "evidence": "F15",
+      "remaining": "安装器仍先静默卸载，缺同目录原地覆盖分支。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] 版本更新后固定到任务栏的pulse会失效"
+    },
+    {
+      "issue": 66,
+      "status": "已有针对实现（静态）",
+      "evidence": "E12",
+      "remaining": "存在调用者可见性过滤和受限索引目录 ACL；未做多账户服务验收。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[安全] 索引服务管道对所有已认证用户开放，检索结果不套用 NTFS ACL（多用户机器信息泄露）"
+    },
+    {
+      "issue": 65,
+      "status": "已有针对实现（静态）",
+      "evidence": "E18",
+      "remaining": "菜单会话可由父进程终止，隔离架构已改变；未注入挂死扩展运行。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[稳定性] 卡住的第三方右键扩展会永久泄漏 pulse_shell 线程（INFINITE join 无法回收）"
+    },
+    {
+      "issue": 60,
+      "status": "已有针对实现（静态）",
+      "evidence": "E06",
+      "remaining": "无冲突小文件已有直接写最终名分流，未重测吞吐。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[性能] 从压缩包拖拽复制明显慢：无冲突时不必绕临时文件（附实测与取舍）"
+    },
+    {
+      "issue": 59,
+      "status": "静态确认",
+      "evidence": "F01",
+      "remaining": "partial 快照仍会写入缓存并作为下一次底稿。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] 1.0.46 右键菜单第三方项时有时无：残缺的快速快照被写入缓存"
+    },
+    {
+      "issue": 58,
+      "status": "静态确认",
+      "evidence": [
+        "run.log：私有目录 a-large 含1000字节文件，b-small 含10字节文件；生产 EnumerateDirectory 的目录 entry.size 均0，生产 EntryLess(Size,Asc) 结果 a-large 在 b-small 前。",
+        "src/app/entry_sort.cpp:87 直接比较 DirEntry.size；folder_sizes_ui.cpp:41 的统计仅为支持显示的视图准备请求，102 只写 folder_size_labels，未把 FolderSizes 的已统计 bytes 投影回排序。"
+      ],
+      "remaining": "这是目录枚举运行边界加统计未接排序的静态确认；未运行“等待真实 FolderSizes 全部完成后 UI 仍错误”的端到端试验，也未覆盖网络手动统计/三种文件夹排序策略。",
+      "group": "filesystem",
+      "detail_status": "静态确认",
+      "title": "按大小排序时，文件夹的大小排序错误，文件的大小排序正确",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 52,
+      "title": "[BUG] 标题栏窗口按钮图标重复绘制且错位重叠（最小化/最大化/关闭）",
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_main.cpp:2319",
+        "bench_data/issue-confirm-ui/visual-manifest.json",
+        "当前实际窗口仍用WS_OVERLAPPEDWINDOW（含WS_SYSMENU），离屏WS_POPUP fixture只验证自绘按钮。"
+      ],
+      "remaining": "原问题为DWM原生按钮透过材质叠影；需要真实标准样式、DWM材质和悬停截图。离屏自绘按钮正常不能宣布原bug已修复或已复现。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\52-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 51,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "评论要求XAVC 4K 50fps 10bit 4:2:2 280Mb/s",
+        "生产MFPlay路径静态存在"
+      ],
+      "remaining": [
+        "原始片段和系统codec",
+        "真实播放失败码与帧率；普通视频成功不能结案"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "大码流的视频几乎都没有办法播放，能不能调用 Quick Look？",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 50,
+      "title": "[Bug] 拖拽窗体不能触发Groupy",
+      "status": "缺少条件",
+      "evidence": [
+        "src/app/app_main.cpp:2319",
+        "docs/validation/issue-confirm-2026-10-23/sources/50-readable.json"
+      ],
+      "remaining": "需真实Groupy版本、窗口过滤与拖动合并；未安装软件或使用全局输入。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\50-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 49,
+      "status": "静态确认",
+      "evidence": "F03",
+      "remaining": "普通打开未设置独立启动工作目录。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] 双击 bat 一闪而过、没有真正执行：打开时没有把条目所在文件夹作为工作目录"
+    },
+    {
+      "issue": 48,
+      "status": "静态确认",
+      "evidence": "F13",
+      "remaining": "存在传统 handler 时，只在包清单注册的扩展未进入逐 handler 主路径。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] 文件和文件夹右键菜单缺少打包扩展（WinRAR），空白处正常"
+    },
+    {
+      "issue": 46,
+      "status": "静态确认",
+      "evidence": "F13",
+      "remaining": "MSIX-only 安装的类型缺支持；原 exe installer 版本仍需真实菜单确认。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] VS Code 右键菜单项缺失"
+    },
+    {
+      "issue": 41,
+      "status": "已有针对实现（静态）",
+      "evidence": "E16/E02/E07",
+      "remaining": "徽章持久化和高级输入框回退有实现；终端失败另见 #165，且该 issue 尚有4条评论未取到。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "open",
+      "title": "BUG 反馈：右键打不开终端，快速访问编辑徽章无法保存"
+    },
+    {
+      "issue": 40,
+      "status": "已有针对实现（静态）",
+      "evidence": "E03/E08",
+      "remaining": "本地已有独立压缩包浏览路径；旧 Office 进程残留需对应文档/provider，未验收。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "zip文件无法用pulse打开和空格预览问题"
+    },
+    {
+      "issue": 38,
+      "status": "静态确认",
+      "evidence": "F13",
+      "remaining": "只依赖打包 IExplorerCommand 的 NanaZip 路径缺实现。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "[BUG] nanazip右键菜单缺失"
+    },
+    {
+      "issue": 29,
+      "status": "静态确认",
+      "evidence": "F13/F01",
+      "remaining": "现代 WinRAR 的包注册与 partial 缓存均存在同类缺口；具体 WinRAR 版本未实装。",
+      "detail_status": "存在（静态）",
+      "github_state_at_capture": "closed",
+      "title": "右键[winrar压缩]的问题"
+    },
+    {
+      "issue": 20,
+      "title": "窗体显示有点异常",
+      "status": "缺少条件",
+      "evidence": [
+        "src/ui/FluentTokens.h:244",
+        "docs/validation/issue-confirm-2026-10-23/sources/20-readable.json"
+      ],
+      "remaining": "系统强调色标题栏开关与Mica/DWM实际组合未切换；离屏像素不含系统DWM底层着色。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\20-readable.json",
+      "group": "ui",
+      "detail_status": "缺条件",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 19,
+      "status": "缺少条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读后续复杂Excel闪白与滚动/拖动问题评论",
+        "当前Office Shell/缩略图路径；未见评论所称内置多sheet表格预览UI"
+      ],
+      "remaining": [
+        "复杂原工作簿",
+        "真实provider及滚动/拖动测试",
+        "不得由早期评论或微小XLSX泛测关闭后续报告"
+      ],
+      "group": "preview",
+      "detail_status": "缺条件",
+      "title": "excel预览卡顿",
+      "github_state_at_capture": "open"
+    },
+    {
+      "issue": 17,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 16,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 9,
+      "status": "定向未复现",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "生产StoreResult注入permanent failure后100次不同generation同key Draw均Failed且queue/pending为0",
+        "src/ui/thumbnail_cache.cpp:58,306缓存key与failure短路",
+        "src/preview_host/main.cpp:671-684仍有四路fallback"
+      ],
+      "remaining": [
+        "失败由fixture注入，原XLSX/CAD-PDF样本未取得",
+        "未测得原40-53ms",
+        "直调host/冷缓存/像素尺寸变化/重启成本仍待测，不据此否认",
+        "未复现永久阻塞或所有后续预览失效"
+      ],
+      "group": "preview",
+      "detail_status": "定向未复现UI同key重复探测；底层残余成本静态存在",
+      "title": "Previews that resolve through the shell thumbnail cost 40-53 ms on every request when no thumbnail can be produced",
+      "github_state_at_capture": "closed"
+    },
+    {
+      "issue": 4,
+      "status": "已有针对实现（静态）",
+      "evidence": "E02",
+      "remaining": "openas 静态项有兜底文字和独立系统 chooser 路径；未运行菜单验收。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "设置里开启了打开方式的选项，但是右键菜单里并没有选择打开方式"
+    },
+    {
+      "issue": 3,
+      "status": "已有针对实现（静态）",
+      "evidence": "E07",
+      "remaining": "共享编辑宿主已重绘输入并支持原生回退；没有本次实际键入画面。",
+      "detail_status": "已针对处理（静态）",
+      "github_state_at_capture": "closed",
+      "title": "Filter box hides the text you type (the same hosted-editor presentation gap 1.0.13 fixed for rename)"
+    },
+    {
+      "issue": 2,
+      "status": "排除",
+      "evidence": "来源筛选记录中已排除，不展开非故障内容。",
+      "remaining": "不纳入故障及待判定条目统计。",
+      "github_state_at_capture": "closed"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F01",
+      "issues": "[#59](https://github.com/jimmgreen/pulse/issues/59)（closed）",
+      "status": "静态确认",
+      "evidence": "[context_menu_controller.cpp](E:/Projects/pulse/src/app/context_menu_controller.cpp:403) 在检查 `partial` 前无条件写 `com_cache_`；[同文件](E:/Projects/pulse/src/app/context_menu_controller.cpp:385) 下一次查询直接使用该缓存。部分结果仍能污染下一次菜单底稿，和原报告的错误赋值相同。"
+    },
+    {
+      "id": "F02",
+      "issues": "[#250](https://github.com/jimmgreen/pulse/issues/250)、[#248](https://github.com/jimmgreen/pulse/issues/248)（closed）",
+      "status": "静态确认",
+      "evidence": "[app_main.cpp](E:/Projects/pulse/src/app/app_main.cpp:2260) 最后一个参数仍直接赋给 `state.shot.path`，相邻分支才检查 `-`。`-Embedding` 等可被当成路径。#248 评论已纠正最初的 Control Panel 触发归因；这里只确认解析缺陷，不能归因于 Pulse 注册了错误 CLSID。"
+    },
+    {
+      "id": "F03",
+      "issues": "[#49](https://github.com/jimmgreen/pulse/issues/49)（closed）",
+      "status": "静态确认",
+      "evidence": "[ops_manager.cpp](E:/Projects/pulse/src/ops/ops_manager.cpp:2001) 只有显式程序/命令分支填写 `request.directory`，普通打开分支只填 `request.paths`；[shell_launch_worker.cpp](E:/Projects/pulse/src/shell_host/shell_launch_worker.cpp:188) 普通打开因此把空目录传为 `nullptr`。依赖同目录相对资源的 bat/cmd 仍会继承启动宿主的工作目录。"
+    },
+    {
+      "id": "F04",
+      "issues": "[#235](https://github.com/jimmgreen/pulse/issues/235)（closed）",
+      "status": "静态确认",
+      "evidence": "[app_input.cpp](E:/Projects/pulse/src/app/app_input.cpp:479) 主窗口拖出文件仍只提供 `DROPEFFECT_COPY | DROPEFFECT_MOVE`。只接受 LINK 的 PDF/编辑器目标与来源没有公共效果；底层函数支持 LINK 并不能弥补调用点漏传。"
+    },
+    {
+      "id": "F05",
+      "issues": "[#106](https://github.com/jimmgreen/pulse/issues/106)（open）",
+      "status": "静态确认",
+      "evidence": "[app_model.cpp](E:/Projects/pulse/src/app/app_model.cpp:1591) 将 recycle/changes/saved-search 也设为 `is_search`；[app_input.cpp](E:/Projects/pulse/src/app/app_input.cpp:937) 拖列宽以及[双击适配](E:/Projects/pulse/src/app/app_input.cpp:2834) 却只认 `kind == search`。回收站仍写普通目录列宽，和绘制使用的数组不一致。"
+    },
+    {
+      "id": "F06",
+      "issues": "[#77](https://github.com/jimmgreen/pulse/issues/77)（closed），关联 [#192](https://github.com/jimmgreen/pulse/issues/192)",
+      "status": "静态确认",
+      "evidence": "[ctx_handlers.cpp](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:203) 仅 native New 豁免初始化截止时间；[同文件](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:396) 子菜单共享截止时间，[空子菜单分支](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:428) 可退成启用的普通行。没有原报告所述 Send to 独立预算/占位替换；[main.cpp](E:/Projects/pulse/src/shell_host/main.cpp:1186) 慢扩展收集也没有 Send to 豁免。同类失效条件仍在，是否在本机出现取决于系统扩展。"
+    },
+    {
+      "id": "F07",
+      "issues": "[#88](https://github.com/jimmgreen/pulse/issues/88)（closed）",
+      "status": "静态确认",
+      "evidence": "[fs_enum.cpp](E:/Projects/pulse/src/fs/fs_enum.cpp:322) 保存 `is_reparse`；[ui_renderer_internal.h](E:/Projects/pulse/src/ui/ui_renderer_internal.h:131) 却对所有目录返回普通“文件夹”，[展示模型](E:/Projects/pulse/src/ui/ui_renderer_internal.h:197) 未按 reparse tag 分类；[link_resolve.cpp](E:/Projects/pulse/src/app/link_resolve.cpp:38) 只解析 .lnk。符号链接/junction 的类型区分和目标解析仍缺失。没有把所有 reparse point 误当 symlink。"
+    },
+    {
+      "id": "F08",
+      "issues": "[#213](https://github.com/jimmgreen/pulse/issues/213)（open，缩略图透明度部分）",
+      "status": "静态确认",
+      "evidence": "[preview_host/main.cpp](E:/Projects/pulse/src/preview_host/main.cpp:628) 接收 `WTS_ALPHATYPE` 后丢弃；[位图转换](E:/Projects/pulse/src/preview_host/main.cpp:596) 优先用预乘 alpha，成功就停止，不会因像素透明而重试 IgnoreAlpha。RGB provider 返回零 alpha 时仍会被解释为透明。PSD 刷新和 7Z 小图标是否同因尚未确认。"
+    },
+    {
+      "id": "F09",
+      "issues": "[#197](https://github.com/jimmgreen/pulse/issues/197)（open）",
+      "status": "静态确认",
+      "evidence": "[app_main.cpp](E:/Projects/pulse/src/app/app_main.cpp:2301) 直接采用会话的窗口坐标，[创建窗口](E:/Projects/pulse/src/app/app_main.cpp:2312) 前没有把恢复矩形约束到当前显示器工作区。拔掉副屏后可能按旧坐标启动；最大化尺寸处理不是恢复位置校正。未做真实双屏拔插。"
+    },
+    {
+      "id": "F10",
+      "issues": "[#277](https://github.com/jimmgreen/pulse/issues/277)（open）",
+      "status": "静态确认",
+      "evidence": "[ctx_handlers.cpp](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:197) 的 `CollectSubmenuLeaves` 将下一层叶子直接追加到同一个 kids，且 `depth >= 1` 时跳过更深菜单。会压平第二层并丢弃更深层；符合 FileMenuTools 报告的结构损失，未安装该扩展做交互验证。"
+    },
+    {
+      "id": "F11",
+      "issues": "[#360](https://github.com/jimmgreen/pulse/issues/360)（open）",
+      "status": "静态确认",
+      "evidence": "[network_index.cpp](E:/Projects/pulse/src/index/network_index.cpp:453) 接受标准 UNC，[AddRoot](E:/Projects/pulse/src/index/network_index.cpp:745) 未排除 WSL；[监视循环](E:/Projects/pulse/src/index/network_index.cpp:1044) 为在线 root 长期打开目录并递归监视。[app_navigation.cpp](E:/Projects/pulse/src/app/app_navigation.cpp:154) 仍对所有钉住网络位置后台探测。全 src 未找到 WSL 路径识别/排除，原报告中后台访问/持有句柄的触发条件仍在。WSL Stopping 本身未复现。"
+    },
+    {
+      "id": "F12",
+      "issues": "[#124](https://github.com/jimmgreen/pulse/issues/124)（open，外部移动部分）",
+      "status": "静态确认",
+      "evidence": "[app_navigation.cpp](E:/Projects/pulse/src/app/app_navigation.cpp:777) 标签视图按保存的 `tag.paths` 枚举；[places.cpp](E:/Projects/pulse/src/app/places.cpp:1258) 有内部移动的 `RemapPaths`；[app_runtime.cpp](E:/Projects/pulse/src/app/app_runtime.cpp:2270) 的 ADS 发现只覆盖浏览到的位置。没有按文件身份全局定位旧路径的流程，因此外部移动后、尚未浏览新位置时，标签仍指旧路径。不能把它扩大为“内部移动也必然失败”。"
+    },
+    {
+      "id": "F13",
+      "issues": "[#48](https://github.com/jimmgreen/pulse/issues/48)、[#38](https://github.com/jimmgreen/pulse/issues/38)、[#46](https://github.com/jimmgreen/pulse/issues/46)、[#29](https://github.com/jimmgreen/pulse/issues/29)（closed），关联 [#288](https://github.com/jimmgreen/pulse/issues/288)",
+      "status": "静态确认",
+      "evidence": "[main.cpp](E:/Projects/pulse/src/shell_host/main.cpp:1142) 主路径按 `EnumerateCtxHandlers` 逐个启动处理器；[ctx_handlers.cpp](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:251) 只枚举传统注册表键，没有读取包 manifest/适配 IExplorerCommand。全 src 检索没有对应实现。只要存在任一传统 handler，主路径便不会进入 [main.cpp 的合并菜单回退](E:/Projects/pulse/src/shell_host/main.cpp:1227)；此时仅通过 MSIX 清单注册、没有传统可激活 handler 的扩展会遗漏。没有传统 handler 时合并菜单回退可能提供它们。不能据此断言所有版本 WinRAR/VS Code 都缺失；具体安装仍需对照。"
+    },
+    {
+      "id": "F14",
+      "issues": "[#86](https://github.com/jimmgreen/pulse/issues/86)（closed）",
+      "status": "静态确认",
+      "evidence": "[context_menu_controller.cpp](E:/Projects/pulse/src/app/context_menu_controller.cpp:323) 具有 command 的静态动词走 ExecuteCommand；[shell_launch_worker.cpp](E:/Projects/pulse/src/shell_host/shell_launch_worker.cpp:137) `CreateProcessW` 失败直接返回错误，没有 740 → runas 回退。因此需要提权的第三方静态命令仍有同类失败路径。与 [#362](https://github.com/jimmgreen/pulse/issues/362)/[#296](https://github.com/jimmgreen/pulse/issues/296) 的显式 runas 不同，后者已在[专门分支](E:/Projects/pulse/src/app/context_menu_controller.cpp:315)处理。"
+    },
+    {
+      "id": "F15",
+      "issues": "[#72](https://github.com/jimmgreen/pulse/issues/72)（closed）",
+      "status": "静态确认",
+      "evidence": "[PulseSetup.iss](E:/Projects/pulse/installer/PulseSetup.iss:684) 每次 PrepareToInstall 仍调用 UninstallPreviousVersion；[同文件](E:/Projects/pulse/installer/PulseSetup.iss:594) 静默运行旧卸载器，没有同目录原地覆盖判断。原报告中“升级先卸载导致任务栏固定丢失”的触发流程仍在。没有实际运行安装器或更改固定项。"
+    },
+    {
+      "id": "F16",
+      "issues": "[#372](https://github.com/jimmgreen/pulse/issues/372)",
+      "status": "运行复现：满屏网格缺框选起点",
+      "evidence": "1000×700、100% 下 Medium/Large Icons 列表范围空白采样数均为 0，生产左键处理进入文件拖动；同尺寸 ExtraLarge 有空白，不能扩大为全部图标模式。"
+    },
+    {
+      "id": "F17",
+      "issues": "[#188](https://github.com/jimmgreen/pulse/issues/188)、[#187](https://github.com/jimmgreen/pulse/issues/187)、[#186](https://github.com/jimmgreen/pulse/issues/186)、[#185](https://github.com/jimmgreen/pulse/issues/185)、[#183](https://github.com/jimmgreen/pulse/issues/183)",
+      "status": "运行复现：删空搜索未回到原目录",
+      "evidence": "生产 SubmitAddressSearch：空内容查询仍保留 content: 搜索路径、清空结果；文件名空查询也没有恢复 origin。未用真实键盘/索引请求验收整个搜索链。"
+    },
+    {
+      "id": "F18",
+      "issues": "[#136](https://github.com/jimmgreen/pulse/issues/136)",
+      "status": "运行复现：长名点选后视口重锚",
+      "evidence": "194 字符、220px 编辑区，生产鼠标命中后 caret 194→182，尾部 END.txt 消失。只确认点选子步骤，未替代真实中文 IME/整段拖选测试。"
+    },
+    {
+      "id": "F19",
+      "issues": "[#169](https://github.com/jimmgreen/pulse/issues/169)、[#129](https://github.com/jimmgreen/pulse/issues/129)",
+      "status": "运行复现：返回上级不保留原视口",
+      "evidence": "生产 NavigateTo/GoBack/恢复选择后，选中项仍为 75，scroll_y 从 1800 变为 1592。没有证明一定滚到目录最底部或丢失选择。"
+    },
+    {
+      "id": "F20",
+      "issues": "[#236](https://github.com/jimmgreen/pulse/issues/236)、[#87](https://github.com/jimmgreen/pulse/issues/87)",
+      "status": "运行复现：网络钉住项没有右键移除菜单",
+      "evidence": "内存中不持久化的虚构 UNC，生产侧栏命中与右键处理后无菜单；未连接服务器，不审计网络发现等建议。"
+    },
+    {
+      "id": "F21",
+      "issues": "[#225](https://github.com/jimmgreen/pulse/issues/225)",
+      "status": "运行复现：内置压缩包视图拖出被路径生成阻断",
+      "evidence": "生产 EntryFullPath/SelectedFullPaths 对内置 archive 项得空路径，拖出函数提前返回；普通目录为对照。没有实际 DoDragDrop 或解压写盘，也不涵盖第三方压缩程序拖入。"
+    },
+    {
+      "id": "F22",
+      "issues": "[#304](https://github.com/jimmgreen/pulse/issues/304)",
+      "status": "运行复现：图标模式不生成分组",
+      "evidence": "私有重编译的当前生产模型在 Details 生成 2 组，Medium/Large/ExtraLarge 均 0；仅确认分组子项，小米互传命令故障未验证。"
+    },
+    {
+      "id": "F23",
+      "issues": "[#173](https://github.com/jimmgreen/pulse/issues/173)",
+      "status": "运行复现：末列外缘无法缩窄",
+      "evidence": "生产命中测试在 Size 末列右外缘得到 ColumnHeader 而非 Divider，末列 resize 索引被拒；未做物理鼠标拖动。"
+    },
+    {
+      "id": "F24",
+      "issues": "[#334](https://github.com/jimmgreen/pulse/issues/334)",
+      "status": "运行复现：窄侧栏长盘名裁切且无省略提示",
+      "evidence": "同一长盘名用生产 DrawDriveSidebarItem 在 184px 宽不显示盘符且无省略号，320px 可完整显示；不是磁盘没有枚举。"
+    },
+    {
+      "id": "F25",
+      "issues": "[#229](https://github.com/jimmgreen/pulse/issues/229)",
+      "status": "缓存边界运行复现；静态确认图标失效缺口",
+      "evidence": "同路径 EXE 红/蓝真实资源转换后，已注入成功缓存的 RequestExact 仍返回旧 hash；源码未找到变更通知清除此缓存。Seed 绕过 worker/IPC，未验收完整外部编译→监视→UI 链。"
+    },
+    {
+      "id": "F26",
+      "issues": "[#263](https://github.com/jimmgreen/pulse/issues/263)",
+      "status": "静态确认：跨实例相对路径缺调用方 cwd",
+      "evidence": "生产 IPC 解码仅保留相对字符串，接收端 ResolveOpenTarget 使用接收进程 cwd；运行只验证解码/解析边界，未启动两个真实实例，也未把未加引号空格问题混为同因。"
+    },
+    {
+      "id": "F27",
+      "issues": "[#58](https://github.com/jimmgreen/pulse/issues/58)",
+      "status": "静态确认：目录统计未接入大小排序",
+      "evidence": "隔离真实 1000/10 字节子目录枚举 size 均为 0，大小排序仍按名字；统计展示缓存未回填排序的静态链成立。未做等待全部统计后的 UI 端到端测试。"
+    },
+    {
+      "id": "F28",
+      "issues": "[#245](https://github.com/jimmgreen/pulse/issues/245)、[#209](https://github.com/jimmgreen/pulse/issues/209)",
+      "status": "静态确认：缺标准 MTP namespace 浏览后端",
+      "evidence": "当前枚举为文件系统/盘符路径，接管过滤 MTP 仅避免抢走窗口；没有 MTP 内容枚举。未连接实体手机，不泛化为 USB 大容量存储卷也不支持。"
+    },
+    {
+      "id": "F29",
+      "issues": "[#94](https://github.com/jimmgreen/pulse/issues/94)",
+      "status": "静态确认：缺右键拖动动作入口",
+      "evidence": "仅左键路径建立 dragPending；右键用于菜单/预取，没有右键拖出并选择复制/移动/快捷方式的分支。不能据此认定完整菜单的所有快捷方式项缺失。"
+    },
+    {
+      "id": "F30",
+      "issues": "[#181](https://github.com/jimmgreen/pulse/issues/181)",
+      "status": "静态确认：IPreviewHandler overlay 失焦时显式隐藏",
+      "evidence": "WM_ACTIVATE/ACTIVATEAPP 传递 inactive，PlaceOverlay 执行 SWP_HIDEWINDOW。属于 overlay 置顶管理策略，不等于 provider 失效；实际 provider 与是否调整策略仍需确认。"
+    }
+  ],
+  "code_notes": [
+    {
+      "id": "E01",
+      "evidence": "[context_menu_controller.cpp](E:/Projects/pulse/src/app/context_menu_controller.cpp:394)、[ctx_handlers.cpp](E:/Projects/pulse/src/shell_host/ctx_handlers.cpp:251)：扩展枚举、partial 缓存和层级都有上列缺口；其他第三方缺项/调用失败需要真实扩展、日志与选择类型，不能统一归为 F13。当前已按扩展名解析 ProgID，不能照搬 #338 评论的“完全没有 ProgID”诊断。"
+    },
+    {
+      "id": "E02",
+      "evidence": "[context_menu_controller.cpp](E:/Projects/pulse/src/app/context_menu_controller.cpp:315)、[shell_launch_worker.cpp](E:/Projects/pulse/src/shell_host/shell_launch_worker.cpp:162)：runas 已专门走动词，选择其他应用会传 owner，但没有专门的前台授权交接；是否后台弹出需实际桌面验证。"
+    },
+    {
+      "id": "E03",
+      "evidence": "[explorer_window_takeover.cpp](E:/Projects/pulse/src/app/explorer_window_takeover.cpp:140)、[explorer_takeover_policy.h](E:/Projects/pulse/src/app/explorer_takeover_policy.h:61)：过滤非文件系统 namespace，等待选择稳定；已针对接管不能浏览的 MTP 窗口、文件选中迟到做处理。不能据此认定所有 Win+E/第三方软件接管报告均解决。"
+    },
+    {
+      "id": "E04",
+      "evidence": "[delete_operation.cpp](E:/Projects/pulse/src/ops/delete_operation.cpp:575)：回收失败且需要永久删除确认时，会重新进入明确的永久删除授权流程；大文件夹/移动卷“只报错”已有对应处理。NAS 删除、第三方 UnionFS 返回码仍需具体设备验证。"
+    },
+    {
+      "id": "E05",
+      "evidence": "[clipboard.h](E:/Projects/pulse/src/ops/clipboard.h:34)、[clipboard.cpp](E:/Projects/pulse/src/ops/clipboard.cpp:188)、[app_runtime.cpp](E:/Projects/pulse/src/app/app_runtime.cpp:1430)：识别虚拟文件并走 Shell 粘贴，使用剪贴板序号；有针对 RDP/外部复制与托盘优先级的实现，未复现真实 RDP/Smart Data Link。"
+    },
+    {
+      "id": "E06",
+      "evidence": "[ops_manager.cpp](E:/Projects/pulse/src/ops/ops_manager.cpp:3067)：已有按冲突/64MB 阈值分流的复制路径，对应 #60；无性能测量。[app_input.cpp](E:/Projects/pulse/src/app/app_input.cpp:479) 的外拖 LINK 缺失单独按 F04 处理。"
+    },
+    {
+      "id": "E07",
+      "evidence": "[edit_host.cpp](E:/Projects/pulse/src/ui/edit_host.cpp:108)、[lumatext_renderer.cpp](E:/Projects/pulse/src/ui/lumatext_renderer.cpp:1040)：输入仍关闭系统重绘后自绘，并更新 composition window。单行首尾滚动定向测试未复现 #359，点选后视口重锚见 F18；真实微软拼音连续词组、数字和首次替换选区仍缺验收。本地单行 ES_AUTOHSCROLL 与上游六行浮卡不同。"
+    },
+    {
+      "id": "E08",
+      "evidence": "[video_preview.cpp](E:/Projects/pulse/src/ui/video_preview.cpp:328)、[main.cpp](E:/Projects/pulse/src/preview_host/main.cpp:745)、[thumbnail_cache.cpp](E:/Projects/pulse/src/ui/thumbnail_cache.cpp:350)：视频走 MFPlay，GIF 按扩展名选择。失败缓存及自定义文件夹图标已做指定样本定向验证；EXE 缓存命中缺口见 F25，overlay 失焦隐藏见 F30。大 GIF、复杂 Excel、codec 和宿主异常仍需原样本/环境；未发现评论所述 FFmpeg 增强包实现。"
+    },
+    {
+      "id": "E09",
+      "evidence": "[app_model.cpp](E:/Projects/pulse/src/app/app_model.cpp:1666)：Details 限制经私有重编译生产模型验证，图标模式分组为 0，见 F22；新增分组工具栏没有补齐此生成路径。不采用上游已实现评论替代本地证据。"
+    },
+    {
+      "id": "E10",
+      "evidence": "[app_input.cpp](E:/Projects/pulse/src/app/app_input.cpp:1011)、[ui_hit_test.cpp](E:/Projects/pulse/src/ui/ui_hit_test.cpp:181)：设置滚动条存在命中和拖动分支，对应 #196/#166，未做设置滚动条运行验收。窄标题栏、深浅主题及 200% 状态栏已有定向截图/命中检查，见验证记录；Win10 材质、真实非客户区、三屏仍有缺口。"
+    },
+    {
+      "id": "E11",
+      "evidence": "[app_navigation.cpp](E:/Projects/pulse/src/app/app_navigation.cpp:1236)、[app_notify_patch.cpp](E:/Projects/pulse/src/app/app_notify_patch.cpp:74)、[fs_watch.cpp](E:/Projects/pulse/src/fs/fs_watch.cpp:230)：普通 NTFS 外部大小修改后的选择保留、隐藏属性刷新和普通目录刷新已定向运行。返回原视口不保留见 F19，文件夹统计未接排序见 F27；Hide Folders 过滤驱动未验证。"
+    },
+    {
+      "id": "E12",
+      "evidence": "[index_host.cpp](E:/Projects/pulse/src/index/index_host.cpp:322)、[index_config.cpp](E:/Projects/pulse/src/index/index_config.cpp:33)：调用者可见性过滤与仅 SYSTEM/Administrators 的索引目录 ACL 已存在，针对 #66。未做真实多用户服务模式验证。"
+    },
+    {
+      "id": "E13",
+      "evidence": "[network_agent_client.cpp](E:/Projects/pulse/src/index/network_agent_client.cpp:105)：请求改为重叠 I/O 和 RAII 关闭管道，已没有 #218 中逐请求创建 Deadline/jthread 的实现；原报告的“STL 必然泄漏”又被维护者实测质疑，不能直接采纳其因果结论。"
+    },
+    {
+      "id": "E14",
+      "evidence": "[live_filename_search.h](E:/Projects/pulse/src/index/live_filename_search.h:15)、[network_agent_client.cpp](E:/Projects/pulse/src/index/network_agent_client.cpp:368)：实时文件名 fallback 只接受 UNC。#74 有对应路径；本地 exFAT 不会走这条 fallback，但是否已有可搜索的其他索引根、计数来自何处仍需卷/配置实例，故 #314/#308 未确认。"
+    },
+    {
+      "id": "E15",
+      "evidence": "[app_navigation.cpp](E:/Projects/pulse/src/app/app_navigation.cpp:154)、[network_index.cpp](E:/Projects/pulse/src/index/network_index.cpp:745)、[settings_controller.cpp](E:/Projects/pulse/src/app/settings_controller.cpp:622)：网络探测、索引根管理和设置移除存在。已钉网络侧栏项右键没有移除菜单经隔离生产路径复现，见 F20；交互凭据重连和真实 SMB 可达性仍缺环境。"
+    },
+    {
+      "id": "E16",
+      "evidence": "[places.cpp](E:/Projects/pulse/src/app/places.cpp:404)、[places.cpp](E:/Projects/pulse/src/app/places.cpp:605)、[app_commands.cpp](E:/Projects/pulse/src/app/app_commands.cpp:1237)：已保存的空标签列表不再恢复默认标签，快速访问徽章也会持久化；对应 #150/#41 的相关部分已针对处理。"
+    },
+    {
+      "id": "E17",
+      "evidence": "[image_open.cpp](E:/Projects/pulse/src/ops/image_open.cpp:532)、[shell_launch_protocol.h](E:/Projects/pulse/src/ipc/shell_launch_protocol.h:15)：图片打开默认允许邻图会话，有针对 Windows 照片“下一张”的实现；未运行 Windows 10 照片应用验收。"
+    },
+    {
+      "id": "E18",
+      "evidence": "[ctx_session_process.cpp](E:/Projects/pulse/src/shell_host/ctx_session_process.cpp:184)：菜单会话位于可终止子进程，不能再把 worker 内部 join 等待直接等同于主宿主永久泄漏；#65 已有针对隔离机制。"
+    },
+    {
+      "id": "E19",
+      "evidence": "[app_main.cpp](E:/Projects/pulse/src/app/app_main.cpp:995)、[fs_watch.cpp](E:/Projects/pulse/src/fs/fs_watch.cpp:219)：卷到达/移除完成会刷新，但没有读取到目录/卷句柄的 `DBT_DEVICEQUERYREMOVE` 预释放实现；#251 的安全弹出部分仍需设备验证，不能宣称已修复。"
+    },
+    {
+      "id": "E20",
+      "evidence": "[user_storage.cpp](E:/Projects/pulse/src/common/user_storage.cpp:311)：默认确实为 LocalAppData/Pulse，另有可迁移存储位置；#377 的正文对“当前用户目录”和给出的当前用户 LocalAppData 路径本身矛盾，未确立应随 exe 保存的既有承诺。"
+    },
+    {
+      "id": "E21",
+      "evidence": "[app_navigation.cpp](E:/Projects/pulse/src/app/app_navigation.cpp:1805)、[fs_enum.cpp](E:/Projects/pulse/src/fs/fs_enum.cpp:216)：向上导航和 ParentPath 对空字符串均可返回而不取非法子串，没有复现 #146 旧报告所述异常路径。"
+    }
+  ],
+  "validation": "- 文件系统/导航私有 fixture：20 PASS、0 FAIL、退出码 0。包含真实 NTFS 写入、属性通知及生产发布/选择恢复路径；不是模拟所有磁盘与第三方过滤驱动。\n- 外部交互私有 fixture：10 个预期观察、0 异常、退出码 0；4 个相关模块私有重编译，没有执行真实 Shell 动词。\n- UI：16 张有效离屏布局截图（320/420/600/800 DIP，100%/200%，深/浅主题）、48 次标题按钮命中；有效帧已检查，初轮因读取交换链时机错误得到的旧帧不计入。长名用生产 LumaText 绘制/鼠标命中，不把它当作真实输入法验收。\n- 预览/图标直调：12 个断言通过、0 失败。首次复制宿主进行 IPC 验证未建立管道，产生 5 个前置条件相关失败，原日志保留；后续直调通过不能覆盖这些失败，未宣称宿主链路通过。\n\n定向未复现的 10 条为 #359/#312/#194/#320/#260/#280/#354/#343/#147/#9：涵盖单行长名首尾滚动、当前窄标题栏/200%状态栏、普通 NTFS 修改选择保持、普通刷新、默认固定菜单、一个具体图标样本、带空格搜索结果路径/模型筛选、同 identity 缩略图失败缓存。每条剩余条件见下表。\n\n尚缺条件主要为：真实微软拼音连续输入；Win10/DWM 设置；三屏和触摸硬件；可复测 exFAT/移动卷/NAS/凭据；指定版本的 Shell 扩展、Groupy/Wgestures/Listary/WPS；原始大图/4K视频/Ogg/复杂 Excel；崩溃转储、升级或服务错误码。已有普通 NTFS 测试不能代替这些环境。\n\n本轮不操作真实回收站、系统接管、注册表、服务、用户剪贴板或用户偏好；没有运行全套 selftest/历史测试。只为本轮证据编译隔离 fixture。各次失败与修正的 fixture 设置问题均在下列验证方法和日志中保留，没有用它们推断产品根因。\n",
+  "method_notes": {
+    "UI 与编辑验证方法": "使用私有 console fixture链接现有生产对象，不写共享构建对象、不修改产品源码/CMake/偏好、不操作用户Pulse、不用桌面全局输入。窗口为隐藏WS_POPUP，生产状态转换和绘制/命中逻辑可以验证，DWM原生非客户区、任务栏、第三方注入与真实IME仍不在该fixture证明范围。\n\n证据入口：[runtime.log](E:/Projects/pulse/bench_data/issue-confirm-ui/runtime.log)、[fixture](E:/Projects/pulse/bench_data/issue-confirm-ui/confirm.cpp)、[对象与源码记录](E:/Projects/pulse/bench_data/issue-confirm-ui/provenance.json)、[有效图片清单](E:/Projects/pulse/bench_data/issue-confirm-ui/visual-manifest.json)。所有关键TU对象时间晚于对应源文件，关键头文件及所有链接对象SHA256已保存；这不是干净重建保证。\n\n截图校准：首轮在Present后读取buffer0得到旧帧/空图，已修正为EndDraw后、Present前。有效16帧全部被最终fixture覆盖；manifest列出的excluded_stale_initial_layouts不计验收。最终16帧为320/420/600/800 DIP×100%/200%×深浅主题，均非纯空色图。19标签下48次标题按钮命中均正确。列表图标未启用真实Shell宿主，空图标不构成产品图标结论。\n\n长名：194字符、220px控件中EM_SETSEL到末尾可见_END.txt，回到起点可见BEGIN；单行滚动没有复现#359所述停住，但没有上游多行浮卡实现。单击中间后caret=182且尾部消失，复现#136的视口重锚子步骤。盘符：184px行只显示External且无省略号，320px行显示External Applications (E:)，复现#334的裁切/提示缺口。",
+    "文件系统与导航验证方法": "验证没有改产品源码/CMake、用户偏好、真实索引服务、剪贴板或回收站。私有 fixture 位于 `bench_data/issue-confirm-fs/`，以现有 `objects1.rsp` 生产对象链接单独 console main。最终运行退出码 0，20 PASS、0 FAIL；没有运行全套 selftest 或 CMake 构建。真实隐藏 HWND/compositor 用于菜单/命中/返回几何，NTFS 私有文件用于外部写入及属性通知。函数/模型运行不等同于前台人工整条操作验收。\n\n证据：`fs_probe.cpp`、`build-probe.cmd`、`link.rsp`、`build-probe.log`、`run.log`、`run-error.log` 与 `object-manifest.json`。相关 13 个 cpp 均早于已有生产 obj；头文件及对象一致性记录另见 `header-manifest.json`。时间先后用于排除明显旧对象，未声明可重现构建哈希等价。一次扩展 fixture 因比较未规范化的 UNC 字符串未找到行，已保留 `run-attempt-2.log`，修正为比较 PlacesCatalog 实际存储路径后重新运行；这是 fixture 定位问题，未当作产品故障。",
+    "预览与图标验证方法": "`bench_data/issue-confirm-preview/build-direct.cmd` 编译私有 fixture 并链接现有生产对象，不重建共享目标。`probe.cpp` 在私有编译单元直接 include 当前 `src/preview_host/main.cpp`，重命名其入口，仅调用生产 `MakeShellThumbnail`。其他路径使用生产 `shell_icons.cpp.obj`、`thumbnail_cache.cpp.obj`、`app_commands.cpp.obj`、`app_model.cpp.obj`，通过已有 friend test access 观察或构造缓存状态。没有修改生产代码以暴露测试入口。对象时间、源文件哈希和本轮 fixture 哈希见 `preview.json`。\n\n最终命令：`bench_data\\issue-confirm-preview\\build-direct.cmd`，然后 `bench_data\\issue-confirm-preview\\confirm-direct.exe bench_data\\issue-confirm-preview`。私有编译、链接成功；`run-direct.log` 为 `RESULT failures=0`。该数字仅表示下面明确列出的窄测试断言通过，不是 15 个 issue 全部通过或整机预览功能通过。\n\n首次尝试使用复制的生产 `Pulse.Preview.exe`/`Pulse.Shell.exe` 子进程进行 IPC 验证，预览管道连接 3 秒超时，图标 worker 没有得到结果，形成 5 个前置条件相关失败。保留 `run-ipc.log` 和原 `run.log`，没有把这些失败算作产品 bug，也没有把后续直调成功算作 IPC 成功。后续未继续调试宿主启动环境；本轮没有验收真实宿主进程、实际键盘预览窗口或第三方 provider 的完整链路。",
+    "Shell 与设备验证方法": "运行复现均为隔离夹具调用当前模型、生产渲染器命中/尺寸函数所观察到的阻断。没有执行实体手机浏览、物理鼠标拖放、完整安装版桌面交互或真实 Shell 动作，不能将这些结果表述为相应完整端到端测试通过。\n\n本次没有修改产品源码、CMake、注册表、系统接管、服务、剪贴板或用户偏好。夹具在 `bench_data/issue-confirm-external/` 内生成源文件、对象和程序；`AppState::isolatedTest=true`，四种相关持久化开关均为 false。静态 Shell 动词枚举仅做注册数据读取，没有运行菜单命令，没有查询完整原生/Pulse COM 菜单。\n\n`probe.exe` 退出码 **0**，有 **10 条预期观察、0 条异常观察**。这里的“预期观察”包括成功观测到已知限制，不能读成 10 个功能修复验收通过。首次普通路径对照未考虑 `\\\\?\\` 规范化前缀，修正的是夹具路径比较，保留了首次日志 `run-attempt1.log`；当前 `run.log` 为修正后结果。\n\n- `bench_data/issue-confirm-external/probe.cpp`、`build-probe.cmd`：独立夹具和可复核构建命令，不调用 CMake、不更新产品构建目标。\n- `module-provenance.json`：记录 app_model、app_runtime、ui_pane_list、ui_hit_test 的源码/原对象日期及 SHA-256。四个相关模块均从当前源码另行私有编译，测试后源码 SHA-256 与编译前一致。\n- `objects.rsp`、`libraries.rsp`、`link-inventory.json`：链接使用现有主程序对象列表并替换上述四个对象，再加入夹具对象，总计 169 个链接输入。对应已复用源文件的时间戳检查未发现源码新于对象；这只是来源记录，不证明所有其他目标被重新构建或验收。\n- `build.log`、`relink.log`、`run.log`、`exit.txt`：实际编译、修正夹具后的链接、观察输出及退出码。首次构建脚本数组拼接错误保留在 `build-attempt1.log`，不计为产品失败。\n- `external.json`：33 条结构化证据条目，每条含 issue/status/evidence/remaining。\n\n本次没有把静态动词枚举结果当作完整系统右键菜单：`.png` 静态项没有 print、`.exe/.lnk` 静态项没有 Pin、`.zip` 静态项没有 Extract，均不能直接推出最终 COM 菜单缺项。也没有把命令搜索不到、环境清单缺失或上游 closed/“已修复”评论当作本机不存在/已修复的证明。"
+  }
+}

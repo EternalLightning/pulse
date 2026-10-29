@@ -1,0 +1,42 @@
+{
+  "number": 165,
+  "title": "我的还是不能右键打开终端呀,可以用自带的,不能使用pulse的",
+  "body": "> 我的还是不能右键打开终端呀,可以用自带的,不能使用pulse的\n> \n> <img width=\"307\" height=\"268\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/7c9b2654-13a9-4012-bdfd-8f37dc6794fa\" />\n> \n> <img width=\"473\" height=\"165\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/e1e78734-c06d-42ef-8daf-61a7d17b7c04\" />\n> \n> <img width=\"510\" height=\"122\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8d0d29ba-b18e-418d-a9ae-46ccd60171dd\" /> \n\n _Originally posted by @Mr-ShiHuaYu in [#41](https://github.com/jimmgreen/pulse/issues/41#issuecomment-6082288915)_",
+  "url": "https://github.com/jimmgreen/pulse/issues/165",
+  "captured_at": "2026-10-23T03:10:07.201623+00:00",
+  "updated_at": "2026-10-09T16:11:34Z",
+  "comments": [
+    {
+      "body": "可能是系统里没有Windows Terminal吧？试试win+R运行wt.exe试试\n",
+      "bodyHTML": "<p dir=\"auto\">可能是系统里没有Windows Terminal吧？试试win+R运行wt.exe试试</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDODIxllA",
+        "login": "hyrinx",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/210527636?u=67e82e0cd6005225cc00ee0b39dd062b17a01a34&v=4",
+        "profileUrl": "https://github.com/hyrinx",
+        "name": "HY"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/165#issuecomment-6084082777"
+    },
+    {
+      "body": "命令行可以",
+      "bodyHTML": "<p dir=\"auto\">命令行可以</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE2NDAyMjQ5",
+        "login": "sonichy",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/16402249?u=dc53ac2b574f8adb136f9227f259d733e64b0679&v=4",
+        "profileUrl": "https://github.com/sonichy",
+        "name": "海天鹰"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/165#issuecomment-6084697072"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoSFNmQAAqjYwODQwODI3Nzc=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoSFvIvAAqjYwODQ2OTcwNzI="
+  }
+}

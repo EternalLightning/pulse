@@ -1,0 +1,15 @@
+{
+  "number": 270,
+  "title": "pulse接管后，在打开pulse窗口的情况下，点击任务栏的资源管理器和Win+E还是会忙碌弹窗，而不是直接切到pulse。",
+  "body": "<img width=\"401\" height=\"188\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c6ca37ea-8ab2-494f-a993-9a80192659e1\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/270",
+  "captured_at": "2026-10-23T03:10:07.146048+00:00",
+  "updated_at": "2026-10-16T03:28:57Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoULBdKgBqzMzNDA0OTMzODM2",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoULBdKgBqzMzNDA0OTMzODM2"
+  }
+}

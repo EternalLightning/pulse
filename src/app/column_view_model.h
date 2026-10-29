@@ -2,6 +2,7 @@
 #pragma once
 #include "../fs/fs_snapshot.h"
 #include "entry_sort.h"
+#include "../ui/smooth_scroll.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -32,6 +33,7 @@ struct ColumnStripColumn {
     bool requested = false;
     bool error = false;
     float scroll_dip = 0.0f;
+    ui::SmoothScroll scroll_motion;
     bool auto_scroll = true;
 };
 
@@ -40,6 +42,7 @@ struct ColumnStripState {
     std::vector<ColumnStripColumn> ancestors;  // farthest -> parent
     ColumnStripColumn child;                   // selected folder (path empty = none)
     float scroll_from_right_dip = 0.0f;        // ancestor strip scroll; 0 = parent visible
+    ui::SmoothScroll horizontal_motion;
 
     bool Empty() const { return for_path.empty() && ancestors.empty() && child.path.empty(); }
 };

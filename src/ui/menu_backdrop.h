@@ -90,6 +90,7 @@ private:
 // capture is unavailable). Keeping the
 // layered popup preserves its rounded corners, shadow, fade and hit-test space.
 class MenuBackdrop {
+    friend struct OperationCenterTestPeer;
 public:
     void Reset() { plate_.reset(); }
     bool Active() const { return plate_.get() != nullptr; }
@@ -102,7 +103,7 @@ private:
 public:
     bool Draw(Compositor& compositor, MenuBackdropSource& source,
               const D2D1_RECT_F& card, POINT origin,
-              bool dark, float scale, bool allow_capture) {
+              bool dark, float scale, bool allow_capture, bool reuse_contained = false) {
         auto* dc = compositor.Dc();
         const HWND owner = compositor.Hwnd();
         if (!dc || !IsWindowVisible(owner) || IsIconic(owner) ||
@@ -115,8 +116,12 @@ public:
         const Key key{origin.x + static_cast<LONG>(card.left),
             origin.y + static_cast<LONG>(card.top), width, height};
         if (width <= 0 || height <= 0) return false;
-        if (plate_.get() && (key_.left != key.left || key_.top != key.top ||
-                key_.width != key.width || key_.height != key.height || dark_ != dark)) Reset();
+        // A shrinking popup can crop its existing screen-aligned plate instead
+        // of allocating and blurring the background again on every frame.
+        const bool contained = reuse_contained && key.left >= key_.left && key.top >= key_.top &&
+            key.left + width <= key_.left + key_.width && key.top + height <= key_.top + key_.height;
+        if (plate_.get() && (dark_ != dark || (!contained &&
+                (key_.left != key.left || key_.top != key.top || key_.width != width || key_.height != height)))) Reset();
         if (!plate_.get()) {
             const float blur = 16.0f * scale;
             const int margin = static_cast<int>(std::ceil(blur * 2.0f));
@@ -187,7 +192,9 @@ public:
         if (FAILED(factory->CreateRoundedRectangleGeometry(
                 D2D1::RoundedRect(card, radius, radius), &clip))) return false;
         dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), clip.get()), nullptr);
-        dc->DrawBitmap(plate_.get(), card);
+        const auto sample = D2D1::RectF(static_cast<float>(key.left - key_.left), static_cast<float>(key.top - key_.top),
+            static_cast<float>(key.left - key_.left + width), static_cast<float>(key.top - key_.top + height));
+        dc->DrawBitmap(plate_.get(), card, 1, D2D1_INTERPOLATION_MODE_LINEAR, sample);
         dc->PopLayer();
         return true;
     }

@@ -1,0 +1,15 @@
+{
+  "number": 135,
+  "title": "删除文件BUG及空格预览视频文件bug",
+  "body": "删除TF上的文件时，出现无法删除\n空格键 预览视频文件时  播放的时候会一卡一卡的  ",
+  "url": "https://github.com/jimmgreen/pulse/issues/135",
+  "captured_at": "2026-10-23T03:10:07.209676+00:00",
+  "updated_at": "2026-10-08T15:01:35Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

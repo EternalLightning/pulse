@@ -6,16 +6,43 @@ namespace pulse::ui {
 
 void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, const Theme& theme) {
     const auto field = SearchBarRect(w);
-    if (!vm.address_searching && w-EffectiveSidebarWidth(w)<480*scale_) {
-        const auto button=D2D1::RectF(field.right-32*scale_,field.top,field.right,field.bottom);
-        DrawButton(button,theme,IsHovered(vm,HitTestResult::AddressSearch) ? theme.fill_hover : kTransparent,
-            kIconSearch,L"",theme.text_secondary,true,true);
-        return;
-    }
+    const float progress = std::clamp(vm.address_search_animation, 0.0f, 1.0f);
+    auto* dc = compositor_->Dc();
+    D2D1_MATRIX_3X2_F transform;
+    dc->GetTransform(&transform);
+    const auto begin_content = [&](float opacity, float offset) {
+        dc->PushLayer(D2D1::LayerParameters(field, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(), opacity), nullptr);
+        dc->SetTransform(D2D1::Matrix3x2F::Translation(offset, 0) * transform);
+    };
+    const auto end_content = [&] { dc->SetTransform(transform); dc->PopLayer(); };
     fluent::ControlState state{};
-    state.focused = vm.address_searching;
     state.hovered = IsHovered(vm, HitTestResult::AddressSearch);
-    if (vm.address_searching) painter_.DrawTextFieldFrame(field, state);
+    const bool compact = w - EffectiveSidebarWidth(w) < 480 * scale_;
+    if (!compact) painter_.DrawTextFieldFrame(field, state);
+    const float collapsed_opacity = AddressSearchContentOpacity(1.0f - progress);
+    const float expanded_opacity = AddressSearchContentOpacity(progress);
+    if (collapsed_opacity > 0.0f) {
+        begin_content(collapsed_opacity, -6.0f * scale_ * progress);
+        if (compact) {
+            const auto icon = D2D1::RectF(field.right - 32 * scale_, field.top, field.right, field.bottom);
+            DrawButton(icon, theme, state.hovered ? theme.fill_hover : kTransparent,
+                kIconSearch, L"", theme.text_secondary, true, true);
+        } else {
+            DrawIconText(field.left + 10 * scale_, field.top, 18 * scale_, field.bottom - field.top,
+                kIconSearch, L"", theme.text_secondary);
+            const float badge_width = painter_.MeasureBadgeWidth(L"Ctrl+K");
+            painter_.DrawBadge({D2D1::RectF(field.right - 8 * scale_ - badge_width, field.top + 3 * scale_,
+                field.right - 8 * scale_, field.bottom - 3 * scale_), L"Ctrl+K", fluent::BadgeKind::Keycap});
+            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
+            const auto placeholder = vm.address_search_placeholder.empty() ? l10n::Get(l10n::StringId::Search)
+                : vm.address_search_placeholder;
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->TextFormat(),
+                brTextSecondary_.get(), placeholder, field.left + 36 * scale_, field.top,
+                std::max(0.0f, field.right - 14 * scale_ - badge_width - field.left - 36 * scale_), field.bottom - field.top);
+        }
+        end_content();
+    }
     auto button = [&](D2D1_RECT_F bounds, const std::wstring& text, const wchar_t* glyph,
                       HitTestResult::Region region, bool dropdown = false) {
         fluent::ButtonSpec spec;
@@ -28,6 +55,8 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
         spec.bordered = false;
         spec.drop_down = dropdown;
         spec.state.hovered = IsHovered(vm, region);
+        spec.state.pressed = (region == HitTestResult::AddressSearchScope && vm.address_search_scope_open) ||
+                             (region == HitTestResult::AddressSearchOptions && vm.address_search_options_open);
         painter_.DrawButton(spec);
         {
             // Compact buttons cannot use the text button's 8-DIP side padding.
@@ -40,7 +69,11 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
                          glyph, L"", theme.text, 0.8f);
         }
     };
-    if (vm.address_searching) {
+    if (expanded_opacity > 0.0f) {
+        begin_content(expanded_opacity, 0);
+        state.focused = true;
+        painter_.DrawTextFieldFrame(field, state, true);
+        dc->SetTransform(D2D1::Matrix3x2F::Translation(6.0f * scale_ * (1.0f - progress), 0) * transform);
         const auto layout = LayoutAddressSearch(field, scale_);
         if (!vm.address_editing) {
             const auto text = vm.address_search_text.empty()
@@ -88,32 +121,7 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
             button(layout.clear, L"", L"\xE711", HitTestResult::AddressSearchClear);
         if (layout.close.right > layout.close.left)
             button(layout.close, L"", L"\xE72B", HitTestResult::AddressSearchClose);
-    } else {
-        fluent::TextFieldSpec search;
-        search.bounds = field;
-        search.state = state;
-        search.placeholder = vm.address_search_placeholder.empty()
-            ? l10n::Get(l10n::StringId::Search) : vm.address_search_placeholder;
-        search.leading_glyph = L"\xE721";
-        search.trailing_keycap = L"Ctrl+K";
-        search.suppress_text = true;
-        painter_.DrawTextField(search);
-        MakeBrush(compositor_->Dc(),theme.text_secondary,brTextSecondary_);
-        const float text_left=field.left+36*scale_;
-        const float text_right=field.right-14*scale_-painter_.MeasureBadgeWidth(search.trailing_keycap);
-        DrawTextEndEllipsis(compositor_, theme.bg, compositor_->Dc(),compositor_->DwriteFactory(),compositor_->TextFormat(),
-            brTextSecondary_.get(),std::wstring(search.placeholder),text_left,field.top,
-            std::max(0.0f,text_right-text_left),field.bottom-field.top);
-    }
-    if (vm.address_search_animation > 0.0f) {
-        auto color = theme.accent;
-        color.a *= vm.address_search_animation;
-        ComPtr<ID2D1SolidColorBrush> brush;
-        compositor_->Dc()->CreateSolidColorBrush(color, &brush);
-        const float right = field.right - 6.0f * scale_;
-        const float width = (field.right - field.left - 12.0f * scale_) * vm.address_search_animation;
-        if (brush.get()) compositor_->Dc()->DrawLine(D2D1::Point2F(right - width, field.bottom - scale_),
-            D2D1::Point2F(right, field.bottom - scale_), brush.get(), 2.0f * scale_);
+        end_content();
     }
 }
 

@@ -1,7 +1,9 @@
 #include "../ui/fluent_menu.h"
 #include "../ui/animation_clock.h"
 #include "../ui/popup_origin.h"
+#include "snapshot_output.h"
 #include "../common/localization.h"
+#include "../app/sidebar_pin_menu.h"
 #include <cstdio>
 #include <cmath>
 #include <filesystem>
@@ -16,6 +18,7 @@ struct FluentMenuTestPeer {
         menu.base_x_ = 300; menu.base_y_ = 200;
         menu.popup_pt_ = {menu.base_x_, menu.base_y_};
         menu.open_ = true; menu.animating_out_ = false; menu.result_ = 0;
+        menu.motion_override_ = 1;
         menu.hover_row_ = -1; menu.hover_swatch_ = -1;
         menu.anim_start_ = AnimationTimeMs();
         if (!menu.Render()) return false;
@@ -56,6 +59,21 @@ struct FluentMenuTestPeer {
         SendMessageW(menu.flyouts_[depth]->hwnd, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
     }
     static float FlyoutScroll(const FluentMenu& menu, int depth) { return menu.flyouts_[depth]->scroll_y; }
+    static bool ScrollPending(const FluentMenu& menu, int depth = -1) {
+        return depth < 0 ? menu.scroll_motion_.Pending() : menu.flyouts_[depth]->scroll_motion.Pending();
+    }
+    static void ScrollFrame(FluentMenu& menu, uint64_t now) { menu.TickScroll(now); }
+    static float RowHeight(const FluentMenu& menu) { return menu.model_.RowHeightPx(); }
+    static int ChooseTopVisible(FluentMenu& menu) {
+        const float y = menu.model_.RowHeightPx() * 0.5f;
+        const auto* item = menu.model_.At(menu.model_.HitTestRow(y + menu.scroll_y_));
+        const int command = item ? item->command : 0;
+        const POINT point{FluentMenu::kShadowMargin + 40,
+            static_cast<LONG>(FluentMenu::kShadowMargin + menu.FilterHeaderPx() + y)};
+        SendMessageW(menu.hwnd_, WM_LBUTTONDOWN, 0, MAKELPARAM(point.x, point.y));
+        SendMessageW(menu.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
+        return command;
+    }
     static int Depth(const FluentMenu& menu) { return menu.open_flyouts_; }
     static void Key(FluentMenu& menu, WPARAM key) { menu.HandleMenuKey(key); }
     static int FlyoutHover(const FluentMenu& menu, int depth) { return menu.flyouts_[depth]->hover; }
@@ -148,6 +166,29 @@ struct FluentMenuTestPeer {
     static void FinishAnimation(FluentMenu& menu) {
         menu.anim_start_ = AnimationTimeMs() - 1000;
         menu.Present(255, 0);
+    }
+    static bool Closing(const FluentMenu& menu) { return menu.animating_out_; }
+    static void Motion(FluentMenu& menu, bool enabled) { menu.motion_override_ = enabled ? 1 : 0; }
+    static void Step(FluentMenu& menu, uint64_t elapsed) {
+        menu.anim_start_ = AnimationTimeMs() - elapsed;
+        menu.TickAnimation();
+    }
+    static void Close(FluentMenu& menu) { menu.BeginDismiss(); }
+    static void Retract(FluentMenu& menu, bool enabled) { menu.retract_on_dismiss_ = enabled; }
+    static bool Retracts(const FluentMenu& menu) { return menu.retract_on_dismiss_; }
+    static bool Snapshot(FluentMenu& menu, const std::filesystem::path& path,
+                         const std::vector<FluentMenuItem>& items) {
+        if (!bench::StreamSnapshots()) return menu.SaveDebugSnapshot(path.c_str(), items, 1);
+        menu.model_.SetItems(items);
+        menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_, menu.dropdown_
+            ? static_cast<float>(menu.dropdown_rect_.right - menu.dropdown_rect_.left)
+            : menu.filter_min_width_ * menu.scale_, menu.compositor_);
+        menu.hover_row_ = 1;
+        menu.snapshot_ = true;
+        const bool rendered = menu.Render();
+        menu.snapshot_ = false;
+        return rendered && bench::EmitSnapshot(path, menu.surf_.w, menu.surf_.h,
+            menu.surf_.w * 4, static_cast<BYTE*>(menu.surf_.bits));
     }
 };
 }
@@ -393,6 +434,201 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0) {
+            using Peer = FluentMenuTestPeer;
+            std::vector<FluentMenuItem> rows;
+            for (int i = 0; i < 100; ++i) rows.push_back(Item(9000 + i, L"Scrollable command"));
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1.0f), "create smooth menu fixture");
+            menu.SetMaxVisibleRows(4);
+            Check(Peer::Begin(menu, rows), "render constrained menu body");
+            Peer::FinishAnimation(menu);
+            const float target = Peer::RowHeight(menu) * 3.0f / 8.0f;
+            SendMessageW(Peer::Window(menu), WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-15)), 0);
+            Check(Peer::ScrollPending(menu), "high resolution wheel starts main-menu animation");
+            Peer::ScrollFrame(menu, AnimationTimeMs() + 40);
+            Check(Peer::ScrollOffset(menu) > 0 && Peer::ScrollOffset(menu) < target && Peer::ScrollPending(menu),
+                "main menu renders a fractional intermediate offset");
+            const int clicked = Peer::ChooseTopVisible(menu);
+            Check(Peer::Result(menu) == clicked && clicked != 0 && !Peer::ScrollPending(menu),
+                "click targets the displayed offset and cancels pending scrolling");
+            menu.Dismiss();
+
+            Check(Peer::Begin(menu, rows), "reopen main menu for reduced motion");
+            Peer::Motion(menu, false);
+            const float before = Peer::ScrollOffset(menu);
+            SendMessageW(Peer::Window(menu), WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-15)), 0);
+            Check(!Peer::ScrollPending(menu) && std::abs(Peer::ScrollOffset(menu) - before - target) < 0.1f,
+                "disabled motion applies the complete high resolution wheel delta");
+            menu.Dismiss();
+
+            auto parent = Item(9200, L"Scrollable flyout");
+            parent.children = rows;
+            FluentMenu nested;
+            Check(nested.Create(owner, &compositor, 1.0f) && Peer::Begin(nested, {parent}),
+                "create tall flyout fixture");
+            Peer::Open(nested);
+            SendMessageW(Peer::SubWindow(nested), WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+            Check(Peer::ScrollPending(nested, 0), "flyout wheel starts its own animation");
+            Peer::ScrollFrame(nested, AnimationTimeMs() + 40);
+            Check(Peer::FlyoutScroll(nested, 0) > 0 && Peer::ScrollPending(nested, 0),
+                "flyout advances before reaching its target");
+            Peer::Key(nested, VK_DOWN);
+            Check(!Peer::ScrollPending(nested, 0), "keyboard reveal cancels flyout momentum");
+            SendMessageW(Peer::SubWindow(nested), WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+            nested.Dismiss();
+            Check(!Peer::ScrollPending(nested, 0), "hidden flyout stops scrolling");
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--separator-centering") == 0) {
+            const auto output = std::filesystem::current_path() /
+                L"docs/validation/context-menu-folders-20261029";
+            if (!pulse::bench::StreamSnapshots()) std::filesystem::create_directories(output);
+            auto first = Item(1, L"打开");
+            first.glyph = L"\xE8E5";
+            first.separator_after = true;
+            auto middle = Item(2, L"查看文件夹最近变化");
+            middle.glyph = L"\xE81C";
+            middle.separator_after = true;
+            auto last = Item(3, L"属性");
+            last.glyph = L"\xE946";
+            last.shortcut = L"Alt+Enter";
+            const std::vector<FluentMenuItem> items{first, middle, last};
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
+                FluentMenuModel model;
+                model.SetItems(items);
+                model.Layout(compositor.DwriteFactory(), scale);
+                const float row_top = model.RowTopPx(1);
+                const float center = row_top + model.RowHeightPx() * 0.5f;
+                const float above = fluent::MenuSeparatorCenter(
+                    model.RowTopPx(0) + model.RowHeightPx(), scale);
+                const float below = fluent::MenuSeparatorCenter(row_top + model.RowHeightPx(), scale);
+                Check(std::abs(center - (above + below) * 0.5f) < 0.01f,
+                    "single row is centered between its two separator slots at each DPI");
+                Check(model.HitTestRow(above) == -1 && model.HitTestRow(below) == -1 &&
+                    model.HitTestRow(center) == 1,
+                    "separator slots stay inactive and the centered row remains clickable");
+                compositor.RecreateTextFormats(scale);
+                for (const bool dark : {false, true}) {
+                    FluentMenu menu;
+                    Check(menu.Create(owner, &compositor, scale), "create separator rendering fixture");
+                    menu.SetTheme(dark, HexColor(0x0078D4));
+                    menu.SetFilterMinWidth(320);
+                    const auto filename = std::wstring(dark ? L"separator-dark-" : L"separator-light-") +
+                        std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                    Check(FluentMenuTestPeer::Snapshot(menu, output / filename, items),
+                        "capture production separator and text rendering");
+                }
+            }
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--sidebar-pins") == 0) {
+            wchar_t fixture_root[32768]{};
+            GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+            const auto output = fixture_root[0] ? std::filesystem::path(fixture_root)
+                : std::filesystem::current_path() / L"bench_data/sidebar-pin-menus";
+            std::filesystem::create_directories(output);
+            for (const auto* language : {L"zh-CN", L"en-US"}) {
+                pulse::l10n::SetLanguage(language);
+                for (const float scale : {1.0f, 1.5f}) for (const bool dark : {false, true}) {
+                    compositor.RecreateTextFormats(scale);
+                    FluentMenu menu;
+                    Check(menu.Create(owner, &compositor, scale), "create shared sidebar pin menu renderer");
+                    menu.SetTheme(dark, HexColor(0x0078D4));
+                    for (const auto kind : {pulse::app::SidebarPinnedKind::QuickAccess,
+                                            pulse::app::SidebarPinnedKind::Workspace}) {
+                        const auto items = pulse::app::BuildSidebarPinMenu(kind);
+                        FluentMenuModel model;
+                        model.SetItems(items);
+                        model.Layout(compositor.DwriteFactory(), scale, 0, &compositor);
+                        bool labels_fit = true;
+                        for (int row = 0; row < model.Count(); ++row) labels_fit &= !model.LabelTruncated(row);
+                        Check(labels_fit,
+                            "Open, workspace Rename and section-specific Unpin labels fit at each language and DPI");
+                        const auto filename = std::wstring(language) +
+                            (kind == pulse::app::SidebarPinnedKind::QuickAccess ? L"-quick" : L"-workspace") +
+                            (dark ? L"-dark-" : L"-light-") +
+                            std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                        Check(menu.SaveDebugSnapshot((output / filename).c_str(), items, 1),
+                            "capture the shared pin menu with the production popup renderer");
+                    }
+                }
+            }
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--dropdown-animation") == 0) {
+            using Peer = FluentMenuTestPeer;
+            wchar_t fixture_root[32768]{};
+            GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+            auto evidence = fixture_root[0] ? std::filesystem::path(fixture_root)
+                : std::filesystem::current_path() / L"docs/validation/font-popup-20261024";
+            evidence.make_preferred();
+            if (!pulse::bench::StreamSnapshots()) std::filesystem::create_directories(evidence);
+            for (const float scale : {1.0f, 1.5f}) for (const bool dark : {false, true}) {
+                compositor.RecreateTextFormats(scale);
+                for (const auto* label : {L"新建", L"排序", L"分组", L"搜索历史"}) {
+                    FluentMenu menu;
+                    Check(menu.Create(owner, &compositor, scale), "create dropdown animation fixture");
+                    menu.SetTheme(dark, HexColor(0x0078D4));
+                    Peer::Retract(menu, true);
+                    const std::vector<FluentMenuItem> items{Item(1, label), Item(2, L"中文文件名称 example.txt")};
+                    Check(Peer::Begin(menu, items), "render real dropdown surface");
+                    Peer::Step(menu, 60);
+                    const auto opening_alpha = Peer::Alpha(menu);
+                    const auto opening_offset = Peer::Offset(menu);
+                    Check(opening_alpha > 0 && opening_alpha < 255 && opening_offset < 0,
+                        "dropdown entry has intermediate opacity and position");
+                    Peer::ChooseRow(menu, 1);
+                    Check(Peer::Closing(menu) && Peer::Result(menu) == 2 &&
+                        Peer::Alpha(menu) == opening_alpha && Peer::Offset(menu) == opening_offset,
+                        "selection starts exit at the current opacity and pose without flashing");
+                    Peer::ChooseRow(menu, 0);
+                    Check(Peer::Result(menu) == 2, "exit ignores repeated clicks and preserves the selected command");
+                    Peer::Step(menu, 70);
+                    Check(menu.IsOpen() && Peer::Alpha(menu) > 0 && Peer::Alpha(menu) < opening_alpha &&
+                        Peer::Offset(menu) < opening_offset, "exit retracts from partial entry while fading without a position jump");
+                    Peer::Step(menu, 150);
+                    Check(Peer::Hidden(menu) && Peer::Result(menu) == 2, "exit completes and returns the selected command");
+                    Check(Peer::Begin(menu, items), "reopen dropdown after exit");
+                    Peer::Step(menu, 210);
+                    Check(Peer::Alpha(menu) == 255 && Peer::Offset(menu) == 0, "entry settles after 200ms");
+                    const auto name = std::wstring(label) + (dark ? L"-dark-" : L"-light-") +
+                        std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                    Check(Peer::Snapshot(menu, evidence / name, items), "encode production dropdown visual evidence");
+                    Peer::Close(menu);
+                    Peer::Step(menu, 70);
+                    Check(Peer::Alpha(menu) > 0 && Peer::Alpha(menu) < 255 && Peer::Offset(menu) < 0,
+                        "full-opacity dropdown retracts toward its opening origin while fading out");
+                    Peer::Motion(menu, false);
+                    Peer::Step(menu, 80);
+                    Check(Peer::Hidden(menu), "disabling system motion during exit hides immediately");
+                    Check(Peer::Begin(menu, items), "reopen reduced-motion fixture");
+                    Peer::Motion(menu, false);
+                    Peer::Step(menu, 0);
+                    Check(Peer::Alpha(menu) == 255 && Peer::Offset(menu) == 0, "reduced-motion entry is immediately visible");
+                    Peer::Close(menu);
+                    Check(Peer::Hidden(menu), "reduced-motion close is immediate");
+                    Peer::Retract(menu, false);
+                    Check(Peer::Begin(menu, items), "reuse the menu for a right-click context popup");
+                    Peer::Step(menu, 210);
+                    Peer::Close(menu);
+                    Peer::Step(menu, 70);
+                    Check(Peer::Alpha(menu) > 0 && Peer::Alpha(menu) < 255 && Peer::Offset(menu) == 0,
+                        "right-click popup retains its existing fade-only dismissal");
+                    Peer::Step(menu, 150);
+                    Check(Peer::Hidden(menu), "right-click popup still completes dismissal");
+                }
+            }
+            DestroyWindow(owner);
+            CoUninitialize();
+            return failures ? 1 : 0;
+        }
         if (argc == 2 && wcscmp(argv[1], L"--nested") == 0) {
             using Peer = FluentMenuTestPeer;
             auto vendor = Item(900, L"7-Zip");
@@ -489,6 +725,8 @@ int wmain(int argc, wchar_t** argv) {
                     "nested cards flip and clamp inside monitor work area including tall child menus");
                 SendMessageW(Peer::FlyoutWindow(sized, 1), WM_MOUSEWHEEL,
                     MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+                Check(Peer::ScrollPending(sized, 1), "third-level wheel starts smooth scrolling");
+                Peer::ScrollFrame(sized, AnimationTimeMs() + 40);
                 Check(Peer::FlyoutScroll(sized, 1) > 0.0f,
                     "mouse wheel scrolls the targeted third-level popup");
                 Peer::Key(sized, VK_UP);
@@ -699,13 +937,19 @@ int wmain(int argc, wchar_t** argv) {
             auto create = Item(186, L"New");
             create.children = {Item(30, L"Folder"), Item(31, L"Text document")};
             const std::vector<FluentMenuItem> items{create, Item(1, L"Refresh")};
-            auto track = [&](bool toggle = true) {
+            auto track = [&](bool toggle = true, bool dropdown = false) {
                 if (toggle) menu.SetToggleRect(anchor);
                 probe.timed_out = false;
                 SetTimer(owner, kToggleTimeout, 1500, nullptr);
-                const int result = menu.TrackPopup({300, 200}, items);
+                const int result = dropdown ? menu.TrackDropdown(anchor, items)
+                                          : toggle ? menu.TrackToolbarPopup({300, 200}, items)
+                                          : menu.TrackPopup({300, 200}, items);
                 KillTimer(owner, kToggleTimeout);
+                MSG replay{};
+                while (PeekMessageW(&replay, owner, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE))
+                    DispatchMessageW(&replay);
                 Check(!probe.timed_out, "queued popup interaction completes without the watchdog");
+                Check(!FluentMenuTestPeer::Retracts(menu), "toolbar dismissal mode resets before the next context popup");
                 return result;
             };
             PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 20));
@@ -714,6 +958,17 @@ int wmain(int argc, wchar_t** argv) {
             PostMessageW(owner, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(30, 20));
             Check(track() == 0 && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 0,
                 "reopened popup also consumes a rapid second press delivered as double click");
+            PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 20));
+            Check(track(false, true) == 0 && probe.owner_presses == 0,
+                "ordinary dropdowns automatically toggle without caller registration");
+            HWND child = CreateWindowExW(0, L"STATIC", L"toggle child", WS_CHILD, 10, 10, 50, 30,
+                owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+            Check(child && SetWindowSubclass(child, ToggleOwnerProc, 93, reinterpret_cast<DWORD_PTR>(&probe)),
+                "create a child control inside the dropdown toggle rectangle");
+            PostMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(20, 10));
+            Check(track(false, true) == 0 && probe.owner_presses == 0,
+                "repeat clicks on child controls close without replaying a reopening press");
+            DestroyWindow(child);
             PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(90, 20));
             Check(track() == 0 && FluentMenuTestPeer::Hidden(menu) && probe.owner_presses == 1,
                 "an outside press closes the popup and still reaches the other owner control");
@@ -877,32 +1132,40 @@ int wmain(int argc, wchar_t** argv) {
             Check(menu.IsOpen() && FluentMenuTestPeer::Result(menu) == 31,
                 "owner and menu-internal focus transfers preserve popup and pending selection");
             menu.DismissForDeactivation(reinterpret_cast<HWND>(1));
-            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
-                "external deactivation immediately hides both windows and discards pending selection");
+            const auto check_dismissal = [&] {
+                Check(FluentMenuTestPeer::Closing(menu) && FluentMenuTestPeer::Result(menu) == 0,
+                    "external dismissal starts an exit transition and discards pending selection immediately");
+                FluentMenuTestPeer::Step(menu, 70);
+                Check(menu.IsOpen() && FluentMenuTestPeer::Alpha(menu) > 0 && FluentMenuTestPeer::Alpha(menu) < 160,
+                    "external dismissal presents an intermediate fading frame");
+                FluentMenuTestPeer::Step(menu, 150);
+                Check(FluentMenuTestPeer::Hidden(menu), "parent and flyout hide after the exit transition");
+            };
+            check_dismissal();
             Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for cancellation message");
             FluentMenuTestPeer::Open(menu);
             FluentMenuTestPeer::PendingResult(menu, 31);
             SendMessageW(FluentMenuTestPeer::Window(menu), WM_CANCELMODE, 0, 0);
-            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
-                "sent WM_CANCELMODE immediately hides both windows and rejects stale selection");
+            check_dismissal();
             Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for application deactivation");
             FluentMenuTestPeer::Open(menu);
             FluentMenuTestPeer::PendingResult(menu, 31);
             SendMessageW(FluentMenuTestPeer::Window(menu), WM_ACTIVATEAPP, FALSE, 0);
-            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 0,
-                "sent application deactivation immediately discards pending selection");
+            check_dismissal();
             Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for successful command selection");
             FluentMenuTestPeer::ChooseRow(menu, 1);
-            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 1,
-                "internal command selection dismisses immediately while preserving its returned command");
+            Check(FluentMenuTestPeer::Closing(menu) && FluentMenuTestPeer::Result(menu) == 1,
+                "internal command selection fades out while preserving its returned command");
             SendMessageW(FluentMenuTestPeer::Window(menu), WM_CANCELMODE, 0, 0);
             Check(FluentMenuTestPeer::Result(menu) == 0,
-                "external cancellation before invocation also clears a selection from an already hidden menu");
+                "external cancellation during the exit transition clears a pending selection");
             Check(FluentMenuTestPeer::Begin(menu, {create, stable}), "reopen menu for submenu command selection");
             FluentMenuTestPeer::Open(menu);
             FluentMenuTestPeer::ChooseSubRow(menu, 1);
-            Check(FluentMenuTestPeer::Hidden(menu) && FluentMenuTestPeer::Result(menu) == 31,
+            Check(FluentMenuTestPeer::Closing(menu) && FluentMenuTestPeer::Result(menu) == 31,
                 "submenu window mouse coordinates select the expected command");
+            FluentMenuTestPeer::Step(menu, 150);
+            Check(FluentMenuTestPeer::Hidden(menu), "submenu and parent hide together after selection fade");
             DestroyWindow(owner);
             Check(ForegroundBelongsToAnotherProcess(), "menu lifecycle does not take foreground activation");
             CoUninitialize();

@@ -7,5 +7,4 @@ void AppendQuickAccessCommand(AppState& s, std::vector<ui::FluentMenuItem>& item
                               const std::vector<std::wstring>& paths);
 bool HandleQuickAccessCommand(AppState& s, int command,
                               const std::vector<std::wstring>& paths);
-void ShowQuickAccessMenu(AppState& s, const std::wstring& path, POINT point);
 }

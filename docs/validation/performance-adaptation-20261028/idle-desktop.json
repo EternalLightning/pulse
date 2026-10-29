@@ -1,0 +1,244 @@
+{
+  "executable": "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.exe",
+  "fixture": "E:\\Projects\\pulse\\bench_data\\idle-sample-93aed68ae1eb4479be615832e798f919",
+  "process_id": 10656,
+  "input_idle": true,
+  "input_idle_ms": 714,
+  "sample_wall_ms": 20002.8921,
+  "cpu_ms": 93.75,
+  "cpu_one_core_percent": 0.4686822262066794,
+  "private_bytes": 88428544,
+  "warmup_seconds": 25,
+  "main_window_handle": 6162514,
+  "threads": [
+    {
+      "id": 33020,
+      "cpu_ms": 62.5
+    },
+    {
+      "id": 10752,
+      "cpu_ms": 0
+    },
+    {
+      "id": 3456,
+      "cpu_ms": 0
+    },
+    {
+      "id": 7540,
+      "cpu_ms": 0
+    },
+    {
+      "id": 42172,
+      "cpu_ms": 0
+    },
+    {
+      "id": 32532,
+      "cpu_ms": 0
+    },
+    {
+      "id": 17320,
+      "cpu_ms": 0
+    },
+    {
+      "id": 29152,
+      "cpu_ms": 0
+    },
+    {
+      "id": 33988,
+      "cpu_ms": 0
+    },
+    {
+      "id": 44904,
+      "cpu_ms": 0
+    },
+    {
+      "id": 33208,
+      "cpu_ms": 0
+    },
+    {
+      "id": 20740,
+      "cpu_ms": 0
+    },
+    {
+      "id": 35092,
+      "cpu_ms": 0
+    },
+    {
+      "id": 38656,
+      "cpu_ms": 0
+    },
+    {
+      "id": 34496,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41120,
+      "cpu_ms": 0
+    },
+    {
+      "id": 38380,
+      "cpu_ms": 0
+    },
+    {
+      "id": 31712,
+      "cpu_ms": 0
+    },
+    {
+      "id": 30164,
+      "cpu_ms": 0
+    },
+    {
+      "id": 29692,
+      "cpu_ms": 0
+    },
+    {
+      "id": 24324,
+      "cpu_ms": 15.625
+    },
+    {
+      "id": 30228,
+      "cpu_ms": 0
+    },
+    {
+      "id": 24864,
+      "cpu_ms": 15.625
+    },
+    {
+      "id": 38860,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41392,
+      "cpu_ms": 0
+    },
+    {
+      "id": 12848,
+      "cpu_ms": 0
+    },
+    {
+      "id": 11208,
+      "cpu_ms": 0
+    },
+    {
+      "id": 32364,
+      "cpu_ms": 0
+    },
+    {
+      "id": 3328,
+      "cpu_ms": 0
+    },
+    {
+      "id": 43808,
+      "cpu_ms": 0
+    },
+    {
+      "id": 12656,
+      "cpu_ms": 0
+    },
+    {
+      "id": 12096,
+      "cpu_ms": 0
+    },
+    {
+      "id": 9364,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41464,
+      "cpu_ms": 0
+    },
+    {
+      "id": 5048,
+      "cpu_ms": 0
+    },
+    {
+      "id": 29940,
+      "cpu_ms": 0
+    },
+    {
+      "id": 44724,
+      "cpu_ms": 0
+    },
+    {
+      "id": 32268,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41520,
+      "cpu_ms": 0
+    },
+    {
+      "id": 18132,
+      "cpu_ms": 0
+    },
+    {
+      "id": 40312,
+      "cpu_ms": 0
+    },
+    {
+      "id": 20220,
+      "cpu_ms": 0
+    },
+    {
+      "id": 36520,
+      "cpu_ms": 0
+    },
+    {
+      "id": 17860,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41732,
+      "cpu_ms": 0
+    },
+    {
+      "id": 45976,
+      "cpu_ms": 0
+    },
+    {
+      "id": 41868,
+      "cpu_ms": 0
+    },
+    {
+      "id": 38396,
+      "cpu_ms": 0
+    },
+    {
+      "id": 35136,
+      "cpu_ms": 0
+    },
+    {
+      "id": 35888,
+      "cpu_ms": 0
+    },
+    {
+      "id": 32684,
+      "cpu_ms": 0
+    },
+    {
+      "id": 16080,
+      "cpu_ms": 0
+    },
+    {
+      "id": 4964,
+      "cpu_ms": 0
+    },
+    {
+      "id": 43384,
+      "cpu_ms": 0
+    },
+    {
+      "id": 45464,
+      "cpu_ms": 0
+    },
+    {
+      "id": 46968,
+      "cpu_ms": 0
+    }
+  ],
+  "scope": "Isolated UI process only; actual visibility is not independently verified; input-idle is not first-present; child services excluded.",
+  "close_main_window_sent": true,
+  "forced_exit": false,
+  "exit_code": 0,
+  "window_style_requested": "Hidden"
+}

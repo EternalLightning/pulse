@@ -10,9 +10,10 @@
 // EMF+ records, which produced a blank page. GDI+ is the one renderer that
 // covers plain WMF, plain EMF and EMF+ alike.
 #include "metafile_raster.h"
+#include "metafile_input.h"
 
-#include "../common/path_utils.h"
 #include <objbase.h>
+#include <wrl/client.h>
 
 // gdiplus.h expects min/max as callable names, while windows.h brought the
 // macros in; std::max stays available through the parenthesised form below.
@@ -31,6 +32,40 @@ namespace {
 
 // Refuse absurd declared extents instead of allocating for them.
 constexpr UINT kMaxDeclaredEdge = 32768;
+constexpr UINT kMaxRasterEdge = 1024;
+
+bool LoadMetaFileStream(const std::wstring& path, Microsoft::WRL::ComPtr<IStream>& stream,
+                        std::wstring* error) {
+    const auto fail = [error](const wchar_t* text) {
+        if (error) *error = text;
+        return false;
+    };
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return fail(L"metafile-load-failed");
+    struct File { HANDLE value; ~File() { CloseHandle(value); } } owner{file};
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0) return fail(L"metafile-load-failed");
+    if (static_cast<uint64_t>(size.QuadPart) > kMaxMetaFileBytes) return fail(L"metafile-input-too-large");
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size.QuadPart));
+    if (!memory) return fail(L"metafile-load-failed");
+    auto* data = static_cast<BYTE*>(GlobalLock(memory));
+    if (!data) { GlobalFree(memory); return fail(L"metafile-load-failed"); }
+    DWORD received = 0;
+    const bool read = ReadFile(file, data, static_cast<DWORD>(size.QuadPart), &received, nullptr) &&
+        received == static_cast<DWORD>(size.QuadPart);
+    const bool valid = read && ValidateMetaFileInput(data, received);
+    GlobalUnlock(memory);
+    if (!valid) { GlobalFree(memory); return fail(L"metafile-input-invalid"); }
+    if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream))) {
+        GlobalFree(memory); return fail(L"metafile-load-failed");
+    }
+    ULARGE_INTEGER stream_size{};
+    stream_size.QuadPart = static_cast<uint64_t>(size.QuadPart);
+    if (FAILED(stream->SetSize(stream_size))) return fail(L"metafile-load-failed");
+    return true;
+}
 
 // Started once per process, on first use: the host only needs GDI+ when a
 // metafile is actually opened. The token is intentionally never shut down.
@@ -56,11 +91,14 @@ bool RasterizeMetaFile(const std::wstring& path, UINT max_edge,
     };
     pixels.clear();
     if (max_edge == 0) max_edge = 1024;
+    max_edge = (std::min)(max_edge, kMaxRasterEdge);
+    Microsoft::WRL::ComPtr<IStream> stream;
+    if (!LoadMetaFileStream(path, stream, error)) return false;
     if (!EnsureGdiplus()) return fail(L"metafile-no-gdiplus");
 
-    // GDI+ rejects \\?\ paths, which the fs layer hands out for long paths.
-    const std::wstring shell_path = path::StripExtendedPathPrefix(path);
-    Gdiplus::Bitmap source(shell_path.c_str(), FALSE);
+    // Parse the bounded immutable bytes already checked above. Reopening the
+    // path would let a concurrent replacement bypass the input budget.
+    Gdiplus::Bitmap source(stream.Get(), FALSE);
     if (source.GetLastStatus() != Gdiplus::Ok) return fail(L"metafile-load-failed");
 
     const UINT declared_w = source.GetWidth();

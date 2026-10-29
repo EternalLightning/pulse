@@ -1,0 +1,10 @@
+{
+  "label": "release-m1-rename",
+  "kind": "rename",
+  "pid": 43928,
+  "samples": 140,
+  "unexpected": 0,
+  "worst_difference": 16,
+  "width": 380,
+  "height": 20
+}

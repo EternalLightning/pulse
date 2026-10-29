@@ -120,6 +120,28 @@ struct Fixture {
     }
 };
 
+void RunPartialContinuation() {
+    Fixture fixture;
+    const auto source = fixture.root / L"source";
+    const auto destination = fixture.root / L"destination";
+    WriteFile(source / L"partial-first.txt", "first remains unchanged");
+    WriteFile(source / L"partial-second.txt", "second continues");
+    OpRequest partial;
+    partial.type = OpType::Copy;
+    partial.dest_dir = destination.wstring();
+    partial.sources = {(source / L"partial-first.txt").wstring(), (source / L"partial-second.txt").wstring()};
+    Check(OperationElevationAdapter::PartialCopyContinuationForTest(fixture.manager, partial, SelfPath()) &&
+              ReadFile(destination / L"partial-first.txt") == "first remains unchanged" &&
+              ReadFile(destination / L"partial-second.txt") == "second continues",
+          "permission continuation imports the real worker result with cumulative 2/2 progress");
+    size_t partial_outputs = 0;
+    for (const auto& entry : fs::directory_iterator(destination))
+        if (entry.path().filename().wstring().starts_with(L"partial-first"))
+            ++partial_outputs;
+    Check(partial_outputs == 1,
+          "partial continuation creates no keep-both duplicate for already completed source");
+}
+
 int RunNormal() {
     std::puts("Same-integrity adapter fixture: real operation engine and transport; no UAC or "
               "protected-system-directory claim.");
@@ -181,21 +203,7 @@ int RunNormal() {
               fs::exists(source / L"move.txt") && !fs::exists(destination / L"move.txt"),
           "move inverse consumes parent history and keeps historical identities in helper");
     fixture.manager.DrainCompletions();
-    WriteFile(source / L"partial-first.txt", "first remains unchanged");
-    WriteFile(source / L"partial-second.txt", "second continues");
-    OpRequest partial = copy;
-    partial.sources = {(source / L"partial-first.txt").wstring(), (source / L"partial-second.txt").wstring()};
-    Check(OperationElevationAdapter::PartialCopyContinuationForTest(fixture.manager, partial, SelfPath()) &&
-              ReadFile(destination / L"partial-first.txt") == "first remains unchanged" &&
-              ReadFile(destination / L"partial-second.txt") == "second continues",
-          "real permission failure resumes retained plan without replacing first output identity or "
-          "duplicating completion");
-    size_t partial_outputs = 0;
-    for (const auto& entry : fs::directory_iterator(destination))
-        if (entry.path().filename().wstring().starts_with(L"partial-first"))
-            ++partial_outputs;
-    Check(partial_outputs == 1,
-          "partial continuation creates no keep-both duplicate for already completed source");
+    RunPartialContinuation();
     WriteFile(source / L"rename.txt", "rename bytes");
     OpRequest rename;
     rename.type = OpType::Rename;
@@ -474,6 +482,10 @@ int wmain(int argc, wchar_t** argv) {
         return OperationElevationAdapter::RunWorker(argc, argv);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     try {
+        if (argc > 1 && std::wstring_view(argv[1]) == L"--partial-continuation") {
+            RunPartialContinuation();
+            return failures ? 1 : 0;
+        }
         if (argc > 1 && std::wstring_view(argv[1]) == L"--uac-fixture")
             return LaunchIsolatedUacFixture();
         if (argc > 1 && std::wstring_view(argv[1]) == L"--uac-fixture-internal") {

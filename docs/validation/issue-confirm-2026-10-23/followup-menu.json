@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-23",
+  "request": "Move Run as administrator to outermost context menu.",
+  "change": "Promote a registered direct runas action immediately after Open and before the existing Open with entry; prefer enabled entries and remove duplicate runas overflow rows. Keep current preference filters, invocation mapping and COM cache validation.",
+  "production_files": [
+    "src/app/context_menu_controller.cpp"
+  ],
+  "tests": [
+    {
+      "name": "admin composition and invocation",
+      "passed": 15,
+      "failed": 0,
+      "source": "src/bench/shell_launch_regression_test.cpp",
+      "argument": "--admin-menu-only",
+      "log": "bench_data/issue-followup-main/admin-menu-test.log"
+    },
+    {
+      "name": "admin localized menu rendering",
+      "passed": 27,
+      "failed": 0,
+      "source": "src/bench/context_menu_loading_test.cpp",
+      "argument": "--run-as",
+      "log": "bench_data/issue-followup-main/admin-menu-ui.log",
+      "screenshots": 8,
+      "matrix": "zh-CN/en-US x 100/150% x dark/light"
+    },
+    {
+      "name": "existing Open with regression",
+      "passed": 14,
+      "failed": 0,
+      "log": "bench_data/issue-followup-main/open-with-regression.log"
+    },
+    {
+      "name": "asynchronous live menu regression",
+      "passed": 9,
+      "failed": 0,
+      "log": "bench_data/issue-followup-main/menu-live-regression.log"
+    }
+  ],
+  "visual_review": "Eight screenshots inspected; chosen order and labels fit.",
+  "first_attempt": "bench_data/issue-followup-main/admin-menu-first.log retains four fixture failures: checks were made after ExecuteShellCommand closes its session; reopening the test session fixed the fixture, without product changes.",
+  "limits": [
+    "No real UAC or elevated process launched; operation/session identifiers observed using test callbacks.",
+    "No runas action synthesized for types with no registered verb.",
+    "No registry or user menu preference mutation."
+  ],
+  "production_build": {
+    "log": "bench_data/issue-followup-main/build-final-labels.log",
+    "pulse_sha256": "3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed"
+  }
+}

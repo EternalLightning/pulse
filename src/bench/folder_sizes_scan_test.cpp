@@ -37,6 +37,12 @@ int main() {
               "the shared scan returns exact file and directory counts with bytes");
         check(wait([&] { return sizes.Get(empty).state == FolderSizeState::Ready; }) && sizes.Get(empty).has_value && sizes.Get(empty).bytes == 0, "empty root remains a known zero");
         check(wait([&] { return sizes.Get(missing).state == FolderSizeState::Unavailable; }) && !sizes.Get(missing).has_value, "missing root is unavailable, never false zero");
+#ifdef PULSE_FOLDER_SIZES_TESTING
+        const auto sync_revision = sizes.SyncRevisionForTest();
+        for (int i = 0; i < 100; ++i) sizes.Sync({{nested}, {empty}, {missing}}, {});
+        check(sizes.SyncRevisionForTest() == sync_revision,
+            "identical consumer interests do not rebuild the service request maps");
+#endif
         write(root / L"nested" / L"child" / L"b.bin", 1000); sizes.Invalidate(nested);
         const auto stale = sizes.Get(nested);
         check(stale.state == FolderSizeState::Updating && stale.has_value && stale.bytes == 6912, "invalidate retains previous total until refresh");

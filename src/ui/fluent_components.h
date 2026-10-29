@@ -9,6 +9,11 @@
 
 namespace pulse::ui::fluent {
 
+inline constexpr float kMenuSeparatorHeight = 5.0f;
+inline constexpr float MenuSeparatorCenter(float row_bottom, float scale) {
+    return row_bottom + kMenuSeparatorHeight * scale * 0.5f;
+}
+
 // Immediate-mode state. The owner keeps input and animation state; controls only draw it.
 struct ControlState {
     bool enabled = true;

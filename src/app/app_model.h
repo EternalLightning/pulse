@@ -8,6 +8,8 @@
 #include "column_view_model.h"
 #include "entry_order_hold.h"
 #include "pane_header_animation.h"
+#include "banner_animation.h"
+#include "network_connect.h"
 #include "../index/content_result_store.h"
 #include <map>
 #include <atomic>
@@ -20,6 +22,7 @@
 #include <stack>
 #include <optional>
 #include <cstdint>
+#include <functional>
 #include <unordered_set>
 
 namespace pulse { struct ContentSizeSummary; struct ContentSelectionRestore; }
@@ -36,6 +39,7 @@ enum class BannerType { None, Other, ContentIndex, SearchIncomplete, ContentScan
 struct ArchiveListing;
 
 struct Tab {
+    uint64_t network_identity = NextNetworkIdentity();
     struct NavigationViewport { float x = 0.0f; float y = 0.0f; };
     struct HistoryEntry {
         std::wstring path;
@@ -59,7 +63,9 @@ struct Tab {
     float scroll_y = 0.0f;
     float scroll_x = 0.0f;
     unsigned home_collapsed_mask = 0;
+    std::array<ui::BinaryTransition, 3> home_group_transitions{};
     ui::ViewMode view_mode = ui::ViewMode::Details;
+    bool view_mode_direct = false;
     uint64_t view_generation = 1;
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
@@ -68,8 +74,9 @@ struct Tab {
     bool downloads_auto_sort = false;
     ui::SortColumn sort_before_downloads = ui::SortColumn::Name;
     ui::SortDirection direction_before_downloads = ui::SortDirection::Asc;
-    std::array<float, 3> details_column_dividers{};
-    std::array<float, 4> search_column_dividers{};
+    // Stored widths: Date, Type, Size, Cloud; search prepends Name.
+    std::array<float, 4> details_column_dividers{};
+    std::array<float, 5> search_column_dividers{};
     std::wstring filter_text;
     bool show_hidden_files = false;
     // Column (Miller) view toggle and user-dragged widths in DIP
@@ -80,7 +87,9 @@ struct Tab {
     std::wstring virtual_title; // tag/search views; empty for real folders
     std::wstring banner_title;
     std::wstring banner_message;
+    BannerAnimation banner_animation;
     std::wstring network_search_root;
+    std::wstring pending_network_pin;
     BannerType banner_type = BannerType::None;
     void SetBannerTitle(BannerType type, std::wstring title) {
         banner_type = type;
@@ -385,6 +394,7 @@ struct WindowTabs {
     size_t active = 0;
     std::vector<TabGroup> tab_groups;
     int next_tab_group_id = 1;
+    std::function<void(LayoutTab&)> before_close;
 
     LayoutTab* Active() { return active < items.size() ? items[active].get() : nullptr; }
     const LayoutTab* Active() const { return active < items.size() ? items[active].get() : nullptr; }
@@ -500,7 +510,11 @@ struct SidebarEntry {
     // Built-in quick-access link (BuiltinQuickAccess), -1 for user entries.
     // The quick-access menu toggles these one by one.
     int builtin = -1;
+    std::wstring icon_path; // optional Shell icon source, independent of navigation
 };
+
+struct CloudRoot;
+SidebarEntry BuildCloudSidebarEntry(const CloudRoot& root);
 
 // Built-in quick-access links, in the order they are listed. The stored mask
 // (session "quickAccessHidden") is indexed by these values, so changing the set
@@ -529,6 +543,11 @@ enum class SidebarSectionId : int {
 
 inline constexpr int kSidebarSectionCount = static_cast<int>(SidebarSectionId::Count);
 
+// Retired section ids stay reserved for session masks and saved display orders.
+constexpr bool IsSidebarSectionAvailable(SidebarSectionId id) {
+    return id != SidebarSectionId::SavedSearches;
+}
+
 // Sections whose rows are the section itself: they render without a header and
 // cannot be folded as a whole. Single source of truth — the view-model builder
 // and the section menu both ask here.
@@ -550,6 +569,7 @@ struct SidebarModel {
     std::vector<SidebarEntry> drives;
     std::vector<SidebarEntry> cloud;   // OneDrive accounts (empty while signed out)
     std::vector<SidebarEntry> starred; // the "starred items" root row
+    std::vector<SidebarEntry> system_networks;
 };
 
 SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle = nullptr);

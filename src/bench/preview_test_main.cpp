@@ -18,6 +18,9 @@ using std::min;
 #include <cstring>
 #include <string>
 #include <vector>
+#include <shlobj.h>
+#include <thumbcache.h>
+#include <wrl/client.h>
 
 using namespace pulse;
 
@@ -256,6 +259,70 @@ bool RunThumbnailFailureTests();
 bool RunThumbnailTransportTests();
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--image-thumbnail-only") == 0) {
+        wchar_t base[MAX_PATH]{};
+        if (!GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", base, ARRAYSIZE(base)))
+            GetTempPathW(ARRAYSIZE(base), base);
+        std::wstring root = base;
+        if (!root.empty() && root.back() != L'\\' && root.back() != L'/') root.push_back(L'\\');
+        root += L"PulseImageThumbnail-" + std::to_wstring(GetCurrentProcessId());
+        if (!CreateDirectoryW(root.c_str(), nullptr)) {
+            std::wprintf(L"[FAIL] thumbnail fixture directory error=%lu path=%ls\n", GetLastError(), root.c_str());
+            return 2;
+        }
+        const std::wstring image = root + L"\\image.bmp";
+        const std::wstring broken = root + L"\\broken.jpg";
+        const std::wstring uncached = root + L"\\uncached.bmp";
+        Check(WriteBmpRgb(image, 600, 400) && WriteBmpRgb(uncached, 600, 400) && WriteBytes(broken, {0xFF, 0xD8, 0}),
+              L"isolated image thumbnail fixtures");
+        Host host;
+        Check(host.Start(), L"start isolated thumbnail decoding host");
+        if (!failed) {
+            Result bitmap;
+            Check(host.Request(image, bitmap, MAXDWORD, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                  bitmap.response.kind == ipc::PreviewContentKind::Bitmap &&
+                  bitmap.response.width <= 256 && bitmap.response.height <= 256 && HasInk(bitmap),
+                  L"Thumbnail request returns bounded real image pixels");
+            for (const DWORD attr : std::vector<DWORD>{FILE_ATTRIBUTE_OFFLINE, 0x00040000u, 0x00400000u}) {
+                Result offline;
+                Check(host.Request(uncached, offline, attr, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                      offline.response.kind == ipc::PreviewContentKind::Unsupported &&
+                      offline.error == L"offline-placeholder" && offline.pixels.empty(),
+                      L"Thumbnail request never extracts a cloud placeholder");
+            }
+            const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            {
+                Microsoft::WRL::ComPtr<IShellItem> item;
+                Microsoft::WRL::ComPtr<IThumbnailCache> cache;
+                Microsoft::WRL::ComPtr<ISharedBitmap> shared;
+                WTS_CACHEFLAGS flags{};
+                const bool seeded = SUCCEEDED(SHCreateItemFromParsingName(image.c_str(), nullptr, IID_PPV_ARGS(&item))) &&
+                    SUCCEEDED(CoCreateInstance(CLSID_LocalThumbnailCache, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&cache))) &&
+                    SUCCEEDED(cache->GetThumbnail(item.Get(), 256, WTS_EXTRACT, &shared, &flags, nullptr));
+                Check(seeded, L"seed Windows thumbnail cache using the isolated local fixture");
+                for (const DWORD attr : std::vector<DWORD>{FILE_ATTRIBUTE_OFFLINE, 0x00040000u, 0x00400000u}) {
+                    Result cached;
+                    Check(host.Request(image, cached, attr, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                          cached.response.kind == ipc::PreviewContentKind::Bitmap && HasInk(cached) &&
+                          cached.response.bytes_read == 0,
+                          L"online thumbnail reuses Windows cached pixels without content reads");
+                }
+                Result content;
+                Check(host.Request(image, content, FILE_ATTRIBUTE_OFFLINE) &&
+                      content.response.kind == ipc::PreviewContentKind::Unsupported && content.response.bytes_read == 0,
+                      L"cached thumbnails do not enable automatic online content preview");
+            }
+            if (SUCCEEDED(com)) CoUninitialize();
+            Result invalid;
+            Check(host.Request(broken, invalid, MAXDWORD, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                  invalid.response.kind == ipc::PreviewContentKind::Unsupported && invalid.pixels.empty(),
+                  L"damaged JPEG thumbnail produces a typed unavailable response");
+        }
+        host.Stop();
+        DeleteFileW(image.c_str()); DeleteFileW(broken.c_str()); DeleteFileW(uncached.c_str());
+        Check(RemoveDirectoryW(root.c_str()) != FALSE, L"clean isolated thumbnail fixtures");
+        return failed ? 1 : 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--thumbnail-transport-only") == 0)
         return RunThumbnailTransportTests() ? 0 : 1;
     if (argc == 2 && wcscmp(argv[1], L"--thumbnail-failures-only") == 0)

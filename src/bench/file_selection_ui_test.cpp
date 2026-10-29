@@ -3,6 +3,7 @@
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include "../app/app_internal.h"
+#include "../app/app_exit.h"
 #include "../app/context_menu.h"
 #include "../ui/ui_renderer_internal.h"
 #include <algorithm>
@@ -17,12 +18,75 @@ int RunStatusBarUiTest();
 int RunOperationCenterApplicationTest();
 int RunOperationCenterMultiwindowTest();
 int RunArchivePresentationUiTest();
+int RunRecycleToolbarUiTest();
 
 namespace {
 int failures = 0;
 void Check(bool ok, const char* message) {
     std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", message);
     if (!ok) ++failures;
+}
+
+int LastTabCloseChecks() {
+    using namespace pulse;
+    auto owned = std::make_unique<AppState>();
+    auto& s = *owned;
+    s.isolatedTest = true;
+    s.appPrefs.persist = s.ctxMenuPrefs.persist = s.places.persist = false;
+    s.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Last tab close fixture",
+        WS_POPUP, -30000, -30000, 960, 640, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!s.hwnd || !s.compositor.Init(s.hwnd)) {
+        Check(false, "initialize last tab close fixture");
+        return 1;
+    }
+    s.renderer.SetCompositor(&s.compositor);
+    s.window_tabs.NewTab(L"C:\\closed-folder");
+    BindCurrentLayout(s);
+    const auto prepare = [&] {
+        ActiveTab(s)->current_path = L"C:\\closed-folder";
+        ActiveTab(s)->back_stack.push({L"C:\\old-history"});
+        s.window_tabs.Active()->title = L"Closed title";
+    };
+    const auto is_home = [&] {
+        return s.window_tabs.items.size() == 1 && ActiveTab(s)->current_path == app::MakeHomePath() &&
+            s.window_tabs.Active()->title.empty() && ActiveTab(s)->back_stack.empty() &&
+            ActiveTab(s)->forward_stack.empty();
+    };
+    for (bool close_window : {false, true}) {
+        prepare();
+        s.appPrefs.close_last_tab_window = close_window;
+        CloseLayoutTab(s, 0);
+        Check(is_home(), "last tab close discards path, history and title and opens home");
+        MSG message{};
+        const bool posted = PeekMessageW(&message, s.hwnd, WM_CLOSE, WM_CLOSE, PM_REMOVE) != FALSE;
+        Check(posted == close_window, "last tab close respects close-window preference");
+    }
+    prepare();
+    s.window_tabs.Active()->pinned = true;
+    CloseLayoutTab(s, 0);
+    Check(ActiveTab(s)->current_path == L"C:\\closed-folder", "tab close protects pinned singleton");
+    s.window_tabs.Active()->pinned = false;
+    s.appPrefs.keep_running_on_close = true;
+    RequestAppWindowClose(s);
+    Check(is_home() && !s.exit_requested, "background window close retires singleton navigation without exiting");
+    prepare();
+    s.appPrefs.keep_running_on_close = false;
+    s.appPrefs.global_search_enabled = true;
+    RequestAppWindowClose(s);
+    Check(is_home() && !s.exit_requested, "global-search background close also opens home next time");
+    s.window_tabs.NewTab(L"C:\\retained-folder");
+    BindCurrentLayout(s);
+    const auto retained_path = ActiveTab(s)->current_path;
+    RequestAppWindowClose(s);
+    Check(s.window_tabs.items.size() == 2 && ActiveTab(s)->current_path == retained_path,
+        "window close preserves existing multiple-tab behavior");
+    s.watches.Stop();
+    s.renderer.SetCompositor(nullptr);
+    s.compositor.Shutdown();
+    DestroyWindow(s.hwnd);
+    s.hwnd = nullptr;
+    std::printf("last tab close: %d failures\n", failures);
+    return failures ? 1 : 0;
 }
 
 bool HasBlueLine(pulse::ui::Compositor& compositor, D2D1_RECT_F cell, float scale) {
@@ -185,6 +249,16 @@ int main(int argc, char** argv) {
     OleInitialize(nullptr);
     compat::EnableDpiAwareness();
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && std::string_view(argv[1]) == "--last-tab-close-only") {
+        const int result = LastTabCloseChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--recycle-toolbar-only") {
+        const int result = RunRecycleToolbarUiTest();
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--operation-center-multiwindow") {
         const int result = RunOperationCenterMultiwindowTest();
         OleUninitialize();

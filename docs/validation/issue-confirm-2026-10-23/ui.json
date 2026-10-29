@@ -1,0 +1,374 @@
+{
+  "scope": "UI / hosted-edit / input / titlebar, 29 issues",
+  "captured_at": "2026-10-23T11:21:20.307188+08:00",
+  "status_counts": {
+    "缺条件": 17,
+    "定向未复现": 3,
+    "运行复现": 7,
+    "排除（交互建议）": 1,
+    "行为已确认但缺陷未定": 1
+  },
+  "verification": {
+    "method": "Private fixture linked existing production objects; hidden WS_POPUP owner; no product source/CMake/preference/system changes; no desktop global input; direct messages limited to own HWNDs.",
+    "runtime": "bench_data/issue-confirm-ui/runtime.log",
+    "fixture": "bench_data/issue-confirm-ui/confirm.cpp",
+    "provenance": "bench_data/issue-confirm-ui/provenance.json",
+    "visual_manifest": "bench_data/issue-confirm-ui/visual-manifest.json",
+    "layout_frames": 16,
+    "caption_hit_checks": 48,
+    "build_exit_code": 0,
+    "fixture_exit_code": 0,
+    "memory_used": false
+  },
+  "issues": [
+    {
+      "issue": 368,
+      "title": "在文字渲染选择清晰时，英文会有明显的横向位移问题，导致字母间距有明显偏差",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/typography.cpp:148",
+        "src/ui/ui_compositor.cpp:354",
+        "当前源码检索无“文字渲染-清晰”选择项；本次只渲染默认文本策略。"
+      ],
+      "remaining": "需原字体、12px参数、清晰选项对应上游实现与同场参考截图；默认渲染图不能验证该模式。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\368-readable.json"
+    },
+    {
+      "issue": 359,
+      "title": "[Bug] 重命名：移动光标，文字不移动，超出看不到",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "bench_data/issue-confirm-ui/rename-start.bmp",
+        "bench_data/issue-confirm-ui/rename-end.bmp",
+        "bench_data/issue-confirm-ui/rename-return.bmp",
+        "194字符、220px编辑区，调用生产 PaintLumaEdit；EM_SETSEL到末尾后END.txt出现，返回0后BEGIN出现。"
+      ],
+      "remaining": "仅单行编辑器横向滚动；本地未实现评论里的六行折行浮卡，未覆盖真实F2图标视图/键盘自动重复/IME。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\359-readable.json"
+    },
+    {
+      "issue": 348,
+      "title": "程序内图标和任务栏图标不一样",
+      "status": "缺条件",
+      "evidence": [
+        "src/app/app_main.cpp:2291",
+        "src/app/pulse.rc:6",
+        "原正文空；唯一评论称又一样了。"
+      ],
+      "remaining": "缺少具体两处图标及原始版本/缓存条件；未操控任务栏或图标缓存。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\348-readable.json"
+    },
+    {
+      "issue": 340,
+      "title": "名字太长的重命名显示有问题",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.h:26",
+        "src/ui/ui_pane_list.cpp:1334",
+        "上游评论的多行六行浮卡与本地单行实现不同。"
+      ],
+      "remaining": "原故障主要为图片，没有等价文字步骤；单行首尾滚动已测，未获得原图标布局触发条件。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\340-readable.json"
+    },
+    {
+      "issue": 334,
+      "title": "侧边栏只显示部分盘符",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/drive-narrow-wide.png",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/fluent_components.cpp:2328",
+        "生产DrawDriveSidebarItem，同名External Applications (E:)在184px宽只显示External且无省略号；320px可见完整(E:)。"
+      ],
+      "remaining": "复现长卷标裁切和缺省略提示；未改变真实卷标，也未把裁切说成磁盘枚举丢失。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\334-readable.json"
+    },
+    {
+      "issue": 333,
+      "title": "win10 Pulse-1.0.56-portable版本的窗口效果切换无效",
+      "status": "缺条件",
+      "evidence": [
+        "bench_data/issue-confirm-environment/environment.json",
+        "原文上传失败；评论有同版本Win10未复现反馈。"
+      ],
+      "remaining": "环境为26300/26H2，非Windows10；需真实Win10材质切换。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\333-readable.json"
+    },
+    {
+      "issue": 330,
+      "title": "BUG：Windows系统重命名光标会跳到首位",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\330-readable.json"
+    },
+    {
+      "issue": 317,
+      "title": "命名文件文字顺序错乱！",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\317-readable.json"
+    },
+    {
+      "issue": 316,
+      "title": "文件名重全名光标串位",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "src/ui/lumatext_renderer.cpp:1040",
+        "系统重绘抑制与composition定位存在，但不能由源码推断真实输入法结果。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\316-readable.json"
+    },
+    {
+      "issue": 312,
+      "title": "深色模式下，状态栏字体颜色显示异常",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/layout-1600-200-dark.png",
+        "bench_data/issue-confirm-ui/layout-1600-200-light.png",
+        "src/ui/ui_renderer.cpp:790",
+        "200%深色状态栏4 items、Nothing selected、快捷键提示均为可读浅灰色。"
+      ],
+      "remaining": "离屏生产渲染、默认主题/强调色；未复现用户整机材质、原3000px窗口与完整索引/搜索状态。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\312-readable.json"
+    },
+    {
+      "issue": 283,
+      "title": "使用bug",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/ui_pane_list.cpp:1334",
+        "src/ui/edit_host.h:26",
+        "重命名框随名称列/图标单元格分配宽度；没有按输入内容增长或用户独立调整输入框宽度。"
+      ],
+      "remaining": "第1项固定宽度仅为行为事实，不足以确认缺陷；第2项外部复制和暂存托盘优先级、第3项真实U盘删除未在UI组运行验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\283-readable.json"
+    },
+    {
+      "issue": 259,
+      "title": "重命名的问题",
+      "status": "排除（交互建议）",
+      "evidence": [
+        "原文仅希望重命名输入框随名称变长动态增加宽度，属于交互建议。"
+      ],
+      "remaining": "仅保留编号对账，不计故障；不展开建议。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\259-readable.json"
+    },
+    {
+      "issue": 234,
+      "title": "重命名鼠标跳转问题",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "原文“鼠标跳转”含义不明；评论按输入光标解读。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。 实际鼠标指针本身是否跳动仍需明确步骤。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\234-readable.json"
+    },
+    {
+      "issue": 212,
+      "title": "手势软件功能失效",
+      "status": "缺条件",
+      "evidence": [
+        "docs/validation/issue-confirm-2026-10-23/sources/212-readable.json"
+      ],
+      "remaining": "需Wgestures实际版本和真实手势注入环境；未安装/修改软件或用模拟消息声称兼容。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\212-readable.json"
+    },
+    {
+      "issue": 211,
+      "title": "重命名文件的时候，录入文字的过程中，光标会自动往前跳",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "维护者早期修复评论与后续同族报告均已阅读；评论不是本次验收证据。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\211-readable.json"
+    },
+    {
+      "issue": 194,
+      "title": "小窗模式下，会出现顶部标签页与设置、明暗按钮的UI重叠",
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/visual-manifest.json",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/ui_renderer_internal.h:1418",
+        "19标签，320/420/600/800 DIP，100%/200%，深浅16帧；48个最小化/最大化/关闭命中检查全部为1。标题栏设置/主题宽度为0，设置在侧栏。"
+      ],
+      "remaining": "当前生产自绘布局未见原述标签与顶部设置/主题重叠；离屏测试未替代真实窗口原生非客户区验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\194-readable.json"
+    },
+    {
+      "issue": 188,
+      "title": "反馈几个bug和建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\188-readable.json"
+    },
+    {
+      "issue": 187,
+      "title": "反馈几个bug和建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\187-readable.json"
+    },
+    {
+      "issue": 186,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\186-readable.json"
+    },
+    {
+      "issue": 185,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\185-readable.json"
+    },
+    {
+      "issue": 183,
+      "title": "反馈几个bug和几个建议",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/app/address_search.cpp:188",
+        "src/app/address_search.cpp:194",
+        "content空串live查询后仍为content:needle、snapshot为空、search_content_empty=true，未返回origin；文件名空串Enter保留旧查询，live仍为search虚拟路径。"
+      ],
+      "remaining": "已复现故障#2（删空后未恢复目录）的生产状态转换；未称完整可见窗口/索引结果排序已复现。故障#1长名输入乱跳仍缺真实IME；建议段不计bug。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\183-readable.json"
+    },
+    {
+      "issue": 162,
+      "title": "[BUG]重命名时首次输入时输入焦点丢失且选词后光标移动到最左侧；[建议]预览文件时按照真实文件头进行判定。",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "原文34MB GIF无本地原样本；按实际文件头判定的建议单独排除。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。 大GIF失败需原样本和预览宿主验证，UI组未宣称修复。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\162-readable.json"
+    },
+    {
+      "issue": 151,
+      "title": "快捷方式显示为*.lnk",
+      "status": "行为已确认但缺陷未定",
+      "evidence": [
+        "bench_data/issue-confirm-ui/layout-1600-200-dark.png",
+        "src/ui/ui_renderer_internal.h:169",
+        "生产展示模型有意保留on-disk .lnk；隔离DirEntry名称Example shortcut.lnk在截图中保留后缀。"
+      ],
+      "remaining": "只确认显示层现象；产品约定未定，不计新增bug。未创建/打开真实Shell快捷方式或修改隐藏扩展名偏好。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\151-readable.json"
+    },
+    {
+      "issue": 138,
+      "title": "暗色设置单选按钮选中文字看不清",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/ui_settings_core.cpp",
+        "bench_data/issue-confirm-environment/environment.json"
+      ],
+      "remaining": "原文指定Win10暗色单选框；当前非Win10环境，普通深色目录截图不代替设置单选控件验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\138-readable.json"
+    },
+    {
+      "issue": 136,
+      "title": "建议优化重命名功能的位置定位，降低灵敏度和取消自动回正",
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-ui/rename-end.bmp",
+        "bench_data/issue-confirm-ui/rename-click-middle.bmp",
+        "bench_data/issue-confirm-ui/runtime.log",
+        "src/ui/lumatext_renderer.cpp:833",
+        "生产CallLumaEditMouse处理编辑器中部单击：caret由194转182，重绘后尾部_END.txt消失；EditScrollX按每次caret从0重新算偏移，已有横向位置不保持。"
+      ],
+      "remaining": "仅长名鼠标点选后视口跳动子步骤；未复现原中文文件名整段拖动和灵敏度，没有真实桌面全局输入。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\136-readable.json"
+    },
+    {
+      "issue": 116,
+      "title": "使用中文重命名文件时，光标会出现在最前面，导致输入的字符顺序有问题。",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/edit_host.cpp:108; src/ui/lumatext_renderer.cpp:1039",
+        "已读评论中“初次修复后后续词组仍偶发”的反馈；不能仅验证首次选区。"
+      ],
+      "remaining": "需要真实微软拼音连续词组、首次替换选区及中英文数字模式；未使用WM_CHAR/WM_IME_COMPOSITION模拟替代真实IME验收。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\116-readable.json"
+    },
+    {
+      "issue": 52,
+      "title": "[BUG] 标题栏窗口按钮图标重复绘制且错位重叠（最小化/最大化/关闭）",
+      "status": "缺条件",
+      "evidence": [
+        "src/app/app_main.cpp:2319",
+        "bench_data/issue-confirm-ui/visual-manifest.json",
+        "当前实际窗口仍用WS_OVERLAPPEDWINDOW（含WS_SYSMENU），离屏WS_POPUP fixture只验证自绘按钮。"
+      ],
+      "remaining": "原问题为DWM原生按钮透过材质叠影；需要真实标准样式、DWM材质和悬停截图。离屏自绘按钮正常不能宣布原bug已修复或已复现。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\52-readable.json"
+    },
+    {
+      "issue": 50,
+      "title": "[Bug] 拖拽窗体不能触发Groupy",
+      "status": "缺条件",
+      "evidence": [
+        "src/app/app_main.cpp:2319",
+        "docs/validation/issue-confirm-2026-10-23/sources/50-readable.json"
+      ],
+      "remaining": "需真实Groupy版本、窗口过滤与拖动合并；未安装软件或使用全局输入。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\50-readable.json"
+    },
+    {
+      "issue": 20,
+      "title": "窗体显示有点异常",
+      "status": "缺条件",
+      "evidence": [
+        "src/ui/FluentTokens.h:244",
+        "docs/validation/issue-confirm-2026-10-23/sources/20-readable.json"
+      ],
+      "remaining": "系统强调色标题栏开关与Mica/DWM实际组合未切换；离屏像素不含系统DWM底层着色。",
+      "source": "docs\\validation\\issue-confirm-2026-10-23\\sources\\20-readable.json"
+    }
+  ],
+  "classification_review": "2026-10-23主审复核：151行为确认不计bug；259交互建议排除；283缺少实际故障验证。未重跑测试，运行证据与provenance保持原样。"
+}

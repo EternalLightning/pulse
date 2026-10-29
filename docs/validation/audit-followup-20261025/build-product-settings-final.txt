@@ -1,0 +1,28 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.41
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+
+  Checking File Globs
+  pulse_localization.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_localization.lib
+  pulse_crash_reporter.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_crash_reporter.lib
+  pulse_document.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Document.exe
+  pulse_text.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_text.lib
+  pulse_document_reader.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_document_reader.lib
+  pulse_fs_watch.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_fs_watch.lib
+  pulse_content_task.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_content_task.lib
+  pulse_sqlite.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_sqlite.lib
+  pulse_user_storage.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_user_storage.lib
+  pulse_index.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Index.exe
+  pulse_integration.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_integration.exe
+  pulse_preview.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Preview.exe
+  pulse_shell.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Shell.exe
+  app_runtime.cpp
+  settings_controller.cpp
+  system_ctx_model.cpp
+  system_ctx_preview_drag.cpp
+  system_ctx_registry.cpp
+  system_ctx_settings.cpp
+  正在生成代码...
+  pulse.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.exe

@@ -1,0 +1,23 @@
+{
+  "runtime": "D:\\AppData\\Temp\\PulseFolderActionsValidation-0eb465d382694874975d324f881d57cc",
+  "artifacts": [
+    {
+      "name": "pulse_folder_actions_test.exe",
+      "source": "E:\\Projects\\pulse\\build-release\\pulse_folder_actions_test.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFolderActionsValidation-0eb465d382694874975d324f881d57cc\\build\\pulse_folder_actions_test.exe",
+      "sha256": "65E13079F7E94325D8C1B5CA35B6E3420AE55F9D85E99979C1B425A85D9A571B"
+    },
+    {
+      "name": "pulse_ops_test.exe",
+      "source": "E:\\Projects\\pulse\\build-release\\pulse_ops_test.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFolderActionsValidation-0eb465d382694874975d324f881d57cc\\build\\pulse_ops_test.exe",
+      "sha256": "6138F20FADC6FA5BAAEB8F11145E2C17EC5699782698A1C4D6C4FB3C035FA5B1"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "source": "E:\\Projects\\pulse\\build-release\\Pulse.Shell.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFolderActionsValidation-0eb465d382694874975d324f881d57cc\\build\\Pulse.Shell.exe",
+      "sha256": "79788EE025FD35A0CC7E78A18E550AB4275CCCC770898AD97C34F66CDE0DA403"
+    }
+  ]
+}

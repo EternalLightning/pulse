@@ -5,13 +5,16 @@
 // bench_data/opstest (created/cleaned by this test). Prints one PASS/FAIL
 // line per check; exit code 0 iff all checks pass.
 #include "../ops/ops_manager.h"
+#include "file_operation_matrix.h"
 #include "../ops/delete_operation.h"
 #include "../ops/clipboard.h"
+#include "../ops/drive_label_backend.h"
 #include "../ops/destination_guard.h"
 #include "shell_completion_cases.h"
 #include "undo_identity_cases.h"
 #include "mutation_undo_cases.h"
 #include "source_contract_cases.h"
+#include "replace_running_exe_cases.h"
 #include "delete_progress_cases.h"
 #include "clipboard_isolation_cases.h"
 #include "../common/path_utils.h"
@@ -46,6 +49,11 @@ struct TransferIntegrationProbe {
                                 decltype(&SetVolumeLabelW) set_label, bool cancelled = false) {
         manager.shell_cancel_requested_.store(cancelled);
         manager.RunDriveLabelRename(request, 1, set_label);
+    }
+    static void RenameMappedDriveLabel(OpsManager& manager, const OpRequest& request,
+                                      const DriveLabelBackend& backend, bool cancelled = false) {
+        manager.shell_cancel_requested_.store(cancelled);
+        manager.RunDriveLabelRename(request, 1, &SetVolumeLabelW, &backend);
     }
     static uint64_t NextTaskId(OpsManager& manager) {
         std::lock_guard<std::mutex> lock(manager.mutex_);
@@ -265,6 +273,24 @@ BOOL WINAPI FakeSetVolumeLabel(LPCWSTR root, LPCWSTR label) {
     return label_error == ERROR_SUCCESS;
 }
 
+UINT fake_drive_type = DRIVE_REMOTE;
+HRESULT alias_result = S_OK;
+size_t alias_calls = 0;
+size_t alias_reads = 0;
+std::wstring alias_root;
+std::wstring alias_value;
+std::optional<std::wstring> alias_display = L"Project share";
+
+UINT WINAPI FakeDriveType(LPCWSTR) { return fake_drive_type; }
+HRESULT FakeSetMappedAlias(const std::wstring& root, const std::wstring& label) {
+    ++alias_calls; alias_root = root; alias_value = label;
+    return alias_result;
+}
+std::optional<std::wstring> FakeReadMappedLabel(const std::wstring& root) {
+    ++alias_reads; alias_root = root;
+    return alias_display;
+}
+
 int RunDriveRegressions() {
     const std::vector<std::wstring> roots = {L"C:", L"C:\\", L"c:/", L"\\\\?\\C:\\", L"\\\\?\\c:"};
     for (const auto& root : roots) {
@@ -346,6 +372,68 @@ int RunDriveRegressions() {
         Check(label_calls == previous_calls && manager.Status().phase == ops::OpPhase::Cancelled,
               L"cancelled drive label request does not call volume API");
     }
+    const ops::DriveLabelBackend backend{FakeDriveType, FakeSetVolumeLabel, FakeSetMappedAlias, FakeReadMappedLabel};
+    for (const auto* typed : {L"Project share", L""}) {
+        ops::OpsManager manager;
+        const auto request = SimpleOp(ops::OpType::Rename, {L"\\\\?\\Z:\\"}, nullptr, typed);
+        const auto previous_volume_calls = label_calls;
+        const auto previous_alias_calls = alias_calls;
+        alias_display = typed[0] ? L"Project share" : L"share (\\\\server)";
+        ops::TransferIntegrationProbe::RenameMappedDriveLabel(manager, request, backend);
+        const auto completed = manager.DrainCompletions();
+        Check(alias_calls == previous_alias_calls + 1 && label_calls == previous_volume_calls &&
+              alias_root == L"Z:\\" && alias_value == typed && manager.Status().phase == ops::OpPhase::Completed,
+              L"mapped rename uses Shell alias at canonical root without touching server volume label");
+        Check(completed.size() == 1 && completed.front().volume_label == alias_display &&
+              completed.front().destinations.empty() && !manager.CanUndo(),
+              L"mapped completion publishes readback including the default name after clearing alias");
+    }
+    {
+        ops::OpsManager manager;
+        fake_drive_type = DRIVE_FIXED;
+        const auto previous_alias_calls = alias_calls;
+        const auto previous_volume_calls = label_calls;
+        ops::TransferIntegrationProbe::RenameMappedDriveLabel(manager,
+            SimpleOp(ops::OpType::Rename, {L"C:\\"}, nullptr, L"Local"), backend);
+        Check(label_calls == previous_volume_calls + 1 && alias_calls == previous_alias_calls &&
+              manager.Status().phase == ops::OpPhase::Completed,
+              L"fixed drive backend retains SetVolumeLabel semantics");
+        fake_drive_type = DRIVE_REMOTE;
+    }
+    for (const auto failure : {HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), HRESULT_FROM_WIN32(ERROR_CANCELLED), E_ABORT}) {
+        ops::OpsManager manager;
+        alias_result = failure;
+        const auto previous_reads = alias_reads;
+        ops::TransferIntegrationProbe::RenameMappedDriveLabel(manager,
+            SimpleOp(ops::OpType::Rename, {L"Z:\\"}, nullptr, L"Alias"), backend);
+        const auto status = manager.Status();
+        Check(status.phase == (failure == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED)
+                  ? ops::OpPhase::Failed : ops::OpPhase::Cancelled) && status.failure_hr == failure &&
+              alias_reads == previous_reads && manager.DrainCompletions().empty() && !manager.CanUndo(),
+              L"mapped Shell failure or cancellation preserves HRESULT without completion or undo");
+        Check(!status.elevation_retry_available, L"mapped alias failure never offers volume elevation retry");
+    }
+    alias_result = S_OK;
+    for (const auto display : {std::optional<std::wstring>{}, std::optional<std::wstring>{L""}}) {
+        ops::OpsManager manager;
+        alias_display = display;
+        ops::TransferIntegrationProbe::RenameMappedDriveLabel(manager,
+            SimpleOp(ops::OpType::Rename, {L"Z:\\"}), backend);
+        Check(manager.Status().phase == ops::OpPhase::Failed && manager.DrainCompletions().empty(),
+              L"failed mapped readback never publishes an invented empty display label");
+    }
+    {
+        ops::OpsManager manager;
+        const auto previous_alias_calls = alias_calls;
+        ops::TransferIntegrationProbe::RenameMappedDriveLabel(manager,
+            SimpleOp(ops::OpType::Rename, {L"Z:\\"}), backend, true);
+        Check(alias_calls == previous_alias_calls && manager.Status().phase == ops::OpPhase::Cancelled &&
+              manager.DrainCompletions().empty(), L"pre-cancelled mapped rename does not enter Shell");
+    }
+    Check(path::MappedDriveLabelFromDisplayName(L"\\\\?\\Z:\\", L"share (\\\\server) (Z:)") == L"share (\\\\server)" &&
+          path::MappedDriveLabelFromDisplayName(L"Z:\\", L"Alias (Z:) content (z:)") == L"Alias (Z:) content" &&
+          path::MappedDriveLabelFromDisplayName(L"Z:\\", L"Alias (Y:)") == L"Alias (Y:)",
+          L"mapped display parsing removes only its own final drive suffix");
     wprintf(L"\n== drive ops: %d passed, %d failed ==\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
@@ -1185,6 +1273,14 @@ int RunTransferUpdateRegressions() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--replacement-fixture-child") return 0;
+    if (argc >= 2 && std::wstring_view(argv[1]) == L"--file-operation-matrix") {
+        if (argc != 3 && argc != 4) {
+            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix LOCAL_PARENT [NETWORK_PARENT]\n");
+            return 2;
+        }
+        return pulse::bench::RunFileOperationMatrix(argv[2], argc == 4 ? argv[3] : L"");
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--json-parser-only")
         return RunJsonUndoParserRegressions();
     if (argc == 3 && std::wstring_view(argv[1]) == L"--network-fixture") {
@@ -1303,6 +1399,11 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (filter == L"directory-skip") return RunDirectorySkipRegressions();
         if (filter == L"transfer-updates") return RunTransferUpdateRegressions();
+        if (filter == L"running-exe-replacement") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            return bench::RunRunningExeReplacementChecks(SandboxRoot() + L"-running-exe-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        }
         if (filter == L"source-contract") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunSourceContractRegressions(SandboxRoot() + L"-source-contract-" +

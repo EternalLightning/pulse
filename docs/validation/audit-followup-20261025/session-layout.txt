@@ -1,0 +1,14 @@
+[PASS] session layout restore keeps only the preset pane slots
+[PASS] session layout restore builds the live tree with the saved ratio
+[PASS] session layout restore and capture preserve the tab marker
+[PASS] session layout capture preserves folder presentation state
+[PASS] session layout restore supplies a usable fallback folder
+[PASS] session layout restore defaults mismatched ratios without losing paths
+[PASS] session layout restore applies nested split ratios in capture order
+[PASS] session layout restore defaults invalid ratios while keeping valid branches
+[PASS] session window tabs restore validates groups
+[PASS] empty window restore loads the same fallback and builds its tree
+[PASS] pinned tab close does not retire live work
+[PASS] all model tab closes retire the selected tab before erasing it
+[PASS] model refuses to retire its surviving singleton
+[PASS] direct session restoration bounds tabs groups and loader requests

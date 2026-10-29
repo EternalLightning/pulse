@@ -7,8 +7,10 @@
 #include "typography.h"
 #include "name_highlight.h"
 #include "dialog_text_fit.h"
+#include "recent_day_label.h"
 #include "../model/places.h"
 #include "../model/builtin_menu_strings.h"
+#include "../model/builtin_menu_items.h"
 #include "../model/search_query.h"
 #include "../common/text_format.h"
 #include "../model/drive_labels.h"
@@ -175,6 +177,7 @@ void ClearTextWidthCache() {
         entry.date_text = pulse::format::LocalFileTime(source.mtime);
         entry.path = !source.full_path.empty() ? source.full_path
                      : (fs::IsVirtualPath(vm.path) ? L"" : JoinDirName(vm.path, source.name));
+        entry.shell_id = source.shell_id;
         entry.attrs = source.attrs;
         entry.size_value = source.size;
         entry.modified_value = (static_cast<uint64_t>(source.mtime.dwHighDateTime) << 32) |
@@ -195,6 +198,15 @@ void ClearTextWidthCache() {
             entry.type_text = source.drive_type != DRIVE_UNKNOWN
                 ? pulse::format::DriveTypeText(source.drive_type)
                 : FormatListType(penetrated ? fs::StripLnkSuffix(source.name) : source.name, entry.is_dir);
+        }
+        entry.pc_device = source.pc_device;
+        if (source.pc_device) {
+            using I = pulse::l10n::StringId;
+            entry.type_text = pulse::l10n::Get(source.pc_device & 2 ? I::DeviceIPhone : I::DevicePhone);
+            if (source.pc_device & 4) entry.type_text += L" · " + pulse::l10n::Get(I::DeviceLocked);
+            else if (source.pc_device & 2) entry.type_text += L" · " + pulse::l10n::Get(I::DeviceReadOnly);
+            entry.size_text.clear();
+            entry.date_text.clear();
         }
         entry.record_only = source.change_record_only;
         entry.change_deleted = source.change_deleted;
@@ -303,21 +315,28 @@ void ClearTextWidthCache() {
         return (TrayCardHeightDip(vm.tray_deck.thumb_dip) + 94.0f) * m.scale;
     }
 
+    float SidebarRowsHeight(const SidebarGroup& group, const SidebarMetrics& m) {
+        // Empty headers have no row spacing to reveal during a fold animation.
+        if (group.items.empty()) return 0.0f;
+        float height = m.groupGap - m.itemGap;
+        for (const auto& item : group.items)
+            height += SidebarItemHeight(item, m) + m.itemGap;
+        return height;
+    }
+
     float SidebarContentHeight(const WindowViewModel& vm, const SidebarMetrics& m) {
         float height = m.pad;
         for (const auto& group : vm.sidebar) {
             if (group.hidden) continue;
-            if (group.items.empty() && group.add_action == SidebarAddAction::None) continue;
+            if (group.items.empty() && group.add_action == SidebarAddAction::None &&
+                !group.show_when_empty) continue;
             // A header-less section (the starred root) is its own first row: it
             // has nothing to fold, so it never carries the header height.
             const bool has_header = !group.header.empty();
             if (has_header) height += m.headerH + 4.0f * m.scale;
             const float expansion = has_header ? SidebarExpansion(group) : 1.0f;
             if (expansion > 0.0f) {
-                float rows_height = m.groupGap - m.itemGap;
-                for (const auto& item : group.items)
-                    rows_height += SidebarItemHeight(item, m) + m.itemGap;
-                height += rows_height * expansion;
+                height += SidebarRowsHeight(group, m) * expansion;
             }
         }
         return height + m.pad;
@@ -358,8 +377,8 @@ void ClearTextWidthCache() {
             for (int g = 0; g < static_cast<int>(vm.sidebar.size()); ++g) {
                 const auto& group = vm.sidebar[g];
                 if (group.hidden) continue;
-                // Empty sections stay invisible, exactly as in the wide layout.
-                if (group.items.empty() && group.add_action == SidebarAddAction::None) continue;
+                if (group.items.empty() && group.add_action == SidebarAddAction::None &&
+                    !group.show_when_empty) continue;
                 // Header-less sections (starred root, OneDrive accounts) are
                 // their own rows and cannot fold; every other section gets a
                 // permanent rail row that folds and unfolds it, so the section
@@ -415,7 +434,8 @@ void ClearTextWidthCache() {
         for (int g = 0; g < static_cast<int>(vm.sidebar.size()); ++g) {
             const auto& group = vm.sidebar[g];
             if (group.hidden) continue;
-            if (group.items.empty() && group.add_action == SidebarAddAction::None) continue;
+            if (group.items.empty() && group.add_action == SidebarAddAction::None &&
+                !group.show_when_empty) continue;
             if (y >= contentBottom) break;
             const float band_top = y;
             // Sections without a header (the starred root) show their rows
@@ -431,14 +451,13 @@ void ClearTextWidthCache() {
                 y += m.headerH + 4.0f * scale;
             }
             if (has_header && SidebarExpansion(group) <= 0.0f) {
+                const float gap = group.items.empty() ? 0.0f : m.groupGap - m.itemGap;
                 if (bands) bands->push_back(
-                    { g, band_top, std::min(y + m.groupGap - m.itemGap, contentBottom) });
+                    { g, band_top, std::min(y + gap, contentBottom) });
                 continue;
             }
             const float rows_top = y;
-            float rows_height = m.groupGap - m.itemGap;
-            for (const auto& item : group.items)
-                rows_height += SidebarItemHeight(item, m) + m.itemGap;
+            const float rows_height = SidebarRowsHeight(group, m);
             const float reveal_bottom = rows_top + rows_height *
                 (has_header ? SidebarExpansion(group) : 1.0f);
             for (int i = 0; i < static_cast<int>(group.items.size()); ++i) {
@@ -562,7 +581,11 @@ void ClearTextWidthCache() {
     }
 
     float PaneBannerHeight(const PaneViewModel& pane, float width, float scale, Compositor* compositor) {
-        if (!pane.is_changes) return pane.banner_message.empty() ? 0.0f : 36 * scale;
+        if (!pane.is_changes) {
+            const float expansion = pane.banner_expansion < 0.0f
+                ? 1.0f : std::clamp(pane.banner_expansion, 0.0f, 1.0f);
+            return pane.banner_message.empty() ? 0.0f : 36 * scale * expansion;
+        }
         ComPtr<IDWriteTextLayout> layout;
         return ChangeBannerLayout(pane, width, scale, compositor, layout);
     }
@@ -677,18 +700,6 @@ void ClearTextWidthCache() {
         const float top = pane.top + header_height + 5.0f * scale;
         return D2D1::RectF(pane.right - 42.0f * scale, top,
                            pane.right - 10.0f * scale, top + 30.0f * scale);
-    }
-
-    bool SidebarItemHasUnpin(const SidebarItem& item) {
-        return item.indent == 0 && item.path.starts_with(L"pulse:workspace:");
-    }
-
-    D2D1_RECT_F WorkspaceUnpinRect(const D2D1_RECT_F& row, float scale) {
-        const float size = 18.0f * scale;
-        const float pad = 8.0f * scale;
-        const float right = row.right - pad;
-        const float top = row.top + ((row.bottom - row.top) - size) * 0.5f;
-        return D2D1::RectF(right - size, top, right, top + size);
     }
 
     D2D1_RECT_F SidebarExpandRect(const D2D1_RECT_F& row, float scale) {
@@ -922,8 +933,25 @@ void ClearTextWidthCache() {
         return all.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
     }
 
+    // The user's first day of the week, Sunday = 0 like SYSTEMTIME::wDayOfWeek.
+    int FirstDayOfWeek() {
+        DWORD value = 0;  // LOCALE_IFIRSTDAYOFWEEK counts from Monday = 0
+        if (!GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER,
+                             reinterpret_cast<LPWSTR>(&value), sizeof(value) / sizeof(wchar_t)) ||
+            value > 6)
+            return 1;
+        return static_cast<int>((value + 1) % 7);
+    }
+
+    std::wstring LastWeekdayName(int day) {
+        wchar_t text[64];
+        swprintf_s(text, pulse::l10n::Get(pulse::l10n::StringId::DateLastWeekFormat).c_str(),
+                   WeekdayName(day).c_str());
+        return text;
+    }
+
     // Recent times read faster relative to today: "今天 14:32", "昨天 09:10",
-    // "周三 18:00", this year "4月13日 22:28", older "2024-04-02".
+    // "周三 18:00" this week, "上周五 18:00" last week, this year "4月13日 22:28", older "2024-04-02".
     std::wstring SmartListDate(uint64_t filetime) {
         if (!filetime) return L"";
         FILETIME ft{static_cast<DWORD>(filetime), static_cast<DWORD>(filetime >> 32)};
@@ -943,9 +971,13 @@ void ClearTextWidthCache() {
         wchar_t hm[16];
         swprintf_s(hm, L"%02u:%02u", st.wHour, st.wMinute);
         using pulse::l10n::StringId;
-        if (diff == 0) return pulse::l10n::Get(StringId::DateToday) + L" " + hm;
-        if (diff == 1) return pulse::l10n::Get(StringId::DateYesterday) + L" " + hm;
-        if (diff > 1 && diff < 7) return WeekdayName(st.wDayOfWeek) + L" " + hm;
+        switch (ClassifyRecentDay(diff, now.wDayOfWeek, FirstDayOfWeek())) {
+        case RecentDayLabel::Today: return pulse::l10n::Get(StringId::DateToday) + L" " + hm;
+        case RecentDayLabel::Yesterday: return pulse::l10n::Get(StringId::DateYesterday) + L" " + hm;
+        case RecentDayLabel::ThisWeek: return WeekdayName(st.wDayOfWeek) + L" " + hm;
+        case RecentDayLabel::LastWeek: return LastWeekdayName(st.wDayOfWeek) + L" " + hm;
+        case RecentDayLabel::Date: break;
+        }
         wchar_t text[64];
         if (diff > 0 && st.wYear == now.wYear) {
             swprintf_s(text, pulse::l10n::Get(StringId::DateMonthDayFormat).c_str(), st.wMonth, st.wDay);
@@ -965,7 +997,10 @@ void ClearTextWidthCache() {
         std::vector<std::wstring> out{pulse::l10n::Get(StringId::DateToday) + L" 23:59",
                                       pulse::l10n::Get(StringId::DateYesterday) + L" 23:59",
                                       L"2026-12-30"};
-        for (int day = 0; day < 7; ++day) out.push_back(WeekdayName(day) + L" 23:59");
+        for (int day = 0; day < 7; ++day) {
+            out.push_back(WeekdayName(day) + L" 23:59");
+            out.push_back(LastWeekdayName(day) + L" 23:59");
+        }
         wchar_t text[64];
         swprintf_s(text, pulse::l10n::Get(StringId::DateMonthDayFormat).c_str(), 12u, 30u);
         out.push_back(std::wstring(text) + L" 23:59");
@@ -1095,6 +1130,16 @@ void ClearTextWidthCache() {
         out.preview = D2D1::RectF(x, panel.top + pad, panel.right - pad,
                                   panel.top + pad + preview_h);
         const float previewBottom = panel.top + pad + preview_h;
+        if (d.preview_enabled && d.cloud_online && !d.is_dir && d.multi_count <= 1 &&
+            preview_h >= 100.0f * s && w >= 100.0f * s) {
+            const auto label = pulse::l10n::Get(d.cloud_download_percent >= 0
+                ? pulse::l10n::StringId::CloudDownloadCancel : pulse::l10n::StringId::CloudDownloadPreview);
+            const float width = std::min(w - 16.0f * s,
+                std::max(140.0f * s, MeasureLayoutText(compositor, dwrite, small_fmt, label) + 40.0f * s));
+            const float left = x + (w - width) * 0.5f;
+            out.cloud_download = D2D1::RectF(left, previewBottom - 46.0f * s,
+                left + width, previewBottom - 14.0f * s);
+        }
         // Preview off: no fold bar and no well to hit up there.
         if (d.preview_enabled) {
             out.preview_toggle = D2D1::RectF(x, previewBottom, panel.right - pad,
@@ -1440,15 +1485,34 @@ TitleChrome MakeTitleChrome(float window_w, float scale, float title_h) {
 }
 
 constexpr float kSettingsNavW = 200.0f;
-constexpr int kSettingsNavCount = 5;
+constexpr int kSettingsNavCount = 10;
+constexpr bool IsSettingsCategory(int page) { return page == 0 || (page >= 6 && page <= 9); }
+constexpr int kSettingsNavOrder[] = {0, 6, 7, 8, 9, 1, 2, 4};
+constexpr int kSettingsNavGroupStart[] = {0, 1, 3, 5, 7};
+constexpr l10n::StringId kSettingsNavTitles[] = {
+    l10n::StringId::SettingsAppearance, l10n::StringId::SettingsSearchIndex,
+    l10n::StringId::SettingsContextMenu, l10n::StringId::SettingsAboutDiagnostics,
+    l10n::StringId::SettingsDuplicates, l10n::StringId::SettingsContextMenu,
+    l10n::StringId::SettingsFileList, l10n::StringId::SettingsPageTabs,
+    l10n::StringId::SettingsPageSystem, l10n::StringId::SettingsPageFileOps,
+};
+constexpr int SettingsSidebarPage(int page) { return page == 5 ? 2 : page; }
 
 struct SettingsLayout {
+    SysCtxLayout sysctx;
     static constexpr int kContextCards = 6;
     D2D1_RECT_F context_cards[kContextCards]{}, context_header[kContextCards]{},
         context_toggle[kContextCards]{}, context_empty[kContextCards]{}, context_restore{};
     std::vector<D2D1_RECT_F> context_rows;
+    D2D1_RECT_F ctx_intro{}, ctx_error{}, ctx_layer[2]{};
+    D2D1_RECT_F pulse_card{}, pulse_title{}, pulse_description{}, pulse_restore{}, pulse_preset[4]{},
+        pulse_tabs{}, pulse_tab[3]{}, pulse_fixed[2]{}, pulse_preview{}, pulse_order_reset{};
     D2D1_RECT_F duplicate_options{};
-    D2D1_RECT_F section[4]{}, group[3]{}, footer{};
+    D2D1_RECT_F section[4]{}, group[4]{}, footer{};
+    l10n::StringId section_title[4]{};
+    int section_count = 0;
+    std::vector<D2D1_RECT_F> category_dividers;
+    D2D1_RECT_F nav_group_label[5]{};
     D2D1_RECT_F theme_row{}, theme_tile[3]{}, effect_choice{}, language_choice{};
     D2D1_RECT_F performance_row{}, text_compare_row{}, disclosure[2]{}, filename_status{};
     D2D1_RECT_F content_header{}, content_types{}, content_pause{}, content_options{}, content_rebuild{}, content_empty{};
@@ -1514,6 +1578,8 @@ struct SettingsLayout {
     D2D1_RECT_F about_distribution_card{};
     D2D1_RECT_F about_distribution_notice{};
     D2D1_RECT_F diagnostics_card{};
+    D2D1_RECT_F transfer_card{}, transfer_description{};
+    D2D1_RECT_F transfer_action[3]{};
     D2D1_RECT_F diagnostics_perf{};
     D2D1_RECT_F diagnostics_action[3]{};
     D2D1_RECT_F about_action[3]{};
@@ -1564,6 +1630,8 @@ size_t AboutRowLines(const WindowViewModel& vm, float card_w, float scale) {
 }
 
 #include "settings_layout_sections.h"
+#include "settings_sysctx_layout.h"
+#include "pulse_menu_layout.h"
 
 
 SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& rect,
@@ -1575,11 +1643,23 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         rect.right - rect.left < 1000 * scale ? 200.0f : 220.0f) * scale;
     l.nav = D2D1::RectF(l.body.left, l.body.top, l.body.left + nav_width, l.body.bottom);
     l.content = D2D1::RectF(l.nav.right, l.body.top, l.body.right, l.body.bottom);
-    for (int i = 0; i < kSettingsNavCount; ++i) {
-        const int position = i == 4 ? 3 : i;
-        const float top = i == 3 ? l.nav.bottom - 92*scale : l.nav.top + (20 + position*46)*scale;
-        l.nav_row[i] = D2D1::RectF(l.nav.left + 8*scale, top, l.nav.right - 8*scale, top + 40*scale);
+    const float nav_height = (l.nav.bottom-l.nav.top)/scale;
+    const bool headings = nav_width >= 100*scale && nav_height >= 660;
+    const float group_gap = headings ? 30.0f : 8.0f;
+    const float row_height = std::clamp((nav_height-76-5*group_gap)/9, 24.0f, 40.0f);
+    float nav_y = l.nav.top + 12*scale;
+    for (int position=0; position<static_cast<int>(std::size(kSettingsNavOrder)); ++position) {
+        for (int group=0; group<5; ++group) if (position==kSettingsNavGroupStart[group]) {
+            if (headings) l.nav_group_label[group]=D2D1::RectF(l.nav.left+20*scale,nav_y,
+                l.nav.right-12*scale,nav_y+22*scale);
+            nav_y+=group_gap*scale;
+        }
+        const int page=kSettingsNavOrder[position];
+        l.nav_row[page]=D2D1::RectF(l.nav.left+8*scale,nav_y,l.nav.right-8*scale,nav_y+row_height*scale);
+        nav_y+=(row_height+4)*scale;
     }
+    const float about_top=std::max(nav_y+12*scale,l.nav.bottom-92*scale);
+    l.nav_row[3]=D2D1::RectF(l.nav.left+8*scale,about_top,l.nav.right-8*scale,about_top+row_height*scale);
     const float pad = 20.0f * scale;
     auto label_btn_w = [&](std::wstring_view label) {
         if (painter) return painter->MeasureButtonWidth(label);
@@ -1589,7 +1669,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
     float y = l.content_origin + pad;
     y += 36.0f * scale;
     y += 8.0f * scale;
-    if (vm.settings_page == 0) {
+    if (IsSettingsCategory(vm.settings_page)) {
         y = LayoutSettingsGeneral(l, vm, scale, y, painter);
     } else if (vm.settings_page == 1) {
         const float card_left = l.content.left + pad;
@@ -1681,35 +1761,9 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         }
         y = LayoutSettingsContent(l, vm, scale, y, painter);
     } else if (vm.settings_page == 2) {
-        y += 30*scale;
-        l.context_rows.resize(vm.settings_items.size());
-        for(int g=0;g<SettingsLayout::kContextCards;++g) {
-            const float top=y;
-            const l10n::StringId descriptions[]={l10n::StringId::ContextSoftwareDesc,l10n::StringId::ContextOpenWithDesc,
-                l10n::StringId::ContextShareDesc,l10n::StringId::ContextSystemDesc,l10n::StringId::ContextPrintDesc,
-                model::builtin_text::GroupDescription};
-            const auto& description=l10n::Get(descriptions[g]);
-            const float header_height=SettingsToggleHeight(l.content.right-l.content.left-2*pad,description,scale,painter,112);
-            l.context_header[g]=D2D1::RectF(l.content.left+pad,y,l.content.right-pad,y+header_height);
-            const auto bounds=SettingsToggleBounds(l.context_header[g],description,scale,painter,112);
-            l.context_toggle[g]=bounds.control;
-            y+=header_height;
-            if(vm.settings_expanded & (1u<<(g+8))) {
-                for(size_t i=0;i<vm.settings_items.size();++i) if(vm.settings_items[i].group==g) {
-                    l.context_rows[i]=D2D1::RectF(l.content.left+pad+12*scale,y,l.content.right-pad-12*scale,y+40*scale);
-                    y+=40*scale;
-                }
-                if(y==l.context_header[g].bottom) {
-                    l.context_empty[g]=D2D1::RectF(l.content.left+pad+16*scale,y,l.content.right-pad-16*scale,y+44*scale);
-                    y+=44*scale;
-                }
-                y+=8*scale;
-            }
-            l.context_cards[g]=D2D1::RectF(l.content.left+pad,top,l.content.right-pad,y);
-            y+=12*scale;
-        }
-        l.context_restore=D2D1::RectF(l.content.left+pad,y,l.content.left+pad+label_btn_w(l10n::Get(l10n::StringId::RestoreDefaults)),y+32*scale);
-        y+=56*scale;
+        y = LayoutSettingsPulseMenu(l, vm, scale, y, painter);
+    } else if (vm.settings_page == 5) {
+        y = LayoutSettingsSysCtx(l, vm, scale, y, painter);
     } else if (vm.settings_page == 3) {
         const float card_left = l.content.left + pad;
         const float card_right = l.content.right - pad;
@@ -1751,6 +1805,33 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         l.about_distribution_card = D2D1::RectF(card_left, y, card_right,
             l.about_action[2].bottom + 16.0f * scale);
         y = l.about_distribution_card.bottom + 12.0f * scale;
+
+        const float transfer_left = card_left + 16.0f * scale;
+        const float transfer_right = card_right - 16.0f * scale;
+        const float transfer_caption = SettingsCaptionHeight(vm.settings_transfer_status,
+            transfer_right - transfer_left, scale, painter);
+        l.transfer_description = D2D1::RectF(transfer_left, y + 44.0f * scale,
+            transfer_right, y + 44.0f * scale + transfer_caption);
+        float transfer_y = l.transfer_description.bottom + 16.0f * scale;
+        const bool transfer_stacked = card_right - card_left < 650.0f * scale;
+        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
+            l10n::StringId::ImportSettingsTitle, vm.settings_transfer_pending ?
+            l10n::StringId::RestartNow : l10n::StringId::RestoreSettingsTitle};
+        float transfer_x = transfer_left;
+        for (int i = 0; i < 3; ++i) {
+            const float width = transfer_stacked ? transfer_right - transfer_left :
+                label_btn_w(l10n::Get(transfer_labels[i]));
+            if (!transfer_stacked && i && transfer_x + width > transfer_right) {
+                transfer_x = transfer_left;
+                transfer_y += 40.0f * scale;
+            }
+            l.transfer_action[i] = D2D1::RectF(transfer_x, transfer_y,
+                (std::min)(transfer_right, transfer_x + width), transfer_y + 32.0f * scale);
+            if (transfer_stacked && i < 2) transfer_y += 40.0f * scale;
+            else transfer_x += width + 8.0f * scale;
+        }
+        l.transfer_card = D2D1::RectF(card_left, y, card_right, transfer_y + 48.0f * scale);
+        y = l.transfer_card.bottom + 12.0f * scale;
 
         const bool compact_diagnostics = card_right - card_left < 650.0f * scale;
         const float performance_height=SettingsToggleHeight(card_right-card_left-16*scale,
@@ -1981,6 +2062,24 @@ std::wstring FitHighlightedFileName(Compositor* compositor, IDWriteFactory2* fac
     }
 }
 
+inline std::array<uint32_t, 3> RowActionButtons(uint32_t allowed_actions) {
+    constexpr std::array<uint32_t, 3> default_order{1u, 0u, 2u};
+    const uint32_t code = (allowed_actions >> 3u) & 0x3fu;
+    if (!code) return default_order;
+    std::array<uint32_t, 3> order{};
+    uint32_t seen = 0;
+    size_t count = 0;
+    for (uint32_t slot = 0; slot < 3; ++slot) {
+        const uint32_t id = (code >> (slot * 2u)) & 3u;
+        if (id >= 3 || (seen & (1u << id))) continue;
+        order[count++] = id;
+        seen |= 1u << id;
+    }
+    for (const uint32_t id : default_order)
+        if (!(seen & (1u << id))) order[count++] = id;
+    return order;
+}
+
 NameTrail LayoutNameTrail(float name_x, float text_y, float text_h,
                                  float col_right, float cell_top, float cell_bottom,
                                  float scale, const std::wstring& name, int tag_n,
@@ -2036,17 +2135,16 @@ NameTrail LayoutNameTrail(float name_x, float text_y, float text_h,
     t.show_star = show_star;
     t.show_more = show_more;
     t.show_new_tab = show_new_tab;
-    if (show_more || (reserve_actions && (reserve_mask & 4u))) {
-        t.more = D2D1::RectF(dock - btn, by, dock, by + btn);
-        dock = t.more.left - gap;
-    }
-    if (show_star || (reserve_actions && (reserve_mask & 1u))) {
-        t.star = D2D1::RectF(dock - btn, by, dock, by + btn);
-        dock = t.star.left - gap;
-    }
-    if (show_new_tab || (reserve_actions && !compact_actions && (reserve_mask & 2u))) {
-        t.new_tab = D2D1::RectF(dock - btn, by, dock, by + btn);
-        dock = t.new_tab.left - gap;
+    const auto action_order = RowActionButtons(allowed_actions);
+    D2D1_RECT_F* action_rects[] = {&t.star, &t.new_tab, &t.more};
+    const bool action_visible[] = {show_star, show_new_tab, show_more};
+    for (size_t i = action_order.size(); i-- > 0;) {
+        const uint32_t id = action_order[i];
+        const bool reserved = reserve_actions && (reserve_mask & (1u << id)) &&
+            (id != 1u || !compact_actions);
+        if (!action_visible[id] && !reserved) continue;
+        *action_rects[id] = D2D1::RectF(dock - btn, by, dock, by + btn);
+        dock -= btn + gap;
     }
     t.line_w = std::max(0.0f, dock - name_x);
 

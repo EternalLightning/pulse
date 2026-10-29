@@ -236,6 +236,8 @@ void ContextMenuController::WaitUntilReady(
 std::vector<ui::FluentMenuItem> ContextMenuController::BuildDisplay(
     ContextMenuPrefs& prefs, const std::vector<ui::FluentMenuItem>& base_items,
     bool& prefs_changed) const {
+    // Keep built-in identities through the merge, so hiding a Pulse command
+    // cannot expose its native duplicate or let a late reply restore it.
     std::vector<ui::FluentMenuItem> display = base_items;
     auto entries = ApplyExplorerPrefs(prefs, ComposeEntries(prefs, prefs_changed));
     for (auto& row : display) {
@@ -333,7 +335,8 @@ std::vector<ui::FluentMenuItem> ContextMenuController::BuildDisplay(
         if (!display.empty()) display.back().separator_after = true;
         display.push_back(std::move(more));
     }
-    return display;
+    return ApplyBuiltinMenuPrefs(std::move(display), prefs,
+        background_ ? BuiltinMenuSurface::Background : BuiltinMenuSurface::Item);
 }
 
 bool ContextMenuController::ExecuteShellCommand(

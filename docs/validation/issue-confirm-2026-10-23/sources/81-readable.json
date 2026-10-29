@@ -1,0 +1,42 @@
+{
+  "number": 81,
+  "title": "设为默认文件资源管理器后的问题",
+  "body": "将pulse设为默认文件资源管理器后，再取消掉，默认文件资源管理器无法打开，出现如下提示：\n\n<img width=\"738\" height=\"213\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/928b851b-c112-4a41-a2f8-9872df57f2d7\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/81",
+  "captured_at": "2026-10-23T03:10:07.218948+00:00",
+  "updated_at": "2026-10-04T08:14:21Z",
+  "comments": [
+    {
+      "body": "已更新1.0.51，问题并没有解决，仍是上面的错误弹窗",
+      "bodyHTML": "<p dir=\"auto\">已更新1.0.51，问题并没有解决，仍是上面的错误弹窗</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOE9TzkA",
+        "login": "mp5am4",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/332723088?v=4",
+        "profileUrl": "https://github.com/mp5am4",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/81#issuecomment-5977471891"
+    },
+    {
+      "body": "补充一下：是在此电脑界面，无法点盘符，右边目录树是可以点的。",
+      "bodyHTML": "<p dir=\"auto\">补充一下：是在此电脑界面，无法点盘符，右边目录树是可以点的。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOE9TzkA",
+        "login": "mp5am4",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/332723088?v=4",
+        "profileUrl": "https://github.com/mp5am4",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/81#issuecomment-5978013044"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoQVLUygBqzMyNDI5MDI3MTQ2",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQaWTaABqzMyNDM5NjY0OTY2"
+  }
+}

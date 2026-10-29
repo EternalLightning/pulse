@@ -1,0 +1,20 @@
+{
+    "RecoveryError":  null,
+    "BackupVerified":  true,
+    "Utc":  "2026-10-24T05:06:53.9563545Z",
+    "Deferred":  [
+
+                 ],
+    "Error":  null,
+    "Phase":  "complete",
+    "Success":  true,
+    "ChangedFiles":  [
+                         "Pulse.exe",
+                         "Pulse.Index.exe",
+                         "Pulse.Shell.exe",
+                         "Pulse.Preview.exe",
+                         "Pulse.Document.exe"
+                     ],
+    "BackupFiles":  70,
+    "BackupDirectory":  "E:\\Projects\\pulse\\dist\\drag-viewport-1.2.0.2-rollback-20261024-121648"
+}

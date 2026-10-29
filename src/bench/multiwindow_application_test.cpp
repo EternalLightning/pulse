@@ -447,6 +447,106 @@ int RunHomeInteractionChecks() {
     return failures ? 1 : 0;
 }
 
+int RunAppLifecycleChecks() {
+    const auto root = std::filesystem::absolute(L"bench_data/audit-app-lifecycle") /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    AppState state;
+    state.isolatedTest = true;
+    state.safeMode = true;
+    const HWND hwnd = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        wc.lpszClassName, L"Pulse lifecycle fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+        -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+    Check(hwnd && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+        "initialize an isolated production window for lifecycle checks");
+    if (!hwnd) return 1;
+
+    auto* original = state.window_tabs.Active();
+    original->pinned = true;
+    const auto original_path = original->ActiveFolder()->current_path;
+    state.appPrefs.keep_running_on_close = true;
+    state.core.global_ui_owner = nullptr;
+    RequestAppWindowClose(state);
+    Check(state.window_tabs.Active() == original && original->pinned &&
+        original->ActiveFolder()->current_path == original_path,
+        "failed tray hiding preserves a pinned singleton and its navigation");
+    state.core.global_ui_owner = hwnd;
+    original->pinned = false;
+
+    const auto seed_search = [&](app::LayoutTab& layout, uint32_t request, uint64_t session) {
+        layout.ActiveFolder()->current_path = app::MakeSearchPath(L"lifecycle");
+        layout.ActiveFolder()->search_session_id = session;
+        state.pendingIndexSearches[request].query.session_id = session;
+    };
+    seed_search(*original, 101, 201);
+    auto& surviving = state.window_tabs.NewTab(app::MakeHomePath());
+    seed_search(surviving, 102, 202);
+    BindCurrentLayout(state);
+    CloseLayoutTab(state, 0);
+    Check(!state.pendingIndexSearches.contains(101) && state.pendingIndexSearches.contains(102),
+        "ordinary close retires its pending search and preserves another tab session");
+    auto& controller_closed = state.window_tabs.NewTab(app::MakeHomePath());
+    seed_search(controller_closed, 103, 203);
+    state.window_tabs.NewTab(app::MakeHomePath());
+    BindCurrentLayout(state);
+    state.tabs.CloseTab(state.window_tabs, 1);
+    Check(!state.pendingIndexSearches.contains(103) && state.pendingIndexSearches.contains(102),
+        "controller close uses the same search teardown before the model erase");
+    state.window_tabs.CloseTab(1);
+    BindCurrentLayout(state);
+    ResetLastTabToHome(state);
+    Check(state.pendingIndexSearches.empty() && ActiveTab(state)->current_path == app::MakeHomePath(),
+        "last-tab reset retires the final search subscription");
+
+    StartLoadingPath(state, *ActiveTab(state), (root / L"folder").wstring());
+    Check(Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+        "load the local directory used by the unavailable-watch check");
+    state.watches.Stop();
+    { std::ofstream added(root / L"folder" / L"unwatched.txt"); added << "watch fallback"; }
+    state.last_unc_poll = GetTickCount64() - 1001;
+    DrainDirNotifies(state);
+    Check(Wait([&] {
+        const auto* tab = ActiveTab(state);
+        if (!tab || tab->loading) return false;
+        for (size_t i = 0; i < tab->EntryCount(); ++i)
+            if (tab->EntryAt(i).name == L"unwatched.txt") return true;
+        return false;
+    }), "unarmed local directory monitoring falls back to a real listing refresh");
+
+    state.isolatedTest = false;
+    state.sidebarHiddenMask = 1u << static_cast<int>(app::SidebarSectionId::Tags);
+    Check(SendMessageW(hwnd, WM_QUERYENDSESSION, 0, ENDSESSION_LOGOFF) == TRUE,
+        "logoff query accepts after saving the current preference snapshot");
+    app::WindowSessionSnapshot preferences;
+    Check(app::LoadSessionPreferences(preferences) &&
+        preferences.sidebar_hidden == static_cast<int>(state.sidebarHiddenMask) &&
+        state.core.windows.Count() == 1,
+        "logoff query persists preferences without destroying the live window");
+    const int saved_mask = preferences.sidebar_hidden;
+    state.sidebarHiddenMask = 1u << static_cast<int>(app::SidebarSectionId::Networks);
+    SendMessageW(hwnd, WM_ENDSESSION, FALSE, ENDSESSION_LOGOFF);
+    Check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == saved_mask,
+        "a canceled end-session notification does not rewrite preferences");
+    SendMessageW(hwnd, WM_ENDSESSION, TRUE, ENDSESSION_LOGOFF);
+    Check(app::LoadSessionPreferences(preferences) &&
+        preferences.sidebar_hidden == static_cast<int>(state.sidebarHiddenMask),
+        "confirmed end-session flushes the latest preferences");
+    state.isolatedTest = true;
+    RequestWindowClose(state);
+    Check(Wait([&] { return state.core.windows.Count() == 0; }), "lifecycle fixture closes its production window");
+    Pump();
+    std::filesystem::remove_all(root);
+    std::printf("app lifecycle: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
+
 int RunSessionChecks() {
     const auto root = std::filesystem::absolute(L"bench_data/window-session") /
         std::to_wstring(GetCurrentProcessId());
@@ -513,7 +613,7 @@ int RunSessionChecks() {
         Check(Wait([&] { return state.core.windows.Count() == 0; }),
             "application exit closes all three windows");
         std::wstring saved;
-        Check(ReadUtf8File((root / L"profile" / L"session.json").wstring(), saved),
+        Check(ReadUtf8File((root / L"profile" / L"preferences.json").wstring(), saved),
             "exit writes the isolated preferences file");
         const json::Document doc(saved);
         Check(doc.Is(json::Kind::Object) && !doc.Find(L"windows") && !doc.Find(L"layoutTabs") &&
@@ -687,10 +787,22 @@ int RunBackgroundChecks() {
     Check(primary && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
         "background fixture initializes a real window with an isolated profile");
     if (!primary) return 1;
+    CloseDialogAutomation automation;
+    state.appPrefs.keep_running_on_close = false;
+    state.appPrefs.global_search_enabled = false;
+    const auto single = StartBlockedCopy(state, root, L"single");
+    Check(single.has_value(), "single window owns a real unfinished transfer with background settings disabled");
+    ShowWindow(primary, SW_SHOWNOACTIVATE);
+    SendMessageW(primary, WM_CLOSE, 0, 0);
+    Check(automation.confirmations == 1 && IsWindowVisible(primary) && !state.core.exiting &&
+        !state.exit_requested && state.ops.HasPendingFileOperations(),
+        "closing the only window prompts for unfinished work; declining leaves the transfer running");
+    if (single) state.ops.ResolveConflict(single->token, ops::ConflictChoice::Skip, false);
+    Check(Wait([&] { return !state.ops.HasPendingFileOperations(); }),
+        "single-window transfer finishes after the close is declined");
     auto* secondary = PostOpenFolderInNewWindow(state, state.open_path);
     Check(secondary && state.core.windows.Count() == 2, "background fixture registers two real windows");
     if (!secondary) { RequestApplicationExit(state); Wait([&] { return !IsWindow(primary); }); return 1; }
-    CloseDialogAutomation automation;
     const auto first = StartBlockedCopy(state, root, L"first");
     const auto second = StartBlockedCopy(*secondary, root, L"second");
     Check(first && second, "both windows own real transfers waiting at independent conflicts");
@@ -704,7 +816,7 @@ int RunBackgroundChecks() {
         automation.confirmations, state.exit_requested, secondary->exit_requested, state.core.windows.Count(),
         IsWindowVisible(primary) != FALSE, IsWindowVisible(secondary->hwnd) != FALSE,
         static_cast<void*>(state.core.global_ui_owner));
-    Check(automation.confirmations == 0 && !state.exit_requested && !secondary->exit_requested &&
+    Check(automation.confirmations == 1 && !state.exit_requested && !secondary->exit_requested &&
         state.core.windows.Count() == 2 && !IsWindowVisible(primary) && !IsWindowVisible(secondary->hwnd),
         "closing every background-enabled window hides its owner without prompting or shutdown");
     Check(state.ops.HasPendingFileOperations() && secondary->ops.HasPendingFileOperations(),
@@ -726,7 +838,7 @@ int RunBackgroundChecks() {
     const auto archive_cancel = std::make_shared<std::atomic_bool>(false);
     secondary->archive_operations.push_back({archive_done, archive_cancel});
     RequestApplicationExit(state);
-    Check(automation.confirmations == 1 && !archive_cancel->load() && !state.core.exiting,
+    Check(automation.confirmations == 2 && !archive_cancel->load() && !state.core.exiting,
         "an archive lifetime alone participates in application exit confirmation; decline preserves it");
 
     const auto third = StartBlockedCopy(state, root, L"third");
@@ -734,16 +846,27 @@ int RunBackgroundChecks() {
     state.appPrefs.keep_running_on_close = false;
     ShowWindow(primary, SW_SHOWNOACTIVATE);
     ShowWindow(secondary->hwnd, SW_SHOWNOACTIVATE);
+    state.appPrefs.global_search_enabled = true;
     SendMessageW(primary, WM_CLOSE, 0, 0);
-    Check(!IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 1,
-        "a secondary close retains pending work without an interruption prompt when background preference is off");
+    Check(IsWindowVisible(primary) && automation.confirmations == 3 && state.ops.HasPendingFileOperations(),
+        "global search cannot silently hide pending work when close-to-tray is disabled");
+    state.appPrefs.global_search_enabled = false;
+    SendMessageW(primary, WM_CLOSE, 0, 0);
+    Check(IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 4 &&
+        state.ops.HasPendingFileOperations(),
+        "declining a multiwindow close keeps its unfinished operation visible");
+    automation.accept = true;
+    SendMessageW(primary, WM_CLOSE, 0, 0);
+    Check(!IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 5,
+        "accepting a multiwindow close continues its pending work in the background");
+    automation.accept = false;
     SendMessageW(secondary->hwnd, WM_CLOSE, 0, 0);
-    Check(automation.confirmations == 2 && !state.core.exiting && !secondary->exit_requested &&
+    Check(automation.confirmations == 6 && !state.core.exiting && !secondary->exit_requested &&
         state.ops.HasPendingFileOperations(),
         "closing the last visible window confirms exit across retained hidden operations; decline preserves them");
     automation.accept = true;
     RequestApplicationExit(*secondary);
-    Check(automation.confirmations == 3 && state.core.exiting && archive_cancel->load(),
+    Check(automation.confirmations == 7 && state.core.exiting && archive_cancel->load(),
         "explicit application exit asks once for all hidden pending work");
     Check(Wait([&] { return secondary->exit_stop_finished.load(std::memory_order_acquire); }) &&
         IsWindow(secondary->hwnd) && !CompleteApplicationExit(*secondary),
@@ -781,6 +904,11 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string(argv[1]) == "--session-only") {
         const int result = RunSessionChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--app-lifecycle-only") {
+        const int result = RunAppLifecycleChecks();
         OleUninitialize();
         return result;
     }

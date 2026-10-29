@@ -23,15 +23,21 @@ namespace pulse::ui {
 D2D1_RECT_F MainRenderer::DetailsPanelRect(float w, float h) const {
     const float reserved = DetailsPanelWidth(w);
     if (reserved <= 0.0f) return D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
-    const float pw = reserved - margin_;
+    const float pw = DetailsPanelTargetWidth(w) - margin_;
     const float top = title_bar_height_ + toolbar_height_ + margin_;
     const float bottom = h - status_height_ - margin_;
-    return D2D1::RectF(w - margin_ - pw, top, w - margin_, bottom);
+    return D2D1::RectF(w - reserved, top, w - reserved + pw, bottom);
 }
 void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                                     const Theme& theme) {
     const D2D1_RECT_F panel = DetailsPanelRect(rect.right, rect.bottom);
-    if (panel.right - panel.left <= 1.0f || !compositor_ || !compositor_->Dc()) return;
+    if (panel.right - panel.left <= 1.0f || !compositor_ || !compositor_->Dc()) {
+        details_scroll_x_.Reset();
+        details_scroll_y_.Reset();
+        details_preview_ready_ = false;
+        EndDetailsPreviewPan();
+        return;
+    }
     ID2D1DeviceContext* dc = compositor_->Dc();
     const float s = scale_;
     const DetailsPanelView& d = vm.details;
@@ -48,6 +54,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         details_preview_identity_ = identity;
         details_content_reveal_.Reset();
         details_viewport_ = {};
+        details_scroll_x_.Reset();
+        details_scroll_y_.Reset();
         details_text_layout_.reset();
         details_layout_text_.clear();
         details_preview_ready_ = false;
@@ -57,6 +65,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         // Collapsed well: drop pan/zoom state so nothing stale paints if the
         // preview is switched back on for another file.
         details_viewport_ = {};
+        details_scroll_x_.Reset();
+        details_scroll_y_.Reset();
         details_preview_ready_ = false;
         details_content_reveal_.Reset();
     }
@@ -197,7 +207,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         // Off: neither the preview child process nor the handler host runs for
         // this selection, which is the whole point of the switch.
         const bool preview_on = d.preview_enabled;
-        const bool handlerPreview = preview_on && !vm.safe_mode && !placeholderOnly &&
+        const bool handlerPreview = preview_on && !d.cloud_online && !vm.safe_mode && !placeholderOnly &&
             preview_handler_.CanHostPath(d.path);
         if (!placeholderOnly) {
             MakeBrush(dc, theme.fill_hover, brFillInput_);
@@ -219,7 +229,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         const uint64_t reveal_now = AnimationTimeMs();
         details_content_reveal_.Sample(reveal_now, MotionEnabled());
         const float content_opacity = MotionEnabled() ? details_content_reveal_.opacity : 1.0f;
-        if (preview_on && !d.is_dir && d.multi_count <= 1) {
+        if (preview_on && !d.cloud_online && !d.is_dir && d.multi_count <= 1) {
             std::vector<PreviewProperty> ignored;
             thumbnail_cache_.Properties(d.path, d.attrs, d.view_generation,
                                         d.modified_value, d.size_value, ignored);
@@ -237,10 +247,14 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
              previewResult == PreviewDrawResult::Hex);
         details_content_reveal_.Tick(details_preview_ready_, reveal_now, MotionEnabled());
         details_content_animating_ = details_content_reveal_.pending;
-        if (!details_preview_ready_) EndDetailsPreviewPan();
+        if (!details_preview_ready_) {
+            EndDetailsPreviewPan();
+            details_scroll_x_.Reset();
+            details_scroll_y_.Reset();
+        }
         preview_handler_.Sync(notify_hwnd_, overlayRc, d.path, d.attrs, d.view_generation,
                               d.modified_value, d.size_value, vm.dark, theme.bg, theme.text,
-                              handlerPreview);
+                              handlerPreview && !details_open_motion_.Pending() && details_visible_);
         const auto handlerState = preview_handler_.state();
         if (handlerPreview) {
             if (handlerState == PreviewHandlerHost::State::Shown) {
@@ -277,6 +291,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 D2D1_RECT_F clipRc = contentRc;
                 clipRc.bottom -= 18.0f * s;
                 if (!details_text_layout_.get() || details_layout_text_ != previewText || details_layout_scale_ != s) {
+                    details_scroll_x_.Reset();
+                    details_scroll_y_.Reset();
                     details_text_layout_.reset();
                     details_layout_text_ = previewText;
                     details_layout_scale_ = s;
@@ -291,7 +307,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                         metrics.height, false);
                     const auto target = details_viewport_.ContentRect();
                     dc->PushAxisAlignedClip(clipRc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                    dc->DrawTextLayout(D2D1::Point2F(target.left, target.top), details_text_layout_.get(),
+                    compositor_->DrawTextLayout(D2D1::Point2F(target.left, target.top), details_text_layout_.get(),
                         brText_.get());
                     dc->PopAxisAlignedClip();
                 }
@@ -305,7 +321,18 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                  compositor_->SmallFormat(), theme.text_secondary);
             if (content_layer) dc->PopLayer();
         }
-        if (handlerPreview && handlerState == PreviewHandlerHost::State::Shown) {
+        if (preview_on && d.cloud_online && !placeholderOnly) {
+            std::wstring state = pulse::l10n::Get(pulse::l10n::StringId::PreviewCloudOnly);
+            if (d.cloud_download_percent >= 0) state += L"\n" + std::to_wstring(d.cloud_download_percent) + L"%";
+            D2D1_RECT_F message = contentRc;
+            if (hit.cloud_download.right > hit.cloud_download.left) message.bottom = hit.cloud_download.top - 8.0f * s;
+            centeredText(state, message, compositor_->SmallFormat(), theme.text_secondary);
+            if (hit.cloud_download.right > hit.cloud_download.left)
+                ghostButton(hit.cloud_download, d.cloud_download_percent >= 0 ? L"\xE711" : L"\xE896",
+                    pulse::l10n::Get(d.cloud_download_percent >= 0 ? pulse::l10n::StringId::CloudDownloadCancel
+                        : pulse::l10n::StringId::CloudDownloadPreview),
+                    vm.hover_region == static_cast<int>(HitTestResult::DetailsCloudDownload));
+        } else if (handlerPreview && handlerState == PreviewHandlerHost::State::Shown) {
             // System preview handler paints into the overlay HWND.
         } else if (preview_on && previewResult != PreviewDrawResult::Bitmap &&
                    previewResult != PreviewDrawResult::Text && previewResult != PreviewDrawResult::Hex) {
@@ -319,8 +346,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                         d.multi_count);
                     state = count;
                 }
-            else if ((d.attrs & (0x00040000u | 0x00400000u)) &&
-                     !(d.attrs & 0x00080000u))
+            else if (d.cloud_online)
                 state = pulse::l10n::Get(pulse::l10n::StringId::OnlineToPreview);
             else if (previewResult == PreviewDrawResult::Pending)
                 state = pulse::l10n::Get(pulse::l10n::StringId::PreviewLoading);
@@ -503,7 +529,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 const DWRITE_TRIMMING trim{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
                 tl->SetTrimming(&trim, nullptr);
                 MakeBrush(dc, fg, brText_);
-                dc->DrawTextLayout(D2D1::Point2F(rc.left + 2.0f * s, rc.top + 26.0f * s),
+                compositor_->DrawTextLayout(D2D1::Point2F(rc.left + 2.0f * s, rc.top + 26.0f * s),
                                    tl.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
         };
@@ -682,6 +708,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
 
 bool MainRenderer::BeginDetailsPreviewPan(float x, float y) {
     if (!details_preview_ready_) return false;
+    details_scroll_x_.Reset();
+    details_scroll_y_.Reset();
     details_preview_dragging_ = false;
     details_preview_drag_pending_ = true;
     details_preview_pointer_ = POINT{static_cast<LONG>(x), static_cast<LONG>(y)};
@@ -701,11 +729,19 @@ void MainRenderer::MoveDetailsPreviewPan(float x, float y) {
 void MainRenderer::ScrollDetailsPreview(float steps, float x, float y, bool horizontal) {
     if (!details_preview_ready_) return;
     if (details_viewport_.image) {
+        if (horizontal) return;
         details_viewport_.ZoomAt(details_viewport_.zoom * std::pow(1.15f, steps), x, y);
         details_zoom_label_until_ = GetTickCount64() + 1200;
     } else {
-        details_viewport_.Pan(horizontal ? -steps * 48 * scale_ : 0,
-                              horizontal ? 0 : steps * 48 * scale_);
+        if (horizontal) {
+            details_scroll_x_.ScrollBy(details_viewport_.x, steps * 48.0f * scale_,
+                details_viewport_.MaxX(), details_viewport_.ViewWidth(),
+                AnimationTimeMs(), MotionEnabled());
+        } else {
+            details_scroll_y_.ScrollBy(details_viewport_.y, -steps * 48.0f * scale_,
+                details_viewport_.MaxY(), details_viewport_.ViewHeight(),
+                AnimationTimeMs(), MotionEnabled());
+        }
     }
 }
 void MainRenderer::ToggleDetailsPreviewFit(float x, float y) {

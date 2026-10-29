@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-23",
+  "scope": "F17 F19 F09 only; F25 watch and explicit-refresh integration coordinated with preview agent",
+  "baseline": {
+    "fixture": "bench_data/issue-fixes-navigation/baseline-fixture.cpp",
+    "log": "bench_data/issue-fixes-navigation/baseline.log",
+    "observed_failures": 10,
+    "notes": "Production SubmitAddressSearch for content/name and Enter/live did not return to origin or clear history deadline. Real directory worker/navigation returned from scroll 1800/x17 to scroll 2128/x0 while preserving selected child75. Initial folder-load preferences selected Details; final regression explicitly covers Details and LargeIcons."
+  },
+  "changes": [
+    {
+      "id": "F17",
+      "issues": [
+        188,
+        187,
+        186,
+        185,
+        183
+      ],
+      "files": [
+        "src/app/address_search.cpp",
+        "src/app/search_flow_test.cpp"
+      ],
+      "behavior": "Whitespace or empty address search exits through existing cancellation and origin restoration path, cancels delayed history writes, honors composition guard."
+    },
+    {
+      "id": "F19",
+      "issues": [
+        169,
+        129
+      ],
+      "files": [
+        "src/app/app_model.h",
+        "src/app/app_model.cpp",
+        "src/app/app_navigation.h",
+        "src/app/app_navigation.cpp"
+      ],
+      "behavior": "Each back/forward entry retains both viewport axes. Loading consumes pending history viewport and synchronizes animation target; child selection restoration skips scrolling when original viewport exists. Old histories without viewport metadata retain existing visibility fallback."
+    },
+    {
+      "id": "F09",
+      "issues": [
+        197
+      ],
+      "files": [
+        "src/app/window_placement.h",
+        "src/app/app_main.cpp"
+      ],
+      "behavior": "Restore saved rectangle against nearest current monitor work area, reduce oversized dimensions and clamp position, using int64 arithmetic to avoid extreme-coordinate subtraction overflow. app_main integration performed by parent agent."
+    }
+  ],
+  "actual_tests": [
+    {
+      "name": "window_placement_test",
+      "source": "src/bench/window_placement_test.cpp",
+      "log": "bench_data/issue-fixes-navigation/placement.log",
+      "passed": 10,
+      "failed": 0,
+      "includes": "Synthetic removed right/left/top displays, negative-coordinate display, top taskbar, oversized/empty/extreme rects, plus actual MonitorFromRect/GetMonitorInfo lookup; no user window moved."
+    },
+    {
+      "name": "navigation_return_test",
+      "source": "src/bench/navigation_return_test.cpp",
+      "build_log": "bench_data/issue-fixes-navigation/build-final.log",
+      "log": "bench_data/issue-fixes-navigation/final.log",
+      "exit_file": "bench_data/issue-fixes-navigation/final-exit.txt",
+      "passed": 31,
+      "failed": 0,
+      "exit_code": 0,
+      "production_objects": "Parent rebuilt pulse including all AppState/Tab ABI dependents. Private fixture relinked against the resulting production objects; shared build not written by this fixture.",
+      "includes": "F17 content/name x Enter/live, whitespace, delayed history cancellation, late content generation rejection, home/This PC origin restoration, IME composing guard. F19 real 240-directory NTFS worker publication, Details2168->2168 and LargeIcons1632->1632, selected75, scroll-animation target, back/forward/repeated returns, legacy metadata fallback, model both-axis restoration and new-navigation history cancellation."
+    }
+  ],
+  "pending_tests": [],
+  "limits": [
+    "No foreground keyboard/IME, real index-service ordering, or complete visible search-chain acceptance.",
+    "No physical monitor disconnect/reconnect; helper tested with supplied geometries and read-only live monitor lookup.",
+    "No user configuration, windows, clipboard, registry, recycle bin or service changed.",
+    "No full historical selftest suite or release build.",
+    "F09 startup call site inspected after parent integration; actual visible restored-session launch and physical screen unplug were not exercised."
+  ],
+  "additional_integration": {
+    "id": "F25",
+    "owner": "fix_preview_confirmed",
+    "file": "src/app/app_navigation.cpp",
+    "behavior": "InvalidateShellIcon for watch event name and old_name before refresh coalescing; overflow invalidates parent; explicit RefreshPath invalidates parent. Cache implementation and tests owned by preview agent."
+  }
+}

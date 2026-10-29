@@ -1,0 +1,70 @@
+{
+  "recorded_at": "2026-10-23T11:19:33.274871+00:00",
+  "scope": "Raw filename candidates and bounded authorization traversal; current MTool disabled-feature investigation. No deployment, disk format, result protocol or GUI behavior changes.",
+  "changes": [
+    "Cache complete raw candidates before authorization; scope, raw query, index epoch and universe invalidate the set. Every response reauthorizes; no allow decisions are cached.",
+    "Explicit budget stop and cancellation break candidate traversal before the next full path is constructed; ordinary denials continue.",
+    "NarrowMatchesLocked exits candidate iteration on cancellation instead of only returning from its lambda.",
+    "Add an existing-metadata-ACL-only selector to run the directly relevant security fixture without unrelated request-queue, tracking or raw-tree tests."
+  ],
+  "cache_test": {
+    "command": ".\\build\\pulse_index_search_cache_test.exe",
+    "exit_code": 0,
+    "passed": 29,
+    "failed": 0,
+    "capture": "Primary agent exec output; first run, no repeated run just to obtain a log.",
+    "cases": [
+      "caller isolation and per-response authorization",
+      "query narrowing and exact-query reuse",
+      "scope and attribute/index epoch invalidation",
+      "empty set and pagination/sort",
+      "cancellation and immediate/partial deadline stop",
+      "sparse and 70000-node dense traversal; ordinary denials continue"
+    ],
+    "synthetic_dense_cold_us": 1852,
+    "synthetic_dense_cached_us": 5,
+    "metric_limit": "Single in-memory synthetic sample; not installed service latency, p95, or a promise of complete search results."
+  },
+  "metadata_acl_test": {
+    "log": "bench_data/search-latency-20261023/metadata-acl-after-medium.log",
+    "passed": 24,
+    "failed": 0
+  },
+  "metadata_acl_command": ".\\build\\pulse_index_security_test.exe --metadata-acl-only",
+  "metadata_acl_token_integrity": "S-1-16-8192",
+  "preserved_failed_attempt": {
+    "log": "bench_data/search-latency-20261023/metadata-acl-after.log",
+    "passed": 15,
+    "failed": 9
+  },
+  "failed_attempt_reason_boundary": "First sandbox run reports Win32 5 installing/changing fixture ACLs; the same existing cases pass at Medium integrity. No failing case was deleted or weakened.",
+  "build": {
+    "targets": [
+      "pulse_index_search_cache_test",
+      "pulse_index",
+      "pulse_index_security_test"
+    ],
+    "passed": true,
+    "logs": [
+      "bench_data/search-latency-20261023/configure-search-optimization.log",
+      "bench_data/search-latency-20261023/build-search-optimization.log",
+      "bench_data/search-latency-20261023/build-search-optimization-retry.log",
+      "bench_data/search-latency-20261023/build-metadata-acl.log"
+    ],
+    "recovery": "Initial new-target rule missing from NMake files; reconfigured existing build cache. Initial service link used an old index_folder_sizes object with the previous Search signature. Explicitly rebuilt its object and the other dependent Engine implementation objects after the header/layout change; scoped service build passed.",
+    "artifacts": {
+      "build/Pulse.Index.exe": "eb691e69752e7703f48484b511228b3e77e45af081b7ad0e82e5eaa1d7279a19",
+      "build/pulse_index_search_cache_test.exe": "9c1d93983e864bf12649e3c77316b9b4da47def3bafdca7d395afd10fad9d8c0",
+      "build/pulse_index_security_test.exe": "c4ad8ba80d6b60349271971695d1e4ff8e9d8d79fb2b55edfea17321eb99bf29"
+    }
+  },
+  "menu_evidence": "bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json",
+  "config_evidence": "bench_data/kaspersky-latency-20261023/mtool-config-inspection.json",
+  "release_source": "bench_data/kaspersky-latency-20261023/mtool-release-source.json",
+  "limits": [
+    "The installed index service and all user settings remain unchanged this round; no after-deployment latency measurement.",
+    "Candidate callback isolation is tested in memory; actual metadata ACL revocation is tested with an isolated current-user fixture, not an additional Windows user account.",
+    "The full matching/ranking versus ACL versus lock-wait share of the protected live snapshot is still not measured; the earlier native stage output is empty.",
+    "The two changes do not remove the two-second budget or all-candidate authorization cost; page-first statistics/UI/protocol changes and host reuse are not implemented."
+  ]
+}

@@ -90,6 +90,10 @@ void StartIndexedContentSearch(AppState& s, app::Tab& tab, const std::wstring& r
         return;
     }
     index::ContentSearchRequest request;
+    if (tab.search_retaining_results && tab.content_results) {
+        request.previous_results = tab.content_results;
+        request.resume_previous = true;
+    }
     request.paged_results = true;
     request.task_scan = !scan;
     request.generation = ++s.nextIndexReq;
@@ -128,7 +132,7 @@ void ShowSearchOptions(AppState& s, bool management) {
     if (management) { OpenSettingsTab(s, 1); return; }
     if (s.searchHistoryOpen) {
         s.searchOptionsPending = true;
-        if (s.menu) s.menu->Dismiss();
+        if (s.menu) s.menu->RequestDismiss();
         return;
     }
     if (!EnsureMenu(s)) return;
@@ -171,6 +175,10 @@ void ShowSearchOptions(AppState& s, bool management) {
         POINT anchor{};
         if (s.addressSearching) {
             const auto layout = ui::LayoutAddressSearch(s.renderer.SearchBarRect(static_cast<float>(s.compositor.Width())), s.scale);
+            RECT toggle{static_cast<LONG>(layout.options.left), static_cast<LONG>(layout.options.top),
+                        static_cast<LONG>(layout.options.right), static_cast<LONG>(layout.options.bottom)};
+            MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+            s.menu->SetToggleRect(toggle);
             ui::FluentMenuModel popup_layout;
             popup_layout.SetItems(items);
             popup_layout.Layout(s.compositor.DwriteFactory(), s.scale);
@@ -185,7 +193,11 @@ void ShowSearchOptions(AppState& s, bool management) {
             s.menu->SaveDebugSnapshot(debug_path, std::move(items));
             return;
         }
-        const int command = s.menu->TrackPopup(anchor, std::move(items));
+        s.searchOptionsOpen = s.addressSearching;
+        InvalidateRect(s.hwnd, nullptr, FALSE);
+        const int command = s.menu->TrackToolbarPopup(anchor, std::move(items));
+        s.searchOptionsOpen = false;
+        InvalidateRect(s.hwnd, nullptr, FALSE);
         if (command == 5) { OpenSettingsTab(s, 1); return; }
         bool search = false;
         if (command == 20 || command == 21) { s.addressSearchCurrent = command == 21; search = true; }

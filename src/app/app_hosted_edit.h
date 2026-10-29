@@ -10,7 +10,7 @@ void PlaceHostedEdit(HWND hwnd, HWND owner, const D2D1_RECT_F& cell, float scale
 HWND CreateHostedEdit(AppState& s, SUBCLASSPROC proc);
 void LayoutAddressEditor(AppState& s);
 void EnsureEditVisuals(AppState& s);
-void ShowAddressEditor(AppState& s);
+void ShowAddressEditor(AppState& s, bool searching = false);
 void HideAddressEditor(AppState& s, bool navigate);
 void ShowAddressSearch(AppState& s);
 bool IsAddressSearchResults(const app::Tab* tab);

@@ -1,0 +1,55 @@
+{
+  "number": 140,
+  "title": "对图片文件右键没有打印按钮",
+  "body": "<img width=\"414\" height=\"667\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/307e65a0-a38f-4085-ae1c-17e91af34103\" /> \n我看设置里面打印是打开的,我试了一下,excel是存在这个右键打印按钮的,希望能够适配到图片",
+  "url": "https://github.com/jimmgreen/pulse/issues/140",
+  "captured_at": "2026-10-23T03:10:07.207619+00:00",
+  "updated_at": "2026-10-22T06:29:50Z",
+  "comments": [
+    {
+      "body": "已修复。\n\n右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。\n\n图片文件（测试用 png）右键里的「打印」已经正常显示，和 Explorer 一致。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复。</p>\n<p dir=\"auto\">右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。</p>\n<p dir=\"auto\">图片文件（测试用 png）右键里的「打印」已经正常显示，和 Explorer 一致。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/140#issuecomment-6180327543"
+    },
+    {
+      "body": "感谢修复,新版的右键管理做的真棒,🐂",
+      "bodyHTML": "<p dir=\"auto\">感谢修复,新版的右键管理做的真棒,🐂</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjY0NTg4OTg5",
+        "login": "lxj-gif",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/64588989?v=4",
+        "profileUrl": "https://github.com/lxj-gif",
+        "name": "yxg"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/140#issuecomment-6208577614"
+    },
+    {
+      "body": "1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。\n",
+      "bodyHTML": "<p dir=\"auto\">1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/140#issuecomment-6334344408"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTyiKhgAqjYxODAzMjc1NDM=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJNNzABqzMzOTIwODg2OTIw"
+  }
+}

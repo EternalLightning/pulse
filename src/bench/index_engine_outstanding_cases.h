@@ -20,7 +20,7 @@
         return node;
     }
 
-    static bool OutstandingStructureFixture() {
+    static bool OutstandingStructureFixture(bool offline_only = false) {
         bool ok = true;
         const auto check = [&](bool value, const char* label) {
             std::cout << (value ? "[PASS] " : "[FAIL] ") << label << '\n'; ok &= value;
@@ -80,17 +80,23 @@
                 check(query_paths(mapped, L"*.txt", L"C:\\B\\renamed") ==
                           std::vector<std::wstring>{L"C:\\B\\renamed\\deep.txt", L"C:\\B\\renamed\\live.txt"},
                       "U03 moved base and newly live descendants appear exactly once");
-                mapped.vols_[0].kind = VolumeKind::Removable;
-                mapped.PreserveOfflineVolumesLocked({}, IndexConfig{});
+                mapped.UpdateVolumeVisibilityLocked({});
+                check(query_paths(mapped, L"*.txt", L"C:\\B\\renamed").empty(),
+                    "U02 offline volume is hidden without discarding its nodes");
                 Engine offline;
-                offline.live_ = std::move(mapped.build_);
-                offline.vols_ = std::move(mapped.build_vols_);
+                const bool flattened = mapped.FlattenLocked(offline.live_, offline.vols_);
                 offline.RebuildChildMapLocked();
                 const auto retained = offline.ResolvePathLocked(L"C:\\B\\renamed\\deep.txt");
-                check(retained >= 0 && offline.ResolvePathLocked(L"C:\\B\\renamed\\live.txt") >= 0 &&
+                check(flattened && retained >= 0 && offline.ResolvePathLocked(L"C:\\B\\renamed\\live.txt") >= 0 &&
                     offline.vols_.size() == 1 && offline.FindByFrnLocked(offline.vols_[0], 12) == retained,
                     "U02/U03 offline preservation retains moved child with later-ID parent and FRN");
             }
+        }
+        if (offline_only) {
+            std::error_code error;
+            std::filesystem::remove_all(directory, error);
+            check(!error && !std::filesystem::exists(directory), "U02 offline fixture is removed");
+            return ok;
         }
         for (bool dense : {false, true}) {
             std::cout << "[CASE] U04 dense=" << dense << '\n';

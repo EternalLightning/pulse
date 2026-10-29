@@ -2,6 +2,7 @@
 #include "../ui/batch_rename_dialog.h"
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
+#include "../ui/typography.h"
 #include <commctrl.h>
 #include <cstdio>
 #include <string>
@@ -68,7 +69,13 @@ void CALLBACK DriveDialog(HWND, UINT, UINT_PTR, DWORD) {
 }
 }
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::wstring_view(argv[i]) == L"--sharp")
+            pulse::ui::typography::SetTextRenderMode(pulse::ui::typography::TextRenderMode::Sharp);
+        else if (std::wstring_view(argv[i]) == L"--smooth")
+            pulse::ui::typography::SetTextRenderMode(pulse::ui::typography::TextRenderMode::Smooth);
+    }
     using namespace pulse;
     compat::EnableDpiAwareness();
     OleInitialize(nullptr);

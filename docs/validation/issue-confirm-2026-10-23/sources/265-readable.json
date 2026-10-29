@@ -1,0 +1,15 @@
+{
+  "number": 265,
+  "title": "【bug】关闭窗口后win+E再打开会显示多窗口",
+  "body": "在设置中，将“启动时打开”→“上次打开的标签”；“关闭最后一个标签时关闭窗口”→√\n此时，按crtl+W，或者直接关闭最后一个标签后，再按win+E 打开新标签，或者启动新的文件夹窗口，会打开之前关闭的很多窗口，然后堆叠在桌面和任务栏。\n复现率（85%）！\n\n\n分析：应该是跟关闭的窗口记忆功能有冲突。程序认为打开新标签→打开 “上次标签”→读取上次的文件标签记忆→上次记忆的窗口全部打开（应该是打开最后一个）\n\n建议：打开给记忆打时间戳，按照关闭窗口的顺序，依次打开。每次按照记忆在新窗口打开，回退上一个关闭的”旧窗口“。\n\n另外：感谢开发团队做出如此好用的软件，并且一直持续更新修复！BUG只是暂时的，未来的光明却是永久的。愿诸君身体康健，事业长虹！\n\n<img width=\"2560\" height=\"1440\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/6a36e4fb-3af5-4268-9462-24ea112ecc4b\" />\n<img width=\"1014\" height=\"673\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/d56b4f75-fb3f-49c2-aa4f-2b022086227e\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/265",
+  "captured_at": "2026-10-23T03:10:07.147274+00:00",
+  "updated_at": "2026-10-16T01:04:22Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

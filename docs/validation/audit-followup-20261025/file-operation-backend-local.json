@@ -1,0 +1,10 @@
+{
+  "parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+  "executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_permanent_fileop_console_test.exe",
+  "sha256": "C7103D7436BB78F270BF6305C7D1953CE83620BEBC319E9D7E56C32FC7DE7E49",
+  "exit_code": 0,
+  "passed": 26,
+  "failed": 0,
+  "skipped": 1,
+  "timestamp": "2026-10-25T16:25:47.1324304+08:00"
+}

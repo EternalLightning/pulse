@@ -1,0 +1,2 @@
+[DIAG] PipePair::Connect stage=CreateFileW(client) win32=5 pid=6252
+[FAIL] P26 connect isolated malformed completion fixture

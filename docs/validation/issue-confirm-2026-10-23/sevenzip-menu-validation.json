@@ -1,0 +1,20 @@
+{
+  "document_check": "PASS",
+  "local_links_valid": 151,
+  "source_hashes_verified": 6,
+  "evidence_hashes_verified": 17,
+  "baseline_in_scope": 149,
+  "baseline_excluded": 19,
+  "checkboxes_preserved": 106,
+  "selected": [
+    302,
+    308,
+    314,
+    374
+  ],
+  "targeted_checks_passed": 92,
+  "captured_callback_checks_passed": 172,
+  "failed": 0,
+  "production_install_changed": false,
+  "production_index_cleaned": false
+}

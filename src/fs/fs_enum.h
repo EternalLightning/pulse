@@ -22,6 +22,8 @@ struct DirEntry {
     bool is_reparse = false;
     bool cloud_recall = false;
     std::wstring full_path; // set for virtual views (search/tag); empty = parent+name
+    std::wstring shell_id; // Absolute Shell ID list for portable-device namespace items.
+    uint8_t pc_device = 0;
     std::wstring recycle_path; // $R payload when listing pulse:recycle; not a .lnk target
     bool change_record_only = false; // Historical deleted/moved-out item, never a file operation source.
     std::wstring change_type_text;

@@ -1,0 +1,15 @@
+{
+  "number": 275,
+  "title": "占位盘符影响索引生成",
+  "body": "Sangfor 用 subst 挂的占位盘在电脑上\n1. 索引时本地磁盘会显示出来，但是无法取消勾选\n2. 排除项中加入这个盘符，也还是无效\n\nAI分析的结论是\nSangfor（aTrust / EasyConnect）用 subst 挂的占位盘符，指向 C:\\Users\\Public\\Sangfor\\DosOccupyDrivePath——所以资源管理器看不到、OneCommander/Pulse 能看到，而 Pulse 的索引服务（LocalSystem）没权限读它们，才在\"全机索引\"时返回拒绝访问（error 5），被 Pulse 包装成了\"管理员授权取消 / 配置无法更新\"",
+  "url": "https://github.com/jimmgreen/pulse/issues/275",
+  "captured_at": "2026-10-23T03:10:07.144217+00:00",
+  "updated_at": "2026-10-16T11:21:02Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoURxqTABqzMzNDM5MzU5NjY2",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoURxqTABqzMzNDM5MzU5NjY2"
+  }
+}

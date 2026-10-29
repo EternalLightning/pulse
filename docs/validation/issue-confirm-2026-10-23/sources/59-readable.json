@@ -1,0 +1,55 @@
+{
+  "number": 59,
+  "title": "[BUG] 1.0.46 右键菜单第三方项时有时无：残缺的快速快照被写入缓存",
+  "body": "[软件版本] 1.0.46\n\n[系统版本] Windows 11 x64\n\n[问题表现]\n同一类文件连续右键，第三方软件的二级菜单（WinRAR 等）和类型动词有时出现、有时不出现。1.0.46 修好了 #48 之后出现的，1.0.42 及之前没有这个问题。\n\n[复现]\n1. 安装 WinRAR 64 位（其 shell extension 是 MSIX 稀疏包）\n2. Pulse 进入任意目录，对同一个文件（或同一类文件）连续右键若干次\n3. 有时能看到 WinRAR，有时看不到；最终结果是一致的，晃动的只是中间态\n\n比较稳的复现方式是连续右键 5～10 次，中间会看到有不带 WinRAR 的菜单。\n\n[根因]\n不是枚举问题——**最终快照一直是稳定的**，晃动的是被缓存下来的\"快速快照\"。\n\n`pulse_shell.exe` 对一次右键会发两次 `RSP_CTX_ITEMS`：先是只含 80ms 预算内跑完的\n处理器的 `CTX_ITEMS_PARTIAL`，然后才是全部处理器的最终快照。打包动词走\n`IExplorerCommand`（通常在 `dllhost` 代理进程里，或者要等经典处理器跑完），\n经常赶不上这 80ms，所以**快速快照里通常没有它**。\n\n而 UI 进程的 `ContextMenuController::CompleteComQuery` 不看 partial 就写缓存：\n\n```cpp\n// src/app/context_menu_controller.cpp\ncom_items_ = std::move(items);\nresult.cache_key = CacheKey(background_, extension_);\ncom_cache_[result.cache_key] = com_items_;   // <-- partial 也写进去了\nif (!partial) {\n    com_ready_ = true;\n    ...\n}\n```\n\n下一次右键同一类文件时，`SeedComItemsFromCache()` 会**先把缓存画出来**，再去等本次的实时结果：\n\n```cpp\nbool ContextMenuController::SeedComItemsFromCache() {\n    if (com_ready_ || !com_items_.empty()) return false;\n    const auto found = com_cache_.find(CacheKey(background_, extension_));\n    if (found == com_cache_.end() || found->second.empty()) return false;\n    com_items_ = found->second;   // <-- 画出来的就是上一次那个残缺的快速快照\n    return true;\n}\n```\n\n所以有没有第三方项，取决于上一次那 80ms 里谁跑完了——这就是\"时有时无\"。\n\n[实测证据]\n直接驱动 `pulse_shell.exe` 发一次右键查询，把两个快照都打出来，连查 6 次同一个文件：\n\n```\ns1 PARTIAL rows=7  flyouts=1  WinRAR=YES     s2 FINAL rows=24  flyouts=4  WinRAR=YES\ns1 PARTIAL rows=2  flyouts=0  WinRAR=NO  <-- s2 FINAL rows=24  flyouts=4  WinRAR=YES\ns1 PARTIAL rows=7  flyouts=1  WinRAR=YES     s2 FINAL rows=24  flyouts=4  WinRAR=YES\ns1 PARTIAL rows=0  flyouts=0  WinRAR=NO  <-- s2 FINAL rows=24  flyouts=4  WinRAR=YES\ns1 PARTIAL rows=7  flyouts=1  WinRAR=YES     s2 FINAL rows=24  flyouts=4  WinRAR=YES\ns1 PARTIAL rows=5  flyouts=1  WinRAR=YES     s2 FINAL rows=24  flyouts=4  WinRAR=YES\n```\n\n最终快照 6 次全部是 24 项、都带 WinRAR；快速快照在 0/2/5/7 项之间跳。\n缓存吸收的正是这个跳动的快速快照。\n\n[建议改法]\n只让**完整快照**进缓存。partial 仍然照常喂给当前这次会话（菜单不会变空、也不会变慢），\n只是不再成为下一次右键的底稿：\n\n```diff\n     result.cache_key = CacheKey(background_, extension_);\n-    com_cache_[result.cache_key] = com_items_;\n+    // A partial snapshot only holds the handlers that finished inside the\n+    // host's fast budget, so it must feed this session and nothing else: the\n+    // next right-click of the same type paints from com_cache_ before the live\n+    // answer arrives, and caching an incomplete list makes packaged verbs\n+    // show up on one right-click and vanish on the next.\n     if (!partial) {\n+        com_cache_[result.cache_key] = com_items_;\n         com_ready_ = true;\n         if (query_started_at_ != 0 && completed_at >= query_started_at_) {\n             result.elapsed_ms = static_cast<uint32_t>(std::min<uint64_t>(\n                 completed_at - query_started_at_, UINT32_MAX));\n         }\n     }\n```\n\n如果希望更彻底，也可以考虑：连\"本次会话先画 partial\"这一步都做成只增不减（partial 到达时\n只补行，不用 partial 替换已画出的完整缓存内容）。不过只改缓存写入点就能解决当前现象，\n改动最小。\n\n[验证]\n新增回归用例 `context menu never caches a partial COM snapshot`（`src/bench/app_controllers_test.cpp`），\n做法是：先给一次完整快照建立缓存，再注入一次缺打包动词的 partial，然后看\"下一次右键会画出什么\"。\n\n对照实验都做了：\n\n| 版本 | 结果 |\n| --- | --- |\n| 1.0.46 原版 | `[FAIL] context menu never caches a partial COM snapshot` |\n| 1.0.46 + 上述改动 | `[PASS]` |\n| 把改动临时撤掉再跑 | `[FAIL]`（确认用例能区分，不是假通过） |\n| `pulse_app_controllers_test` 全套 | PASS |\n\n改动量 +65 / −2，只动了这一个缓存写入点，其余逻辑（快照机制、捆绑、去重）没碰。\n需要的话我可以附上补丁和验证工具。\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/59",
+  "captured_at": "2026-10-23T03:55:26.338637+00:00",
+  "updated_at": "2026-10-03T11:20:22Z",
+  "comments": [
+    {
+      "body": "补充一条独立的问题（性能向，不是 #59 的同一个 bug）：从压缩包拖拽复制明显慢，我做了实测和归因，提在 #60。\n\n一句话：复制循环对每个文件先写 `.pulse-copy-` 临时文件再改名，无冲突场景下这层间接没用；实测（2000×32 KB，轮转 3 轮平均）现状 2750 ms → 直接写最终名 1131 ms（2.4×）。临时文件在目标已存在、原子替换那一支仍然必要，所以建议按情况分流，取舍写在 #60 里等作者确认。\n\n顺带说明：我确认过这不是 1.0.46 引入的回归（1.0.42 同负载 1547/1656 ms，1.0.46 是 1328/1500 ms），也与进度改成状态栏胶囊显示无关。",
+      "bodyHTML": "<p dir=\"auto\">补充一条独立的问题（性能向，不是 <a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673179088\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/59\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/59/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/59\">#59</a> 的同一个 bug）：从压缩包拖拽复制明显慢，我做了实测和归因，提在 <a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673663757\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/60\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/60/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/60\">#60</a>。</p>\n<p dir=\"auto\">一句话：复制循环对每个文件先写 <code class=\"notranslate\">.pulse-copy-</code> 临时文件再改名，无冲突场景下这层间接没用；实测（2000×32 KB，轮转 3 轮平均）现状 2750 ms → 直接写最终名 1131 ms（2.4×）。临时文件在目标已存在、原子替换那一支仍然必要，所以建议按情况分流，取舍写在 <a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673663757\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/60\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/60/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/60\">#60</a> 里等作者确认。</p>\n<p dir=\"auto\">顺带说明：我确认过这不是 1.0.46 引入的回归（1.0.42 同负载 1547/1656 ms，1.0.46 是 1328/1500 ms），也与进度改成状态栏胶囊显示无关。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjQ2NjE1MDIz",
+        "login": "sdcxb",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/46615023?u=19e9955d9b172ddfc5b3961440b94004e1fa6f84&v=4",
+        "profileUrl": "https://github.com/sdcxb",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/59#issuecomment-5946597465"
+    },
+    {
+      "body": "补充：我把我复核确认的两条**会删源文件**的问题修好并提了 PR #61（拖放忽略来源的 Preferred DropEffect、剪贴板位与判断把复制当剪切）。\n\n#61 不涉及本 issue 的缓存问题——这条（残缺快速快照被写入缓存）我按之前说的等作者确认取舍，还没有动。",
+      "bodyHTML": "<p dir=\"auto\">补充：我把我复核确认的两条<strong>会删源文件</strong>的问题修好并提了 PR <a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673831456\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/61\" data-hovercard-type=\"pull_request\" data-hovercard-url=\"/jimmgreen/pulse/pull/61/hovercard\" href=\"https://github.com/jimmgreen/pulse/pull/61\">#61</a>（拖放忽略来源的 Preferred DropEffect、剪贴板位与判断把复制当剪切）。</p>\n<p dir=\"auto\"><a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673831456\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/61\" data-hovercard-type=\"pull_request\" data-hovercard-url=\"/jimmgreen/pulse/pull/61/hovercard\" href=\"https://github.com/jimmgreen/pulse/pull/61\">#61</a> 不涉及本 issue 的缓存问题——这条（残缺快速快照被写入缓存）我按之前说的等作者确认取舍，还没有动。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjQ2NjE1MDIz",
+        "login": "sdcxb",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/46615023?u=19e9955d9b172ddfc5b3961440b94004e1fa6f84&v=4",
+        "profileUrl": "https://github.com/sdcxb",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/59#issuecomment-5946801313"
+    },
+    {
+      "body": "已修复：右键菜单不再把“快速部分结果”写入缓存，下一次右键会直接显示完整结果，所以 WinRAR 等打包（MSIX）扩展不会时有时无了。\n\n修复来自 #62（合并于 f14cf0e，测试补丁 2171d06），回归测试 `context menu never caches a partial COM snapshot` 已通过。将包含在下一个版本中。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复：右键菜单不再把“快速部分结果”写入缓存，下一次右键会直接显示完整结果，所以 WinRAR 等打包（MSIX）扩展不会时有时无了。</p>\n<p dir=\"auto\">修复来自 <a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5673865323\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/62\" data-hovercard-type=\"pull_request\" data-hovercard-url=\"/jimmgreen/pulse/pull/62/hovercard\" href=\"https://github.com/jimmgreen/pulse/pull/62\">#62</a>（合并于 <a class=\"commit-link\" data-hovercard-type=\"commit\" data-hovercard-url=\"https://github.com/jimmgreen/pulse/commit/f14cf0ee4a3fb43f55ec994c9e31376dd541b78d/hovercard\" href=\"https://github.com/jimmgreen/pulse/commit/f14cf0ee4a3fb43f55ec994c9e31376dd541b78d\"><tt>f14cf0e</tt></a>，测试补丁 <a class=\"commit-link\" data-hovercard-type=\"commit\" data-hovercard-url=\"https://github.com/jimmgreen/pulse/commit/2171d0670ef65871b4ffbd8db91a67f1c8c18d87/hovercard\" href=\"https://github.com/jimmgreen/pulse/commit/2171d0670ef65871b4ffbd8db91a67f1c8c18d87\"><tt>2171d06</tt></a>），回归测试 <code class=\"notranslate\">context menu never caches a partial COM snapshot</code> 已通过。将包含在下一个版本中。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/59#issuecomment-5968663876"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPtAihAAqjU5NDY1OTc0NjU=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQaWSbgBqzMyNDM5NjY0NjI3"
+  }
+}

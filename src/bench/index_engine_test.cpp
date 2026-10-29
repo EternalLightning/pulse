@@ -25,6 +25,7 @@ struct EngineTestAccess {
 #include "index_delta_replay_cases.h"
 #include "index_engine_outstanding_cases.h"
 #include "index_engine_exclusions_cases.h"
+#include "index_ingest_boundary_cases.h"
 
     static bool InvalidMemoryParentFixture() {
         Engine engine;
@@ -36,8 +37,7 @@ struct EngineTestAccess {
             Engine::Store output;
             std::vector<Engine::VolState> volumes;
             const bool rejected = !engine.FlattenLocked(output, volumes);
-            engine.PreserveOfflineVolumesLocked({}, IndexConfig{});
-            const bool safe = rejected && output.nodes.empty() && engine.build_.nodes.empty();
+            const bool safe = rejected && output.nodes.empty() && volumes.empty() && engine.build_.nodes.empty();
             std::cout << (safe ? "[PASS] " : "[FAIL] ") << "invalid in-memory parent rejected before remap access\n";
             ok &= safe;
         }
@@ -596,14 +596,50 @@ struct EngineTestAccess {
             (e.NodeAt(folder).flags & Engine::kFlagDir) != 0;
     }
 
-    static void RepairOffline(Engine& e) {
+    static bool RebuildLegacyFixture(Engine& e) {
+        // Recreate this fixture's raw MFT records and exercise the production
+        // builder; offline retention alone does not repair legacy hidden flags.
         e.excluded_paths_ = {L"C:\\Users\\TestUser\\excluded"};
-        e.PreserveOfflineVolumesLocked({}, IndexConfig{});
+        if (e.vols_.size() != 1) return false;
+        const auto& old = e.vols_.front();
+        std::vector<uint64_t> frns(static_cast<size_t>(e.LiveCount()));
+        const auto remember = [&](uint64_t frn, int32_t id) {
+            if (id >= 0 && id < e.LiveCount()) frns[static_cast<size_t>(id)] = frn;
+        };
+        for (uint32_t i = 0; i < old.frn_base_n; ++i) remember(old.frn_base[i].frn, old.frn_base[i].idx);
+        for (const auto& item : old.frn_new) remember(item.frn, item.idx);
+        for (const auto& item : old.frn_build) remember(item.first, item.second);
+        if (old.root_idx < 0 || old.root_idx >= e.LiveCount()) return false;
+        const uint64_t root_frn = frns[static_cast<size_t>(old.root_idx)];
+        if (!root_frn) return false;
+        std::vector<Engine::FrnNode> records;
+        for (int32_t i = 0; i < e.LiveCount(); ++i) {
+            if (i == old.root_idx || e.IsTomb(i)) continue;
+            const auto node = e.NodeAt(i);
+            if (node.parent < 0 || node.parent >= e.LiveCount()) return false;
+            Engine::FrnNode record;
+            record.frn = frns[static_cast<size_t>(i)];
+            record.parent = frns[static_cast<size_t>(node.parent)];
+            if (!record.frn || !record.parent) return false;
+            record.name = e.NameOf(i);
+            record.is_dir = (node.flags & Engine::kFlagDir) != 0;
+            record.size = e.AttrAt(i).size;
+            record.mtime = e.AttrAt(i).mtime;
+            records.push_back(std::move(record));
+        }
+        Engine::VolState volume;
+        volume.letter = old.letter;
+        volume.kind = old.kind;
+        volume.volume_id = old.volume_id;
+        e.build_.Clear();
+        e.build_vols_.clear();
+        if (!e.BuildMftTree(std::move(volume), root_frn, std::move(records))) return false;
         e.map_.reset();
         e.live_ = std::move(e.build_);
         e.vols_ = std::move(e.build_vols_);
         e.RebuildChildMapLocked();
         e.InvalidateFilterLocked();
+        return true;
     }
 
     static bool RootHidden(const Engine& e) {
@@ -939,7 +975,99 @@ bool MftReadFixture() {
 
 #include "index_cache_resolution_cases.h"
 
+void LegacyRepairTests(const std::filesystem::path& dir, const std::filesystem::path& base) {
+    {
+        std::fstream file(base, std::ios::binary | std::ios::in | std::ios::out);
+        DiskHeader header{};
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        header.ver = 10;
+        // Legacy snapshots may omit prefix tables; V12 varints cannot be
+        // reinterpreted as the older integer posting representation.
+        header.prefix1_off = 0;
+        header.prefix2_off = 0;
+        file.seekp(0);
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        file.close();
+        Engine legacy;
+        Check(EngineTestAccess::Load(legacy, base.wstring()) && EngineTestAccess::NeedsRebuild(legacy),
+              "V10 snapshot requests repair for persisted attr-only corruption");
+    }
+    // Reproduce a persisted V9 index whose root flag contaminated all descendants.
+    {
+        std::fstream file(base, std::ios::binary | std::ios::in | std::ios::out);
+        DiskHeader header{};
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        header.ver = 9;
+        file.seekp(0);
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        for (uint32_t i = 0; i < header.node_count; ++i) {
+            const auto offset = static_cast<std::streamoff>(header.nodes_off + i * sizeof(Node));
+            Node node;
+            file.seekg(offset);
+            file.read(reinterpret_cast<char*>(&node), sizeof(node));
+            node.flags |= 2;
+            file.seekp(offset);
+            file.write(reinterpret_cast<const char*>(&node), sizeof(node));
+        }
+    }
+    {
+        Engine old;
+        Check(EngineTestAccess::Load(old, base.wstring()), "legacy snapshot remains readable");
+        Check(EngineTestAccess::NeedsRebuild(old), "legacy snapshot triggers repair");
+        Check(Search(old, L".codex").total == 0, "fixture reproduces old search failure");
+        Check(EngineTestAccess::RebuildLegacyFixture(old), "legacy fixture rebuilds through actual MFT tree builder");
+        CheckSearch(old);
+        Check(EngineTestAccess::Save(old, (dir / L"repaired.bin").wstring()), "rebuilt legacy snapshot persists");
+    }
+    {
+        const auto paths = MakeShardPaths(dir.wstring(), L"migration-test");
+        ShardManifest manifest;
+        Check(PublishShardBase(paths, base.wstring(), 123456, 0, manifest), "publish legacy generation");
+        Check(PublishShardBase(paths, (dir / L"repaired.bin").wstring(), 123456, 0, manifest),
+              "publish repaired generation");
+        std::wstring active;
+        Check(ResolveActiveShard(paths, manifest, active), "resolve repaired generation");
+        {
+            Engine repaired;
+            Check(EngineTestAccess::Load(repaired, active) && !EngineTestAccess::NeedsRebuild(repaired),
+                  "published repair remains current after restart");
+            CheckSearch(repaired);
+        }
+        {
+            std::ofstream corrupt(active, std::ios::binary | std::ios::trunc);
+            corrupt << "corrupt";
+        }
+        Check(ResolveActiveShard(paths, manifest, active), "corrupt repaired slot falls back safely");
+        Engine fallback;
+        Check(EngineTestAccess::Load(fallback, active) && EngineTestAccess::NeedsRebuild(fallback),
+              "legacy fallback still requests repair");
+    }
+}
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--offline-retention-only") {
+        std::cout << std::unitbuf;
+        const bool parents = EngineTestAccess::InvalidMemoryParentFixture();
+        const bool retained = EngineTestAccess::OutstandingStructureFixture(true);
+        return parents && retained ? 0 : 1;
+    }
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--legacy-repair-only") {
+        std::cout << std::unitbuf;
+        const auto dir = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
+            (L"legacy-repair-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+        std::filesystem::create_directories(dir);
+        const auto base = dir / L"base.bin";
+        {
+            Engine source;
+            const bool saved = EngineTestAccess::Build(source) && EngineTestAccess::Save(source, base.wstring());
+            Check(saved, "save legacy repair source fixture");
+            if (saved) LegacyRepairTests(dir, base);
+        }
+        std::error_code error;
+        std::filesystem::remove_all(dir, error);
+        Check(!error && !std::filesystem::exists(dir), "legacy repair fixture is removed");
+        return failures ? 1 : 0;
+    }
     std::cout << std::unitbuf;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--outstanding-structure-only")
         return EngineTestAccess::OutstandingStructureFixture() ? 0 : 1;
@@ -950,6 +1078,7 @@ int wmain(int argc, wchar_t** argv) {
     if (argc > 1 && std::wstring_view(argv[1]) == L"--delta-replay-only")
         return EngineTestAccess::DeltaReplayFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--notify-modified-only") return EngineTestAccess::NotifyModifiedFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--ingest-boundary-only") return EngineTestAccess::IngestBoundaryFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--query-narrowing-only") return QueryNarrowingTests();
     if (argc > 1 && std::wstring_view(argv[1]) == L"--cache-resolution-only") return CacheResolutionTests();
     if (argc > 1 && std::wstring_view(argv[1]) == L"--shard-io-rebuild-only") {
@@ -1502,68 +1631,7 @@ int wmain(int argc, wchar_t** argv) {
         EngineTestAccess::Usn(mapped, 100, 20, L".codex-new", USN_REASON_FILE_DELETE);
         Check(Search(mapped, L".codex-new").total == 0, "USN delete removed");
     }
-    {
-        std::fstream file(base, std::ios::binary | std::ios::in | std::ios::out);
-        DiskHeader header{};
-        file.read(reinterpret_cast<char*>(&header), sizeof(header));
-        header.ver = 10;
-        file.seekp(0);
-        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-        file.close();
-        Engine legacy;
-        Check(EngineTestAccess::Load(legacy, base.wstring()) && EngineTestAccess::NeedsRebuild(legacy),
-              "V10 snapshot requests repair for persisted attr-only corruption");
-    }
-    // Reproduce a persisted V9 index whose root flag contaminated all descendants.
-    {
-        std::fstream file(base, std::ios::binary | std::ios::in | std::ios::out);
-        DiskHeader header{};
-        file.read(reinterpret_cast<char*>(&header), sizeof(header));
-        header.ver = 9;
-        file.seekp(0);
-        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-        for (uint32_t i = 0; i < header.node_count; ++i) {
-            const auto offset = static_cast<std::streamoff>(header.nodes_off + i * sizeof(Node));
-            Node node;
-            file.seekg(offset);
-            file.read(reinterpret_cast<char*>(&node), sizeof(node));
-            node.flags |= 2;
-            file.seekp(offset);
-            file.write(reinterpret_cast<const char*>(&node), sizeof(node));
-        }
-    }
-    {
-        Engine old;
-        Check(EngineTestAccess::Load(old, base.wstring()), "legacy snapshot remains readable");
-        Check(EngineTestAccess::NeedsRebuild(old), "legacy snapshot triggers repair");
-        Check(Search(old, L".codex").total == 0, "fixture reproduces old search failure");
-        EngineTestAccess::RepairOffline(old);
-        CheckSearch(old);
-        Check(EngineTestAccess::Save(old, (dir / L"repaired.bin").wstring()), "repaired offline snapshot persists");
-    }
-    {
-        const auto paths = MakeShardPaths(dir.wstring(), L"migration-test");
-        ShardManifest manifest;
-        Check(PublishShardBase(paths, base.wstring(), 123456, 0, manifest), "publish legacy generation");
-        Check(PublishShardBase(paths, (dir / L"repaired.bin").wstring(), 123456, 0, manifest),
-              "publish repaired generation");
-        std::wstring active;
-        Check(ResolveActiveShard(paths, manifest, active), "resolve repaired generation");
-        {
-            Engine repaired;
-            Check(EngineTestAccess::Load(repaired, active) && !EngineTestAccess::NeedsRebuild(repaired),
-                  "published repair remains current after restart");
-            CheckSearch(repaired);
-        }
-        {
-            std::ofstream corrupt(active, std::ios::binary | std::ios::trunc);
-            corrupt << "corrupt";
-        }
-        Check(ResolveActiveShard(paths, manifest, active), "corrupt repaired slot falls back safely");
-        Engine fallback;
-        Check(EngineTestAccess::Load(fallback, active) && EngineTestAccess::NeedsRebuild(fallback),
-              "legacy fallback still requests repair");
-    }
+    LegacyRepairTests(dir, base);
     // This directory was created exclusively by this process under bench_data.
     std::filesystem::remove_all(dir);
     return failures ? 1 : 0;

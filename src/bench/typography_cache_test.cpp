@@ -37,7 +37,7 @@ Compositor::Compositor() {
     }
 }
 Compositor::~Compositor() = default;
-bool Compositor::LumaTextEnabled() const noexcept { return luma_enabled; }
+bool Compositor::LumaTextEnabled() const noexcept { return luma_enabled && typography::UseLumaTextForUi(); }
 bool Compositor::MeasureLumaText(std::wstring_view, IDWriteTextFormat* format, float& width, float*) {
     ++luma_calls;
     if (!typography::UsesLumaText(this, format)) return false;
@@ -62,6 +62,85 @@ float LegacyWidth(IDWriteFactory2* factory, IDWriteTextFormat* format, std::wstr
     layout->GetOverhangMetrics(&overhang);
     return metrics.widthIncludingTrailingWhitespace + std::max(0.0f, overhang.right) + 1.0f;
 }
+
+void CheckModeLayouts(IDWriteFactory2* factory) {
+    using pulse::ui::ComPtr;
+    namespace type = pulse::ui::typography;
+    for (auto mode : {type::TextRenderMode::Auto, type::TextRenderMode::Sharp, type::TextRenderMode::Smooth}) {
+        type::SetTextRenderMode(mode);
+        const bool sharp = mode == type::TextRenderMode::Sharp;
+        ComPtr<IDWriteRenderingParams2> params;
+        Check(SUCCEEDED(type::CreateRenderingParams(factory, nullptr, &params)) && params.get() &&
+              params->GetRenderingMode() == (sharp ? DWRITE_RENDERING_MODE_GDI_CLASSIC : DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC) &&
+              params->GetGridFitMode() == (sharp ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED) &&
+              type::MeasuringMode() == (sharp ? DWRITE_MEASURING_MODE_GDI_CLASSIC : DWRITE_MEASURING_MODE_NATURAL),
+              "selected mode pairs rasterization, grid fit and DrawText measurement");
+        bool positions_match = true;
+        bool widths_match = true;
+        size_t layouts = 0;
+        for (const wchar_t* family : {L"Microsoft YaHei UI", L"Segoe UI Variable Text"}) {
+            for (float size : {13.0f, 14.0f, 17.5f, 21.0f}) {
+                ComPtr<IDWriteTextFormat> format;
+                if (FAILED(factory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"zh-CN", &format))) {
+                    positions_match = false;
+                    continue;
+                }
+                for (const std::wstring text : {L"appcompat", L"Downloaded Program Files", L"Program",
+                        L"\u4e2d\u6587\u6587\u4ef6.txt", L"space  ffi AV", L"long-file-name.7z"}) {
+                    ComPtr<IDWriteTextLayout> actual, reference;
+                    const HRESULT actual_hr = type::CreateTextLayout(factory, text.data(), static_cast<UINT32>(text.size()),
+                        format.get(), 10000.0f, 100.0f, &actual);
+                    const HRESULT expected_hr = sharp
+                        ? factory->CreateGdiCompatibleTextLayout(text.data(), static_cast<UINT32>(text.size()),
+                            format.get(), 10000.0f, 100.0f, 1.0f, nullptr, FALSE, &reference)
+                        : factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+                            format.get(), 10000.0f, 100.0f, &reference);
+                    if (FAILED(actual_hr) || FAILED(expected_hr) || !actual.get() || !reference.get()) {
+                        positions_match = false;
+                        continue;
+                    }
+                    ++layouts;
+                    for (UINT32 i = 0; i <= text.size(); ++i) {
+                        FLOAT x = 0, y = 0, ref_x = 0, ref_y = 0;
+                        DWRITE_HIT_TEST_METRICS hit{}, ref_hit{};
+                        actual->HitTestTextPosition(i, FALSE, &x, &y, &hit);
+                        reference->HitTestTextPosition(i, FALSE, &ref_x, &ref_y, &ref_hit);
+                        positions_match = positions_match && Near(x, ref_x) && Near(y, ref_y) &&
+                            Near(hit.width, ref_hit.width) && hit.textPosition == ref_hit.textPosition;
+                    }
+                    DWRITE_TEXT_METRICS metrics{};
+                    DWRITE_OVERHANG_METRICS overhang{};
+                    reference->GetMetrics(&metrics);
+                    reference->GetOverhangMetrics(&overhang);
+                    widths_match = widths_match && Near(type::MeasureAdvance(factory, format.get(), text),
+                        metrics.widthIncludingTrailingWhitespace + std::max(0.0f, overhang.right) + 1.0f);
+                    // Width cache keys include format identity. Clear before releasing a format,
+                    // as Compositor::RecreateTextFormats does in production.
+                }
+                type::ClearMeasurementCache();
+            }
+        }
+        Check(positions_match && layouts == 48, "48 Latin/CJK layouts match native reference caret positions at 100/125/150 percent");
+        Check(widths_match, "fitting widths match the selected layout including right overhang");
+        ComPtr<IDWriteTextFormat> dip_format;
+        ComPtr<IDWriteTextLayout> dip_layout, dip_reference;
+        factory->CreateTextFormat(L"Microsoft YaHei UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"zh-CN", &dip_format);
+        const HRESULT dip_result = type::CreateTextLayout(factory, L"Downloaded Program Files", 24,
+            dip_format.get(), 1000.0f, 100.0f, &dip_layout, 1.25f);
+        if (sharp) factory->CreateGdiCompatibleTextLayout(L"Downloaded Program Files", 24,
+            dip_format.get(), 1000.0f, 100.0f, 1.25f, nullptr, FALSE, &dip_reference);
+        else factory->CreateTextLayout(L"Downloaded Program Files", 24,
+            dip_format.get(), 1000.0f, 100.0f, &dip_reference);
+        DWRITE_TEXT_METRICS dip_metrics{}, dip_expected{};
+        const bool dip_ok = SUCCEEDED(dip_result) && dip_layout.get() && dip_reference.get() &&
+            SUCCEEDED(dip_layout->GetMetrics(&dip_metrics)) && SUCCEEDED(dip_reference->GetMetrics(&dip_expected));
+        Check(dip_ok && Near(dip_metrics.width, dip_expected.width),
+            "DIP-coordinate floating search layouts use their actual pixels per DIP");
+    }
+    type::SetTextRenderMode(type::TextRenderMode::Auto);
+}
 }
 
 int main() {
@@ -77,6 +156,7 @@ int main() {
         return 1;
     }
     Check(true, "real DirectWrite factory/format created without a window");
+    CheckModeLayouts(factory);
     const std::vector<std::wstring> cases{
         L"", L"Pulse", L"trailing  ", L"\u4f60\u597d\u6587\u4ef6.txt", L"italic ffi AV",
         L"line one\nline two", L"one\ttwo", std::wstring(1100, L'W')};
@@ -110,33 +190,25 @@ int main() {
           Near(type::MeasureLine(&compositor, format.get(), label), line) && luma_calls == measured_calls,
           "Luma composite width stays separate and hits cache without altering advance");
     Check(type::UsesLumaText(&compositor, format.get()) &&
-          !type::UsesLumaText(&compositor, compositor.FileNameFormat()) &&
+          type::UsesLumaText(&compositor, compositor.FileNameFormat()) &&
           !type::UsesLumaText(nullptr, format.get()) && !type::UsesLumaText(&compositor, nullptr),
-          "shared drawing/measurement route rejects filenames and invalid formats with Luma enabled");
-    type::ClearMeasurementCache();
+          "Auto routes valid filename and UI formats through Luma");
+    type::SetTextRenderMode(type::TextRenderMode::Sharp);
+    Check(!type::UsesLumaText(&compositor, format.get()) &&
+          !type::UsesLumaText(&compositor, compositor.FileNameFormat()) &&
+          type::CurrentMeasureCache().widths.empty(),
+          "Sharp bypasses Luma for all formats and invalidates widths");
     IDWriteTextFormat* filename_format = compositor.FileNameFormat();
     const float filename_advance = type::MeasureAdvance(factory, filename_format, label);
     const int filename_calls = luma_calls;
     Check(Near(type::MeasureLine(&compositor, filename_format, label), filename_advance) &&
-          Near(type::MeasureLine(&compositor, filename_format, label), filename_advance) &&
           type::CurrentMeasureCache().widths.size() == 1 && luma_calls == filename_calls,
-          "Luma-enabled filenames share the advance entry without attempting Luma measurement");
-    bool filename_equivalent = true;
-    for (const auto& text : cases) {
-        filename_equivalent = filename_equivalent &&
-            Near(type::MeasureLine(&compositor, filename_format, text),
-                 LegacyWidth(factory, filename_format, text));
-    }
-    Check(filename_equivalent && luma_calls == filename_calls,
-          "filename routing preserves DWrite CJK/whitespace/empty/long-text widths with Luma enabled");
-    const size_t filename_entries = type::CurrentMeasureCache().widths.size();
-    Check(type::MeasureLine(&compositor, filename_format, L"") == 0.0f &&
-          type::MeasureLine(&compositor, nullptr, label) == 0.0f &&
-          type::MeasureLine(nullptr, filename_format, label) == 0.0f &&
-          Near(type::MeasureLine(&compositor, filename_format, std::wstring(1100, L'W')),
-               LegacyWidth(factory, filename_format, std::wstring(1100, L'W'))) &&
-          type::CurrentMeasureCache().widths.size() == filename_entries && luma_calls == filename_calls,
-          "invalid/empty/long DirectWrite lines bypass composite keys and Luma calls");
+          "Sharp filename layout and fitting share compatible advance without Luma");
+    type::SetTextRenderMode(type::TextRenderMode::Smooth);
+    Check(!type::UsesLumaText(&compositor, format.get()) &&
+          Near(type::MeasureAdvance(factory, filename_format, label), LegacyWidth(factory, filename_format, label)),
+          "Smooth bypasses Luma and restores natural advances");
+    type::SetTextRenderMode(type::TextRenderMode::Auto);
     luma_enabled = false;
     const auto generation = type::Generation();
     type::InvalidateCaches();

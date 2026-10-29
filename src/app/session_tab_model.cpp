@@ -3,23 +3,13 @@
 #include "tab_group_id.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <unordered_set>
 
 namespace pulse::app {
 
 namespace {
-
-size_t SnapshotPresetCount(LayoutPreset preset) {
-    switch (preset) {
-    case LayoutPreset::TwoVertical:
-    case LayoutPreset::TwoHorizontal: return 2;
-    case LayoutPreset::Three: return 3;
-    case LayoutPreset::FourGrid: return 4;
-    case LayoutPreset::Single:
-    default: return 1;
-    }
-}
 
 void CollectTreePanes(const SplitContainer& node, std::vector<Pane*>& out) {
     if (node.is_leaf) {
@@ -35,6 +25,14 @@ void CollectTreeRatios(const SplitContainer& node, std::vector<float>& out) {
     out.push_back(node.ratio);
     if (node.first) CollectTreeRatios(*node.first, out);
     if (node.second) CollectTreeRatios(*node.second, out);
+}
+
+void RestoreTreeRatios(SplitContainer& node, const std::vector<float>& ratios, size_t& index) {
+    if (node.is_leaf) return;
+    const float ratio = ratios[index++];
+    node.ratio = std::isfinite(ratio) && ratio > 0.0f && ratio < 1.0f ? ratio : 0.5f;
+    if (node.first) RestoreTreeRatios(*node.first, ratios, index);
+    if (node.second) RestoreTreeRatios(*node.second, ratios, index);
 }
 
 } // namespace
@@ -81,11 +79,11 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
     tab.target_index = snapshot.target;
     tab.panes.clear();
     tab.root.reset();
-    for (const auto& saved : snapshot.panes) {
-        // Empty paths are placeholders from an interrupted save; a preset pane
-        // without a location cannot be restored and must not consume a slot.
-        if (saved.path.empty()) continue;
+    const size_t need = LayoutPresetCount(tab.layout);
+    for (size_t i = 0; i < snapshot.panes.size() && i < need; ++i) {
+        const auto& saved = snapshot.panes[i];
         auto pane = std::make_unique<Pane>();
+        pane->view.current_path = saved.path; // An empty saved path represents This PC.
         pane->view.view_mode = saved.view;
         pane->view.details_column_dividers = saved.columns;
         pane->view.search_column_dividers = saved.search_columns;
@@ -98,10 +96,10 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
     if (tab.panes.empty()) {
         auto pane = std::make_unique<Pane>();
         pane->focused = true;
+        pane->view.current_path = pulse::path::DefaultNavigationRoot();
         tab.panes.push_back(std::move(pane));
-        if (load_tab) load_tab(*tab.panes.front()->ActiveTab(), pulse::path::DefaultNavigationRoot());
+        if (load_tab) load_tab(*tab.panes.front()->ActiveTab(), tab.panes.front()->view.current_path);
     }
-    const size_t need = SnapshotPresetCount(tab.layout);
     while (tab.panes.size() < need) {
         auto pane = std::make_unique<Pane>();
         const Tab& source = *tab.panes.front()->ActiveTab();
@@ -110,7 +108,7 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
         pane->view.search_column_dividers = source.search_column_dividers;
         pane->view.column_layout = source.column_layout;
         pane->view.column_widths_dip = source.column_widths_dip;
-        const std::wstring clone = source.current_path.empty() ? pulse::path::DefaultNavigationRoot() : source.current_path;
+        const std::wstring clone = source.current_path;
         pane->view.current_path = clone;
         Tab* raw = pane->ActiveTab();
         tab.panes.push_back(std::move(pane));
@@ -118,10 +116,15 @@ void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
     }
     tab.focused_index = std::clamp(tab.focused_index, 0,
                                    static_cast<int>(tab.panes.size()) - 1);
-    if (tab.target_index >= static_cast<int>(tab.panes.size())) tab.target_index = -1;
+    if (tab.target_index < -1 || tab.target_index >= static_cast<int>(tab.panes.size())) tab.target_index = -1;
     for (size_t i = 0; i < tab.panes.size(); ++i) {
         tab.panes[i]->focused = static_cast<int>(i) == tab.focused_index;
         tab.panes[i]->target = static_cast<int>(i) == tab.target_index;
+    }
+    RebuildLayoutRoot(tab);
+    if (tab.root && snapshot.split_ratios.size() == need - 1) {
+        size_t index = 0;
+        RestoreTreeRatios(*tab.root, snapshot.split_ratios, index);
     }
 }
 
@@ -135,12 +138,14 @@ void RestoreWindowTabs(WindowTabs& tabs,
     std::unordered_set<int> valid_groups;
     int max_group = 0;
     for (const auto& saved : groups) {
+        if (tabs.tab_groups.size() == kMaxSessionTabGroups) break;
         if (saved.id <= 0 || !valid_groups.insert(saved.id).second) continue;
         tabs.tab_groups.push_back({saved.id, saved.name, saved.color_rgb, saved.collapsed});
         max_group = std::max(max_group, saved.id);
     }
     tabs.next_tab_group_id = NextTabGroupId(max_group);
     for (const auto& saved : layout_tabs) {
+        if (tabs.items.size() == kMaxSessionLayoutTabs) break;
         // Loading can reuse requests from panes already registered in the window.
         tabs.items.push_back(std::make_unique<LayoutTab>());
         auto& tab = tabs.items.back();
@@ -150,9 +155,7 @@ void RestoreWindowTabs(WindowTabs& tabs,
     }
     if (tabs.items.empty()) {
         auto tab = std::make_unique<LayoutTab>();
-        auto pane = std::make_unique<Pane>();
-        pane->focused = true;
-        tab->panes.push_back(std::move(pane));
+        RestoreLayoutTab(*tab, {}, load_tab);
         tabs.items.push_back(std::move(tab));
     }
     tabs.active = 0;

@@ -2,6 +2,8 @@
 #include "../common/localization.h"
 #include "about_info.h"
 #include "background_window_fit.h"
+#include "system_ctx_settings.h"
+#include "settings_transfer_ui.h"
 #include <algorithm>
 #include <cwctype>
 #include <cmath>
@@ -40,24 +42,29 @@ int Dropdown(AppState& s, int index, std::vector<ui::FluentMenuItem> items) {
 }
 struct SettingDestination { I title;int page;unsigned expanded; };
 constexpr SettingDestination destinations[]={
-    {I::SettingsTheme,0,0},{I::SettingsThemeColor,0,0},{I::SettingsWindowEffect,0,0},{I::SettingsLanguage,0,0},
-    {I::SettingsLaunch,0,0},{I::SettingsKeepRunning,0,0},{I::SettingsRowHeight,0,0},{I::SettingsShowPerformance,0,0},
-    {I::ListSmartDate,0,0},{I::ListZebraRows,0,0},{I::ListSizeBar,0,0},{I::SettingsFolderSort,0,0},
-    {I::SettingsWallpaper,0,1},{I::SettingsMatchBackground,0,1},{I::SettingsWallpaperLook,0,1},{I::SettingsWallpaperBlur,0,1},{I::SettingsTrayIcon,0,1},{I::SettingsShowHidden,0,1},{I::SettingsShowProtected,0,1},{I::PinnedNames,0,1},
-    {I::SettingsBlankClickBack,0,1},{I::SettingsChangeTracking,0,1},{I::SettingsLockWindowSize,0,1},
-    {I::ConfigurationLocation,0,0},
-    {I::SettingsNewTabHome,0,0},
-    {I::SettingsExternalOpen,0,0},
-    {I::SettingsTextCompare,0,0},
-    {I::SettingsDefaultManager,0,0},
-    {I::StartToTray,0,0},{I::CloseLastTabWindow,0,0},
-    {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},{I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},
-    {I::Exclusions,1,2},{I::ServerFolders,1,2},{I::SettingsContextMenu,2,0},{I::SettingsDuplicates,4,0},{I::SettingsAboutDiagnostics,3,0},
+    {I::SettingsTheme,0,0},{I::SettingsThemeColor,0,0},{I::SettingsWindowEffect,0,0},
+    {I::SettingsWallpaper,0,0},{I::SettingsWallpaperLook,0,0},{I::SettingsWallpaperBlur,0,0},
+    {I::SettingsLanguage,0,0},{I::SettingsTextRender,0,0},
+    {I::SettingsBlankClickBack,6,0},{I::SettingsShowHidden,6,0},{I::SettingsShowProtected,6,0},
+    {I::SettingsFolderSort,6,0},{I::SettingsRowHeight,6,0},{I::ListSmartDate,6,0},
+    {I::ListZebraRows,6,0},{I::ListSizeBar,6,0},{I::SettingsShowPerformance,6,0},
+    {I::SettingsNewTabHome,7,0},{I::SettingsExternalOpen,7,0},{I::PinnedNames,7,0},
+    {I::CloseLastTabWindow,7,0},{I::SettingsMatchBackground,7,0},{I::SettingsLockWindowSize,7,0},
+    {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},{I::SettingsLaunch,8,0},
+    {I::StartToTray,8,0},{I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
+    {I::SettingsTrayIcon,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
+    {I::SettingsChangeDays,9,0},
+    {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},
+    {I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},
+    {I::Exclusions,1,2},{I::ServerFolders,1,2},{I::SettingsContextMenu,2,0},
+    {I::SettingsDuplicates,4,0},{I::SettingsAboutDiagnostics,3,0},{I::SettingsSystemContextMenu,5,0},
 };
 std::vector<ui::FluentMenuItem> FilterSettings(const std::wstring& query) {
     std::wstring needle=query;std::transform(needle.begin(),needle.end(),needle.begin(),towlower);
     std::vector<ui::FluentMenuItem> items;
-    const I pages[]={I::SettingsGeneral,I::SettingsSearchIndex,I::SettingsContextMenu,I::SettingsAboutDiagnostics,I::SettingsDuplicates};
+    const I pages[]={I::SettingsAppearance,I::SettingsSearchIndex,I::SettingsContextMenu,
+        I::SettingsAboutDiagnostics,I::SettingsDuplicates,I::SettingsContextMenu,
+        I::SettingsFileList,I::SettingsPageTabs,I::SettingsPageSystem,I::SettingsPageFileOps};
     for(size_t i=0;i<std::size(destinations);++i) {
         auto item=Item(static_cast<int>(i)+1,destinations[i].title);
         item.shortcut=l10n::Get(pages[destinations[i].page]);
@@ -138,13 +145,33 @@ bool TestSettingsFilter(const std::wstring& query,I expected) {
 
 bool HandleSettingsControl(AppState& s,const H& hit) {
     switch(hit.region) {
+    case H::SettingsDiagnosticsAction:
+        if (hit.index < 3 || hit.index > 5) return false;
+        SettingsTransferAction(s, hit.index - 3);
+        break;
+    case H::SettingsSysCtx: HandleSystemContextAction(s,hit.index);break;
+    case H::SettingsCtxPivot: OpenSettingsTab(s,hit.index);break;
+    case H::SettingsToggle: {
+        if(hit.index<ui::kSettingsMenuFixedHit) return false;
+        if(hit.index<ui::kSettingsMenuRowHit) return true;
+        const auto vm=BuildVm(s,false);
+        const auto rect=D2D1::RectF(0,0,static_cast<float>(s.compositor.Width()),static_cast<float>(s.compositor.Height()));
+        POINT point{};GetCursorPos(&point);ScreenToClient(s.hwnd,&point);
+        const float pos=static_cast<float>(vm.settings_context_tab==2 ? point.x : point.y);
+        const int item=hit.index-ui::kSettingsMenuRowHit;
+        const float start=s.renderer.SettingsMenuRowStart(vm,rect,item);
+        if(std::isnan(start)) return true;
+        s.settings.BeginMenuDrag(item,pos,pos-start);
+        SetCapture(s.hwnd);
+        break;
+    }
     case H::SettingsWallpaper:
         if (hit.index != 2) return false;
         MatchWindowToBackground(s);
         break;
     case H::SettingsFind: FindSetting(s);break;
     case H::SettingsDisclosure: {
-        if(hit.index!=0 && hit.index!=1 && (hit.index<8 || hit.index>12)) return true;
+        if(hit.index!=0 && hit.index!=1 && (hit.index<8 || hit.index>13)) return true;
         CancelScrollAnimation(s);
         s.settingsExpanded^=1u<<hit.index;
         auto vm=BuildVm(s,false);

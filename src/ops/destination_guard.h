@@ -274,13 +274,14 @@ public:
         return true;
     }
 
-    Handle PinLeaf(const std::wstring& path, std::wstring& error, DWORD* code = nullptr) const {
+    Handle PinLeaf(const std::wstring& path, std::wstring& error, DWORD* code = nullptr,
+                   DWORD extra_access = 0) const {
         if (code) *code = ERROR_INVALID_DATA; // identity rejection is not a lock failure
         const auto parts = Components(path);
         if (parts.empty()) { Fail(path, error); return {}; }
         const auto found = snapshots_.find(parts.back());
         if (found == snapshots_.end()) { Fail(path, error); return {}; }
-        Handle handle(Open(parts.back(), true));
+        Handle handle(Open(parts.back(), true, extra_access));
         if (!handle) {
             const DWORD saved = GetLastError();
             if (code) *code = saved;
@@ -353,8 +354,8 @@ public:
         return true;
     }
 
-    bool DeleteOwnedLeaf(const std::wstring& path, std::wstring& error) {
-        auto handle = PinLeaf(path, error);
+    bool DeleteOwnedLeaf(const std::wstring& path, std::wstring& error, Handle handle = {}) {
+        if (!handle) handle = PinLeaf(path, error);
         if (!handle || !Check(path, error)) return false;
         FILE_DISPOSITION_INFO disposition{TRUE};
         if (!SetFileInformationByHandle(handle.get(), FileDispositionInfo,

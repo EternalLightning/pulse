@@ -1,0 +1,235 @@
+{
+  "date": "2026-10-23",
+  "scope": "第二阶段体积分析及下一步评估。只新增离线聚合分析脚本和JSON证据；未改引擎、安装文件、服务、配置、ACL或线上索引；不再次清理，保留A/B恢复。",
+  "privacy": "仅输出数值、合成夹具标签及文件级校验和；不输出任何私有索引名称、父路径或FRN。普通token不能打开线上快照，没有提权或绕过ACL。",
+  "decision": "优先精确basename共享：现有UTF16切片模型允许共享偏移，具备不改磁盘布局的实施路径。线上真实收益仍未知。UTF8/前缀新格式暂缓；固定记录先纠正unused误判，FRN pad仅约3.01%单快照理论上界，不足以单独证明新格式迁移的收益。",
+  "existing_verified_baseline": {
+    "source": "bench_data/everything-size-20261023/evidence.json",
+    "snapshot_version": 12,
+    "nodes": 2463927,
+    "before_cleanup_directory_bytes": 2335240520,
+    "retained_directory_bytes": 659009579,
+    "active_snapshot_bytes": 327561632,
+    "name_pool_utf16_bytes": 119496382,
+    "postings_bytes": 89795904,
+    "fixed_node_attr_frn_child_order_bytes": 118268496,
+    "fixed_bytes_per_item": 48,
+    "retention": "A/B快照和pinyin/WAL/manifest仍保留。以上来自此前CRC有效的维护证据，本轮没有权限重新读取线上快照。",
+    "everything_saved_database_bytes": 105619478,
+    "everything_later_runtime_count": 2519325,
+    "comparison_limit": "Everything保存文件与后续runtime数量不同时点，索引范围/字段不同；只能比较数量级，不能声称同语料或精确每记录编码成本。"
+  },
+  "production_probe": {
+    "status": "unavailable",
+    "error": {
+      "type": "PermissionError",
+      "errno": 13,
+      "winerror": null
+    },
+    "access": "Python open(rb), read-only mmap; standard token; no ACL mutation or bypass",
+    "actual_corpus_name_statistics": "not measured",
+    "next_measurement": "已有受授权管理员会话可运行analyze_name_storage.py，对固定active快照只做汇总并将JSON写回仓库；无需停服务、保存Everything DB或复制私有名称。",
+    "command_for_existing_authorized_administrator_session": "python E:\\Projects\\pulse\\bench_data\\everything-size-20261023\\analyze_name_storage.py --input production-known-active=D:\\AppData\\Index\\v9\\9ACBEFD40DDAC9E8\\base-b.bin --output E:\\Projects\\pulse\\bench_data\\everything-size-20261023\\name-storage-production-statistics.json",
+    "live_snapshot_limit": "该路径是此前已知active槽；若后台发布发生，需由有权限的既有探针确认manifest/CRC。脚本本身校验字段范围及文件SHA256，不声称验证manifest CRC或当前active角色。"
+  },
+  "isolated_measurement": {
+    "raw_statistics": "bench_data/everything-size-20261023/name-storage-statistics.json",
+    "datasets": [
+      {
+        "label": "synthetic-60050-v11",
+        "version": 11,
+        "node_count": 60050,
+        "volume_count": 2,
+        "snapshot_bytes": 15865312,
+        "snapshot_sha256": "484a7a25bc0e35bbd75609f17b6ccd9d0864461da03a65208f8cf12cc55dd3df"
+      },
+      {
+        "label": "synthetic-60050-v12",
+        "version": 12,
+        "node_count": 60050,
+        "volume_count": 2,
+        "snapshot_bytes": 8675344,
+        "snapshot_sha256": "16d0a06e0dfc22cf1056bad40f7295af2dde440eb7a80632b2bc8ae21654563a"
+      }
+    ],
+    "same_name_statistics_across_v11_v12": true,
+    "corpus_limit": "已有60,050节点双卷合成夹具，每卷生成同一批规则名称；全部ASCII，约一半重复是刻意重复的双卷数据。不能将收益率乘到246万节点线上语料。",
+    "utf16_name_pool_bytes": 2863632,
+    "unreferenced_or_shared_delta_bytes": 0,
+    "ascii_only_names": 60050,
+    "invalid_utf16_names": 0,
+    "exact_basename_interning": {
+      "unique_names": 30026,
+      "duplicate_occurrences": 30024,
+      "duplicate_occurrence_percent": 49.99833472106578,
+      "unique_utf16_bytes": 1431820,
+      "saving_vs_current_pool_bytes": 1431812,
+      "unique_invalid_utf16_names": 0,
+      "unique_utf8_valid_payload_bytes": 715910,
+      "unique_lossless_payload_bytes": 715910,
+      "unique_lossless_length_and_encoding_varint_bytes": 30026,
+      "unique_lossless_encoded_bytes": 745936,
+      "lossless_encoded_saving_vs_current_pool_bytes": 2117696
+    },
+    "lossless_utf8_or_utf16_model": {
+      "payload_bytes": 1431816,
+      "length_and_encoding_varint_bytes": 60050,
+      "bytes": 1491866,
+      "saving_vs_current_pool_bytes": 1371766
+    },
+    "prefix_dictionary_models": {
+      "utf16": [
+        {
+          "block_size_names": 16,
+          "unique_names": 30026,
+          "suffix_bytes": 776966,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 7508,
+          "bytes": 844526,
+          "shared_prefix_bytes": 654854,
+          "max_preceding_names_to_decode": 15
+        },
+        {
+          "block_size_names": 32,
+          "unique_names": 30026,
+          "suffix_bytes": 755208,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 3756,
+          "bytes": 819016,
+          "shared_prefix_bytes": 676612,
+          "max_preceding_names_to_decode": 31
+        },
+        {
+          "block_size_names": 64,
+          "unique_names": 30026,
+          "suffix_bytes": 744320,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 1880,
+          "bytes": 806252,
+          "shared_prefix_bytes": 687500,
+          "max_preceding_names_to_decode": 63
+        }
+      ],
+      "mixed_utf8_or_utf16_tagged": [
+        {
+          "block_size_names": 16,
+          "unique_names": 30026,
+          "suffix_bytes": 390360,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 7508,
+          "bytes": 457920,
+          "shared_prefix_bytes": 355576,
+          "max_preceding_names_to_decode": 15
+        },
+        {
+          "block_size_names": 32,
+          "unique_names": 30026,
+          "suffix_bytes": 378543,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 3756,
+          "bytes": 442351,
+          "shared_prefix_bytes": 367393,
+          "max_preceding_names_to_decode": 31
+        },
+        {
+          "block_size_names": 64,
+          "unique_names": 30026,
+          "suffix_bytes": 372630,
+          "record_header_bytes": 60052,
+          "block_offset_bytes": 1880,
+          "bytes": 434562,
+          "shared_prefix_bytes": 373306,
+          "max_preceding_names_to_decode": 63
+        }
+      ]
+    },
+    "fixed_records": {
+      "node_bytes": 960800,
+      "attr_bytes": 720600,
+      "frn_count": 60050,
+      "frn_bytes": 960800,
+      "child_order_bytes": 240200,
+      "node_subtree_end_nonzero": 60050,
+      "node_subtree_end_in_valid_forward_range": 60050,
+      "node_pad_nonzero": 0,
+      "frn_pad_nonzero": 0,
+      "frn_padding_only_theoretical_saving_bytes": 240200,
+      "sizes_within_uint32": 60050,
+      "node_unused_direct_removal_saving_bytes": 0
+    }
+  },
+  "encoding_model_definition": [
+    "Exact basename interning以完整UTF16字节完全相等为准；不做大小写折叠、归一化或仅按hash判等。每个Node仍保留各自parent、flags和off/len，FRN与节点身份不合并。",
+    "UTF8模型对可严格解码的UTF16名称编码成UTF8；包含未配对surrogate的整名保留原UTF16，每个编码名称附带varint((byte_length<<1)|fallback_tag)。统计包含这个长度/tag开销。",
+    "该UTF8模型不是逐名选择较短编码，CJK等BMP名称可能由2B/unit变成3B/unit；真正混合选择最短编码还需另做成本和运行时评估。",
+    "前缀模型先对唯一名称的编码字节排序，每16/32/64个唯一名重启一次，每条写入varint(shared_prefix_bytes)、varint(suffix_bytes)及suffix，每块增加4B绝对偏移。UTF16前缀边界按2字节对齐；mixed模型用显式1B编码tag作为名称token一部分。",
+    "字典序号可在新格式中复用现有Node.off的32位槽，不额外再加每节点4B；这是假定新格式的成本模型，现有Node.off并非字典ID。Node.len仍保留原UTF16长度。该假定必须由版本化读写实现和边界校验兑现。",
+    "前缀模型没有增加全节点名称排序表，最多需解码块内15/31/63个前序名；不再满足NameOf返回mmap wchar_t切片的当前契约。未测搜索/排序/path构造时的解码成本、cache峰值和冷启动。",
+    "所有模型为未对齐的名称字典区大小，未计新header、原有其它段的重新对齐和迁移临时峰值；各候选有重叠，收益不得简单相加。"
+  ],
+  "fixed_record_correction": {
+    "Node_unused_is_live": true,
+    "references": [
+      "src/index/index_engine.h::Node",
+      "src/index/index_engine.cpp::SubtreeEndLocked",
+      "src/index/index_engine.cpp::FlattenLocked",
+      "src/index/index_engine.cpp::WriteVolumeShards"
+    ],
+    "evidence": "SubtreeEndLocked读取unused作为DFS子树结束ID；FlattenLocked写入它并用于卷span；夹具60050/60050节点均有合法向前结束ID。不得凭字段名称删除。",
+    "superseded_estimate": "evidence.json candidate Compact disk Node and FRN records所述两字段合计19,711,416B不能按可直接删除解释。",
+    "production_frn_count_inferred_from_record_segment": 2463927,
+    "DiskFrn_pad_theoretical_saving_bytes": 9855708,
+    "percent_of_current_active_snapshot": 3.0088102626134186,
+    "active_snapshot_if_only_pad_removed_ignoring_alignment": 317705924,
+    "implementation_cost": "DiskFrn从16B改12B需新磁盘版本、旧格式兼容、mmap/volume FRN边界和WAL/恢复验证。以上是同数量FRN下的字段上界，非交付收益。",
+    "other_fields": "Node.pad仅1B；父ID、名称offset/len、flags、subtree-end、Attr时间/64位size、FRN身份和child_order均有语义。未获真实分布与新编码证明前不压窄或删除。"
+  },
+  "candidate_decisions": [
+    {
+      "candidate": "精确basename UTF16共享",
+      "decision": "优先实施/独立验证",
+      "benefit_evidence": "合成池从2,863,632B降至1,431,820B；不改16B Node或UTF16读取契约。线上收益待真实聚合。",
+      "implementation_path": "FlattenLocked生成不可变快照时按完整wstring_view查找已写pool偏移；hash冲突仍比较名称。若key引用out.pool，必须稳定预留容量或使用独立稳定来源，禁止vector扩容后悬空引用。",
+      "verification": "重复/大小写不同/中文/非BMP/未配对surrogate/空名称不丢失，父关系/FRN/排序/子串和WAL重放一致；测快照体积、构建耗时、峰值内存；A/B保持可回退。"
+    },
+    {
+      "candidate": "UTF8或tagged混合名称",
+      "decision": "暂缓新磁盘格式",
+      "reason": "全部ASCII合成语料编码加header可到1,491,866B，去重后745,936B；但线上ASCII比例未知，需改变NameOf/QueryName的wstring_view生命周期和所有名称消费者，不能以payload比率代替整体收益。"
+    },
+    {
+      "candidate": "分块前缀字典",
+      "decision": "仅保留可复现实验模型",
+      "reason": "合成唯一字典block32：UTF16 819,016B，mixed442,351B；省空间需付最多31名前序解码和cache管理成本，未做生产运行时原型。"
+    },
+    {
+      "candidate": "固定记录去padding",
+      "decision": "后于basename共享",
+      "reason": "可解释的FRN pad上界9,855,708B/单快照，即3.01%；Node.unused不能直接删。避免为一个低个位数收益孤立引入版本迁移。"
+    },
+    {
+      "candidate": "删除postings或减少A/B副本",
+      "decision": "拒绝以匹配Everything.db大小为理由实施",
+      "reason": "postings全段89,795,904B不是可无损省下的数值；A/B属于恢复策略。当前数据没有证明全RAM扫描/启动重建可以维持搜索延迟和恢复保证。"
+    }
+  ],
+  "validation": {
+    "analysis_script_selftest": {
+      "status": "pass",
+      "lossless_cases": 7,
+      "varint_boundaries": 5,
+      "prefix_size_examples": 2
+    },
+    "successful_isolated_snapshot_reads": 2,
+    "failed_protected_snapshot_reads": 1,
+    "v11_v12_name_measurements_identical": true,
+    "prior_production_segment_bytes_reconcile": true,
+    "product_build_or_tests_run": false,
+    "reason": "只新增离线脚本和分析证据；主代理负责产品改动及统一构建。Python计时仅分析器耗时，不是引擎性能测试。"
+  },
+  "source_sha256": {
+    "analyze_name_storage.py": "b7d2029dea308cc112020db21881f436b8e53c5940c5ab66246ed67c50efba80",
+    "name-storage-statistics.json": "3ac6711633220bbcd8570786795d486e3d2a4e25772ad7e03664ce000cdc0bc7",
+    "evidence.json": "ba09a1c0811d35f2baf191f9d79f7738f62f888c9b05f8c08a91719de882feb8"
+  }
+}

@@ -1,0 +1,250 @@
+{
+  "date": "2026-10-23",
+  "repairs": [
+    {
+      "id": "F01",
+      "issues": [
+        59
+      ],
+      "change": "仅最终COM菜单快照进入跨会话缓存。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-shell.json",
+      "validation": "Shell29/0；有修复前失败对照。",
+      "limits": "原第三方扩展/完整桌面菜单未验收。"
+    },
+    {
+      "id": "F02",
+      "issues": [
+        250,
+        248
+      ],
+      "change": "忽略末尾 -Embedding 等开关，避免将其作为目录。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-main.json",
+      "validation": "命令行22/0；实际隐藏主程序前后启动对照。",
+      "limits": "仅参数误当路径子项。"
+    },
+    {
+      "id": "F03",
+      "issues": [
+        49
+      ],
+      "change": "普通打开逐文件提供其父目录为工作目录。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-shell.json",
+      "validation": "Shell29/0，含真实私有批处理。",
+      "limits": "完整UI/IPC双击链未验收；UNC仅参数验证。"
+    },
+    {
+      "id": "F04",
+      "issues": [
+        235
+      ],
+      "change": "文件拖出允许COPY/MOVE/LINK。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0；实际CF_HDROP、本地LINK-only COM目标。",
+      "limits": "原PDF软件和外部OLE拖动未验收。"
+    },
+    {
+      "id": "F05",
+      "issues": [
+        106
+      ],
+      "change": "回收站列宽调整使用渲染的同一列宽数组。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0；回收站及搜索视图对照。",
+      "limits": "隐藏窗口合成输入。"
+    },
+    {
+      "id": "F08",
+      "issues": [
+        213
+      ],
+      "change": "保留Shell缩略图alpha类型，RGB忽略无意义alpha。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-preview.json",
+      "validation": "真实DIB经生产WIC转换4/0。",
+      "limits": "原PSD/7Z样本、第三方provider/IPC未验收；仅RGB边界。"
+    },
+    {
+      "id": "F09",
+      "issues": [
+        197
+      ],
+      "change": "恢复窗口矩形约束到当前显示器工作区。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-navigation.json",
+      "validation": "矩形10/0，含实际只读显示器查询。",
+      "limits": "未物理拔屏或移动用户窗口。"
+    },
+    {
+      "id": "F14",
+      "issues": [
+        86
+      ],
+      "change": "CreateProcess错误740时以原程序、参数、目录重试runas。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-shell.json",
+      "validation": "Shell29/0，API拦截覆盖740、取消与非740。",
+      "limits": "未启动实际提权程序或HiBit。"
+    },
+    {
+      "id": "F16",
+      "issues": [
+        372
+      ],
+      "change": "Medium/Large图标格边缘预留4DIP框选起点。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0，图标中心为选择对照。",
+      "limits": "未验收物理指针整段框选。"
+    },
+    {
+      "id": "F17",
+      "issues": [
+        188,
+        187,
+        186,
+        185,
+        183
+      ],
+      "change": "清空搜索取消请求、清除延迟历史并返回原目录。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-navigation.json",
+      "validation": "导航31/0，含四组合、迟到结果、composing守卫。",
+      "limits": "只修复清空搜索子项，未覆盖各混合报告全部现象。"
+    },
+    {
+      "id": "F18",
+      "issues": [
+        136
+      ],
+      "change": "长行内编辑保留水平视口，重复点击不漂移。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0，caret182→182。",
+      "limits": "未验证真实IME或前台物理输入。"
+    },
+    {
+      "id": "F19",
+      "issues": [
+        169,
+        129
+      ],
+      "change": "后退/前进保留两轴滚动，异步发布及选择恢复保持视口。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-navigation.json",
+      "validation": "导航31/0，Details2168→2168、LargeIcons1632→1632。",
+      "limits": "真实私有目录worker；非安装版人工验收。"
+    },
+    {
+      "id": "F20",
+      "issues": [
+        236,
+        87
+      ],
+      "change": "网络侧栏固定项提供取消固定菜单。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0，取消和取消固定均验证。",
+      "limits": "虚构UNC且不持久化；不删除网络索引根。"
+    },
+    {
+      "id": "F23",
+      "issues": [
+        173
+      ],
+      "change": "最后一列外边缘支持调整，移动增量只应用一次。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0，三次移动共缩小30px。",
+      "limits": "隐藏窗口合成输入，未覆盖物理拖动/多DPI。"
+    },
+    {
+      "id": "F24",
+      "issues": [
+        334
+      ],
+      "change": "窄盘名采用单行字符省略号。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-ui.json",
+      "validation": "UI22/0；184/320px截图目视。",
+      "limits": "浅色100%DPI；过长末尾盘符仍可被省略。"
+    },
+    {
+      "id": "F25",
+      "issues": [
+        229
+      ],
+      "change": "通知/显式刷新使本地图标缓存失效，拒绝迟到回复。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-preview.json",
+      "validation": "生产worker定向7/0。",
+      "limits": "完整Shell/IPC首次加载1PASS/1FAIL；未到图标替换步骤，不算整链通过。"
+    },
+    {
+      "id": "F26",
+      "issues": [
+        263
+      ],
+      "change": "相对路径在调用方目录内转绝对路径后再IPC转发。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-main.json",
+      "validation": "命令行22/0，跨不同目录编码/解码。",
+      "limits": "Listary未引号空格参数拆分尚未确认。"
+    },
+    {
+      "id": "F27",
+      "issues": [
+        58
+      ],
+      "change": "目录总量参与大小排序，保持选择/视口，交互期间延期。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-preview.json",
+      "validation": "真实目录统计排序30/0；三策略×两方向及节流/取消。",
+      "limits": "仅普通物理目录，未扩展搜索/压缩包/回收站。"
+    }
+  ],
+  "tests": [
+    {
+      "name": "命令行",
+      "passed": 22,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-main/cli-test.log"
+    },
+    {
+      "name": "Shell启动",
+      "passed": 29,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-main/shell-final.log"
+    },
+    {
+      "name": "导航",
+      "passed": 31,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-navigation/final.log"
+    },
+    {
+      "name": "窗口位置",
+      "passed": 10,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-navigation/placement.log"
+    },
+    {
+      "name": "UI",
+      "passed": 22,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-ui/after.log"
+    },
+    {
+      "name": "缩略图alpha",
+      "passed": 4,
+      "failed": 0,
+      "log": "bench_data/issue-confirm-preview-fixes/run-alpha.log"
+    },
+    {
+      "name": "图标缓存",
+      "passed": 7,
+      "failed": 0,
+      "log": "bench_data/issue-confirm-preview-fixes/run-icons.log"
+    },
+    {
+      "name": "文件夹大小排序",
+      "passed": 30,
+      "failed": 0,
+      "log": "bench_data/issue-confirm-preview-fixes/run-sizes.log"
+    },
+    {
+      "name": "接管设置",
+      "passed": 71,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-main/settings-run.log"
+    }
+  ],
+  "untouched": "F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审计结论，未实施修复：涉及缺样本/设备、原现象未复现、产品约定未定或跨协议能力扩展。F10/F21等已确认能力限制仍存在，不能称全部已确认条目均已修复。",
+  "production_sha256": "66e3dbc9b48d1075784609707c174fb0e80c6ee44b7ff7b6d91f7fa62d203435"
+}

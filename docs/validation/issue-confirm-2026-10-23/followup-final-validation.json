@@ -1,0 +1,18 @@
+{
+  "evidence_json": "PASS",
+  "followup_assertions": 168,
+  "baseline_rows": 149,
+  "excluded": 19,
+  "checkboxes": 106,
+  "selected": [
+    302,
+    308,
+    314,
+    374
+  ],
+  "editor_sources_and_objects_unchanged": "PASS",
+  "local_report_links": 132,
+  "missing_links": 0,
+  "final_build_hashes": "PASS",
+  "line_suffix_handling": "Corrected validator to recognize documented path:line syntax; no report links removed"
+}

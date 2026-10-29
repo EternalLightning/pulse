@@ -1,5 +1,6 @@
 // clipboard.cpp — CF_HDROP + CFSTR_PREFERREDDROPEFFECT interop.
 #include "clipboard.h"
+#include "../common/shell_id.h"
 #include "../common/path_utils.h"
 #include <windows.h>
 #include <shellapi.h>
@@ -160,7 +161,7 @@ bool DropShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_e
     IDropTarget* drop = nullptr;
     IShellItem* folder = nullptr;
     const std::wstring shell_path = path::StripExtendedPathPrefix(dir);
-    if (SUCCEEDED(SHCreateItemFromParsingName(shell_path.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+    if (SUCCEEDED(shell_id::CreateItem(shell_path, IID_PPV_ARGS(&folder)))) {
         folder->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&drop));
         folder->Release();
     }

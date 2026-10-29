@@ -1,4 +1,5 @@
 #pragma once
+#include <windows.h>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -39,6 +40,7 @@ public:
     FolderSizeValue Get(const std::wstring& path) const;
     void Invalidate(const std::wstring& path);
     bool TakeChanged();
+    void SetChangeNotify(HWND hwnd, UINT message);
     void Stop();
 #ifdef PULSE_FOLDER_SIZES_TESTING
     void SetScanHookForTest(std::function<void(const std::wstring&)> hook);

@@ -1,0 +1,329 @@
+{
+  "generated_at": "2026-10-23",
+  "scope": "External/system/device issue verification; no product source/CMake changes; no Shell action invocation, registry edits, system takeover, service control, clipboard writes or user preference persistence.",
+  "summary": {
+    "total": 33,
+    "runtime_reproduced": 3,
+    "static_confirmed": 3,
+    "targeted_not_reproduced": 1,
+    "missing_conditions": 26
+  },
+  "validation": {
+    "fixture": "bench_data/issue-confirm-external/probe.cpp",
+    "run_log": "bench_data/issue-confirm-external/run.log",
+    "exit_code": 0,
+    "expected_observations": 10,
+    "unexpected_observations": 0,
+    "recompiled_sources": [
+      "src/app/app_model.cpp",
+      "src/app/app_runtime.cpp",
+      "src/ui/ui_pane_list.cpp",
+      "src/ui/ui_hit_test.cpp"
+    ],
+    "provenance": "bench_data/issue-confirm-external/module-provenance.json",
+    "link_inventory": "bench_data/issue-confirm-external/link-inventory.json",
+    "limitations": "运行复现限定隔离模型/生产渲染器命中测试，未做实体手机、物理拖拽、前台选择器或完整系统COM菜单交互。"
+  },
+  "issues": [
+    {
+      "issue": 373,
+      "status": "缺条件",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:71,162-170：openas 通过验证后的 owner 调用 ShellExecuteEx；未发现仅凭 owner 就能保证前台的证据。",
+        "已读取 sources/373-readable.json；原现象是应用选择器后台打开并闪任务栏。"
+      ],
+      "remaining": "需用户桌面上的应用选择器实测及前台窗口/进程记录；本次禁止执行真实 Shell 动作，未打开选择器。"
+    },
+    {
+      "issue": 370,
+      "status": "缺条件",
+      "evidence": [
+        "sources/370-readable.json 明确是 Windows Terminal 1.24.11911.0 的系统 Open in Terminal 扩展，而不是 Pulse 内置入口。",
+        "src/ops/ops_manager.cpp:1140 为内置 wt.exe 入口，不能替代原入口验收；环境只确认 wt.exe alias 存在。"
+      ],
+      "remaining": "需同版本系统终端扩展、真实菜单调用与前台焦点轨迹；本次未执行终端命令。"
+    },
+    {
+      "issue": 361,
+      "status": "缺条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:275-287 当前会由 .exe 扩展解析 ProgID 并枚举其 ContextMenuHandlers，不能照搬旧版完全漏扫 exefile 的归因。",
+        "私有夹具仅枚举 .exe 静态动词：runas/openas；它没有查询完整 COM 菜单。"
+      ],
+      "remaining": "需对同一未固定 exe 比较原生/Pulse COM 菜单及个人固定状态；静态动词无 Pin 不足以确认缺项。"
+    },
+    {
+      "issue": 338,
+      "status": "缺条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:275-287 已有 ProgID 路径；sources/338-readable.json 的旧版评论未作为当前根因。",
+        "src/shell_host/ctx_handlers.cpp:197-218,424-429 的 Send to 子菜单预算/层级仍有风险，但未查询本机完整菜单。"
+      ],
+      "remaining": "需 exe 是否已固定的状态、完整 COM 菜单及 Send to 子菜单；原评论中出现的是取消固定，不能混同固定项缺失。"
+    },
+    {
+      "issue": 327,
+      "status": "缺条件",
+      "evidence": [
+        "src/app/context_menu_controller.cpp:393-404 把 partial 结果写入 com_cache；启用设置不能证明 handler 生成条目。",
+        "原文只有设置与实际菜单截图，未列具体扩展版本。"
+      ],
+      "remaining": "需具体勾选扩展、目标文件类型和一次菜单 query 的返回/partial 日志；未把共性缓存风险认定为本条根因。"
+    },
+    {
+      "issue": 319,
+      "status": "缺条件",
+      "evidence": [
+        "sources/319-readable.json 要求 Win10 三块不同分辨率屏、笔记本屏居中设主屏并启用用 Pulse 打开文件夹。",
+        "bench_data/issue-confirm-environment/environment.json 只见单块 3440x1440 屏；本次没有改变系统接管。"
+      ],
+      "remaining": "缺三屏拓扑、原 Win10 环境和桌面实际命中/z-order 记录；不能用单屏隐藏窗口替代。"
+    },
+    {
+      "issue": 304,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：Details+Type 为2组；LargeIcons、MediumIcons、ExtraLargeIcons 保留 Type 选项而 group_count 均为0。",
+        "src/app/app_model.cpp:1666 仍明确以 ViewMode::Details 为分组生成条件；相关模块已从当前源码私有重编译。",
+        "本机静态 folder 动词可见 MiDropExtMenu，但未执行它。"
+      ],
+      "remaining": "仅确认图标分组部分；小米互传报无法启动需真实扩展调用，未确认。没有把模型复现称为完整图标界面视觉验收。"
+    },
+    {
+      "issue": 298,
+      "status": "缺条件",
+      "evidence": [
+        "sources/298-readable.json 混合上传文件对话框诉求与快捷图标缺固定到开始；本次只审计后者。",
+        "私有夹具 .lnk 静态枚举只有 openas；该结果不包含 COM 菜单。"
+      ],
+      "remaining": "需真实 .lnk 的目标/关联/固定状态和完整菜单；上传文件对话框接管不纳入本次 bug 结论。"
+    },
+    {
+      "issue": 292,
+      "status": "缺条件",
+      "evidence": [
+        "sources/292-readable.json 指定 Win10、Light Image Resizer 7.6.5.176，文件正常而文件夹缺项且多选项丢失。",
+        "src/shell_host/ctx_handlers.cpp:197-218 会压平一层并跳过更深子菜单，这只是相关风险。"
+      ],
+      "remaining": "未建立该扩展版本安装条件；需同文件/文件夹菜单对照及层级返回，不能仅由通用裁剪风险断定同因。"
+    },
+    {
+      "issue": 280,
+      "status": "定向未复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：默认隔离 folder 菜单含 enabled CmdPinQuickAccess。",
+        "src/app/quick_access.cpp:26-47 生成该条目；src/app/app_commands.cpp:805,1164 为文件项/背景菜单接入点。"
+      ],
+      "remaining": "仅验证默认内存设置下的菜单构建，没有打开真实菜单、执行固定或写入偏好；原报告个人 item_enabled 和选择对象仍未复测。"
+    },
+    {
+      "issue": 278,
+      "status": "缺条件",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:162-170 有 openas/owner 调用；与 #373 同类前台现象。",
+        "sources/278-readable.json 主要为截图，缺应用关联与交互时序。"
+      ],
+      "remaining": "需原系统应用选择器、实际 foreground owner 和任务栏状态；本次未执行真实 Shell 打开方式动作。"
+    },
+    {
+      "issue": 274,
+      "status": "缺条件",
+      "evidence": [
+        "sources/274-readable.json 为 Git Commit 偶发长延迟，环境 Windows 11 26300.9711、125% 缩放。",
+        "src/app/context_menu_controller.cpp:289-299 调用 operations_.invoke；并非仅菜单枚举慢这一种原因。"
+      ],
+      "remaining": "需相同 Git Shell 扩展版本、仓库状态及 query/invoke/进程就绪分段计时；本次不调用 Git Commit。"
+    },
+    {
+      "issue": 270,
+      "status": "缺条件",
+      "evidence": [
+        "sources/270-readable.json 为启用接管后已有 Pulse 窗口时 Win+E/任务栏 Explorer 仍弹忙碌提示。",
+        "src/app/explorer_window_takeover.cpp:140-154 和 explorer_takeover_policy.h 有支持过滤与稳定期，不能据此证明真实启动路径正常。"
+      ],
+      "remaining": "需已授权的系统接管、Win+E 与 Explorer 启动进程/窗口时间线；本次没有改变接管或发送系统打开动作。"
+    },
+    {
+      "issue": 265,
+      "status": "缺条件",
+      "evidence": [
+        "sources/265-readable.json 指定上次标签+关闭最后标签时关闭窗口，再 Ctrl+W/Win+E 会恢复多窗口。",
+        "src/app/session.cpp:421-457 支持多窗口序列化；src/app/app_main.cpp:1858-1860 另有退出偏好保存路径。"
+      ],
+      "remaining": "需受控的多窗口会话文件、启动偏好及完整关闭/重新打开步骤；本次不读写用户会话或改变启动偏好。"
+    },
+    {
+      "issue": 246,
+      "status": "缺条件",
+      "evidence": [
+        "src/app/context_menu_prefs.cpp:139-151 保存 seen 项，352-390 合并旧键；旧版评论声称迁移到实时系统列表不自动构成本地运行证据。",
+        "本次没有 Avira 卸载前后目录/注册残留或 Notepad++ 版本对照。"
+      ],
+      "remaining": "需卸载前后实际扩展注册/设置目录快照及 Notepad++ 安装类型；未将保留 seen 机制直接认定为当前 UI 一定残留。"
+    },
+    {
+      "issue": 245,
+      "status": "静态确认",
+      "evidence": [
+        "src/fs/fs_enum.cpp:468-488 的 This PC 只按 GetLogicalDrives 生成盘符项；525-556 目录路径只走 NT/Win32 枚举。",
+        "src/app/app_model.cpp:1322 设备列表仍为逻辑盘；对 src/app、src/fs 检索未找到 PortableDevice/WPD/MTP/EnumObjects 枚举后端。",
+        "src/app/explorer_window_takeover.cpp:140-154 拒绝非文件系统 namespace；过滤接管并未实现手机浏览。"
+      ],
+      "remaining": "确认当前缺标准 MTP namespace 枚举/浏览能力；未连接 Android 手机复现空目录，不能扩大为所有 USB 盘模式都不支持。上游将发布支持的评论不是本地实现证据。"
+    },
+    {
+      "issue": 241,
+      "status": "缺条件",
+      "evidence": [
+        "sources/241-readable.json 未提供 Listary 版本/配置；评论对适配责任有不同判断。",
+        "没有通过改注册表、伪装窗口类或启动外部软件来猜测兼容。"
+      ],
+      "remaining": "需 Listary 的实际版本、跳转入口/适配配置和当前窗口识别记录；现有材料不能判断 Pulse 或 Listary 谁负责。"
+    },
+    {
+      "issue": 237,
+      "status": "缺条件",
+      "evidence": [
+        "sources/237-readable.json 只说明 NAS 映射盘复制进去后无法删除，缺设备、协议和返回码。",
+        "环境虽有 Z: Network/NTFS，但不能据此认定与报告相同 NAS。src/ops/delete_operation.cpp:575 有回收失败后的永久删除授权流程。"
+      ],
+      "remaining": "需相同 NAS 设备/映射协议/权限及隔离测试文件的删除返回；本次未删除网络映射盘数据。"
+    },
+    {
+      "issue": 230,
+      "status": "缺条件",
+      "evidence": [
+        "sources/230-readable.json 的标题/评论明确 Windows 预览版 26340.9616 升级后 Win+E 回到 Explorer。",
+        "当前环境 inventory 为26300.9457，与原 OS build 不同。src/app/default_file_manager.cpp:73-76 有独立 Directory/WinE 项。"
+      ],
+      "remaining": "需26340.9616及实际接管注册/Win+E链路；本次未更改注册表或系统接管，不能确认是否为 OS 回归。"
+    },
+    {
+      "issue": 228,
+      "status": "缺条件",
+      "evidence": [
+        "sources/228-readable.json 提供 Explorer→VSLauncher→devenv 和禁用 AnyCode 后转 Git GUI 的原环境轨迹，作者自己仍称根因未定。",
+        "src/app/default_file_manager.cpp:73 的 Directory 组及112-221备份/冲突保护路径需要结合原注册状态判断。"
+      ],
+      "remaining": "需原 HKCU/HKLM Directory 默认动作、隐藏标记、关联合并和 Procmon 重放；本次未临时禁用 AnyCode、修改注册表或启动桌面默认动作。"
+    },
+    {
+      "issue": 225,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：普通文件夹选择能得到规范化文件路径；切换同一 snapshot 到 ArchiveViewPath 后 SelectedCount=1 但 EntryFullPath/SelectedFullPaths 都为空。",
+        "src/app/app_runtime.cpp:2242,2254-2263 清空压缩包来源；src/app/app_input.cpp:472-473 在 OLE 之前对空路径返回。"
+      ],
+      "remaining": "确认内置压缩包视图直接拖出的阻断；没有真实 DoDragDrop/解压写盘，也没有验证第三方压缩软件虚拟 IDataObject 拖入。原文另外两项建议不纳入故障结论。"
+    },
+    {
+      "issue": 214,
+      "status": "缺条件",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:253-292 枚举传统 handlers；src/shell_host/main.cpp:1141 起逐 handler 路径存在特定包扩展覆盖风险。",
+        "sources/214-readable.json 的修复声明用 Bandizip 代测，评论也说未装 WinRAR/7-Zip；不能用它验收原软件。"
+      ],
+      "remaining": "需报告者 WinRAR/7-Zip 实际版本、传统/MSIX安装类型和文件夹菜单；本次未安装或调用压缩扩展。"
+    },
+    {
+      "issue": 209,
+      "status": "静态确认",
+      "evidence": [
+        "与 #245 同源：src/fs/fs_enum.cpp:468-488,525-556 只支持逻辑盘/NT/Win32 路径，src/app/app_model.cpp:1322 同为逻辑盘。",
+        "sources/209-readable.json 的手机支持评论属于上游将发布声明；当前没有该后端/设备分组实现。"
+      ],
+      "remaining": "确认标准 Android MTP 设备不能由当前枚举路径提供；未用实体手机复现，评论另提 Send to 仍需完整菜单检查。"
+    },
+    {
+      "issue": 205,
+      "status": "缺条件",
+      "evidence": [
+        "sources/205-readable.json 为 Bandizip 菜单缺失，原文只有截图、未注明版本；维护者测试机的修复声明不是当前安装证据。",
+        "传统 handler 枚举路径存在，包扩展则有原审计 F13 的条件性风险。"
+      ],
+      "remaining": "需 Bandizip 具体版本/安装类型、目标文件类型及完整原生/Pulse菜单对照；未执行扩展动作。"
+    },
+    {
+      "issue": 176,
+      "status": "缺条件",
+      "evidence": [
+        "sources/176-readable.json 为设置开关与实际菜单不同；评论称实时目录重构，不能代替本地菜单返回验证。",
+        "src/app/context_menu_controller.cpp:393-404 的 partial 缓存和 context_menu_prefs.cpp:139-151 的 seen 项均需实际配置才可归因。"
+      ],
+      "remaining": "需具体勾选项目、handler注册、返回菜单与设置数据的同一时点快照；本次只读源码，没有改用户配置。"
+    },
+    {
+      "issue": 175,
+      "status": "缺条件",
+      "evidence": [
+        "sources/175-readable.json 描述 Git 菜单经常自动关闭，未提供事件步骤/扩展版本。",
+        "src/ui/fluent_menu.cpp:365-373,1880 有失活关闭路径，不能仅凭存在关闭逻辑认定异常。"
+      ],
+      "remaining": "需菜单打开到关闭的激活/焦点/异步完成时间线和 Git 扩展状态；本次未打开真实 Git 菜单或模拟系统失焦。"
+    },
+    {
+      "issue": 173,
+      "status": "运行复现",
+      "evidence": [
+        "bench_data/issue-confirm-external/run.log：普通Details共4列，Size右外缘x=1062命中ColumnHeader(56)，内部Type/Size分界命中ColumnDivider(57)。",
+        "src/ui/ui_hit_test.cpp:896 只检查count-1个内部边；src/ui/ui_pane_list.cpp:567 拒绝末列外缘索引，私有调用返回原始宽度数组。"
+      ],
+      "remaining": "确认末列右外缘不能向左拖；未对原截图1411x753进行像素复现，也没有物理鼠标拖动或安装版验收。"
+    },
+    {
+      "issue": 165,
+      "status": "缺条件",
+      "evidence": [
+        "src/ops/ops_manager.cpp:1140-1148 的内置入口使用 wt.exe -d；环境能找到 WindowsApps/wt.exe alias。",
+        "sources/165-readable.json 评论里作者说命令行可运行，不能简单归因为未安装Terminal。"
+      ],
+      "remaining": "需原会话环境、内置菜单实际启动错误/HRESULT与alias可执行行为；本次未打开终端，不把alias存在当启动成功。"
+    },
+    {
+      "issue": 154,
+      "status": "缺条件",
+      "evidence": [
+        "sources/154-readable.json 的评论确认截图关联为 NanaZip；原报告要求zip解压菜单。",
+        "私有静态 .zip 枚举只有 openwith/openas，不包含 COM；传统/包扩展覆盖差异仍需具体安装。"
+      ],
+      "remaining": "需 NanaZip版本及zip完整菜单，不能用本机静态动词缺 Extract 或维护者Bandizip测试宣称复现/解决。"
+    },
+    {
+      "issue": 140,
+      "status": "缺条件",
+      "evidence": [
+        "src/app/shell_verbs.cpp:77 有print显示名称；私有静态 .png 枚举5项没有print。",
+        "该夹具没有构造原生或Pulse COM菜单，因此没有证实最终图片菜单缺打印。"
+      ],
+      "remaining": "需原图片关联、png/报告图片类型以及完整COM菜单对照；本次未调用打印。"
+    },
+    {
+      "issue": 115,
+      "status": "缺条件",
+      "evidence": [
+        "sources/115-readable.json 为 WPS 打开文件位置提示访问被拒，未提供文件路径/权限/具体WPS版本。",
+        "系统集成/默认动作与路径权限均可能参与，静态代码不能独立归因。"
+      ],
+      "remaining": "需同版本WPS、原路径与 Shell调用/权限记录；本次未启动WPS或改变系统关联。"
+    },
+    {
+      "issue": 94,
+      "status": "静态确认",
+      "evidence": [
+        "src/app/app_input.cpp:2140-2143 仅左键行点击设置dragPending；1604-1617要求VK_LBUTTON才启动StartDragOut。",
+        "同文件3321-3358的HandleRButtonDown只预取上下文菜单；ui/drag_drop.cpp:549虽接受MK_RBUTTON释放但没有右键启动调用点。"
+      ],
+      "remaining": "仅确认右键拖拽选择复制/移动/快捷方式的入口缺失；创建快捷方式菜单及FastCopy/Send to仍需具体完整菜单验证，未统一认定都缺失。"
+    },
+    {
+      "issue": 81,
+      "status": "缺条件",
+      "evidence": [
+        "sources/81-readable.json 后续明确是This PC点盘符失败，侧树仍可用；不能只按最初默认管理器还原标题判断。",
+        "src/app/default_file_manager.cpp:188-221,279 有旧版本迁移/备份还原流程，未检验原注册初值。"
+      ],
+      "remaining": "需开启/取消前后的用户关联快照、This PC盘符默认动作和真实Shell失败信息；本次不修改系统接管/注册表。"
+    }
+  ]
+}
+

@@ -17,6 +17,22 @@ bool Report(const char* name, bool passed) {
 int main(int argc, char** argv) {
     using namespace pulse::l10n;
     bool passed = true;
+    if (argc == 2 && std::string_view(argv[1]) == "--synced-features") {
+        for (const auto language : {L"zh-CN", L"en-US"}) {
+            Initialize(GetModuleHandleW(nullptr), language);
+            bool complete = true;
+            for (UINT id = IDS_DATE_LAST_WEEK_FORMAT; id <= IDS_NETWORK_DISCOVERY_OFF_DESC; ++id)
+                complete &= !Get(static_cast<StringId>(id)).empty();
+            passed &= Report("synced feature resources are present in display language", complete);
+            const bool chinese = std::wstring_view(language) == L"zh-CN";
+            passed &= Report("relative weekdays distinguish previous week in display language",
+                Format(StringId::DateLastWeekFormat, chinese ? L"周五" : L"Fri") ==
+                    (chinese ? L"上周五" : L"Last Fri"));
+            passed &= Report("shortcut drop badge retains its separator",
+                Get(StringId::DropLink).ends_with(L" "));
+        }
+        return passed ? 0 : 1;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--runtime-messages") {
         Initialize(nullptr, L"en-US");
         bool fallback_complete = true;
@@ -87,7 +103,7 @@ int main(int argc, char** argv) {
             StringId::PlaybackSeeking, StringId::PlaybackEnded, StringId::PlaybackFramePrefix, StringId::PlaybackPlaying,
             StringId::PlaybackPaused, StringId::LinkDestinationTitle, StringId::LinkContinue, StringId::LinkDirectoryMessage,
             StringId::LinkFileMessage, StringId::LinkHardMessage, StringId::LinkNameCountSuffix, StringId::LinkTaskScopeNote,
-            StringId::LockedItemGenericMessage, StringId::HelpOpenKeys, StringId::HelpEyebrow, StringId::ListSeparator,
+            StringId::LockedItemGenericMessage, StringId::ListSeparator,
         };
         for (const auto language : {L"zh-CN", L"en-US"}) {
             SetLanguage(language);
@@ -106,8 +122,7 @@ int main(int argc, char** argv) {
                     : L"Close this window, reopen the file, and enter the password again. If the password is correct, the archive may be damaged.") &&
                 Get(StringId::ExitStopTasks) == (chinese ? L"停止任务并退出" : L"Stop tasks and exit") &&
                 Get(StringId::PlaybackNextFrame) == (chinese ? L"下一帧" : L"Next frame") &&
-                Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue") &&
-                Get(StringId::HelpOpenKeys) == (chinese ? L"Enter / 双击" : L"Enter / Double-click"));
+                Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue"));
             passed &= Report("localized prefixes suffixes and separators preserve significant spaces",
                 Get(StringId::ArchiveCreateFolderPrefix) == (chinese ? L"创建文件夹：" : L"Create folder: ") &&
                 Get(StringId::PlaybackFramePrefix) == (chinese ? L"帧 " : L"Frame ") &&

@@ -34,51 +34,80 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
     FillRect(dc, brStrokeDivider_.get(), lay.nav.left+16*scale_, lay.nav_row[3].top-12*scale_,
         lay.nav.right-lay.nav.left-32*scale_, 1);
-    if (!compact_nav) painter_.DrawText(L"Pulse " + vm.settings_version,
+    if (!compact_nav && lay.nav_row[3].bottom+4*scale_<=lay.nav.bottom-40*scale_) painter_.DrawText(L"Pulse " + vm.settings_version,
         D2D1::RectF(lay.nav.left+20*scale_,lay.nav.bottom-40*scale_,lay.nav.right-12*scale_,lay.nav.bottom-16*scale_),
         compositor_->SmallFormat(),theme.text_secondary);
 
-    static constexpr pulse::l10n::StringId kNav[] = {
-        pulse::l10n::StringId::SettingsGeneral,
-        pulse::l10n::StringId::SettingsSearchIndex,
-        pulse::l10n::StringId::SettingsContextMenu,
-        pulse::l10n::StringId::SettingsAboutDiagnostics,
-        pulse::l10n::StringId::SettingsDuplicates,
-    };
     static constexpr const wchar_t* kNavIcon[] = {
-        kIconHome, kIconSearch, kIconSettings, kIconInfo, kIconCopy
+        L"\xE790", kIconSearch, kIconSettings, kIconInfo, kIconCopy, kIconSettings,
+        L"\xED25", L"\xE737", L"\xE7E8", L"\xE8DE"
     };
+    static constexpr l10n::StringId groups[] = {l10n::StringId::SettingsNavPersonal,
+        l10n::StringId::SettingsNavBrowse,l10n::StringId::SettingsNavSystem,
+        l10n::StringId::SettingsNavFeatures,l10n::StringId::SettingsNavTools};
+    for(int i=0;i<5;++i) if(lay.nav_group_label[i].bottom>lay.nav_group_label[i].top)
+        painter_.DrawText(l10n::Get(groups[i]),lay.nav_group_label[i],compositor_->SmallFormat(),theme.text_secondary);
+    const int sidebar_page = SettingsSidebarPage(vm.settings_page);
+    const bool animate = motion_enabled_ && !IsHighContrast();
+    D2D1_RECT_F selection_bounds{};
+    float selection_weight = 0;
     for (int i = 0; i < kSettingsNavCount; ++i) {
-        const bool active = vm.settings_page == i;
+        if (i == 5) continue;
+        auto& selection = settings_nav_tracks_[i];
+        selection.Tick(sidebar_page == i, settings_switch_now_, animate, 180);
+        surface_animating_ |= selection.Pending();
+        const auto& row = lay.nav_row[i];
+        selection_bounds.left += row.left * selection.value;
+        selection_bounds.top += row.top * selection.value;
+        selection_bounds.right += row.right * selection.value;
+        selection_bounds.bottom += row.bottom * selection.value;
+        selection_weight += selection.value;
+    }
+    if (selection_weight > 0) {
+        selection_bounds.left /= selection_weight;
+        selection_bounds.top /= selection_weight;
+        selection_bounds.right /= selection_weight;
+        selection_bounds.bottom /= selection_weight;
+        // One moving shape owns both the selected fill and its accent marker.
+        MakeBrush(dc, theme.fill_selected, brFillSelected_);
+        FillRoundedRect(dc, brFillSelected_.get(), selection_bounds.left, selection_bounds.top,
+            selection_bounds.right - selection_bounds.left,
+            selection_bounds.bottom - selection_bounds.top, 6 * scale_);
+        MakeBrush(dc, theme.accent, brAccent_);
+        FillRoundedRect(dc, brAccent_.get(), selection_bounds.left, selection_bounds.top + 8 * scale_,
+            3 * scale_, std::max(0.0f, selection_bounds.bottom - selection_bounds.top - 16 * scale_),
+            1.5f * scale_);
+    }
+    for (int i = 0; i < kSettingsNavCount; ++i) {
+        if(i==5) continue;
+        const bool active = sidebar_page == i;
         const bool hovered = IsHovered(vm, HitTestResult::SettingsNav, i);
         const auto& rc = lay.nav_row[i];
-        if (active || hovered) {
-            MakeBrush(dc, active ? theme.fill_selected : theme.fill_hover, brFillSelected_);
+        auto& selection = settings_nav_tracks_[i];
+        const float hot = HoverOpacity(L"settings-nav:" + std::to_wstring(i), hovered);
+        if (!active && hot > 0) {
+            auto fill = theme.fill_hover;
+            fill.a *= hot;
+            MakeBrush(dc, fill, brFillSelected_);
             FillRoundedRect(dc, brFillSelected_.get(), rc.left, rc.top,
                             rc.right - rc.left, rc.bottom - rc.top, 6.0f * scale_);
         }
-        if (active) {
-            MakeBrush(dc, theme.accent, brFillSelected_);
-            FillRoundedRect(dc, brFillSelected_.get(), rc.left, rc.top+10*scale_, 3*scale_, 20*scale_, 1.5f*scale_);
-        }
         DrawIconText(rc.left + (compact_nav ? 13.0f : 12.0f) * scale_, rc.top, 22.0f * scale_, rc.bottom - rc.top,
-                     kNavIcon[i], L"*", active ? theme.accent : theme.text_secondary, 0.85f);
+                     kNavIcon[i], L"*", BlendOver(WithAlpha(theme.accent, selection.value),
+                         theme.text_secondary), 0.85f);
         MakeBrush(dc, theme.text, brText_);
-        if (!compact_nav) DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), pulse::l10n::Get(kNav[i]),
+        if (!compact_nav) DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), pulse::l10n::Get(kSettingsNavTitles[i]),
                      rc.left + 42.0f * scale_, rc.top, rc.right - rc.left - 48.0f * scale_,
                      rc.bottom - rc.top);
     }
 
+    settings_content_surface_.Paint(dc, lay.content, std::to_wstring(vm.settings_page), true,
+        settings_switch_now_, animate, 6 * scale_, 170, [&] {
     dc->PushAxisAlignedClip(lay.content, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     const float pad = 20.0f * scale_;
     const float origin = lay.content_origin;
 
-    const auto page_title_id = vm.settings_page == 0
-        ? pulse::l10n::StringId::SettingsGeneral
-        : vm.settings_page == 1 ? pulse::l10n::StringId::SettingsSearchIndex
-        : vm.settings_page == 2 ? pulse::l10n::StringId::SettingsContextMenu
-        : vm.settings_page == 4 ? pulse::l10n::StringId::SettingsDuplicates
-                                : pulse::l10n::StringId::SettingsAboutDiagnostics;
+    const auto page_title_id = kSettingsNavTitles[sidebar_page];
     MakeBrush(dc, theme.text, brText_);
     const auto& title = l10n::Get(page_title_id);
     ComPtr<IDWriteTextFormat> title_format;
@@ -91,12 +120,12 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             lay.content.right-pad,origin+pad+40*scale_),title_format.get(),theme.text);
     }
     if (vm.settings_page == 0 || vm.settings_page == 1)
-        painter_.DrawText(l10n::Get(vm.settings_page == 0 ? l10n::StringId::SettingsGeneralIntro : l10n::StringId::SettingsSearchIntro),
+        painter_.DrawText(l10n::Get(vm.settings_page == 0 ? l10n::StringId::SettingsAppearanceIntro : l10n::StringId::SettingsSearchIntro),
             D2D1::RectF(lay.content.left+pad,origin+60*scale_,lay.content.right-pad,origin+84*scale_),
             compositor_->SmallFormat(),theme.text_secondary);
 
 
-    if (vm.settings_page == 0) {
+    if (IsSettingsCategory(vm.settings_page)) {
         DrawSettingsCore(vm, rect, theme);
     } else if (vm.settings_page == 1) {
         auto draw_card = [&](const D2D1_RECT_F& card) {
@@ -344,6 +373,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         }
     } else if (vm.settings_page == 2) {
         DrawSettingsContext(vm,rect,theme);
+    } else if (vm.settings_page == 5) {
+        DrawSettingsSysCtx(vm,rect,theme);
     } else if (vm.settings_page == 3) {
         auto draw_card = [&](const D2D1_RECT_F& card) {
             MakeBrush(dc, theme.fill_input, brFillInput_);
@@ -417,6 +448,26 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         painter_.DrawButton({lay.about_action[2], l10n::Get(l10n::StringId::AboutUpstream), {},
                              fluent::ButtonKind::Standard, upstream_state});
 
+        draw_card(lay.transfer_card);
+        MakeBrush(dc, theme.text, brText_);
+        DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), l10n::Get(l10n::StringId::SettingsTransfer),
+            lay.transfer_card.left + 16.0f * scale_, lay.transfer_card.top + 12.0f * scale_,
+            lay.transfer_card.right - lay.transfer_card.left - 32.0f * scale_, 22.0f * scale_);
+        painter_.DrawWrappedCaption(vm.settings_transfer_status,
+            D2D1::Point2F(lay.transfer_description.left, lay.transfer_description.top),
+            lay.transfer_description.right - lay.transfer_description.left, theme.text_secondary);
+        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
+            l10n::StringId::ImportSettingsTitle, vm.settings_transfer_pending ?
+            l10n::StringId::RestartNow : l10n::StringId::RestoreSettingsTitle};
+        for (int i = 0; i < 3; ++i) {
+            fluent::ControlState state{};
+            state.enabled = !vm.settings_transfer_busy && (i < 2 ||
+                vm.settings_transfer_pending || vm.settings_transfer_has_backup);
+            state.hovered = state.enabled && IsHovered(vm, HitTestResult::SettingsDiagnosticsAction, i + 3);
+            painter_.DrawButton({lay.transfer_action[i], l10n::Get(transfer_labels[i]), {},
+                fluent::ButtonKind::Standard, state});
+        }
+
         draw_card(lay.diagnostics_card);
         MakeBrush(dc, theme.text, brText_);
         DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
@@ -455,11 +506,11 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             fluent::ControlState st{};
             st.checked = vm.settings_show_performance;
             st.hovered = IsHovered(vm, HitTestResult::SettingsToggle, 4);
-            painter_.DrawSwitch(D2D1::RectF(row.right - 60.0f * scale_,
+            DrawSettingsSwitch(L"setting:4",D2D1::RectF(row.right - 60.0f * scale_,
                                             (row.top + row.bottom - 32.0f * scale_) * 0.5f,
                                             row.right - 16.0f * scale_,
                                             (row.top + row.bottom + 32.0f * scale_) * 0.5f),
-                                L"", st);
+                                st);
         }
         static constexpr pulse::l10n::StringId kDiagnosticsActions[] = {
             pulse::l10n::StringId::OpenDiagnostics,
@@ -710,6 +761,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         bar.expand_progress = 1.0f;
         painter_.DrawScrollbar(bar);
     }
+    });
+    surface_animating_ |= settings_content_surface_.pending;
 }
 
 D2D1_RECT_F MainRenderer::SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const {
@@ -722,6 +775,10 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     using I=l10n::StringId;
     D2D1_RECT_F target{};
     switch(static_cast<I>(setting_id)) {
+    case I::SettingsTextRender: target=l.text_render_card;break;
+    case I::SettingsExplorerTakeover: target=l.explorer_takeover_row;break;
+    case I::SettingsLockWindowSize: target=l.window_size_lock_row;break;
+    case I::SettingsChangeDays: target=l.change_days_row;break;
     case I::SettingsTheme: target=l.theme_row;break;
     case I::SettingsThemeColor: target=l.accent_card;break;
     case I::SettingsWindowEffect: target=l.effect_card;break;

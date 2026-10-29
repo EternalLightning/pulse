@@ -223,6 +223,7 @@ void ClientLoop(HANDLE pipe) {
         if (header.type >= agent::REQ_CHANGE_LEASE && header.type <= agent::REQ_CHANGE_DETAILS) {
             if (!HandleChanges(pipe, header, payload)) break;
         } else if (header.type == agent::REQ_ROOTS) {
+            if (!g.fixture) g.index.RefreshConfiguration();
             WriteFrame(pipe, agent::RSP_ROOTS, header.request_id, RootsPayload());
         } else if (header.type == agent::REQ_STATUS) {
             PayloadWriter writer;

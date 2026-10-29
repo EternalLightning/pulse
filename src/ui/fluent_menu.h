@@ -16,6 +16,7 @@
 #pragma once
 #include "menu_backdrop.h"
 #include "fluent_components.h"
+#include "smooth_scroll.h"
 
 #include <dwrite_3.h>
 #include <chrono>
@@ -70,7 +71,8 @@ class FluentMenuModel {
 public:
     void SetItems(std::vector<FluentMenuItem> items);
     // Measures text; dwrite may be nullptr (falls back to an estimate).
-    void Layout(IDWriteFactory2* dwrite, float scale, float min_width_px = 0);
+    void Layout(IDWriteFactory2* dwrite, float scale, float min_width_px = 0,
+                Compositor* compositor = nullptr);
 
     int WidthPx() const { return width_; }
     int HeightPx() const { return height_; }
@@ -124,6 +126,7 @@ public:
     using CommandFn = std::function<bool(int command)>;
     int TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
                    FilterFn filter = nullptr, bool top_center = false, CommandFn command = nullptr);
+    int TrackToolbarPopup(POINT screen_pt, std::vector<FluentMenuItem> items);
     int TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> items);
 
     // Renders the menu to a PNG without showing it (GUI verification helper).
@@ -132,6 +135,7 @@ public:
 
     bool IsOpen() const { return open_; }
     void Dismiss(); // immediate (no animation); safe anytime
+    void RequestDismiss(); // normal user dismissal; retains the surface through its exit animation
     void DismissForDeactivation(HWND activated);
     // Safe from the owner window while TrackPopup's modal loop is running
     // (e.g. async index hits arrived). No-op if the menu is closed.
@@ -218,6 +222,8 @@ private:
     bool AnimationsEnabled() const;
     void BeginDismiss();
     bool TickAnimation();
+    bool TickScroll(uint64_t now);
+    void StopScroll();
     void OnMouse(POINT client_pt, bool button_up);
     void UpdateHover(int row, int swatch = -1);
     float BodyHeightPx() const;
@@ -278,11 +284,13 @@ private:
     int hover_swatch_ = -1;
     int max_visible_rows_ = 0;
     float scroll_y_ = 0.0f;
+    SmoothScroll scroll_motion_;
     float body_limit_px_ = 0.0f;
     HWND tooltip_ = nullptr;
     std::wstring tooltip_text_;
     bool open_ = false;
     bool animating_out_ = false;
+    bool retract_on_dismiss_ = false;
     int result_ = 0;
     int base_x_ = 0;               // window position before slide animation
     int base_y_ = 0;
@@ -305,6 +313,7 @@ private:
         int hover = -1;
         int hover_swatch = -1;
         float scroll_y = 0.0f;
+        SmoothScroll scroll_motion;
         float body_height = 0.0f;
         int x = 0;
         int y = 0;

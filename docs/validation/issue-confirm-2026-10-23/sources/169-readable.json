@@ -1,0 +1,15 @@
+{
+  "number": 169,
+  "title": "文件夹位置问题",
+  "body": "如图，打开文件夹，再返回，文件夹位置不是原来的位置\n\n<img width=\"1573\" height=\"929\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/14ce98ce-9c14-4999-8bc9-dc56d7a86370\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/169",
+  "captured_at": "2026-10-23T03:10:07.201366+00:00",
+  "updated_at": "2026-10-10T01:05:57Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "Name": "ops-followup",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_audit_ops_followup_test.exe",
+    "Arguments": [],
+    "WorkingDirectory": "E:\\Projects\\pulse",
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\ops-followup.txt"
+  },
+  {
+    "Name": "permanent-fileop",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_permanent_fileop_console_test.exe",
+    "Arguments": [],
+    "WorkingDirectory": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+    "ExitCode": 0,
+    "OutputLines": 33,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\permanent-fileop.txt"
+  }
+]

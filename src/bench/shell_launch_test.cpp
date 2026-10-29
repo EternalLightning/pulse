@@ -536,7 +536,8 @@ int wmain(int argc, wchar_t** argv) {
     const bool protocol_only = argc == 3 && std::wstring_view(argv[2]) == L"--protocol";
     const bool interaction_only = argc == 3 && std::wstring_view(argv[2]) == L"--interactions";
     const bool startup_only = argc == 3 && std::wstring_view(argv[2]) == L"--startup-only";
-    if (argc != 2 && !protocol_only && !interaction_only && !startup_only) {
+    const bool commands_only = argc == 3 && std::wstring_view(argv[2]) == L"--commands-only";
+    if (argc != 2 && !protocol_only && !interaction_only && !startup_only && !commands_only) {
         std::printf("Requires isolated shell-launch worker fixture executable\n");
         return 2;
     }
@@ -570,6 +571,15 @@ int wmain(int argc, wchar_t** argv) {
         CheckInteractionIsolation(fixture, temp.path);
         Check(fixture.Shutdown(), "interaction fixture broker exits and reclaims workers");
         Check(temp.Clean(), "interaction fixture directory cleanup");
+        return failures ? 1 : 0;
+    }
+    if (commands_only) {
+        std::error_code error;
+        const auto executable = std::filesystem::absolute(std::filesystem::path(argv[1]), error);
+        if (error) Check(false, "resolve real command fixture executable path");
+        else CheckRealCommand(fixture, executable, temp.path);
+        Check(fixture.Shutdown(), "command fixture broker exits and reclaims workers");
+        Check(temp.Clean(), "command fixture directory cleanup");
         return failures ? 1 : 0;
     }
     for (uint32_t index = 0; index < malformed.size(); ++index) {

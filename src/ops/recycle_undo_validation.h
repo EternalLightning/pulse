@@ -1,12 +1,19 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include <cstring>
 
 namespace pulse::ops {
 class DestinationGuard;
 struct RecycleUndoIdentity {
     FILE_ID_INFO payload{};
     FILE_ID_INFO index{};
+    bool operator==(const RecycleUndoIdentity& other) const {
+        return payload.VolumeSerialNumber == other.payload.VolumeSerialNumber &&
+            index.VolumeSerialNumber == other.index.VolumeSerialNumber &&
+            std::memcmp(&payload.FileId, &other.payload.FileId, sizeof(payload.FileId)) == 0 &&
+            std::memcmp(&index.FileId, &other.index.FileId, sizeof(index.FileId)) == 0;
+    }
 };
 // Read-only worker helpers. Pair validation is also usable with isolated fixture
 // $R/$I files; production separately requires current-user recycle ownership.

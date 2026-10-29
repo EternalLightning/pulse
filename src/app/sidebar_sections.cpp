@@ -82,6 +82,7 @@ void ShowSidebarSectionsMenu(AppState& s, POINT screen_pt) {
     items.reserve(kSectionCount + 2);
     // Listed in display order, so the menu matches the sidebar after a reorder.
     for (int i : app::NormalizeSidebarOrder(s.sidebarOrder)) {
+        if (!app::IsSidebarSectionAvailable(static_cast<app::SidebarSectionId>(i))) continue;
         ui::FluentMenuItem item;
         item.command = kToggleBase + i;
         item.text = SectionTitle(i);

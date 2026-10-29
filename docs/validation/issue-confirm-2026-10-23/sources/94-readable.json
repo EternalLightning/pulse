@@ -1,0 +1,42 @@
+{
+  "number": 94,
+  "title": "右键菜单没有创建快捷方式？还有原文件管理器的右键拖拽可选处理方式功能也没有。",
+  "body": "<img width=\"434\" height=\"389\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f9d74135-7d5e-438e-ad55-07bc14c2e8d6\" />\n图为选中后右键拖拽的选项栏",
+  "url": "https://github.com/jimmgreen/pulse/issues/94",
+  "captured_at": "2026-10-23T03:10:07.214660+00:00",
+  "updated_at": "2026-10-10T00:34:50Z",
+  "comments": [
+    {
+      "body": "相同问题.\n我现在想为 EXE 文件创建一个快捷方式, 但是没有找到...\n在\"本地右键菜单\" 设置里, 把所有的选项都勾上了, 还是没有创建快捷方式的入口. \n\n另外, 其他程序引入的右键菜单, 比如 FastCopy 程序添加的\"Delete / Copy\" 等菜单 , 也是没有的.\n\n希望能尽快实现, 挺不方便的",
+      "bodyHTML": "<p dir=\"auto\">相同问题.<br>\n我现在想为 EXE 文件创建一个快捷方式, 但是没有找到...<br>\n在\"本地右键菜单\" 设置里, 把所有的选项都勾上了, 还是没有创建快捷方式的入口.</p>\n<p dir=\"auto\">另外, 其他程序引入的右键菜单, 比如 FastCopy 程序添加的\"Delete / Copy\" 等菜单 , 也是没有的.</p>\n<p dir=\"auto\">希望能尽快实现, 挺不方便的</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE5ODk3NjAy",
+        "login": "grade1984",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/19897602?v=4",
+        "profileUrl": "https://github.com/grade1984",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/94#issuecomment-6073731374"
+    },
+    {
+      "body": "右键菜单没有创建快捷方式+1",
+      "bodyHTML": "<p dir=\"auto\">右键菜单没有创建快捷方式+1</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE2NDAyMjQ5",
+        "login": "sonichy",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/16402249?u=dc53ac2b574f8adb136f9227f259d733e64b0679&v=4",
+        "profileUrl": "https://github.com/sonichy",
+        "name": "海天鹰"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/94#issuecomment-6091674098"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoR65wwgAqjYwNzM3MzEzNzQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoSM75BAAqjYwOTE2NzQwOTg="
+  }
+}

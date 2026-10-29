@@ -6,6 +6,7 @@
 
 #include "ui_compositor.h"
 #include "fluent_components.h"
+#include "smooth_scroll.h"
 #include "../app/text_diff.h"
 #include "../app/window_result_mailbox.h"
 
@@ -76,6 +77,11 @@ private:
     void ScrollTo(float y);
     void ScrollBy(float dy) { ScrollTo(scroll_y_ + dy); }
     void ScrollX(float dx);
+    void WheelScroll(float dx, float dy);
+    float ScrollMaximumY() const;
+    float ScrollMaximumX() const;
+    void ResetScrollAnimation();
+    void UpdateScrollTimer();
     void GoHunk(int index);
     void StepHunk(int delta);
     void CopySelection();
@@ -137,6 +143,7 @@ private:
     // View state
     float scroll_y_ = 0.0f;
     float scroll_x_ = 0.0f;
+    SmoothScroll smooth_scroll_y_, smooth_scroll_x_;
     int current_hunk_ = -1;
     int sel_anchor_ = -1;
     int sel_end_ = -1;

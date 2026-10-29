@@ -34,7 +34,20 @@ void RunRecentChangesMenuChecks(Check check) {
     (*entries)[0].full_path = L"C:\\real";
     check(app::RecentChangesMenuPath(tab, false) == L"C:\\real", "real folder search result retains command");
     auto menu = app::BuildItemMenu(false, {}, true);
-    app::AppendRecentChangesCommand(menu, L"C:\\real");
+    app::AppendRecentChangesCommand(menu, L"C:\\real", false);
+    check(std::none_of(menu.begin(), menu.end(), [](const auto& item) {
+        return item.command == app::CmdViewRecentChanges;
+    }), "disabled tracking hides item menu entry");
+    auto background = app::BuildBackgroundMenu(false, false, {});
+    app::AppendRecentChangesCommand(background, L"C:\\real", false);
+    check(std::none_of(background.begin(), background.end(), [](const auto& item) {
+        return item.command == app::CmdViewRecentChanges;
+    }), "disabled tracking hides background menu entry");
+    app::AppendRecentChangesCommand(background, L"C:\\real", true);
+    check(std::count_if(background.begin(), background.end(), [](const auto& item) {
+        return item.command == app::CmdViewRecentChanges;
+    }) == 1, "enabled tracking restores background menu entry");
+    app::AppendRecentChangesCommand(menu, L"C:\\real", true);
     app::ContextMenuPrefs prefs;
     app::ShellMenuEntry native;
     native.command = app::CmdShellStaticBase;

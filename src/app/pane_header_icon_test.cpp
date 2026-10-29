@@ -1,4 +1,3 @@
-#include "../ui/shortcut_help.h"
 #if defined(PULSE_WITH_SELFTEST) || defined(PULSE_PANE_HEADER_STANDALONE)
 #include "../ui/ui_renderer_internal.h"
 #include "../ui/pane_header_icons.h"
@@ -93,20 +92,6 @@ struct PaneHeaderIconTest {
                 check(drawn && compositor.SaveSnapshot(file.c_str()),"toolbar render and capture");
             }
         }
-        for (bool chinese:{false,true}) for (bool dark:{false,true}) {
-            l10n::SetLanguage(chinese ? L"zh-CN" : L"en-US");
-            const auto hints=app::BuildShortcutHints();
-            check(hints.children.empty(), "shortcut help opens a dialog instead of a nested menu");
-            compositor.Resize(884,945);
-            auto* dc=compositor.Dc();
-            dc->BeginDraw();dc->Clear(HexColor(0xB5BBC7));
-            DrawShortcutHelp(compositor,dark,HexColor(0x6269CD),1,0);
-            const bool drawn=SUCCEEDED(dc->EndDraw());
-            const auto path=std::filesystem::path(L"bench_data/pane-header-icons") /
-                ((chinese ? std::wstring(L"shortcuts-zh") : std::wstring(L"shortcuts-en"))+(dark ? L"-dark.png" : L"-light.png"));
-            check(drawn && compositor.SaveSnapshot(path.c_str()),"shortcut hints render in both languages and themes");
-        }
-        l10n::SetLanguage(L"zh-CN");
         return ok;
     }
     static bool Run() {

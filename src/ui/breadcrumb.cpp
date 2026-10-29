@@ -1,10 +1,14 @@
 #include "ui_renderer.h"
+#include "device_crumbs.h"
 #include "../common/localization.h"
 #include "../common/known_folder_labels.h"
 #include "../model/places.h"
 
 namespace pulse::ui {
-std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
+namespace { DeviceCrumbResolver device_resolver = nullptr; }
+void SetDeviceCrumbResolver(DeviceCrumbResolver resolver) { device_resolver = resolver; }
+std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
+    std::wstring_view virtual_title) {
     std::vector<BreadcrumbSegment> out;
     std::wstring p = path;
     if (p.starts_with(L"\\\\?\\UNC\\")) p = L"\\\\" + p.substr(8);
@@ -18,6 +22,30 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
         out.push_back(seg);
         return out;
     }
+    if (p.starts_with(L"pulse:device:")) {
+        const auto rest = p.substr(13);
+        const auto slash = rest.find(L'\\');
+        const auto key = rest.substr(0, slash);
+        const DeviceCrumbInfo info = device_resolver ? device_resolver(key) : DeviceCrumbInfo{};
+        out.push_back({pulse::l10n::Get(pulse::l10n::StringId::ThisPc), L""});
+        std::wstring prefix = L"pulse:device:" + key;
+        const auto name = info.name.empty() ? pulse::l10n::Get(pulse::l10n::StringId::DevicePhone) : info.name;
+        out.push_back({name, prefix});
+        if (slash == std::wstring::npos) return out;
+        size_t start = slash + 1;
+        bool storage = true;
+        while (start < rest.size()) {
+            const auto next = rest.find(L'\\', start);
+            const auto part = rest.substr(start, next == std::wstring::npos ? next : next - start);
+            prefix += L"\\" + part;
+            if (!(storage && info.skips_storage)) out.push_back({part, prefix});
+            else out.back().path = prefix;
+            storage = false;
+            if (next == std::wstring::npos) break;
+            start = next + 1;
+        }
+        return out;
+    }
     std::wstring pulse_kind, pulse_rest;
     if (model::ParsePulsePath(p, &pulse_kind, &pulse_rest)) {
         if (pulse_kind == L"recycle") {
@@ -26,7 +54,8 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
             pc.path = L"";
             out.push_back(pc);
             BreadcrumbSegment bin;
-            bin.text = pulse::l10n::Get(pulse::l10n::StringId::RecycleBin);
+            bin.text = virtual_title.empty() ? pulse::l10n::Get(pulse::l10n::StringId::RecycleBin)
+                : std::wstring(virtual_title);
             bin.path = L"pulse:recycle";
             out.push_back(bin);
             return out;
@@ -55,6 +84,7 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path) {
                 ? pulse::l10n::Get(pulse::l10n::StringId::Tag) : pulse_rest;
         else
             seg.text = pulse_kind;
+        if (!virtual_title.empty()) seg.text = virtual_title;
         out.push_back(seg);
         return out;
     }

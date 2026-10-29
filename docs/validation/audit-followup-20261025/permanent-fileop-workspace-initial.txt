@@ -1,0 +1,3 @@
+[FAIL] fixture exception: create_directories: Access is denied.: "E:\Projects\pulse\bench_data\permanent-fileop-console-3776-14929078"
+[PASS] remove the isolated permanent-delete fixture
+1 PASS / 1 FAIL

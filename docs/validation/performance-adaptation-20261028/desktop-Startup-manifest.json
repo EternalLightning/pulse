@@ -1,0 +1,42 @@
+﻿[
+    {
+        "name":  "Pulse.exe",
+        "sha256":  "3900F3152DCF13255BFCD75ED541A111EF207F9723AF969E6D1DE4769D08B422",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.exe"
+    },
+    {
+        "name":  "Pulse.Shell.exe",
+        "sha256":  "DD31FC96C0730561DECF8D6FCF497D567CF73858B98996F88676EEDB61353003",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.Shell.exe"
+    },
+    {
+        "name":  "Pulse.Preview.exe",
+        "sha256":  "059F4089E1DAD764E77F1EA95EAE32A4FC53883FD45FF80C305694FAD3C47EDD",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.Preview.exe"
+    },
+    {
+        "name":  "Pulse.Index.exe",
+        "sha256":  "0F07DA1DDED75AFFC414DFF9D68386B781E64311415E82B08291A54247AD6F51",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.Index.exe"
+    },
+    {
+        "name":  "Pulse.Integration.exe",
+        "sha256":  "F7345D513B563C1C3071633C9A18325E4E0EF767DF9A97F25632EE5C40CB45EB",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.Integration.exe"
+    },
+    {
+        "name":  "Pulse.Document.exe",
+        "sha256":  "10181E5D95C12957ADCCD1E6D5E67D153358931C01E13E518E4F0F2C7C5D7E98",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\Pulse.Document.exe"
+    },
+    {
+        "name":  "pdfium.dll",
+        "sha256":  "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\pdfium.dll"
+    },
+    {
+        "name":  "lumatext.dll",
+        "sha256":  "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+        "path":  "D:\\AppData\\Temp\\pulse-preview-validation-19b7c424ecd346f0b20ef6afacab49b8\\lumatext.dll"
+    }
+]

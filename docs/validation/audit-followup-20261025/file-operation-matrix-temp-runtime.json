@@ -1,0 +1,23 @@
+{
+  "runtime_directory": "D:\\AppData\\Temp\\PulseFileOperationValidation-386a376e1a394d76bd39b0dd688c0f28",
+  "unchanged_token": true,
+  "artifacts": [
+    {
+      "name": "pulse_ops_test.exe",
+      "source": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_ops_test.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFileOperationValidation-386a376e1a394d76bd39b0dd688c0f28\\pulse_ops_test.exe",
+      "sha256": "2E2A584D6418E11F088A23843DAE765CFF10E85F61E267D8A7F02BA403ED403B"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "source": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\Pulse.Shell.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFileOperationValidation-386a376e1a394d76bd39b0dd688c0f28\\Pulse.Shell.exe",
+      "sha256": "970CCA0A1F0CC320F2F80A874D99D18F250AD0E8331B7CE73578C44DF2B0DC6D"
+    }
+  ],
+  "local_parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+  "network_parent": "Z:\\",
+  "exit_code": 1,
+  "assertion_lines": 78,
+  "timestamp": "2026-10-25T16:18:44.9938166+08:00"
+}

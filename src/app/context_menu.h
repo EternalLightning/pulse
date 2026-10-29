@@ -62,6 +62,7 @@ enum MenuCmd : int {
     CmdSettings,            // palette / title-bar gear → settings tab
     CmdSettingsContextMenu, // 管理右键项… → 右键菜单 page
     CmdTags,
+    CmdUngroupFolder = 66,
     CmdTagBase = 70,        // +0..6  Ctrl+Shift+1..7
     CmdViewBase = 80,       // + ViewModeIndex (8 stable view choices)
     CmdTabColorBase = 90,   // +0..7  tab-group color swatches
@@ -96,7 +97,7 @@ enum MenuCmd : int {
     CmdUnpinQuickAccess,
     CmdViewRecentChanges = 180,
     CmdColumnLayout = 181,
-    CmdShortcutHelp = 182,
+    CmdNewFolderWithSelection = 182,
     CmdNewFile = 183,
     CmdExtract = 184,
     CmdExtractAll = 185,
@@ -109,7 +110,12 @@ enum MenuCmd : int {
     CmdGroupDate,
     CmdGroupType,
     CmdGroupSize,
-    CmdGroupDirection,
+    CmdGroupAscending = 116,
+    CmdGroupDescending = 117,
+    CmdCloudKeep = 196,
+    CmdCloudFree = 197,
+    CmdCloudDownload = 198,
+    CmdCloudCancelDownload = 199,
     CmdRecentBase = 200,
     CmdIndexBase = 1000,
     // Explorer integration (优化.md §7): registry static verbs bound to the
@@ -149,7 +155,7 @@ void AppendTextCompareCommands(std::vector<ui::FluentMenuItem>& items,
 std::wstring TerminalMenuPath(const Tab& tab, bool background);
 std::wstring RecentChangesMenuPath(const Tab& tab, bool background);
 void AppendRecentChangesCommand(std::vector<ui::FluentMenuItem>& items,
-                                const std::wstring& path);
+                                const std::wstring& path, bool enabled);
 
 // Appends the merged Explorer section at the very bottom: separator, then one
 // row per entry. Software submenus become one-level flyout headers (children
@@ -172,6 +178,8 @@ struct BackgroundViewOptions {
     ui::ViewMode view_mode = ui::ViewMode::Details;
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
+    ui::GroupMode group_mode = ui::GroupMode::Auto;
+    ui::SortDirection group_direction = ui::SortDirection::Desc;
     int folder_sort = 0; // 0 folders first, 1 follow direction, 2 mixed
     bool details_panel = false;
     bool can_sort = true;
@@ -182,7 +190,6 @@ struct BackgroundViewOptions {
 void AppendBackgroundViewCommands(std::vector<ui::FluentMenuItem>& items,
                                   const BackgroundViewOptions& options);
 std::vector<ui::FluentMenuItem> BuildSortMenu(const BackgroundViewOptions& options);
-ui::FluentMenuItem BuildShortcutHints();
 std::vector<ui::FluentMenuItem> BuildRecycleItemMenu(bool can_undo,
                                                      const std::wstring& undo_label);
 std::vector<ui::FluentMenuItem> BuildRecycleBackgroundMenu(bool can_undo,

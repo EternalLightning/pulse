@@ -1,0 +1,15 @@
+{
+  "number": 372,
+  "title": "鼠标左键无法在网格布局下多文件布满窗口长摁框选",
+  "body": "问题描述\n在网格布局下，当文件较多、铺满窗口时，无法通过按住鼠标左键并拖动的方式框选多个文件，影响批量选择操作。\n\n复现步骤\n打开包含较多文件的目录。\n切换为网格布局，使文件铺满可视区域。\n按住鼠标左键并拖动，尝试框选多个文件。\n实际结果\n无法正常进行拖拽框选。\n\n预期结果\n即使文件铺满窗口，也应提供可用的框选起点，支持通过鼠标左键拖拽框选多个文件。\n\n版本：1.0.56",
+  "url": "https://github.com/jimmgreen/pulse/issues/372",
+  "captured_at": "2026-10-23T03:10:07.120573+00:00",
+  "updated_at": "2026-10-22T14:18:00Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

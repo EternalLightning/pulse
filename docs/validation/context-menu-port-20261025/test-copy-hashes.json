@@ -1,0 +1,32 @@
+[
+  {
+    "File": "pulse_builtin_menu_order_test.exe",
+    "SHA256": "F84B3E6B725CAAC781EA7C3FEAB3930D29D69B872EEC24A18F3FB4EA1596888D",
+    "Match": true
+  },
+  {
+    "File": "pulse_builtin_menu_items_test.exe",
+    "SHA256": "24A7AB8432681ACEC879DA1221F00BC89877576CFCC884A8E17A76D0E4B116FF",
+    "Match": true
+  },
+  {
+    "File": "pulse_system_ctx_test.exe",
+    "SHA256": "D3702C1CE30DA415BD95CA168776CC229590296F70CAF8F0C320BE7EFA5747E3",
+    "Match": true
+  },
+  {
+    "File": "pulse_system_ctx_model_test.exe",
+    "SHA256": "0A9297D3D2F4A8235E7E49A4B77C4161271494B13A7F3D204200CA9106D12B8D",
+    "Match": true
+  },
+  {
+    "File": "pulse_context_menu_settings_ui_test.exe",
+    "SHA256": "FA500067DC64E154CFD812AB8B05C7A5BD6E82A933ECA4EDEBC8BC09DC378A3B",
+    "Match": true
+  },
+  {
+    "File": "lumatext.dll",
+    "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+    "Match": true
+  }
+]

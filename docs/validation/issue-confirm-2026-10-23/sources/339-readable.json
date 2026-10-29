@@ -1,0 +1,42 @@
+{
+  "number": 339,
+  "title": "我的下载文件夹已更改路径，Pulse不支持",
+  "body": "我的下载文件夹已更改路径，系统默认文件管理器的快速访问支持更换下载的默认路径，但Pulse不支持更改，且不支持删除，导致我手动添加后新路径后，快捷访问里出现两个下载\n\n<img width=\"840\" height=\"621\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/db638ed7-229a-40ae-b11a-2ed10c7b6a05\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/339",
+  "captured_at": "2026-10-23T03:10:07.127368+00:00",
+  "updated_at": "2026-10-20T06:57:35Z",
+  "comments": [
+    {
+      "body": "<img width=\"315\" height=\"283\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/acee03c7-1587-4fee-86a3-f7f77629d511\" />\n快速访问标题上右键取消它",
+      "bodyHTML": "<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/11865661/678698724-acee03c7-1587-4fee-86a3-f7f77629d511.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyMDYsIm5iZiI6MTc5MjcyNDkwNiwicGF0aCI6Ii8xMTg2NTY2MS82Nzg2OTg3MjQtYWNlZTAzYzctMTU4Ny00ZmVlLTg2YTMtZjdmNzc2MjlkNTExLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDgyNlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWI4NWJmOTIxN2ZjYjVjNGNmM2NjNzZmNjJkMGM0OWVhOWI3MmE0NGM1OGZjOWY3ZDY3MzVhMDYzMDExNmM2NjkmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.vfc1UW7kO-3MgGEiMtStuZOVgSWrxe5Ps7kGaQGyoUE\"><img width=\"315\" height=\"283\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/11865661/678698724-acee03c7-1587-4fee-86a3-f7f77629d511.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyMDYsIm5iZiI6MTc5MjcyNDkwNiwicGF0aCI6Ii8xMTg2NTY2MS82Nzg2OTg3MjQtYWNlZTAzYzctMTU4Ny00ZmVlLTg2YTMtZjdmNzc2MjlkNTExLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDgyNlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWI4NWJmOTIxN2ZjYjVjNGNmM2NjNzZmNjJkMGM0OWVhOWI3MmE0NGM1OGZjOWY3ZDY3MzVhMDYzMDExNmM2NjkmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.vfc1UW7kO-3MgGEiMtStuZOVgSWrxe5Ps7kGaQGyoUE\" style=\"max-width: 100%; height: auto; max-height: 283px;; aspect-ratio: 315 / 283; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>\n快速访问标题上右键取消它",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjExODY1NjYx",
+        "login": "Dzika",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/11865661?v=4",
+        "profileUrl": "https://github.com/Dzika",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/339#issuecomment-6284758087"
+    },
+    {
+      "body": "感谢感谢",
+      "bodyHTML": "<p dir=\"auto\">感谢感谢</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBwnhmg",
+        "login": "haorenlinge",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/118088090?v=4",
+        "profileUrl": "https://github.com/haorenlinge",
+        "name": "好人琳哥"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/339#issuecomment-6285273016"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVf3NEgAqjYyODQ3NTgwODc=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoVgZ5xgAqjYyODUyNzMwMTY="
+  }
+}

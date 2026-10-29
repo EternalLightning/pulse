@@ -59,6 +59,8 @@ public:
 
     uint32_t CreateFolder(const std::wstring& path, const Owner& owner = {});
     uint32_t CreateNewFile(const std::wstring& path, const Owner& owner = {});
+    uint32_t DeviceOperation(HWND window, const std::wstring& verb,
+        const std::vector<std::wstring>& ids, const std::wstring& name = {}, const Owner& owner = {});
     void Cancel(uint32_t id);
     void Abort(uint32_t id);
     bool Ping();

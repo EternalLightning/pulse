@@ -2,6 +2,7 @@
 #pragma once
 
 #include "../ui/ui_compositor.h"
+#include "../ui/smooth_scroll.h"
 #include "../ui/notification_toast.h"
 #include "../ui/ui_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -14,16 +15,22 @@
 #include "../fs/fs_snapshot.h"
 #include "../fs/fs_watch.h"
 #include "app_model.h"
+#include "device_navigation.h"
 #include "app_core.h"
 #include "sidebar_scrollbar_fade.h"
 #include "ui_schedule_state.h"
 #include "home_catalog.h"
+#include "app_network_access.h"
+#include "app_network_locations.h"
 #include <deque>
 #include "content_results_ui.h"
 #include "app_worker.h"
 #include "app_notify_patch.h"
 #include "tray_metadata.h"
 #include "window_result_mailbox.h"
+#include "cloud_commands.h"
+#include "cloud_download.h"
+#include "app_drop_shortcuts.h"
 #include "window_size_lock.h"
 #include "external_open.h"
 #include "clipboard_availability.h"
@@ -103,8 +110,13 @@ constexpr UINT WM_EXTERNAL_OPEN_READY = WM_APP + 73;
 constexpr UINT WM_NEW_WINDOW = WM_APP + 76; // heap resolved target for the new window
 constexpr UINT WM_DETACH_LAYOUT_TAB = WM_APP + 77;
 constexpr UINT WM_DETACH_PANE = WM_APP + 78;
+constexpr UINT WM_CLOUD_DOWNLOAD = WM_APP + 110;
+constexpr UINT WM_CLOUD_PIN_DONE = WM_APP + 111;
+constexpr UINT WM_DROP_SHORTCUTS_RESULT = WM_APP + 79;
+constexpr UINT WM_UI_KICK = WM_APP + 106;
 constexpr UINT kTimerUi = 1;
 constexpr UINT kTimerUiDeadline = 2;
+constexpr UINT kTimerDeferredStartup = 3;
 
 enum class OmnibarMode { Path, Mixed, Command, Project };
 
@@ -203,15 +215,27 @@ struct AppState : AppCoreOwner {
     };
     std::vector<ArchiveOperation> archive_operations;
     HWND hwnd = nullptr;
+    app::CloudDownloads cloud_downloads;
+    std::optional<app::CloudPreviewIntent> cloud_preview_intent;
+    std::shared_ptr<std::atomic<bool>> cloud_pin_cancel;
+    std::shared_ptr<app::WindowResultMailbox<app::CloudPinCompletion>> cloud_pin_mailbox;
+    uint64_t cloud_roots_revision = 0;
+    uint64_t cloud_sync_revision = 0;
+    ULONGLONG cloud_status_tick = 0;
+    ipc::ShellClient::Owner device_shell_owner;
+    std::shared_ptr<app::WindowResultMailbox<app::DeviceOperationResult>> device_operation_mailbox;
     std::shared_ptr<app::WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
     std::shared_ptr<app::WindowResultMailbox<bool>> shell_registry_mailbox;
     std::shared_ptr<app::WindowResultMailbox<bool>> clipboard_paste_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<app::ShortcutDropResult>> shortcut_drop_mailbox;
     std::shared_ptr<app::WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
     uint64_t external_open_issued_sequence = 0;
     uint64_t external_open_next_apply_sequence = 1;
     std::unordered_map<uint64_t, app::ExternalOpenResult> external_open_pending;
     std::shared_ptr<app::WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
     app::UiScheduleState ui_schedule;
+    unsigned deferred_startup_step = 0;
+    bool first_frame_drawn = false;
     ui::Compositor compositor;
     ui::NotificationToast notification_toast;
     ui::MainRenderer renderer;
@@ -266,6 +290,8 @@ struct AppState : AppCoreOwner {
 
     app::SidebarModel sidebar;
     app::HomeCatalog home_catalog;
+    std::shared_ptr<app::NetworkAccessState> network_access;
+    std::shared_ptr<NetworkLocationLoad> network_locations;
     fs::RecycleBinInfo recycle_info;
     // SHQueryRecycleBin and $I files lag IFileOperation; retry occupancy/list
     // after recycle mutations and ignore occupancy that still matches the
@@ -454,6 +480,9 @@ struct AppState : AppCoreOwner {
 
     // Smooth scroll animation.
     bool scrollAnimating = false;
+    ui::SmoothScroll sidebarScrollMotion, detailsScrollMotion, horizontalScrollMotion;
+    app::Tab* horizontalScrollTab = nullptr;
+    std::wstring horizontalScrollPath;
     float scrollTargetY = 0.0f;
     float scrollVelocityY = 0.0f;
     std::chrono::steady_clock::time_point scrollLastUpdateTime;
@@ -503,6 +532,9 @@ struct AppState : AppCoreOwner {
     bool addressEditing = false;
     bool addressSearching = false;
     bool searchHistoryOpen = false;
+    bool searchHistoryPointerClosing = false;
+    bool searchScopeOpen = false;
+    bool searchOptionsOpen = false;
     bool searchScopePending = false;
     bool sidebarResizing = false;
     bool addressSearchComposing = false;
@@ -518,6 +550,9 @@ struct AppState : AppCoreOwner {
     bool pinyinReadyLast = false;
     std::wstring addressSearchRoot;
     float addressSearchAnimation = 0.0f;
+    float addressPathAnimation = 0.0f;
+    std::wstring addressPathClosingText;
+    std::wstring addressSearchClosingText;
     float addressScopeAnimation = 0.0f;
     ULONGLONG addressAnimationTick = 0;
     bool addressIgnoreKillFocus = false;

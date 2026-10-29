@@ -1,0 +1,42 @@
+{
+  "number": 334,
+  "title": "侧边栏只显示部分盘符",
+  "body": "只有C和D两个盘有盘符，其余的只显示名称\n<img width=\"207\" height=\"270\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/91ff5841-c58f-4fb7-928f-7c32b671c52d\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/334",
+  "captured_at": "2026-10-23T03:10:07.129799+00:00",
+  "updated_at": "2026-10-20T07:13:20Z",
+  "comments": [
+    {
+      "body": "你把侧栏宽度拉长一点",
+      "bodyHTML": "<p dir=\"auto\">你把侧栏宽度拉长一点</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjExODY1NjYx",
+        "login": "Dzika",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/11865661?v=4",
+        "profileUrl": "https://github.com/Dzika",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/334#issuecomment-6282188715"
+    },
+    {
+      "body": "> 1. 你把侧栏宽度拉长一点\n\n行吧，解决了，它也没个小省略号之类的告诉我是没显示全",
+      "bodyHTML": "<blockquote>\n<ol dir=\"auto\">\n<li>你把侧栏宽度拉长一点</li>\n</ol>\n</blockquote>\n<p dir=\"auto\">行吧，解决了，它也没个小省略号之类的告诉我是没显示全</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOC93w_Q",
+        "login": "StephenC117",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/199094525?v=4",
+        "profileUrl": "https://github.com/StephenC117",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/334#issuecomment-6285504875"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVc3kbAAqjYyODIxODg3MTU=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoVgoUoABqzMzNzE4MTE2MDY3"
+  }
+}

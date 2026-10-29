@@ -1,0 +1,42 @@
+{
+  "number": 87,
+  "title": "网络位置如何添加？",
+  "body": "在系统的资源管理器中已有的网络文件夹，在pulse中既没有显示，我也没找到添加的方法。\n\n<img width=\"1551\" height=\"689\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9ce1d60b-389c-4086-aec6-08a056a32b1a\" />\n<img width=\"1509\" height=\"946\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/3eb8ea68-0af7-469c-9d4e-1746ef0e54a1\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/87",
+  "captured_at": "2026-10-23T03:10:07.217540+00:00",
+  "updated_at": "2026-10-05T11:02:57Z",
+  "comments": [
+    {
+      "body": "找到方法了，需要在pulse中找到需要的网络文件夹，然后钉一下。\n但是，问题又来了。1：这个不能继承于系统的设置吗？比如我的资源管理器中本来就添加着WPS云盘，pulse中也不显示。2：当前版本把目录树的“此电脑”改为能够点击了，那“网络位置”也应该是一样的逻辑吧？目录树的其他区域是不是也是一样的逻辑？个人认为操作逻辑尽量和系统的资源管理器保持一致，能够减少用户的学习使用成本，更能够做到无缝衔接。",
+      "bodyHTML": "<p dir=\"auto\">找到方法了，需要在pulse中找到需要的网络文件夹，然后钉一下。<br>\n但是，问题又来了。1：这个不能继承于系统的设置吗？比如我的资源管理器中本来就添加着WPS云盘，pulse中也不显示。2：当前版本把目录树的“此电脑”改为能够点击了，那“网络位置”也应该是一样的逻辑吧？目录树的其他区域是不是也是一样的逻辑？个人认为操作逻辑尽量和系统的资源管理器保持一致，能够减少用户的学习使用成本，更能够做到无缝衔接。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOFBZqZQ",
+        "login": "bbll7451",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/337013349?v=4",
+        "profileUrl": "https://github.com/bbll7451",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/87#issuecomment-5977800657"
+    },
+    {
+      "body": "> 找到方法了，需要在pulse中找到需要的网络文件夹，然后钉一下。 但是，问题又来了。1：这个不能继承于系统的设置吗？比如我的资源管理器中本来就添加着WPS云盘，pulse中也不显示。2：当前版本把目录树的“此电脑”改为能够点击了，那“网络位置”也应该是一样的逻辑吧？目录树的其他区域是不是也是一样的逻辑？个人认为操作逻辑尽量和系统的资源管理器保持一致，能够减少用户的学习使用成本，更能够做到无缝衔接。\n\n已经添加了的网络位置怎么删除？我点击鼠标右键没有反应\n\n<img width=\"337\" height=\"224\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/7ebb0f46-1331-4752-bcf0-dae627f3a865\" />",
+      "bodyHTML": "<blockquote>\n<p dir=\"auto\">找到方法了，需要在pulse中找到需要的网络文件夹，然后钉一下。 但是，问题又来了。1：这个不能继承于系统的设置吗？比如我的资源管理器中本来就添加着WPS云盘，pulse中也不显示。2：当前版本把目录树的“此电脑”改为能够点击了，那“网络位置”也应该是一样的逻辑吧？目录树的其他区域是不是也是一样的逻辑？个人认为操作逻辑尽量和系统的资源管理器保持一致，能够减少用户的学习使用成本，更能够做到无缝衔接。</p>\n</blockquote>\n<p dir=\"auto\">已经添加了的网络位置怎么删除？我点击鼠标右键没有反应</p>\n<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/67049883/665608209-7ebb0f46-1331-4752-bcf0-dae627f3a865.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjcsIm5iZiI6MTc5MjcyNDk2NywicGF0aCI6Ii82NzA0OTg4My82NjU2MDgyMDktN2ViYjBmNDYtMTMzMS00NzUyLWJjZjAtZGFlNjI3ZjNhODY1LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDkyN1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTU4ZGRkOWRiZmU4ZjJlYjdkNmM5YTNjNDU4MzcwYzA5NGE0NWJkNjNiMWJkNWFlN2M4Y2MyNmQwN2U4YzNhMGImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.SkqhwNtf8RwWCc0qvg3PVcTS1PkqhzgbpBVC_TE30O4\"><img width=\"337\" height=\"224\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/67049883/665608209-7ebb0f46-1331-4752-bcf0-dae627f3a865.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjcsIm5iZiI6MTc5MjcyNDk2NywicGF0aCI6Ii82NzA0OTg4My82NjU2MDgyMDktN2ViYjBmNDYtMTMzMS00NzUyLWJjZjAtZGFlNjI3ZjNhODY1LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDkyN1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTU4ZGRkOWRiZmU4ZjJlYjdkNmM5YTNjNDU4MzcwYzA5NGE0NWJkNjNiMWJkNWFlN2M4Y2MyNmQwN2U4YzNhMGImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.SkqhwNtf8RwWCc0qvg3PVcTS1PkqhzgbpBVC_TE30O4\" style=\"max-width: 100%; height: auto; max-height: 224px;; aspect-ratio: 337 / 224; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjY3MDQ5ODgz",
+        "login": "cap153",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/67049883?u=cc186279e734f887456f3cb02e480b1ca1fffc99&v=4",
+        "profileUrl": "https://github.com/cap153",
+        "name": "夜未央，天将亮"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/87#issuecomment-5993146136"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoQXd1vgAqjU5Nzc4MDA2NTc=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQu7JugAqjU5OTMxNDYxMzY="
+  }
+}

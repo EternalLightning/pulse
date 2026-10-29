@@ -1,0 +1,42 @@
+{
+  "number": 246,
+  "title": "右键菜单问题",
+  "body": "已经卸载的杀毒软件avira，在右键菜单设置里还显示，而且显示多个重复的\n\n本来在右键菜单里有notepad++打开，在pulse右键菜单里却没有了\n\n<img width=\"1492\" height=\"1467\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/19fe8404-7c2b-4a21-a12e-766709e34b21\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/246",
+  "captured_at": "2026-10-23T03:10:07.174349+00:00",
+  "updated_at": "2026-10-22T06:29:15Z",
+  "comments": [
+    {
+      "body": "已修复。\n\n1. 已卸载的 Avira 仍然显示、而且重复：旧版设置页的列表是根据过去右键时见过的条目累积出来的，卸载软件后不会自动清除，同一个扩展在不同文件类型上见过还会出现多次。新版第三方扩展改到「系统右键菜单」页统一管理，列表直接读取系统当前注册的扩展，已卸载的软件不会再出现。\n2. Notepad++ 缺失：右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。 测试机没有装 Notepad++，如果新版本中仍然缺少，请告诉我 Notepad++ 的版本，我们继续跟进。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复。</p>\n<ol dir=\"auto\">\n<li>已卸载的 Avira 仍然显示、而且重复：旧版设置页的列表是根据过去右键时见过的条目累积出来的，卸载软件后不会自动清除，同一个扩展在不同文件类型上见过还会出现多次。新版第三方扩展改到「系统右键菜单」页统一管理，列表直接读取系统当前注册的扩展，已卸载的软件不会再出现。</li>\n<li>Notepad++ 缺失：右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。 测试机没有装 Notepad++，如果新版本中仍然缺少，请告诉我 Notepad++ 的版本，我们继续跟进。</li>\n</ol>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/246#issuecomment-6180328617"
+    },
+    {
+      "body": "1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。\n",
+      "bodyHTML": "<p dir=\"auto\">1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/246#issuecomment-6334336260"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTyiPaAAqjYxODAzMjg2MTc=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJMrngBqzMzOTIwODUxMjcw"
+  }
+}

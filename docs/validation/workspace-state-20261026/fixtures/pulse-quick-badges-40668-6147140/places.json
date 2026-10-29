@@ -1,0 +1,33 @@
+{
+  "places_version":2,
+  "tag_version":2,
+  "active_workspace":-1,
+  "workspaces":[
+    {"name":"pulse","root":"C:\\Projects\\pulse","layout":0,"focused_pane":0,"panes":["\\\\?\\C:\\Projects\\pulse"],"views":["details"],"freq":[]},
+    {"name":"Thesis","root":"C:\\Projects\\Thesis","layout":0,"focused_pane":0,"panes":["\\\\?\\C:\\Projects\\Thesis"],"views":["details"],"freq":[]},
+    {"name":"Camp","root":"C:\\Projects\\Camp","layout":0,"focused_pane":0,"panes":["\\\\?\\C:\\Projects\\Camp"],"views":["details"],"freq":[]},
+    {"name":"Split","root":"C:\\Projects\\Split","layout":1,"focused_pane":1,"panes":["C:\\Other","\\\\?\\C:\\Projects\\Split"],"views":["details","large-icons"],"freq":[]},
+    {"name":"Existing","root":"C:\\Projects\\Existing","layout":1,"focused_pane":1,"panes":["C:\\Other","C:\\Projects\\Existing"],"views":["details","large-icons"],"freq":[]},
+    {"name":"Explicit","root":"C:\\Projects\\Explicit","layout":1,"focused_pane":1,"panes":["C:\\Other","C:\\Projects\\Explicit\\child"],"views":["details","large-icons"],"freq":[]}
+  ],
+  "tags":[
+    {"id":"finder-red","name":"紧急修补","rgb":15680580,"paths":[]},
+    {"id":"finder-orange","name":"设计审阅","rgb":16096779,"paths":[]},
+    {"id":"finder-green","name":"进行中","rgb":2278750,"paths":[]},
+    {"id":"finder-yellow","name":"待确认","rgb":15381256,"paths":[]},
+    {"id":"finder-purple","name":"灵感参考","rgb":11032055,"paths":[]},
+    {"id":"finder-blue","name":"参考资料","rgb":3900150,"paths":[]},
+    {"id":"finder-gray","name":"归档","rgb":9741240,"paths":[]}
+  ],
+  "networks":[
+  ],
+  "starred":[],
+  "quick_access_paths":[],
+  "quick_access_order":[],
+  "starred_items":[
+  ],
+  "quick_access_badges":[
+  ],
+  "recent_items":[
+  ]
+}

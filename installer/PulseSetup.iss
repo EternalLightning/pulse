@@ -1,5 +1,6 @@
 ; Pulse installer — single-file exe setup via Inno Setup 6.
-; Builds dist\PulseSetup-<version>.exe from the Release build in build\.
+; build_installer.bat uses build-release\ by default and passes BuildDir.
+; Builds dist\PulseSetup-<version>.exe. See docs/build-and-package.md.
 ;
 ; Install-time behaviour:
 ;   - Installs the executables into Program Files\Pulse (admin required).
@@ -86,10 +87,13 @@ Source: "{#BuildDir}\Pulse.Index.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Document.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Preview.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Shell.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\Pulse.Integration.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
 ; The Shell helper was renamed; remove only the superseded app-local binary.
 Type: files; Name: "{app}\pulse_shell.exe"
+; The integration helper now follows the other Pulse helper filenames.
+Type: files; Name: "{app}\pulse_integration.exe"
 #ifndef AppLocalRuntime
 ; Exact app-local files from older MD releases; never touch Windows runtimes.
 Type: files; Name: "{app}\msvcp140.dll"

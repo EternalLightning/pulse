@@ -1,6 +1,7 @@
 #pragma once
 #include "usn_packet_queue.h"
 #include "usn_read_wait.h"
+#include "usn_record.h"
 #include <winioctl.h>
 #include <new>
 #include <thread>
@@ -60,6 +61,10 @@ private:
                     ok = true;
                 }
                 if (!ok) { Failed(GetLastError()); break; }
+                if (received < sizeof(request.StartUsn) || received > buffer.size() ||
+                    !ValidateUsnRecords(buffer.data() + sizeof(request.StartUsn), received - sizeof(request.StartUsn))) {
+                    Failed(ERROR_INVALID_DATA); break;
+                }
                 const bool queued = packets_.Push(buffer.data(), received);
                 SetEvent(signal_);
                 if (!queued) break;

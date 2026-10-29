@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-24",
+  "status": "upstream-sharp-spacing-reproduced",
+  "product_changed": false,
+  "installed_changed": false,
+  "user_preference": "Preserve upstream editing/presentation design and offer Auto, Sharp and Smooth; do not replace all modes with a forced DirectWrite/GDI path.",
+  "upstream_commit": "c4fe01ed82fe091f495f531972a854aa32caac2b",
+  "probe": "bench_data/sharp-spacing-20261024/probe.cpp",
+  "renders": 72,
+  "fonts": [
+    "Microsoft YaHei UI",
+    "Segoe UI Variable Text"
+  ],
+  "physical_sizes": [
+    13,
+    16.25,
+    19.5
+  ],
+  "variants": [
+    "GDI_CLASSIC + natural layout",
+    "GDI_CLASSIC + GDI-compatible layout (useGdiNatural=false)",
+    "NATURAL + grid fit enabled + natural layout",
+    "NATURAL_SYMMETRIC + grid fit disabled + natural layout"
+  ],
+  "screenshots": [
+    "bench_data/sharp-spacing-20261024/comparison-appcompat.png",
+    "bench_data/sharp-spacing-20261024/comparison-downloaded.png"
+  ],
+  "markdown_lines": [
+    "**用户新方向：保留上游的编辑实现，并提供“自动／清晰／平滑”三个文字选项；先查清“清晰”模式中 co、ed、gram 的细小字距问题。** 本轮完成源码和隔离渲染核验，没有修改产品或替换安装版；三选项尚未接入本地，编辑闪烁也仍未标记解决。",
+    "",
+    "**定位：上游“清晰”把栅格化改成 GDI Classic 并启用网格对齐，但列表文字仍使用 Natural 度量。** `typography.cpp:190-214` 选择 GDI_CLASSIC；`ui_pane_list.cpp:2037-2039` 回退绘制显式使用 DWRITE_MEASURING_MODE_NATURAL，高亮/扩展名则用 CreateTextLayout。微软 DWRITE_RENDERING_MODE 文档将 GDI_CLASSIC 指定给 GDI_CLASSIC 度量；IDWriteFactory::CreateGdiCompatibleTextLayout 文档说明 FALSE 对应 GDI classic 度量、TRUE 对应 GDI natural。",
+    "",
+    "这种组合下，排版保留小数字形 advance，笔画栅格化又贴像素格，可能使相邻字母的可见空隙不均。它没有向字符串插入空格，也不表示显示名称被更改；正常字体自带的 side bearing 和词间空格仍会保留。",
+    "",
+    "**截图复现证据：** 使用本机 Windows DirectWrite + 软件 Direct2D，Microsoft YaHei UI 13 物理像素，重画 appcompat。用户截图与“GDI_CLASSIC + Natural layout”的紧包围二值笔画都是71×12像素，平移搜索±2像素后差异为0，最佳平移为0。判断阈值为任一RGB通道超过区域众数背景75，排除红色标记；该结果不是逐RGB像素相等，也不是三个标框全部逐像素验证。Downloaded Program Files 已做同配置截图对照。",
+    "",
+    "另外渲染2种字体×3个物理字号（13／16.25／19.5）×4种排版/绘制组合×3个字符串，共72组布局，所有Windows绘制调用成功。GDI-compatible布局改变了字距分布：13px雅黑UI下，appcompat总advance从71.0874变为70，Downloaded Program Files从168.099变为164。该实验说明度量差异真实存在；不据此宣称每对字母间隙均已消除，或完成真实主程序验收。",
+    "",
+    "**后续实现约束：** 保留自动、清晰、平滑的选择及持久化，沿用上游的完整编辑选区与表面逻辑。清晰模式的测宽、排版、裁切、省略、着色分段、光标命中与缓存失效须使用同一度量策略；可比较 GDI-compatible排版配GDI_CLASSIC，或Natural排版配NATURAL+gridfit。不要只改单个DrawText调用，也不要把列表和编辑框永久强制为同一种渲染后端。不同策略的清晰度和字距需要实际主程序画面对照后再定稿。",
+    "",
+    "主程序未构建、安装版未改。证据：[对照源码](E:/Projects/pulse/bench_data/sharp-spacing-20261024/probe.cpp)、[appcompat放大对比](E:/Projects/pulse/bench_data/sharp-spacing-20261024/comparison-appcompat.png)、[Downloaded Program Files放大对比](E:/Projects/pulse/bench_data/sharp-spacing-20261024/comparison-downloaded.png)、[逐字符位置](E:/Projects/pulse/bench_data/sharp-spacing-20261024/positions.csv)、[截图二值核验](E:/Projects/pulse/bench_data/sharp-spacing-20261024/screenshot-match.json)。本节仍合并在唯一报告中。"
+  ]
+}

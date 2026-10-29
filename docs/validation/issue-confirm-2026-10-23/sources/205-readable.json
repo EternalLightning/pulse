@@ -1,0 +1,29 @@
+{
+  "number": 205,
+  "title": "对 Bandzip 右键菜单不支持",
+  "body": "<img width=\"410\" height=\"150\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/dff2b04f-909f-495f-a294-da0dcf6f4fa1\" />\n原版explorer正常显示，pulse无法显示",
+  "url": "https://github.com/jimmgreen/pulse/issues/205",
+  "captured_at": "2026-10-23T03:10:07.190682+00:00",
+  "updated_at": "2026-10-16T10:42:18Z",
+  "comments": [
+    {
+      "body": "已修复。\n\n右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。\n\nBandizip 在测试机上已实测：普通文件上显示「压缩」子菜单（压缩为 zip/7z、新建压缩包），zip 文件上显示解压到当前文件夹、智能解压、解压到子文件夹、选择解压路径，文件夹上也有「压缩」子菜单，和 Explorer 一致。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复。</p>\n<p dir=\"auto\">右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。</p>\n<p dir=\"auto\">Bandizip 在测试机上已实测：普通文件上显示「压缩」子菜单（压缩为 zip/7z、新建压缩包），zip 文件上显示解压到当前文件夹、智能解压、解压到子文件夹、选择解压路径，文件夹上也有「压缩」子菜单，和 Explorer 一致。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/205#issuecomment-6180326012"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTyiDsAAqjYxODAzMjYwMTI=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoUROMxABqzMzNDM2NTAzNDcz"
+  }
+}

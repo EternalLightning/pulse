@@ -1,0 +1,11 @@
+{
+  "requested_destination": "E:\\Projects\\TestPrograms\\PulseFileOperations-20261025",
+  "copy_completed": false,
+  "failure": "Access denied creating destination directory",
+  "package_directory": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\fileops-user-package-bf42ff07f92047b3add8cd1d1f5b7601",
+  "archive": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\PulseFileOperations-20261025.zip",
+  "archive_sha256": "0CED0AB2C4412A521C0B7CA18E64EDEA4564C7D5360D68D86E9D961B30A0F7E4",
+  "verified_archive_entries": 6,
+  "tests_run": false,
+  "timestamp": "2026-10-25T16:42:21.0391341+08:00"
+}

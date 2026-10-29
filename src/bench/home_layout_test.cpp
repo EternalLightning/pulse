@@ -1,6 +1,8 @@
 #include "../ui/home_layout.h"
 #include "../app/places.h"
 #include "../app/home_catalog.h"
+#include "../app/app_model.h"
+#include "../common/drive_display_name.h"
 #include "../common/localization.h"
 #include <shlobj.h>
 #include <iostream>
@@ -59,6 +61,24 @@ int main() {
             pane.home_collapsed_mask = 7;
             check(ui::MakeHomeLayout(pane, bounds, scale).cards.empty(), "all collapsed groups retain headings without card targets");
             pane.home_collapsed_mask = 0;
+            pane.network_discovery_disabled = true;
+            const auto notice_layout = ui::MakeHomeLayout(pane, bounds, scale);
+            const auto notice = notice_layout.network_notice;
+            check(notice.right <= bounds.right && notice.left >= bounds.left &&
+                notice.bottom > notice.top && notice_layout.height > layout.height,
+                "network discovery notice reserves space within narrow and scaled home layouts");
+            pane.scroll_y = std::max(0.0f, notice.top - bounds.top - 12 * scale);
+            const auto visible_notice = ui::MakeHomeLayout(pane, bounds, scale).network_notice;
+            check(ui::HitHomeNetworkSettings(pane, bounds, scale, visible_notice.left + scale,
+                visible_notice.top + scale) && ui::HitHomeCard(pane, bounds, scale,
+                visible_notice.left + scale, visible_notice.top + scale) == -1,
+                "network settings notice is reachable after scrolling without overlapping drive cards");
+            pane.home_collapsed_mask = 4;
+            check(ui::MakeHomeLayout(pane, bounds, scale).network_notice.right == 0,
+                "collapsed network group hides its settings notice");
+            pane.home_collapsed_mask = 0;
+            pane.scroll_y = 0;
+            pane.network_discovery_disabled = false;
         }
     }
     pane.home_cards.clear();
@@ -71,6 +91,23 @@ int main() {
     while (catalog.Loading() && GetTickCount64() < deadline) Sleep(5);
     check(!catalog.Loading(), "background catalog completes without touching user preferences");
     catalog.Fill(pane);
+    app::SidebarModel sidebar;
+    for (const auto& card : pane.home_cards) {
+        if (card.group == 0) continue;
+        app::SidebarEntry drive;
+        drive.path = L"\\\\?\\" + card.path;
+        drive.label = L"incorrect fallback";
+        sidebar.drives.push_back(std::move(drive));
+    }
+    catalog.FillDriveLabels(sidebar);
+    bool labels_match = !sidebar.drives.empty();
+    for (const auto& drive : sidebar.drives) {
+        const auto card = std::find_if(pane.home_cards.begin(), pane.home_cards.end(), [&](const auto& item) {
+            return drive.path == L"\\\\?\\" + item.path;
+        });
+        labels_match &= card != pane.home_cards.end() && card->label == drive.label;
+    }
+    check(labels_match, "sidebar uses resolved home labels including mapped drives and extended roots");
     const auto recycle = std::find_if(pane.home_cards.begin(), pane.home_cards.end(),
         [](const auto& card) { return card.path == app::MakeRecyclePath(); });
     check(recycle != pane.home_cards.end() && recycle->group == 0, "recycle bin remains a navigable library card");
@@ -109,9 +146,8 @@ int main() {
     if (GetDriveTypeW(L"Z:\\") == DRIVE_REMOTE && GetDiskFreeSpaceExW(L"Z:\\", &available, &total, &free) && total.QuadPart) {
         check(mapped != pane.home_cards.end() && mapped->used_ratio >= 0 && !mapped->detail.empty(),
             "available mapped Z drive retains capacity and usage bar");
-        wchar_t label[MAX_PATH + 1]{};
-        if (GetVolumeInformationW(L"Z:\\", label, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0) && label[0])
-            check(mapped != pane.home_cards.end() && mapped->label == std::wstring(label) + L" (Z:)", "mapped drive volume label matches Windows");
+        if (const auto label = path::ReadMappedDriveLabel(L"Z:\\"))
+            check(mapped != pane.home_cards.end() && mapped->label == *label + L" (Z:)", "mapped drive display name matches Windows Shell");
     }
     check(catalog.ConsumeUpdate() && !catalog.ConsumeUpdate(), "completed catalog update is consumed once");
     return failures ? 1 : 0;

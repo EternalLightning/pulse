@@ -1,6 +1,7 @@
 // fs_enum.cpp
 #include "fs_enum.h"
 #include "../common/unique_resource.h"
+#include "../common/drive_display_name.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlwapi.h>
@@ -471,12 +472,18 @@ static bool EnumerateThisPc(std::vector<DirEntry>& out, const std::function<bool
         if (cancelled && cancelled()) return false;
         if (!(drives & (1 << i))) continue;
         wchar_t root[4] = { wchar_t(L'A' + i), L':', L'\\', L'\0' };
-        wchar_t volName[MAX_PATH + 1] = {};
-        GetVolumeInformationW(root, volName, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
         DirEntry e;
         e.drive_type = GetDriveTypeW(root);
-        e.name = volName[0] ? std::wstring(volName) + L" (" + root[0] + L":)"
-                           : std::wstring(root, 2);
+        if (e.drive_type == DRIVE_REMOTE) {
+            const auto label = path::ReadMappedDriveLabel(root);
+            e.name = label && !label->empty() ? *label + L" (" + std::wstring(root, 2) + L")"
+                                             : std::wstring(root, 2);
+        } else {
+            wchar_t volume_name[MAX_PATH + 1] = {};
+            GetVolumeInformationW(root, volume_name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
+            e.name = volume_name[0] ? std::wstring(volume_name) + L" (" + root[0] + L":)"
+                                    : std::wstring(root, 2);
+        }
         e.full_path = NormalizePath(root);
         e.is_dir = true;
         e.attrs = FILE_ATTRIBUTE_DIRECTORY;

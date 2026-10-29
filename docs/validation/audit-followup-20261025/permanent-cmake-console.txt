@@ -1,0 +1,33 @@
+[PASS] prepare read-only file and directory descendants
+[PASS] capture original permanent-delete identity
+[PASS] same-name replacement after authorization fails closed and preserves both objects
+[PASS] capture the preceding root identity
+[PASS] a later root identity mismatch rejects the whole batch before any root mutation
+[PASS] capture the replacement for its own authorized delete
+[PASS] freeze the authorized deletion handle
+[DIAG] frozen fixture read without FILE_SHARE_DELETE Win32=32
+[PASS] independent readers require delete sharing while the authorized DELETE handle is retained
+[PASS] frozen object prevents rename before its mutation
+[PASS] capture distinct identities for the unfrozen replacement control
+[DIAG] unfrozen same-directory replacement result=1 Win32=0
+[PASS] same-directory replacement succeeds for an unfrozen control object
+[PASS] capture the replacement contender identity
+[DIAG] frozen same-name replacement result=0 Win32=5
+[PASS] frozen object rejects a same-name replacement and preserves both objects
+[PASS] permanent deletion acts through the captured handle
+[PASS] capture the nonempty directory identity
+[PASS] native permanent delete removes a nonempty directory and read-only descendants
+[PASS] prepare a read-only disposition failure
+[DIAG] disposition rejected result=0 Win32=5 attributes=1
+[DIAG] frozen fixture read without FILE_SHARE_DELETE Win32=32
+[PASS] failed deletion retains its authorized DELETE handle until release
+[PASS] failed disposition preserves bytes and restores the original read-only attribute
+[PASS] capture cancellation fixture identities
+[PASS] cancellation before capture leaves the authorized root intact
+[PASS] cancellation after all roots are captured leaves both roots intact
+[PASS] progress names the completed captured root
+[PASS] cancellation after one root reports only the completed root and preserves the next root
+[PASS] native deletion rejects a drive root before enumeration
+[SKIP] directory symlink fixture unavailable, Win32=1314
+[PASS] remove the isolated permanent-delete fixture
+26 PASS / 0 FAIL

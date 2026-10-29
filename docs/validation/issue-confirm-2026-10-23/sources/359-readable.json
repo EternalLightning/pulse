@@ -1,0 +1,29 @@
+{
+  "number": 359,
+  "title": "[Bug] 重命名：移动光标，文字不移动，超出看不到",
+  "body": "v1.0.56",
+  "url": "https://github.com/jimmgreen/pulse/issues/359",
+  "captured_at": "2026-10-23T03:10:07.124832+00:00",
+  "updated_at": "2026-10-22T06:47:36Z",
+  "comments": [
+    {
+      "body": "感谢反馈，已修复。\n\n**原因**：1.0.56 里，图标视图的重命名框会把长文件名折成多行，但内容超过框的高度时不会滚动，光标所在的行可能被挡住或在框外，所以移动光标时看起来文字不动、超出部分也看不到。\n\n**修复**：\n- 重命名框折行的位置和图标下面显示的名字完全一致，进入编辑时不会重新排版；\n- 名字很长时，框最多显示 6 行，超出部分在框里上下滚动，光标所在的行始终可见；\n- 图标视图的重命名框改为浮动卡片，始终完整显示在可视区域内；靠近底部时，列表会平滑上移。\n\n已实机验证。将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈，已修复。</p>\n<p dir=\"auto\"><strong>原因</strong>：1.0.56 里，图标视图的重命名框会把长文件名折成多行，但内容超过框的高度时不会滚动，光标所在的行可能被挡住或在框外，所以移动光标时看起来文字不动、超出部分也看不到。</p>\n<p dir=\"auto\"><strong>修复</strong>：</p>\n<ul dir=\"auto\">\n<li>重命名框折行的位置和图标下面显示的名字完全一致，进入编辑时不会重新排版；</li>\n<li>名字很长时，框最多显示 6 行，超出部分在框里上下滚动，光标所在的行始终可见；</li>\n<li>图标视图的重命名框改为浮动卡片，始终完整显示在可视区域内；靠近底部时，列表会平滑上移。</li>\n</ul>\n<p dir=\"auto\">已实机验证。将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/359#issuecomment-6334609344"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoWJde0AAqjYzMzQ2MDkzNDQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJde0AAqjYzMzQ2MDkzNDQ="
+  }
+}

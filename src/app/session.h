@@ -8,6 +8,17 @@
 
 namespace pulse::app {
 
+inline constexpr size_t kMaxSessionLayoutTabs = 128;
+inline constexpr size_t kMaxSessionTabGroups = 128;
+inline constexpr size_t kMaxSessionPanes = 4;
+
+inline bool WindowPlacementRestoresMaximized(const WINDOWPLACEMENT& placement) {
+    return placement.showCmd == SW_SHOWMAXIMIZED ||
+        ((placement.flags & WPF_RESTORETOMAXIMIZED) != 0 &&
+         (placement.showCmd == SW_SHOWMINIMIZED || placement.showCmd == SW_MINIMIZE ||
+          placement.showCmd == SW_SHOWMINNOACTIVE));
+}
+
 struct GroupSessionSnapshot {
     int id = 0;
     std::wstring name;
@@ -18,8 +29,8 @@ struct GroupSessionSnapshot {
 struct PaneFolderSnapshot {
     std::wstring path;
     ui::ViewMode view = ui::ViewMode::Details;
-    std::array<float, 3> columns{};
-    std::array<float, 4> search_columns{};
+    std::array<float, 4> columns{};
+    std::array<float, 5> search_columns{};
     bool column_layout = false;
     std::vector<float> column_widths; // DIP, see ui::ColumnStripWidthDip
 };
@@ -65,8 +76,10 @@ struct SessionSnapshot : WindowSessionSnapshot {
 std::wstring GetPulseDataDir();
 bool SaveSession(const SessionSnapshot& snap);
 bool LoadSession(SessionSnapshot& snap);
-// Startup keeps appearance, tray and undo state, but never restores navigation.
+// preferences.json retains appearance, tray and undo. Legacy session.json is
+// read only when no preferences file exists; startup never restores navigation.
 bool SaveSessionPreferences(const WindowSessionSnapshot& snap);
+std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap);
 bool LoadSessionPreferences(WindowSessionSnapshot& snap);
 std::wstring SessionToJson(const SessionSnapshot& snap);
 bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap);

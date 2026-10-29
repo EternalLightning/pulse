@@ -1,5 +1,6 @@
 #include "ui_renderer_internal.h"
 #include "toolbar_layout.h"
+#include "address_search_layout.h"
 #include "toolbar_command_state.h"
 #include "pane_header_icons.h"
 #include "../common/resource_ids.h"
@@ -10,8 +11,11 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
     const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle);
-    const bool searchOverlay=vm.address_searching && rect.right-left<480*scale_;
-    if (!searchOverlay) {
+    const float address_opacity = rect.right - left < 480 * scale_
+        ? AddressSearchContentOpacity(1.0f - vm.address_search_animation) : 1.0f;
+    if (address_opacity > 0.0f) {
+        if (address_opacity < 1.0f) dc->PushLayer(D2D1::LayerParameters(rect, nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), address_opacity), nullptr);
         const wchar_t* nav_glyphs[] = {kIconBack,kIconForward,kIconUp,kIconRefresh};
         const HitTestResult::Region nav_hits[] = {HitTestResult::NavBack,HitTestResult::NavForward,HitTestResult::NavUp,HitTestResult::NavRefresh};
         for (int i=0;i<4;++i) {
@@ -24,11 +28,33 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         // Breadcrumb address bar: segments clickable, empty area -> edit mode.
         D2D1_RECT_F addrRc = AddressBarRect(rect.right);
         fluent::ControlState addrState{};
-        addrState.focused = vm.address_editing && !vm.address_searching;
         addrState.hovered = !vm.address_editing && IsHovered(vm, HitTestResult::AddressBar);
         painter_.DrawTextFieldFrame(addrRc, addrState);
+        const float path_progress = std::clamp(vm.address_path_animation, 0.0f, 1.0f);
+        const float breadcrumb_opacity = AddressSearchContentOpacity(1.0f - path_progress);
+        const float editor_opacity = AddressSearchContentOpacity(path_progress);
+        if (editor_opacity > 0.0f) {
+            dc->PushLayer(D2D1::LayerParameters(addrRc, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                D2D1::Matrix3x2F::Identity(), editor_opacity), nullptr);
+            addrState.focused = true;
+            painter_.DrawTextFieldFrame(addrRc, addrState, true);
+            if (!vm.address_editing || vm.address_searching) {
+                MakeBrush(dc, theme.text, brText_);
+                const float offset = 6.0f * scale_ * (1.0f - path_progress);
+                DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), vm.address_path_closing_text,
+                    addrRc.left + 10 * scale_ + offset, addrRc.top + 2 * scale_,
+                    std::max(0.0f, addrRc.right - addrRc.left - 20 * scale_ - offset),
+                    addrRc.bottom - addrRc.top - 4 * scale_, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+            dc->PopLayer();
+        }
         dc->PushAxisAlignedClip(addrRc, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        if (!vm.address_editing || vm.address_searching) {
+        if (breadcrumb_opacity > 0.0f) {
+            D2D1_MATRIX_3X2_F transform;
+            dc->GetTransform(&transform);
+            dc->PushLayer(D2D1::LayerParameters(addrRc, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                D2D1::Matrix3x2F::Identity(), breadcrumb_opacity), nullptr);
+            dc->SetTransform(D2D1::Matrix3x2F::Translation(-6.0f * scale_ * path_progress, 0) * transform);
             std::vector<BreadcrumbPlaced> placed;
             BreadcrumbLayout(vm.pane, rect.right, placed);
             for (size_t i = 0; i < placed.size(); ++i) {
@@ -64,8 +90,11 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                     addrRc.right - addrRc.left - 18.0f * scale_,
                     addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
+            dc->SetTransform(transform);
+            dc->PopLayer();
         }
         dc->PopAxisAlignedClip();
+        if (address_opacity < 1.0f) dc->PopLayer();
     }
     DrawAddressSearchChrome(vm, rect.right, theme);
     const auto operation_color = vm.operation_count > 0 || vm.operation_center_open

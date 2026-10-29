@@ -1,0 +1,24 @@
+{
+  "BackupDirectory": "E:\\Projects\\pulse\\dist\\edit-surface-1.2.0.3-rollback-20261024-140547",
+  "Deferred": [
+    {
+      "Reason": "Access to the path 'D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-444476a133d545ec93c555a5df34acb6' is denied.",
+      "SHA256": "A534619957CEFB404B7A836CCE5870B8E0A069C000121944FEC1BDD29036A5D9",
+      "Path": "D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-444476a133d545ec93c555a5df34acb6"
+    }
+  ],
+  "Success": true,
+  "Error": null,
+  "Phase": "complete",
+  "BackupFiles": 70,
+  "ChangedFiles": [
+    "Pulse.exe",
+    "Pulse.Index.exe",
+    "Pulse.Shell.exe",
+    "Pulse.Preview.exe",
+    "Pulse.Document.exe"
+  ],
+  "Utc": "2026-10-24T06:07:11.9024882Z",
+  "RecoveryError": null,
+  "BackupVerified": true
+}

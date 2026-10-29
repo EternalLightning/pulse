@@ -3,11 +3,16 @@
 #include "../ops/archive.h"
 // app_runtime.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
+#include "cloud_roots.h"
+#include "cloud_sync_probe.h"
+#include "../ui/cloud_status.h"
 #include "app_column_view.h"
+#include "app_surface_scroll.h"
 #include "pane_animations.h"
 #include "folder_sizes_ui.h"
 #include "index_volume_badge.h"
 #include "about_info.h"
+#include "settings_transfer_ui.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
@@ -27,6 +32,7 @@
 #include "snapshot_patch.h"
 #include "session.h"
 #include "context_menu.h"
+#include "system_ctx_model.h"
 #include "batch_rename.h"
 #include "link_resolve.h"
 #include "duplicate_scan.h"
@@ -105,6 +111,7 @@ private:
             ipc::ShellQueryRequest shell_request;
             shell_request.kind = ipc::ShellQueryKind::TypeName;
             shell_request.path = path::StripExtendedPathPrefix(request.path);
+            if (result->attrs_valid) shell_request.attributes = fad.dwFileAttributes;
             ipc::ShellQueryResult shell_result;
             const auto cancelled = [this, &request] {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -252,14 +259,18 @@ std::vector<std::wstring> VisibleFolderPaths(const AppState& s) {
 
 void SyncVisibleWatches(AppState& s) {
     s.systemIntegration.Publish(s);
-    s.watches.Sync(VisibleFolderPaths(s), [&s](const std::wstring& path, bool overflow,
+    const HWND hwnd = s.hwnd;
+    s.watches.Sync(VisibleFolderPaths(s), [&s, hwnd](const std::wstring& path, bool overflow,
                                               std::vector<fs::DirNotifyEvent> events) {
         std::lock_guard<std::mutex> lock(s.notify_mu);
+        const bool first = s.notify_queue.empty();
         s.notify_queue.push_back({path, overflow, std::move(events)});
+        if (first) PostMessageW(hwnd, WM_UI_KICK, 0, 0);
     });
 }
 
 void BindCurrentLayout(AppState& s) {
+    CancelAppSurfaceScroll(s);
     app::LayoutTab* tab = s.window_tabs.Active();
     if (!tab || tab->panes.empty()) {
         s.pane = nullptr;
@@ -370,25 +381,29 @@ app::Pane* PaneAtSlot(AppState& s, int index) {
 std::wstring EntryFullPath(const app::Tab& tab, int index);
 
 D2D1_RECT_F ListRect(const AppState& s) {
-    D2D1_RECT_F pane = FocusedPaneRect(s);
-    float extra = 0.0f;
+    ui::PaneViewModel layout;
     const app::Tab* tab = s.pane ? s.pane->ActiveTab() : nullptr;
-    if (tab && !tab->banner_message.empty()) extra = 36.0f * s.scale;
-    std::wstring virtual_kind;
-    if (tab && app::ParsePulsePath(tab->current_path, &virtual_kind, nullptr) &&
-        virtual_kind == L"recent") {
-        extra += 40.0f * s.scale;
+    if (tab) {
+        // Only project geometry inputs; building the full VM here can recurse
+        // through details-panel layout and materialize snapshot-derived data.
+        layout.view_mode = tab->view_mode;
+        layout.banner_message = tab->banner_message;
+        if (const auto& banner = tab->banner_animation; banner.MatchesPath(tab->current_path)) {
+            layout.banner_message = banner.message;
+            layout.banner_expansion = banner.expansion.value;
+        }
+        std::wstring virtual_kind;
+        app::ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
+        layout.is_recent = virtual_kind == L"recent";
+        layout.is_query_search = virtual_kind == L"search";
+        layout.is_changes = virtual_kind == L"changes";
+        if (layout.is_changes) {
+            layout.banner_message = l10n::Get(l10n::StringId::ChangeScope);
+            layout.change_status_text = tab->change_status_text;
+        }
+        if (tab->column_layout) app::FillColumnStripView(layout.column_strip, *tab);
     }
-    if (virtual_kind == L"changes") extra += 36.0f * s.scale;
-    const ui::ViewMode mode = tab ? tab->view_mode : ui::ViewMode::Details;
-    if (tab && tab->column_layout) {
-        ui::PaneViewModel strip;
-        app::FillColumnStripView(strip.column_strip, *tab);
-        pane = s.renderer.PaneBodyBounds(strip, pane);
-    }
-    pane.top += s.renderer.PaneHeaderHeight() + extra +
-                (ui::ShowsColumnHeader(mode) ? s.renderer.ColumnHeaderHeight() : 0.0f);
-    return pane;
+    return s.renderer.PaneListRect(layout, FocusedPaneRect(s));
 }
 bool ScrollbarGeometry(const AppState& s, const ui::PaneViewModel& pane,
                               D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maxScroll) {
@@ -517,8 +532,23 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_index_status = s.index.Status();
             vm.settings_index_migrating = s.settings.migration_pending();
             if (vm.settings_page == 3) {
+                const auto transfer = GetSettingsTransferView();
+                vm.settings_transfer_busy = transfer.busy;
+                vm.settings_transfer_pending = transfer.pending;
+                vm.settings_transfer_has_backup = transfer.has_backup;
+                vm.settings_transfer_status = l10n::Get(transfer.busy ? l10n::StringId::SettingsTransferring :
+                    transfer.pending ? l10n::StringId::SettingsTransferPending : l10n::StringId::SettingsTransferDesc);
+                if (!transfer.busy && !transfer.pending && transfer.has_backup)
+                    vm.settings_transfer_status += L" \u00B7 " + transfer.backup_time;
                 vm.settings_about_rows = app::BuildAboutRows(vm.settings_index_service,
                                                              vm.settings_index_installed, s.scale);
+            }
+            if (vm.settings_page == 5) {
+                auto& system_context = s.settings.SystemCtx();
+                system_context.SetNotifyWindow(s.hwnd);
+                system_context.SetPulseHidden(s.ctxMenuPrefs.HiddenCatalogKeys());
+                system_context.EnsureLoaded();
+                vm.settings_sysctx = system_context.View();
             }
             if (s.shot.active) {
                 wchar_t simulated[2]{};
@@ -539,7 +569,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 vm.settings_index_storage_status = l10n::Get(l10n::StringId::StorageNextStartup) + s.settings.index_pending_path();
             if (!vm.settings_index_service && !s.settings.index_storage_error().empty())
                 vm.settings_index_status = s.settings.index_storage_error();
-            if (vm.settings_page == 0 && !s.settings.error().empty())
+            if (vm.settings_page == 8 && !s.settings.error().empty())
                 vm.settings_configuration_status = s.settings.error();
             vm.settings_index_error = s.settings.error();
             vm.settings_index_volumes.clear();
@@ -609,6 +639,16 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 row.group = static_cast<int>(ipc::GroupOf(seen.category));
                 row.on = s.ctxMenuPrefs.ItemEnabled(seen.key, seen.category, seen.from_com);
                 vm.settings_items.push_back(std::move(row));
+            }
+            vm.settings_builtin_first = vm.settings_items.size();
+            vm.settings_builtin_hidden = s.ctxMenuPrefs.builtin_hidden;
+            vm.settings_context_tab = s.settings.ContextTab();
+            for (int surface = 0; surface < static_cast<int>(app::BuiltinMenuSurface::Count); ++surface)
+                vm.settings_builtin_order[surface] = s.ctxMenuPrefs.BuiltinOrder(static_cast<app::BuiltinMenuSurface>(surface));
+            if (s.settings.menu_drag_live()) {
+                vm.settings_menu_drag = s.settings.menu_drag_item();
+                vm.settings_menu_drag_pos = s.settings.menu_drag_pos();
+                vm.settings_menu_drag_grab = s.settings.menu_drag_grab();
             }
             for (int index = 0; index < app::kBuiltinMenuItemCount; ++index) {
                 const auto item = static_cast<app::BuiltinMenuItem>(index);
@@ -751,7 +791,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             // it instead of rebuilding all snapshot-derived data twice.
             if (slot.focused) slot.pane = vm.pane;
             else app::FillPaneViewModel(slot.pane, *p, &s.places);
-            slot.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
+            slot.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
+                s.ctxMenuPrefs.BuiltinOrder(app::BuiltinMenuSurface::RowButtons));
             if (app::Tab* tab = p->ActiveTab()) {
                 FillChangePane(s, *tab, slot.pane, slot.rect);
                 for (const auto& cutPath : s.cutPaths) {
@@ -1435,7 +1476,7 @@ bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
                     if (item.exists) paths.push_back(item.path);
             }
             return paths;
-        }, !IsClipboardFormatAvailable(CF_HDROP) && ops::ClipboardHasShellFiles());
+        }, ops::ClipboardHasShellFiles());
     changed = availability.Consume() || changed;
     if (auto request = availability.BeginRefresh(now)) {
         const auto mailbox = availability.mailbox();
@@ -1457,7 +1498,9 @@ bool CanPasteIntoCurrent(AppState& s, bool refresh) {
     if (refresh && PumpClipboardAvailability(s, GetTickCount64()))
         InvalidateRect(s.hwnd, nullptr, FALSE);
     const auto* tab = ActiveTab(s);
-    return tab && !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path) &&
+    return tab && !tab->current_path.empty() &&
+        (!fs::IsVirtualPath(tab->current_path) || (app::IsDeviceTab(tab) &&
+            app::DeviceRegistry::Instance().FolderWritable(tab->current_path))) &&
         !tab->net_readonly && s.clipboard_availability.Available();
 }
 
@@ -1578,7 +1621,10 @@ void PrepareViewState(AppState& s) {
         s.detailsProbeViewGeneration = tab->view_generation;
         s.detailsProbeSnapshot = tab->snapshot;
         s.detailsProbeTick = GetTickCount64();
-        if (different_path) s.detailsScroll = 0.0f;
+        if (different_path) {
+            s.detailsScroll = 0.0f;
+            s.detailsScrollMotion.Reset();
+        }
         // Drop old facts before the worker publishes the next request version.
         s.detailsSelValid = false;
         s.detailsTypeName.clear();
@@ -1597,11 +1643,14 @@ void PrepareViewState(AppState& s) {
 ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     if (!s.pane) return {};
     s.changes.visible_paths.clear();
+    s.home_catalog.FillDriveLabels(s.sidebar);
     ui::WindowViewModel vm = app::BuildWindowViewModel(*s.pane, s.sidebar,
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
         s.sidebarQuickAccessHiddenMask, include_status);
-    vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden);
+    vm.details_motion_sampled = true;
+    vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
+        s.ctxMenuPrefs.BuiltinOrder(app::BuiltinMenuSurface::RowButtons));
     const auto command_context = BuildCommandContext(s);
     vm.can_paste = command_context.can_paste;
     vm.selection_has_drive_root = command_context.selection_has_drive_root;
@@ -1662,8 +1711,11 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.address_search_has_text = s.addressSearching && s.hwndAddressEdit &&
                                 GetWindowTextLengthW(s.hwndAddressEdit) > 0;
     vm.address_search_animation = s.addressSearchAnimation;
+    vm.address_path_animation = s.addressPathAnimation;
+    vm.address_path_closing_text = s.addressPathClosingText;
     vm.address_scope_animation = s.addressScopeAnimation;
     FillAddressSearchView(s, vm);
+    if (vm.address_searching && !s.addressSearching) vm.address_search_animation = 1.0f;
     vm.splitter_pressed = s.splitterDragging;
     vm.details_resize_pressed = s.detailsPanelResizing;
     if (s.marqueeActive) {
@@ -1894,6 +1946,8 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
                 : TrayDisplayPath(tab->current_path);
         }
         if (dv.has_selection && dv.multi_count == 1 && !dv.path.empty()) {
+            dv.cloud_online = !dv.is_dir && fs::IsCloudPlaceholder(dv.attrs);
+            dv.cloud_download_percent = s.cloud_downloads.Percent(dv.path);
             dv.starred = s.places.IsStarred(dv.path);
             if (s.detailsSelValid) {
                 dv.created_text = pulse::format::LocalFileTime(s.detailsCreated);
@@ -1946,7 +2000,19 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.tooltip_y = static_cast<float>(s.hoverPoint.y);
     FillPaneSlots(s, vm);
     s.home_catalog.Fill(vm.pane, &s.places);
-    for (auto& slot : vm.pane_slots) s.home_catalog.Fill(slot.pane, &s.places);
+    vm.pane.network_discovery_disabled = NetworkDiscoveryDisabled(s);
+    for (auto& slot : vm.pane_slots) {
+        s.home_catalog.Fill(slot.pane, &s.places);
+        slot.pane.network_discovery_disabled = vm.pane.network_discovery_disabled;
+        if (slot.pane.is_home) {
+            slot.pane.scroll_y = std::clamp(slot.pane.scroll_y, 0.0f, s.renderer.MaxScrollForPane(slot.pane, slot.rect));
+            const auto index = static_cast<int>(&slot - vm.pane_slots.data());
+            if (auto* pane = PaneAtSlot(s, index)) {
+                if (auto* tab = pane->ActiveTab()) tab->scroll_y = slot.pane.scroll_y;
+            }
+            if (slot.focused) vm.pane.scroll_y = slot.pane.scroll_y;
+        }
+    }
     if (vm.pane.is_home) {
         vm.status.status_text = l10n::Get(vm.pane.home_loading ? l10n::StringId::HomeLoading : l10n::StringId::Home);
         vm.status.selection_text.clear();
@@ -2049,7 +2115,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsFind: return text(I::SettingsFind);
     case R::SettingsNav: {
         const I names[]={I::SettingsGeneral,I::SettingsSearchIndex,I::SettingsContextMenu,I::SettingsAboutDiagnostics,I::SettingsDuplicates};
-        return s.hoverControlIndex>=0 && s.hoverControlIndex<5 ? text(names[s.hoverControlIndex]) : L"";
+        return s.hoverControlIndex>=0 && s.hoverControlIndex<static_cast<int>(std::size(names)) ? text(names[s.hoverControlIndex]) : L"";
     }
     case R::SettingsEffect: {
         if (s.hoverControlIndex >= 0 && s.hoverControlIndex < ui::kWindowEffectCount) {
@@ -2080,6 +2146,11 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsIndexExcludeAction: return text(I::TooltipAddExclusion);
     case R::SettingsIndexExcludeRemove: return text(I::TooltipRemoveExclusion);
     case R::SettingsDiagnosticsAction: {
+        if (s.hoverControlIndex >= 3 && s.hoverControlIndex <= 5) {
+            const I transfer[] = {I::ExportSettingsTitle, I::ImportSettingsTitle,
+                GetSettingsTransferView().pending ? I::RestartNow : I::RestoreSettingsTitle};
+            return text(transfer[s.hoverControlIndex - 3]);
+        }
         static constexpr I actions[] = {
             I::OpenDiagnostics, I::ClearDiagnostics, I::ExportDiagnostics,
         };
@@ -2142,7 +2213,6 @@ std::wstring TooltipForHover(AppState& s) {
     case R::RowStar: return text(I::Star);
     case R::RowNewTab: return text(I::OpenNewTab);
     case R::RowMore: return text(I::MoreActions);
-    case R::SidebarItemAction: return text(I::Unpin);
     // On the icon rail there is no text to read, so every row (and every folded
     // section's icon) names itself on hover.
     case R::SidebarHeader: return SidebarRailActive(s) ? s.hoverLabel : L"";
@@ -2177,6 +2247,11 @@ std::wstring TooltipForHover(AppState& s) {
             if (entry.is_dir && !entry.change_record_only)
                 tooltip = pulse::path::KnownFolderDisplayName(full, tooltip);
             const std::wstring name_only = tooltip;
+            if (app::IsUnderCloudFilesRoot(full)) {
+                const uint64_t modified = (static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) | entry.mtime.dwLowDateTime;
+                tooltip += L" · " + l10n::Get(ui::CloudStatusLabel(entry.attrs,
+                    app::CloudSyncProbe::Instance().Lookup(full, modified)));
+            }
             // Narrow panes drop columns; keep their facts reachable on hover.
             if (tab->view_mode == ui::ViewMode::Details) {
                 using K = ui::MainRenderer::ColumnKind;

@@ -1,0 +1,19 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.41
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+CMake is re-running because E:/Projects/pulse/build_audit_msbuild_20261025/CMakeFiles/generate.stamp is out-of-date.
+  the file 'E:/Projects/pulse/CMakeLists.txt'
+  is newer than 'E:/Projects/pulse/build_audit_msbuild_20261025/CMakeFiles/generate.stamp.depend'
+  result='-1'
+-- Selecting Windows SDK version 10.0.26100.0 to target Windows 6.2.9200.
+-- Pulse text renderer: installed LumaText shared library
+-- Configuring done (0.3s)
+-- Generating done (1.3s)
+-- Build files have been written to: E:/Projects/pulse/build_audit_msbuild_20261025
+
+  Checking File Globs
+  Building Custom Rule E:/Projects/pulse/CMakeLists.txt
+  system_ctx_exchange_test.cpp
+  pulse_system_ctx_exchange_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_exchange_test.exe

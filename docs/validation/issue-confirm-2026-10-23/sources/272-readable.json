@@ -1,0 +1,15 @@
+{
+  "number": 272,
+  "title": "预览动画存在异常",
+  "body": "https://github.com/user-attachments/assets/2f3342a5-641b-4a65-9996-3eccd8ca1adc\n如上所见，预览时先打开上翻的预览再关闭，体验感不好",
+  "url": "https://github.com/jimmgreen/pulse/issues/272",
+  "captured_at": "2026-10-23T03:10:07.145648+00:00",
+  "updated_at": "2026-10-16T05:26:22Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

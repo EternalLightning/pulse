@@ -43,11 +43,12 @@ using namespace pulse;
 
 namespace pulse {
 std::wstring FormatAddressPath(const std::wstring& text) {
+    // The empty address is This PC, including when submitting its unchanged editor.
     std::wstring t = text;
-    if (t.empty()) return pulse::path::DefaultNavigationRoot();
+    if (t.empty()) return {};
     auto start = t.find_first_not_of(L" \"");
     auto end = t.find_last_not_of(L" \"");
-    if (start == std::wstring::npos) return pulse::path::DefaultNavigationRoot();
+    if (start == std::wstring::npos) return {};
     t = t.substr(start, end - start + 1);
     if (t.size() == 2 && t[1] == L':') t += L'\\';
     return t;
@@ -108,14 +109,19 @@ void LayoutAddressEditor(AppState& s) {
     if (!s.hwndAddressEdit || !s.hwnd) return;
     D2D1_RECT_F addr = s.addressSearching ? s.renderer.SearchBarRect((float)s.compositor.Width()) : s.renderer.AddressBarRect((float)s.compositor.Width());
     if (s.addressSearching) {
-        PlaceHostedEdit(s.hwndAddressEdit, s.hwnd, ui::LayoutAddressSearch(addr, s.scale).input,
+        auto input = ui::LayoutAddressSearch(addr, s.scale).input;
+        const float offset = 6.0f * s.scale * (1.0f - s.addressSearchAnimation);
+        input.left += offset;
+        input.right += offset;
+        PlaceHostedEdit(s.hwndAddressEdit, s.hwnd, input,
                         s.scale, 0, 0);
         return;
     }
     const float insetX = 10.0f * s.scale;
     const float insetY = 2.0f * s.scale;
+    const float offset = 6.0f * s.scale * (1.0f - s.addressPathAnimation);
     PlaceHostedEdit(s.hwndAddressEdit, s.hwnd,
-        D2D1::RectF(addr.left + insetX, addr.top + insetY,
+        D2D1::RectF(addr.left + insetX + offset, addr.top + insetY,
                     addr.right - insetX, addr.bottom - insetY),
         s.scale, 0, 0);
 }
@@ -129,14 +135,25 @@ void EnsureEditVisuals(AppState& s) {
 
 void HideRenameOverlay(AppState& s, bool commit);
 
-void ShowAddressEditor(AppState& s) {
+void ShowAddressEditor(AppState& s, bool searching) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     if (s.renameIndex >= 0) HideRenameOverlay(s, false);
     if (!s.tagRenameId.empty()) HideTagRenameOverlay(s, true);
     if (s.filterEditing) HideFilterEditor(s, true);
-    s.addressSearching = false;
+    if (s.addressEditing && s.addressSearching != searching && s.hwndAddressEdit) {
+        const int length = GetWindowTextLengthW(s.hwndAddressEdit);
+        auto& closing_text = s.addressSearching ? s.addressSearchClosingText : s.addressPathClosingText;
+        closing_text.resize(static_cast<size_t>(length) + 1);
+        closing_text.resize(GetWindowTextW(s.hwndAddressEdit, closing_text.data(), length + 1));
+    }
+    s.addressSearching = searching;
     s.addressEditing = true;
+    s.addressAnimationTick = app::PaneAnimationTimeMs();
+    if (!searching) {
+        s.addressPathClosingText.clear();
+        if (!s.renderer.MotionEnabled() || s.shot_high_contrast) s.addressPathAnimation = 1.0f;
+    }
     // DestroyWindow synchronously sends WM_KILLFOCUS to the old editor.
     s.addressIgnoreKillFocus = true;
     if (s.hwndAddressEdit) {
@@ -147,14 +164,18 @@ void ShowAddressEditor(AppState& s) {
         s.hwndAddressEdit = CreateHostedEdit(s, AddressEditProc);
         if (!s.hwndAddressEdit) {
             s.addressEditing = false;
+            s.addressSearching = false;
             s.addressIgnoreKillFocus = false;
             return;
         }
     }
     const std::wstring shown = ClipboardPath(tab->current_path);
-    SendMessageW(s.hwndAddressEdit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L""));
-    SetWindowTextW(s.hwndAddressEdit, shown.empty() ? l10n::Get(l10n::StringId::ThisPc).c_str() : shown.c_str());
+    const auto cue = shown.empty() ? l10n::Get(l10n::StringId::ThisPc) : std::wstring{};
+    SendMessageW(s.hwndAddressEdit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(cue.c_str()));
+    SetWindowTextW(s.hwndAddressEdit, shown.c_str());
     LayoutAddressEditor(s);
+    s.compositor.SetEditOpacity(s.hwndAddressEdit, ui::AddressSearchContentOpacity(
+        searching ? s.addressSearchAnimation : s.addressPathAnimation));
     ShowWindow(s.hwndAddressEdit, SW_SHOW);
     SetForegroundWindow(GetAncestor(s.hwndAddressEdit, GA_ROOT));
     SetFocus(s.hwndAddressEdit);
@@ -165,8 +186,20 @@ void ShowAddressEditor(AppState& s) {
 
 void HideAddressEditor(AppState& s, bool navigate) {
     if (!s.hwndAddressEdit) return;
+    if (s.searchHistoryOpen && s.menu) s.menu->RequestDismiss();
     FlushAddressSearch(s);
     SaveAddressSearchDraft(s);
+    if (s.addressSearching) {
+        const int length = GetWindowTextLengthW(s.hwndAddressEdit);
+        s.addressSearchClosingText.resize(static_cast<size_t>(length) + 1);
+        s.addressSearchClosingText.resize(GetWindowTextW(s.hwndAddressEdit,
+            s.addressSearchClosingText.data(), length + 1));
+    } else if (s.addressEditing) {
+        const int length = GetWindowTextLengthW(s.hwndAddressEdit);
+        s.addressPathClosingText.resize(static_cast<size_t>(length) + 1);
+        s.addressPathClosingText.resize(GetWindowTextW(s.hwndAddressEdit,
+            s.addressPathClosingText.data(), length + 1));
+    }
     if (navigate) {
         wchar_t buf[MAX_PATH * 4];
         GetWindowTextW(s.hwndAddressEdit, buf, ARRAYSIZE(buf));
@@ -548,8 +581,16 @@ LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
     if (s && s->addressSearchComposing && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_CHAR))
         return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
-    if (s && msg == WM_LBUTTONUP && s->addressSearching && !s->searchHistoryOpen)
-        PostMessageW(s->hwnd, WM_SEARCH_HISTORY, 0, 0);
+    if (s && msg == WM_LBUTTONDOWN && s->addressSearching) {
+        s->searchHistoryPointerClosing = s->searchHistoryOpen;
+        if (s->searchHistoryPointerClosing && s->menu) s->menu->RequestDismiss();
+    }
+    if (s && msg == WM_LBUTTONUP && s->addressSearching) {
+        const bool closing = s->searchHistoryPointerClosing;
+        s->searchHistoryPointerClosing = false;
+        if (!closing && !s->searchHistoryOpen)
+            PostMessageW(s->hwnd, WM_SEARCH_HISTORY, 0, 0);
+    }
     LRESULT handled = 0;
     if (s && HandleHostedEditMessage(*s, hwnd, msg, wParam, lParam, handled)) return handled;
     switch (msg) {
@@ -578,7 +619,7 @@ LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
         if (wParam == VK_ESCAPE) {
-            if (s->menu && s->menu->IsOpen()) s->menu->Dismiss();
+            if (s->menu && s->menu->IsOpen()) s->menu->RequestDismiss();
             else if (s->addressSearching) ExitAddressSearch(*s);
             else HideAddressEditor(*s, false);
             return 0;

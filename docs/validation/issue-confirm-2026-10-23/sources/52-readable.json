@@ -1,0 +1,55 @@
+{
+  "number": 52,
+  "title": "[BUG] 标题栏窗口按钮图标重复绘制且错位重叠（最小化/最大化/关闭）",
+  "body": "## 问题描述\n\n窗口标题栏右上角的**最小化 / 最大化（还原）/ 关闭**三个图标被挤在一起，并且**同一组图标被绘制了两遍**：一组不透明度较高（清晰明亮），一组不透明度较低（灰暗），两个图标错位叠在一起。这看起来是标题栏按钮的**渲染/绘制缺陷**，而不是图标本身的设计。\n\n## 复现步骤\n\n1. 启动 Pulse（当前版本 **1.0.45**）。\n2. 观察窗口标题栏右上角的窗口按钮区域。\n3. 无需其他操作，问题稳定出现。\n\n## 实际表现\n\n对截图（1600×960，缩放 100%）标题栏区域做逐像素分析，把像素按亮度分成**亮组**（不透明度高）与**暗组**（不透明度低）后，可以看到每个按钮都各出现**两次**，且暗组相对亮组整体发生**向右下方向的错位**：\n\n| 按钮 | 暗组（低不透明度） | 亮组（高不透明度） | 错位 |\n| --- | --- | --- | --- |\n| 最小化（—） | x=1407–1421, y=22 | x=1421–1433, y=35–36 | +14, +13 |\n| 最大化 / 还原（方块） | x=1476–1501, y=15–42 | x=1490–1502, y=29–42 | +14, +14 |\n| 关闭（×） | x=1547–1570, y=15–41 | x=1560–1570, y=30–41 | +13, +15 |\n\n也就是说：\n\n- 三个按钮**各自只应出现一次**，实际却各出现了两次（一亮一暗）；\n- 两套图标之间的错位约为 **+14 px 水平、+14 px 垂直**（右下方向）；\n- 由于错位，亮组图标与相邻按钮的暗组图标发生**视觉重叠**，三个按钮看起来\"挤在一起\"，难以分辨边界。\n\n以下是同一区域的放大图（6 倍最近邻放大），可以清楚看到\"一暗一亮\"两组图标错位叠放：\n\n![标题栏窗口按钮放大图](https://gist.githubusercontent.com/yukitakasama/622f3f86a08ba46b61ac2bb55f9df060/raw/92d862f25e4bde0478b2e09155173f71be041f4e/issue1.png)\n\n## 期望表现\n\n- 最小化、最大化/还原、关闭三个按钮**各自只绘制一次**；\n- 不存在重复的低不透明度副本，也不存在错位叠影；\n- 三个按钮各自占用独立、互不重叠的区域，间距一致。\n\n## 环境\n\n- Pulse 版本：1.0.45（最新版）\n- 系统：Windows\n- 显示缩放：100%，截图分辨率 1600×960\n\n## 截图说明\n\n上文嵌入的图片来自完整截图 `issue1.png` 中标题栏右上角区域（原图 x≈1400–1600, y≈0–70）的 6 倍放大。原始截图文件：`issue1.png`。\n\n> 备注：本问题与 #50（拖拽窗体不能触发 Groupy）无关，属于标题栏按钮的渲染/绘制问题。",
+  "url": "https://github.com/jimmgreen/pulse/issues/52",
+  "captured_at": "2026-10-23T03:10:07.221948+00:00",
+  "updated_at": "2026-10-03T13:10:08Z",
+  "comments": [
+    {
+      "body": "<img width=\"1600\" height=\"960\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/4cf130d6-1915-4055-b32a-589252690094\" />",
+      "bodyHTML": "<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/302508430/662698536-4cf130d6-1915-4055-b32a-589252690094.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjksIm5iZiI6MTc5MjcyNDk2OSwicGF0aCI6Ii8zMDI1MDg0MzAvNjYyNjk4NTM2LTRjZjEzMGQ2LTE5MTUtNDA1NS1iMzJhLTU4OTI1MjY5MDA5NC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYxMDIzJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MTAyM1QwMzA5MjlaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1mY2JkZTY4MjZmODczMDhmMmQ1N2JiMDQyNzQ5NWEwNjY0YzZkYjg1NzExMWFlNWM4MzVlNzRjMjVmOWIzYjZhJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.LDJfso-LG0vj8aJFt55KLUuxrTQgZj-q-jZMoae9IuA\"><img width=\"1600\" height=\"960\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/302508430/662698536-4cf130d6-1915-4055-b32a-589252690094.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjksIm5iZiI6MTc5MjcyNDk2OSwicGF0aCI6Ii8zMDI1MDg0MzAvNjYyNjk4NTM2LTRjZjEzMGQ2LTE5MTUtNDA1NS1iMzJhLTU4OTI1MjY5MDA5NC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYxMDIzJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MTAyM1QwMzA5MjlaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1mY2JkZTY4MjZmODczMDhmMmQ1N2JiMDQyNzQ5NWEwNjY0YzZkYjg1NzExMWFlNWM4MzVlNzRjMjVmOWIzYjZhJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.LDJfso-LG0vj8aJFt55KLUuxrTQgZj-q-jZMoae9IuA\" style=\"max-width: 100%; height: auto; max-height: 960px;; aspect-ratio: 1600 / 960; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOEgfpjg",
+        "login": "yukitakasama",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/302508430?v=4",
+        "profileUrl": "https://github.com/yukitakasama",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/52#issuecomment-5923369358"
+    },
+    {
+      "body": "<img width=\"1864\" height=\"1158\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/a0097155-9a45-4542-b22a-2ea09d5637ea\" />\n我使用的版本为 1.0.45，运行在 Windows 11 22H2 上，发现了完全一样的问题。同时，将指针悬浮在后方的虚影上时，会出现两种不同风格的 Tooltips，如上图所示。",
+      "bodyHTML": "<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/109282157/662842820-a0097155-9a45-4542-b22a-2ea09d5637ea.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjksIm5iZiI6MTc5MjcyNDk2OSwicGF0aCI6Ii8xMDkyODIxNTcvNjYyODQyODIwLWEwMDk3MTU1LTlhNDUtNDU0Mi1iMjJhLTJlYTA5ZDU2MzdlYS5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYxMDIzJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MTAyM1QwMzA5MjlaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1lN2VkN2UyYzMyOTliY2E5ZDk0MDQyNzQ0ZjQ1NWZiMTMxZTAwYTQxNDZlMDEyZjJmNTBlNTkyMjk2Yzk2ZGY2JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.iE1SsQiMHjlmYIpy6lJj7ncSSHnHT08JyzbGk68eH9k\"><img width=\"1864\" height=\"1158\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/109282157/662842820-a0097155-9a45-4542-b22a-2ea09d5637ea.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNjksIm5iZiI6MTc5MjcyNDk2OSwicGF0aCI6Ii8xMDkyODIxNTcvNjYyODQyODIwLWEwMDk3MTU1LTlhNDUtNDU0Mi1iMjJhLTJlYTA5ZDU2MzdlYS5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYxMDIzJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MTAyM1QwMzA5MjlaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1lN2VkN2UyYzMyOTliY2E5ZDk0MDQyNzQ0ZjQ1NWZiMTMxZTAwYTQxNDZlMDEyZjJmNTBlNTkyMjk2Yzk2ZGY2JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.iE1SsQiMHjlmYIpy6lJj7ncSSHnHT08JyzbGk68eH9k\" style=\"max-width: 100%; height: auto; max-height: 1158px;; aspect-ratio: 1864 / 1158; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>\n我使用的版本为 1.0.45，运行在 Windows 11 22H2 上，发现了完全一样的问题。同时，将指针悬浮在后方的虚影上时，会出现两种不同风格的 Tooltips，如上图所示。",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBoODbQ",
+        "login": "Hexa5586",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/109282157?u=cc9eaca2f7c3eff0fca47302d29f3a93cba51c2f&v=4",
+        "profileUrl": "https://github.com/Hexa5586",
+        "name": "HoshiInori."
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/52#issuecomment-5926447698"
+    },
+    {
+      "body": "感谢详细的逐像素分析和截图。@Hexa5586 补充的「悬停在虚影上会出现两种不同风格的 Tooltip」也印证了原因。\n\n**原因**：那组灰暗、错位的按钮不是 Pulse 画的，而是 Windows（DWM）在窗口底层画的系统原生「最小化 / 最大化 / 关闭」按钮。主窗口当时带有 `WS_SYSMENU` 样式，DWM 因此在扩展到客户区的框架里画出了自己的一组按钮，又被 Pulse 半透明的 Mica 标题栏透了出来，于是形成「一亮一暗」两组叠影，悬停时也会同时出现系统和 Pulse 两种 Tooltip。\n\n**修复**：0699592 去掉了主窗口的 `WS_SYSMENU`，系统最小化 / 最大化动画、Alt+F4、调整大小和贴靠布局都不受影响，同时加了编译期检查防止它被重新加回来。这个修复从 **1.0.46** 开始包含在发布版本里，你们反馈时用的是 1.0.45。\n\n请更新到最新版（目前是 1.0.48）后再看看。如果还能看到重复的按钮，请重新打开这个 issue，并附上版本号和截图。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢详细的逐像素分析和截图。<a class=\"user-mention notranslate\" data-hovercard-type=\"user\" data-hovercard-url=\"/users/Hexa5586/hovercard\" data-octo-click=\"hovercard-link-click\" data-octo-dimensions=\"link_type:self\" href=\"https://github.com/Hexa5586\">@Hexa5586</a> 补充的「悬停在虚影上会出现两种不同风格的 Tooltip」也印证了原因。</p>\n<p dir=\"auto\"><strong>原因</strong>：那组灰暗、错位的按钮不是 Pulse 画的，而是 Windows（DWM）在窗口底层画的系统原生「最小化 / 最大化 / 关闭」按钮。主窗口当时带有 <code class=\"notranslate\">WS_SYSMENU</code> 样式，DWM 因此在扩展到客户区的框架里画出了自己的一组按钮，又被 Pulse 半透明的 Mica 标题栏透了出来，于是形成「一亮一暗」两组叠影，悬停时也会同时出现系统和 Pulse 两种 Tooltip。</p>\n<p dir=\"auto\"><strong>修复</strong>：0699592 去掉了主窗口的 <code class=\"notranslate\">WS_SYSMENU</code>，系统最小化 / 最大化动画、Alt+F4、调整大小和贴靠布局都不受影响，同时加了编译期检查防止它被重新加回来。这个修复从 <strong>1.0.46</strong> 开始包含在发布版本里，你们反馈时用的是 1.0.45。</p>\n<p dir=\"auto\">请更新到最新版（目前是 1.0.48）后再看看。如果还能看到重复的按钮，请重新打开这个 issue，并附上版本号和截图。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/52#issuecomment-5969478372"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPU-PWAAqjU5MjMzNjkzNTg=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQHi34ABqzMyMzk3ODkwNDE0"
+  }
+}

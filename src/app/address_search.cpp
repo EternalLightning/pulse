@@ -59,6 +59,10 @@ void SaveAddressSearchDraft(AppState& s) {
 
 void FillAddressSearchView(AppState& s, ui::WindowViewModel& vm) {
     vm.address_search_content = s.addressSearchContent;
+    vm.address_search_scope_open = s.searchScopeOpen;
+    vm.address_search_options_open = s.searchOptionsOpen;
+    if (!s.addressSearching && s.addressSearchAnimation > 0.0f)
+        vm.address_search_text = s.addressSearchClosingText;
     auto* tab = ActiveTab(s);
     if (!s.addressEditing && IsAddressSearchResults(tab)) {
         RestoreSearchDraft(*tab);
@@ -113,6 +117,8 @@ void ShowAddressSearch(AppState& s) {
     auto* tab = ActiveTab(s);
     if (!tab) return;
     std::wstring query;
+    if (IsAddressSearchResults(tab)) s.addressSearchAnimation = 1.0f;
+    s.addressSearchClosingText.clear();
     if (IsAddressSearchResults(tab)) RestoreSearchDraft(*tab);
     if (tab->search_input_path == tab->current_path) {
         query = tab->search_input_text;
@@ -124,7 +130,7 @@ void ShowAddressSearch(AppState& s) {
         s.addressSearchCurrent = !s.addressSearchRoot.empty();
         s.addressSearchContent = s.appPrefs.address_search_content;
     }
-    ShowAddressEditor(s);
+    ShowAddressEditor(s, true);
     if (!s.addressEditing || !s.hwndAddressEdit) return;
     s.addressSearching = true;
     s.addressAnimationTick = app::PaneAnimationTimeMs();
@@ -133,6 +139,7 @@ void ShowAddressSearch(AppState& s) {
     const auto cue = l10n::Get(s.addressSearchContent ? l10n::StringId::SearchContentHint : l10n::StringId::SearchNameHint);
     SendMessageW(s.hwndAddressEdit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(cue.c_str()));
     LayoutAddressEditor(s);
+    s.compositor.SetEditOpacity(s.hwndAddressEdit, ui::AddressSearchContentOpacity(s.addressSearchAnimation));
     InvalidateRect(s.hwnd, nullptr, FALSE);
     if (query.empty() && !s.searchHistoryOpen)
         PostMessageW(s.hwnd, WM_SEARCH_HISTORY, 0, 0);
@@ -141,7 +148,7 @@ void ShowAddressSearch(AppState& s) {
 void SwitchAddressSearchMode(AppState& s, bool content) {
     if (!s.addressSearching) ShowAddressSearch(s);
     if (s.addressSearchContent == content) return;
-    if (s.searchHistoryOpen && s.menu) s.menu->Dismiss();
+    if (s.searchHistoryOpen && s.menu) s.menu->RequestDismiss();
     s.addressSearchContent = content;
     const auto& cue = l10n::Get(content ? l10n::StringId::SearchContentHint : l10n::StringId::SearchNameHint);
     SendMessageW(s.hwndAddressEdit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(cue.c_str()));
@@ -251,7 +258,7 @@ void SubmitAddressSearch(AppState& s, bool live) {
 void ShowAddressSearchScope(AppState& s) {
     if (s.searchHistoryOpen) {
         s.searchScopePending = true;
-        if (s.menu) s.menu->Dismiss();
+        if (s.menu) s.menu->RequestDismiss();
         return;
     }
     if (!s.addressSearching || !EnsureMenu(s)) return;
@@ -272,11 +279,18 @@ void ShowAddressSearchScope(AppState& s) {
     const auto layout = ui::LayoutAddressSearch(
         s.renderer.SearchBarRect(static_cast<float>(s.compositor.Width())), s.scale);
     POINT anchor{static_cast<LONG>(layout.scope.left), static_cast<LONG>(layout.scope.bottom)};
+    RECT toggle{static_cast<LONG>(layout.scope.left), static_cast<LONG>(layout.scope.top),
+                static_cast<LONG>(layout.scope.right), static_cast<LONG>(layout.scope.bottom)};
+    MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+    s.menu->SetToggleRect(toggle);
     ClientToScreen(s.hwnd, &anchor);
     anchor.x -= ui::FluentMenu::kShadowMargin;
     anchor.y += static_cast<LONG>(4 * s.scale) - ui::FluentMenu::kShadowMargin;
     s.addressIgnoreKillFocus = true;
-    const int command = s.menu->TrackPopup(anchor, std::move(items));
+    s.searchScopeOpen = true;
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+    const int command = s.menu->TrackToolbarPopup(anchor, std::move(items));
+    s.searchScopeOpen = false;
     if (command == 3) {
         std::wstring chosen;
         if (PickFolder(s.hwnd, chosen, l10n::Get(l10n::StringId::SearchChooseScope).c_str())) {
@@ -392,7 +406,8 @@ bool TickAddressSearchDeadlines(AppState& s, ULONGLONG now) {
 
 bool TickAddressSearchAnimation(AppState& s, uint64_t now) {
     const float target = s.addressSearching ? 1.0f : 0.0f;
-    if (s.addressSearchAnimation == target && s.addressScopeAnimation == 0.0f) {
+    const float path_target = s.addressEditing && !s.addressSearching ? 1.0f : 0.0f;
+    if (s.addressSearchAnimation == target && s.addressPathAnimation == path_target && s.addressScopeAnimation == 0.0f) {
         s.addressAnimationTick = 0;
         return false;
     }
@@ -400,11 +415,20 @@ bool TickAddressSearchAnimation(AppState& s, uint64_t now) {
     const float dt = s.addressAnimationTick ? static_cast<float>(now - s.addressAnimationTick) : 16.0f;
     s.addressAnimationTick = now;
     const float blend = animate ? 1.0f - std::exp(-std::min(dt, 100.0f) / 55.0f) : 1.0f;
-    s.addressSearchAnimation += (target - s.addressSearchAnimation) * blend;
+    const float step = animate ? std::min(dt, 100.0f) / 200.0f : 1.0f;
+    s.addressSearchAnimation += std::clamp(target - s.addressSearchAnimation, -step, step);
     if (std::abs(s.addressSearchAnimation - target) < 0.005f) s.addressSearchAnimation = target;
+    s.addressPathAnimation += std::clamp(path_target - s.addressPathAnimation, -step, step);
+    if (std::abs(s.addressPathAnimation - path_target) < 0.005f) s.addressPathAnimation = path_target;
+    if (s.addressPathAnimation == 0.0f) s.addressPathClosingText.clear();
     s.addressScopeAnimation *= 1.0f - blend;
     if (s.addressScopeAnimation < 0.005f) s.addressScopeAnimation = 0.0f;
-    return s.addressSearchAnimation != target || s.addressScopeAnimation != 0.0f;
+    if (s.addressEditing && s.hwndAddressEdit) {
+        LayoutAddressEditor(s);
+        s.compositor.SetEditOpacity(s.hwndAddressEdit, ui::AddressSearchContentOpacity(
+            s.addressSearching ? s.addressSearchAnimation : s.addressPathAnimation));
+    }
+    return s.addressSearchAnimation != target || s.addressPathAnimation != path_target || s.addressScopeAnimation != 0.0f;
 }
 
 } // namespace pulse

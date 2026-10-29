@@ -1,0 +1,87 @@
+{
+  "scope": "F01 #59, F03 #49, F10 #277, F14 #86",
+  "date": "2026-10-23",
+  "modified_product_files": [
+    "src/app/context_menu_controller.cpp",
+    "src/shell_host/shell_launch_worker.cpp"
+  ],
+  "regression_source": "src/bench/shell_launch_regression_test.cpp",
+  "validation": {
+    "method": "Private MSVC x64 C++20 /W4 build; direct production controller plus production worker Execute compiled into a test translation unit with CreateProcessW/ShellExecuteExW interception limited to that fixture. Ordinary batch regression uses real ShellExecuteExW and two isolated batch files; elevation uses captured API calls only.",
+    "build_command": "cmd /d /c bench_data\\issue-confirm-shell-fixes\\build-probe.cmd",
+    "run_command": ".\\bench_data\\issue-confirm-shell-fixes\\probe.exe",
+    "before": {
+      "checks": 17,
+      "failed": 11,
+      "log": "docs/validation/issue-confirm-2026-10-23/shell-fixes-before.txt",
+      "note": "Initial focused cases were run against unchanged production sources before the fixes. Additional boundary cases and fixture cleanup checks were added afterward."
+    },
+    "after": {
+      "checks": 29,
+      "failed": 0,
+      "log": "docs/validation/issue-confirm-2026-10-23/shell-fixes-after.txt",
+      "source": "src/bench/shell_launch_regression_test.cpp"
+    },
+    "limits": [
+      "No HiBit, WinRAR or FileMenuTools installation or invocation; no actual UAC prompt or elevated process was launched.",
+      "The ordinary batch check exercises the production launch function; it does not automate a visible Pulse double click or verify the complete IPC broker lifecycle.",
+      "UNC directory selection is checked lexically with captured ShellExecute arguments; no network share is contacted.",
+      "Private build reused existing pulse_localization.lib, pulse_user_storage.lib and the builtin_menu_items object; it did not run CMake or write shared build outputs.",
+      "Full product targets and the newly connected CMake regression target remain for the parent agent's serialized build."
+    ]
+  },
+  "findings": [
+    {
+      "id": "F01",
+      "issue": 59,
+      "status": "fixed_confirmed_same_bug",
+      "original_source": "docs/validation/issue-confirm-2026-10-23/sources/59-readable.json",
+      "confirmation": "Original issue identifies CompleteComQuery caching partial snapshots; its maintainer confirms the final-only cache fix. Current production contained the same unconditional assignment. The unchanged production controller failed the next-session full-cache and cold-partial checks.",
+      "change": "Cache COM items only when partial is false. Partial items continue to serve the active session, final empty snapshots still clear the cache, and cached commands remain disabled until the new live session validates them.",
+      "evidence": [
+        "src/app/context_menu_controller.cpp:427",
+        "src/bench/shell_launch_regression_test.cpp:53"
+      ]
+    },
+    {
+      "id": "F03",
+      "issue": 49,
+      "status": "fixed_confirmed_same_bug",
+      "original_source": "docs/validation/issue-confirm-2026-10-23/sources/49-readable.json",
+      "confirmation": "Original batch reproducer depends on same-folder data and helper files; maintainer confirms ordinary opening must supply the item's folder. The unchanged production launch function reproduced that failure with two real isolated batch files.",
+      "change": "When no executable or explicit directory is specified, derive each target's working directory in the Shell worker before ShellExecute. Preserve explicit directory precedence; handle relative paths, drive/share roots, trailing separators, extended prefixes and UNC file parents; leave virtual parsing names and bare UNC server browsing without a filesystem directory.",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:124",
+        "src/bench/shell_launch_regression_test.cpp:90"
+      ]
+    },
+    {
+      "id": "F14",
+      "issue": 86,
+      "status": "fixed_confirmed_same_bug",
+      "original_source": "docs/validation/issue-confirm-2026-10-23/sources/86-readable.json",
+      "confirmation": "Maintainer explicitly identifies CreateProcess Windows error 740 and confirms retrying the same executable with the original arguments and directory through runas; issue reporter confirms HiBit recovered. Current production returned error 740 directly. Injecting that API result into the unchanged production Execute reproduced the missing fallback and cancellation propagation.",
+      "change": "Only ERROR_ELEVATION_REQUIRED retries ShellExecuteExW with runas; preserve original executable/argument tail/directory. Keep a separate mutable CreateProcess buffer, resolve unquoted executable prefixes in order, preserve cancellation and other Shell errors, and retain the original error for unparseable commands. Other CreateProcess errors do not request elevation.",
+      "evidence": [
+        "src/shell_host/shell_launch_worker.cpp:145",
+        "src/shell_host/shell_launch_worker.cpp:197",
+        "src/bench/shell_launch_regression_test.cpp:147"
+      ],
+      "boundary": "Real UAC and the HiBit monitoring workflow were deliberately not executed; API result handling, parameter preservation and error paths were verified with interception."
+    },
+    {
+      "id": "F10",
+      "issue": 277,
+      "status": "not_changed_capability_extension",
+      "original_source": "docs/validation/issue-confirm-2026-10-23/sources/277-readable.json",
+      "confirmation": "Original issue requests preserving FileMenuTools nested menus. Local collection flattens the second submenu level and skips deeper ones, but CtxItemOut, IPC CtxMenuItem and ComposeEntries only express one parent/child layer.",
+      "decision": "Preserving arbitrary nesting requires extending the wire/model and display/invocation contracts across modules; this exceeds a narrowly confirmed existing-path fix. No product change or claim of FileMenuTools runtime reproduction was made.",
+      "evidence": [
+        "src/shell_host/ctx_handlers.cpp:197",
+        "src/shell_host/ctx_handlers.h:19",
+        "src/app/context_menu_controller.cpp:467"
+      ]
+    }
+  ],
+  "preserved_existing_changes": "Existing Open With promotion in context_menu_controller.cpp and all other worktree changes were retained. No app_main/app_runtime/app_input, public report, report-data or CMake edits were made by this agent."
+}

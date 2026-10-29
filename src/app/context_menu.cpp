@@ -74,6 +74,8 @@ void OrganizeItemMenu(std::vector<ui::FluentMenuItem>& items) {
         case CmdOpenPath: return 12;
         case CmdOpenTerminal: return 13;
         case CmdBatchRename: return 20;
+        case CmdNewFolderWithSelection: return 23;
+        case CmdUngroupFolder: return 24;
         case CmdCopyPath: return 21;
         case CmdUndo: return 22;
         case CmdSelectTextCompare: return 30;
@@ -189,8 +191,8 @@ std::wstring RecentChangesMenuPath(const Tab& tab, bool background) {
 }
 
 void AppendRecentChangesCommand(std::vector<ui::FluentMenuItem>& items,
-                                const std::wstring& path) {
-    if (path.empty() || fs::IsVirtualPath(path)) return;
+                                const std::wstring& path, bool enabled) {
+    if (!enabled || path.empty() || fs::IsVirtualPath(path)) return;
     auto item = Item(CmdViewRecentChanges, l10n::Get(l10n::StringId::ChangeView).c_str(), L"\xE81C");
     items.insert(items.begin() + (items.empty() ? 0 : 1), std::move(item));
 }
@@ -347,19 +349,17 @@ std::vector<ui::FluentMenuItem> BuildSortMenu(const BackgroundViewOptions& optio
     return std::move(sort.children);
 }
 
-ui::FluentMenuItem BuildShortcutHints() {
-    return Item(CmdShortcutHelp, l10n::Get(l10n::StringId::ShortcutHints).c_str(), L"\xE946");
-}
-
 void AppendBackgroundViewCommands(std::vector<ui::FluentMenuItem>& items,
                                   const BackgroundViewOptions& options) {
     auto view = Item(CmdNone, l10n::Get(l10n::StringId::View).c_str(), L"\xE8A9");
     view.children = BuildViewMenu(options.view_mode, options.details_panel);
     auto sort = Item(CmdNone, l10n::Get(l10n::StringId::SortBy).c_str(), L"\xE8CB", nullptr, options.can_sort);
     sort.children = BuildSortMenu(options);
+    auto group = Item(CmdNone, l10n::Get(l10n::StringId::GroupBy).c_str(), L"\xF168", nullptr, options.can_sort);
+    group.children = BuildGroupingMenu(options.group_mode, options.group_direction, options.can_sort);
     auto refresh = Item(CmdRefresh, l10n::Get(l10n::StringId::Refresh).c_str(), L"\xE72C", L"F5");
     refresh.separator_after = true;
-    items.insert(items.begin(), { std::move(view), std::move(sort), std::move(refresh) });
+    items.insert(items.begin(), { std::move(view), std::move(sort), std::move(group), std::move(refresh) });
     if (options.filesystem) {
         if (!items.empty()) items.back().separator_after = true;
         items.push_back(Item(CmdFolderProperties,
@@ -417,11 +417,15 @@ std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
         items.push_back(std::move(item));
     }
     items.back().separator_after = true;
-    auto order = Item(CmdGroupDirection, l10n::Get(l10n::StringId::GroupDirection).c_str(), L"\xE8CB",
-        l10n::Get(direction == ui::SortDirection::Asc ? l10n::StringId::GroupAscending
-            : l10n::StringId::GroupDescending).c_str(), enabled && mode != ui::GroupMode::Auto &&
-                mode != ui::GroupMode::None);
-    items.push_back(std::move(order));
+    const bool can_order = enabled && mode != ui::GroupMode::Auto && mode != ui::GroupMode::None;
+    auto ascending = Item(CmdGroupAscending, l10n::Get(l10n::StringId::GroupAscending).c_str(), L"", nullptr, can_order);
+    ascending.radio_group = true;
+    ascending.radio = direction == ui::SortDirection::Asc;
+    items.push_back(std::move(ascending));
+    auto descending = Item(CmdGroupDescending, l10n::Get(l10n::StringId::GroupDescending).c_str(), L"", nullptr, can_order);
+    descending.radio_group = true;
+    descending.radio = direction == ui::SortDirection::Desc;
+    items.push_back(std::move(descending));
     return items;
 }
 

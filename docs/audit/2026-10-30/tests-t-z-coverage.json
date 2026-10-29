@@ -1,0 +1,13 @@
+[
+  "src/bench/tab_indicator_animation_test.cpp",
+  "src/bench/tab_indicator_ui_test.cpp",
+  "src/bench/text_render_settings_test.cpp",
+  "src/bench/text_task_reader_test.cpp",
+  "src/bench/thumbnail_cache_test.cpp",
+  "src/bench/titlebar_layout_test.cpp",
+  "src/bench/transfer_pipeline_test.cpp",
+  "src/bench/usn_packet_queue_test.cpp",
+  "src/bench/window_transfer_regression_test.cpp",
+  "src/bench/worker_lifecycle_test.cpp",
+  "src/bench/worker_projection_cases.h"
+]

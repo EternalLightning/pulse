@@ -1,0 +1,42 @@
+{
+  "number": 245,
+  "title": "安卓手机通过数据线接入电脑后，Pulse读取有问题",
+  "body": "安卓手机通过数据线接入电脑，手机端选择“文件传输模式”，Pulse能显示新增盘符，但是点击进去无文件。换用系统自带文件管理器，无这一问题。",
+  "url": "https://github.com/jimmgreen/pulse/issues/245",
+  "captured_at": "2026-10-23T03:10:07.175965+00:00",
+  "updated_at": "2026-10-22T07:06:32Z",
+  "comments": [
+    {
+      "body": "已支持。手机用数据线连接并在手机上选择「文件传输」后，会显示在 **此电脑** 的「设备」分组和侧边栏里，可以直接打开浏览手机内部存储的文件夹；地址栏会显示为 此电脑 › 手机名 › …。\n\n如果连上了却看不到，此电脑里会有一个「没有连接的手机」提示块，点开有排查步骤（下拉通知栏把 USB 用途改为「文件传输」、在手机上点「允许」等）；手机锁屏未授权、没有响应时也会提示原因并提供「重试」，手机解锁或重新插上后会自动刷新。\n\n目前手机里的文件**只能浏览**，从手机复制文件出来的功能还在开发中，暂时请用系统资源管理器复制。\n\n将在下个版本发布，发布后欢迎试用反馈。\n",
+      "bodyHTML": "<p dir=\"auto\">已支持。手机用数据线连接并在手机上选择「文件传输」后，会显示在 <strong>此电脑</strong> 的「设备」分组和侧边栏里，可以直接打开浏览手机内部存储的文件夹；地址栏会显示为 此电脑 › 手机名 › …。</p>\n<p dir=\"auto\">如果连上了却看不到，此电脑里会有一个「没有连接的手机」提示块，点开有排查步骤（下拉通知栏把 USB 用途改为「文件传输」、在手机上点「允许」等）；手机锁屏未授权、没有响应时也会提示原因并提供「重试」，手机解锁或重新插上后会自动刷新。</p>\n<p dir=\"auto\">目前手机里的文件<strong>只能浏览</strong>，从手机复制文件出来的功能还在开发中，暂时请用系统资源管理器复制。</p>\n<p dir=\"auto\">将在下个版本发布，发布后欢迎试用反馈。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/245#issuecomment-6334796644"
+    },
+    {
+      "body": "感谢回复。请问新版本何时发布？",
+      "bodyHTML": "<div class=\"email-fragment\">感谢回复。请问新版本何时发布？</div>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjEyNTM3MzI5",
+        "login": "angstyu",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/12537329?v=4",
+        "profileUrl": "https://github.com/angstyu",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/245#issuecomment-6334906435"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoWJob_AAqjYzMzQ3OTY2NDQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJuzNgAqjYzMzQ5MDY0MzU="
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "number": 211,
+  "title": "重命名文件的时候，录入文字的过程中，光标会自动往前跳",
+  "body": "重命名文件的时候，录入文字的过程中，光标会自动往前跳，导致打字过程中还得频繁修改光标位置",
+  "url": "https://github.com/jimmgreen/pulse/issues/211",
+  "captured_at": "2026-10-23T03:10:07.188956+00:00",
+  "updated_at": "2026-10-22T06:47:43Z",
+  "comments": [
+    {
+      "body": "感谢反馈。我们在本地用微软拼音复现了重命名时光标往前跳的问题并已修复：F2 选中文件名主干后，第一次输入的词替换选区时，输入法会把光标放回开头，导致后续文字插到前面。现在开始组合输入时会先删除选区，本地验证连续输入、以及按方向键移动光标后再输入，位置都正确。\n\n修复会包含在下一个版本中。如果更新后你那边仍然出现（尤其是使用其他输入法时），请告诉我们所用的输入法和具体操作步骤。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈。我们在本地用微软拼音复现了重命名时光标往前跳的问题并已修复：F2 选中文件名主干后，第一次输入的词替换选区时，输入法会把光标放回开头，导致后续文字插到前面。现在开始组合输入时会先删除选区，本地验证连续输入、以及按方向键移动光标后再输入，位置都正确。</p>\n<p dir=\"auto\">修复会包含在下一个版本中。如果更新后你那边仍然出现（尤其是使用其他输入法时），请告诉我们所用的输入法和具体操作步骤。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/211#issuecomment-6172861957"
+    },
+    {
+      "body": "补充一下：1.0.56 之后又收到几个同类报告（#316、#317、#330），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">补充一下：1.0.56 之后又收到几个同类报告（<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5916956907\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/316\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/316/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/316\">#316</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5917101733\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/317\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/317/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/317\">#317</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5926388797\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/330\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/330/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/330\">#330</a>），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/211#issuecomment-6334611044"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTsxfzAAqjYxNzI4NjE5NTc=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJdlpgAqjYzMzQ2MTEwNDQ="
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-23",
+  "scope": [
+    "F04",
+    "F05",
+    "F16",
+    "F18",
+    "F20",
+    "F23",
+    "F24"
+  ],
+  "baseline": {
+    "log": "bench_data\\issue-fixes-ui\\before.log",
+    "pass": 11,
+    "fail": 11,
+    "completed": true
+  },
+  "after": {
+    "log": "bench_data\\issue-fixes-ui\\after.log",
+    "pass": 22,
+    "fail": 0,
+    "completed": true
+  },
+  "fixture_source": "bench_data/issue-fixes-ui/probe.cpp",
+  "unified_pulse_sha256": "66e3dbc9b48d1075784609707c174fb0e80c6ee44b7ff7b6d91f7fa62d203435",
+  "final_fixture_sha256": "1050d4d0c4c243bddd7863c22e70597ac823541c4fcb240fdf2791b0b298e0ce",
+  "fixture_build": "python bench_data/issue-fixes-ui/build.py --unified; cmd /c bench_data\\issue-fixes-ui\\build.cmd",
+  "changes": [
+    {
+      "id": "F04",
+      "issues": [
+        235
+      ],
+      "before": "Production StartDragOut passes COPY|MOVE; a local CF_HDROP-accepting LINK-only target receives no acceptable effect.",
+      "fix": "Advertise COPY|MOVE|LINK; existing MOVE-only refresh branch remains unchanged.",
+      "verification": "Private StartDragOut dependency replacement builds a production FileDataObject and invokes a local IDropTarget LINK-only decision; source fixture.pdf and snapshot are preserved.",
+      "limits": "No actual third-party PDF/editor OLE drag loop. Original issue body could not be re-fetched: GitHub web returned no readable result and REST request had TLS failure; original audit title/evidence and the local production defect are the scope."
+    },
+    {
+      "id": "F05",
+      "issues": [
+        106
+      ],
+      "before": "Recycle divider drag and double-click update the ordinary details array while rendering uses search_column_dividers; normal search is a passing control.",
+      "fix": "Use the rendered pane is_search flag for drag and autofit.",
+      "verification": "Production down/move/up and double-click on Recycle and search headers; rendered Size width changes and the rendered stored width resets."
+    },
+    {
+      "id": "F16",
+      "issues": [
+        372
+      ],
+      "before": "Filled Medium/Large grid cell edges enter the file-drag path.",
+      "fix": "Reserve a 4-DIP gutter inside grid cell edges in ViewLayout::HitTest.",
+      "verification": "Production pointer down on both gutters starts marqueePending without dragPending; icon centers remain selectable.",
+      "limits": "Synthetic hidden-window events at 1000x700, 100%; no physical pointer or full marquee motion acceptance."
+    },
+    {
+      "id": "F18",
+      "issues": [
+        136
+      ],
+      "before": "Same-position repeated clicks in a 194-character/220px edit move the caret 182 to 174 and hide the trailing END.txt.",
+      "fix": "Retain the edit viewport scroll by HWND/text and move it only when the caret exits the visible range; honor externally changed selection endpoints.",
+      "verification": "Production LumaText mouse path keeps caret 182 to 182; rendered after-click preview retains END.txt.",
+      "limits": "No real Microsoft Pinyin composition or long selection-drag acceptance."
+    },
+    {
+      "id": "F20",
+      "issues": [
+        236,
+        87
+      ],
+      "before": "A network-only pinned row has no sidebar context menu.",
+      "fix": "Offer Open and localized Unpin; re-find the pin after the modal menu and remove only that catalog row, then save.",
+      "verification": "Production sidebar hit/right-click plus native FluentMenu keyboard cancellation and Unpin; cancel preserves the fixture pin and choosing Unpin removes it.",
+      "limits": "Invented UNC, persistence disabled. Real SMB reachability/credentials and index-root removal are outside this sidebar-pin correction."
+    },
+    {
+      "id": "F23",
+      "issues": [
+        173
+      ],
+      "before": "Final Size outer edge is not hit as a divider and its resize index is rejected.",
+      "fix": "Expose the final divider, calculate its true total-width edge, allow final metadata resize/autofit, and track pointer deltas so repeated moves are applied once.",
+      "verification": "Outer-edge production hit and resize; three production mouse moves shrink Size by exactly 30px, with the flexible Name column absorbing the space.",
+      "limits": "Hidden-window synthetic mouse messages; no physical drag or DPI matrix."
+    },
+    {
+      "id": "F24",
+      "issues": [
+        334
+      ],
+      "before": "At 184px drive text is silently word-trimmed to External without an ellipsis; 320px is complete.",
+      "fix": "Use a single-line native DirectWrite name layout with the existing ellipsis sign.",
+      "verification": "Production DrawDriveSidebarItem 184px/320px render compared visually; narrow label now has ellipsis, wide label and 72% remain intact.",
+      "limits": "Light theme, 100% DPI only. Long names can still omit the trailing drive letter, visibly indicated by ellipsis."
+    }
+  ],
+  "screenshots": [
+    "bench_data/issue-fixes-ui/before-drive.png",
+    "bench_data/issue-fixes-ui/after-drive.png",
+    "bench_data/issue-fixes-ui/before-rename-click.bmp",
+    "bench_data/issue-fixes-ui/after-rename-click.bmp"
+  ],
+  "test_seams": [
+    "The private app_input.cpp build replaces GetKeyState for VK_LBUTTON only to hold the synthetic button during WM_MOUSEMOVE. No global input is injected.",
+    "The private app_input.cpp build replaces DoFileDragDrop with a local CF_HDROP/IDropTarget capability check; no external application is invoked.",
+    "All other final executable objects come from the unified production pulse build."
+  ],
+  "intermediate_harness_limits": [
+    "During concurrent edits, mixing old shared objects with new AppState/Tab layouts caused access/heap failures before checks; these are invalid fixture prerequisites, not reported product regressions.",
+    "A later private link ran while the unified build was replacing dependency objects and failed with missing new symbols; final evidence uses the completed unified build.",
+    "The first Unpin test used unsupported VK_END, then an incorrect default-hover assumption; the fixture now explicitly starts with no hovered item and uses Down twice, Return."
+  ],
+  "system_state": "Only isolated workspace fixtures and nonpersistent in-memory places/preferences are used; no user preferences, real source files, recycle bin, or deployment is modified."
+}

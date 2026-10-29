@@ -1,5 +1,6 @@
 // shell_icons.cpp
 #include "shell_icons.h"
+#include "../fs/cloud_state.h"
 #include "../common/path_utils.h"
 #include "../ipc/shell_query_client.h"
 
@@ -452,7 +453,7 @@ ID2D1Bitmap* ShellIconCache::BitmapFor(const std::wstring& path, const std::wstr
                                        bool is_dir, DWORD attrs, float desired_dips) {
     PruneStaleBitmaps();
     int index = -1;
-    const bool exact = NeedsExactIcon(name, is_dir, path) && !path.empty();
+    const bool exact = !fs::IsCloudPlaceholder(attrs) && NeedsExactIcon(name, is_dir, path);
     if (exact && worker_) {
         std::lock_guard lock(worker_->mutex);
         const auto it = worker_->exact_index.find(path);

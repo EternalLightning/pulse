@@ -42,6 +42,9 @@ public:
     void SetNotifyWindow(HWND hwnd, Consumer consumer = Consumer::Main);
     // Reset is service-wide shutdown; Evict only cancels the named consumer.
     void Reset();
+    void Warm();
+    bool Prefetch(const std::wstring& path, DWORD attrs, uint32_t pixels,
+                  uint64_t generation, uint64_t modified, uint64_t size);
     void Evict(Consumer consumer = Consumer::Main);
     // pan_x/pan_y non-null: cover mode (fill dest, crop overflow) with a
     // draggable pan offset in DIPs; values are clamped and written back.
@@ -68,6 +71,7 @@ public:
                           std::vector<PreviewProperty>& properties);
 private:
     friend struct ThumbnailCacheTestAccess;
+    friend struct ThumbnailPipelineTestAccess;
     struct Item {
         std::array<ComPtr<ID2D1Bitmap>, 2> bitmaps;
         std::vector<uint8_t> pixels;
@@ -102,6 +106,8 @@ private:
         uint32_t failure_attempts = 0;
         ULONGLONG retry_due = 0;
         bool details = false;
+        bool prefetch = false;
+        uint64_t modified = 0, size = 0;
         std::wstring path, key, identity;
     };
     struct Interest {
@@ -132,13 +138,15 @@ private:
     void CancelInterests(Consumer consumer, bool details_only);
     void QueueRequest(Request request, Consumer consumer);
     void Trim();
-    void Worker();
+    void StartWorkers();
+    std::deque<Request>::iterator NextRequest(size_t lane, ULONGLONG now);
+    void Worker(size_t lane = 0);
     bool StoreResult(const Request& request, Item result);
     void Touch(Item& item);
-    bool Connect();
-    bool FetchResponse(const Request& request, Item& result);
+    bool Connect(size_t lane = 0);
+    bool FetchResponse(const Request& request, Item& result, size_t lane = 0);
     std::function<void()> before_response_body_; // regression gate, empty in production
-    void StopChild();
+    void StopChild(size_t lane = 0);
     std::wstring Key(const std::wstring& path, uint32_t pixels, uint64_t modified,
                      uint64_t size, uint32_t frame_index = 0) const;
     std::array<ConsumerState, 2> consumers_;
@@ -157,5 +165,13 @@ private:
     size_t cache_bytes_ = 0;
     std::atomic<uint32_t> epoch_{1};
     std::thread worker_;
+    struct Host {
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        PROCESS_INFORMATION child{};
+        uint32_t token = 0;
+        std::thread worker;
+    };
+    std::array<Host, 3> hosts_;
+    size_t lane_count_ = 1;
 };
 } // namespace pulse::ui

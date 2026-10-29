@@ -8,6 +8,7 @@
 #include "context_menu_prefs.h"
 #include "search_history.h"
 #include "saved_search.h"
+#include "network_recent_store.h"
 #include "../ui/render_caches.h"
 #include <memory>
 #include <vector>
@@ -35,6 +36,7 @@ struct AppCore {
     app::SearchHistory search_history;
     app::SearchHistoryWriter search_history_writer;
     app::SavedSearchStore saved_searches;
+    std::shared_ptr<app::NetworkRecentStore> network_recent;
     bool shared_preferences_loaded = false;
     bool exiting = false;
     // Global UI services (tray, global hotkey, shell registry watch) follow this

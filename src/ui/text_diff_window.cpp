@@ -19,6 +19,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"PulseTextDiffWindow";
 constexpr UINT kMsgJobDone = WM_APP + 41;
 constexpr UINT_PTR kTooltipTimer = 1;
+constexpr UINT_PTR kScrollTimer = 2;
 constexpr float kToolbarH = 48.0f;
 constexpr float kHeaderH = 46.0f;
 constexpr float kStatusH = 26.0f;
@@ -41,6 +42,12 @@ bool DiffHighContrast() {
     HIGHCONTRASTW value{sizeof(value)};
     return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
            (value.dwFlags & HCF_HIGHCONTRASTON);
+}
+
+bool AnimateDiffScroll() {
+    BOOL enabled = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+    return enabled && !DiffHighContrast();
 }
 
 struct Palette {
@@ -190,6 +197,7 @@ void TextDiffWindow::Show(HWND owner, const std::wstring& left, const std::wstri
     expanded_folds_.clear();
     spans_.clear();
     scroll_x_ = scroll_y_ = 0.0f;
+    ResetScrollAnimation();
     current_hunk_ = -1;
     sel_anchor_ = sel_end_ = -1;
     first_result_ = true;
@@ -202,6 +210,7 @@ void TextDiffWindow::Show(HWND owner, const std::wstring& left, const std::wstri
 }
 
 void TextDiffWindow::Close() {
+    ResetScrollAnimation();
     StopJob();
     computing_ = false;
     if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
@@ -228,6 +237,7 @@ void TextDiffWindow::StopJob() {
 }
 
 void TextDiffWindow::StartJob(bool reload) {
+    ResetScrollAnimation();
     StopJob();
     const uint64_t generation = ++generation_;
     computing_ = true;
@@ -329,6 +339,7 @@ void TextDiffWindow::AdoptResult(WPARAM identity) {
 }
 
 void TextDiffWindow::RebuildView() {
+    ResetScrollAnimation();
     // Keep the top visible DiffRow in place across mode / fold changes.
     int anchor_row = -1;
     if (!view_.empty()) {
@@ -571,20 +582,61 @@ TextDiffWindow::Hit TextDiffWindow::HitTest(float x, float y, int* view_row) con
 }
 
 void TextDiffWindow::ScrollTo(float y) {
-    const float body_h = body_.bottom - body_.top;
-    const float max_y = (std::max)(0.0f, ContentHeight() - body_h + RowHeight());
-    scroll_y_ = std::clamp(y, 0.0f, max_y);
+    smooth_scroll_y_.Reset();
+    scroll_y_ = std::clamp(y, 0.0f, ScrollMaximumY());
+    UpdateScrollTimer();
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void TextDiffWindow::ScrollX(float dx) {
+float TextDiffWindow::ScrollMaximumY() const {
+    const float body_h = body_.bottom - body_.top;
+    return (std::max)(0.0f, ContentHeight() - body_h + RowHeight());
+}
+
+float TextDiffWindow::ScrollMaximumX() const {
     const float body_w = body_.right - body_.left;
     const float gutter = static_cast<float>(number_digits_) * char_w_ + 20.0f * scale_;
     const float text_w = unified_ ? body_w - gutter * 2.0f - 24.0f * scale_
                                   : body_w / 2.0f - gutter - 16.0f * scale_;
-    const float max_x = (std::max)(0.0f, static_cast<float>(max_cols_) * char_w_ -
-                                             text_w + 24.0f * scale_);
-    scroll_x_ = std::clamp(scroll_x_ + dx, 0.0f, max_x);
+    return (std::max)(0.0f, static_cast<float>(max_cols_) * char_w_ -
+                              text_w + 24.0f * scale_);
+}
+
+void TextDiffWindow::ScrollX(float dx) {
+    smooth_scroll_x_.Reset();
+    scroll_x_ = std::clamp(scroll_x_ + dx, 0.0f, ScrollMaximumX());
+    UpdateScrollTimer();
+    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void TextDiffWindow::ResetScrollAnimation() {
+    smooth_scroll_y_.Reset();
+    smooth_scroll_x_.Reset();
+    UpdateScrollTimer();
+}
+
+void TextDiffWindow::UpdateScrollTimer() {
+    if (!hwnd_) return;
+    if (smooth_scroll_y_.Pending() || smooth_scroll_x_.Pending()) {
+        if (!SetTimer(hwnd_, kScrollTimer, 15, nullptr)) {
+            const auto now = GetTickCount64();
+            smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, false);
+            smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, false);
+        }
+    }
+    else KillTimer(hwnd_, kScrollTimer);
+}
+
+void TextDiffWindow::WheelScroll(float dx, float dy) {
+    const auto now = GetTickCount64();
+    const bool animate = AnimateDiffScroll();
+    if (dx != 0.0f)
+        smooth_scroll_x_.ScrollBy(scroll_x_, dx, ScrollMaximumX(),
+                                 body_.right - body_.left, now, animate);
+    if (dy != 0.0f)
+        smooth_scroll_y_.ScrollBy(scroll_y_, dy, ScrollMaximumY(),
+                                 body_.bottom - body_.top, now, animate);
+    UpdateScrollTimer();
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -663,6 +715,7 @@ void TextDiffWindow::OnClick(float x, float y, bool shift) {
     case Hit::Prev: StepHunk(-1); break;
     case Hit::Next: StepHunk(1); break;
     case Hit::Minimap: {
+        ResetScrollAnimation();
         minimap_drag_ = true;
         SetCapture(hwnd_);
         const float h = minimap_.bottom - minimap_.top;
@@ -741,6 +794,11 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
     GetClientRect(hwnd_, &client);
     compositor_.Resize((std::max)(1L, client.right), (std::max)(1L, client.bottom));
     Layout();
+    const auto now = GetTickCount64();
+    const bool animate = AnimateDiffScroll();
+    smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, animate);
+    smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, animate);
+    UpdateScrollTimer();
     auto* dc = compositor_.Dc();
     auto* factory = compositor_.DwriteFactory();
     const bool hc = DiffHighContrast();
@@ -1184,8 +1242,7 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         RecreateFormats();
         return 0;
     case WM_SIZE:
-        ScrollTo(scroll_y_);
-        ScrollX(0.0f);
+        ResetScrollAnimation();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     case WM_MOVE:
@@ -1258,6 +1315,19 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         }
         return 0;
     case WM_TIMER:
+        if (wparam == kScrollTimer) {
+            if (!visible()) {
+                ResetScrollAnimation();
+                return 0;
+            }
+            const auto now = GetTickCount64();
+            const bool animate = AnimateDiffScroll();
+            const bool changed_x = smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, animate);
+            const bool changed_y = smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, animate);
+            if (changed_x || changed_y) InvalidateRect(hwnd_, nullptr, FALSE);
+            UpdateScrollTimer();
+            return 0;
+        }
         if (wparam == kTooltipTimer) {
             KillTimer(hwnd_, kTooltipTimer);
             tooltip_visible_ = hover_ == Hit::Prev || hover_ == Hit::Next;
@@ -1302,14 +1372,14 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
     case WM_MOUSEWHEEL: {
         const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
         if (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT)
-            ScrollX(-steps * char_w_ * 8.0f);
+            WheelScroll(-steps * char_w_ * 8.0f, 0.0f);
         else
-            ScrollBy(-steps * 3.0f * RowHeight());
+            WheelScroll(0.0f, -steps * 3.0f * RowHeight());
         return 0;
     }
     case WM_MOUSEHWHEEL: {
         const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
-        ScrollX(steps * char_w_ * 8.0f);
+        WheelScroll(steps * char_w_ * 8.0f, 0.0f);
         return 0;
     }
     case WM_KEYDOWN: {
@@ -1319,14 +1389,14 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         switch (wparam) {
         case VK_F7: StepHunk(shift ? -1 : 1); return 0;
         case VK_ESCAPE: Close(); return 0;
-        case VK_UP: ScrollBy(-RowHeight()); return 0;
-        case VK_DOWN: ScrollBy(RowHeight()); return 0;
-        case VK_PRIOR: ScrollBy(-page); return 0;
-        case VK_NEXT: ScrollBy(page); return 0;
+        case VK_UP: WheelScroll(0, -RowHeight()); return 0;
+        case VK_DOWN: WheelScroll(0, RowHeight()); return 0;
+        case VK_PRIOR: WheelScroll(0, -page); return 0;
+        case VK_NEXT: WheelScroll(0, page); return 0;
         case VK_HOME: ScrollTo(0.0f); return 0;
         case VK_END: ScrollTo(ContentHeight()); return 0;
-        case VK_LEFT: ScrollX(-char_w_ * 4.0f); return 0;
-        case VK_RIGHT: ScrollX(char_w_ * 4.0f); return 0;
+        case VK_LEFT: WheelScroll(-char_w_ * 4.0f, 0); return 0;
+        case VK_RIGHT: WheelScroll(char_w_ * 4.0f, 0); return 0;
         case 'C':
             if (ctrl) {
                 CopySelection();
@@ -1344,6 +1414,9 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         break;
     case WM_CLOSE:
         Close();
+        return 0;
+    case WM_DESTROY:
+        ResetScrollAnimation();
         return 0;
     default: break;
     }

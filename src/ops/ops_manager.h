@@ -38,10 +38,13 @@
 
 namespace pulse::ops {
 
+struct DriveLabelBackend;
+
 struct DeleteIntegrationProbe;
 struct OperationJournalProbe;
 
-enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder, CreateTextFile, RestoreRecycle, EmptyRecycle, BatchRename };
+enum class OpType { Copy, Move, RecycleDelete, RealDelete, Rename, CreateFolder, CreateTextFile, RestoreRecycle, EmptyRecycle, BatchRename, RemoveEmptyFolder };
+enum class FolderAction { None, GroupSelection, DissolveFolders, RestoreEmptyFolder, RemoveCreatedFolder };
 enum class CollisionPolicy { System, Replace, KeepBoth };
 enum class OpPhase { Queued, Scanning, WaitingForConflict, Running, Paused,
                      Verifying, Cancelling, Completed, Failed, WaitingForDeleteConfirmation, Cancelled };
@@ -92,6 +95,10 @@ struct DeleteRequestTarget {
 
 struct OpRequest {
     OpType type = OpType::Copy;
+    FolderAction folder_action = FolderAction::None;
+    uint64_t undo_group = 0;
+    std::wstring undo_label;
+    std::optional<FILE_BASIC_INFO> folder_metadata;
     std::vector<std::wstring> sources;
     std::wstring dest_dir;    // Copy / Move
     std::wstring new_name;    // Rename
@@ -128,6 +135,9 @@ struct TransferPlanEntry {
 
 struct UndoEntry {
     OpType type = OpType::Copy;
+    uint64_t undo_group = 0;
+    std::wstring undo_label;
+    std::optional<FILE_BASIC_INFO> folder_metadata;
     std::vector<std::wstring> sources;
     std::vector<std::wstring> destinations; // actual names, including keep-both results
     std::wstring dest_dir;
@@ -364,6 +374,7 @@ private:
         uint64_t recovery_sequence = 0; // retained until deletion is admitted
         bool lock_retry = false;
         bool elevated_retry = false;
+        std::optional<OpStatus> retry_batch_status; // parent-only presentation of the original batch
         bool exact_transfer_resume = false;
         uint64_t retry_generation = 0;
         HRESULT retry_failure_hr = S_OK;
@@ -424,7 +435,8 @@ private:
         decltype(&IsCurrentUserRecyclePayload) owns_payload = &IsCurrentUserRecyclePayload,
         DestinationGuard* continuation_guard = nullptr);
     void RunDriveLabelRename(const OpRequest& req, uint64_t task_id,
-                            decltype(&SetVolumeLabelW) set_label = &SetVolumeLabelW);
+                            decltype(&SetVolumeLabelW) set_label = &SetVolumeLabelW,
+                            const DriveLabelBackend* backend = nullptr);
     void RunDelete(const QueueItem& item,
                    const std::vector<std::wstring>& prior_deleted = {},
                    const std::vector<std::wstring>& prior_recycled = {},
@@ -459,6 +471,8 @@ private:
                      const std::shared_ptr<DestinationGuard>& prior_destination_guard = {},
                      bool exact_plan = false);
     void ExecuteFileOperation(QueueItem& item);
+    void RunFolderAction(const OpRequest& req, uint64_t task_id);
+    void ContinueFolderUndo(const OpRequest& req);
     bool RefreshProducedUndoReferences(OpRequest& request);
     LockReport CaptureLockedFailure(const QueueItem& retry, HRESULT error,
                                    const std::wstring& failed_item, const LockCancelled& cancelled);
@@ -477,7 +491,9 @@ private:
                   const std::vector<FileIdentity>* produced_identities = nullptr,
                   const std::vector<FileObjectReference>* produced_references = nullptr);
     void FinishMutationUndo(const OpRequest& req);
+    void FinishRecycleUndo(const OpRequest& req);
     bool FinishMutationUndoLocked(const OpRequest& req); // caller holds mutex_
+    bool FinishRecycleUndoLocked(const OpRequest& req); // caller holds mutex_
     void LoadRecoveryJournal();
     void PersistJournal();
     std::wstring JournalJsonLocked(const std::wstring& path) const;
@@ -533,6 +549,7 @@ private:
     std::atomic<bool> verify_copies_{false};
     decltype(&GetFileInformationByHandleEx) transfer_identity_query_ = GetFileInformationByHandleEx;
     decltype(&CopyFile2) transfer_copy_file_ = CopyFile2;
+    bool transfer_parallel_override_ = false; // explicit opt-in for concurrent injected copy regressions
     std::function<void(const std::wstring&)> before_source_cleanup_; // regression gate, empty in production
     std::function<void(const std::wstring&)> before_source_enumeration_; // regression gate, empty in production
     bool force_copy_move_ = false; // isolated cross-volume regression without a second user volume

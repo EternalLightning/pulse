@@ -1,0 +1,120 @@
+{
+  "number": 122,
+  "title": "索引服务无法安装",
+  "body": "<img width=\"251\" height=\"246\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c2049e0d-e28d-4471-a2f6-d7e1d52da7f5\" />\n9月30日前使用正常，10月8日更新到1.0.53版本后，搜索功能无法使用，点击设置里的索引安装服务，提示拒绝访问。\n想要导出诊断文件，也无法导出。\n\n<img width=\"315\" height=\"249\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/d88810ae-0a47-4cbb-8fcf-8e3c1f1e6ba6\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/122",
+  "captured_at": "2026-10-23T03:10:09.138546+00:00",
+  "updated_at": "2026-10-10T08:52:09Z",
+  "comments": [
+    {
+      "body": "+1重新安装时也会报错",
+      "bodyHTML": "<p dir=\"auto\">+1重新安装时也会报错</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOC45WhA",
+        "login": "TLock-C",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/193877636?v=4",
+        "profileUrl": "https://github.com/TLock-C",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6051295042"
+    },
+    {
+      "body": "<img width=\"1919\" height=\"1005\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9bc5b68a-a78d-4bd1-a93b-5f332b839a20\" />，发现索引失败，而且无法安装索引服务，1.0.53版本",
+      "bodyHTML": "<p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/10106382/669295984-9bc5b68a-a78d-4bd1-a93b-5f332b839a20.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUzMDIsIm5iZiI6MTc5MjcyNTAwMiwicGF0aCI6Ii8xMDEwNjM4Mi82NjkyOTU5ODQtOWJjNWI2OGEtYTc4ZC00YmQxLWE5M2ItNWYzMzJiODM5YTIwLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMTAwMlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPThmNDM0Nzg0MGMyOGJiYjJkOTU4MmUzZGI4YTYwMDVkYWUzYjhkZWUxMjI2YTllMmM0NWQxYWI5ZjE3ZTgwNjgmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.nBqJjOk9tJSlE026iQs5rf9alVn06ibgD09_7B10bPM\"><img width=\"1919\" height=\"1005\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/10106382/669295984-9bc5b68a-a78d-4bd1-a93b-5f332b839a20.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUzMDIsIm5iZiI6MTc5MjcyNTAwMiwicGF0aCI6Ii8xMDEwNjM4Mi82NjkyOTU5ODQtOWJjNWI2OGEtYTc4ZC00YmQxLWE5M2ItNWYzMzJiODM5YTIwLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMTAwMlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPThmNDM0Nzg0MGMyOGJiYjJkOTU4MmUzZGI4YTYwMDVkYWUzYjhkZWUxMjI2YTllMmM0NWQxYWI5ZjE3ZTgwNjgmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.nBqJjOk9tJSlE026iQs5rf9alVn06ibgD09_7B10bPM\" style=\"max-width: 100%; height: auto; max-height: 1005px;; aspect-ratio: 1919 / 1005; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>，发现索引失败，而且无法安装索引服务，1.0.53版本</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjEwMTA2Mzgy",
+        "login": "miaoxu1com",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/10106382?v=4",
+        "profileUrl": "https://github.com/miaoxu1com",
+        "name": "miaoxu"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6073216307"
+    },
+    {
+      "body": "+1\nWindows 10 + Portable v1.0.53 版本, \n提示 本地磁盘 索引失败, 搜索不到任何文件. \n\"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.",
+      "bodyHTML": "<p dir=\"auto\">+1<br>\nWindows 10 + Portable v1.0.53 版本,<br>\n提示 本地磁盘 索引失败, 搜索不到任何文件.<br>\n\"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE5ODk3NjAy",
+        "login": "grade1984",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/19897602?v=4",
+        "profileUrl": "https://github.com/grade1984",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6075697448"
+    },
+    {
+      "body": "> 3\\. +1\n>     Windows 10 + Portable v1.0.53 版本,\n>     提示 本地磁盘 索引失败, 搜索不到任何文件.\n>     \"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.\n\n在 \"任务管理器\" 中手工将 pulse_index.exe 进程全部杀掉, 然后退出 pluse 应用, 再重新进入, 发现索引重建了, 而且应该是生效了, 索引目录占用了好几个G的空间.",
+      "bodyHTML": "<blockquote>\n<p dir=\"auto\">3. +1<br>\nWindows 10 + Portable v1.0.53 版本,<br>\n提示 本地磁盘 索引失败, 搜索不到任何文件.<br>\n\"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.</p>\n</blockquote>\n<p dir=\"auto\">在 \"任务管理器\" 中手工将 pulse_index.exe 进程全部杀掉, 然后退出 pluse 应用, 再重新进入, 发现索引重建了, 而且应该是生效了, 索引目录占用了好几个G的空间.</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE5ODk3NjAy",
+        "login": "grade1984",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/19897602?v=4",
+        "profileUrl": "https://github.com/grade1984",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6076104629"
+    },
+    {
+      "body": "\n> 3\\. +1\n>     Windows 10 + Portable v1.0.53 版本,\n>     提示 本地磁盘 索引失败, 搜索不到任何文件.\n>     \"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.\n\n以管理员模式打开安装试试",
+      "bodyHTML": "<blockquote>\n<p dir=\"auto\">3. +1<br>\nWindows 10 + Portable v1.0.53 版本,<br>\n提示 本地磁盘 索引失败, 搜索不到任何文件.<br>\n\"全机索引\"处指示: \"全机索引服务已安装, 正在等待连接.</p>\n</blockquote>\n<p dir=\"auto\">以管理员模式打开安装试试</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjEwMDY5NTYy",
+        "login": "jw8013",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/10069562?v=4",
+        "profileUrl": "https://github.com/jw8013",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6078024922"
+    },
+    {
+      "body": "@jw8013 试了不行\n",
+      "bodyHTML": "<p dir=\"auto\"><a class=\"user-mention notranslate\" data-hovercard-type=\"user\" data-hovercard-url=\"/users/jw8013/hovercard\" data-octo-click=\"hovercard-link-click\" data-octo-dimensions=\"link_type:self\" href=\"https://github.com/jw8013\">@jw8013</a> 试了不行</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjEwMTA2Mzgy",
+        "login": "miaoxu1com",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/10106382?v=4",
+        "profileUrl": "https://github.com/miaoxu1com",
+        "name": "miaoxu"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6078373024"
+    },
+    {
+      "body": "+1 ，使用管理员安装后，依旧提示拒绝访问\n\n<img width=\"598\" height=\"464\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/e954ac34-07c1-4d43-8c8b-2368a7376a88\" />",
+      "bodyHTML": "<p dir=\"auto\">+1 ，使用管理员安装后，依旧提示拒绝访问</p>\n<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://private-user-images.githubusercontent.com/66111727/670248170-e954ac34-07c1-4d43-8c8b-2368a7376a88.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUzMDIsIm5iZiI6MTc5MjcyNTAwMiwicGF0aCI6Ii82NjExMTcyNy82NzAyNDgxNzAtZTk1NGFjMzQtMDdjMS00ZDQzLThjOGItMjM2OGE3Mzc2YTg4LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMTAwMlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTAzZjMzMjc2NDc4ZDBmZGY3YWJkYzAxMDcwMzAxZjQxOWFjZDc0MWEzZGQ4YWM3NTg4M2Y1ODM2MzdhZmZmMjgmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.mDMk74E8ZCYy8ZQlPyp4kCeyPo5IcZFc1dCeWZSR56M\"><img width=\"598\" height=\"464\" alt=\"Image\" src=\"https://private-user-images.githubusercontent.com/66111727/670248170-e954ac34-07c1-4d43-8c8b-2368a7376a88.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUzMDIsIm5iZiI6MTc5MjcyNTAwMiwicGF0aCI6Ii82NjExMTcyNy82NzAyNDgxNzAtZTk1NGFjMzQtMDdjMS00ZDQzLThjOGItMjM2OGE3Mzc2YTg4LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMTAwMlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTAzZjMzMjc2NDc4ZDBmZGY3YWJkYzAxMDcwMzAxZjQxOWFjZDc0MWEzZGQ4YWM3NTg4M2Y1ODM2MzdhZmZmMjgmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.mDMk74E8ZCYy8ZQlPyp4kCeyPo5IcZFc1dCeWZSR56M\" style=\"max-width: 100%; height: auto; max-height: 464px;; aspect-ratio: 598 / 464; background-color: var(--bgColor-muted); border-radius: 6px\" class=\"js-gh-image-fallback\"></a>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjY2MTExNzI3",
+        "login": "wenguge",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/66111727?v=4",
+        "profileUrl": "https://github.com/wenguge",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6093729985"
+    },
+    {
+      "body": "> 6\\. [@jw8013](https://github.com/jw8013) 试了不行\n\n在安装目录下手动运行pulse.index.exe就可以了。",
+      "bodyHTML": "<blockquote>\n<p dir=\"auto\">6. <a href=\"https://github.com/jw8013\">@jw8013</a> 试了不行</p>\n</blockquote>\n<p dir=\"auto\">在安装目录下手动运行pulse.index.exe就可以了。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjY2MTExNzI3",
+        "login": "wenguge",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/66111727?v=4",
+        "profileUrl": "https://github.com/wenguge",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/122#issuecomment-6095854034"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoRl2VaAAqjYwNTEyOTUwNDI=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoSUDMqgAqjYwOTU4NTQwMzQ="
+  }
+}

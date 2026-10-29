@@ -123,6 +123,8 @@ int wmain(int argc, wchar_t** argv) {
         (L"index_security_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64())));
     std::filesystem::create_directories(base / L"parent");
     const auto identity = transport::Identity::Current();
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--metadata-acl-only")
+        std::wcout << L"[INFO] metadata ACL token integrity=" << identity.integrity << L'\n';
     Check(identity.valid && !agent::PipeName().empty() && agent::PipeName().find(identity.user) != std::wstring::npos,
         "network endpoint binds current user and logon authentication");
     auto changed = identity; ++changed.session;
@@ -170,6 +172,12 @@ int wmain(int argc, wchar_t** argv) {
     Check(!restored.RecordVisible(deleted), "deleted historical ACL cannot be guessed from parent access");
     deleted.path = file;
     Check(!restored.RecordVisible(deleted), "recreated readable path cannot authorize a formerly deleted identity");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--metadata-acl-only") {
+        std::error_code cleanup;
+        std::filesystem::remove_all(base, cleanup);
+        Check(!cleanup, "isolated metadata ACL fixtures clean up");
+        return failures ? 1 : 0;
+    }
     Check(!IndexRequestLimits::Admit(32, false, 0, 0, 0, 0, 1), "unique session flood is bounded");
     Check(!IndexRequestLimits::Admit(0, true, 32, 0, 32, 0, 1), "client queue item flood is bounded");
     Check(!IndexRequestLimits::Admit(0, false, 0, 512 * 1024, 0, 0, 1), "client queue bytes are bounded");

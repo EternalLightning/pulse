@@ -3,6 +3,11 @@
 #include <algorithm>
 
 namespace pulse::ui {
+inline float AddressSearchContentOpacity(float progress) {
+    const float t = std::clamp(progress * 2.0f - 1.0f, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 struct AddressSearchLayout {
     D2D1_RECT_F scope, mode, name, content, input, clear, options, close;
     bool scope_label = false;

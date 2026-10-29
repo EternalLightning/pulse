@@ -8,6 +8,7 @@
 #include <cmath>
 #include <vector>
 #include <new>
+#include <memory>
 
 namespace pulse::ui {
 namespace {
@@ -15,6 +16,7 @@ constexpr wchar_t kDevice[] = L"Pulse.DialogComposition.Device";
 constexpr wchar_t kVisual[] = L"Pulse.DialogComposition.Visual";
 constexpr wchar_t kFading[] = L"Pulse.DialogFading";
 constexpr wchar_t kFadeState[] = L"Pulse.DialogFadeState";
+constexpr wchar_t kClosing[] = L"Pulse.DialogClosing";
 constexpr UINT_PTR kFadeSubclass = 0x50464144;
 constexpr float kFadeSeconds = 0.110f;
 constexpr wchar_t kOwnerDim[] = L"Pulse.OwnerDimOverlay";
@@ -165,18 +167,45 @@ struct FadeState {
             }
         }
     }
+    bool Prepare(float from, float to, float seconds) {
+        if (device && visual) {
+            Microsoft::WRL::ComPtr<IDCompositionAnimation> animation;
+            return (effect || SUCCEEDED(device->CreateEffectGroup(&effect))) &&
+                SUCCEEDED(device->CreateAnimation(&animation)) &&
+                SUCCEEDED(animation->AddCubic(0.0, from, 0.0f,
+                    3.0f * (to - from) / (seconds * seconds),
+                    -2.0f * (to - from) / (seconds * seconds * seconds))) &&
+                SUCCEEDED(animation->End(seconds, to)) &&
+                SUCCEEDED(effect->SetOpacity(animation.Get())) &&
+                SUCCEEDED(visual->SetEffect(effect.Get())) && SUCCEEDED(device->Commit());
+        }
+        if (original_style & WS_EX_NOREDIRECTIONBITMAP) return false;
+        const LONG_PTR current_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+        SetWindowLongPtrW(window, GWL_EXSTYLE, current_style | WS_EX_LAYERED);
+        return SetOpacity(from);
+    }
+    bool SetOpacity(float opacity) {
+        SetDimOpacity(dim, opacity);
+        return effect || SetLayeredWindowAttributes(window, original_key,
+            static_cast<BYTE>(std::lround(opacity * original_alpha)), original_flags | LWA_ALPHA);
+    }
 };
 
 LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
     UINT_PTR subclass, DWORD_PTR data);
 
-void CancelFade(HWND window) {
+FadeState* DetachFade(HWND window) {
     auto* state = static_cast<FadeState*>(GetPropW(window, kFadeState));
-    if (!state) return;
+    if (!state) return nullptr;
     RemovePropW(window, kFadeState);
     RemoveWindowSubclass(window, FadeProc, kFadeSubclass);
     if (state->timer) KillTimer(window, state->timer);
-    delete state;
+    state->timer = 0;
+    return state;
+}
+
+void CancelFade(HWND window) {
+    delete DetachFade(window);
 }
 
 LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
@@ -187,11 +216,7 @@ LRESULT CALLBACK FadeProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
         const float t = std::min(1.0f,
             static_cast<float>(AnimationTimeMs() - state->start) / (kFadeSeconds * 1000.0f));
         const float opacity = t * t * (3.0f - 2.0f * t);
-        if (!state->effect)
-            SetLayeredWindowAttributes(window, state->original_key,
-                static_cast<BYTE>(std::lround(opacity * state->original_alpha)),
-                state->original_flags | LWA_ALPHA);
-        SetDimOpacity(state->dim, opacity);
+        state->SetOpacity(opacity);
         if (t >= 1.0f) CancelFade(window);
         return 0;
     }
@@ -212,26 +237,7 @@ void ShowFade(HWND window, int show_command) {
     if (!AnimationsEnabled()) { show_immediately(); return; }
     auto* state = new (std::nothrow) FadeState(window, dim);
     if (!state) { show_immediately(); return; }
-    bool ready = true;
-    if (state->device && state->visual) {
-        Microsoft::WRL::ComPtr<IDCompositionAnimation> animation;
-        ready = SUCCEEDED(state->device->CreateEffectGroup(&state->effect)) &&
-            SUCCEEDED(state->device->CreateAnimation(&animation)) &&
-            SUCCEEDED(animation->AddCubic(0.0, 0.0f, 0.0f,
-                3.0f / (kFadeSeconds * kFadeSeconds),
-                -2.0f / (kFadeSeconds * kFadeSeconds * kFadeSeconds))) &&
-            SUCCEEDED(animation->End(kFadeSeconds, 1.0f)) &&
-            SUCCEEDED(state->effect->SetOpacity(animation.Get())) &&
-            SUCCEEDED(state->visual->SetEffect(state->effect.Get())) &&
-            SUCCEEDED(state->device->Commit());
-    } else if (state->original_style & WS_EX_NOREDIRECTIONBITMAP) ready = false;
-    else {
-        GetLayeredWindowAttributes(window, &state->original_key,
-            &state->original_alpha, &state->original_flags);
-        SetWindowLongPtrW(window, GWL_EXSTYLE, state->original_style | WS_EX_LAYERED);
-        ready = SetLayeredWindowAttributes(window, state->original_key, 0,
-            state->original_flags | LWA_ALPHA) != FALSE;
-    }
+    const bool ready = state->Prepare(0.0f, 1.0f, kFadeSeconds);
     if (!ready || !SetPropW(window, kFadeState, state)) {
         delete state;
         show_immediately();
@@ -248,6 +254,49 @@ void ShowFade(HWND window, int show_command) {
     if (dim) ShowWindow(dim, SW_SHOWNOACTIVATE);
     ShowWindow(window, show_command);
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
+std::unique_ptr<FadeState> FadeBeforeHide(HWND window, HWND dim) {
+    std::unique_ptr<FadeState> state(DetachFade(window));
+    float from = 1.0f;
+    if (state) {
+        const float t = std::min(1.0f,
+            static_cast<float>(AnimationTimeMs() - state->start) / (kFadeSeconds * 1000.0f));
+        from = t * t * (3.0f - 2.0f * t);
+        if (!state->effect && state->original_alpha) {
+            BYTE alpha = 0;
+            DWORD flags = 0;
+            if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags))
+                from = static_cast<float>(alpha) / state->original_alpha;
+        }
+    }
+    if (!IsWindowVisible(window) || !AnimationsEnabled() || from <= 0.0f) return state;
+    if (!state) state.reset(new (std::nothrow) FadeState(window, dim));
+    if (!state) return state;
+    state->dim = dim;
+    const float seconds = kFadeSeconds * from;
+    if (!state->Prepare(from, 0.0f, seconds)) return state;
+    const uint64_t start = AnimationTimeMs();
+    // Callers release their compositor immediately after hiding. Keep its references
+    // and the final transparent frame alive until the entire owned tree is hidden.
+    // Queued commands stay in the outer modal loop; only paint messages dispatch here.
+    while (IsWindowVisible(window)) {
+        const float t = std::min(1.0f,
+            static_cast<float>(AnimationTimeMs() - start) / (seconds * 1000.0f));
+        state->SetOpacity(from * (1.0f - t * t * (3.0f - 2.0f * t)));
+        if (t >= 1.0f) break;
+        MSG message{};
+        if (PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_NOREMOVE)) break;
+        // Animated dialogs may invalidate themselves from WM_PAINT. Draining
+        // that queue can run forever after the visual has faded to zero.
+        if (PeekMessageW(&message, window, WM_PAINT, WM_PAINT, PM_REMOVE))
+            DispatchMessageW(&message);
+        const auto elapsed = AnimationTimeMs() - start;
+        const auto remaining = static_cast<DWORD>(std::max(0.0f, seconds * 1000.0f - static_cast<float>(elapsed)));
+        if (remaining) MsgWaitForMultipleObjectsEx(0, nullptr, std::min<DWORD>(16, remaining),
+            QS_SENDMESSAGE, MWMO_INPUTAVAILABLE);
+    }
+    return state;
 }
 
 }
@@ -302,7 +351,7 @@ void ShowDialogWithFade(HWND dialog) {
 }
 
 void ShowDialogWithFade(HWND dialog, int show_command) {
-    if (!IsWindow(dialog) || IsWindowVisible(dialog)) return;
+    if (!IsWindow(dialog) || IsWindowVisible(dialog) || GetPropW(dialog, kClosing)) return;
     ShowFade(dialog, show_command);
 }
 
@@ -311,14 +360,15 @@ void DestroyDialogWithFade(HWND dialog) {
 }
 
 void DestroyDialogWithFade(HWND dialog, HWND modal_owner) {
-    if (!IsWindow(dialog) || GetPropW(dialog, kFading)) return;
+    if (!IsWindow(dialog) || GetPropW(dialog, kFading) || GetPropW(dialog, kClosing)) return;
     SetPropW(dialog, kFading, reinterpret_cast<HANDLE>(1));
     HideComposedDialog(dialog, modal_owner);
     if (IsWindow(dialog)) DestroyWindow(dialog);
 }
 
 void HideComposedDialog(HWND dialog, HWND modal_owner) {
-    if (!dialog || !IsWindow(dialog)) return;
+    if (!dialog || !IsWindow(dialog) || GetPropW(dialog, kClosing)) return;
+    const bool marked_closing = SetPropW(dialog, kClosing, reinterpret_cast<HANDLE>(1)) != FALSE;
     const bool active = OwnedBy(GetActiveWindow(), dialog);
     // Windows must have an enabled activation target before the active popup disappears.
     if (modal_owner && IsWindow(modal_owner)) {
@@ -337,9 +387,12 @@ void HideComposedDialog(HWND dialog, HWND modal_owner) {
     // Hide any remaining owned auxiliary windows before releasing composition.
     // Hide all of them while the dialog surface still covers the owner.
     for (HWND window : owned.windows) HideWithoutActivation(window);
-    HideWithoutActivation(dialog);
     const HWND dim = CompanionDimOverlay(dialog, false);
+    auto fade = marked_closing ? FadeBeforeHide(dialog, dim) : nullptr;
+    HideWithoutActivation(dialog);
     if (dim) HideWithoutActivation(dim);
     CancelFade(dialog);
+    fade.reset();
+    if (marked_closing) RemovePropW(dialog, kClosing);
 }
 }

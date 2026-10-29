@@ -146,6 +146,46 @@ int wmain() {
         restored.windows.size() == 32 && restored.windows.back().active_path == L"window-31",
         "session serialization caps restored windows at 32");
 
+    WindowSessionSnapshot oversized;
+    oversized.layout_tabs.resize(pulse::app::kMaxSessionLayoutTabs + 1);
+    oversized.layout_tabs.front().layout = static_cast<int>(pulse::app::LayoutPreset::FourGrid);
+    oversized.layout_tabs.front().panes.resize(pulse::app::kMaxSessionPanes + 1);
+    oversized.tab_groups.resize(pulse::app::kMaxSessionTabGroups + 1);
+    SessionSnapshot bounded;
+    bounded.windows.push_back(oversized);
+    check(pulse::app::ParseSessionJson(pulse::app::SessionToJson(bounded), restored) &&
+        restored.layout_tabs.size() == pulse::app::kMaxSessionLayoutTabs &&
+        restored.layout_tabs.front().panes.size() == pulse::app::kMaxSessionPanes &&
+        restored.tab_groups.size() == pulse::app::kMaxSessionTabGroups,
+        "session serialization bounds tabs groups and panes consistently");
+    auto oversized_tabs_json = pulse::app::LayoutTabsToJson(oversized.layout_tabs);
+    oversized_tabs_json.insert(oversized_tabs_json.size() - 1, L",{}");
+    std::vector<LayoutTabSnapshot> decoded_tabs;
+    check(!pulse::app::ParseLayoutTabs(oversized_tabs_json, decoded_tabs),
+        "session parser rejects excess tabs before restoring work");
+    std::vector<LayoutTabSnapshot> excess_panes;
+    check(!pulse::app::ParseLayoutTabs(LR"([{"panes":[{},{},{},{},{}]}])", excess_panes),
+        "session parser rejects pane arrays beyond supported layouts");
+    check(pulse::app::ParseLayoutTabs(LR"([{"splitRatios":"3500,invalid,6500"}])", decoded_tabs) &&
+        decoded_tabs.size() == 1 && decoded_tabs.front().split_ratios == std::vector<float>{0.35f, 0.5f, 0.65f},
+        "an invalid saved split ratio keeps its slot without shifting later branches");
+
+    check(pulse::app::ParseSessionJson(
+        LR"({"version":8,"sidebarCollapsed":-1,"sidebarHidden":2147483647,"quickAccessHidden":2147483647})", restored) &&
+        restored.sidebar_collapsed == 0 &&
+        restored.sidebar_hidden == static_cast<int>((1u << pulse::app::kSidebarSectionCount) - 1u) &&
+        restored.quick_access_hidden == static_cast<int>((1u << static_cast<int>(pulse::app::BuiltinQuickAccess::Count)) - 1u),
+        "session masks discard negative values and unsupported section bits");
+
+    WINDOWPLACEMENT placement{sizeof(placement)};
+    placement.showCmd = SW_SHOWMINIMIZED;
+    placement.flags = WPF_RESTORETOMAXIMIZED;
+    check(pulse::app::WindowPlacementRestoresMaximized(placement),
+        "minimized maximized windows retain their restore state");
+    placement.showCmd = SW_SHOWNORMAL;
+    check(!pulse::app::WindowPlacementRestoresMaximized(placement),
+        "stale restore flags do not maximize a normal window");
+
     std::cout << "[INFO] failures=" << failures << '\n';
     return failures ? 1 : 0;
 }

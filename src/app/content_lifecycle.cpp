@@ -1,7 +1,20 @@
 #include "app_internal.h"
+#include "content_results_ui.h"
 #include "../common/localization.h"
 
 namespace pulse {
+void TeardownTabSearch(AppState& s, const app::Tab& tab) {
+    CancelNetworkAuthenticationForTab(s, tab);
+    CancelContentSelection(s, tab);
+    if (!tab.search_session_id) return;
+    s.index.CancelSession(tab.search_session_id);
+    s.networkIndex.CancelSession(tab.search_session_id);
+    s.contentSearch.Cancel(tab.search_session_id);
+    std::erase_if(s.pendingIndexSearches, [&](const auto& pending) {
+        return pending.second.query.session_id == tab.search_session_id;
+    });
+}
+
 void MarkContentSearchStopped(app::Tab& tab) {
     tab.search_content_stopped = true;
     tab.pending_generation = tab.search_live_generation = 0;

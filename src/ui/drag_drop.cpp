@@ -653,7 +653,7 @@ HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt
     }
     preferred_ = PreferredDropEffect(obj);
     drag_point_ = ClientPoint(pt);
-    drag_keys_ = key_state;
+    drag_keys_ = key_state | ((GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u);
     drag_allowed_ = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
     *effect = RefreshDragFeedback();
     return S_OK;
@@ -666,13 +666,14 @@ HRESULT WindowDropTarget::DragOver(DWORD key_state, POINTL pt, DWORD* effect) {
         return S_OK;
     }
     drag_point_ = ClientPoint(pt);
-    drag_keys_ = key_state;
+    drag_keys_ = key_state | ((GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u);
     drag_allowed_ = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
     *effect = RefreshDragFeedback();
     return S_OK;
 }
 
 DWORD WindowDropTarget::RefreshDragFeedback() {
+    drag_keys_ = (drag_keys_ & ~0x20u) | ((GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u);
     return !sources_.empty() && drag_allowed_ && cb_.drag_over
         ? cb_.drag_over(sources_, drag_point_, drag_keys_, drag_allowed_, preferred_) & drag_allowed_
         : DROPEFFECT_NONE;
@@ -697,6 +698,7 @@ HRESULT WindowDropTarget::Drop(IDataObject* obj, DWORD key_state, POINTL pt, DWO
     }
     // The dropped object may differ from the object passed to DragEnter.
     const DWORD preferred = PreferredDropEffect(obj);
+    key_state |= (GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u;
     DWORD performed = cb_.drop ? cb_.drop(sources, ClientPoint(pt), key_state, allowed, preferred) & allowed
                                : DROPEFFECT_NONE;
     *effect = performed;

@@ -1,0 +1,20 @@
+{
+  "document_check": "PASS",
+  "local_links_valid": 145,
+  "current_source_hashes_verified": 7,
+  "baseline_in_scope": 149,
+  "baseline_excluded": 19,
+  "checkboxes_preserved": 106,
+  "selected": [
+    302,
+    308,
+    314,
+    374
+  ],
+  "storage_top_level_checks_passed": 42,
+  "storage_paired_query_comparisons": 291,
+  "exfat_checks_passed": 29,
+  "failed": 0,
+  "production_install_changed": false,
+  "production_index_cleaned": false
+}

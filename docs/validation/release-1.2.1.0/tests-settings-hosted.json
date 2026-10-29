@@ -1,0 +1,14 @@
+[
+  {
+    "Name": "settings",
+    "ExitCode": 0,
+    "Pass": 493,
+    "Fail": 0
+  },
+  {
+    "Name": "hosted",
+    "ExitCode": 1,
+    "Pass": 505,
+    "Fail": 48
+  }
+]

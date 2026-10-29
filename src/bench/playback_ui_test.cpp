@@ -8,6 +8,8 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <fstream>
 
 namespace pulse::ui {
 struct QuickPreviewPlaybackProbe {
@@ -49,6 +51,84 @@ struct QuickPreviewPlaybackProbe {
         item.size = (uint64_t{data.nFileSizeHigh} << 32) | data.nFileSizeLow;
         item.modified = (uint64_t{data.ftLastWriteTime.dwHighDateTime} << 32) | data.ftLastWriteTime.dwLowDateTime;
         return item;
+    }
+    static int RunSmoothScroll() {
+        failures = 0;
+        const auto folder = std::filesystem::absolute(L"bench_data/smooth-scroll-preview");
+        std::filesystem::create_directories(folder);
+        const auto long_path = folder / L"long.txt", short_path = folder / L"short.txt";
+        {
+            std::ofstream file(long_path);
+            for (int i = 0; i < 500; ++i) file << i << " preview smooth scrolling fixture\n";
+        }
+        { std::ofstream file(short_path); file << "short preview\n"; }
+        HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"Scroll test owner",
+            WS_OVERLAPPEDWINDOW, 40, 40, 900, 700, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        QuickPreviewWindow q;
+        Check(q.Initialize(owner, WM_APP + 1, WM_APP + 2), "initialize production text preview window");
+        if (!q.hwnd_) { DestroyWindow(owner); return 1; }
+        q.Show(Item(long_path.wstring()), false, WindowEffect::None, true);
+        const bool ready = Until([&] { return q.native_kind_ == QuickPreviewWindow::NativeKind::Text &&
+                                             q.TextScrollMaximum() > 1000.0f; });
+        Check(ready, "smooth preview fixture loads through native text decoder");
+        if (!ready) { q.Close(); DestroyWindow(owner); return 1; }
+        BOOL enabled = TRUE;
+        HIGHCONTRASTW hc{sizeof(hc)};
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0);
+        const bool animate = enabled && !(hc.dwFlags & HCF_HIGHCONTRASTON);
+        q.text_scroll_ = 500.0f;
+        q.ResetTextScroll();
+        SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+        Check(q.text_smooth_scroll_.Pending() == animate,
+              "native preview wheel respects system animation and high contrast policy");
+        if (animate) {
+            Sleep(30);
+            SendMessageW(q.hwnd_, WM_TIMER, 10, 0);
+            Check(q.text_scroll_ > 500.0f && q.text_scroll_ < 500.0f + 56.0f * q.scale_,
+                  "native preview exposes a continuous intermediate frame");
+        }
+        const float reversed = q.text_scroll_;
+        SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
+        Sleep(30);
+        SendMessageW(q.hwnd_, WM_TIMER, 10, 0);
+        Check(q.text_scroll_ < reversed, "native preview reverse wheel cancels forward momentum");
+        Check(Until([&] { return !q.text_smooth_scroll_.Pending(); }), "native preview animation reaches rest");
+        q.text_scroll_ = q.TextScrollMaximum();
+        q.ResetTextScroll();
+        SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+        Check(q.text_scroll_ == q.TextScrollMaximum() && !q.text_smooth_scroll_.Pending(),
+              "native preview bottom boundary leaves no pending animation");
+        q.text_scroll_ = 0.0f;
+        q.ResetTextScroll();
+        SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
+        Check(q.text_scroll_ == 0.0f && !q.text_smooth_scroll_.Pending(),
+              "native preview top boundary leaves no pending animation");
+        SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+        q.Update(Item(short_path.wstring()));
+        Check(q.text_scroll_ == 0.0f && !q.text_smooth_scroll_.Pending(),
+              "preview content switch clears offset and pending animation immediately");
+        Check(Until([&] { return q.native_kind_ == QuickPreviewWindow::NativeKind::Text &&
+                                q.preview_text_.find(L"short preview") != std::wstring::npos; }) &&
+              q.text_scroll_ == 0.0f && q.TextScrollMaximum() == 0.0f,
+              "short replacement content stays at its zero scroll boundary");
+        const auto hex_path = folder / L"bytes.bin";
+        { std::ofstream file(hex_path, std::ios::binary); file << std::string(32768, '\0'); }
+        q.Update(Item(hex_path.wstring()));
+        const bool hex_ready = Until([&] { return q.native_kind_ == QuickPreviewWindow::NativeKind::Hex &&
+                                                 q.TextScrollMaximum() > 100.0f; });
+        Check(hex_ready, "binary fixture loads through native hex decoder");
+        if (hex_ready) {
+            SendMessageW(q.hwnd_, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+            Check(q.text_smooth_scroll_.Pending() == animate,
+                  "hex wheel uses the same continuous animation policy");
+            Check(Until([&] { return !q.text_smooth_scroll_.Pending(); }) && q.text_scroll_ > 0.0f,
+                  "hex wheel advances and comes to rest");
+        }
+        q.Close();
+        Check(!q.text_smooth_scroll_.Pending(), "closing preview clears pending scroll animation");
+        DestroyWindow(owner);
+        return failures ? 1 : 0;
     }
     static void Capture(QuickPreviewWindow& q, const wchar_t* name) {
         // Render the production controls/HUD into an isolated GPU target.
@@ -400,13 +480,15 @@ struct QuickPreviewPlaybackProbe {
 };
 }
 int wmain(int argc, wchar_t** argv) {
+    const bool smooth_scroll_only = argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0;
     const bool video_only = argc == 3 && wcscmp(argv[1], L"--video-only") == 0;
     const bool end_seek_only = argc == 3 && wcscmp(argv[1], L"--end-seek-only") == 0;
     if (argc != 2 && !video_only && !end_seek_only) return 2;
     OleInitialize(nullptr);
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const int result = end_seek_only ? pulse::ui::QuickPreviewPlaybackProbe::RunEndSeek(argv[2])
+    const int result = smooth_scroll_only ? pulse::ui::QuickPreviewPlaybackProbe::RunSmoothScroll()
+        : end_seek_only ? pulse::ui::QuickPreviewPlaybackProbe::RunEndSeek(argv[2])
         : video_only ? pulse::ui::QuickPreviewPlaybackProbe::RunVideo(argv[2])
         : pulse::ui::QuickPreviewPlaybackProbe::Run(argv[1]);
     OleUninitialize(); return result;

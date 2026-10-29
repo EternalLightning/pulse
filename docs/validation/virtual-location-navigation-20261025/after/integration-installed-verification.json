@@ -1,0 +1,31 @@
+{
+  "Success": true,
+  "InstalledHashes": 41,
+  "BackupHashes": 41,
+  "RetiredFiles": 1,
+  "Backup": "E:\\Projects\\pulse\\dist\\installed-backups\\20261025-175738-fe09a6a163e34387bad72f827732084d",
+  "Smoke": {
+    "MissingDirectoryExit": 0,
+    "HomeExit": 0,
+    "IntegrationMissingArgumentsExit": 2,
+    "ScreenshotsReviewed": true
+  },
+  "UI": {
+    "Path": "D:\\Applications\\Pulse\\Pulse.exe",
+    "InputIdle": true,
+    "ProcessId": 7712,
+    "MainWindowHandle": 19794456,
+    "MainWindowTitle": "主页 - Pulse"
+  },
+  "Service": {
+    "State": "Stopped",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "Agents": [
+    {
+      "ProcessId": 56604,
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ]
+}

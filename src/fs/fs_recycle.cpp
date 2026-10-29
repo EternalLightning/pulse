@@ -140,20 +140,39 @@ bool EnumerateRecycleBinAtRoot(const std::wstring& recycle_root, std::vector<Dir
     if (sid.empty()) return false; // Never fall back to scanning other users.
     const std::wstring sid_dir = NormalizePath(recycle_root) + L"\\" + sid;
     WIN32_FIND_DATAW index{};
-    HANDLE find = FindFirstFileW((sid_dir + L"\\$I*").c_str(), &index);
+    HANDLE find = FindFirstFileW((sid_dir + L"\\*").c_str(), &index);
     if (find == INVALID_HANDLE_VALUE) {
         const DWORD error = GetLastError();
         return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
     }
+    bool complete = true;
     do {
-        if (index.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        const std::wstring_view name(index.cFileName);
+        if (name.size() < 3 || name[0] != L'$') continue;
+        if (name[1] == L'R' || name[1] == L'r') {
+            const auto metadata = RecycleIndexPath(sid_dir + L"\\" + index.cFileName);
+            RecycleItem item;
+            if (!ReadRecycleIndex(metadata, item)) complete = false;
+            continue;
+        }
+        if (name[1] != L'I' && name[1] != L'i') continue;
+        if (index.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { complete = false; continue; }
+        auto payload = sid_dir + L"\\" + index.cFileName;
+        payload[sid_dir.size() + 2] = name[1] == L'I' ? L'R' : L'r';
+        if (GetFileAttributesW(payload.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            const DWORD absent = GetLastError();
+            // Exact restore deliberately retains its index. Metadata without a
+            // payload contains no remaining deleted data and is not a live item.
+            if (absent == ERROR_FILE_NOT_FOUND || absent == ERROR_PATH_NOT_FOUND) continue;
+        }
         RecycleItem item;
         if (ReadRecycleIndex(sid_dir + L"\\" + index.cFileName, item))
             out.push_back(ToDirEntry(item));
+        else complete = false;
     } while (FindNextFileW(find, &index));
     const DWORD error = GetLastError();
     FindClose(find);
-    return error == ERROR_NO_MORE_FILES;
+    return complete && error == ERROR_NO_MORE_FILES;
 }
 
 void EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo* info) {

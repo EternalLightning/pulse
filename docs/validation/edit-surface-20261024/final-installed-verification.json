@@ -1,0 +1,71 @@
+{
+  "UI": [
+    {
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "IntegrityRid": 8192,
+      "CreationDate": "2026-10-24T14:07:49.536005+08:00",
+      "ProcessId": 41516
+    }
+  ],
+  "IndexHosts": [
+    {
+      "ProcessId": 36948,
+      "CreationDate": "2026-10-24T13:09:53.617849+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "Files": [
+    {
+      "Version": "1.2.0.3",
+      "SHA256": "75D0CE9EC19F71BF29435FA6F3C2DDB6E169F69B26FF22473D30CFC6E464CCF3",
+      "Match": true,
+      "Relative": "Pulse.exe"
+    },
+    {
+      "Version": "1.2.0.3",
+      "SHA256": "230F8BBA417D259B6ACF914002D71426861DC1345D6B481E098896702CF0029F",
+      "Match": true,
+      "Relative": "Pulse.Index.exe"
+    },
+    {
+      "Version": "1.2.0.3",
+      "SHA256": "957FF68C8D502733FF5E4B6DFA5D4F570A0013C4505A944DB1A22B54F307C1FC",
+      "Match": true,
+      "Relative": "Pulse.Shell.exe"
+    },
+    {
+      "Version": "1.2.0.3",
+      "SHA256": "C660915E057985B72E0C99318FCAF9BB53CF699C6F1B2BEFADE1631183E3A5A5",
+      "Match": true,
+      "Relative": "Pulse.Preview.exe"
+    },
+    {
+      "Version": "1.2.0.3",
+      "SHA256": "3F17D2A0D6FB4B168429CA5EC46A5BE78D66896143FFD507189035D77B34B522",
+      "Match": true,
+      "Relative": "Pulse.Document.exe"
+    },
+    {
+      "Version": null,
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+      "Match": true,
+      "Relative": "lumatext.dll"
+    },
+    {
+      "Version": "155.0.8044.0",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+      "Match": true,
+      "Relative": "pdfium.dll"
+    }
+  ],
+  "Service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "ProcessId": 7292,
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "Success": true,
+  "Utc": "2026-10-24T06:07:51.7600115Z",
+  "Version": "1.2.0.3"
+}

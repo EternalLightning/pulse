@@ -15,6 +15,7 @@
 namespace pulse::index { class IndexClient; class NetworkAgentClient; }
 
 namespace pulse::app {
+class SystemCtxModel;
 
 enum class SettingsEffect : uint32_t {
     None = 0,
@@ -54,6 +55,8 @@ enum class SettingsTaskKind : uint8_t {
     NetworkRebuild,
     NetworkRemove,
     DiagnosticsExport,
+    SettingsExport,
+    SettingsImport,
 };
 
 constexpr bool IsNetworkTask(SettingsTaskKind kind) noexcept {
@@ -68,6 +71,7 @@ struct SettingsTask {
     std::wstring path;
     bool enabled = false;
     bool pin = false;
+    std::vector<std::pair<std::wstring, std::wstring>> snapshots;
 };
 
 struct SettingsTaskResult {
@@ -93,6 +97,7 @@ public:
         std::function<void(SettingsEffect)> apply_effects;
         std::function<void(int)> toggle_system_integration;
         SettingsTaskCompletion task_completion;
+        SettingsTaskOperation settings_transfer;
         std::function<void(const std::wstring&)> open_path;
         std::function<void()> open_diagnostics;
         std::function<bool(std::wstring&)> clear_diagnostics;
@@ -101,7 +106,7 @@ public:
             export_diagnostics;
     };
 
-    SettingsController() = default;
+    SettingsController();
     ~SettingsController();
     SettingsController(const SettingsController&) = delete;
     SettingsController& operator=(const SettingsController&) = delete;
@@ -119,6 +124,8 @@ public:
     bool network_pending() const noexcept;
     bool diagnostics_pending() const noexcept;
     bool migration_pending() const noexcept;
+    bool settings_transfer_pending() const noexcept;
+    bool StartSettingsTransfer(SettingsTask task);
 
     SettingsTaskEffect CompleteTask(const SettingsTaskResult& result,
                                     bool service_installed);
@@ -145,6 +152,17 @@ public:
     void Language(std::wstring_view language_id);
     void Wallpaper(int action);
     void ToggleUi(int index);
+    int ContextTab() const noexcept { return context_tab_; }
+    SystemCtxModel& SystemCtx();
+    bool SystemCtxLoaded() const noexcept { return system_context_ != nullptr; }
+    void BeginMenuDrag(int item, float pos, float grab) noexcept;
+    bool MenuDragMove(float pos) noexcept;
+    void EndMenuDrag() noexcept { menu_drag_item_ = -1; menu_drag_live_ = false; }
+    int menu_drag_item() const noexcept { return menu_drag_item_; }
+    bool menu_drag_live() const noexcept { return menu_drag_live_; }
+    float menu_drag_pos() const noexcept { return menu_drag_pos_; }
+    float menu_drag_grab() const noexcept { return menu_drag_grab_; }
+    void SetMenuOrder(const BuiltinMenuOrder& order);
     void BeginGlobalSearchHotkeyCapture() noexcept { global_search_capturing_ = true; }
     void CancelGlobalSearchHotkeyCapture() noexcept { global_search_capturing_ = false; }
     bool CaptureGlobalSearchHotkey(uint32_t key, uint32_t modifiers);
@@ -179,11 +197,17 @@ private:
         bool network_pending = false;
         bool diagnostics_pending = false;
         bool migration_pending = false;
+        bool settings_transfer_pending = false;
     };
 
     bool global_search_capturing_ = false;
     std::wstring global_search_error_;
     int page_ = 0;
+    int context_tab_ = 0;
+    int menu_drag_item_ = -1;
+    bool menu_drag_live_ = false;
+    float menu_drag_start_ = 0, menu_drag_pos_ = 0, menu_drag_grab_ = 0;
+    std::unique_ptr<SystemCtxModel> system_context_;
     float scroll_ = 0.0f;
     std::shared_ptr<TaskState> task_state_ = std::make_shared<TaskState>();
     std::mutex workers_mutex_;

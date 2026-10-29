@@ -12,6 +12,7 @@ void EmptyRecycleBin(AppState& s);
 void CollectToTray(AppState& s, bool move_intent);
 void ShowBatchRename(AppState& s);
 void PinAndShowOperationWindow(AppState& s);
+void EnsureOperationWindow(AppState& s);
 void InitializeOperationCenter(AppState& s);
 void ToggleOperationCenter(AppState& s);
 void UpdateOperationCenter(AppState& s);

@@ -1,0 +1,33 @@
+{
+  "quick_access_paths": [
+    "E:\\Projects"
+  ],
+  "active_workspace": 0,
+  "workspaces": [
+    {
+      "panes": [
+        "E:\\Projects\\pulse"
+      ],
+      "name": "pulse",
+      "root": "E:\\Projects\\pulse",
+      "freq": [
+        "E:\\Projects\\pulse\\build-release\t2"
+      ],
+      "layout": 0,
+      "views": [
+        "details"
+      ]
+    },
+    {
+      "panes": [
+        "E:\\Projects\\Thesis"
+      ],
+      "name": "Thesis",
+      "views": [
+        "details"
+      ],
+      "layout": 0,
+      "root": "E:\\Projects\\Thesis"
+    }
+  ]
+}

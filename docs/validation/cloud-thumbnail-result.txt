@@ -1,0 +1,1 @@
+[FAIL] thumbnail fixture directory error=5 path=E:\Projects\pulse\bench_data\PulseImageThumbnail-34528

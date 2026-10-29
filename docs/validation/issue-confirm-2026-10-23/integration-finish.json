@@ -1,0 +1,328 @@
+{
+  "date": "2026-10-23",
+  "generated_at": "2026-10-23T19:42:19.3607953+08:00",
+  "scope": "Supplemental integration evidence for Explorer selection takeover, #374 recycle size rejection, removable unavailable/stale generation, and MTP applicability. No product source, user configuration, installed binary, registry, service, or private user file changes.",
+  "new_product_changes": [],
+  "build_scope": "Private fixture compilation and relinking only. Main agent owns shared target builds. Existing fixture reruns retain original binary provenance and are not relabeled as current production rebuilds.",
+  "wechat": {
+    "issue": 345,
+    "status": "opt-in setting and isolated selection delivery verified; actual WeChat integration unverified",
+    "configuration_before": {
+      "path": "D:/AppData/Pulse/app.json",
+      "sha256": "5CB99A293DF82BC2B701A6E95C517B869BD83EA3FB0B51C8B0504E4E42B6B5F7",
+      "mtime_utc": "2026-10-23T11:11:07.9317055Z",
+      "experimental_explorer_takeover": false,
+      "open_folders_in_pulse": true,
+      "take_over_win_e": true,
+      "take_over_this_pc": true
+    },
+    "configuration_sha256_after": "5CB99A293DF82BC2B701A6E95C517B869BD83EA3FB0B51C8B0504E4E42B6B5F7",
+    "configuration_unchanged": true,
+    "observation": "experimental_explorer_takeover is false while the three folder/Win+E/This-PC preferences are true. Ordinary folder association preferences do not enable the experimental Explorer selection observer.",
+    "source_evidence": [
+      "src/app/app_prefs.h:22 default is false",
+      "src/app/settings_controller.cpp:438 forwards control 24",
+      "src/ui/settings_layout_sections.h:277 creates the row",
+      "src/ui/ui_settings_core.cpp:181 renders independent control 24",
+      "src/app/system_integration.cpp:134 starts observer only for task.experimental",
+      "src/app/system_integration.cpp:253 toggles the opt-in preference",
+      "src/app/system_integration.cpp:394 routes request.selected_paths with explicit selection flags",
+      "src/app/system_integration.cpp:409 rejects disabled or inactive requests before selection",
+      "src/app/system_integration.cpp:420 applies selection before successful acknowledgement"
+    ],
+    "safety": "Real Explorer service and registry disabled in selection/settings fixtures. No global input, user WeChat call, Explorer manipulation, or actual opt-in setting change. No installed update.",
+    "settings": {
+      "name": "existing takeover settings fixture rerun",
+      "exit_code": 0,
+      "passed": 71,
+      "failed": 0,
+      "binary": {
+        "path": "bench_data\\issue-fixes-main\\settings-test.exe",
+        "bytes": 4813312,
+        "mtime_utc": "2026-10-23T04:20:21.6878211Z",
+        "sha256": "d3e4edeaa24268cdc3f06c93d068f5994e7d9698b544f66628e202ff15bc8798"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\settings-existing.log",
+        "bytes": 3730,
+        "mtime_utc": "2026-10-23T11:32:53.4889049Z",
+        "sha256": "70b431bdf5bc46f7c133e7100d396531326153f9e05d2a671517caca4c0c6bc5"
+      },
+      "scope": "Nonpersistent state and memory registry, 16 offscreen render captures. Binary from earlier 2026-10-23 build; no claim of final installed UI acceptance."
+    },
+    "selection_delivery": {
+      "name": "production-object isolated takeover delivery",
+      "exit_code": 0,
+      "passed": 9,
+      "failed": 0,
+      "binary": {
+        "path": "bench_data\\integration-finish-20261023\\delivery.exe",
+        "bytes": 3833344,
+        "mtime_utc": "2026-10-23T11:39:31.9645619Z",
+        "sha256": "3c135b53ef556b596304be79afbcb27b0a5da0c93494f2575ea6de544cbca2e7"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\delivery.log",
+        "bytes": 675,
+        "mtime_utc": "2026-10-23T11:39:55.7125356Z",
+        "sha256": "95e394036bc19450437124aefc035e7cf5e9eb660409296a2cfc700042ce6236"
+      },
+      "scope": "Current stable production objects privately relinked with existing takeover_delivery_fixture_test.cpp. Request callbacks are injected; UI selection/acknowledgement is production. Covers late selection reuse, changed view, unknown replacement, replaced unresolved completion, and filtered-out target."
+    },
+    "startup_ipc": {
+      "name": "existing startup/IPC fixture rerun",
+      "exit_code": 0,
+      "passed": 22,
+      "failed": 0,
+      "binary": {
+        "path": "build\\pulse_command_line_open_test.exe",
+        "bytes": 200192,
+        "mtime_utc": "2026-10-23T04:04:09.6329829Z",
+        "sha256": "59d35ba9f4740af4f5b68a4aa8975fd2af4d6c0d758c8e68240bf4f004dee9de"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\cli-existing.log",
+        "bytes": 1223,
+        "mtime_utc": "2026-10-23T11:31:57.7335205Z",
+        "sha256": "f824a93af5c1cb60e6e693f85223368f55f1bb1a8b102cf89fd84b14da57f2cd"
+      },
+      "scope": "Existing binary: argument parsing, caller-relative path normalization, IPC decoding. Does not simulate WeChat or prove Explorer selection transfer."
+    },
+    "manual_boundary": "With an explicitly chosen safe local sample and explicit experimental opt-in by the user, invoke the real WeChat show-in-folder menu against the intended installed build, observe selected file and Explorer window disposition. Client version, real call, and installed behavior were not exercised."
+  },
+  "recycle_374": {
+    "original_source": "docs/validation/issue-confirm-2026-10-23/sources/374-readable.json",
+    "original_claim": "Windows reports that a system folder is too large for Recycle Bin; Pulse reports cannot delete.",
+    "status": "Real owned sparse-directory size rejection and permanent confirmation rejection path verified; original system-directory bug not reproduced or fixed",
+    "sparse_fixture": {
+      "logical_bytes": 8796093022208,
+      "allocated_bytes": 0,
+      "ownership": "Only newly created unique directories beneath bench_data/integration-finish-20261023, with .owner marker and retained FileIdentity",
+      "sandbox_observation": "0x80270021 COPYENGINE_E_ACCESS_DENIED_SRC, source retained and cleaned",
+      "unrestricted_observation": "Byte-identical binary returned 0x80270037 COPYENGINE_E_RECYCLE_SIZE_TOO_BIG; NeedsPermanentDeleteConfirmation true; source retained and cleaned",
+      "environment_inference": "Return differs across execution environments; no product root cause is inferred from sandbox access denial",
+      "restoration": "Direct backend returned no recycled payload in either run, so no recycle-bin item was restored or removed. If ever returned, fixture guards restoration using exact returned path, current-user bin parent, retained identity, owner marker and original-path metadata."
+    },
+    "direct_backend": {
+      "binary": {
+        "path": "bench_data\\integration-finish-20261023\\sparse-recycle.exe",
+        "bytes": 297472,
+        "mtime_utc": "2026-10-23T11:32:30.2909130Z",
+        "sha256": "6b14d4c18fdfbb5fbe5b3cbe0f2521b1bf85a563dddac7c2e1b35d38880e7e5e"
+      },
+      "sandbox_log": {
+        "path": "bench_data\\integration-finish-20261023\\sparse-recycle.log",
+        "bytes": 252,
+        "mtime_utc": "2026-10-23T11:41:32.0026094Z",
+        "sha256": "f22d0f3aa1ac860245bdea63646a873b33b3793cdbada525642bf8571cbe5889"
+      },
+      "unrestricted_log": {
+        "path": "bench_data\\integration-finish-20261023\\sparse-recycle-unrestricted.log",
+        "bytes": 252,
+        "mtime_utc": "2026-10-23T11:41:38.0936987Z",
+        "sha256": "e8d8d8ae06920427c6fc3e5af5fee00c202efd6378fd28c7b0d2a8f26896c247"
+      },
+      "sandbox_provenance": {
+        "phase": "sandbox",
+        "exit_code": 0,
+        "sha256_before": "6B14D4C18FDFBB5FBE5B3CBE0F2521B1BF85A563DDDAC7C2E1B35D38880E7E5E",
+        "sha256_after": "6B14D4C18FDFBB5FBE5B3CBE0F2521B1BF85A563DDDAC7C2E1B35D38880E7E5E"
+      },
+      "unrestricted_provenance": {
+        "phase": "unrestricted",
+        "exit_code": 0,
+        "sha256_before": "6B14D4C18FDFBB5FBE5B3CBE0F2521B1BF85A563DDDAC7C2E1B35D38880E7E5E",
+        "sha256_after": "6B14D4C18FDFBB5FBE5B3CBE0F2521B1BF85A563DDDAC7C2E1B35D38880E7E5E"
+      },
+      "actual_shell_provider_call": true,
+      "backend_permanent_delete_requested": false,
+      "bin_empty_action": false,
+      "fixture_cleaned": true,
+      "cleanup_note": "Cleanup permanently removes only the fixture files and its empty root after owner-marker and retained-identity checks. Test operation itself submits no permanent-delete request."
+    },
+    "production_manager": {
+      "name": "real OpsManager to Shell IPC recycle fallback decline",
+      "exit_code": 0,
+      "passed": 6,
+      "failed": 0,
+      "binary": {
+        "path": "bench_data\\integration-finish-20261023\\manager.exe",
+        "bytes": 3341824,
+        "mtime_utc": "2026-10-23T11:39:37.6291123Z",
+        "sha256": "5a3e3dc10ff0b98aaa340053a08763d6267319b44d667bb1525c7f48d7db8e3e"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\manager.log",
+        "bytes": 518,
+        "mtime_utc": "2026-10-23T11:40:07.9175232Z",
+        "sha256": "d3671fe617e4b75e1a096f70ae22d61a89357b0fd24fe32a916fac72a261c032"
+      },
+      "scope": "Production OpsManager and byte-copied production Pulse.Shell.exe. Private storage and journal. Real backend rejects 8-TiB sparse directory; exact permanent confirmation is declined; original survives, Cancelled, no completion or undo. No native confirmation dialog rendered."
+    },
+    "existing_confirmation_state_machine": {
+      "name": "existing injected recycle confirmation fixture rerun",
+      "exit_code": 0,
+      "passed": 8,
+      "failed": 0,
+      "binary": {
+        "path": "bench_data\\issue-followup-index\\delete-confirm-probe.exe",
+        "bytes": 2916352,
+        "mtime_utc": "2026-10-23T05:44:42.6677642Z",
+        "sha256": "b392e529e7c09ddf2143eb82cc145d6a996d06a9f3e0cec7372783f06bfafc41"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\delete-confirm-existing.log",
+        "bytes": 614,
+        "mtime_utc": "2026-10-23T11:31:58.2103274Z",
+        "sha256": "949e94de50b2dd154b6dbe7d08d3d06c78acaf1db2683b457cf6acb2a909f874"
+      },
+      "scope": "Injected transport only: reject/accept use fresh exact-root plan; backend cancellation and ordinary access-denied boundaries. No real deletion; earlier binary provenance retained."
+    },
+    "source_evidence": [
+      "src/shell_host/recycle_fileop.cpp:155 explicit RecycleItem never silently permanently deletes",
+      "src/shell_host/delete_fileop.h:21 maps explicit recycle refusal codes to a fresh permanent confirmation",
+      "src/ops/delete_operation.cpp:575 runs the remaining exact roots through a new RealDelete admission",
+      "src/ops/delete_operation.cpp:434 waits for a presenter decision before backend dispatch"
+    ],
+    "manual_boundary": "Original system folder, its permissions and returned Shell HRESULT were not available. The sparse fixture demonstrates an actual quota refusal on a safe owned root, not the original directory ACL/elevation behavior. No defect is declared from incomplete original context."
+  },
+  "removable": {
+    "historical_real_device_evidence": "docs/validation/issue-confirm-2026-10-23/exfat-device-validation.json",
+    "historical_result": "29 PASS / 0 FAIL on actual G: exFAT USB; retained as prior evidence, not rerun hardware acceptance",
+    "current_probe": {
+      "binary": {
+        "path": "bench_data\\issue-fixes-removable\\exfat-device-test.exe",
+        "bytes": 2263552,
+        "mtime_utc": "2026-10-23T07:35:41.0359897Z",
+        "sha256": "da924d8b9bad11ccf4203f94e9124ff105730437cdb8f566a4963cb0b684ee46"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\exfat-probe.log",
+        "bytes": 123,
+        "mtime_utc": "2026-10-23T11:31:58.1389818Z",
+        "sha256": "348a0ed1606b9d80bfc9dac81f929d8ca011a1652f707320e80046173ca1b437"
+      },
+      "exit_code": 2,
+      "meaning": "No online exFAT removable device found; G: GetVolumeInformationW fails with ERROR_PATH_NOT_FOUND (3). This is a missing-device observation, not a test failure."
+    },
+    "supplemental_boundaries": {
+      "name": "current-source unavailable device/generation/startup IPC boundaries",
+      "exit_code": 0,
+      "passed": 11,
+      "failed": 0,
+      "binary": {
+        "path": "bench_data\\integration-finish-20261023\\boundaries.exe",
+        "bytes": 1886208,
+        "mtime_utc": "2026-10-23T11:32:49.1499394Z",
+        "sha256": "2bd70900b5d43a8d39804d7902ad5b5d492556463591f7dc06f635a5d2a8873d"
+      },
+      "log": {
+        "path": "bench_data\\integration-finish-20261023\\boundaries.log",
+        "bytes": 767,
+        "mtime_utc": "2026-10-23T11:32:54.5231437Z",
+        "sha256": "77899955f3c1a6c620bcb493b2e7ae0fa2f2901ec73156bd98745427283959c7"
+      },
+      "scope": "Synthetic removable-cache clear; absent route errors before CWD scan; previous, zero, and duplicate generations rejected; current completion accepted. Also production argument and malformed IPC checks. No physical hot unplug."
+    },
+    "manual_boundary": "Physical unplug/reinsert with an in-flight request and installed UI remains unverified. No request to attach or detach user hardware was made."
+  },
+  "mtp": {
+    "status": "not applicable to current drive-path backend; no MTP/WPD backend implemented",
+    "evidence": [
+      "src/fs/fs_enum.cpp:469 This PC enumerates GetLogicalDrives",
+      "src/app/app_model.cpp:1345 sidebar enumerates GetLogicalDrives",
+      "src/app and src/fs search found no MTP, WPD, PortableDevice, EnumObjects implementation"
+    ],
+    "boundary": "Standard Android MTP shell namespace browsing/search is unsupported. This does not imply unsupported USB mass-storage/drive-letter devices. No phone was connected or manipulated; no new MTP backend was added."
+  },
+  "private_build": {
+    "standalone_log": {
+      "path": "bench_data\\integration-finish-20261023\\build-private.log",
+      "bytes": 339,
+      "mtime_utc": "2026-10-23T11:32:42.5020302Z",
+      "sha256": "b67bfe31a99958fa65e5bcc64b99c404baca69ccb2e29c899d9dcdd0678e02b9"
+    },
+    "production_object_log": {
+      "path": "bench_data\\integration-finish-20261023\\build-production-fixtures.log",
+      "bytes": 57,
+      "mtime_utc": "2026-10-23T11:39:32.7509571Z",
+      "sha256": "3d8091042cd53503b0724f48aba14c3dcf228fca5ee3ffd79e515c24ad5fbab3"
+    },
+    "shared_build_run_by_this_agent": false
+  },
+  "provenance": [
+    {
+      "path": "build\\Pulse.exe",
+      "bytes": 7804416,
+      "mtime_utc": "2026-10-23T11:36:41.5458882Z",
+      "sha256": "3bccca8e0b61502387353dd50a487e8145c977ca82af4d5bdd40132c4ed326b5"
+    },
+    {
+      "path": "build\\Pulse.Shell.exe",
+      "bytes": 1482752,
+      "mtime_utc": "2026-10-23T11:39:32.7144515Z",
+      "sha256": "451dbb4c84ba06245038655005aba27da657f4e21ab46e1116f6900e868ec345"
+    },
+    {
+      "path": "bench_data\\integration-finish-20261023\\Pulse.Shell.exe",
+      "bytes": 1482752,
+      "mtime_utc": "2026-10-23T11:39:32.7144515Z",
+      "sha256": "451dbb4c84ba06245038655005aba27da657f4e21ab46e1116f6900e868ec345"
+    },
+    {
+      "path": "src\\bench\\takeover_delivery_fixture_test.cpp",
+      "bytes": 6431,
+      "mtime_utc": "2026-10-20T04:07:18.2527117Z",
+      "sha256": "e222bf143fe9be7692b25ff99844f3a9fbe28ed9de6f9e0a613d3f2386f43d07"
+    },
+    {
+      "path": "src\\shell_host\\recycle_fileop.cpp",
+      "bytes": 10791,
+      "mtime_utc": "2026-10-08T10:45:14.2783841Z",
+      "sha256": "5aa9500a05d3bf8145a07757a5dc93d5c8b419e18844159ba1b18a9e365797d6"
+    },
+    {
+      "path": "src\\shell_host\\deletion_identity.cpp",
+      "bytes": 3437,
+      "mtime_utc": "2026-10-22T08:43:37.2759680Z",
+      "sha256": "591fcaf11d50b552bb5c576471e2cbaf38626c89362920e1117b4db03f9a31a6"
+    },
+    {
+      "path": "src\\ops\\delete_operation.cpp",
+      "bytes": 34221,
+      "mtime_utc": "2026-10-22T13:51:16.2602928Z",
+      "sha256": "051ddedfa45f407ace2922f050bee6c07f724c15e368c931adfeeaeb66bf2eb4"
+    },
+    {
+      "path": "src\\app\\system_integration.cpp",
+      "bytes": 21854,
+      "mtime_utc": "2026-10-19T14:16:41.6276743Z",
+      "sha256": "6fe6cf0d7e835970d06747dba31e169ea275e3b45d98877896dae511b359ff65"
+    },
+    {
+      "path": "build\\CMakeFiles\\pulse.dir\\src\\app\\system_integration.cpp.obj",
+      "bytes": 955899,
+      "mtime_utc": "2026-10-23T04:16:53.9710285Z",
+      "sha256": "bcfb8c3290e465fb76ec66788725e7d1bd80c330d48102c219043a6d1d279081"
+    },
+    {
+      "path": "build\\CMakeFiles\\pulse.dir\\src\\ops\\delete_operation.cpp.obj",
+      "bytes": 1390775,
+      "mtime_utc": "2026-10-23T04:17:12.3595844Z",
+      "sha256": "f4f9bdce989a18247e19c39a2ab6031c8d85a7f6a8bd398e02f6df1cc0461d45"
+    },
+    {
+      "path": "bench_data\\integration-finish-20261023\\delivery-link.rsp",
+      "bytes": 9881,
+      "mtime_utc": "2026-10-23T11:36:08.5323934Z",
+      "sha256": "42d85e27ffa35c0ad78a91842a62080cba0ffbd05dd7c323f012af5051425f6f"
+    },
+    {
+      "path": "bench_data\\integration-finish-20261023\\manager-link.rsp",
+      "bytes": 9879,
+      "mtime_utc": "2026-10-23T11:36:08.5330924Z",
+      "sha256": "203288a1016eb78c8bd0dae596a0baa11049198951457a52f834cd2079d00915"
+    }
+  ],
+  "remaining": "No confirmed new product bug or source fix in this subtask. Real WeChat invocation and installed UI behavior, original system-directory context, physical USB hotplug, and optional MTP capability are separate unverified acceptance boundaries."
+}

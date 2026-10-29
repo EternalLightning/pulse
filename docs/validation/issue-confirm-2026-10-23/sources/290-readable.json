@@ -1,0 +1,15 @@
+{
+  "number": 290,
+  "title": "选择某一个文件夹标签的时候就闪退",
+  "body": "我选择下载文件夹或者我之前打开的某一个文件夹标签的时候，稳定闪退。",
+  "url": "https://github.com/jimmgreen/pulse/issues/290",
+  "captured_at": "2026-10-23T03:10:07.141871+00:00",
+  "updated_at": "2026-10-17T03:39:01Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

@@ -6,6 +6,8 @@
 #include "typography.h"
 #include "ui_compositor.h"
 #include "window_helpers.h"
+#include "smooth_scroll.h"
+#include "animation_clock.h"
 #include "../common/localization.h"
 #include "../model/batch_rename_preview.h"
 
@@ -282,6 +284,9 @@ private:
         preview_pending_ = true;
         preview_failed_ = false;
         items_.clear();
+        scroll_animation_.Reset();
+        scroll_ = 0.0f;
+        KillTimer(hwnd_, 2);
         rename_count_ = unchanged_count_ = collision_count_ = 0;
         preview_.Request(paths_, rule_);
     }
@@ -343,6 +348,28 @@ private:
         state.focused = enabled && GetFocus() == edit;
         state.hovered = hover_ == hit_id;
         painter_.DrawTextFieldFrame(bounds, state, true);
+    }
+
+    bool ScrollAnimationsEnabled() const {
+        BOOL enabled = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        return enabled && !IsHighContrast() && IsWindowVisible(hwnd_) && !IsIconic(hwnd_);
+    }
+
+    float ScrollViewport() const {
+        const auto bounds = PreviewBounds();
+        return std::max(0.0f, bounds.bottom - bounds.top - 16.0f * scale_);
+    }
+
+    float ScrollMaximum() const {
+        return std::max(0.0f, static_cast<float>(items_.size()) * 22.0f * scale_ - ScrollViewport());
+    }
+
+    void UpdateScrollTimer() {
+        if (scroll_animation_.Pending()) {
+            if (!SetTimer(hwnd_, 2, 15, nullptr))
+                scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), false);
+        } else KillTimer(hwnd_, 2);
     }
 
     void Render() {
@@ -428,14 +455,15 @@ private:
         const float old_right = preview.left + pad + names_w * 0.5f;
         const float arrow_right = old_right + arrow_w;
         const float new_right = preview.right - pad - status_w;
-        const int visible = std::max(1, static_cast<int>((inner_bottom - inner_top) / row_h));
-        const int max_scroll = std::max(0, static_cast<int>(items_.size()) - visible);
-        scroll_ = std::clamp(scroll_, 0, max_scroll);
-        for (int i = 0; i < visible; ++i) {
-            const int index = scroll_ + i;
-            if (index >= static_cast<int>(items_.size())) break;
+        scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), ScrollAnimationsEnabled());
+        UpdateScrollTimer();
+        const int first = static_cast<int>(scroll_ / row_h);
+        compositor_.Dc()->PushAxisAlignedClip(D2D1::RectF(preview.left, inner_top,
+            preview.right, inner_bottom), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        for (int index = first; index < static_cast<int>(items_.size()); ++index) {
+            const float y = inner_top + static_cast<float>(index) * row_h - scroll_;
+            if (y >= inner_bottom) break;
             const auto& item = items_[static_cast<size_t>(index)];
-            const float y = inner_top + static_cast<float>(i) * row_h;
             D2D1_COLOR_F color = theme.text;
             if (item.status != model::BatchRenameStatus::Ok &&
                 item.status != model::BatchRenameStatus::Unchanged)
@@ -455,6 +483,7 @@ private:
                               D2D1::RectF(new_right, y, preview.right - pad, y + row_h),
                               compositor_.SmallFormat(), color);
         }
+        compositor_.Dc()->PopAxisAlignedClip();
 
         wchar_t summary[128]{};
         swprintf_s(summary, l10n::Get(l10n::StringId::BatchRenameSummary).c_str(),
@@ -514,12 +543,21 @@ private:
         }
         case WM_TIMER:
             if (wparam == 1) PollPreview();
+            else if (wparam == 2) {
+                scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), ScrollAnimationsEnabled());
+                UpdateScrollTimer();
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
             return 0;
         case WM_NCCALCSIZE:
             return 0;
         case WM_NCHITTEST:
             return pulse::ui::BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
         case WM_SIZE:
+            if (wparam == SIZE_MINIMIZED) {
+                scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), false);
+                KillTimer(hwnd_, 2);
+            }
             if (compositor_.Dc()) compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
             LayoutEdits();
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -543,12 +581,24 @@ private:
             }
             return 0;
         case WM_MOUSEWHEEL: {
-            const int delta = GET_WHEEL_DELTA_WPARAM(wparam);
-            if (delta > 0) scroll_ = std::max(0, scroll_ - 3);
-            else scroll_ += 3;
+            scroll_animation_.ScrollBy(scroll_, -GET_WHEEL_DELTA_WPARAM(wparam) / 120.0f * 66.0f * scale_,
+                ScrollMaximum(), ScrollViewport(), AnimationTimeMs(), ScrollAnimationsEnabled());
+            UpdateScrollTimer();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), ScrollAnimationsEnabled());
+            UpdateScrollTimer();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        case WM_SHOWWINDOW:
+            if (!wparam) {
+                scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), false);
+                KillTimer(hwnd_, 2);
+            }
+            break;
         case WM_MOUSEMOVE: {
             const int next = Hit(static_cast<float>(GET_X_LPARAM(lparam)),
                                  static_cast<float>(GET_Y_LPARAM(lparam)));
@@ -619,6 +669,8 @@ private:
         case WM_DESTROY:
             preview_.Close();
             KillTimer(hwnd_, 1);
+            KillTimer(hwnd_, 2);
+            scroll_animation_.Reset();
             DestroyEdits();
             if (font_) {
                 DeleteObject(font_);
@@ -660,7 +712,8 @@ private:
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;
     int pressed_ = 0;
-    int scroll_ = 0;
+    float scroll_ = 0.0f;
+    SmoothScroll scroll_animation_;
     int rename_count_ = 0;
     int unchanged_count_ = 0;
     int collision_count_ = 0;

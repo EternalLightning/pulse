@@ -88,6 +88,13 @@ public:
                       const D2D1_RECT_F& bounds, const D2D1_COLOR_F& foreground,
                       const D2D1_COLOR_F& background,
                       DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING);
+    void DrawTextLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
+                        ID2D1SolidColorBrush* brush,
+                        D2D1_DRAW_TEXT_OPTIONS options = D2D1_DRAW_TEXT_OPTIONS_NONE);
+    bool DrawLumaTextSplit(std::wstring_view text, IDWriteTextFormat* format,
+                           const D2D1_RECT_F& bounds, const D2D1_COLOR_F& foreground,
+                           std::uint32_t split, const D2D1_COLOR_F& split_foreground,
+                           const D2D1_COLOR_F& background);
     bool MeasureLumaText(std::wstring_view text, IDWriteTextFormat* format,
                          float& width, float* height = nullptr);
     bool PaintLumaEdit(HWND hwnd, HDC hdc, IDWriteTextFormat* format,
@@ -101,6 +108,7 @@ public:
     bool CustomEditEnabled() const noexcept;
     bool UsesComposedEdits(HWND edit) const;
     void SynchronizeEditSurface(HWND edit);
+    void SetEditOpacity(HWND edit, float opacity);
     void RemoveEditSurface(HWND edit);
     void SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     const LumaTextStats* GetLumaTextStats() const noexcept;

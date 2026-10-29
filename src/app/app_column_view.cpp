@@ -88,6 +88,7 @@ void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab, app::FolderSo
         col.rows_show_protected == tab.show_protected_os_files &&
         col.rows_sort_column == tab.sort_column && col.rows_sort_direction == tab.sort_direction &&
         col.rows_folder_sort == folders) return;
+    col.scroll_motion.Reset();
     col.rows_snapshot = col.snapshot;
     col.rows_show_hidden = tab.show_hidden_files;
     col.rows_show_protected = tab.show_protected_os_files;
@@ -166,6 +167,7 @@ void RebuildAncestors(AppState& s, app::Tab& tab) {
             col.rows.reset(); // re-resolve the highlight row
             col.auto_scroll = true;
         }
+        col.scroll_motion.Reset();
         next.push_back(std::move(col));
     }
     tab.column_strip.ancestors = std::move(next);
@@ -173,6 +175,7 @@ void RebuildAncestors(AppState& s, app::Tab& tab) {
     for (auto& col : tab.column_strip.ancestors) col.requested = false;
     tab.column_strip.for_path = tab.current_path;
     tab.column_strip.scroll_from_right_dip = 0.0f;
+    tab.column_strip.horizontal_motion.Reset();
 }
 
 void SyncTab(AppState& s, app::Tab& tab) {
@@ -231,10 +234,12 @@ bool SlotLayout(AppState& s, const ui::WindowViewModel& vm, int pane_index,
 bool ScrollStripBy(AppState& s, const ui::WindowViewModel& vm, int pane_index, float delta_dip) {
     app::Tab* tab = TabAtSlot(s, pane_index);
     ui::ColumnStripLayout layout;
-    if (!tab || !SlotLayout(s, vm, pane_index, layout) || layout.max_scroll_px <= 0.0f) return false;
+    if (!tab || !SlotLayout(s, vm, pane_index, layout)) return false;
     const float scale = s.scale > 0.0f ? s.scale : 1.0f;
     float& offset = tab->column_strip.scroll_from_right_dip;
-    offset = std::clamp(offset + delta_dip, 0.0f, layout.max_scroll_px / scale);
+    tab->column_strip.horizontal_motion.ScrollBy(offset, delta_dip,
+        layout.max_scroll_px / scale, (layout.viewport.right - layout.viewport.left) / scale,
+        GetTickCount64(), s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
     InvalidateRect(s.hwnd, nullptr, FALSE);
     return true;
 }
@@ -281,6 +286,69 @@ void SyncColumnStrips(AppState& s) {
     });
 }
 
+bool TickColumnStripScroll(AppState& s, ui::WindowViewModel& vm, uint64_t now) {
+    const float scale = s.scale > 0.0f ? s.scale : 1.0f;
+    const bool animate = s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast();
+    bool pending = false;
+    const auto tick_pane = [&](app::Tab& tab, ui::PaneViewModel& pane,
+                               const D2D1_RECT_F& bounds, int pane_index) {
+        auto& strip = tab.column_strip;
+        const auto layout = s.renderer.ColumnStripGeometry(pane, bounds);
+        if (!Eligible(tab) || strip.for_path != tab.current_path || !layout.active) {
+            strip.horizontal_motion.Reset();
+            for (auto& col : strip.ancestors) col.scroll_motion.Reset();
+            strip.child.scroll_motion.Reset();
+            return;
+        }
+        if (s.stripHScrolling && s.stripResizePane == pane_index)
+            strip.horizontal_motion.Reset();
+        strip.horizontal_motion.Tick(strip.scroll_from_right_dip,
+            layout.max_scroll_px / scale, now, animate);
+        pending |= strip.horizontal_motion.Pending();
+        pane.column_strip.scroll_from_right_dip = strip.scroll_from_right_dip;
+        // Ancestors outside the horizontal viewport have the same row height
+        // and clipping bounds, so their vertical motion can finish normally.
+        const float view_h = layout.columns.empty() ? 0.0f
+            : s.renderer.ColumnStripViewHeight(layout.columns.front().rect);
+        const auto tick_column = [&](app::ColumnStripColumn& col, ui::ColumnStripColumnView& view) {
+            if (col.auto_scroll) {
+                col.scroll_motion.Reset();
+                col.scroll_dip = s.renderer.ColumnStripScrollPx(view, view_h) / scale;
+            } else {
+                col.scroll_motion.Tick(col.scroll_dip,
+                    s.renderer.ColumnStripMaxScrollPx(view, view_h) / scale, now, animate);
+                pending |= col.scroll_motion.Pending();
+            }
+            view.scroll_dip = col.scroll_dip;
+            view.auto_scroll = col.auto_scroll;
+        };
+        for (size_t i = 0; i < strip.ancestors.size() && i < pane.column_strip.ancestors.size(); ++i)
+            tick_column(strip.ancestors[i], pane.column_strip.ancestors[i]);
+        if (pane.column_strip.has_child) tick_column(strip.child, pane.column_strip.child);
+    };
+    if (vm.pane_slots.empty()) {
+        if (app::Tab* tab = ActiveTab(s)) {
+            const auto bounds = s.renderer.ContentRect(static_cast<float>(s.compositor.Width()),
+                                                       static_cast<float>(s.compositor.Height()));
+            tick_pane(*tab, vm.pane, bounds, 0);
+        }
+    } else {
+        for (size_t i = 0; i < vm.pane_slots.size(); ++i) {
+            auto& slot = vm.pane_slots[i];
+            if (app::Tab* tab = TabAtSlot(s, static_cast<int>(i))) {
+                tick_pane(*tab, slot.pane, slot.rect, static_cast<int>(i));
+                if (slot.focused) vm.pane.column_strip = slot.pane.column_strip;
+            }
+        }
+    }
+    return pending;
+}
+
+bool TickColumnStripScroll(AppState& s, uint64_t now) {
+    auto vm = BuildVm(s, false);
+    return TickColumnStripScroll(s, vm, now);
+}
+
 uint64_t SharedColumnStripGeneration(AppState& s, const std::wstring& path,
                                     const app::Tab* excluding, uint64_t generation) {
     uint64_t shared = 0;
@@ -304,6 +372,7 @@ uint64_t SharedColumnStripGeneration(AppState& s, const std::wstring& path,
 void InvalidateColumnStripPath(AppState& s, const std::wstring& path, fs::SnapshotPtr fresh) {
     const auto update = [&](app::ColumnStripColumn& col) {
         if (!SamePath(col.path, path)) return;
+        col.scroll_motion.Reset();
         col.rows.reset();
         if (fresh) {
             col.notify_watermark = (std::max)({col.notify_watermark, col.applied_generation,
@@ -405,6 +474,7 @@ bool HandleColumnStripMouseDown(AppState& s, const ui::WindowViewModel& vm,
             return true;
         }
         const float travel = (track.right - track.left) - (thumb.right - thumb.left);
+        tab->column_strip.horizontal_motion.Reset();
         s.stripHScrolling = true;
         s.stripResizePane = hit.pane_index;
         s.stripResizeStartX = x;
@@ -425,6 +495,7 @@ bool UpdateColumnStripResize(AppState& s, int x) {
         if (!tab) return true;
         const float scale = s.scale > 0.0f ? s.scale : 1.0f;
         const float moved = static_cast<float>(x - s.stripResizeStartX) * s.stripHScrollRatio / scale;
+        tab->column_strip.horizontal_motion.Reset();
         tab->column_strip.scroll_from_right_dip =
             std::clamp(s.stripHScrollStartDip - moved, 0.0f, s.stripHScrollMaxDip);
         InvalidateRect(s.hwnd, nullptr, FALSE);
@@ -476,16 +547,18 @@ bool ColumnStripSwallowDoubleClick(const AppState& s) {
 }
 
 bool HandleColumnStripWheel(AppState& s, const ui::WindowViewModel& vm,
-                            const ui::HitTestResult& hit, int wheel_delta) {
+                            const ui::HitTestResult& hit, int wheel_delta, bool horizontal_wheel) {
     using R = ui::HitTestResult;
-    const bool horizontal = hit.region == R::ColumnStripHScroll ||
+    const bool on_column = hit.region == R::ColumnStripHScroll ||
+        hit.region == R::ColumnStripRow || hit.region == R::ColumnStripBlank;
+    const bool horizontal = (horizontal_wheel && on_column) || hit.region == R::ColumnStripHScroll ||
         ((GetKeyState(VK_SHIFT) & 0x8000) != 0 &&
          hit.sub_index != ui::kColumnStripChildId &&
          (hit.region == R::ColumnStripRow || hit.region == R::ColumnStripBlank));
     if (horizontal) {
         // Wheel up reveals farther ancestors (to the left).
         ScrollStripBy(s, vm, hit.pane_index,
-                      static_cast<float>(wheel_delta) / WHEEL_DELTA * 96.0f);
+                      static_cast<float>(horizontal_wheel ? -wheel_delta : wheel_delta) / WHEEL_DELTA * 96.0f);
         return true;
     }
     if (hit.region != R::ColumnStripRow && hit.region != R::ColumnStripBlank) return false;
@@ -513,9 +586,14 @@ bool HandleColumnStripWheel(AppState& s, const ui::WindowViewModel& vm,
         const float max_scroll = s.renderer.ColumnStripMaxScrollPx(*view, view_h);
         const float step = static_cast<float>(wheel_delta) / WHEEL_DELTA * 3.0f *
                            s.renderer.RowHeight();
-        const float next = std::clamp(current - step, 0.0f, max_scroll);
+        if (col->auto_scroll) {
+            col->scroll_motion.Reset();
+            col->scroll_dip = current / scale;
+        }
         col->auto_scroll = false;
-        col->scroll_dip = next / scale;
+        col->scroll_motion.ScrollBy(col->scroll_dip, -step / scale, max_scroll / scale,
+            view_h / scale, GetTickCount64(),
+            s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
         InvalidateRect(s.hwnd, nullptr, FALSE);
         break;
     }

@@ -1,0 +1,44 @@
+[
+  {
+    "Name": "child-auto",
+    "ExitCode": 0,
+    "Pass": 153,
+    "Fail": 0
+  },
+  {
+    "Name": "child-sharp",
+    "ExitCode": 0,
+    "Pass": 153,
+    "Fail": 0
+  },
+  {
+    "Name": "child-smooth",
+    "ExitCode": 0,
+    "Pass": 153,
+    "Fail": 0
+  },
+  {
+    "Name": "dialog-auto",
+    "ExitCode": 0,
+    "Pass": 425,
+    "Fail": 0
+  },
+  {
+    "Name": "dialog-sharp",
+    "ExitCode": 0,
+    "Pass": 425,
+    "Fail": 0
+  },
+  {
+    "Name": "dialog-smooth",
+    "ExitCode": 0,
+    "Pass": 425,
+    "Fail": 0
+  },
+  {
+    "Name": "settings",
+    "ExitCode": -1073740791,
+    "Pass": 14,
+    "Fail": 0
+  }
+]

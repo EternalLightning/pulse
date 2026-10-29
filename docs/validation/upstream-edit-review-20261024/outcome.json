@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-24",
+  "status": "source-comparison-complete-flicker-unresolved",
+  "product_changed": false,
+  "installed_changed": false,
+  "upstream": {
+    "repository": "jimmgreen/pulse",
+    "release": "v1.0.56",
+    "release_date": "2026-10-16",
+    "tag_object": "4f5ff6ee991cde71a91977ca88934f24b97ad135",
+    "commit": "c4fe01ed82fe091f495f531972a854aa32caac2b",
+    "main_at_check": "c4fe01ed82fe091f495f531972a854aa32caac2b",
+    "zip_sha256": "A32621CF9A74754E1561C46EB6BFA013607114ED63FC8097048CF26465E75F1A",
+    "snapshot": "bench_data/upstream-edit-review-20261024/pulse-c4fe01ed82fe091f495f531972a854aa32caac2b",
+    "latest_verified_by": [
+      "GitHub releases/latest page",
+      "git ls-remote tag dereference and main",
+      "fixed-commit codeload ZIP and version.txt"
+    ],
+    "api_limit": "Anonymous REST release lookup was rate-limited; release page and Git refs were used instead."
+  },
+  "markdown_lines": [
+    "**结论：上游 1.0.56 与本地 1.2.0.3 的编辑框绘制路径存在实质差异，之前改成原生 EDIT 的做法没有沿用上游当前完整方案。用户已实测最新版无该现象；本轮完成固定版本源码审查，未修改产品、构建或替换安装版，当前轻微闪烁仍未解决。**",
+    "",
+    "截至本轮查询，GitHub `releases/latest` 指向 **v1.0.56（2026-10-16）**；tag 解引用及 main 都指向 `c4fe01ed82fe091f495f531972a854aa32caac2b`。已下载该提交的源码 ZIP 并核对 `version.txt=1.0.56`，没有把旧 baseline 当最新版。ZIP SHA256：`A32621CF9A74754E1561C46EB6BFA013607114ED63FC8097048CF26465E75F1A`。匿名 REST 查询限流，版本通过发行页和 Git refs 交叉核实。",
+    "",
+    "| 项目 | 上游 1.0.56 的源码事实 | 本地当前状态与含义 |",
+    "|---|---|---|",
+    "| 绘制所有权 | `app_hosted_edit.cpp:114-127,600-628`：创建重定向 child EDIT，四种宿主过程统一进入 Handle/DefPresented；EDIT 保留文本、撤销、IME，自绘层处理显示 | `src/app/app_hosted_edit.cpp:95-105,511-652`：路径、搜索、筛选、文件/标签重命名走原生 EDIT；1.2.0.3 已绕过自绘，不能把其他对话框仍使用的 edit_host 自绘直接视为当前路径栏根因 |",
+    "| 实际文字后端 | `lumatext_renderer.cpp:1195-1359`：入口虽名为 LumaText，编辑文字实际通过 DirectWrite layout + Direct2D DrawTextLayout，采用灰度抗锯齿；命中与选区使用同一布局 | 当前五类宿主使用 GDI EDIT 原生绘制；其他自绘控件还走旧 LumaText 字形与命中，不能只恢复旧 wrapper 认为等同于上游 |",
+    "| 拖动选区 | `lumatext_renderer.cpp:1050-1167,1500-1535`：移动时更新内部 anchor/caret 和 deferred 标志；松开、失去捕获以及复制/编辑等必要操作前提交 EM_SETSEL，避免每次移动都经过原生 redraw guard | 本地旧自绘 `lumatext_renderer.cpp:873-945,1099-1138` 仍每次移动 EM_SETSEL，并用捕获期间 WM_SETREDRAW guard。当前路径/重命名已走原生，属于后续迁移必须成套替换的旧机制，不能称为已证明的当前根因 |",
+    "| 方向键与视口 | `lumatext_renderer.cpp:1016-1036,1089-1093,1392-1470`：保存绘制偏移，命中使用上次已画出的偏移；同步文本/键盘/IME后的选区，记录选区活动端及销毁清理 | 本地旧自绘通过捕获期间冻结偏移、越界单独滚动处理，缺少上游完整同步机制；直接复用存在反向扩选、释放后跳动风险 |",
+    "| 合成表面 | `edit_host.h:39-58`，`ui_compositor.cpp:221-238`：LWA_ALPHA 交给 Windows 重定向；自绘位图送入该窗口 DC，避免将这一模式与 UpdateLayeredWindow 混用 | 本地当前宿主也设置 LWA_ALPHA，compositor 中也已有 redirected DC 分支；表面策略并非完全缺失。不能把 WS_EX_LAYERED 本身、或不加 WS_CLIPCHILDREN，直接认定为差异根因 |",
+    "| 字体 | `typography.cpp:147-153,277-289`：简体中文 Microsoft YaHei UI；英文 Segoe UI Variable Text；集中创建编辑字体，DirectWrite 灰度绘制 | 本地简体中文同为 Microsoft YaHei UI、默认14 DIP；字体家族相同，观感差异主要候选是 GDI/DirectWrite 及渲染参数，但尚未实测归因 |",
+    "| 重复布局 | `app_hosted_edit.cpp:106-111` 同样先判断 margins 是否改变，仍每父帧 SetWindowPos；主窗口同样使用 WS_EX_NOREDIRECTIONBITMAP | 这些行为两边共有，本轮没有证据据此宣布闪烁根因；上轮重复布局计数不等同于可见闪烁证据 |",
+    "",
+    "上游源码明确将拖动闪烁与每次移动触发 EM_SETSEL / WM_SETREDRAW 造成重定向表面短暂隐藏关联；这是上游代码注释和处理机制的事实，不能代替对本地当前原生绘制版本的根因验证。上游也保留键盘等变化时短暂 redraw guard，所以不能将其概括为彻底不使用 WM_SETREDRAW。",
+    "",
+    "**建议修复路线：** 以该固定提交的完整编辑显示流程作为基线，小范围迁移 DirectWrite 布局/绘制、延迟选区提交、选区活动端同步、共享视口及重定向表面处理；删除这一范围内已被替代的捕获冻结、原生直绘旁路，保留本地业务快捷键、Esc静音及其他已确认行为。不要只复制某一个 flag，也不合并上游无关新功能。",
+    "",
+    "收益：编辑文本、命中、选区使用一致度量，采用用户已经实测正常的上游方向。成本和风险：并非一行补丁，需核对 compositor/renderer/typography 接口与退回原生路径，尤其是反向 Shift 扩选、复制剪切、中文 IME、越界滚动和 DPI。",
+    "",
+    "验收应比较同机上游与修复版，在中文、当前缩放/主题下使用真实路径栏和真实文件重命名，覆盖长短文本、方向键/Shift、快速双向拖动、越界后释放、双击选词、输入法替换；观察连续实际桌面帧，确认没有整行空白、第三种文字帧或释放后原点跳动。历史553项和192帧结果不充当本次验收。本轮只读，不运行这些功能验收，也不宣称已修好。",
+    "",
+    "证据：[固定源码与比较元数据](E:/Projects/pulse/docs/validation/upstream-edit-review-20261024/outcome.json)；固定源码快照位于 `bench_data/upstream-edit-review-20261024/pulse-c4fe01ed82fe091f495f531972a854aa32caac2b`。本节合并在唯一报告中。"
+  ]
+}

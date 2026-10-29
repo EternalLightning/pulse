@@ -14,11 +14,11 @@ bool HasPendingWindowOperations(const AppState& s) {
         });
 }
 
-void HideAppWindow(AppState& s, bool require_tray) {
+bool HideAppWindow(AppState& s, bool require_tray) {
     if (require_tray) {
         AppState* owner = s.core.windows.Lookup(s.core.global_ui_owner);
         if (!owner || (!owner->tray_controller.SetVisible(true) &&
-                FindWindowW(L"Shell_TrayWnd", nullptr))) return;
+                FindWindowW(L"Shell_TrayWnd", nullptr))) return false;
     }
     SuspendContentSearches(s);
     s.globalSearchWindow.Hide();
@@ -26,6 +26,7 @@ void HideAppWindow(AppState& s, bool require_tray) {
     if (s.operationWindow) s.operationWindow->Hide();
     ShowWindow(s.hwnd, SW_HIDE);
     s.core.windows.Touch(s.hwnd);
+    return true;
 }
 
 void BeginWindowShutdown(AppState& s) {
@@ -44,6 +45,7 @@ void BeginWindowShutdown(AppState& s) {
     try {
         s.exit_thread = std::thread([&s, hwnd, launch] {
             launch->wait(false, std::memory_order_acquire);
+            s.settings.Stop();
             s.systemIntegration.Stop();
             s.ops.Stop();
             s.exit_stop_finished.store(true, std::memory_order_release);
@@ -60,10 +62,10 @@ void BeginWindowShutdown(AppState& s) {
     }
 }
 
-bool ConfirmWindowShutdown(AppState& s, bool pending) {
+bool ConfirmWindowShutdown(AppState& s, bool pending, bool background = false) {
     s.exit_confirming = true;
     const bool accepted = !pending || ui::ShowConfirmDialog(s.hwnd,
-        app::ExitConfirmationSpec(), s.darkMode, s.accentColor);
+        background ? app::BackgroundCloseConfirmationSpec() : app::ExitConfirmationSpec(), s.darkMode, s.accentColor);
     s.exit_confirming = false;
     return accepted;
 }
@@ -71,9 +73,12 @@ bool ConfirmWindowShutdown(AppState& s, bool pending) {
 
 void RequestAppWindowClose(AppState& s) {
     if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
+    CancelNetworkAuthentication(s);
     if (s.core.exiting) { RequestWindowClose(s); return; }
     if (s.appPrefs.keep_running_on_close || s.appPrefs.global_search_enabled) {
-        HideAppWindow(s, true);
+        if (!s.appPrefs.keep_running_on_close &&
+            !ConfirmWindowShutdown(s, HasPendingWindowOperations(s), true)) return;
+        if (HideAppWindow(s, true)) ResetLastTabToHome(s);
         return;
     }
     bool another_visible_window = false;
@@ -82,7 +87,9 @@ void RequestAppWindowClose(AppState& s) {
             another_visible_window = true;
     });
     if (!another_visible_window) { RequestApplicationExit(s); return; }
-    if (HasPendingWindowOperations(s)) HideAppWindow(s, false);
+    if (HasPendingWindowOperations(s)) {
+        if (ConfirmWindowShutdown(s, true, true)) HideAppWindow(s, false);
+    }
     else RequestWindowClose(s);
 }
 

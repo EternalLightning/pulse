@@ -1,0 +1,29 @@
+{
+  "number": 279,
+  "title": "[BUG] 添加网络位置时 即使选择好了搜索索引文件夹 任弹出并无法添加网络位置",
+  "body": "添加网络位置时 即使选择好了搜索索引文件夹 任弹出并无法添加网络位置\n<img width=\"2203\" height=\"477\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/1c2fce70-8a4b-4ceb-bbce-91bd0eed33ca\" />\n且点击确定后无法继续添加\n<img width=\"1500\" height=\"960\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/b42e8e76-86ce-4f3f-bd21-57f261040292\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/279",
+  "captured_at": "2026-10-23T03:10:07.143727+00:00",
+  "updated_at": "2026-10-22T13:14:38Z",
+  "comments": [
+    {
+      "body": "感谢反馈，已修复。\n\n**原因**：设置 › 网络索引 只能添加服务器共享里的文件夹（`\\\\服务器\\共享`，或映射的网络驱动器）。选了本机文件夹时，只返回一句笼统的错误；而选择框又会记住上次选的文件夹，每次都回到那个本机文件夹，看起来就像一直在重复弹出。\n\n**修复**：\n- 选择框改为从最近一个已添加的服务器文件夹开始；\n- 选了本机文件夹，会直接说明要选服务器共享或映射的网络驱动器（本地磁盘在「本地磁盘」里勾选即可索引）；\n- 选了 WSL 中的文件夹，也会说明为什么不能添加。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈，已修复。</p>\n<p dir=\"auto\"><strong>原因</strong>：设置 › 网络索引 只能添加服务器共享里的文件夹（<code class=\"notranslate\">\\\\服务器\\共享</code>，或映射的网络驱动器）。选了本机文件夹时，只返回一句笼统的错误；而选择框又会记住上次选的文件夹，每次都回到那个本机文件夹，看起来就像一直在重复弹出。</p>\n<p dir=\"auto\"><strong>修复</strong>：</p>\n<ul dir=\"auto\">\n<li>选择框改为从最近一个已添加的服务器文件夹开始；</li>\n<li>选了本机文件夹，会直接说明要选服务器共享或映射的网络驱动器（本地磁盘在「本地磁盘」里勾选即可索引）；</li>\n<li>选了 WSL 中的文件夹，也会说明为什么不能添加。</li>\n</ul>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/279#issuecomment-6334332566"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoWJMaCgAqjYzMzQzMzI1NjY=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWO_0jABqzMzOTUyODYxNDMw"
+  }
+}

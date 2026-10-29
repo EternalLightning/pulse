@@ -23,19 +23,25 @@ namespace {
 constexpr int kSessionVersion = 8;
 constexpr size_t kMaxSessionWindows = 32;
 
-std::wstring FormatScaled3(const std::array<float, 3>& edges) {
-    return std::to_wstring(static_cast<int>(std::lround(edges[0] * 10000.0f))) + L","
-         + std::to_wstring(static_cast<int>(std::lround(edges[1] * 10000.0f))) + L","
-         + std::to_wstring(static_cast<int>(std::lround(edges[2] * 10000.0f)));
+template<size_t Count>
+std::wstring FormatScaledColumns(const std::array<float, Count>& edges) {
+    std::wstring result;
+    for (size_t i = 0; i < Count; ++i) {
+        if (i) result += L",";
+        result += std::to_wstring(static_cast<int>(std::lround(edges[i] * 10000.0f)));
+    }
+    return result;
 }
 
 template<size_t Count>
 std::array<float, Count> ParseScaledColumns(const std::wstring& value) {
     std::array<float, Count> output{};
+    const size_t stored_count = std::count(value.begin(), value.end(), L',') + 1;
+    if (stored_count != Count && stored_count != Count - 1) return {};
     size_t pos = 0;
-    for (size_t i = 0; i < Count; ++i) {
+    for (size_t i = 0; i < stored_count; ++i) {
         const size_t comma = value.find(L',', pos);
-        if ((comma == std::wstring::npos) != (i + 1 == Count)) return {};
+        if ((comma == std::wstring::npos) != (i + 1 == stored_count)) return {};
         const auto token = std::wstring_view(value).substr(pos,
             comma == std::wstring::npos ? value.size() - pos : comma - pos);
         int scaled = 0;
@@ -46,24 +52,9 @@ std::array<float, Count> ParseScaledColumns(const std::wstring& value) {
     return output;
 }
 
-std::array<float, 3> ParseScaled3(const std::wstring& value) {
-    return ParseScaledColumns<3>(value);
-}
-
-std::wstring FormatScaled4(const std::array<float, 4>& edges) {
-    return std::to_wstring(static_cast<int>(std::lround(edges[0] * 10000.0f))) + L","
-         + std::to_wstring(static_cast<int>(std::lround(edges[1] * 10000.0f))) + L","
-         + std::to_wstring(static_cast<int>(std::lround(edges[2] * 10000.0f))) + L","
-         + std::to_wstring(static_cast<int>(std::lround(edges[3] * 10000.0f)));
-}
-
-std::array<float, 4> ParseScaled4(const std::wstring& value) {
-    return ParseScaledColumns<4>(value);
-}
-
 std::wstring FormatScaledList(const std::vector<float>& values) {
     std::wstring out;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (size_t i = 0; i < values.size() && i + 1 < kMaxSessionPanes; ++i) {
         if (i) out += L",";
         out += std::to_wstring(static_cast<int>(std::lround(values[i] * 10000.0f)));
     }
@@ -73,14 +64,13 @@ std::wstring FormatScaledList(const std::vector<float>& values) {
 std::vector<float> ParseScaledList(const std::wstring& value) {
     std::vector<float> out;
     size_t pos = 0;
-    while (pos < value.size()) {
+    while (!value.empty() && out.size() < kMaxSessionPanes) {
         const size_t comma = value.find(L',', pos);
-        const std::wstring token = value.substr(
-            pos, comma == std::wstring::npos ? std::wstring::npos : comma - pos);
+        const auto token = std::wstring_view(value).substr(
+            pos, comma == std::wstring::npos ? value.size() - pos : comma - pos);
         int scaled = 0;
-        pulse::json::ParseInteger(token, scaled);
-        if (scaled > 0 && scaled < 10000)
-            out.push_back(static_cast<float>(scaled) / 10000.0f);
+        const bool valid = pulse::json::ParseInteger(token, scaled) && scaled > 0 && scaled < 10000;
+        out.push_back(valid ? static_cast<float>(scaled) / 10000.0f : 0.5f);
         if (comma == std::wstring::npos) break;
         pos = comma + 1;
     }
@@ -118,7 +108,7 @@ std::vector<float> ParseDipList(const std::wstring& value) {
 
 std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs) {
     std::wstring out = L"[";
-    for (size_t i = 0; i < tabs.size(); ++i) {
+    for (size_t i = 0; i < tabs.size() && i < kMaxSessionLayoutTabs; ++i) {
         if (i) out += L",";
         const LayoutTabSnapshot& tab = tabs[i];
         out += L"{\"pinned\":";
@@ -135,7 +125,7 @@ std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs) {
         out += L",\"splitRatios\":\"";
         out += FormatScaledList(tab.split_ratios);
         out += L"\",\"panes\":[";
-        for (size_t p = 0; p < tab.panes.size(); ++p) {
+        for (size_t p = 0; p < tab.panes.size() && p < kMaxSessionPanes; ++p) {
             if (p) out += L",";
             const PaneFolderSnapshot& pane = tab.panes[p];
             out += L"{\"path\":\"";
@@ -145,9 +135,9 @@ std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs) {
             out += L"\",\"view\":\"";
             out += ui::ViewModeName(pane.view);
             out += L"\",\"cols\":\"";
-            out += FormatScaled3(pane.columns);
+            out += FormatScaledColumns(pane.columns);
             out += L"\",\"searchCols\":\"";
-            out += FormatScaled4(pane.search_columns);
+            out += FormatScaledColumns(pane.search_columns);
             out += L"\",\"colLayout\":";
             out += pane.column_layout ? L"true" : L"false";
             out += L",\"colWidths\":\"";
@@ -162,7 +152,7 @@ std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs) {
 
 std::wstring TabGroupsToJson(const std::vector<GroupSessionSnapshot>& groups) {
     std::wstring out = L"[";
-    for (size_t g = 0; g < groups.size(); ++g) {
+    for (size_t g = 0; g < groups.size() && g < kMaxSessionTabGroups; ++g) {
         if (g) out += L",";
         const GroupSessionSnapshot& grp = groups[g];
         out += L"{\"id\":" + std::to_wstring(grp.id);
@@ -182,10 +172,11 @@ std::wstring TabGroupsToJson(const std::vector<GroupSessionSnapshot>& groups) {
 // Extract the contents of each top-level {...} object inside an array body
 // (without the outer brackets). Handles nested objects/arrays and string
 // escapes; returns false on unbalanced input.
-static bool SplitTopLevelObjects(const std::wstring& body, std::vector<std::wstring>& out) {
+static bool SplitTopLevelObjects(const std::wstring& body, std::vector<std::wstring>& out,
+                                 size_t limit) {
     const std::wstring array = L"[" + body + L"]";
     const pulse::json::Document doc(array);
-    if (!doc.Is(pulse::json::Kind::Array)) return false;
+    if (!doc.Is(pulse::json::Kind::Array) || doc.Root().children.size() > limit) return false;
     for (const auto& item : doc.Root().children)
         if (item.kind != pulse::json::Kind::Object) return false;
     out = pulse::json::Objects(doc, &doc.Root());
@@ -208,7 +199,7 @@ bool ParseTabGroups(const std::wstring& array_json,
         return false;
     }
     std::vector<std::wstring> objs;
-    if (!SplitTopLevelObjects(array_json.substr(1, array_json.size() - 2), objs))
+    if (!SplitTopLevelObjects(array_json.substr(1, array_json.size() - 2), objs, kMaxSessionTabGroups))
         return false;
     for (const std::wstring& gj : objs) {
         const pulse::json::Document group_doc(gj);
@@ -231,7 +222,7 @@ bool ParseLayoutTabs(const std::wstring& array_json,
         return false;
     }
     std::vector<std::wstring> tabObjs;
-    if (!SplitTopLevelObjects(array_json.substr(1, array_json.size() - 2), tabObjs))
+    if (!SplitTopLevelObjects(array_json.substr(1, array_json.size() - 2), tabObjs, kMaxSessionLayoutTabs))
         return false;
     for (const std::wstring& tabJson : tabObjs) {
         const pulse::json::Document tab_doc(tabJson);
@@ -251,14 +242,14 @@ bool ParseLayoutTabs(const std::wstring& array_json,
         std::wstring panesBody;
         if (ExtractJsonArray(tab_doc, L"panes", panesBody)) {
             std::vector<std::wstring> paneObjs;
-            if (!SplitTopLevelObjects(panesBody, paneObjs)) return false;
+            if (!SplitTopLevelObjects(panesBody, paneObjs, kMaxSessionPanes)) return false;
             for (const std::wstring& pj : paneObjs) {
                 const pulse::json::Document pane_doc(pj);
                 PaneFolderSnapshot pane;
                 pane.path = pulse::json::ExtractString(pane_doc, L"path");
                 pane.view = ui::ParseViewMode(pulse::json::ExtractString(pane_doc, L"view"));
-                pane.columns = ParseScaled3(pulse::json::ExtractString(pane_doc, L"cols"));
-                pane.search_columns = ParseScaled4(
+                pane.columns = ParseScaledColumns<4>(pulse::json::ExtractString(pane_doc, L"cols"));
+                pane.search_columns = ParseScaledColumns<5>(
                     pulse::json::ExtractString(pane_doc, L"searchCols"));
                 pane.column_layout = pulse::json::ExtractBool(pane_doc, L"colLayout");
                 pane.column_widths = ParseDipList(pulse::json::ExtractString(pane_doc, L"colWidths"));
@@ -336,8 +327,11 @@ static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapsh
     snap.maximized = pulse::json::ExtractBool(doc, L"maximized");
     snap.dark = pulse::json::ExtractBool(doc, L"dark");
     if (navigation) snap.active_path = pulse::json::ExtractString(doc, L"path");
-    snap.sidebar_collapsed = pulse::json::ExtractInt(doc, L"sidebarCollapsed");
-    snap.sidebar_hidden = pulse::json::ExtractInt(doc, L"sidebarHidden");
+    const auto sidebar_mask = (1u << kSidebarSectionCount) - 1u;
+    snap.sidebar_collapsed = static_cast<int>(static_cast<uint32_t>(std::max(0,
+        pulse::json::ExtractInt(doc, L"sidebarCollapsed"))) & sidebar_mask);
+    snap.sidebar_hidden = static_cast<int>(static_cast<uint32_t>(std::max(0,
+        pulse::json::ExtractInt(doc, L"sidebarHidden"))) & sidebar_mask);
     // Section order travels as "0,1,2,6,3,4,5"; anything malformed falls back to
     // the default order (NormalizeSidebarOrder rebuilds a full permutation).
     snap.sidebar_order.clear();
@@ -370,6 +364,8 @@ static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapsh
     // anything older restarts with every built-in link visible.
     snap.quick_access_hidden = pulse::json::ExtractInt(doc, L"version") >= 7
         ? pulse::json::ExtractInt(doc, L"quickAccessHidden") : 0;
+    snap.quick_access_hidden = static_cast<int>(static_cast<uint32_t>(std::max(0,
+        snap.quick_access_hidden)) & ((1u << static_cast<int>(BuiltinQuickAccess::Count)) - 1u));
     snap.starred_expanded = !doc.Find(L"starredExpanded")
         ? true : pulse::json::ExtractBool(doc, L"starredExpanded");
     snap.details_panel = pulse::json::ExtractInt(doc, L"detailsPanel") != 0;
@@ -459,9 +455,18 @@ bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap) {
     return true;
 }
 
+static bool SaveSessionJson(const std::wstring& path, const std::wstring& json) {
+    const pulse::json::Document doc(json);
+    if (!doc.Is(pulse::json::Kind::Object)) return false;
+    std::vector<uint8_t> bytes;
+    // Match both the JSON character budget and ReadUtf8File's byte budget.
+    if (!EncodeUtf8Bytes(json, bytes) || bytes.size() > 16ull * 1024 * 1024) return false;
+    return WriteUtf8FileAtomic(path, json);
+}
+
 bool SaveSession(const SessionSnapshot& snap) {
     const auto dir = GetPulseDataDir();
-    return !dir.empty() && WriteUtf8FileAtomic(dir + L"\\session.json", SessionToJson(snap));
+    return !dir.empty() && SaveSessionJson(dir + L"\\session.json", SessionToJson(snap));
 }
 
 bool LoadSession(SessionSnapshot& snap) {
@@ -472,13 +477,23 @@ bool LoadSession(SessionSnapshot& snap) {
 
 bool SaveSessionPreferences(const WindowSessionSnapshot& snap) {
     const auto dir = GetPulseDataDir();
-    return !dir.empty() && WriteUtf8FileAtomic(dir + L"\\session.json", WindowSessionToJson(snap, false));
+    return !dir.empty() && SaveSessionJson(dir + L"\\preferences.json", WindowSessionToJson(snap, false));
+}
+
+std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap) {
+    return WindowSessionToJson(snap, false);
 }
 
 bool LoadSessionPreferences(WindowSessionSnapshot& snap) {
     const auto dir = GetPulseDataDir();
+    if (dir.empty()) return false;
     std::wstring json;
-    return !dir.empty() && ReadUtf8File(dir + L"\\session.json", json) && ParseWindowSessionJson(json, snap, false);
+    const std::wstring preferences = dir + L"\\preferences.json";
+    if (GetFileAttributesW(preferences.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return ReadUtf8File(preferences, json) && ParseWindowSessionJson(json, snap, false);
+    const DWORD error = GetLastError();
+    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
+    return ReadUtf8File(dir + L"\\session.json", json) && ParseWindowSessionJson(json, snap, false);
 }
 
 } // namespace pulse::app

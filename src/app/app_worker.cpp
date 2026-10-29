@@ -1,5 +1,6 @@
 // app_worker.cpp
 #include "app_worker.h"
+#include "device_registry.h"
 #include "app_model.h"
 #include "directory_projection.h"
 #include "link_resolve.h"
@@ -215,7 +216,7 @@ uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
     item.folder_sort = folders;
     item.cache_write_ticket = cache_write_ticket;
     item.cached_snapshot = std::move(cached);
-    item.provider_request = fs::IsUncPath(path) || fs::IsRecycleViewPath(path);
+    item.provider_request = fs::IsUncPath(path) || fs::IsRecycleViewPath(path) || fs::IsDevicePath(path);
     if (!fs::IsVirtualPath(path) && !fs::IsRecycleViewPath(path)) {
         std::shared_ptr<DirectoryWork> group;
         const auto previous = state->LatestDirectory(path);
@@ -433,6 +434,15 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             }
             entries->push_back(std::move(entry));
         }
+    } else if (fs::IsDevicePath(item.path)) {
+        const auto error = DeviceRegistry::Instance().ListFolder(item.path, *entries, cancelled);
+        if (error != fs::DeviceError::None) {
+            res.cancelled = error == fs::DeviceError::Cancelled || cancelled();
+            res.error = !res.cancelled;
+            res.device_error = static_cast<uint8_t>(error);
+            res.error_code = error == fs::DeviceError::TimedOut ? ERROR_TIMEOUT : ERROR_DEVICE_NOT_CONNECTED;
+            return res;
+        }
     } else if (fs::IsRecycleViewPath(item.path)) {
         try {
             fs::EnumerateRecycleBin(*entries, &res.recycle_info);
@@ -466,6 +476,17 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             return res;
         }
     }
+    if (item.path.empty()) {
+        for (const auto& device : DeviceRegistry::Instance().Devices()) {
+            fs::DirEntry entry;
+            entry.name = device.name;
+            entry.full_path = fs::FormatDevicePath({device.key, L"", {}});
+            entry.pc_device = fs::PcDeviceFlags(device);
+            entry.attrs = FILE_ATTRIBUTE_DIRECTORY;
+            entry.is_dir = true;
+            entries->push_back(std::move(entry));
+        }
+    }
     auto t1 = std::chrono::steady_clock::now();
     res.enum_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
@@ -473,7 +494,7 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
     if (cancelled()) { res.cancelled = true; res.snapshot.reset(); res.facts.reset(); return res; }
 
     // Resolve .lnk targets (Recent folder, desktop shortcuts) before display.
-    if (!fs::IsRecycleViewPath(item.path)) {
+    if (!fs::IsRecycleViewPath(item.path) && !fs::IsDevicePath(item.path)) {
         ResolveLinksInPlace(item.path, *entries, cancelled);
     }
     if (cancelled()) { res.cancelled = true; res.snapshot.reset(); res.facts.reset(); return res; }

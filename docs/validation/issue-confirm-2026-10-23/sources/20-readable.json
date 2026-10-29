@@ -1,0 +1,42 @@
+{
+  "number": 20,
+  "title": "窗体显示有点异常",
+  "body": "如图所示，标签栏的底色分界线看起来明显靠上了。这里应该是小问题，可以适当修复一下\n<img width=\"787\" height=\"224\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/0086b5d4-6319-4f3b-89c3-a5f16a23346c\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/20",
+  "captured_at": "2026-10-23T03:10:07.225562+00:00",
+  "updated_at": "2026-10-03T14:33:31Z",
+  "comments": [
+    {
+      "body": "感谢截图！请告知系统缩放比例（100%/125%/150%）、深浅主题和窗口效果设置，方便复现。",
+      "bodyHTML": "<p dir=\"auto\">感谢截图！请告知系统缩放比例（100%/125%/150%）、深浅主题和窗口效果设置，方便复现。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/20#issuecomment-5919841219"
+    },
+    {
+      "body": "已修复（3909617）。\n\n**原因**：系统设置里开启了“在标题栏上显示强调色”时，DWM 只在它自己的系统标题栏高度范围内（100% 缩放下约 30px）给背景材质涂上强调色，而 Pulse 的标题栏有 48px，所以涂色在标签中间就停了，看起来像是分界线偏上。截图里的深灰色带应该就是灰色的强调色。\n\n**修复**：启用 Mica、Mica Alt 或亚克力时，标题栏颜色不再“跟随系统”，改为 `DWMWA_COLOR_NONE`，整条标题栏保持同一个颜色，直到标签栏底部。窗口效果设为“无”时行为不变。代价是开了这个系统选项后，Pulse 的标题栏不会显示强调色。\n\n**验证**（Windows 11 23H2，125% 缩放，Mica Alt）：临时打开“在标题栏上显示强调色”后，修复前标题栏顶部 38px 是一条蓝色带（分界线在标签中间），修复后整条标题栏颜色均匀；验证完已恢复原设置。\n\n如果更新后还能看到这条分界线，请重新打开这个 issue，并告诉我缩放比例、主题和窗口效果的设置。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复（3909617）。</p>\n<p dir=\"auto\"><strong>原因</strong>：系统设置里开启了“在标题栏上显示强调色”时，DWM 只在它自己的系统标题栏高度范围内（100% 缩放下约 30px）给背景材质涂上强调色，而 Pulse 的标题栏有 48px，所以涂色在标签中间就停了，看起来像是分界线偏上。截图里的深灰色带应该就是灰色的强调色。</p>\n<p dir=\"auto\"><strong>修复</strong>：启用 Mica、Mica Alt 或亚克力时，标题栏颜色不再“跟随系统”，改为 <code class=\"notranslate\">DWMWA_COLOR_NONE</code>，整条标题栏保持同一个颜色，直到标签栏底部。窗口效果设为“无”时行为不变。代价是开了这个系统选项后，Pulse 的标题栏不会显示强调色。</p>\n<p dir=\"auto\"><strong>验证</strong>（Windows 11 23H2，125% 缩放，Mica Alt）：临时打开“在标题栏上显示强调色”后，修复前标题栏顶部 38px 是一条蓝色带（分界线在标签中间），修复后整条标题栏颜色均匀；验证完已恢复原设置。</p>\n<p dir=\"auto\">如果更新后还能看到这条分界线，请重新打开这个 issue，并告诉我缩放比例、主题和窗口效果的设置。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/20#issuecomment-5970137123"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPQqd7gAqjU5MTk4NDEyMTk=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQaWSbgBqzMyNDM5NjY0ODcz"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "number": 333,
+  "title": "win10 Pulse-1.0.56-portable版本的窗口效果切换无效",
+  "body": "<!-- Failed to upload \"image.png\" -->",
+  "url": "https://github.com/jimmgreen/pulse/issues/333",
+  "captured_at": "2026-10-23T03:10:07.130342+00:00",
+  "updated_at": "2026-10-20T06:53:52Z",
+  "comments": [
+    {
+      "body": "我也是win10用的版本号也是1.0.56没问题",
+      "bodyHTML": "<p dir=\"auto\">我也是win10用的版本号也是1.0.56没问题</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjg4MzcwMjIx",
+        "login": "abchook",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/88370221?v=4",
+        "profileUrl": "https://github.com/abchook",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/333#issuecomment-6285220675"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVgWgAAAqjYyODUyMjA2NzU=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoVgWgAAAqjYyODUyMjA2NzU="
+  }
+}

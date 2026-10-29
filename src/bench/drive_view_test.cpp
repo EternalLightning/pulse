@@ -58,7 +58,7 @@ int wmain() {
         }) - items.begin();
     };
     app::AppendTextCompareCommands(items, true, L"C:\\fixture\\file.txt", true);
-    app::AppendRecentChangesCommand(items, L"C:\\fixture");
+    app::AppendRecentChangesCommand(items, L"C:\\fixture", true);
     app::OrganizeItemMenu(items);
     check(!items.front().quick_swatches.empty() && items.front().separator_after &&
           position(app::CmdOpen) < position(app::CmdOpenInNewTab) &&

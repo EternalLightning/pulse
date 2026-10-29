@@ -1,0 +1,9 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.41
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+
+  Checking File Globs
+  system_ctx_exchange_test.cpp
+  pulse_system_ctx_exchange_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_exchange_test.exe

@@ -151,7 +151,28 @@ bool OpsManager::RetryElevatedOperation(uint64_t task_id) {
                 undo_.empty() || !undo_.back().supported) return false;
             pending_mutation_undo_revision_ = retry.req.undo_revision;
         }
-        retry.seq = next_seq_++;
+        if (retry.req.is_undo && retry.req.type == OpType::RestoreRecycle) {
+            if (pending_recycle_undo_revision_ || undo_.empty() || !undo_.back().supported ||
+                undo_.back().type != OpType::RecycleDelete) return false;
+            const auto& history = undo_.back();
+            for (size_t i = 0; i < retry.req.sources.size(); ++i) {
+                const auto source = std::find(history.sources.begin(), history.sources.end(), retry.req.sources[i]);
+                const auto index = static_cast<size_t>(source - history.sources.begin());
+                if (index >= history.destinations.size() || index >= history.recycle_identities.size() ||
+                    i >= retry.req.recycle_paths.size() || i >= retry.req.recycle_undo_identities.size() ||
+                    history.destinations[index] != retry.req.recycle_paths[i] ||
+                    !(history.recycle_identities[index] == retry.req.recycle_undo_identities[i])) return false;
+            }
+            retry.req.undo_revision = undo_revision_;
+            pending_recycle_undo_revision_ = undo_revision_;
+        }
+        retry.retry_batch_status = status_;
+        const auto previous = std::find_if(finished_tasks_.begin(), finished_tasks_.end(),
+            [task_id](const auto& task) { return task.task_id == task_id; });
+        if (previous != finished_tasks_.end()) {
+            retry.retry_batch_status->source_label = previous->source_label;
+            retry.retry_batch_status->destination_label = previous->destination_label;
+        }
         retry.elevated_retry = true;
         retry.recovery_sequence = IsDeleteOperation(retry.req.type) ? task_id : 0;
         retry.lock_retry = false;

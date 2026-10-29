@@ -1,0 +1,15 @@
+{
+  "number": 319,
+  "title": "三屏情况下，桌面有的地方点击不了。",
+  "body": "win10系统，3块屏幕（其中一块为笔记本的屏幕），三块屏幕大小分辨率不一致，在将笔记本屏幕设置为主屏幕，且居中的情况下，笔记本屏幕的大部分的图标无法点击，右键无效，只有右边一小块可以点击。\n重启后是好的，但是只要一打开pulse，且开启“用pulse打开文件夹”的情况下，屏幕就会出现上述的问题。",
+  "url": "https://github.com/jimmgreen/pulse/issues/319",
+  "captured_at": "2026-10-23T03:10:07.134614+00:00",
+  "updated_at": "2026-10-19T06:59:28Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

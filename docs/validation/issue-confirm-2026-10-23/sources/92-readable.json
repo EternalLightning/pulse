@@ -1,0 +1,42 @@
+{
+  "number": 92,
+  "title": "OGG格式无法预览，及音乐相关问题",
+  "body": "1. 软件里标注ogg格式音频可以预览，但实际上无法播放。\n2. 希望增加“详细信息”视图下的参数选项，目前只有日期、类型、大小。以音频文件夹的角度举例，需要诸如标题、副标题、艺人、专辑、评分等等……\n3. 目前快捷视图切换只有 详细信息 和 中图标 两种，个人比较习惯于大图标，就需要去更多里点击。希望提供默认设置的选项，或者自动记忆上一次用户选择了哪种图标视图。\n4. 顺带报个bug：侧边栏的硬盘空间容量不更新",
+  "url": "https://github.com/jimmgreen/pulse/issues/92",
+  "captured_at": "2026-10-23T03:10:07.215992+00:00",
+  "updated_at": "2026-10-06T04:07:21Z",
+  "comments": [
+    {
+      "body": "借楼，视频预览希望增加DirectShow选项，不想安装其他额外解码器了",
+      "bodyHTML": "<p dir=\"auto\">借楼，视频预览希望增加DirectShow选项，不想安装其他额外解码器了</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOC3kjow",
+        "login": "xy9861",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/192488355?v=4",
+        "profileUrl": "https://github.com/xy9861",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/92#issuecomment-5979431824"
+    },
+    {
+      "body": "分点说一下现状（基于最新 main / v1.0.53）：\n\n1. **OGG 播放已在 1.0.53 解决**：新版本引入了可下载的 FFmpeg 预览增强包（设置 → 预览增强包），Media Foundation 解不了的格式（如 Ogg 里的 Speex、MKV 里的 Theora）会自动改由 FFmpeg 解码播放，Ogg 家族在打包 CI 里也做了冒烟测试。旧版本确实只有 MF 一条路，系统缺解码器就没声音。\n2. **详细信息视图的音频元数据列目前还没有**：现有可配置列只有 修改/创建/访问/类型/大小。属性读取链路其实已经能取到 标题/艺人/专辑 等 Music.* 字段（Quick Look 音频页就在用），把它们接进列表列是可行的，这条记为待开发。\n3. **视图切换与记忆现在已是全量的**：详细信息/内容/大中小特大图标/列表/平铺共 8 种都在视图菜单里，而且会按文件夹记忆上次选择、支持设置全局默认并\"应用到所有文件夹\"，升级到最新版后不会再退回中图标。\n4. **侧边栏容量刷新在当前 main 已经实现**（更正：此前误判为仍是 bug）：磁盘空间不再是一次性快照，最新 main 引入了后台周期刷新机制——约 30 秒空闲周期、文件操作完成、F5 与卷插拔时都会在工作线程重算各盘占用并只替换侧栏的盘条目。旧版本（1.0.52 及之前）确实不刷新，建议升级到最新构建验证。\n\n（借楼的 DirectShow 诉求：随 1.0.53 的 FFmpeg 增强包，解码已不再依赖系统解码器，可以先试试新版本是否满足。）",
+      "bodyHTML": "<p dir=\"auto\">分点说一下现状（基于最新 main / v1.0.53）：</p>\n<ol dir=\"auto\">\n<li><strong>OGG 播放已在 1.0.53 解决</strong>：新版本引入了可下载的 FFmpeg 预览增强包（设置 → 预览增强包），Media Foundation 解不了的格式（如 Ogg 里的 Speex、MKV 里的 Theora）会自动改由 FFmpeg 解码播放，Ogg 家族在打包 CI 里也做了冒烟测试。旧版本确实只有 MF 一条路，系统缺解码器就没声音。</li>\n<li><strong>详细信息视图的音频元数据列目前还没有</strong>：现有可配置列只有 修改/创建/访问/类型/大小。属性读取链路其实已经能取到 标题/艺人/专辑 等 Music.* 字段（Quick Look 音频页就在用），把它们接进列表列是可行的，这条记为待开发。</li>\n<li><strong>视图切换与记忆现在已是全量的</strong>：详细信息/内容/大中小特大图标/列表/平铺共 8 种都在视图菜单里，而且会按文件夹记忆上次选择、支持设置全局默认并\"应用到所有文件夹\"，升级到最新版后不会再退回中图标。</li>\n<li><strong>侧边栏容量刷新在当前 main 已经实现</strong>（更正：此前误判为仍是 bug）：磁盘空间不再是一次性快照，最新 main 引入了后台周期刷新机制——约 30 秒空闲周期、文件操作完成、F5 与卷插拔时都会在工作线程重算各盘占用并只替换侧栏的盘条目。旧版本（1.0.52 及之前）确实不刷新，建议升级到最新构建验证。</li>\n</ol>\n<p dir=\"auto\">（借楼的 DirectShow 诉求：随 1.0.53 的 FFmpeg 增强包，解码已不再依赖系统解码器，可以先试试新版本是否满足。）</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOEgfpjg",
+        "login": "yukitakasama",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/302508430?v=4",
+        "profileUrl": "https://github.com/yukitakasama",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/92#issuecomment-6001691557"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoQao_sgAqjU5Nzk0MzE4MjQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQ_kXjgBqzMyNTczMDc1Nzgz"
+  }
+}

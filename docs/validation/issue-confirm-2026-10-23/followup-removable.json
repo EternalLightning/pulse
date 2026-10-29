@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-23",
+  "issues": [
+    314,
+    308
+  ],
+  "change": "按用户确认排除所有可移动和USB设备（包括DRIVE_FIXED外置SSD）的持久文件名/内容索引；保留既有当前目录临时扫描。",
+  "behavior": [
+    "持久策略按GetVolumePathName解析实际所在卷；DRIVE_REMOVABLE、USB/SD/MMC/1394/RemovableMedia证据禁止索引，在线非USB内置盘保留，系统盘总线查询不可用可回退，其他未知/离线设备停止持久扫描。",
+    "include_removable_ntfs默认关闭，旧true不再能启用；机器卷启用命令、MFT/Journal、profile遍历/Watch、旧卷可见性及feed均受策略约束。",
+    "内容旧配置仅过滤有明确可移动证据的根；未知/离线内置根保留配置和缓存，Watch/Reconcile/读入/Store/任务补充扫描停止，避免误当用户删除并prune旧缓存。",
+    "UI从后台卷IPC缓存读取分类，不执行卷查询/存储IOCTL；移动设备当前目录文件名搜索复用ScanLiveFilenames，内容请求走已有indexed=false一次性scan。",
+    "禁用卷设置行显示本地化状态，隐藏旧计数/进度，开关不可点；UNC文件名搜索原语义保留。"
+  ],
+  "tests": [
+    {
+      "name": "removable_index_policy_test",
+      "passed": 36,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/policy.log",
+      "build_log": "bench_data/issue-fixes-removable/build.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_index_policy_test.exe",
+        "sha256": "29e598a4e28baebeff7859360f835bdbb4c4178d947cf5d1fc4cac6cc1f15930",
+        "mtime": "2026-10-23T13:54:15.412893+08:00"
+      },
+      "coverage": [
+        "注入策略矩阵含固定USB/内置/未知/离线/系统回退/盘子目录/挂载目录",
+        "C和E实际只读设备探测均允许",
+        "真实私有NTFS目录341文件扫描、过滤、分页、取消、尾斜杠及空根防误扫",
+        "旧未知离线根保留配置，执行快照暂停"
+      ]
+    },
+    {
+      "name": "removable_search_routing_test_final_production_objects",
+      "passed": 23,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/routing.log",
+      "build_log": "bench_data/issue-fixes-removable/build-routing-final.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_search_routing_test.exe",
+        "sha256": "0961fd4137cbe86734bb4cbf9f4ed942fe774212eec82451ca2d1666928bb847",
+        "mtime": "2026-10-23T13:54:12.189708+08:00"
+      },
+      "coverage": [
+        "复用最终pulse生产对象和资源私有重链",
+        "卷IPC到缓存、当前目录文件名分派、内容非索引临时请求",
+        "中文英文非空状态、禁用开关、隐藏旧统计、内部盘可用",
+        "中英深浅800/1100共8截图渲染"
+      ]
+    },
+    {
+      "name": "removable_content_cache_test_final_legacy_writer_object",
+      "passed": 12,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/cache.log",
+      "build_log": "bench_data/issue-fixes-removable/build-cache.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_content_cache_test.exe",
+        "sha256": "211f85b5fbc41ce82cae4ec72fca8e3a996ea981afe70297e6be2abcdec802b6",
+        "mtime": "2026-10-23T13:53:42.764448+08:00"
+      },
+      "coverage": [
+        "LOCALAPPDATA重定向到私有fixture目录",
+        "实际私有SQLite/sidecar和最终content_index生产对象",
+        "离线未知内部根仍在配置、无活动扫描",
+        "缓存文档和epoch不变、sidecar字节一致、新未知设备配置拒绝"
+      ]
+    }
+  ],
+  "production_build": {
+    "targets": [
+      "pulse",
+      "pulse_index"
+    ],
+    "logs": [
+      "bench_data/issue-followup-main/build-final-policy.log",
+      "bench_data/issue-followup-main/build-final-labels.log"
+    ],
+    "result": "主进程统一构建通过；本代理只私有编译/重链定向夹具，三个私有最终编译日志无warning/error。",
+    "binaries": [
+      {
+        "path": "build/Pulse.exe",
+        "sha256": "3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed",
+        "mtime": "2026-10-23T13:52:51.286444+08:00"
+      },
+      {
+        "path": "build/Pulse.Index.exe",
+        "sha256": "1e1093ffeb69553aa28fbdda2e55101d98bd4a064e6e00337b1248e3ea6aabee",
+        "mtime": "2026-10-23T13:49:19.534923+08:00"
+      }
+    ],
+    "content_engine_object": {
+      "path": "build/CMakeFiles/pulse_index.dir/src/index/content_index.cpp.obj",
+      "sha256": "3e9ffa6e6e94dda82fbfe32634f1a582d785c839a871415d278e45888d98be41",
+      "mtime": "2026-10-23T13:49:16.461519+08:00"
+    }
+  },
+  "device_probes": {
+    "C:": {
+      "online": true,
+      "bus_known": true,
+      "removable_bus": false,
+      "system": true,
+      "allowed": true
+    },
+    "E:": {
+      "online": true,
+      "bus_known": true,
+      "removable_bus": false,
+      "system": false,
+      "allowed": true
+    }
+  },
+  "visual_verification": {
+    "inspected": [
+      "bench_data/issue-fixes-removable/settings-zh-light-800.png",
+      "bench_data/issue-fixes-removable/settings-zh-light-1100.png",
+      "bench_data/issue-fixes-removable/settings-zh-dark-800.png",
+      "bench_data/issue-fixes-removable/settings-zh-dark-1100.png",
+      "bench_data/issue-fixes-removable/settings-en-light-800.png",
+      "bench_data/issue-fixes-removable/settings-en-light-1100.png",
+      "bench_data/issue-fixes-removable/settings-en-dark-800.png",
+      "bench_data/issue-fixes-removable/settings-en-dark-1100.png"
+    ],
+    "result": "逐张检查最终8图，设备行处于可见区域；Not indexed/Device unavailable及中文状态均完整，禁用控件无重叠；首次长英文标签截断已由主进程缩短后重验。",
+    "screenshots": [
+      {
+        "path": "bench_data/issue-fixes-removable/settings-zh-light-800.png",
+        "sha256": "7f6205fa1752ccfeac8164e02d5d398c8529ecb87a28828b54fad02f19eff354",
+        "mtime": "2026-10-23T13:54:13.238134+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-zh-light-1100.png",
+        "sha256": "b30be10f21acce7d2e339a7fb2f15b7a91f0c5710fedd7b7fd9c9ffa9039281d",
+        "mtime": "2026-10-23T13:54:13.207832+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-zh-dark-800.png",
+        "sha256": "c9bbdfecf461cbbf927cd0a312cfe74281407795be5f9ce5ab6f5780f1f5cede",
+        "mtime": "2026-10-23T13:54:13.341141+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-zh-dark-1100.png",
+        "sha256": "41ad5126b4fa7c636c9cc3a35e8239d203666b615187b83a8bfde4ea40084dc4",
+        "mtime": "2026-10-23T13:54:13.282364+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-en-light-800.png",
+        "sha256": "c4a440f2c95d959f05a285a5059dca3ca2cb2ff66c14506a545f3e9454c61494",
+        "mtime": "2026-10-23T13:54:13.476592+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-en-light-1100.png",
+        "sha256": "925630144b95d1b3483b535a4aa38a88f6aad88319befe01aacda61cb6df6e6e",
+        "mtime": "2026-10-23T13:54:13.406132+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-en-dark-800.png",
+        "sha256": "cbfd35dd439dc10b1d2fa4857dccede4402a881fcc1e74d5ab7739029f14bedc",
+        "mtime": "2026-10-23T13:54:13.607876+08:00"
+      },
+      {
+        "path": "bench_data/issue-fixes-removable/settings-en-dark-1100.png",
+        "sha256": "00a817e8e1cb78340ca8ecb9c85b91a493686690ff1a9aaa41b7327cd6d7e0e3",
+        "mtime": "2026-10-23T13:54:13.561669+08:00"
+      }
+    ],
+    "fixture_note": "设备来自合成卷IPC，未连接/修改实际USB设备；截图滚动到磁盘行，仅状态显示验证，不代表实盘热插拔通过。"
+  },
+  "source_files": [
+    "src/index/persistent_index_policy.h",
+    "src/index/index_config.h",
+    "src/index/index_config.cpp",
+    "src/index/index_engine.h",
+    "src/index/index_engine.cpp",
+    "src/index/content_scope.h",
+    "src/index/content_config_storage.h",
+    "src/index/content_configuration.cpp",
+    "src/index/content_index.cpp",
+    "src/index/index_client.cpp",
+    "src/index/live_filename_search.h",
+    "src/index/network_agent_client.cpp",
+    "src/app/app_navigation.cpp",
+    "src/app/search_options.cpp",
+    "src/app/app_runtime.cpp",
+    "src/app/settings_controller.cpp",
+    "src/bench/removable_index_policy_test.cpp",
+    "src/bench/removable_search_routing_test.cpp",
+    "src/bench/removable_content_cache_test.cpp"
+  ],
+  "limits": [
+    "未接真实USB/exFAT/USB固定SSD、挂载文件夹或进行热插拔端到端实盘验证；策略矩阵使用注入事实，实盘只读探测C:/E:。",
+    "内容当前目录临时扫描验证了应用请求与订阅边界；本次没有重新端到端测试所有文档格式解析。",
+    "MTP沿用原有不支持边界，未增加手机索引或新的搜索后端。",
+    "未安装、发布或替换正在运行的程序，未更改真实用户配置、服务状态或现有索引文件。"
+  ],
+  "artifacts_retained": "仅在bench_data/issue-fixes-removable保存私有fixture、日志、可执行文件、截图；未删除已有索引。"
+}

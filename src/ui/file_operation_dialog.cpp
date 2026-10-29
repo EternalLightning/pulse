@@ -6,7 +6,11 @@
 #include "typography.h"
 #include "window_helpers.h"
 #include "dialog_text_fit.h"
+#include "conflict_details.h"
 #include "animation_clock.h"
+#ifdef PULSE_UI_TEST_HOOKS
+#include "../bench/snapshot_output.h"
+#endif
 
 #include <windowsx.h>
 #include <algorithm>
@@ -24,6 +28,7 @@ constexpr wchar_t kConflictClass[] = L"PulseFileConflictWindow";
 constexpr wchar_t kConfirmClass[] = L"PulseConfirmWindow";
 constexpr float kConfirmMinW = 380.0f;
 constexpr UINT_PTR kRenderTimer = 1;
+constexpr UINT_PTR kScrollTimer = 2;
 constexpr float kDlgW = 460.0f;
 constexpr float kTitleH = 36.0f;
 constexpr float kPadX = 20.0f;
@@ -448,25 +453,14 @@ private:
 
         if (details_) {
             const float top = 326.0f;
-            painter_.FillRoundedRect(Rect(scale_, 20, top, 440, 104), 7 * scale_,
-                                     dark_ ? HexColor(0x161616, 0.62f) : HexColor(0xFFFFFF, 0.62f));
-            painter_.StrokeRoundedRect(Rect(scale_, 20, top, 440, 104), 7 * scale_, theme.stroke_card);
-            painter_.DrawText(l10n::Get(l10n::StringId::OpSource).c_str(), Rect(scale_, 32, top + 8, 190, 20),
-                              compositor_.SmallFormat(), theme.accent);
-            painter_.DrawText(l10n::Get(l10n::StringId::OpExisting).c_str(), Rect(scale_, 252, top + 8, 190, 20),
-                              compositor_.SmallFormat(), theme.text_secondary);
             const std::wstring source_meta = pulse::format::ByteSize(conflict_.source_size) + L"  ·  "
                                            + pulse::format::LocalFileTime(conflict_.source_modified, l10n::Get(l10n::StringId::OpUnknown).c_str());
             const std::wstring target_meta = pulse::format::ByteSize(conflict_.destination_size) + L"  ·  "
                                            + pulse::format::LocalFileTime(conflict_.destination_modified, l10n::Get(l10n::StringId::OpUnknown).c_str());
-            painter_.DrawText(source_meta, Rect(scale_, 32, top + 30, 198, 20),
-                              compositor_.SmallFormat(), theme.text);
-            painter_.DrawText(target_meta, Rect(scale_, 252, top + 30, 196, 20),
-                              compositor_.SmallFormat(), theme.text);
-            painter_.DrawText(conflict_.source, Rect(scale_, 32, top + 55, 198, 38),
-                              compositor_.SmallFormat(), theme.text_secondary);
-            painter_.DrawText(conflict_.destination, Rect(scale_, 252, top + 55, 196, 38),
-                              compositor_.SmallFormat(), theme.text_secondary);
+            const auto source_label = l10n::Get(l10n::StringId::OpSource);
+            const auto existing_label = l10n::Get(l10n::StringId::OpExisting);
+            DrawConflictDetails(painter_, compositor_, Rect(scale_, 20, top, 440, 104), scale_, theme, dark_, true,
+                {source_label, source_meta, conflict_.source}, {existing_label, target_meta, conflict_.destination});
         }
         pulse::ui::EndSurface(compositor_);
     }
@@ -747,6 +741,9 @@ private:
         const float check_h = spec_.checkbox_text.empty() ? 0.0f : ScaleDip(scale_, 38.0f);
         message_rc_ = D2D1::RectF(pad, msg_top, width - pad, footer_top - ScaleDip(scale_, 12.0f) - check_h);
         message_height_ = MeasureContent(width - 2.0f * pad);
+        dc_scroll_max_ = std::max(0.0f, message_height_ - (message_rc_.bottom - message_rc_.top));
+        message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), false);
+        KillTimer(hwnd_, kScrollTimer);
         check_rc_ = D2D1::RectF(pad, message_rc_.bottom + ScaleDip(scale_, 4.0f),
                                width - pad, message_rc_.bottom + check_h);
         divider_top_ = title_h;
@@ -837,7 +834,8 @@ private:
                                  0, theme.stroke_divider);
 
         dc_scroll_max_ = std::max(0.0f, message_height_ - (message_rc_.bottom - message_rc_.top));
-        message_scroll_ = std::clamp(message_scroll_, 0.0f, dc_scroll_max_);
+        message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), ScrollAnimationsEnabled());
+        UpdateScrollTimer();
         compositor_.Dc()->PushAxisAlignedClip(message_rc_, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         float content_y = message_rc_.top - message_scroll_;
         if (body_height_ > 0.0f) {
@@ -922,6 +920,26 @@ private:
         pulse::ui::EndSurface(compositor_);
     }
 
+    bool ScrollAnimationsEnabled() const {
+        BOOL enabled = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        return enabled && !IsHighContrast() && IsWindowVisible(hwnd_) && !IsIconic(hwnd_);
+    }
+
+    void UpdateScrollTimer() {
+        if (message_scroll_animation_.Pending()) {
+            if (!SetTimer(hwnd_, kScrollTimer, 15, nullptr))
+                message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), false);
+        } else KillTimer(hwnd_, kScrollTimer);
+    }
+
+    void ScrollMessage(float delta, bool animate = true) {
+        message_scroll_animation_.ScrollBy(message_scroll_, delta, dc_scroll_max_,
+            message_rc_.bottom - message_rc_.top, AnimationTimeMs(), animate && ScrollAnimationsEnabled());
+        UpdateScrollTimer();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
     LRESULT Handle(UINT message, WPARAM wparam, LPARAM lparam) {
         switch (message) {
         case WM_CREATE:
@@ -936,7 +954,7 @@ private:
 #ifdef PULSE_UI_TEST_HOOKS
         case kConfirmSnapshotMessage:
             Render();
-            return lparam && compositor_.SaveSnapshot(reinterpret_cast<const wchar_t*>(lparam));
+            return lparam && bench::SaveSnapshot(compositor_, reinterpret_cast<const wchar_t*>(lparam));
         case kConfirmInspectMessage:
             if (lparam) {
                 Render();
@@ -1007,23 +1025,40 @@ private:
             return 0;
         }
         case WM_MOUSEWHEEL:
-            message_scroll_ = std::clamp(message_scroll_ - GET_WHEEL_DELTA_WPARAM(wparam) / 120.0f * 48.0f * scale_, 0.0f, dc_scroll_max_);
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            ScrollMessage(-GET_WHEEL_DELTA_WPARAM(wparam) / 120.0f * 48.0f * scale_);
             return 0;
         case WM_TIMER:
-            if (spec_.still_valid && !spec_.still_valid()) Complete(false);
+            if (wparam == kScrollTimer) {
+                message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), ScrollAnimationsEnabled());
+                UpdateScrollTimer();
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            } else if (spec_.still_valid && !spec_.still_valid()) Complete(false);
             return 0;
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), ScrollAnimationsEnabled());
+            UpdateScrollTimer();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        case WM_SHOWWINDOW:
+            if (!wparam) {
+                message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), false);
+                KillTimer(hwnd_, kScrollTimer);
+            }
+            break;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) { Complete(false); return 0; }
             if (wparam == VK_HOME || wparam == VK_END) {
+                message_scroll_animation_.Reset();
+                KillTimer(hwnd_, kScrollTimer);
                 message_scroll_ = wparam == VK_HOME ? 0.0f : dc_scroll_max_;
                 InvalidateRect(hwnd_, nullptr, FALSE);
                 return 0;
             }
             if (wparam == VK_NEXT || wparam == VK_PRIOR || wparam == VK_DOWN || wparam == VK_UP) {
                 const float direction = wparam == VK_NEXT || wparam == VK_DOWN ? 1.0f : -1.0f;
-                message_scroll_ = std::clamp(message_scroll_ + direction * 80 * scale_, 0.0f, dc_scroll_max_);
-                InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+                ScrollMessage(direction * 80 * scale_);
+                return 0;
             }
             if (wparam == VK_TAB) {
                 const int count = (spec_.checkbox_text.empty() ? 2 : 3) + (spec_.alternate_text.empty() ? 0 : 1);
@@ -1051,6 +1086,8 @@ private:
         case WM_ERASEBKGND:
             return 1;
         case WM_DESTROY:
+            KillTimer(hwnd_, kScrollTimer);
+            message_scroll_animation_.Reset();
             compositor_.Shutdown();
             done_ = true;
             return 0;
@@ -1084,6 +1121,7 @@ private:
     float body_height_ = 0;
     float note_height_ = 0;
     std::vector<float> row_heights_;
+    SmoothScroll message_scroll_animation_;
     float message_scroll_ = 0;
     float dc_scroll_max_ = 0;
     float divider_top_ = 36.0f;
@@ -1147,7 +1185,11 @@ void FileOperationWindow::Update(const ops::OpStatus& status) {
             shown.failed_path != status_.failed_path));
     if (new_task || shown.phase != ops::OpPhase::Completed) completion_reveal_.Reset();
     status_ = std::move(shown);
-    if (new_task || detail_changed) failure_scroll_ = failure_scroll_max_ = 0.0f;
+    if (new_task || detail_changed) {
+        failure_scroll_ = failure_scroll_max_ = 0.0f;
+        failure_scroll_animation_.Reset();
+        if (hwnd_) KillTimer(hwnd_, kScrollTimer);
+    }
     if (entering_failure) detailed_ = true;
     if (new_task) {
         cancel_requested_ = false;
@@ -1179,6 +1221,8 @@ void FileOperationWindow::Show(bool activate) {
 
 void FileOperationWindow::Hide() {
     completion_reveal_.Sample(AnimationTimeMs(), false);
+    failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+    if (hwnd_) KillTimer(hwnd_, kScrollTimer);
     if (hwnd_) HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr);
     options_.modal_owner = false;
 }
@@ -1257,6 +1301,8 @@ void FileOperationWindow::RefreshAnimationSettings() {
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
     animations_enabled_ = animations && !IsHighContrast();
     completion_reveal_.Sample(AnimationTimeMs(), animations_enabled_);
+    failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), animations_enabled_);
+    UpdateFailureScrollTimer();
 }
 
 bool FileOperationWindow::NeedsAnimationFrame() const {
@@ -1394,11 +1440,11 @@ void FileOperationWindow::Render(bool present) {
     } else if (emptying) {
         file_line = l10n::Get(l10n::StringId::OpEmptyingSub);
         badge_text = l10n::Get(l10n::StringId::OpEmptying);
-        badge_kind = fluent::BadgeKind::Warning;
+        badge_kind = fluent::BadgeKind::Accent;
     } else {
         file_line = status_.current_item.empty() ? src : l10n::Get(l10n::StringId::OpItemPrefix) + status_.current_item;
         badge_text = options_.use_summary_title ? status_.summary : deleting ? l10n::Get(l10n::StringId::OpDeleting).c_str() : moving ? l10n::Get(l10n::StringId::OpMoving).c_str() : l10n::Get(l10n::StringId::OpCopying).c_str();
-        badge_kind = fluent::BadgeKind::Success;
+        badge_kind = fluent::BadgeKind::Accent;
     }
     const float badge_w = std::max(48.0f, painter_.MeasureBadgeWidth(badge_text) / std::max(scale_, 0.001f));
     const bool fading_completion = completed && completion_reveal_.opacity < 1.0f;
@@ -1409,8 +1455,14 @@ void FileOperationWindow::Render(bool present) {
     DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
         Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f - badge_w - 12.0f, 20),
         file_line, theme.text, theme.bg);
-    painter_.DrawBadge({ Rect(scale_, dip_w - kPadX - badge_w, 70, badge_w, 18),
-                         badge_text, badge_kind });
+    fluent::BadgeSpec badge{ Rect(scale_, dip_w - kPadX - badge_w, 70, badge_w, 18),
+                            badge_text, badge_kind };
+    if (badge_kind == fluent::BadgeKind::Accent && !high_contrast) {
+        badge.use_custom_colors = true;
+        badge.custom_background = dark_ ? HexColor(0x12344A) : HexColor(0xE1F0FC);
+        badge.custom_foreground = sky;
+    }
+    painter_.DrawBadge(badge);
     if (fading_completion) compositor_.Dc()->PopLayer();
 
     const auto track = Rect(scale_, kPadX, 98, dip_w - kPadX * 2.0f, 10);
@@ -1506,8 +1558,11 @@ void FileOperationWindow::Render(bool present) {
             width - 32 * scale_, height - 64 * scale_);
         const auto text = ops::OperationFailureDetails(status_);
         const float text_height = painter_.MeasureWrappedCaptionHeight(text, text_bounds.right - text_bounds.left);
-        failure_scroll_max_ = std::max(0.0f, text_height - (text_bounds.bottom - text_bounds.top));
-        failure_scroll_ = std::clamp(failure_scroll_, 0.0f, failure_scroll_max_);
+        failure_viewport_ = std::max(0.0f, text_bounds.bottom - text_bounds.top);
+        failure_scroll_max_ = std::max(0.0f, text_height - failure_viewport_);
+        failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(),
+            animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
+        UpdateFailureScrollTimer();
         compositor_.Dc()->PushAxisAlignedClip(text_bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         painter_.DrawWrappedCaption(text, D2D1::Point2F(text_bounds.left, text_bounds.top - failure_scroll_),
             text_bounds.right - text_bounds.left, theme.text_secondary);
@@ -1609,8 +1664,18 @@ LRESULT CALLBACK FileOperationWindow::WndProc(HWND hwnd, UINT message,
                 : DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
-void FileOperationWindow::ScrollFailureDetails(float delta) {
-    failure_scroll_ = std::clamp(failure_scroll_ + delta, 0.0f, failure_scroll_max_);
+void FileOperationWindow::UpdateFailureScrollTimer() {
+    if (!hwnd_) return;
+    if (failure_scroll_animation_.Pending()) {
+        if (!SetTimer(hwnd_, kScrollTimer, 15, nullptr))
+            failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+    } else KillTimer(hwnd_, kScrollTimer);
+}
+
+void FileOperationWindow::ScrollFailureDetails(float delta, bool animate) {
+    failure_scroll_animation_.ScrollBy(failure_scroll_, delta, failure_scroll_max_, failure_viewport_,
+        AnimationTimeMs(), animate && animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
+    UpdateFailureScrollTimer();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -1638,6 +1703,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
     }
     case WM_SIZE:
         if (wparam == SIZE_MINIMIZED) completion_reveal_.Sample(AnimationTimeMs(), false);
+        failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+        KillTimer(hwnd_, kScrollTimer);
         if (compositor_.Dc() && wparam != SIZE_MINIMIZED)
             compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
         if (wparam != SIZE_MINIMIZED && detailed_ && status_.phase == ops::OpPhase::Failed &&
@@ -1650,6 +1717,12 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         RefreshAnimationSettings();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
+    case WM_SHOWWINDOW:
+        if (!wparam) {
+            failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+            KillTimer(hwnd_, kScrollTimer);
+        }
+        break;
     case WM_MOVE:
         compositor_.UpdateTextRenderingParams(
             MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
@@ -1665,6 +1738,13 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         return 0;
     }
     case WM_TIMER:
+        if (wparam == kScrollTimer) {
+            failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(),
+                animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
+            UpdateFailureScrollTimer();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         if (wparam == kRenderTimer && IsWindowVisible(hwnd_) && !IsIconic(hwnd_)) {
             bool dirty = NeedsAnimationFrame() || compositor_.NeedsRecovery();
             if (TransferStatisticsActive(status_)) {
@@ -1720,6 +1800,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
                     if (callbacks_.resume) callbacks_.resume();
                 } else if (callbacks_.pause) callbacks_.pause();
             } else if (hit == 5) {
+                failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+                KillTimer(hwnd_, kScrollTimer);
                 detailed_ = !detailed_;
                 ResizeForDetails(true);
             }
@@ -1740,7 +1822,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         }
         if (detailed_ && status_.phase == ops::OpPhase::Failed) {
             if (wparam == VK_HOME || wparam == VK_END) {
-                ScrollFailureDetails(wparam == VK_HOME ? -failure_scroll_max_ : failure_scroll_max_);
+                failure_scroll_animation_.Reset();
+                ScrollFailureDetails(wparam == VK_HOME ? -failure_scroll_max_ : failure_scroll_max_, false);
                 return 0;
             }
             if (wparam == VK_NEXT || wparam == VK_PRIOR || wparam == VK_DOWN || wparam == VK_UP) {
@@ -1774,6 +1857,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         return 1;
     case WM_DESTROY:
         KillTimer(hwnd_, kRenderTimer);
+        KillTimer(hwnd_, kScrollTimer);
+        failure_scroll_animation_.Reset();
         compositor_.Shutdown();
         hwnd_ = nullptr;
         return 0;

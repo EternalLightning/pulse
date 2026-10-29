@@ -56,6 +56,7 @@ struct WorkResult {
     FolderSortMode folder_sort = FolderSortMode::FoldersFirst;
     bool preserve_order = false;
     DWORD error_code = ERROR_SUCCESS;
+    uint8_t device_error = 0;
     fs::SnapshotPtr facts;
     bool projection_only = false;
     bool final = true;

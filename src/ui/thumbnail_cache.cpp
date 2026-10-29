@@ -1,4 +1,6 @@
 #include "thumbnail_cache.h"
+#include "thumbnail_disk_cache.h"
+#include "../fs/cloud_state.h"
 #include "../ipc/preview_response.h"
 #include <algorithm>
 #include <chrono>
@@ -15,6 +17,13 @@ ThumbnailCache::ThumbnailCache() {
     const uint32_t sequence = g_preview_cache_sequence.fetch_add(1);
     pipe_token_ = GetCurrentProcessId() ^ (sequence * 0x9E3779B9u);
     if (!pipe_token_) pipe_token_ = sequence ? sequence : 1;
+    const auto cores = std::thread::hardware_concurrency();
+    lane_count_ = std::clamp<size_t>(cores > 2 ? cores - 2 : 1, 1, 4);
+    for (auto& host : hosts_) {
+        const uint32_t next = g_preview_cache_sequence.fetch_add(1);
+        host.token = GetCurrentProcessId() ^ (next * 0x9E3779B9u);
+        if (!host.token) host.token = next ? next : 1;
+    }
 }
 
 ThumbnailCache::~ThumbnailCache() { Reset(); if (stop_event_) CloseHandle(stop_event_); }
@@ -61,15 +70,22 @@ std::wstring ThumbnailCache::Key(const std::wstring& path, uint32_t pixels,
     return path + L"\n" + std::to_wstring(pixels) + L":" + std::to_wstring(modified) +
            L":" + std::to_wstring(size) + L":" + std::to_wstring(frame_index);
 }
-void ThumbnailCache::StopChild() {
-    if (pipe_ != INVALID_HANDLE_VALUE) { CloseHandle(pipe_); pipe_ = INVALID_HANDLE_VALUE; }
-    if (child_.hProcess) { TerminateProcess(child_.hProcess, 0); CloseHandle(child_.hProcess); CloseHandle(child_.hThread); child_ = {}; }
+void ThumbnailCache::StopChild(size_t lane) {
+    auto& lane_pipe = lane ? hosts_[lane - 1].pipe : this->pipe_;
+    auto& lane_child = lane ? hosts_[lane - 1].child : this->child_;
+    if (lane_pipe != INVALID_HANDLE_VALUE) { CloseHandle(lane_pipe); lane_pipe = INVALID_HANDLE_VALUE; }
+    if (lane_child.hProcess) { TerminateProcess(lane_child.hProcess, 0); CloseHandle(lane_child.hProcess); CloseHandle(lane_child.hThread); lane_child = {}; }
 }
 void ThumbnailCache::Reset() {
-    running_ = false; cv_.notify_all();
+    {
+        std::lock_guard lock(mutex_);
+        running_ = false;
+    }
+    cv_.notify_all();
     if (stop_event_) SetEvent(stop_event_);
     if (worker_.joinable()) worker_.join();
-    StopChild();
+    for (auto& host : hosts_) if (host.worker.joinable()) host.worker.join();
+    for (size_t lane = 0; lane < lane_count_; ++lane) StopChild(lane);
     std::lock_guard lock(mutex_); queue_.clear(); pending_.clear(); items_.clear(); lru_.clear();
     cache_bytes_ = 0;
     for (auto& state : consumers_) {
@@ -134,6 +150,10 @@ void ThumbnailCache::QueueRequest(Request request, Consumer consumer) {
         // A list request must remain valid even when the same window changes its details selection.
         const bool details = interest.active ? interest.details && request.details : request.details;
         interest = {true, details, request.generation, state.epoch};
+        if (!request.prefetch) {
+            for (auto& queued : queue_) if (queued.id == found->second.id) queued.prefetch = false;
+            cv_.notify_all();
+        }
         return;
     }
     request.id = next_id_++;
@@ -142,44 +162,89 @@ void ThumbnailCache::QueueRequest(Request request, Consumer consumer) {
     pending.id = request.id; pending.identity = request.identity;
     pending.interests[index] = {true, request.details, request.generation, state.epoch};
     pending_.emplace(request.key, std::move(pending));
-    if (request.kind == ipc::PreviewRequestKind::Properties) queue_.push_back(std::move(request));
+    if (request.prefetch || request.kind == ipc::PreviewRequestKind::Properties) queue_.push_back(std::move(request));
     else queue_.push_front(std::move(request));
     if (queue_.size() > 128) { pending_.erase(queue_.back().key); queue_.pop_back(); }
-    if (!running_.exchange(true)) {
-        if (stop_event_) ResetEvent(stop_event_);
-        worker_ = std::thread([this]{ Worker(); });
-    }
-    cv_.notify_one();
+    StartWorkers();
+    cv_.notify_all();
 }
-bool ThumbnailCache::Connect() {
+void ThumbnailCache::StartWorkers() {
+    if (running_.exchange(true)) return;
+    if (stop_event_) ResetEvent(stop_event_);
+    size_t started = 0;
+    try {
+        worker_ = std::thread([this] { Worker(); });
+        started = 1;
+        for (size_t lane = 1; lane < lane_count_; ++lane) {
+            hosts_[lane - 1].worker = std::thread([this, lane] { Worker(lane); });
+            ++started;
+        }
+    } catch (const std::system_error&) {
+        // Keep the lanes already started; a later request can retry if none
+        // could be created. The UI still draws its normal file icon.
+        if (!started) running_ = false;
+        else lane_count_ = started;
+    }
+}
+void ThumbnailCache::Warm() {
+    std::lock_guard lock(mutex_);
+    StartWorkers();
+}
+bool ThumbnailCache::Prefetch(const std::wstring& path, DWORD attrs, uint32_t pixels,
+                               uint64_t generation, uint64_t modified, uint64_t size) {
+    if (path.empty() || pixels < 24 || pixels > 512 ||
+        (attrs & FILE_ATTRIBUTE_DIRECTORY) || fs::IsCloudPlaceholder(attrs)) return true;
+    // Restrict speculative work to cheap still-image formats.
+    const auto dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos) return true;
+    const auto ext = path.substr(dot);
+    if (_wcsicmp(ext.c_str(), L".jpg") && _wcsicmp(ext.c_str(), L".jpeg") &&
+        _wcsicmp(ext.c_str(), L".png") && _wcsicmp(ext.c_str(), L".bmp") &&
+        _wcsicmp(ext.c_str(), L".webp")) return true;
+    std::lock_guard lock(mutex_);
+    const auto key = Key(path, pixels, modified, size) + L":thumbnail";
+    if (items_.contains(key) || pending_.contains(key)) return true;
+    if (queue_.size() >= 64 || lane_count_ < 2) return false;
+    Request req;
+    req.path = path; req.attrs = attrs; req.pixels = pixels; req.generation = generation;
+    req.modified = modified; req.size = size;
+    req.kind = ipc::PreviewRequestKind::Thumbnail; req.prefetch = true;
+    req.key = key; req.identity = Key(path, 0, modified, size);
+    QueueRequest(std::move(req), Consumer::Main);
+    return true;
+}
+bool ThumbnailCache::Connect(size_t lane) {
+    auto& lane_pipe = lane ? hosts_[lane - 1].pipe : this->pipe_;
+    auto& lane_child = lane ? hosts_[lane - 1].child : this->child_;
+    const auto lane_token = lane ? hosts_[lane - 1].token : this->pipe_token_;
     if (!running_ || !stop_event_ || WaitForSingleObject(stop_event_, 0) != WAIT_TIMEOUT) return false;
-    if (pipe_ != INVALID_HANDLE_VALUE) return true;
-    const std::wstring pipeName = ipc::PreviewPipeName(pipe_token_);
+    if (lane_pipe != INVALID_HANDLE_VALUE) return true;
+    const std::wstring pipeName = ipc::PreviewPipeName(lane_token);
     wchar_t exe[MAX_PATH]{}; GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
     wchar_t* slash = wcsrchr(exe, L'\\'); if (!slash) return false; *(slash + 1) = 0;
     std::wstring cmd = L"\"" + std::wstring(exe) + L"Pulse.Preview.exe\" " +
-        std::to_wstring(pipe_token_);
+        std::to_wstring(lane_token);
     STARTUPINFOW si{sizeof(si)};
     si.dwFlags = STARTF_FORCEOFFFEEDBACK; // background helper: no AppStarting cursor
     if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-                        nullptr, nullptr, &si, &child_)) return false;
+                        nullptr, nullptr, &si, &lane_child)) return false;
     const ULONGLONG deadline = GetTickCount64() + 3000;
     do {
-        pipe_ = CreateFileW(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+        lane_pipe = CreateFileW(pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                             OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-        if (pipe_ != INVALID_HANDLE_VALUE) {
+        if (lane_pipe != INVALID_HANDLE_VALUE) {
             ULONG server_pid = 0;
-            if (GetNamedPipeServerProcessId(pipe_, &server_pid) &&
-                server_pid == child_.dwProcessId)
+            if (GetNamedPipeServerProcessId(lane_pipe, &server_pid) &&
+                server_pid == lane_child.dwProcessId)
                 return true;
-            CloseHandle(pipe_);
-            pipe_ = INVALID_HANDLE_VALUE;
-            StopChild();
+            CloseHandle(lane_pipe);
+            lane_pipe = INVALID_HANDLE_VALUE;
+            StopChild(lane);
             return false;
         }
         Sleep(25);
     } while (running_ && GetTickCount64() < deadline);
-    StopChild(); return false;
+    StopChild(lane); return false;
 }
 PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F& dest,
                                        const std::wstring& path, DWORD attrs, uint32_t pixels,
@@ -195,8 +260,13 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
                                        uint32_t* source_width, uint32_t* source_height,
                                        PreviewViewport* viewport, Consumer consumer) {
     if (!dc || path.empty() || pixels < 24) return PreviewDrawResult::Failed;
+    if (direct_preview && fs::IsCloudPlaceholder(attrs)) {
+        if (error) *error = L"offline-placeholder";
+        return PreviewDrawResult::Failed;
+    }
     SetDeviceContext(dc, consumer);
-    const std::wstring key = Key(path, pixels, modified, size, frame_index);
+    const std::wstring key = Key(path, pixels, modified, size, frame_index) +
+        (direct_preview ? L"" : fs::IsCloudPlaceholder(attrs) ? L":thumbnail:cloud-cache" : L":thumbnail");
     {
         std::lock_guard lock(mutex_);
         KeepVisible(consumer, key);
@@ -205,7 +275,8 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
         auto queue_request = [&] {
             Request request;
             request.generation = generation; request.pixels = pixels; request.attrs = attrs;
-            request.kind = ipc::PreviewRequestKind::Content;
+            request.kind = direct_preview ? ipc::PreviewRequestKind::Content : ipc::PreviewRequestKind::Thumbnail;
+            request.modified = modified; request.size = size;
             request.details = direct_preview; request.frame_index = frame_index;
             request.path = path; request.key = key; request.identity = identity;
             QueueRequest(std::move(request), consumer);
@@ -313,7 +384,7 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
 bool ThumbnailCache::Properties(const std::wstring& path, DWORD attrs, uint64_t generation,
                                 uint64_t modified, uint64_t size,
                                 std::vector<PreviewProperty>& properties, Consumer consumer) {
-    if (path.empty()) return false;
+    if (path.empty() || fs::IsCloudPlaceholder(attrs)) return false;
     const std::wstring identity = Key(path, 0, modified, size);
     const std::wstring key = identity + L":properties";
     std::lock_guard lock(mutex_);
@@ -433,13 +504,14 @@ void ThumbnailCache::Trim() {
     }
 }
 
-bool ThumbnailCache::FetchResponse(const Request& req, Item& result) {
+bool ThumbnailCache::FetchResponse(const Request& req, Item& result, size_t lane) {
+    const auto lane_pipe = lane ? hosts_[lane - 1].pipe : this->pipe_;
     if (!stop_event_ || !running_) return false;
     ipc::PipeIoOptions options;
     options.cancel_event = stop_event_;
     options.deadline = GetTickCount64() + 1000;
-    const auto read = [&](void* data, DWORD bytes) { return ipc::PipeRead(pipe_, data, bytes, options); };
-    const auto write = [&](const void* data, DWORD bytes) { return ipc::PipeWrite(pipe_, data, bytes, options); };
+    const auto read = [&](void* data, DWORD bytes) { return ipc::PipeRead(lane_pipe, data, bytes, options); };
+    const auto write = [&](const void* data, DWORD bytes) { return ipc::PipeWrite(lane_pipe, data, bytes, options); };
     try {
         if (req.path.empty() || req.path.size() > 32768) return false;
         ipc::PreviewRequest wire;
@@ -507,32 +579,76 @@ bool ThumbnailCache::FetchResponse(const Request& req, Item& result) {
     }
 }
 
-void ThumbnailCache::Worker() {
+std::deque<ThumbnailCache::Request>::iterator ThumbnailCache::NextRequest(size_t lane, ULONGLONG now) {
+    auto ready = queue_.end();
+    int best = -1;
+    for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+        if (it->retry_due > now || (lane == 0 && it->prefetch)) continue;
+        int priority = it->prefetch ? 0 : 1;
+        for (const auto& state : consumers_)
+            if (state.visible_keys.contains(it->key) || state.frame_keys.contains(it->key)) priority = 2;
+        if (it->details) priority = 3;
+        if (priority > best) { best = priority; ready = it; }
+    }
+    return ready;
+}
+
+void ThumbnailCache::Worker(size_t lane) {
+    Connect(lane); // warm only on this lane's background thread
     while (running_) {
         Request req;
         {
             std::unique_lock lock(mutex_);
             while (running_) {
                 const ULONGLONG now = GetTickCount64();
-                auto ready = std::find_if(queue_.begin(), queue_.end(), [now](const Request& queued) {
-                    return queued.retry_due <= now;
-                });
+                auto ready = NextRequest(lane, now);
                 if (ready != queue_.end()) {
                     req = std::move(*ready);
                     queue_.erase(ready);
                     break;
                 }
-                if (queue_.empty()) cv_.wait(lock);
+                if (queue_.empty() || (lane == 0 && std::all_of(queue_.begin(), queue_.end(),
+                    [](const Request& r) { return r.prefetch; }))) cv_.wait(lock);
                 else {
-                    const auto earliest = std::min_element(queue_.begin(), queue_.end(),
-                        [](const Request& a, const Request& b) { return a.retry_due < b.retry_due; });
-                    cv_.wait_for(lock, std::chrono::milliseconds(earliest->retry_due - now));
+                    ULONGLONG next_due = MAXULONGLONG;
+                    for (const auto& queued : queue_)
+                        if (lane != 0 || !queued.prefetch) next_due = std::min(next_due, queued.retry_due);
+                    cv_.wait_for(lock, std::chrono::milliseconds(next_due - now));
                 }
             }
             if (!running_) break;
         }
         Item result;
-        const bool ok = Connect() && FetchResponse(req, result);
+        const bool grid = req.kind == ipc::PreviewRequestKind::Thumbnail;
+        ThumbnailStoreKey disk_key{req.path, req.attrs, req.pixels, req.modified, req.size};
+        ThumbnailFileIdentity before{};
+        const bool verified = grid && ReadThumbnailFileIdentity(disk_key, before);
+        StoredThumbnail stored;
+        bool disk_hit = verified && ThumbnailDiskCache::Shared().Load(disk_key, stored);
+        const auto started = GetTickCount64();
+        bool ok = disk_hit;
+        if (disk_hit) {
+            result.pixels = std::move(stored.pixels);
+            result.w = stored.width; result.h = stored.height; result.stride = stored.width * 4;
+            result.source_width = stored.source_width; result.source_height = stored.source_height;
+            result.kind = ipc::PreviewContentKind::Bitmap; result.cost = result.pixels.size();
+        } else ok = Connect(lane) && FetchResponse(req, result, lane);
+        if (!running_) break;
+        {
+            std::lock_guard lock(mutex_);
+            const auto pending = pending_.find(req.key);
+            if (req.epoch != epoch_.load(std::memory_order_relaxed) || pending == pending_.end() ||
+                pending->second.id != req.id) continue;
+        }
+        if (verified) {
+            ThumbnailFileIdentity after{};
+            if (!ReadThumbnailFileIdentity(disk_key, after) || !(before == after)) ok = false;
+        }
+        if (verified && ok && !disk_hit && !result.failed && result.kind == ipc::PreviewContentKind::Bitmap) {
+            stored = {result.pixels, result.w, result.h, result.source_width, result.source_height, 0};
+            ThumbnailDiskCache::Shared().Save(disk_key,
+                static_cast<uint32_t>(std::min<ULONGLONG>(GetTickCount64() - started, UINT32_MAX)), stored, &before);
+        }
         if (!ok) {
             result = {};
             result.failed = true;
@@ -540,7 +656,7 @@ void ThumbnailCache::Worker() {
         }
         result.animation_identity = req.identity;
         StoreResult(req, std::move(result));
-        if (!ok) StopChild();
+        if (!ok) StopChild(lane);
     }
 }
 } // namespace pulse::ui

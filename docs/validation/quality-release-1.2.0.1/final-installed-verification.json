@@ -1,0 +1,67 @@
+{
+  "Success": true,
+  "UI": [
+    {
+      "ProcessId": 40740,
+      "CreationDate": "2026-10-24T11:57:49.904678+08:00"
+    }
+  ],
+  "Service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "ProcessId": 26688,
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "Files": [
+    {
+      "Match": true,
+      "Hash": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A",
+      "Version": "1.2.0.1",
+      "Relative": "Pulse.exe",
+      "Expected": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A"
+    },
+    {
+      "Match": true,
+      "Hash": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566",
+      "Version": "1.2.0.1",
+      "Relative": "Pulse.Index.exe",
+      "Expected": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566"
+    },
+    {
+      "Match": true,
+      "Hash": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8",
+      "Version": "1.2.0.1",
+      "Relative": "Pulse.Shell.exe",
+      "Expected": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8"
+    },
+    {
+      "Match": true,
+      "Hash": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50",
+      "Version": "1.2.0.1",
+      "Relative": "Pulse.Preview.exe",
+      "Expected": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50"
+    },
+    {
+      "Match": true,
+      "Hash": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3",
+      "Version": "1.2.0.1",
+      "Relative": "Pulse.Document.exe",
+      "Expected": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3"
+    },
+    {
+      "Match": true,
+      "Hash": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+      "Version": null,
+      "Relative": "lumatext.dll",
+      "Expected": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "Match": true,
+      "Hash": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+      "Version": "155.0.8044.0",
+      "Relative": "pdfium.dll",
+      "Expected": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    }
+  ],
+  "Utc": "2026-10-24T04:00:02.7145888Z"
+}

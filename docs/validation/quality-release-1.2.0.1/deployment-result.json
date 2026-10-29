@@ -1,0 +1,24 @@
+{
+    "RecoveryError":  null,
+    "BackupVerified":  true,
+    "Utc":  "2026-10-24T03:56:44.6188783Z",
+    "Deferred":  [
+                     {
+                         "Path":  "D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-4fadbf6de0fc4821ac9410910b02e1b2",
+                         "SHA256":  "908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED",
+                         "Reason":  "对路径“D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-4fadbf6de0fc4821ac9410910b02e1b2”的访问被拒绝。"
+                     }
+                 ],
+    "Error":  null,
+    "Phase":  "complete",
+    "Success":  true,
+    "ChangedFiles":  [
+                         "Pulse.exe",
+                         "Pulse.Index.exe",
+                         "Pulse.Shell.exe",
+                         "Pulse.Preview.exe",
+                         "Pulse.Document.exe"
+                     ],
+    "BackupFiles":  69,
+    "BackupDirectory":  "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-final-rollback-20261024-115519"
+}

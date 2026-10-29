@@ -25,35 +25,126 @@ int Worker(DWORD parent, uint32_t id) {
     if (pipe.value == INVALID_HANDLE_VALUE || (!ConnectNamedPipe(pipe.value, nullptr) &&
         GetLastError() != ERROR_PIPE_CONNECTED)) return 2;
     MsgHeader header{}; DWORD read = 0;
-    if (!ReadFile(pipe.value, &header, sizeof(header), &read, nullptr) || read != sizeof(header)) return 3;
-    std::vector<uint8_t> payload(header.payload_size);
-    if (header.payload_size && !ReadFile(pipe.value, payload.data(), header.payload_size, &read, nullptr)) return 4;
-    if (id != 1) {
-        PayloadWriter writer;
-        writer.PutU32(id); writer.PutU32(id == 4 ? 0 : CTX_ITEMS_PARTIAL);
-        writer.PutU32(id >= 3 ? 1 : 0);
-        if (id >= 3) {
-            writer.PutU32(7); writer.PutU32(CTX_ITEM_ENABLED); writer.PutString(L"fixture.ready");
-            writer.PutString(std::to_wstring(GetCurrentProcessId())); writer.PutString(L""); writer.PutString(L"");
-        }
-        writer.PutStringArray({});
-        if (!Frame(pipe.value, RSP_CTX_ITEMS, id, writer.data())) return 5;
-    }
+    std::vector<uint8_t> payload;
+    uint32_t current = 0;
     while (ReadFile(pipe.value, &header, sizeof(header), &read, nullptr) && read == sizeof(header)) {
         payload.resize(header.payload_size);
-        if (header.payload_size && !ReadFile(pipe.value, payload.data(), header.payload_size, &read, nullptr)) return 6;
-        if (header.type == REQ_CTX_INVOKE) {
+        if (header.payload_size && !ReadFile(pipe.value, payload.data(), header.payload_size, &read, nullptr)) return 4;
+        if (header.type == REQ_CTX_QUERY) {
+            current = header.request_id;
+            if (current == 1) continue;
+            PayloadWriter writer;
+            writer.PutU32(current); writer.PutU32(current == 2 || current == 3 ? CTX_ITEMS_PARTIAL : 0);
+            writer.PutU32(current >= 3 ? 1 : 0);
+            if (current >= 3) {
+                writer.PutU32(7); writer.PutU32(CTX_ITEM_ENABLED); writer.PutString(L"fixture.ready");
+                writer.PutString(std::to_wstring(GetCurrentProcessId())); writer.PutString(L""); writer.PutString(L"");
+            }
+            writer.PutStringArray({});
+            if (!Frame(pipe.value, RSP_CTX_ITEMS, current, writer.data())) return 5;
+        } else if (header.type == REQ_CTX_CLOSE) {
+            if (current != 14 && !Frame(pipe.value, RSP_PONG, current, {})) return 6;
+        } else if (header.type == REQ_CTX_INVOKE) {
             PayloadWriter done; done.PutU32(S_OK); done.PutU32(0); done.PutString(L"fixture invoked");
             if (!Frame(pipe.value, RSP_DONE, header.request_id, done.data())) return 7;
         }
     }
     return 0;
 }
+
+int ReuseTest(const wchar_t* executable) {
+    using namespace pulse::shell;
+    int failures = 0;
+    const auto check = [&](bool passed, const char* name) {
+        std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", name);
+        if (!passed) ++failures;
+    };
+    std::mutex mutex;
+    std::map<uint32_t, DWORD> pids;
+    std::map<uint32_t, uint32_t> counts;
+    std::map<uint32_t, uint32_t> invocation_results;
+    ContextSessionProcesses processes(executable, [&](uint32_t type, uint32_t id, const auto& payload) {
+        PayloadReader reader(payload.data(), payload.size());
+        uint32_t session = 0, flags = 0, count = 0, item = 0;
+        std::wstring verb, text;
+        if (type == RSP_DONE && reader.GetU32(flags)) {
+            std::lock_guard lock(mutex);
+            invocation_results[id] = flags;
+        } else if (type == RSP_CTX_ITEMS && reader.GetU32(session) && reader.GetU32(flags) && reader.GetU32(count)) {
+            if (count && (!reader.GetU32(item) || !reader.GetU32(flags) || !reader.GetString(verb) || !reader.GetString(text))) return;
+            std::lock_guard lock(mutex);
+            counts[id] = count;
+            if (count) pids[id] = wcstoul(text.c_str(), nullptr, 10);
+        }
+    }, {400, 2});
+    const auto wait = [&](const auto& predicate, DWORD timeout = 3000) {
+        const auto deadline = GetTickCount64() + timeout;
+        do {
+            if (predicate()) return true;
+            Sleep(10);
+        } while (GetTickCount64() < deadline);
+        return false;
+    };
+    const auto query = [&](uint32_t id) {
+        processes.Query(id, {});
+        return wait([&] { std::lock_guard lock(mutex); return pids.contains(id); });
+    };
+    check(query(10), "first isolated query completes");
+    processes.Close(10);
+    check(wait([&] { return processes.IdleProcesses() == 1; }), "cleanup acknowledgement admits one idle worker");
+    check(query(11), "next session uses the released worker");
+    {
+        std::lock_guard lock(mutex);
+        check(pids[10] && pids[10] == pids[11], "acknowledged queries use the same process with different session IDs");
+    }
+    processes.Close(10);
+    processes.Invoke(10, 110, {});
+    check(wait([&] { std::lock_guard lock(mutex); return invocation_results.contains(110); }) &&
+        processes.ActiveProcesses() == 1 && processes.IdleProcesses() == 0,
+        "stale close and invoke cannot address the reused process under its previous session ID");
+    processes.Close(11);
+    check(wait([&] { return processes.ActiveProcesses() == 0; }), "query count limit physically retires the warm process");
+    check(query(12), "query after retirement recovers with a fresh process");
+    processes.Close(12);
+    check(wait([&] { return processes.IdleProcesses() == 1; }), "fresh released query becomes idle");
+    check(wait([&] { return processes.ActiveProcesses() == 0; }), "idle deadline physically reclaims the worker");
+    check(query(14), "unresponsive close fixture completes its query");
+    processes.Close(14);
+    check(wait([&] { return processes.ActiveProcesses() == 0; }), "missing cleanup acknowledgement kills the worker within a bounded wait");
+    check(processes.IdleProcesses() == 0, "unacknowledged worker is never reused");
+    check(query(16), "synthetic invocation fixture completes its query");
+    processes.Invoke(16, 116, {});
+    check(wait([&] { std::lock_guard lock(mutex); return invocation_results.contains(116) && invocation_results[116] == S_OK; }),
+        "synthetic command completes before retirement");
+    processes.Close(16);
+    check(wait([&] { return processes.ActiveProcesses() == 0; }) && processes.IdleProcesses() == 0,
+        "invoked processes are physically retired and never become idle");
+    for (uint32_t id = 20; id < 24; ++id) check(query(id), "concurrent isolated query admitted");
+    processes.Query(24, {});
+    check(wait([&] { std::lock_guard lock(mutex); return counts.contains(24) && counts[24] == 0; }) &&
+        processes.ActiveProcesses() == ContextSessionProcesses::kProcessLimit,
+        "fifth concurrent menu is rejected without exceeding the physical process limit");
+    for (uint32_t id = 20; id < 24; ++id) processes.Close(id);
+    check(wait([&] { return processes.ActiveProcesses() <= 1; }), "concurrent cleanup retains at most one idle process");
+    check(wait([&] { return processes.ActiveProcesses() == 0; }), "remaining concurrent idle worker expires");
+    check(query(15), "query recovers after cleanup failure");
+    processes.Close(15);
+    check(wait([&] { return processes.IdleProcesses() == 1; }), "idle worker ready for shutdown");
+    processes.Stop();
+    check(wait([&] { return processes.ActiveProcesses() == 0; }), "Stop physically reclaims idle processes");
+    return failures ? 1 : 0;
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     if (argc == 4 && wcscmp(argv[1], L"--context-worker") == 0)
         return Worker(wcstoul(argv[2], nullptr, 10), wcstoul(argv[3], nullptr, 10));
+    if (argc == 2 && wcscmp(argv[1], L"--reuse") == 0) {
+        wchar_t executable[32768]{};
+        if (!GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable))) return 2;
+        return ReuseTest(executable);
+    }
     using namespace pulse::shell;
     int failures = 0;
     const auto check = [&](bool passed, const char* name) {
@@ -75,7 +166,7 @@ int wmain(int argc, wchar_t** argv) {
             result.final |= !(flags & CTX_ITEMS_PARTIAL);
             result.count = count;
         } else if (type == RSP_DONE && reader.GetU32(flags)) result.done = flags == S_OK;
-    });
+    }, {0, 0});
     const auto start = GetTickCount64();
     for (uint32_t id = 1; id <= 4; ++id) processes.Query(id, {});
     const auto wait = [&](const auto& predicate, DWORD timeout) {

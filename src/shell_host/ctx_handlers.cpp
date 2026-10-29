@@ -1,4 +1,5 @@
 #include "ctx_handlers.h"
+#include "../common/shell_id.h"
 
 #include "../common/path_utils.h"
 #include "../ipc/ctx_menu_util.h"
@@ -196,7 +197,7 @@ void InitMenuPopup(IContextMenu2* menu2, IContextMenu3* menu3, HMENU submenu, UI
 
 void CollectSubmenuLeaves(IContextMenu* menu, IContextMenu2* menu2, IContextMenu3* menu3,
                           HMENU submenu, UINT pos, bool background, UINT id_first,
-                          bool parent_enabled, bool native_new, int depth, ULONGLONG deadline,
+                          bool parent_enabled, bool native_new, bool preserve_builtin, int depth, ULONGLONG deadline,
                           std::vector<CtxItemOut>& kids) {
     // The native New submenu starts empty and must receive its initialization
     // message even when the handler's cold parent query used the flyout budget.
@@ -213,7 +214,7 @@ void CollectSubmenuLeaves(IContextMenu* menu, IContextMenu2* menu2, IContextMenu
             const bool nested_enabled =
                 parent_enabled && !(sub.fState & (MFS_DISABLED | MFS_GRAYED));
             CollectSubmenuLeaves(menu, menu2, menu3, sub.hSubMenu, static_cast<UINT>(j),
-                                 background, id_first, nested_enabled, native_new, depth + 1, deadline,
+                                 background, id_first, nested_enabled, native_new, preserve_builtin, depth + 1, deadline,
                                  kids);
             continue;
         }
@@ -224,7 +225,7 @@ void CollectSubmenuLeaves(IContextMenu* menu, IContextMenu2* menu2, IContextMenu
         item.enabled = parent_enabled && !(sub.fState & (MFS_DISABLED | MFS_GRAYED));
         item.child = true;
         item.verb = CtxVerbOf(menu, sub.wID, id_first);
-        if (IsBuiltinContextVerb(item.verb, background) ||
+        if ((!preserve_builtin && IsBuiltinContextVerb(item.verb, background)) ||
             (native_new && pulse::ipc::IsPulseNewTemplateVerb(item.verb))) continue;
         item.text = child_text;
         kids.push_back(std::move(item));
@@ -303,8 +304,7 @@ bool ParseCtxSelection(const std::vector<std::wstring>& paths, bool background,
     out.pidls.reserve(count);
     for (size_t i = 0; i < count; ++i) {
         PIDLIST_ABSOLUTE pidl = nullptr;
-        if (SUCCEEDED(SHParseDisplayName(ToParsingPath(paths[i]).c_str(), nullptr,
-                &pidl, 0, nullptr)) && pidl)
+        if (SUCCEEDED(pulse::shell_id::ParseId(ToParsingPath(paths[i]), &pidl)) && pidl)
             out.pidls.push_back(pidl);
     }
     return !out.pidls.empty();
@@ -430,14 +430,14 @@ void CollectHandlerItems(const CtxHandlerSlot& slot, bool background,
         const bool enabled = !(mii.fState & (MFS_DISABLED | MFS_GRAYED));
         if (mii.hSubMenu) {
             const std::wstring parent_verb = CtxVerbOf(slot.menu, mii.wID, slot.id_first);
-            if (IsBuiltinContextVerb(parent_verb, background) ||
+            if ((!slot.preserve_builtin && IsBuiltinContextVerb(parent_verb, background)) ||
                 IsDroppedContextSubmenu(parent_verb)) continue;
             const std::wstring parent_text = MenuItemText(slot.hmenu, static_cast<UINT>(i));
             if (parent_text.empty()) continue;
             std::vector<CtxItemOut> kids;
             CollectSubmenuLeaves(slot.menu, slot.menu2, slot.menu3, mii.hSubMenu,
                                  static_cast<UINT>(i), background, slot.id_first, enabled,
-                                 background && pulse::ipc::IsNativeNewMenuHandler(slot.clsid), 0,
+                                 background && pulse::ipc::IsNativeNewMenuHandler(slot.clsid), slot.preserve_builtin, 0,
                                  deadline, kids);
             if (kids.empty()) {
                 if (background && pulse::ipc::IsNativeNewMenuHandler(slot.clsid)) continue;
@@ -467,7 +467,7 @@ void CollectHandlerItems(const CtxHandlerSlot& slot, bool background,
         }
         if (mii.wID < slot.id_first || mii.wID > slot.id_last) continue;
         const std::wstring verb = CtxVerbOf(slot.menu, mii.wID, slot.id_first);
-        if (IsBuiltinContextVerb(verb, background)) continue;
+        if (!slot.preserve_builtin && IsBuiltinContextVerb(verb, background)) continue;
         CtxItemOut item;
         item.id = mii.wID;
         item.enabled = enabled;

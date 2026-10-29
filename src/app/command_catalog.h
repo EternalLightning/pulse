@@ -14,7 +14,10 @@ struct CommandContext {
     bool read_only = false;
     bool filesystem_folder = false;
     bool selection_filesystem = false;
+    bool device_selection = false;
     bool selection_has_drive_root = false;
+    bool can_group_selection = false;
+    bool can_dissolve_selection = false;
     bool has_entries = false;
     bool can_paste = false;
     bool can_undo = false;
@@ -29,7 +32,7 @@ struct CommandContext {
 enum class CommandAvailability {
     Always, Selection, MutableSelection, Rename, BatchRename, Properties,
     Paste, NewItem, Undo, CopyToTarget, MoveToTarget, Entries, PinWorkspace,
-    Terminal, CopyPath, View,
+    Terminal, CopyPath, View, GroupSelection, DissolveSelection,
 };
 
 struct CommandShortcut {

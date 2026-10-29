@@ -10,6 +10,7 @@
 #include <shellscalingapi.h>
 #include <shlobj.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace pulse::ui {
@@ -187,6 +188,36 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
     return false;
 }
 
+void Compositor::DrawTextLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
+                                ID2D1SolidColorBrush* brush, D2D1_DRAW_TEXT_OPTIONS options) {
+    if (!dc_.get() || !layout || !brush) return;
+    // Colour fonts (emoji) keep DirectWrite's colour glyph path.
+    if (!(options & D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT) && LumaTextEnabled()) {
+        D2D1_COLOR_F color = brush->GetColor();
+        color.a *= brush->GetOpacity();
+        if (lumaText_->DrawLayout(origin, layout, color,
+                                  (options & D2D1_DRAW_TEXT_OPTIONS_CLIP) != 0)) {
+            return;
+        }
+        lumaText_->RecordFallback();
+    }
+    dc_->DrawTextLayout(origin, layout, brush, options);
+}
+
+bool Compositor::DrawLumaTextSplit(std::wstring_view text, IDWriteTextFormat* format,
+                                   const D2D1_RECT_F& bounds,
+                                   const D2D1_COLOR_F& foreground, std::uint32_t split,
+                                   const D2D1_COLOR_F& split_foreground,
+                                   const D2D1_COLOR_F& background) {
+    if (!LumaTextEnabled()) return false;
+    if (lumaText_->DrawSplit(text, format, bounds, foreground, split, split_foreground,
+                             background)) {
+        return true;
+    }
+    lumaText_->RecordFallback();
+    return false;
+}
+
 bool Compositor::MeasureLumaText(std::wstring_view text, IDWriteTextFormat* format,
                                  float& width, float* height) {
     if (!typography::UsesLumaText(this, format)) return false;
@@ -229,6 +260,14 @@ bool Compositor::UsesComposedEdits(HWND edit) const {
 }
 void Compositor::SynchronizeEditSurface(HWND edit) {
     if (editComposition_) editComposition_->Synchronize(edit);
+}
+void Compositor::SetEditOpacity(HWND edit, float opacity) {
+    if (!edit || !IsWindow(edit)) return;
+    const BYTE alpha = static_cast<BYTE>(std::lround(std::clamp(opacity, 0.0f, 1.0f) * 255.0f));
+    if (alpha == 255) RemovePropW(edit, L"Pulse.EditOpacity");
+    else SetPropW(edit, L"Pulse.EditOpacity", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(alpha) + 1));
+    SetLayeredWindowAttributes(edit, 0, alpha, LWA_ALPHA);
+    SynchronizeEditSurface(edit);
 }
 void Compositor::RemoveEditSurface(HWND edit) {
     if (editComposition_) editComposition_->Remove(edit);

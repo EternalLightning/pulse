@@ -1,0 +1,29 @@
+{
+  "number": 225,
+  "title": "三个问题，希望能快速处理",
+  "body": "第一个：希望可以像win一样，可以设置所有文件夹一样排序，也可以单独设置某个文件夹的排序、分组方式。现在只可以统一设置，乱的看着头疼\n\n第二个：从压缩包直接拖到文件夹，不支持，无法拖过去，只能用解压到\n\n第三个：这个不算重要，就是左边快捷栏的默认图标和快捷入口不支持删除，我不喜欢那么多，我只想放自己觉得有用的\n\n希望以上问题赶紧处理下",
+  "url": "https://github.com/jimmgreen/pulse/issues/225",
+  "captured_at": "2026-10-23T03:10:07.185529+00:00",
+  "updated_at": "2026-10-13T10:16:51Z",
+  "comments": [
+    {
+      "body": "没人理我么？\n附加一条，希望侧面标签栏，可以设置到右边，跟左边的快捷入口拆开",
+      "bodyHTML": "<p dir=\"auto\">没人理我么？<br>\n附加一条，希望侧面标签栏，可以设置到右边，跟左边的快捷入口拆开</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjgzNzM5NzA1",
+        "login": "xiaomiaowxm",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/83739705?u=aafdd36317718b3de00078ed58dad32c4b769f9f&v=4",
+        "profileUrl": "https://github.com/xiaomiaowxm",
+        "name": "汪小喵"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/225#issuecomment-6143348161"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTTDzlAAqjYxNDMzNDgxNjE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoTTDzlAAqjYxNDMzNDgxNjE="
+  }
+}

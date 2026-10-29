@@ -6,6 +6,7 @@ namespace pulse {
 void StopUiScheduling(AppState& s) {
     KillTimer(s.hwnd, kTimerUi);
     KillTimer(s.hwnd, kTimerUiDeadline);
+    KillTimer(s.hwnd, kTimerDeferredStartup);
     s.ui_schedule.stopped = true;
     s.ui_schedule.options_due = 0;
     s.ui_schedule.deadline = 0;
@@ -15,11 +16,12 @@ void StopUiScheduling(AppState& s) {
 void SyncUiScheduling(AppState& s) {
     if (s.ui_schedule.stopped || !s.hwnd || !IsWindow(s.hwnd)) return;
     const bool visible = IsWindowVisible(s.hwnd) && !IsIconic(s.hwnd);
-    const UINT interval = visible && !s.exit_requested ? 100 : 200;
+    const uint64_t now = GetTickCount64();
+    if (!s.ui_schedule.last_activity) s.ui_schedule.NoteActivity(now);
+    const UINT interval = s.ui_schedule.MaintenanceInterval(visible, s.exit_requested, now);
     if (s.ui_schedule.maintenance_ms != interval && SetTimer(s.hwnd, kTimerUi, interval, nullptr))
         s.ui_schedule.maintenance_ms = interval;
 
-    const uint64_t now = GetTickCount64();
     const bool options_ready = !s.exit_requested && visible && s.searchOptionsPending &&
         !s.searchHistoryOpen && (!s.menu || !s.menu->IsOpen());
     if (!options_ready) s.ui_schedule.options_due = 0;

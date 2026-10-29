@@ -1,0 +1,524 @@
+{
+  "date": "2026-10-23",
+  "scope": "Investigation only; benchmark quality parsing improved; no production optimization/deployment this round.",
+  "everything": {
+    "generated_at": "2026-10-23T09:59:59.191250+00:00",
+    "scope": "Read-only Everything/Pulse size and documented NTFS filename permission comparison; no product modification, database save, rebuild, configuration or ACL change.",
+    "privacy": "No private indexed filenames, paths or FRNs were read or emitted. Everything SDK query returned zero rows. Public official forum pages can contain their authors' example paths.",
+    "everything_local": {
+      "observed_at": "2026-10-23T17:57:16.5177285+08:00",
+      "version": "1.4.1.1032",
+      "db_count": 1,
+      "db_bytes": 105619478,
+      "db_last_write": "2026-10-23T14:54:04.1681182+08:00",
+      "db_file_attributes": 32,
+      "options": {
+        "db_compress": "0",
+        "db_location": "",
+        "index_size": "1",
+        "index_date_modified": "1",
+        "index_date_created": "0",
+        "index_date_accessed": "0",
+        "index_attributes": "0",
+        "index_folder_size": "0",
+        "fast_size_sort": "1",
+        "fast_date_modified_sort": "1",
+        "fast_path_sort": "1",
+        "fast_date_created_sort": "0",
+        "fast_date_accessed_sort": "0",
+        "fast_attributes_sort": "0",
+        "fast_extension_sort": "0",
+        "fast_ascii_search": "1",
+        "exclude_list_enabled": "1",
+        "exclude_files": "",
+        "exclude_folders": "",
+        "folders": ""
+      },
+      "notes": [
+        "Read only file metadata and whitelisted saved INI options; no indexed names read.",
+        "Saved INI may differ from unsaved runtime settings.",
+        "db_count covers the program directory; not a recursive search across the machine.",
+        "Configured volume entry count is not current online volume count."
+      ]
+    },
+    "everything_runtime_counts": {
+      "queried_at": "2026-10-23T17:48:41.279715+08:00",
+      "sdk_url": "https://www.voidtools.com/Everything-SDK.zip",
+      "sdk_sha256": "f5716d9513cce6b462b5170a0a2e7e081e191d9bcac6774f5decc061497df443",
+      "mode": "Official SDK v1 empty search, max_results=0; only header totals, no returned index rows or names",
+      "notification_window_found_on_caller_desktop": true,
+      "query_success": true,
+      "query_error": 0,
+      "total_results": 2519325,
+      "total_files": 2122139,
+      "total_folders": 397186,
+      "returned_rows": 0,
+      "limits": [
+        "These are live runtime counts, not a decode of the saved database snapshot.",
+        "No configuration, GUI search field, rebuild, database save or application exit command is sent."
+      ]
+    },
+    "comparison_limits": [
+      "Everything saved DB at 14:54 and runtime count at 17:48 are different epochs; their ratio is only an order-of-magnitude reference, not measured encoded bytes per saved record.",
+      "Everything and Pulse have different entry counts, scope/options, snapshot times and retention policies; this is not an equivalent-dataset benchmark.",
+      "The program-directory scan finds one Everything.db; it does not assert that no other copy exists anywhere on the machine.",
+      "File length and NTFS file attribute flags are not a physical allocation or RAM metric.",
+      "Saved INI db_compress=0 documents disabled bzip2 for the saved configuration; the DB payload has not been parsed to prove every byte of the current serialization."
+    ],
+    "comparison_reference": {
+      "everything_single_saved_db_bytes": 105619478,
+      "everything_saved_db_bytes_divided_by_later_runtime_count": 41.92372083792286,
+      "ratio_is_not_saved_record_cost": true,
+      "pulse_single_snapshot_bytes": 327561632,
+      "pulse_retained_directory_bytes": 659009579,
+      "instruction": "Compare the 105.6 MB saved Everything file with the 327.6 MB Pulse single snapshot before separately explaining the 659 MB retained directory. MB here is decimal."
+    },
+    "pulse_snapshot": {
+      "source": "bench_data/index-live-cleanup-20261023/snapshot-converted.json",
+      "snapshot_version": 12,
+      "generation": 200,
+      "active_slot": 1,
+      "crc_valid": true,
+      "nodes": 2463927,
+      "volumes": 4,
+      "active_snapshot_bytes": 327561632,
+      "bytes_per_node": 132.94291267557847,
+      "segments": {
+        "utf16_name_pool": {
+          "bytes": 119496382,
+          "percent_of_snapshot": 36.480579630278555,
+          "bytes_per_node": 48.498345121426084
+        },
+        "nodes": {
+          "bytes": 39422832,
+          "percent_of_snapshot": 12.035241050453674,
+          "bytes_per_node": 16.0
+        },
+        "attributes": {
+          "bytes": 29567124,
+          "percent_of_snapshot": 9.026430787840257,
+          "bytes_per_node": 12.0
+        },
+        "frn_map": {
+          "bytes": 39422832,
+          "percent_of_snapshot": 12.035241050453674,
+          "bytes_per_node": 16.0
+        },
+        "child_order": {
+          "bytes": 9855708,
+          "percent_of_snapshot": 3.0088102626134186,
+          "bytes_per_node": 4.0
+        },
+        "one_character_postings_including_segment_alignment": {
+          "bytes": 32647376,
+          "percent_of_snapshot": 9.966788784347003,
+          "bytes_per_node": 13.250139310133783
+        },
+        "bigram_postings_including_segment_alignment": {
+          "bytes": 57148528,
+          "percent_of_snapshot": 17.446648940862524,
+          "bytes_per_node": 23.1940832662656
+        },
+        "volume_records": {
+          "bytes": 704,
+          "percent_of_snapshot": 0.00021492138615306446,
+          "bytes_per_node": 0.00028572275071461127
+        },
+        "header": {
+          "bytes": 128,
+          "percent_of_snapshot": 3.907661566419354e-05,
+          "bytes_per_node": 5.194959103902023e-05
+        },
+        "other_alignment": {
+          "bytes": 18,
+          "percent_of_snapshot": 5.4951490777772164e-06,
+          "bytes_per_node": 7.30541123986222e-06
+        }
+      },
+      "retained_directory_bytes_after_cleanup": 659009579,
+      "retained_directory_source": "bench_data/index-live-cleanup-20261023/inventory-after.json",
+      "retention_note": "Retained directory includes two snapshot generations, pinyin sidecars, WAL and manifest; compare Everything single DB with Pulse single snapshot before discussing retention overhead."
+    },
+    "official_sources": [
+      {
+        "id": "developer-algorithm-2020",
+        "url": "https://www.voidtools.com/forum/viewtopic.php?p=60222",
+        "final_url": "https://www.voidtools.com/forum/viewtopic.php?p=60222",
+        "retrieved_at": "2026-10-23T09:57:18.001052+00:00",
+        "sha256": "6afd165e81128ec851d526b884888f292686b47a7b2e905de4456dba9a037438",
+        "bytes": 46608,
+        "html": "developer-algorithm-2020.html",
+        "plain_text": "developer-algorithm-2020.txt"
+      },
+      {
+        "id": "developer-ntfs-permissions-2019",
+        "url": "https://www.voidtools.com/forum/viewtopic.php?p=25276",
+        "final_url": "https://www.voidtools.com/forum/viewtopic.php?p=25276",
+        "retrieved_at": "2026-10-23T09:57:18.018571+00:00",
+        "sha256": "1815e176c009dc4bcadbbca874de5eaf763e03642311e2310adcdfa0419d81ca",
+        "bytes": 97542,
+        "html": "developer-ntfs-permissions-2019.html",
+        "plain_text": "developer-ntfs-permissions-2019.txt"
+      },
+      {
+        "id": "service-security",
+        "url": "https://www.voidtools.com/support/everything/everything_service/",
+        "final_url": "https://www.voidtools.com/support/everything/everything_service/",
+        "retrieved_at": "2026-10-23T09:57:18.051413+00:00",
+        "sha256": "5c836e725e1748bf723b6af319a96ab39f0f6261364bc09e3f8aa8dd131eeb0e",
+        "bytes": 39159,
+        "html": "service-security.html",
+        "plain_text": "service-security.txt"
+      },
+      {
+        "id": "legacy-db-format",
+        "url": "https://www.voidtools.com/support/everything/db/",
+        "final_url": "https://www.voidtools.com/support/everything/db/",
+        "retrieved_at": "2026-10-23T09:57:17.597690+00:00",
+        "sha256": "33c61cf0aada52211c55be8a5faba94c8275643be1353540304b90433ed34550",
+        "bytes": 35926,
+        "html": "legacy-db-format.html",
+        "plain_text": "legacy-db-format.txt"
+      },
+      {
+        "id": "index-options",
+        "url": "https://www.voidtools.com/support/everything/indexes/",
+        "final_url": "https://www.voidtools.com/support/everything/indexes/",
+        "retrieved_at": "2026-10-23T09:57:19.547434+00:00",
+        "sha256": "a3103b71ac25ccc26e543818dd1c634b1b9fa438eb50be6420d7c3487335112e",
+        "bytes": 43829,
+        "html": "index-options.html",
+        "plain_text": "index-options.txt"
+      },
+      {
+        "id": "ini-options",
+        "url": "https://www.voidtools.com/support/everything/ini/",
+        "final_url": "https://www.voidtools.com/support/everything/ini/",
+        "retrieved_at": "2026-10-23T09:57:19.387058+00:00",
+        "sha256": "ddb9f747f26dd7976eecb6df8309ec40c07f2d053ca3065ac06c903421cc6c0e",
+        "bytes": 154772,
+        "html": "ini-options.html",
+        "plain_text": "ini-options.txt"
+      }
+    ],
+    "documented_findings": [
+      {
+        "id": "filename-representation",
+        "source": "developer-algorithm-2020",
+        "author": "void (Developer)",
+        "post_date": "2020-11-04",
+        "finding": "Author describes UTF-8 filenames, size, modified time and parent-folder pointers, RAM database restored from disk and saved on exit, and optimized multi-threaded strstr over each filename.",
+        "boundary": "A 1.4-era developer description, not a byte-exact specification for installed 1.4.1.1032. It does not prove that every auxiliary substring structure is absent."
+      },
+      {
+        "id": "compact-legacy-serialization",
+        "sources": [
+          "legacy-db-format",
+          "developer-algorithm-2020"
+        ],
+        "finding": "Official legacy format contains sorted folder/file records, parent offsets, coded names, and zero code-length for a repeated name. On 2020-11-10 the developer explicitly states that page is not up to date for 1.4, while the structure is still similar.",
+        "boundary": "No current DB byte-layout decode was performed. Do not infer exact prefix-coding mechanics, field widths or a current compression ratio from this old page."
+      },
+      {
+        "id": "bzip2-option",
+        "source": "ini-options",
+        "finding": "db_compress selects bzip2 as an additional disk compression layer. Local saved value is 0, so bzip2 is not a supported explanation for this machine's small DB. Internal compact serialization is a separate question."
+      },
+      {
+        "id": "ntfs-permission-visibility",
+        "sources": [
+          "developer-ntfs-permissions-2019",
+          "service-security"
+        ],
+        "author": "void (Developer)",
+        "post_date": "2019-03-15",
+        "short_direct_quote": "Everything ignores file permissions when using NTFS indexing.",
+        "finding": "The developer statement and official service Security section support that NTFS filename visibility is not trimmed to each caller's file ACL. Service documentation says local users can obtain the NTFS filename list, while the service cannot access the files themselves.",
+        "boundary": "Scope is NTFS filename indexing/list visibility. This does not claim that file opens, content reads, folder indexing, all metadata queries or every internal call skips permissions. The local installation was not tested with a second Windows account. It explains a semantic difference, not the exact amount of Pulse query latency."
+      },
+      {
+        "id": "disk-versus-ram",
+        "source": "index-options",
+        "finding": "Official documentation distinguishes the running in-memory database from the saved disk database; optional fields and fast sorting affect indexed state. Do not treat Everything.db file length as total running memory."
+      }
+    ],
+    "pulse_code_observations": [
+      {
+        "source": "src/index/index_engine.h:41",
+        "finding": "Node already stores parent ID and name offset/length. Pulse does not store a full path for every snapshot node."
+      },
+      {
+        "source": "src/index/index_engine.cpp:779",
+        "finding": "BuildPathLocked constructs paths from parent relations."
+      },
+      {
+        "source": "src/index/index_engine.cpp:2138",
+        "finding": "FlattenLocked appends each name to the UTF-16 pool; exact basename interning is a candidate to measure."
+      },
+      {
+        "source": "src/index/index_engine.h:41",
+        "finding": "Node is 16 bytes including a 4-byte unused member; DiskFrn is 16 bytes including a 4-byte pad."
+      },
+      {
+        "source": "src/index/index_engine.h:41",
+        "finding": "Node + DiskFrn + Attr totals 44 bytes/node; adding 4-byte child_order makes 48 bytes/node. Do not label only the first three as 48 bytes."
+      }
+    ],
+    "candidate_optimizations_not_implemented": [
+      {
+        "candidate": "Exact basename interning",
+        "benefit": "Avoid repeated identical name bytes while preserving basename+parent semantics.",
+        "measured_savings": null,
+        "cost": "Build-time hashing/dictionary memory; measure unique-name bytes before claiming benefit."
+      },
+      {
+        "candidate": "UTF-8 or mixed lossless name storage",
+        "benefit": "ASCII names can use fewer bytes; actual corpus effect is unknown.",
+        "measured_savings": null,
+        "cost": "UTF-16 consumers, decoding cost, non-ASCII expansion and unpaired-surrogate lossless fallback require explicit format/runtime design."
+      },
+      {
+        "candidate": "Compact disk Node and FRN records",
+        "theoretical_bytes_from_two_4byte_fields": 19711416,
+        "percent_of_current_single_snapshot": 6.017620525226837,
+        "cost": "New on-disk structures/version compatibility and mmap access changes; this is a field-size upper bound before format overhead, not a delivered saving."
+      },
+      {
+        "candidate": "Further posting encoding or search representation research",
+        "current_posting_segment_bytes": 89795904,
+        "percent_of_current_single_snapshot": 27.413437725209526,
+        "cost": "89,795,904 bytes is the entire current posting segment total, not a lossless achievable saving. Preserve substring correctness and performance; do not remove all postings merely to match DB size."
+      },
+      {
+        "candidate": "Compare persisted postings with startup reconstruction or optimized RAM scanning",
+        "measured_savings": null,
+        "cost": "Measure cold-start rebuild time, peak RAM, first-query latency, live-update cost and query parity before changing the storage/search contract. Keep A/B recovery generations."
+      }
+    ],
+    "optional_name_statistics": {
+      "status": "not run",
+      "helper": "bench_data/everything-size-20261023/pulse_name_stats.h",
+      "reason": "Protected production snapshot requires the already pending administrator probe; do not modify that executable or request another UAC. No ASCII/UTF8/unique-name measurements are claimed."
+    },
+    "source_corrections": [
+      "Earlier handoff identified forum t=8966 incorrectly; it is not the database algorithm source.",
+      "Earlier handoff identified t=1597 incorrectly; it returned 404 when verified.",
+      "Use p=60222: void posts dated 2020-11-04 and 2020-11-10.",
+      "The retrieved legacy DB page describes EZDB / version word 0x01060006; it does not document the installed 1.4.1.1032 byte layout."
+    ],
+    "validation": {
+      "product_tests_run": false,
+      "reason": "Read-only research only; no product change.",
+      "segment_bytes_reconcile": true,
+      "official_pages_saved": 6
+    }
+  },
+  "kaspersky_evidence": "bench_data/kaspersky-latency-20261023/evidence.json",
+  "native_stages": null,
+  "search_optimization": {
+    "recorded_at": "2026-10-23T11:19:33.274871+00:00",
+    "scope": "Raw filename candidates and bounded authorization traversal; current MTool disabled-feature investigation. No deployment, disk format, result protocol or GUI behavior changes.",
+    "changes": [
+      "Cache complete raw candidates before authorization; scope, raw query, index epoch and universe invalidate the set. Every response reauthorizes; no allow decisions are cached.",
+      "Explicit budget stop and cancellation break candidate traversal before the next full path is constructed; ordinary denials continue.",
+      "NarrowMatchesLocked exits candidate iteration on cancellation instead of only returning from its lambda.",
+      "Add an existing-metadata-ACL-only selector to run the directly relevant security fixture without unrelated request-queue, tracking or raw-tree tests."
+    ],
+    "cache_test": {
+      "command": ".\\build\\pulse_index_search_cache_test.exe",
+      "exit_code": 0,
+      "passed": 29,
+      "failed": 0,
+      "capture": "Primary agent exec output; first run, no repeated run just to obtain a log.",
+      "cases": [
+        "caller isolation and per-response authorization",
+        "query narrowing and exact-query reuse",
+        "scope and attribute/index epoch invalidation",
+        "empty set and pagination/sort",
+        "cancellation and immediate/partial deadline stop",
+        "sparse and 70000-node dense traversal; ordinary denials continue"
+      ],
+      "synthetic_dense_cold_us": 1852,
+      "synthetic_dense_cached_us": 5,
+      "metric_limit": "Single in-memory synthetic sample; not installed service latency, p95, or a promise of complete search results."
+    },
+    "metadata_acl_test": {
+      "log": "bench_data/search-latency-20261023/metadata-acl-after-medium.log",
+      "passed": 24,
+      "failed": 0
+    },
+    "metadata_acl_command": ".\\build\\pulse_index_security_test.exe --metadata-acl-only",
+    "metadata_acl_token_integrity": "S-1-16-8192",
+    "preserved_failed_attempt": {
+      "log": "bench_data/search-latency-20261023/metadata-acl-after.log",
+      "passed": 15,
+      "failed": 9
+    },
+    "failed_attempt_reason_boundary": "First sandbox run reports Win32 5 installing/changing fixture ACLs; the same existing cases pass at Medium integrity. No failing case was deleted or weakened.",
+    "build": {
+      "targets": [
+        "pulse_index_search_cache_test",
+        "pulse_index",
+        "pulse_index_security_test"
+      ],
+      "passed": true,
+      "logs": [
+        "bench_data/search-latency-20261023/configure-search-optimization.log",
+        "bench_data/search-latency-20261023/build-search-optimization.log",
+        "bench_data/search-latency-20261023/build-search-optimization-retry.log",
+        "bench_data/search-latency-20261023/build-metadata-acl.log"
+      ],
+      "recovery": "Initial new-target rule missing from NMake files; reconfigured existing build cache. Initial service link used an old index_folder_sizes object with the previous Search signature. Explicitly rebuilt its object and the other dependent Engine implementation objects after the header/layout change; scoped service build passed.",
+      "artifacts": {
+        "build/Pulse.Index.exe": "eb691e69752e7703f48484b511228b3e77e45af081b7ad0e82e5eaa1d7279a19",
+        "build/pulse_index_search_cache_test.exe": "9c1d93983e864bf12649e3c77316b9b4da47def3bafdca7d395afd10fad9d8c0",
+        "build/pulse_index_security_test.exe": "c4ad8ba80d6b60349271971695d1e4ff8e9d8d79fb2b55edfea17321eb99bf29"
+      }
+    },
+    "menu_evidence": "bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json",
+    "config_evidence": "bench_data/kaspersky-latency-20261023/mtool-config-inspection.json",
+    "release_source": "bench_data/kaspersky-latency-20261023/mtool-release-source.json",
+    "limits": [
+      "The installed index service and all user settings remain unchanged this round; no after-deployment latency measurement.",
+      "Candidate callback isolation is tested in memory; actual metadata ACL revocation is tested with an isolated current-user fixture, not an additional Windows user account.",
+      "The full matching/ranking versus ACL versus lock-wait share of the protected live snapshot is still not measured; the earlier native stage output is empty.",
+      "The two changes do not remove the two-second budget or all-candidate authorization cost; page-first statistics/UI/protocol changes and host reuse are not implemented."
+    ]
+  },
+  "markdown_lines": [
+    "**当前轮次已落实原始候选缓存、超时/取消遍历停止，并完成定向验证；没有部署到安装版。** 本节同时区分旧版美化扩展栈和当前“未开启菜单功能”的调查结果。前轮索引清理及 v12 安装结果见下一节；前轮菜单解析复用修复仍未部署。",
+    "",
+    "### 1. Everything 为什么更小",
+    "",
+    "| 对照项 | Everything | Pulse |",
+    "|---|---:|---:|",
+    "| 本地版本 / 快照 | 1.4.1.1032 | v12 活动快照 |",
+    "| 文件与文件夹总数 | 2,519,325 | 2,463,927 |",
+    "| 单份保存文件 | 105,619,478 B（100.73 MiB） | 327,561,632 B（312.39 MiB） |",
+    "| 约字节 / 项 | 41.92 | 132.94 |",
+    "| 目录合计 | 此处只计一份 everything.db | 659,009,579 B，含恢复用 A/B 与其他文件 |",
+    "",
+    "Everything 条数来自官方 SDK 的空查询，仅请求总数、返回行数为 0，没有读取文件名列表。它是 17:48 的运行时数量，DB 最后保存于 14:54；Pulse 数量来自已记录的活动快照，因此不是同一冻结数据集的精确逐项对照。但两者都约 250 万项，不能再仅以数量不同解释约 3.1 倍的单文件差距。",
+    "",
+    "**本机保存配置是 `db_compress=0`。** Everything 支持可选 Bzip2，但这次 105.6 MB 不能归因为本机开启了这一外层压缩。保存配置可能与尚未保存的运行时设置有差异；没有强制保存或重建 Everything 数据库。其文件大小与修改时间已重新核对。",
+    "",
+    "官方作者在 2020-11-04 说明名称用 UTF-8，记录父目录引用、大小和修改时间；内存中另有名称/路径/大小/时间排序结构，普通子串搜索使用优化后的多线程 strstr。历史数据库文档还公开了排序记录中的 code length/code offset，以及长度 0 复用名称。作者在 2020-11-10 明确说这份文档对 Everything 1.4 已过时、整体结构仍相似。因此可以学习紧凑编码与名称复用，不能把旧表偏移当成本机 1.4.1.1032 的已验证格式，也不能断言其当前磁盘文件不包含任何派生结构。",
+    "",
+    "本节更正前轮调查边界：前轮所查索引/INI/FAQ 页面没有提供二进制布局；本轮找到了官方历史格式页面和作者的版本限定。旧证据保留，但“没有公开格式”不应理解成网上不存在官方历史文档。",
+    "",
+    "| Pulse v12 活动快照段 | 字节数 | 占单份快照 |",
+    "|---|---:|---:|",
+    "| UTF-16 文件名池 | 119,496,382 | 36.48% |",
+    "| 双字符倒排 | 57,148,528 | 17.45% |",
+    "| Node | 39,422,832 | 12.04% |",
+    "| FRN | 39,422,832 | 12.04% |",
+    "| 单字符倒排 | 32,647,376 | 9.97% |",
+    "| Attr | 29,567,124 | 9.03% |",
+    "| 子项顺序 | 9,855,708 | 3.01% |",
+    "| 卷记录、头和对齐 | 850 | <0.01% |",
+    "",
+    "Pulse **已经使用 basename + 父节点编号**，不是每项都保存完整路径。Node 16 + FRN 16 + Attr 12 = 44 字节，再加子项顺序 4 字节，固定部分即 48 字节/项；名称池本身也已大于 Everything 整个 DB。单/双字符倒排合计 89,795,904 B，已经过上一轮差分 varint 优化，仍是另一个明确成本。A/B 恢复代使整个目录约为两份快照，但不能用移除恢复代来掩盖单份编码差距。",
+    "",
+    "下一轮体积优化按下列顺序评估，均尚未实现：",
+    "",
+    "1. **名称池：**先统计 ASCII/UTF-8 长度分布、重复 basename 和公共前缀，再比较 UTF-8、名称字典、分块前缀编码。中文 UTF-8 未必比 UTF-16 小；不能预先承诺减半。名称解码、大小写/Unicode 匹配、随机访问、重命名和 WAL 都必须一起验证。本轮准备了只输出聚合量的统计器，但尚未运行。",
+    "2. **固定记录：**评估 FRN/父节点编号、默认属性和时间/大小的分列或分块编码，保留稳定文件身份。固定部分已占 118,268,496 B；不能为了节省字段破坏重命名、增量更新或恢复。",
+    "3. **派生候选结构：**测量更小的 posting 编码，以及哪些排序/倒排可以仅驻内存、启动时重建。把结构从磁盘移到启动计算会增加启动 CPU/内存成本，不等同于免费缩小；也不能据旧文档推断 Everything 当前的完整策略。",
+    "4. **恢复策略：**保留 A/B；若未来改成更小的前代/增量恢复，必须单独验证断电、损坏、WAL 重放及版本回滚。本轮不删除恢复快照。",
+    "",
+    "官方来源：[作者的索引算法说明](https://www.voidtools.com/forum/viewtopic.php?p=60222)、[历史 DB 格式](https://www.voidtools.com/support/everything/db/)、[可选索引](https://www.voidtools.com/support/everything/indexes/)、[INI 设置](https://www.voidtools.com/support/everything/ini/)。",
+    "[Everything 本地与格式证据](E:/Projects/pulse/bench_data/everything-size-20261023/evidence.json)；[官方页面时间与哈希](E:/Projects/pulse/bench_data/everything-size-20261023/official-sources.json)。",
+    "",
+    "### 2. 卡巴斯基首次成本与美化菜单关闭状态",
+    "",
+    "已核对 CLSID `{36d7ad11-6890-4adb-b2da-c74d182cdb7c}`，注册 DLL 为 Kaspersky 21.26 x64/shellex.dll，版本 21.26.4.406。真实 QueryContextMenu 的 vtable 方法地址也落在该 DLL 中；没有仅凭注册项名称归因。",
+    "",
+    "**下表及 11 次栈采样属于 17:46–17:52 的旧现场，当时 MToolExtend 为 2.0.2.0；不能把旧版本观察直接当成当前开关状态。**",
+    "",
+    "| 隔离对照 | 实测结果 |",
+    "|---|---|",
+    "| 新进程首次 QueryContextMenu | 约 1,166–1,270 ms |",
+    "| 同一目标线程 CPU | 常规冷调用约 1,047–1,203 ms；另一采样冷调用约 1,031 ms |",
+    "| 同进程换新对象 / 原对象重复 | 约 1.4–4.8 ms |",
+    "| 同进程依次换新 STA 线程 | 1,219.69 → 1.94 → 1.63 ms |",
+    "| 先生成 7-Zip 菜单 / 先创建 Shell.Application | 随后的卡巴斯基冷调用仍约 1,212 ms |",
+    "| 返回菜单项 | 本次探针样本为 0；不代表所有场景都不应有菜单 |",
+    "",
+    "14 组对照改变单/多文件、目录、菜单标志、Initialize 的目录/关联参数和 ShellFolder 数据对象，均未消除首次成本。Initialize 本身约 0.001 ms。WCT 采样没有观察到跨线程等待链，线程 CPU 又接近墙钟时间，所以**不能把这一秒解释成已经证实的阻塞式 IPC 等待**；采样仍可能遗漏短暂等待。",
+    "",
+    "64 帧有限调用栈的 11 次采样均含卡巴斯基 shellex.dll → Windows.Storage，其中 2 次还记录到内部嵌套的 combase / KERNELBASE / ntdll → MToolExtend.dll → ucrtbase。MToolExtend.dll 对应“枫の美化工具箱扩展”2.0.2.0。两个指令采样也观察到该模块。可以确认它参与了慢调用链；样本不足以将全部 1.2 秒分摊给卡巴斯基、Windows 或美化扩展，未证明注入方式，也未定位到第三方源码级根因。",
+    "",
+    "Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首次初始化成本。可行方向是**在隔离宿主中有界复用进程/空闲预热**：保留一个受控 STA，菜单对象仍逐会话创建关闭；进程卡死可终止，保留会话所有权、取消、当前用户令牌和资源释放边界。新 STA 对照证明同进程可保留热态收益，但还不是生产宿主复用验证。不能把扩展移进 UI 线程，也不能把超时自动禁用当成性能优化。",
+    "",
+    "前轮 PIDL 只解析一次的修复解决约 1 秒的重复 Shell 解析；这轮调查解释剩下的另一段首次成本。前轮最终共享构建中 7-Zip 首次结果约 323–353 ms，全部扩展完成约 1.53–1.56 秒。两者是不同阶段，不重复累计为同一个根因。安装版 Shell 尚未替换；这轮没有禁用杀毒、美化扩展或任何处理器，也没有执行扩展菜单命令。",
+    "[新 STA 对照](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/new-sta-same-process.jsonl)；[有限栈摘要](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/stack64-summary.json)；[矩阵运行记录](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/run-results.json)。",
+    "[卡巴斯基完整结构化证据](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/evidence.json)。",
+    "",
+    "**针对“没有开启右键菜单功能”的追加核实：**",
+    "",
+    "- 当前 MToolExtend 已于 18:50 更换为 2.1.0.0，本机另有 MToolFluentMenu.dll 1.0.0.2。官方发布说明将 Fluent 上下文菜单作为单独可启用功能列出。通用扩展出现在调用链里，不能推导出这项功能已打开。",
+    "- 旧探针的 production 模式只显式 CoCreate 卡巴斯基处理器，没有枚举并创建 MTool 处理器；旧栈证明的是卡巴斯基查询内部间接进入 MToolExtend，不是 Pulse 单独选中了美化菜单。具体历史加载入口仍未知。",
+    "- 当前 HKCR 64/32 位的即时 CLSID InprocServer32，以及 Pulse 对本次 TXT/ZIP 选择覆盖的 26 个 ContextMenuHandlers 路径，均未找到指向 Extend 或 FluentMenu 的匹配；选定的其他全局 Shell 入口也无匹配。此范围不覆盖所有手动加载、钩子或间接入口，不能由无注册匹配断言 DLL 不可能加载。",
+    "- 只做一次当前版本的新进程对照：首次 QueryContextMenu **767.04 ms**（目标线程 CPU 718.75 ms），同进程重复 **1.72 ms**。7 次有限栈样本均有卡巴斯基/Windows.Storage，未捕获两个 MTool 模块；探针退出和清理正常。首次成本在当前样本中仍存在，尚无受控开关 A/B，不能把 1.2 秒到 0.77 秒的差异归因于升级或关闭菜单。",
+    "- 配置检查只读取了 config.mcfg 的格式和元数据，未输出私人配置内容、未读取账号令牌；其为专有 dmresv2 格式，未解码出菜单开关。因此保留用户“未开启”的现场说明，不声称独立读取到了该布尔值，也不修改设置进行试验。",
+    "",
+    "[关闭功能追加核实](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json)；[配置检查边界](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-config-inspection.json)；[官方发布页面取证](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-release-source.json)。",
+    "",
+    "### 3. 搜索提速应先改结果生成流程",
+    "",
+    "**先纠正验证结论：此前工具只读取结果数量，没有解析回复末尾的 error/incomplete。** 因此旧日志只能证明服务回复成功，不能证明结果完整。本轮已完善 `pulse_index_perf` 的结果记录解析、质量列与 `--enforce` 判定，并新增单次 `--diagnose` 和无匹配词；实际路径/文件名不输出。没有据此宣称原来所有 25 次回复都已查明完整性。",
+    "",
+    "| 本轮实际安装服务查询 | 墙钟 ms | 可见计数 | 当前页 | error | incomplete |",
+    "|---|---:|---:|---:|---:|---|",
+    "| a | 3,724.51 | 7,200 | 48 | 0 | 是 |",
+    "| ab | 2,217.83 | 5,418 | 48 | 0 | 是 |",
+    "| abc | 2,192.96 | 2,064 | 48 | 0 | 是 |",
+    "| report | 2,100.78 | 2,177 | 48 | 0 | 是 |",
+    "| pdf | 2,197.71 | 1,747 | 48 | 0 | 是 |",
+    "| 唯一无匹配词 | 7.29 | 0 | 0 | 0 | 否 |",
+    "",
+    "每词仅 1 次诊断采样，不能当成统计意义上的 p95；工具虽然保留 p50/p95 栏名，在此模式两者只是同一观测值。常见词均未满足性能预算，且结果不完整，表中计数不能当成精确总数。无匹配词 7.29 ms 表明 IPC 和空结果路径并非始终需要两秒，但不能单凭这一对照量化匹配算法各阶段的开销。",
+    "",
+    "优化前源码确认的开销来源（前两项优化已在下文落实，其余成本仍保留）：",
+    "",
+    "- `index_host.cpp::SearchThread` 在进入引擎前创建 2,000 ms 的 CallerVisibility；在引擎等待锁、匹配期间预算也会流逝。返回前还会重读目录快照，并用新的权限检查器复核当前页。",
+    "- `Engine::Search` 先取得全部候选，对每个候选构造完整路径并执行授权，之后才排序并选 48 行。权限检查包括父目录链、读取安全描述符、AccessCheck，以及模拟请求用户再次打开。它会真实触碰文件系统。",
+    "- 授权预算过期后，Visible 会拒绝并标记不完整；但 MatchSet::ForEach 不能退出，而调用顺序仍先 BuildQueryPathLocked，再进入已超时的回调。过期查询还会继续遍历/拼接大量路径，取消时也只跳过回调而未退出遍历。",
+    "- 引擎已有原始候选缓存，但仅在没有 authorize 回调时填充；真实服务搜索带回调，所以连续输入不能正常利用这一填充路径。安全的优化目标是缓存未授权候选 ID，不能缓存前次允许访问的结论。",
+    "- query_mu_ 与引擎共享锁覆盖了上述权限 I/O；存在阻挡其他查询与更新的代码路径。本轮尚未量化并发排队占比。",
+    "",
+    "**本轮已落实：**完整原始候选在授权前缓存，真实服务查询也能复用；每次响应仍重新授权。缓存按查询文本、目录范围、是否只查文件夹、索引代次和节点集合失效。超时信号与普通权限拒绝分离；只有取消或预算结束才真正停止遍历，并在下一次拼路径之前退出。缩小查询时同类的 lambda 取消问题也已修复。超时保持既有 incomplete 语义，不把不完整计数当精确总数。",
+    "",
+    "回归覆盖不同授权回调、同调用者重复响应、被拒绝条目仍保留于 raw 集、范围切换、同节点数的属性变更、空结果失效、分页/排序，以及稀疏与 70,000 候选的真实遍历退出。测试回调隔离不是新建 Windows 账号的跨用户实测。",
+    "",
+    "独立目录夹具对 10,000 个拥有访问权的文件执行现有元数据可见性检查，10,000 个均可见，耗时 1,188 ms，未超时，夹具清理通过。这证实权限路径本身就可能昂贵，但不是现场索引阶段耗时分解，更不是一次通过的延迟预算测试。",
+    "",
+    "**与 Everything 比速度时还必须对齐可见性约定：**官方作者说明 NTFS 索引忽略文件权限，官方服务文档也说明本地用户可获得全部 NTFS 文件名列表。Pulse 当前按请求用户过滤可见结果，做了额外工作。此结论仅指 NTFS 文件名列表；不意味着 Everything 能绕过打开/读取文件的系统权限，也不泛化到内容搜索或 folder indexing。不能通过删除 Pulse 授权检查来宣称等价提速。",
+    "",
+    "| 优先级 | 改进方向 | 收益与验证边界 |",
+    "|---|---|---|",
+    "| 已实现 | 为候选遍历增加明确的取消/预算停止信号，在拼路径之前停止 | 消除已经超时后的无效工作，保留 incomplete；不得把普通权限拒绝误判为停止信号。不会自动解决正常的两秒授权成本。 |",
+    "| 已实现 | 缓存原始候选集，按索引代次、查询及目录范围失效 | 连续输入复用候选；每次仍重新授权，不复用允许结论。单独做这一项预计不能消除逐项授权瓶颈。 |",
+    "| 随后 | 内存匹配/排序和权限 I/O 分阶段，缩短持锁时间 | 用稳定对象身份与代次校验处理变化；需验证取消、重命名/删除、并发更新及权限变更，不能直接解锁后继续引用 mmap 指针。 |",
+    "| 主要体验改善 | 按目标排序先授权足够的可见行，先显示当前页，再补充分批结果/统计 | 不必为显示 48 行先授权所有候选；精确总数改成下界/处理中是协议和 UI 语义变化，需要明确标识，不能显示为精确总数。保留发布前权限复核。 |",
+    "| 最后度量 | 优化字符匹配、SIMD/并行、posting 结构与路径重建 | 先取得匹配、权限、排序、锁等待的独立计时，再按占比投入。当前未证明更换子串算法能解决约两秒的现场延迟。 |",
+    "",
+    "原始候选缓存、授权遍历停止及缩小查询取消已实现并验证；缩短持锁时间、分阶段首屏和其他算法调整尚未实施。本轮没有替换安装版索引服务，不能用合成缓存样本承诺现场达到 50 ms，预算内的逐候选权限成本仍在。",
+    "",
+    "[实际服务与质量标志](E:/Projects/pulse/bench_data/search-latency-20261023/installed-before-quality.log)；[独立权限夹具](E:/Projects/pulse/bench_data/search-latency-20261023/visibility-fixture-before.log)；[改进后的诊断工具](E:/Projects/pulse/src/bench/index_perf_main.cpp)。",
+    "权限对照来源：[官方作者 2019-03-15 回复](https://www.voidtools.com/forum/viewtopic.php?p=25276)、[Everything Service Security](https://www.voidtools.com/support/everything/everything_service/)。",
+    "",
+    "### 本轮实际验证与限制",
+    "",
+    "- 本轮 pulse_index_search_cache_test **29 PASS / 0 FAIL**；70,000 候选合成样本冷查询 1,852 μs、缓存查询 5 μs，仅说明该隔离样本的候选复用效果，不是现场总体搜索延迟。新 pulse_index 与安全夹具目标均构建成功，未部署。",
+    "- 新增 --metadata-acl-only 入口复用已有元数据安全用例，普通 Medium 令牌 S-1-16-8192 下 **24 PASS / 0 FAIL**，覆盖父目录撤权、子项属性拒绝、目录快照失效、恢复及超时，夹具清理通过；不运行无关队列、追踪或 raw-tree 测试。初次沙盒运行设置 ACL 返回 Win32=5，保留全部失败记录；同一组用例未删除、未弱化。",
+    "- 新目标初次因 NMake 尚未再生成规则而不可用，随后只重新生成既有构建目录。服务初次链接又遇到旧 index_folder_sizes 对象引用旧 Search 签名；显式重编该对象及另外两个依赖 Engine 布局的实现对象后，受影响目标构建通过。未做全量清理或全量构建。",
+    "[本轮搜索优化与构建证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/search-optimization-outcomes.json)；[普通用户 ACL 回归](E:/Projects/pulse/bench_data/search-latency-20261023/metadata-acl-after-medium.log)；[初次沙盒失败记录](E:/Projects/pulse/bench_data/search-latency-20261023/metadata-acl-after.log)。",
+    "",
+    "- 已定向构建 pulse_index_perf 与 pulse_index_security_test，完成实际服务 6 个词的单次诊断和 --visibility-bench；未运行完整安全套件、全量 release/selftest 或实际 GUI 搜索验收。诊断检查错误与完整性后显示的是性能/质量失败，没有以退出码 0 替代通过结论。",
+    "- 只读阶段探针已构建，设计为读取实际 v12 快照，分别测无授权、只构造路径和真实用户授权；不启动引擎、不写快照或 WAL、不返回名字。",
+    "- **读取受限快照的阶段探针尚未形成有效数据。** 旧 Windows 管理员请求现已结束，但输出文件为 0 字节，不能算执行成功；没有捕获其退出码，也未确定具体失败阶段。没有绕过 ACL 或把未取得的阶段数据作为实测，因此尚不能给出现场每阶段精确比例。备份目录同样拒绝当前读取，未尝试修改权限。",
+    "- 卡巴斯基调查使用私有探针和受控文件，未改杀毒/美化配置、注册项或安装文件；没有调用第三方实际菜单命令。新对象/新 STA 的热态收益是探针证据，不能当作已完成宿主复用。",
+    "- 唯一完整报告继续为本文；各 JSON、源码和日志为证据。早期状态仍保留在后面的历史节中，冲突处以本节的新增实测与限定为准。"
+  ]
+}

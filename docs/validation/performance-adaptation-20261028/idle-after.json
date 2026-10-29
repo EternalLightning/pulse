@@ -1,0 +1,12 @@
+{
+  "executable": "E:\\Projects\\pulse\\build-release\\Pulse.exe",
+  "fixture": "E:\\Projects\\pulse\\bench_data\\idle-sample-4d18088bc449430498f9f0405fb1d75c",
+  "process_id": 33204,
+  "input_idle": true,
+  "input_idle_ms": 590,
+  "sample_wall_ms": 8015.9351,
+  "cpu_ms": 203.125,
+  "cpu_one_core_percent": 2.5340150271426225,
+  "private_bytes": 58494976,
+  "scope": "Isolated hidden UI process only; input-idle is not first-present; child services excluded."
+}

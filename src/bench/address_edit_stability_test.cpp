@@ -1,5 +1,6 @@
 #include "../app/app_internal.h"
 #include "../common/localization.h"
+#include "../ui/typography.h"
 #include <iostream>
 
 namespace {
@@ -24,8 +25,12 @@ LRESULT CALLBACK Observe(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_P
     return result;
 }
 }
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--sharp") ui::typography::SetTextRenderMode(ui::typography::TextRenderMode::Sharp);
+        else if (std::string(argv[i]) == "--smooth") ui::typography::SetTextRenderMode(ui::typography::TextRenderMode::Smooth);
+    }
     OleInitialize(nullptr); l10n::Initialize(GetModuleHandleW(nullptr),L"zh-CN");
     auto owned=std::make_unique<AppState>(); auto& s=*owned;
     s.isolatedTest=true; s.appPrefs.persist=false; s.searchHistory.persist=false;
@@ -34,7 +39,7 @@ int main() {
     auto check=[&](bool ok,const char* label){std::cout<<(ok ? "[PASS] ":"[FAIL] ")<<label<<std::endl;if(!ok)++failures;};
     if(!s.hwnd || !s.compositor.Init(s.hwnd)) return 2;
     s.renderer.SetCompositor(&s.compositor); s.compositor.RecreateTextFormats(1);s.renderer.SetScale(1);
-    check(s.compositor.LumaTextEnabled(),"fixture uses actual LumaText hosted-editor path");
+    check(s.compositor.CustomEditEnabled(),"fixture uses the production compositor with custom editing enabled");
     s.window_tabs.EnsureDefault();s.pane=s.window_tabs.Active()->FocusedPane();
     auto* tab=ActiveTab(s);tab->current_path=app::MakeSearchPath(L"content:3d3s");
     tab->pending_generation=990;tab->search_content_active=true;
@@ -63,7 +68,7 @@ int main() {
              <<" redraw="<<messages.redraw<<" hidden="<<messages.hidden<<" text="<<messages.text<<std::endl;
     check(stable,"continuous search notifications preserve query text selection and focus");
     check(messages.margins==0 && messages.positions==0 && messages.size==0,"unchanged search editor geometry does not reapply native layout");
-    check(messages.redraw==0 && messages.hidden==0 && messages.text==0,"search frames never hide or reinitialize LumaText edit surface");
+    check(messages.redraw==0 && messages.hidden==0 && messages.text==0,"search frames never hide or reinitialize the hosted edit surface");
     messages={};
     SetWindowPos(s.hwnd,nullptr,-20000,-20000,720,720,SWP_NOACTIVATE|SWP_NOZORDER);Render(s);
     check(messages.positions==1,"actual window resize updates hosted editor once");
@@ -96,7 +101,7 @@ int main() {
     SendMessageW(s.hwndAddressEdit,WM_LBUTTONDOWN,MK_LBUTTON,click);
     SendMessageW(s.hwndAddressEdit,WM_LBUTTONUP,0,click);
     type(L"abc",true);
-    check(read_query()==L"3d3sabc","LumaText mouse placement at text end preserves following typing order");
+    check(read_query()==L"3d3sabc","mouse placement at text end preserves following typing order");
     RemoveWindowSubclass(s.hwndAddressEdit,Observe,98);
     s.addressIgnoreKillFocus=true;DestroyWindow(s.hwndAddressEdit);s.hwndAddressEdit=nullptr;
     s.renderer.SetCompositor(nullptr);s.compositor.Shutdown();DestroyWindow(s.hwnd);s.hwnd=nullptr;

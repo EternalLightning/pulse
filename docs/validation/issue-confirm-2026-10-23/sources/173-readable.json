@@ -1,0 +1,15 @@
+{
+  "number": 173,
+  "title": "列宽问题",
+  "body": "详细列表的最后一列，没法往前拖动，导致后面间距很大\n<img width=\"1411\" height=\"753\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/e0f73f97-1d73-416f-ad31-39b3684abcae\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/173",
+  "captured_at": "2026-10-23T03:10:07.200212+00:00",
+  "updated_at": "2026-10-10T01:37:22Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

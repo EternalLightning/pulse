@@ -6,6 +6,8 @@
 #include "../ui/typography.h"
 #include "../ui/svg_bitmap.h"
 #include "../ui/edit_host.h"
+#include "../ui/smooth_scroll.h"
+#include "../ui/animation_clock.h"
 #include "../common/path_utils.h"
 #include <uxtheme.h>
 #include "../common/localization.h"
@@ -35,6 +37,7 @@ constexpr UINT kNetworkResult = WM_APP + 184;
 constexpr UINT_PTR kDebounce = 1;
 constexpr UINT_PTR kConnectTimeout = 2;
 constexpr UINT_PTR kScopeTooltipTimer = 3;
+constexpr UINT_PTR kScrollTimer = 4;
 constexpr uint64_t kSession = 0x50554c534547534full;
 constexpr float kHeader = 76, kTabs = 52, kFooter = 48, kRow = 88;
 constexpr float kEditCornerRadius = 4;
@@ -58,7 +61,10 @@ struct GlobalSearchWindow::Impl {
     std::wstring current_folder, current_folder_tip, query, error;
     struct Row { std::wstring name, path, snippet; bool directory = false; };
     std::vector<Row> rows;
-    int selected = 0, first = 0;
+    int selected = 0;
+    float scroll_y = 0;
+    ui::SmoothScroll scroll_motion;
+    int motion_override = -1; // Isolated fixture override; production follows Windows.
     uint32_t generation = 1;
     size_t total = 0;
     std::unique_ptr<index::IndexClient> owned_filenames;
@@ -113,15 +119,43 @@ struct GlobalSearchWindow::Impl {
     D2D1_COLOR_F Color(UINT32 value) const { return D2D1::ColorF(value); }
     void Invalidate() { if (hwnd) InvalidateRect(hwnd, nullptr, FALSE); }
     int PageSize() const { return std::max(1, static_cast<int>((height - kHeader - kTabs - kFooter) / kRow)); }
+    float ViewHeight() const { return std::max(1.0f, height - kFooter - 136); }
+    float MaxScroll() const { return std::max(0.0f, static_cast<float>(rows.size()) * kRow - ViewHeight()); }
+    bool AnimationsEnabled() const {
+        if (motion_override >= 0) return motion_override != 0;
+        BOOL enabled = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        return enabled && !ui::IsHighContrast();
+    }
+    void StopScroll() {
+        scroll_motion.Reset();
+        if (hwnd) KillTimer(hwnd, kScrollTimer);
+        scroll_y = std::clamp(scroll_y, 0.0f, MaxScroll());
+    }
+    void Scroll(float delta) {
+        scroll_motion.ScrollBy(scroll_y, delta, MaxScroll(), ViewHeight(), ui::AnimationTimeMs(), AnimationsEnabled());
+        if (scroll_motion.Pending() && !SetTimer(hwnd, kScrollTimer, USER_TIMER_MINIMUM, nullptr)) {
+            scroll_motion.Tick(scroll_y, MaxScroll(), ui::AnimationTimeMs(), false);
+        }
+        if (!scroll_motion.Pending()) KillTimer(hwnd, kScrollTimer);
+        Invalidate();
+    }
+    void TickScroll(uint64_t now) {
+        if (scroll_motion.Tick(scroll_y, MaxScroll(), now, AnimationsEnabled())) Invalidate();
+        if (!scroll_motion.Pending()) KillTimer(hwnd, kScrollTimer);
+    }
     void ClampSelection(bool reveal_selection = true) {
         selected = std::clamp(selected, 0, std::max(0, static_cast<int>(rows.size()) - 1));
+        StopScroll();
         if (reveal_selection) {
-            if (selected < first) first = selected;
-            if (selected >= first + PageSize()) first = selected - PageSize() + 1;
+            const float top = static_cast<float>(selected) * kRow;
+            if (top < scroll_y) scroll_y = top;
+            if (top + kRow > scroll_y + ViewHeight()) scroll_y = top + kRow - ViewHeight();
         }
-        first = std::clamp(first, 0, std::max(0, static_cast<int>(rows.size()) - PageSize()));
+        scroll_y = std::clamp(scroll_y, 0.0f, MaxScroll());
     }
     void Cancel() {
+        StopScroll();
         generation = next_request ? ++*next_request : generation + 1;
         if (filenames) filenames->CancelSession(kSession);
         if (network) network->CancelSession(kSession);
@@ -141,7 +175,7 @@ struct GlobalSearchWindow::Impl {
         query.resize(static_cast<size_t>(count) + 1);
         GetWindowTextW(edit, query.data(), count + 1);
         query.resize(static_cast<size_t>(count));
-        rows.clear(); selected = first = 0; total = 0; error.clear(); truncated = false;
+        rows.clear(); selected = 0; scroll_y = 0; total = 0; error.clear(); truncated = false;
         local_result = {}; network_result = {}; local_ready = network_ready = false;
         if (!query.empty() && !composing) { busy = true; SetTimer(hwnd, kDebounce, 180, nullptr); }
         Invalidate();
@@ -245,6 +279,7 @@ struct GlobalSearchWindow::Impl {
     void Layout() {
         RECT rect{}; GetClientRect(hwnd, &rect);
         width = static_cast<float>(rect.right) / scale; height = static_cast<float>(rect.bottom) / scale;
+        StopScroll();
         if (target) {
             if (target.Get() == compositor.Dc()) compositor.Resize(rect.right, rect.bottom);
             target->SetDpi(96 * scale, 96 * scale);
@@ -442,7 +477,7 @@ struct GlobalSearchWindow::Impl {
             Fill({scope_center - 12, 124, scope_center + 12, 127}, accent, 1.5f);
             Fill({0, 128, width, 129}, line);
             const float bottom = height - kFooter;
-            target->PushAxisAlignedClip({0, 130, width, bottom}, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            target->PushAxisAlignedClip({0, 136, width, bottom}, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             if (rows.empty()) {
                 const auto& status = !error.empty() ? error : busy ? Text(StringId::GlobalSearchLoading) : query.empty() ? Text(StringId::GlobalSearchEmpty) : Text(StringId::GlobalSearchNoResults);
                 const D2D1_RECT_F bounds{16, 136, width - 16, bottom - 8};
@@ -459,8 +494,10 @@ struct GlobalSearchWindow::Impl {
                     Label(status, bounds, 16, muted, false, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
                 }
             }
-            for (int i = first; i < static_cast<int>(rows.size()) && i < first + PageSize() + 1; ++i) {
-                const float y = 136 + static_cast<float>(i - first) * kRow;
+            const int first = static_cast<int>(scroll_y / kRow);
+            for (int i = first; i < static_cast<int>(rows.size()); ++i) {
+                const float y = 136 + static_cast<float>(i) * kRow - scroll_y;
+                if (y >= bottom) break;
                 const auto& row = rows[static_cast<size_t>(i)];
                 if (i == selected) { Fill({5, y, width - 5, y + kRow - 3}, dark ? 0x293947 : 0xe1effa, 6); Fill({5, y + 9, 8, y + kRow - 12}, accent, 2); }
                 const auto dot = row.name.find_last_of(L'.');
@@ -478,9 +515,9 @@ struct GlobalSearchWindow::Impl {
                 if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, muted, false, L"Segoe UI", true);
             }
             target->PopAxisAlignedClip();
-            if (rows.size() > static_cast<size_t>(PageSize())) {
-                const float track = bottom - 142, thumb = std::max(20.0f, track * static_cast<float>(PageSize()) / static_cast<float>(rows.size()));
-                const float top = 138 + (track - thumb) * static_cast<float>(first) / static_cast<float>(rows.size() - static_cast<size_t>(PageSize()));
+            if (MaxScroll() > 0) {
+                const float track = bottom - 142, thumb = std::min(track, std::max(20.0f, track * ViewHeight() / (static_cast<float>(rows.size()) * kRow)));
+                const float top = 138 + (track - thumb) * scroll_y / MaxScroll();
                 Fill({width - 4, top, width - 1, top + thumb}, muted, 1.5f);
             }
             Fill({0, bottom, width, bottom + 1}, line);
@@ -506,6 +543,7 @@ struct GlobalSearchWindow::Impl {
         case WM_THEMECHANGED:
         case WM_SETTINGCHANGE:
         case WM_DWMCOLORIZATIONCOLORCHANGED:
+            TickScroll(ui::AnimationTimeMs());
             ApplyAppearance(); return 0;
         case WM_SIZE: if (edit) Layout(); return 0;
         case WM_DPICHANGED: {
@@ -524,7 +562,9 @@ struct GlobalSearchWindow::Impl {
             SetTextColor(dc, dark ? RGB(245, 245, 247) : RGB(32, 33, 36)); return reinterpret_cast<LRESULT>(background);
         }
         case WM_TIMER:
-            if (wp == kDebounce) Search();
+            if (wp == kScrollTimer) {
+                TickScroll(ui::AnimationTimeMs());
+            } else if (wp == kDebounce) Search();
             else if (wp == kConnectTimeout) {
                 KillTimer(hwnd, kConnectTimeout);
                 if (busy && !content_mode) { busy = false; error = Text(StringId::GlobalSearchFailed); Invalidate(); }
@@ -561,14 +601,15 @@ struct GlobalSearchWindow::Impl {
                     if (!current_only) { current_only = true; Changed(); }
                 }
             } else if (y >= 136 && y < height - kFooter) {
-                selected = first + static_cast<int>((y - 136) / kRow); ClampSelection(); Invalidate();
+                selected = static_cast<int>((y - 136 + scroll_y) / kRow); ClampSelection(false); Invalidate();
             }
             if (IsWindowVisible(hwnd)) SetFocus(edit); return 0;
         }
         case WM_LBUTTONDBLCLK: if (GET_Y_LPARAM(lp) >= Px(136) && GET_Y_LPARAM(lp) < Px(height - kFooter)) Open(false); return 0;
         case WM_MOUSEWHEEL:
-            first = std::clamp(first - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * 3, 0, std::max(0, static_cast<int>(rows.size()) - PageSize()));
-            Invalidate(); return 0;
+            Scroll(-GET_WHEEL_DELTA_WPARAM(wp) / static_cast<float>(WHEEL_DELTA) * kRow * 3);
+            return 0;
+        case WM_DESTROY: StopScroll(); return 0;
         case kIndexStatus: Invalidate(); return 0;
         case kIndexResult: {
             index::SearchResult result;

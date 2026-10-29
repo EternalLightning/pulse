@@ -240,6 +240,28 @@ bool PlacesCatalog::Load() {
             w.pane_views.push_back(ui::ParseViewMode(value));
         while (w.pane_views.size() < w.pane_paths.size())
             w.pane_views.push_back(ui::ViewMode::Details);
+        w.focused_pane = pulse::json::ExtractInt(block_doc, L"focused_pane", -1);
+        if (w.focused_pane < 0 || static_cast<size_t>(w.focused_pane) >= w.pane_paths.size()) {
+            w.focused_pane = 0;
+            const auto root = Norm(w.root);
+            const auto parent = Norm(fs::ParentPath(root));
+            int root_pane = -1, parent_pane = -1, parent_count = 0;
+            for (size_t i = 0; i < w.pane_paths.size(); ++i) {
+                const auto path = Norm(w.pane_paths[i]);
+                if (root_pane < 0 && EqualI(path, root)) root_pane = static_cast<int>(i);
+                if (!parent.empty() && EqualI(path, parent)) {
+                    parent_pane = static_cast<int>(i);
+                    ++parent_count;
+                }
+            }
+            if (root_pane >= 0) w.focused_pane = root_pane;
+            else if (parent_count == 1) {
+                // Older pins captured the containing folder instead of the
+                // selected root. Only repair an unambiguous matching pane.
+                w.focused_pane = parent_pane;
+                w.pane_paths[static_cast<size_t>(parent_pane)] = root;
+            }
+        }
         auto freq = pulse::json::ExtractStringArray(block_doc, L"freq");
         for (const auto& row : freq) {
             auto tab = row.find(L'\t');
@@ -520,6 +542,15 @@ bool PlacesCatalog::Save() const {
 bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
     std::wstring dir = app::GetPulseDataDir();
     if (dir.empty()) return false;
+    DeleteFileW((dir + L"\\places.tmp").c_str());
+    return WriteUtf8FileAtomic(dir + L"\\places.json", SnapshotJson(snapshot));
+}
+
+std::wstring PlacesCatalog::ToJson() const {
+    return SnapshotJson(CaptureSaveSnapshot());
+}
+
+std::wstring PlacesCatalog::SnapshotJson(const SaveSnapshot& snapshot) {
     std::wostringstream f;
     auto writeArr = [&](const std::vector<std::wstring>& arr) {
         f << L"[";
@@ -539,7 +570,8 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
         pulse::json::Escape(w.name, name);
         pulse::json::Escape(w.root, root);
         f << L"    {\"name\":\"" << name << L"\",\"root\":\"" << root
-          << L"\",\"layout\":" << w.layout << L",\"panes\":";
+          << L"\",\"layout\":" << w.layout << L",\"focused_pane\":" << w.focused_pane
+          << L",\"panes\":";
         writeArr(w.pane_paths);
         std::vector<std::wstring> views;
         views.reserve(w.pane_views.size());
@@ -625,8 +657,7 @@ bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
         f << L"\n";
     }
     f << L"  ]\n}\n";
-    DeleteFileW((dir + L"\\places.tmp").c_str());
-    return WriteUtf8FileAtomic(dir + L"\\places.json", f.str());
+    return f.str();
 }
 
 bool PlacesCatalog::FlushPendingSave(bool force) const {
@@ -641,17 +672,40 @@ bool PlacesCatalog::FlushPendingSave(bool force) const {
 int PlacesCatalog::FindWorkspace(const std::wstring& root) const {
     const std::wstring n = Norm(root);
     for (int i = 0; i < static_cast<int>(workspaces.size()); ++i)
-        if (Norm(workspaces[static_cast<size_t>(i)].root) == n) return i;
+        if (EqualI(Norm(workspaces[static_cast<size_t>(i)].root), n)) return i;
     return -1;
+}
+
+int PlacesCatalog::FindWorkspaceForPath(const std::wstring& path) const {
+    if (path.empty() || fs::IsVirtualPath(path)) return -1;
+    const std::wstring normalized = Norm(path);
+    int match = -1;
+    size_t longest = 0;
+    for (int i = 0; i < static_cast<int>(workspaces.size()); ++i) {
+        const auto& saved_root = workspaces[static_cast<size_t>(i)].root;
+        if (saved_root.empty() || fs::IsVirtualPath(saved_root)) continue;
+        std::wstring root = Norm(saved_root);
+        while (root.size() > 1 && root.back() == L'\\' && root[root.size() - 2] != L':')
+            root.pop_back();
+        if (root.size() > longest && PathIsOrDescendant(normalized, root)) {
+            match = i;
+            longest = root.size();
+        }
+    }
+    return match;
 }
 
 int PlacesCatalog::PinWorkspace(const std::wstring& root, const std::wstring& name, int layout,
                                 const std::vector<std::wstring>& pane_paths,
-                                const std::vector<ui::ViewMode>& pane_views) {
+                                const std::vector<ui::ViewMode>& pane_views, int focused_pane) {
     const std::wstring n = Norm(root);
+    auto paths = pane_paths;
+    if (paths.empty()) paths.push_back(n);
+    focused_pane = std::clamp(focused_pane, 0, static_cast<int>(paths.size()) - 1);
+    paths[static_cast<size_t>(focused_pane)] = n;
     int existing = FindWorkspace(n);
     if (existing >= 0) {
-        UpdateWorkspaceSnapshot(existing, layout, pane_paths, pane_views);
+        UpdateWorkspaceSnapshot(existing, layout, paths, pane_views, focused_pane);
         if (!name.empty()) workspaces[static_cast<size_t>(existing)].name = name;
         active_workspace = existing;
         Save();
@@ -661,14 +715,31 @@ int PlacesCatalog::PinWorkspace(const std::wstring& root, const std::wstring& na
     w.root = n;
     w.name = name.empty() ? FolderTitle(n) : name;
     w.layout = layout;
-    w.pane_paths = pane_paths;
+    w.pane_paths = std::move(paths);
     w.pane_views = pane_views;
+    w.focused_pane = focused_pane;
     while (w.pane_views.size() < w.pane_paths.size())
         w.pane_views.push_back(ui::ViewMode::Details);
     workspaces.push_back(std::move(w));
     active_workspace = static_cast<int>(workspaces.size()) - 1;
     Save();
     return active_workspace;
+}
+
+bool PlacesCatalog::RenameWorkspace(const std::wstring& root, const std::wstring& raw_name) {
+    const auto first = raw_name.find_first_not_of(L" \t\r\n");
+    if (first == std::wstring::npos) return false;
+    const auto last = raw_name.find_last_not_of(L" \t\r\n");
+    const auto name = raw_name.substr(first, last - first + 1);
+    const int index = FindWorkspace(root);
+    if (index < 0 || name.size() > 128 ||
+        std::any_of(name.begin(), name.end(), [](wchar_t ch) { return ch < L' '; })) return false;
+    auto& workspace = workspaces[static_cast<size_t>(index)];
+    if (workspace.name == name) return false;
+    workspace.name = name;
+    MarkPlacesDirty();
+    QueuePlacesSave();
+    return true;
 }
 
 bool PlacesCatalog::UnpinWorkspace(int index) {
@@ -686,12 +757,14 @@ bool PlacesCatalog::UnpinWorkspace(const std::wstring& root) {
 
 void PlacesCatalog::UpdateWorkspaceSnapshot(int index, int layout,
                                             const std::vector<std::wstring>& pane_paths,
-                                            const std::vector<ui::ViewMode>& pane_views) {
+                                            const std::vector<ui::ViewMode>& pane_views, int focused_pane) {
     if (index < 0 || index >= static_cast<int>(workspaces.size())) return;
     auto& w = workspaces[static_cast<size_t>(index)];
     w.layout = layout;
     w.pane_paths = pane_paths;
     w.pane_views = pane_views;
+    w.focused_pane = w.pane_paths.empty() ? 0 :
+        std::clamp(focused_pane, 0, static_cast<int>(w.pane_paths.size()) - 1);
     while (w.pane_views.size() < w.pane_paths.size())
         w.pane_views.push_back(ui::ViewMode::Details);
 }

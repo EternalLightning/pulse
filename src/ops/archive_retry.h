@@ -5,6 +5,7 @@
 #include "../common/json_utils.h"
 #include "../common/path_utils.h"
 #include "../common/utf8_file.h"
+#include "../common/file_operation_error.h"
 #include <map>
 #include <set>
 
@@ -33,7 +34,7 @@ public:
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         if (!directory || directory.get() == INVALID_HANDLE_VALUE) {
             if (directory.get() == INVALID_HANDLE_VALUE) directory.release();
-            return Fail(error);
+            return IoFail(error, L"读取解压目标目录", target, GetLastError());
         }
         target_id_ = Identity(directory.get());
         if (target_id_.empty()) return Fail(error);
@@ -43,7 +44,8 @@ public:
         if (!created && (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS))
             file_ = CreateFileW((target / kName).c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
                 FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-        if (file_ == INVALID_HANDLE_VALUE) return Fail(error);
+        if (file_ == INVALID_HANDLE_VALUE)
+            return IoFail(error, L"打开解压恢复记录", target / kName, GetLastError());
         BY_HANDLE_FILE_INFORMATION info{};
         if (!GetFileInformationByHandle(file_, &info) || info.nNumberOfLinks != 1 ||
             (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return Fail(error);
@@ -213,8 +215,21 @@ private:
         std::vector<uint8_t> bytes;
         if (!EncodeUtf8Bytes(text, bytes) || bytes.size() > 16 * 1024 * 1024) return Fail(error);
         DWORD written = 0;
-        return (WriteFile(file_, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
-            written == bytes.size() && FlushFileBuffers(file_)) || Fail(error);
+        if (!WriteFile(file_, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr))
+            return IoFail(error, L"写入解压恢复记录", target_ / kName, GetLastError());
+        if (written != bytes.size()) return IoFail(error, L"写入解压恢复记录", target_ / kName, ERROR_WRITE_FAULT);
+        if (!FlushFileBuffers(file_)) return IoFail(error, L"保存解压恢复记录", target_ / kName, GetLastError());
+        return true;
+    }
+    static bool IoFail(std::wstring& error, const wchar_t* operation,
+        const std::filesystem::path& path, DWORD code) {
+        error = std::wstring(L"无法") + operation + L"：" + path.wstring() + L"\n" +
+            format::FileOperationErrorText(HRESULT_FROM_WIN32(code));
+        if (code == ERROR_ACCESS_DENIED || code == ERROR_PRIVILEGE_NOT_HELD || code == ERROR_ELEVATION_REQUIRED)
+            error += L"\n请检查目标目录及恢复记录的写入权限。受保护目录请以管理员身份运行 Pulse 后重试，或选择可写目录。";
+        else if (code == ERROR_SHARING_VIOLATION || code == ERROR_LOCK_VIOLATION)
+            error += L"\n解压恢复记录正被其他任务或程序占用，请等待其结束后重试。";
+        return false;
     }
     static bool Fail(std::wstring& error) {
         error = L"无法安全读取或保存未完成解压记录，操作已停止。";

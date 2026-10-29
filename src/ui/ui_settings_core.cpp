@@ -19,6 +19,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         dc->DrawRoundedRectangle(D2D1::RoundedRect(r,8*scale_,8*scale_),brStrokeCard_.get(),1);
     };
     auto divider=[&](D2D1_RECT_F r) {
+        if(r.bottom<=r.top) return;
         MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
         FillRect(dc,brStrokeDivider_.get(),r.left+16*scale_,r.bottom,r.right-r.left-32*scale_,1);
     };
@@ -36,7 +37,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                     description->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
                     description->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
                     MakeBrush(dc,theme.text_secondary,brTextSecondary_);
-                    dc->DrawTextLayout(D2D1::Point2F(bounds.left,bounds.top),description.get(),brTextSecondary_.get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    compositor_->DrawTextLayout(D2D1::Point2F(bounds.left,bounds.top),description.get(),brTextSecondary_.get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 }
             }
         }
@@ -59,7 +60,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         // Busy is enforced in HitTest/controller, not by recoloring every sibling
         // switch. Its geometry and checked appearance stay stable until result.
         fluent::ControlState state{}; state.checked=on; state.hovered=IsHovered(vm,H::SettingsToggle,hit);
-        painter_.DrawSwitch(bounds.control,L"",state);
+        DrawSettingsSwitch(L"setting:"+std::to_wstring(hit),bounds.control,state);
     };
     auto button=[&](D2D1_RECT_F r,const std::wstring& value,H::Region region,int index,bool primary=false,bool enabled=true,const wchar_t* glyph=L"") {
         fluent::ControlState st{}; st.enabled=enabled; st.hovered=enabled && IsHovered(vm,region,index);
@@ -87,211 +88,296 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             painter_.DrawSegmentedItem(item);
         }
     };
-    if(vm.settings_page==0) {
-        section(0,I::SettingsAppearance);section(1,I::SettingsStartupShutdown);section(2,I::SettingsFileList);
-        for(const auto& group:lay.group) draw_card(group);
-        const bool small_theme=lay.theme_tile[0].left<lay.theme_row.left+100*scale_;
-        label(lay.theme_row,l10n::Get(I::SettingsTheme),small_theme ? L"" : l10n::Get(I::SettingsThemeDesc),L"\xE790",
-            small_theme ? lay.theme_row.right-16*scale_ : lay.theme_tile[0].left-12*scale_);
-        const I theme_names[]={I::SettingsThemeLight,I::SettingsThemeDark,I::SettingsThemeSystem};
-        const int theme_values[]={1,2,0};
-        for(int i=0;i<3;++i) {
-            const auto r=lay.theme_tile[i];auto preview=r;preview.bottom-=22*scale_;
-            const bool selected=vm.settings_theme==theme_values[i];
-            MakeBrush(dc,i==0 ? HexColor(0xF3F5F8) : HexColor(0x1A1A1A),brFillHover_);
-            dc->FillRoundedRectangle(D2D1::RoundedRect(preview,5*scale_,5*scale_),brFillHover_.get());
-            MakeBrush(dc,i==0 ? HexColor(0xFFFFFF) : HexColor(0x333333),brFillHover_);
-            FillRoundedRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+8*scale_,preview.right-preview.left-14*scale_,8*scale_,2*scale_);
-            FillRoundedRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+21*scale_,14*scale_,preview.bottom-preview.top-28*scale_,2*scale_);
-            if(i==2) {MakeBrush(dc,HexColor(0xF3F5F8),brFillHover_); FillRect(dc,brFillHover_.get(),preview.left+7*scale_,preview.top+8*scale_,(preview.right-preview.left)/2-7*scale_,preview.bottom-preview.top-15*scale_);}
-            MakeBrush(dc,selected ? theme.accent : IsHovered(vm,H::SettingsTheme,theme_values[i]) ? theme.text_secondary : theme.stroke_card,brStrokeCard_);
-            dc->DrawRoundedRectangle(D2D1::RoundedRect(preview,5*scale_,5*scale_),brStrokeCard_.get(),selected ? 2*scale_ : 1);
-            if(selected) DrawIconText(preview.right-23*scale_,preview.top+3*scale_,20*scale_,20*scale_,L"\xE73E",L"",
-                !vm.dark && i!=0 ? HexColor(0xFFFFFF) : theme.accent,0.7f);
-            painter_.DrawText(l10n::Get(theme_names[i]),D2D1::RectF(r.left,preview.bottom+2*scale_,r.right,r.bottom),compositor_->SmallFormat(),theme.text,fluent::HorizontalAlignment::Center);
-        }
-        divider(lay.theme_row);
-        const bool narrow_accent=lay.accent_picker.left<lay.accent_card.left+250*scale_;
-        label(lay.accent_card,l10n::Get(I::SettingsThemeColor),l10n::Get(I::SettingsThemeColorDesc),L"\xE790",
-            narrow_accent ? lay.accent_card.right-16*scale_ : lay.accent_picker.left-12*scale_);
-        button(lay.accent_picker,L"#"+vm.settings_accent_hex,H::SettingsAccent,0);
-        button(lay.accent_system,l10n::Get(I::SettingsThemeSystem),H::SettingsAccent,1,false,true,
-            vm.settings_accent_system ? L"\xE73E" : L"");
-        divider(lay.accent_card);
-        const I effects[]={I::EffectNone,I::EffectAcrylic,I::EffectMica,I::EffectMicaAlt};
-        const I languages[]={I::LanguageSystem,I::LanguageZhCN,I::LanguageEnUS};
-        const auto dropdown=[&](D2D1_RECT_F r,D2D1_RECT_F c,I title,I desc,const std::wstring& value,int id) {
-            label(r,l10n::Get(title),l10n::Get(desc),id==0 ? L"\xE790" : L"\xE8C1",c.left<r.left+100*scale_ ? r.right-16*scale_ : c.left-12*scale_);
+    if (IsSettingsCategory(vm.settings_page)) {
+        for (int i = 0; i < lay.section_count; ++i) section(i, lay.section_title[i]);
+        for (const auto &group : lay.group) draw_card(group);
+        MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
+        for (const auto &line : lay.category_dividers)
+            FillRect(dc, brStrokeDivider_.get(), line.left, line.top, line.right - line.left, 1);
+        const I languages[] = {I::LanguageSystem, I::LanguageZhCN, I::LanguageEnUS};
+        const auto dropdown = [&](D2D1_RECT_F r, D2D1_RECT_F c, I title, I desc, const std::wstring &value, int id) {
+            label(r, l10n::Get(title), l10n::Get(desc), id == 0 ? L"\xE790" : L"\xE8C1",
+                  c.left < r.left + 100 * scale_ ? r.right - 16 * scale_ : c.left - 12 * scale_);
             fluent::ButtonSpec control{};
-            control.bounds=c; control.text=value; control.drop_down=true;
-            control.state.hovered=IsHovered(vm,H::SettingsDropdown,id);
+            control.bounds = c;
+            control.text = value;
+            control.drop_down = true;
+            control.state.hovered = IsHovered(vm, H::SettingsDropdown, id);
             painter_.DrawButton(control);
         };
-        label(lay.effect_card,l10n::Get(I::SettingsWindowEffect),l10n::Get(I::SettingsWindowEffectDesc),L"\xE790",lay.effect_card.right-16*scale_);
-        for(int i=0;i<kWindowEffectCount;++i) {
-            const auto r=lay.effect_row[i];
-            auto preview=r;preview.bottom-=22*scale_;
-            const bool selected=i==static_cast<int>(vm.window_effect);
-            const bool hovered=IsHovered(vm,H::SettingsEffect,i);
-            const float tint[]={0.0f,0.22f,0.065f,0.16f};
-            auto background=BlendOver(WithAlpha(theme.accent,tint[i]),theme.surface_title);
-            MakeBrush(dc,background,brFillHover_);
-            dc->FillRoundedRectangle(D2D1::RoundedRect(preview,6*scale_,6*scale_),brFillHover_.get());
-            // A small window silhouette explains the material, not a fake DWM surface.
-            dc->PushAxisAlignedClip(preview,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            if(i==1 || i==3) {
-                MakeBrush(dc,WithAlpha(theme.accent,vm.dark ? 0.18f : 0.13f),brFillHover_);
-                dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(preview.right-18*scale_,preview.top+11*scale_),
-                    36*scale_,26*scale_),brFillHover_.get());
+        if (vm.settings_page == 0) {
+            const bool small_theme = lay.theme_tile[0].left < lay.theme_row.left + 100 * scale_;
+            label(lay.theme_row, l10n::Get(I::SettingsTheme), small_theme ? L"" : l10n::Get(I::SettingsThemeDesc),
+                  L"\xE790", small_theme ? lay.theme_row.right - 16 * scale_ : lay.theme_tile[0].left - 12 * scale_);
+            const I theme_names[] = {I::SettingsThemeLight, I::SettingsThemeDark, I::SettingsThemeSystem};
+            const int theme_values[] = {1, 2, 0};
+            for (int i = 0; i < 3; ++i) {
+                const auto r = lay.theme_tile[i];
+                auto preview = r;
+                preview.bottom -= 22 * scale_;
+                const bool selected = vm.settings_theme == theme_values[i];
+                MakeBrush(dc, i == 0 ? HexColor(0xF3F5F8) : HexColor(0x1A1A1A), brFillHover_);
+                dc->FillRoundedRectangle(D2D1::RoundedRect(preview, 5 * scale_, 5 * scale_), brFillHover_.get());
+                MakeBrush(dc, i == 0 ? HexColor(0xFFFFFF) : HexColor(0x333333), brFillHover_);
+                FillRoundedRect(dc, brFillHover_.get(), preview.left + 7 * scale_, preview.top + 8 * scale_,
+                                preview.right - preview.left - 14 * scale_, 8 * scale_, 2 * scale_);
+                FillRoundedRect(dc, brFillHover_.get(), preview.left + 7 * scale_, preview.top + 21 * scale_,
+                                14 * scale_, preview.bottom - preview.top - 28 * scale_, 2 * scale_);
+                if (i == 2) {
+                    MakeBrush(dc, HexColor(0xF3F5F8), brFillHover_);
+                    FillRect(dc, brFillHover_.get(), preview.left + 7 * scale_, preview.top + 8 * scale_,
+                             (preview.right - preview.left) / 2 - 7 * scale_,
+                             preview.bottom - preview.top - 15 * scale_);
+                }
+                MakeBrush(dc,
+                          selected                                           ? theme.accent
+                          : IsHovered(vm, H::SettingsTheme, theme_values[i]) ? theme.text_secondary
+                                                                             : theme.stroke_card,
+                          brStrokeCard_);
+                dc->DrawRoundedRectangle(D2D1::RoundedRect(preview, 5 * scale_, 5 * scale_), brStrokeCard_.get(),
+                                         selected ? 2 * scale_ : 1);
+                if (selected)
+                    DrawIconText(preview.right - 23 * scale_, preview.top + 3 * scale_, 20 * scale_, 20 * scale_,
+                                 L"\xE73E", L"", !vm.dark && i != 0 ? HexColor(0xFFFFFF) : theme.accent, 0.7f);
+                painter_.DrawText(l10n::Get(theme_names[i]),
+                                  D2D1::RectF(r.left, preview.bottom + 2 * scale_, r.right, r.bottom),
+                                  compositor_->SmallFormat(), theme.text, fluent::HorizontalAlignment::Center);
             }
-            const float inset=10*scale_;
-            auto window=D2D1::RectF(preview.left+inset,preview.top+9*scale_,preview.right-inset,preview.bottom-9*scale_);
-            const float plate_alpha=i==1 ? 0.48f : i==3 ? 0.72f : 0.96f;
-            MakeBrush(dc,WithAlpha(theme.surface_card,plate_alpha),brFillInput_);
-            dc->FillRoundedRectangle(D2D1::RoundedRect(window,3*scale_,3*scale_),brFillInput_.get());
-            MakeBrush(dc,WithAlpha(theme.text_secondary,0.30f),brTextSecondary_);
-            FillRoundedRect(dc,brTextSecondary_.get(),window.left+6*scale_,window.top+6*scale_,
-                (std::min)(18*scale_,(window.right-window.left)*0.18f),2*scale_,scale_);
-            MakeBrush(dc,WithAlpha(theme.accent,0.10f),brFillHover_);
-            FillRoundedRect(dc,brFillHover_.get(),window.right-22*scale_,window.top+5*scale_,
-                16*scale_,window.bottom-window.top-10*scale_,2*scale_);
-            dc->PopAxisAlignedClip();
-            MakeBrush(dc,selected ? theme.accent : hovered ? theme.text_secondary : theme.stroke_card,brStrokeCard_);
-            dc->DrawRoundedRectangle(D2D1::RoundedRect(preview,6*scale_,6*scale_),brStrokeCard_.get(),
-                selected ? 1.5f*scale_ : scale_);
-            if(selected) {
-                const auto center=D2D1::Point2F(preview.right-9*scale_,preview.bottom-9*scale_);
-                MakeBrush(dc,theme.accent,brAccent_);
-                dc->FillEllipse(D2D1::Ellipse(center,7*scale_,7*scale_),brAccent_.get());
-                DrawIconText(center.x-6*scale_,center.y-6*scale_,12*scale_,12*scale_,
-                    L"\xE73E",L"",theme.accent_text,0.6f);
+
+            const bool narrow_accent = lay.accent_picker.left < lay.accent_card.left + 250 * scale_;
+            label(lay.accent_card, l10n::Get(I::SettingsThemeColor), l10n::Get(I::SettingsThemeColorDesc), L"\xE790",
+                  narrow_accent ? lay.accent_card.right - 16 * scale_ : lay.accent_picker.left - 12 * scale_);
+            button(lay.accent_picker, L"#" + vm.settings_accent_hex, H::SettingsAccent, 0);
+            button(lay.accent_system, l10n::Get(I::SettingsThemeSystem), H::SettingsAccent, 1, false, true,
+                   vm.settings_accent_system ? L"\xE73E" : L"");
+
+            const I effects[] = {I::EffectNone, I::EffectAcrylic, I::EffectMica, I::EffectMicaAlt};
+            label(lay.effect_card, l10n::Get(I::SettingsWindowEffect), l10n::Get(I::SettingsWindowEffectDesc),
+                  L"\xE790", lay.effect_card.right - 16 * scale_);
+            for (int i = 0; i < kWindowEffectCount; ++i) {
+                const auto r = lay.effect_row[i];
+                auto preview = r;
+                preview.bottom -= 22 * scale_;
+                const bool selected = i == static_cast<int>(vm.window_effect);
+                const bool hovered = IsHovered(vm, H::SettingsEffect, i);
+                const float tint[] = {0.0f, 0.22f, 0.065f, 0.16f};
+                auto background = BlendOver(WithAlpha(theme.accent, tint[i]), theme.surface_title);
+                MakeBrush(dc, background, brFillHover_);
+                dc->FillRoundedRectangle(D2D1::RoundedRect(preview, 6 * scale_, 6 * scale_), brFillHover_.get());
+                // A small window silhouette explains the material, not a fake DWM surface.
+                dc->PushAxisAlignedClip(preview, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                if (i == 1 || i == 3) {
+                    MakeBrush(dc, WithAlpha(theme.accent, vm.dark ? 0.18f : 0.13f), brFillHover_);
+                    dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(preview.right - 18 * scale_, preview.top + 11 * scale_),
+                                                  36 * scale_, 26 * scale_),
+                                    brFillHover_.get());
+                }
+                const float inset = 10 * scale_;
+                auto window = D2D1::RectF(preview.left + inset, preview.top + 9 * scale_, preview.right - inset,
+                                          preview.bottom - 9 * scale_);
+                const float plate_alpha = i == 1 ? 0.48f : i == 3 ? 0.72f : 0.96f;
+                MakeBrush(dc, WithAlpha(theme.surface_card, plate_alpha), brFillInput_);
+                dc->FillRoundedRectangle(D2D1::RoundedRect(window, 3 * scale_, 3 * scale_), brFillInput_.get());
+                MakeBrush(dc, WithAlpha(theme.text_secondary, 0.30f), brTextSecondary_);
+                FillRoundedRect(dc, brTextSecondary_.get(), window.left + 6 * scale_, window.top + 6 * scale_,
+                                (std::min)(18 * scale_, (window.right - window.left) * 0.18f), 2 * scale_, scale_);
+                MakeBrush(dc, WithAlpha(theme.accent, 0.10f), brFillHover_);
+                FillRoundedRect(dc, brFillHover_.get(), window.right - 22 * scale_, window.top + 5 * scale_,
+                                16 * scale_, window.bottom - window.top - 10 * scale_, 2 * scale_);
+                dc->PopAxisAlignedClip();
+                MakeBrush(dc,
+                          selected  ? theme.accent
+                          : hovered ? theme.text_secondary
+                                    : theme.stroke_card,
+                          brStrokeCard_);
+                dc->DrawRoundedRectangle(D2D1::RoundedRect(preview, 6 * scale_, 6 * scale_), brStrokeCard_.get(),
+                                         selected ? 1.5f * scale_ : scale_);
+                if (selected) {
+                    const auto center = D2D1::Point2F(preview.right - 9 * scale_, preview.bottom - 9 * scale_);
+                    MakeBrush(dc, theme.accent, brAccent_);
+                    dc->FillEllipse(D2D1::Ellipse(center, 7 * scale_, 7 * scale_), brAccent_.get());
+                    DrawIconText(center.x - 6 * scale_, center.y - 6 * scale_, 12 * scale_, 12 * scale_, L"\xE73E", L"",
+                                 theme.accent_text, 0.6f);
+                }
+                painter_.DrawText(l10n::Get(effects[i]),
+                                  D2D1::RectF(r.left, preview.bottom + 3 * scale_, r.right, r.bottom),
+                                  compositor_->SmallFormat(), selected ? theme.accent : theme.text_secondary,
+                                  fluent::HorizontalAlignment::Center);
             }
-            painter_.DrawText(l10n::Get(effects[i]),D2D1::RectF(r.left,preview.bottom+3*scale_,r.right,r.bottom),
-                compositor_->SmallFormat(),selected ? theme.accent : theme.text_secondary,
-                fluent::HorizontalAlignment::Center);
-        }
-        divider(lay.effect_card);
-        dropdown(lay.language_card,lay.language_choice,I::SettingsLanguage,I::SettingsLanguageDesc,l10n::Get(languages[vm.settings_language]),1);
-        toggle(lay.startup_row[0],I::SettingsLaunch,I::SettingsLaunchDesc,L"\xE7E8",vm.settings_launch_on_startup,1);divider(lay.startup_row[0]);
-        toggle(lay.startup_tray_row,I::StartToTray,I::StartToTrayDesc,L"\xE73F",vm.settings_start_to_tray,31);divider(lay.startup_tray_row);
-        toggle(lay.startup_row[1],I::SettingsKeepRunning,I::SettingsKeepRunningDesc,L"\xE737",vm.settings_keep_running,2);divider(lay.startup_row[1]);
-        toggle(lay.last_tab_row,I::CloseLastTabWindow,I::CloseLastTabWindowDesc,L"\xE8BB",vm.settings_close_last_tab_window,32);divider(lay.last_tab_row);
-        toggle(lay.startup_row[2],I::SettingsDefaultManager,I::SettingsDefaultManagerDesc,L"\xE8B7",
-            vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc,21);
-        divider(lay.startup_row[2]);
-        toggle(lay.explorer_takeover_row,I::SettingsExplorerTakeover,I::SettingsExplorerTakeoverDesc,
-            L"\xE8B7",vm.settings_explorer_takeover,24);
-        divider(lay.explorer_takeover_row);
-        if(lay.system_status.bottom>lay.system_status.top) {
-            const auto r=lay.system_status;
-            DrawIconText(r.left+16*scale_,r.top+12*scale_,24*scale_,24*scale_,L"\xE946",L"",theme.text_secondary,0.85f);
-            painter_.DrawWrappedCaption(vm.settings_system_status,D2D1::Point2F(r.left+54*scale_,r.top+kSettingsRowPaddingDip*scale_),
-                r.right-r.left-70*scale_,theme.text_secondary);
-            divider(r);
-        }
-        toggle(lay.new_tab_row,I::SettingsNewTabHome,I::SettingsNewTabHomeDesc,L"\xE80F",vm.settings_new_tab_home,20);
-        divider(lay.new_tab_row);
-        const I external_modes[]={I::ExternalOpenReuse,I::ExternalOpenTab,I::ExternalOpenWindow};
-        dropdown(lay.external_open_card,lay.external_open_choice,I::SettingsExternalOpen,I::SettingsExternalOpenDesc,
-            l10n::Get(external_modes[std::clamp(vm.settings_external_open_mode,0,2)]),2);
-        const I density[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy};const int heights[]={28,34,40};
-        segmented(lay.density_card,lay.density_row,density,heights,vm.settings_row_height,H::SettingsDensity,I::SettingsRowHeight,I::SettingsRowHeightDesc);divider(lay.density_card);
-        const I text_render[]={I::TextRenderAuto,I::TextRenderSharp,I::TextRenderSmooth};const int text_render_values[]={0,1,2};
-        const bool text_render_stacked=lay.text_render_row[0].left<lay.text_render_card.left+100*scale_;
-        const float text_render_right=text_render_stacked ? lay.text_render_card.right-16*scale_ : lay.text_render_row[0].left-12*scale_;
-        const float text_render_caption=SettingsCaptionHeight(l10n::Get(I::SettingsTextRenderDesc),
-            text_render_right-lay.text_render_card.left-54*scale_,scale_,&painter_)/scale_;
-        segmented(lay.text_render_card,lay.text_render_row,text_render,text_render_values,vm.settings_text_render,H::SettingsTextRender,I::SettingsTextRender,I::SettingsTextRenderDesc,std::max(22.0f,text_render_caption));divider(lay.text_render_card);
-        toggle(lay.performance_row,I::SettingsShowPerformance,I::SettingsShowPerformanceDesc,L"\xE946",vm.settings_show_performance,4);divider(lay.performance_row);
-        toggle(lay.text_compare_row,I::SettingsTextCompare,I::SettingsTextCompareDesc,L"\xE8A5",vm.settings_text_compare,33);divider(lay.text_compare_row);
-        toggle(lay.list_style_row[0],I::ListSmartDate,I::ListSmartDateDesc,L"\xE787",vm.settings_list_smart_date,17);divider(lay.list_style_row[0]);
-        toggle(lay.list_style_row[1],I::ListZebraRows,I::ListZebraRowsDesc,L"\xE8FD",vm.settings_list_zebra_rows,18);divider(lay.list_style_row[1]);
-        toggle(lay.list_style_row[2],I::ListSizeBar,I::ListSizeBarDesc,L"\xE9D2",vm.settings_list_size_bar,19);divider(lay.list_style_row[2]);
-        const I folder_sort[]={I::FolderSortTop,I::FolderSortFollow,I::FolderSortMixed};const int folder_sort_values[]={0,1,2};
-        segmented(lay.folder_sort_card,lay.folder_sort_row,folder_sort,folder_sort_values,vm.settings_folder_sort,H::SettingsFolderSort,I::SettingsFolderSort,I::SettingsFolderSortDesc);
-        disclosure(lay.disclosure[0],I::SettingsAdvanced,I::SettingsAdvancedDesc,L"\xE713",0,true);
-        if(vm.settings_expanded & 1u) {
-        draw_card(lay.wallpaper_card);
-        const auto& preview = lay.wallpaper_preview;
-        MakeBrush(dc, theme.fill_hover, brFillHover_);
-        FillRoundedRect(dc, brFillHover_.get(), preview.left, preview.top,
-                        preview.right - preview.left, preview.bottom - preview.top, 6.0f * scale_);
-        if (!vm.background_image.empty())
-            material_.DrawSourceCover(dc, preview, vm.background_image);
-        MakeBrush(dc, theme.stroke_card, brStrokeCard_);
-        dc->DrawRoundedRectangle(D2D1::RoundedRect(preview, 6.0f * scale_, 6.0f * scale_),
-                                 brStrokeCard_.get(), 1.0f);
-        const float text_left = preview.right + 12.0f * scale_;
-        const bool compact_wallpaper = lay.wallpaper_choose.top >
-            lay.wallpaper_card.top + 64.0f * scale_;
-        const float text_right = compact_wallpaper
-            ? lay.wallpaper_card.right - 16.0f * scale_
-            : lay.wallpaper_choose.left - 12.0f * scale_;
-        MakeBrush(dc, theme.text, brText_);
-        DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
-                     pulse::l10n::Get(pulse::l10n::StringId::SettingsWallpaper),
-                     text_left, lay.wallpaper_card.top + 18.0f * scale_,
-                     (std::max)(40.0f * scale_, text_right - text_left), 22.0f * scale_);
-        const std::wstring wallpaper_desc = vm.background_image.empty()
-            ? pulse::l10n::Get(pulse::l10n::StringId::SettingsWallpaperDesc)
-            : FileNameOf(vm.background_image);
-        MakeBrush(dc, theme.text_secondary, brTextSecondary_);
-        DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), wallpaper_desc,
-                     text_left, lay.wallpaper_card.top + 42.0f * scale_,
-                     (std::max)(40.0f * scale_, text_right - text_left), 18.0f * scale_);
-        fluent::ControlState choose{};
-        choose.hovered = IsHovered(vm, HitTestResult::SettingsWallpaper, 0);
-        painter_.DrawButton({ lay.wallpaper_choose,
-                              pulse::l10n::Get(pulse::l10n::StringId::ChooseImage), {},
-                              fluent::ButtonKind::Standard, choose });
-        fluent::ControlState clear{};
-        clear.enabled = !vm.background_image.empty();
-        clear.hovered = clear.enabled && IsHovered(vm, HitTestResult::SettingsWallpaper, 1);
-        painter_.DrawButton({ lay.wallpaper_clear,
-                              pulse::l10n::Get(pulse::l10n::StringId::Clear), {},
-                              fluent::ButtonKind::Standard, clear });
 
+            const auto &preview = lay.wallpaper_preview;
+            MakeBrush(dc, theme.fill_hover, brFillHover_);
+            FillRoundedRect(dc, brFillHover_.get(), preview.left, preview.top, preview.right - preview.left,
+                            preview.bottom - preview.top, 6.0f * scale_);
+            if (!vm.background_image.empty()) material_.DrawSourceCover(dc, preview, vm.background_image);
+            MakeBrush(dc, theme.stroke_card, brStrokeCard_);
+            dc->DrawRoundedRectangle(D2D1::RoundedRect(preview, 6.0f * scale_, 6.0f * scale_), brStrokeCard_.get(),
+                                     1.0f);
+            const float text_left = preview.right + 12.0f * scale_;
+            const bool compact_wallpaper = lay.wallpaper_choose.top > lay.wallpaper_card.top + 64.0f * scale_;
+            const float text_right = compact_wallpaper ? lay.wallpaper_card.right - 16.0f * scale_
+                                                       : lay.wallpaper_choose.left - 12.0f * scale_;
+            MakeBrush(dc, theme.text, brText_);
+            DrawTextRect(dc, compositor_->TextFormat(), brText_.get(),
+                         pulse::l10n::Get(pulse::l10n::StringId::SettingsWallpaper), text_left,
+                         lay.wallpaper_card.top + 18.0f * scale_, (std::max)(40.0f * scale_, text_right - text_left),
+                         22.0f * scale_);
+            const std::wstring wallpaper_desc = vm.background_image.empty()
+                                                    ? pulse::l10n::Get(pulse::l10n::StringId::SettingsWallpaperDesc)
+                                                    : FileNameOf(vm.background_image);
+            MakeBrush(dc, theme.text_secondary, brTextSecondary_);
+            DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), wallpaper_desc, text_left,
+                         lay.wallpaper_card.top + 42.0f * scale_, (std::max)(40.0f * scale_, text_right - text_left),
+                         18.0f * scale_);
+            fluent::ControlState choose{};
+            choose.hovered = IsHovered(vm, HitTestResult::SettingsWallpaper, 0);
+            painter_.DrawButton({lay.wallpaper_choose,
+                                 pulse::l10n::Get(pulse::l10n::StringId::ChooseImage),
+                                 {},
+                                 fluent::ButtonKind::Standard,
+                                 choose});
+            fluent::ControlState clear{};
+            clear.enabled = !vm.background_image.empty();
+            clear.hovered = clear.enabled && IsHovered(vm, HitTestResult::SettingsWallpaper, 1);
+            painter_.DrawButton({lay.wallpaper_clear,
+                                 pulse::l10n::Get(pulse::l10n::StringId::Clear),
+                                 {},
+                                 fluent::ButtonKind::Standard,
+                                 clear});
 
-            draw_card(lay.wallpaper_fit_card);
-            label(lay.wallpaper_fit_card,l10n::Get(I::SettingsMatchBackground),l10n::Get(I::SettingsMatchBackgroundDesc),L"\xE740",
-                lay.wallpaper_fit.left < lay.wallpaper_fit_card.left+100*scale_
-                    ? lay.wallpaper_fit_card.right-16*scale_ : lay.wallpaper_fit.left-12*scale_);
-            const auto background_size = BackgroundImageSize(vm.background_image);
-            button(lay.wallpaper_fit,l10n::Get(I::MatchWindowSize),H::SettingsWallpaper,2,false,
-                !vm.settings_lock_window_size && background_size.cx>0 && background_size.cy>0);
-            draw_card(lay.window_size_lock_row);
-            toggle(lay.window_size_lock_row,I::SettingsLockWindowSize,I::SettingsLockWindowSizeDesc,L"\xE72E",vm.settings_lock_window_size,34);
-            const int levels[]={0,1,2};
-            draw_card(lay.wallpaper_look_card);
-            label(lay.wallpaper_look_card,l10n::Get(I::SettingsWallpaperLook),l10n::Get(I::SettingsWallpaperLookDesc),L"\xE8A4",
-                lay.wallpaper_look_value.left<lay.wallpaper_look_card.left+100*scale_ ? lay.wallpaper_look_card.right-16*scale_ : lay.wallpaper_look_value.left-12*scale_);
-            button(lay.wallpaper_look_value,std::to_wstring(vm.wallpaper_visibility)+L"%",H::SettingsWallpaperLook,0);
-            const I blurs[]={I::WallpaperBlurOff,I::WallpaperBlurLight,I::WallpaperBlurStrong};
-            draw_card(lay.wallpaper_blur_card);segmented(lay.wallpaper_blur_card,lay.wallpaper_blur_row,blurs,levels,vm.wallpaper_blur,H::SettingsWallpaperBlur,I::SettingsWallpaperBlur,I::SettingsWallpaperBlurDesc);
-            const I sizes[]={I::SettingsTraySmall,I::SettingsTrayStandard,I::SettingsTrayLarge};const int icons[]={40,48,56};
-            draw_card(lay.tray_icon_card);segmented(lay.tray_icon_card,lay.tray_icon_row,sizes,icons,vm.settings_tray_icon,H::SettingsTrayIcon,I::SettingsTrayIcon,I::SettingsTrayIconDesc);
-            draw_card(lay.hidden_files_row);toggle(lay.hidden_files_row,I::SettingsShowHidden,I::SettingsShowHiddenDesc,L"\xE890",vm.settings_show_hidden_files,5);
+            const int levels[] = {0, 1, 2};
+
+            label(lay.wallpaper_look_card, l10n::Get(I::SettingsWallpaperLook), l10n::Get(I::SettingsWallpaperLookDesc),
+                  L"\xE8A4",
+                  lay.wallpaper_look_value.left < lay.wallpaper_look_card.left + 100 * scale_
+                      ? lay.wallpaper_look_card.right - 16 * scale_
+                      : lay.wallpaper_look_value.left - 12 * scale_);
+            button(lay.wallpaper_look_value, std::to_wstring(vm.wallpaper_visibility) + L"%", H::SettingsWallpaperLook,
+                   0);
+            const I blurs[] = {I::WallpaperBlurOff, I::WallpaperBlurLight, I::WallpaperBlurStrong};
+            segmented(lay.wallpaper_blur_card, lay.wallpaper_blur_row, blurs, levels, vm.wallpaper_blur,
+                      H::SettingsWallpaperBlur, I::SettingsWallpaperBlur, I::SettingsWallpaperBlurDesc);
+            dropdown(lay.language_card, lay.language_choice, I::SettingsLanguage, I::SettingsLanguageDesc,
+                     l10n::Get(languages[vm.settings_language]), 1);
+            const I text_render[] = {I::TextRenderAuto, I::TextRenderSharp, I::TextRenderSmooth};
+            const int text_render_values[] = {0, 1, 2};
+            const bool text_render_stacked = lay.text_render_row[0].left < lay.text_render_card.left + 100 * scale_;
+            const float text_render_right = text_render_stacked ? lay.text_render_card.right - 16 * scale_
+                                                                : lay.text_render_row[0].left - 12 * scale_;
+            const float text_render_caption =
+                SettingsCaptionHeight(l10n::Get(I::SettingsTextRenderDesc),
+                                      text_render_right - lay.text_render_card.left - 54 * scale_, scale_, &painter_) /
+                scale_;
+            segmented(lay.text_render_card, lay.text_render_row, text_render, text_render_values,
+                      vm.settings_text_render, H::SettingsTextRender, I::SettingsTextRender, I::SettingsTextRenderDesc,
+                      std::max(22.0f, text_render_caption));
+        } else if (vm.settings_page == 6) {
+            toggle(lay.blank_click_row, I::SettingsBlankClickBack, I::SettingsBlankClickBackDesc, L"\xE72B",
+                   vm.settings_blank_click_go_back, 7);
+            toggle(lay.hidden_files_row, I::SettingsShowHidden, I::SettingsShowHiddenDesc, L"\xE890",
+                   vm.settings_show_hidden_files, 5);
             // Hidden + system entries: File Explorer keeps these behind a second option.
-            draw_card(lay.protected_files_row);toggle(lay.protected_files_row,I::SettingsShowProtected,I::SettingsShowProtectedDesc,L"\xE72E",vm.settings_show_protected_os_files,16);
-            draw_card(lay.pinned_names_row);toggle(lay.pinned_names_row,I::PinnedNames,I::PinnedNamesDesc,L"\xE718",vm.show_pinned_tab_names,6);
-            draw_card(lay.blank_click_row);toggle(lay.blank_click_row,I::SettingsBlankClickBack,I::SettingsBlankClickBackDesc,L"\xE72B",vm.settings_blank_click_go_back,7);
-            draw_card(lay.change_tracking_row);toggle(lay.change_tracking_row,I::SettingsChangeTracking,I::SettingsChangeTrackingDesc,L"\xE823",vm.settings_change_tracking,8);
-            const I days[]={I::ChangeToday,I::ChangeLast3Days,I::ChangeLast7Days};const int day_values[]={1,3,7};
-            draw_card(lay.change_days_row);segmented(lay.change_days_row,lay.change_days,days,day_values,vm.settings_change_days,H::SettingsChangeDays,I::SettingsChangeDays,I::SettingsChangeTrackingDesc);
+            toggle(lay.protected_files_row, I::SettingsShowProtected, I::SettingsShowProtectedDesc, L"\xE72E",
+                   vm.settings_show_protected_os_files, 16);
+            const I density[] = {I::SettingsDensityCompact, I::SettingsDensityStandard, I::SettingsDensityRoomy};
+            const int heights[] = {28, 34, 40};
+            segmented(lay.density_card, lay.density_row, density, heights, vm.settings_row_height, H::SettingsDensity,
+                      I::SettingsRowHeight, I::SettingsRowHeightDesc);
+            toggle(lay.list_style_row[0], I::ListSmartDate, I::ListSmartDateDesc, L"\xE787",
+                   vm.settings_list_smart_date, 17);
+            toggle(lay.list_style_row[1], I::ListZebraRows, I::ListZebraRowsDesc, L"\xE8FD",
+                   vm.settings_list_zebra_rows, 18);
+            toggle(lay.list_style_row[2], I::ListSizeBar, I::ListSizeBarDesc, L"\xE9D2", vm.settings_list_size_bar, 19);
+            const I folder_sort[] = {I::FolderSortTop, I::FolderSortFollow, I::FolderSortMixed};
+            const int folder_sort_values[] = {0, 1, 2};
+            segmented(lay.folder_sort_card, lay.folder_sort_row, folder_sort, folder_sort_values,
+                      vm.settings_folder_sort, H::SettingsFolderSort, I::SettingsFolderSort, I::SettingsFolderSortDesc);
+            toggle(lay.performance_row, I::SettingsShowPerformance, I::SettingsShowPerformanceDesc, L"\xE946",
+                   vm.settings_show_performance, 4);
+        } else if (vm.settings_page == 7) {
+            toggle(lay.new_tab_row, I::SettingsNewTabHome, I::SettingsNewTabHomeDesc, L"\xE80F",
+                   vm.settings_new_tab_home, 20);
+
+            const I external_modes[] = {I::ExternalOpenReuse, I::ExternalOpenTab, I::ExternalOpenWindow};
+            dropdown(lay.external_open_card, lay.external_open_choice, I::SettingsExternalOpen,
+                     I::SettingsExternalOpenDesc,
+                     l10n::Get(external_modes[std::clamp(vm.settings_external_open_mode, 0, 2)]), 2);
+            toggle(lay.pinned_names_row, I::PinnedNames, I::PinnedNamesDesc, L"\xE718", vm.show_pinned_tab_names, 6);
+            toggle(lay.last_tab_row, I::CloseLastTabWindow, I::CloseLastTabWindowDesc, L"\xE8BB",
+                   vm.settings_close_last_tab_window, 32);
+
+            label(lay.wallpaper_fit_card, l10n::Get(I::SettingsMatchBackground),
+                  l10n::Get(I::SettingsMatchBackgroundDesc), L"\xE740",
+                  lay.wallpaper_fit.left < lay.wallpaper_fit_card.left + 100 * scale_
+                      ? lay.wallpaper_fit_card.right - 16 * scale_
+                      : lay.wallpaper_fit.left - 12 * scale_);
+            const auto background_size = BackgroundImageSize(vm.background_image);
+            button(lay.wallpaper_fit, l10n::Get(I::MatchWindowSize), H::SettingsWallpaper, 2, false,
+                   !vm.settings_lock_window_size && background_size.cx > 0 && background_size.cy > 0);
+
+            toggle(lay.window_size_lock_row, I::SettingsLockWindowSize, I::SettingsLockWindowSizeDesc, L"\xE72E",
+                   vm.settings_lock_window_size, 34);
+        } else if (vm.settings_page == 8) {
+            toggle(lay.startup_row[2], I::SettingsDefaultManager, I::SettingsDefaultManagerDesc, L"\xE8B7",
+                   vm.settings_open_folders && vm.settings_take_over_win_e && vm.settings_take_over_this_pc, 21);
+
+            toggle(lay.explorer_takeover_row, I::SettingsExplorerTakeover, I::SettingsExplorerTakeoverDesc, L"\xE8B7",
+                   vm.settings_explorer_takeover, 24);
+
+            if (lay.system_status.bottom > lay.system_status.top) {
+                const auto r = lay.system_status;
+                DrawIconText(r.left + 16 * scale_, r.top + 12 * scale_, 24 * scale_, 24 * scale_, L"\xE946", L"",
+                             theme.text_secondary, 0.85f);
+                painter_.DrawWrappedCaption(
+                    vm.settings_system_status,
+                    D2D1::Point2F(r.left + 54 * scale_, r.top + kSettingsRowPaddingDip * scale_),
+                    r.right - r.left - 70 * scale_, theme.text_secondary);
+            }
+            toggle(lay.startup_row[0], I::SettingsLaunch, I::SettingsLaunchDesc, L"\xE7E8",
+                   vm.settings_launch_on_startup, 1);
+            toggle(lay.startup_tray_row, I::StartToTray, I::StartToTrayDesc, L"\xE73F", vm.settings_start_to_tray, 31);
+            toggle(lay.startup_row[1], I::SettingsKeepRunning, I::SettingsKeepRunningDesc, L"\xE737",
+                   vm.settings_keep_running, 2);
+
+            const auto config = lay.configuration_path;
+            text(l10n::Get(I::ConfigurationLocation),
+                 D2D1::RectF(config.left + 16 * scale_, config.top + 8 * scale_, config.right - 16 * scale_,
+                             config.top + 32 * scale_));
+            text(vm.settings_configuration_path,
+                 D2D1::RectF(config.left + 16 * scale_, config.top + 34 * scale_, config.right - 16 * scale_,
+                             config.top + 56 * scale_),
+                 true);
+            const auto status_bounds = D2D1::RectF(config.left + 16 * scale_, config.top + 60 * scale_,
+                                                   config.right - 16 * scale_, config.top + 100 * scale_);
+            dc->PushAxisAlignedClip(status_bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            painter_.DrawWrappedCaption(vm.settings_configuration_status.empty()
+                                            ? l10n::Get(I::StorageRestartDescription)
+                                            : vm.settings_configuration_status,
+                                        D2D1::Point2F(status_bounds.left, status_bounds.top),
+                                        status_bounds.right - status_bounds.left, theme.text_secondary);
+            dc->PopAxisAlignedClip();
+            button(lay.configuration_action[0], l10n::Get(I::OpenLocation), H::SettingsConfigurationAction, 0);
+            button(lay.configuration_action[1], l10n::Get(I::ChangeLocation), H::SettingsConfigurationAction, 1, true,
+                   !vm.settings_storage_pending);
+            dc->PushAxisAlignedClip(lay.footer, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            painter_.DrawWrappedCaption(l10n::Get(I::SettingsStorageFooter),
+                                        D2D1::Point2F(lay.footer.left, lay.footer.top),
+                                        lay.footer.right - lay.footer.left, theme.text_secondary);
+            dc->PopAxisAlignedClip();
+        } else if (vm.settings_page == 9) {
+            const I sizes[] = {I::SettingsTraySmall, I::SettingsTrayStandard, I::SettingsTrayLarge};
+            const int icons[] = {40, 48, 56};
+            segmented(lay.tray_icon_card, lay.tray_icon_row, sizes, icons, vm.settings_tray_icon, H::SettingsTrayIcon,
+                      I::SettingsTrayIcon, I::SettingsTrayIconDesc);
+            toggle(lay.text_compare_row, I::SettingsTextCompare, I::SettingsTextCompareDesc, L"\xE8A5",
+                   vm.settings_text_compare, 33);
+            toggle(lay.change_tracking_row, I::SettingsChangeTracking, I::SettingsChangeTrackingDesc, L"\xE823",
+                   vm.settings_change_tracking, 8);
+            const I days[] = {I::ChangeToday, I::ChangeLast3Days, I::ChangeLast7Days};
+            const int day_values[] = {1, 3, 7};
+            segmented(lay.change_days_row, lay.change_days, days, day_values, vm.settings_change_days,
+                      H::SettingsChangeDays, I::SettingsChangeDays, I::SettingsChangeTrackingDesc);
         }
-        draw_card(lay.configuration_path);
-        const auto config = lay.configuration_path;
-        text(l10n::Get(I::ConfigurationLocation),D2D1::RectF(config.left+16*scale_,config.top+8*scale_,config.right-16*scale_,config.top+32*scale_));
-        text(vm.settings_configuration_path,D2D1::RectF(config.left+16*scale_,config.top+34*scale_,config.right-16*scale_,config.top+56*scale_),true);
-        const auto status_bounds = D2D1::RectF(config.left+16*scale_,config.top+60*scale_,config.right-16*scale_,config.top+100*scale_);
-        dc->PushAxisAlignedClip(status_bounds,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        painter_.DrawWrappedCaption(vm.settings_configuration_status.empty() ? l10n::Get(I::StorageRestartDescription) : vm.settings_configuration_status,D2D1::Point2F(status_bounds.left,status_bounds.top),status_bounds.right-status_bounds.left,theme.text_secondary);
-        dc->PopAxisAlignedClip();
-        button(lay.configuration_action[0],l10n::Get(I::OpenLocation),H::SettingsConfigurationAction,0);
-        button(lay.configuration_action[1],l10n::Get(I::ChangeLocation),H::SettingsConfigurationAction,1,true,!vm.settings_storage_pending);
-        dc->PushAxisAlignedClip(lay.footer,D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        painter_.DrawWrappedCaption(l10n::Get(I::SettingsStorageFooter),D2D1::Point2F(lay.footer.left,lay.footer.top),lay.footer.right-lay.footer.left,theme.text_secondary);
-        dc->PopAxisAlignedClip();
     } else {
         section(0,I::SearchModeName);section(1,I::SearchModeContent);
         draw_card(lay.group[0]);draw_card(lay.group[1]);

@@ -1,0 +1,94 @@
+{
+  "number": 338,
+  "title": "右键菜单不生效，右键EXE没有固定到开始菜单",
+  "body": "右键菜单不生效，右键EXE没有固定到开始菜单\n\n<img width=\"2034\" height=\"1467\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/05f9feee-d8b8-4b7e-8a2e-921085579994\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/338",
+  "captured_at": "2026-10-23T03:10:07.129167+00:00",
+  "updated_at": "2026-10-22T15:24:02Z",
+  "comments": [
+    {
+      "body": "你这不是有个 从开始菜单取消固定吗？",
+      "bodyHTML": "<p dir=\"auto\">你这不是有个 从开始菜单取消固定吗？</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjExODY1NjYx",
+        "login": "Dzika",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/11865661?v=4",
+        "profileUrl": "https://github.com/Dzika",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6284814181"
+    },
+    {
+      "body": "我是默认开机启动，替代文件管理器，就行了！",
+      "bodyHTML": "<p dir=\"auto\">我是默认开机启动，替代文件管理器，就行了！</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjg4MzcwMjIx",
+        "login": "abchook",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/88370221?v=4",
+        "profileUrl": "https://github.com/abchook",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6285202658"
+    },
+    {
+      "body": "我开始是没有的，在开始菜单里右击固定的，刚才截图时没注意，还真是有了个取消，我也不清楚原因，此外右击后没有发送到桌面快捷方式",
+      "bodyHTML": "<p dir=\"auto\">我开始是没有的，在开始菜单里右击固定的，刚才截图时没注意，还真是有了个取消，我也不清楚原因，此外右击后没有发送到桌面快捷方式</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBwnhmg",
+        "login": "haorenlinge",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/118088090?v=4",
+        "profileUrl": "https://github.com/haorenlinge",
+        "name": "好人琳哥"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6285261236"
+    },
+    {
+      "body": "我这也没有，不知道怎么切换。我至今还在用win10磁贴，还是挺影响使用的",
+      "bodyHTML": "<p dir=\"auto\">我这也没有，不知道怎么切换。我至今还在用win10磁贴，还是挺影响使用的</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjc5NTY3ODkz",
+        "login": "Sherlock-debug",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/79567893?u=47f2a2adad61fd74acad991e4f96a086495f0da3&v=4",
+        "profileUrl": "https://github.com/Sherlock-debug",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6288225199"
+    },
+    {
+      "body": "确实没有，不知道怎么显示",
+      "bodyHTML": "<p dir=\"auto\">确实没有，不知道怎么显示</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjc4MDA5NTI=",
+        "login": "appleat",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/7800952?v=4",
+        "profileUrl": "https://github.com/appleat",
+        "name": "appleat"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6306719486"
+    },
+    {
+      "body": "﻿## 鏍瑰洜瀹氫綅锛歚pulse_shell.exe` 鐨勬敞鍐岃〃鎵弿鏍归敭閲屾病鏈?`exefile`\n\n鎴戝湪 1.0.56 涓婂鐜板苟瀹氫綅鍒颁簡纭垏鍘熷洜銆傚紑鍏虫槸寮€鐫€鐨勶紙`context_menu.json` 閲?`system_extra: true`锛夛紝浣嗚繖椤规案杩滃嚭涓嶆潵锛屽洜涓哄畠**鏍规湰娌¤鏋氫妇鍒?*銆?\n### 澶嶇幇瀵圭収\n\n鐢?`IShellFolder::GetUIObjectOf(IID_IContextMenu)` + `QueryContextMenu` 鐩存帴鏋勫缓鑿滃崟锛屽姣斿悓涓€鎵规枃浠讹細\n\n| 鐩爣 | Explorer 鑿滃崟閲屾湁銆屽浐瀹氬埌\"寮€濮?銆嶅悧 |\n| --- | --- |\n| `b.exe`锛堝鍒跺嚭鏉ョ殑 notepad锛?| 鉁?鏈夛紝`id=121` |\n| `a.txt` | 鉂?娌℃湁 |\n| 鏂囦欢澶?| 鉁?鏈夛紝`id=78` |\n\n杩欏拰娉ㄥ唽琛ㄤ綅缃畬鍏ㄥ惢鍚?鈥斺€?璇?handler 鍙敞鍐屽湪**涓や釜**浣嶇疆锛?\n```\nHKCR\\exefile\\shellex\\ContextMenuHandlers\\PintoStartScreen  ->  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\nHKCR\\Folder\\shellex\\ContextMenuHandlers\\PintoStartScreen   ->  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\n```\n\n`{470C0EBD}` 鎸囧悜 `appresolver.dll`锛圵in11 鐪熸骞叉椿鐨勯偅涓級銆?\n### 闂鎵€鍦?\n`pulse_shell.exe` 閲岀‖缂栫爜鐨勬壂鎻忔牴閿彧鏈夎繖 7 涓細\n\n```\nDirectory\\Background / Directory / Folder / LibraryFolder\\Background / Drive / * / AllFilesystemObjects\n```\n\n**`exefile` 涓嶅湪鍏朵腑**銆傚疄娴嬩簩杩涘埗閲?`exefile` 鍑虹幇 0 娆★紝`ProgID` 涔熸槸 0 娆?鈥斺€?涔熷氨鏄畬鍏ㄦ病鏈?鎸?ProgID / 鎵╁睍鍚嶈В鏋?杩欐潯璺緞銆?\n鏃ュ織鍗拌瘉锛?\n```\npulse_shell_host.log 閲岃鏌ヨ杩囩殑 handler 鍏?18 涓?{470C0EBD} 鏌ヨ娆℃暟 = 0\n```\n\nPulse 浠庡ご鍒板熬娌￠棶杩囪繖涓?handler锛屾墍浠ュ紑鍏冲紑鎴栧叧閮戒笉褰卞搷缁撴灉銆?\n### 闄勫甫鍙戠幇\n\n`pulse_shell.exe` 浼氬幓鏌?`{a2a9545d}`锛堟棫鐗?Start Menu Pin锛夊拰 `{90aa3a4e}`锛圱askband Pin锛夛紝杩欎袱涓湪 Win11 涓婂凡缁忔槸绌哄３锛屾棩蹇楅噷绋冲畾 `rows=0`锛涚湡姝ｇ敓鏁堢殑 `{470C0EBD}` 鍙嶈€屾病琚壂鍒般€?\n### 寤鸿\n\n1. 鍦ㄦ壂鎻忔牴閿噷琛ヤ笂 `exefile`锛堜互鍙?`SystemFileAssociations\\<ext>` / `<progid>` 鐨?shellex 鍒嗘敮锛夛紱\n2. 鏇村交搴曠殑鍋氭硶锛?*閫夊尯鑿滃崟涔熸敼鎴愬悜 Shell 瑕佸悎骞惰彍鍗?*锛岃€屼笉鏄嚜宸辨壂娉ㄥ唽琛?鈥斺€?杩欏拰 #48 鏄悓涓€绫绘牴鍥狅紝閭ｈ竟宸茬粡楠岃瘉杩囧彲琛屻€?\n鎸夌 2 鏉℃敼锛宍exefile` 杩欑被\"鍙敞鍐屽湪鐗瑰畾 ProgID 涓?鐨?handler 鎵嶄細涓€鍔虫案閫稿湴瑕嗙洊鍒般€?\n### 鐜\n\n- Pulse 1.0.56锛坆uild `20261016T005022Z-C715C169`锛?- Windows 11 26H2 / Build 26340\n- 涓?#338 鏄悓涓€闂锛屾湰璐磋ˉ鍏呬簡鏍瑰洜\n\r\n",
+      "bodyHTML": "<h2 dir=\"auto\">鏍瑰洜瀹氫綅锛歚pulse_shell.exe<code class=\"notranslate\"> 鐨勬敞鍐岃〃鎵弿鏍归敭閲屾病鏈?</code>exefile`</h2>\n<p dir=\"auto\">鎴戝湪 1.0.56 涓婂鐜板苟瀹氫綅鍒颁簡纭垏鍘熷洜銆傚紑鍏虫槸寮€鐫€鐨勶紙<code class=\"notranslate\">context_menu.json</code> 閲?<code class=\"notranslate\">system_extra: true</code>锛夛紝浣嗚繖椤规案杩滃嚭涓嶆潵锛屽洜涓哄畠**鏍规湰娌¤鏋氫妇鍒?*銆?</p>\n<h3 dir=\"auto\">澶嶇幇瀵圭収</h3>\n<p dir=\"auto\">鐢?<code class=\"notranslate\">IShellFolder::GetUIObjectOf(IID_IContextMenu)</code> + <code class=\"notranslate\">QueryContextMenu</code> 鐩存帴鏋勫缓鑿滃崟锛屽姣斿悓涓€鎵规枃浠讹細</p>\n<markdown-accessiblity-table><table role=\"table\">\n<thead>\n<tr>\n<th>鐩爣</th>\n<th>Explorer 鑿滃崟閲屾湁銆屽浐瀹氬埌\"寮€濮?銆嶅悧</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code class=\"notranslate\">b.exe</code>锛堝鍒跺嚭鏉ョ殑 notepad锛?</td>\n<td>鉁?鏈夛紝<code class=\"notranslate\">id=121</code></td>\n</tr>\n<tr>\n<td><code class=\"notranslate\">a.txt</code></td>\n<td>鉂?娌℃湁</td>\n</tr>\n<tr>\n<td>鏂囦欢澶?</td>\n<td>鉁?鏈夛紝<code class=\"notranslate\">id=78</code></td>\n</tr>\n</tbody>\n</table></markdown-accessiblity-table>\n<p dir=\"auto\">杩欏拰娉ㄥ唽琛ㄤ綅缃畬鍏ㄥ惢鍚?鈥斺€?璇?handler 鍙敞鍐屽湪<strong>涓や釜</strong>浣嶇疆锛?</p>\n<div class=\"snippet-clipboard-content notranslate position-relative overflow-auto\" data-snippet-clipboard-copy-content=\"HKCR\\exefile\\shellex\\ContextMenuHandlers\\PintoStartScreen  -&gt;  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\nHKCR\\Folder\\shellex\\ContextMenuHandlers\\PintoStartScreen   -&gt;  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\"><pre class=\"notranslate\"><code class=\"notranslate\">HKCR\\exefile\\shellex\\ContextMenuHandlers\\PintoStartScreen  -&gt;  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\nHKCR\\Folder\\shellex\\ContextMenuHandlers\\PintoStartScreen   -&gt;  {470C0EBD-5D73-4d58-9CED-E91E22E23282}\n</code></pre></div>\n<p dir=\"auto\"><code class=\"notranslate\">{470C0EBD}</code> 鎸囧悜 <code class=\"notranslate\">appresolver.dll</code>锛圵in11 鐪熸骞叉椿鐨勯偅涓級銆?</p>\n<h3 dir=\"auto\">闂鎵€鍦?</h3>\n<p dir=\"auto\"><code class=\"notranslate\">pulse_shell.exe</code> 閲岀‖缂栫爜鐨勬壂鎻忔牴閿彧鏈夎繖 7 涓細</p>\n<div class=\"snippet-clipboard-content notranslate position-relative overflow-auto\" data-snippet-clipboard-copy-content=\"Directory\\Background / Directory / Folder / LibraryFolder\\Background / Drive / * / AllFilesystemObjects\"><pre class=\"notranslate\"><code class=\"notranslate\">Directory\\Background / Directory / Folder / LibraryFolder\\Background / Drive / * / AllFilesystemObjects\n</code></pre></div>\n<p dir=\"auto\"><strong><code class=\"notranslate\">exefile</code> 涓嶅湪鍏朵腑</strong>銆傚疄娴嬩簩杩涘埗閲?<code class=\"notranslate\">exefile</code> 鍑虹幇 0 娆★紝<code class=\"notranslate\">ProgID</code> 涔熸槸 0 娆?鈥斺€?涔熷氨鏄畬鍏ㄦ病鏈?鎸?ProgID / 鎵╁睍鍚嶈В鏋?杩欐潯璺緞銆?<br>\n鏃ュ織鍗拌瘉锛?</p>\n<div class=\"snippet-clipboard-content notranslate position-relative overflow-auto\" data-snippet-clipboard-copy-content=\"pulse_shell_host.log 閲岃鏌ヨ杩囩殑 handler 鍏?18 涓?{470C0EBD} 鏌ヨ娆℃暟 = 0\"><pre class=\"notranslate\"><code class=\"notranslate\">pulse_shell_host.log 閲岃鏌ヨ杩囩殑 handler 鍏?18 涓?{470C0EBD} 鏌ヨ娆℃暟 = 0\n</code></pre></div>\n<p dir=\"auto\">Pulse 浠庡ご鍒板熬娌￠棶杩囪繖涓?handler锛屾墍浠ュ紑鍏冲紑鎴栧叧閮戒笉褰卞搷缁撴灉銆?</p>\n<h3 dir=\"auto\">闄勫甫鍙戠幇</h3>\n<p dir=\"auto\"><code class=\"notranslate\">pulse_shell.exe</code> 浼氬幓鏌?<code class=\"notranslate\">{a2a9545d}</code>锛堟棫鐗?Start Menu Pin锛夊拰 <code class=\"notranslate\">{90aa3a4e}</code>锛圱askband Pin锛夛紝杩欎袱涓湪 Win11 涓婂凡缁忔槸绌哄３锛屾棩蹇楅噷绋冲畾 <code class=\"notranslate\">rows=0</code>锛涚湡姝ｇ敓鏁堢殑 <code class=\"notranslate\">{470C0EBD}</code> 鍙嶈€屾病琚壂鍒般€?</p>\n<h3 dir=\"auto\">寤鸿</h3>\n<ol dir=\"auto\">\n<li>鍦ㄦ壂鎻忔牴閿噷琛ヤ笂 <code class=\"notranslate\">exefile</code>锛堜互鍙?<code class=\"notranslate\">SystemFileAssociations\\&lt;ext&gt;</code> / <code class=\"notranslate\">&lt;progid&gt;</code> 鐨?shellex 鍒嗘敮锛夛紱</li>\n<li>鏇村交搴曠殑鍋氭硶锛?*閫夊尯鑿滃崟涔熸敼鎴愬悜 Shell 瑕佸悎骞惰彍鍗?*锛岃€屼笉鏄嚜宸辨壂娉ㄥ唽琛?鈥斺€?杩欏拰 <span class=\"reference\"><svg data-component=\"Octicon\" class=\"octicon octicon-issue-closed closed mr-1\" title=\"Closed\" viewBox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\"><path d=\"M11.28 6.78a.75.75 0 0 0-1.06-1.06L7.25 8.69 5.78 7.22a.75.75 0 0 0-1.06 1.06l2 2a.75.75 0 0 0 1.06 0l3.5-3.5Z\"></path><path d=\"M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0Zm-1.5 0a6.5 6.5 0 1 0-13 0 6.5 6.5 0 0 0 13 0Z\"></path></svg><a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5648512432\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/48\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/48/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/48\">[BUG] 文件和文件夹右键菜单缺少打包扩展（WinRAR），空白处正常<span class=\"issue-shorthand\"> #48</span></a></span> 鏄悓涓€绫绘牴鍥狅紝閭ｈ竟宸茬粡楠岃瘉杩囧彲琛屻€?<br>\n鎸夌 2 鏉℃敼锛宍exefile` 杩欑被\"鍙敞鍐屽湪鐗瑰畾 ProgID 涓?鐨?handler 鎵嶄細涓€鍔虫案閫稿湴瑕嗙洊鍒般€?</li>\n</ol>\n<h3 dir=\"auto\">鐜</h3>\n<ul dir=\"auto\">\n<li>Pulse 1.0.56锛坆uild <code class=\"notranslate\">20261016T005022Z-C715C169</code>锛?- Windows 11 26H2 / Build 26340</li>\n<li>涓?<span class=\"reference\"><svg data-component=\"Octicon\" class=\"octicon octicon-issue-opened open mr-1\" title=\"Open\" viewBox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\"><path d=\"M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\"></path><path d=\"M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z\"></path></svg><a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5936736534\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/338\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/338/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/338\">右键菜单不生效，右键EXE没有固定到开始菜单<span class=\"issue-shorthand\"> #338</span></a></span> 鏄悓涓€闂锛屾湰璐磋ˉ鍏呬簡鏍瑰洜</li>\n</ul>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjY0Nzc0MDUw",
+        "login": "emmm00",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/64774050?v=4",
+        "profileUrl": "https://github.com/emmm00",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/338#issuecomment-6344449254"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVf7K-gAqjYyODQ4MTQxODE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWQ2SlAAqjYzNDQ0NDkyNTQ="
+  }
+}

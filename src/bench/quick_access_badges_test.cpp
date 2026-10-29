@@ -1,7 +1,11 @@
 #include "../app/app_model.h"
 #include "../app/places.h"
+#include "../app/sidebar_pin_menu.h"
+#include "workspace_snapshot_cases.h"
+#include "workspace_badge_cases.h"
 #include "../common/utf8_file.h"
 #include "../ui/FluentTokens.h"
+#include "../ui/ui_renderer_internal.h"
 #include <cstdio>
 #include <filesystem>
 #include <memory>
@@ -77,6 +81,175 @@ int wmain(int argc, wchar_t** argv) {
     const std::wstring pinned = L"C:\\fixture\\pinned";
     const std::wstring cloud = L"\\\\server\\share\\云盘";
     const std::wstring long_path = L"C:\\fixture\\" + std::wstring(280, L'x');
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--workspaces")
+        return RunWorkspaceSnapshotChecks(data_dir);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--workspace-badges")
+        return RunWorkspaceBadgeChecks();
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--sidebar-pins") {
+        l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        using K = app::SidebarPinnedKind;
+        app::PlacesCatalog places;
+        places.persist = false;
+        places.PinWorkspace(L"C:\\fixture\\first", L"First", 0, {L"C:\\fixture\\first"});
+        places.PinWorkspace(L"C:\\fixture\\second", L"Second", 0, {L"C:\\fixture\\second"});
+        places.SetQuickAccessPinned({L"C:\\fixture\\second", cloud, long_path}, true);
+        const auto workspace = app::ResolveSidebarPinnedPlace(places, L"pulse:workspace:1");
+        const auto quick = app::ResolveSidebarPinnedPlace(places, L"C:\\fixture\\second");
+        check(workspace && workspace->kind == K::Workspace &&
+              workspace->path == fs::NormalizePath(L"C:\\fixture\\second"),
+            "workspace menu captures its root rather than retaining a mutable sidebar index");
+        check(quick && quick->kind == K::QuickAccess, "quick access row resolves to its own pin kind");
+        for (const auto* path : {L"pulse:workspace:", L"pulse:workspace:abc", L"pulse:workspace:-1",
+                                  L"pulse:workspace:2", L"pulse:workspace:1junk", L"C:\\not-pinned"})
+            check(!app::ResolveSidebarPinnedPlace(places, path), "invalid or unpinned rows cannot open a pin menu");
+        const auto quick_menu = app::BuildSidebarPinMenu(K::QuickAccess);
+        const auto workspace_menu = app::BuildSidebarPinMenu(K::Workspace);
+        check(quick_menu.size() == 2 && workspace_menu.size() == 3 &&
+              quick_menu[0].command == workspace_menu[0].command &&
+              quick_menu[1].command == workspace_menu[2].command &&
+              quick_menu[0].glyph == workspace_menu[0].glyph && quick_menu[1].glyph == workspace_menu[2].glyph,
+              "both pin types use the same Open and Unpin rows and icons");
+        check(workspace_menu[1].command == static_cast<int>(app::SidebarPinCommand::Rename),
+              "workspace offers Rename between Open and Unpin without changing quick-access actions");
+        check(quick_menu[1].text == L"从快速访问取消固定" && workspace_menu[2].text == L"从工作区取消固定",
+              "unpin labels identify the correct sidebar section");
+        places.UnpinWorkspace(0);
+        check(workspace && app::UnpinSidebarPlace(places, *workspace) && places.workspaces.empty(),
+              "workspace unpin still removes the intended root after its old row index changes");
+        check(places.IsQuickAccessPinned(L"C:\\fixture\\second"),
+              "removing a workspace leaves an independent quick-access pin intact");
+        check(workspace && !app::UnpinSidebarPlace(places, *workspace),
+              "an already removed workspace cannot remove an unrelated row");
+        check(quick && app::UnpinSidebarPlace(places, *quick) &&
+              !places.IsQuickAccessPinned(L"C:\\fixture\\second"), "quick access unpin removes its own entry");
+        for (const auto& path : {cloud, long_path}) {
+            const auto target = app::ResolveSidebarPinnedPlace(places, path);
+            check(target && app::UnpinSidebarPlace(places, *target), "UNC and long-path quick pins use the same unpin action");
+        }
+        places.PinWorkspace(L"C:\\fixture\\second", L"Second", 0, {L"C:\\fixture\\second"});
+        places.SetQuickAccessPinned({L"C:\\fixture\\second"}, true);
+        check(quick && app::UnpinSidebarPlace(places, *quick) && places.workspaces.size() == 1,
+              "removing quick access also leaves an independent workspace intact");
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--sidebar-sections") {
+        l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+        app::Pane pane;
+        pane.NewTab(app::MakeHomePath());
+        app::SidebarModel sidebar;
+        app::SidebarEntry search;
+        search.label = L"Saved fixture";
+        search.path = L"pulse:search:fixture";
+        sidebar.saved_searches.push_back(search);
+        app::PlacesCatalog places;
+        places.persist = false;
+        const int workspace_id = static_cast<int>(app::SidebarSectionId::Workspaces);
+        const int searches_id = static_cast<int>(app::SidebarSectionId::SavedSearches);
+        const auto build = [&](uint32_t hidden, uint32_t collapsed = 0) {
+            return app::BuildWindowViewModel(pane, sidebar, true, false, false,
+                &places, collapsed, hidden);
+        };
+        const auto empty = build(0);
+        const int group = app::SidebarSectionIndex(empty, workspace_id);
+        check(group >= 0 && empty.sidebar[group].items.empty() &&
+              empty.sidebar[group].show_when_empty && !empty.sidebar[group].hidden,
+              "enabled empty workspaces retain their section header");
+        check(!app::IsSidebarSectionAvailable(app::SidebarSectionId::SavedSearches) &&
+              app::IsSidebarSectionAvailable(app::SidebarSectionId::Workspaces),
+              "section menu excludes saved searches while retaining workspaces");
+        const auto searches = app::SidebarSectionIndex(empty, searches_id);
+        check(searches >= 0 && empty.sidebar[searches].hidden &&
+              empty.sidebar[searches].items.size() == 1 && sidebar.saved_searches.size() == 1,
+              "saved searches have no visible navigation entry and their data remains intact");
+        check(static_cast<int>(app::SidebarSectionId::Drives) == 3 &&
+              app::NormalizeSidebarOrder({ searches_id, workspace_id }).front() == searches_id,
+              "retired section keeps persisted ids and legacy display orders stable");
+        for (const float scale : {1.0f, 1.5f}) {
+            for (const bool rail : {false, true}) {
+                const auto bounds = D2D1::RectF(0, 0,
+                    (rail ? ui::kSidebarRailWidthDip : 240.0f) * scale, 1000 * scale);
+                const auto has_workspace = [&](const ui::WindowViewModel& vm) {
+                    std::vector<ui::SidebarSlot> slots;
+                    ui::LayoutSidebar(vm, bounds, scale, slots);
+                    const auto kind = rail ? ui::SidebarSlot::Rail : ui::SidebarSlot::Header;
+                    return std::any_of(slots.begin(), slots.end(), [&](const auto& slot) {
+                        return slot.group >= 0 && vm.sidebar[slot.group].id == workspace_id &&
+                            slot.kind == kind;
+                    });
+                };
+                check(has_workspace(empty), "empty workspace header appears in wide and rail layouts at each DPI");
+                const auto hidden = build(1u << workspace_id);
+                check(!has_workspace(hidden), "hiding an empty workspace removes its header at each width and DPI");
+                check(has_workspace(build(0, 1u << workspace_id)),
+                      "collapsed empty workspace keeps its header available");
+                const auto metrics = ui::MakeSidebarMetrics(scale);
+                check(ui::SidebarContentHeight(empty, metrics) >
+                      ui::SidebarContentHeight(hidden, metrics),
+                      "empty workspace visibility updates sidebar scroll extent");
+
+                ui::WindowViewModel folding;
+                folding.sidebar.push_back(empty.sidebar[group]);
+                ui::SidebarGroup following;
+                following.id = 100;
+                following.header = L"Following section";
+                following.show_when_empty = true;
+                folding.sidebar.push_back(following);
+                const auto geometry = [&]() {
+                    std::vector<ui::SidebarSlot> slots;
+                    std::vector<ui::SidebarGroupBand> bands;
+                    ui::LayoutSidebar(folding, bounds, scale, slots, &bands);
+                    float following_top = -1.0f;
+                    for (const auto& slot : slots)
+                        if (slot.group == 1 && (slot.kind == ui::SidebarSlot::Header ||
+                                              slot.kind == ui::SidebarSlot::Rail))
+                            following_top = slot.rc.top;
+                    const float band_bottom = bands.empty() ? 0.0f : bands.front().bottom;
+                    return std::array{following_top,
+                        ui::SidebarContentHeight(folding, metrics), band_bottom};
+                };
+                folding.sidebar.front().expansion = 0.0f;
+                const auto folded = geometry();
+                bool empty_stable = folded[0] >= 0.0f;
+                bool band_stable = rail || std::abs(folded[2] - folded[0]) < 0.001f;
+                for (const float expansion : {0.0f, 0.5f, 1.0f}) {
+                    folding.sidebar.front().expansion = expansion;
+                    const auto current = geometry();
+                    empty_stable &= std::abs(current[0] - folded[0]) < 0.001f &&
+                        std::abs(current[1] - folded[1]) < 0.001f;
+                    band_stable &= std::abs(current[2] - folded[2]) < 0.001f;
+                }
+                check(empty_stable,
+                      "empty workspace expansion never shifts following headers or scroll extent at each width and DPI");
+                check(band_stable,
+                      "empty workspace drag band consistently ends at the following section at every expansion");
+                folding.sidebar.front().items.push_back(ui::SidebarItem{});
+                folding.sidebar.front().expansion = 0.0f;
+                const auto populated_folded = geometry();
+                folding.sidebar.front().expansion = 0.5f;
+                const auto halfway = geometry();
+                folding.sidebar.front().expansion = 1.0f;
+                const auto expanded = geometry();
+                const float rows_height = ui::SidebarItemHeight(folding.sidebar.front().items.front(), metrics) +
+                    metrics.groupGap;
+                const float layout_height = rail ? 38.0f * scale : rows_height;
+                check(halfway[0] > populated_folded[0] && expanded[0] > halfway[0] &&
+                      halfway[1] > populated_folded[1] && expanded[1] > halfway[1] &&
+                      std::abs((halfway[0] - populated_folded[0]) * 2.0f -
+                               (expanded[0] - populated_folded[0])) < 0.001f &&
+                      std::abs(expanded[0] - populated_folded[0] - layout_height) < 0.001f &&
+                      std::abs(expanded[1] - populated_folded[1] - rows_height) < 0.001f,
+                      "populated workspace still reveals rows and scroll extent proportionally at each width and DPI");
+            }
+        }
+        places.PinWorkspace(L"C:\\fixture\\workspace", L"Fixture", 0,
+            { L"C:\\fixture\\workspace" });
+        const auto populated = build(0);
+        const auto hidden_populated = build(1u << workspace_id);
+        check(populated.sidebar[group].items.size() == 1 && !populated.sidebar[group].hidden &&
+              hidden_populated.sidebar[group].hidden,
+              "populated workspaces continue to obey the same visibility mask");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--order") {
         app::Pane pane;
         pane.NewTab(app::MakeHomePath());

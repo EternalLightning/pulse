@@ -1,10 +1,13 @@
 #include "shell_thumbnail_bitmap.h"
+#include "../fs/cloud_state.h"
 #include "../ipc/preview_protocol.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
 #include "../common/preview_extensions.h"
 #include "../common/crash_reporter.h"
 #include "metafile_raster.h"
+#include "image_decoder.h"
+#include "jpeg_embedded_preview.h"
 #include "svg_raster.h"
 #include "video_codec.h"
 #include <shobjidl.h>
@@ -25,15 +28,13 @@
 
 using namespace pulse;
 using Microsoft::WRL::ComPtr;
+using preview::DecodeImage;
 
 namespace {
 
-constexpr DWORD kRecallOnOpen = 0x00040000; // FILE_ATTRIBUTE_RECALL_ON_OPEN
-constexpr DWORD kRecallOnData = 0x00400000; // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-constexpr DWORD kPinned = 0x00080000; // FILE_ATTRIBUTE_PINNED
 
 bool IsOfflinePlaceholder(DWORD attrs) {
-    return (attrs & (kRecallOnOpen | kRecallOnData)) && !(attrs & kPinned);
+    return fs::IsCloudPlaceholder(attrs);
 }
 
 #ifndef PULSE_GIF_DECODER_TESTING
@@ -300,55 +301,6 @@ bool WriteString(HANDLE pipe, const std::wstring& value) {
 #endif
 
 } // namespace
-
-#ifndef PULSE_GIF_DECODER_TESTING
-static bool DecodeImage(const std::wstring& path, DWORD attrs, UINT pixels,
-                        std::vector<uint8_t>& out, UINT& width, UINT& height, UINT& stride,
-                        UINT& source_width, UINT& source_height) {
-    if (IsOfflinePlaceholder(attrs)) return false;
-    ComPtr<IWICImagingFactory> factory;
-    ComPtr<IWICBitmapDecoder> decoder;
-    ComPtr<IWICBitmapFrameDecode> frame;
-    ComPtr<IWICBitmapScaler> scaler;
-    ComPtr<IWICFormatConverter> converter;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&factory))) ||
-        FAILED(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                  WICDecodeMetadataCacheOnDemand, &decoder)) ||
-        FAILED(decoder->GetFrame(0, &frame))) return false;
-
-    UINT sourceWidth = 0, sourceHeight = 0;
-    if (FAILED(frame->GetSize(&sourceWidth, &sourceHeight)) ||
-        sourceWidth == 0 || sourceHeight == 0) return false;
-    source_width = sourceWidth;
-    source_height = sourceHeight;
-
-    IWICBitmapSource* source = frame.Get();
-    const UINT longest = (std::max)(sourceWidth, sourceHeight);
-    if (longest > pixels) {
-        const double ratio = static_cast<double>(pixels) / longest;
-        const UINT scaledWidth = (std::max)(1u, static_cast<UINT>(sourceWidth * ratio + 0.5));
-        const UINT scaledHeight = (std::max)(1u, static_cast<UINT>(sourceHeight * ratio + 0.5));
-        if (FAILED(factory->CreateBitmapScaler(&scaler)) ||
-            FAILED(scaler->Initialize(frame.Get(), scaledWidth, scaledHeight,
-                                      WICBitmapInterpolationModeFant))) return false;
-        source = scaler.Get();
-    }
-    if (FAILED(factory->CreateFormatConverter(&converter)) ||
-        FAILED(converter->Initialize(source, GUID_WICPixelFormat32bppPBGRA,
-                                     WICBitmapDitherTypeNone, nullptr, 0.0,
-                                     WICBitmapPaletteTypeCustom)) ||
-        FAILED(converter->GetSize(&width, &height)) || width == 0 || height == 0) return false;
-    stride = width * 4;
-    out.resize(static_cast<size_t>(stride) * height);
-    if (FAILED(converter->CopyPixels(nullptr, stride, static_cast<UINT>(out.size()),
-                                     out.data()))) {
-        out.clear();
-        return false;
-    }
-    return true;
-}
-#endif
 
 static bool MetadataUInt(IWICMetadataQueryReader* reader, const wchar_t* name,
                          uint32_t& value) {
@@ -618,8 +570,10 @@ static bool FromThumbnailCache(IShellItem* item, UINT pixels, bool cache_only, H
 
 static bool MakeShellThumbnail(const std::wstring& path, DWORD attrs, UINT pixels,
                                std::vector<uint8_t>& out, UINT& width, UINT& height,
-                               UINT& stride) {
-    if (IsOfflinePlaceholder(attrs)) return false;
+                               UINT& stride, bool cache_only = false) {
+    const DWORD current_attrs = GetFileAttributesW(path.c_str());
+    if (current_attrs != INVALID_FILE_ATTRIBUTES) attrs |= current_attrs;
+    if (IsOfflinePlaceholder(attrs) && !cache_only) return false;
     const std::wstring shell_path = ShellPath(path);
     ComPtr<IShellItem> item;
     if (FAILED(SHCreateItemFromParsingName(shell_path.c_str(), nullptr, IID_PPV_ARGS(&item))))
@@ -628,7 +582,7 @@ static bool MakeShellThumbnail(const std::wstring& path, DWORD attrs, UINT pixel
     HBITMAP bitmap = nullptr;
     WTS_ALPHATYPE alpha = WTSAT_UNKNOWN;
 
-    if (isDirectory) {
+    if (isDirectory && !cache_only) {
         ComPtr<IShellItemImageFactory> factory;
         if (FAILED(item.As(&factory))) return false;
         const SIZE size{static_cast<LONG>(pixels), static_cast<LONG>(pixels)};
@@ -640,6 +594,18 @@ static bool MakeShellThumbnail(const std::wstring& path, DWORD attrs, UINT pixel
 
     if (!FromThumbnailCache(item.Get(), pixels, true, bitmap, alpha) || !bitmap)
         bitmap = nullptr;
+    if (cache_only) {
+        if (!bitmap) return false;
+        BITMAP info{};
+        if (GetObjectW(bitmap, sizeof(info), &info) != sizeof(info) ||
+            info.bmWidth <= 0 || info.bmHeight <= 0 ||
+            static_cast<UINT>(info.bmWidth) > pixels ||
+            static_cast<UINT>(info.bmHeight) > pixels) {
+            DeleteObject(bitmap);
+            return false;
+        }
+        return HbitmapToBgra(bitmap, true, out, width, height, stride, alpha);
+    }
     if (!bitmap && !FromThumbnailProvider(item.Get(), pixels, bitmap, alpha))
         bitmap = nullptr;
     if (!bitmap && (!FromThumbnailCache(item.Get(), pixels, false, bitmap, alpha) || !bitmap))
@@ -690,6 +656,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         response.generation=req.generation;
 
         bool made = false;
+        const DWORD current_attrs = GetFileAttributesW(path.c_str());
+        if (current_attrs != INVALID_FILE_ATTRIBUTES) req.attrs |= current_attrs;
         if (req.kind == ipc::PreviewRequestKind::Properties) {
             if (!IsOfflinePlaceholder(req.attrs)) properties = ReadProperties(path);
             if (properties.size() > ipc::kPreviewMaxPropertyCount)
@@ -706,7 +674,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             bool truncated = false;
             uint32_t bytesRead = 0;
             const bool isDirectory = (req.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            if (isDirectory) {
+            if (IsOfflinePlaceholder(req.attrs)) {
+                // Browsing may reuse Explorer's cached pixels, but must never
+                // fall through to providers, image decoders or content reads.
+                if (req.kind == ipc::PreviewRequestKind::Thumbnail)
+                    made = MakeShellThumbnail(path, req.attrs,
+                        ipc::ClampPreviewPixelSize(req.pixel_size, false), pixels, w, h, stride, true);
+                if (made) response.kind = ipc::PreviewContentKind::Bitmap;
+            } else if (isDirectory) {
                 made = MakeShellThumbnail(path, req.attrs,
                                           ipc::ClampPreviewPixelSize(req.pixel_size, false),
                                           pixels, w, h, stride);
@@ -716,11 +691,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 uint32_t frame_count = 1, frame_delay = 0, loop_count = 0;
                 const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);
+                const bool thumbnail = req.kind == ipc::PreviewRequestKind::Thumbnail;
+                if (thumbnail && !gif && !IsOfflinePlaceholder(req.attrs)) {
+                    made = MakeShellThumbnail(path, req.attrs, cap, pixels, w, h, stride, true);
+                    if (!made && IsOneOf(extension, {L".jpg", L".jpeg", L".jpe", L".jfif"})) {
+                        preview::JpegEmbeddedPreview embedded;
+                        if (preview::ReadJpegEmbeddedPreview(path, req.attrs, cap, embedded)) {
+                            made = DecodeImage(path, req.attrs, cap, pixels, w, h, stride,
+                                source_w, source_h, &embedded.jpeg, embedded.orientation);
+                            if (made) {
+                                source_w = embedded.orientation >= 5 ? embedded.source_height : embedded.source_width;
+                                source_h = embedded.orientation >= 5 ? embedded.source_width : embedded.source_height;
+                            }
+                        }
+                    }
+                }
                 if (gif) {
                     made = DecodeGifFrame(gif_state, path, req.attrs, cap, req.frame_index,
                         pixels, w, h, stride, frame_count, frame_delay, loop_count,
                         source_w, source_h);
-                } else {
+                } else if (!made) {
                     made = DecodeImage(path, req.attrs, cap, pixels, w, h, stride,
                                        source_w, source_h);
                 }

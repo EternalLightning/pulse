@@ -1,0 +1,17 @@
+{
+  "executable": "D:\\Applications\\Pulse\\Pulse.exe",
+  "sha256": "3900F3152DCF13255BFCD75ED541A111EF207F9723AF969E6D1DE4769D08B422",
+  "elevated": false,
+  "fixture": "E:\\Projects\\pulse\\bench_data\\installed-smoke-fa92957383d84577a6ee11582d7ebb09",
+  "screenshot": "E:\\Projects\\pulse\\docs\\validation\\packaging-20261028-170339\\installed-home.png",
+  "isolated_exit_code": 0,
+  "session_restore": "existing_process",
+  "restored_process_id": 20820,
+  "restored_executable": "D:\\Applications\\Pulse\\Pulse.exe",
+  "restored_main_window": 5509266,
+  "service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  }
+}

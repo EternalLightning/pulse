@@ -1,0 +1,22 @@
+﻿[
+    {
+        "test":  "image-thumbnail-only",
+        "exit_code":  0,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\image-thumbnail-only-desktop.log"
+    },
+    {
+        "test":  "thumbnail-transport-only",
+        "exit_code":  0,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\thumbnail-transport-only-desktop.log"
+    },
+    {
+        "test":  "thumbnail-failures-only",
+        "exit_code":  0,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\thumbnail-failures-only-desktop.log"
+    },
+    {
+        "test":  "thumbnail-pipeline",
+        "exit_code":  1,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\thumbnail-pipeline-desktop.log"
+    }
+]

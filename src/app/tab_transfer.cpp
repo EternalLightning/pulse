@@ -2,23 +2,89 @@
 #include "app_runtime.h"
 #include "app_internal.h"
 #include "app_exit.h"
+#include "tab_group_id.h"
+#include "content_results_ui.h"
+#include <dwmapi.h>
 
 namespace pulse {
 namespace {
-void CancelTransferredPaneWork(AppState& source, app::Pane& pane) {
-    app::Tab& tab = pane.view;
-    if (!tab.current_path.empty() && tab.pending_generation)
-        source.worker.Cancel(tab.current_path, tab.pending_generation);
-    source.index.CancelSession(tab.search_session_id);
-    source.networkIndex.CancelSession(tab.search_session_id);
-    if (tab.archive_cancel) tab.archive_cancel->store(true);
+HHOOK caption_escape_hook = nullptr;
+HHOOK caption_message_hook = nullptr;
+HWND caption_drag_window = nullptr;
+bool caption_drag_cancelled = false;
+
+LRESULT CALLBACK CaptionEscapeHook(int code, WPARAM key, LPARAM flags) {
+    if (code == HC_ACTION && key == VK_ESCAPE && !(flags & (1LL << 31)))
+        caption_drag_cancelled = true;
+    return CallNextHookEx(caption_escape_hook, code, key, flags);
 }
 
-void ReloadTransferredLayout(AppState& destination, app::LayoutTab& layout) {
+LRESULT CALLBACK CaptionMessageHook(int code, WPARAM removed, LPARAM value) {
+    const auto* message = reinterpret_cast<const MSG*>(value);
+    if (code >= 0 && removed == PM_REMOVE && message && message->message == WM_KEYDOWN &&
+        message->wParam == VK_ESCAPE) caption_drag_cancelled = true;
+    return CallNextHookEx(caption_message_hook, code, removed, value);
+}
+
+void CancelTransferredPaneWork(AppState& source, app::Pane& pane) {
+    app::Tab& tab = pane.view;
+    TeardownTabSearch(source, tab);
+    CancelTransferredListing(source, tab);
+    if (tab.archive_cancel) tab.archive_cancel->store(true);
+    source.explicit_entry_refreshes.erase(&tab);
+}
+
+void RescaleTransferredPane(const AppState& source, const AppState& destination, app::Pane& pane) {
+    const float ratio = source.scale > 0.0f && destination.scale > 0.0f
+        ? destination.scale / source.scale : 1.0f;
+    pane.view.scroll_x *= ratio;
+    pane.view.scroll_y *= ratio;
+    const auto scale_viewport = [&](app::Tab::NavigationViewport& viewport) {
+        viewport.x *= ratio;
+        viewport.y *= ratio;
+    };
+    if (pane.view.pending_history_viewport) scale_viewport(*pane.view.pending_history_viewport);
+    const auto scale_history = [&](auto& stack) {
+        std::vector<app::Tab::HistoryEntry> entries;
+        while (!stack.empty()) {
+            auto entry = std::move(stack.top());
+            stack.pop();
+            if (entry.viewport) scale_viewport(*entry.viewport);
+            entries.push_back(std::move(entry));
+        }
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it) stack.push(std::move(*it));
+    };
+    scale_history(pane.view.back_stack);
+    scale_history(pane.view.forward_stack);
+}
+
+void ResumeTransferredLayout(AppState& destination, app::LayoutTab& layout) {
     for (auto& pane : layout.panes) {
-        if (!pane || pane->view.current_path.empty()) continue;
-        const std::wstring path = pane->view.current_path;
-        StartLoadingPath(destination, pane->view, path, PathLoadReason::Navigate);
+        if (pane) ResumeTransferredTab(destination, pane->view);
+    }
+}
+
+void ReleaseTransferredLayoutInteraction(AppState& state, const app::LayoutTab& layout) {
+    const auto owns = [&](const app::Tab* view, const app::Pane* pane) {
+        return std::any_of(layout.panes.begin(), layout.panes.end(), [&](const auto& item) {
+            return item && (item.get() == pane || &item->view == view);
+        });
+    };
+    if (owns(nullptr, state.pane)) {
+        if (state.renameIndex >= 0) HideRenameOverlay(state, false);
+        if (state.addressEditing) HideAddressEditor(state, false);
+        if (state.filterEditing) HideFilterEditor(state, true);
+        state.quickPreview.Close();
+    }
+    if (owns(state.renameClickTab, state.renameClickPane)) CancelRenameClick(state);
+    if (owns(state.blankClickTab, state.blankClickPane)) {
+        state.blankClickTab = nullptr;
+        state.blankClickPane = nullptr;
+    }
+    if (owns(state.blankDoubleTab, state.blankDoublePane)) {
+        state.blankDoubleTab = nullptr;
+        state.blankDoublePane = nullptr;
+        state.blankDoublePending = false;
     }
 }
 
@@ -46,13 +112,101 @@ void TransferTabGroupMembership(app::WindowTabs& source, app::WindowTabs& destin
         tab.tab_group = matching->id;
         return;
     }
-    int next_id = std::max(1, destination.next_tab_group_id);
-    for (const auto& candidate : destination.tab_groups)
-        next_id = std::max(next_id, candidate.id + 1);
+    const int next_id = app::AllocateTabGroupId(destination);
+    if (next_id == 0) {
+        tab.tab_group = 0;
+        return;
+    }
     destination.tab_groups.push_back({next_id, group->name, group->color_rgb, group->collapsed});
-    destination.next_tab_group_id = next_id + 1;
     tab.tab_group = next_id;
 }
+}
+
+bool IsWindowTransferDesktopSurface(HWND hwnd) {
+    const HWND desktop = GetShellWindow();
+    if (!hwnd || !desktop) return false;
+    if (hwnd == desktop) return true;
+    DWORD desktop_process = 0, window_process = 0;
+    GetWindowThreadProcessId(desktop, &desktop_process);
+    GetWindowThreadProcessId(hwnd, &window_process);
+    if (!desktop_process || desktop_process != window_process) return false;
+    wchar_t class_name[64]{};
+    if (!GetClassNameW(hwnd, class_name, ARRAYSIZE(class_name))) return false;
+    // Explorer can put the wallpaper and desktop icons in separate WorkerW
+    // surfaces. Other Explorer windows and foreign tool windows still block.
+    return wcscmp(class_name, L"Progman") == 0 || wcscmp(class_name, L"WorkerW") == 0;
+}
+
+AppState* WindowTransferTargetAtPoint(AppState& source, POINT screen_point, bool& covered, bool ignore_source) {
+    covered = false;
+    for (HWND hwnd = GetTopWindow(nullptr); hwnd; hwnd = GetWindow(hwnd, GW_HWNDNEXT)) {
+        if ((ignore_source && hwnd == source.hwnd) || !IsWindowVisible(hwnd) || IsIconic(hwnd)) continue;
+        DWORD cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+            continue;
+        RECT rect{};
+        if (!GetWindowRect(hwnd, &rect) || !PtInRect(&rect, screen_point)) continue;
+        if (IsWindowTransferDesktopSurface(hwnd)) return nullptr;
+        covered = true;
+        return source.core.windows.Lookup(hwnd);
+    }
+    // A drop back onto the source is a reorder, never a new window.
+    RECT source_rect{};
+    covered = source.hwnd && IsWindowVisible(source.hwnd) &&
+        GetWindowRect(source.hwnd, &source_rect) && PtInRect(&source_rect, screen_point);
+    return nullptr;
+}
+
+bool CancelWindowTransferDrag(AppState& state) {
+    if (!state.tabDragPending && !state.tabDragging &&
+        !state.paneDragPending && !state.paneDragging) return false;
+    state.paneDragPending = false;
+    state.paneDragging = false;
+    state.paneDragLayoutIndex = state.paneDragPaneIndex = -1;
+    state.tabDragPending = false;
+    state.tabDragging = false;
+    state.tabDragIndex = -1;
+    state.tabDragRunPos = 0;
+    state.tabDragRunLen = 1;
+    state.tabDragFromChip = false;
+    state.tabDragGroupId = 0;
+    state.tabDragSlots = 1.0f;
+    state.tabDragBlockW = 0.0f;
+    state.tabOrder.clear();
+    state.tabTracks.clear();
+    state.tabOffsets.clear();
+    state.chipTracks.clear();
+    state.chipOffsets.clear();
+    if (GetCapture() == state.hwnd) ReleaseCapture();
+    InvalidateRect(state.hwnd, nullptr, FALSE);
+    return true;
+}
+
+void BeginWindowCaptionTransfer(HWND hwnd) {
+    if (caption_drag_window) return;
+    caption_drag_window = hwnd;
+    caption_drag_cancelled = false;
+    caption_escape_hook = SetWindowsHookExW(WH_KEYBOARD, CaptionEscapeHook, nullptr, GetCurrentThreadId());
+    caption_message_hook = SetWindowsHookExW(WH_GETMESSAGE, CaptionMessageHook, nullptr, GetCurrentThreadId());
+    // Without the hook we cannot reliably distinguish Esc in the system loop.
+    if (!caption_escape_hook && !caption_message_hook) caption_drag_cancelled = true;
+}
+
+bool EndWindowCaptionTransfer(HWND hwnd) {
+    if (caption_drag_window != hwnd) return false;
+    const bool accepted = !caption_drag_cancelled;
+    CancelWindowCaptionTransfer(hwnd);
+    return accepted;
+}
+
+void CancelWindowCaptionTransfer(HWND hwnd) {
+    if (caption_drag_window != hwnd) return;
+    if (caption_escape_hook) UnhookWindowsHookEx(caption_escape_hook);
+    if (caption_message_hook) UnhookWindowsHookEx(caption_message_hook);
+    caption_escape_hook = nullptr;
+    caption_message_hook = nullptr;
+    caption_drag_window = nullptr;
+    caption_drag_cancelled = false;
 }
 
 bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
@@ -60,9 +214,15 @@ bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
     if (&source == &destination || index >= source.window_tabs.items.size()) return false;
     auto& src = source.window_tabs;
     auto& dst = destination.window_tabs;
+    RememberLayoutFocus(source);
+    RememberLayoutFocus(destination);
+    ReleaseTransferredLayoutInteraction(source, *src.items[index]);
     const bool moved_pinned = src.items[index]->pinned;
     auto moved = std::move(src.items[index]);
-    for (auto& pane : moved->panes) if (pane) CancelTransferredPaneWork(source, *pane);
+    for (auto& pane : moved->panes) if (pane) {
+        CancelTransferredPaneWork(source, *pane);
+        RescaleTransferredPane(source, destination, *pane);
+    }
     src.items.erase(src.items.begin() + static_cast<ptrdiff_t>(index));
     const bool source_became_empty = src.items.empty();
     if (source_became_empty) {
@@ -96,7 +256,7 @@ bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
     });
     BindCurrentLayout(source);
     BindCurrentLayout(destination);
-    ReloadTransferredLayout(destination, *dst.Active());
+    ResumeTransferredLayout(destination, *dst.Active());
     if (source_became_empty && close_empty_source && source.hwnd)
         RequestWindowClose(source);
     InvalidateRect(source.hwnd, nullptr, FALSE);
@@ -118,14 +278,20 @@ bool TransferPane(AppState& source, size_t pane_index, AppState& destination,
     app::LayoutTab* dst = destination.window_tabs.Active();
     if (!src || pane_index >= src->panes.size() || !dst || dst->panes.size() >= 4)
         return false;
+    RememberLayoutFocus(source);
+    RememberLayoutFocus(destination);
+    ReleaseTransferredLayoutInteraction(source, *src);
     CancelTransferredPaneWork(source, *src->panes[pane_index]);
+    RescaleTransferredPane(source, destination, *src->panes[pane_index]);
     auto moved = std::move(src->panes[pane_index]);
+    app::Pane* transferred = moved.get();
     src->panes.erase(src->panes.begin() + static_cast<ptrdiff_t>(pane_index));
     const bool source_replaced = src->panes.empty();
     if (source_replaced) src->panes.push_back(std::make_unique<app::Pane>());
-    src->focused_index = std::min(src->focused_index,
-        static_cast<int>(src->panes.size()) - 1);
-    src->target_index = -1;
+    if (src->focused_index > static_cast<int>(pane_index)) --src->focused_index;
+    src->focused_index = std::min(src->focused_index, static_cast<int>(src->panes.size()) - 1);
+    if (src->target_index == static_cast<int>(pane_index)) src->target_index = -1;
+    else if (src->target_index > static_cast<int>(pane_index)) --src->target_index;
     src->layout = PresetForPaneCount(src->panes.size());
     app::RebuildLayoutRoot(*src);
     if (replace_destination_starter) {
@@ -141,7 +307,7 @@ bool TransferPane(AppState& source, size_t pane_index, AppState& destination,
     app::RebuildLayoutRoot(*dst);
     BindCurrentLayout(source);
     BindCurrentLayout(destination);
-    ReloadTransferredLayout(destination, *dst);
+    ResumeTransferredTab(destination, transferred->view);
     if (source_replaced && source.pane)
         StartLoadingPath(source, source.pane->view, L"", PathLoadReason::Navigate);
     InvalidateRect(source.hwnd, nullptr, FALSE);
@@ -161,8 +327,16 @@ bool TransferLayoutTabIntoPaneArea(AppState& source, size_t index, AppState& des
     if (target_count + incoming->panes.size() > 4)
         return TransferLayoutTab(source, index, destination);
 
+    RememberLayoutFocus(source);
+    RememberLayoutFocus(destination);
+    ReleaseTransferredLayoutInteraction(source, *incoming);
     auto moved = std::move(source.window_tabs.items[index]);
-    for (auto& pane : moved->panes) if (pane) CancelTransferredPaneWork(source, *pane);
+    std::vector<app::Pane*> transferred;
+    for (auto& pane : moved->panes) if (pane) {
+        CancelTransferredPaneWork(source, *pane);
+        RescaleTransferredPane(source, destination, *pane);
+        transferred.push_back(pane.get());
+    }
     source.window_tabs.items.erase(source.window_tabs.items.begin() + static_cast<ptrdiff_t>(index));
     const bool source_empty = source.window_tabs.items.empty();
     if (source_empty) source.window_tabs.active = 0;
@@ -185,7 +359,7 @@ bool TransferLayoutTabIntoPaneArea(AppState& source, size_t index, AppState& des
     });
     BindCurrentLayout(source);
     BindCurrentLayout(destination);
-    ReloadTransferredLayout(destination, *target);
+    for (app::Pane* pane : transferred) ResumeTransferredTab(destination, pane->view);
     if (source_empty && source.hwnd) RequestWindowClose(source);
     InvalidateRect(source.hwnd, nullptr, FALSE);
     InvalidateRect(destination.hwnd, nullptr, FALSE);
@@ -195,7 +369,7 @@ bool TransferLayoutTabIntoPaneArea(AppState& source, size_t index, AppState& des
 bool TryTransferLayoutTabAtScreenPoint(AppState& source, size_t index, POINT screen_point) {
     bool transferred = false;
     bool covered_by_window = false;
-    source.core.windows.ForEach([&](HWND hwnd, AppState& target) {
+    auto route = [&](HWND hwnd, AppState& target) {
         if (transferred || !target.hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return;
         RECT wr{};
         if (!GetWindowRect(hwnd, &wr) || screen_point.x < wr.left || screen_point.x >= wr.right ||
@@ -229,7 +403,9 @@ bool TryTransferLayoutTabAtScreenPoint(AppState& source, size_t index, POINT scr
             break;
         default: break;
         }
-    });
+    };
+    if (AppState* target = WindowTransferTargetAtPoint(source, screen_point, covered_by_window))
+        route(target->hwnd, *target);
     if (!transferred && !covered_by_window && source.hwnd) {
         transferred = PostMessageW(source.hwnd, WM_DETACH_LAYOUT_TAB,
             static_cast<WPARAM>(index), 0) != FALSE;
@@ -239,7 +415,7 @@ bool TryTransferLayoutTabAtScreenPoint(AppState& source, size_t index, POINT scr
 
 bool TryMergeWindowAtScreenPoint(AppState& source, POINT screen_point) {
     bool merged = false;
-    source.core.windows.ForEach([&](HWND hwnd, AppState& target) {
+    auto route = [&](HWND hwnd, AppState& target) {
         if (merged || &target == &source || !target.hwnd ||
             !IsWindowVisible(hwnd) || IsIconic(hwnd)) return;
         RECT wr{};
@@ -253,7 +429,10 @@ bool TryMergeWindowAtScreenPoint(AppState& source, POINT screen_point) {
         }
         merged = true;
         if (source.hwnd) RequestWindowClose(source);
-    });
+    };
+    bool covered = false;
+    if (AppState* target = WindowTransferTargetAtPoint(source, screen_point, covered, true))
+        route(target->hwnd, *target);
     return merged;
 }
 
@@ -261,7 +440,7 @@ bool TryTransferPaneAtScreenPoint(AppState& source, size_t layout_index,
                                  size_t pane_index, POINT screen_point) {
     bool transferred = false;
     bool covered_by_window = false;
-    source.core.windows.ForEach([&](HWND hwnd, AppState& target) {
+    auto route = [&](HWND hwnd, AppState& target) {
         if (transferred || !target.hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return;
         RECT wr{};
         if (!GetWindowRect(hwnd, &wr) || screen_point.x < wr.left || screen_point.x >= wr.right ||
@@ -279,7 +458,9 @@ bool TryTransferPaneAtScreenPoint(AppState& source, size_t layout_index,
             hit.region != ui::HitTestResult::Pane &&
             hit.region != ui::HitTestResult::PaneEmptyNewFolder)) return;
         transferred = TransferPane(source, pane_index, target, layout_index);
-    });
+    };
+    if (AppState* target = WindowTransferTargetAtPoint(source, screen_point, covered_by_window))
+        route(target->hwnd, *target);
     if (!transferred && !covered_by_window && source.hwnd) {
         transferred = PostMessageW(source.hwnd, WM_DETACH_PANE,
             static_cast<WPARAM>(pane_index), static_cast<LPARAM>(layout_index)) != FALSE;

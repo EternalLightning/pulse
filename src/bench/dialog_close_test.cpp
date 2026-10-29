@@ -8,11 +8,22 @@ HWND editor = nullptr;
 bool enabled_before_hide = true;
 bool editors_hidden_first = true;
 int failures = 0;
+ULONGLONG repaint_until = 0;
+unsigned closing_paints = 0;
 void Check(bool value, const char* message) {
     std::printf("[%s] %s\n", value ? "PASS" : "FAIL", message);
     if (!value) ++failures;
 }
 LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_PAINT && window == dialog && repaint_until) {
+        PAINTSTRUCT paint{};
+        BeginPaint(window, &paint);
+        EndPaint(window, &paint);
+        ++closing_paints;
+        // Bound the broken implementation too, so a regression fails instead of hanging.
+        if (GetTickCount64() < repaint_until) InvalidateRect(window, nullptr, FALSE);
+        return 0;
+    }
     if (msg == WM_WINDOWPOSCHANGING && (reinterpret_cast<WINDOWPOS*>(lp)->flags & SWP_HIDEWINDOW)) {
         if (window == dialog || window == editor) enabled_before_hide &= IsWindowEnabled(owner) != FALSE;
         if (window == dialog) editors_hidden_first &= !IsWindowVisible(editor);
@@ -66,6 +77,35 @@ int main() {
         DestroyWindow(dialog);
         dialog = editor = nullptr;
     }
+    dialog = Make(owner);
+    ShowWindow(dialog, SW_SHOWNOACTIVATE);
+    BOOL animations = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+    HIGHCONTRASTW close_contrast{sizeof(close_contrast)};
+    SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(close_contrast), &close_contrast, 0);
+    const ULONGLONG close_started = GetTickCount64();
+    repaint_until = close_started + 1500;
+    InvalidateRect(dialog, nullptr, FALSE);
+    pulse::ui::HideComposedDialog(dialog, owner);
+    Check(GetTickCount64() - close_started < 750 && !IsWindowVisible(dialog),
+        "self-invalidating progress window closes before the repaint stream stops");
+    if (animations && !(close_contrast.dwFlags & HCF_HIGHCONTRASTON))
+        Check(closing_paints > 1, "close animation handles repeated paint frames without draining forever");
+    Check(!GetPropW(dialog, L"Pulse.DialogFadeState") && !GetPropW(dialog, L"Pulse.DialogClosing"),
+        "animated progress close clears transient state");
+    repaint_until = 0;
+    DestroyWindow(dialog);
+    dialog = Make(owner);
+    pulse::ui::ShowDialogWithFade(dialog, SW_SHOWNOACTIVATE);
+    PostQuitMessage(91);
+    pulse::ui::HideComposedDialog(dialog, owner);
+    Check(!IsWindowVisible(dialog) && !GetPropW(dialog, L"Pulse.DialogFadeState") &&
+        !GetPropW(dialog, L"Pulse.DialogClosing"),
+        "thread shutdown closes and clears a pending transition");
+    Check(GetMessageW(&modal_message, nullptr, 0, 0) == 0 && modal_message.wParam == 91,
+        "close transition preserves queued thread shutdown for the outer loop");
+    DestroyWindow(dialog);
+    dialog = nullptr;
     HIGHCONTRASTW contrast{sizeof(contrast)};
     SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
     if (!(contrast.dwFlags & HCF_HIGHCONTRASTON)) {

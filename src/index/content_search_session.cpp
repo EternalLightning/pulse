@@ -5,7 +5,7 @@ namespace pulse::index {
 ContentSearchSession::ContentSearchSession(const ContentSearchRequest& request, HWND notify, UINT message)
     : generation_(request.generation),
       results_(request.paged_results ? std::make_shared<ContentResultStore>(notify, message) : nullptr),
-      previous_(request.task_scan ? nullptr : request.previous_results) {
+      previous_(request.task_scan && !request.resume_previous ? nullptr : request.previous_results) {
     sort_ = request.sort; descending_ = request.sort_desc; task_scan_ = request.task_scan;
 }
 

@@ -1,0 +1,66 @@
+[
+  {
+    "Case": "single",
+    "FirstSevenZipMs": 1317,
+    "FinalMs": 3069,
+    "TotalRows": 22,
+    "SevenZipRows": 17,
+    "DefaultPrefsPass": 17,
+    "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+    "Providers": [
+      "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+      "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+      "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+      "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+    ],
+    "ErrorEvents": 0
+  },
+  {
+    "Case": "multiple",
+    "FirstSevenZipMs": 1090,
+    "FinalMs": 2397,
+    "TotalRows": 22,
+    "SevenZipRows": 17,
+    "DefaultPrefsPass": 17,
+    "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+    "Providers": [
+      "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+      "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+      "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+      "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+    ],
+    "ErrorEvents": 0
+  },
+  {
+    "Case": "mixed",
+    "FirstSevenZipMs": 1447,
+    "FinalMs": 2647,
+    "TotalRows": 22,
+    "SevenZipRows": 17,
+    "DefaultPrefsPass": 17,
+    "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+    "Providers": [
+      "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+      "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+      "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+      "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+    ],
+    "ErrorEvents": 0
+  },
+  {
+    "Case": "directory",
+    "FirstSevenZipMs": 1087,
+    "FinalMs": 2286,
+    "TotalRows": 21,
+    "SevenZipRows": 17,
+    "DefaultPrefsPass": 17,
+    "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+    "Providers": [
+      "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+      "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+      "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+      "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+    ],
+    "ErrorEvents": 0
+  }
+]

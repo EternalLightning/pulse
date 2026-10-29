@@ -1,0 +1,28 @@
+{
+  "Mode": "Plan",
+  "Files": 41,
+  "Changed": 6,
+  "Runtime": {
+    "Agents": [
+      {
+        "ProcessId": 33396,
+        "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+      }
+    ],
+    "Service": [
+      {
+        "State": "Running",
+        "StartMode": "Auto",
+        "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+      }
+    ]
+  },
+  "Changes": [
+    "Pulse.Document.exe",
+    "Pulse.exe",
+    "Pulse.Index.exe",
+    "Pulse.Integration.exe",
+    "Pulse.Preview.exe",
+    "Pulse.Shell.exe"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "BackupDirectory": "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-failed-candidate-20261024-113157",
+  "Version": "1.2.0.0",
+  "IndexDirectory": "D:\\AppData\\Index",
+  "InstallDirectory": "D:\\Applications\\Pulse",
+  "GracefulExitHash": "E19771CE201BBF3A48A3EB24E0651229786EDD165895C9DAF315D35406FDCAFF",
+  "ValidationComplete": true,
+  "EvidenceDirectory": "E:\\Projects\\pulse\\docs\\validation\\quality-release-1.2.0.1\\rollback-after-smoke-failure",
+  "Files": [
+    {
+      "Relative": "Pulse.exe",
+      "SHA256": "C313945F5827CB72741484413BA2D4A114F4BF7D807CC6330878206CC7E536E1"
+    },
+    {
+      "Relative": "Pulse.Index.exe",
+      "SHA256": "908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED"
+    },
+    {
+      "Relative": "Pulse.Shell.exe",
+      "SHA256": "6DCFFA84C1DA3E0EB3428C6CE0861249125F0A249FB8F064744696543780E0BF"
+    },
+    {
+      "Relative": "Pulse.Preview.exe",
+      "SHA256": "7FC1B27A6EC94597AB714A0856107CC5CEF8F9F68B66D4F05283FB48EA4C48D2"
+    },
+    {
+      "Relative": "Pulse.Document.exe",
+      "SHA256": "E735DC50751885864BFC6ACB116C80735DBBDE2D98BE832A339498DCCD3BE1CC"
+    },
+    {
+      "Relative": "lumatext.dll",
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+    },
+    {
+      "Relative": "pdfium.dll",
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+    }
+  ],
+  "GracefulExitTool": "E:\\Projects\\pulse\\bench_data\\finish-all-20261023\\final-pass\\graceful_exit.exe",
+  "BuildDirectory": "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-rollback-20261024-112650"
+}

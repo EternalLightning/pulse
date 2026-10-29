@@ -1,10 +1,11 @@
 #include "edit_host.h"
+#include "edit_composition.h"
+#include "edit_motion.h"
 #include "FluentTokens.h"
 #include "typography.h"
 #include <commctrl.h>
 #include <algorithm>
 namespace pulse::ui {
-constexpr UINT_PTR kEditCaretTimer = 71;
 namespace {
 constexpr wchar_t kNativeEdit[] = L"Pulse.NativeEditFallback";
 constexpr wchar_t kPolicyNative[] = L"Pulse.NativeEditPolicy";
@@ -33,8 +34,10 @@ bool CustomEdit(Compositor& compositor, HWND hwnd) {
         if (!GetLayeredWindowAttributes(hwnd, nullptr, nullptr, &flags) || !(flags & LWA_ALPHA))
             SetPropW(hwnd, kRestoreUploaded, reinterpret_cast<HANDLE>(1));
         SetPropW(hwnd, kPolicyNative, reinterpret_cast<HANDLE>(1));
-        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+        SetLayeredWindowAttributes(hwnd, 0, EditSurfaceOpacity(hwnd), LWA_ALPHA);
         KillTimer(hwnd, kEditCaretTimer);
+        KillTimer(hwnd, kEditMotionTimer);
+        RemovePropW(hwnd, L"Pulse.EditMotionPending");
         RestoreNativeCaret(hwnd);
         InvalidateRect(hwnd, nullptr, TRUE);
         RemovePropW(hwnd, kMigrating);
@@ -48,7 +51,7 @@ bool CustomEdit(Compositor& compositor, HWND hwnd) {
         RemovePropW(hwnd, kPolicyNative);
         if (GetFocus() == hwnd) {
             HideCaret(hwnd);
-            SetTimer(hwnd, kEditCaretTimer, GetCaretBlinkTime(), nullptr);
+            compositor.SynchronizeEditSelection(hwnd, WM_SETFOCUS, 0, 0);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         RemovePropW(hwnd, kMigrating);
@@ -65,8 +68,10 @@ bool PresentEdit(Compositor& compositor, HWND hwnd, IDWriteTextFormat* format,
     // Keep native EDIT input, selection and IME together if presentation fails.
     SetPropW(hwnd, kNativeEdit, reinterpret_cast<HANDLE>(1));
     compositor.RemoveEditSurface(hwnd);
-    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    SetLayeredWindowAttributes(hwnd, 0, EditSurfaceOpacity(hwnd), LWA_ALPHA);
     KillTimer(hwnd, kEditCaretTimer);
+    KillTimer(hwnd, kEditMotionTimer);
+    RemovePropW(hwnd, L"Pulse.EditMotionPending");
     RestoreNativeCaret(hwnd);
     InvalidateRect(hwnd, nullptr, TRUE);
     return false;
@@ -103,6 +108,7 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
         RemovePropW(hwnd, kPolicyNative);
         RemovePropW(hwnd, kRestoreUploaded);
         RemovePropW(hwnd, kMigrating);
+        RemovePropW(hwnd, L"Pulse.EditOpacity");
         return false;
     }
     if (msg == WM_WINDOWPOSCHANGED) compositor.SynchronizeEditSurface(hwnd);
@@ -147,7 +153,7 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
         result = DefSubclassProc(hwnd, msg, wParam, lParam);
         if (CustomEdit(compositor, hwnd)) {
             HideCaret(hwnd);
-            SetTimer(hwnd, kEditCaretTimer, GetCaretBlinkTime(), nullptr);
+            compositor.SynchronizeEditSelection(hwnd, msg, wParam, lParam);
             PresentEdit(compositor, hwnd, format,
                                          foreground, background);
         } else {
@@ -161,7 +167,7 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
         return false;
     case WM_TIMER:
         if (wParam == kEditCaretTimer) {
-            if (GetCapture() != hwnd && CustomEdit(compositor, hwnd)) {
+            if (GetFocus() == hwnd && GetCapture() != hwnd && CustomEdit(compositor, hwnd)) {
                 PresentEdit(compositor, hwnd, format,
                                              foreground, background);
             } else if (GetCapture() != hwnd) {

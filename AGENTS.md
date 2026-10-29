@@ -28,18 +28,24 @@ Use an x64 Visual Studio developer prompt with MSVC, CMake 3.25+, and Ninja:
 以下为按需选择的命令，不是每次任务必须依次执行的清单：
 
 ```powershell
-# 默认：仅构建受影响的目标，此处以主程序为例
-cmake --build build --target pulse
+# 默认：在已配置的 Ninja 目录中仅构建受影响目标，此处以主程序为例
+cmake --build build-release --target pulse
 # 仅涉及对应模块时运行；必要时先构建对应测试目标
-.\build\pulse_preview_test.exe
-.\build\pulse_ops_test.exe
-# 仅确有全量构建需求时使用
+.\build-release\pulse_preview_test.exe
+.\build-release\pulse_ops_test.exe
+# 需要更新完整生产交付文件时使用；不运行测试
 .\build_release.bat
 ```
 
-`build_release.bat` builds all Release targets; build one target during iteration. For the optional headless suite, configure with `-DPULSE_WITH_SELFTEST=ON`, then run `pulse.exe --selftest` and explicitly wait for it to exit.
+`build_release.bat` defaults to `build-release` (Ninja, Release, `/MT`, `PULSE_WITH_SELFTEST=OFF`) and builds the six production executables and their dependencies, without running tests. It explicitly builds `pulse`, `pulse_index`, `pulse_shell`, `pulse_preview`, and `pulse_document`; `pulse_integration` is a dependency of `pulse`. Build only affected targets during iteration. The main `pulse` target depends on all five packaged helpers, including `pulse_document` through the CMake document-target loop.
 
-`build_installer.bat` builds Release and compiles `dist\PulseSetup-<version>.exe` (Inno Setup 6, `winget install JRSoftware.InnoSetup`); the script is `installer/PulseSetup.iss`. The installer requires admin, optionally registers and starts the `PulseIndex` service for full-disk MFT/USN indexing, and removes it on uninstall. Crash logs live in `%LOCALAPPDATA%\Pulse` (`pulse_crash.log`, `pulse_shell_host.log`) so installed copies under Program Files can write them.
+Both batch scripts take the build directory as their second argument, e.g. `.\build_release.bat "" build-custom`. `/clean` refreshes and cleans a Ninja directory; an existing NMake cache is rejected even with `/clean`. For optional embedded selftests, use a separate directory with `-DPULSE_WITH_SELFTEST=ON`, select relevant cases and explicitly wait for the process to exit. Rebuild production with selftests disabled before packaging.
+
+`build_installer.bat` builds Release, checks versions, filenames, selftest markers and MSVC runtime dependencies, then compiles `dist\PulseSetup-<version>.exe` with Inno Setup 6 using `installer/PulseSetup.iss`. `/skipbuild build-release` reuses existing binaries without checking source freshness. `pwsh -NoProfile -File scripts/package_portable.ps1 -BuildDir build-release` separately packages the existing payload as `dist\Pulse-<version>-portable-win-x64.zip` (PowerShell 7.2+). Back up same-version artifacts when needed; packaging overwrites them without automatic backup.
+
+Use `scripts/verify_release_artifacts.ps1` with an explicit `-BuildDir` to compare ZIP contents to their sources and record installer identity. It does not validate installer contents or installation behavior. Building, packaging, replacing an installed copy and publishing are separate operations. Current commands and CI/signing limitations are documented in [docs/build-and-package.md](docs/build-and-package.md) and [scripts/RELEASE.md](scripts/RELEASE.md).
+
+The installer requires admin, optionally registers and starts the `PulseIndex` service for full-disk MFT/USN indexing, and removes it on uninstall. Extracting the portable ZIP does not register the service; preferences, caches and logs remain in user application-data directories. Crash logs live in `%LOCALAPPDATA%\Pulse` (`pulse_crash.log`, `pulse_shell_host.log`) so installed copies under Program Files can write them.
 
 ## Coding Style & Naming Conventions
 

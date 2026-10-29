@@ -1,4 +1,5 @@
 #include "shell_query_metadata.h"
+#include "../fs/cloud_state.h"
 #include "../common/path_utils.h"
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -21,18 +22,36 @@ HRESULT LastError() {
 }
 
 void QueryShellName(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
-    const auto path = pulse::path::StripExtendedPathPrefix(request.path);
+    auto path = pulse::path::StripExtendedPathPrefix(request.path);
     LPCWSTR query = path.c_str();
     UINT flags = request.kind == ipc::ShellQueryKind::TypeName ? SHGFI_TYPENAME : SHGFI_DISPLAYNAME;
+    DWORD attributes = 0;
     Pidl pidl;
     if (path.starts_with(L"::") || path.starts_with(L"shell:")) {
         result.error = SHParseDisplayName(path.c_str(), nullptr, &pidl.value, 0, nullptr);
         if (FAILED(result.error)) return;
         query = reinterpret_cast<LPCWSTR>(pidl.value);
         flags |= SHGFI_PIDL;
+    } else if (request.kind == ipc::ShellQueryKind::TypeName) {
+        attributes = request.attributes;
+        if (!fs::IsCloudPlaceholder(attributes)) {
+            const DWORD current = GetFileAttributesW(request.path.c_str());
+            if (current != INVALID_FILE_ATTRIBUTES) attributes |= current;
+        }
+        if (fs::IsCloudPlaceholder(attributes)) {
+            // A selected online-only item still needs a type label. Ask by
+            // extension and attributes so Shell never opens the actual item.
+            const size_t dot = path.find_last_of(L'.');
+            const size_t slash = path.find_last_of(L"\\/");
+            path = L"dummy" + (dot != std::wstring::npos &&
+                (slash == std::wstring::npos || dot > slash) ? path.substr(dot) : L"");
+            attributes = attributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+            query = path.c_str();
+            flags |= SHGFI_USEFILEATTRIBUTES;
+        }
     }
     SHFILEINFOW info{};
-    if (!SHGetFileInfoW(query, 0, &info, sizeof(info), flags)) {
+    if (!SHGetFileInfoW(query, attributes, &info, sizeof(info), flags)) {
         result.error = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND); return;
     }
     result.text = request.kind == ipc::ShellQueryKind::TypeName ? info.szTypeName : info.szDisplayName;
@@ -47,7 +66,8 @@ void QueryShellNamespace(const ipc::ShellQueryRequest& request, ipc::ShellQueryR
         if (!pidl.value) { result.error = E_OUTOFMEMORY; return; }
         std::memcpy(pidl.value, request.pidl.data(), request.pidl.size());
     } else {
-        result.error = SHParseDisplayName(request.path.c_str(), nullptr, &pidl.value, 0, nullptr);
+        const auto path = pulse::path::StripExtendedPathPrefix(request.path);
+        result.error = SHParseDisplayName(path.c_str(), nullptr, &pidl.value, 0, nullptr);
         if (FAILED(result.error) || !pidl.value) {
             if (SUCCEEDED(result.error)) result.error = E_FAIL;
             return;
@@ -96,12 +116,19 @@ void InitializePreviewItem(const ipc::ShellQueryRequest& request, ipc::ShellQuer
     result.error = handler.As(&initialize);
     if (FAILED(result.error)) return;
     ComPtr<IShellItem> item;
-    result.error = SHCreateItemFromParsingName(request.path.c_str(), nullptr, IID_PPV_ARGS(&item));
+    const auto path = pulse::path::StripExtendedPathPrefix(request.path);
+    result.error = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&item));
     if (FAILED(result.error)) return;
     result.error = initialize->Initialize(item.Get(), STGM_READ);
 }
 
 void QueryShellShortcut(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
+    const DWORD attrs = GetFileAttributesW(request.path.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) { result.error = LastError(); return; }
+    if (fs::IsCloudPlaceholder(attrs)) {
+        result.error = HRESULT_FROM_WIN32(ERROR_FILE_OFFLINE);
+        return;
+    }
     ComPtr<IShellLinkW> link;
     result.error = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link));
     if (FAILED(result.error)) return;

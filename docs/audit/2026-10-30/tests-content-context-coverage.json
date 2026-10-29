@@ -1,0 +1,16 @@
+[
+  "src/bench/content_index_test.cpp",
+  "src/bench/content_instant_test.cpp",
+  "src/bench/content_paging_test.cpp",
+  "src/bench/content_progress_ui_test.cpp",
+  "src/bench/content_reconcile_capacity_cases.h",
+  "src/bench/content_refresh_test.cpp",
+  "src/bench/content_reveal_ui_test.cpp",
+  "src/bench/content_search_test.cpp",
+  "src/bench/content_timing_test.cpp",
+  "src/bench/context_menu_loading_test.cpp",
+  "src/bench/context_menu_refresh_cases.h",
+  "src/bench/context_menu_settings_ui_test.cpp",
+  "src/bench/context_query_timeout_test.cpp",
+  "src/bench/context_session_process_test.cpp"
+]

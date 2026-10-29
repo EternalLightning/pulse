@@ -25,7 +25,7 @@ inline bool ValidatePreviewResponse(const PreviewRequest& request, const Preview
             response.mapping_chars || response.text_chars || response.flags || response.bytes_read ||
             response.source_width || response.source_height || response.frame_count != 1 || response.frame_delay_ms)
             return false;
-    } else if (request.kind == PreviewRequestKind::Content) {
+    } else if (request.kind == PreviewRequestKind::Content || request.kind == PreviewRequestKind::Thumbnail) {
         if (response.property_count || (response.status == 0 && !bitmap && !text) ||
             (response.status == 1 && response.kind != PreviewContentKind::Unsupported) ||
             (response.status == 2 && !bitmap)) return false;

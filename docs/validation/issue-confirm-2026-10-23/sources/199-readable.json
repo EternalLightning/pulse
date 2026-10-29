@@ -1,0 +1,29 @@
+{
+  "number": 199,
+  "title": "关于无论咋样都更新不了新版本的问题",
+  "body": "更新到1.0.51版本之后,再更新就是图片所示,并且更新失败只会软件会非常卡顿,重启之后才恢复正常,但是依旧无法更新\n<img width=\"967\" height=\"495\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8f47c7ea-53f4-4b72-8f96-6f9385c3a4fb\" />\n\n<img width=\"1312\" height=\"402\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/bd54d32c-c5ac-4a0f-8c6a-169266e0c3e7\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/199",
+  "captured_at": "2026-10-23T03:10:07.192238+00:00",
+  "updated_at": "2026-10-11T05:16:54Z",
+  "comments": [
+    {
+      "body": "全部跳过之后还是1.0.51版本,没有更新到最新版,如果还需要我提供其他数据的话我第一时间回复",
+      "bodyHTML": "<p dir=\"auto\">全部跳过之后还是1.0.51版本,没有更新到最新版,如果还需要我提供其他数据的话我第一时间回复</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOE4Ocvg",
+        "login": "123paouiem",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/327392446?v=4",
+        "profileUrl": "https://github.com/123paouiem",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/199#issuecomment-6105758168"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoSlkfXAAqjYxMDU3NTgxNjg=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoSlkfXAAqjYxMDU3NTgxNjg="
+  }
+}

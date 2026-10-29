@@ -1,0 +1,23 @@
+[
+  {
+    "Actual": "Microsoft YaHei UI",
+    "Quality": "ANTIALIASED_QUALITY",
+    "Weight": 400,
+    "Requested": "Microsoft YaHei UI",
+    "PixelHeight": 14
+  },
+  {
+    "Actual": "Segoe UI Variable Text",
+    "Quality": "ANTIALIASED_QUALITY",
+    "Weight": 400,
+    "Requested": "Segoe UI Variable Text",
+    "PixelHeight": 14
+  },
+  {
+    "Actual": "Segoe UI",
+    "Quality": "ANTIALIASED_QUALITY",
+    "Weight": 400,
+    "Requested": "Segoe UI",
+    "PixelHeight": 14
+  }
+]

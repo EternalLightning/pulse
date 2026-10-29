@@ -89,6 +89,7 @@ enum MsgType : uint32_t {
     // Same plan fields followed by owner HWND(u64); Shell owns recycle warnings.
     REQ_AUTHORIZED_RECYCLE = 16,
     REQ_SHELL_LAUNCH = 17, // versioned payload in shell_launch_protocol.h; never replayed
+    REQ_DEVICE_OPERATION = 18, // owner(u64), verb, name, absolute Shell IDs; never replayed
     RSP_PROGRESS = 100,
     RSP_DONE = 101,
     RSP_PONG = 102,

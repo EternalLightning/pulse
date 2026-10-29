@@ -70,6 +70,8 @@ public:
 
     std::vector<NetworkRootInfo> Roots() const;
     std::wstring ConfigurationError() const;
+    // Reconcile an externally imported configuration without writing old roots back.
+    void RefreshConfiguration();
     bool AddRoot(const std::wstring& path, std::wstring* error = nullptr);
     bool RemoveRoot(const std::wstring& path, std::wstring* error = nullptr);
     void Rebuild(const std::wstring& path = {});
@@ -95,6 +97,9 @@ private:
 
     bool LoadConfiguration(std::vector<std::wstring>& configured);
     std::wstring config_error_;
+    std::wstring configuration_path_;
+    uint64_t configuration_stamp_ = 0;
+    uint64_t configuration_size_ = 0;
     void CrawlLoop();
     void WatchLoop();
     void SearchLoop();

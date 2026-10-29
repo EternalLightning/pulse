@@ -1,0 +1,311 @@
+{
+  "date_local": "2026-10-23",
+  "scope": "Context-menu cold-start follow-up; isolated process reuse; query/close-only third-party measurements",
+  "status": "implementation and all targeted normal-integrity runtime validation passed",
+  "implementation": {
+    "strategy": "Keep at most one successfully cleaned, uninvoked context worker idle; rebuild session and per-handler STA/COM/menu state for every query",
+    "idle_timeout_ms": 30000,
+    "max_queries_per_process": 8,
+    "physical_process_limit": 4,
+    "release_ack_wait_ms": 500,
+    "release_ack": "Private RSP_PONG(session) only after CtxSessionThreadImpl returns, handler threads join, menus/COM bindings are released and session COM apartments are uninitialized; no acknowledgement after handler exception",
+    "never_reuse": [
+      "incomplete or timed-out query",
+      "pending or dispatched invocation",
+      "missing cleanup acknowledgement",
+      "handler exception",
+      "visible window",
+      "stopped or failed process"
+    ],
+    "retained_contracts": [
+      "partial results remain usable until close or existing query/session deadlines",
+      "commands route to the exact active session and handler STA",
+      "worker job is killable and preserves launched programs",
+      "no menu command or cached COM object crosses sessions"
+    ],
+    "com_release_order": "Query-time CtxBind is released before publication and before handler CoUninitialize; menu COM state remains on the original handler STA until normal release",
+    "release_ack_write_timeout_ms": 100,
+    "visible_window_check": "Checked both before requesting cleanup and after receiving the release acknowledgement"
+  },
+  "preexisting_evidence": {
+    "pidl_parse_fix": "Already implemented before this follow-up; one parse per menu session; no repetition of that change",
+    "old_shared_build_sha256": "557846B94CE8D4F021E81539F28B46FD7C4F91C41BD98473BB3E2F60FFCB9D01",
+    "kaspersky_first_repeat_qcm_ms": [
+      767.0371,
+      1.7189
+    ],
+    "same_process_new_sta_qcm_ms": [
+      1219.69,
+      1.9392,
+      1.6333
+    ],
+    "sources": [
+      "bench_data/menu-latency-20261023/shared-build-check/validation.json",
+      "bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json",
+      "bench_data/kaspersky-latency-20261023/new-sta-same-process.jsonl"
+    ]
+  },
+  "mtool_boundary": {
+    "user_statement": "The right-click menu module was not enabled",
+    "historical_observation": "Old Kaspersky-only activation probe captured indirect MTool 2.0.2 frames; this does not prove Pulse independently selected MTool or that the menu feature was enabled",
+    "current_observation": "Current MTool 2.1 sampling captured no MTool frames in seven sparse stack samples",
+    "unconfirmed": [
+      "exact historical indirect activation entry",
+      "full per-module time attribution",
+      "whether an uncaptured module ever loaded"
+    ],
+    "changes_to_security_or_third_party_configuration": "none"
+  },
+  "validation": {
+    "private_probe_build": "PASS: MSVC /W4 /permissive- /utf-8; standalone probe and current ctx_session_process.cpp; no warnings",
+    "final_shared_build": "PASS: parent-owned targeted pulse_shell, pulse_context_query_timeout_test, pulse_context_worker_fixture and pulse_context_session_test build; build-menu-final.log",
+    "reuse_fixture": {
+      "status": "PASS",
+      "pass": 25,
+      "fail": 0,
+      "log": "bench_data/finish-all-20261023/menu-reuse-medium.log",
+      "coverage": [
+        "same PID across different session IDs after cleanup acknowledgement",
+        "stale session close/invoke rejected",
+        "query count retirement",
+        "idle deadline retirement",
+        "missing acknowledgement forced retirement",
+        "synthetic invoked process never reused",
+        "four-process physical admission cap",
+        "concurrent cleanup leaves at most one idle worker",
+        "failure recovery",
+        "Stop reclaims idle workers"
+      ]
+    },
+    "existing_timeout_fixture": {
+      "status": "PASS",
+      "pass": 6,
+      "fail": 0,
+      "elapsed_ms": 8094,
+      "log": "bench_data/finish-all-20261023/menu-timeout-medium.log",
+      "coverage": [
+        "initial and empty-partial hangs terminate",
+        "ready partial snapshot survives query timeout and remains invokable",
+        "normal complete query remains invokable",
+        "all closed worker processes physically exit"
+      ]
+    },
+    "real_query_close": {
+      "status": "PASS",
+      "integrity": "normal Windows integrity via authorized sandbox escalation",
+      "driver": "src/bench/context_menu_reuse_probe.cpp directly drives production ContextSessionProcesses and hash-identical real context worker",
+      "total_queries": 16,
+      "cases": [
+        {
+          "case": "single",
+          "cold": {
+            "final_ms": [
+              719,
+              828,
+              829,
+              828
+            ],
+            "first_7zip_ms": [
+              157,
+              156,
+              157,
+              156
+            ],
+            "worker_pids": [
+              40660,
+              2892,
+              35960,
+              8124
+            ],
+            "final_counts": [
+              22,
+              22,
+              22,
+              22
+            ],
+            "close_idle": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "remaining": 0,
+            "failed": false
+          },
+          "warm": {
+            "final_ms": [
+              813,
+              109,
+              109,
+              109
+            ],
+            "first_7zip_ms": [
+              141,
+              109,
+              109,
+              109
+            ],
+            "worker_pids": [
+              29976,
+              29976,
+              29976,
+              29976
+            ],
+            "final_counts": [
+              22,
+              22,
+              22,
+              22
+            ],
+            "close_idle": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "remaining": 0,
+            "failed": false
+          },
+          "warm_same_pid_all_four": true,
+          "cold_all_fresh_pids": true,
+          "exact_command_snapshots_equal_all_queries": true,
+          "cold_median_final_ms": 828.0,
+          "warm_repeat_median_final_ms": 109,
+          "passed": true
+        },
+        {
+          "case": "mixed",
+          "cold": {
+            "final_ms": [
+              812,
+              703,
+              812,
+              813
+            ],
+            "first_7zip_ms": [
+              156,
+              157,
+              156,
+              141
+            ],
+            "worker_pids": [
+              18112,
+              31840,
+              37368,
+              18540
+            ],
+            "final_counts": [
+              22,
+              22,
+              22,
+              22
+            ],
+            "close_idle": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "remaining": 0,
+            "failed": false
+          },
+          "warm": {
+            "final_ms": [
+              843,
+              109,
+              109,
+              125
+            ],
+            "first_7zip_ms": [
+              172,
+              109,
+              109,
+              110
+            ],
+            "worker_pids": [
+              23548,
+              23548,
+              23548,
+              23548
+            ],
+            "final_counts": [
+              22,
+              22,
+              22,
+              22
+            ],
+            "close_idle": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "remaining": 0,
+            "failed": false
+          },
+          "warm_same_pid_all_four": true,
+          "cold_all_fresh_pids": true,
+          "exact_command_snapshots_equal_all_queries": true,
+          "cold_median_final_ms": 812.0,
+          "warm_repeat_median_final_ms": 109,
+          "passed": true
+        }
+      ],
+      "cleanup": {
+        "processes": [],
+        "processes_remaining": 0
+      },
+      "evidence": "bench_data/menu-reuse-20261023/validation.json",
+      "binary_hash_evidence": "bench_data/menu-reuse-20261023/binary-hashes.json",
+      "limits": [
+        "Four queries per mode per case; serial cold-then-warm sampling, not a population performance benchmark.",
+        "Probe drives ContextSessionProcesses directly and real final Shell worker; omits UI and broker-start latency.",
+        "Queries and closes only; no third-party command invoked."
+      ]
+    },
+    "deployed": false,
+    "third_party_commands_invoked": false,
+    "full_context_session_fixture": {
+      "status": "PASS",
+      "pass": 28,
+      "fail": 0,
+      "exit_code": 0,
+      "log": "bench_data/finish-all-20261023/menu-session-with-fixture.log",
+      "command": "build/pulse_context_session_test.exe E:\\Projects\\pulse\\build\\pulse_context_worker_fixture.exe",
+      "coverage": [
+        "hung sibling query remains partial and later normal handlers merge",
+        "ready handler can invoke despite hung sibling",
+        "blocked query and invocation physically reclaimed on close",
+        "visible modeless command window survives until closed",
+        "launched child program survives menu process cleanup",
+        "four-process physical admission cap",
+        "file-operation host and pipe remain usable",
+        "parent exit job kills outstanding context workers"
+      ],
+      "harness_invocation_note": "An earlier no-argument launch exited 2 for its missing required fixture argument; the corrected command above passed all 28 assertions"
+    },
+    "sandbox_boundary": {
+      "observation": "Sandboxed fixture runs did not receive expected query responses; the final binary passed all reuse and timeout assertions at normal Windows integrity",
+      "exact_blocked_operation": "not instrumented or proven; do not claim a particular job/pipe/root cause",
+      "assertions_weakened": false
+    },
+    "scoped_diff_check": "PASS: git diff --check for modified shell/menu fixture files; only repository line-ending conversion notices",
+    "final_hash_recheck": "PASS: final shared and private host SHA256 remain identical after measurements"
+  },
+  "limits": [
+    "Does not remove the first third-party QueryContextMenu cost in a fresh process",
+    "No third-party InvokeCommand performed",
+    "No security, antivirus, MTool, registry or user-preference setting changed",
+    "No installed Pulse binary replaced",
+    "Timing comparison is the same final binary with process reuse disabled/enabled; it excludes UI/broker startup and does not validate user-visible menu interaction or third-party commands"
+  ],
+  "final_shared_build_sha256": "6DCFFA84C1DA3E0EB3428C6CE0861249125F0A249FB8F064744696543780E0BF",
+  "result": "In this sample, complete menu-query median fell from 828 ms to 109 ms for repeated single-file menus, and from 812 ms to 109 ms for repeated mixed-selection menus. All complete 22-row command snapshots were exactly equal across cold and warm queries. Initial warm-pool queries remained 813 and 843 ms; no claim of removing fresh-process first-use cost.",
+  "changed_files_this_followup": [
+    "src/shell_host/ctx_session_process.cpp",
+    "src/shell_host/ctx_session_process.h",
+    "src/shell_host/main.cpp",
+    "src/bench/context_query_timeout_test.cpp",
+    "src/bench/context_menu_reuse_probe.cpp"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "number": 370,
+  "title": "”在终端中打开“功能无法自动聚焦到终端窗口",
+  "body": "<img width=\"1004\" height=\"578\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8e99a3bf-0824-455a-9116-0f84631a3319\" />\n\nPulse 版本 v1.0.56\n打开终端时的情况大致如图所示，终端窗口藏在 Pulse 窗口的后面，且没有聚焦。\n\n<img width=\"239\" height=\"525\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c2ce57db-a68a-4b9c-b41a-f86f1e901ca1\" />\n\n使用的菜单项是 Open in Terminal (应当在 System Context Menu，但是我翻了好久没找到) 而非 Open terminal here（在Pulse Context Menu）\n终端：Windows Terminal v1.24.11911.0\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/370",
+  "captured_at": "2026-10-23T03:10:07.122221+00:00",
+  "updated_at": "2026-10-22T12:17:21Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

@@ -1,0 +1,12 @@
+{"stage":"production_shell_spawn_pipe_ping_submit_no_roundtrip","ms":66.9425,"hr":0,"count":0}
+{"stage":"production_shell_stop","ms":0.4579,"hr":0,"count":0}
+{"stage":"private_STA_COM_initialization","ms":2.482,"hr":0,"count":0}
+{"stage":"production_BindCtxSelection","ms":91.8306,"hr":0,"count":0}
+{"stage":"7zip_CoCreateInstance","ms":0.9703,"hr":0,"count":0}
+{"stage":"7zip_QI_IShellExtInit","ms":0.0357,"hr":0,"count":0}
+{"stage":"7zip_Initialize","ms":0.1466,"hr":0,"count":0}
+{"stage":"7zip_QI_IContextMenu_and_CreatePopupMenu","ms":0.0289,"hr":0,"count":0}
+{"stage":"7zip_QueryContextMenu","ms":0.684,"hr":18,"count":0}
+{"stage":"7zip_QI_IContextMenu2_3","ms":0.0281,"hr":0,"count":0}
+{"stage":"production_CollectHandlerItems","ms":0.0497,"hr":0,"count":17}
+{"stage":"7zip_release","ms":0.3193,"hr":0,"count":0}

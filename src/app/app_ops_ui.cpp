@@ -21,6 +21,7 @@
 #include "link_resolve.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
+#include "clipboard_paste_choice.h"
 #include "../ipc/ctx_menu_util.h"
 #include <windows.h>
 #include <windowsx.h>
@@ -142,24 +143,28 @@ void ReleaseTrayBatch(AppState& s, size_t idx) {
 // Ctrl+V: release newest tray batch, else paste from the system clipboard.
 void PasteIntoCurrent(AppState& s) {
     app::Tab* tab = ActiveTab(s);
-    if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
+    if (!tab || tab->current_path.empty() || tab->net_readonly) return;
+    if (app::IsDeviceTab(tab)) {
+        if (CanPasteIntoCurrent(s)) app::QueueDeviceOperation(s, L"paste",
+            {app::DeviceRegistry::Instance().FolderShellId(tab->current_path)});
+        return;
+    }
+    if (fs::IsVirtualPath(tab->current_path)) return;
     if (!CanPasteIntoCurrent(s)) return;
     const uint32_t observed_sequence = GetClipboardSequenceNumber();
-    const bool has_path_files = IsClipboardFormatAvailable(CF_HDROP) != 0;
-    const bool virtual_files = !has_path_files && ops::ClipboardHasShellFiles();
-    if (observed_sequence != GetClipboardSequenceNumber()) return;
-    if (!virtual_files && !s.tray.batches().empty()) {
+    ops::ClipboardData cb;
+    const bool clipboard_paths = ops::ReadClipboard(cb);
+    const bool shell_files = ops::ClipboardHasShellFiles();
+    const auto source = app::ChooseClipboardPasteSource(clipboard_paths, cb, shell_files,
+        !s.tray.batches().empty(), observed_sequence, GetClipboardSequenceNumber());
+    if (source == app::ClipboardPasteSource::None) return;
+    if (source == app::ClipboardPasteSource::Tray) {
         size_t idx = s.tray.batches().size() - 1;
         if (s.tray.batches()[idx].move_intent) s.cutPaths.clear();
         ReleaseTrayBatch(s, idx);
         return;
     }
-
-    ops::ClipboardData cb;
-    const bool clipboard_paths = ops::ReadClipboard(cb);
-    const uint32_t clipboard_sequence = clipboard_paths ? cb.sequence : observed_sequence;
-    if (clipboard_sequence != GetClipboardSequenceNumber()) return;
-    if (clipboard_paths) {
+    if (source == app::ClipboardPasteSource::Paths) {
         ops::OpRequest req;
         req.type = cb.cut ? ops::OpType::Move : ops::OpType::Copy;
         req.dest_dir = tab->current_path;
@@ -170,12 +175,12 @@ void PasteIntoCurrent(AppState& s) {
             s.pendingCutClipboardPaths = cb.paths;
             s.completedCutClipboardPaths.clear();
         }
-    } else if (virtual_files) {
+    } else if (source == app::ClipboardPasteSource::Shell) {
         // Shell providers can block while materializing virtual files. The I/O
         // worker is an STA, so OleGetClipboard and the folder drop target stay
         // off the UI thread and in one apartment.
         const std::wstring destination = tab->current_path;
-        const uint32_t sequence = clipboard_sequence;
+        const uint32_t sequence = observed_sequence;
         const auto mailbox = s.clipboard_paste_mailbox;
         const bool queued = s.worker.EnqueueIo([destination, sequence, mailbox] {
             const bool pasted = ops::PasteShellClipboard(destination, sequence);
@@ -190,7 +195,7 @@ void PasteIntoCurrent(AppState& s) {
 void DeleteSelected(AppState& s, bool permanent) {
     if(DeferContentSelection(s,[=](AppState& v){DeleteSelected(v,permanent);})) return;
     app::Tab* tab = ActiveTab(s);
-    if (!tab || tab->net_readonly) return;
+    if (!tab || tab->net_readonly || app::HasDeviceSelection(*tab)) return;
     if (IsRecycleTab(tab)) {
         ops::OpRequest req;
         req.type = ops::OpType::RealDelete;
@@ -244,6 +249,10 @@ void CollectToTray(AppState& s, bool move_intent) {
     if(DeferContentSelection(s,[=](AppState& v){CollectToTray(v,move_intent);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || IsRecycleTab(tab)) return;
+    if (app::HasDeviceSelection(*tab)) {
+        if (!move_intent) app::QueueDeviceOperation(s, L"copy", app::DeviceSelectedIds(*tab));
+        return;
+    }
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
     if (std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     if (!paths.empty()) {
@@ -258,7 +267,34 @@ void CollectToTray(AppState& s, bool move_intent) {
         InvalidateRect(s.hwnd, nullptr, FALSE);
     }
 }
+void EnsureOperationWindow(AppState& s) {
+    if (s.operationWindow || s.exit_requested || s.ui_schedule.stopped || !s.hwnd) return;
+    const HWND hwnd = s.hwnd;
+    s.operationWindow = std::make_unique<ui::FileOperationWindow>();
+    ui::FileOperationCallbacks operation_callbacks;
+    operation_callbacks.cancel = [hwnd] {
+        if (AppState* state = GetAppState(hwnd)) state->ops.CancelCurrent();
+    };
+    operation_callbacks.pause = [hwnd] {
+        if (AppState* state = GetAppState(hwnd)) state->ops.PauseCurrent();
+    };
+    operation_callbacks.resume = [hwnd] {
+        if (AppState* state = GetAppState(hwnd)) state->ops.ResumeCurrent();
+    };
+    operation_callbacks.dismiss = [hwnd] {
+        if (AppState* state = GetAppState(hwnd)) {
+            state->operationDismissedTaskId = state->ops.Status().task_id;
+            state->operationPinnedByUser = false;
+        }
+    };
+    if (!s.operationWindow->Create(hwnd, std::move(operation_callbacks))) {
+        s.operationWindow.reset();
+        return;
+    }
+    s.operationWindow->SetTheme(s.darkMode, s.accentColor);
+}
 void PinAndShowOperationWindow(AppState& s) {
+    EnsureOperationWindow(s);
     if (!s.operationWindow) return;
     const ops::OpStatus status = s.ops.Status();
     if (!status.active && status.summary.empty() && status.last_error.empty()) return;
@@ -292,6 +328,9 @@ void ShowBatchRename(AppState& s) {
 void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
     UpdateOperationCenter(s);
     if (allow_conflict_dialog) PresentDeleteConfirmation(s);
+    const auto pending_status = s.ops.Status();
+    if (pending_status.active || !pending_status.summary.empty() || !pending_status.last_error.empty())
+        EnsureOperationWindow(s);
     if (!s.operationWindow) return;
     const auto now = std::chrono::steady_clock::now();
     const ops::OpStatus status = s.ops.Status();
@@ -321,8 +360,8 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
                 ui::BatchConflictLabels labels;
                 labels.title = l10n::Get(I::OpConflictTitle);
                 labels.instruction = l10n::Get(I::BatchConflictInstruction);
-                labels.source = l10n::Get(I::BatchConflictSource);
-                labels.destination = l10n::Get(I::BatchConflictDestination);
+                labels.source = l10n::Get(I::OpSource);
+                labels.destination = l10n::Get(I::OpExisting);
                 labels.replace = l10n::Get(I::OpReplaceFile);
                 labels.skip = l10n::Get(I::OpSkipFile);
                 labels.keep_both = l10n::Get(I::OpKeepBoth);

@@ -16,7 +16,12 @@
 #include "tab_indicator_animation.h"
 #include "tab_close_animation.h"
 #include "content_reveal_animation.h"
+#include "binary_transition.h"
+#include "surface_transition.h"
+#include "smooth_scroll.h"
 #include "preview_handler_host.h"
+#include "sysctx_view.h"
+#include "../model/builtin_menu_items.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_snapshot.h"
 #include <algorithm>
@@ -36,6 +41,9 @@ enum class PaneHeaderIcon;
 
 inline constexpr unsigned kSettingsContextExpandedMask = 0x3f00u;
 inline constexpr unsigned kSettingsDefaultExpandedMask = kSettingsContextExpandedMask | 0x3u;
+inline constexpr int kSettingsMenuFixedHit = 99990;
+inline constexpr int kSettingsMenuRowHit = 100000;
+inline constexpr int kSettingsMenuOrderReset = 68;
 
 
 // Embedded Fluent Color SVG for a Segoe sidebar/toolbar glyph, or 0.
@@ -70,12 +78,14 @@ struct ListEntryView {
     std::wstring date_text;
     std::wstring type_text;
     std::wstring path;
+    std::wstring shell_id;
     DWORD attrs = 0;
     uint64_t size_value = 0;
     uint64_t modified_value = 0;
     bool is_dir = false;
     bool is_reparse = false;
     bool cloud_recall = false;
+    uint8_t pc_device = 0;
     bool record_only = false;
     bool change_deleted = false;
     bool cut = false;
@@ -154,11 +164,13 @@ struct PaneViewModel {
     using FilterMap = std::vector<int>;
     using TagDots = std::unordered_map<int, std::vector<D2D1_COLOR_F>>;
 
-    std::wstring path;
+    std::wstring path; // Navigation address; empty means This PC. Titles belong in header_text.
     bool is_home = false;
     bool home_loading = false;
     unsigned home_collapsed_mask = 0;
+    std::array<float, 3> home_expansion{-1.0f, -1.0f, -1.0f};
     std::vector<HomeCardView> home_cards;
+    bool network_discovery_disabled = false;
     std::wstring header_text;
     std::unordered_map<int, ChangeBadge> change_badges;
     std::unordered_map<int, FolderSizeLabel> folder_size_labels;
@@ -174,6 +186,7 @@ struct PaneViewModel {
     float header_controls_opacity = 1.0f;
     std::wstring banner_title;
     std::wstring banner_message;
+    float banner_expansion = -1.0f; // Negative keeps direct/un-ticked view models fully visible.
     std::wstring network_search_root;
     int banner_kind = 0; // 0 info, 1 success, 2 warning, 3 error
     // Derived data is shared with the tab cache. Search views can contain
@@ -198,6 +211,7 @@ struct PaneViewModel {
     bool can_go_up = false;
     bool can_create = false;
     bool is_file_system = false;
+    bool cloud_status_column = false;
     bool curated_order = false;
     bool is_starred = false;
     bool is_recent = false;
@@ -215,6 +229,7 @@ struct PaneViewModel {
     bool all_selected = false;
     const std::unordered_set<int>* selected_indices = nullptr;
     int hover_index = -1;
+    bool view_mode_direct = false;
     uint32_t row_action_mask = 7u; // star, open in new tab, more
     int drop_target_index = -1;   // folder row under an OLE drag (accent 2px stroke)
     bool header_drop = false;     // pane title bar is a navigate-to-folder target
@@ -228,8 +243,9 @@ struct PaneViewModel {
     GroupMode group_mode = GroupMode::Auto;
     SortDirection group_direction = SortDirection::Desc;
     // Individual column widths in DIPs; zero selects the responsive default.
-    std::array<float, 3> details_column_dividers{};
-    std::array<float, 4> search_column_dividers{};
+    // Stored widths: Date, Type, Size, Cloud; search prepends Name.
+    std::array<float, 4> details_column_dividers{};
+    std::array<float, 5> search_column_dividers{};
     bool focused = true;
     bool marquee_active = false;
     D2D1_RECT_F marquee_rect{};
@@ -279,7 +295,8 @@ struct BreadcrumbSegment {
 
 // Splits "C:\Users\TestUser" into [{C:\, C:\}, {Users, C:\Users}, ...].
 // UNC roots split into a server segment plus a share segment. Pure; unit-tested.
-std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path);
+std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
+    std::wstring_view virtual_title = {});
 
 struct SidebarItem {
     std::wstring label;
@@ -306,6 +323,7 @@ struct SidebarItem {
     bool expanded = false;
     bool starred_child = false;
     bool use_path_icon = false;
+    std::wstring icon_path; // empty uses the navigation path
 };
 
 enum class SidebarAddAction { None, CreateTag, AddNetwork };
@@ -321,6 +339,7 @@ struct SidebarGroup {
     bool collapsed = false;
     float expansion = -1.0f;    // Negative uses collapsed; otherwise animated row fraction.
     bool hidden = false;           // Section menu: the group is not laid out at all.
+    bool show_when_empty = false;  // Keep an enabled section's header available before it has rows.
     SidebarAddAction add_action = SidebarAddAction::None;
 };
 
@@ -392,6 +411,8 @@ struct DetailsPanelView {
     std::wstring subtitle_text;     // under-name line: type · size short form
     bool is_dir = false;
     DWORD attrs = 0;
+    bool cloud_online = false;
+    int cloud_download_percent = -1;
     uint64_t modified_value = 0;    // thumbnail cache key parts
     uint64_t size_value = 0;
     uint64_t view_generation = 1;
@@ -421,7 +442,7 @@ struct DetailsPanelView {
 // Interactive rects inside the details panel, shared by draw and hit-test.
 struct DetailsHitRects {
     D2D1_RECT_F open{}, new_tab{}, copy_path{}, more{}, star{}, rename{};
-    D2D1_RECT_F tag_add{}, preview{}, preview_toggle{}, preview_enable{};
+    D2D1_RECT_F tag_add{}, preview{}, preview_toggle{}, preview_enable{}, cloud_download{};
     D2D1_RECT_F attr_readonly{}, attr_hidden{}, attr_advanced{};
     D2D1_RECT_F security_change{};
     std::vector<D2D1_RECT_F> preset_chips;
@@ -527,6 +548,7 @@ struct WindowViewModel {
     float sidebar_scrollbar_expand = 0.0f;
     TrayDeckView tray_deck;
     bool details_visible = false;   // right details panel toggle (view menu)
+    bool details_motion_sampled = false;
     DetailsPanelView details;
     StatusBarView status;
     bool operation_center_open = false;
@@ -582,6 +604,8 @@ struct WindowViewModel {
     bool address_searching = false;
     bool address_search_current = false;
     bool address_search_content = false;
+    bool address_search_scope_open = false;
+    bool address_search_options_open = false;
     bool settings_search_pinyin = true;
     bool settings_global_search_enabled = false;
     bool settings_global_search_capturing = false;
@@ -592,6 +616,8 @@ struct WindowViewModel {
     std::wstring address_search_text;
     std::wstring address_search_placeholder;
     float address_search_animation = 0.0f;
+    float address_path_animation = 0.0f;
+    std::wstring address_path_closing_text;
     float address_scope_animation = 0.0f;
     bool filter_editing = false;
     bool splitter_pressed = false;
@@ -606,7 +632,7 @@ struct WindowViewModel {
     unsigned settings_expanded = kSettingsDefaultExpandedMask;
     int settings_theme = 0; // system, light, dark
     bool settings_open = false;
-    int settings_page = 0; // 0 general, 1 search/index, 2 context menu, 3 about, 4 duplicates
+    int settings_page = 0; // 0 appearance, 1 search/index, 2 context, 3 about, 4 duplicates, 5 system menu, 6 files, 7 tabs, 8 startup, 9 operations
     float settings_scroll = 0.0f;
     bool settings_launch_on_startup = false;
     bool settings_start_to_tray = false;
@@ -638,6 +664,13 @@ struct WindowViewModel {
     int settings_language = 0;    // 0 system, 1 zh-CN, 2 en-US
     bool settings_group_on[6] = { true, true, false, false, true, true };
     std::vector<SettingsRowView> settings_items;
+    int settings_context_tab = 0;
+    uint32_t settings_builtin_hidden = 0;
+    size_t settings_builtin_first = 0;
+    model::BuiltinMenuOrder settings_builtin_order[static_cast<size_t>(model::BuiltinMenuSurface::Count)];
+    int settings_menu_drag = -1;
+    float settings_menu_drag_pos = 0, settings_menu_drag_grab = 0;
+    std::shared_ptr<const SysCtxView> settings_sysctx;
     bool settings_index_service = false;
     bool settings_index_installed = false;
     std::wstring settings_index_status;
@@ -655,6 +688,10 @@ struct WindowViewModel {
     std::wstring settings_build_id;
     std::vector<std::pair<std::wstring, std::wstring>> settings_about_rows; // label, value
     bool settings_diagnostics_exporting = false;
+    bool settings_transfer_busy = false;
+    bool settings_transfer_pending = false;
+    bool settings_transfer_has_backup = false;
+    std::wstring settings_transfer_status;
     bool settings_show_performance = false;
     int dup_scope = 0;
     std::wstring dup_folder;
@@ -689,6 +726,7 @@ struct HitTestResult {
         HomeButton,
         HomeCard,
         HomeGroup,
+        HomeNetworkSettings,
         Minimize,
         Maximize,
         Close,
@@ -747,7 +785,6 @@ struct HitTestResult {
         SidebarHeader,
         SidebarHeaderAction,
         SidebarItem,
-        SidebarItemAction,
         SidebarItemExpand,
         SidebarBlank,             // empty space in the sidebar: section menu
         TrayRelease,
@@ -776,11 +813,14 @@ struct HitTestResult {
         DetailsPreview,
         DetailsPreviewToggle,
         DetailsPreviewEnable,   // preview pane on/off chip inside the well
+        DetailsCloudDownload,
         DetailsResize,
         StatusBar,
         StatusBarTask,
         StatusBarCancelSearch,
         SettingsNav,
+        SettingsSysCtx,
+        SettingsCtxPivot,
         SettingsToggle,
         SettingsGlobalSearchHotkey,
         SettingsChangeDays,
@@ -846,7 +886,12 @@ class MainRenderer {
     friend struct FolderSizesUiTest;
     friend struct ColumnResizeUiTest;
     friend struct ContentRevealUiTest;
+    friend struct NavigationMotionUiTest;
+    friend struct AdditionalMotionUiTest;
+    friend struct InteractionFeedbackUiTest;
     friend struct TabIndicatorUiTest;
+    friend struct SurfaceScrollUiTest;
+    friend struct TooltipMotionUiTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);
@@ -891,10 +936,16 @@ public:
     // Right details panel: toggled from the view menu; ContentRect shrinks.
     void SetDetailsPanelVisible(bool visible) {
         details_visible_ = visible;
-        if (!visible) { EndDetailsPreviewPan(); details_preview_ready_ = false; }
+        if (!visible) {
+            EndDetailsPreviewPan();
+            details_preview_ready_ = false;
+            details_scroll_x_.Reset();
+            details_scroll_y_.Reset();
+        }
     }
     // Preferred width, capped by the window so the file list keeps a usable width.
     float DetailsPanelWidth(float window_w) const;
+    void TickDetailsPanelAnimation(uint64_t now, float window_width, bool animate);
     void SetDetailsPanelWidth(float width_dip) {
         details_width_ = std::clamp(width_dip, kDetailsMinWidthDip, kPanelWidthMaxDip);
     }
@@ -955,14 +1006,16 @@ public:
     void ScrollDetailsPreview(float steps, float x, float y, bool horizontal = false);
     void ToggleDetailsPreviewFit(float x, float y);
 
-    enum class ColumnKind : uint8_t { Name, Path, Date, Type, Size };
-    // Details columns in display order. Name is always first; Path only in
+    enum class ColumnKind : uint8_t { Name, Path, Date, Type, Size, Cloud };
+    // Details columns in display order. Name is always first; Cloud precedes Date; Path only in
     // wide search views; Type then Date are dropped first when space is short.
     struct DetailsColumnLayout {
         float left = 0.0f;
         float right = 0.0f;
-        std::array<float, 5> widths{};
-        std::array<ColumnKind, 5> kinds{ColumnKind::Name, ColumnKind::Date,
+        float cloud_left = 0.0f;
+        float cloud_width = 0.0f;
+        std::array<float, 6> widths{};
+        std::array<ColumnKind, 6> kinds{ColumnKind::Name, ColumnKind::Date,
                                         ColumnKind::Type, ColumnKind::Size, ColumnKind::Size};
         int count = 4;
         // Narrow search view: the folder path is drawn under the name.
@@ -1017,30 +1070,32 @@ public:
     // Double-click on a divider: drop the manual widths on both sides so the
     // columns return to their fitted widths.
     void AutoFitColumnDivider(const D2D1_RECT_F& pane_bounds,
-                              std::array<float, 3>& dividers, bool search_view,
-                              std::array<float, 4>& search_dividers, int divider_index) const;
+                              std::array<float, 4>& dividers, bool search_view,
+                              std::array<float, 5>& search_dividers, int divider_index,
+                              bool cloud_status = false) const;
     DetailsColumnLayout DetailsColumns(
         const D2D1_RECT_F& pane_bounds,
-        const std::array<float, 3>& dividers = {},
+        const std::array<float, 4>& dividers = {},
         bool search_view = false,
-        const std::array<float, 4>& search_dividers = {}) const;
+        const std::array<float, 5>& search_dividers = {},
+        bool cloud_status = false) const;
     DetailsColumnLayout DetailsColumns(const D2D1_RECT_F& pane_bounds,
                                        const PaneViewModel& vm) const;
-    std::array<float, 3> ResizeDetailsColumnDivider(
-        const D2D1_RECT_F& pane_bounds,
-        const std::array<float, 3>& dividers,
-        int divider_index, float cursor_x) const;
-    std::array<float, 4> ResizeSearchColumnDivider(
+    std::array<float, 4> ResizeDetailsColumnDivider(
         const D2D1_RECT_F& pane_bounds,
         const std::array<float, 4>& dividers,
-        int divider_index, float cursor_x) const;
+        int divider_index, float cursor_x, bool cloud_status = false) const;
+    std::array<float, 5> ResizeSearchColumnDivider(
+        const D2D1_RECT_F& pane_bounds,
+        const std::array<float, 5>& dividers,
+        int divider_index, float cursor_x, bool cloud_status = false) const;
 
     D2D1_RECT_F NameCellRect(const D2D1_RECT_F& pane_bounds, int view_row, float scroll_y,
                              float extra_top = 0.0f, ViewMode mode = ViewMode::Details,
                              float scroll_x = 0.0f, size_t item_count = 0,
-                             const std::array<float, 3>& column_dividers = {},
+                             const std::array<float, 4>& column_dividers = {},
                              bool search_view = false,
-                             const std::array<float, 4>& search_dividers = {},
+                             const std::array<float, 5>& search_dividers = {},
                              float row_height_px = 0.0f,
                              const std::vector<DateGroup>* date_groups = nullptr) const;
     bool PointInItemName(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
@@ -1077,6 +1132,10 @@ public:
 
     HitTestResult HitTest(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           float x, float y) const;
+    float SettingsMenuRowStart(const WindowViewModel& vm, const D2D1_RECT_F& rect, int item);
+    model::BuiltinMenuOrder SettingsMenuDropOrder(const WindowViewModel& vm, const D2D1_RECT_F& rect, float x, float y);
+    float SysCtxPreviewItemTop(const WindowViewModel& vm, const D2D1_RECT_F& rect, int item);
+    int SysCtxDropZone(const WindowViewModel& vm, const D2D1_RECT_F& rect, float x, float y);
 
     bool PaneScrollbarGeometry(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
                                D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& max_scroll) const;
@@ -1110,10 +1169,17 @@ public:
     // Uniform tab pitch (excludes group-chip offsets); used by drag math.
     float TabPitchPx(const WindowViewModel& vm, float window_w) const;
     bool ScrollTabStrip(const WindowViewModel& vm, float window_w, float steps);
+    bool TickSurfaceScroll(uint64_t now);
+    bool SurfaceScrollAnimating() const {
+        return tab_strip_scroll_.animation.Pending() || details_scroll_x_.Pending() ||
+            details_scroll_y_.Pending();
+    }
     D2D1_RECT_F TabStripViewportRect(const WindowViewModel& vm, float window_w) const;
     bool TabIndicatorAnimating() const { return tab_indicator_.pending; }
     void CaptureTabCloseLayout(const WindowViewModel& vm, float window_w);
     bool TabCloseAnimating() const { return tab_close_.Pending(); }
+    bool SettingsSwitchAnimating() const { return settings_switch_animating_; }
+    bool SurfaceAnimating() const { return surface_animating_; }
     float SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;
     bool SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w, float window_h,
                                    D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maximum) const;
@@ -1149,6 +1215,7 @@ private:
     };
     struct TabStripScrollState {
         float offset = 0.0f;
+        SmoothScroll animation;
         float viewport_w = -1.0f;
         float content_w = -1.0f;
         float scale = 0.0f;
@@ -1162,6 +1229,8 @@ private:
     void DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
                   const D2D1_RECT_F& bounds, int pane_index, const Theme& theme);
+    void DrawSettingsSwitch(const std::wstring& key, const D2D1_RECT_F& bounds,
+                            fluent::ControlState state);
     void DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                         const D2D1_RECT_F& bounds, int pane_index, bool focused, bool target,
@@ -1179,6 +1248,13 @@ private:
     void DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSettingsContext(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawSettingsPulseMenu(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawCtxLayerCards(const D2D1_RECT_F& pulse, const D2D1_RECT_F& system,
+                          bool system_current, bool other_hovered, const Theme& theme);
+    IDWriteTextFormat* SysCtxTitleFormat();
+    ComPtr<IDWriteTextFormat> sysctx_title_format_, sysctx_stat_format_;
+    float sysctx_title_scale_ = 0;
     void DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
 
     void DrawList(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
@@ -1268,6 +1344,8 @@ private:
     bool details_visible_ = false;
     float details_width_ = 340.0f;
     PreviewViewport details_viewport_;
+    SmoothScroll details_scroll_x_;
+    SmoothScroll details_scroll_y_;
     std::wstring details_preview_identity_;
     ContentRevealAnimation details_content_reveal_;
     bool details_content_animating_ = false;
@@ -1322,6 +1400,40 @@ private:
     float tab_indicator_scroll_offset_ = 0.0f;
     float tab_indicator_window_width_ = 0.0f;
     bool motion_enabled_ = false;
+    struct SettingsSwitchTrack {
+        BinaryTransition transition;
+        uint64_t frame = 0;
+    };
+    std::unordered_map<std::wstring, SettingsSwitchTrack> settings_switch_tracks_;
+    uint64_t settings_switch_frame_ = 0;
+    uint64_t settings_switch_now_ = 0;
+    int settings_switch_page_ = -1;
+    bool settings_switch_animating_ = false;
+    SurfaceTransition page_surface_;
+    std::array<SurfaceTransition, 8> pane_surfaces_;
+    SurfaceTransition settings_content_surface_;
+    BinaryTransition details_open_motion_;
+    float details_motion_window_width_ = 0;
+    ComPtr<ID2D1CommandList> details_exit_commands_;
+    float details_exit_left_ = 0;
+    float DetailsPanelTargetWidth(float window_width) const;
+    void DrawAnimatedDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    bool surface_animating_ = false;
+    BinaryTransition tooltip_transition_;
+    std::wstring tooltip_text_;
+    float tooltip_x_ = 0.0f;
+    float tooltip_y_ = 0.0f;
+    int tooltip_hover_region_ = 0;
+    int tooltip_control_index_ = -1;
+    int tooltip_sub_index_ = -1;
+    void UpdateTooltipAnimation(const WindowViewModel& vm, uint64_t now, bool animate);
+    void DrawTooltip(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    int painting_pane_ = 0;
+    struct HoverTrack { BinaryTransition animation; uint64_t frame = 0; };
+    std::unordered_map<std::wstring, HoverTrack> hover_tracks_;
+    std::array<BinaryTransition, 10> settings_nav_tracks_{};
+    float HoverOpacity(const std::wstring& key, bool hovered);
+    float SelectionOpacity(const std::wstring& key, bool selected);
 
 };
 

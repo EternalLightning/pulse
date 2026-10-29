@@ -6,6 +6,7 @@
 #include "window_material.h"
 #include "fluent_menu.h"
 #include "video_preview.h"
+#include "smooth_scroll.h"
 
 #include <string>
 #include <vector>
@@ -87,6 +88,9 @@ private:
     void EndPlaybackDrag(bool resume);
     void DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush);
     void ResetTextState();
+    void ResetTextScroll();
+    float TextScrollMaximum() const;
+    void UpdateTextScrollTimer();
 
     D2D1_RECT_F ContentRect() const;
     D2D1_RECT_F FindBarRect() const;
@@ -160,6 +164,7 @@ private:
     bool handler_immediate_ = false;
     float scale_ = 1.0f;
     float text_scroll_ = 0.0f;
+    SmoothScroll text_smooth_scroll_;
     float pan_x_ = 0.0f;
     float pan_y_ = 0.0f;
     bool image_fit_ = true;

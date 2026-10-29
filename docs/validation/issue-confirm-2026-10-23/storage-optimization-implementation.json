@@ -1,0 +1,144 @@
+{
+  "date": "2026-10-23",
+  "scope": "Disable derived filename query copies for production; retain canonical snapshot, A/B and real WAL. No installation, service/config/ACL changes or existing production index cleanup.",
+  "implementation": {
+    "default_use_volume_query_shards": false,
+    "legacy_access": "private EngineTestAccess friend only; no environment, CLI or user preference override",
+    "guards": [
+      "WriteVolumeShards before any directory creation/write",
+      "RefreshQueryShardsLocked clears mappings then returns before directory/manifest resolution"
+    ]
+  },
+  "build": {
+    "targets": [
+      "pulse_index",
+      "pulse",
+      "pulse_index_storage_test"
+    ],
+    "exit_code": 0,
+    "new_compiler_warnings": 0,
+    "logs": [
+      "bench_data/index-storage-optimization/build-production.log",
+      "bench_data/index-storage-optimization/configure.log",
+      "bench_data/index-storage-optimization/build-fixture-final.log"
+    ]
+  },
+  "test": {
+    "exit_code": 0,
+    "passed_top_level_checks": 42,
+    "failed": 0,
+    "paired_query_cases": {
+      "baseline": 97,
+      "overlay": 97,
+      "WAL-restart": 97
+    },
+    "files": 60000,
+    "volumes": 2,
+    "directories": 48,
+    "generations": 2,
+    "log": "bench_data/index-storage-optimization/paired-run.log",
+    "fixture": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-32452-2667218",
+    "retained": true
+  },
+  "metrics": [
+    {
+      "mode": "legacy",
+      "generations": 1,
+      "snapshot_logical_bytes": 32259224,
+      "snapshot_files": 7,
+      "volume_copy_bytes": 16390680,
+      "build_publish_ms": 630.797,
+      "aggregate_mapped_file_bytes": 15865312,
+      "shard_mapped_file_bytes": 16389792
+    },
+    {
+      "mode": "legacy",
+      "generations": 2,
+      "snapshot_logical_bytes": 64517120,
+      "snapshot_files": 11,
+      "volume_copy_bytes": 32780468,
+      "build_publish_ms": 639.363,
+      "aggregate_mapped_file_bytes": 15865312,
+      "shard_mapped_file_bytes": 16389792
+    },
+    {
+      "mode": "optimized",
+      "generations": 1,
+      "snapshot_logical_bytes": 15865748,
+      "snapshot_files": 2,
+      "volume_copy_bytes": 0,
+      "build_publish_ms": 328.597,
+      "aggregate_mapped_file_bytes": 15865312,
+      "shard_mapped_file_bytes": 0
+    },
+    {
+      "mode": "optimized",
+      "generations": 2,
+      "snapshot_logical_bytes": 31731060,
+      "snapshot_files": 3,
+      "volume_copy_bytes": 0,
+      "build_publish_ms": 372.523,
+      "aggregate_mapped_file_bytes": 15865312,
+      "shard_mapped_file_bytes": 0
+    },
+    {
+      "mode": "legacy",
+      "phase": "baseline",
+      "query_samples": 30,
+      "query_median_ms": 12.872,
+      "query_p95_ms": 33.2415,
+      "cache": "invalidated_each_sample",
+      "warmup": 3
+    },
+    {
+      "mode": "optimized",
+      "phase": "baseline",
+      "query_samples": 30,
+      "query_median_ms": 13.7989,
+      "query_p95_ms": 35.2438,
+      "cache": "invalidated_each_sample",
+      "warmup": 3
+    },
+    {
+      "mode": "legacy",
+      "phase": "overlay",
+      "query_samples": 30,
+      "query_median_ms": 21.027,
+      "query_p95_ms": 42.0835,
+      "cache": "invalidated_each_sample",
+      "warmup": 3
+    },
+    {
+      "mode": "optimized",
+      "phase": "overlay",
+      "query_samples": 30,
+      "query_median_ms": 19.473,
+      "query_p95_ms": 40.7409,
+      "cache": "invalidated_each_sample",
+      "warmup": 3
+    }
+  ],
+  "two_generation_snapshot_reduction_percent": 50.81761244147289,
+  "exfat_evidence": "docs/validation/issue-confirm-2026-10-23/exfat-device-validation.json",
+  "source_and_binary_sha256": {
+    "src/index/index_engine.cpp": "5af376087958d673abd660294a6bba5a3ce6c007cf9058bce80cb95827c69e86",
+    "src/index/index_engine.h": "c9c60f763f3e8c497f5c396a2f1a6be1b5adbdbf14d8c30736bdaaa85f35bf84",
+    "src/bench/index_storage_pair_test.cpp": "1a6db74ce2367083fc3fcd8f96713b7dd3155c0077e470d24763c0fe8971f4b7",
+    "src/bench/removable_exfat_device_test.cpp": "65645c568e7039ccb83873f89e98c83a718823d7fca9b3fd243c0143669ea9d9",
+    "CMakeLists.txt": "9c51597d5ad13de7980f8f4cd8b97d60de66fffd7a514358e702843941d782ac",
+    "build/Pulse.Index.exe": "b460630d23cff6c0d5b624dff9aa5ed570739e9c64199db734b713bfa311a0e2",
+    "build/Pulse.exe": "3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed",
+    "build/pulse_index_storage_test.exe": "bf7ecd0290ad283040b3b862678d34f38b06132108d331d00e728562b8edee46"
+  },
+  "limits": [
+    "Logical snapshot bases/manifests only, excludes real WAL, filesystem allocation and temporary peak.",
+    "Mapping bytes are mapped file extents; resident working set/private bytes not measured.",
+    "Synthetic MFT/USN data with production engine query/persistence, no live-volume journal or full scan.",
+    "Authorization callback tested; actual Windows user-token/ACL combinations not tested.",
+    "30 warm mixed-query samples per mode/phase, legacy measured first; no cold-cache or broad latency guarantee.",
+    "Active-base corruption fallback tested, not every interruption/power-loss/locked-file condition.",
+    "No new pinyin-specific, offline/online hotplug, feed, old-format or single-volume rebuild regression run.",
+    "Existing v9/volumes remains unchanged; protected production directory cannot be inventoried.",
+    "Installed program/service not replaced; no manual UI acceptance or physical USB unplug."
+  ]
+}

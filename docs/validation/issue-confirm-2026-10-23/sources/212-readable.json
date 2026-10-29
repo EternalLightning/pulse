@@ -1,0 +1,15 @@
+{
+  "number": 212,
+  "title": "手势软件功能失效",
+  "body": "本人电脑为win11系统，全局手势软件为Wgestures，目前使用pulse体验良好，就是全局手势失效，希望作者能抽空看看能否添加一下支持全局手势的功能，谢谢",
+  "url": "https://github.com/jimmgreen/pulse/issues/212",
+  "captured_at": "2026-10-23T03:10:07.188518+00:00",
+  "updated_at": "2026-10-12T02:24:33Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

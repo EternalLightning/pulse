@@ -1,0 +1,15 @@
+{
+  "number": 302,
+  "title": "索引文件太大，1.7GB，Everything 索引才 136MB，另一个包括内容索引才 50MB",
+  "body": "- 看起来 878 ≈ 532 + 345，重复索引么\n- 是否 包含内容索引，如果包含，能否支持自定义哪些 文件后缀、大小 的需要索引\n\n<img width=\"746\" height=\"112\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/cb5435b1-afc1-4369-82dd-2127043606e6\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/302",
+  "captured_at": "2026-10-23T03:10:07.140508+00:00",
+  "updated_at": "2026-10-18T04:14:52Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

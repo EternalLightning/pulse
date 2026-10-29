@@ -1,0 +1,1700 @@
+{
+  "captured_at": "2026-10-23T10:25:50.4204705+08:00",
+  "repository": "jimmgreen/pulse",
+  "local_head": "45fdd54920eb23b1bcca3759bf33a161422327d4",
+  "index_total": 333,
+  "index_open": 251,
+  "index_closed": 82,
+  "selected_candidates": 168,
+  "comments_read": 193,
+  "comments_total": 197,
+  "issues": [
+    {
+      "number": 377,
+      "url": "https://github.com/jimmgreen/pulse/issues/377",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E20",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-23T00:56:44Z"
+    },
+    {
+      "number": 375,
+      "url": "https://github.com/jimmgreen/pulse/issues/375",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "E04",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T15:35:49Z"
+    },
+    {
+      "number": 374,
+      "url": "https://github.com/jimmgreen/pulse/issues/374",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E04",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T15:03:21Z"
+    },
+    {
+      "number": 373,
+      "url": "https://github.com/jimmgreen/pulse/issues/373",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E02",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T14:47:07Z"
+    },
+    {
+      "number": 372,
+      "url": "https://github.com/jimmgreen/pulse/issues/372",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T14:18:00Z"
+    },
+    {
+      "number": 370,
+      "url": "https://github.com/jimmgreen/pulse/issues/370",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01/E02",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T12:17:21Z"
+    },
+    {
+      "number": 368,
+      "url": "https://github.com/jimmgreen/pulse/issues/368",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T09:14:46Z"
+    },
+    {
+      "number": 367,
+      "url": "https://github.com/jimmgreen/pulse/issues/367",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T07:14:50Z"
+    },
+    {
+      "number": 362,
+      "url": "https://github.com/jimmgreen/pulse/issues/362",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E02",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:28:49Z"
+    },
+    {
+      "number": 361,
+      "url": "https://github.com/jimmgreen/pulse/issues/361",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-22T00:41:58Z"
+    },
+    {
+      "number": 360,
+      "url": "https://github.com/jimmgreen/pulse/issues/360",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F11",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:28:56Z"
+    },
+    {
+      "number": 359,
+      "url": "https://github.com/jimmgreen/pulse/issues/359",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:47:36Z"
+    },
+    {
+      "number": 354,
+      "url": "https://github.com/jimmgreen/pulse/issues/354",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-21T04:27:44Z"
+    },
+    {
+      "number": 348,
+      "url": "https://github.com/jimmgreen/pulse/issues/348",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-21T13:38:12Z"
+    },
+    {
+      "number": 345,
+      "url": "https://github.com/jimmgreen/pulse/issues/345",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-20T11:41:20Z"
+    },
+    {
+      "number": 343,
+      "url": "https://github.com/jimmgreen/pulse/issues/343",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-20T10:05:40Z"
+    },
+    {
+      "number": 340,
+      "url": "https://github.com/jimmgreen/pulse/issues/340",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:47:38Z"
+    },
+    {
+      "number": 339,
+      "url": "https://github.com/jimmgreen/pulse/issues/339",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E16",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-20T06:57:35Z"
+    },
+    {
+      "number": 338,
+      "url": "https://github.com/jimmgreen/pulse/issues/338",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01/F06",
+      "comments_read": 6,
+      "comments_total": 6,
+      "updated_at": "2026-10-22T15:24:02Z"
+    },
+    {
+      "number": 334,
+      "url": "https://github.com/jimmgreen/pulse/issues/334",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-20T07:13:20Z"
+    },
+    {
+      "number": 333,
+      "url": "https://github.com/jimmgreen/pulse/issues/333",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-20T06:53:52Z"
+    },
+    {
+      "number": 331,
+      "url": "https://github.com/jimmgreen/pulse/issues/331",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T18:07:06Z"
+    },
+    {
+      "number": 330,
+      "url": "https://github.com/jimmgreen/pulse/issues/330",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:47:35Z"
+    },
+    {
+      "number": 327,
+      "url": "https://github.com/jimmgreen/pulse/issues/327",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T13:17:49Z"
+    },
+    {
+      "number": 324,
+      "url": "https://github.com/jimmgreen/pulse/issues/324",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-19T09:24:16Z"
+    },
+    {
+      "number": 321,
+      "url": "https://github.com/jimmgreen/pulse/issues/321",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T08:34:47Z"
+    },
+    {
+      "number": 320,
+      "url": "https://github.com/jimmgreen/pulse/issues/320",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T07:18:38Z"
+    },
+    {
+      "number": 319,
+      "url": "https://github.com/jimmgreen/pulse/issues/319",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03/E10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T06:59:28Z"
+    },
+    {
+      "number": 318,
+      "url": "https://github.com/jimmgreen/pulse/issues/318",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T04:53:36Z"
+    },
+    {
+      "number": 317,
+      "url": "https://github.com/jimmgreen/pulse/issues/317",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:47:33Z"
+    },
+    {
+      "number": 316,
+      "url": "https://github.com/jimmgreen/pulse/issues/316",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:47:31Z"
+    },
+    {
+      "number": 314,
+      "url": "https://github.com/jimmgreen/pulse/issues/314",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E14",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-19T02:02:59Z"
+    },
+    {
+      "number": 312,
+      "url": "https://github.com/jimmgreen/pulse/issues/312",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-19T01:09:17Z"
+    },
+    {
+      "number": 308,
+      "url": "https://github.com/jimmgreen/pulse/issues/308",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E14",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-18T11:20:42Z"
+    },
+    {
+      "number": 304,
+      "url": "https://github.com/jimmgreen/pulse/issues/304",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01/E09",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-18T05:49:03Z"
+    },
+    {
+      "number": 302,
+      "url": "https://github.com/jimmgreen/pulse/issues/302",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E12",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-18T04:14:52Z"
+    },
+    {
+      "number": 298,
+      "url": "https://github.com/jimmgreen/pulse/issues/298",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T10:57:42Z"
+    },
+    {
+      "number": 296,
+      "url": "https://github.com/jimmgreen/pulse/issues/296",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E02",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:28:54Z"
+    },
+    {
+      "number": 293,
+      "url": "https://github.com/jimmgreen/pulse/issues/293",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:37:16Z"
+    },
+    {
+      "number": 292,
+      "url": "https://github.com/jimmgreen/pulse/issues/292",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01/F10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T04:28:05Z"
+    },
+    {
+      "number": 290,
+      "url": "https://github.com/jimmgreen/pulse/issues/290",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T03:39:01Z"
+    },
+    {
+      "number": 288,
+      "url": "https://github.com/jimmgreen/pulse/issues/288",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F13",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T02:50:37Z"
+    },
+    {
+      "number": 286,
+      "url": "https://github.com/jimmgreen/pulse/issues/286",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E17",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T02:08:44Z"
+    },
+    {
+      "number": 283,
+      "url": "https://github.com/jimmgreen/pulse/issues/283",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E04/E05/E07",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-17T00:15:02Z"
+    },
+    {
+      "number": 280,
+      "url": "https://github.com/jimmgreen/pulse/issues/280",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T13:49:45Z"
+    },
+    {
+      "number": 279,
+      "url": "https://github.com/jimmgreen/pulse/issues/279",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E15",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T13:14:38Z"
+    },
+    {
+      "number": 278,
+      "url": "https://github.com/jimmgreen/pulse/issues/278",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E02",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T12:55:47Z"
+    },
+    {
+      "number": 277,
+      "url": "https://github.com/jimmgreen/pulse/issues/277",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T12:00:53Z"
+    },
+    {
+      "number": 276,
+      "url": "https://github.com/jimmgreen/pulse/issues/276",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E04",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T11:49:22Z"
+    },
+    {
+      "number": 275,
+      "url": "https://github.com/jimmgreen/pulse/issues/275",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E14",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T11:21:02Z"
+    },
+    {
+      "number": 274,
+      "url": "https://github.com/jimmgreen/pulse/issues/274",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T07:25:41Z"
+    },
+    {
+      "number": 273,
+      "url": "https://github.com/jimmgreen/pulse/issues/273",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T06:17:14Z"
+    },
+    {
+      "number": 272,
+      "url": "https://github.com/jimmgreen/pulse/issues/272",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T05:26:22Z"
+    },
+    {
+      "number": 270,
+      "url": "https://github.com/jimmgreen/pulse/issues/270",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T03:28:57Z"
+    },
+    {
+      "number": 266,
+      "url": "https://github.com/jimmgreen/pulse/issues/266",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T01:42:43Z"
+    },
+    {
+      "number": 265,
+      "url": "https://github.com/jimmgreen/pulse/issues/265",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-16T01:04:22Z"
+    },
+    {
+      "number": 263,
+      "url": "https://github.com/jimmgreen/pulse/issues/263",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "F02/E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-15T07:39:35Z"
+    },
+    {
+      "number": 262,
+      "url": "https://github.com/jimmgreen/pulse/issues/262",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-15T07:18:45Z"
+    },
+    {
+      "number": 260,
+      "url": "https://github.com/jimmgreen/pulse/issues/260",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-15T03:52:27Z"
+    },
+    {
+      "number": 259,
+      "url": "https://github.com/jimmgreen/pulse/issues/259",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:47:40Z"
+    },
+    {
+      "number": 251,
+      "url": "https://github.com/jimmgreen/pulse/issues/251",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E19",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:03Z"
+    },
+    {
+      "number": 250,
+      "url": "https://github.com/jimmgreen/pulse/issues/250",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F02",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:07Z"
+    },
+    {
+      "number": 249,
+      "url": "https://github.com/jimmgreen/pulse/issues/249",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-14T10:30:52Z"
+    },
+    {
+      "number": 248,
+      "url": "https://github.com/jimmgreen/pulse/issues/248",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F02",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:29:11Z"
+    },
+    {
+      "number": 246,
+      "url": "https://github.com/jimmgreen/pulse/issues/246",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:15Z"
+    },
+    {
+      "number": 245,
+      "url": "https://github.com/jimmgreen/pulse/issues/245",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T07:06:32Z"
+    },
+    {
+      "number": 241,
+      "url": "https://github.com/jimmgreen/pulse/issues/241",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-16T04:03:56Z"
+    },
+    {
+      "number": 240,
+      "url": "https://github.com/jimmgreen/pulse/issues/240",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:44:52Z"
+    },
+    {
+      "number": 237,
+      "url": "https://github.com/jimmgreen/pulse/issues/237",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E04",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-13T14:08:30Z"
+    },
+    {
+      "number": 236,
+      "url": "https://github.com/jimmgreen/pulse/issues/236",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E15",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-15T02:39:12Z"
+    },
+    {
+      "number": 235,
+      "url": "https://github.com/jimmgreen/pulse/issues/235",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F04",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:29:19Z"
+    },
+    {
+      "number": 234,
+      "url": "https://github.com/jimmgreen/pulse/issues/234",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 4,
+      "comments_total": 4,
+      "updated_at": "2026-10-22T06:47:42Z"
+    },
+    {
+      "number": 230,
+      "url": "https://github.com/jimmgreen/pulse/issues/230",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-14T10:06:33Z"
+    },
+    {
+      "number": 229,
+      "url": "https://github.com/jimmgreen/pulse/issues/229",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-13T07:19:52Z"
+    },
+    {
+      "number": 228,
+      "url": "https://github.com/jimmgreen/pulse/issues/228",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-12T20:51:19Z"
+    },
+    {
+      "number": 226,
+      "url": "https://github.com/jimmgreen/pulse/issues/226",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E15",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:00Z"
+    },
+    {
+      "number": 225,
+      "url": "https://github.com/jimmgreen/pulse/issues/225",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E06",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-13T10:16:51Z"
+    },
+    {
+      "number": 222,
+      "url": "https://github.com/jimmgreen/pulse/issues/222",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-12T09:21:10Z"
+    },
+    {
+      "number": 220,
+      "url": "https://github.com/jimmgreen/pulse/issues/220",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E13/E20",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T07:00:05Z"
+    },
+    {
+      "number": 218,
+      "url": "https://github.com/jimmgreen/pulse/issues/218",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E13",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-15T00:09:20Z"
+    },
+    {
+      "number": 214,
+      "url": "https://github.com/jimmgreen/pulse/issues/214",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01/F13",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:29:23Z"
+    },
+    {
+      "number": 213,
+      "url": "https://github.com/jimmgreen/pulse/issues/213",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F08",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-13T06:47:46Z"
+    },
+    {
+      "number": 212,
+      "url": "https://github.com/jimmgreen/pulse/issues/212",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-12T02:24:33Z"
+    },
+    {
+      "number": 211,
+      "url": "https://github.com/jimmgreen/pulse/issues/211",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:47:43Z"
+    },
+    {
+      "number": 209,
+      "url": "https://github.com/jimmgreen/pulse/issues/209",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T12:23:19Z"
+    },
+    {
+      "number": 208,
+      "url": "https://github.com/jimmgreen/pulse/issues/208",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E16",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:27Z"
+    },
+    {
+      "number": 205,
+      "url": "https://github.com/jimmgreen/pulse/issues/205",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01/F13",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-16T10:42:18Z"
+    },
+    {
+      "number": 200,
+      "url": "https://github.com/jimmgreen/pulse/issues/200",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-11T07:42:29Z"
+    },
+    {
+      "number": 199,
+      "url": "https://github.com/jimmgreen/pulse/issues/199",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E20",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-11T05:16:54Z"
+    },
+    {
+      "number": 197,
+      "url": "https://github.com/jimmgreen/pulse/issues/197",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F09",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T16:11:18Z"
+    },
+    {
+      "number": 196,
+      "url": "https://github.com/jimmgreen/pulse/issues/196",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E10",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:59:23Z"
+    },
+    {
+      "number": 194,
+      "url": "https://github.com/jimmgreen/pulse/issues/194",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T06:32:39Z"
+    },
+    {
+      "number": 193,
+      "url": "https://github.com/jimmgreen/pulse/issues/193",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:37:13Z"
+    },
+    {
+      "number": 192,
+      "url": "https://github.com/jimmgreen/pulse/issues/192",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F06",
+      "comments_read": 6,
+      "comments_total": 6,
+      "updated_at": "2026-10-22T06:29:31Z"
+    },
+    {
+      "number": 188,
+      "url": "https://github.com/jimmgreen/pulse/issues/188",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07/E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T03:16:25Z"
+    },
+    {
+      "number": 187,
+      "url": "https://github.com/jimmgreen/pulse/issues/187",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E07/E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T03:18:28Z"
+    },
+    {
+      "number": 186,
+      "url": "https://github.com/jimmgreen/pulse/issues/186",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E07/E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T03:18:19Z"
+    },
+    {
+      "number": 185,
+      "url": "https://github.com/jimmgreen/pulse/issues/185",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E07/E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T03:18:11Z"
+    },
+    {
+      "number": 184,
+      "url": "https://github.com/jimmgreen/pulse/issues/184",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08/E10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T02:33:18Z"
+    },
+    {
+      "number": 183,
+      "url": "https://github.com/jimmgreen/pulse/issues/183",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E07/E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T03:17:55Z"
+    },
+    {
+      "number": 181,
+      "url": "https://github.com/jimmgreen/pulse/issues/181",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T02:26:59Z"
+    },
+    {
+      "number": 179,
+      "url": "https://github.com/jimmgreen/pulse/issues/179",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E05",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T02:16:06Z"
+    },
+    {
+      "number": 176,
+      "url": "https://github.com/jimmgreen/pulse/issues/176",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:36Z"
+    },
+    {
+      "number": 175,
+      "url": "https://github.com/jimmgreen/pulse/issues/175",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:46:51Z"
+    },
+    {
+      "number": 174,
+      "url": "https://github.com/jimmgreen/pulse/issues/174",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:46:04Z"
+    },
+    {
+      "number": 173,
+      "url": "https://github.com/jimmgreen/pulse/issues/173",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "F05",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:37:22Z"
+    },
+    {
+      "number": 172,
+      "url": "https://github.com/jimmgreen/pulse/issues/172",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:29:19Z"
+    },
+    {
+      "number": 171,
+      "url": "https://github.com/jimmgreen/pulse/issues/171",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:19:44Z"
+    },
+    {
+      "number": 170,
+      "url": "https://github.com/jimmgreen/pulse/issues/170",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:18:11Z"
+    },
+    {
+      "number": 169,
+      "url": "https://github.com/jimmgreen/pulse/issues/169",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-10T01:05:57Z"
+    },
+    {
+      "number": 166,
+      "url": "https://github.com/jimmgreen/pulse/issues/166",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E10",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:59:25Z"
+    },
+    {
+      "number": 165,
+      "url": "https://github.com/jimmgreen/pulse/issues/165",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E02",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-09T16:11:34Z"
+    },
+    {
+      "number": 162,
+      "url": "https://github.com/jimmgreen/pulse/issues/162",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07/E08",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:47:46Z"
+    },
+    {
+      "number": 154,
+      "url": "https://github.com/jimmgreen/pulse/issues/154",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01/F13",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:29:41Z"
+    },
+    {
+      "number": 151,
+      "url": "https://github.com/jimmgreen/pulse/issues/151",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-09T08:35:16Z"
+    },
+    {
+      "number": 150,
+      "url": "https://github.com/jimmgreen/pulse/issues/150",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E16",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-22T06:59:27Z"
+    },
+    {
+      "number": 147,
+      "url": "https://github.com/jimmgreen/pulse/issues/147",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11/E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-09T03:54:18Z"
+    },
+    {
+      "number": 146,
+      "url": "https://github.com/jimmgreen/pulse/issues/146",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E21",
+      "comments_read": 4,
+      "comments_total": 4,
+      "updated_at": "2026-10-22T06:29:46Z"
+    },
+    {
+      "number": 142,
+      "url": "https://github.com/jimmgreen/pulse/issues/142",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-09T01:54:34Z"
+    },
+    {
+      "number": 140,
+      "url": "https://github.com/jimmgreen/pulse/issues/140",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E01",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:29:50Z"
+    },
+    {
+      "number": 138,
+      "url": "https://github.com/jimmgreen/pulse/issues/138",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-09T00:34:31Z"
+    },
+    {
+      "number": 136,
+      "url": "https://github.com/jimmgreen/pulse/issues/136",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-08T15:14:32Z"
+    },
+    {
+      "number": 135,
+      "url": "https://github.com/jimmgreen/pulse/issues/135",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E04/E08",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-08T15:01:35Z"
+    },
+    {
+      "number": 129,
+      "url": "https://github.com/jimmgreen/pulse/issues/129",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-08T08:53:39Z"
+    },
+    {
+      "number": 128,
+      "url": "https://github.com/jimmgreen/pulse/issues/128",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-08T07:54:44Z"
+    },
+    {
+      "number": 126,
+      "url": "https://github.com/jimmgreen/pulse/issues/126",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E05",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-08T06:34:07Z"
+    },
+    {
+      "number": 124,
+      "url": "https://github.com/jimmgreen/pulse/issues/124",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F12",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-08T15:08:57Z"
+    },
+    {
+      "number": 122,
+      "url": "https://github.com/jimmgreen/pulse/issues/122",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E12/E13",
+      "comments_read": 8,
+      "comments_total": 8,
+      "updated_at": "2026-10-10T08:52:09Z"
+    },
+    {
+      "number": 116,
+      "url": "https://github.com/jimmgreen/pulse/issues/116",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E07",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-22T06:47:48Z"
+    },
+    {
+      "number": 115,
+      "url": "https://github.com/jimmgreen/pulse/issues/115",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-06T15:23:46Z"
+    },
+    {
+      "number": 111,
+      "url": "https://github.com/jimmgreen/pulse/issues/111",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-06T09:56:12Z"
+    },
+    {
+      "number": 109,
+      "url": "https://github.com/jimmgreen/pulse/issues/109",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E05",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-22T06:29:59Z"
+    },
+    {
+      "number": 108,
+      "url": "https://github.com/jimmgreen/pulse/issues/108",
+      "state": "OPEN",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-06T01:17:45Z"
+    },
+    {
+      "number": 106,
+      "url": "https://github.com/jimmgreen/pulse/issues/106",
+      "state": "OPEN",
+      "classification": "存在",
+      "evidence": "F05",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-05T14:32:21Z"
+    },
+    {
+      "number": 94,
+      "url": "https://github.com/jimmgreen/pulse/issues/94",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "F06/E01",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-10T00:34:50Z"
+    },
+    {
+      "number": 92,
+      "url": "https://github.com/jimmgreen/pulse/issues/92",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08/E11",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-06T04:07:21Z"
+    },
+    {
+      "number": 88,
+      "url": "https://github.com/jimmgreen/pulse/issues/88",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F07",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-04T16:47:56Z"
+    },
+    {
+      "number": 87,
+      "url": "https://github.com/jimmgreen/pulse/issues/87",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E15",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-05T11:02:57Z"
+    },
+    {
+      "number": 86,
+      "url": "https://github.com/jimmgreen/pulse/issues/86",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F14",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-05T03:44:24Z"
+    },
+    {
+      "number": 81,
+      "url": "https://github.com/jimmgreen/pulse/issues/81",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E03",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-04T08:14:21Z"
+    },
+    {
+      "number": 79,
+      "url": "https://github.com/jimmgreen/pulse/issues/79",
+      "state": "CLOSED",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-10-12T01:42:57Z"
+    },
+    {
+      "number": 77,
+      "url": "https://github.com/jimmgreen/pulse/issues/77",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F06",
+      "comments_read": 8,
+      "comments_total": 8,
+      "updated_at": "2026-10-07T14:10:08Z"
+    },
+    {
+      "number": 74,
+      "url": "https://github.com/jimmgreen/pulse/issues/74",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E14",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-04T00:04:56Z"
+    },
+    {
+      "number": 73,
+      "url": "https://github.com/jimmgreen/pulse/issues/73",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E01",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-03T15:48:44Z"
+    },
+    {
+      "number": 72,
+      "url": "https://github.com/jimmgreen/pulse/issues/72",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F15",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-03T11:27:33Z"
+    },
+    {
+      "number": 66,
+      "url": "https://github.com/jimmgreen/pulse/issues/66",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E12",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-03T13:57:08Z"
+    },
+    {
+      "number": 65,
+      "url": "https://github.com/jimmgreen/pulse/issues/65",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E18",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-03T13:25:25Z"
+    },
+    {
+      "number": 60,
+      "url": "https://github.com/jimmgreen/pulse/issues/60",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E06",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-03T14:13:26Z"
+    },
+    {
+      "number": 59,
+      "url": "https://github.com/jimmgreen/pulse/issues/59",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F01",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-03T11:20:22Z"
+    },
+    {
+      "number": 58,
+      "url": "https://github.com/jimmgreen/pulse/issues/58",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E11",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-10-03T12:22:34Z"
+    },
+    {
+      "number": 52,
+      "url": "https://github.com/jimmgreen/pulse/issues/52",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-03T13:10:08Z"
+    },
+    {
+      "number": 51,
+      "url": "https://github.com/jimmgreen/pulse/issues/51",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 4,
+      "comments_total": 4,
+      "updated_at": "2026-10-08T06:55:57Z"
+    },
+    {
+      "number": 50,
+      "url": "https://github.com/jimmgreen/pulse/issues/50",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-09-30T21:16:50Z"
+    },
+    {
+      "number": 49,
+      "url": "https://github.com/jimmgreen/pulse/issues/49",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F03",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-03T14:50:52Z"
+    },
+    {
+      "number": 48,
+      "url": "https://github.com/jimmgreen/pulse/issues/48",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F13",
+      "comments_read": 4,
+      "comments_total": 4,
+      "updated_at": "2026-10-03T14:50:42Z"
+    },
+    {
+      "number": 46,
+      "url": "https://github.com/jimmgreen/pulse/issues/46",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F13",
+      "comments_read": 5,
+      "comments_total": 5,
+      "updated_at": "2026-10-03T14:50:33Z"
+    },
+    {
+      "number": 41,
+      "url": "https://github.com/jimmgreen/pulse/issues/41",
+      "state": "OPEN",
+      "classification": "已针对处理",
+      "evidence": "E16/E02/E07",
+      "comments_read": 6,
+      "comments_total": 10,
+      "updated_at": "2026-10-09T13:51:37Z"
+    },
+    {
+      "number": 40,
+      "url": "https://github.com/jimmgreen/pulse/issues/40",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E03/E08",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-03T14:50:28Z"
+    },
+    {
+      "number": 38,
+      "url": "https://github.com/jimmgreen/pulse/issues/38",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F13",
+      "comments_read": 6,
+      "comments_total": 6,
+      "updated_at": "2026-10-11T09:49:24Z"
+    },
+    {
+      "number": 29,
+      "url": "https://github.com/jimmgreen/pulse/issues/29",
+      "state": "CLOSED",
+      "classification": "存在",
+      "evidence": "F13/F01",
+      "comments_read": 4,
+      "comments_total": 4,
+      "updated_at": "2026-10-03T14:50:47Z"
+    },
+    {
+      "number": 20,
+      "url": "https://github.com/jimmgreen/pulse/issues/20",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E10",
+      "comments_read": 2,
+      "comments_total": 2,
+      "updated_at": "2026-10-03T14:33:31Z"
+    },
+    {
+      "number": 19,
+      "url": "https://github.com/jimmgreen/pulse/issues/19",
+      "state": "OPEN",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 3,
+      "comments_total": 3,
+      "updated_at": "2026-10-20T07:25:18Z"
+    },
+    {
+      "number": 17,
+      "url": "https://github.com/jimmgreen/pulse/issues/17",
+      "state": "CLOSED",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-09-27T16:43:05Z"
+    },
+    {
+      "number": 16,
+      "url": "https://github.com/jimmgreen/pulse/issues/16",
+      "state": "CLOSED",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-09-27T16:43:02Z"
+    },
+    {
+      "number": 9,
+      "url": "https://github.com/jimmgreen/pulse/issues/9",
+      "state": "CLOSED",
+      "classification": "未确认",
+      "evidence": "E08",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-09-19T11:31:18Z"
+    },
+    {
+      "number": 4,
+      "url": "https://github.com/jimmgreen/pulse/issues/4",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E02",
+      "comments_read": 0,
+      "comments_total": 0,
+      "updated_at": "2026-09-21T01:42:05Z"
+    },
+    {
+      "number": 3,
+      "url": "https://github.com/jimmgreen/pulse/issues/3",
+      "state": "CLOSED",
+      "classification": "已针对处理",
+      "evidence": "E07",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-09-17T03:46:42Z"
+    },
+    {
+      "number": 2,
+      "url": "https://github.com/jimmgreen/pulse/issues/2",
+      "state": "CLOSED",
+      "classification": "排除",
+      "evidence": "",
+      "comments_read": 1,
+      "comments_total": 1,
+      "updated_at": "2026-09-17T03:46:19Z"
+    }
+  ],
+  "audited_bug_reports": 150,
+  "classification_counts": {
+    "targeted_implementation_present": 27,
+    "excluded": 18,
+    "unconfirmed": 102,
+    "static_present": 21
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-25T16:22:46.5554479+08:00",
+  "runtime_directory": "D:\\AppData\\Temp\\PulseFileOperationValidation-4f7bb11bb49f404eabb0b38e0ecdc346",
+  "artifacts": [
+    {
+      "name": "pulse_ops_test.exe",
+      "source": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_ops_test.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFileOperationValidation-4f7bb11bb49f404eabb0b38e0ecdc346\\pulse_ops_test.exe",
+      "sha256": "19ED827D35D2E1414F2DE81388FEE51AA8AEC333BD9C8A7ED89EA0446F249E8E"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "source": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\Pulse.Shell.exe",
+      "copy": "D:\\AppData\\Temp\\PulseFileOperationValidation-4f7bb11bb49f404eabb0b38e0ecdc346\\Pulse.Shell.exe",
+      "sha256": "970CCA0A1F0CC320F2F80A874D99D18F250AD0E8331B7CE73578C44DF2B0DC6D"
+    }
+  ],
+  "local_parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+  "network_parent": "Z:\\",
+  "exit_code": 1,
+  "passed": 111,
+  "failed": 21,
+  "blocked": 0,
+  "groups": [
+    "== local: 35 passed, 11 failed, 0 blocked ==",
+    "== network: 34 passed, 10 failed, 0 blocked ==",
+    "== local-to-network: 21 passed, 0 failed, 0 blocked ==",
+    "== network-to-local: 21 passed, 0 failed, 0 blocked =="
+  ],
+  "fixture_roots": [
+    "[INFO] [local] exclusive fixture=E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console\\pulse-fileops-8ef685ae949d2111df481277a5cf4ccb",
+    "[INFO] [network] exclusive fixture=Z:\\pulse-fileops-1f3fa2f98a5973b7e2647fe55a206d78"
+  ],
+  "log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\file-operation-matrix-20261025-162234-833.log"
+}

@@ -26,7 +26,7 @@ int RunSettingsWidthBorderTest(AppState& s, const wchar_t* output) {
             vm.settings_open = true;
             vm.settings_scroll = 0;
             const auto window = D2D1::RectF(0, 0, width*scale, 1464*scale);
-            for (int page = 0; page < 5; ++page) {
+            for (int page : {0,1,2,3,4,6,7,8,9}) {
                 vm.settings_page = page;
                 const auto l = ui::MakeSettingsLayout(vm, window, scale,
                     s.renderer.TitleBarHeight(), 28*scale, nullptr);
@@ -141,7 +141,7 @@ int RunSearchColumnsTest(AppState& s,const wchar_t* output) {
     HandleSettingsControl(s,disclosure);check((s.settingsExpanded&2u)!=0,"storage can reopen");
     Render(s);check(s.compositor.SaveSnapshot((base/L"storage-expanded.png").c_str()),"default expanded storage screenshot captured");
     // Pre-1.0.39 sessions stored divider ratios; they read back as automatic widths.
-    const std::array<float,4> saved{0.31f,0.43f,0.62f,0.82f};
+    const std::array<float,5> saved{0.31f,0.43f,0.62f,0.82f};
     using K=ui::MainRenderer::ColumnKind;
     for(float scale:{1.0f,1.25f,1.5f,2.0f}) {
         s.renderer.SetScale(scale);
@@ -149,7 +149,7 @@ int RunSearchColumnsTest(AppState& s,const wchar_t* output) {
         for(float width:{500.0f,800.0f,1440.0f,2400.0f}) {
             const auto pane=D2D1::RectF(0,0,width*scale,600*scale);
             const auto automatic=s.renderer.DetailsColumns(pane,{},true,{});
-            for(const auto& dividers:{std::array<float,4>{},saved}) {
+            for(const auto& dividers:{std::array<float,5>{},saved}) {
                 const auto c=s.renderer.DetailsColumns(pane,{},true,dividers);
                 compact &= c.Width(K::Date)<=176*scale+0.01f && c.Width(K::Type)<=196*scale+0.01f && c.Width(K::Size)<=112*scale+0.01f;
                 float sum=0;for(int i=0;i<c.count;++i){positive &= c.widths[i]>0;sum+=c.widths[i];}
@@ -230,7 +230,7 @@ int RunAdaptiveColumnsTest(AppState& s, const wchar_t* output) {
             check(GetCapture() == s.hwnd, "double-click fixture begins with mouse capture");
             HandleLButtonDblClk(&s, s.hwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(x, y));
             check(tab->details_column_dividers[0] == 0.0f &&
-                  tab->search_column_dividers == std::array<float, 4>{0.28f, 0.48f, 0.70f, 0.86f},
+                  tab->search_column_dividers == std::array<float, 5>{0.28f, 0.48f, 0.70f, 0.86f},
                 "actual divider double-click refits adjacent columns without changing the other layout");
             check(!s.columnResizing && s.columnResizeIndex == -1 && s.columnResizePane == -1 &&
                   GetCapture() != s.hwnd,
@@ -530,14 +530,14 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
             const auto window=D2D1::RectF(0,0,width*scale,1000*scale);
             auto vm=BuildVm(s,false);vm.settings_open=true;vm.settings_scroll=0;
             vm.settings_content_folders={{LR"(C:\Projects\Very long project folder name)",L"Ready",false},{LR"(D:\Unavailable)",L"Unavailable (3)",true}};
-            for(int page=0;page<5;++page) {
+            for(int page:{0,1,2,3,4,6,7,8,9}) {
                 vm.settings_page=page;vm.settings_expanded=0;
                 const auto layout=ui::MakeSettingsLayout(vm,window,scale,s.renderer.TitleBarHeight(),28*scale,&painter);
                 auto hit=[&](D2D1_RECT_F r){return s.renderer.HitTest(vm,window,(r.left+r.right)/2,(r.top+r.bottom)/2);};
-                bool nav=true;for(int i=0;i<5;++i) {auto h=hit(layout.nav_row[i]);nav &= h.region==H::SettingsNav && h.index==i;}
+                bool nav=true;for(int i:{0,1,2,3,4,6,7,8,9}) {auto h=hit(layout.nav_row[i]);nav &= h.region==H::SettingsNav && h.index==i;}
                 check(nav,"fixed navigation preserves all page destinations across widths and DPI");
-                check(layout.nav_row[0].top == layout.nav.top + 20*scale,
-                    "settings navigation starts without a search-box gap");
+                check(layout.nav_row[0].top >= layout.nav.top + 12*scale,
+                    "settings navigation reserves space for its category heading");
                 check(layout.nav_row[4].bottom<layout.nav_row[3].top,"about is pinned below primary navigation");
                 if(page==0) {
                     check(hit(layout.theme_tile[0]).region==H::SettingsTheme && hit(layout.theme_tile[0]).index==1,"light theme preview hit target");
@@ -546,13 +546,15 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
                     check(hit(layout.accent_system).region==H::SettingsAccent && hit(layout.accent_system).index==1,
                         "system accent button remains reachable");
                     check(layout.effect_choice.right == 0 && hit(layout.language_choice).index==1,"window effect has no duplicate dropdown; language dropdown remains");
-                    auto scrolled=vm;
-                    scrolled.settings_scroll=layout.density_card.top-layout.content.top;
+                    auto files=vm;files.settings_page=6;
+                    const auto files_layout=ui::MakeSettingsLayout(files,window,scale,s.renderer.TitleBarHeight(),28*scale,&painter);
+                    auto scrolled=files;
+                    scrolled.settings_scroll=files_layout.density_card.top-files_layout.content.top;
                     const auto density_layout=ui::MakeSettingsLayout(scrolled,window,scale,s.renderer.TitleBarHeight(),28*scale,&painter);
                     const auto density=density_layout.density_row[2];
                     check(s.renderer.HitTest(scrolled,window,(density.left+density.right)/2,(density.top+density.bottom)/2).region==H::SettingsDensity,"density segments remain reachable after scrolling into view");
-                    check(layout.wallpaper_card.bottom==0 && layout.startup_row[2].bottom>0,
-                        "default file manager remains visible when advanced settings are collapsed");
+                    check(layout.wallpaper_card.bottom>0 && layout.startup_row[2].bottom==0,
+                        "appearance exposes background and leaves integration in its own category");
                     for(const auto* locale:{L"zh-CN",L"en-US"}) {
                         l10n::SetLanguage(locale);bool fits=true;
                         const I labels[]={I::SettingsDensityCompact,I::SettingsDensityStandard,I::SettingsDensityRoomy,I::SettingsTraySmall,I::SettingsTrayStandard,I::SettingsTrayLarge};
@@ -560,7 +562,7 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
                             const auto& label=l10n::Get(id);ui::ComPtr<IDWriteTextLayout> measured;
                             s.compositor.DwriteFactory()->CreateTextLayout(label.c_str(),static_cast<UINT32>(label.size()),s.compositor.TextFormat(),2000*scale,100*scale,&measured);
                             DWRITE_TEXT_METRICS metrics{};if(measured.get()) measured->GetMetrics(&metrics);
-                            fits &= measured.get() && metrics.widthIncludingTrailingWhitespace<=layout.density_row[0].right-layout.density_row[0].left-6*scale;
+                            fits &= measured.get() && metrics.widthIncludingTrailingWhitespace<=files_layout.density_row[0].right-files_layout.density_row[0].left-6*scale;
                         }
                         check(fits,"density and tray labels fit their segments in both languages");
                     }
@@ -598,30 +600,25 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
     click(layout().theme_tile[0]);check(!s.darkMode && s.appPrefs.theme_mode==1,"mouse click applies and saves light theme");
     click(layout().theme_tile[1]);check(s.darkMode && s.appPrefs.theme_mode==2,"mouse click applies and saves dark theme");
     click(layout().theme_tile[2]);check(s.EffectiveThemeMode()==ui::ThemeMode::Auto && s.appPrefs.theme_mode==0,"system theme is a persistent explicit selection");
+    OpenSettingsTab(s,6);
     s.settings.SetScroll(layout().density_card.top-layout().content.top,
         s.renderer.SettingsMaxScroll(BuildVm(s,false),window.right,window.bottom));
     click(layout().density_row[0]);check(s.appPrefs.row_height==28,"mouse click changes density through existing controller");
-    s.settings.SetScroll(0,0);
+    OpenSettingsTab(s,0);s.settings.SetScroll(0,0);
     auto vm=BuildVm(s,false);
-    const auto collapsed_max=s.renderer.SettingsMaxScroll(vm,window.right,window.bottom);
-    H toggle;toggle.region=H::SettingsDisclosure;toggle.index=0;HandleSettingsControl(s,toggle);
-    vm=BuildVm(s,false);const auto expanded_max=s.renderer.SettingsMaxScroll(vm,window.right,window.bottom);
-    check((s.settingsExpanded&1u) && expanded_max>collapsed_max,"expanding advanced settings updates scroll range");
-    vm.settings_scroll = expanded_max;
-    const auto advanced_layout = ui::MakeSettingsLayout(vm,window,s.scale,
+    const auto background_layout=ui::MakeSettingsLayout(vm,window,s.scale,
         s.renderer.TitleBarHeight(),28*s.scale,&painter);
-    const auto percent_rect = advanced_layout.wallpaper_look_value;
-    check(percent_rect.right>percent_rect.left,
-        "background percentage input is laid out in expanded settings");
+    check(background_layout.wallpaper_look_value.right>background_layout.wallpaper_look_value.left,
+        "background percentage input is available without an advanced disclosure");
+    OpenSettingsTab(s,6);
     {
-        // The advanced group owns both the hidden-files switch and the protected
-        // operating system files switch; both need a reachable row and fitting text.
-        auto advanced=BuildVm(s,false);advanced.settings_expanded|=1u;advanced.settings_scroll=0;
+        // File list owns both visibility switches; both remain directly reachable.
+        auto advanced=BuildVm(s,false);advanced.settings_expanded=0;advanced.settings_scroll=0;
         const auto lay=ui::MakeSettingsLayout(advanced,window,s.scale,s.renderer.TitleBarHeight(),28*s.scale,&painter);
         check(lay.protected_files_row.top>=lay.hidden_files_row.bottom &&
             lay.protected_files_row.bottom-lay.protected_files_row.top>=64*s.scale-1.0f &&
-            lay.protected_files_row.bottom<=lay.footer.top,
-            "protected system files row sits between the hidden row and the footer");
+            lay.protected_files_row.bottom<=lay.group[1].bottom,
+            "protected system files row sits in the visible-items section");
         const float text_width=lay.hidden_files_row.right-lay.hidden_files_row.left-126*s.scale;
         for(const auto* locale:{L"zh-CN",L"en-US"}) {
             l10n::SetLanguage(locale);bool fits=true;
@@ -654,12 +651,10 @@ int RunSettingsFlowTest(AppState& s,const wchar_t* output) {
         check(s.compositor.SaveSnapshot((std::filesystem::path(output).parent_path()/L"settings-advanced.png").c_str()),
             "advanced settings screenshot captured");
     }
-    s.settings.SetScroll(expanded_max,expanded_max);HandleSettingsControl(s,toggle);
-    check(s.settings.scroll()<=collapsed_max,"collapsing advanced settings clamps existing scroll");
     OpenSettingsTab(s,1);s.settings.SetScroll(0,0);
     const bool before=s.appPrefs.search_pinyin;click(layout().search_pinyin_row);
     check(s.appPrefs.search_pinyin!=before,"mouse click changes pinyin setting");
-    toggle.index=1;HandleSettingsControl(s,toggle);vm=BuildVm(s,false);
+    H toggle;toggle.region=H::SettingsDisclosure;toggle.index=1;HandleSettingsControl(s,toggle);vm=BuildVm(s,false);
     const float offset=s.renderer.SettingsDestinationOffset(vm,static_cast<int>(I::IndexLocation),window.right,window.bottom);
     check(offset>0 && (s.settingsExpanded&2u),"search destination locates expanded index storage section");
     log<<"failures="<<failures<<'\n';return failures ? 1 : 0;

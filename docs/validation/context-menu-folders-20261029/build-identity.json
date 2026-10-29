@@ -1,0 +1,47 @@
+{
+  "version": "1.2.2.0",
+  "artifacts": [
+    {
+      "name": "Pulse.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\Pulse.exe",
+      "bytes": 8555008,
+      "modified": "2026-10-29T10:57:08.3862117+08:00",
+      "sha256": "26812C6138A710E1E703A483E49326E29D2E54663261C0EE34BB140620440765"
+    },
+    {
+      "name": "Pulse.Shell.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\Pulse.Shell.exe",
+      "bytes": 1660416,
+      "modified": "2026-10-29T10:51:40.4738946+08:00",
+      "sha256": "337930D4F2D65953498E23732B061501996327E0269C707673F22D59B3DC346B"
+    },
+    {
+      "name": "pulse_folder_actions_test.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\pulse_folder_actions_test.exe",
+      "bytes": 1345024,
+      "modified": "2026-10-29T10:51:39.5949956+08:00",
+      "sha256": "5332878BACFB9C3EFA8B0F03B669B874A7C18E7981F75372CB23BFE3AC86EBEC"
+    },
+    {
+      "name": "pulse_folder_actions_menu_test.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\pulse_folder_actions_menu_test.exe",
+      "bytes": 2205696,
+      "modified": "2026-10-29T10:34:41.9958289+08:00",
+      "sha256": "77010A5214802D40C4CA47E12A5169C4CEC0DE9554C5BD5376F1878ECEE076B4"
+    },
+    {
+      "name": "pulse_menu_text_test.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\pulse_menu_text_test.exe",
+      "bytes": 886272,
+      "modified": "2026-10-29T10:34:39.5531430+08:00",
+      "sha256": "067D37837E5DC57F65AF48E50C8D653A1A7F29C64040CD712921F14B96814371"
+    },
+    {
+      "name": "pulse_ops_test.exe",
+      "path": "E:\\Projects\\pulse\\build-release\\pulse_ops_test.exe",
+      "bytes": 1876992,
+      "modified": "2026-10-29T10:52:03.2786072+08:00",
+      "sha256": "186BF837223EC6D6081DD27521B6E9F6F8E2D62A76577A79E9F4205DD255547B"
+    }
+  ]
+}

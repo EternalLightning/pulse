@@ -1,0 +1,30 @@
+{
+  "completed_generated_commands_45": true,
+  "completed_generated_commands_28": true,
+  "artifacts": {
+    "Pulse.exe": {
+      "sha256": "2072aef4b0f96a6c81eb13e63b4bd19c571b1becc835860af2a04ab90406e457"
+    },
+    "pulse_pane_animation_application_test.exe": {
+      "sha256": "7f71b641af388ec6a53c5b52cdcee4cfef6bfd63748259709d889b9a99858358"
+    },
+    "pulse_menu_text_test.exe": {
+      "sha256": "03c69f8a90fe236148466522a7f810ff477c14e703cf6cf65eef8a6854dc23c9"
+    },
+    "pulse_file_operation_failure_test.exe": {
+      "sha256": "9abeab9e2f9795653c77f4baf612a75a748ecaf5a9e6306354cc3e7d56c0a8c9"
+    },
+    "pulse_text_diff_ui_test.exe": {
+      "sha256": "f8d9582a00f14e7fdd4fa3ab834e57608d2d8c5b732c3f22da4b77ac6ccb7f55"
+    },
+    "pulse_global_search_window_test.exe": {
+      "sha256": "9fadcc2137d6d6b90fcb19de42ba152f33891dd43332de023647c9ec0c029a1b"
+    },
+    "pulse_playback_ui_test.exe": {
+      "sha256": "02218a2205f748de826aa90d95156440bd1df692d64b8364a857e70fc2081782"
+    },
+    "pulse_smooth_scroll_test.exe": {
+      "sha256": "b43281a401a6d0a887316e54b67f41d2bb859b46f917bb6c9570bc96fbb29793"
+    }
+  }
+}

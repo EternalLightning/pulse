@@ -2,6 +2,7 @@
 #pragma once
 #include "app_runtime.h"
 #include "command_catalog.h"
+#include "app_folder_actions.h"
 
 namespace pulse {
 app::CommandContext BuildCommandContext(AppState& s);
@@ -21,6 +22,7 @@ void ShowCreateTagPicker(AppState& s, POINT screen_pt);
 void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt);
 void DispatchMenuCommand(AppState& s, int cmd);
 void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s);
+// Raw commands; ContextMenuController applies visibility and order after Shell merging.
 std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         AppState& s, bool can_undo, const std::wstring& undo_label);
 std::wstring CommonExtension(const app::Tab& tab,
@@ -53,7 +55,7 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
                                     POINT screen_pt);
 void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
                                 bool recent, POINT screen_pt);
-void SetViewMode(AppState& s, ui::ViewMode mode);
+void SetViewMode(AppState& s, ui::ViewMode mode, bool direct_manipulation = false);
 void ShowViewDropdown(AppState& s, int pane_index);
 void ShowSortDropdown(AppState& s);
 void ShowGroupDropdown(AppState& s);
@@ -80,6 +82,7 @@ D2D1_COLOR_F ResolveAccentColor(const app::AppPrefs& prefs, bool dark = false);
 void ApplyAccentFromPrefs(AppState& s);
 bool SelectedQuickPreviewItem(AppState& s, ui::QuickPreviewItem& item);
 void ToggleQuickPreview(AppState& s);
+void EnsureQuickPreviewWindow(AppState& s);
 void NavigateQuickPreview(AppState& s, int direction);
 // File verb requested from inside the quick preview (WM_QUICK_PREVIEW_COMMAND).
 void HandleQuickPreviewCommand(AppState& s, ui::QuickPreviewAction action, bool shift);

@@ -1,0 +1,29 @@
+{
+  "number": 220,
+  "title": "绿色版没安装索引服务但也会启动pulse.index.exe",
+  "body": "",
+  "url": "https://github.com/jimmgreen/pulse/issues/220",
+  "captured_at": "2026-10-23T03:10:07.187361+00:00",
+  "updated_at": "2026-10-22T07:00:05Z",
+  "comments": [
+    {
+      "body": "感谢反馈。**设置 › 搜索与索引** 最上面新增了「搜索与索引」总开关：关闭后会停止所有索引（包括绿色版使用的用户级索引进程 Pulse.Index.exe），不会再在后台启动，并可以选择是否删除已建立的索引；需要时再打开即可恢复。\n\n将在下个版本发布，发布后欢迎试用反馈。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈。<strong>设置 › 搜索与索引</strong> 最上面新增了「搜索与索引」总开关：关闭后会停止所有索引（包括绿色版使用的用户级索引进程 Pulse.Index.exe），不会再在后台启动，并可以选择是否删除已建立的索引；需要时再打开即可恢复。</p>\n<p dir=\"auto\">将在下个版本发布，发布后欢迎试用反馈。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/220#issuecomment-6334804503"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoWJo6QgAqjYzMzQ4MDQ1MDM=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJo6QgAqjYzMzQ4MDQ1MDM="
+  }
+}

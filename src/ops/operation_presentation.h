@@ -7,6 +7,24 @@
 
 namespace pulse::ops {
 
+inline void ApplyOperationContinuation(OpStatus& status, const OpStatus& batch) {
+    status.type = batch.type;
+    status.source_label = batch.source_label;
+    status.destination_label = batch.destination_label;
+    status.total_items = batch.total_items ? batch.total_items : batch.completed_items + status.total_items;
+    status.completed_items = (std::min)(status.total_items, batch.completed_items + status.completed_items);
+    // Transfer workers only receive the remaining plan. Derive committed bytes
+    // from that plan so a failed partial copy is not counted twice.
+    const auto prior_bytes = status.total_bytes && batch.total_bytes >= status.total_bytes
+        ? batch.total_bytes - status.total_bytes : batch.transferred_bytes;
+    status.total_bytes = (std::max)(batch.total_bytes, status.total_bytes);
+    status.transferred_bytes = (std::min)(status.total_bytes, prior_bytes + status.transferred_bytes);
+    if (status.percent >= 0.0f) {
+        if (status.total_bytes) status.percent = 100.0f * static_cast<float>(status.transferred_bytes) / static_cast<float>(status.total_bytes);
+        else if (status.total_items) status.percent = 100.0f * static_cast<float>(status.completed_items) / static_cast<float>(status.total_items);
+    }
+}
+
 inline void ApplyShellProgress(OpStatus& status, float percent, const std::wstring& item,
                                uint32_t items_done, uint32_t total_items, bool deleting) {
     status.percent = NormalizeProgressPercent(percent);

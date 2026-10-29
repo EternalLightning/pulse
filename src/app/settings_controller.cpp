@@ -1,5 +1,6 @@
 #include "../common/localization.h"
 #include "settings_controller.h"
+#include "system_ctx_model.h"
 #include "../common/user_storage.h"
 #include "../index/index_client.h"
 #include "../index/index_config.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cwchar>
+#include <cmath>
 #include <thread>
 
 namespace pulse::app {
@@ -23,6 +25,8 @@ bool SelectValue(int index, const int (&values)[Size], int& target) {
 
 } // namespace
 
+SettingsController::SettingsController() = default;
+
 SettingsController::~SettingsController() {
     Stop();
 }
@@ -32,6 +36,11 @@ int SettingsController::PageFromName(std::wstring_view name) noexcept {
     if (name == L"context") return 2;
     if (name == L"about") return 3;
     if (name == L"duplicates") return 4;
+    if (name == L"system-menu") return 5;
+    if (name == L"files") return 6;
+    if (name == L"tabs") return 7;
+    if (name == L"startup") return 8;
+    if (name == L"operations") return 9;
     return 0;
 }
 
@@ -40,12 +49,19 @@ const wchar_t* SettingsController::PageName(int page) noexcept {
     if (page == 2) return L"context";
     if (page == 3) return L"about";
     if (page == 4) return L"duplicates";
+    if (page == 5) return L"system-menu";
+    if (page == 6) return L"files";
+    if (page == 7) return L"tabs";
+    if (page == 8) return L"startup";
+    if (page == 9) return L"operations";
     return L"general";
 }
 
 void SettingsController::SelectPage(int page) noexcept {
     CancelGlobalSearchHotkeyCapture();
-    page_ = std::clamp(page, 0, 4);
+    EndMenuDrag();
+    if (system_context_) system_context_->EndPreviewDrag();
+    page_ = std::clamp(page, 0, 9);
     scroll_ = 0.0f;
 }
 
@@ -55,6 +71,40 @@ void SettingsController::SetScroll(float value, float maximum) noexcept {
 
 void SettingsController::ScrollBy(float delta, float scale, float maximum) noexcept {
     SetScroll(scroll_ - delta / 120.0f * 72.0f * scale, maximum);
+}
+
+SystemCtxModel& SettingsController::SystemCtx() {
+    if (!system_context_) system_context_ = std::make_unique<SystemCtxModel>();
+    return *system_context_;
+}
+
+void SettingsController::BeginMenuDrag(int item, float pos, float grab) noexcept {
+    menu_drag_item_ = item;
+    menu_drag_live_ = false;
+    menu_drag_start_ = menu_drag_pos_ = pos;
+    menu_drag_grab_ = grab;
+}
+
+bool SettingsController::MenuDragMove(float pos) noexcept {
+    if (menu_drag_item_ < 0 || (!menu_drag_live_ && std::fabs(pos - menu_drag_start_) < 3.0f)) return false;
+    menu_drag_live_ = true;
+    menu_drag_pos_ = pos;
+    return true;
+}
+
+void SettingsController::SetMenuOrder(const BuiltinMenuOrder& order) {
+    if (!context_) return;
+    const auto surface = context_tab_ == 1 ? BuiltinMenuSurface::Background
+        : context_tab_ == 2 ? BuiltinMenuSurface::RowButtons : BuiltinMenuSurface::Item;
+    const auto previous = context_->BuiltinOrder(surface);
+    context_->SetBuiltinOrder(surface, order);
+    if (!context_->Save()) {
+        context_->SetBuiltinOrder(surface, previous);
+        error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        return;
+    }
+    error_.clear();
+    if (surface == BuiltinMenuSurface::RowButtons) Apply(SettingsEffect::ListStyle);
 }
 
 bool SettingsController::VolumePending(std::wstring_view id) const {
@@ -75,6 +125,16 @@ bool SettingsController::diagnostics_pending() const noexcept {
 bool SettingsController::migration_pending() const noexcept {
     std::lock_guard<std::mutex> lock(task_state_->mutex);
     return task_state_->migration_pending;
+}
+
+bool SettingsController::settings_transfer_pending() const noexcept {
+    std::lock_guard<std::mutex> lock(task_state_->mutex);
+    return task_state_->settings_transfer_pending;
+}
+
+bool SettingsController::StartSettingsTransfer(SettingsTask task) {
+    if (task.kind != SettingsTaskKind::SettingsExport && task.kind != SettingsTaskKind::SettingsImport) return false;
+    return StartTask(std::move(task), ui_.settings_transfer, ui_.task_completion);
 }
 
 bool SettingsController::StartTask(SettingsTask task, SettingsTaskOperation operation,
@@ -99,6 +159,8 @@ bool SettingsController::StartTask(SettingsTask task, SettingsTaskOperation oper
                 task.kind == SettingsTaskKind::ConfigureConfigurationPath;
             task_state_->diagnostics_pending =
                 task.kind == SettingsTaskKind::DiagnosticsExport;
+            task_state_->settings_transfer_pending = task.kind == SettingsTaskKind::SettingsExport ||
+                task.kind == SettingsTaskKind::SettingsImport;
             if (task.kind == SettingsTaskKind::Volume)
                 task_state_->pending_volume = task.key;
         }
@@ -127,6 +189,7 @@ bool SettingsController::StartTask(SettingsTask task, SettingsTaskOperation oper
             state->local_pending = false;
             state->migration_pending = false;
             state->diagnostics_pending = false;
+            state->settings_transfer_pending = false;
             if (task.kind == SettingsTaskKind::Volume)
                 state->pending_volume.clear();
         }
@@ -139,6 +202,7 @@ bool SettingsController::StartTask(SettingsTask task, SettingsTaskOperation oper
             state->local_pending = false;
             state->migration_pending = false;
             state->diagnostics_pending = false;
+            state->settings_transfer_pending = false;
             state->pending_volume.clear();
         }
         return false;
@@ -188,6 +252,9 @@ bool SettingsController::StartUiTask(SettingsTask task) {
         case SettingsTaskKind::DiagnosticsExport:
             return diagnostics_export &&
                 diagnostics_export(value.path, value.enabled, error);
+        case SettingsTaskKind::SettingsExport:
+        case SettingsTaskKind::SettingsImport:
+            return false;
         }
         return false;
     }, ui_.task_completion);
@@ -206,6 +273,8 @@ SettingsTaskEffect SettingsController::CompleteTask(const SettingsTaskResult& re
         if (result.task.kind == SettingsTaskKind::DiagnosticsExport)
             effect.open_path = result.task.path;
         if (!IsNetworkTask(result.task.kind) &&
+            result.task.kind != SettingsTaskKind::SettingsExport &&
+            result.task.kind != SettingsTaskKind::SettingsImport &&
             result.task.kind != SettingsTaskKind::DiagnosticsExport &&
             result.task.kind != SettingsTaskKind::ConfigureConfigurationPath &&
             !(result.task.kind == SettingsTaskKind::ConfigureIndexPath && !result.task.enabled)) {
@@ -248,6 +317,7 @@ void SettingsController::BindUi(AppPrefs& prefs, ContextMenuPrefs& context,
 
 void SettingsController::ResetUi() noexcept {
     CancelGlobalSearchHotkeyCapture();
+    EndMenuDrag();
     prefs_ = nullptr;
     context_ = nullptr;
     index_ = nullptr;
@@ -401,6 +471,15 @@ std::wstring SettingsController::GlobalSearchHotkeyText() const {
 
 void SettingsController::ToggleUi(int index) {
     if (!prefs_ || !context_) return;
+    auto commit_context = [&](ContextMenuPrefs staged, SettingsEffect effects = SettingsEffect::None) {
+        if (!staged.Save()) {
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+            return;
+        }
+        *context_ = std::move(staged);
+        error_.clear();
+        Apply(effects);
+    };
     if (index == 31) {
         const bool previous = prefs_->start_to_tray;
         if (prefs_->launch_on_startup && !prefs_->ApplyLaunchOnStartup(true)) {
@@ -485,33 +564,61 @@ void SettingsController::ToggleUi(int index) {
         }
         global_search_error_.clear();
         Apply(SettingsEffect::GlobalSearch);
+    } else if (index >= 60 && index < 63) {
+        const auto previous = context_->builtin_hidden;
+        context_->builtin_hidden = BuiltinMenuPresetHidden(static_cast<BuiltinMenuPreset>(index - 60));
+        if (!context_->Save()) {
+            context_->builtin_hidden = previous;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else {
+            error_.clear();
+            Apply(SettingsEffect::ListStyle);
+        }
+    } else if (index >= 64 && index < 67) {
+        EndMenuDrag();
+        context_tab_ = index - 64;
+    } else if (index == 67) {
+        const auto previous = *context_;
+        context_->builtin_hidden = 0;
+        context_->ResetBuiltinOrder();
+        if (!context_->Save()) {
+            *context_ = previous;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else {
+            error_.clear();
+            Apply(SettingsEffect::ListStyle);
+        }
+    } else if (index == 68) {
+        SetMenuOrder({});
     } else if (index == kBuiltinGroupToggle) {
-        context_->SetBuiltinGroupEnabled(!context_->BuiltinGroupEnabled());
-        context_->Save();
-        Apply(SettingsEffect::ListStyle);
+        auto staged = *context_;
+        staged.SetBuiltinGroupEnabled(!staged.BuiltinGroupEnabled());
+        commit_context(std::move(staged), SettingsEffect::ListStyle);
     } else if (index >= 10 && index < 15) {
         static constexpr ipc::CtxMenuGroup groups[] = {
             ipc::CtxMenuGroup::Software, ipc::CtxMenuGroup::OpenWith,
             ipc::CtxMenuGroup::Share, ipc::CtxMenuGroup::System, ipc::CtxMenuGroup::Print
         };
         const auto group = groups[index - 10];
-        context_->SetGroupEnabled(group, !context_->GroupEnabled(group));
-        context_->Save();
+        auto staged = *context_;
+        staged.SetGroupEnabled(group, !staged.GroupEnabled(group));
+        commit_context(std::move(staged));
     } else if (index >= 100) {
         const size_t item = static_cast<size_t>(index - 100);
         if (item >= context_->seen.size()) {
             const size_t builtin = item - context_->seen.size();
             if (builtin >= static_cast<size_t>(kBuiltinMenuItemCount)) return;
             const auto which = static_cast<BuiltinMenuItem>(builtin);
-            context_->SetBuiltinItemEnabled(which, !context_->BuiltinItemEnabled(which));
-            context_->Save();
-            Apply(SettingsEffect::ListStyle);
+            auto staged = *context_;
+            staged.SetBuiltinItemEnabled(which, !staged.BuiltinItemEnabled(which));
+            commit_context(std::move(staged), SettingsEffect::ListStyle);
             return;
         }
         const auto& seen = context_->seen[item];
-        const bool enabled = context_->ItemEnabled(seen.key, seen.category, seen.from_com);
-        context_->SetItemEnabled(seen.key, !enabled);
-        context_->Save();
+        const bool enabled = context_->RowEnabled(seen.key, seen.category, seen.from_com);
+        auto staged = *context_;
+        staged.SetItemEnabled(seen.key, !enabled);
+        commit_context(std::move(staged));
     }
 }
 

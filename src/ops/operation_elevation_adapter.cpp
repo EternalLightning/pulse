@@ -1,4 +1,5 @@
 #include "operation_elevation_adapter.h"
+#include "operation_presentation.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
 #include <algorithm>
@@ -820,6 +821,10 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
             req.sources = completed.sources;
             if (req.is_undo) {
                 req.undo_produced_identities.clear();
+                if (req.type == OpType::RestoreRecycle) {
+                    req.recycle_paths.clear();
+                    req.recycle_undo_identities.clear();
+                }
                 for (const auto& source : req.sources) {
                     const auto found =
                         std::find(state.item.req.sources.begin(), state.item.req.sources.end(), source);
@@ -828,6 +833,11 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
                         index < state.item.req.undo_produced_identities.size())
                         req.undo_produced_identities.push_back(
                             state.item.req.undo_produced_identities[index]);
+                    if (req.type == OpType::RestoreRecycle && index < state.item.req.recycle_paths.size() &&
+                        index < state.item.req.recycle_undo_identities.size()) {
+                        req.recycle_paths.push_back(state.item.req.recycle_paths[index]);
+                        req.recycle_undo_identities.push_back(state.item.req.recycle_undo_identities[index]);
+                    }
                 }
             }
             manager.PushUndo(req, &completed.destinations, &record.identities);
@@ -859,6 +869,8 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
                 ++state.imported_deletes;
             }
             manager.status_ = snapshot.status;
+            if (state.item.retry_batch_status)
+                ApplyOperationContinuation(manager.status_, *state.item.retry_batch_status);
             manager.status_.completed_ops = state.completed_ops;
             manager.status_.deletes_without_mutation += state.deletes_without_mutation;
             manager.status_.lock_retry_available = false;
@@ -942,15 +954,17 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
     manager.transfer_active_.store(item.req.type == OpType::Copy || item.req.type == OpType::Move);
     manager.delete_cancel_.store(false);
     manager.SetStatus([&](OpStatus& status) {
+        if (item.retry_batch_status) status = *item.retry_batch_status;
         status.active = true;
         status.task_id = item.seq;
-        status.type = item.req.type;
+        status.type = item.retry_batch_status ? item.retry_batch_status->type : item.req.type;
         status.phase = OpPhase::Running;
         status.summary = l10n::Get(l10n::StringId::PermissionOperationContinue);
         status.last_error.clear();
         status.failed_path.clear();
         status.failure_hr = S_OK;
         status.lock_retry_available = false;
+        status.locked_path.clear(); status.lock_owners.clear();
     });
     OperationElevationResult result;
     bool helper_missing = false;
@@ -1106,6 +1120,7 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
         }
     }
     manager.FinishMutationUndo(item.req);
+    manager.FinishRecycleUndo(item.req);
 }
 
 OperationElevationResult OperationElevationAdapter::ExecuteWorker(void* raw, std::span<const uint8_t> bytes,
@@ -1519,6 +1534,8 @@ bool OperationElevationAdapter::PartialCopyContinuationForTest(OpsManager& manag
             manager.status_.failure_hr != E_ACCESSDENIED)
             return false;
         retry = *manager.elevation_retry_;
+        retry.retry_batch_status = manager.status_;
+        retry.elevated_retry = true;
         if (retry.retry_completed_sources != std::vector<std::wstring>{request.sources.front()} ||
             retry.retry_transfer_plan.empty())
             return false;
@@ -1537,7 +1554,8 @@ bool OperationElevationAdapter::PartialCopyContinuationForTest(OpsManager& manag
     const auto status = manager.Status();
     const auto final_completions = manager.DrainCompletions();
     FileIdentity after;
-    return status.phase == OpPhase::Completed && pulse::ReadPathFileIdentity(first_path, after) &&
+    return status.phase == OpPhase::Completed && status.total_items == 2 && status.completed_items == 2 &&
+           pulse::ReadPathFileIdentity(first_path, after) &&
            after == before && final_completions.size() == 1 &&
            final_completions[0].sources == std::vector<std::wstring>{request.sources.back()} &&
            final_completions[0].destinations.size() == 1 && final_completions[0].task_id == retry.seq;

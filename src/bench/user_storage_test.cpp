@@ -192,6 +192,7 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring image; pulse::json::Escape(original + L"\\wallpaper.png", image);
     pulse::WriteUtf8FileAtomic(original + L"\\app.json", L"{\"background_image\":\"" + image + L"\",\"theme_mode\":2}");
     pulse::WriteUtf8FileAtomic(original + L"\\session.json", L"{\"version\":7}");
+    pulse::WriteUtf8FileAtomic(original + L"\\preferences.json", L"{\"version\":8,\"sidebarHidden\":2}");
     pulse::WriteUtf8FileAtomic(original + L"\\network-index.json", L"{\"test\":true}");
     pulse::WriteUtf8FileAtomic(original + L"\\wallpaper.png", L"image fixture");
     pulse::WriteUtf8FileAtomic(original + L"\\pulse-index.bin", L"must remain original");
@@ -212,6 +213,10 @@ int wmain(int argc, wchar_t** argv) {
     check(ConfigurationRoot() == migrated && Pending(Kind::Configuration).empty(), "commit root and clear pending");
     check(pulse::json::ExtractString(app, L"background_image") == migrated + L"\\wallpaper.png", "rewrite managed wallpaper path");
     check(fs::exists(migrated + L"\\network-index.json") && fs::exists(original + L"\\app.json"), "copy network config and retain originals");
+    std::wstring migrated_preferences;
+    check(pulse::ReadUtf8File(migrated + L"\\preferences.json", migrated_preferences) &&
+        migrated_preferences == L"{\"version\":8,\"sidebarHidden\":2}",
+        "configuration migration retains the separate session preferences");
     check(!fs::exists(migrated + L"\\pulse-index.bin") && !fs::exists(migrated + L"\\unrelated.txt"), "exclude index and unrelated files");
     check(ReadBytes(migrated + L"\\content-index.config") == content_config &&
           ReadBytes(original + L"\\ContentIndex\\content-v1.sqlite.config") == content_config &&

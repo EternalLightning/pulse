@@ -1,0 +1,135 @@
+[
+  {
+    "Target": "pulse",
+    "FinalBuildExit": 0,
+    "Log": "build-repaired-pulse.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_audit_ops_followup_test",
+    "FinalBuildExit": 0,
+    "Log": "build-repaired-pulse_audit_ops_followup_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_app_controllers_test",
+    "FinalBuildExit": 0,
+    "Log": "build-repaired-pulse_app_controllers_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_session_layout_test",
+    "FinalBuildExit": 0,
+    "Log": "build-repaired-pulse_session_layout_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_index_engine_test",
+    "FinalBuildExit": 0,
+    "Log": "build-index-final.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_binary_input_boundary_test",
+    "FinalBuildExit": 0,
+    "Log": "build-final-pulse_binary_input_boundary_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_permanent_fileop_console_test",
+    "FinalBuildExit": 0,
+    "Log": "build-final-pulse_permanent_fileop_console_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_system_ctx_test",
+    "FinalBuildExit": 0,
+    "Log": "build-final-pulse_system_ctx_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_system_ctx_model_test",
+    "FinalBuildExit": 0,
+    "Log": "build-final-pulse_system_ctx_model_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_shell_launch_client_test",
+    "FinalBuildExit": 0,
+    "Log": "build-final-pulse_shell_launch_client_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_json_persistence_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_json_persistence_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_session_windows_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_session_windows_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_multiwindow_application_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_multiwindow_application_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_user_storage_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_user_storage_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_metafile_input_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_metafile_input_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_shell_launch_regression_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_shell_launch_regression_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_shell_launch_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_shell_launch_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_shell_query_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_shell_query_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  },
+  {
+    "Target": "pulse_context_query_timeout_test",
+    "FinalBuildExit": 0,
+    "Log": "build-pulse_context_query_timeout_test.log",
+    "Generator": "Visual Studio 17 2022",
+    "Configuration": "Release x64"
+  }
+]

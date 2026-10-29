@@ -1,0 +1,199 @@
+{
+  "captured_at": "2026-10-23T05:53:06.8494807Z",
+  "scope": "Read-only follow-up for issues 302 and 374. Issue 290 excluded after user confirmed accidental selection. No product, main report, checklist, configuration, ACL, owner, service or existing index data changes.",
+  "summary": "已核查 #302：源码确认同一机器索引会持久化 aggregate 总快照和 per-volume 查询副本，两类又各有 A/B 前代保留。用户给出的两目录各 1.08G 与该布局相符，但现场文件读取仍被 Windows 拒绝，尚未测得实际容量、活动代或文件身份。没有证实重复扫描或重复查询行；本轮不删除数据或改存储合同。#374 注入 SIZE_TOO_BIG 后的确认/取消流程 8 项通过。",
+  "runtime_evidence": {
+    "metadata_and_crashes": "bench_data/issue-followup-index/runtime-evidence.json",
+    "metadata_collector": "bench_data/issue-followup-index/collect-safe-evidence.ps1",
+    "network_configuration": "bench_data/issue-followup-index/network-config-evidence.json",
+    "network_configuration_collector": "bench_data/issue-followup-index/network-config-audit.ps1",
+    "fixture": "bench_data/issue-followup-index/network-overlap-probe.cpp",
+    "fixture_build": "bench_data/issue-followup-index/build-probe.cmd",
+    "fixture_build_log": "bench_data/issue-followup-index/build-probe.log",
+    "fixture_result": "bench_data/issue-followup-index/network-overlap-result.json",
+    "fixture_run_log": "bench_data/issue-followup-index/network-overlap-run.log",
+    "source_manifest": "bench_data/issue-followup-index/source-manifest.json",
+    "fixture_exit_code": 0,
+    "fixture_passed": 2,
+    "fixture_failed": 0,
+    "limits": "Private executable directly compiles relevant production index sources with the existing testing hooks. All enumeration is injected and all shards are private. No NetworkIndex::Start, real UNC access, user content reads, shared build, real recycle quota manipulation or end-to-end delete was performed. The delete check covers only HRESULT-to-confirmation mapping.",
+    "delete_confirmation_fixture": {
+      "preparation": "bench_data/issue-followup-index/prepare-delete-probe.ps1",
+      "build": "bench_data/issue-followup-index/build-delete-probe.cmd",
+      "passed": 8,
+      "run_log": "bench_data/issue-followup-index/delete-confirm-run.log",
+      "build_log": "bench_data/issue-followup-index/build-delete-probe.log",
+      "production_object_manifest": "bench_data/issue-followup-index/delete-production-object-manifest.json",
+      "result": "bench_data/issue-followup-index/delete-confirm-result.json",
+      "failed": 0,
+      "transport_manifest": "bench_data/issue-followup-index/delete-injection-manifest.json",
+      "real_shell_started": false,
+      "exit_code": 0,
+      "real_delete_performed": false,
+      "fixture": "bench_data/issue-followup-index/delete-confirm-probe.cpp"
+    }
+  },
+  "issues": [
+    {
+      "issue": 302,
+      "status": "源码确认两套重复持久表示；重复扫描/查询未确认；实际容量读取受限",
+      "source": "docs/validation/issue-confirm-2026-10-23/sources/302-readable.json",
+      "evidence": [
+        "原文的 1.7GB、其他产品容量及 878≈532+345 是报告者现象与怀疑。截图字段未逐项视觉识别；不能把三个数直接认定为机器、用户、网络或内容三类索引。",
+        "src/index/index_engine.h:41、49、53 与 index_engine.cpp:1542：本地文件名索引是 PIDX 自定义二进制，非 SQLite。每项至少包含 Node 16 字节、Attr 12 字节、child_order 4 字节，另有 UTF-16 名池、字符/双字符倒排、卷及 FRN 信息。",
+        "src/index/index_engine.cpp:1502-1569：一个节点会进入多个不同字符或字符对的 posting，这些是检索结构，不能按 posting 条数当成重复文件记录。",
+        "src/index/index_shard.cpp:367-427：发布到另一 A/B 槽并在 manifest 保留 active_slot/previous_slot，存在物理上前后两代快照的设计；物理重复元数据不等于活动查询重复行。未读取现场 manifest，不能断言现场 1.7GB 就由两代快照构成。",
+        "src/index/index_engine.cpp:3123-3151：MFT 构建按同一卷内 FRN 合并同号记录；index_engine.cpp:747-783 的路径构建复用父节点下同名子项。它们提供局部去重约束，不构成所有扫描、重放及历史版本的全局唯一性证明。",
+        "src/index/index_engine.h:111 与 index_engine.cpp:463-500、3226：Engine 总数和卷 indexed_items 是同一文件名后端的总量/分卷口径。如果旧截图三项是总数和两个卷分量，近似相加可以是正常汇总；截图语义尚未确认，此解释仅为条件性说明。",
+        "src/index/index_host.cpp:270-276、344-345：当前服务模式向客户端隐藏总数和卷计数，发送 0。因此不能把旧 issue 截图的显示口径直接当成当前服务模式行为。",
+        "src/index/index_client.cpp:63-76、194-212：装有服务时不启动同名用户 helper；HandleStatus 保存当前后端的 count。src/app/app_runtime.cpp:454-464、516、555-589 分开形成本地状态、卷行、内容摘要与网络根行。已审计路径没有把机器、用户、网络、内容计数相加成总数的代码。",
+        "src/index/content_index.cpp:1073-1091：内容 LegacyWriter 路径使用独立 SQLite，documents.path UNIQUE、roots.path PRIMARY KEY、scan_queue.path PRIMARY KEY，documents.body 与外部 content FTS5 检索结构并存；content_index.cpp:600 对同 path 执行 ON CONFLICT UPDATE。",
+        "src/index/content_index.cpp:733-753：内容文件总数来自 documents 按 root 分组后相加，非把 FTS posting 与 documents 行相加。内容路径归一化不等于文件身份去重，硬链接/别名边界仍需活动数据统计。",
+        "src/index/content_config_storage.h:10-20：内容数据库默认位于当前用户独立 ContentIndex 目录。content_index.cpp:401-410 区分 Instant 与 LegacyWriter；仅有 SQLite schema 代码不能证明当前机正在持久化内容索引。现场默认 ContentIndex 目录可读但文件数为 0。",
+        "src/index/network_index.cpp:745-761 只避免相等网络根重复添加；1181-1209 逐 shard 累计匹配。私有父/子根注入扫描得到 root_count_sum=3，查询同一文件得 total=2、rows=2、unique_path=1，证实 NetworkIndex 后端存在跨重叠根重复边界，未验证 UI 后续合并结果。",
+        "当前用户可读配置根没有 network-index.json，fresh load 的配置根数为 0、父子重叠为 false。读取活动索引进程命令行被 Windows 拒绝，因此运行中 agent 角色未知；不能把该私有网络边界解释为 #302 本机机器索引容量现象。",
+        "src/index/content_index.h:13-19、content_configuration.cpp:31-42、92-119：内容配置支持根、目录/路径排除、文本及文档字节上限（默认 64MiB/512MiB）；document_reader.cpp:506-517 和 common/text_decode.cpp:24 固定决定文本、Office 与 PDF 支持集。未见任意用户后缀 allowlist 字段，不宣称后缀自定义已实现。",
+        "用户确认该自定义索引目录并观察总量 2.16G，v9/9ACBEFD40DDAC9E8 与 v9/volumes 各 1.08G，其中 aggregate/base-a.bin 565M；这些均是用户观察，未转换成未经确认的精确字节数。",
+        "src/index/index_shard.cpp:98-105 的 ShardIdHash 对 aggregate 独立计算得到 9ACBEFD40DDAC9E8，见 aggregate-hash-proof.json。index_engine.cpp:232-234 在机器 scope 明确使用此 source_id，故该 hash 不是用户helper或fixture的标识。",
+        "src/index/index_host.cpp:852 按 as_service 设置机器 scope；index_engine.cpp:1713-1762 把 aggregate 的每卷节点、属性、名称和 FRN 范围重新序列化到 v9/volumes/<volume-hash>。两套文件由同一 Engine 的正常构建、合并和单卷重建路径先后发布，不需假设存在两个持久 writer。",
+        "index_engine.cpp:1478-1492、1760 对新临时文件执行完整写入，未使用硬链接创建API。源码支持其为独立序列化副本；由于现场文件身份不可读，未对现场每个文件是否硬链接作实测判断。",
+        "index_engine.cpp:989-994 的匹配采集在 query_shards_ready_ 时使用分卷，否则使用 aggregate，二者不相加；卷局部ID用 shard.first 还原全局ID。存储两套表示不等于逻辑查询返回两套记录。",
+        "目录自身属性及父目录项元数据可读，但不包含递归总大小。Robocopy /L /E /BYTES /R:0 /W:0 /NFL /NDL /XJ 单次只列出检查返回 ERROR 5、exit16，未创建目标。完整已知 base-a.bin/base-b.bin/manifest.json 的单次 Get-Item 元数据也遭 PermissionDenied；停止继续尝试。所有容量保持 null，不把拒绝/失败后的0计作测量。",
+        "Get-Service 只读确认 PulseIndex Running / Automatic；服务注册配置是 Pulse.Index.exe --service。机器 index-config.json 的直接只读访问仍被拒绝，不能实测其 index_path；用户确认的目录与源码布局构成当前关联证据。"
+      ],
+      "physical_audit": {
+        "configured_index_directory": "Windows PermissionDenied / System.UnauthorizedAccessException; ordinary and explicitly escalated read-only listing both failed. This was not an automatic approval rejection.",
+        "actual_logical_bytes": null,
+        "actual_allocated_bytes": null,
+        "active_and_previous_shard_sizes": null,
+        "sqlite_page_count": null,
+        "sqlite_freelist_count": null,
+        "sqlite_wal_bytes": null,
+        "duplicate_aggregate": null,
+        "sqlite_connection_opened": false,
+        "sqlite_policy": "If accessible later, ordinary mode=ro is required so active WAL is respected; immutable, write PRAGMAs, VACUUM and deletion are excluded. No SQLite connection or backup was attempted against inaccessible data.",
+        "metadata_evidence": "bench_data/issue-followup-index/index-size-metadata-evidence.json",
+        "supported_tool_evidence": "bench_data/issue-followup-index/index-size-robocopy-result.json",
+        "exact_known_file_evidence": "bench_data/issue-followup-index/aggregate-file-metadata.json",
+        "service_evidence": "bench_data/issue-followup-index/index-service-state.json",
+        "machine_configuration_evidence": "bench_data/issue-followup-index/machine-config-evidence.json"
+      },
+      "remaining": "本轮停止权限探测与产品修改。下次如需容量实测，最少保留 aggregate 及每卷分片的相对文件名、字节大小、manifest 的 active_slot/previous_slot/active_bytes/generation；无需提供索引正文、私人路径或整库。用户睡觉期间不再提问。是否实施可选分卷副本策略与旧副本回收应先按本报告合同及定向对照验证决定。",
+      "user_observations": [
+        {
+          "tool_measured": false,
+          "source": "user_observation",
+          "value": "2.16G",
+          "role": "whole_index_directory"
+        },
+        {
+          "tool_measured": false,
+          "source": "user_observation",
+          "value": "100MB",
+          "role": "comparison_everything_db",
+          "same_dataset_verified": false
+        },
+        {
+          "tool_measured": false,
+          "source": "user_observation",
+          "value": "1.08G",
+          "role": "v9/9ACBEFD40DDAC9E8"
+        },
+        {
+          "tool_measured": false,
+          "source": "user_observation",
+          "value": "1.08G",
+          "role": "v9/volumes"
+        },
+        {
+          "tool_measured": false,
+          "source": "user_observation",
+          "value": "565M",
+          "role": "v9/9ACBEFD40DDAC9E8/base-a.bin"
+        }
+      ],
+      "storage_contract_assessment": {
+        "evidence_level": "Current source audit and independent source_id hash calculation. No production storage changes or proposed-mode runtime validation.",
+        "hash_proof": "bench_data/issue-followup-index/aggregate-hash-proof.json",
+        "consumer_audit": [
+          {
+            "role": "aggregate writers",
+            "evidence": "index_engine.cpp:1671-1688 CommitMappedFile publishes aggregate; 2507/2525-2528 merge, 3269/3286-3288 single-volume rebuild, 3412/3439-3443 initial build publish aggregate then derive volume shards. TryLoadCache:2566-2574 imports validated legacy pulse-index.bin into aggregate; this import does not make aggregate itself obsolete."
+          },
+          {
+            "role": "aggregate readers and recovery",
+            "evidence": "TryLoadCache:2544-2583 resolves active/previous aggregate and adopts its map. AdoptMappedLocked:1885-1933 creates canonical global nodes and per-volume FRN/journal/USN state from it. OpenDeltasLocked/ReplayDeltasLocked:2200-2264 attach updates to this generation. RebuildVolumeMft:3172-3198 flattens the current canonical view, preserves healthy volumes and replaces the failed volume before publishing a new aggregate. No audited path reconstructs this canonical state from per-volume query copies."
+          },
+          {
+            "role": "per-volume writers",
+            "evidence": "WriteVolumeShards:1713-1762 serializes Node/Attr/name/FRN slices from the already-built aggregate; invoked after successful initial build, merge and single-volume rebuild. These are derived copies of the same dataset, not another scanner."
+          },
+          {
+            "role": "per-volume readers",
+            "evidence": "RefreshQueryShardsLocked:1936-1969 requires an existing aggregate map and matching built time, node count and volume ID for every volume; maps all volumes while retaining aggregate. QueryShardForLocked/QueryNodeAtLocked/QueryAttrAtLocked/QueryNameOfLocked:1972-2002 convert local IDs and fall back to aggregate accessors. CollectMatchesLocked:989-994 selects one posting source. SortIdsLocked:1126-1195 contains optional per-volume ordered-stream merge; current WriteIndexFile:1552-1554 omits those three ordering arrays, so that stream shortcut is unavailable for newly written current snapshots. Query output/authorization use the same canonical global IDs. Memory diagnostics:379 only account for mapped copies."
+          },
+          {
+            "role": "delta storage must be preserved",
+            "evidence": "index_delta.cpp:63-73 writes live per-volume delta WAL under root/Volumes/<volume-hash>/wal-a.log. This root-level Volumes tree is distinct from v9/volumes query snapshots. A future query-copy optimization must not disable or delete live delta logs."
+          }
+        ],
+        "why_per_volume_exists": "The introducing commit 7640746 describes pending index shards but supplies no verified design rationale or benchmark. Current code establishes a per-volume query layout with locally numbered nodes/postings and optional sorted-stream machinery. It does not establish an OOM requirement: all volume maps and the aggregate remain mapped together. Any locality/performance benefit remains a hypothesis until measured.",
+        "fallback_contract": "Aggregate query fallback is a normal production branch, not solely an error handler: helper scope never uses per-volume maps; machine initial build marks the aggregate ready before writing volume copies; absent, mismatched or unreadable volume query shards leave query_shards_ready_ false. Posting collection, query accessors, ranking, path reconstruction and general sorting have aggregate paths. This is strong static support for a simpler mode, but not a completed parity proof for disabling the feature.",
+        "minimal_candidate": {
+          "direction": "Retain aggregate as authoritative snapshot and retain its A/B recovery contract. Make per-volume query-copy generation and loading consistently optional; initially evaluate with the option disabled against the existing aggregate path.",
+          "code_points": [
+            "index_engine.cpp:1713 WriteVolumeShards: single policy guard avoids its three callers generating new query-copy snapshots.",
+            "index_engine.cpp:1936 RefreshQueryShardsLocked: after clearing maps/ready flag, the same policy guard returns before loading old copies.",
+            "Keep canonical aggregate publish/adoption, query IDs, live root-level Volumes WAL, USN processing, per-volume recovery and caller visibility unchanged."
+          ],
+          "existing_data": "Stopping writes does not reclaim existing v9/volumes bytes. Any later cleanup requires a separate verified migration: validate active/previous aggregate, exclude live mappings/writers and only remove inventory-proven derived query copies. No deletion or cleanup is authorized/performed in this audit.",
+          "expected_benefit": "Eliminates a second newly serialized snapshot set and associated temporary store/posting work. The user-observed equal directory totals suggest this set is material, but actual allocated-space savings and latency changes were not measured; no promise of matching Everything size.",
+          "risk": "Cold/warm query page locality and tail latency can change, particularly cross-volume or restricted-path searches; aggregate still spans the full dataset. Startup checksum/mmap, paging, peak private memory and commit I/O must be compared. Removing aggregate instead requires a larger canonical-state/FRN/WAL/startup redesign and is not the minimal option.",
+          "decision": "Do not implement during this read-only turn. The minimal direction appears feasible from code, but full functional and performance equivalence is unverified and existing-space reclamation needs its own safe migration contract. Leave the choice for the next interaction without further questions now."
+        },
+        "focused_validation_for_a_future_change": {
+          "reuse_without_full_suite": [
+            "pulse_index_engine_test --cache-resolution-only: active CRC/manifest failures, legacy import and two-slot rebuild publication.",
+            "--shard-recovery-only and --shard-io-rebuild-only: exact A/B fallback and I/O failure preservation.",
+            "--mapped-validation-only: offsets, node/FRN ranges and bounds.",
+            "--outstanding-query-only / --outstanding-structure-only / --query-narrowing-only: hit sets, path reconstruction, rename/move, scoped queries, dense/sparse and pagination boundaries.",
+            "--delta-replay-only / --mixed-usn-only / --feed-only / --authorization-only: canonical updates, query-visible revisions and caller scope."
+          ],
+          "missing_comparison": "Existing selectors are useful but are not a dedicated per-volume-enabled versus disabled parity suite. Add one isolated identical multi-volume synthetic dataset comparison for name/path/kind/size/time filters, ranking, ascending/descending sorting, offsets, rapid cancellation, rename/delete overlays, offline/returning volumes and restart/WAL recovery; no real user volume mutations.",
+          "performance": "Compare cold/warm first-page and tail latency, service startup, merge write bytes, resident/private/peak memory and total logical/allocated snapshot bytes on the same dataset. Existing index_perf_main.cpp queries the default service pipe and is not an isolated paired harness; adapt a private comparison rather than automatically benchmarking the live service.",
+          "run_now": false
+        }
+      }
+    },
+    {
+      "issue": 374,
+      "status": "SIZE_TOO_BIG确认/拒绝/取消流程定向通过；真实Shell错误码待确认",
+      "source": "docs/validation/issue-confirm-2026-10-23/sources/374-readable.json",
+      "evidence": [
+        "原文只有系统提示目录太大无法入回收站、Pulse 提示无法删除；没有实际 HRESULT、卷类型、限额、版本或目标性质。",
+        "src/shell_host/delete_fileop.h:21-24 将 RECYCLE_FORCE_NUKE、RECYCLE_SIZE_TOO_BIG、RECYCLE_PATH_TOO_LONG、RECYCLE_BIN_NOT_FOUND 精确映射到需要新永久删除确认。私有头文件定向测试实测 SIZE_TOO_BIG 为 true、E_ACCESSDENIED 为 false，PASS。",
+        "src/ops/delete_operation.cpp:574-593 仅对未取消且非 undo 的剩余确切根建立 RealDelete，并重新调用删除 admission。src/ops/delete_service.cpp:68-71 在存在 Permanent 项时进入 AwaitingConfirmation；src/app/delete_confirmation_ui.cpp:23 使用永久删除确认文案。",
+        "src/bench/ops_feedback_test.cpp:643-646 已有错误映射断言，但本次没有运行整套。头文件映射 PASS 不能证明生产 Shell 返回了该 HRESULT，也不能证明原大目录最终删除完成。",
+        "新增私有 delete-confirm-probe：保留生产 RunDelete/DeleteService/回调对象，仅在私有 shell_client_injected.cpp 替换 DeleteAuthorized 运输返回。复用现有 ShellCompletionTestProbe friend；不 Acquire/Start/reader/helper，不启动 Shell。注入 SIZE_TOO_BIG，拒绝时仅一次 recycle 调用且没有 permanent 请求；接受时才产生一次 exact source + fresh token 的 permanent 请求，并立即注入后端取消。",
+        "8 PASS / 0 FAIL、exit0：隐藏 owner 存在、两种决策均只产生一次精确永久确认、拒绝不发送永久请求、允许才发送且token新、两分支源文件保留且无虚假undo/completion、普通 E_ACCESSDENIED 不提供永久回退。私有源仅几十字节且没有执行任何删除。",
+        "delete-production-object-manifest.json 记录未修改生产 delete_operation/delete_service/ops_manager 的源和链接对象SHA256及时间；相关对象均晚于源。该注入验证说明精确 HRESULT 的管理流程有效，不证明原用户环境 Windows Shell 一定返回相同码或实际永久删除成功。"
+      ],
+      "remaining": "用户本机没有安全复测目标，本轮不创建真实大文件、不操作真实回收站、不再扩大验证。当前未建立需改代码的证据，保留原Shell返回码和版本未知这一边界；未来自然再现时再关联安全错误摘要，不做猜测性修复。"
+    }
+  ],
+  "verification": {
+    "product_build_run": false,
+    "full_suite_run": false,
+    "product_files_modified": false,
+    "reports_other_than_this_file_modified": false,
+    "private_fixture_assertions": "Earlier network-overlap and HRESULT mapping fixture: 2 PASS / 0 FAIL. New production RunDelete confirmation/decline/backend-cancel injection: 8 PASS / 0 FAIL. Both exit0. No storage-mode change or proposed optimization validation was performed.",
+    "json_validation": "JSON parsed and required issue/evidence fields checked after write; no private paths, SIDs, document bodies or full event messages are retained."
+  },
+  "excluded_issues": [
+    {
+      "reason": "User confirmed accidental selection; excluded from this work",
+      "issue": 290,
+      "further_investigation": false
+    }
+  ]
+}

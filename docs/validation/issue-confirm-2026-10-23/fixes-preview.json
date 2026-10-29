@@ -1,0 +1,132 @@
+{
+  "captured_at": "2026-10-23T12:21:22.862269+08:00",
+  "scope": "Confirmed local thumbnail alpha, changed-path icon cache and ordinary-directory size sort defects only. No archive drag feature added.",
+  "changes": [
+    {
+      "finding": "F08",
+      "issue": 213,
+      "status": "fixed_confirmed_rgb_alpha_boundary",
+      "production_paths": [
+        "src/preview_host/main.cpp:591",
+        "src/preview_host/main.cpp:612",
+        "src/preview_host/main.cpp:658",
+        "src/preview_host/shell_thumbnail_bitmap.h:11"
+      ],
+      "behavior": "Retain WTS_ALPHATYPE from IThumbnailProvider and ISharedBitmap. Declared RGB ignores the unused alpha channel; declared ARGB and unknown retain the existing alpha interpretation. ImageFactory fallback resets format to unknown.",
+      "validation": {
+        "command": "bench_data/issue-confirm-preview-fixes/alpha.exe --alpha",
+        "log": "bench_data/issue-confirm-preview-fixes/run-alpha.log",
+        "passed": 4,
+        "failed": 0,
+        "actual": "Real CreateDIBSection plus the production WIC conversion helper. The unchanged unknown-alpha control reproduces invisible RGB pixels; declared RGB becomes opaque and preserves color; declared ARGB preserves 128 and zero alpha."
+      },
+      "limits": [
+        "No original PSD or 7Z sample was supplied; their separate refresh and icon symptoms are not claimed fixed.",
+        "This exercises the production conversion boundary, not a registered third-party IThumbnailProvider through host IPC.",
+        "sources/213-readable.json is absent from the supplied source snapshot; F08 source chain and the real bitmap control establish the local defect."
+      ]
+    },
+    {
+      "finding": "F25",
+      "issue": 229,
+      "status": "fixed_confirmed_local_cache_invalidation",
+      "production_paths": [
+        "src/ui/shell_icons.cpp:182",
+        "src/ui/shell_icons.cpp:269",
+        "src/ui/shell_icons.cpp:327",
+        "src/ui/ui_renderer.h",
+        "src/app/app_navigation.cpp"
+      ],
+      "behavior": "A changed path or changed parent directory removes exact-path indices, CPU pixels and retry entries case-insensitively. Per-request tickets reject invalidated in-flight results. Renderer exposes a nonblocking invalidation forwarding method; navigation agent connects file notifications and explicit refresh.",
+      "validation": {
+        "command": "bench_data/issue-confirm-preview-fixes/icons.exe --invalidation",
+        "log": "bench_data/issue-confirm-preview-fixes/run-icons.log",
+        "passed": 7,
+        "failed": 0,
+        "actual": "Runs the production WorkerMain thread with a query hook. The old query is blocked, invalidated and replaced; its late result never allocates an index. New query produces a new index; sibling prefixes remain cached; CPU pixel bytes are removed."
+      },
+      "complete_worker_attempt": {
+        "log": "bench_data/issue-confirm-preview-fixes/run-refresh.log",
+        "passed": 1,
+        "failed": 1,
+        "status": "blocked_at_initial_icon_before_replacement_or_invalidation",
+        "actual": "A private red EXE resource was created, but the first production Shell worker/IPC icon request did not load an icon. No changed-EXE conclusion follows from this failed bootstrap."
+      },
+      "limits": [
+        "The deterministic worker regression substitutes the Shell query result. It does not validate the complete compiler -> watcher -> IPC -> rendered icon chain.",
+        "The full Shell worker attempt failed during initial loading; its root cause is not inferred, and the failure is not called a passed check.",
+        "Windows system icon cache invalidation is outside the confirmed local cache gap."
+      ]
+    },
+    {
+      "finding": "F27",
+      "issue": 58,
+      "status": "fixed_targeted_real_filesystem_runtime",
+      "production_paths": [
+        "src/app/folder_sizes_ui.cpp:43",
+        "src/app/folder_sizes_ui.cpp:135",
+        "src/app/app_main.cpp"
+      ],
+      "behavior": "Size sort requests every actual directory in the current physical snapshot regardless of visibility or filtering. Cached totals are separate sort keys; raw DirEntry.size remains unchanged. Unknown values sort last within their folder policy group in either direction. Sorts throttle to 750ms and defer during pointer gestures, menu display and inline rename; selection, focus, anchor, scroll and view generation are preserved or updated explicitly.",
+      "validation": {
+        "source": "src/bench/issue_confirm_preview_fixes.cpp",
+        "command": "bench_data/issue-confirm-preview-fixes/fixes.exe --folder-sizes",
+        "log": "bench_data/issue-confirm-preview-fixes/run-sizes.log",
+        "status": "passed_consistently_rebuilt_production_objects",
+        "passed": 30,
+        "failed": 0,
+        "actual": "Production EnumerateDirectory reproduces raw directory size zero. Production PrepareFolderSizes scans all offscreen Details rows. Real FolderSizes totals of 1000, 10 and zero feed ApplyFolderSizeSort for all three folder policies in both directions. Checks cover unknown-last ordering, unmodified DirEntry.size, identity-based selection/focus/anchor remap, empty and select-all semantics, retained scroll, advanced view generation, rename/drag deferral, throttle retention, path switching and cancellation of old interests.",
+        "relink": "Compiled fixture and linked current build/CMakeFiles/pulse.dir/objects1.rsp after the parent completed its final unified build. No old ABI mixture is used."
+      },
+      "limits": [
+        "No archive, search, recycle or content-result view sorting is added.",
+        "No installed UI end-to-end interaction or screenshot claim is made.",
+        "The cancellation check changes prepared interests and guards against resorting a retained previous-path snapshot; it does not deliberately block a filesystem provider during cancellation."
+      ]
+    },
+    {
+      "finding": "F21",
+      "issue": 225,
+      "status": "confirmed_left_unchanged",
+      "production_paths": [
+        "src/app/app_input.cpp:467",
+        "src/app/app_runtime.cpp",
+        "src/app/archive_navigation.cpp:249",
+        "src/ui/drag_drop.cpp"
+      ],
+      "reason": "Archive selections deliberately have no physical filesystem source paths and therefore cannot be passed to the existing CF_HDROP drag implementation. Existing private extraction is a single-member open flow; multi-selection drag-out needs asynchronous staging or virtual file IDataObject ownership, collision handling, cancellation and cleanup lifetimes. Replacing the empty path guard would hand non-filesystem paths to file operations and is not a safe minimal fix.",
+      "validation": {
+        "status": "reviewed_unchanged",
+        "actual": "Read existing confirmed EntryFullPath/SelectedFullPaths reproduction and checked production drag/open/extraction ownership paths; no archive drag code changed and no real extraction or DoDragDrop claimed."
+      }
+    }
+  ],
+  "source_hashes": {
+    "src/app/folder_sizes_ui.cpp": "114bfd764fca4e4e36206ee963362b04be40d84598ec39e0237112afa41a5fed",
+    "src/preview_host/main.cpp": "569fa92014693d56034914a1868593fe10a2552de5b78098edbb61dfc085024c",
+    "src/preview_host/shell_thumbnail_bitmap.h": "1d0453f6fcc5cbb47775fc0419dc17c45241a9fdf227d1e50b3a608608ffef61",
+    "src/ui/shell_icons.cpp": "201529d0b7f0f170ca22c7c3c71792a106d51bb43ff155932b2245a5720d0a4c",
+    "src/ui/shell_icons.h": "111a25451cee29d1999a5bc0e32d08e8ee08068855add4d044b3aca03cb7728f",
+    "src/bench/shell_icons_test.cpp": "cf10d9610ecff6e186c35307d64e8be259aec867b95a8f3a94e265c8f2b1ccb4",
+    "src/bench/issue_confirm_preview_fixes.cpp": "469cd1298a6726086b6f5ea46787e2121fcfcbd0174995a9d9185eebb188cdac"
+  },
+  "modified_existing_files": [
+    "src/app/app_state.h",
+    "src/app/folder_sizes_ui.cpp",
+    "src/app/folder_sizes_ui.h",
+    "src/preview_host/main.cpp",
+    "src/ui/shell_icons.cpp",
+    "src/ui/shell_icons.h",
+    "src/ui/ui_renderer.h",
+    "src/bench/shell_icons_test.cpp"
+  ],
+  "added_source_files": [
+    "src/preview_host/shell_thumbnail_bitmap.h",
+    "src/bench/issue_confirm_preview_fixes.cpp"
+  ],
+  "constraints": [
+    "No real user files or preferences were changed by the fixtures.",
+    "No shared CMake build directory was written by this agent; private compiles link only existing built libraries or consistently rebuilt objects.",
+    "Existing uncommitted modifications were retained."
+  ]
+}

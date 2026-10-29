@@ -1,0 +1,55 @@
+{
+  "number": 241,
+  "title": "Listary不会自动跳转的问题",
+  "body": "之前用系统资源管理器都是可以自动跳转的，但是使用咱们这个有点不识别，能不能改进一下？",
+  "url": "https://github.com/jimmgreen/pulse/issues/241",
+  "captured_at": "2026-10-23T03:10:07.176405+00:00",
+  "updated_at": "2026-10-16T04:03:56Z",
+  "comments": [
+    {
+      "body": "这个应该反馈给 listary 吧，文件管理器应该没办法主动去适应吧",
+      "bodyHTML": "<p dir=\"auto\">这个应该反馈给 listary 吧，文件管理器应该没办法主动去适应吧</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBvlYHA",
+        "login": "doit132",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/117004316?u=22def5a7ca1ab2d456a10a93d67a5a0523cfff1d&v=4",
+        "profileUrl": "https://github.com/doit132",
+        "name": "yongjie ma"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/241#issuecomment-6196009048"
+    },
+    {
+      "body": "问题是其他资源管理器都是可以的，只有它不行，那肯定是资源管理器的问题，对不对？",
+      "bodyHTML": "<p dir=\"auto\">问题是其他资源管理器都是可以的，只有它不行，那肯定是资源管理器的问题，对不对？</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjMzOTUyMDky",
+        "login": "zhymster",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/33952092?v=4",
+        "profileUrl": "https://github.com/zhymster",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/241#issuecomment-6207724977"
+    },
+    {
+      "body": "应该不是，因为其他资源管理器都是 listary 主动去适配之后才支持的，我已经反馈给listary了，看他后续能否支持吧\n\n也可能我判断有误, 如果 pulse 能实现的话更好\n",
+      "bodyHTML": "<div class=\"email-fragment\">应该不是，因为其他资源管理器都是 listary 主动去适配之后才支持的，我已经反馈给listary了，看他后续能否支持吧\n\n也可能我判断有误, 如果 pulse 能实现的话更好</div>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBvlYHA",
+        "login": "doit132",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/117004316?u=22def5a7ca1ab2d456a10a93d67a5a0523cfff1d&v=4",
+        "profileUrl": "https://github.com/doit132",
+        "name": "yongjie ma"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/241#issuecomment-6207795317"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoUA3pRgAqjYxOTYwMDkwNDg=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoULgM8AAqjYyMDc3OTUzMTc="
+  }
+}

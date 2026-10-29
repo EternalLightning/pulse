@@ -1,0 +1,42 @@
+{
+  "number": 229,
+  "title": "C#编译的程序修改图标后不变",
+  "body": "使用 CSC 命令行编译。\nhttps://s41.ax1x.com/2026/10/13/pnaN79S.png",
+  "url": "https://github.com/jimmgreen/pulse/issues/229",
+  "captured_at": "2026-10-23T03:10:07.184037+00:00",
+  "updated_at": "2026-10-13T07:19:52Z",
+  "comments": [
+    {
+      "body": "缓存的缘故，重启一下pulse就行了，qdir也是这样",
+      "bodyHTML": "<p dir=\"auto\">缓存的缘故，重启一下pulse就行了，qdir也是这样</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE5NjEyOTAz",
+        "login": "flowprog",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/19612903?u=836f4406c5b578602c6f0000cfcd8b6d551a9e84&v=4",
+        "profileUrl": "https://github.com/flowprog",
+        "name": "flowprog"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/229#issuecomment-6136010241"
+    },
+    {
+      "body": "tessos，easyExplorer，XYExplorer 都是这样。\n之前重启没用，刚才重启正常了。",
+      "bodyHTML": "<p dir=\"auto\">tessos，easyExplorer，XYExplorer 都是这样。<br>\n之前重启没用，刚才重启正常了。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE2NDAyMjQ5",
+        "login": "sonichy",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/16402249?u=dc53ac2b574f8adb136f9227f259d733e64b0679&v=4",
+        "profileUrl": "https://github.com/sonichy",
+        "name": "海天鹰"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/229#issuecomment-6140378943"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTLZ8BAAqjYxMzYwMTAyNDE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoTQeehgAqjYxNDAzNzg5NDM="
+  }
+}

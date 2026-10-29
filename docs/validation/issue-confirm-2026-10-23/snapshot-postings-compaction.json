@@ -1,0 +1,178 @@
+{
+  "date": "2026-10-23",
+  "scope": "Bucket-local delta-varint compression of immutable filename postings; no deployed service, configuration, ACL or index-file changes by this subtask.",
+  "official_sources": [
+    {
+      "url": "https://www.voidtools.com/support/everything/indexes/",
+      "retrieved_date": "2026-10-23"
+    },
+    {
+      "url": "https://www.voidtools.com/support/everything/ini/",
+      "retrieved_date": "2026-10-23"
+    },
+    {
+      "url": "https://www.voidtools.com/faq/",
+      "retrieved_date": "2026-10-23"
+    }
+  ],
+  "official_findings": [
+    "Everything documents a RAM-resident runtime database saved at exit, with name/path mandatory and several metadata indexes optional.",
+    "Everything db_compress publicly documents Bzip 2 database compression and a CPU-versus-I/O loading/saving tradeoff.",
+    "Everything FAQ gives example sizes (one million files: about 100 MB RAM and 45 MB disk); user/Pulse/Everything indexed data equivalence was not established.",
+    "No unpublished Everything.db structure was read or inferred."
+  ],
+  "production_before": {
+    "role": "aggregate",
+    "directory_hash": "9ACBEFD40DDAC9E8",
+    "generation": 197,
+    "active_slot": 0,
+    "previous_slot": 1,
+    "crc_valid": true,
+    "a_bytes": 579699360,
+    "b_bytes": 579404816,
+    "snapshot_version": 11,
+    "nodes": 2448041,
+    "volumes": 4,
+    "built": 1792738717,
+    "nodes_bytes": 39168656,
+    "attributes_bytes": 29376492,
+    "name_pool_bytes": 119116740,
+    "frn_bytes": 39168656,
+    "prefix1_bytes": 128722432,
+    "prefix2_bytes": 214353360
+  },
+  "production_postings_share_percent": 59.18167513588423,
+  "fixture_before": {
+    "file": "E:\\Projects\\pulse\\bench_data\\index-storage-pair-32452-2667218\\optimized\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+    "bytes": 15865312,
+    "node_count": 60050,
+    "volume_count": 2,
+    "version": 11,
+    "sections": {
+      "nodes": {
+        "bytes": 960800,
+        "percent": 6.055979233184951
+      },
+      "attributes": {
+        "bytes": 720600,
+        "percent": 4.541984424888713
+      },
+      "UTF16_name_pool": {
+        "bytes": 2863632,
+        "percent": 18.049641885391225
+      },
+      "child_order": {
+        "bytes": 240200,
+        "percent": 1.5139948082962378
+      },
+      "FRN_identity": {
+        "bytes": 960800,
+        "percent": 6.055979233184951
+      },
+      "volumes": {
+        "bytes": 352,
+        "percent": 0.002218676821483246
+      },
+      "p1": {
+        "bytes": 4429260,
+        "percent": 27.91788777932637,
+        "postings": 1041778,
+        "delta_varint_projected_bytes": 1304149
+      },
+      "p2": {
+        "bytes": 5689516,
+        "percent": 35.861355893914975,
+        "postings": 1356842,
+        "delta_varint_projected_bytes": 1624642
+      }
+    }
+  },
+  "fixture_after": {
+    "file": "E:\\Projects\\pulse\\bench_data\\index-compaction-20261023\\run-2\\compressed.bin",
+    "bytes": 8675344,
+    "version": 12,
+    "node_count": 60050,
+    "volume_count": 2
+  },
+  "fixture_reduction_percent": 45.31879360456321,
+  "implementation": {
+    "snapshot_version": 12,
+    "old_read_versions": [
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "legacy_semantic_rebuild_below_version": 11,
+    "encoding": "65537 uint32 byte offsets per table; bucket-local strictly increasing IDs stored as canonical unsigned delta LEB128.",
+    "query": "mmap and decode selected bucket only; no table-sized decompression heap or query semantics removed.",
+    "startup_integrity": "Full bounded bucket/varint validation; rejects truncated, noncanonical, overflow, nonmonotonic, out-of-node-range and section-crossing data. Existing manifest CRC validation/A-B/WAL strategy unchanged.",
+    "writer_peak": "Build and encode the two raw posting tables sequentially, releasing each raw ID array before constructing the next.",
+    "offline_converter": "--convert ABS_INPUT ABS_ABSENT_OUTPUT uses production mapping/writing; preserves built timestamp, node/attribute/name-pool/child-order/FRN bytes, volume checkpoints and every posting ID; only output.tmp and then specified output are written, no Engine.Start/TryLoadCache/AdoptMapped, no service or manifest mutation."
+  },
+  "build": {
+    "targets": [
+      "pulse_index_compaction_test",
+      "pulse_index_storage_test",
+      "pulse_index"
+    ],
+    "log": "bench_data\\index-compaction-20261023\\build-round2.log",
+    "compiler_warnings": 0,
+    "initial_issue": "First storage publication failure was stale index_shard.cpp.obj retaining version 11 due missing header rebuild dependency. All affected index_shard.cpp objects were explicitly recompiled; final directed storage suite passed. No test was removed or weakened."
+  },
+  "validation": {
+    "compaction": {
+      "passed": 45,
+      "failed": 0,
+      "query_cases": 1071,
+      "log": "bench_data\\index-compaction-20261023\\test-round2.log",
+      "checks": [
+        "real-v11 complete read and v12 write",
+        "all core sections compared byte-for-byte and hashed",
+        "all single-char and bigram posting IDs compared bucket-by-bucket",
+        "malformed codec and mapped-file cases",
+        "full query total/order/pages/scope/auth/cancel comparison",
+        "real same-FRN USN rename/create/delete, including BMP CJK and surrogate pair",
+        "real per-volume WAL bytes and hashes exactly match across encodings",
+        "real WAL restart restores paths/tombstones/checkpoints",
+        "mixed v12 active to v11 previous A/B fallback",
+        "valid v11 does not trigger encoding-only full rescan"
+      ]
+    },
+    "storage": {
+      "passed": 42,
+      "failed": 0,
+      "query_cases": 291,
+      "log": "bench_data\\index-compaction-20261023\\storage-round2.log"
+    },
+    "metrics": [
+      "before_bytes=15865312 after_bytes=8675344 reduction_percent=45.3188 old_map_ms=0.8244 new_map_ms=4.7944 write_ms=74.3489",
+      "query_mode=old samples=176 median_ms=4.3833 p95_ms=38.1002",
+      "query_mode=compressed samples=176 median_ms=4.1443 p95_ms=37.5643",
+      "compared_query_cases=357",
+      "query_mode=old samples=176 median_ms=4.5588 p95_ms=32.6051",
+      "query_mode=compressed samples=176 median_ms=4.5918 p95_ms=33.3423",
+      "compared_query_cases=357",
+      "query_mode=old samples=176 median_ms=4.3475 p95_ms=30.321",
+      "query_mode=compressed samples=176 median_ms=4.5885 p95_ms=30.6741",
+      "compared_query_cases=357"
+    ]
+  },
+  "known_limits": [
+    "Timing is an isolated synthetic warm-cache fixture; no cold-cache latency or resident-RAM claim.",
+    "Strict mmap-time varint validation adds CPU at load (fixture: raw 0.8244 ms vs compressed 4.7944 ms).",
+    "New binary can read old bases; old <=v11 binary rejects v12, so rollback must restore compatible bases/manifests/binary/WAL together.",
+    "Production conversion, deployment and actual-byte reduction are owned and recorded by the main agent separately.",
+    "Existing index_engine_test.cpp mechanically relabels latest-format payload as old versions in some legacy tests; those fixtures need representation-aware adaptation, and a separate earlier dirty removal left a PreserveOfflineVolumesLocked reference. Those old tests were not built or claimed passed in this subtask."
+  ],
+  "sha256": {
+    "src/index/index_postings.h": "9719d4567ccd30f811abfdc5ea57b9473690fdcce50cfda224e17acddbd8b94f",
+    "src/index/index_engine.cpp": "7bfcb0dbabf84989f473ba3b42a82a15357c27bda2ab41a4704fc9882603ba4e",
+    "src/index/index_engine.h": "4fcab817de375c6e31c5fc4a0de2a3c2f68de935565f693921bbf5fce1925beb",
+    "src/index/index_shard.h": "4e8be75a9c192662d3cfb3554a6a613036102f5ff2c6214d4e966a19a24eea03",
+    "src/bench/index_compaction_test.cpp": "6a29a8e9d1b5b7e6f96aade42f04f9e43545e437f21fce03e65009a7bdbdfea7",
+    "build/pulse_index_compaction_test.exe": "d77e826c783766da5b0908406d4a9e6202397e42c0215c7d7f8cd51404491000",
+    "build/Pulse.Index.exe": "91e3f7e96ee374b6ab9081cd152f9e2a9033a86bb0eae5ab0a8b1d59859bfe5d"
+  }
+}

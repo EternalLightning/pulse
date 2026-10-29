@@ -1,0 +1,15 @@
+{
+  "number": 280,
+  "title": "[BUG] 右键菜单无法显示固定到快速访问",
+  "body": "预览中右键菜单显示“固定到快速访问”\n<img width=\"2175\" height=\"1108\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/7fcc3d47-f0cb-45b0-abe7-7a1af8565e16\" />\n实际没有\n<img width=\"446\" height=\"831\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/a4735733-68ce-49c2-bc80-c1deda4171fa\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/280",
+  "captured_at": "2026-10-23T03:10:07.142395+00:00",
+  "updated_at": "2026-10-16T13:49:45Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

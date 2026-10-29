@@ -1,4 +1,5 @@
 #include "app_input.h"
+#include "cloud_commands.h"
 #include <windowsx.h>
 #include "../ui/preview_grab_cursor.h"
 
@@ -11,7 +12,13 @@ bool HandleDetailsPreviewPointer(AppState* s, HWND hwnd, UINT msg, WPARAM wParam
         const auto vm = BuildVm(*s, false);
         const auto rect = D2D1::RectF(0, 0, static_cast<float>(s->compositor.Width()),
                                     static_cast<float>(s->compositor.Height()));
-        if (s->renderer.HitTest(vm, rect, x, y).region != ui::HitTestResult::DetailsPreview)
+        const auto hit = s->renderer.HitTest(vm, rect, x, y);
+        if (hit.region == ui::HitTestResult::DetailsCloudDownload) {
+            HandleCloudCommand(*s, vm.details.cloud_download_percent >= 0
+                ? app::CmdCloudCancelDownload : app::CmdCloudDownload);
+            return true;
+        }
+        if (hit.region != ui::HitTestResult::DetailsPreview)
             return false;
         if (s->renderer.BeginDetailsPreviewPan(x, y)) {
             s->dragPending = false;

@@ -1,0 +1,15 @@
+{
+  "number": 361,
+  "title": "对于.exe文件，右键添加到开始始终不显示",
+  "body": "在<系统右键菜单中>对于程序文件的固定到开始屏幕按钮已经打开，但是右键菜单仍然不显示\n\n<img width=\"2220\" height=\"1272\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/fed7ac32-f0f2-4de4-b2b2-5a6ca1c1f8d6\" />\n\n<img width=\"837\" height=\"972\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/015c3a9a-c628-49e8-b9b2-55c4b38cac4c\" />\n\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/361",
+  "captured_at": "2026-10-23T03:10:07.123090+00:00",
+  "updated_at": "2026-10-22T00:41:58Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

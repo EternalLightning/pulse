@@ -6,6 +6,7 @@
 #include "../app/exit_confirmation.h"
 #include "../ui/file_operation_dialog.h"
 #include "../ui/animation_clock.h"
+#include "snapshot_output.h"
 #include <filesystem>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@ struct FileOperationFailureProbe {
     static const ops::OpStatus& Status(const FileOperationWindow& window) { return window.status_; }
     static float Scroll(const FileOperationWindow& window) { return window.failure_scroll_; }
     static float MaxScroll(const FileOperationWindow& window) { return window.failure_scroll_max_; }
+    static bool ScrollPending(const FileOperationWindow& window) { return window.failure_scroll_animation_.Pending(); }
     static const FileOperationProgressInspection& Inspect(FileOperationWindow& window) {
         window.Render(false);
         return window.progress_inspection_;
@@ -94,12 +96,19 @@ struct FileOperationFailureProbe {
             }
         }
         if (!has_content) return false;
+        if (bench::StreamSnapshots())
+            return bench::EmitSnapshot(path, size.width, size.height, pixels.pitch, pixels.bits);
         ComPtr<IWICImagingFactory> wic;
         if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
             IID_PPV_ARGS(&wic)))) return false;
         ComPtr<IWICStream> stream;
-        if (FAILED(wic->CreateStream(&stream)) ||
-            FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE))) return false;
+        if (FAILED(wic->CreateStream(&stream))) return false;
+        const auto absolute_path = std::filesystem::absolute(path);
+        const HRESULT stream_hr = stream->InitializeFromFilename(absolute_path.c_str(), GENERIC_WRITE);
+        if (FAILED(stream_hr)) {
+            std::printf("[DIAG] snapshot file open failed: 0x%08lX\n", static_cast<unsigned long>(stream_hr));
+            return false;
+        }
         ComPtr<IWICBitmapEncoder> encoder;
         if (FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
             FAILED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache))) return false;
@@ -112,6 +121,97 @@ struct FileOperationFailureProbe {
             SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
     }
 };
+}
+
+static size_t PumpScrollMessages(HWND hwnd, ULONGLONG duration_ms) {
+    const ULONGLONG start = GetTickCount64();
+    size_t scroll_timers = 0;
+    do {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.hwnd == hwnd && message.message == WM_TIMER && message.wParam == 2)
+                ++scroll_timers;
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(1);
+    } while (GetTickCount64() - start < duration_ms);
+    return scroll_timers;
+}
+
+static int RunScrollTests(HWND owner) {
+    using namespace pulse;
+    using ui::FileOperationFailureProbe;
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label); failures += !ok;
+    };
+    ui::FileOperationWindow window;
+    check(window.Create(owner, {}), "scroll fixture creates the actual failure window");
+    const HWND hwnd = FileOperationFailureProbe::Window(window);
+    if (!hwnd) return failures + 1;
+    window.Show(false);
+    FileOperationFailureProbe::SetAnimationPolicy(window, true);
+    ops::OpStatus status;
+    status.task_id = 1; status.type = ops::OpType::Copy;
+    status.phase = ops::OpPhase::Failed; status.failure_hr = E_ACCESSDENIED;
+    status.failed_path = L"\\\\?\\UNC\\server\\share";
+    for (int i = 0; i < 1000; ++i) status.failed_path += L"\\long-directory";
+    window.Update(status);
+    FileOperationFailureProbe::Inspect(window);
+    const float maximum = FileOperationFailureProbe::MaxScroll(window);
+    check(maximum > 100, "failure fixture has a scrollable clipped text viewport");
+    const auto wheel = [&](int direction) {
+        SendMessageW(hwnd, WM_MOUSEWHEEL,
+            MAKEWPARAM(0, static_cast<WORD>(direction * WHEEL_DELTA)), 0);
+    };
+    wheel(-1);
+    check(FileOperationFailureProbe::ScrollPending(window) &&
+        FileOperationFailureProbe::Scroll(window) < maximum,
+        "wheel begins motion without jumping to the end of the text");
+    check(PumpScrollMessages(hwnd, 45) > 0 && FileOperationFailureProbe::Scroll(window) > 0 &&
+        FileOperationFailureProbe::ScrollPending(window),
+        "actual scroll timer presents an intermediate pixel offset");
+    const float middle = FileOperationFailureProbe::Scroll(window);
+    PumpScrollMessages(hwnd, 750);
+    check(FileOperationFailureProbe::Scroll(window) > middle &&
+        !FileOperationFailureProbe::ScrollPending(window),
+        "wheel motion advances from the middle and settles");
+    check(PumpScrollMessages(hwnd, 80) == 0, "settled wheel motion stops its timer");
+    SendMessageW(hwnd, WM_KEYDOWN, VK_HOME, 0);
+    wheel(-1);
+    PumpScrollMessages(hwnd, 45);
+    const float before_reverse = FileOperationFailureProbe::Scroll(window);
+    wheel(1);
+    PumpScrollMessages(hwnd, 45);
+    check(FileOperationFailureProbe::Scroll(window) < before_reverse,
+        "reversing the wheel changes direction on the next frames");
+    PumpScrollMessages(hwnd, 750);
+    check(FileOperationFailureProbe::Scroll(window) == 0 && !FileOperationFailureProbe::ScrollPending(window),
+        "reverse motion stops at the upper boundary");
+    wheel(1);
+    check(!FileOperationFailureProbe::ScrollPending(window) && PumpScrollMessages(hwnd, 60) == 0,
+        "wheel input at the boundary does not start an idle timer");
+    FileOperationFailureProbe::SetAnimationPolicy(window, false);
+    wheel(-1);
+    const float direct_offset = FileOperationFailureProbe::Scroll(window);
+    check(direct_offset > 0 && !FileOperationFailureProbe::ScrollPending(window) &&
+        PumpScrollMessages(hwnd, 60) == 0,
+        "disabled animation applies the wheel endpoint without scheduling frames");
+    FileOperationFailureProbe::SetAnimationPolicy(window, true);
+    SendMessageW(hwnd, WM_KEYDOWN, VK_HOME, 0);
+    wheel(-1);
+    PumpScrollMessages(hwnd, 750);
+    check(std::abs(FileOperationFailureProbe::Scroll(window) - direct_offset) < 0.6f,
+        "animated and direct wheel input reach the same endpoint");
+    wheel(-1);
+    ++status.task_id;
+    window.Update(status);
+    check(FileOperationFailureProbe::Scroll(window) == 0 && !FileOperationFailureProbe::ScrollPending(window) &&
+        PumpScrollMessages(hwnd, 60) == 0,
+        "new task clears the offset and cancels pending frames");
+    window.Destroy();
+    return failures;
 }
 
 static int RunResourceTests(HWND owner) {
@@ -443,6 +543,9 @@ static int RunProgressTests(HWND owner) {
         auto inspection = FileOperationFailureProbe::Inspect(window);
         check(inspection.show_pause && inspection.remaining_label == l10n::Get(l10n::StringId::OpRemainingItems),
             "default copy/move retain pause and remaining item count");
+        check(FileOperationFailureProbe::Capture(window, output /
+            (type == ops::OpType::Copy ? L"copy-running-zh-CN.png" : L"move-running-zh-CN.png")),
+            "capture running transfer status badge");
         FileOperationFailureProbe::Click(window, inspection.pause);
         status.phase = OpPhase::Paused; window.Update(status);
         inspection = FileOperationFailureProbe::Inspect(window);
@@ -619,6 +722,13 @@ int wmain(int argc, wchar_t** argv) {
         std::printf("[RESULT] failures=%d\n", failures);
         return failures ? 1 : 0;
     }
+    if (argc == 2 && std::wcscmp(argv[1], L"--scroll-only") == 0) {
+        failures = RunScrollTests(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        std::printf("[RESULT] failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wcscmp(argv[1], L"--resource-only") == 0) {
         failures = RunResourceTests(owner);
         DestroyWindow(owner);
@@ -634,7 +744,12 @@ int wmain(int argc, wchar_t** argv) {
         return failures ? 1 : 0;
     }
     if (argc == 2 && std::wcscmp(argv[1], L"--progress-only") == 0) {
-        failures = RunProgressTests(owner);
+        try {
+            failures = RunProgressTests(owner);
+        } catch (const std::filesystem::filesystem_error& exception) {
+            std::printf("[FAIL] operation progress fixture: %s\n", exception.what());
+            failures = 1;
+        }
         DestroyWindow(owner);
         CoUninitialize();
         std::printf("[RESULT] failures=%d\n", failures);
@@ -711,6 +826,7 @@ int wmain(int argc, wchar_t** argv) {
                         FileOperationFailureProbe::MaxScroll(window) > 0,
                         "very long errors keep close button on screen and enable scrolling");
                     SendMessageW(hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+                    PumpScrollMessages(hwnd, 45);
                     check(FileOperationFailureProbe::Scroll(window) > 0, "mouse wheel scrolls the full failure reason");
                     SendMessageW(hwnd, WM_KEYDOWN, VK_END, 0);
                     check(FileOperationFailureProbe::Scroll(window) == FileOperationFailureProbe::MaxScroll(window) &&

@@ -1,0 +1,18 @@
+{
+  "scope": "One production host spawn/pipe/send observation followed by separate private STA API timings on the same dedicated single TXT fixture. Not production concurrent worker phase profiling.",
+  "raw_evidence": "docs/validation/issue-confirm-2026-10-23/sevenzip-menu/stages-single.jsonl",
+  "markdown_lines": [
+    "另做一次独立分段测量，使用同一专用单文件夹具：",
+    "",
+    "| 测量段 | 耗时 / ms | 边界 |",
+    "|---|---:|---|",
+    "| 生产 Shell 宿主启动、连接及 Ping 提交 | 66.94 | 不包含 Ping 回复往返 |",
+    "| 私有 STA 的生产 BindCtxSelection | 91.83 | 独立探针，非生产并发工作线程现场 |",
+    "| 7-Zip CoCreateInstance | 0.97 | 独立探针 |",
+    "| 7-Zip Initialize | 0.15 | 独立探针 |",
+    "| 7-Zip QueryContextMenu | 0.68 | 独立探针；HRESULT=18 为成功命令范围计数 |",
+    "| 生产 CollectHandlerItems | 0.05 | 独立探针；取得父项及 16 子项 |",
+    "",
+    "这次独立测量中，7-Zip 自身生成菜单不到 1 ms。它不能解释上表生产回调首次出现的约 1.1～1.45 秒延迟，也不能把两组测量拼接相加。生产并发宿主内剩余耗时尚未归因；本轮没有宣称菜单延迟已经优化。自动禁用策略的确定缺陷可以独立修复，无须把耗时直接归咎于 7-Zip。"
+  ]
+}

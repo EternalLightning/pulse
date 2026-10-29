@@ -11,7 +11,59 @@
 #include <string_view>
 #include "places_tag_loading_cases.h"
 
+static int RunSessionPreferencesChecks() {
+    using namespace pulse;
+    int failures = 0;
+    const auto check = [&](bool passed, const char* name) {
+        std::cout << (passed ? "[PASS] " : "[FAIL] ") << name << '\n';
+        failures += !passed;
+    };
+    const auto root = std::filesystem::absolute(L"bench_data") /
+        (L"session-preferences-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root);
+    storage::OverrideDefaultRootForTesting(root.wstring());
+    app::SessionSnapshot full;
+    full.active_path = L"C:\\retained";
+    full.sidebar_hidden = 1;
+    full.layout_tabs.resize(1);
+    full.layout_tabs.front().panes.push_back({full.active_path});
+    check(app::SaveSession(full), "write an isolated legacy complete session");
+    app::WindowSessionSnapshot preferences;
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1 &&
+        preferences.active_path.empty() && preferences.layout_tabs.empty(),
+        "preferences migrate legacy settings without restoring navigation");
+    std::wstring original_session;
+    check(ReadUtf8File((root / L"session.json").wstring(), original_session),
+        "capture the complete legacy session before saving preferences");
+    preferences.sidebar_hidden = 2;
+    preferences.active_path = L"D:\\must-not-be-written";
+    check(app::SaveSessionPreferences(preferences), "save preferences into their separate file");
+    std::wstring saved_session, saved_preferences;
+    check(ReadUtf8File((root / L"session.json").wstring(), saved_session) && saved_session == original_session &&
+        ReadUtf8File((root / L"preferences.json").wstring(), saved_preferences),
+        "saving preferences preserves the complete session bytes");
+    const json::Document doc(saved_preferences);
+    check(doc.Is(json::Kind::Object) && !doc.Find(L"path") && !doc.Find(L"layoutTabs") && !doc.Find(L"windows"),
+        "the preference schema contains no navigation state");
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 && preferences.active_path.empty(),
+        "the new preference file takes precedence over legacy values");
+    app::SessionSnapshot restored;
+    check(app::LoadSession(restored) && restored.active_path == full.active_path && restored.layout_tabs.size() == 1,
+        "complete session remains readable after preference updates");
+    preferences.undo_json = L"[\"" + std::wstring(json::kMaxDocumentChars, L'a') + L"\"]";
+    check(!app::SaveSessionPreferences(preferences) &&
+        ReadUtf8File((root / L"preferences.json").wstring(), saved_session) && saved_session == saved_preferences,
+        "oversized preferences fail before replacing the previous file");
+    check(WriteUtf8FileAtomic((root / L"preferences.json").wstring(), L"{damaged") &&
+        !app::LoadSessionPreferences(preferences),
+        "a damaged new preference file does not silently resurrect legacy values");
+    std::filesystem::remove_all(root);
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--session-preferences")
+        return RunSessionPreferencesChecks();
     if (argc == 2 && std::string_view(argv[1]) == "--places-tags-load")
         return RunPlacesTagLoadingCases();
     using namespace pulse;
@@ -43,6 +95,13 @@ int main(int argc, char** argv) {
               restored.panes[1]->view.current_path == folder.path && restored.focused_index == 1 &&
               requested == std::vector<std::wstring>{L"", folder.path},
               "session restore keeps This PC and folder panes in their original positions");
+        saved.panes.resize(1);
+        requested.clear();
+        app::RestoreLayoutTab(restored, saved, load);
+        check(restored.panes.size() == 2 && restored.panes[0]->view.current_path.empty() &&
+              restored.panes[1]->view.current_path.empty() &&
+              requested == std::vector<std::wstring>{L"", L""},
+              "session restore preserves This PC when filling missing preset panes");
     }
     if (argc == 2 && std::string_view(argv[1]) == "--session-this-pc") return failures ? 1 : 0;
     {

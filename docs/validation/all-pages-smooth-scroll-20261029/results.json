@@ -1,0 +1,80 @@
+[
+  {
+    "target": "pulse_smooth_scroll_test",
+    "args": [],
+    "exit_code": 0,
+    "status": "passed"
+  },
+  {
+    "target": "pulse_pane_animation_application_test",
+    "args": [
+      "--page-scroll-only"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_pane_animation_application_test",
+    "args": [
+      "--column-scroll-only"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_pane_animation_application_test",
+    "args": [
+      "--surface-scroll"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_menu_text_test",
+    "args": [
+      "--smooth-scroll"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_menu_text_test",
+    "args": [
+      "--nested"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_file_operation_failure_test",
+    "args": [
+      "--scroll-only"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_text_diff_ui_test",
+    "args": [
+      "--smooth-scroll"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_global_search_window_test",
+    "args": [
+      "--smooth-scroll"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  },
+  {
+    "target": "pulse_playback_ui_test",
+    "args": [
+      "--smooth-scroll"
+    ],
+    "exit_code": 3221225794,
+    "status": "startup_failed"
+  }
+]

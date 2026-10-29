@@ -756,13 +756,20 @@ int32_t Engine::EnsureChainLocked(Store& s, const std::wstring& path, bool leaf_
     if (index_live) {
         cur = FindChildLiveLocked(-1, root);
         if (cur < 0) cur = AddNodeLocked(s, -1, root, kFlagDir | kFlagHidden, 0, 0, 0, true);
+        std::wstring candidate = root;
+        bool hidden_parent = false;
         for (size_t k = 0; k < segs.size(); ++k) {
+            if (!candidate.empty() && candidate.back() != L'\\') candidate += L'\\';
+            candidate.append(segs[k]);
+            const bool hidden = hidden_parent || ShouldSkipName(segs[k]) || IsExcludedPath(candidate);
             int32_t child = FindChildLiveLocked(cur, segs[k]);
             if (child < 0) {
                 const bool leaf = (k + 1 == segs.size());
-                child = AddNodeLocked(s, cur, segs[k], (!leaf || leaf_is_dir) ? kFlagDir : 0,
-                                      0, 0, 0, true);
+                uint8_t flags = (!leaf || leaf_is_dir) ? kFlagDir : 0;
+                if (hidden) flags |= kFlagHidden;
+                child = AddNodeLocked(s, cur, segs[k], flags, 0, 0, 0, true);
             }
+            hidden_parent = hidden || (NodeAt(child).flags & kFlagHidden) != 0;
             cur = child;
         }
         return cur;
@@ -2970,6 +2977,7 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
     std::vector<BYTE> buf;
     if (stream == journal_streams_.end()) { blob.reserve(256 * 1024); buf.resize(256 * 1024); }
     bool ok = true;
+    DWORD read_error = ERROR_SUCCESS;
     USN last = start_usn;
     if (stream != journal_streams_.end()) ok = stream->second->Take(blob, last);
     else for (;;) {
@@ -2978,6 +2986,7 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
         if (!DeviceIoControl(h, FSCTL_READ_USN_JOURNAL, &rud, sizeof(rud),
                              buf.data(), static_cast<DWORD>(buf.size()), &br, nullptr)) {
             const DWORD error = GetLastError();
+            read_error = error;
             if (error == ERROR_JOURNAL_ENTRY_DELETED || error == ERROR_JOURNAL_NOT_ACTIVE ||
                 error == ERROR_INVALID_PARAMETER) {
                 std::unique_lock<std::shared_mutex> state_lock(mutex_);
@@ -2988,25 +2997,41 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
             ok = false;
             break;
         }
-        if (br < sizeof(USN)) break;
+        if (br < sizeof(USN) || br > buf.size() ||
+            !ValidateUsnRecords(buf.data() + sizeof(USN), br - sizeof(USN))) {
+            read_error = ERROR_INVALID_DATA;
+            ok = false;
+            break;
+        }
         const USN next = *reinterpret_cast<USN*>(buf.data());
         BYTE* p = buf.data() + sizeof(USN);
         BYTE* end = buf.data() + br;
         size_t nrec = 0;
-        while (p + sizeof(USN_RECORD_COMMON_HEADER) <= end) {
-            auto* hdr = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(p);
-            if (hdr->RecordLength == 0 || p + hdr->RecordLength > end) break;
-            blob.insert(blob.end(), p, p + hdr->RecordLength);
+        while (p < end) {
+            UsnRecordView view;
+            if (!ReadUsnRecord(p, static_cast<size_t>(end - p), view)) {
+                read_error = ERROR_INVALID_DATA; ok = false; break;
+            }
+            blob.insert(blob.end(), p, p + view.record.RecordLength);
             ++nrec;
-            p += hdr->RecordLength;
+            p += view.record.RecordLength;
         }
+        if (!ok) break;
         rud.StartUsn = next;
         last = next;
         if (nrec == 0) break;
     }
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
     if (!ok || !running_) {
-        const DWORD error = stream == journal_streams_.end() ? GetLastError() : stream->second->Error();
+        const DWORD error = read_error ? read_error :
+            (stream == journal_streams_.end() ? GetLastError() : stream->second->Error());
+        if (error == ERROR_INVALID_DATA) {
+            std::unique_lock state_lock(mutex_);
+            GapFeed();
+            v.journal_id = 0;
+            SetStatus(std::wstring(1, letter) + L": 的文件变更记录损坏，正在重建索引…");
+        }
+        SetLastError(error ? error : ERROR_OPERATION_ABORTED);
         filename_timing_.End(FilenameStage::Journal, timing, 0, error ? error : ERROR_OPERATION_ABORTED, "read_failed", letter);
         return false;
     }
@@ -3018,16 +3043,23 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
     }
 
     std::unique_lock<std::shared_mutex> lock(mutex_);
+    if (!ValidateUsnRecords(blob.data(), blob.size())) {
+        GapFeed();
+        v.journal_id = 0;
+        SetLastError(ERROR_INVALID_DATA);
+        filename_timing_.End(FilenameStage::Journal, timing, 0, ERROR_INVALID_DATA, "invalid_records", letter);
+        return false;
+    }
     BYTE* p = blob.empty() ? nullptr : blob.data();
-    BYTE* end = p + blob.size();
+    BYTE* end = p ? p + blob.size() : nullptr;
     bool any_struct = false;
     bool any_attr = false;
     uint64_t applied = 0;
-    while (p && p + sizeof(USN_RECORD_COMMON_HEADER) <= end) {
+    while (p && p < end) {
         if (!running_) return false;
-        auto* hdr = reinterpret_cast<USN_RECORD_COMMON_HEADER*>(p);
-        if (hdr->RecordLength == 0 || p + hdr->RecordLength > end) break;
-        if (hdr->MajorVersion == 2) {
+        UsnRecordView view;
+        if (!ReadUsnRecord(p, static_cast<size_t>(end - p), view)) return false;
+        {
             const UsnApply apply = ApplyUsnLocked(v, reinterpret_cast<USN_RECORD_V2*>(p));
             if (apply != UsnApply::None) ++applied;
             // An invalid parent relation needs a fresh volume snapshot, not a
@@ -3039,7 +3071,7 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
             if (apply == UsnApply::Structure) any_struct = true;
             else if (apply == UsnApply::Attr) any_attr = true;
         }
-        p += hdr->RecordLength;
+        p += view.record.RecordLength;
     }
     v.next_usn = last;
     v.folder_size_current = true;
@@ -3121,11 +3153,24 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
                 }
                 break;
             }
-            if (br <= sizeof(USN)) break;
+            if (br < sizeof(USN) || br > buffer.size() ||
+                !ValidateUsnRecords(buffer.data() + sizeof(USN), br - sizeof(USN))) {
+                CloseHandle(h);
+                SetLastError(ERROR_INVALID_DATA);
+                return false;
+            }
+            if (br == sizeof(USN)) break;
             med.StartFileReferenceNumber = *reinterpret_cast<USN*>(buffer.data());
-            auto* rec = reinterpret_cast<PUSN_RECORD_V2>(buffer.data() + sizeof(USN));
-            BYTE* end = buffer.data() + br;
-            while (reinterpret_cast<BYTE*>(rec) + sizeof(USN_RECORD_V2) <= end) {
+            const BYTE* record_data = buffer.data() + sizeof(USN);
+            const BYTE* end = buffer.data() + br;
+            while (record_data < end) {
+                UsnRecordView view;
+                if (!ReadUsnRecord(record_data, static_cast<size_t>(end - record_data), view)) {
+                    CloseHandle(h);
+                    SetLastError(ERROR_INVALID_DATA);
+                    return false;
+                }
+                const auto* rec = &view.record;
                 if (frn_nodes.size() >= kIndexCap) {
                     CloseHandle(h);
                     SetLastError(ERROR_MORE_DATA);
@@ -3134,11 +3179,10 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
                 FrnNode n;
                 n.frn = rec->FileReferenceNumber;
                 n.parent = rec->ParentFileReferenceNumber;
-                n.name.assign(rec->FileName, rec->FileNameLength / sizeof(WCHAR));
+                n.name.assign(view.name);
                 n.is_dir = (rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 frn_nodes.push_back(std::move(n));
-                if (rec->RecordLength == 0) break;
-                rec = reinterpret_cast<PUSN_RECORD_V2>(reinterpret_cast<BYTE*>(rec) + rec->RecordLength);
+                record_data += rec->RecordLength;
             }
             SetStatus(StatusDriveProgress(letter, frn_nodes.size()));
             PingNotify();
@@ -3969,6 +4013,10 @@ uint64_t Engine::ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DW
         }
         ChangeRecord event; event.path = full;
         const int32_t known = ResolvePathLocked(full);
+        const auto visible = [&](int32_t id, const std::wstring& path) {
+            return id >= 0 && !IsTomb(id) && !(NodeAt(id).flags & kFlagHidden) && !IsExcludedPath(path);
+        };
+        bool previous_visible = visible(known, full);
         event.is_dir = known >= 0 && (NodeAt(known).flags & kFlagDir) != 0;
         if (info->Action == FILE_ACTION_ADDED) {
             event.kind = ChangeKind::Created;
@@ -3977,9 +4025,9 @@ uint64_t Engine::ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DW
         } else if (info->Action == FILE_ACTION_REMOVED) event.kind = ChangeKind::Deleted;
         else if (info->Action == FILE_ACTION_RENAMED_NEW_NAME) { event.kind = ChangeKind::Renamed; event.old_path = pending_old;
             const int32_t old_index = ResolvePathLocked(pending_old);
+            previous_visible = visible(old_index, pending_old);
             if (old_index >= 0) event.is_dir = (NodeAt(old_index).flags & kFlagDir) != 0;
             else GapFeed(); }
-        if (info->Action != FILE_ACTION_RENAMED_OLD_NAME) { RecordFeed(event); changes_.Record(std::move(event)); }
         switch (info->Action) {
         case FILE_ACTION_ADDED: {
             WIN32_FILE_ATTRIBUTE_DATA fad{};
@@ -4053,12 +4101,16 @@ uint64_t Engine::ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DW
                     ? std::wstring_view(full) : std::wstring_view(full).substr(slash + 1);
                 const Node old = NodeAt(idx);
                 const int32_t new_parent = slash == std::wstring::npos ? old.parent : EnsureChainLocked(live_, full.substr(0, slash), true, true);
+                uint8_t flags = old.flags & static_cast<uint8_t>(~kFlagHidden);
+                if ((new_parent >= 0 && NodeAt(new_parent).parent >= 0 && (NodeAt(new_parent).flags & kFlagHidden)) ||
+                    ShouldSkipName(new_name) || IsExcludedPath(full)) flags |= kFlagHidden;
                 if (idx < BaseCount() && old.parent != new_parent) base_parent_changed_ = true;
                 ChildMapRemove(old.parent, NameOf(idx), idx);
                 const int32_t base = BaseCount();
                 if (idx >= base) {
                     Node& n = live_.nodes[static_cast<size_t>(idx - base)];
                     n.parent = new_parent;
+                    n.flags = flags;
                     pool_waste_ += n.len;
                     n.off = static_cast<uint32_t>(live_.pool.size());
                     n.len = static_cast<uint16_t>((std::min)(new_name.size(), static_cast<size_t>(65535)));
@@ -4066,7 +4118,7 @@ uint64_t Engine::ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DW
                 } else {
                     Patch& pt = patches_[idx];
                     pt.parent = new_parent;
-                    pt.flags = old.flags;
+                    pt.flags = flags;
                     pt.has_meta = true;
                     if (pt.has_name) pool_waste_ += pt.len;
                     pt.has_name = true;
@@ -4075,15 +4127,33 @@ uint64_t Engine::ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DW
                     live_.pool.insert(live_.pool.end(), new_name.begin(), new_name.begin() + pt.len);
                 }
                 ChildMapAdd(new_parent, new_name, idx);
+                if (old.flags & kFlagDir) RefreshSubtreeVisibilityLocked(idx, nullptr);
                 InvalidateFilterLocked();
             } else {
-                EnsureChainLocked(live_, full, false, true);
+                const DWORD attributes = GetFileAttributesW(full.c_str());
+                const bool is_dir = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
+                EnsureChainLocked(live_, full, is_dir, true);
+                event.is_dir = is_dir;
                 InvalidateFilterLocked();
             }
             pending_old.clear();
             break;
         }
         default: break;
+        }
+        if (info->Action != FILE_ACTION_RENAMED_OLD_NAME) {
+            const bool current_visible = visible(ResolvePathLocked(full), full);
+            if (current_visible || previous_visible) {
+                if (event.kind == ChangeKind::Renamed && !current_visible) {
+                    event.kind = ChangeKind::Deleted;
+                    event.path = std::move(event.old_path);
+                    event.old_path.clear();
+                } else if (event.kind == ChangeKind::Renamed && !previous_visible) {
+                    event.kind = ChangeKind::Created;
+                    event.old_path.clear();
+                }
+                RecordFeed(event); changes_.Record(std::move(event));
+            }
         }
         if (info->NextEntryOffset == 0) break;
         if (info->NextEntryOffset < sizeof(FILE_NOTIFY_INFORMATION) || info->NextEntryOffset > static_cast<size_t>(end - p)) { GapFeed(); break; }

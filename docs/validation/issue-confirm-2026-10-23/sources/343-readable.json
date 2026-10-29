@@ -1,0 +1,15 @@
+{
+  "number": 343,
+  "title": "[BUG] 自定义的文件夹图标也会重绘",
+  "body": "问题描述：\n在使用图标视图时，对于自定义更改过的文件夹图标，只要该文件夹里面不全是文件夹，就会被pulse重绘。\n在win11文件资源管理里效果如上图，pulse里效果为下图。\n\n建议(OR)：\n1.增加文件夹图标重绘开关。\n2.修改重绘逻辑，对于已经自定义过图标的文件夹不进行重绘。\n3.增加pulse原生的图标自定义功能。\n4.对于文件夹里面全是文件夹的图标也进行重绘，不使用windows默认样式。\n\n<img width=\"587\" height=\"282\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/eaad5ded-11bc-4df2-b0eb-b0995bc71ef3\" />\n\n<img width=\"555\" height=\"292\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/23b92b58-6d2b-43c0-9e56-80b5db07b8dd\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/343",
+  "captured_at": "2026-10-23T03:10:07.126708+00:00",
+  "updated_at": "2026-10-20T10:05:40Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

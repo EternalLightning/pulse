@@ -1,4 +1,5 @@
 #include "../app/clipboard_availability.h"
+#include "../app/clipboard_paste_choice.h"
 #include "../ui/toolbar_command_state.h"
 #include <windows.h>
 #include <cstdio>
@@ -18,6 +19,35 @@ void Check(bool passed, const char* name) {
 
 int wmain() {
     using namespace pulse;
+    using PasteSource = app::ClipboardPasteSource;
+    const ops::ClipboardData empty_paths{{}, false, 12};
+    const ops::ClipboardData valid_drop{{L"source.txt"}, false, 12};
+    const auto choose = [&](bool read, const ops::ClipboardData& data, bool shell, bool tray,
+                            uint32_t current = 12) {
+        return app::ChooseClipboardPasteSource(read, data, shell, tray, 12, current);
+    };
+    Check(choose(false, empty_paths, true, false) == PasteSource::Shell,
+          "failed HDROP read falls back to virtual clipboard contents");
+    Check(choose(true, empty_paths, true, false) == PasteSource::Shell,
+          "empty HDROP cannot mask virtual clipboard contents");
+    Check(choose(false, empty_paths, true, true) == PasteSource::Shell &&
+          choose(true, empty_paths, true, true) == PasteSource::Shell,
+          "failed or empty HDROP with virtual files does not release the old tray");
+    Check(choose(true, valid_drop, true, false) == PasteSource::Paths,
+          "valid HDROP takes the local file operation path before virtual formats");
+    Check(choose(true, valid_drop, true, true) == PasteSource::Tray &&
+          choose(true, valid_drop, false, true) == PasteSource::Tray,
+          "valid path clipboard preserves the existing tray priority");
+    Check(choose(false, empty_paths, false, true) == PasteSource::Tray &&
+          choose(false, empty_paths, false, false) == PasteSource::None,
+          "ordinary tray fallback and empty clipboard behavior remain unchanged");
+    Check(choose(false, empty_paths, true, true, 13) == PasteSource::None &&
+          choose(true, valid_drop, true, true, 13) == PasteSource::None,
+          "clipboard replacement rejects virtual and tray requests before dispatch");
+    auto stale_drop = valid_drop;
+    stale_drop.sequence = 11;
+    Check(choose(true, stale_drop, true, true) == PasteSource::None,
+          "mismatched decoded path sequence cannot fall through to shell or tray");
     const ui::ToolbarCommandState drive_commands{false, 1, true, false};
     Check(!drive_commands.Enabled(0) && !drive_commands.Enabled(1) && !drive_commands.Enabled(4),
           "drive toolbar disables cut copy and delete");
@@ -104,6 +134,28 @@ int wmain() {
         *virtual_without_tray_paths, reader, exists));
     availability.Consume();
     Check(availability.Available(), "virtual clipboard takes priority over unavailable older tray paths");
+    app::ClipboardAvailability mixed_formats;
+    mixed_formats.Update(1, true, true, {}, true);
+    const auto mixed_request = mixed_formats.BeginRefresh(0);
+    if (!mixed_request) return 2;
+    const auto failed_reader = [](ops::ClipboardData&) { return false; };
+    mixed_formats.mailbox()->Publish(app::ProbeClipboardAvailability(*mixed_request, failed_reader, exists));
+    mixed_formats.Consume();
+    Check(mixed_formats.Available(),
+          "mixed HDROP and virtual formats enable paste after the path reader fails despite an empty tray");
+    const auto empty_reader = [](ops::ClipboardData& out) { out = {{}, false, 1}; return true; };
+    mixed_formats.mailbox()->Publish(app::ProbeClipboardAvailability(*mixed_request, empty_reader, exists));
+    mixed_formats.Consume();
+    Check(mixed_formats.Available(),
+          "mixed HDROP and virtual formats enable paste when decoded paths are empty");
+    mixed_formats.mailbox()->Publish(app::ProbeClipboardAvailability(*mixed_request, reader, exists));
+    mixed_formats.Consume();
+    Check(!mixed_formats.Available(),
+          "valid HDROP with a virtual format still requires the selected tray paths to be available");
+    mixed_formats.Update(2, false, false, {});
+    mixed_formats.mailbox()->Publish(app::ProbeClipboardAvailability(*mixed_request, failed_reader, exists));
+    mixed_formats.Consume();
+    Check(!mixed_formats.Available(), "stale mixed-format availability cannot enable a replacement clipboard");
     availability.Update(1, true, false, {});
     const auto first = availability.BeginRefresh(0);
     Check(first.has_value() && !availability.Available(), "file clipboard waits for worker validation");

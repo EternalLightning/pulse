@@ -36,25 +36,34 @@ class UserSecurity {
 public:
     UserSecurity() {
         HANDLE raw_token = nullptr;
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token)) return;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token)) { Fail("OpenProcessToken"); return; }
         Handle token(raw_token);
         DWORD bytes = 0;
         GetTokenInformation(token.get(), TokenUser, nullptr, 0, &bytes);
-        if (!bytes) return;
+        if (!bytes) { Fail("GetTokenInformation(size)"); return; }
         std::vector<BYTE> data(bytes);
-        if (!GetTokenInformation(token.get(), TokenUser, data.data(), bytes, &bytes)) return;
+        if (!GetTokenInformation(token.get(), TokenUser, data.data(), bytes, &bytes)) {
+            Fail("GetTokenInformation(user)"); return;
+        }
         LPWSTR sid = nullptr;
-        if (!ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(data.data())->User.Sid, &sid)) return;
+        if (!ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(data.data())->User.Sid, &sid)) {
+            Fail("ConvertSidToStringSidW"); return;
+        }
         const std::wstring sddl = L"D:P(A;;GA;;;" + std::wstring(sid) + L")";
         LocalFree(sid);
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1,
-                &descriptor_, nullptr)) return;
+                &descriptor_, nullptr)) { Fail("ConvertStringSecurityDescriptorToSecurityDescriptorW"); return; }
         attributes_.nLength = static_cast<DWORD>(sizeof(attributes_));
         attributes_.lpSecurityDescriptor = descriptor_;
     }
     ~UserSecurity() { if (descriptor_) LocalFree(descriptor_); }
     SECURITY_ATTRIBUTES* get() { return descriptor_ ? &attributes_ : nullptr; }
+    DWORD error() const { return error_; }
+    const char* stage() const { return stage_; }
 private:
+    void Fail(const char* stage) { error_ = GetLastError(); stage_ = stage; }
+    DWORD error_ = ERROR_SUCCESS;
+    const char* stage_ = "security descriptor";
     PSECURITY_DESCRIPTOR descriptor_ = nullptr;
     SECURITY_ATTRIBUTES attributes_{};
 };
@@ -64,40 +73,45 @@ public:
     bool Connect() {
         static uint32_t sequence = 0;
         UserSecurity security;
-        if (!security.get()) return false;
+        if (!security.get()) return Failed(security.stage(), security.error());
         const std::wstring name = L"\\\\.\\pipe\\PulseShellLaunchFixture." +
             std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64()) +
             L"." + std::to_wstring(++sequence);
         server_.reset(CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
             FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
             PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 4096, 0, security.get()));
-        if (!server_.valid()) return false;
+        if (!server_.valid()) return Failed("CreateNamedPipeW", GetLastError());
         Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-        if (!event.valid()) return false;
+        if (!event.valid()) return Failed("CreateEventW", GetLastError());
         OVERLAPPED connected{};
         connected.hEvent = event.get();
         const BOOL immediate = ConnectNamedPipe(server_.get(), &connected);
         const DWORD error = immediate ? ERROR_SUCCESS : GetLastError();
-        if (!immediate && error != ERROR_IO_PENDING && error != ERROR_PIPE_CONNECTED) return false;
+        if (!immediate && error != ERROR_IO_PENDING && error != ERROR_PIPE_CONNECTED)
+            return Failed("ConnectNamedPipe", error);
         client_.reset(CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
             OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
         if (!client_.valid()) {
+            const DWORD client_error = GetLastError();
             if (error == ERROR_IO_PENDING) {
                 CancelIoEx(server_.get(), &connected);
                 DWORD ignored = 0;
                 GetOverlappedResult(server_.get(), &connected, &ignored, TRUE);
             }
-            return false;
+            return Failed("CreateFileW(client)", client_error);
         }
         if (error == ERROR_IO_PENDING) {
-            if (WaitForSingleObject(event.get(), kDeadlineMs) != WAIT_OBJECT_0) {
+            const DWORD waited = WaitForSingleObject(event.get(), kDeadlineMs);
+            if (waited != WAIT_OBJECT_0) {
+                const DWORD wait_error = waited == WAIT_FAILED ? GetLastError() : ERROR_TIMEOUT;
                 CancelIoEx(server_.get(), &connected);
                 DWORD ignored = 0;
                 GetOverlappedResult(server_.get(), &connected, &ignored, TRUE);
-                return false;
+                return Failed("WaitForSingleObject(connect)", wait_error);
             }
             DWORD ignored = 0;
-            if (!GetOverlappedResult(server_.get(), &connected, &ignored, FALSE)) return false;
+            if (!GetOverlappedResult(server_.get(), &connected, &ignored, FALSE))
+                return Failed("GetOverlappedResult(connect)", GetLastError());
         }
         return true;
     }
@@ -141,6 +155,11 @@ public:
             PipeWrite(server_.get(), writer.data().data(), header.payload_size, options);
     }
 private:
+    static bool Failed(const char* stage, DWORD error) {
+        std::cout << "[DIAG] PipePair::Connect stage=" << stage << " win32=" << error <<
+            " pid=" << GetCurrentProcessId() << '\n';
+        return false;
+    }
     Handle server_, client_;
 };
 
@@ -420,6 +439,42 @@ struct ShellLaunchClientTestProbe {
                 "backpressure request receives exactly one terminal completion");
         }
     }
+    static void MalformedResults() {
+        std::vector<PayloadWriter> payloads(6);
+        payloads[1].PutU32(S_OK);
+        payloads[2].PutU32(S_OK); payloads[2].PutU32(1);
+        payloads[3].PutU32(S_OK); payloads[3].PutU32(0); payloads[3].PutU32(UINT32_MAX);
+        payloads[4].PutU32(S_OK); payloads[4].PutU32(2); payloads[4].PutString(L"");
+        payloads[5].PutU32(S_OK); payloads[5].PutU32(1); payloads[5].PutString(L"");
+        payloads[5].PutU32(1);
+        for (const auto& payload : payloads) {
+            Recorder recorder, fallback;
+            PipePair pair;
+            ShellClient client;
+            Check(pair.Connect(), "P26 connect isolated malformed completion fixture");
+            const auto endpoint = pair.ReleaseClient();
+            if (endpoint == INVALID_HANDLE_VALUE) return;
+            Prepare(client, endpoint, fallback);
+            const auto owner = std::make_shared<ShellClient::CallbackOwner>(&client, recorder.Callbacks());
+            for (uint32_t id : {71u, 72u, 73u}) {
+                AddPending(client, REQ_NEW_FILE, id);
+                client.BindOwner(id, owner);
+            }
+            Read(client);
+            const bool received = pair.RespondPayload(RSP_DONE, 71, payload) &&
+                pair.RespondPayload(RSP_DONE, 71, payload) && pair.Respond(RSP_DONE, 72) &&
+                pair.Respond(RSP_DONE, 73) && recorder.Wait(3);
+            const auto events = recorder.Snapshot();
+            Check(received && events.size() == 3 && events[0].id == 71 &&
+                events[0].hr == static_cast<uint32_t>(E_INVALIDARG) && !events[0].cancelled &&
+                !events[0].error.empty() && events[1].id == 72 && events[1].hr == S_OK &&
+                events[2].id == 73 && events[2].hr == S_OK && Empty(client) &&
+                client.request_owners_.empty() && fallback.Snapshot().empty(),
+                "P26 malformed terminal reply fails once, retires its owner and preserves subsequent frames");
+            client.Stop();
+            client.Release(owner);
+        }
+    }
     static void FrameLiveness() {
         for (unsigned mode = 0; mode != 3; ++mode) {
             Recorder recorder;
@@ -668,6 +723,10 @@ struct ShellLaunchClientTestProbe {
 int main(int argc, char** argv) {
     std::cout << std::unitbuf;
     if (argc == 2 && std::string(argv[1]) == "--exit-before-pipe") return 7;
+    if (argc == 2 && std::string(argv[1]) == "--malformed-results") {
+        pulse::ipc::ShellLaunchClientTestProbe::MalformedResults();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--multiwindow-owners") {
         pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwners();
         pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwnerFrames();
@@ -690,6 +749,7 @@ int main(int argc, char** argv) {
     pulse::ipc::ShellLaunchClientTestProbe::DisconnectPolicy();
     pulse::ipc::ShellLaunchClientTestProbe::TransportRouting();
     pulse::ipc::ShellLaunchClientTestProbe::InteractionReplyRouting();
+    pulse::ipc::ShellLaunchClientTestProbe::MalformedResults();
     pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwners();
     pulse::ipc::ShellLaunchClientTestProbe::MultiwindowOwnerFrames();
     return failures ? 1 : 0;

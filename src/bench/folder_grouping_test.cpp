@@ -192,6 +192,12 @@ int main() {
         L"{\"path\":\"C:\\\\bad2\",\"widths\":[100,\"200\",300]}]}");
     Check(restored.FindColumns(L"C:\\legacy").has_value() && !restored.FindColumns(L"C:\\bad") &&
         !restored.FindColumns(L"C:\\bad2"), "legacy normalized widths remain readable and corrupt persisted widths are rejected");
+    prefs.SetColumns(unc, {160, 120, 96, 88});
+    std::wstring cloud_json = L"{\"version\":1";
+    prefs.AppendJson(cloud_json);
+    cloud_json += L"}";
+    restored.ReadJson(cloud_json);
+    Check(restored.FindColumns(unc) == prefs.FindColumns(unc), "cloud status width round trips with existing metadata widths");
     std::printf("%d failures\n", failures);
     return failures ? 1 : 0;
 }

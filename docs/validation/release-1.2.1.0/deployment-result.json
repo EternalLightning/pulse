@@ -1,0 +1,24 @@
+{
+  "RecoveryError": null,
+  "Success": true,
+  "Deferred": [
+    {
+      "Reason": "Access to the path 'D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-ec809c08c2d24d3ca1a7069bcf263b69' is denied.",
+      "SHA256": "230F8BBA417D259B6ACF914002D71426861DC1345D6B481E098896702CF0029F",
+      "Path": "D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-ec809c08c2d24d3ca1a7069bcf263b69"
+    }
+  ],
+  "BackupFiles": 71,
+  "Phase": "complete",
+  "BackupDirectory": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.1.0-20261024-172300",
+  "Error": null,
+  "ChangedFiles": [
+    "Pulse.exe",
+    "Pulse.Index.exe",
+    "Pulse.Shell.exe",
+    "Pulse.Preview.exe",
+    "Pulse.Document.exe"
+  ],
+  "BackupVerified": true,
+  "Utc": "2026-10-24T09:24:53.2694618Z"
+}

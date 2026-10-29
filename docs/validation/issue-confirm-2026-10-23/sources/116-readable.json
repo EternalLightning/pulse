@@ -1,0 +1,55 @@
+{
+  "number": 116,
+  "title": "使用中文重命名文件时，光标会出现在最前面，导致输入的字符顺序有问题。",
+  "body": "https://github.com/user-attachments/assets/846fd7b4-dcc9-4bbb-9167-6da3dece7ce7",
+  "url": "https://github.com/jimmgreen/pulse/issues/116",
+  "captured_at": "2026-10-23T03:10:07.212545+00:00",
+  "updated_at": "2026-10-22T06:47:48Z",
+  "comments": [
+    {
+      "body": "感谢反馈和视频，已在本地用微软拼音复现并修复。\n\n**原因**：重命名时 F2 会先选中文件名主干，第一次输入的词替换这段选区后，微软拼音会把光标重新放回输入框开头，于是下一个词插到了前面（例如先输入「你好」再输入「的」，得到「的你好」）。之后在普通光标位置输入的词不受影响，所以只在每次重命名的第一个词之后出现。\n\n**修复**：开始输入法组合输入时，如果有选区，先删除选区再开始组合（和提交后的结果一致），输入法就不会再把光标放回开头。\n\n**本地验证**（微软拼音）：「你好」+「的」+「世界」→「你好的世界」；输入后按 ← 再输入也位置正确；微信输入法同样正常。\n\n修复会包含在下一个版本中。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈和视频，已在本地用微软拼音复现并修复。</p>\n<p dir=\"auto\"><strong>原因</strong>：重命名时 F2 会先选中文件名主干，第一次输入的词替换这段选区后，微软拼音会把光标重新放回输入框开头，于是下一个词插到了前面（例如先输入「你好」再输入「的」，得到「的你好」）。之后在普通光标位置输入的词不受影响，所以只在每次重命名的第一个词之后出现。</p>\n<p dir=\"auto\"><strong>修复</strong>：开始输入法组合输入时，如果有选区，先删除选区再开始组合（和提交后的结果一致），输入法就不会再把光标放回开头。</p>\n<p dir=\"auto\"><strong>本地验证</strong>（微软拼音）：「你好」+「的」+「世界」→「你好的世界」；输入后按 ← 再输入也位置正确；微信输入法同样正常。</p>\n<p dir=\"auto\">修复会包含在下一个版本中。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/116#issuecomment-6172860659"
+    },
+    {
+      "body": "> 1. 感谢反馈和视频，已在本地用微软拼音复现并修复。\n>    **原因**：重命名时 F2 会先选中文件名主干，第一次输入的词替换这段选区后，微软拼音会把光标重新放回输入框开头，于是下一个词插到了前面（例如先输入「你好」再输入「的」，得到「的你好」）。之后在普通光标位置输入的词不受影响，所以只在每次重命名的第一个词之后出现。\n>    **修复**：开始输入法组合输入时，如果有选区，先删除选区再开始组合（和提交后的结果一致），输入法就不会再把光标放回开头。\n>    **本地验证**（微软拼音）：「你好」+「的」+「世界」→「你好的世界」；输入后按 ← 再输入也位置正确；微信输入法同样正常。\n>    修复会包含在下一个版本中。\n\n(https://github.com/user-attachments/assets/e7be6f0e-53b2-4481-9951-18b8f09dfe78)\n\n，你好，在最新版中虽然第一次输入是正确了，但是后面的输入也有可能会出现这种情况，不一定能百分百复现，偶尔会出现一次",
+      "bodyHTML": "<blockquote>\n<ol dir=\"auto\">\n<li>感谢反馈和视频，已在本地用微软拼音复现并修复。<br>\n<strong>原因</strong>：重命名时 F2 会先选中文件名主干，第一次输入的词替换这段选区后，微软拼音会把光标重新放回输入框开头，于是下一个词插到了前面（例如先输入「你好」再输入「的」，得到「的你好」）。之后在普通光标位置输入的词不受影响，所以只在每次重命名的第一个词之后出现。<br>\n<strong>修复</strong>：开始输入法组合输入时，如果有选区，先删除选区再开始组合（和提交后的结果一致），输入法就不会再把光标放回开头。<br>\n<strong>本地验证</strong>（微软拼音）：「你好」+「的」+「世界」→「你好的世界」；输入后按 ← 再输入也位置正确；微信输入法同样正常。<br>\n修复会包含在下一个版本中。</li>\n</ol>\n</blockquote>\n<p dir=\"auto\">(<a href=\"https://github.com/user-attachments/assets/e7be6f0e-53b2-4481-9951-18b8f09dfe78\">https://github.com/user-attachments/assets/e7be6f0e-53b2-4481-9951-18b8f09dfe78</a>)</p>\n<p dir=\"auto\">，你好，在最新版中虽然第一次输入是正确了，但是后面的输入也有可能会出现这种情况，不一定能百分百复现，偶尔会出现一次</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBry-DQ",
+        "login": "chamer-vati",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/113032717?v=4",
+        "profileUrl": "https://github.com/chamer-vati",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/116#issuecomment-6284819401"
+    },
+    {
+      "body": "补充一下：1.0.56 之后又收到几个同类报告（#316、#317、#330），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">补充一下：1.0.56 之后又收到几个同类报告（<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5916956907\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/316\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/316/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/316\">#316</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5917101733\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/317\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/317/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/317\">#317</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5926388797\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/330\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/330/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/330\">#330</a>），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/116#issuecomment-6334612145"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTsxb5AAqjYxNzI4NjA2NTk=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJdqiAAqjYzMzQ2MTIxNDU="
+  }
+}

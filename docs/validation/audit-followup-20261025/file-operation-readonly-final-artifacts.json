@@ -1,0 +1,26 @@
+{
+  "source": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_permanent_fileop_console_test.exe",
+  "copy": "D:\\AppData\\Temp\\PulseFileOperationReadonlyFinal-205551fef1994c579bdddb3991d890b2\\pulse_permanent_fileop_console_test.exe",
+  "sha256": "6F6A71C3A1D858A09DEF57EF98FDD74E8B46097C041AF55B4DF21AE21814EFBF",
+  "runs": [
+    {
+      "name": "local",
+      "parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+      "exit_code": 0,
+      "passed": 4,
+      "failed": 0,
+      "blocked": 0,
+      "log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\file-operation-readonly-final-local.log"
+    },
+    {
+      "name": "network",
+      "parent": "Z:\\",
+      "exit_code": 1,
+      "passed": 1,
+      "failed": 1,
+      "blocked": 1,
+      "log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\file-operation-readonly-final-network.log"
+    }
+  ],
+  "timestamp": "2026-10-25T16:31:22.6119221+08:00"
+}

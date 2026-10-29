@@ -1,0 +1,15 @@
+{
+  "number": 129,
+  "title": "文件位置问题",
+  "body": "返回上级文件夹时，父文件夹位置不在打开前的位置，滚动到了最底部（文件夹铺满窗口的情况下）\n\n<img width=\"1558\" height=\"951\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/713f2579-6477-46a4-bfc3-f84eaa0e5d4f\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/129",
+  "captured_at": "2026-10-23T03:10:07.211158+00:00",
+  "updated_at": "2026-10-08T08:53:39Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

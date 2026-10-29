@@ -1,5 +1,6 @@
 // link_resolve.cpp — See link_resolve.h.
 #include "link_resolve.h"
+#include "../fs/cloud_state.h"
 #include "../ipc/shell_query_client.h"
 #include <cwctype>
 
@@ -16,6 +17,7 @@ bool HasLnkSuffix(const std::wstring& name) {
 
 bool ResolveLink(const std::wstring& lnk_path, fs::DirEntry& e,
                  const std::function<bool()>& cancel) {
+    if (fs::IsCloudPlaceholder(e.attrs)) return false;
     ipc::ShellQueryRequest request;
     request.kind = ipc::ShellQueryKind::Shortcut;
     request.path = lnk_path;

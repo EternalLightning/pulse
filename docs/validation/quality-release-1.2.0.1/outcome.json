@@ -1,0 +1,675 @@
+{
+  "version": "1.2.0.1",
+  "status": "installed-verified",
+  "tests": [
+    {
+      "name": "hosted-edit",
+      "label": "正式编辑框 / 主题缩放",
+      "passed": 313,
+      "failed": 0,
+      "exit": {
+        "Utc": "2026-10-24T03:20:59.1833396Z",
+        "ExitCode": 0
+      }
+    },
+    {
+      "name": "address-edit",
+      "label": "正式地址栏持续输入",
+      "passed": 11,
+      "failed": 0,
+      "exit": {
+        "Utc": "2026-10-24T03:22:10.4256476Z",
+        "ExitCode": 0
+      }
+    },
+    {
+      "name": "removable-routing",
+      "label": "正式 USB IPC 搜索路由",
+      "passed": 11,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:23:03.6639239Z"
+      }
+    },
+    {
+      "name": "folder-sizes-ui",
+      "label": "正式目录尺寸缓存 / 排序",
+      "passed": 15,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:23:21.4799121Z"
+      }
+    },
+    {
+      "name": "removable-policy",
+      "label": "正式设备策略 / 挂载枚举",
+      "passed": 43,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:23:35.4172456Z"
+      }
+    },
+    {
+      "name": "index-cache",
+      "label": "生产模式候选缓存 / 名称池",
+      "passed": 62,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:24:35.5588754Z"
+      }
+    },
+    {
+      "name": "index-storage",
+      "label": "旧分卷与 aggregate 对照",
+      "passed": 42,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:27:22.2312627Z"
+      }
+    },
+    {
+      "name": "index-compaction",
+      "label": "压缩 / 损坏拒绝 / A/B 恢复",
+      "passed": 45,
+      "failed": 0,
+      "exit": {
+        "ExitCode": 0,
+        "Utc": "2026-10-24T03:26:24.3370493Z"
+      }
+    }
+  ],
+  "artifacts": {
+    "schema_version": 1,
+    "verified_at_utc": "2026-10-24T03:54:41.9709349Z",
+    "expected_version": "1.2.0.1",
+    "scope": "Portable paths, payload identity, EXE metadata and selftest marker; installer file identity only",
+    "status": "passed",
+    "build_dir": "E:\\Projects\\pulse\\build_release_clean",
+    "portable": {
+      "path": "E:\\Projects\\pulse\\dist\\Pulse-1.2.0.1-portable-win-x64.zip",
+      "size_bytes": 12405127,
+      "sha256": "A121ECF14E2FFA7DEA7A68A27E76C200CB40064AC33A0E24E87888F5A4E16A3D",
+      "payload_verified": true
+    },
+    "installer": {
+      "path": "E:\\Projects\\pulse\\dist\\PulseSetup-1.2.0.1.exe",
+      "size_bytes": 10073545,
+      "sha256": "5632538DEE84F40F5FDE84C2706DFF37F5CE8C4379CA323B259B2B94D75F7EBD",
+      "status": "identity_recorded",
+      "installation_tested": false,
+      "payload_verified": false
+    },
+    "executable_versions": [
+      {
+        "file": "Pulse.exe",
+        "file_version": "1.2.0.1",
+        "product_version": "1.2.0.1",
+        "original_filename": "Pulse.exe",
+        "source": "build; ZIP identity checked by SHA256"
+      },
+      {
+        "file": "Pulse.Index.exe",
+        "file_version": "1.2.0.1",
+        "product_version": "1.2.0.1",
+        "original_filename": "Pulse.Index.exe",
+        "source": "build; ZIP identity checked by SHA256"
+      },
+      {
+        "file": "Pulse.Document.exe",
+        "file_version": "1.2.0.1",
+        "product_version": "1.2.0.1",
+        "original_filename": "Pulse.Document.exe",
+        "source": "build; ZIP identity checked by SHA256"
+      },
+      {
+        "file": "Pulse.Preview.exe",
+        "file_version": "1.2.0.1",
+        "product_version": "1.2.0.1",
+        "original_filename": "Pulse.Preview.exe",
+        "source": "build; ZIP identity checked by SHA256"
+      },
+      {
+        "file": "Pulse.Shell.exe",
+        "file_version": "1.2.0.1",
+        "product_version": "1.2.0.1",
+        "original_filename": "Pulse.Shell.exe",
+        "source": "build; ZIP identity checked by SHA256"
+      }
+    ],
+    "payload": [
+      {
+        "path": "LICENSE",
+        "size_bytes": 11358,
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "source": "E:\\Projects\\pulse\\LICENSE",
+        "source_sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "matches_source": true
+      },
+      {
+        "path": "lumatext.dll",
+        "size_bytes": 1811968,
+        "sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\lumatext.dll",
+        "source_sha256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+        "matches_source": true
+      },
+      {
+        "path": "NOTICE",
+        "size_bytes": 1139,
+        "sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA",
+        "source": "E:\\Projects\\pulse\\NOTICE",
+        "source_sha256": "0C6EC716E1F3463529E9C4AF0C954FB791A815ED0C84A0D4780DFE46D71BDCAA",
+        "matches_source": true
+      },
+      {
+        "path": "pdfium.dll",
+        "size_bytes": 7370752,
+        "sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\pdfium.dll",
+        "source_sha256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+        "matches_source": true
+      },
+      {
+        "path": "Pulse.Document.exe",
+        "size_bytes": 237056,
+        "sha256": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\Pulse.Document.exe",
+        "source_sha256": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3",
+        "matches_source": true
+      },
+      {
+        "path": "Pulse.exe",
+        "size_bytes": 7817216,
+        "sha256": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\Pulse.exe",
+        "source_sha256": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A",
+        "matches_source": true
+      },
+      {
+        "path": "Pulse.Index.exe",
+        "size_bytes": 3403264,
+        "sha256": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\Pulse.Index.exe",
+        "source_sha256": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566",
+        "matches_source": true
+      },
+      {
+        "path": "Pulse.Preview.exe",
+        "size_bytes": 264704,
+        "sha256": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\Pulse.Preview.exe",
+        "source_sha256": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50",
+        "matches_source": true
+      },
+      {
+        "path": "Pulse.Shell.exe",
+        "size_bytes": 1482752,
+        "sha256": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\Pulse.Shell.exe",
+        "source_sha256": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8",
+        "matches_source": true
+      },
+      {
+        "path": "README.txt",
+        "size_bytes": 1668,
+        "sha256": "10892A79838EA70E6538DBC476705974B9AAD283ACEE7941F7AFCE0F147C44BB",
+        "source": "package_portable.ps1 generated README template",
+        "source_sha256": "10892A79838EA70E6538DBC476705974B9AAD283ACEE7941F7AFCE0F147C44BB",
+        "matches_source": true
+      },
+      {
+        "path": "7zip/7z.dll",
+        "size_bytes": 1906688,
+        "sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\7zip\\7z.dll",
+        "source_sha256": "65E4C1F855F9EF6E8F0F5DF8E3F27D9EB5F07311408639DA0A1CA0B8F4871B0D",
+        "matches_source": true
+      },
+      {
+        "path": "7zip/7z.exe",
+        "size_bytes": 577536,
+        "sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\7zip\\7z.exe",
+        "source_sha256": "6EE3C0ED0B27663C1B948AE85A7C0BB073AED1498983182F3F0DF1F6A8C30B2F",
+        "matches_source": true
+      },
+      {
+        "path": "7zip/License.txt",
+        "size_bytes": 6031,
+        "sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\7zip\\License.txt",
+        "source_sha256": "519AC0A4BDED9C18EA02E0AFB71F663D8C47373BD9FACD3AC96A79F51D77765D",
+        "matches_source": true
+      },
+      {
+        "path": "7zip/README.md",
+        "size_bytes": 956,
+        "sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\7zip\\README.md",
+        "source_sha256": "6A99485FA74B9F43E69B678F6013F4AE168301CB914EAA851985697899DE751D",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/FilesIcon/LICENSE-MIT.txt",
+        "size_bytes": 1103,
+        "sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69",
+        "source": "E:\\Projects\\pulse\\third_party\\files-icon\\LICENSE-MIT.txt",
+        "source_sha256": "7FE90D83A27E6CDF14CB9184D896F5EC48FB922AE0D567DFB344818482470D69",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/FilesIcon/README.md",
+        "size_bytes": 549,
+        "sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB",
+        "source": "E:\\Projects\\pulse\\third_party\\files-icon\\README.md",
+        "source_sha256": "52DE151C33D39079D3230B54BFD1DA3BA0A5936E09CC004A5AD83D0839B679CB",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/FluentSystemIcons/LICENSE",
+        "size_bytes": 1099,
+        "sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381",
+        "source": "E:\\Projects\\pulse\\assets\\fluent\\LICENSE",
+        "source_sha256": "9BE360C19BF5502C7927A6CA365A7504B620B408CDF6E3E2413FA63A325BD381",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/FluentSystemIcons/SOURCES.md",
+        "size_bytes": 576,
+        "sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983",
+        "source": "E:\\Projects\\pulse\\assets\\fluent\\SOURCES.md",
+        "source_sha256": "C56A35043B9385479F37EE2C4C59B17F03DDD537CEEF789564EC79C084C57983",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/ib-pinyin/LICENSE.txt",
+        "size_bytes": 1088,
+        "sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9",
+        "source": "E:\\Projects\\pulse\\third_party\\ib-pinyin-cpp\\LICENSE.txt",
+        "source_sha256": "F558DAB9F0BF942C2DE2B296758C05DFFD88F44923A7BE67BE8751B1080808F9",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/LumaText/FreeType.txt",
+        "size_bytes": 6743,
+        "sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\LumaText\\FreeType.txt",
+        "source_sha256": "08C135755DD589039470F1FDBB400DAAABAAA50D0B366D19CEBFF4D22986BAA1",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/LumaText/HarfBuzz.txt",
+        "size_bytes": 1570,
+        "sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\LumaText\\HarfBuzz.txt",
+        "source_sha256": "9818875FA596557BC1DCDB3B1E4C2840D4355758D86115AC519B3D26B550F6D2",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/LumaText/LICENSE",
+        "size_bytes": 1079,
+        "sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\LumaText\\LICENSE",
+        "source_sha256": "AF235DA00C8F63A2561893B4F23AE41A60B114CB121ED5BBAE933F48549E3DBE",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/LumaText/Unicode.txt",
+        "size_bytes": 1995,
+        "sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\LumaText\\Unicode.txt",
+        "source_sha256": "027337B3A0BC5F3C958E1629D5A7650926C2B0698AB53BFC973F245EBC04B531",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/MicrosoftBrand/LICENSE.pdf",
+        "size_bytes": 333685,
+        "sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C",
+        "source": "E:\\Projects\\pulse\\assets\\microsoft_brand\\LICENSE.pdf",
+        "source_sha256": "6136299970F138FF5567BB196D0C72F62DFE886B24C006DEEE80764B2CC1045C",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/MicrosoftBrand/README.md",
+        "size_bytes": 897,
+        "sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F",
+        "source": "E:\\Projects\\pulse\\assets\\microsoft_brand\\README.md",
+        "source_sha256": "89446447B0AE66CCBC9B90FD5CDCC1F996054A0D7951748D789A321D10544D7F",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/abseil.txt",
+        "size_bytes": 11564,
+        "sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\abseil.txt",
+        "source_sha256": "F54FFF0B905DF5B3464527C652A30E903B172D6DCAB4D89B5E6F105D5E4A4603",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/agg23.txt",
+        "size_bytes": 739,
+        "sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\agg23.txt",
+        "source_sha256": "000AA4A787D3F3E5E02EBB02E55560BB1F04FA383A4EA262EED60C7E2BCC1D11",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/binary-distribution.txt",
+        "size_bytes": 1186,
+        "sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\binary-distribution.txt",
+        "source_sha256": "21100D79B148C06AB95D5C34965F601776390A1FB2A672CD74642EBF99EEAA9A",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/fast_float.txt",
+        "size_bytes": 1106,
+        "sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\fast_float.txt",
+        "source_sha256": "BF1B57355FECA8FCE77EE95F48002F8D4789FB71B30EC7599C06CDA4901FBB2B",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/freetype.txt",
+        "size_bytes": 6910,
+        "sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\freetype.txt",
+        "source_sha256": "93DB264E083FA85B7494B3DD47A214A4043B37170D7079CD4B16EB05842F5EAC",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/icu.txt",
+        "size_bytes": 28286,
+        "sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\icu.txt",
+        "source_sha256": "93679F4389D53B6835D89843F251844FB9BC455B35BAB036D3C8E7ABE497A47A",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/lcms.txt",
+        "size_bytes": 1380,
+        "sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\lcms.txt",
+        "source_sha256": "30D07E82FD1FDDA892B43234104424F7E01E44DB0BA86E996BDE09F5D45D6C9B",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/libjpeg_turbo.ijg",
+        "size_bytes": 13059,
+        "sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\libjpeg_turbo.ijg",
+        "source_sha256": "DB16A04128171879C60708D171B88D97345A2DD20F9BFC173680A4497C73F704",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/libjpeg_turbo.md",
+        "size_bytes": 5755,
+        "sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\libjpeg_turbo.md",
+        "source_sha256": "BE2B2B5AB168BCE87BC3E31F2A5C5ADBA4B7F6E9E51D618E958D1D46972EBD95",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/libopenjpeg.txt",
+        "size_bytes": 1826,
+        "sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\libopenjpeg.txt",
+        "source_sha256": "F24F5B3D732A99AE41F2307626289CEFFDF4F8A28E4D0CD4C07D58D7A8005D4A",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/libpng.txt",
+        "size_bytes": 5479,
+        "sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\libpng.txt",
+        "source_sha256": "452390433BA0F88AA3E2B122C647741B72A0C117CD6ED7A329B49785AECB5511",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/llvm-libc.txt",
+        "size_bytes": 15418,
+        "sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\llvm-libc.txt",
+        "source_sha256": "3B6226C32E168C83B891D8D6F0D3C29C2116DC3EF93DC93C307B54F279ECF383",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/pdfium.txt",
+        "size_bytes": 13048,
+        "sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\pdfium.txt",
+        "source_sha256": "EBA14EE555966589AC8B441D0FF398B6CAA2D558DBA81B1BCE2B920A08B9C049",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/simdutf.txt",
+        "size_bytes": 1077,
+        "sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\simdutf.txt",
+        "source_sha256": "C172A0BA936FF31230FEBB5DAD869E25CB7C1A07480C7A381BE8CF011BB52719",
+        "matches_source": true
+      },
+      {
+        "path": "licenses/PDFium/zlib.txt",
+        "size_bytes": 1361,
+        "sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539",
+        "source": "E:\\Projects\\pulse\\build_release_clean\\licenses\\PDFium\\zlib.txt",
+        "source_sha256": "C26AC3BBB71A9DF8B34C1990593786E44D3FCDE9116676EC227DE0FAE0DB6539",
+        "matches_source": true
+      }
+    ],
+    "errors": []
+  },
+  "deployment": {
+    "RecoveryError": null,
+    "BackupVerified": true,
+    "Utc": "2026-10-24T03:56:44.6188783Z",
+    "Deferred": [
+      {
+        "Path": "D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-4fadbf6de0fc4821ac9410910b02e1b2",
+        "SHA256": "908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED",
+        "Reason": "对路径“D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-4fadbf6de0fc4821ac9410910b02e1b2”的访问被拒绝。"
+      }
+    ],
+    "Error": null,
+    "Phase": "complete",
+    "Success": true,
+    "ChangedFiles": [
+      "Pulse.exe",
+      "Pulse.Index.exe",
+      "Pulse.Shell.exe",
+      "Pulse.Preview.exe",
+      "Pulse.Document.exe"
+    ],
+    "BackupFiles": 69,
+    "BackupDirectory": "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-final-rollback-20261024-115519"
+  },
+  "rollback": {
+    "RecoveryError": null,
+    "BackupVerified": true,
+    "Utc": "2026-10-24T03:32:46.3934611Z",
+    "Deferred": [],
+    "Error": null,
+    "Phase": "complete",
+    "Success": true,
+    "ChangedFiles": [
+      "Pulse.exe",
+      "Pulse.Index.exe",
+      "Pulse.Shell.exe",
+      "Pulse.Preview.exe",
+      "Pulse.Document.exe"
+    ],
+    "BackupFiles": 69,
+    "BackupDirectory": "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-failed-candidate-20261024-113157"
+  },
+  "smoke": {
+    "Exited": true,
+    "Utc": "2026-10-24T03:57:22.9918580Z",
+    "ExitCode": 0,
+    "ScreenshotExists": true,
+    "ProcessId": 35588
+  },
+  "restored": {
+    "Success": true,
+    "Utc": "2026-10-24T03:57:53.2517256Z",
+    "IndexHosts": [
+      {
+        "ProcessId": 26804,
+        "CreationDate": "2026-10-24T11:34:56.044912+08:00",
+        "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+        "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+      }
+    ],
+    "Version": "1.2.0.1",
+    "OrdinaryMediumLaunch": true,
+    "UI": [
+      {
+        "ProcessId": 40740,
+        "CreationDate": "2026-10-24T11:57:49.904678+08:00",
+        "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+        "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.exe\" "
+      }
+    ]
+  },
+  "installed_verification": {
+    "Success": true,
+    "UI": [
+      {
+        "ProcessId": 40740,
+        "CreationDate": "2026-10-24T11:57:49.904678+08:00"
+      }
+    ],
+    "Service": {
+      "State": "Running",
+      "StartMode": "Auto",
+      "ProcessId": 26688,
+      "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+    },
+    "Files": [
+      {
+        "Match": true,
+        "Hash": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A",
+        "Version": "1.2.0.1",
+        "Relative": "Pulse.exe",
+        "Expected": "7020D04200264B56B5834F442AA37EDA73B8050D410EB5BE87D041F92F6ADA1A"
+      },
+      {
+        "Match": true,
+        "Hash": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566",
+        "Version": "1.2.0.1",
+        "Relative": "Pulse.Index.exe",
+        "Expected": "CBE013B15E5FDA4B29233C7484604AB98B3AEBDD0B584A37013319B611FF5566"
+      },
+      {
+        "Match": true,
+        "Hash": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8",
+        "Version": "1.2.0.1",
+        "Relative": "Pulse.Shell.exe",
+        "Expected": "33E9E50FC9353300DE4909B10102F228BC3D5E93BE8FBAD198B66C8B529EBCC8"
+      },
+      {
+        "Match": true,
+        "Hash": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50",
+        "Version": "1.2.0.1",
+        "Relative": "Pulse.Preview.exe",
+        "Expected": "A7DA076BCAD09E6C1D45E620F88D66951412A5BAF83858969937B1EB39CDBE50"
+      },
+      {
+        "Match": true,
+        "Hash": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3",
+        "Version": "1.2.0.1",
+        "Relative": "Pulse.Document.exe",
+        "Expected": "FC663042C7392915929084241CB1DA5181B66CCD97D23CE7F15B085010DFFEA3"
+      },
+      {
+        "Match": true,
+        "Hash": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+        "Version": null,
+        "Relative": "lumatext.dll",
+        "Expected": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911"
+      },
+      {
+        "Match": true,
+        "Hash": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+        "Version": "155.0.8044.0",
+        "Relative": "pdfium.dll",
+        "Expected": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9"
+      }
+    ],
+    "Utc": "2026-10-24T04:00:02.7145888Z"
+  },
+  "accepted": true,
+  "search": {
+    "Utc": "2026-10-24T03:58:52.3343788Z",
+    "ExitCode": 1,
+    "Scope": "Actual installed service, five samples per query; nearest-rank p95 and quality reported independently"
+  },
+  "markdown_lines": [
+    "**当前状态：已完成本轮代码质量改进、定向验证和两个 1.2.0.1 发布包。安装版文件、真实启动、用户界面和服务状态均已核验。完成日期：2026-10-24（Asia/Shanghai）。**",
+    "",
+    "### 9 项审查问题的处理",
+    "",
+    "| 原项 | 改进结果 |",
+    "|---|---|",
+    "| 迟到 runas 破坏稳定菜单 | 仅初始快照可提升 COM runas；本次菜单中首次晚到项留动态区，下次打开再提升。冷菜单→部分/最终异步更新回归先复现 3 FAIL，再通过。 |",
+    "| USB 目录挂载路由 | 后台枚举卷的全部挂载别名；已知 GUID 复用服务 kind/online，未知卷仅探测一次，UI 只读规范化缓存并按最长目录边界匹配。IPC 字节格式不变。 |",
+    "| 常规测试接口滞后 | 补充主机测试直接协议依赖；旧离线测试按当前 Flatten/MFT builder 改写，保留 FRN、隐藏/排除、搜索、持久化、重启和恢复断言；未添加产品空实现。 |",
+    "| 测试依赖临时 rsp | 编辑框、地址栏、USB 路由、尺寸缓存与设备策略都有正式 CMake 目标。四个应用回归共用一套生产对象；不再需要旧 bench_data 私有链接输入，移除路由测试中固定本机 DLL 路径。 |",
+    "| 每帧全目录业务工作 | 请求按 snapshot/范围/详情路径失效；排序按面板生命周期、snapshot、方向、分组模式、尺寸修订失效。稳定帧不构造全量请求、不重复 Sync，也不重复排队/排序。保留 worker 容量恢复重试。 |",
+    "| 导航平行栈叠加 | 六个平行容器收为前后两个 HistoryEntry 栈，路径、搜索来源、双轴视口在同一记录保存；删去长度不符时整栈丢元数据的补偿。旧路径记录仍可缺省字段。 |",
+    "| 无效慢扩展策略 | 删除 deferred、慢成功计数及其触发的 UI 设置写盘；保留明确禁用和旧 JSON 自动禁用迁移，未恢复自动禁用。 |",
+    "| 性能工具误导 | 明确样本数；单次显示 single，输出全部原始样本、min/median/max 与 nearest-rank p95；质量与时间预算分开，退出码仍由 enforce 合并验收。增加统计边界检查。 |",
+    "| 旧优化残留 | 删除 index_changed 假指标及无效断言；旧分卷查询声明、字段、实现和调用仅在 storage 对照目标的宏内编译。生产只保留 aggregate；旧格式、WAL、回退和其他必要授权回调不删。 |",
+    "",
+    "### 正式目标实际验证",
+    "",
+    "| 检查 | 结果 | 日志 |",
+    "|---|---:|---|",
+    "| 正式编辑框 / 主题缩放 | 313 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/hosted-edit.log) |",
+    "| 正式地址栏持续输入 | 11 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/address-edit.log) |",
+    "| 正式 USB IPC 搜索路由 | 11 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/removable-routing.log) |",
+    "| 正式目录尺寸缓存 / 排序 | 15 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/folder-sizes-ui.log) |",
+    "| 正式设备策略 / 挂载枚举 | 43 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/removable-policy.log) |",
+    "| 生产模式候选缓存 / 名称池 | 62 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-cache.log) |",
+    "| 旧分卷与 aggregate 对照 | 42 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-storage.log) |",
+    "| 压缩 / 损坏拒绝 / A/B 恢复 | 45 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-compaction.log) |",
+    "",
+    "本轮子任务先前已完成：导航模型 69/0；冷菜单 runas 10/0；7-Zip/显式禁用兼容 10/0；离线保留 15/0；旧格式修复 44/0；主机目录尺寸协议 5/0；扫描 23/0、2 SKIP。前三项只保留在子任务工具输出，没有落盘日志，不伪造日志链接或为重复计数重跑；其余日志分别在 bench_data/quality-offline-retention.log、quality-legacy-repair.log、quality-host-folder-sizes-medium.log、folder-sizes-quality/scan-results.log。各测试范围有重叠，不相加宣称覆盖率。",
+    "",
+    "### 过程中发现的失败与修正",
+    "",
+    "- 用户看到的 pulse_folder_sizes_ui_cache_test.exe 弹窗是本轮新增排序缓存实现的真实空地址写入：vector::insert(end(), {}) 选中空 initializer_list 重载，返回 end 后被解引用。已改为 emplace_back 后取末项，保留原断言；此失败发生在安装替换前。",
+    "- 随后双面板共享旧 snapshot 的转移优化造成 3 项计数断言失败。删除跨面板转移，统一在新 snapshot 身份改变后各重建一次；新增明确的一次失效断言，保留跨 750 ms 的 100 稳定帧强断言，最终 15/0。SetErrorMode 只防止测试崩溃反复弹框，不改变异常退出码或绕过检查。",
+    "- 首次长构建中断；恢复后的受限环境链接器停在等待并留下部分 EXE。核对命令行后仅结束本轮构建树，在普通 Medium 环境重新完成。未强制结束用户 UI 或安装服务。",
+    "- 新路由测试目标首次因没有继承 /MANIFEST:NO 发生重复 manifest 链接失败；正式质量目标统一继承生产链接选项，已重新构建和验证。",
+    "- 首次实际安装的隔离截图启动发生 0xC0000005，立即从69文件校验备份回退旧版并重新打开，保留失败候选快照。生产对象166份依赖文件中99份为空；39个直接包含模型头的源中35个对象早于头文件且依赖为空，形成新旧模型布局混用。实测编译器只有2052中文资源，VSLANG=1033仍回退中文，不能假定实际输出英文。现在用UTF-8编译包装器与全新Ninja目录build_release_clean，拒绝复用本地化NMake依赖；发布脚本默认build-release并可指定目录。新app_navigation依赖记录302项，明确包含app_state.h/app_model.h。未用带测试宏的quality对象替换生产。",
+    "- 所有早期日志保留；不把中断、环境失败、重复资源或首次崩溃说成通过。最终生产程序只有五个交付目标，PULSE_WITH_SELFTEST=OFF；没有默认运行完整旧自测或全部历史测试。",
+    "- 全新构建EXE继承Low完整性标签，而截图目录为Medium，直接运行的截图写入返回1；未把它记为产品通过。将七项载荷按字节写入Medium隔离目录、逐项核对哈希后，生产启动与截图退出0，再进行最终部署。安装目录中的最终启动也退出0。未改用户全局ACL或用提权运行掩盖产品行为。",
+    "",
+    "### 发布包",
+    "",
+    "- [便携包](../dist/Pulse-1.2.0.1-portable-win-x64.zip)：12,405,127 B；SHA256 `A121ECF14E2FFA7DEA7A68A27E76C200CB40064AC33A0E24E87888F5A4E16A3D`。",
+    "- [安装包](../dist/PulseSetup-1.2.0.1.exe)：10,073,545 B；SHA256 `5632538DEE84F40F5FDE84C2706DFF37F5CE8C4379CA323B259B2B94D75F7EBD`。",
+    "- [逐项核验](validation/quality-release-1.2.0.1/artifacts.json)：40 项便携载荷与 build/仓库资源大小和 SHA256 全匹配，五个 EXE FileVersion/ProductVersion/OriginalFilename 正确，无测试或调试文件混入，无内置自测，路径与许可证检查通过。安装包编译成功并记录身份，未单独解包比对或运行安装向导。",
+    "",
+    "### 安装与验证边界",
+    "",
+    "- 完整备份并核验 69 个原安装文件，恢复目录 `E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-final-rollback-20261024-115519`；实际替换 `Pulse.exe, Pulse.Index.exe, Pulse.Shell.exe, Pulse.Preview.exe, Pulse.Document.exe`。其余原文件按备份哈希逐项核对。",
+    "- 安装版采用正常托盘退出、管理员原位替换和恢复原 PulseIndex 启动/运行状态；没有运行会卸载旧版的安装向导，不改索引格式、索引位置或用户配置，不重建索引。",
+    "- [部署结果](validation/quality-release-1.2.0.1/deployment-result.json)，保留仍被旧进程占用的已知哈希映像：1 项。",
+    "- 安装路径隔离截图启动：退出码 0；结果见 [记录](validation/quality-release-1.2.0.1/installed-smoke-result.json)。静态截图不能替代物理拖选及动画连续帧验收。",
+    "- 普通用户界面及网络代理恢复状态见 [记录](validation/quality-release-1.2.0.1/user-ui-restored.json)。",
+    "- 原网络代理保持原进程，不强制终止；它占用的一份旧Index映像按已知哈希保留。磁盘上五个正式程序均为1.2.0.1，服务已重启加载新程序；旧代理下一次正常退出后该退休映像才可回收。",
+    "- [最终安装核验](validation/quality-release-1.2.0.1/final-installed-verification.json)记录五EXE版本、七项载荷SHA256、Running/Auto服务及持续运行主界面。",
+    "- USB 实际目录挂载/热插拔、真实 UAC 菜单命令与第三方菜单 Invoke、路径栏物理拖选未作为本轮运行验收。设备验证包括真实系统卷枚举与模拟别名经过生产 IPC 处理和路由。",
+    "- 本轮改的是代码质量及验收口径，没有承诺把宽泛百万匹配查询压到 150 ms。安装后性能如仍超预算应按实际日志保留失败，不能以协议成功或单词毫秒级响应掩盖。",
+    "",
+    "实际安装服务6词×5次共30次观测，全部完整且无协议错误：True；质量与时间预算分开输出。enforce退出码1，宽泛a/ab的p95预算未通过，不能称速度全部达标。",
+    "[实际搜索原始样本](../bench_data/quality-release-1.2.0.1/installed-search.log)。本轮a中位291.68ms、ab中位26.22ms，abc/report/pdf中位约6.05/2.08/2.05ms；五样本分位不代表长期p95。"
+  ]
+}

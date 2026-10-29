@@ -1,0 +1,68 @@
+{
+  "number": 234,
+  "title": "重命名鼠标跳转问题",
+  "body": "在重命名时，鼠标会自动跳转，影响使用。\n\n<img width=\"360\" height=\"240\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/120dbd24-f7d8-47d5-98b8-8b1af1b31073\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/234",
+  "captured_at": "2026-10-23T03:10:07.181040+00:00",
+  "updated_at": "2026-10-22T06:47:42Z",
+  "comments": [
+    {
+      "body": "存在同样问题",
+      "bodyHTML": "<p dir=\"auto\">存在同样问题</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjgyMDc1MTY5",
+        "login": "zkx2021",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/82075169?v=4",
+        "profileUrl": "https://github.com/zkx2021",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/234#issuecomment-6141111431"
+    },
+    {
+      "body": "存在同样问题",
+      "bodyHTML": "<p dir=\"auto\">存在同样问题</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjQwNDQ3OTA=",
+        "login": "leesing",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/4044790?v=4",
+        "profileUrl": "https://github.com/leesing",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/234#issuecomment-6158854052"
+    },
+    {
+      "body": "感谢反馈。我们理解这里的「跳转」是指重命名时输入光标位置跳动。这个问题已在本地用微软拼音复现并修复：F2 选中文件名主干后，第一次输入的词替换选区时，输入法会把光标放回开头。现在开始组合输入时会先删除选区，光标会留在新输入的文字后面。\n\n修复会包含在下一个版本中。如果你说的是鼠标指针本身在跳，或者更新后仍然出现，请补充一下所用的输入法和操作步骤，我们再看。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈。我们理解这里的「跳转」是指重命名时输入光标位置跳动。这个问题已在本地用微软拼音复现并修复：F2 选中文件名主干后，第一次输入的词替换选区时，输入法会把光标放回开头。现在开始组合输入时会先删除选区，光标会留在新输入的文字后面。</p>\n<p dir=\"auto\">修复会包含在下一个版本中。如果你说的是鼠标指针本身在跳，或者更新后仍然出现，请补充一下所用的输入法和操作步骤，我们再看。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/234#issuecomment-6172862518"
+    },
+    {
+      "body": "补充一下：1.0.56 之后又收到几个同类报告（#316、#317、#330），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">补充一下：1.0.56 之后又收到几个同类报告（<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5916956907\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/316\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/316/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/316\">#316</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5917101733\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/317\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/317/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/317\">#317</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5926388797\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/330\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/330/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/330\">#330</a>），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/234#issuecomment-6334610621"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTRJpOAAqjYxNDExMTE0MzE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJdjsgAqjYzMzQ2MTA2MjE="
+  }
+}

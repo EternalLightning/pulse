@@ -1,0 +1,29 @@
+{
+  "number": 348,
+  "title": "程序内图标和任务栏图标不一样",
+  "body": "",
+  "url": "https://github.com/jimmgreen/pulse/issues/348",
+  "captured_at": "2026-10-23T03:10:07.125464+00:00",
+  "updated_at": "2026-10-21T13:38:12Z",
+  "comments": [
+    {
+      "body": "现在一样了。",
+      "bodyHTML": "<p dir=\"auto\">现在一样了。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE2NDAyMjQ5",
+        "login": "sonichy",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/16402249?u=dc53ac2b574f8adb136f9227f259d733e64b0679&v=4",
+        "profileUrl": "https://github.com/sonichy",
+        "name": "海天鹰"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/348#issuecomment-6317485606"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoV6u-gAAqjYzMTc0ODU2MDY=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoV6vCaABqzMzODUwNzc0NTY5"
+  }
+}

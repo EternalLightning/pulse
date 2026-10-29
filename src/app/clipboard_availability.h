@@ -22,6 +22,7 @@ struct ClipboardAvailabilityResult {
     uint64_t generation = 0;
     bool clipboard_available = false;
     bool tray_available = false;
+    bool shell_available = false;
 };
 
 inline ClipboardAvailabilityResult ProbeClipboardAvailability(
@@ -31,6 +32,7 @@ inline ClipboardAvailabilityResult ProbeClipboardAvailability(
     const std::function<bool()>& cancelled = {}) {
     ClipboardAvailabilityResult result;
     result.generation = request.generation;
+    bool shell_fallback = !request.file_format;
     const auto valid_paths = [&](const auto& paths) {
         if (paths.empty()) return false;
         for (const auto& path : paths) {
@@ -40,13 +42,17 @@ inline ClipboardAvailabilityResult ProbeClipboardAvailability(
     };
     if (request.file_format && !(cancelled && cancelled())) {
         ops::ClipboardData clipboard;
-        result.clipboard_available = read_clipboard(clipboard) && clipboard.sequence == request.sequence &&
+        const bool paths_read = read_clipboard(clipboard);
+        shell_fallback = !paths_read || clipboard.paths.empty();
+        result.clipboard_available = !shell_fallback && clipboard.sequence == request.sequence &&
             valid_paths(clipboard.paths);
     }
     // Virtual files have no paths to validate. Their formats and clipboard
     // sequence are captured by the UI pump; tray paths still get worker checks.
-    if (!result.clipboard_available && request.shell_format && !(cancelled && cancelled()))
+    if (shell_fallback && request.shell_format && !(cancelled && cancelled())) {
         result.clipboard_available = true;
+        result.shell_available = true;
+    }
     if (request.tray_present && result.clipboard_available) result.tray_available = valid_paths(request.tray_paths);
     return result;
 }
@@ -76,7 +82,7 @@ public:
         inputs_.shell_format = shell_format;
         inputs_.tray_present = tray_present; inputs_.tray_paths = std::move(tray_paths);
         inputs_.generation = mailbox_->generation.fetch_add(1) + 1;
-        clipboard_available_ = tray_available_ = false;
+        clipboard_available_ = tray_available_ = shell_available_ = false;
         pending_ = false; next_probe_ = 0;
         return previously_available;
     }
@@ -104,6 +110,7 @@ public:
         pending_ = false;
         clipboard_available_ = result->clipboard_available;
         tray_available_ = result->tray_available;
+        shell_available_ = result->shell_available;
         return previous != Available();
     }
 
@@ -122,7 +129,7 @@ public:
 
     bool Available() const noexcept {
         return clipboard_available_ &&
-            (!inputs_.tray_present || tray_available_ || inputs_.shell_format);
+            (!inputs_.tray_present || tray_available_ || shell_available_);
     }
 
     std::shared_ptr<Mailbox> mailbox() const { return mailbox_; }
@@ -136,6 +143,7 @@ private:
     bool pending_ = false;
     bool clipboard_available_ = false;
     bool tray_available_ = false;
+    bool shell_available_ = false;
 };
 
 } // namespace pulse::app

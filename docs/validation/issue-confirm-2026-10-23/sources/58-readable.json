@@ -1,0 +1,29 @@
+{
+  "number": 58,
+  "title": "按大小排序时，文件夹的大小排序错误，文件的大小排序正确",
+  "body": "<img width=\"559\" height=\"1718\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/0d1a24ce-cb27-4854-930c-cb09e7959fa6\" />   1.0.46版本",
+  "url": "https://github.com/jimmgreen/pulse/issues/58",
+  "captured_at": "2026-10-23T03:10:07.220313+00:00",
+  "updated_at": "2026-10-03T12:22:34Z",
+  "comments": [
+    {
+      "body": "感谢反馈！原因是按大小排序时，文件夹的「大小」一直按 0 字节参与比较，所以文件夹实际上仍是按名称排列，与界面上显示的容量不一致。\n\n已修复（见上方提交）：\n\n- 按「大小」排序时，Pulse 会统计当前文件夹内**所有**子文件夹的容量（不再只统计屏幕上可见的行），优先使用索引的估算值，仅限本地磁盘，网络位置仍需手动点击统计。\n- 文件夹按其实际总容量参与排序；随着统计结果陆续返回，列表会自动重新排序（最多每 0.75 秒一次，按住鼠标、拖拽或重命名时会暂缓），已选中的项目保持选中。\n- 尚未得到容量的文件夹会排在其他文件夹之后（升序、降序都是）。\n- 「文件夹置顶 / 跟随方向 / 混合」三种文件夹排序方式都适用；混合模式下文件夹总容量与文件大小一起比较。\n\n修复会包含在下一个版本中，欢迎更新后再试，有问题请随时重新打开。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈！原因是按大小排序时，文件夹的「大小」一直按 0 字节参与比较，所以文件夹实际上仍是按名称排列，与界面上显示的容量不一致。</p>\n<p dir=\"auto\">已修复（见上方提交）：</p>\n<ul dir=\"auto\">\n<li>按「大小」排序时，Pulse 会统计当前文件夹内<strong>所有</strong>子文件夹的容量（不再只统计屏幕上可见的行），优先使用索引的估算值，仅限本地磁盘，网络位置仍需手动点击统计。</li>\n<li>文件夹按其实际总容量参与排序；随着统计结果陆续返回，列表会自动重新排序（最多每 0.75 秒一次，按住鼠标、拖拽或重命名时会暂缓），已选中的项目保持选中。</li>\n<li>尚未得到容量的文件夹会排在其他文件夹之后（升序、降序都是）。</li>\n<li>「文件夹置顶 / 跟随方向 / 混合」三种文件夹排序方式都适用；混合模式下文件夹总容量与文件大小一起比较。</li>\n</ul>\n<p dir=\"auto\">修复会包含在下一个版本中，欢迎更新后再试，有问题请随时重新打开。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/58#issuecomment-5969115493"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoQG3L-gBqzMyMzk2MzA5MDkz",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQaWSbgBqzMyNDM5NjY0NzYx"
+  }
+}

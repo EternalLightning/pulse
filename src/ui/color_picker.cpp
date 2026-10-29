@@ -882,7 +882,11 @@ void OpenModeCombo(State& s) {
     POINT pt{ s.base_x + s.present_dx + static_cast<int>(std::lround(s.r_combo.left)),
               s.base_y + static_cast<int>(std::lround(s.r_combo.bottom)) +
                   static_cast<int>(std::lround(4.0f * s.scale)) };
-    const int cmd = s.menu->TrackPopup(pt, std::move(items));
+    s.menu->SetToggleRect({pt.x,
+        s.base_y + static_cast<LONG>(std::lround(s.r_combo.top)),
+        s.base_x + s.present_dx + static_cast<LONG>(std::lround(s.r_combo.right)),
+        s.base_y + static_cast<LONG>(std::lround(s.r_combo.bottom))});
+    const int cmd = s.menu->TrackToolbarPopup(pt, std::move(items));
     const bool want_hsv = cmd == 2 ? true : cmd == 1 ? false : s.hsv_mode;
     if (want_hsv != s.hsv_mode) {
         s.hsv_mode = want_hsv;
@@ -1292,6 +1296,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
         DispatchMessageW(&msg);
     }
 
+    HideComposedDialog(s.hwnd);
     for (HWND e : s.edits) {
         if (e) DestroyWindow(e); // subclass is removed with the window
     }

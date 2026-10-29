@@ -40,17 +40,12 @@ bool FamilyExists(IDWriteFactory2* factory, const wchar_t* family) {
 }
 
 const wchar_t* ResolveFamily(IDWriteFactory2* factory, FontRole role) {
-    const bool chinese = pulse::l10n::effective_language() == pulse::l10n::Language::ZhCN;
-    const wchar_t* const text_zh[] = {
-        L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI", nullptr};
-    const wchar_t* const text_en[] = {
-        L"Segoe UI Variable Text", L"Segoe UI", L"Microsoft YaHei UI",
-        L"Microsoft YaHei", nullptr};
-    const wchar_t* const display_zh[] = {
-        L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI", nullptr};
-    const wchar_t* const display_en[] = {
-        L"Segoe UI Variable Display", L"Segoe UI Variable Text", L"Segoe UI",
-        L"Microsoft YaHei UI", L"Microsoft YaHei", nullptr};
+    const wchar_t* const text_fonts[] = {
+        L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI Variable Text",
+        L"Segoe UI", nullptr};
+    const wchar_t* const display_fonts[] = {
+        L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI Variable Display",
+        L"Segoe UI Variable Text", L"Segoe UI", nullptr};
     const wchar_t* const icons[] = {
         L"Segoe Fluent Icons", L"Segoe MDL2 Assets", L"Segoe UI", nullptr};
     const wchar_t* const mono[] = {
@@ -58,10 +53,10 @@ const wchar_t* ResolveFamily(IDWriteFactory2* factory, FontRole role) {
 
     const wchar_t* const* candidates = nullptr;
     switch (role) {
-    case FontRole::Display: candidates = chinese ? display_zh : display_en; break;
+    case FontRole::Display: candidates = display_fonts; break;
     case FontRole::Icon: candidates = icons; break;
     case FontRole::Monospace: candidates = mono; break;
-    default: candidates = chinese ? text_zh : text_en; break;
+    default: candidates = text_fonts; break;
     }
     for (size_t i = 0; candidates[i]; ++i) {
         if (FamilyExists(factory, candidates[i])) return candidates[i];
@@ -125,8 +120,7 @@ bool HasIconFont(IDWriteFactory2* factory) {
 }
 
 const wchar_t* PreferredTextFamily() noexcept {
-    return pulse::l10n::effective_language() == pulse::l10n::Language::ZhCN
-        ? L"Microsoft YaHei UI" : L"Segoe UI Variable Text";
+    return L"Microsoft YaHei UI";
 }
 
 HRESULT CreateTextFormat(IDWriteFactory2* factory, const TextFormatSpec& spec,
@@ -164,6 +158,7 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
     }
 
     const bool sharp = CurrentTextRenderMode() == TextRenderMode::Sharp;
+    const bool grid_fit = CurrentTextRenderMode() != TextRenderMode::Smooth;
     IDWriteFactory3* modern = nullptr;
     if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&modern)))) {
         IDWriteRenderingParams3* modern_params = nullptr;
@@ -171,7 +166,7 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
             base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
             base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
             sharp ? DWRITE_RENDERING_MODE1_GDI_CLASSIC : DWRITE_RENDERING_MODE1_NATURAL_SYMMETRIC,
-            sharp ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED,
+            grid_fit ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED,
             &modern_params);
         modern->Release();
         if (SUCCEEDED(result) && modern_params) {
@@ -184,7 +179,7 @@ HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
         base->GetGamma(), base->GetEnhancedContrast(), grayscale_contrast,
         base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT,
         sharp ? DWRITE_RENDERING_MODE_GDI_CLASSIC : DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-        sharp ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED, params);
+        grid_fit ? DWRITE_GRID_FIT_MODE_ENABLED : DWRITE_GRID_FIT_MODE_DISABLED, params);
     base->Release();
     return result;
 }

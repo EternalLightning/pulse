@@ -1,8 +1,11 @@
 #include "../ipc/shell_query_client.cpp"
 #include "../shell_host/shell_query_metadata.h"
+#include "../common/path_utils.h"
+#include "../fs/cloud_state.h"
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shlwapi.h>
+#include <shellapi.h>
 #include <wrl/client.h>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -254,9 +257,26 @@ void NamespaceQueries(const std::filesystem::path& directory) {
     Check(queried &&
         SUCCEEDED(identity.error) && ValidShellPidl(identity.pidl) && !identity.text.empty() &&
         identity.filesystem_path == directory.wstring(), "helper parses folder identity and caches both COM getter names");
+    ShellQueryResult extended;
+    Check(QueryShell(Request(ShellQueryKind::FolderIdentity, L"\\\\?\\" + directory.wstring()), extended) &&
+        SUCCEEDED(extended.error) && extended.pidl == identity.pidl &&
+        extended.filesystem_path == identity.filesystem_path,
+        "P14 extended folder prefix resolves the same Shell identity and filesystem name");
     ShellQueryResult item;
     Check(QueryShell(Request(ShellQueryKind::ParsePidl, file.wstring()), item) &&
         SUCCEEDED(item.error) && ValidShellPidl(item.pidl), "helper parses an actual Unicode filesystem item into PIDL bytes");
+    Check(QueryShell(Request(ShellQueryKind::ParsePidl, L"\\\\?\\" + file.wstring()), extended) &&
+        SUCCEEDED(extended.error) && extended.pidl == item.pidl,
+        "P14 extended file prefix resolves the same Unicode item PIDL");
+    Check(pulse::path::StripExtendedPathPrefix(L"\\\\?\\UNC\\server\\share\\folder") ==
+        L"\\\\server\\share\\folder", "P14 extended UNC prefix retains the server and share parsing path");
+    const auto long_directory = directory / std::wstring(90, L'a') / std::wstring(90, L'b') / std::wstring(70, L'c');
+    const auto long_path = L"\\\\?\\" + long_directory.wstring();
+    std::filesystem::create_directories(long_path);
+    Check(QueryShell(Request(ShellQueryKind::FolderIdentity, long_path), extended) &&
+        SUCCEEDED(extended.error) && ValidShellPidl(extended.pidl) &&
+        pulse::path::StripExtendedPathPrefix(extended.filesystem_path) == long_directory.wstring(),
+        "P14 existing folder beyond MAX_PATH resolves through the namespace helper");
     ShellQueryRequest name;
     name.kind = ShellQueryKind::PidlName;
     name.pidl = item.pidl;
@@ -361,6 +381,17 @@ void PreviewItemQueries(const std::filesystem::path& directory) {
         Check(initialized && SUCCEEDED(result.error) && result.text.empty() && result.pidl.empty() &&
             fixture.status->calls == 1 && fixture.status->item_resolved == 1,
             "helper creates the Shell item and initializes the external provider with an HRESULT-only reply");
+        request.path = L"\\\\?\\" + file.wstring();
+        Check(QueryShell(request, result) && SUCCEEDED(result.error) && fixture.status->calls == 2 &&
+            fixture.status->item_resolved == 2,
+            "P14 preview initialization resolves an extended-prefixed file in the external provider");
+        const auto long_directory = directory / std::wstring(90, L'a') / std::wstring(90, L'b') / std::wstring(70, L'c');
+        std::filesystem::create_directories(L"\\\\?\\" + long_directory.wstring());
+        request.path = L"\\\\?\\" + (long_directory / L"preview item.txt").wstring();
+        std::ofstream(std::filesystem::path(request.path)) << "preview fixture";
+        Check(QueryShell(request, result) && SUCCEEDED(result.error) && fixture.status->calls == 3 &&
+            fixture.status->item_resolved == 3,
+            "P14 preview initialization resolves an existing file beyond MAX_PATH");
         const LONG before = fixture.status->calls;
         request.path = L":pulse-shell-preview-lost:" + file.wstring();
         Check(!QueryShell(request, result) && fixture.status->calls == before + 1,
@@ -395,6 +426,28 @@ void LongShortcutBaseline(const std::filesystem::path& directory) {
         std::printf("native long shortcut HRESULT=0x%08lX\n", static_cast<unsigned long>(result.error));
     Check(SUCCEEDED(result.error) && result.text == target.wstring() && result.target_size == 7 &&
         !result.target_is_dir, "production shortcut parser resolves long path and actual target metadata");
+}
+
+void CloudTypeQueries() {
+    const auto missing = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
+        (L"missing-cloud-type-" + std::to_wstring(GetCurrentProcessId())));
+    Check(!std::filesystem::exists(missing), "cloud metadata fixture has no file content to open");
+    for (const DWORD attrs : {DWORD(FILE_ATTRIBUTE_OFFLINE), pulse::fs::kAttrRecallOnOpen,
+            pulse::fs::kAttrRecallOnDataAccess, pulse::fs::kAttrPinned | pulse::fs::kAttrRecallOnDataAccess}) {
+        for (const bool directory : {false, true}) {
+            ShellQueryRequest request = Request(ShellQueryKind::TypeName,
+                (missing / L"parent.with.dot" / (directory ? L"folder" : L"online.txt")).wstring());
+            request.attributes = attrs | (directory ? FILE_ATTRIBUTE_DIRECTORY : 0);
+            ShellQueryResult result;
+            pulse::shell::QueryShellName(request, result);
+            SHFILEINFOW expected{};
+            const auto reference = SHGetFileInfoW(directory ? L"dummy" : L"dummy.txt",
+                directory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL, &expected,
+                sizeof(expected), SHGFI_TYPENAME | SHGFI_USEFILEATTRIBUTES);
+            Check(reference && SUCCEEDED(result.error) && result.text == expected.szTypeName,
+                "cloud type metadata uses attributes without requiring a real item for every recall flag");
+        }
+    }
 }
 
 void RealQueries(const std::filesystem::path& directory) {
@@ -505,6 +558,13 @@ void LifecycleTests() {
 
 int wmain(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring_view(argv[1]) == L"--preview-provider") return RunPreviewFixture(argv[2]);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--cloud-metadata-only") {
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(com)) return 3;
+        CloudTypeQueries();
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     if (argc != 2 && argc != 3) return 2;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(com)) return 3;

@@ -378,6 +378,17 @@ uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply repl
         }) : std::function<void(uint32_t)>{}, owner);
 }
 
+uint32_t ShellClient::DeviceOperation(HWND window, const std::wstring& verb,
+        const std::vector<std::wstring>& ids, const std::wstring& name, const Owner& owner) {
+    if (ids.empty()) return 0;
+    PayloadWriter writer;
+    writer.PutU64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window)));
+    writer.PutString(verb);
+    writer.PutString(name);
+    writer.PutStringArray(ids);
+    return Submit(REQ_DEVICE_OPERATION, writer.data(), {}, owner);
+}
+
 void ShellClient::Cancel(uint32_t id) {
     std::unique_lock lock(send_mutex_, std::try_to_lock);
     if (!lock.owns_lock()) {
@@ -540,7 +551,7 @@ void ShellClient::ReaderThread() {
                     const auto found = pending_.find(h.request_id);
                     if (found != pending_.end() && found->second.type != REQ_SHELL_LAUNCH) {
                         deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
-                        if (deletion) pending_.erase(found);
+                        pending_.erase(found);
                         pending = true;
                     }
                 }
@@ -558,22 +569,26 @@ void ShellClient::ReaderThread() {
                         else if (cb.done) cb.done(h.request_id, result.hr, result.cancelled, result.error);
                     });
                 } else if (pending) {
-                    uint32_t hr = 0, cancelled = 0;
-                    std::wstring err;
-                    if (r.GetU32(hr) && r.GetU32(cancelled) && r.GetString(err)) {
-                        std::vector<FileIdentity> produced;
+                    uint32_t hr = static_cast<uint32_t>(E_INVALIDARG), cancelled = 0;
+                    std::wstring err = L"Malformed operation result";
+                    std::vector<FileIdentity> produced;
+                    if (r.GetU32(hr) && r.GetU32(cancelled) && cancelled <= 1 && r.GetString(err)) {
                         if (r.remaining() && (!ReadFileIdentities(r, produced) || r.remaining())) {
                             hr = static_cast<uint32_t>(E_INVALIDARG);
+                            cancelled = 0;
                             err = L"Malformed produced-item identity result";
                             produced.clear();
                         }
-                        { std::lock_guard<std::mutex> lock(pending_mutex_); pending_.erase(h.request_id); }
-                        Dispatch(h.request_id, true, [&](Callbacks& cb) {
-                            if (cb.produced_done && !produced.empty())
-                                cb.produced_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(produced));
-                            else if (cb.done) cb.done(h.request_id, hr, cancelled != 0, err);
-                        });
+                    } else {
+                        hr = static_cast<uint32_t>(E_INVALIDARG);
+                        cancelled = 0;
+                        err = L"Malformed operation result";
                     }
+                    Dispatch(h.request_id, true, [&](Callbacks& cb) {
+                        if (cb.produced_done && !produced.empty())
+                            cb.produced_done(h.request_id, hr, cancelled != 0, std::move(err), std::move(produced));
+                        else if (cb.done) cb.done(h.request_id, hr, cancelled != 0, err);
+                    });
                 }
             } else if (h.type == RSP_CTX_ITEMS) {
                 uint32_t session = 0, msg_flags = 0, count = 0;

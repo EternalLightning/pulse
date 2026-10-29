@@ -1,0 +1,15 @@
+{
+  "number": 298,
+  "title": "第三方软件无法换醒",
+  "body": "1. 钉钉和微信，qq等第三方软件上传文件时无法换新此软件，还是系统自带文件管理器。\n2. 快捷图标，右菜单，没有选项有固定在开始菜单的选项。",
+  "url": "https://github.com/jimmgreen/pulse/issues/298",
+  "captured_at": "2026-10-23T03:10:07.140995+00:00",
+  "updated_at": "2026-10-17T10:57:42Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

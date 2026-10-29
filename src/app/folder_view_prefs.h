@@ -29,8 +29,8 @@ public:
     bool SetSort(const std::wstring& path, model::SortColumn column, model::SortDirection direction);
     std::optional<FolderGroupPrefs> FindGroup(const std::wstring& path) const;
     bool SetGroup(const std::wstring& path, ui::GroupMode mode, model::SortDirection direction);
-    std::optional<std::array<float, 3>> FindColumns(const std::wstring& path) const;
-    bool SetColumns(const std::wstring& path, const std::array<float, 3>& columns);
+    std::optional<std::array<float, 4>> FindColumns(const std::wstring& path) const;
+    bool SetColumns(const std::wstring& path, const std::array<float, 4>& columns);
     void Clear() { views_.clear(); sorts_.clear(); groups_.clear(); columns_.clear(); }
     void AppendJson(std::wstring& out) const;
     void ReadJson(const std::wstring& json);
@@ -42,7 +42,7 @@ private:
     std::map<std::wstring, ui::ViewMode, PathLess> views_;
     std::map<std::wstring, FolderSortPrefs, PathLess> sorts_;
     std::map<std::wstring, FolderGroupPrefs, PathLess> groups_;
-    std::map<std::wstring, std::array<float, 3>, PathLess> columns_;
+    std::map<std::wstring, std::array<float, 4>, PathLess> columns_;
 };
 
 } // namespace pulse::app

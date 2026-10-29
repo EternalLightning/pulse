@@ -1,7 +1,10 @@
 #include "archive_navigation.h"
+#include "app_network_access.h"
+#include "app_network_locations.h"
 #include "../ops/archive.h"
 // app_navigation.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
+#include "device_navigation.h"
 #include "../index/live_filename_search.h"
 #include "app_column_view.h"
 #include "../ui/lumatext_renderer.h"
@@ -76,6 +79,22 @@ std::vector<ui::ViewMode> CollectPaneViews(const AppState& s) {
     return out;
 }
 
+int CollectFocusedPaneIndex(const AppState& s) {
+    if (!Root(s)) return 0;
+    std::vector<app::Pane*> visible;
+    Root(s)->CollectPanes(visible);
+    const auto found = std::find(visible.begin(), visible.end(), s.pane);
+    return found == visible.end() ? 0 : static_cast<int>(found - visible.begin());
+}
+
+void ToggleWorkspacePin(AppState& s, const std::wstring& root) {
+    if (root.empty() || fs::IsVirtualPath(root)) return;
+    if (s.places.FindWorkspace(root) >= 0) s.places.UnpinWorkspace(root);
+    else s.places.PinWorkspace(root, L"", static_cast<int>(LayoutOf(s)), CollectPanePaths(s),
+        CollectPaneViews(s), CollectFocusedPaneIndex(s));
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+
 bool IsUncPath(const std::wstring& p) {
     return fs::IsUncPath(p);
 }
@@ -134,6 +153,7 @@ void ApplyUncProbeResult(AppState& s, const fs::UncProbeResult& result) {
         ForEachPane(s, [&](app::Pane& pane) {
             app::Tab* tab = pane.ActiveTab();
             if (!tab || tab->current_path != result.unc) return;
+            if (NetworkForegroundRequestPending(s, *tab) || s.explicit_entry_refreshes.contains(tab)) return;
             if (result.status == fs::NetStatus::Online || result.status == fs::NetStatus::Slow) {
                 tab->net_readonly = false;
                 if (tab->banner_type == app::BannerType::Offline) tab->ClearBanner();
@@ -148,6 +168,12 @@ void ApplyUncProbeResult(AppState& s, const fs::UncProbeResult& result) {
 
 void RequestUncProbe(AppState& s, std::wstring unc) {
     if (!fs::IsUncPath(unc) || !s.hwnd) return;
+    bool foreground_pending = false;
+    ForEachPane(s, [&](app::Pane& pane) {
+        const auto* tab = pane.ActiveTab();
+        if (tab && tab->current_path == unc && NetworkForegroundRequestPending(s, *tab)) foreground_pending = true;
+    });
+    if (foreground_pending) return;
     if (s.probe_scheduler.Enqueue(fs::NormalizePath(unc))) PumpUncProbe(s);
 }
 
@@ -205,22 +231,26 @@ void OpenWorkspace(AppState& s, int index) {
     if (found != static_cast<size_t>(-1)) SwitchTab(s, found);
     else NewTab(s, w.root.empty() ? pulse::path::DefaultNavigationRoot() : w.root);
     ApplyLayoutPreset(s, static_cast<app::LayoutPreset>(std::clamp(w.layout, 0, 4)));
+    std::vector<app::Pane*> visible;
+    if (Root(s)) Root(s)->CollectPanes(visible);
     if (w.pane_paths.empty()) {
         NavigateTo(s, w.root);
     } else {
-        for (size_t i = 0; i < Panes(s).size() && i < w.pane_paths.size(); ++i) {
+        for (size_t i = 0; i < visible.size() && i < w.pane_paths.size(); ++i) {
             const std::wstring& pth = w.pane_paths[i];
             if (pth.empty()) continue;
-            app::Tab* t = Panes(s)[i]->ActiveTab();
+            app::Tab* t = visible[i]->ActiveTab();
             if (!t) {
-                Panes(s)[i]->NewTab(pth);
-                t = Panes(s)[i]->ActiveTab();
+                visible[i]->NewTab(pth);
+                t = visible[i]->ActiveTab();
             }
             if (t && i < w.pane_views.size()) t->view_mode = w.pane_views[i];
             if (t) StartLoadingPath(s, *t, pth, PathLoadReason::RestoreSession);
         }
         RememberPath(s, w.root);
     }
+    if (!visible.empty()) FocusPane(s, visible[static_cast<size_t>(std::clamp(
+        w.focused_pane, 0, static_cast<int>(visible.size()) - 1))]);
     s.places.Save();
     for (const auto& n : s.places.networks) WarmupUnc(s, n.unc);
     for (const auto& pth : w.pane_paths) WarmupUnc(s, pth);
@@ -458,6 +488,8 @@ void RequestSavedSearch(AppState& s, app::Tab& tab, size_t saved_index) {
         return;
     }
     const app::SavedSearch& search = saved[saved_index];
+    const auto previous = tab.search_retaining_results ? tab.content_results : nullptr;
+    const auto retained_count = tab.search_retaining_results ? tab.EntryCount() : size_t{};
     CancelContentSelection(s,tab);
     tab.content_results.reset();
     tab.content_selection_restore.reset();
@@ -472,6 +504,7 @@ void RequestSavedSearch(AppState& s, app::Tab& tab, size_t saved_index) {
     tab.pending_generation = generation;
     if (search.mode == app::SavedSearchMode::Name) {
         index::Query query = MakeSearchPageQuery(tab, search.query, 0);
+        query.limit = (std::min)(index::kSearchPageCap, (std::max)(query.limit, retained_count));
         query.session_id=tab.search_session_id;query.subscribe=true;tab.filename_live_generation=generation;
         query.path_prefix = search.root;
         tab.network_search_root = !index::FilenameSearchRoot(query.path_prefix).empty() && s.networkIndex.UsesLiveSearch(query.path_prefix) ? query.path_prefix : std::wstring{};
@@ -488,6 +521,10 @@ void RequestSavedSearch(AppState& s, app::Tab& tab, size_t saved_index) {
         ? index::ContentSearchMode::Duplicates : index::ContentSearchMode::Content;
     ConfigureContentSort(tab,request);
     request.paged_results = search.mode == app::SavedSearchMode::Content;
+    if (previous && request.paged_results) {
+        request.previous_results = previous;
+        request.resume_previous = true;
+    }
     if(search.mode == app::SavedSearchMode::Duplicates) request.maximum_hits = 10000;
     request.root = search.root;
     request.needle = search.query;
@@ -750,6 +787,8 @@ void CancelActiveContentSearch(AppState& s, app::Tab& tab) {
 }
 
 void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    CancelNetworkAuthenticationForTab(s, tab);
+    if (path == app::MakeHomePath()) RequestNetworkDiscovery(s);
     tab.current_path = path;
     tab.loading = false;
     tab.pending_generation = 0;
@@ -758,6 +797,11 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
 
     std::wstring kind, rest;
     app::ParsePulsePath(path, &kind, &rest);
+    if (kind == L"networks") {
+        RequestNetworkLocations(s);
+        FillNetworkLocationsView(s, tab);
+        return;
+    }
     if (kind == L"home") {
         tab.virtual_title = l10n::Get(l10n::StringId::Home);
         tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
@@ -908,6 +952,8 @@ static void CancelUnsharedListing(AppState& s, const app::Tab& tab) {
 }
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    CancelNetworkAuthenticationForTab(s, tab);
+    if (reason != PathLoadReason::NetworkRetry) tab.pending_network_pin.clear();
     if (reason == PathLoadReason::Navigate && !s.shot.active &&
         !tab.snapshot_path.empty() && tab.snapshot_path == tab.current_path) RememberFolderColumns(s, tab);
     CancelUnsharedListing(s, tab);
@@ -916,9 +962,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.pending_created_names.clear();
     s.explicit_entry_refreshes.erase(&tab);
     if (tab.archive_cancel) tab.archive_cancel->store(true);
-    s.index.CancelSession(tab.search_session_id);
-    s.networkIndex.CancelSession(tab.search_session_id);
-    std::erase_if(s.pendingIndexSearches,[&](const auto& item){return item.second.query.session_id==tab.search_session_id;});
+    TeardownTabSearch(s, tab);
     tab.filename_live_generation=0;
     tab.search_retaining_results = false;
     std::wstring normalized = fs::NormalizePath(path);
@@ -971,7 +1015,6 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.search_total = 0;
     tab.search_next_offset = 0;
     tab.pending_search_offset = 0;
-    if (tab.search_session_id) s.contentSearch.Cancel(tab.search_session_id);
     tab.search_live_generation = 0;
     tab.search_loading_more = false;
     tab.content_subscription_error = ERROR_SUCCESS;
@@ -990,6 +1033,18 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
             tab.scroll_x = 0.0f;
         }
         LoadArchiveView(s, tab);
+        SyncVisibleWatches(s);
+        return;
+    }
+    if (app::IsDeviceTab(&tab)) {
+        tab.virtual_title = app::DeviceTitle(normalized);
+        tab.ClearBanner();
+        tab.net_readonly = !app::DeviceRegistry::Instance().FolderWritable(normalized);
+        tab.SetSnapshot(nullptr);
+        tab.applied_generation = 0;
+        tab.loading = true;
+        tab.pending_generation = AdmitListingRequest(s, tab, s.worker.Refresh(normalized,
+            tab.sort_column, tab.sort_direction, app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode)));
         SyncVisibleWatches(s);
         return;
     }
@@ -1059,9 +1114,103 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         ? shared_generation
         : AdmitListingRequest(s, tab, s.worker.Refresh(normalized, tab.sort_column, tab.sort_direction,
                            app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), snap));
+    if (reason == PathLoadReason::Navigate || reason == PathLoadReason::NetworkRetry) MarkNetworkForegroundListing(s, tab);
 
     SyncVisibleWatches(s);
     if (fs::IsUncPath(normalized)) RequestUncProbe(s, normalized);
+}
+
+void ResumeTransferredTab(AppState& s, app::Tab& tab) {
+    const bool was_loading = tab.loading || tab.pending_generation != 0;
+    tab.pending_generation = 0;
+    tab.applied_generation = 0;
+    tab.notify_patch_generation = 0;
+    tab.search_session_id = 0;
+    tab.filename_live_generation = 0;
+    tab.search_live_generation = 0;
+    tab.search_loading_more = false;
+    tab.loading = false;
+
+    if (!fs::IsVirtualPath(tab.current_path) || app::IsDeviceTab(&tab)) {
+        if (tab.snapshot) CaptureListingSelection(tab);
+        tab.PrepareEntryRefresh(false);
+        tab.loading = !tab.snapshot;
+        const auto [shared, snapshot] = SharedListingRequest(s, tab, tab.current_path);
+        tab.pending_generation = shared ? shared : AdmitListingRequest(s, tab,
+            s.worker.Refresh(tab.current_path, tab.sort_column, tab.sort_direction,
+                app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), tab.snapshot));
+        SyncVisibleWatches(s);
+        if (fs::IsUncPath(tab.current_path)) RequestUncProbe(s, tab.current_path);
+        return;
+    }
+
+    std::wstring kind, rest;
+    app::ParsePulsePath(tab.current_path, &kind, &rest);
+    if (kind == L"home") {
+        s.home_catalog.Refresh();
+        RequestNetworkDiscovery(s);
+        return;
+    }
+    if (kind == L"settings") {
+        s.settings.SelectPage(app::SettingsController::PageFromName(rest));
+        return;
+    }
+    if (tab.search_content_stopped) return;
+
+    // Reattach only this pane's producer. Keep its published rows and viewport
+    // while the destination window takes ownership of the replacement request.
+    const auto snapshot = tab.snapshot;
+    const auto selected = tab.selected;
+    const auto selected_index = tab.selected_index;
+    const auto anchor = tab.selection_anchor;
+    const auto all_selected = tab.all_selected;
+    const auto scroll_x = tab.scroll_x, scroll_y = tab.scroll_y;
+    const auto title = tab.virtual_title;
+    const auto content = tab.content_results;
+    tab.search_retaining_results = (kind == L"search" || kind == L"saved-search") && (snapshot || content);
+    if (kind == L"search" && !app::SplitSearchQueryText(rest).content.present()) {
+        tab.search_session_id = ++s.nextIndexReq;
+        const uint32_t generation = ++s.nextIndexReq;
+        tab.pending_generation = tab.filename_live_generation = generation;
+        tab.pending_search_offset = 0;
+        auto query = MakeSearchPageQuery(tab, rest, 0);
+        query.limit = (std::min)(index::kSearchPageCap,
+            (std::max)(query.limit, (std::max)(tab.search_next_offset, tab.EntryCount())));
+        query.session_id = tab.search_session_id;
+        query.subscribe = true;
+        DispatchIndexSearch(s, query, generation);
+    } else if (kind == L"search") RequestSearchPage(s, tab, rest, true);
+    else if (kind == L"saved-search") {
+        wchar_t* end = nullptr;
+        const auto index = wcstoull(rest.c_str(), &end, 10);
+        if (end && end != rest.c_str() && *end == L'\0')
+            RequestSavedSearch(s, tab, static_cast<size_t>(index));
+    } else if (IsArchiveView(tab.current_path)) {
+        if (was_loading || !snapshot) LoadArchiveView(s, tab);
+        else tab.archive_cancel.reset();
+    } else if (was_loading || !snapshot) {
+        LoadVirtualView(s, tab, tab.current_path);
+    }
+    if (snapshot) tab.SetSnapshot(snapshot);
+    if (content) tab.content_results = content;
+    tab.selected = selected;
+    tab.selected_index = selected_index;
+    tab.selection_anchor = anchor;
+    tab.all_selected = all_selected;
+    tab.scroll_x = scroll_x;
+    tab.scroll_y = scroll_y;
+    tab.virtual_title = title;
+    if (snapshot || content) tab.loading = false;
+    if (ActiveTab(s) == &tab) {
+        s.scrollTargetY = tab.scroll_y;
+        s.scrollAnimating = false;
+    }
+    SyncVisibleWatches(s);
+}
+
+void CancelTransferredListing(AppState& s, const app::Tab& tab) {
+    CancelNetworkAuthenticationForTab(s, tab);
+    CancelUnsharedListing(s, tab);
 }
 
 void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
@@ -1101,7 +1250,13 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                 tab->pending_generation != res.generation) return;
             if (res.generation < tab->applied_generation) return;
             tab->applied_generation = res.generation;
+            const auto explicit_request = s.explicit_entry_refreshes.find(tab);
+            const bool foreground = TakeNetworkForegroundListing(s, *tab, res.generation) ||
+                (explicit_request != s.explicit_entry_refreshes.end() && explicit_request->second.path == res.path &&
+                    explicit_request->second.generation == res.generation);
             FailListing(s, *tab, res.error_code);
+            if (fs::IsDevicePath(res.path)) app::SetDeviceError(*tab, static_cast<fs::DeviceError>(res.device_error));
+            if (foreground && !res.cancelled) RequestNetworkAuthentication(s, *tab, res.error_code);
         });
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
@@ -1120,6 +1275,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
         if (tab->pending_generation != 0 && tab->pending_generation != res.generation) return;
         if (tab->applied_generation != 0 && res.generation < tab->applied_generation) return;
         const auto explicit_request = s.explicit_entry_refreshes.find(tab);
+        const bool network_opened = TakeNetworkForegroundListing(s, *tab, res.generation);
         const bool explicit_result = explicit_request != s.explicit_entry_refreshes.end() &&
             explicit_request->second.path == res.path && explicit_request->second.generation == res.generation;
         if (explicit_result && !again) s.explicit_entry_refreshes.erase(explicit_request);
@@ -1166,10 +1322,12 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             tab->pending_generation = 0;
             tab->applied_generation = res.generation;
             if (!res.projection_only) {
-                tab->net_readonly = false;
+                tab->net_readonly = app::IsDeviceTab(tab) &&
+                    !app::DeviceRegistry::Instance().FolderWritable(res.path);
                 tab->ClearBanner();
                 tab->cache_unix = 0;
             }
+            if (!res.projection_only && network_opened) RecordNetworkLocationOpened(s, *tab);
             if (virtual_kind == L"recycle" || fs::IsRecycleViewPath(res.path)) {
                 ApplyQueriedRecycleInfo(s, res.recycle_info);
                 ApplyRecycleOccupancy(s);
@@ -1274,7 +1432,12 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
     std::vector<app::Tab*> tabs;
     ForEachPane(s, [&](app::Pane& pane) {
         app::Tab* tab = pane.ActiveTab();
-        if (tab && tab->current_path == normalized) tabs.push_back(tab);
+        if (tab && tab->current_path == normalized) {
+            if (reason != RefreshReason::Explicit && fs::IsUncPath(normalized) &&
+                (NetworkForegroundRequestPending(s, *tab) || s.explicit_entry_refreshes.contains(tab))) return;
+            if (reason == RefreshReason::Explicit) CancelNetworkAuthenticationForTab(s, *tab);
+            tabs.push_back(tab);
+        }
     });
     if (tabs.empty()) return;
     if (IsArchiveView(normalized)) {
@@ -1282,7 +1445,7 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
     }
-    if (fs::IsVirtualPath(normalized) && !fs::IsRecycleViewPath(normalized)) {
+    if (fs::IsVirtualPath(normalized) && !fs::IsRecycleViewPath(normalized) && !fs::IsDevicePath(normalized)) {
         for (app::Tab* tab : tabs) {
             if (tab->search_content_stopped && reason != RefreshReason::Explicit) continue;
             // The subscribed session consumes changes since its initial snapshot,
@@ -1313,7 +1476,9 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
         if (explicit_refresh) s.explicit_entry_refreshes[tab] = {normalized, 0};
         CaptureListingSelection(*tab);
         tab->PrepareEntryRefresh(explicit_refresh);
-        tab->loading = !tab->snapshot;
+        // A completed failure is also a presentation to retain during background
+        // retries; hiding it here makes unwatched error pages blink every poll.
+        tab->loading = !tab->snapshot && (explicit_refresh || tab->applied_generation == 0);
         tab->pending_generation = 0;
     }
     for (app::Tab* tab : tabs) {
@@ -1550,7 +1715,6 @@ void DrainDirNotifies(AppState& s) {
     if (now - s.last_unc_poll >= 1000) {
         s.last_unc_poll = now;
         for (const auto& path : VisibleFolderPaths(s)) {
-            if (!fs::IsUncPath(path)) continue;
             if (s.watches.Armed(path) || PathHasPendingRefresh(s, path)) continue;
             RefreshPath(s, path);
             changed = true;
@@ -1581,6 +1745,8 @@ void RestoreNavigationReturnSelection(AppState& s, app::Tab& tab,
 }
 
 void NavigateTo(AppState& s, const std::wstring& path) {
+    if (path == kConnectServerPath) { ShowConnectServer(s); return; }
+    if (OpenSystemNetworkShortcut(s, path)) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     std::wstring normalized = fs::NormalizePath(path);
@@ -1620,8 +1786,8 @@ void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset) {
     const size_t n = app::LayoutPresetCount(preset);
     std::wstring clone = pulse::path::DefaultNavigationRoot();
     ui::ViewMode cloneView = ui::ViewMode::Details;
-    std::array<float, 3> cloneColumns{};
-    std::array<float, 4> cloneSearchColumns{};
+    std::array<float, 4> cloneColumns{};
+    std::array<float, 5> cloneSearchColumns{};
     if (s.pane && s.pane->ActiveTab() && !s.pane->ActiveTab()->current_path.empty())
         clone = s.pane->ActiveTab()->current_path;
     if (s.pane && s.pane->ActiveTab()) {
@@ -1772,6 +1938,19 @@ void OpenSelected(AppState& s) {
     if(DeferContentSelection(s,[=](AppState& v){OpenSelected(v);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot) return;
+    if (app::HasDeviceSelection(*tab)) {
+        if (tab->SelectedCount() == 1) {
+            const auto& row = tab->EntryAt(static_cast<size_t>(tab->SelectedIndices().front()));
+            if (row.pc_device) {
+                const auto where = fs::ParseDevicePath(row.full_path);
+                if (where) for (const auto& device : app::DeviceRegistry::Instance().Devices())
+                    if (device.key == where->device) { NavigateTo(s, fs::DeviceOpenTarget(device)); return; }
+            }
+            if (row.is_dir) { NavigateTo(s, row.full_path); return; }
+        }
+        app::QueueDeviceOperation(s, L"open", app::DeviceSelectedIds(*tab));
+        return;
+    }
     if (OpenArchiveSelection(s)) return;
     if (IsRecycleTab(tab)) {
         RestoreSelected(s);
@@ -1821,6 +2000,10 @@ void OpenSelected(AppState& s) {
 void GoUp(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
+    if (app::IsDeviceTab(tab)) {
+        NavigateTo(s, app::DeviceParent(tab->current_path));
+        return;
+    }
     if (IsRecycleTab(tab)) {
         NavigateTo(s, L"");
         return;
@@ -1925,11 +2108,26 @@ void OpenSettingsTab(AppState& s, int page) {
     if (app::Tab* tab = ActiveTab(s))
         tab->virtual_title = l10n::Get(l10n::StringId::Settings);
 }
+void ResetLastTabToHome(AppState& s) {
+    if (s.window_tabs.items.size() != 1) return;
+    CancelNetworkAuthentication(s);
+    NewTab(s, app::MakeHomePath());
+    // Window close also retires a pinned singleton; ordinary tab close still protects pins.
+    s.window_tabs.items.front()->pinned = false;
+    s.window_tabs.CloseTab(0);
+    s.window_tabs.tab_groups.clear();
+    BindCurrentLayout(s);
+    s.hitTestVmValid = false;
+}
+
 void CloseLayoutTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
     if (s.window_tabs.items[idx]->pinned) return;
-    if (s.window_tabs.items.size() == 1 && s.appPrefs.close_last_tab_window) {
-        PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
+    CancelNetworkAuthentication(s);
+    if (s.window_tabs.items.size() == 1) {
+        // Closing a tab retires its navigation even when WM_CLOSE only hides the window.
+        ResetLastTabToHome(s);
+        if (s.appPrefs.close_last_tab_window) PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
         return;
     }
     if (s.renderer.MotionEnabled() && !s.shot_high_contrast && !s.tabDragging &&
@@ -1954,6 +2152,7 @@ void CloseActiveTab(AppState& s) {
 
 void SwitchTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
+    CancelNetworkAuthentication(s);
     if (s.addressSearching) HideAddressEditor(s, false);
     RememberLayoutFocus(s);
     s.window_tabs.SwitchTab(idx);

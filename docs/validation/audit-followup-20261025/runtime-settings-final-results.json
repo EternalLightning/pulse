@@ -1,0 +1,40 @@
+[
+  {
+    "Name": "system-context-registry",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_system_ctx_test.exe",
+    "Arguments": [],
+    "WorkingDirectory": "E:\\Projects\\pulse",
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\system-context-registry.txt"
+  },
+  {
+    "Name": "system-context-model",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_system_ctx_model_test.exe",
+    "Arguments": [],
+    "WorkingDirectory": "E:\\Projects\\pulse",
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\system-context-model.txt"
+  },
+  {
+    "Name": "system-context-exchange-protocol",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_system_ctx_exchange_test.exe",
+    "Arguments": [
+      "--protocol-only"
+    ],
+    "WorkingDirectory": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+    "ExitCode": 0,
+    "OutputLines": 19,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\system-context-exchange-protocol.txt"
+  },
+  {
+    "Name": "system-context-transaction-console",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_system_ctx_transaction_console_test.exe",
+    "Arguments": [],
+    "WorkingDirectory": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+    "ExitCode": 2,
+    "OutputLines": 1,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\system-context-transaction-console.txt"
+  }
+]

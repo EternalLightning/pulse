@@ -1,0 +1,15 @@
+{
+  "number": 292,
+  "title": "右键文件夹不显示 Light Image Resizer（文件正常）",
+  "body": "系统资源管理器右键文件/文件夹都正常\nPulse 右键文件/图片正常显示，但无法显示扩展的多个选项\nPulse 右键文件夹不显示(异常)\n Windows10 , Pulse 版本 1.0.56 , Light Image Resizer 版本7.6.5.176",
+  "url": "https://github.com/jimmgreen/pulse/issues/292",
+  "captured_at": "2026-10-23T03:10:07.140775+00:00",
+  "updated_at": "2026-10-17T04:28:05Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

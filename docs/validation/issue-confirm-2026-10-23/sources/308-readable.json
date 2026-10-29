@@ -1,0 +1,15 @@
+{
+  "number": 308,
+  "title": "exFAT volume shows index count increase but search returns no results",
+  "body": "Body:\n\nEnvironment\nPulse version: v1.0.56\n\nWindows version: (Windows 11 24H2)\n\nDrive type: exFAT external/removable volume (G:)\n\nSummary\nSearch on an exFAT partition does not work. The drive is recognized as \"Non-NTFS\" in Settings → Search & Index → Local Disks, and files on it cannot be found through the search box, even after manually adding a folder from that volume.\n\nSteps to reproduce\nConnect an exFAT-formatted volume (e.g., G:).\n\nOpen Settings → Search & Index → Local Disks — the drive is listed as \"Non-NTFS\".\n\nClick Add Folder and select the drive (G:) — this fails with:\n\n\"全机索引，操作未完成。管理员授权可能已取消或索引服务无法更新配置。\"\n(Whole-machine index operation incomplete. Admin authorization may have been cancelled or the index service could not update the configuration.)\n\nInstead, add a specific folder on that drive (G:\\test). The index count visibly increases, suggesting files were scanned.\n\nOpen the folder G:\\test in the file browser and type anything into the search box — no results are returned.\n\nOpening a folder on the exFAT volume and searching also shows:\n\n\"此文件夹不在共用搜索范围内，请在【存储与维护】中检查...\"\n(This folder is not within the shared search scope, please check in Storage & Maintenance...)\n\nExpected behavior\nEither:\n\nexFAT volumes should be searchable via a fallback/direct-scan mode, or\n\nThe UI should clearly state that search is unsupported on non-NTFS volumes, instead of showing an increasing index count that implies the files are searchable.\n\nActual behavior\nThe index counter increases after adding G:\\test, but search returns nothing.\n\nThe \"not in shared search scope\" message confirms the volume is excluded from the active search index.\n\nThe error when adding the whole drive suggests the index service cannot register a non-NTFS location.\n\nAdditional context\nBased on the public description, Pulse's fast search relies on the NTFS MFT/USN journal, which exFAT does not provide. The test sources (e.g., search_audit_test.cpp, content_search_test.cpp) show a transient/direct-scan path exists (request.indexed = false), so a non-indexed fallback appears to exist at the engine level — but the UI does not seem to enable it for non-NTFS volumes.\n\nQuestions\nIs exFAT (or non-NTFS) search support planned?\n\nIf not, can the UI avoid showing a misleading index count for volumes that cannot actually be searched?\n\nIs there a hidden setting to force direct/transient scanning on a non-NTFS folder?",
+  "url": "https://github.com/jimmgreen/pulse/issues/308",
+  "captured_at": "2026-10-23T03:10:07.138860+00:00",
+  "updated_at": "2026-10-18T11:20:42Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "date": "2026-10-23",
+  "markdown_lines": [
+    "**截至本次最终复核：现场索引清理完成，Index 服务程序已更新；主程序与 Shell 安装文件仍为原版。** 下列容量均为文件逻辑字节数，不是磁盘实际分配空间或常驻内存。",
+    "",
+    "| 项目 | 初次现场清单 | 完成后 |",
+    "|---|---:|---:|",
+    "| 索引目录总计 | 2,335,240,520 B（2.175 GiB） | 659,009,579 B（0.614 GiB） |",
+    "| 文件数 | 21 | 9 |",
+    "| aggregate A/B | v11，579,699,360 / 579,404,816 B | v12，327,574,736 / 327,561,632 B |",
+    "| v9/volumes 派生查询副本 | 四卷、每卷 A/B 与 manifest | 已删除，服务重启后未重建 |",
+    "",
+    "初次清单到最终清单累计减少 **1,676,230,941 B，约 71.78%**。最终清理阶段精确回收派生副本 **1,164,971,712 B**。维护期间服务正常发布新快照、重置已归并 WAL，现场节点数也有变化；总差值不是同一冻结数据集上的纯编码压缩率。真实 WAL 在停服维护期间逐文件校验不变，重启后的正常追加/归并另计；未按名称删除根目录 `Volumes`。",
+    "",
+    "### Everything 对比与本轮实现",
+    "",
+    "阅读了 voidtools 官方索引说明、INI 的 db_compress 和 FAQ，并保留网页文本。公开可确认的是：Everything 运行时数据库驻内存，文件名/路径必需、部分元数据可选；磁盘数据库支持 Bzip2 压缩，读写时以 CPU 换 I/O。官方没有在这些资料中公开可供本轮核验的 everything.db 二进制记录布局，因此未把推测当成已读到的结构。Everything 的约 100 MB 用户观察值与 Pulse 的节点、元数据、A/B 恢复份及覆盖范围未经对齐，不能承诺优化到相同容量。",
+    "",
+    "- [Everything 索引说明](https://www.voidtools.com/support/everything/indexes/)、[db_compress 官方设置](https://www.voidtools.com/support/everything/ini/)、[FAQ 资源示例](https://www.voidtools.com/faq/)。 本地原始页面位于 `bench_data/index-compaction-20261023/*-official.txt`。",
+    "- Pulse 现场 v11 活动快照中，单字符和双字符倒排段合计 **343,075,792 B，占 59.18%**。本轮将有序节点编号改为桶内差分 varint，并保留桶偏移；查询直接解码选中的桶，沿用 mmap。没有采用整库 Bzip2 解压到堆内存的运行方式。",
+    "- 同时停止生产模式写入和读取派生分卷查询副本，查询使用 aggregate。主快照 A/B、卷身份/FRN、元数据、卷检查点、拼音侧缓存及真实增量 WAL 保留。v12 读取器兼容 v7–v11，v11 不因纯编码版本升级强制全盘重扫。旧程序不读 v12，回滚必须同时匹配程序与快照/WAL。",
+    "- 冻结的 60,050 节点夹具单份快照从 **15,865,312 → 8,675,344 B，减少 45.32%**。严格加载校验样本约 **0.82 → 4.79 ms**；查询中位数相近。这是定向样本，未作冷缓存、常驻内存或所有查询加速承诺。",
+    "",
+    "[压缩实现及来源证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/snapshot-postings-compaction.json)。",
+    "",
+    "### 实际验证、安装及恢复",
+    "",
+    "- 压缩定向检查 **45 PASS / 0 FAIL**，包含 **1,071** 组旧/新编码查询比较：节点/属性/文件名/FRN/卷检查点逐段一致，全部 posting ID 逐桶一致，Unicode 与代理对重命名、增删、真实 WAL 字节一致和重放、v12 损坏主代回退 v11 上一代。存储检查 **42 PASS / 0 FAIL**，另外包含 **291** 组查询比较及停止采用遗留副本的恢复边界。",
+    "- 现场每代转换各 **15 PASS / 0 FAIL**，各有 44 组实际快照查询对照。最终再次读取两代文件，确认 v12、节点非空、活动 manifest 字节数与 CRC 一致；派生副本未重建，原索引根 ACL 不变。服务恢复 Running / Auto，原网络代理 PID 10816 保持。",
+    "- 全部 40 个安装文件前后逐项核对，只有 `Pulse.Index.exe` 改变；最终 SHA256 为 `91E3F7E96EE374B6AB9081CD152F9E2A9033A86BB0EAE5AB0A8B1D59859BFE5D`。未结束驻留主程序、未修改用户设置或第三方插件注册表。",
+    "- 维护脚本的 Windows PowerShell 5 数组、退出码和原生 NULL 绑定问题均保留失败证据。前两个保护检查发生于转换前；原生 NULL 问题阻止无备份名的 ReplaceFileW 发布，后经隔离真实文件替换验证修正。期间 Index 二进制已成功更新，服务恢复后自动发布了 v12 快照；最终从核实状态重新完整备份并成功清理，未将中间失败记为通过。",
+    "- 首轮存储验证因 NMake 遗留的 index_shard 对象仍使用 v11 常量而失败。显式重编三个目标的相关对象后，45/42 项验证通过。未运行完整 release/selftest 或旧版整套索引测试；后者存在机械降版本夹具与历史符号引用需要另行适配，未弱化这些测试。",
+    "",
+    "最终完整回滚位置：`E:\\Projects\\pulse\\dist\\index-maintenance-20261023-04`。含全量安装文件与停服时全部原始索引，逐文件哈希验证；最终又复核 21 个索引备份文件。先前原版程序与 v11 索引备份另保留在 `dist/index-maintenance-20261023-02`。备份位于 E 盘并继续占空间，上述节省指 D 盘现场索引目录，不是所有磁盘合计释放量。",
+    "",
+    "[现场维护结果](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/maintenance-result.json)；[最终原生检查](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/final-check.json)；[安装文件核对](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/installed-payload-after.json)。",
+    "",
+    "### 实际服务搜索：功能返回，性能预算仍未达标",
+    "",
+    "更新前后均向实际服务进行 a / ab / abc / report / pdf 各 5 次查询；25 次回复均成功，p95 更新前约 2,102–3,881 ms，更新后约 2,108–3,755 ms，仍全部超过工具的 50–150 ms 预算。工具未启用 --enforce 时退出码 0 不代表性能通过。本轮不宣称搜索加速；现场数据会变化，结果数不同也不能直接用于同数据集等价证明。状态显示 count=0 是服务 StatusPayload 主动隐藏机器总条数的既有协议行为，不是空索引；实际快照约 246 万节点且查询有返回。",
+    "",
+    "[更新前搜索](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/query-before.log)；[更新后搜索](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/query-after.log)。",
+    "",
+    "### 右键菜单慢：两段原因及修复状态",
+    "",
+    "生产并发跟踪确认，21 个扩展工作线程分别 SHParseDisplayName 解析同一选择，7-Zip 线程的路径解析约 **987 ms**，它自身 QueryContextMenu 仅 **0.63 ms**。改为每菜单会话解析一次不可变 PIDL，工作线程仍各自创建和持有自己的 STA/COM 对象；全部线程创建后统一放行，修复早期混合选择样本在工作线程创建阶段的停顿。没有保留生产打点代码。",
+    "",
+    "| 选择 | 基线首次 7-Zip / ms | 最终共享构建首次 7-Zip / ms | 最终全部扩展 / ms |",
+    "|---|---:|---:|---:|",
+    "| 单文件 | 1,211 | 353 | 1,562 |",
+    "| 多文件 | 1,308 | 331 | 1,537 |",
+    "| TXT + ZIP | 1,312 | 323 | 1,528 |",
+    "",
+    "私有最终宿主 10 项、共享构建复核 4 项均通过；保留 7-Zip 父项与 16 个原命令及全部基线行，提前关闭无错误，测试宿主残留 0。仅实际 ShellClient 查询和关闭，未执行压缩命令或人工验收弹出菜单。",
+    "",
+    "最终回复仍约 1.5 秒，因为 CLSID `{36d7ad11-6890-4adb-b2da-c74d182cdb7c}` 仍超过 1 秒。本机只读注册表确认其为 **卡巴斯基 Kaspersky 21.26 的 x64/shellex.dll**。已有解析复用阶段 trace 中该处理器 QueryContextMenu 约 1,058–1,329 ms；最终共享构建仅确认它超过 1 秒，未把早期精细打点数值当成最终逐段实测。协调器持续发布部分结果，最终结果等待所有线程；IPC 另有 100 ms 轮询带来的小段尾部成本。没有禁用卡巴斯基或更改其配置，也没有证据解释该 DLL 内部为何慢。",
+    "",
+    "**右键修复目前是已构建验证的源码，未部署到安装版。** `Pulse.Shell.exe` 共享构建 SHA256 为 `557846B94CE8D4F021E81539F28B46FD7C4F91C41BD98473BB3E2F60FFCB9D01`；安装版 UI 与 Shell 仍运行原版本，不能声称用户现用菜单已达到表中速度。此前 7-Zip 自动禁用迁移/最外层入口等 UI 改动也仍需后续受控更新。",
+    "",
+    "[共享 Shell 复核](E:/Projects/pulse/bench_data/menu-latency-20261023/shared-build-check/validation.json)；[并发根因跟踪](E:/Projects/pulse/bench_data/menu-latency-20261023/validation.json)；[卡巴斯基注册信息](E:/Projects/pulse/bench_data/menu-latency-20261023/remaining-handler-registration.json)。"
+  ],
+  "initial_bytes": 2335240520,
+  "final_bytes": 659009579,
+  "reduced_bytes": 1676230941,
+  "reduction_percent": 71.77979855368389,
+  "maintenance": {
+    "RecoveryError": null,
+    "BeforeBytes": 1823981291,
+    "DerivedRemovedBytes": 1164971712,
+    "BackupVerified": true,
+    "Converted": [
+      {
+        "Input": "D:\\AppData\\Index\\v9\\9ACBEFD40DDAC9E8\\base-a.bin",
+        "Info": {
+          "bytes": 327574736,
+          "crc64": "12191496080057338857",
+          "version": 12,
+          "built": 1792745553,
+          "nodes": 2463950
+        },
+        "Output": "D:\\AppData\\Index\\v9\\9ACBEFD40DDAC9E8\\base-a.bin.maintenance-new",
+        "Slot": "a"
+      },
+      {
+        "Input": "D:\\AppData\\Index\\v9\\9ACBEFD40DDAC9E8\\base-b.bin",
+        "Info": {
+          "bytes": 327561632,
+          "crc64": "14290883477682623974",
+          "version": 12,
+          "built": 1792745977,
+          "nodes": 2463927
+        },
+        "Output": "D:\\AppData\\Index\\v9\\9ACBEFD40DDAC9E8\\base-b.bin.maintenance-new",
+        "Slot": "b"
+      }
+    ],
+    "Error": null,
+    "Phase": "complete",
+    "Success": true,
+    "Backup": "E:\\Projects\\pulse\\dist\\index-maintenance-20261023-04",
+    "IndexChanged": true,
+    "FinishedUtc": "2026-10-23T09:01:35.6081338Z",
+    "BinaryChanged": false
+  },
+  "final_check": {
+    "Service": {
+      "State": "Running",
+      "StartMode": "Auto",
+      "ProcessId": 24692
+    },
+    "DerivedCopiesAbsent": true,
+    "FullIndexRollbackHashesVerified": 21,
+    "CheckedUtc": "2026-10-23T09:03:40.0919138Z",
+    "Snapshots": [
+      {
+        "Slot": "a",
+        "Info": {
+          "bytes": 327571536,
+          "crc64": "5859642830163778465",
+          "version": 12,
+          "built": 1792746109,
+          "nodes": 2464031
+        }
+      },
+      {
+        "Slot": "b",
+        "Info": {
+          "bytes": 327561632,
+          "crc64": "14290883477682623974",
+          "version": 12,
+          "built": 1792745977,
+          "nodes": 2463927
+        }
+      }
+    ],
+    "Success": true,
+    "OriginalAclPreserved": true,
+    "ActiveManifestCrcValid": true
+  },
+  "shell_deployed": false,
+  "live_search_transport_passed": true,
+  "live_search_budgets_passed": false
+}

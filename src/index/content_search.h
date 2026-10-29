@@ -48,6 +48,7 @@ struct ContentSearchRequest {
     size_t maximum_hits = 0; // 0 means complete results.
     bool paged_results = false; // Client-side disk spool; not an IPC payload flag.
     std::shared_ptr<ContentResultStore> previous_results; // Same-query background refresh only.
+    bool resume_previous = false; // Rebind an unchanged query to another window owner.
 };
 
 struct ContentHit {

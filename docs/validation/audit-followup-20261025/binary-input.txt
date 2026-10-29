@@ -1,0 +1,77 @@
+[PASS] USN V2 reads bounded fixed fields and the nondefault filename offset
+[PASS] USN V2 accepts a filename immediately following its fixed header
+[PASS] USN empty batch needs no input pointer
+[PASS] USN nonempty input rejects a null pointer
+[PASS] USN rejects every proper prefix of a complete record
+[PASS] USN zero record length cannot stall iteration
+[PASS] USN short record cannot expose fixed fields
+[PASS] USN record length cannot exceed available bytes
+[PASS] USN record length requires eight-byte alignment
+[PASS] USN unsupported major version is rejected
+[PASS] USN unsupported minor version is rejected
+[PASS] USN filename cannot overlap the fixed header
+[PASS] USN filename offset requires UTF-16 alignment
+[PASS] USN filename offset cannot exceed its record
+[PASS] USN filename length requires complete UTF-16 units
+[PASS] USN filename length cannot extend beyond its record
+[PASS] USN accepts a zero-length filename at the record boundary
+[PASS] USN validates concatenated records of different lengths
+[PASS] USN batch rejects a malformed record after a valid prefix
+[PASS] USN batch rejects a truncated final record
+[PASS] USN batch rejects an incomplete trailing header
+[PASS] USN failed reads clear a previously populated output view
+[PASS] EMF accepts a complete binary header and EOF fixture
+[PASS] EMF accepts an intervening native record
+[PASS] EMF rejects every proper prefix of a complete fixture
+[PASS] metafile nonempty input rejects a null pointer
+[PASS] metafile empty input is rejected
+[PASS] EMF rejects an incorrect signature
+[PASS] EMF rejects a declared file size beyond captured input
+[PASS] EMF rejects a declared file size shorter than captured input
+[PASS] EMF rejects zero-sized header records
+[PASS] EMF rejects headers shorter than the fixed fields
+[PASS] EMF rejects headers extending beyond input
+[PASS] EMF rejects header record misalignment
+[PASS] EMF rejects declared and actual record count mismatch
+[PASS] EMF rejects declared record counts over budget
+[PASS] EMF zero-sized records cannot stall iteration
+[PASS] EMF rejects records smaller than their common header
+[PASS] EMF rejects record size misalignment
+[PASS] EMF rejects records extending beyond input
+[PASS] EMF rejects an undersized EOF record
+[PASS] EMF requires an EOF record
+[PASS] EMF EOF must end at the input boundary
+[PASS] EMF accepts description characters contained in an extended header
+[PASS] EMF description cannot overlap fixed header fields
+[PASS] EMF description offset requires UTF-16 alignment
+[PASS] EMF description offset cannot exceed its header
+[PASS] EMF description length cannot overflow its header
+[PASS] EMF accepts the exact actual record budget
+[PASS] EMF enforces actual record budget despite a small declared count
+[PASS] EMF accepts a structurally complete comment container at the byte budget
+[PASS] EMF rejects an otherwise structured container over the byte budget
+[PASS] WMF accepts a complete standard binary header and EOF fixture
+[PASS] WMF accepts an intervening native record
+[PASS] WMF accepts supported memory type and older header version
+[PASS] WMF rejects every proper prefix of a standard fixture
+[PASS] WMF rejects unsupported file types
+[PASS] WMF rejects unsupported versions
+[PASS] WMF rejects incorrect fixed header length
+[PASS] WMF rejects nonzero reserved parameter count
+[PASS] WMF rejects a declared file size beyond input
+[PASS] WMF rejects byte lengths containing an incomplete WORD
+[PASS] WMF zero-sized records cannot stall iteration
+[PASS] WMF rejects records smaller than their common header
+[PASS] WMF record size must respect its header maximum
+[PASS] WMF record size cannot overflow or exceed captured input
+[PASS] WMF rejects a truncated record header
+[PASS] WMF requires an EOF record
+[PASS] WMF EOF must end at the input boundary
+[PASS] WMF EOF cannot contain extra parameters
+[PASS] WMF accepts a placeable binary header with a correct checksum
+[PASS] WMF rejects every proper prefix of a placeable fixture
+[PASS] WMF rejects a corrupted placeable checksum
+[PASS] WMF validates the standard header following a placeable header
+[PASS] WMF accepts the exact actual record budget
+[PASS] WMF rejects actual record counts over budget
+76 PASS, 0 FAIL

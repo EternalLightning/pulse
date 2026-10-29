@@ -1,0 +1,20 @@
+{
+    "RecoveryError":  null,
+    "BackupVerified":  true,
+    "Utc":  "2026-10-24T03:30:35.3114370Z",
+    "Deferred":  [
+
+                 ],
+    "Error":  null,
+    "Phase":  "complete",
+    "Success":  true,
+    "ChangedFiles":  [
+                         "Pulse.exe",
+                         "Pulse.Index.exe",
+                         "Pulse.Shell.exe",
+                         "Pulse.Preview.exe",
+                         "Pulse.Document.exe"
+                     ],
+    "BackupFiles":  69,
+    "BackupDirectory":  "E:\\Projects\\pulse\\dist\\quality-release-1.2.0.1-rollback-20261024-112650"
+}

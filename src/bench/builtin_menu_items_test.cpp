@@ -99,17 +99,17 @@ int wmain() {
     const auto visible = app::FilterBuiltinMenuItems({Item(app::CmdOpen), copied_path,
         core_strip, tags, empty_group, shell_group, Item(app::CmdProperties), undo},
         app::kBuiltinMenuMask);
-    check(visible.size() == 4 && visible[0].command == app::CmdOpen &&
+    check(visible.size() == 3 && visible[0].command == app::CmdOpen &&
           visible[0].separator_after && visible[1].quick_swatches.size() == 4 &&
           visible[2].children.size() == 1 && visible[2].children[0].command == app::CmdShellComBase + 17 &&
-          visible.back().command == app::CmdProperties && !visible.back().separator_after,
+          !visible.back().separator_after,
           "hidden rows transfer separators, remove empty flyouts and tag strips, and retain Shell children");
     check(HasCommand(visible, app::CmdOpen) && HasCommand(visible, app::CmdCut) &&
           HasCommand(visible, app::CmdCopy) && HasCommand(visible, app::CmdDelete) &&
-          HasCommand(visible, app::CmdRename) && HasCommand(visible, app::CmdProperties) &&
+          HasCommand(visible, app::CmdRename) && !HasCommand(visible, app::CmdProperties) &&
           !HasCommand(visible, app::CmdTags) && !HasCommand(visible, app::CmdSelectAll) &&
           !HasCommand(visible, app::CmdUndo),
-          "mandatory operations remain available when every optional Pulse menu item is hidden");
+          "hiding optional Properties retains Open, the core action strip, and Shell commands");
     for (const auto* language : {L"zh-CN", L"en-US"}) {
         l10n::SetLanguage(language);
         bool labels = true;

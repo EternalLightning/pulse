@@ -12,6 +12,7 @@ struct EditComposition::Impl {
     struct Entry {
         ComPtr<IDCompositionVisual> visual;
         ComPtr<IDCompositionSurface> surface;
+        ComPtr<IDCompositionEffectGroup> opacity;
         UINT width = 0, height = 0;
     };
     HWND host;
@@ -47,7 +48,17 @@ struct EditComposition::Impl {
         if (target) target->SetRoot(nullptr);
         if (device) device->Commit();
     }
-    bool Place(HWND edit, IDCompositionVisual* visual, UINT width, UINT height) {
+    bool Place(HWND edit, Entry& entry, UINT width, UINT height) {
+        auto* visual = entry.visual.Get();
+        const BYTE alpha = EditSurfaceOpacity(edit);
+        if (alpha < 255) {
+            if ((!entry.opacity && FAILED(device->CreateEffectGroup(&entry.opacity))) ||
+                FAILED(entry.opacity->SetOpacity(alpha / 255.0f)) ||
+                FAILED(visual->SetEffect(entry.opacity.Get()))) return false;
+        } else if (entry.opacity) {
+            if (FAILED(visual->SetEffect(nullptr))) return false;
+            entry.opacity.Reset();
+        }
         POINT origin{};
         if (!ClientToScreen(edit, &origin) || !ScreenToClient(host, &origin)) return false;
         const D2D_RECT_F clip{0, 0, static_cast<float>(width), static_cast<float>(height)};
@@ -106,7 +117,7 @@ bool EditComposition::Present(HWND edit, ID2D1Bitmap1* bitmap) {
     }
     target.Reset(); texture.Reset();
     const HRESULT ended = entry->surface->EndDraw();
-    if (FAILED(hr) || FAILED(ended) || !state.Place(edit, entry->visual.Get(), size.width, size.height)) return false;
+    if (FAILED(hr) || FAILED(ended) || !state.Place(edit, *entry, size.width, size.height)) return false;
     if (replace) {
         if (FAILED(state.root->AddVisual(next.visual.Get(), TRUE, nullptr))) return false;
         if (found != state.entries.end()) state.root->RemoveVisual(found->second.visual.Get());
@@ -122,7 +133,7 @@ void EditComposition::Synchronize(HWND edit) {
     auto found = state.entries.find(edit);
     if (found == state.entries.end()) return;
     if (!IsWindowVisible(edit)) { Remove(edit); return; }
-    if (state.Place(edit, found->second.visual.Get(), found->second.width, found->second.height))
+    if (state.Place(edit, found->second, found->second.width, found->second.height))
         state.device->Commit();
 }
 void EditComposition::Remove(HWND edit) {

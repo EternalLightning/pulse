@@ -1,0 +1,29 @@
+{
+  "number": 50,
+  "title": "[Bug] 拖拽窗体不能触发Groupy",
+  "body": "我平时使用[Groupy](https://www.stardock.com/products/groupy/) 管理窗体，拖拽Pulse标题栏不能触发Groupy的tab bar/合并操作，手动添加也无法识别窗口（不在候选列表中）",
+  "url": "https://github.com/jimmgreen/pulse/issues/50",
+  "captured_at": "2026-10-23T03:10:07.224286+00:00",
+  "updated_at": "2026-09-30T21:16:50Z",
+  "comments": [
+    {
+      "body": "感谢反馈！原因可能是 Pulse 为了自绘标题栏使用了特殊的窗口样式，Groupy 会把这类窗口过滤掉。需要在不影响标题栏和动画的前提下调整，会继续跟进。",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈！原因可能是 Pulse 为了自绘标题栏使用了特殊的窗口样式，Groupy 会把这类窗口过滤掉。需要在不影响标题栏和动画的前提下调整，会继续跟进。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/50#issuecomment-5919890664"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPQtWgAAqjU5MTk4OTA2NjQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoPQtYdABqzMyMjAxODYzMzc0"
+  }
+}

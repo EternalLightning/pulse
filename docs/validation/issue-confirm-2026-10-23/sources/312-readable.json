@@ -1,0 +1,29 @@
+{
+  "number": 312,
+  "title": "深色模式下，状态栏字体颜色显示异常",
+  "body": "<img width=\"3000\" height=\"1904\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9abdddc0-3ba7-41c6-9253-fba185bb540d\" />\n\nPulse\n版本: 1.0.56 · x64\n构建时间: 2026-10-16 08:50\n构建 ID: 20261016T005022Z-C715C169\n操作系统: Windows 11 Pro for Workstations 26H2 (26300.9711)\n安装位置: D:\\ProgramFile\\Pulse\n索引服务: 运行中（全盘索引）\n显示: 200% 缩放 · Direct2D\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/312",
+  "captured_at": "2026-10-23T03:10:07.138493+00:00",
+  "updated_at": "2026-10-19T01:09:17Z",
+  "comments": [
+    {
+      "body": "@jimmgreen ",
+      "bodyHTML": "<p dir=\"auto\"><a class=\"user-mention notranslate\" data-hovercard-type=\"user\" data-hovercard-url=\"/users/jimmgreen/hovercard\" data-octo-click=\"hovercard-link-click\" data-octo-dimensions=\"link_type:self\" href=\"https://github.com/jimmgreen\">@jimmgreen</a></p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjMzMDYwODc3",
+        "login": "cheechang",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/33060877?u=11c513be5b8b28ecede0b989ae595288cf65d7b8&v=4",
+        "profileUrl": "https://github.com/cheechang",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/312#issuecomment-6257508328"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoVG0qkgAqjYyNTc1MDgzMjg=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoVG0qkgAqjYyNTc1MDgzMjg="
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "Path": "E:\\Projects\\pulse\\build\\Pulse.Shell.exe",
+    "Version": "1.2.0.0",
+    "SHA256": "010DD42FC9C49062AEFCE8C9F02B224AD8CA9012580B5AEE804DAA3285FC8B61"
+  },
+  {
+    "Path": "E:\\Projects\\pulse\\bench_data\\sevenzip-menu\\Pulse.Shell.exe",
+    "Version": "1.2.0.0",
+    "SHA256": "010DD42FC9C49062AEFCE8C9F02B224AD8CA9012580B5AEE804DAA3285FC8B61"
+  },
+  {
+    "Path": "D:\\Applications\\Pulse\\Pulse.exe",
+    "Version": "1.2.0.0",
+    "SHA256": "1B4AE2FA4EED245546252BA4ED0866E0D0A59B88A9EE5B522DBF439D99D8A77B"
+  },
+  {
+    "Path": "D:\\Applications\\Pulse\\Pulse.Shell.exe",
+    "Version": "1.2.0.0",
+    "SHA256": "C9933AA58944E1FDADB4BEBAC219BCBC8759B21D275FE0187ECC3903B31B435C"
+  },
+  {
+    "Path": "E:\\Applications\\7-Zip\\7-zip.dll",
+    "Version": "26.04",
+    "SHA256": "F9E21C22019D14643441A6889D8BE3802053AB294814752E600C8788750B518C"
+  }
+]

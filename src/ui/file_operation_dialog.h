@@ -4,6 +4,7 @@
 #include "fluent_components.h"
 #include "ui_compositor.h"
 #include "content_reveal_animation.h"
+#include "smooth_scroll.h"
 #include "../ops/ops_manager.h"
 
 #include <deque>
@@ -72,7 +73,8 @@ private:
     void Render(bool present = true);
     void ResizeForDetails(bool preserve_center);
     float DetailBlockHeight() const;
-    void ScrollFailureDetails(float delta);
+    void ScrollFailureDetails(float delta, bool animate = true);
+    void UpdateFailureScrollTimer();
     int HitTestControl(float x, float y) const;
     void RequestClose();
     void RequestCancel();
@@ -101,6 +103,8 @@ private:
     float scale_ = 1.0f;
     float failure_scroll_ = 0.0f;
     float failure_scroll_max_ = 0.0f;
+    float failure_viewport_ = 0.0f;
+    SmoothScroll failure_scroll_animation_;
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;
     int pressed_ = 0;

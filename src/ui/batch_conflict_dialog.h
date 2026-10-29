@@ -9,7 +9,7 @@ namespace pulse::ui {
 struct BatchConflictLabels {
     std::wstring title = L"Resolve file conflicts";
     std::wstring instruction = L"Choose an action for each item. Keep both is selected by default.";
-    std::wstring source = L"Source", destination = L"Existing destination";
+    std::wstring source = L"Source", destination = L"Existing";
     std::wstring replace = L"Replace", skip = L"Skip", keep_both = L"Keep both";
     std::wstring apply_all = L"Apply to every row", confirm = L"Continue", cancel = L"Cancel";
     std::wstring folder = L"Folder", reparse = L"Link", unknown = L"Unknown";
@@ -29,7 +29,7 @@ public:
         bool dark, D2D1_COLOR_F accent);
 
 private:
-    enum class Action { Apply, Select, Confirm, Cancel };
+    enum class Action { Apply, Select, Confirm, Cancel, Close };
     struct Control {
         D2D1_RECT_F bounds{};
         Action action = Action::Cancel;
@@ -42,9 +42,14 @@ private:
         const BatchConflictLabels& labels, bool dark, D2D1_COLOR_F accent, bool interactive);
     bool Valid() const;
     void Layout();
+    D2D1_RECT_F DetailsRect(const D2D1_RECT_F& row) const;
     bool Render(bool present = true);
     void Text(const std::wstring& text, const D2D1_RECT_F& bounds, D2D1_COLOR_F color, bool heading = false);
-    void Scroll(float delta);
+    void Scroll(float delta, bool smooth = false);
+    bool TickScroll(uint64_t now);
+    void SetScrollOffset(float value);
+    void StopScroll();
+    void RefreshMotion();
     void ScrollAt(float y);
     void Focus(int direction);
     int Hit(float x, float y) const;
@@ -67,7 +72,9 @@ private:
     float header_height_ = 0, footer_height_ = 0;
     int hover_ = -1, pressed_ = -1, focus_ = -1;
     bool dark_ = false, backdrop_ = false, done_ = false, owner_disabled_ = false;
-    bool dragging_ = false;
+    bool dragging_ = false, animations_enabled_ = false, scroll_animating_ = false;
+    float scroll_from_ = 0, scroll_target_ = 0;
+    uint64_t scroll_started_ = 0;
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
 };
 

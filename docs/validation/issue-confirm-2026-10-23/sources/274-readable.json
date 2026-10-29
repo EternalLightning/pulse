@@ -1,0 +1,15 @@
+{
+  "number": 274,
+  "title": "右键项目文件夹，选择Git Commit后，会卡很长时间才能出现git提交窗口",
+  "body": "右键项目文件夹，选择Git Commit后，会卡很长时间才能出现git提交窗口。\n不是每次，但是经常。\n\nPulse\n版本: 1.0.56 · x64\n构建时间: 2026-10-16 08:50\n构建 ID: 20261016T005022Z-C715C169\n操作系统: Windows 11 Pro 26H2 (26300.9711)\n安装位置: d:\\Program Files\\Pulse\n索引服务: 运行中（全盘索引）\n显示: 125% 缩放 · Direct2D\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/274",
+  "captured_at": "2026-10-23T03:10:07.145361+00:00",
+  "updated_at": "2026-10-16T07:25:41Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

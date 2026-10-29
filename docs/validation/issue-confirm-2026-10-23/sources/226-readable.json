@@ -1,0 +1,42 @@
+{
+  "number": 226,
+  "title": "无法访问服务器",
+  "body": "访问局域网服务器，提示离线，无法访问，没有任何弹窗出来。正常是应该弹窗要求输入用户名、密码的。\nWindow自带的文件管理器可以正常访问。\n<img width=\"729\" height=\"358\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/82c11b10-29f0-4201-b31f-abd9c6d07127\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/226",
+  "captured_at": "2026-10-23T03:10:07.185969+00:00",
+  "updated_at": "2026-10-22T06:29:00Z",
+  "comments": [
+    {
+      "body": "[Pulse网络路径失效反馈_20261016.md](https://github.com/user-attachments/files/33521626/Pulse._20261016.md)",
+      "bodyHTML": "<p dir=\"auto\"><a href=\"https://github.com/user-attachments/files/33521626/Pulse._20261016.md\">Pulse网络路径失效反馈_20261016.md</a></p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjQ5ODU4Mjg2",
+        "login": "Jacky527",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/49858286?u=9cf11d4f15b2d5b2a3f25446ec63f21d26fc9955&v=4",
+        "profileUrl": "https://github.com/Jacky527",
+        "name": "Jacky"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/226#issuecomment-6206627533"
+    },
+    {
+      "body": "感谢这么详细的排查记录，对定位帮助很大。\n\n**凭据框**：新版里打开网络文件夹失败时，会和资源管理器一样先用已保存的凭据连接；服务器要求时，弹出系统的凭据输入框，连接成功后自动重新加载。后台刷新不会弹框。\n\n**所有服务器都立刻显示离线（elapsed_ms=0）**：最可能的原因是网络目录读取的并发名额被占满。Pulse 同时最多读取 4 个网络目录；某次读取超时后会被放弃，但它占用的名额要等底层 I/O 真正结束才归还。4 个名额都被卡住时，之后每个网络文件夹都会立即失败，显示离线。你有多台服务器，启动时恢复的网络标签页和侧栏位置的预读又会把名额占满，所以重启也没用；删掉 `session.json`（里面是要恢复的标签页）后就好了。netcache 里只有目录快照，没有任何「离线」标记。\n\n**修复**：\n- 名额满时不再立即失败，而是在这次读取自己的超时时间内等待空出的名额，期间可以取消；\n- 读取失败时，诊断日志会新增一条 `navigation_error`，记录失败原因（Win32 错误、NTSTATUS、超时、名额已满）和错误码。以后如果再遇到，导出诊断就能直接看出原因。\n\n将在下个版本发布。如果新版本里还出现，请附上诊断导出，我再看。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢这么详细的排查记录，对定位帮助很大。</p>\n<p dir=\"auto\"><strong>凭据框</strong>：新版里打开网络文件夹失败时，会和资源管理器一样先用已保存的凭据连接；服务器要求时，弹出系统的凭据输入框，连接成功后自动重新加载。后台刷新不会弹框。</p>\n<p dir=\"auto\"><strong>所有服务器都立刻显示离线（elapsed_ms=0）</strong>：最可能的原因是网络目录读取的并发名额被占满。Pulse 同时最多读取 4 个网络目录；某次读取超时后会被放弃，但它占用的名额要等底层 I/O 真正结束才归还。4 个名额都被卡住时，之后每个网络文件夹都会立即失败，显示离线。你有多台服务器，启动时恢复的网络标签页和侧栏位置的预读又会把名额占满，所以重启也没用；删掉 <code class=\"notranslate\">session.json</code>（里面是要恢复的标签页）后就好了。netcache 里只有目录快照，没有任何「离线」标记。</p>\n<p dir=\"auto\"><strong>修复</strong>：</p>\n<ul dir=\"auto\">\n<li>名额满时不再立即失败，而是在这次读取自己的超时时间内等待空出的名额，期间可以取消；</li>\n<li>读取失败时，诊断日志会新增一条 <code class=\"notranslate\">navigation_error</code>，记录失败原因（Win32 错误、NTSTATUS、超时、名额已满）和错误码。以后如果再遇到，导出诊断就能直接看出原因。</li>\n</ul>\n<p dir=\"auto\">将在下个版本发布。如果新版本里还出现，请附上诊断导出，我再看。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/226#issuecomment-6334333067"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoUKGBdAAqjYyMDY2Mjc1MzM=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJMc-AAqjYzMzQzMzMwNjc="
+  }
+}

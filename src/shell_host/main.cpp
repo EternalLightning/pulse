@@ -1,6 +1,8 @@
 #include "../common/file_operation_error.h"
 #include "../common/progress_percent.h"
 #include "host_log_line.h"
+#include "device_operations.h"
+#include "../common/shell_id.h"
 // main.cpp — Pulse.Shell.exe: windowless STA+COM shell-operation proxy.
 //
 // Pipe server on \\.\pipe\pulse_shell_<ui-pid> (ui-pid passed as argv[1],
@@ -21,6 +23,7 @@
 #include "deletion_identity.h"
 #include "delete_fileop.h"
 #include "recycle_fileop.h"
+#include "permanent_fileop.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
 #include "../common/file_create.h"
@@ -77,6 +80,7 @@ struct Request {
     uint64_t delete_token = 0;
     std::vector<pulse::FileIdentity> expected_identities;
     HWND owner = nullptr;
+    pulse::shell::DeviceOperation device_operation;
 };
 
 bool IsAuthorizedDeletion(uint32_t type) {
@@ -345,7 +349,7 @@ std::wstring ToParsingPath(std::wstring path) {
 
 HRESULT MakeItem(const std::wstring& path, IShellItem** out) {
     const std::wstring parsed = ToParsingPath(path);
-    HRESULT hr = SHCreateItemFromParsingName(parsed.c_str(), nullptr, IID_PPV_ARGS(out));
+    HRESULT hr = pulse::shell_id::CreateItem(parsed, IID_PPV_ARGS(out));
     if (FAILED(hr) && parsed != path)
         hr = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(out));
     return hr;
@@ -410,6 +414,11 @@ HRESULT ExecuteCreate(const uint32_t type, const std::wstring& path,
 }
 
 void ExecuteRequest(Request* req) {
+    if (req->type == REQ_DEVICE_OPERATION) {
+        const HRESULT hr = pulse::shell::ExecuteDeviceOperation(req->device_operation);
+        SendDone(req->id, hr, hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), L"");
+        return;
+    }
     if (req->type == REQ_DELETE_RECYCLE || req->type == REQ_REALDELETE) {
         SendDone(req->id, E_ACCESSDENIED, false, L"Legacy deletion frame has no deletion-service authorization.");
         delete req;
@@ -427,6 +436,19 @@ void ExecuteRequest(Request* req) {
             delete req;
             return;
         }
+    }
+    if (req->type == REQ_AUTHORIZED_DELETE) {
+        const auto result = pulse::shell::DeletePermanentAuthorized(req->sources, req->expected_identities,
+            [id = req->id] { return g.cancel_id.load() == id; },
+            [id = req->id](size_t done, size_t total, const std::wstring& path) {
+                SendProgress(id, total ? static_cast<float>(done * 100.0 / total) : 0.0f, path, done, total);
+            });
+        const auto error = FAILED(result.error) && !result.cancelled
+            ? pulse::format::FileOperationErrorText(result.error) + L" | " + result.failed_path : std::wstring{};
+        if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
+        SendDeleteDone(req->id, result.error, result.cancelled, error, result.deleted, {}, {}, result.failed_path);
+        delete req;
+        return;
     }
     if (req->type == REQ_AUTHORIZED_RECYCLE) {
         const auto result = pulse::shell::RecycleAuthorized(req->sources,
@@ -699,6 +721,29 @@ DWORD WINAPI ReaderThreadImpl() {
                 }
                 break;
             }
+            case REQ_DEVICE_OPERATION: {
+                if (g_context_worker) {
+                    SendDone(h.request_id, E_ACCESSDENIED, false, L"Context workers cannot perform device operations");
+                    break;
+                }
+                auto request = std::make_unique<Request>();
+                request->type = h.type;
+                request->id = h.request_id;
+                PayloadReader reader(payload.data(), payload.size());
+                uint64_t owner = 0;
+                auto& operation = request->device_operation;
+                if (!reader.GetU64(owner) || !reader.GetString(operation.verb) ||
+                    !reader.GetString(operation.name) || !reader.GetStringArray(operation.ids) ||
+                    reader.remaining() != 0 || operation.ids.empty() || operation.ids.size() > 4096) {
+                    SendDone(h.request_id, E_INVALIDARG, false, L"Malformed device operation");
+                    break;
+                }
+                operation.owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(owner));
+                if (PostMessageW(g.hwnd_msg, WM_EXEC_REQUEST, 0, reinterpret_cast<LPARAM>(request.get())))
+                    request.release();
+                else SendDone(h.request_id, HRESULT_FROM_WIN32(GetLastError()), false, L"Shell queue unavailable");
+                break;
+            }
             case REQ_DELETE_RECYCLE:
             case REQ_REALDELETE:
             case REQ_AUTHORIZED_RECYCLE:
@@ -831,8 +876,9 @@ UINT QueryContextMenuFlags(const CtxSessionData& d) {
 // Walks the populated HMENU via the same nested-flyout rules as per-handler
 // collection so fallback and worker paths cannot drift.
 void CollectCtxItems(IContextMenu* menu, IContextMenu2* menu2, HMENU hmenu,
-                     bool background, std::vector<CtxItemOut>& out) {
+                     bool background, std::vector<CtxItemOut>& out, bool preserve_builtin = false) {
     pulse::shell::CtxHandlerSlot slot;
+    slot.preserve_builtin = preserve_builtin;
     slot.menu = menu;
     slot.menu2 = menu2;
     slot.hmenu = hmenu;
@@ -870,7 +916,7 @@ HRESULT BuildCtxMenu(const CtxSessionData& d, IContextMenu** out_menu, HMENU* ou
         std::vector<PIDLIST_ABSOLUTE> pidls;
         for (const auto& p : d.paths) {
             PIDLIST_ABSOLUTE pidl = nullptr;
-            if (SUCCEEDED(SHParseDisplayName(ToParsingPath(p).c_str(), nullptr, &pidl, 0, nullptr)))
+            if (SUCCEEDED(pulse::shell_id::ParseId(ToParsingPath(p), &pidl)))
                 pidls.push_back(pidl);
         }
         if (pidls.empty()) return E_INVALIDARG;
@@ -895,7 +941,8 @@ HRESULT BuildCtxMenu(const CtxSessionData& d, IContextMenu** out_menu, HMENU* ou
     }
     IContextMenu2* menu2 = nullptr;
     menu->QueryInterface(IID_PPV_ARGS(&menu2));
-    CollectCtxItems(menu, menu2, hmenu, d.background, items);
+    CollectCtxItems(menu, menu2, hmenu, d.background, items,
+        !d.paths.empty() && d.paths.front().starts_with(L"::"));
     if (menu2) menu2->Release();
     *out_menu = menu;
     *out_hmenu = hmenu;
@@ -919,7 +966,7 @@ void CtxInvoke(const CtxSessionData& d, IContextMenu* menu, UINT id_first,
     info.hwnd = d.owner;
     info.lpVerb = MAKEINTRESOURCEA(item_id - id_first);
     info.lpVerbW = MAKEINTRESOURCEW(item_id - id_first);
-    info.lpDirectoryW = dir.c_str();
+    info.lpDirectoryW = dir.starts_with(L"::") ? nullptr : dir.c_str();
     info.nShow = SW_SHOWNORMAL;
     const HRESULT hr = menu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
     SendDone(invoke_req_id, hr, false,
@@ -1158,6 +1205,8 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
 
     auto handlers = pulse::shell::EnumerateCtxHandlers(
         data->background, data->paths.front(), data->disabled_clsids);
+    // Namespace items own their menu. Registry file associations cannot describe MTP.
+    if (data->paths.front().starts_with(L"::")) handlers.clear();
 #ifdef PULSE_CONTEXT_PROCESS_TESTING
     if (data->paths.size() == 1 && data->paths.front() == L":pulse-context-process-test:") {
         handlers = {{ {}, L"fixture-ready", L"fixture-ready" },

@@ -1,0 +1,12 @@
+﻿[
+    {
+        "test":  "delete-parallel",
+        "exit_code":  0,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\permanent-parallel-desktop.log"
+    },
+    {
+        "test":  "delete-default",
+        "exit_code":  0,
+        "log":  "E:\\Projects\\pulse\\docs\\validation\\performance-adaptation-20261028\\permanent-default-desktop.log"
+    }
+]

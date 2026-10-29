@@ -27,7 +27,9 @@ bool QueryRecycleBinInfo(RecycleBinInfo& out);
 bool ReadRecycleIndex(const std::wstring& index_path, RecycleItem& out);
 std::wstring RecycleIndexPath(const std::wstring& content_path);
 // Append live items belonging to the current user under one $Recycle.Bin root.
-// Missing directories are empty; access/enumeration failures return false.
+// Missing directories are empty. Failed enumeration, unreadable/malformed
+// metadata for live payloads and orphan payloads return false; valid items are
+// still appended. Payload-free indexes retained by exact restore are ignored.
 bool EnumerateRecycleBinAtRoot(const std::wstring& recycle_root, std::vector<DirEntry>& out);
 void EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo* info = nullptr);
 

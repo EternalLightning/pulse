@@ -1,0 +1,55 @@
+{
+  "number": 230,
+  "title": "用 Pulse 代替文件资源管理器的开关都打开了了，win+E打开的是Windows资源管理器，不知道是不是Windows预览版的原因，26340.9616",
+  "body": "",
+  "url": "https://github.com/jimmgreen/pulse/issues/230",
+  "captured_at": "2026-10-23T03:10:07.181788+00:00",
+  "updated_at": "2026-10-14T10:06:33Z",
+  "comments": [
+    {
+      "body": "那儿几个开启项的上边还有一个总开关哦",
+      "bodyHTML": "<p dir=\"auto\">那儿几个开启项的上边还有一个总开关哦</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE5NjEyOTAz",
+        "login": "flowprog",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/19612903?u=836f4406c5b578602c6f0000cfcd8b6d551a9e84&v=4",
+        "profileUrl": "https://github.com/flowprog",
+        "name": "flowprog"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/230#issuecomment-6136033641"
+    },
+    {
+      "body": "> 1. 那儿几个开启项的上边还有一个总开关哦\n\n总开关开了",
+      "bodyHTML": "<blockquote>\n<ol dir=\"auto\">\n<li>那儿几个开启项的上边还有一个总开关哦</li>\n</ol>\n</blockquote>\n<p dir=\"auto\">总开关开了</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjkxMDQ1NDkw",
+        "login": "cz-97",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/91045490?v=4",
+        "profileUrl": "https://github.com/cz-97",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/230#issuecomment-6138071021"
+    },
+    {
+      "body": "另一台电脑升级到了26340.9616后复现了问题，升级之前win+e打开的是此程序",
+      "bodyHTML": "<p dir=\"auto\">另一台电脑升级到了26340.9616后复现了问题，升级之前win+e打开的是此程序</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjkxMDQ1NDkw",
+        "login": "cz-97",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/91045490?v=4",
+        "profileUrl": "https://github.com/cz-97",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/230#issuecomment-6165889679"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTLb2FgAqjYxMzYwMzM2NDE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoTngIAAAqjYxNjU4ODk2Nzk="
+  }
+}

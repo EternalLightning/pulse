@@ -47,9 +47,10 @@ bool Pack(const fs::path& archive, const fs::path& source, const std::wstring& o
     if (code != 0) std::cerr << "[DIAG] archive fixture process exit: " << code << '\n';
     return code == 0;
 }
-void ProgressTests() {
+void ProgressSamplingTests() {
     ArchiveProgressTracker tracker;
     tracker.Begin(ArchivePhase::Extracting, 10000000, 2, 0);
+    tracker.Feed("0%\r", 0);
     tracker.Feed("  2", 300);
     tracker.Feed("5% 1 - file.txt\r", 1000);
     Check(tracker.Status().percent == 25 && tracker.Status().processed_bytes == 2500000 &&
@@ -76,6 +77,48 @@ void ProgressTests() {
     tracker.Begin(ArchivePhase::Completed, 0, 0, 0);
     tracker.Advance(0, 0, {}, 0);
     Check(tracker.Status().percent == 100, "empty or fully skipped archives finish at 100 percent");
+    constexpr uint64_t mib = 1024ull * 1024;
+    tracker.Begin(ArchivePhase::Extracting, 1000 * mib, 1, 0);
+    tracker.Feed("35%\r", 1000);
+    Check(tracker.Status().bytes_per_second == 0 && tracker.Status().eta_seconds == 0,
+        "first percentage establishes a baseline instead of inventing a startup speed spike");
+    tracker.Feed("37%\r", 2000);
+    bool stable = true;
+    for (ULONGLONG tick = 2020; tick <= 7000; tick += 20) {
+        if (tick % 1000 == 0) {
+            const auto percent = 37 + (tick - 2000) / 1000 * 2;
+            tracker.Feed(std::to_string(percent) + "%\r", tick);
+        } else {
+            tracker.Feed(tick % 100 == 0 ? "1%\rfilename 100%\r" : "", tick);
+        }
+        stable = stable && std::abs(tracker.Status().bytes_per_second - 20 * mib) < 1.0;
+    }
+    Check(stable && tracker.Status().eta_seconds > 0,
+        "sparse percentages with empty, backwards and diagnostic polls retain steady throughput");
+    tracker.Feed("49%\r", 9000);
+    Check(tracker.Status().bytes_per_second > 0 && tracker.Status().bytes_per_second < 20 * mib,
+        "measured slowdown still lowers the rate when advancing percentages arrive more slowly");
+    tracker.Begin(ArchivePhase::Extracting, 1000 * mib, 1, 0);
+    tracker.Feed("0%\r", 0);
+    tracker.Feed("1%\r", 6000);
+    const auto slow_speed = tracker.Status().bytes_per_second;
+    bool slow_stable = slow_speed > 0;
+    for (ULONGLONG tick = 6020; tick <= 18000; tick += 20) {
+        if (tick % 6000 == 0) tracker.Feed(std::to_string(tick / 6000) + "%\r", tick);
+        else tracker.Feed("1%\r", tick);
+        slow_stable = slow_stable && std::abs(tracker.Status().bytes_per_second - slow_speed) < 1.0;
+    }
+    Check(slow_stable, "slow one-percent updates do not produce recurring spikes or decay between reports");
+    tracker.Feed("3%\r", 30000);
+    Check(tracker.Status().bytes_per_second == 0 && tracker.Status().eta_seconds == 0,
+        "a prolonged extraction stall clears stale speed and ETA");
+    tracker.Feed("4%\r", 31000);
+    Check(tracker.Status().bytes_per_second > 0 && tracker.Status().bytes_per_second < slow_speed,
+        "resumed progress includes the stalled interval without a recovery spike");
+}
+void ProgressTests() {
+    ProgressSamplingTests();
+    ArchiveProgressTracker tracker;
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
     wchar_t module[32768]{};
     GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
@@ -376,6 +419,74 @@ void RetryIntegrityAudit() {
         std::cout << "[LIMIT] cancellation did not retain a partial member in this timing window\n";
     }
     std::cout << "[INFO] retained isolated audit fixture: " << DiagnosticUtf8(root.wstring()) << '\n';
+}
+
+void JournalErrorTests(const wchar_t* archive) {
+    const auto root = fs::absolute(fs::path(L"bench_data") /
+        (L"archive-journal-errors-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    fs::create_directories(root / L"target");
+    const auto target = root / L"target";
+    const auto marker = target / ArchiveRetry::kName;
+    const auto source = (root / L"source.zip").wstring();
+    std::wstring error;
+    {
+        ArchiveRetry journal;
+        Check(journal.Open(target, source, error), "writable extraction directory accepts recovery journal");
+        ArchiveRetry concurrent;
+        Check(!concurrent.Open(target, source, error) && error.find(L"0x80070020") != std::wstring::npos &&
+            error.find(L"占用") != std::wstring::npos && error.find(marker.wstring()) != std::wstring::npos,
+            "busy journal reports sharing violation and its path");
+    }
+    Check(!fs::exists(marker), "empty successful journal is removed");
+    std::ofstream(marker) << "user-owned marker";
+    Check(SetFileAttributesW(marker.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY) != FALSE,
+        "prepare read-only recovery record");
+    {
+        ArchiveRetry denied;
+        Check(!denied.Open(target, source, error) && error.find(L"0x80070005") != std::wstring::npos &&
+            error.find(L"管理员") != std::wstring::npos && error.find(marker.wstring()) != std::wstring::npos,
+            "journal access denial reports permissions guidance, system error and path");
+    }
+    Check(SetFileAttributesW(marker.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE, "restore fixture attributes");
+    {
+        ArchiveRetry invalid;
+        Check(!invalid.Open(target, source, error) && error.find(L"无法安全读取") != std::wstring::npos &&
+            error.find(L"管理员") == std::wstring::npos,
+            "invalid recovery data is not misreported as a permissions failure");
+    }
+    {
+        std::ifstream stream(marker);
+        const std::string contents(std::istreambuf_iterator<char>(stream), {});
+        Check(contents == "user-owned marker", "refused recovery record remains unchanged");
+    }
+    fs::create_directories(root / L"source");
+    std::ofstream(root / L"source/member.txt") << "fixture-data";
+    if (Pack(root / L"source.zip", root / L"source", L"")) {
+        const auto result = ExtractArchive(source, (root / L"extracted").wstring(), {}, L"", nullptr);
+        if (result.outcome != ArchiveOutcome::Success) std::cout << "[DIAG] " << DiagnosticUtf8(result.error) << '\n';
+        Check(result.outcome == ArchiveOutcome::Success && fs::exists(root / L"extracted/member.txt") &&
+            !fs::exists(root / L"extracted" / ArchiveRetry::kName),
+            "real archive extracts into writable directory and clears journal");
+    } else Check(false, "pack isolated journal extraction fixture");
+    if (archive) {
+        const auto listing = ListArchive(archive);
+        const auto output = root / L"user-archive";
+        const auto result = ExtractArchive(archive, output.wstring(), {}, L"", nullptr);
+        if (result.outcome != ArchiveOutcome::Success) std::cout << "[DIAG] " << DiagnosticUtf8(result.error) << '\n';
+        bool matches = listing.outcome == ArchiveOutcome::Success && result.outcome == ArchiveOutcome::Success;
+        for (const auto& entry : listing.entries) {
+            const auto path = output / entry.path;
+            matches = matches && (entry.is_dir ? fs::is_directory(path) :
+                fs::is_regular_file(path) && fs::file_size(path) == entry.size);
+        }
+        Check(matches && !fs::exists(output / ArchiveRetry::kName),
+            "user archive extracts with matching entry types and sizes into isolated directory");
+    }
+    if (!failures) {
+        std::error_code cleanup;
+        fs::remove_all(root, cleanup);
+        Check(!cleanup, "isolated journal diagnostics fixtures are cleaned");
+    }
 }
 
 void RetryOwnershipTests() {
@@ -800,12 +911,25 @@ void RecoveryTests() {
 }
 #endif
 int wmain(int argc, wchar_t** argv) {
+    std::cout << std::unitbuf;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--progress-sampling-only") {
+        ProgressSamplingTests();
+        return failures ? 1 : 0;
+    }
+    if ((argc == 2 || argc == 3) && std::wstring_view(argv[1]) == L"--journal-errors-only") {
+        try {
+            JournalErrorTests(argc == 3 ? argv[2] : nullptr);
+        } catch (const fs::filesystem_error& exception) {
+            std::cerr << "[FAIL] journal diagnostic fixture: " << exception.what() << '\n';
+            return 1;
+        }
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--retry-recovery-only") {
         RetryIntegrityAudit();
         RetryOwnershipTests();
         return failures ? 1 : 0;
     }
-    std::cout << std::unitbuf;
     if (argc == 2 && std::wstring(argv[1]) == L"--password-only") return PasswordTests();
 #ifdef PULSE_ARCHIVE_PROCESS_TEST
     if (argc == 2 && std::wstring(argv[1]) == L"--retry-integrity-only") {
@@ -813,7 +937,12 @@ int wmain(int argc, wchar_t** argv) {
         return failures ? 1 : 0;
     }
     if (argc == 2 && std::wstring(argv[1]) == L"--progress-only") {
-        ProgressTests();
+        try {
+            ProgressTests();
+        } catch (const fs::filesystem_error& exception) {
+            std::cerr << "[FAIL] archive progress fixture: " << exception.what() << '\n';
+            return 1;
+        }
         return failures ? 1 : 0;
     }
     if (argc == 2 && std::wstring(argv[1]) == L"--direct-only") {

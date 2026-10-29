@@ -1,0 +1,15 @@
+{
+  "number": 184,
+  "title": "[BUG反馈] 选中 .srt 文件时右侧详细信息侧边栏异常遮挡其他界面元素",
+  "body": "### 问题描述\n在文件管理器中浏览并选中 `.srt`（字幕）类型文件时，右侧的详细信息侧边栏显示正常，但是侧边栏上方的文件预览窗口会遮挡后续操作的交互面板，导致无法正常点击和继续操作。\n\n### 截图附件\n<img width=\"670\" height=\"602\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f21c3531-1af8-4332-bf9c-c0a9b2a54c9a\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/184",
+  "captured_at": "2026-10-23T03:10:07.197260+00:00",
+  "updated_at": "2026-10-10T02:33:18Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

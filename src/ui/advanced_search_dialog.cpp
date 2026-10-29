@@ -408,7 +408,11 @@ private:
             FluentMenu menu;
             if (!menu.Create(hwnd_, &compositor_, scale_)) return;
             menu.SetTheme(dark_, accent_);
-            const int command = menu.TrackPopup(anchor, std::move(items));
+            RECT toggle{static_cast<LONG>(rect.left), static_cast<LONG>(rect.top),
+                static_cast<LONG>(rect.right), static_cast<LONG>(rect.bottom)};
+            MapWindowPoints(hwnd_, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
+            menu.SetToggleRect(toggle);
+            const int command = menu.TrackToolbarPopup(anchor, std::move(items));
             if (!command) return;
             const int value = command - 1;
             if (id == 4) spec_.name_how = static_cast<model::NameMatchHow>(value);

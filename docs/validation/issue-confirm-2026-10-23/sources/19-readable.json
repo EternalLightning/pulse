@@ -1,0 +1,55 @@
+{
+  "number": 19,
+  "title": "excel预览卡顿",
+  "body": "预览excel的时候无法使用滚轮上下翻页，而且很卡",
+  "url": "https://github.com/jimmgreen/pulse/issues/19",
+  "captured_at": "2026-10-23T03:10:07.226958+00:00",
+  "updated_at": "2026-10-20T07:25:18Z",
+  "comments": [
+    {
+      "body": "1.0.45 起 XLSX 改用内置表格预览（固定表头、支持滚轮、可切换工作表），不再依赖 Excel 预览处理器。升级后如果仍然卡顿，麻烦提供文件大小和行数。",
+      "bodyHTML": "<p dir=\"auto\">1.0.45 起 XLSX 改用内置表格预览（固定表头、支持滚轮、可切换工作表），不再依赖 Excel 预览处理器。升级后如果仍然卡顿，麻烦提供文件大小和行数。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/19#issuecomment-5919839574"
+    },
+    {
+      "body": "使用内置表格预览就很流畅了。不过没找到固定表头的设置，我这里看到的是列号固定了，但是实际第一行内容还不能固定。另外列宽不能设置，看的时候不太方便，希望能增加这个功能。",
+      "bodyHTML": "<p dir=\"auto\">使用内置表格预览就很流畅了。不过没找到固定表头的设置，我这里看到的是列号固定了，但是实际第一行内容还不能固定。另外列宽不能设置，看的时候不太方便，希望能增加这个功能。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjMxNDMwOTk3",
+        "login": "huddao",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/31430997?u=0d40889a42c70801555d0e110a0decd145fa3d65&v=4",
+        "profileUrl": "https://github.com/huddao",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/19#issuecomment-6055736855"
+    },
+    {
+      "body": "另外遇到大的复杂的excel表格，预览会闪一下然后边空白卡住，过一会儿能显示的时候，使用滚轮或者拖拽进度条也很难滑动，只能点击进度条位置才能行",
+      "bodyHTML": "<p dir=\"auto\">另外遇到大的复杂的excel表格，预览会闪一下然后边空白卡住，过一会儿能显示的时候，使用滚轮或者拖拽进度条也很难滑动，只能点击进度条位置才能行</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjMxNDMwOTk3",
+        "login": "huddao",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/31430997?u=0d40889a42c70801555d0e110a0decd145fa3d65&v=4",
+        "profileUrl": "https://github.com/huddao",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/19#issuecomment-6285697252"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPQqYEgAqjU5MTk4Mzk1NzQ=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoVgzRzAAqjYyODU2OTcyNTI="
+  }
+}

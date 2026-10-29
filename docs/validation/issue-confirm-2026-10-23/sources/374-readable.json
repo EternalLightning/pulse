@@ -1,0 +1,10 @@
+{
+  "number": 374,
+  "title": "windows大文件夹无法删除",
+  "body": "系统文件夹删除会提示“该文件夹太大，无法放入回收站”，但pulse直接提示无法删除",
+  "url": "https://github.com/jimmgreen/pulse/issues/374",
+  "captured_at": "2026-10-23T05:22:29.761618+00:00",
+  "source_method": "web.run rendered GitHub issue page, description lines147-155",
+  "comments": [],
+  "comments_note": "No comment bodies present in the fetched page; no assertion of complete pagination."
+}

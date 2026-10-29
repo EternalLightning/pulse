@@ -1,0 +1,22 @@
+{
+  "label": "release-m1-address",
+  "kind": "address",
+  "pid": 43216,
+  "samples": 135,
+  "unexpected": 0,
+  "worst_difference": 16,
+  "width": 417,
+  "height": 20,
+  "presentation": "current",
+  "composed_verified": true,
+  "mode": 1,
+  "long_text": false,
+  "theme": 2,
+  "endpoint_ink_pixels": [
+    495,
+    495
+  ],
+  "text_visible": true,
+  "accepted": true,
+  "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+}

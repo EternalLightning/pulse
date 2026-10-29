@@ -27,6 +27,22 @@ bool WithinDeletedPath(const std::wstring& path, const std::wstring& deleted) {
         normalized.starts_with(root) && normalized[root.size()] == L'\\');
 }
 
+bool CoveredPermanentTarget(const DeleteTarget& child, const DeleteTarget& parent) {
+    if (child.disposition != DeleteDisposition::Permanent || parent.disposition != DeleteDisposition::Permanent ||
+        child.physical_paths.size() != 1 || parent.physical_paths.size() != 1) return false;
+    const auto source = fs::NormalizePath(child.physical_paths.front());
+    const auto ancestor = fs::NormalizePath(parent.physical_paths.front());
+    if (source.size() <= ancestor.size() || !WithinDeletedPath(source, ancestor)) return false;
+    // Strict components preserve case-distinct siblings. Reparse ancestors do
+    // not cover their targets because recursive deletion never follows them.
+    for (size_t end = ancestor.size(); end != std::wstring::npos; end = source.find(L'\\', end + 1)) {
+        const DWORD attrs = GetFileAttributesW(source.substr(0, end).c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
+            (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    }
+    return true;
+}
+
 bool IsNetworkDeletionPath(std::wstring_view path) {
     const auto parsed = pulse::path::StripExtendedPathPrefix(path);
     if (parsed.starts_with(L"\\\\")) return true;
@@ -109,6 +125,12 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
         }
         plan.targets.push_back(std::move(target));
     }
+    const auto selected = plan.targets;
+    std::erase_if(plan.targets, [&](const DeleteTarget& target) {
+        return std::any_of(selected.begin(), selected.end(), [&](const DeleteTarget& parent) {
+            return CoveredPermanentTarget(target, parent);
+        });
+    });
     for (const auto& target : plan.targets)
         for (const auto& path : target.physical_paths)
             if (!ipc::IsLosslessDeleteShellPath(path)) {

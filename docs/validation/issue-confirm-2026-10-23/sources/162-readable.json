@@ -1,0 +1,55 @@
+{
+  "number": 162,
+  "title": "[BUG]重命名时首次输入时输入焦点丢失且选词后光标移动到最左侧；[建议]预览文件时按照真实文件头进行判定。",
+  "body": "1.如图，重命名文件进行第一次键入时，输入法的焦点不在当前输入位置，并且选词后会自动跳转最前方。\n\nhttps://github.com/user-attachments/assets/7954d7a7-5ffa-4040-885f-282b4427ecc3\n\n2.对于被修改了后缀的文件（例如jpg后缀但实际为GIF的文件），预览时还会按照文件后缀（jpg）来进行预览，导致无法播放动图等问题。\n\n3.过大的图像（34MB的GIF）无法预览，视频中前者为资源管理器+Quicklook，后者为Pulse的自带预览。\n\nhttps://github.com/user-attachments/assets/f9ff460b-51d3-4213-bf6a-411425a1b171",
+  "url": "https://github.com/jimmgreen/pulse/issues/162",
+  "captured_at": "2026-10-23T03:10:07.203268+00:00",
+  "updated_at": "2026-10-22T06:47:46Z",
+  "comments": [
+    {
+      "body": "地址栏的输入也有同样的问题。\n\nhttps://github.com/user-attachments/assets/609d6845-4d6b-4ce6-8147-13311b1cfd07",
+      "bodyHTML": "<p dir=\"auto\">地址栏的输入也有同样的问题。</p>\n<details open=\"\" class=\"details-reset border rounded-2\">\n  <summary class=\"tmp-px-3 py-2\">\n    <svg aria-hidden=\"true\" data-component=\"Octicon\" height=\"16\" viewBox=\"0 0 16 16\" version=\"1.1\" width=\"16\" data-view-component=\"true\" class=\"octicon octicon-device-camera-video\">\n    <path d=\"M16 3.75v8.5a.75.75 0 0 1-1.136.643L11 10.575v.675A1.75 1.75 0 0 1 9.25 13h-7.5A1.75 1.75 0 0 1 0 11.25v-6.5C0 3.784.784 3 1.75 3h7.5c.966 0 1.75.784 1.75 1.75v.675l3.864-2.318A.75.75 0 0 1 16 3.75Zm-6.5 1a.25.25 0 0 0-.25-.25h-7.5a.25.25 0 0 0-.25.25v6.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-6.5ZM11 8.825l3.5 2.1v-5.85l-3.5 2.1Z\"></path>\n</svg>\n    <span class=\"m-1\">SnowShot_Video_2026-10-09_21-02-39.mp4</span>\n    <span class=\"dropdown-caret\"></span>\n  </summary>\n\n  <video src=\"https://private-user-images.githubusercontent.com/61811099/669705713-609d6845-4d6b-4ce6-8147-13311b1cfd07.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNTYsIm5iZiI6MTc5MjcyNDk1NiwicGF0aCI6Ii82MTgxMTA5OS82Njk3MDU3MTMtNjA5ZDY4NDUtNGQ2Yi00Y2U2LTgxNDctMTMzMTFiMWNmZDA3Lm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDkxNlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTI1MmIwMDQ1OGFjZGE0ZmVhMzMzYTZmZTBlN2M5YmVkMGQ5YTAzZTNkNTY3MmY2YjUyZDk5Yjg2NTkzZGEwMWYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT12aWRlbyUyRm1wNCJ9.OU_N5pKXKdSzjw7O1IdC1dtcjIhx5VQ06E0KefbKgpo\" data-canonical-src=\"https://private-user-images.githubusercontent.com/61811099/669705713-609d6845-4d6b-4ce6-8147-13311b1cfd07.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTI3MjUyNTYsIm5iZiI6MTc5MjcyNDk1NiwicGF0aCI6Ii82MTgxMTA5OS82Njk3MDU3MTMtNjA5ZDY4NDUtNGQ2Yi00Y2U2LTgxNDctMTMzMTFiMWNmZDA3Lm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjEwMjMlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMDIzVDAzMDkxNlomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTI1MmIwMDQ1OGFjZGE0ZmVhMzMzYTZmZTBlN2M5YmVkMGQ5YTAzZTNkNTY3MmY2YjUyZDk5Yjg2NTkzZGEwMWYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT12aWRlbyUyRm1wNCJ9.OU_N5pKXKdSzjw7O1IdC1dtcjIhx5VQ06E0KefbKgpo\" controls=\"controls\" muted=\"muted\" class=\"d-block rounded-bottom-2 border-top width-fit\" style=\"max-height:640px; min-height: 200px\">\n\n  </video>\n</details>\n",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjYxODExMDk5",
+        "login": "SayaGoodBye",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/61811099?u=35535fe6086908ff50a5c06040a1a219b6c1e7e8&v=4",
+        "profileUrl": "https://github.com/SayaGoodBye",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/162#issuecomment-6081494119"
+    },
+    {
+      "body": "感谢反馈。第 1 点（重命名第一次输入时输入法位置不对、选词后光标跳到最左侧）已在本地用微软拼音复现并修复：\n\n**原因**：F2 会先选中文件名主干，第一次输入的词替换这段选区时，输入法在组合期间仍按旧的选区定位，提交后又把光标放回输入框开头。\n\n**修复**：开始组合输入时先删除选区，输入法总是从光标处开始组合；提交后光标留在新输入的文字后面。\n\n**本地验证**：「你好」+「的」+「世界」→「你好的世界」，组合时选中的旧文字也会立即被替换。\n\n修复会包含在下一个版本中。第 2、3 点（按真实文件头判定预览格式、超大 GIF 预览）属于预览功能，会另外跟进。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈。第 1 点（重命名第一次输入时输入法位置不对、选词后光标跳到最左侧）已在本地用微软拼音复现并修复：</p>\n<p dir=\"auto\"><strong>原因</strong>：F2 会先选中文件名主干，第一次输入的词替换这段选区时，输入法在组合期间仍按旧的选区定位，提交后又把光标放回输入框开头。</p>\n<p dir=\"auto\"><strong>修复</strong>：开始组合输入时先删除选区，输入法总是从光标处开始组合；提交后光标留在新输入的文字后面。</p>\n<p dir=\"auto\"><strong>本地验证</strong>：「你好」+「的」+「世界」→「你好的世界」，组合时选中的旧文字也会立即被替换。</p>\n<p dir=\"auto\">修复会包含在下一个版本中。第 2、3 点（按真实文件头判定预览格式、超大 GIF 预览）属于预览功能，会另外跟进。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/162#issuecomment-6172861387"
+    },
+    {
+      "body": "补充一下：1.0.56 之后又收到几个同类报告（#316、#317、#330），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">补充一下：1.0.56 之后又收到几个同类报告（<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5916956907\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/316\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/316/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/316\">#316</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5917101733\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/317\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/317/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/317\">#317</a>、<a class=\"issue-link js-issue-link\" data-error-text=\"Failed to load title\" data-id=\"5926388797\" data-permission-text=\"Title is private\" data-url=\"https://github.com/jimmgreen/pulse/issues/330\" data-hovercard-type=\"issue\" data-hovercard-url=\"/jimmgreen/pulse/issues/330/hovercard\" href=\"https://github.com/jimmgreen/pulse/issues/330\">#330</a>），原因已经找到——自绘输入框在处理输入时，系统没有把光标的新位置告诉输入法，导致上屏后光标回到旧位置。10 月中旬那次只修了其中一种情况，这次修全了，已用微软拼音实机验证。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/162#issuecomment-6334611628"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoSDGGYAAqjYwODE0OTQxMTk=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJdolAAqjYzMzQ2MTE2Mjg="
+  }
+}

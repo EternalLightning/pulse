@@ -1,0 +1,14 @@
+[
+  {
+    "ProcessId": 15896,
+    "CreationDate": "2026-10-24T13:06:52.892761+08:00",
+    "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+    "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  {
+    "ProcessId": 36948,
+    "CreationDate": "2026-10-24T13:09:53.617849+08:00",
+    "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+    "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+  }
+]

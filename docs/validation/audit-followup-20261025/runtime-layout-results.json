@@ -1,0 +1,8 @@
+{
+  "Name": "session-layout",
+  "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_session_layout_test.exe",
+  "Arguments": [],
+  "ExitCode": 0,
+  "OutputLines": 14,
+  "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\session-layout.txt"
+}

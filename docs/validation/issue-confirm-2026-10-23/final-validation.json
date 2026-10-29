@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-23",
+  "report": "docs/issue-bug-audit-2026-10-23.md",
+  "unique_issue_rows": 149,
+  "excluded_rows": 19,
+  "local_links_resolved": 116,
+  "repair_groups": 18,
+  "associated_issue_ids": 25,
+  "focused_repair_assertions_passed": 226,
+  "recycle_toolbar_assertions_passed": 441,
+  "full_shell_icon_attempt": "1 pass, 1 failed at initial acquisition; preserved, root cause unestablished",
+  "wechat_end_to_end": "not tested",
+  "git_diff_check": "passed; Git emitted CRLF conversion notices only",
+  "installed_application_replaced": false
+}

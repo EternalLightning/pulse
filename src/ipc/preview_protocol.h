@@ -15,6 +15,7 @@ enum class PreviewContentKind : uint32_t {
 enum class PreviewRequestKind : uint32_t {
     Content = 0,
     Properties = 1,
+    Thumbnail = 2,
 };
 constexpr uint32_t kPreviewFlagTruncated = 1u << 0;
 constexpr uint32_t kPreviewMaxPropertyCount = 6;

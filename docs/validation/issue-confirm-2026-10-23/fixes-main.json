@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-23",
+  "cli": {
+    "passed": 22,
+    "failed": 0,
+    "log": "bench_data/issue-fixes-main/cli-test.log",
+    "source": "src/bench/command_line_open_test.cpp",
+    "before": "bench_data/issue-fixes-main/embedding-before.timing.txt",
+    "after": "bench_data/issue-fixes-main/embedding-after.timing.txt",
+    "actual_before": "path=\\\\?\\E:\\Projects\\pulse\\-Embedding\nfirst_frame_ms=5926.57\nenum_sort_done_ms=0.00\n",
+    "actual_after": "path=\\\\?\\C:\\\nfirst_frame_ms=1240.25\nenum_sort_done_ms=0.23\n",
+    "shot_exit": 0
+  },
+  "wechat": {
+    "installed_executable": "D:/Applications/Pulse/Pulse.exe",
+    "observed_pid": 17364,
+    "version": "1.2.0.0",
+    "configuration_file": "D:/AppData/Pulse/app.json",
+    "experimental_explorer_takeover": false,
+    "normal_folder_WinE_ThisPC_preferences": true,
+    "effective_associations": "Read-only registry queries inconclusive; stored preferences are not proof of effective registration.",
+    "confirmed_source_gap": "Worker starts takeover only with task.experimental; settings had no viewmodel/layout/hit entry and controller did not forward existing control24. Restored opt-in entry; current configuration unchanged.",
+    "actual_wechat_call": "Not captured; complete show-in-folder takeover remains unverified.",
+    "settings": {
+      "passed": 71,
+      "failed": 0,
+      "source": "src/bench/explorer_takeover_settings_test.cpp",
+      "log": "bench_data/issue-fixes-main/settings-run.log",
+      "build": "bench_data/issue-fixes-main/settings-build.cmd",
+      "screenshots": "bench_data/issue-fixes-main/settings",
+      "screenshot_count": 16,
+      "matrix": "zh-CN/en-US x 100/200% x 760/1100 DIP x dark/light",
+      "visual_review": "16-screen contact sheet and full narrow English screenshot inspected: new row title, description and switch have no clipping/overlap.",
+      "isolation": "Memory registry; real Explorer services disabled; nonpersistent preferences; direct controller control24 and production renderer hit test; no global input.",
+      "real_registry_writes": 0
+    }
+  },
+  "production_sha256": "66e3dbc9b48d1075784609707c174fb0e80c6ee44b7ff7b6d91f7fa62d203435",
+  "build_logs": [
+    "bench_data/issue-fixes-main/build-pulse.log",
+    "bench_data/issue-fixes-main/build-pulse-incremental.log",
+    "bench_data/issue-fixes-main/build-pulse-final.log",
+    "bench_data/issue-fixes-main/build-shell-final.log"
+  ],
+  "limits": [
+    "No installed application replacement or user configuration/registry/service/clipboard mutation.",
+    "No real recycle-bin empty action.",
+    "No full release build or full historical selftest."
+  ],
+  "recycle_toolbar_recheck": {
+    "passed": 441,
+    "failed": 0,
+    "log": "bench_data/issue-fixes-main/recycle-run.log",
+    "build": "bench_data/issue-fixes-main/recycle-build.cmd",
+    "operation_worker": "stopped; production pointer dispatch queues EmptyRecycle without execution",
+    "visual_review": "Final Chinese 1100 DIP light populated screenshot checked: toolbar action visible and no command/filter overlap."
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "number": 321,
+  "title": "触摸适配不太好",
+  "body": "触摸适配不太好，在文件区域上下滑动会被识别成拖动文件，资源管理器在文件区域可以正常上下滑动",
+  "url": "https://github.com/jimmgreen/pulse/issues/321",
+  "captured_at": "2026-10-23T03:10:07.132695+00:00",
+  "updated_at": "2026-10-19T08:34:47Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

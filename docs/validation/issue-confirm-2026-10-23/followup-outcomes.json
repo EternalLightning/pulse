@@ -1,0 +1,161 @@
+{
+  "date": "2026-10-23",
+  "scope": "原勾选 5 条中，用户明确 #290 为误勾选，已取消；本次选择为 #314、#308、#302、#374。另处理用户明确提出的重命名拖选闪烁、可移动设备策略、管理员菜单位置、筛选 Esc 提示音。勾选和已有针对代码均不替代本地故障确认。以下为追加核验，不改变首轮历史审计计数。",
+  "changes": [
+    {
+      "name": "重命名拖选闪烁",
+      "change": "修复前 16 次鼠标移动各触发一次原生重绘关闭/开启及 WS_VISIBLE 丢失。改为整次捕获拖动共用一次重绘抑制，保留原生实时选区和 LumaText 呈现；补齐释放、失捕获和失去按键状态的收尾。最终 16 次原生选区更新保留，移动期间重绘切换和可见状态丢失均为 0。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json",
+      "limits": "22 项使用实际生产处理器、原生 EDIT 和 LumaText，选区截图已检查；没有物理鼠标录像、真实 IME 或实际文件重命名验收。"
+    },
+    {
+      "name": "可移动及 USB 外接存储；#314 / #308",
+      "change": "统一持久索引设备策略，排除 DRIVE_REMOVABLE 及包括 Windows 固定磁盘在内的 USB 外接存储。旧开关、手动根和后台写入不能重新启用；设置页禁用对应选项并显示简短状态。复用现有工作线程扫描器保留已识别设备当前目录内文件名及内容临时搜索，分页、取消和 UNC 路由定向检查通过。旧离线/未知内置根保留配置和缓存，只暂停不允许的扫描。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/followup-removable.json",
+      "limits": "追加真实 G:/ exFAT USB 后端检查 29 PASS / 0 FAIL，设备排除、临时搜索、取消、陈旧结果及隔离配置写入通过；证据见专项第9节。未实际拔盘或手工验收安装版 UI；MTP 手机不属于本次盘符后端。"
+    },
+    {
+      "name": "以管理员身份运行",
+      "change": "将已注册的直接 runas 操作提升至最外层“打开”之后、“打开方式”之前，保留偏好筛选、调用绑定、缓存与 COM 会话有效性约束。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/followup-menu.json",
+      "limits": "15 项菜单组成/调用、27 项渲染、原打开方式 14 项及异步菜单 9 项通过；8 张中英文、100/150%、深浅主题截图已检查。没有真实提权或注册表修改。"
+    },
+    {
+      "name": "Ctrl+F 后 Esc 提示音",
+      "change": "FilterEditProc 消费已处理 Enter/Esc 后队列中的 WM_CHAR，阻止字符继续到达原生 EDIT 默认错误提示音路径。普通输入及同步逻辑保留。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json",
+      "limits": "包含于上述 22 项，未重复累计；未播放和听取实际系统音频。"
+    },
+    {
+      "name": "#302 索引体积",
+      "change": "第一阶段源码已完成：同时停写、停读可由 aggregate 重建的分卷查询副本，保留主格式、A/B 和真实 WAL。6 万文件双卷双代隔离快照逻辑大小减少 50.8%；三组各 97 个查询对照及更新/恢复通过。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/storage-optimization-implementation.json",
+      "limits": "安装版未替换，真实 2.16G 目录未清理。逻辑大小和映射长度不是实际分配空间/RAM；现场迁移及更广泛性能验收仍待完成。"
+    },
+    {
+      "name": "#374 大目录回收失败",
+      "change": "生产 RunDelete 在隔离 IPC 注入 SIZE_TOO_BIG 后进入新的确切根永久删除确认。拒绝确认不发永久删除；接受才发新 token 请求；后端取消不产生虚假完成/撤销。普通访问拒绝不错误升级为永久删除。8 项通过，未发现该路径需要修复的本地同类故障。",
+      "evidence": "docs/validation/issue-confirm-2026-10-23/followup-index-audit.json",
+      "limits": "未改删除产品代码；未启动真实 Shell、填满真实回收站或删除用户文件。原目录/系统 HRESULT 未取得，不称原大目录场景已验收。"
+    }
+  ],
+  "tests": [
+    {
+      "name": "管理员菜单组成与调用",
+      "passed": 15,
+      "failed": 0,
+      "source": "src/bench/shell_launch_regression_test.cpp",
+      "argument": "--admin-menu-only",
+      "log": "bench_data/issue-followup-main/admin-menu-test.log"
+    },
+    {
+      "name": "管理员菜单本地化渲染",
+      "passed": 27,
+      "failed": 0,
+      "source": "src/bench/context_menu_loading_test.cpp",
+      "argument": "--run-as",
+      "log": "bench_data/issue-followup-main/admin-menu-ui.log",
+      "screenshots": 8,
+      "matrix": "zh-CN/en-US x 100/150% x dark/light"
+    },
+    {
+      "name": "原打开方式回归",
+      "passed": 14,
+      "failed": 0,
+      "log": "bench_data/issue-followup-main/open-with-regression.log"
+    },
+    {
+      "name": "异步实时菜单回归",
+      "passed": 9,
+      "failed": 0,
+      "log": "bench_data/issue-followup-main/menu-live-regression.log"
+    },
+    {
+      "name": "重命名拖选与筛选 Enter/Esc",
+      "passed": 22,
+      "failed": 0,
+      "log": "bench_data/issue-followup-ui/after.log"
+    },
+    {
+      "name": "可移动设备策略与临时文件名扫描",
+      "passed": 36,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/policy.log",
+      "build_log": "bench_data/issue-fixes-removable/build.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_index_policy_test.exe",
+        "sha256": "29e598a4e28baebeff7859360f835bdbb4c4178d947cf5d1fc4cac6cc1f15930",
+        "mtime": "2026-10-23T13:54:15.412893+08:00"
+      },
+      "coverage": [
+        "注入策略矩阵含固定USB/内置/未知/离线/系统回退/盘子目录/挂载目录",
+        "C和E实际只读设备探测均允许",
+        "真实私有NTFS目录341文件扫描、过滤、分页、取消、尾斜杠及空根防误扫",
+        "旧未知离线根保留配置，执行快照暂停"
+      ]
+    },
+    {
+      "name": "应用搜索入口与设置渲染",
+      "passed": 23,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/routing.log",
+      "build_log": "bench_data/issue-fixes-removable/build-routing-final.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_search_routing_test.exe",
+        "sha256": "0961fd4137cbe86734bb4cbf9f4ed942fe774212eec82451ca2d1666928bb847",
+        "mtime": "2026-10-23T13:54:12.189708+08:00"
+      },
+      "coverage": [
+        "复用最终pulse生产对象和资源私有重链",
+        "卷IPC到缓存、当前目录文件名分派、内容非索引临时请求",
+        "中文英文非空状态、禁用开关、隐藏旧统计、内部盘可用",
+        "中英深浅800/1100共8截图渲染"
+      ]
+    },
+    {
+      "name": "离线内置盘配置与缓存保护",
+      "passed": 12,
+      "failed": 0,
+      "log": "bench_data/issue-fixes-removable/cache.log",
+      "build_log": "bench_data/issue-fixes-removable/build-cache.log",
+      "executable": {
+        "path": "bench_data/issue-fixes-removable/removable_content_cache_test.exe",
+        "sha256": "211f85b5fbc41ce82cae4ec72fca8e3a996ea981afe70297e6be2abcdec802b6",
+        "mtime": "2026-10-23T13:53:42.764448+08:00"
+      },
+      "coverage": [
+        "LOCALAPPDATA重定向到私有fixture目录",
+        "实际私有SQLite/sidecar和最终content_index生产对象",
+        "离线未知内部根仍在配置、无活动扫描",
+        "缓存文档和epoch不变、sidecar字节一致、新未知设备配置拒绝"
+      ]
+    },
+    {
+      "name": "网络重叠根边界与回收错误码映射",
+      "passed": 2,
+      "failed": 0,
+      "log": "bench_data/issue-followup-index/network-overlap-run.log"
+    },
+    {
+      "name": "回收拒绝后的重新确认、拒绝与后端取消",
+      "passed": 8,
+      "failed": 0,
+      "log": "bench_data/issue-followup-index/delete-confirm-run.log"
+    }
+  ],
+  "passed": 168,
+  "failed": 0,
+  "production_sha256": "3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed",
+  "index_sha256": "1e1093ffeb69553aa28fbdda2e55101d98bd4a064e6e00337b1248e3ea6aabee",
+  "build": "此前追加验证的构建记录（不重标为本次重跑）：追加修改后 pulse 与 pulse_index 定向构建通过（build-final-policy.log）；状态文字缩短后 pulse 再构建通过（build-final-labels.log），无新增编译警告。最终 Pulse.exe SHA256 `3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed`；Pulse.Index.exe SHA256 `1e1093ffeb69553aa28fbdda2e55101d98bd4a064e6e00337b1248e3ea6aabee`。编辑器夹具使用其证据记录的统一编辑器对象；之后仅索引边界及资源重链，没有改变这些编辑器对象。未运行完整 release/selftest，未部署或替换安装版。 本次存储构建和最终索引程序哈希见下一节专项结果。",
+  "index_size": "现场容量均为用户观察：D:/AppData/Index 约 2.16 GB；v9/9ACBEFD40DDAC9E8 与 v9/volumes 各约 1.08 GB；前者 base-a.bin 约 565 MB；everything.db 约 100 MB。并非工具读取的精确字节数，不将不同数据集合及索引结构的容量直接作为重复记录证明。目录哈希及两套表示的源码证据解释了占用结构，未核实现场各文件的活动代或文件身份。根目录 Volumes 的活跃增量 WAL 与 v9/volumes 查询副本不同，不能按相似名称清理。",
+  "remaining": "尚待受控安装更新、真实索引清单与派生副本回收，以及报告明确列出的现场验收。#374 原大目录 Shell 现场返回值如以后可安全取得再比较；#290 按用户更正排除。本轮不再提问，不更改 ACL、所有者、真实配置或服务，不删除现存索引。",
+  "issue_treatment": {
+    "314": "按用户要求排除可移动/USB 持久索引；真实 exFAT 临时搜索与排除策略通过，原持久索引故障未复现",
+    "308": "同 #314；真实 exFAT 临时搜索与排除策略通过，原持久索引故障未复现",
+    "302": "已实现停写停读派生分卷副本；双路径及恢复通过；真实目录空间回收/安装验收待迁移",
+    "374": "8 项隔离确认/取消检查通过；未发现需修同类故障，原大目录未复测",
+    "290": "用户明确误勾选，本次取消选择、未修复"
+  },
+  "pre_storage_build": "追加修改后 pulse 与 pulse_index 定向构建通过（build-final-policy.log）；状态文字缩短后 pulse 再构建通过（build-final-labels.log），无新增编译警告。最终 Pulse.exe SHA256 `3404159d8d78e3f7d23f0e74e4d2ef755d858b74991703c33708c9a5691e8bed`；Pulse.Index.exe SHA256 `1e1093ffeb69553aa28fbdda2e55101d98bd4a064e6e00337b1248e3ea6aabee`。编辑器夹具使用其证据记录的统一编辑器对象；之后仅索引边界及资源重链，没有改变这些编辑器对象。未运行完整 release/selftest，未部署或替换安装版。"
+}

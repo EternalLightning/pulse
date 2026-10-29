@@ -1,0 +1,21 @@
+Command: docs\validation\audit-followup-20261025\shell_pipe_probe.exe
+Compiler: standalone MSVC x64 /W4 /MT; kernel32 + advapi32, no user32 dependency
+Compile exit: 0, no warnings
+
+pid=27184 integrity_rid=8192 restricted=1
+mode=current-user-only stage=ConnectNamedPipe immediate=0 win32=997
+mode=current-user-only stage=CreateFileW(client) win32=5
+mode=current-user-only stage=GetOverlappedResult wait=0 success=0 win32=995
+mode=default-security stage=ConnectNamedPipe immediate=0 win32=997
+mode=default-security stage=CreateFileW(client) win32=5
+mode=default-security stage=GetOverlappedResult wait=0 success=0 win32=995
+RESULT current-user-only=0 default-security=0
+native_exit=1
+
+Interpretation: CreateNamedPipeW and overlapped admission succeeded; the client open
+was denied before any protocol frame was exchanged. Win32 995 is the expected
+completion after the probe cancelled the pending connect following that denial.
+Both the fixture's current-user DACL and default security reproduced this failure.
+This classifies the current P26 run as a pipe-access environment block, not a
+failed malformed-result assertion. No unrestricted-token comparison was run, so
+the precise restricting policy is not claimed as proven.

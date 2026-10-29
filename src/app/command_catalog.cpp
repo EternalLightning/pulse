@@ -18,6 +18,8 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdCopyToTarget, S::CopyToTarget, L"\xE8C8", {'C', true, false, true}, A::CopyToTarget},
     {CmdMoveToTarget, S::MoveToTarget, L"\xE8C6", {'X', true, false, true}, A::MoveToTarget},
     {CmdNewFolder, S::NewFolder, L"\xE8F4", {VK_F7}, A::NewItem},
+    {CmdNewFolderWithSelection, S::NewFolderWithSelection, L"\xE8F4", {}, A::GroupSelection},
+    {CmdUngroupFolder, S::UngroupFolder, L"\xE8B7", {}, A::DissolveSelection},
     {CmdNewFile, S::File, L"\xE8A5", {}, A::NewItem},
     {CmdUndo, S::Undo, L"\xE7A7", {'Z', true}, A::Undo},
     {CmdBatchRename, S::BatchRename, L"\xE8AC", {'R', true, true}, A::BatchRename},
@@ -52,13 +54,13 @@ bool Enabled(CommandAvailability availability, const CommandContext& context) {
     const bool selected = context.selected_count > 0 && context.selection_filesystem &&
         !context.archive_view;
     const bool transferable = selected && !context.selection_has_drive_root;
-    const bool mutable_selection = transferable && !context.read_only;
+    const bool mutable_selection = transferable && !context.read_only && !context.device_selection;
     switch (availability) {
     case A::Always: return true;
     case A::Selection: return transferable;
     case A::MutableSelection: return mutable_selection;
     case A::Rename:
-        return selected && !context.read_only &&
+        return selected && !context.read_only && !context.device_selection &&
             (!context.selection_has_drive_root || context.selected_count == 1);
     case A::BatchRename: return mutable_selection && context.selected_count >= 2;
     case A::Properties: return context.archive_view || selected;
@@ -76,6 +78,8 @@ bool Enabled(CommandAvailability availability, const CommandContext& context) {
     case A::Terminal: return context.terminal_available && !context.archive_view;
     case A::CopyPath: return context.copy_path_available && !context.archive_view;
     case A::View: return context.can_view;
+    case A::GroupSelection: return mutable_selection && context.filesystem_folder && context.can_group_selection;
+    case A::DissolveSelection: return mutable_selection && context.filesystem_folder && context.can_dissolve_selection;
     }
     return false;
 }

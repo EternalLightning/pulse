@@ -1,0 +1,14 @@
+[
+  {
+    "name": "pulse_ops_test.exe",
+    "sha256": "2D5825A35279845A9F07916104355425BB02F0FD81E3E9ADAABF9C3617531EDA"
+  },
+  {
+    "name": "Pulse.Shell.exe",
+    "sha256": "970CCA0A1F0CC320F2F80A874D99D18F250AD0E8331B7CE73578C44DF2B0DC6D"
+  },
+  {
+    "name": "pulse_permanent_fileop_console_test.exe",
+    "sha256": "6F6A71C3A1D858A09DEF57EF98FDD74E8B46097C041AF55B4DF21AE21814EFBF"
+  }
+]

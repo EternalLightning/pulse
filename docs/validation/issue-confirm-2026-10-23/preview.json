@@ -1,0 +1,325 @@
+{
+  "captured_at": "2026-10-23T11:22:52.6570994+08:00",
+  "head": "45fdd54920eb23b1bcca3759bf33a161422327d4",
+  "scope": "preview icons 15 issues; no product modification",
+  "issues_count": 15,
+  "method": "private fixture linked cached production objects; private include of current preview_host main.cpp for direct MakeShellThumbnail; seeded cache state bypasses worker and IPC",
+  "validation": {
+    "build": "private compile/link succeeded",
+    "direct_log": "bench_data/issue-confirm-preview/run-direct.log",
+    "direct_failures": 0,
+    "ipc_log": "bench_data/issue-confirm-preview/run-ipc.log",
+    "ipc_precondition_failures": 5,
+    "ipc_verified": false,
+    "global_desktop_input": false
+  },
+  "provenance": [
+    {
+      "path": "src/ui/shell_icons.cpp",
+      "modified_at": "2026-10-16T21:10:20.2083542+08:00",
+      "size": 16843,
+      "sha256": "B74DE068C88EEF26A548AA1D68E19B3EE5099A1E62615EEC78977ABDE56DBAF3"
+    },
+    {
+      "path": "src/ui/thumbnail_cache.cpp",
+      "modified_at": "2026-10-10T23:59:29.1372918+08:00",
+      "size": 27440,
+      "sha256": "F598AAFA4EDF2C171A0526854393756976EB3FEB0411007CD19EE62AF41F07FA"
+    },
+    {
+      "path": "src/app/app_commands.cpp",
+      "modified_at": "2026-10-23T10:16:16.9775715+08:00",
+      "size": 100773,
+      "sha256": "DA3DA0F881354E1820EFFDB8BE9D59D84345BBC7AD076A178A0F22992A959793"
+    },
+    {
+      "path": "src/app/app_model.cpp",
+      "modified_at": "2026-10-22T16:12:53.5178269+08:00",
+      "size": 82388,
+      "sha256": "88DC20910B85CDF72DB041B0DDDA748E5E3373F118C0FE716CCD4BE0FEA2F171"
+    },
+    {
+      "path": "src/preview_host/main.cpp",
+      "modified_at": "2026-10-21T18:29:30.8055594+08:00",
+      "size": 43708,
+      "sha256": "AFED411F0870CFEA245B03F0BC6219E6A247BB81CC5A317B0CD482EE441B4F15"
+    },
+    {
+      "path": "src/shell_host/shell_query_icons.cpp",
+      "modified_at": "2026-10-10T10:14:41.4666900+08:00",
+      "size": 6148,
+      "sha256": "4E6018CE9AF11C9293FBAD22DF43EE1A1D31C1F4D782CBFDDA84ECFF4BE7564B"
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/shell_icons.cpp.obj",
+      "modified_at": "2026-10-22T11:49:57.9668589+08:00",
+      "size": 1308581,
+      "sha256": "1D022C8759262457C8FD0DC89CA9F9063A8C0F238E66961CEAC053A23BEA17C3"
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/ui/thumbnail_cache.cpp.obj",
+      "modified_at": "2026-10-22T11:50:03.7303065+08:00",
+      "size": 1128202,
+      "sha256": "48C306737582143F4BE7E367A864181670A991D2720CB9582813F4426B16715C"
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_commands.cpp.obj",
+      "modified_at": "2026-10-23T10:35:56.3544467+08:00",
+      "size": 2491941,
+      "sha256": "D28B8A24A65406656A0B88F2AB558275074C8B295DF375B3F6ECE8D0854DD36D"
+    },
+    {
+      "path": "build/CMakeFiles/pulse.dir/src/app/app_model.cpp.obj",
+      "modified_at": "2026-10-23T10:17:40.3102950+08:00",
+      "size": 3806978,
+      "sha256": "3C8B540CB5922197E961C525AAB6B4D48291DEA43ADD43C4D6198FD305CB8B9B"
+    },
+    {
+      "path": "build/CMakeFiles/pulse_shell.dir/src/shell_host/shell_query_icons.cpp.obj",
+      "modified_at": "2026-10-22T11:42:54.0616201+08:00",
+      "size": 152817,
+      "sha256": "44C359CDC6D39987F92FDC340C88F65A0EE2FEB6C3CE0F3EE88690A6E2479021"
+    },
+    {
+      "path": "bench_data/issue-confirm-preview/confirm.cpp",
+      "modified_at": "2026-10-23T11:17:27.1669273+08:00",
+      "size": 11886,
+      "sha256": "5F37F045C945F0F17A43C978BE62030D9D95869971B0B4AE58DF108851C71671"
+    },
+    {
+      "path": "bench_data/issue-confirm-preview/probe.cpp",
+      "modified_at": "2026-10-23T11:16:03.8529828+08:00",
+      "size": 317,
+      "sha256": "49A87F569433B6593D8A1EA332D6ACC91C3541F6BE56D8173BB01D59D2896691"
+    },
+    {
+      "path": "bench_data/issue-confirm-preview/confirm-direct.exe",
+      "modified_at": "2026-10-23T11:17:38.5090605+08:00",
+      "size": 3211776,
+      "sha256": "AEC8C02C6126B9720BFE2145085D2BEF9F7BE5ECAB2E3DA85C57F962100A8D62"
+    },
+    {
+      "path": "bench_data/issue-confirm-preview/run-direct.log",
+      "modified_at": "2026-10-23T11:17:39.1339966+08:00",
+      "size": 1237,
+      "sha256": "0D8A9BC102939EEF0FCF8CC26C400ED2F24ECA24000DB7DF09163A6797A1BACE"
+    },
+    {
+      "path": "bench_data/issue-confirm-preview/run-ipc.log",
+      "modified_at": "2026-10-23T11:13:14.6530873+08:00",
+      "size": 1186,
+      "sha256": "46AA563CFCD062D44282F79D17B27B8A6654787620EC038F172A99CE97F2938C"
+    }
+  ],
+  "issues": [
+    {
+      "issue": 354,
+      "status": "定向未复现原问题",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "run-direct.log: 256x256 folder icon, red_bounds=[104,104,152,152], artwork48x48 centered",
+        "src/shell_host/shell_query_icons.cpp:24,90 NormalizeJumbo"
+      ],
+      "remaining": [
+        "原问题的具体图标与实际Large/ExtraLarge UI截图",
+        "本例只出现小图案，未复现左下角偏移"
+      ]
+    },
+    {
+      "issue": 343,
+      "status": "定向未复现",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "desktop.ini custom red icon with non-folder.txt preserved: red_pixels=2304",
+        "src/preview_host/main.cpp:661-668 SIIGBF_ICONONLY"
+      ],
+      "remaining": [
+        "真实IPC/UI及原自定义provider未验收",
+        "未逐像素对照原附件"
+      ]
+    },
+    {
+      "issue": 272,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读正文视频描述",
+        "QuickPreviewWindow存在Show/Update/Close和动画重置路径"
+      ],
+      "remaining": [
+        "原视频逐帧对照",
+        "可复现的预览开关顺序和动画捕获"
+      ]
+    },
+    {
+      "issue": 266,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读正文截图与失效描述",
+        "存在失败重试和RetireStalledApartment机制"
+      ],
+      "remaining": [
+        "原文件类型、HRESULT、宿主及provider前后状态",
+        "本轮私有IPC失败不能代替原问题复现"
+      ]
+    },
+    {
+      "issue": 262,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读原文宿主不可用提问",
+        "本轮私有宿主管道超时另见run-ipc.log"
+      ],
+      "remaining": [
+        "原安装布局和宿主版本/文件",
+        "错误码和安全软件信息",
+        "本轮环境失败不判定为产品缺陷"
+      ]
+    },
+    {
+      "issue": 229,
+      "status": "缓存命中边界运行复现；静态确认失效缺口",
+      "category": "runtime_reproduced",
+      "evidence": [
+        "同路径EXE红蓝资源实际变更；生产ConvertShellIconPixels转像素",
+        "friend Seed注入红缓存后，生产RequestExact仍返回相同index/hash11229969851736765315",
+        "从当前蓝资源新建独立cache hash11291544229467526019",
+        "src/ui/shell_icons.cpp:231-233,424-427只按path命中；全src未找到文件变化后调用图标缓存按路径失效/Clear/Reset"
+      ],
+      "remaining": [
+        "Seed绕过worker和IPC",
+        "没有端到端验证CSC/外部更新/监视通知/UI",
+        "本组运行复现限定生产缓存命中逻辑"
+      ]
+    },
+    {
+      "issue": 184,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "PreviewHandlerHost使用WS_POPUP overlay和条件HWND_TOPMOST",
+        ".srt未列入原生文本白名单"
+      ],
+      "remaining": [
+        "真实srt关联provider",
+        "打开交互面板后的重叠和输入验证",
+        "不能由overlay设计单独推出原故障"
+      ]
+    },
+    {
+      "issue": 181,
+      "status": "静态确认同类失焦隐藏行为（限IPreviewHandler overlay）",
+      "category": "static_confirmed_behavior",
+      "evidence": [
+        "src/app/app_main.cpp:1013-1030传递激活状态",
+        "src/ui/preview_handler_host.cpp:545-550显式SWP_HIDEWINDOW",
+        "src/ui/preview_handler_host.cpp:863-873,1097-1103状态发布与同identity重放位置"
+      ],
+      "remaining": [
+        "真实provider切焦未运行",
+        "显式隐藏为overlay置顶策略，不等于provider失效",
+        "是否符合产品预期仍待决定；不泛化到原生预览"
+      ]
+    },
+    {
+      "issue": 147,
+      "status": "定向未复现模型/路径部分",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "生产SelectedQuickPreviewItem返回含空格绝对路径",
+        "生产CollectFilterMatches对两项仅保留匹配项",
+        "src/app/app_input.cpp:3693-3694空格调用ToggleQuickPreview"
+      ],
+      "remaining": [
+        "未实发空格或打开实际预览",
+        "搜索框输入路由、焦点、流式结果、内容分页未验收"
+      ]
+    },
+    {
+      "issue": 142,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "src/preview_host/main.cpp:304,753-778存在WIC及图片回退路径"
+      ],
+      "remaining": [
+        "原图尺寸/编码/位深",
+        "解码错误、内存和延迟测量",
+        "未用普通小图片代替原件"
+      ]
+    },
+    {
+      "issue": 135,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "src/ui/video_preview.cpp:328 MFPlay播放路径",
+        "已将TF删除与视频卡顿分开记录"
+      ],
+      "remaining": [
+        "TF介质与删除原错误码",
+        "原卡顿视频及播放测量",
+        "本组未做TF删除"
+      ]
+    },
+    {
+      "issue": 92,
+      "status": "缺条件（bug部分）",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读四点正文与评论",
+        "生产路径仍MFPlay，全src未找到FFmpeg播放增强包实现"
+      ],
+      "remaining": [
+        "Ogg内部编码与实际文件、系统codec",
+        "播放与磁盘容量刷新运行验证",
+        "不将评论修复宣称当成本地实现"
+      ]
+    },
+    {
+      "issue": 51,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "评论要求XAVC 4K 50fps 10bit 4:2:2 280Mb/s",
+        "生产MFPlay路径静态存在"
+      ],
+      "remaining": [
+        "原始片段和系统codec",
+        "真实播放失败码与帧率；普通视频成功不能结案"
+      ]
+    },
+    {
+      "issue": 19,
+      "status": "缺条件",
+      "category": "missing_conditions",
+      "evidence": [
+        "已读后续复杂Excel闪白与滚动/拖动问题评论",
+        "当前Office Shell/缩略图路径；未见评论所称内置多sheet表格预览UI"
+      ],
+      "remaining": [
+        "复杂原工作簿",
+        "真实provider及滚动/拖动测试",
+        "不得由早期评论或微小XLSX泛测关闭后续报告"
+      ]
+    },
+    {
+      "issue": 9,
+      "status": "定向未复现UI同key重复探测；底层残余成本静态存在",
+      "category": "targeted_not_reproduced",
+      "evidence": [
+        "生产StoreResult注入permanent failure后100次不同generation同key Draw均Failed且queue/pending为0",
+        "src/ui/thumbnail_cache.cpp:58,306缓存key与failure短路",
+        "src/preview_host/main.cpp:671-684仍有四路fallback"
+      ],
+      "remaining": [
+        "失败由fixture注入，原XLSX/CAD-PDF样本未取得",
+        "未测得原40-53ms",
+        "直调host/冷缓存/像素尺寸变化/重启成本仍待测，不据此否认",
+        "未复现永久阻塞或所有后续预览失效"
+      ]
+    }
+  ]
+}

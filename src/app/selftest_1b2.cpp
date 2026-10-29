@@ -400,6 +400,7 @@ void TestBreadcrumb() {
     cat.PinWorkspace(L"C:\\local", L"local", 0, { L"C:\\local" });
     cat.PinWorkspace(L"\\\\server\\share", L"nas", 0, { L"\\\\server\\share" });
     cat.workspaces[1].frequent.push_back({ L"\\\\server\\share\\sub", 3 });
+    pane.NavigateTo(L"\\\\server\\share");
     const auto wvm = BuildWindowViewModel(pane, sidebar, true, false, true, &cat, 0);
     const auto workspaces = std::find_if(wvm.sidebar.begin(), wvm.sidebar.end(),
         [](const auto& section) {
@@ -511,8 +512,8 @@ void TestMouseHistoryNavigation() {
     pane.NewTab(L"pulse:settings/general");
     state->pane = &pane;
     auto* tab = pane.ActiveTab();
-    tab->back_stack.push(L"pulse:settings/about");
-    tab->back_stack.push(L"pulse:settings/appearance");
+    tab->back_stack.push({L"pulse:settings/about"});
+    tab->back_stack.push({L"pulse:settings/appearance"});
     WNDCLASSW wc{};
     wc.lpfnWndProc = NavigationTestProc;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -1013,7 +1014,7 @@ void TestBlankPaneClickNavigation() {
         Check(tab->current_path == fs::NormalizePath(L"C:\\PulseBlankClickTest") && GetCapture() != hwnd,
               L"blank pane: restored folder without history navigates to parent on release");
         tab->back_stack = {};
-        tab->back_stack.push(L"C:\\PulseBlankClickHistory");
+        tab->back_stack.push({L"C:\\PulseBlankClickHistory"});
         press();
         release();
         SendMessageW(hwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, point);
@@ -1022,7 +1023,7 @@ void TestBlankPaneClickNavigation() {
               L"blank pane: available history takes precedence over parent");
         const std::wstring folder = tab->current_path;
         tab->current_path = L"pulse:search:showbox";
-        tab->back_stack.push(folder);
+        tab->back_stack.push({folder});
         const auto history_size = tab->back_stack.size();
         press();
         Check(state->marqueePending && !state->blankClickTab,
@@ -1062,7 +1063,7 @@ void TestBlankPaneClickNavigation() {
         release();
         Check(tab->current_path == before,
               L"blank pane: navigation during press invalidates release");
-        tab->back_stack.push(L"C:\\PulseBlankClickDouble");
+        tab->back_stack.push({L"C:\\PulseBlankClickDouble"});
         press();
         release();
         SendMessageW(hwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, point);
@@ -2256,12 +2257,7 @@ void TestContextMenuPrefs() {
     ContextMenuPrefs slow_handler;
     slow_handler.persist = false;
     const std::wstring slow_key = ipc::HandlerCatalogKey(adobe_clsid);
-    slow_handler.RecordComTiming(slow_key, 1000);
-    slow_handler.RecordComTiming(slow_key, 1000);
-    Check(!slow_handler.ComDisabled(slow_key), L"prefs: two handler timeouts do not disable");
-    slow_handler.RecordComTiming(slow_key, 1000);
-    Check(slow_handler.ComDisabled(slow_key) && !slow_handler.HandlerEnabled(adobe_clsid),
-          L"prefs: three handler timeouts disable the CLSID");
+    slow_handler.SetComDisabled(slow_key, true);
     auto disabled_clsids = slow_handler.DisabledHandlerClsids();
     bool listed = false;
     for (const auto& c : disabled_clsids)
@@ -2269,7 +2265,7 @@ void TestContextMenuPrefs() {
     Check(listed, L"prefs: disabled handler CLSIDs are sent to the host");
     slow_handler.SetItemEnabled(slow_key, true);
     Check(slow_handler.HandlerEnabled(adobe_clsid),
-          L"prefs: re-enabling a handler clears the timeout skip");
+          L"prefs: re-enabling a handler clears the explicit skip");
     Check(ipc::IsHandlerCatalogKey(slow_key) &&
           ipc::HandlerClsidFromKey(slow_key) == ipc::ToLowerVerb(adobe_clsid),
           L"prefs: handler catalog key round-trips the CLSID");
@@ -2299,21 +2295,12 @@ void TestContextMenuPrefs() {
           loaded.explorer_cap == ipc::kDefaultExplorerCap && !loaded.share && loaded.print,
           L"prefs: JSON round-trip keeps override, seen, and defaults");
 
-    Check(prefs.RecordComTiming(L".dwg", 800) && prefs.ComDeferred(L".dwg") == false, L"prefs: one slow COM hit does not defer");
-    prefs.RecordComTiming(L".dwg", 800);
-    prefs.RecordComTiming(L".dwg", 800);
-    Check(prefs.ComDeferred(L".dwg") && !prefs.ComDisabled(L".dwg"),
-          L"prefs: three 500ms+ COM hits defer the extension");
-    prefs.RecordComTiming(L".cad", 1200);
-    prefs.RecordComTiming(L".cad", 1200);
-    prefs.RecordComTiming(L".cad", 1200);
-    Check(prefs.ComDisabled(L".cad"), L"prefs: three 1000ms+ COM hits disable the extension");
+    prefs.SetComDisabled(L".cad", true);
     const std::wstring json_slow = prefs.ToJson();
     ContextMenuPrefs slow_loaded;
     slow_loaded.persist = false;
-    Check(slow_loaded.FromJson(json_slow) && slow_loaded.ComDeferred(L".dwg") &&
-              slow_loaded.ComDisabled(L".cad"),
-          L"prefs: slow COM stats round-trip");
+    Check(slow_loaded.FromJson(json_slow) && slow_loaded.ComDisabled(L".cad"),
+          L"prefs: explicit COM skip round-trips without timing state");
 
     loaded.ResetToDefaults();
     Check(loaded.seen.empty() && loaded.item_enabled.empty() && !loaded.share,
@@ -3748,10 +3735,14 @@ void TestQuickAccess() {
         AppendQuickAccessCommand(state, menu, {L"C:\\one", L"C:\\two"});
         Check(menu.size() == 1 && menu[0].command == CmdUnpinQuickAccess &&
               menu[0].text == L"从快速访问取消固定", L"quick access: all pinned offers unpin");
-        state.ctxMenuPrefs.SetItemEnabled(L"pulse:quick-access", false);
+        state.ctxMenuPrefs.FromJson(LR"({"pulse_items":{"quick_access":true},"items":{"pulse:quick-access":{"enabled":false}}})");
         menu.clear();
         AppendQuickAccessCommand(state, menu, {L"C:\\one"});
-        Check(menu.empty(), L"quick access: menu preference is respected");
+        Check(menu.size() == 1, L"quick access: obsolete catalog override cannot hide an enabled built-in");
+        state.ctxMenuPrefs.SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, false);
+        AppendQuickAccessCommand(state, menu, {L"C:\\one"});
+        menu = ApplyBuiltinMenuPrefs(std::move(menu), state.ctxMenuPrefs, BuiltinMenuSurface::Item);
+        Check(menu.empty(), L"quick access: built-in menu preference is respected");
 
         // Section menu: hiding is per section id; the bulk pair owns every bit.
         state.sidebarHiddenMask = 0;
@@ -4738,7 +4729,7 @@ void TestListColumns() {
         Check(close_to(manual.Width(K::Date), 200.0f) && close_to(manual.Width(K::Type), 128.0f),
               L"columns: a manual DIP width is honoured and the rest stay fitted");
 
-        std::array<float, 3> dividers{};
+        std::array<float, 4> dividers{};
         dividers = r.ResizeDetailsColumnDivider(pane(1200.0f), dividers, 0, wide.DividerX(0) - 50.0f * scale);
         const auto grown = r.DetailsColumns(pane(1200.0f), dividers, false);
         Check(close_to(grown.Width(K::Date), 180.0f) && close_to(grown.Width(K::Size), 90.0f) &&
@@ -4749,7 +4740,7 @@ void TestListColumns() {
         Check(close_to(moved.Width(K::Date), 200.0f) && close_to(moved.Width(K::Type), 108.0f) &&
               std::abs(moved.DividerX(1) - grown.DividerX(1) - 20.0f * scale) < 0.05f,
               L"columns: dragging metadata divider transfers width between its neighbors");
-        std::array<float, 4> unused{};
+        std::array<float, 5> unused{};
         r.AutoFitColumnDivider(pane(1200.0f), dividers, false, unused, 1);
         const auto refit = r.DetailsColumns(pane(1200.0f), dividers, false);
         Check(dividers[0] == 0.0f && dividers[1] == 0.0f && close_to(refit.Width(K::Date), 130.0f),
@@ -4767,7 +4758,7 @@ void TestListColumns() {
         vm.is_search = true;
         Check(r.ListRowHeightDip(vm, pane(700.0f)) >= 42.0f && r.ListRowHeightDip(vm, pane(1000.0f)) < 42.0f,
               L"columns: only the two-line search layout grows the row height");
-        std::array<float, 4> search_dividers{};
+        std::array<float, 5> search_dividers{};
         search_dividers = r.ResizeSearchColumnDivider(pane(1000.0f), search_dividers, 0,
                                                       search_wide.DividerX(0) - 60.0f * scale);
         const auto search_moved = r.DetailsColumns(pane(1000.0f), {}, true, search_dividers);
@@ -4777,8 +4768,8 @@ void TestListColumns() {
             const auto initial = r.DetailsColumns(pane(width), {}, search);
             bool stable = true, tracks = true;
             for (int divider = 0; divider < initial.count - 1; ++divider) for (int direction : {-1, 1}) {
-                std::array<float, 3> normal{};
-                std::array<float, 4> searching{};
+                std::array<float, 4> normal{};
+                std::array<float, 5> searching{};
                 // The real mouse-down handler captures the rendered widths.
                 for (int i = 0; i < initial.count; ++i) {
                     const auto kind = initial.kinds[i];
@@ -4838,7 +4829,7 @@ void TestSettingsStorage() {
             for (int mode = 0; mode < 4; ++mode) {
                 ui::WindowViewModel vm;
                 vm.settings_open = true;
-                vm.settings_page = mode == 0 ? 0 : 1;
+                vm.settings_page = mode == 0 ? 8 : 1;
                 vm.settings_expanded = 3;
                 vm.settings_index_service = mode == 2;
                 vm.settings_index_installed = mode == 3;
@@ -5750,13 +5741,11 @@ void TestTabShortcuts() {
     Check(have_keys && SetKeyboardState(keys), L"tab shortcuts: set edit test modifiers");
     if (have_keys) {
         auto state = std::make_unique<AppState>();
-        LRESULT result = -1;
-        Check(HandleHostedEditMessage(*state, nullptr, WM_CHAR, VK_TAB, 0, result) && result == 0,
+        Check(HandleHostedEditShortcut(*state, WM_CHAR, VK_TAB, 0),
               L"tab shortcuts: hosted edits consume Ctrl+Tab character");
         keys[VK_SHIFT] = 0x80;
         SetKeyboardState(keys);
-        result = -1;
-        Check(HandleHostedEditMessage(*state, nullptr, WM_CHAR, VK_TAB, 0, result) && result == 0,
+        Check(HandleHostedEditShortcut(*state, WM_CHAR, VK_TAB, 0),
               L"tab shortcuts: hosted edits consume Ctrl+Shift+Tab character");
         SetKeyboardState(saved_keys);
     }
@@ -6126,7 +6115,8 @@ void TestDetailsPreviewInteraction() {
     saved.sidebar_collapsed = 0x2;
     saved.sidebar_hidden = 0x4;
     saved.sidebar_order = { 3, 6, 0, 7, 1, 2, 4, 5 };
-    saved.quick_access_hidden = (1 << 1) | (1 << 4);
+    saved.quick_access_hidden = (1 << static_cast<int>(BuiltinQuickAccess::Desktop)) |
+        (1 << static_cast<int>(BuiltinQuickAccess::RecycleBin));
     Check(SaveSession(saved) && LoadSession(loaded) && loaded.details_preview_only &&
         !loaded.details_preview && loaded.details_panel_width == 420,
         L"preview: folded mode, preview switch and panel width survive session reload");

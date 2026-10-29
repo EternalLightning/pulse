@@ -1,0 +1,15 @@
+{
+  "number": 237,
+  "title": "nas映射的磁盘，文件无法删除",
+  "body": "nas映射的磁盘，文件复制进去就无法删除",
+  "url": "https://github.com/jimmgreen/pulse/issues/237",
+  "captured_at": "2026-10-23T03:10:07.178038+00:00",
+  "updated_at": "2026-10-13T14:08:30Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

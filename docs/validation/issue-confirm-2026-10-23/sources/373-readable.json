@@ -1,0 +1,15 @@
+{
+  "number": 373,
+  "title": "Windows系统下“选择其他应用”窗口不在前台显示",
+  "body": "选择“打开方式” -> “选择其他应用”时，系统的应用选择弹窗没有直接弹到前台。相反，该弹窗在后台打开，任务栏上的图标出现黄色闪烁提示。必须手动点击任务栏闪烁的图标，窗口才会显示出来。",
+  "url": "https://github.com/jimmgreen/pulse/issues/373",
+  "captured_at": "2026-10-23T03:10:07.119671+00:00",
+  "updated_at": "2026-10-22T14:47:07Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

@@ -1,0 +1,199 @@
+file	verb	HKLM	*\shell\MiDropExtMenu	on				MiDropExtMenu	
+file	verb	HKLM	*\shell\pintohomefile	on				添加到收藏夹(F)	
+file	verb	HKLM	*\shell\removeproperties	off				removeproperties	
+file	verb	HKLM	*\shell\UpdateEncryptionSettingsWork	on				文件所有权	
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\ FileSyncEx	on				 FileSyncEx	C:\Program Files\Microsoft OneDrive\26.183.0920.0005\FileSyncShell64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\7-Zip	on				7-Zip	E:\Applications\7-Zip\7-zip.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\AccExt	on				AccExt	C:\Program Files (x86)\Common Files\Adobe\CoreSyncExtension\CoreSync_x64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\cloudmusic	on	missing			cloudmusic	
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\DesktopDockShellExt	on				DesktopDockShellExt	
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\FencesShellExt	on				FencesShellExt	C:\Program Files (x86)\Stardock\Fences\FencesMenu64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\Foxit_ConvertToPDF	on				Foxit_ConvertToPDF	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\plugins\ConvertToPDFShellExtension_x64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\Foxit_ConvertToPDFPlus	on				Foxit_ConvertToPDFPlus	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\plugins\ConvetToPDFPlusShellExtension_x64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\Open With	on		prot		Open With	C:\Windows\system32\shell32.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\Open With EncryptionMenu	on				Open With EncryptionMenu	C:\Windows\system32\shell32.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\YunShellExt	on				YunShellExt	E:\Applications\BaiduNetdisk\YunShellExtV164.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\{90AA3A4E-1CBA-4233-B8BB-535773D48449}	on				Taskband Pin	C:\Windows\system32\shell32.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\{a2a9545d-a0c2-42b4-9708-a0b2badd77c8}	on				Start Menu Pin	C:\Windows\system32\shell32.dll
+file	shellex	HKLM	*\shellex\ContextMenuHandlers\卡巴斯基免费版 21.26	on				卡巴斯基免费版 21.26	C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.26\x64\shellex.dll
+file	shellex	HKLM	*\shellex\-ContextMenuHandlers\EPP	off				EPP	C:\Program Files\Windows Defender\shellext.dll
+file	shellex	HKLM	*\shellex\-ContextMenuHandlers\Sharing	off				Sharing	C:\Windows\system32\ntshrui.dll
+allobj	verb	HKLM	AllFilesystemObjects\shell\ModernProperties	off			ti	ModernProperties	
+allobj	verb	HKLM	AllFilesystemObjects\shell\OfflineFilesLaunchSyncCenter	off				启动同步中心。	
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\ContextMenuHandlers\CopyAsPathMenu	on				CopyAsPathMenu	C:\Windows\system32\shell32.dll
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\ContextMenuHandlers\ModernSharing	on				ModernSharing	C:\Windows\system32\ntshrui.dll
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\ContextMenuHandlers\SendTo	on		prot		SendTo	C:\Windows\system32\shell32.dll
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\ContextMenuHandlers\{a2a9545d-a0c2-42b4-9708-a0b2badd77c8}	on				Start Menu Pin	C:\Windows\system32\shell32.dll
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\-ContextMenuHandlers\{474C98EE-CF3D-41f5-80E3-4AAB0AB04301}	off				{474C98EE-CF3D-41f5-80E3-4AAB0AB04301}	C:\Windows\System32\cscui.dll
+allobj	shellex	HKLM	AllFilesystemObjects\shellex\-ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}	off				Previous Versions Property Page	C:\Windows\system32\twext.dll
+folder	verb	HKLM	Directory\shell\AnyCode	on				使用 Visual Studio 打开(V)	C:\Program Files (x86)\Common Files\Microsoft Shared\MSEnv\VSLauncher.exe
+folder	verb	HKLM	Directory\shell\cmd	on			ti	在此处打开命令窗口(W)	C:\Windows\SYSTEM32\cmd.exe
+folder	verb	HKLM	Directory\shell\find	off		prot		find	C:\Windows\Explorer.exe
+folder	verb	HKLM	Directory\shell\git_gui	on				Open Git GUI here	E:\Applications\Git\cmd\git-gui.exe
+folder	verb	HKLM	Directory\shell\git_shell	on				Open Git Bash here	E:\Applications\Git\git-bash.exe
+folder	verb	HKLM	Directory\shell\MiDropExtMenu	on				MiDropExtMenu	
+folder	verb	HKLM	Directory\shell\Powershell	on			ti	在此处打开 Powershell 窗口(S)	C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+folder	verb	HKLM	Directory\shell\UpdateEncryptionSettings	on				文件所有权	
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\ FileSyncEx	on				 FileSyncEx	C:\Program Files\Microsoft OneDrive\26.183.0920.0005\FileSyncShell64.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\7-Zip	on				7-Zip	E:\Applications\7-Zip\7-zip.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\DesktopDockShellExt	on				DesktopDockShellExt	
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\EncryptionMenu	on				EncryptionMenu	C:\Windows\system32\shell32.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\FencesShellExt	on				FencesShellExt	C:\Program Files (x86)\Stardock\Fences\FencesMenu64.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\YunShellExt	on				YunShellExt	E:\Applications\BaiduNetdisk\YunShellExtV164.dll
+folder	shellex	HKLM	Directory\shellex\ContextMenuHandlers\卡巴斯基免费版 21.26	on				卡巴斯基免费版 21.26	C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.26\x64\shellex.dll
+folder	shellex	HKLM	Directory\shellex\-ContextMenuHandlers\EPP	off				EPP	C:\Program Files\Windows Defender\shellext.dll
+folder	shellex	HKLM	Directory\shellex\-ContextMenuHandlers\Offline Files	off				Offline Files	C:\Windows\System32\cscui.dll
+folder	shellex	HKLM	Directory\shellex\-ContextMenuHandlers\Sharing	off				Sharing	C:\Windows\system32\ntshrui.dll
+folder	shellex	HKLM	Directory\shellex\-ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}	off				Previous Versions Property Page	C:\Windows\system32\twext.dll
+folder	verb	HKCU	Folder\shell\explore	off		prot		explore	
+folder	verb	HKCU	Folder\shell\open	on		prot		open	C:\Windows\Explorer.exe
+folder	verb	HKLM	Folder\shell\opennewprocess	on		prot		在新进程中打开(P)	
+folder	verb	HKLM	Folder\shell\opennewtab	on		prot		在新标签页中打开(B)	
+folder	verb	HKLM	Folder\shell\opennewwindow	on		prot		在新窗口中打开(E)	
+folder	verb	HKLM	Folder\shell\pintohome	on				固定到快速访问(Q)	
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\7-Zip	on				7-Zip	E:\Applications\7-Zip\7-zip.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\AccExt	on				AccExt	C:\Program Files (x86)\Common Files\Adobe\CoreSyncExtension\CoreSync_x64.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\DesktopDockShellExt	on				DesktopDockShellExt	
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\FencesShellExt	on				FencesShellExt	C:\Program Files (x86)\Stardock\Fences\FencesMenu64.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\Foxit_ConvertToPDF	on				Foxit_ConvertToPDF	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\plugins\ConvertToPDFShellExtension_x64.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\Foxit_ConvertToPDFPlus	on				Foxit_ConvertToPDFPlus	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\plugins\ConvetToPDFPlusShellExtension_x64.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\Library Location	on				Library Location	C:\Windows\system32\shell32.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\PintoStartScreen	on				PintoStartScreen	C:\Windows\System32\appresolver.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\{a2a9545d-a0c2-42b4-9708-a0b2badd77c8}	on				Start Menu Pin	C:\Windows\system32\shell32.dll
+folder	shellex	HKLM	Folder\shellex\ContextMenuHandlers\卡巴斯基免费版 21.26	on				卡巴斯基免费版 21.26	C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.26\x64\shellex.dll
+folder	shellex	HKLM	Folder\shellex\-ContextMenuHandlers\Offline Files	off				Offline Files	C:\Windows\System32\cscui.dll
+dirbg	verb	HKLM	Directory\Background\shell\AnyCode	on				使用 Visual Studio 打开(V)	C:\Program Files (x86)\Common Files\Microsoft Shared\MSEnv\VSLauncher.exe
+dirbg	verb	HKLM	Directory\Background\shell\cmd	on			ti	在此处打开命令窗口(W)	C:\Windows\SYSTEM32\cmd.exe
+dirbg	verb	HKLM	Directory\Background\shell\git_gui	on				Open Git GUI here	E:\Applications\Git\cmd\git-gui.exe
+dirbg	verb	HKLM	Directory\Background\shell\git_shell	on				Open Git Bash here	E:\Applications\Git\git-bash.exe
+dirbg	verb	HKLM	Directory\Background\shell\Powershell	on			ti	在此处打开 Powershell 窗口(S)	C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\ FileSyncEx	on				 FileSyncEx	C:\Program Files\Microsoft OneDrive\26.183.0920.0005\FileSyncShell64.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\DesktopDockShellExt	on				DesktopDockShellExt	
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\FencesShellExt	on				FencesShellExt	C:\Program Files (x86)\Stardock\Fences\FencesMenu64.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\New	on		prot		New	C:\Windows\system32\shell32.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\NvAppDesktopContext	on				NvAppDesktopContext	C:\Program Files\NVIDIA Corporation\NVIDIA App\NvCpl\nvui.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext	on				NvCplDesktopContext	C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_b20cc8aeaed64fc2\nvshext.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\ContextMenuHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+dirbg	shellex	HKLM	Directory\Background\shellex\-ContextMenuHandlers\Sharing	off				Sharing	C:\Windows\system32\ntshrui.dll
+desk	verb	HKLM	DesktopBackground\shell\.SpotlightLearnMore	on			ti	.SpotlightLearnMore	
+desk	verb	HKLM	DesktopBackground\shell\.SpotlightNextImage	on			ti	.SpotlightNextImage	
+desk	verb	HKLM	DesktopBackground\shell\Display	on			ti	显示设置(D)	C:\Windows\System32\display.dll
+desk	verb	HKLM	DesktopBackground\shell\EditStickers	on			ti	EditStickers	
+desk	verb	HKLM	DesktopBackground\shell\Personalize	on			ti	个性化(R)	C:\Windows\system32\themecpl.dll
+desk	shellex	HKLM	DesktopBackground\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+desk	shellex	HKLM	DesktopBackground\shellex\ContextMenuHandlers\DesktopSlideshow	on				DesktopSlideshow	C:\Windows\system32\stobject.dll
+drive	verb	HKLM	Drive\shell\change-passphrase	on				更改 BitLocker 密码	C:\Windows\System32\bdechangepin.exe
+drive	verb	HKLM	Drive\shell\change-pin	on				更改 BitLocker PIN	C:\Windows\System32\bdechangepin.exe
+drive	verb	HKLM	Drive\shell\cmd	off			ti	在此处打开命令窗口(W)	C:\Windows\SYSTEM32\cmd.exe
+drive	verb	HKLM	Drive\shell\find	off		prot		find	C:\Windows\Explorer.exe
+drive	verb	HKLM	Drive\shell\manage-bde	on				管理 BitLocker(B)	C:\Windows\System32\control.exe
+drive	verb	HKLM	Drive\shell\pintohome	on				固定到快速访问	
+drive	verb	HKLM	Drive\shell\Powershell	on			ti	在此处打开 Powershell 窗口(S)	C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+drive	verb	HKLM	Drive\shell\resume-bde	on				恢复 BitLocker 保护(B)	C:\Windows\System32\BitLockerWizard.exe
+drive	verb	HKLM	Drive\shell\resume-bde-elev	on				恢复 BitLocker 保护(B)	C:\Windows\System32\BitLockerWizardElev.exe
+drive	verb	HKLM	Drive\shell\unlock-bde	on				解锁驱动器(U)...	C:\Windows\System32\bdeunlock.exe
+drive	shellex	HKLM	Drive\shellex\ContextMenuHandlers\ @nilesoft.shell	on				 @nilesoft.shell	D:\Applications\Nilesoft Shell\shell.dll
+drive	shellex	HKLM	Drive\shellex\ContextMenuHandlers\EnhancedStorageShell	on			ti	EnhancedStorageShell	C:\Windows\System32\EhStorShell.dll
+drive	shellex	HKLM	Drive\shellex\ContextMenuHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+drive	shellex	HKLM	Drive\shellex\ContextMenuHandlers\卡巴斯基免费版 21.26	on				卡巴斯基免费版 21.26	C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.26\x64\shellex.dll
+drive	shellex	HKLM	Drive\shellex\-ContextMenuHandlers\EPP	off				EPP	C:\Program Files\Windows Defender\shellext.dll
+drive	shellex	HKLM	Drive\shellex\-ContextMenuHandlers\Sharing	off				Sharing	C:\Windows\system32\ntshrui.dll
+drive	shellex	HKLM	Drive\shellex\-ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}	off				Previous Versions Property Page	C:\Windows\system32\twext.dll
+drive	shellex	HKLM	Drive\shellex\-ContextMenuHandlers\{D6791A63-E7E2-4fee-BF52-5DED8E86E9B8}	off				Portable Devices Menu	C:\Windows\system32\wpdshext.dll
+drive	shellex	HKLM	Drive\shellex\-ContextMenuHandlers\{fbeb8a05-beee-4442-804e-409d6c4515e9}	off				ShellFolder for CD Burning	C:\Windows\system32\shell32.dll
+pc	verb	HKLM	CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\find	off		prot	ti	搜索(E)...	C:\Windows\Explorer.exe
+pc	verb	HKLM	CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\Manage	on				管理(G)	C:\Windows\system32\CompMgmtLauncher.exe
+bin	verb	HKLM	CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\shell\empty	on			ti	清空​​回收站	C:\Windows\SYSTEM32\shell32.dll
+bin	verb	HKLM	CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\shell\ModernProperties	off			ti	ModernProperties	
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\ FileSyncEx	on				 FileSyncEx	C:\Program Files\Microsoft OneDrive\26.183.0920.0005\FileSyncShell64.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\DesktopDockShellExt	on				DesktopDockShellExt	
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\FencesShellExt	on				FencesShellExt	C:\Program Files (x86)\Stardock\Fences\FencesMenu64.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\NvAppShExt	on				NvAppShExt	C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_b20cc8aeaed64fc2\nv3dappshext.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\OpenContainingFolderMenu	on		prot		OpenContainingFolderMenu	C:\Windows\system32\shell32.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\OpenGLShExt	on				OpenGLShExt	C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_b20cc8aeaed64fc2\nv3dappshext.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\Start10Shell	on				Start10Shell	C:\Program Files (x86)\Stardock\Start11\Start10Shell64.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\YunShellExt	on				YunShellExt	E:\Applications\BaiduNetdisk\YunShellExtV164.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\{00021401-0000-0000-C000-000000000046}	on				Shortcut	C:\Windows\System32\windows.storage.dll
+lnk	shellex	HKLM	lnkfile\shellex\ContextMenuHandlers\卡巴斯基免费版 21.26	on				卡巴斯基免费版 21.26	C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.26\x64\shellex.dll
+exe	verb	HKLM	exefile\shell\open	on		prot		open	
+exe	verb	HKLM	exefile\shell\runas	on		prot		runas	
+exe	verb	HKLM	exefile\shell\runasuser	on		prot		以其他用户身份运行(F)	
+exe	shellex	HKLM	exefile\shellex\ContextMenuHandlers\NvAppShExt	on				NvAppShExt	C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_b20cc8aeaed64fc2\nv3dappshext.dll
+exe	shellex	HKLM	exefile\shellex\ContextMenuHandlers\OpenGLShExt	on				OpenGLShExt	C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_b20cc8aeaed64fc2\nv3dappshext.dll
+exe	shellex	HKLM	exefile\shellex\ContextMenuHandlers\PintoStartScreen	on				PintoStartScreen	C:\Windows\System32\appresolver.dll
+exe	shellex	HKLM	exefile\shellex\ContextMenuHandlers\Start10Shell	on				Start10Shell	C:\Program Files (x86)\Stardock\Start11\Start10Shell64.dll
+exe	shellex	HKLM	exefile\shellex\-ContextMenuHandlers\Compatibility	off				Compatibility	C:\Windows\system32\acppage.dll
+shellnew	shellnew	HKLM	.contact\-ShellNew	off				联系人	
+shellnew	shellnew	HKLM	.docx\Word.Document.12\ShellNew	on				Microsoft Word 文档	
+shellnew	shellnew	HKLM	.library-ms\ShellNew	on				库	
+shellnew	shellnew	HKLM	.lnk\ShellNew	on				快捷方式	
+shellnew	shellnew	HKLM	.pptx\PowerPoint.Show.12\ShellNew	on				Microsoft PowerPoint 演示文稿	
+shellnew	shellnew	HKLM	.vsdx\Visio.Drawing.15\ShellNew	on				Microsoft Visio Drawing	
+shellnew	shellnew	HKLM	.xlsx\Excel.Sheet.12\ShellNew	on				Microsoft Excel 工作表	
+shellnew	shellnew	HKLM	.zip\CompressedFolder\ShellNew	on				压缩(zipped)文件夹	
+shellnew	shellnew	HKLM	Folder\ShellNew	on		prot		文件夹(&F)	
+sendto	sendto	file	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Compressed (zipped) Folder.ZFSendToTarget	on				Compressed (zipped) Folder	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Compressed (zipped) Folder.ZFSendToTarget
+sendto	sendto	file	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Desktop (create shortcut).DeskLink	on				Desktop (create shortcut)	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Desktop (create shortcut).DeskLink
+sendto	sendto	file	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Mail Recipient.MAPIMail	on				Mail Recipient	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\Mail Recipient.MAPIMail
+sendto	sendto	file	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\文档.mydocs	on				文档	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\文档.mydocs
+sendto	sendto	file	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\蓝牙文件传送.LNK	on				蓝牙文件传送	C:\Users\EternalLightning\AppData\Roaming\Microsoft\Windows\SendTo\蓝牙文件传送.LNK
+openwith	openwith	HKCU	Applications\7zFM.exe	on				7zFM.exe	E:\Applications\Scoop\apps\7zip\26.01\7zFM.exe
+openwith	openwith	HKCU	Applications\Code.exe	on				Code.exe	D:\Applications\Microsoft VS Code\Code.exe
+openwith	openwith	HKCU	Applications\Photoshop.exe	on				Photoshop.exe	D:\Applications\Adobe\Adobe Photoshop 2026\Photoshop.exe
+openwith	openwith	HKCU	Applications\PotPlayerMini64.exe	on				PotPlayerMini64.exe	E:\Applications\PotPlayer\PotPlayerMini64.exe
+openwith	openwith	HKCU	Applications\sublime_text.exe	on				sublime_text.exe	E:\Applications\Sublime Text\sublime_text.exe
+openwith	openwith	HKLM	Applications\iexplore.exe	off				iexplore.exe	C:\Program Files\Internet Explorer\iexplore.exe
+openwith	openwith	HKLM	Applications\Nemux.exe	on				Nemux.exe	C:\Program Files\MuMuPlayer\nx_main\MuMuNxMain.exe
+openwith	openwith	HKLM	Applications\notepad.exe	off				notepad.exe	C:\Windows\system32\NOTEPAD.EXE
+openwith	openwith	HKLM	Applications\provtool.exe	off				provtool.exe	C:\Windows\System32\provtool.exe
+openwith	openwith	HKLM	Applications\rebased64.exe	on				rebased64.exe	E:\Applications\GitClient\bin\rebased64.exe
+openwith	openwith	HKLM	Applications\vmware.exe	on				VMware Workstation	E:\Applications\VMware\vmware.exe
+openwith	openwith	HKLM	Applications\VSLauncher.exe	on				VSLauncher.exe	C:\Program Files (x86)\Common Files\Microsoft Shared\MSEnv\VSLauncher.exe
+dragdrop	dragdrop	HKLM	Directory\shellex\DragDropHandlers\7-Zip	on				7-Zip	E:\Applications\7-Zip\7-zip.dll
+dragdrop	dragdrop	HKLM	Directory\shellex\DragDropHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+dragdrop	dragdrop	HKLM	Drive\shellex\DragDropHandlers\7-Zip	on				7-Zip	E:\Applications\7-Zip\7-zip.dll
+dragdrop	dragdrop	HKLM	Drive\shellex\DragDropHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+dragdrop	dragdrop	HKLM	Folder\shellex\DragDropHandlers\RaiDrive.CopyMove	on				RaiDrive.CopyMove	E:\Applications\Raidrive\RaiDrive.ShellExtension.x64.dll
+dragdrop	dragdrop	HKLM	Folder\shellex\DragDropHandlers\{BD472F60-27FA-11cf-B8B4-444553540000}	on				Compressed (zipped) Folder Right Drag Handler	C:\Windows\system32\zipfldr.dll
+dragdrop	dragdrop	HKLM	Folder\shellex\DragDropHandlers\{D12E3394-DE4B-4777-93E9-DF0AC88F8584}	on				Compressed Archive Folder Right Drag Handler	C:\Windows\system32\zipfldr.dll
+ext:.png	verb	HKCU	SystemFileAssociations\.png\shell\SnowShot.Edit	on				使用 Snow Shot 编辑	E:\Applications\SnowShot\bin\snow_shot.exe
+ext:.png	verb	HKLM	SystemFileAssociations\.png\shell\setdesktopwallpaper	on				设置为桌面背景(B)	C:\Windows\Explorer.exe
+ext:.png	shellex	HKLM	SystemFileAssociations\.png\shellex\ContextMenuHandlers\ShellImagePreview	on				ShellImagePreview	C:\Program Files\Windows Photo Viewer\PhotoViewer.dll
+ext:.png	verb	HKCU	AppX43hnxtbyyps62jhe9sqpdzxn1790zetc\shell\open	on		prot		open	
+ext:.jpg	verb	HKCU	SystemFileAssociations\.jpg\shell\SnowShot.Edit	on				使用 Snow Shot 编辑	E:\Applications\SnowShot\bin\snow_shot.exe
+ext:.jpg	verb	HKLM	SystemFileAssociations\.jpg\shell\setdesktopwallpaper	on				设置为桌面背景(B)	C:\Windows\Explorer.exe
+ext:.jpg	shellex	HKLM	SystemFileAssociations\.jpg\shellex\ContextMenuHandlers\ShellImagePreview	on				ShellImagePreview	C:\Program Files\Windows Photo Viewer\PhotoViewer.dll
+ext:.jpg	verb	HKCU	AppX43hnxtbyyps62jhe9sqpdzxn1790zetc\shell\open	on		prot		open	
+ext:.mp4	shellex	HKLM	SystemFileAssociations\.mp4\shellex\ContextMenuHandlers\PlayTo	on				PlayTo	C:\Windows\System32\playtomenu.dll
+ext:.mp4	verb	HKCU	mp4_auto_file\shell\open	on		prot		open	E:\Applications\PotPlayer\PotPlayerMini64.exe
+ext:.zip	shellex	HKLM	SystemFileAssociations\.zip\shellex\ContextMenuHandlers\{b8cdcb65-b1bf-4b42-9428-1dfdb7ee92af}	on			ti	Compressed (zipped) Folder Context Menu	C:\Windows\system32\zipfldr.dll
+ext:.zip	verb	HKLM	CompressedFolder\shell\find	off		prot		find	C:\Windows\Explorer.exe
+ext:.zip	verb	HKLM	CompressedFolder\shell\Open	on		prot		Open	C:\Windows\Explorer.exe
+ext:.zip	shellex	HKLM	CompressedFolder\shellex\ContextMenuHandlers\{b8cdcb65-b1bf-4b42-9428-1dfdb7ee92af}	on				Compressed (zipped) Folder Context Menu	C:\Windows\system32\zipfldr.dll
+ext:.pdf	verb	HKLM	FoxitPhantomPDF.Document\shell\open	on		prot		open	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\FOXITPDFEDITOR.EXE
+ext:.pdf	verb	HKLM	FoxitPhantomPDF.Document\shell\print	on				print	E:\APPLICATIONS\FOXIT\FOXIT PDF EDITOR\FOXITPDFEDITOR.EXE
+ext:.txt	verb	HKCU	SystemFileAssociations\.txt\shell\SnowShot.Edit	on				使用 Snow Shot 编辑	E:\Applications\SnowShot\bin\snow_shot.exe
+ext:.txt	verb	HKCU	AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw\shell\Edit	on				编辑	C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe
+ext:.txt	verb	HKCU	AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw\shell\open	on		prot		open	C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe
+ext:.txt	verb	HKCU	AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw\shell\Print	on				打印	C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe
+ext:.txt	verb	HKCU	Text Document\shell\open	on		prot		Open with 花笺	E:\Applications\花笺\floral-notepaper.exe
+ext:.docx	verb	HKLM	Word.Document.12\shell\Edit	on				编辑(E)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\New	on				新建(N)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\OnenotePrintto	on				打印(P)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\Open	on		prot		打开(O)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\OpenAsReadOnly	on				以只读方式打开	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\Print	on				打印(P)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+ext:.docx	verb	HKLM	Word.Document.12\shell\ViewProtected	on				在受保护的视图中打开(V)	C:\Program Files\Microsoft Office\Root\Office16\WINWORD.EXE
+perc:image	verb	HKLM	SystemFileAssociations\image\shell\print	on				print	C:\Windows\System32\rundll32.exe
+perc:image	shellex	HKLM	SystemFileAssociations\image\shellex\ContextMenuHandlers\PlayTo	on				PlayTo	C:\Windows\System32\playtomenu.dll
+perc:audio	shellex	HKLM	SystemFileAssociations\audio\shellex\ContextMenuHandlers\PlayTo	on				PlayTo	C:\Windows\System32\playtomenu.dll
+perc:text	verb	HKLM	SystemFileAssociations\text\shell\edit	on				edit	C:\Windows\system32\NOTEPAD.EXE
+perc:text	verb	HKLM	SystemFileAssociations\text\shell\open	on		prot		open	C:\Windows\system32\NOTEPAD.EXE
+perc:video	shellex	HKLM	SystemFileAssociations\video\shellex\ContextMenuHandlers\PlayTo	on				PlayTo	C:\Windows\System32\playtomenu.dll

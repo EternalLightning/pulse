@@ -1,0 +1,42 @@
+{
+  "number": 86,
+  "title": "右键菜单无法启动第三方卸载软件",
+  "body": "版本号：windows 10 家庭版 22H2（19045.6466）\n第三方卸载软件：HiBit Uninstaller 4.0.10\nexe程序右键菜单点击HiBit Uninstaller监视安装无法运行卸载软件，原版资源管理器则可以正常使用，如图：\n\n<img width=\"1417\" height=\"792\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/d41a00bc-dac0-4241-b4a3-556348e77169\" />\n\n<img width=\"1248\" height=\"751\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f1374312-e588-42ba-a392-50001ff82974\" />\n\n<img width=\"1494\" height=\"830\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/6b7646b2-46d8-4c30-9751-784a591ca7c0\" />\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/86",
+  "captured_at": "2026-10-23T03:55:31.487420+00:00",
+  "updated_at": "2026-10-05T03:44:24Z",
+  "comments": [
+    {
+      "body": "已修复需要管理员权限的右键命令启动路径，代码已合入 main（f2c3c95），现已随正式版 [1.0.52](https://github.com/jimmgreen/pulse/releases/tag/v1.0.52) 发布，两个平台的发布检查均通过。\n\n核对 HiBit Uninstaller 4.0.10 后确认，它要求管理员权限；原先直接启动会返回 Windows 错误 740。现在遇到该错误时交给 Windows 请求提权，并保留原命令参数和工作目录；取消权限确认不会再作为启动失败弹错。\n\n相关 10 项检查已通过，包括提权、取消、失败及参数传递。不过尚未在你这台 Windows 10 上完整验证 HiBit 的“监视安装”流程，先保持 issue 打开。升级至 1.0.52 后请再试一次；如果仍失败，请附上诊断包和触发时间，方便继续定位。\r\n",
+      "bodyHTML": "<p dir=\"auto\">已修复需要管理员权限的右键命令启动路径，代码已合入 main（f2c3c95），现已随正式版 <a href=\"https://github.com/jimmgreen/pulse/releases/tag/v1.0.52\">1.0.52</a> 发布，两个平台的发布检查均通过。</p>\n<p dir=\"auto\">核对 HiBit Uninstaller 4.0.10 后确认，它要求管理员权限；原先直接启动会返回 Windows 错误 740。现在遇到该错误时交给 Windows 请求提权，并保留原命令参数和工作目录；取消权限确认不会再作为启动失败弹错。</p>\n<p dir=\"auto\">相关 10 项检查已通过，包括提权、取消、失败及参数传递。不过尚未在你这台 Windows 10 上完整验证 HiBit 的“监视安装”流程，先保持 issue 打开。升级至 1.0.52 后请再试一次；如果仍失败，请附上诊断包和触发时间，方便继续定位。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/86#issuecomment-5979126261"
+    },
+    {
+      "body": "在升级至1.0.52 后，我这边已经能够通过右键启动 HiBit Uninstaller进行监视安装，问题已解决",
+      "bodyHTML": "<p dir=\"auto\">在升级至1.0.52 后，我这边已经能够通过右键启动 HiBit Uninstaller进行监视安装，问题已解决</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCMa7zg",
+        "login": "whyubulme",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/147241934?u=28d920ade74c204395d42ddcea19e86602c1948b&v=4",
+        "profileUrl": "https://github.com/whyubulme",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/86#issuecomment-5979749401"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoQXL-MABqzMyNDMyNzQ0OTU2",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoQoppcABqzMyNDc1MjY1NTcx"
+  }
+}

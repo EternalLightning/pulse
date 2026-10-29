@@ -1,0 +1,14 @@
+
+Path : E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_virtual_location_navigation_test.exe
+Hash : DFA9B4BCEFDCAED5F9304A9BB1B3F064421A88464175DBA8AF9767C40266E771
+
+Path : C:\Users\EternalLightning\.codex\visualizations\2026\10\25\01a1724e-806c-7682-af66-fa174d26305f\navigation-check\pulse_virtual_location_navigation_test.exe
+Hash : DFA9B4BCEFDCAED5F9304A9BB1B3F064421A88464175DBA8AF9767C40266E771
+
+Path : E:\Projects\pulse\build_audit_msbuild_20261025\Release\lumatext.dll
+Hash : E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911
+
+Path : C:\Users\EternalLightning\.codex\visualizations\2026\10\25\01a1724e-806c-7682-af66-fa174d26305f\navigation-check\lumatext.dll
+Hash : E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911
+
+

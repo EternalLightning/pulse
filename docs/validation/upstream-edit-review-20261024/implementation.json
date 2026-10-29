@@ -1,0 +1,440 @@
+{
+  "date": "2026-10-24",
+  "status": "implemented-with-desktop-edit-flicker-still-open",
+  "product_changed": true,
+  "installed_changed": false,
+  "upstream_commit": "c4fe01ed82fe091f495f531972a854aa32caac2b",
+  "build_directory": "build_release_clean",
+  "test_results": "bench_data/sharp-spacing-20261024/final-results.json",
+  "refresh_rate_followup": {
+    "active_display_hz": 165,
+    "active_display_pixels": [
+      3440,
+      1440
+    ],
+    "adapter": "NVIDIA GeForce RTX 3070 Ti",
+    "official_portable_version": "1.0.56",
+    "official_live_result": "bench_data/edit-upstream-ab-20261024/upstream-text-address-result.json",
+    "local_live_result": "bench_data/edit-upstream-ab-20261024/local-text-address-result.json",
+    "display_settings": "bench_data/edit-upstream-ab-20261024/effective-display-settings.json",
+    "root_opacity_effect_ab": "No improvement in the full desktop matrix; temporary source edit reverted.",
+    "system_settings_changed": false,
+    "sixty_hz_same_host_tested": false
+  },
+  "markdown_lines": [
+    "**本轮已修改本地源码，未打包、发布或替换安装版。** 已接入“自动／清晰／平滑”，恢复上游编辑选区与绘制机制，并统一“清晰”的排版和绘制度量。**编辑闪烁仍未验收通过：最终真实桌面采样在三模式下均捕获到方向键处理中的短暂第三帧，不能宣布闪烁已解决。**",
+    "",
+    "**165 Hz 后续实机对照：** 用户补充原版便携版在宿主机也会闪烁，而虚拟机60 Hz几乎看不出。只读检查确认宿主机当前为 RTX 3070 Ti、3440×1440、165 Hz，非远程会话；有效字体平滑和ClearType均开启，平滑类型2、对比度1200，未取得系统设置损坏的证据。165 Hz帧间隔约6.06 ms，60 Hz约16.67 ms；更高刷新率暴露短暂中间画面与目前证据吻合，但没有在同一宿主机上切换60／165 Hz作因果对照，也没有据此排除驱动或其他合成因素。系统设置没有被修改。",
+    "",
+    "为排除仅为离屏夹具现象，已从上游正式发布资产下载1.0.56便携包，并在隔离配置、隔离文件目录内启动两个真实程序窗口。对相同短文本 Pulse_中文_123.txt、方向键切换与父窗口重绘作独立桌面采样：原版161帧中28帧超出端点像素阈值，本地147帧中5帧超出；两者最坏帧均为文字整行暂时消失，最大差异均620像素。采样调度与次数不同，这些数字不用于比较哪一版更严重，也不等同用户正常操作中的闪烁频率；它们确认当前165 Hz宿主环境下原版也可出现空白帧。脚本只修改隔离路径内的输入文字，以Esc取消，未操作用户文件。",
+    "",
+    "另对本地主窗口永久绑定的透明度effect作单变量A/B：移除绑定后的完整Sharp桌面矩阵仍为89 PASS／4 FAIL，未改善，临时改动已撤回。不能将这一差异列为已确认根因，也不保留无效补丁。原版与本地都存在的短WM_SETREDRAW与layered child呈现时序仍需修复；恢复上游本身不足以保证高刷新率无闪烁。[实机对照脚本](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/live_compare.py)、[有效显示参数](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/effective-display-settings.json)、[原版坏帧](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/upstream-text-address-worst.png)、[本地坏帧](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/local-text-address-worst.png)。",
+    "",
+    "**更好呈现方式的隔离对照：**本轮未改产品源码、安装版或系统设置。165 Hz宿主、清晰模式、同一短文本路径栏：现有方式131帧／4异常；仅将测试进程的子窗口切为完整位图上传150帧／0异常，但左右端点截图均无文字，已判不可用，不能将全空白算作无闪烁；使用现有原生回退，两轮124及137帧／均0异常，文字可见。它们是同步方向键与父窗口重绘压力采样，不能当作正常操作闪烁率，也没有覆盖真实鼠标、长路径、重命名或输入法。原生绘制可作为稳定性优先的备选，但会改变自绘选区及三模式文字效果的一致性。建议优先验证：原生EDIT继续负责输入、撤销和IME，自绘画面作为主窗口DirectComposition树中的持久编辑层，上一幅完整画面保留到下一幅准备好，再替换；避免更新时隐藏可见表面，也有机会省去每次GPU读回和GDI搬运。这只是待验证架构方案，尚未实施，需证明输入焦点、候选框、裁切、DPI、设备重建及原生回退正确。[隔离对照数据](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/presentation-investigation.json)。",
+    "",
+    "**持久合成原型验证（2026-10-24）：**已实现并构建仅由测试进程环境变量 PULSE_TEST_COMPOSED_EDIT=1 启用的原型；默认通道、安装版及 E:/Projects/TestPrograms/Pulse 均未替换。EDIT保持可见、继续负责输入和IME，主窗口同一设备增加位于子HWND上方的持久编辑合成层，完整GPU画面准备后提交；新通道不使用WM_SETREDRAW开关，也跳过CPU读回与GDI呈现。补齐失焦更新、隐藏/销毁移除、位置尺寸同步和失败回退。最终三模式各153 PASS／0 FAIL，默认通道133 PASS／0 FAIL；覆盖原生Unicode编辑/撤销、拖选提交、100%/150%及部分125%文字路径、模式切换、隐藏重建和强制失败回退。另一次早期Auto仅前台保持断言失败，后续通过，原因未定，旧日志保留。",
+    "",
+    "当前165 Hz桌面上，三模式的暗色路径栏短文本和浅色重命名栏长文本共825帧，另对清晰模式补充浅色路径栏和暗色重命名栏282帧；**最终共1107帧／0超阈值异常**，端点均有文字，并逐次检查合成标记，未以原生回退或全空白误判通过。已查看浅色路径栏及暗色长文本重命名的完整窗口截图，所查看画面位置、裁切和背景正常。这是同步方向键＋父窗口重绘采样，不代表正常操作闪烁率，更不是物理键鼠验收。",
+    "",
+    "**原型仍未完成的验收：** 真实SendInput多次未能打开编辑框（一次受限桌面失焦安全退出，其余焦点检查正确但F4后无EDIT）；扫描码版本相同，关闭原型的默认通道对照也相同。未确定具体原因，未按通过处理。实际中文输入法候选交互、物理鼠标拖选、辅助功能、设备丢失重建和跨屏DPI仍未验收；本轮没有据此切换默认实现或发布安装包。[原型证据](E:/Projects/pulse/bench_data/composed-edit-prototype-20261024/validation.json)、[隔离原型启动脚本](E:/Projects/pulse/bench_data/composed-edit-prototype-20261024/launch-prototype.ps1)。",
+    "",
+    "**模式与设置：** 设置页增加三段选择，保存到 app.json 的 text_render（0／1／2）；缺省或非法值回到自动。选择后更新现有窗口、编辑框、文字格式、布局和测量缓存，无须重启。自动沿用上游可用的 LumaText 普通界面路径；清晰与平滑使用 DirectWrite 的对应参数。编辑框沿用上游 DirectWrite／Direct2D 自绘和原生 EDIT 输入、撤销与 IME，并未因为模式名称而改成另一套输入控件。",
+    "",
+    "**字距：** 清晰使用 GDI_CLASSIC 栅格化及 CreateGdiCompatibleTextLayout(useGdiNatural=FALSE)，普通 DrawText 也使用 GDI_CLASSIC measuring。测宽、排版、高亮、裁切、省略与编辑命中共用 typography 策略；平滑保持自然度量。修正的是绘制与排版模式不匹配，没有针对 co、ed、gram 或特定文件名插入补偿。字体原有的字侧空白仍然存在，不能承诺任意字母之间都无可见间隙。",
+    "",
+    "**编辑机制：** 恢复上游鼠标 anchor／caret 与延迟提交选区，拖动期间不逐帧 EM_SETSEL；复用同一布局进行绘制和命中。保留鼠标释放时的已绘制滚动原点，下一次非鼠标文本或光标变化再跟踪光标，避免松手跳动。移除本地旧的整段拖动冻结与重复视口维护，保留本地快捷键、Esc 静音和中文输入相关业务。颜色、菜单过滤、预览查找等外围编辑入口也统一到同一处理；原生回退路径直接交还 EDIT，保持鼠标和系统光标。",
+    "",
+    "### 本轮实际验证",
+    "",
+    "| 范围 | 实际结果 | 证据及限制 |",
+    "|---|---|---|",
+    "| 主程序及受影响测试目标 | 构建通过 | 使用 build_release_clean，最后增量构建 pulse、pulse_child_edit_test、pulse_hosted_edit_stability_test 成功；不是安装验收。 |",
+    "| 文字策略与缓存 | 29 PASS／0 FAIL | typography.log；真实 Windows DWrite 对照 2 字体、4 字号、6 字符串、3 模式的144组布局，并验证125% DIP路径。Luma路由部分用stub，不视为真实Luma图像验收。 |",
+    "| 子编辑框与原生回退 | 最终三模式各133 PASS／0 FAIL | final-child-auto／sharp／smooth.log；含初始呈现失败、失焦后点击、Unicode输入及原生回退。 |",
+    "| 路径与对话框编辑集成 | 三模式各11及425 PASS／0 FAIL | address-auto／sharp／smooth.log 和 dialogs-auto／sharp／smooth.log；隔离夹具，不操作用户文件。 |",
+    "| 设置点击、持久化和双窗口生效 | 493 PASS／0 FAIL | settings.log；通过实际命中、控制器、效果和窗口消息，配置仅在内存序列化，未改用户实际偏好。 |",
+    "| 宿主编辑离屏矩阵 | 后续三模式各553 PASS／0 FAIL | hosted-auto-diagnostic.log、hosted-sharp.log、hosted-smooth-diagnostic.log；不等同桌面无闪烁。初轮Auto与Smooth各有一次552／1，后续未复现；原日志保留，缺少当时坏帧，原因未定。 |",
+    "| 真实桌面连续采样 | 最终三模式各89 PASS／4 FAIL | final-desktop-auto／sharp／smooth.log；4个失败均为浅／深主题的路径栏和重命名栏方向键第三帧，拖选采样均通过。未提高像素阈值、删除断言或将失败算作通过。 |",
+    "",
+    "**视觉复核：** 设置页覆盖中英文、620／1100宽、100%／150%、浅深主题与三模式；实际 MainRenderer 列表覆盖中英文、100%／125%／150%、浅深主题与三模式，含搜索高亮和长名省略。已查看窄设置、150%英文暗色设置、中文暗色列表及三模式字距放大对照，未见所查看画面裁切重叠。这些截图不能替代真实输入法操作和用户显示器上的最终体验。中文主字体仍为 Microsoft YaHei UI，英文为 Segoe UI Variable Text，保留本地14 DIP默认字号。",
+    "",
+    "**剩余问题与边界：** 屏幕坏帧可见编辑表面下方窗口内容，且同步记录到短 WM_SETREDRAW 中 WS_VISIBLE 改变。上游源码同样保留这个短 guard，并强制 LWA_ALPHA 重定向子表面；后续正式便携包实机对照也已捕获到空白帧，见前述数据。尝试仅在重绘开关同步调用中拦截 WM_STYLECHANGING，没有阻止可见位变化，候选已移除。没有留下无效补丁，也没有引入全桌面 LockWindowUpdate、额外 overlay 或新的输入／呈现双窗口架构。此项需要后续单独处理；当前恢复上游与三模式接入不代表它已修复。",
+    "",
+    "证据：[最终结果](E:/Projects/pulse/bench_data/sharp-spacing-20261024/final-results.json)、[设置验证](E:/Projects/pulse/bench_data/sharp-spacing-20261024/settings.log)、[三模式字距画面对照](E:/Projects/pulse/bench_data/text-render-settings-20261024/mode-spacing-comparison.png)、[实际列表截图](E:/Projects/pulse/bench_data/text-render-settings-20261024/file-list-zh-CN-100-dark-1.png)。本节继续合并在唯一报告中。"
+  ],
+  "presentation_investigation": {
+    "date": "2026-10-24",
+    "scope": "Isolated running Pulse address field, Sharp mode, same 165 Hz host, short text, synchronous arrow-key messages and parent redraw; no physical input or IME acceptance.",
+    "product_sources_changed": false,
+    "system_settings_changed": false,
+    "cases": [
+      {
+        "label": "present-current",
+        "kind": "address",
+        "pid": 9316,
+        "samples": 131,
+        "unexpected": 4,
+        "worst_difference": 507,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "endpoint_ink_pixels": [
+          508,
+          507
+        ],
+        "text_visible": true
+      },
+      {
+        "label": "present-uploaded",
+        "kind": "address",
+        "pid": 19172,
+        "samples": 150,
+        "unexpected": 0,
+        "worst_difference": 0,
+        "width": 417,
+        "height": 20,
+        "presentation": "uploaded",
+        "endpoint_ink_pixels": [
+          0,
+          0
+        ],
+        "text_visible": false
+      },
+      {
+        "label": "present-native",
+        "kind": "address",
+        "pid": 12584,
+        "samples": 124,
+        "unexpected": 0,
+        "worst_difference": 20,
+        "width": 417,
+        "height": 20,
+        "presentation": "native",
+        "endpoint_ink_pixels": [
+          433,
+          433
+        ],
+        "text_visible": true
+      },
+      {
+        "label": "present-native-confirm",
+        "kind": "address",
+        "pid": 29776,
+        "samples": 137,
+        "unexpected": 0,
+        "worst_difference": 20,
+        "width": 417,
+        "height": 20,
+        "presentation": "native",
+        "endpoint_ink_pixels": [
+          433,
+          433
+        ],
+        "text_visible": true
+      }
+    ],
+    "conclusions": {
+      "uploaded": "Rejected: both endpoint screenshots contain no visible text; zero unexpected frames is not a pass.",
+      "native": "Text visible and zero unexpected frames in two limited runs; does not establish correctness for drag selection, long text, IME or all editor hosts.",
+      "recommended": "Investigate persistent edit visuals in the main DirectComposition tree while retaining native EDIT input. Architecture proposal only, not implemented or validated."
+    }
+  },
+  "composition_prototype": {
+    "date": "2026-10-24",
+    "status": "opt-in-prototype-with-positive-synchronous-desktop-results-physical-input-unverified",
+    "default_enabled": false,
+    "enabled_by": "Process-only PULSE_TEST_COMPOSED_EDIT=1",
+    "installed_changed": false,
+    "test_programs_copy_changed": false,
+    "system_settings_changed": false,
+    "active_display": {
+      "remote_session": false,
+      "effective_settings": {
+        "font_smoothing": 1,
+        "clear_type_enabled": 1,
+        "smoothing_type": 2,
+        "smoothing_contrast": 1200,
+        "client_area_animation": 1,
+        "ui_effects": 1
+      },
+      "active_displays": [
+        {
+          "name": "\\\\.\\DISPLAY1",
+          "adapter": "NVIDIA GeForce RTX 3070 Ti",
+          "primary": true,
+          "width": 3440,
+          "height": 1440,
+          "frequency": 165
+        }
+      ]
+    },
+    "sources": [
+      "src/ui/edit_composition.h",
+      "src/ui/edit_composition.cpp",
+      "src/ui/ui_compositor.h",
+      "src/ui/ui_compositor.cpp",
+      "src/ui/edit_host.cpp",
+      "src/ui/lumatext_renderer.h",
+      "src/ui/lumatext_renderer.cpp",
+      "CMakeLists.txt",
+      "src/bench/child_edit_test.cpp"
+    ],
+    "executable_sha256": "709ee38c419e900d64ee965d758750ac92756dda0a612b5b8dd7f2739a9b378a",
+    "synchronous_matrix": [
+      {
+        "label": "composed-final-m0-address",
+        "kind": "address",
+        "pid": 46000,
+        "samples": 135,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 0,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          580,
+          580
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-final-m0-rename",
+        "kind": "rename",
+        "pid": 44140,
+        "samples": 137,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 376,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 0,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1788,
+          1787
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-final-m1-address",
+        "kind": "address",
+        "pid": 37244,
+        "samples": 141,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          495,
+          495
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-final-m1-rename",
+        "kind": "rename",
+        "pid": 29984,
+        "samples": 139,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 380,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1494,
+          1499
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-final-m2-address",
+        "kind": "address",
+        "pid": 43384,
+        "samples": 136,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 2,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          596,
+          596
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-final-m2-rename",
+        "kind": "rename",
+        "pid": 6240,
+        "samples": 137,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 376,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 2,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1788,
+          1787
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      }
+    ],
+    "layout_followups": [
+      {
+        "label": "composed-layout-light",
+        "kind": "address",
+        "pid": 26740,
+        "samples": 145,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": false,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          453,
+          453
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "composed-layout-dark",
+        "kind": "rename",
+        "pid": 46332,
+        "samples": 137,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 380,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": true,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          1618,
+          1623
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      }
+    ],
+    "total_final_synchronous_samples": 1107,
+    "total_final_unexpected": 0,
+    "child_tests": [
+      {
+        "mode": "auto",
+        "exit_code": 0,
+        "passes": 153,
+        "failures": 0,
+        "composed_assertions": 4
+      },
+      {
+        "mode": "sharp",
+        "exit_code": 0,
+        "passes": 153,
+        "failures": 0,
+        "composed_assertions": 4
+      },
+      {
+        "mode": "smooth",
+        "exit_code": 0,
+        "passes": 153,
+        "failures": 0,
+        "composed_assertions": 4
+      },
+      {
+        "mode": "default-sharp",
+        "exit_code": 0,
+        "passes": 133,
+        "failures": 0,
+        "composed_assertions": 0
+      }
+    ],
+    "physical_input_attempts": [
+      {
+        "role": "prototype",
+        "evidence": "bench_data\\edit-upstream-ab-20261024\\desktop-composed-real-input-20261024-164829-159461\\result.json",
+        "accepted": false,
+        "error": "RuntimeError('Probe lost foreground; stopped to avoid sending input to another application')"
+      },
+      {
+        "role": "prototype",
+        "evidence": "bench_data\\edit-upstream-ab-20261024\\desktop-composed-real-input-20261024-164858-309099\\result.json",
+        "accepted": false,
+        "error": "RuntimeError('Expected exactly one editor, got 0; visible child classes: []')"
+      },
+      {
+        "role": "prototype",
+        "evidence": "bench_data\\edit-upstream-ab-20261024\\desktop-composed-real-input-diagnostic-20261024-165234-367832\\result.json",
+        "accepted": false,
+        "error": "RuntimeError('Expected exactly one editor, got 0; visible child classes: []')"
+      },
+      {
+        "role": "prototype",
+        "evidence": "bench_data\\edit-upstream-ab-20261024\\desktop-composed-scancode-20261024-170014-019300\\result.json",
+        "accepted": false,
+        "error": "RuntimeError('Expected exactly one editor, got 0; visible child classes: []')"
+      },
+      {
+        "role": "baseline",
+        "evidence": "bench_data\\edit-upstream-ab-20261024\\desktop-baseline-scancode-20261024-170100-355640\\result.json",
+        "accepted": false,
+        "error": "RuntimeError('Expected exactly one editor, got 0; visible child classes: []')"
+      }
+    ],
+    "earlier_failure": {
+      "log": "bench_data\\composed-edit-prototype-20261024\\child-auto.log",
+      "detail": "One earlier Auto run failed only the foreground-preservation assertion; later runs passed. Cause of that transient was not established; initial log retained."
+    },
+    "architecture": "Native EDIT remains visible and handles input; a persistent DirectComposition target above child HWNDs covers native immediate drawing, with the same host device and opacity effect. GPU bitmap is copied directly to a retained composition surface. No WM_SETREDRAW toggles in the composed path, no CPU readback/GDI present in that path. Focus loss, hide/destroy, resize positioning and native fallback release/update the surface. Default presentation is unchanged.",
+    "limits": [
+      "Synchronous screen sampling detects observed third frames only; it is not a normal-use flicker rate or proof against every transient.",
+      "Physical SendInput could not open the editor even with correct focus and scan codes; default-channel control also failed. Cause not established; not passed.",
+      "Actual IME candidate interaction, physical drag selection, accessibility, device reset and cross-monitor DPI behavior are not accepted.",
+      "The eight final desktop cases cover three modes, dark address short text / light rename long text, plus Sharp light address and dark rename; not a full theme/DPI cross-product."
+    ],
+    "launcher": "bench_data\\composed-edit-prototype-20261024\\launch-prototype.ps1"
+  }
+}

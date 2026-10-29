@@ -15,12 +15,13 @@ inline bool IsDialogSurfaceFading(HWND window) {
 }
 // Composition handles are borrowed only while the window's compositor is alive.
 void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual);
-// Fade-in returns immediately; hiding or compositor teardown cancels it.
+// Fade-in returns immediately; closing reverses it and compositor teardown cancels it.
 void ShowDialogWithFade(HWND dialog);
 void ShowDialogWithFade(HWND dialog, int show_command);
 void DestroyDialogWithFade(HWND dialog);
 void DestroyDialogWithFade(HWND dialog, HWND modal_owner);
-// Hide the complete owned-window tree before tearing down composition resources.
+// Fade out, then hide the complete owned-window tree before returning. Composition
+// resources must remain alive until this returns; closing processes only paint messages.
 // Pass the disabled owner for a modal dialog; omit it for a modeless window.
 void HideComposedDialog(HWND dialog, HWND modal_owner = nullptr);
 

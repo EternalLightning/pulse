@@ -1,0 +1,62 @@
+[
+  {
+    "path": "E:\\Projects\\pulse\\build-release\\Pulse.exe",
+    "length": 8626176,
+    "last_write": "2026-10-30T00:07:52.3403478+08:00",
+    "sha256": "B54A5D7AEE9F24B0BB801B1C6F224CFE803CA3514EFF1AF6CB180E9ED55C343F"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build-release\\Pulse.Shell.exe",
+    "length": 1663488,
+    "last_write": "2026-10-29T23:55:26.5538418+08:00",
+    "sha256": "B36F0D74203EB9077694070DD0B02D63CAD826FFF5C9CCEF497C7ADC03F581D9"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\build-release\\Pulse.Preview.exe",
+    "length": 279552,
+    "last_write": "2026-10-29T20:05:10.2219940+08:00",
+    "sha256": "E61EFF625FAF026741276C692FF50D176AC4FA6D58A1177D69AAE526D80E87D4"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\ui\\thumbnail_cache.cpp",
+    "length": 34270,
+    "last_write": "2026-10-29T20:03:57.9704747+08:00",
+    "sha256": "F99ECA96713D0E5CEB1737222DD28D6FCFC131E1DA2AF6D6F941A8548AC6BCD1"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\ui\\shell_icons.cpp",
+    "length": 18899,
+    "last_write": "2026-10-29T20:02:00.6826140+08:00",
+    "sha256": "1AA58DA0A4D102D6A83DBC958EC326133157C4AB67FF4D7BE53BC61CE2581239"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\preview_host\\main.cpp",
+    "length": 43109,
+    "last_write": "2026-10-29T20:04:43.7298596+08:00",
+    "sha256": "9542E7E2F7BBA38F070A39DAEB8BE420CDAD6633FDB313493A6C9CE86DE0ECB6"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\app\\cloud_sync_probe.cpp",
+    "length": 6935,
+    "last_write": "2026-10-29T23:32:29.6000683+08:00",
+    "sha256": "DC876B35A46038E63B878EC1A958A7F713B3355E04EF370F213C689489FC759C"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\app\\cloud_probe_access.h",
+    "length": 1049,
+    "last_write": "2026-10-29T23:32:46.3170589+08:00",
+    "sha256": "0A0ED27EAE03C6B6C0B3AF06F7C058D04BD5A03B2195A9928E027CA584ECE77B"
+  },
+  {
+    "path": "E:\\Projects\\pulse\\src\\shell_host\\shell_query_metadata.cpp",
+    "length": 8478,
+    "last_write": "2026-10-29T23:51:07.3014800+08:00",
+    "sha256": "BC7EA54799A6754237F31A3ED84EBF5E81ED04CD85A830487ADFB34875939A6A"
+  },
+  {
+    "path": "D:\\Applications\\Pulse\\Pulse.exe",
+    "length": 8591872,
+    "last_write": "2026-10-29T19:37:28.3020376+08:00",
+    "sha256": "4B548FEA81AD92F1D594239B3FA5A73400D53445179D701934D3DE04042E6309"
+  }
+]

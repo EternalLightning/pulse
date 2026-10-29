@@ -1,0 +1,8 @@
+[
+  "src/bench/operation_elevation_adapter_test.cpp",
+  "src/bench/operation_records_test.cpp",
+  "src/bench/ops_feedback_test.cpp",
+  "src/bench/ops_test_main.cpp",
+  "src/bench/recycle_backend_test.cpp",
+  "src/bench/rename_ops_test.cpp"
+]

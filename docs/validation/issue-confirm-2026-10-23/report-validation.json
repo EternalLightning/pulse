@@ -1,0 +1,18 @@
+{
+  "report": "docs/issue-bug-audit-2026-10-23.md",
+  "issue_rows": 149,
+  "excluded_rows": 19,
+  "unique_candidates": 168,
+  "counts": {
+    "行为已确认但缺陷未定": 3,
+    "排除": 19,
+    "已有针对实现（静态）": 27,
+    "缺少条件": 66,
+    "运行复现": 16,
+    "静态确认": 27,
+    "定向未复现": 10
+  },
+  "missing_local_links": [],
+  "duplicate_reports_removed": true,
+  "verification": "Documentation consistency checks only; no build or functional tests rerun."
+}

@@ -1,0 +1,22 @@
+{
+  "Success": true,
+  "Utc": "2026-10-24T03:57:53.2517256Z",
+  "IndexHosts": [
+    {
+      "ProcessId": 26804,
+      "CreationDate": "2026-10-24T11:34:56.044912+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "Version": "1.2.0.1",
+  "OrdinaryMediumLaunch": true,
+  "UI": [
+    {
+      "ProcessId": 40740,
+      "CreationDate": "2026-10-24T11:57:49.904678+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.exe\" "
+    }
+  ]
+}

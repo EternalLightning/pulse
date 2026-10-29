@@ -215,8 +215,8 @@ int RunSearchExitTest(AppState& s, const wchar_t* output) {
     SubmitAddressSearch(s, true);
     tab->search_origin_valid = false;
     tab->back_stack = {};
-    tab->back_stack.push(L"pulse:home");
-    tab->back_stack.push(app::MakeSearchPath(L"older"));
+    tab->back_stack.push({L"pulse:home"});
+    tab->back_stack.push({app::MakeSearchPath(L"older")});
     ExitAddressSearch(s);
     check(tab->current_path == L"pulse:home", "missing origin falls back across searches to nearest virtual page");
     // A repeated query can occur in multiple history entries with different origins.
@@ -706,6 +706,9 @@ int RunSearchFlowTest(AppState& s, const wchar_t* output) {
     check(!l10n::Get(l10n::StringId::SearchModeContent).empty() && !l10n::Get(l10n::StringId::ContentIndexNoQuery).empty(), "search labels loaded");
     s.contentSearch.Stop();
     auto* tab = ActiveTab(s);
+    const auto search_origin = tab->current_path;
+    tab->search_origin_path = search_origin;
+    tab->search_origin_valid = true;
     tab->current_path = app::MakeSearchPath(L"content:budget");
     tab->pending_generation = 900001;
     tab->search_content_active = true;
@@ -737,9 +740,16 @@ int RunSearchFlowTest(AppState& s, const wchar_t* output) {
     s.addressSearchContent = true;
     SetWindowTextW(s.hwndAddressEdit, L"");
     SubmitAddressSearch(s, false);
-    check(tab->search_content_empty && tab->snapshot->empty(), "clearing content clears results");
-    RequestSearchPage(s, *tab, L"content:budget", true);
-    check(tab->snapshot->empty() && !tab->loading, "empty content does not rerun previous query");
+    check(tab->current_path == search_origin && !IsAddressSearchResults(tab), "clearing content returns to original location");
+    const auto restored_snapshot = tab->snapshot;
+    index::ContentSearchUpdate after_clear;
+    after_clear.progress.generation = 900001;
+    after_clear.progress.done = true;
+    after_clear.hits.push_back({L"C:\\fixture\\late.txt", L"late.txt", L"budget"});
+    ApplyContentSearchUpdate(s, std::move(after_clear));
+    check(tab->current_path == search_origin && tab->snapshot == restored_snapshot, "cleared content cannot overwrite restored directory");
+    ShowAddressSearch(s);
+    s.addressSearchContent = true;
     SetWindowTextW(s.hwndAddressEdit, L"budget");
     SubmitAddressSearch(s, false);
     log << "restore empty=" << tab->search_content_empty << " editor=" << IsWindow(s.hwndAddressEdit) << " textlen=" << GetWindowTextLengthW(s.hwndAddressEdit) << " composing=" << s.addressSearchComposing << " searching=" << s.addressSearching << std::endl;

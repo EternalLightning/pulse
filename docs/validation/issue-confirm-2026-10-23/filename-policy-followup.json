@@ -1,0 +1,175 @@
+{
+  "utc": "2026-10-23T13:07:41.1522410Z",
+  "deployment": {
+    "RecoveryError": null,
+    "Utc": "2026-10-23T13:07:41.1522410Z",
+    "NewHash": "908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED",
+    "Error": null,
+    "Phase": "complete",
+    "Success": true,
+    "Backup": "E:\\Projects\\pulse\\dist\\filename-index-only-20261023-210737",
+    "BackupFiles": 68,
+    "Deferred": {
+      "Path": "D:\\Applications\\Pulse\\Pulse.Index.exe.filename-old-5c53936e7c1a4f8991f25e7e1f9f03cb",
+      "SHA256": "97BAC51D2E035FC99D0D7B59CFCC531601534E0952AB7E3A1AE343C8CE709D02",
+      "Reason": "对路径“D:\\Applications\\Pulse\\Pulse.Index.exe.filename-old-5c53936e7c1a4f8991f25e7e1f9f03cb”的访问被拒绝。"
+    }
+  },
+  "before": [
+    {
+      "query": "a",
+      "p50_ms": 2077.4,
+      "p95_ms": 2077.4,
+      "matches": 6265,
+      "returned": 48,
+      "error": 0,
+      "incomplete": true,
+      "budget_passed": false
+    },
+    {
+      "query": "ab",
+      "p50_ms": 2118.33,
+      "p95_ms": 2118.33,
+      "matches": 4647,
+      "returned": 48,
+      "error": 0,
+      "incomplete": true,
+      "budget_passed": false
+    },
+    {
+      "query": "abc",
+      "p50_ms": 2181.5,
+      "p95_ms": 2181.5,
+      "matches": 2235,
+      "returned": 48,
+      "error": 0,
+      "incomplete": true,
+      "budget_passed": false
+    },
+    {
+      "query": "report",
+      "p50_ms": 2102.24,
+      "p95_ms": 2102.24,
+      "matches": 2310,
+      "returned": 48,
+      "error": 0,
+      "incomplete": true,
+      "budget_passed": false
+    },
+    {
+      "query": "pdf",
+      "p50_ms": 2188.85,
+      "p95_ms": 2188.85,
+      "matches": 1746,
+      "returned": 48,
+      "error": 0,
+      "incomplete": true,
+      "budget_passed": false
+    },
+    {
+      "query": "pulse-no-match-9f64b73ad180",
+      "p50_ms": 23.43,
+      "p95_ms": 23.43,
+      "matches": 0,
+      "returned": 0,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": true
+    }
+  ],
+  "after": [
+    {
+      "query": "a",
+      "p50_ms": 367.01,
+      "p95_ms": 405.37,
+      "matches": 1249754,
+      "returned": 48,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": false
+    },
+    {
+      "query": "ab",
+      "p50_ms": 46.11,
+      "p95_ms": 50.68,
+      "matches": 97115,
+      "returned": 48,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": false
+    },
+    {
+      "query": "abc",
+      "p50_ms": 1.31,
+      "p95_ms": 2.71,
+      "matches": 4014,
+      "returned": 48,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": true
+    },
+    {
+      "query": "report",
+      "p50_ms": 1.22,
+      "p95_ms": 1.23,
+      "matches": 3738,
+      "returned": 48,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": true
+    },
+    {
+      "query": "pdf",
+      "p50_ms": 0.92,
+      "p95_ms": 1.92,
+      "matches": 4233,
+      "returned": 48,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": true
+    },
+    {
+      "query": "pulse-no-match-9f64b73ad180",
+      "p50_ms": 1.47,
+      "p95_ms": 1.67,
+      "matches": 0,
+      "returned": 0,
+      "error": 0,
+      "incomplete": false,
+      "budget_passed": true
+    }
+  ],
+  "verification": {
+    "cache_pass": 62,
+    "cache_fail": 0,
+    "host_pass": 11,
+    "host_fail": 0
+  },
+  "markdown_lines": [
+    "按用户“不要逐个文件鉴权”的明确要求，文件名搜索现在直接使用索引元数据。删除候选 ACL 检查、目录复验、最终页复验和相应 2 秒授权预算；总数与全局排序覆盖本次索引匹配全集。可搜到无权打开的文件名，实际打开、预览、读取和文件操作仍受其原有 Windows 权限约束。",
+    "",
+    "保留索引服务连接身份验证、配置写入授权、原始索引目录 ACL、内容搜索及其他非文件名接口的现有边界。本次没有更改索引格式，不需要重建索引。",
+    "",
+    "已更新安装版 Pulse.Index.exe；其余安装文件的哈希未变，68 个原有文件均完整备份并核验。服务恢复 Running / Auto；原主界面 PID 与启动时间保持一致。原网络代理仍运行旧映像，下一次正常启动使用新程序；因该映像占用产生的精确哈希旧文件保留，未强制结束代理。",
+    "",
+    "| 查询 | 更新前单次 ms | 更新后中位 ms | 更新后样本 p95 ms | 完整匹配数 | 结果质量 / 预算 |",
+    "|---|---:|---:|---:|---:|---|",
+    "| a | 2077.40 | 367.01 | 405.37 | 1,249,754 | 完整；预算未通过 |",
+    "| ab | 2118.33 | 46.11 | 50.68 | 97,115 | 完整；预算未通过 |",
+    "| abc | 2181.50 | 1.31 | 2.71 | 4,014 | 完整；预算通过 |",
+    "| report | 2102.24 | 1.22 | 1.23 | 3,738 | 完整；预算通过 |",
+    "| pdf | 2188.85 | 0.92 | 1.92 | 4,233 | 完整；预算通过 |",
+    "| 无匹配 | 23.43 | 1.47 | 1.67 | 0 | 完整；预算通过 |",
+    "",
+    "更新前每词仅 1 次，更新后每词 5 次，为同一真实安装服务管道的测量，包含查询、计数、排序、分页和序列化，不包含 UI 绘制。五次样本的分位值不代表稳定长期 p95；索引代次、后台负载与缓存状态未冻结。所有更新后响应 error=0、incomplete=no。`a` 需要对约 125 万匹配项排序，仍超过 150 ms；`ab` 的样本 p95 略高于 50 ms。因此速度验收退出码为 1，不能记为全部预算通过。",
+    "",
+    "- 定向候选缓存/取消/并发/名称池及本次权限边界共 62 PASS / 0 FAIL。隔离文件被旧权限策略拒绝且 Windows 拒绝内容读取，但名称、索引大小、完整计数和分页正常返回。搜索不授予内容权限。",
+    "- 首次新增断言误以为拒绝属性位后 Windows 属性打开一定失败；实际当前令牌仍可打开属性句柄，内容读取被拒绝。保留首次 60 PASS / 1 FAIL 日志；修正该测试前提，增加真实令牌经旧策略拒绝的断言，未删减原有测试。",
+    "- 原有主机测试目标因缺少 transport 与 folder-size 的直接头文件无法编译。未修改原测试或弱化断言；私有驱动只补入两份头文件后包含原文件，11 条原断言全部通过，包括 16 连接、快速查询合并、最新请求、空结果、畸形帧和停机。原目标构建失败日志继续保留。",
+    "- 生产载荷检查与 git diff --check 通过。未执行全量历史回归，也未把后端测量当作主 UI 视觉验收。",
+    "",
+    "恢复备份：`E:\\Projects\\pulse\\dist\\filename-index-only-20261023-210737`。新索引程序 SHA256：`908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED`。",
+    "",
+    "[测量和部署证据](../bench_data/filename-index-only-20261023/)；[定向回归](../bench_data/filename-index-only-20261023/search-cache.log)；[实际服务更新前](../bench_data/filename-index-only-20261023/installed-before.log)；[实际服务更新后](../bench_data/filename-index-only-20261023/installed-after.log)。"
+  ]
+}

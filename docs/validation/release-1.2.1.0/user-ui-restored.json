@@ -1,0 +1,14 @@
+{
+  "Success": true,
+  "Utc": "2026-10-24T09:25:35.3908480Z",
+  "UI": [
+    {
+      "IntegrityRid": 8192,
+      "CreationDate": "2026-10-24T17:25:33.279243+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "ProcessId": 47748
+    }
+  ],
+  "Version": "1.2.1.0",
+  "OrdinaryMediumLaunch": true
+}

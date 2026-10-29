@@ -1,0 +1,15 @@
+{
+  "number": 320,
+  "title": "[bug] 选中的文件被修改后，选中状态会变成其他文件",
+  "body": "选中的文件被修改后，选中状态会变成其他文件（临近的文件）。\n\n原因是由于文件修改后，会被重新排序，选中状态没一起跟着变化。\n\n操作系统：Win11 架构：x86_x64",
+  "url": "https://github.com/jimmgreen/pulse/issues/320",
+  "captured_at": "2026-10-23T03:10:07.133969+00:00",
+  "updated_at": "2026-10-19T07:18:38Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

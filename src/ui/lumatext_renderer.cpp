@@ -2,6 +2,9 @@
 #include "optional_lumatext.h"
 #include "typography.h"
 #include "edit_word_range.h"
+#include "edit_motion.h"
+#include "animation_clock.h"
+#include "FluentTokens.h"
 
 #include <windows.h>
 #include <windowsx.h>
@@ -38,6 +41,30 @@ float EditScrollForTest(HWND hwnd) {
 #endif
 namespace {
 
+#if defined(PULSE_HAS_LUMATEXT)
+uint64_t EditPresentationTime(HWND hwnd) {
+#ifdef PULSE_TEST_EDIT_VIEWPORT
+    if (const auto* time = reinterpret_cast<const uint64_t*>(GetPropW(hwnd, L"Pulse.Test.EditTime")))
+        return *time;
+#else
+    (void)hwnd;
+#endif
+    return AnimationTimeMs();
+}
+
+bool IsEditCaretActivity(UINT message) {
+    switch (message) {
+    case WM_SETFOCUS: case WM_SETTEXT: case EM_SETSEL: case EM_REPLACESEL:
+    case WM_KEYDOWN: case WM_CHAR: case WM_CUT: case WM_PASTE: case WM_CLEAR:
+    case WM_UNDO: case EM_UNDO: case WM_IME_STARTCOMPOSITION:
+    case WM_IME_COMPOSITION: case WM_IME_ENDCOMPOSITION:
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 bool EnvironmentEnabled() noexcept {
     wchar_t value[16]{};
     const DWORD length = GetEnvironmentVariableW(L"PULSE_LUMATEXT", value, ARRAYSIZE(value));
@@ -51,6 +78,19 @@ std::wstring FontPath(const wchar_t* file_name) {
     const UINT length = GetWindowsDirectoryW(windows, ARRAYSIZE(windows));
     if (length == 0 || length >= ARRAYSIZE(windows)) return {};
     return (std::filesystem::path(windows) / L"Fonts" / file_name).wstring();
+}
+
+// A font the user installed (per-user first, then for all users). Pulse
+// never ships these faces; it only uses them when they are already present.
+std::wstring InstalledFontPath(const wchar_t* file_name) {
+    wchar_t local[MAX_PATH]{};
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, ARRAYSIZE(local));
+    if (length != 0 && length < ARRAYSIZE(local)) {
+        std::error_code error;
+        const auto user = std::filesystem::path(local) / L"Microsoft" / L"Windows" / L"Fonts" / file_name;
+        if (std::filesystem::exists(user, error)) return user.wstring();
+    }
+    return FontPath(file_name);
 }
 
 std::wstring FontFamily(IDWriteTextFormat* format) {
@@ -157,14 +197,17 @@ struct LumaTextRenderer::Impl {
 
     LumaText::Context context;
     LumaText::Renderer renderer;
-    LumaText::RenderProfile profile;
+    LumaText::Renderer layout_renderer;
+    LumaText::Renderer edit_renderer;
     LumaText::FontFace yahei_regular;
     LumaText::FontFace yahei_bold;
     LumaText::FontFace segoe_regular;
     LumaText::FontFace segoe_semibold;
     LumaText::FontFace segoe_bold;
-    LumaText::FontCascade yahei_cascade;
-    LumaText::FontCascade segoe_cascade;
+    LumaText::FontFace pingfang_regular;
+    LumaText::FontFace pingfang_semibold;
+    // Use YaHei for both Latin and CJK UI text; other faces cover missing glyphs.
+    LumaText::FontCascade text_cascade;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> target_dc;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> recording_dc;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> blit_dc;
@@ -215,6 +258,19 @@ struct LumaTextRenderer::Impl {
         float y = 0.0f;
     };
     std::unordered_map<HWND, EditPainted> edit_painted;
+    struct EditMotionState {
+        EditCaretMotion caret;
+        EditTextMotion change;
+        std::wstring text;
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        IDWriteTextFormat* format = nullptr;
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> change_layout;
+        float change_scroll = 0;
+        float scroll = 0, suffix_dx = 0;
+        int width = 0, height = 0;
+    };
+    std::unordered_map<HWND, EditMotionState> edit_motion;
+    std::unordered_map<HWND, EditCaretBlink> edit_blinks;
     // Up/Down keep the column they started from across short lines.
     HWND line_goal_hwnd = nullptr;
     int line_goal_caret = -1;
@@ -272,7 +328,8 @@ struct LumaTextRenderer::Impl {
 
     bool MakeFace(const std::wstring& path, LumaText::FontFace& face,
                   float variable_weight = 0.0f) {
-        if (path.empty() || !std::filesystem::exists(path)) return false;
+        std::error_code error;
+        if (path.empty() || !std::filesystem::exists(path,error)) return false;
         lt_font_axis axis{Tag('w', 'g', 'h', 't'), variable_weight};
         auto desc = LumaText::Descriptor<lt_font_source_desc>();
         desc.source_type = LT_FONT_SOURCE_FILE;
@@ -371,6 +428,32 @@ struct LumaTextRenderer::Impl {
         layout_lru.clear();
     }
 
+    // CoreText-like UI text: exact FreeType coverage with linear (gamma 1.0)
+    // edges, light autohinting in y only (PingFang's CFF carries no useful
+    // hints; x positions and HarfBuzz widths stay unhinted), and symmetric
+    // outline dilation that grows with the text colour's luminance, the way
+    // CoreGraphics font smoothing thickens light-on-dark text more than
+    // dark-on-light. Constants come from fitting macOS 15 CoreText renders
+    // (strength 0.0145 em dark text .. 0.030 em light text, capped) and are
+    // scaled by 0.92 to offset the extra contrast of hinted rows.
+    static void ApplySharpConfig(lt_render_config& config,
+                                 const D2D1_COLOR_F& foreground) noexcept {
+        config.coverage_gamma = 1.00f;
+        config.coverage_contrast = 1.00f;
+        config.raster_filter = LT_RASTER_FILTER_DIRECT;
+        config.flags |= LT_RENDER_CONFIG_DISABLE_STEM_COMPENSATION |
+                        LT_RENDER_CONFIG_AUTOHINT_LIGHT |
+                        LT_RENDER_CONFIG_DISABLE_OPTICAL_GAMMA;
+        const float luminance = std::clamp(0.2126f * foreground.r + 0.7152f * foreground.g +
+                                           0.0722f * foreground.b, 0.0f, 1.0f);
+        const float level = std::round(luminance * 4.0f) / 4.0f;
+        constexpr float kFit = 0.92f;
+        config.dilation_per_em = static_cast<std::uint8_t>(
+            std::lround((0.0145f + 0.0155f * level) * kFit * 4096.0f));
+        config.dilation_max = static_cast<std::uint8_t>(
+            std::lround((0.45f + 0.20f * level) * kFit * 64.0f));
+    }
+
     void FillLayoutDesc(lt_text_layout_desc& desc, const LayoutKey& key,
                         lt_text_style& style, float font_size,
                         LumaText::FontCascade& cascade) const {
@@ -425,6 +508,13 @@ struct LumaTextRenderer::Impl {
             return false;
         }
 
+        renderer_desc.render_target=target_dc.Get();
+        if(lt_d2d_renderer_create(context.get(),&renderer_desc,layout_renderer.put())!=LT_OK)
+            layout_renderer.reset();
+        renderer_desc.render_target=blit_dc.Get();
+        if(lt_d2d_renderer_create(context.get(),&renderer_desc,edit_renderer.put())!=LT_OK)
+            edit_renderer.reset();
+
         if (!MakeFace(FontPath(L"msyh.ttc"), yahei_regular) ||
             !MakeFace(FontPath(L"msyhbd.ttc"), yahei_bold)) {
             return false;
@@ -433,8 +523,10 @@ struct LumaTextRenderer::Impl {
         // Win11's segoeui.ttf is a ~200 KB stub; Segoe UI Variable holds the
         // real outlines. Two faces share one mapped file in LumaText.
         const std::wstring variable = FontPath(L"SegUIVar.ttf");
-        if (!MakeFace(variable, segoe_regular, 400.0f) ||
-            !MakeFace(variable, segoe_bold, 700.0f)) {
+        if (MakeFace(variable, segoe_regular, 400.0f) &&
+            MakeFace(variable, segoe_bold, 700.0f)) {
+            if (!MakeFace(variable, segoe_semibold, 600.0f)) segoe_semibold.reset();
+        } else {
             segoe_regular.reset();
             segoe_bold.reset();
             if (!MakeFace(FontPath(L"segoeui.ttf"), segoe_regular) ||
@@ -443,41 +535,34 @@ struct LumaTextRenderer::Impl {
             }
         }
 
-        std::vector<lt_font_cascade_entry> yahei_entries;
-        PushFace(yahei_entries, yahei_regular, 400);
-        PushFace(yahei_entries, yahei_bold, 600);
-        PushFace(yahei_entries, yahei_bold, 700);
-        if (yahei_entries.empty() || !MakeCascade(yahei_entries, yahei_cascade)) return false;
-
-        std::vector<lt_font_cascade_entry> segoe_entries;
-        PushFace(segoe_entries, segoe_regular, 400);
-        if (segoe_semibold) {
-            PushFace(segoe_entries, segoe_semibold, 600);
-        } else {
-            PushFace(segoe_entries, segoe_bold, 600);
+        // Optional fallback for glyphs missing from the primary UI font.
+        if (!MakeFace(InstalledFontPath(L"PingFangSC-Regular.otf"), pingfang_regular) ||
+            !MakeFace(InstalledFontPath(L"PingFangSC-Semibold.otf"), pingfang_semibold)) {
+            pingfang_regular.reset();
+            pingfang_semibold.reset();
         }
-        PushFace(segoe_entries, segoe_bold, 700);
-        PushFace(segoe_entries, yahei_regular, 400);
-        PushFace(segoe_entries, yahei_bold, 700);
-        if (segoe_entries.empty() || !MakeCascade(segoe_entries, segoe_cascade)) return false;
 
-        auto profile_desc = LumaText::Descriptor<lt_render_profile_desc>();
-        profile_desc.light = LumaText::Descriptor<lt_render_config>();
-        profile_desc.light.coverage_gamma = 0.85f;
-        profile_desc.light.coverage_contrast = 1.00f;
-        profile_desc.light.raster_filter = LT_RASTER_FILTER_DIRECT;
-        // Small CJK glyphs need the font's grid fitting to keep adjacent
-        // horizontal strokes distinct at the filename's 13 px size.
-        profile_desc.light.flags = LT_RENDER_CONFIG_HINTED_OUTLINES;
-        profile_desc.dark = profile_desc.light;
-        profile_desc.regular_optical_weight = 0.0f;
-        profile_desc.bold_optical_weight = 0.0f;
+        // Faces are picked per grapheme: nearest weight first, then cascade
+        // order. Keep YaHei first at every weight for consistent UI typography.
+        std::vector<lt_font_cascade_entry> entries;
+        const auto push_weight = [&](std::uint16_t weight, const LumaText::FontFace& segoe,
+                                     const LumaText::FontFace& pingfang,
+                                     const LumaText::FontFace& yahei) {
+            PushFace(entries, yahei, weight);
+            PushFace(entries, segoe, weight);
+            PushFace(entries, pingfang, weight);
+        };
+        push_weight(400, segoe_regular, pingfang_regular, yahei_regular);
+        push_weight(600, segoe_semibold ? segoe_semibold : segoe_bold, pingfang_semibold, yahei_bold);
+        push_weight(700, segoe_bold, pingfang_semibold, yahei_bold);
+        if (entries.empty() || !MakeCascade(entries, text_cascade)) return false;
+
 #if defined(PULSE_TEST_LUMATEXT_INIT_FAILURE)
         wchar_t fail_init[2]{};
         if (GetEnvironmentVariableW(L"PULSE_TEST_LUMATEXT_INIT_FAILURE", fail_init, ARRAYSIZE(fail_init)))
             return false;
 #endif
-        return lt_render_profile_create(&profile_desc, profile.put()) == LT_OK;
+        return true;
     }
 
     void ReleasePresent() noexcept {
@@ -582,14 +667,16 @@ struct LumaTextRenderer::Impl {
         blit_w = 0;
         blit_h = 0;
         busy = false;
-        segoe_cascade.reset();
-        yahei_cascade.reset();
+        text_cascade.reset();
+        pingfang_semibold.reset();
+        pingfang_regular.reset();
         segoe_bold.reset();
         segoe_semibold.reset();
         segoe_regular.reset();
         yahei_bold.reset();
         yahei_regular.reset();
-        profile.reset();
+        edit_renderer.reset();
+        layout_renderer.reset();
         renderer.reset();
         recording_dc.Reset();
         target_dc.Reset();
@@ -796,11 +883,9 @@ struct LumaTextRenderer::Impl {
         draw.background = {background.r, background.g, background.b, background.a};
         draw.background_type = LT_BACKGROUND_TRANSPARENT;
         draw.render_config = LumaText::Descriptor<lt_render_config>();
-        draw.render_config.coverage_gamma = 0.85f;
-        draw.render_config.coverage_contrast = 1.00f;
-        draw.render_config.raster_filter = LT_RASTER_FILTER_DIRECT;
-        draw.render_config.flags = LT_RENDER_CONFIG_HINTED_OUTLINES;
-        draw.profile = profile.get();
+        ApplySharpConfig(draw.render_config, foreground);
+        // No render profile: it would pick a config by background and drop
+        // the foreground-dependent dilation set above.
 
         const lt_result result = lt_frame_draw_text_layout(frame.get(), layout->get(), &draw);
         auto frame_stats = LumaText::Descriptor<lt_frame_stats>();
@@ -839,6 +924,104 @@ struct LumaTextRenderer::Impl {
                       alignment);
     }
 
+    // A DirectWrite layout keeps its own shaping, fallback fonts, wrapping and
+    // trimming; LumaText only rasterizes the glyph runs. Ranges coloured with
+    // SetDrawingEffect(ID2D1SolidColorBrush) keep their colour.
+    bool DrawLayoutOn(LumaText::Renderer& destination, ID2D1DeviceContext* dc,
+                      D2D1_POINT_2F origin, IDWriteTextLayout* layout,
+                    const D2D1_COLOR_F& foreground, bool clip) {
+        if (!destination || !dc || !layout) return false;
+        float dpi_x = 96.0f, dpi_y = 96.0f;
+        dc->GetDpi(&dpi_x, &dpi_y);
+        auto frame_desc = LumaText::Descriptor<lt_frame_desc>();
+        frame_desc.dpi_x = dpi_x;
+        frame_desc.dpi_y = dpi_y;
+        LumaText::Frame frame;
+        if (lt_frame_begin(destination.get(), &frame_desc, frame.put()) != LT_OK) return false;
+        auto draw = LumaText::Descriptor<lt_draw_text_desc>();
+        draw.origin_x = origin.x;
+        draw.origin_y = origin.y;
+        draw.clip_enabled = clip;
+        if (clip) {
+            draw.clip = {origin.x, origin.y, origin.x + layout->GetMaxWidth(),
+                         origin.y + layout->GetMaxHeight()};
+        }
+        draw.foreground = {foreground.r, foreground.g, foreground.b, foreground.a};
+        draw.background_type = LT_BACKGROUND_TRANSPARENT;
+        draw.render_config = LumaText::Descriptor<lt_render_config>();
+        ApplySharpConfig(draw.render_config, foreground);
+        const lt_result result = lt_frame_draw_layout(frame.get(), layout, &draw);
+        auto frame_stats = LumaText::Descriptor<lt_frame_stats>();
+        if (result == LT_OK && lt_frame_get_stats(frame.get(), &frame_stats) == LT_OK) {
+            stats.freetype_glyphs += frame_stats.freetype_glyphs;
+            stats.cache_hits += frame_stats.glyph_cache_hits;
+        }
+        const lt_result end_result = lt_frame_end(frame.get());
+        if(result!=LT_OK || end_result!=LT_OK) return false;
+        ++stats.draw_calls;
+        return true;
+    }
+
+    bool DrawLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
+                    const D2D1_COLOR_F& foreground, bool clip) {
+        return DrawLayoutOn(layout_renderer,target_dc.Get(),origin,layout,foreground,clip);
+    }
+
+    // Two colours in one shaped line (a dimmed file extension): the same
+    // layout is drawn twice, clipped at the caret x of `split` in that layout,
+    // so glyph positions never depend on substring widths.
+    bool DrawSplit(std::wstring_view text, IDWriteTextFormat* format,
+                   const D2D1_RECT_F& bounds, const D2D1_COLOR_F& foreground,
+                   std::uint32_t split, const D2D1_COLOR_F& split_foreground,
+                   const D2D1_COLOR_F& background) {
+        ID2D1DeviceContext* dc = target_dc.Get();
+        if (!dc || busy || !renderer || !format || split == 0 || split >= text.size()) return false;
+        std::uint32_t family = 0;
+        LumaText::FontCascade* cascade = nullptr;
+        const float font_size = format->GetFontSize();
+        if (!(font_size > 0.0f) || !ResolveCascade(format, text, family, cascade) || !cascade) {
+            return false;
+        }
+        LayoutKey key;
+        key.text.assign(text);
+        key.family = family;
+        key.weight = static_cast<std::uint16_t>(std::clamp<int>(
+            static_cast<int>(format->GetFontWeight()), 1, 1000));
+        key.size_64 = static_cast<std::int32_t>(std::lround(font_size * 64.0f));
+        key.width_64 = kUnboundedWidth64;
+        key.alignment = DWRITE_TEXT_ALIGNMENT_LEADING;
+        LumaText::TextLayout* layout = GetLayout(key, font_size, *cascade);
+        if (!layout || !*layout) return false;
+        auto metrics = LumaText::Descriptor<lt_text_metrics>();
+        if (lt_text_layout_get_metrics(layout->get(), &metrics) != LT_OK) return false;
+        // DrawOn would ellipsize this line, and the split would no longer
+        // index the drawn glyphs.
+        const float ink = pulse::ui::typography::InkPad(format);
+        if (metrics.width + ink > bounds.right - bounds.left + 0.5f) return false;
+        float split_x = 0.0f, split_y = 0.0f;
+        auto hit = LumaText::Descriptor<lt_hit_test_metrics>();
+        if (lt_text_layout_hit_test_position(layout->get(), split, false,
+                                             &split_x, &split_y, &hit) != LT_OK) {
+            return false;
+        }
+        const float cut = std::round(bounds.left + split_x);
+        const float top = bounds.top - 8.0f, bottom = bounds.bottom + 8.0f;
+        dc->PushAxisAlignedClip(D2D1::RectF(std::floor(bounds.left) - 8.0f, top, cut, bottom),
+                                D2D1_ANTIALIAS_MODE_ALIASED);
+        const bool head = DrawOn(dc, text, format, bounds, foreground, background,
+                                 DWRITE_TEXT_ALIGNMENT_LEADING);
+        dc->PopAxisAlignedClip();
+        if (!head) return false;
+        dc->PushAxisAlignedClip(D2D1::RectF(cut, top, std::ceil(bounds.right) + 8.0f, bottom),
+                                D2D1_ANTIALIAS_MODE_ALIASED);
+        // Same layout and geometry as the head draw; it cannot fail where
+        // that one succeeded short of a device loss, which redraws anyway.
+        DrawOn(dc, text, format, bounds, split_foreground, background,
+               DWRITE_TEXT_ALIGNMENT_LEADING);
+        dc->PopAxisAlignedClip();
+        return true;
+    }
+
     static bool ContainsCjk(std::wstring_view text) noexcept {
         for (const wchar_t c : text) {
             if ((c >= 0x2E80 && c <= 0x9FFF) ||
@@ -860,21 +1043,11 @@ struct LumaTextRenderer::Impl {
                    !Contains(family_name, L"Assets") &&
                    !Contains(family_name, L"Emoji");
         if (!yahei && !segoe_text) return false;
-        // Chinese runs keep YaHei first even when the shell language (and the
-        // DirectWrite family) is English / Segoe.
-        if (ContainsCjk(text) && yahei_cascade.get()) {
-            family = kYaHei;
-            cascade = &yahei_cascade;
-            return true;
-        }
-        if (yahei) {
-            family = kYaHei;
-            cascade = &yahei_cascade;
-            return yahei_cascade.get() != nullptr;
-        }
-        family = kSegoe;
-        cascade = &segoe_cascade;
-        return segoe_cascade.get() != nullptr;
+        // Chinese runs shape as zh-CN even when the shell language (and the
+        // DirectWrite family) is English / Segoe; the faces are the same.
+        family = (yahei || ContainsCjk(text)) ? kYaHei : kSegoe;
+        cascade = &text_cascade;
+        return text_cascade.get() != nullptr;
     }
 
     bool Measure(std::wstring_view text, IDWriteTextFormat* format,
@@ -1319,6 +1492,67 @@ struct LumaTextRenderer::Impl {
         const float scroll = wraps ? 0.0f : mouse_scroll_hwnd == hwnd && painted_scroll != edit_scrolls.end()
             ? painted_scroll->second : EditScroll(hwnd, dw_layout.Get(), caret_x, static_cast<float>(w));
         edit_scrolls[hwnd] = scroll;
+        const uint64_t now = EditPresentationTime(hwnd);
+        BOOL system_motion = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &system_motion, 0);
+#ifdef PULSE_TEST_EDIT_VIEWPORT
+        if (const auto policy = reinterpret_cast<ULONG_PTR>(GetPropW(hwnd, L"Pulse.Test.EditMotion")))
+            system_motion = policy == 1;
+#endif
+        const bool animate = system_motion && !IsHighContrast() && GetFocus() == hwnd &&
+            sel_lo == sel_hi && !GetPropW(hwnd, L"Pulse.EditComposing");
+        auto& motion = edit_motion[hwnd];
+        if (motion.width != w || motion.height != h || motion.format != format) motion = {};
+        auto& caret_blink = edit_blinks[hwnd];
+        const std::array<float, 3> caret_target{std::floor(pad + caret_x - scroll), caret_top, caret_bottom};
+        if (!motion.caret.initialized || motion.text != text || motion.caret.target != caret_target)
+            caret_blink.Reset(now);
+        motion.change.Sample(now);
+        if (motion.text != text) {
+            if (animate && motion.layout) {
+                const float carried = motion.change.pending ? motion.suffix_dx * (1 - motion.change.progress) : 0;
+                motion.change_layout = motion.layout;
+                motion.change_scroll = motion.scroll;
+                motion.change.Begin(motion.text, text, now);
+                auto& change = motion.change;
+                // Expand the changed span to shaped cluster boundaries (IME,
+                // combining marks and ligatures are never split by clipping).
+                const auto cluster = [](IDWriteTextLayout* layout, size_t index) {
+                    float x = 0, y = 0;
+                    DWRITE_HIT_TEST_METRICS hit{};
+                    layout->HitTestTextPosition(static_cast<UINT32>(index), FALSE, &x, &y, &hit);
+                    return hit;
+                };
+                change.prefix = std::min({change.prefix,
+                    change.prefix < text.size() ? static_cast<size_t>(cluster(dw_layout.Get(), change.prefix).textPosition) : change.prefix,
+                    change.prefix < motion.text.size() ? static_cast<size_t>(cluster(motion.layout.Get(), change.prefix).textPosition) : change.prefix});
+                const auto old_hit = cluster(motion.layout.Get(), change.old_end);
+                const auto new_hit = cluster(dw_layout.Get(), change.new_end);
+                const size_t extra = std::max(
+                    change.old_end < motion.text.size() && change.old_end > old_hit.textPosition ? old_hit.textPosition + old_hit.length - change.old_end : size_t{0},
+                    change.new_end < text.size() && change.new_end > new_hit.textPosition ? new_hit.textPosition + new_hit.length - change.new_end : size_t{0});
+                change.old_end = std::min(motion.text.size(), change.old_end + extra);
+                change.new_end = std::min(text.size(), change.new_end + extra);
+                motion.suffix_dx = DwCaretX(motion.layout.Get(), static_cast<int>(change.old_end),
+                    static_cast<int>(motion.text.size())) - motion.scroll + carried -
+                    (caret_origin(static_cast<int>(change.new_end)) - scroll);
+                DWRITE_TEXT_METRICS metrics{};
+                dw_layout->GetMetrics(&metrics);
+                // Keep complex bidirectional runs in their shaped positions.
+                if (wraps) motion.suffix_dx = 0;
+                if (metrics.maxBidiReorderingDepth > 1) motion.change = {};
+            } else motion.change = {};
+        }
+        if (!animate) motion.change = {};
+        motion.caret.Tick(caret_target, now, animate);
+        motion.text = text; motion.layout = dw_layout; motion.scroll = scroll;
+        motion.format = format; motion.width = w; motion.height = h;
+        const bool motion_pending = motion.caret.pending || motion.change.pending;
+        caret_blink.Sample(now, motion_pending);
+        if (motion_pending) SetTimer(hwnd, kEditMotionTimer, 16, nullptr);
+        else KillTimer(hwnd, kEditMotionTimer);
+        if (motion_pending) SetPropW(hwnd, L"Pulse.EditMotionPending", reinterpret_cast<HANDLE>(1));
+        else RemovePropW(hwnd, L"Pulse.EditMotionPending");
 #ifdef PULSE_TEST_EDIT_VIEWPORT
         observed_edit_scroll[hwnd] = scroll;
 #endif
@@ -1372,25 +1606,99 @@ struct LumaTextRenderer::Impl {
                 brush->SetColor(visible_color);
                 blit_dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
                 blit_dc->SetTextRenderingParams(params);
-                blit_dc->DrawTextLayout(D2D1::Point2F(std::round(pad - scroll), y), visible_layout.Get(),
-                                        brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+                const auto origin=D2D1::Point2F(std::round(pad-scroll),y);
+                const auto draw_text = [&](float opacity, float dx, float dy) {
+                    auto color = visible_color; color.a *= opacity;
+                    brush->SetColor(color);
+                    const auto point = D2D1::Point2F(origin.x + dx, origin.y + dy);
+                    const bool luma = typography::UseLumaTextForUi() &&
+                        DrawLayoutOn(edit_renderer, blit_dc.Get(), point, visible_layout.Get(), color, false);
+                    if (luma) ++stats.edit_lumatext_draws;
+                    else blit_dc->DrawTextLayout(point, visible_layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+                };
+                if (motion.change.pending && visible == text) {
+                    const auto range = [&](size_t start, size_t end, float opacity, float dx, float dy, bool suffix = false) {
+                        if (end <= start || opacity <= 0) return;
+                        UINT32 count = 0;
+                        visible_layout->HitTestTextRange(static_cast<UINT32>(start), static_cast<UINT32>(end - start),
+                            origin.x + dx, origin.y + dy, nullptr, 0, &count);
+                        std::vector<DWRITE_HIT_TEST_METRICS> regions(count);
+                        if (count && SUCCEEDED(visible_layout->HitTestTextRange(static_cast<UINT32>(start),
+                            static_cast<UINT32>(end - start), origin.x + dx, origin.y + dy,
+                            regions.data(), count, &count))) {
+                            for (const auto& region : regions) {
+                                float shift_x = dx, shift_y = dy;
+                                float range_opacity = opacity;
+                                if (wraps && suffix && motion.change_layout) {
+                                    const size_t old_position = motion.change.old_end + region.textPosition - motion.change.new_end;
+                                    float old_x = 0, old_y = 0;
+                                    DWRITE_HIT_TEST_METRICS old_hit{};
+                                    motion.change_layout->HitTestTextPosition(static_cast<UINT32>(old_position),
+                                        FALSE, &old_x, &old_y, &old_hit);
+                                    DWRITE_TEXT_METRICS old_metrics{};
+                                    motion.change_layout->GetMetrics(&old_metrics);
+                                    const float old_origin_y = std::round((static_cast<float>(h) - old_metrics.height) * 0.5f) - old_metrics.top;
+                                    shift_x = (pad - motion.change_scroll + old_x - region.left) * (1 - motion.change.progress);
+                                    shift_y = (old_origin_y + old_y - region.top) * (1 - motion.change.progress);
+                                    if (std::abs(old_origin_y + old_y - region.top) > region.height * 0.5f) {
+                                        // Crossing a line uses a reveal rather than flying through
+                                        // the unchanged text between the old and new line.
+                                        shift_x = shift_y = 0;
+                                        range_opacity *= motion.change.progress;
+                                    }
+                                }
+                                auto clip = D2D1::RectF(region.left + shift_x - dx, region.top + shift_y - dy,
+                                    region.left + region.width + shift_x - dx, region.top + region.height + shift_y - dy);
+                                if (!suffix && start == motion.change.prefix && end == motion.change.new_end &&
+                                    end < text.size() && motion.change_layout) {
+                                    float old_x = 0, old_y = 0, new_x = 0, new_y = 0;
+                                    DWRITE_HIT_TEST_METRICS old_hit{}, new_hit{};
+                                    motion.change_layout->HitTestTextPosition(static_cast<UINT32>(motion.change.old_end),
+                                        FALSE, &old_x, &old_y, &old_hit);
+                                    visible_layout->HitTestTextPosition(static_cast<UINT32>(end), FALSE, &new_x, &new_y, &new_hit);
+                                    if (std::abs(region.top - dy - origin.y - new_y) < 1 && std::abs(old_y - new_y) < 1) {
+                                        const float tail_delta = wraps ? old_x - new_x + scroll - motion.change_scroll : motion.suffix_dx;
+                                        const float tail = origin.x + new_x + tail_delta * (1 - motion.change.progress);
+                                        clip.right = std::min(clip.right, tail);
+                                    }
+                                }
+                                if (clip.right <= clip.left || clip.bottom <= clip.top) continue;
+                                if (clip.right < 0 || clip.left > w || clip.bottom < 0 || clip.top > h) continue;
+                                blit_dc->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+                                draw_text(range_opacity, shift_x, shift_y);
+                                blit_dc->PopAxisAlignedClip();
+                            }
+                        }
+                    };
+                    const auto& change = motion.change;
+                    range(0, change.prefix, 1, 0, 0);
+                    range(change.prefix, change.new_end, change.progress, 0, (1 - change.progress) * 1.5f);
+                    range(change.new_end, text.size(), 1, motion.suffix_dx * (1 - change.progress), 0, true);
+                } else draw_text(1, 0, 0);
                 blit_dc->SetTextRenderingParams(nullptr);
                 text_drawn = true;
             }
         }
-        const UINT blink = GetCaretBlinkTime();
+        UINT blink = GetCaretBlinkTime();
+#ifdef PULSE_TEST_EDIT_VIEWPORT
+        if (const auto interval = reinterpret_cast<ULONG_PTR>(GetPropW(hwnd, L"Pulse.Test.EditBlinkInterval")))
+            blink = static_cast<UINT>(interval);
+#endif
         const bool caret_on = GetFocus() == hwnd && GetCapture() != hwnd &&
-            (blink == INFINITE || ((GetTickCount() / std::max(1u, blink)) % 2u) == 0u);
+            caret_blink.Visible(now, blink);
+        const UINT blink_delay = caret_blink.NextDelay(now, blink);
+        if (GetFocus() == hwnd && blink_delay) SetTimer(hwnd, kEditCaretTimer, blink_delay, nullptr);
+        else KillTimer(hwnd, kEditCaretTimer);
         if (caret_on && brush) {
             brush->SetColor(foreground);
             // Fill whole pixels: a half-pixel origin splits the caret into two
             // half-intensity columns that blend into the first placeholder glyph.
             DWORD caret_width = 1;
             SystemParametersInfoW(SPI_GETCARETWIDTH, 0, &caret_width, 0);
-            const float x = std::floor(pad + caret_x - scroll);
+            const float x = std::floor(motion.caret.value[0]);
             blit_dc->FillRectangle(
-                D2D1::RectF(x, caret_top, x + static_cast<float>(std::max<DWORD>(1, caret_width)),
-                            caret_bottom),
+                D2D1::RectF(x, motion.caret.value[1], x + static_cast<float>(std::max<DWORD>(1, caret_width)),
+                            motion.caret.value[2]),
                 brush.Get());
         }
         const HRESULT end = blit_dc->EndDraw();
@@ -1463,6 +1771,22 @@ void LumaTextRenderer::TrackEdit(HWND hwnd) {
 LRESULT CALLBACK LumaTextRenderer::EditSelectionProc(HWND hwnd, UINT message, WPARAM wparam,
                                                     LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
     auto* self = reinterpret_cast<LumaTextRenderer*>(data);
+    if (message == WM_TIMER && wparam == kEditMotionTimer) {
+        if (GetFocus() == hwnd && IsWindowVisible(hwnd) && GetPropW(hwnd, L"Pulse.EditMotionPending") &&
+            !GetPropW(hwnd, L"Pulse.NativeEditFallback") && !GetPropW(hwnd, L"Pulse.NativeEditPolicy"))
+            InvalidateRect(hwnd, nullptr, FALSE);
+        else {
+            KillTimer(hwnd, kEditMotionTimer);
+            RemovePropW(hwnd, L"Pulse.EditMotionPending");
+#if defined(PULSE_HAS_LUMATEXT)
+            if (self->impl_) self->impl_->edit_motion.erase(hwnd);
+#endif
+        }
+        return 0;
+    }
+    if (message == WM_IME_STARTCOMPOSITION) SetPropW(hwnd, L"Pulse.EditComposing", reinterpret_cast<HANDLE>(1));
+    if (message == WM_IME_ENDCOMPOSITION || message == WM_KILLFOCUS || message == WM_NCDESTROY)
+        RemovePropW(hwnd, L"Pulse.EditComposing");
 #if defined(PULSE_HAS_LUMATEXT)
     if (self->impl_ && self->impl_->DeferredSelection(hwnd)) {
         // Input and focus changes act on the dragged selection the user sees;
@@ -1496,7 +1820,18 @@ LRESULT CALLBACK LumaTextRenderer::EditSelectionProc(HWND hwnd, UINT message, WP
 void LumaTextRenderer::SyncEditSelection(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
 #if defined(PULSE_HAS_LUMATEXT)
     if (!impl_) return;
+    if (!impl_->applying_mouse_selection && !impl_->setting_mouse_selection &&
+        GetFocus() == hwnd && IsEditCaretActivity(message))
+        impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
+    if (message == WM_SETTEXT || message == WM_SIZE || message == WM_SETFONT ||
+        message == WM_IME_STARTCOMPOSITION || message == WM_KILLFOCUS || message == WM_NCDESTROY) {
+        impl_->edit_motion.erase(hwnd);
+        KillTimer(hwnd, kEditMotionTimer);
+        RemovePropW(hwnd, L"Pulse.EditMotionPending");
+    }
     if (message == WM_NCDESTROY || message == WM_KILLFOCUS) {
+        impl_->edit_blinks.erase(hwnd);
+        KillTimer(hwnd, kEditCaretTimer);
         if (impl_->mouse_scroll_hwnd == hwnd) impl_->mouse_scroll_hwnd = nullptr;
         if (impl_->mouse_hwnd == hwnd) {
             impl_->mouse_hwnd = nullptr;
@@ -1541,8 +1876,12 @@ void LumaTextRenderer::SyncEditSelection(HWND hwnd, UINT message, WPARAM wparam,
 void LumaTextRenderer::SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 #if defined(PULSE_HAS_LUMATEXT)
     if (!impl_ || impl_->setting_mouse_selection) return;
+    if (GetFocus() == hwnd && IsEditCaretActivity(msg))
+        impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
     if (impl_->mouse_scroll_hwnd == hwnd) impl_->mouse_scroll_hwnd = nullptr;
     if (msg == WM_NCDESTROY || msg == WM_KILLFOCUS) {
+        impl_->edit_blinks.erase(hwnd);
+        KillTimer(hwnd, kEditCaretTimer);
         if (impl_->mouse_hwnd == hwnd) impl_->mouse_hwnd = nullptr;
         return;
     }
@@ -1570,6 +1909,8 @@ LRESULT LumaTextRenderer::CallEditDefaultMouse(HWND hwnd, UINT msg, WPARAM wPara
 #if defined(PULSE_HAS_LUMATEXT)
     if (format && impl_ && impl_->renderer) {
         TrackEdit(hwnd);
+        if (msg != WM_MOUSEMOVE || GetCapture() == hwnd)
+            impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
         struct MouseSelectionGuard {
             Impl& state;
             HWND window;
@@ -1614,20 +1955,27 @@ bool LumaTextRenderer::Init(IDWriteFactory* dwrite, ID2D1RenderTarget* target) {
     Shutdown();
     if (!EnvironmentEnabled() || !dwrite || !target || !LoadOptionalLumaText()) return false;
     if (impl_->Init(dwrite, target)) return true;
-    // The renderer is allocated before fonts, cascades and the profile. A late
+    // The renderer is allocated before fonts and cascades. A late
     // failure must not leave Enabled() true and suppress native EDIT painting.
     Shutdown();
     return false;
 }
 
 void LumaTextRenderer::Shutdown() noexcept {
-    for (HWND hwnd : tracked_edits_)
+    for (HWND hwnd : tracked_edits_) {
+        KillTimer(hwnd, kEditCaretTimer);
+        KillTimer(hwnd, kEditMotionTimer);
+        RemovePropW(hwnd, L"Pulse.EditMotionPending");
+        RemovePropW(hwnd, L"Pulse.EditComposing");
         RemoveWindowSubclass(hwnd, EditSelectionProc, reinterpret_cast<UINT_PTR>(this));
+    }
     tracked_edits_.clear();
 #if defined(PULSE_HAS_LUMATEXT)
     if (impl_) {
         impl_->edit_selections.clear();
         impl_->edit_scrolls.clear();
+        impl_->edit_motion.clear();
+        impl_->edit_blinks.clear();
         impl_->mouse_hwnd = nullptr;
         impl_->mouse_scroll_hwnd = nullptr;
         impl_->mouse_selection_deferred = false;
@@ -1658,6 +2006,38 @@ bool LumaTextRenderer::Draw(std::wstring_view text, IDWriteTextFormat* format,
     (void)foreground;
     (void)background;
     (void)alignment;
+    return false;
+#endif
+}
+
+bool LumaTextRenderer::DrawLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
+                                  const D2D1_COLOR_F& foreground, bool clip) {
+#if defined(PULSE_HAS_LUMATEXT)
+    return impl_ && impl_->DrawLayout(origin, layout, foreground, clip);
+#else
+    (void)origin;
+    (void)layout;
+    (void)foreground;
+    (void)clip;
+    return false;
+#endif
+}
+
+bool LumaTextRenderer::DrawSplit(std::wstring_view text, IDWriteTextFormat* format,
+                                 const D2D1_RECT_F& bounds, const D2D1_COLOR_F& foreground,
+                                 std::uint32_t split, const D2D1_COLOR_F& split_foreground,
+                                 const D2D1_COLOR_F& background) {
+#if defined(PULSE_HAS_LUMATEXT)
+    return impl_ && impl_->DrawSplit(text, format, bounds, foreground, split,
+                                     split_foreground, background);
+#else
+    (void)text;
+    (void)format;
+    (void)bounds;
+    (void)foreground;
+    (void)split;
+    (void)split_foreground;
+    (void)background;
     return false;
 #endif
 }

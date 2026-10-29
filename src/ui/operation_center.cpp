@@ -1,5 +1,6 @@
 #include "operation_center.h"
 #include "operation_center_layout.h"
+#include "animation_clock.h"
 #include "dialog_text_fit.h"
 #include "typography.h"
 #include "../common/text_format.h"
@@ -23,9 +24,6 @@ bool Terminal(const ops::OpStatus& task) {
 }
 bool Transfer(const ops::OpStatus& task) {
     return task.type == ops::OpType::Copy || task.type == ops::OpType::Move;
-}
-bool ShowPhaseBadge(const ops::OpStatus& task) {
-    return task.phase != ops::OpPhase::Running && task.phase != ops::OpPhase::Completed;
 }
 bool AbsoluteDestination(const ops::OpStatus& task) {
     if (task.type == ops::OpType::RecycleDelete || task.type == ops::OpType::RealDelete ||
@@ -122,6 +120,8 @@ void OperationCenter::Destroy() {
     if (memory_) DeleteDC(memory_);
     dib_ = nullptr; memory_ = nullptr; bits_ = nullptr;
     backdrop_.Reset(); backdrop_source_.Reset();
+    render_bitmap_.reset(); readback_bitmap_.reset();
+    render_device_.reset();
     compositor_ = nullptr;
 }
 
@@ -143,6 +143,7 @@ void OperationCenter::SetLabels(OperationCenterLabels labels) {
 }
 
 void OperationCenter::Update(std::vector<ops::OpStatus> tasks) {
+    if (tasks.empty() && tasks_.empty()) return;
     uint64_t focused_task = 0;
     Action focused_action = Action::Clear;
     const bool had_focus = focused_ >= 0 && focused_ < static_cast<int>(buttons_.size());
@@ -175,7 +176,7 @@ void OperationCenter::Update(std::vector<ops::OpStatus> tasks) {
         if (IsWindowVisible(hwnd_) && GetCursorPos(&cursor) && ScreenToClient(hwnd_, &cursor))
             hover_ = Hit(static_cast<float>(cursor.x), static_cast<float>(cursor.y));
         Redraw();
-        SetTimer(hwnd_, kTimer, 16, nullptr);
+        if(!scroll_animating_) SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
     }
 }
 
@@ -211,7 +212,7 @@ void OperationCenter::Layout() {
         Card card;
         card.task = i; card.section = std::move(section); card.section_top = top;
         card.paired_paths = right - left >= 360 * s && !task.source_label.empty() && !task.destination_label.empty();
-        y += (ShowPhaseBadge(task) ? 64 : 44) * s;
+        y += 44 * s;
         if (!task.source_label.empty()) { card.source_y = y; y += 24 * s; }
         if (!task.destination_label.empty()) {
             card.destination_y = card.paired_paths ? card.source_y : y;
@@ -287,7 +288,17 @@ void OperationCenter::Layout() {
         y += 10 * s;
     }
     content_height_ = y + 8 * s;
-    scroll_ = std::clamp(scroll_, 0.0f, (std::max)(0.0f, content_height_ - body_height_));
+    const float maximum=(std::max)(0.0f,content_height_-body_height_);
+    scroll_=std::clamp(scroll_,0.0f,maximum);
+    if(scroll_animating_) {
+        const float target=std::clamp(scroll_target_,0.0f,maximum);
+        if(target==scroll_) StopScroll();
+        else if(target!=scroll_target_) {
+            scroll_from_=scroll_;scroll_target_=target;scroll_started_=AnimationTimeMs();
+        }
+    } else {
+        scroll_from_=scroll_target_=scroll_;
+    }
     AnimateCardLayout();
     const float offset = margin + kHeader * s - scroll_;
     for (auto& button : buttons_) if (button.action != Action::Clear) {
@@ -327,9 +338,9 @@ void OperationCenter::UpdateHeight(bool animate) {
     } else if (next != target_height_) {
         resize_from_height_ = height_;
         target_height_ = next;
-        resize_start_ = GetTickCount64();
+        resize_start_ = AnimationTimeMs();
         resizing_ = height_ != target_height_;
-        if (resizing_) SetTimer(hwnd_, kTimer, 16, nullptr);
+        if (resizing_ && !scroll_animating_) SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
     }
 }
 
@@ -362,18 +373,20 @@ void OperationCenter::Toggle(RECT anchor) {
         visibility_ = 0;
     }
     open_ = true;
-    BeginVisibility(false);
     if (!AnimationsEnabled()) visibility_ = 1;
     if (!Render()) { Hide(false); return; }
+    // Desktop capture, blur and text preparation must not consume the reveal.
+    BeginVisibility(false);
     Present();
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
-    SetTimer(hwnd_, kTimer, 16, nullptr);
+    SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
 }
 
 void OperationCenter::Hide(bool animate) {
     if (!hwnd_) return;
+    StopScroll();
     if (animate && open_ && !closing_ && AnimationsEnabled()) {
         BeginVisibility(true);
         return;
@@ -420,15 +433,33 @@ void OperationCenter::Text(const std::wstring& text, D2D1_RECT_F rect, D2D1_COLO
 bool OperationCenter::Render(bool allow_capture) {
     if (!compositor_ || !compositor_->Dc() || width_ <= 0 || height_ <= 0) return false;
     auto* dc = compositor_->Dc();
+    ComPtr<ID2D1Device> device;
+    dc->GetDevice(&device);
+    if (render_device_.get() != device.get()) {
+        render_bitmap_.reset(); readback_bitmap_.reset();
+        backdrop_.Reset(); backdrop_source_.Reset();
+        render_device_ = std::move(device);
+    }
     const auto size = D2D1::SizeU(static_cast<UINT32>(width_), static_cast<UINT32>(height_));
-    const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-    ComPtr<ID2D1Bitmap1> bitmap;
-    if (FAILED(dc->CreateBitmap(size, nullptr, 0, props, &bitmap))) return false;
+    const auto allocated = render_bitmap_.get() ? render_bitmap_->GetPixelSize() : D2D1::SizeU();
+    if (allocated.width != size.width || allocated.height < size.height || !readback_bitmap_.get()) {
+        // Reserve both endpoints so resizing never reallocates these surfaces
+        // between animation frames. Read back only the currently displayed area.
+        const auto capacity = D2D1::SizeU(size.width,
+            static_cast<UINT32>((std::max)({height_, target_height_, resize_from_height_})));
+        const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        const auto cpu_props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            props.pixelFormat, 96, 96);
+        ComPtr<ID2D1Bitmap1> bitmap, cpu;
+        if (FAILED(dc->CreateBitmap(capacity, nullptr, 0, props, &bitmap)) ||
+            FAILED(dc->CreateBitmap(capacity, nullptr, 0, cpu_props, &cpu))) return false;
+        render_bitmap_ = std::move(bitmap); readback_bitmap_ = std::move(cpu);
+    }
     ComPtr<ID2D1Image> previous;
     dc->GetTarget(&previous);
     const auto aa = dc->GetTextAntialiasMode();
-    dc->SetTarget(bitmap.get());
+    dc->SetTarget(render_bitmap_.get());
     dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     dc->BeginDraw();
     dc->Clear(D2D1::ColorF(0, 0));
@@ -436,7 +467,7 @@ bool OperationCenter::Render(bool allow_capture) {
     const float s = scale_, margin = kMargin * s, top = margin + kHeader * s;
     const auto surface = D2D1::RectF(margin, margin, width_ - margin, height_ - margin);
     acrylic_ = !force_solid_ && !snapshot_ && backdrop_.Draw(*compositor_, backdrop_source_, surface,
-        POINT{base_x_, base_y_}, dark_, s, allow_capture && !IsWindowVisible(hwnd_));
+        POINT{base_x_, base_y_}, dark_, s, allow_capture && !IsWindowVisible(hwnd_), true);
     if (painter_.BeginFrame(theme, IsHighContrast())) {
         // A soft stacked silhouette stays within the transparent window margin.
         for (int i = 4; i > 0; --i) {
@@ -446,7 +477,7 @@ bool OperationCenter::Render(bool allow_capture) {
                 D2D1::ColorF(0, 0.018f));
         }
         // Repaint the sampled plate after the surrounding shadow.
-        if (acrylic_) backdrop_.Draw(*compositor_, backdrop_source_, surface, POINT{base_x_, base_y_}, dark_, s, false);
+        if (acrylic_) backdrop_.Draw(*compositor_, backdrop_source_, surface, POINT{base_x_, base_y_}, dark_, s, false, true);
         painter_.DrawMenuSurface(surface, acrylic_);
         float title_right = surface.right - kContentInset * s;
         if (!buttons_.empty() && buttons_[0].action == Action::Clear) title_right = buttons_[0].bounds.left - 8 * s;
@@ -477,29 +508,21 @@ bool OperationCenter::Render(bool allow_capture) {
             painter_.StrokeRoundedRect(rect, 8 * s, theme.stroke_card);
             const float x = rect.left + kCardPadding * s, right = rect.right - kCardPadding * s;
             const float offset = top - scroll_;
-            const auto type = static_cast<size_t>(task.type), phase = static_cast<size_t>(task.phase);
+            const auto type = static_cast<size_t>(task.type);
             const std::wstring type_label = type < labels_.type_names.size() ? labels_.type_names[type] : labels_.title;
-            const std::wstring phase_label = phase < labels_.phase_names.size() ? labels_.phase_names[phase] : std::wstring{};
-            fluent::BadgeKind kind = fluent::BadgeKind::Accent;
             auto state_color = theme.accent;
-            if (task.phase == ops::OpPhase::Failed) { kind = fluent::BadgeKind::Danger; state_color = theme.danger; }
+            if (task.phase == ops::OpPhase::Failed) { state_color = theme.danger; }
             else if (task.phase == ops::OpPhase::Completed) {
-                kind = fluent::BadgeKind::Success;
                 state_color = IsHighContrast() ? theme.text : dark_ ? HexColor(0x45D7A4) : HexColor(0x107C5A);
             } else if (task.phase == ops::OpPhase::Paused || task.phase == ops::OpPhase::WaitingForConflict ||
                 task.phase == ops::OpPhase::WaitingForDeleteConfirmation) {
-                kind = fluent::BadgeKind::Warning;
                 state_color = IsHighContrast() ? theme.text : dark_ ? HexColor(0xF7D154) : HexColor(0x8A5500);
             } else if (task.phase == ops::OpPhase::Queued || task.phase == ops::OpPhase::Cancelled ||
-                task.phase == ops::OpPhase::Cancelling) { kind = fluent::BadgeKind::Neutral; state_color = theme.text_secondary; }
+                task.phase == ops::OpPhase::Cancelling) { state_color = theme.text_secondary; }
             painter_.DrawGlyph(TaskGlyph(task), D2D1::RectF(x, rect.top + 12 * s, x + 20 * s, rect.top + 32 * s), state_color);
             const float title_x = x + 32 * s;
             const auto& title = task.summary.empty() || task.summary == task.last_error ? type_label : task.summary;
             Text(title, D2D1::RectF(title_x, rect.top + 9 * s, card.title_right, rect.top + 33 * s), theme.text, false);
-            if (ShowPhaseBadge(task)) {
-                const float badge_width = (std::min)(painter_.MeasureBadgeWidth(phase_label), right - title_x);
-                painter_.DrawBadge({D2D1::RectF(title_x, rect.top + 36 * s, title_x + badge_width, rect.top + 54 * s), phase_label, kind});
-            }
             const auto path_line = [&](const std::wstring& path, float y, float left, float end, const wchar_t* glyph) {
                 if (!y) return;
                 painter_.DrawGlyph(glyph, D2D1::RectF(left, y + offset + 2 * s, left + 16 * s, y + offset + 18 * s), theme.text_secondary);
@@ -595,13 +618,14 @@ bool OperationCenter::Render(bool allow_capture) {
     }
     const auto hr = dc->EndDraw();
     dc->SetTarget(previous.get()); dc->SetTextAntialiasMode(aa);
-    if (FAILED(hr)) return false;
-    const auto cpu_props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-    ComPtr<ID2D1Bitmap1> cpu;
-    if (FAILED(dc->CreateBitmap(size, nullptr, 0, cpu_props, &cpu)) || FAILED(cpu->CopyFromBitmap(nullptr, bitmap.get(), nullptr))) return false;
+    if (FAILED(hr)) {
+        render_bitmap_.reset(); readback_bitmap_.reset();
+        return false;
+    }
+    const D2D1_RECT_U region{0, 0, size.width, size.height};
+    if (FAILED(readback_bitmap_->CopyFromBitmap(nullptr, render_bitmap_.get(), &region))) return false;
     D2D1_MAPPED_RECT mapped{};
-    if (FAILED(cpu->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return false;
+    if (FAILED(readback_bitmap_->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return false;
     if (!memory_) memory_ = CreateCompatibleDC(nullptr);
     if (dib_ && (dib_width_ != width_ || dib_height_ != height_)) { DeleteObject(dib_); dib_ = nullptr; }
     if (!dib_ && memory_) {
@@ -615,7 +639,7 @@ bool OperationCenter::Render(bool allow_capture) {
     if (dib_) for (int row = 0; row < height_; ++row)
         std::memcpy(static_cast<BYTE*>(bits_) + static_cast<size_t>(row) * width_ * 4,
             mapped.bits + static_cast<size_t>(row) * mapped.pitch, static_cast<size_t>(width_) * 4);
-    cpu->Unmap();
+    readback_bitmap_->Unmap();
     return dib_ != nullptr;
 }
 
@@ -636,6 +660,10 @@ void OperationCenter::Tick() {
     if (!AnimationsEnabled()) {
         if (closing_) { Hide(false); return; }
         visibility_ = 1;
+        if(scroll_animating_) {
+            const float target=scroll_target_;
+            StopScroll();SetScrollOffset(target);
+        }
         FinishCardTransition();
         if (resizing_) UpdateHeight(false);
         Layout();
@@ -643,7 +671,8 @@ void OperationCenter::Tick() {
         KillTimer(hwnd_, kTimer);
         return;
     }
-    const float elapsed = static_cast<float>(GetTickCount64() - animation_start_);
+    const auto now = AnimationTimeMs();
+    const float elapsed = static_cast<float>(now - animation_start_);
     const float t = std::clamp(elapsed / (closing_ ? kCloseDurationMs : kOpenDurationMs), 0.0f, 1.0f);
     const float eased = closing_ ? t * t : 1 - (1 - t) * (1 - t) * (1 - t);
     visibility_ = animation_from_ + ((closing_ ? 0.0f : 1.0f) - animation_from_) * eased;
@@ -651,11 +680,11 @@ void OperationCenter::Tick() {
     const bool height_changed = resizing_;
     const bool cards_changed = cards_animating_;
     if (cards_animating_) {
-        card_progress_ = std::clamp(static_cast<float>(GetTickCount64() - card_animation_start_) / kCardDurationMs, 0.0f, 1.0f);
+        card_progress_ = std::clamp(static_cast<float>(now - card_animation_start_) / kCardDurationMs, 0.0f, 1.0f);
         if (card_progress_ >= 1) FinishCardTransition();
     }
     if (resizing_) {
-        const float progress = std::clamp(static_cast<float>(GetTickCount64() - resize_start_) / kResizeDurationMs, 0.0f, 1.0f);
+        const float progress = std::clamp(static_cast<float>(now - resize_start_) / kResizeDurationMs, 0.0f, 1.0f);
         const float resize_eased = progress * progress * (3 - 2 * progress);
         height_ = static_cast<int>(std::lround(resize_from_height_ + (target_height_ - resize_from_height_) * resize_eased));
         if (progress >= 1) { height_ = target_height_; resizing_ = false; }
@@ -671,18 +700,13 @@ void OperationCenter::Tick() {
         const int next = (std::max)(target_height_, fitted);
         if (next != height_) { height_ = next; UpdateVerticalPosition(); Layout(); }
     }
-    if (height_changed || cards_changed || t >= 1) Redraw();
+    const bool scroll_changed=TickScroll(now);
+    if (height_changed || cards_changed || scroll_changed || t >= 1) Redraw();
     else Present();
     const bool indeterminate = std::any_of(tasks_.begin(), tasks_.end(), [](const auto& task) {
         return task.active && task.percent < 0 && task.phase != ops::OpPhase::Paused;
     });
-    if (t >= 1 && !indeterminate && !resizing_ && !cards_animating_) KillTimer(hwnd_, kTimer);
-}
-
-void OperationCenter::Scroll(float delta) {
-    const float previous = scroll_;
-    scroll_ = std::clamp(scroll_ + delta, 0.0f, (std::max)(0.0f, content_height_ - body_height_));
-    if (previous != scroll_) { hover_ = pressed_ = -1; Layout(); Redraw(); }
+    if (t >= 1 && !indeterminate && !resizing_ && !cards_animating_ && !scroll_animating_) KillTimer(hwnd_, kTimer);
 }
 
 void OperationCenter::ScrollAt(float y) {
@@ -703,6 +727,7 @@ int OperationCenter::Hit(float x, float y) const {
 }
 
 void OperationCenter::FocusButton(int direction) {
+    StopScroll();
     if (buttons_.empty()) return;
     focused_ = focused_ < 0 ? (direction > 0 ? 0 : static_cast<int>(buttons_.size()) - 1) :
         (focused_ + direction + static_cast<int>(buttons_.size())) % static_cast<int>(buttons_.size());
@@ -763,15 +788,15 @@ LRESULT CALLBACK OperationCenter::WndProc(HWND hwnd, UINT message, WPARAM wparam
         if (wparam == VK_ESCAPE) self->Hide();
         else if (wparam == VK_TAB) self->FocusButton(GetKeyState(VK_SHIFT) < 0 ? -1 : 1);
         else if (wparam == VK_RETURN || wparam == VK_SPACE) self->Invoke(self->focused_);
-        else if (wparam == VK_DOWN) self->Scroll(48 * self->scale_);
-        else if (wparam == VK_UP) self->Scroll(-48 * self->scale_);
-        else if (wparam == VK_NEXT) self->Scroll(self->body_height_ * 0.8f);
-        else if (wparam == VK_PRIOR) self->Scroll(-self->body_height_ * 0.8f);
+        else if (wparam == VK_DOWN) self->Scroll(48 * self->scale_, true);
+        else if (wparam == VK_UP) self->Scroll(-48 * self->scale_, true);
+        else if (wparam == VK_NEXT) self->Scroll(self->body_height_ * 0.8f, true);
+        else if (wparam == VK_PRIOR) self->Scroll(-self->body_height_ * 0.8f, true);
         else if (wparam == VK_HOME) self->Scroll(-self->content_height_);
         else if (wparam == VK_END) self->Scroll(self->content_height_);
         return 0;
     case WM_MOUSEWHEEL:
-        self->Scroll(-GET_WHEEL_DELTA_WPARAM(wparam) / static_cast<float>(WHEEL_DELTA) * 72 * self->scale_); return 0;
+        self->Scroll(-GET_WHEEL_DELTA_WPARAM(wparam) / static_cast<float>(WHEEL_DELTA) * 72 * self->scale_, true); return 0;
     case WM_MOUSEMOVE: {
         if (self->dragging_scrollbar_) { self->ScrollAt(static_cast<float>(GET_Y_LPARAM(lparam))); return 0; }
         TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0}; TrackMouseEvent(&track);
@@ -780,6 +805,7 @@ LRESULT CALLBACK OperationCenter::WndProc(HWND hwnd, UINT message, WPARAM wparam
     }
     case WM_MOUSELEAVE: self->hover_ = -1; self->Redraw(); return 0;
     case WM_LBUTTONDOWN:
+        self->StopScroll();
         if (!self->closing_ && self->content_height_ > self->body_height_ &&
             GET_X_LPARAM(lparam) >= self->width_ - (kMargin + 14) * self->scale_ &&
             GET_Y_LPARAM(lparam) >= (kMargin + kHeader) * self->scale_) {

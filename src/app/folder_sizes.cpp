@@ -1,4 +1,5 @@
 #include "folder_sizes.h"
+#include "ui_change_signal.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_watch.h"
 #include "../common/json_utils.h"
@@ -139,7 +140,8 @@ struct FolderSizes::Impl {
     std::vector<std::wstring> last_roots;
     std::function<std::wstring()> cache_path;
     std::thread worker;
-    std::atomic<bool> stopping{false}, changed{false};
+    std::atomic<bool> stopping{false};
+    UiChangeSignal changed;
     bool dirty = false;
     bool index_enabled = true;
     HANDLE index_cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -482,8 +484,10 @@ FolderSizeValue FolderSizes::Get(const std::wstring& path) const {
     return value;
 }
 void FolderSizes::Invalidate(const std::wstring& path) { impl_->Invalidate(path); }
-bool FolderSizes::TakeChanged() { return impl_->changed.exchange(false); }
+bool FolderSizes::TakeChanged() { return impl_->changed.Take(); }
+void FolderSizes::SetChangeNotify(HWND hwnd, UINT message) { impl_->changed.SetTarget(hwnd, message); }
 void FolderSizes::Stop() {
+    impl_->changed.SetTarget(nullptr, 0);
     auto& s = *impl_; s.stopping = true; s.wake.notify_all();
     if (s.index_cancel) SetEvent(s.index_cancel);
     if (s.worker.joinable()) {

@@ -1,0 +1,50 @@
+{
+  "status": "reported-flicker-unresolved",
+  "product_changed": false,
+  "fonts": [
+    {
+      "Actual": "Microsoft YaHei UI",
+      "Quality": "ANTIALIASED_QUALITY",
+      "Weight": 400,
+      "Requested": "Microsoft YaHei UI",
+      "PixelHeight": 14
+    },
+    {
+      "Actual": "Segoe UI Variable Text",
+      "Quality": "ANTIALIASED_QUALITY",
+      "Weight": 400,
+      "Requested": "Segoe UI Variable Text",
+      "PixelHeight": 14
+    },
+    {
+      "Actual": "Segoe UI",
+      "Quality": "ANTIALIASED_QUALITY",
+      "Weight": 400,
+      "Requested": "Segoe UI",
+      "PixelHeight": 14
+    }
+  ],
+  "tests": [
+    {
+      "name": "中文字体与编辑路径",
+      "passed": 553,
+      "failed": 0,
+      "log": "bench_data/edit-surface-20261024/font-trace-zh.log"
+    },
+    {
+      "name": "中文桌面绘制和拖选",
+      "passed": 93,
+      "failed": 0,
+      "log": "bench_data/edit-surface-20261024/selection-isolated.log"
+    }
+  ],
+  "markdown_lines": [
+    "**当前问题状态：用户确认 1.2.0.3 仍有整行文字或选区一起轻微闪烁；根因尚未确认，本轮不标记修复完成。安装版保持 1.2.0.3，本轮仅增加诊断测试和证据，没有更改产品字体或替换安装文件。**",
+    "- 字体核实：中文界面使用 Microsoft YaHei UI（微软雅黑 UI），普通字重 400，字符高度 14 DIP 随缩放换算；英文界面指定 Segoe UI Variable Text。生产宿主中文夹具在 100%/150%/200% 下的 GetTextFaceW 均确认实际选中 Microsoft YaHei UI；另用相同 CreateFontW 参数查询系统，三个候选字体均未发生字体替换。代码位于 src/app/app_hosted_edit.cpp:124 和 src/ui/typography.cpp:126；[系统映射证据](validation/font-flicker-20261024/native-font-resolution.json)。",
+    "- 1.2.0.3 编辑文字改为 GDI/原生 EDIT，字体质量参数为 ANTIALIASED_QUALITY；这一绘制方式变化可能解释与正文文字的观感差异，尚不能以此解释用户所见整行闪烁。字体核查结论与闪烁根因分开记录。",
+    "- 新增诊断发现，每 10 个父窗口渲染帧，路径/搜索/筛选仍有 20 次 WM_WINDOWPOSCHANGING，重命名/标签有 10 次；同一观察区间 WM_PAINT 和 WM_ERASEBKGND 均为 0。确认存在冗余布局调用，但尚无证据证明它造成所报闪烁，未以此作推测性产品修复。",
+    "- 中文定向路径检查 553 PASS / 0 FAIL；之后补齐测试父窗口与生产一致的擦除、绘制及通知处理，移除夹具独有的 WS_CLIPCHILDREN，加入独立线程从桌面采样。中文、100%、深浅主题、路径与重命名、方向键与框内拖选共采集 192 个桌面帧，未观察到预期两个选区/光标画面之外的第三帧；该有限范围检查为 93 PASS / 0 FAIL，不代替用户实际使用条件。",
+    "- 拖选诊断首轮为 92 PASS / 1 FAIL，抓到第三个选区画面；隔离脚本拖选期间 Windows 补发的真实指针移动后，93 PASS / 0 FAIL。原失败日志和截图保留，不将这一测试输入隔离调整算作产品 bug 修复。",
+    "- [中文字体与路径日志](../bench_data/edit-surface-20261024/font-trace-zh.log)、[独立桌面采样](../bench_data/edit-surface-20261024/selection-isolated.log)、[原失败日志](../bench_data/edit-surface-20261024/selection-before.log)、[原失败截图](validation/font-flicker-20261024/selection-before-worst.bmp)。尚未稳定捕获用户所见闪烁；没有据自动检查通过宣称现场问题已消除。"
+  ]
+}

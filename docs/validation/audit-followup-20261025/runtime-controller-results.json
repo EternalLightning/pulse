@@ -1,0 +1,22 @@
+[
+  {
+    "Name": "app-controller-layout",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_app_controllers_test.exe",
+    "Arguments": [
+      "--session-layout"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\app-controller-layout.txt"
+  },
+  {
+    "Name": "context-settings-save",
+    "Executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_app_controllers_test.exe",
+    "Arguments": [
+      "--context-settings-save"
+    ],
+    "ExitCode": -1073741502,
+    "OutputLines": 0,
+    "Log": "E:\\Projects\\pulse\\docs\\validation\\audit-followup-20261025\\context-settings-save.txt"
+  }
+]

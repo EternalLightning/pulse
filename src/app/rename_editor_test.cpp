@@ -2,7 +2,6 @@
 #include "rename_editor_test.h"
 #include "app_hosted_edit.h"
 #include "app_input.h"
-#include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include <cstdio>
 #include <filesystem>
@@ -51,7 +50,7 @@ struct EditorPixels {
     int glyphs = 0;
     int selection = 0;
 };
-bool CaptureEditor(HWND edit, const wchar_t* path, AppState* rendered_state = nullptr,
+bool CaptureEditor(HWND edit, const wchar_t* path, bool client_surface = false,
                    EditorPixels* sampled = nullptr, bool dark = false) {
     RECT rc{};
     GetWindowRect(edit, &rc);
@@ -78,10 +77,10 @@ bool CaptureEditor(HWND edit, const wchar_t* path, AppState* rendered_state = nu
     }
     const auto old = SelectObject(dc, bitmap);
     DwmFlush();
-    bool ok = rendered_state
-        ? rendered_state->compositor.PaintLumaEdit(edit, dc, rendered_state->compositor.TextFormat(),
-            HostedEditForeground(*rendered_state), HostedEditBackground(*rendered_state))
-        : BitBlt(dc, 0, 0, width, height, screen, rc.left, rc.top, SRCCOPY | CAPTUREBLT) != FALSE;
+    HDC source = client_surface ? GetDC(edit) : screen;
+    bool ok = source && BitBlt(dc, 0, 0, width, height, source,
+        client_surface ? 0 : rc.left, client_surface ? 0 : rc.top, SRCCOPY | CAPTUREBLT) != FALSE;
+    if (client_surface && source) ReleaseDC(edit, source);
     GdiFlush();
     if (ok && sampled) {
         *sampled = {};
@@ -176,7 +175,7 @@ bool RunAddressEditorTest() {
         const auto inspect = [&](const wchar_t* name, bool selected) {
             if (!capture) return;
             EditorPixels pixels;
-            check(CaptureEditor(state->hwndAddressEdit, (output / name).c_str(), nullptr,
+            check(CaptureEditor(state->hwndAddressEdit, (output / name).c_str(), false,
                 &pixels, state->darkMode) && pixels.glyphs > 15 && (!selected || pixels.selection > 20),
                 "screen shows search characters and any requested selection");
         };
@@ -211,7 +210,7 @@ bool RunAddressEditorTest() {
             if (history->capture) {
                 EditorPixels pixels;
                 valid &= CaptureEditor(s.hwndAddressEdit, (history->output / L"history.bmp").c_str(),
-                    nullptr, &pixels, s.darkMode) && pixels.glyphs > 15;
+                    false, &pixels, s.darkMode) && pixels.glyphs > 15;
                 valid &= CaptureEditor(s.hwnd, (history->output / L"history-owner.bmp").c_str());
             }
             history->passed = valid;
@@ -378,7 +377,7 @@ bool RunRenameEditorTest() {
         if (capture_editor) {
             Pump();
             EditorPixels sampled;
-            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/initial.bmp", nullptr,
+            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/initial.bmp", false,
                 &sampled, state->darkMode), "capture initial editor appearance");
             check(sampled.glyphs > 15 && sampled.selection > 20,
                 "screen pixels contain both filename glyphs and the initial selection");
@@ -386,19 +385,16 @@ bool RunRenameEditorTest() {
             SendMessageW(state->hwndRenameEdit, WM_TIMER, 71, 0);
             check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/repaint.bmp"), "capture editor after caret repaint");
             LayoutRenameOverlay(*state);
-            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/relayout.bmp", nullptr,
+            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/relayout.bmp", false,
                 &sampled, state->darkMode), "capture editor after repeated layout");
             check(sampled.glyphs > 15 && sampled.selection > 20,
                 "filename and selection remain visible after repaint and layout");
-            if (state->compositor.LumaTextEnabled())
-                check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/rendered.bmp", state.get()), "capture rendered editor bitmap");
+            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/rendered.bmp", true), "capture native editor surface");
         }
         GUITHREADINFO gui{sizeof(gui)};
         GetGUIThreadInfo(GetCurrentThreadId(), &gui);
-        if (!state->compositor.LumaTextEnabled()) {
-            check(gui.hwndFocus == state->hwndRenameEdit && gui.hwndCaret == state->hwndRenameEdit &&
-                (gui.flags & GUI_CARETBLINKING), "native fallback keeps its caret visible");
-        } else check(gui.hwndFocus == state->hwndRenameEdit, "LumaText editor receives focus");
+        check(gui.hwndFocus == state->hwndRenameEdit && gui.hwndCaret == state->hwndRenameEdit &&
+            (gui.flags & GUI_CARETBLINKING), "native editor keeps focus and its caret visible");
         const LPARAM mouse_point = MAKELPARAM(4, 10);
         SendMessageW(state->hwndRenameEdit, WM_LBUTTONDBLCLK, MK_LBUTTON, mouse_point);
         SendMessageW(state->hwndRenameEdit, WM_LBUTTONUP, 0, mouse_point);
@@ -406,19 +402,17 @@ bool RunRenameEditorTest() {
             reinterpret_cast<LPARAM>(&selection_end));
         check(selection_end > selection_start && GetCapture() != state->hwndRenameEdit,
             "mouse selection remains editable and releases capture");
-        if (capture_editor && state->compositor.LumaTextEnabled()) {
+        if (capture_editor) {
             EditorPixels sampled;
-            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/mouse.bmp", nullptr,
+            check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/mouse.bmp", false,
                 &sampled, state->darkMode) && sampled.glyphs > 15 && sampled.selection > 20,
                 "mouse selection preserves the rendered filename on screen");
         }
         SendMessageW(state->hwndRenameEdit, EM_SETSEL, 0, 6);
-        if (state->compositor.LumaTextEnabled()) {
-            const auto draws = state->compositor.GetLumaTextStats()->draw_calls;
-            SendMessageW(state->hwndRenameEdit, EM_SETSEL, 0, 6);
-            check(state->compositor.GetLumaTextStats()->draw_calls > draws,
-                "setting the initial selection immediately repaints the LumaText surface");
-        }
+        EditorPixels selected_surface;
+        check(CaptureEditor(state->hwndRenameEdit, L"bench_data/rename-editor/selection-surface.bmp", true,
+            &selected_surface, state->darkMode) && selected_surface.glyphs > 15 && selected_surface.selection > 20,
+            "setting the initial selection immediately paints native glyphs and selection");
         SetWindowTextW(state->hwndRenameEdit, L"after.txt");
         const auto list = ListRect(*state);
         const LPARAM point = MAKELPARAM(static_cast<int>(list.left + 30), static_cast<int>(list.bottom - 30));
@@ -478,7 +472,7 @@ bool RunRenameEditorTest() {
                 Pump();
                 EditorPixels sampled;
                 const auto path = L"bench_data/rename-editor/name-" + std::to_wstring(capture_index) + L".bmp";
-                check(CaptureEditor(state->hwndRenameEdit, path.c_str(), nullptr, &sampled, state->darkMode) &&
+                check(CaptureEditor(state->hwndRenameEdit, path.c_str(), false, &sampled, state->darkMode) &&
                     sampled.glyphs > 15 && sampled.selection > 20, "filename and selection are visible on screen");
             }
             SendMessageW(state->hwndRenameEdit, WM_CHAR, L'X', 1);
@@ -489,7 +483,7 @@ bool RunRenameEditorTest() {
             if (capture_editor) {
                 EditorPixels sampled;
                 const auto path = L"bench_data/rename-editor/typed-" + std::to_wstring(capture_index) + L".bmp";
-                check(CaptureEditor(state->hwndRenameEdit, path.c_str(), nullptr, &sampled, state->darkMode) &&
+                check(CaptureEditor(state->hwndRenameEdit, path.c_str(), false, &sampled, state->darkMode) &&
                     sampled.glyphs > 15, "typed replacement is visible immediately");
             }
             HideRenameOverlay(*state, false);

@@ -1,0 +1,15 @@
+{
+  "number": 181,
+  "title": "[bug] 预览文件在窗口焦点切出pulse后不显示",
+  "body": "正常预览的文件，在切换其他窗口后，预览窗会直接显示为空白，切回pulse后又能显示",
+  "url": "https://github.com/jimmgreen/pulse/issues/181",
+  "captured_at": "2026-10-23T03:10:07.198618+00:00",
+  "updated_at": "2026-10-10T02:26:59Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

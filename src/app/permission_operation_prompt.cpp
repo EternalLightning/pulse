@@ -48,7 +48,10 @@ void PumpPermissionOperationPrompt(AppState& state) {
     state.permissionOperationPromptActive = true;
     const bool accepted = ui::ShowConfirmDialog(state.hwnd, spec, state.darkMode, state.accentColor);
     if (accepted && spec.still_valid()) {
-        if (!state.ops.RetryElevatedOperation(status.task_id))
+        if (state.ops.RetryElevatedOperation(status.task_id)) {
+            state.operationDismissedTaskId = 0;
+            state.operationUiTaskId = 0;
+        } else
             state.ops.CancelElevationRetry(status.task_id);
     } else state.ops.CancelElevationRetry(status.task_id);
     state.permissionOperationPromptActive = false;

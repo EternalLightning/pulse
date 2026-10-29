@@ -1,4 +1,5 @@
 #include "../app/link_resolve.h"
+#include "../fs/cloud_state.h"
 #include "../ipc/shell_query_client.h"
 #include <iostream>
 
@@ -87,6 +88,20 @@ int main() {
           "enumeration cancellation is checked for each shortcut and before applying a response");
 
     entries.resize(1);
+    for (const DWORD attrs : std::initializer_list<DWORD>{FILE_ATTRIBUTE_OFFLINE, fs::kAttrRecallOnOpen, fs::kAttrRecallOnDataAccess,
+            fs::kAttrPinned | fs::kAttrRecallOnDataAccess}) {
+        entries[0] = {};
+        entries[0].name = L"online.lnk";
+        entries[0].attrs = attrs;
+        query_count = 0;
+        app::ResolveLinksInPlace(L"C:\\fixture", entries, {});
+        Check(query_count == 0 && entries[0].link_target.empty(),
+              "browsing an online shortcut never sends a content-reading Shell query");
+        Check(!app::ResolveLink(L"C:\\fixture\\online.lnk", entries[0]) && query_count == 0,
+              "direct shortcut resolution also rejects online placeholders");
+    }
+    entries[0] = {};
+    entries[0].name = L"item.lnk";
     entries[0].full_path = L"\\\\?\\C:\\" + std::wstring(280, L'x') + L"\\item.lnk";
     query_count = 0;
     app::ResolveLinksInPlace(L"pulse:recent", entries, {});

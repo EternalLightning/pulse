@@ -10,7 +10,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_TEXT_RENDER_SMOOTH;
+constexpr UINT kLastString = IDS_UNGROUP_FOLDER;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -27,7 +27,8 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::SettingsExplorerTakeoverDesc) <= kLastString &&
               static_cast<UINT>(StringId::IndexRemovableExcluded) <= kLastString &&
               static_cast<UINT>(StringId::IndexDeviceUnavailable) <= kLastString &&
-              static_cast<UINT>(StringId::TextRenderSmooth) <= kLastString);
+              static_cast<UINT>(StringId::TextRenderSmooth) <= kLastString &&
+              static_cast<UINT>(StringId::OpenNetworkSettings) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

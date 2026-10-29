@@ -1,0 +1,15 @@
+{
+  "number": 147,
+  "title": "搜索结果中没有过滤掉不符合要求的文件，以及搜索出来的文件无法空格预览。",
+  "body": "在右上角的搜索框中输入关键词后，搜索结果展示列表中没有过滤掉不合符要求的文件，而符合要求的文件只是在标题上的关键字用蓝色标识出来。这是bug吗？这种没有过滤掉不符合要求的展示列表让人不适应。还有就是搜索出来的列表文件无法通过空格键预览，或者说空格键预览功能在此处失效。",
+  "url": "https://github.com/jimmgreen/pulse/issues/147",
+  "captured_at": "2026-10-23T03:10:07.205185+00:00",
+  "updated_at": "2026-10-09T03:54:18Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

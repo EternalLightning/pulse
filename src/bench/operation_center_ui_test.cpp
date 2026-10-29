@@ -1,12 +1,199 @@
 #include "../ui/operation_center.h"
 #include "../common/localization.h"
+#include "../ui/animation_clock.h"
+#include "snapshot_output.h"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <chrono>
 
 namespace pulse::ui {
 struct OperationCenterTestPeer {
+#include "operation_center_scroll_cases.h"
+    static int RunVisibilityPerformance(OperationCenter& center) {
+        int failures = 0;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            failures += !passed;
+        };
+        ShowWindow(center.owner_, SW_SHOWNOACTIVATE);
+        center.compositor_->Resize(1600, 1600);
+        auto* dc = center.compositor_->Dc();
+        dc->BeginDraw(); dc->Clear(HexColor(0x789ABC));
+        check(SUCCEEDED(dc->EndDraw()) && center.compositor_->CaptureFrame(), "prepare isolated visibility backdrop");
+        POINT origin{};
+        ClientToScreen(center.owner_, &origin);
+        center.work_area_ = {origin.x, origin.y, origin.x + 1600, origin.y + 1600};
+        center.anchor_ = {origin.x, origin.y, origin.x + 40, origin.y + 40};
+        center.base_x_ = origin.x;
+        center.motion_override_ = 1;
+        for (const float scale : {1.0f, 2.0f}) for (const bool dark : {false, true}) {
+            center.Hide(false);
+            center.scale_ = scale; center.painter_.SetScale(scale);
+            center.compositor_->RecreateTextFormats(scale);
+            center.SetTheme(dark, HexColor(0x0078D4));
+            center.Update({});
+            center.width_ = static_cast<int>(496 * scale);
+            center.height_ = static_cast<int>(234 * scale);
+            center.Layout(); center.UpdateHeight(false);
+            center.open_ = true; center.visibility_ = 0;
+            check(center.Render(false), "empty popup prepares its content before animation");
+            center.BeginVisibility(false); center.Present();
+            ShowWindow(center.hwnd_, SW_SHOWNOACTIVATE);
+            const auto pump = [&](bool closing) {
+                const auto start = std::chrono::steady_clock::now();
+                auto previous = start;
+                int frames = 0, intermediate = 0;
+                double worst_gap = 0, total_gap = 0;
+                float previous_visibility = center.visibility_;
+                bool continuous = true;
+                while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(600)) {
+                    MSG message{};
+                    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                        if (message.hwnd == center.hwnd_ && message.message == WM_TIMER) {
+                            // Production maintenance can notify an unchanged empty list.
+                            center.Update({});
+                            DispatchMessageW(&message);
+                            const auto now = std::chrono::steady_clock::now();
+                            const double gap = std::chrono::duration<double, std::milli>(now - previous).count();
+                            previous = now; total_gap += gap; worst_gap = (std::max)(worst_gap, gap);
+                            ++frames;
+                            intermediate += center.visibility_ > 0 && center.visibility_ < 1;
+                            continuous &= closing ? center.visibility_ <= previous_visibility : center.visibility_ >= previous_visibility;
+                            previous_visibility = center.visibility_;
+                        } else DispatchMessageW(&message);
+                    }
+                    if (closing ? !center.open_ : center.visibility_ >= 1) break;
+                    MsgWaitForMultipleObjectsEx(0, nullptr, 4, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                }
+                check(continuous && intermediate >= 2 && (closing ? !center.open_ : center.visibility_ == 1),
+                    closing ? "empty popup closes continuously under repeated empty updates" :
+                        "empty popup opens continuously under repeated empty updates");
+                std::printf("[VISIBILITY] dpi=%.0f dark=%d closing=%d frames=%d interval_avg=%.2fms interval_max=%.2fms\n",
+                    scale * 100, dark, closing, frames, frames ? total_gap / frames : 0, worst_gap);
+            };
+            pump(false);
+            center.Hide(); pump(true);
+            center.open_ = true; center.visibility_ = 0; center.BeginVisibility(false);
+            center.animation_start_ = AnimationTimeMs() - 60; center.Tick();
+            const float opened = center.visibility_;
+            center.Hide();
+            check(center.closing_ && center.animation_from_ == opened, "empty popup reverses opening from displayed opacity");
+            center.animation_start_ = AnimationTimeMs() - 30; center.Tick();
+            const float closed = center.visibility_;
+            center.BeginVisibility(false);
+            check(!center.closing_ && center.animation_from_ == closed, "empty popup reopens continuously during closing");
+            center.motion_override_ = 0; center.Tick();
+            check(center.visibility_ == 1, "disabled motion settles empty popup opening immediately");
+            center.Hide();
+            check(!center.open_, "disabled motion closes empty popup immediately");
+            center.motion_override_ = 1;
+        }
+        center.Hide(false);
+        std::printf("Operation center visibility: %d failure(s)\n", failures);
+        return failures ? 1 : 0;
+    }
+
+    static int RunClearPerformance(OperationCenter& center, const std::filesystem::path& output) {
+        int failures = 0;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            failures += !passed;
+        };
+        // Exercise real acrylic rendering using a synthetic owner frame offscreen.
+        ShowWindow(center.owner_, SW_SHOWNOACTIVATE);
+        center.compositor_->Resize(1600, 1600);
+        auto* dc = center.compositor_->Dc();
+        dc->BeginDraw();
+        dc->Clear(HexColor(0x789ABC));
+        check(SUCCEEDED(dc->EndDraw()) && center.compositor_->CaptureFrame(), "prepare isolated backdrop frame");
+        POINT origin{};
+        ClientToScreen(center.owner_, &origin);
+        center.work_area_ = {origin.x, origin.y, origin.x + 1600, origin.y + 1600};
+        center.anchor_ = {origin.x, origin.y, origin.x + 40, origin.y + 40};
+        center.base_x_ = origin.x;
+        center.motion_override_ = 1;
+        OperationCenterCallbacks callbacks;
+        callbacks.details = [](uint64_t) {};
+        callbacks.open_destination = [](const auto&) {};
+        callbacks.clear_finished = [&] {
+            auto remaining = center.tasks_;
+            std::erase_if(remaining, [](const auto& task) { return !task.active; });
+            center.Update(std::move(remaining));
+        };
+        center.SetCallbacks(std::move(callbacks));
+        for (const float scale : {1.0f, 2.0f}) for (const bool dark : {false, true})
+            for (const bool keep_active : {false, true}) for (const bool scrolled : {false, true}) {
+            center.Hide(false);
+            center.scale_ = scale; center.painter_.SetScale(scale);
+            center.compositor_->RecreateTextFormats(scale);
+            center.SetTheme(dark, HexColor(0x0078D4));
+            center.width_ = static_cast<int>(496 * scale);
+            center.height_ = static_cast<int>(624 * scale);
+            std::vector<ops::OpStatus> tasks;
+            for (uint64_t id = 1; id <= 64; ++id) {
+                ops::OpStatus task;
+                task.task_id = id; task.type = ops::OpType::Copy; task.phase = ops::OpPhase::Completed;
+                task.summary = L"复制项目资料"; task.source_label = L"E:\\fixture\\source";
+                task.destination_label = L"D:\\fixture\\destination";
+                task.total_items = task.completed_items = 21; task.percent = 100;
+                tasks.push_back(std::move(task));
+            }
+            if (keep_active) {
+                auto task = tasks.front();
+                task.task_id = 100; task.active = true; task.phase = ops::OpPhase::Running;
+                task.percent = 50; tasks.push_back(std::move(task));
+            }
+            center.Update(std::move(tasks));
+            center.scroll_ = scrolled ? 1e6f : 0;
+            center.Layout(); center.UpdateHeight(false);
+            center.open_ = true; center.visibility_ = center.animation_from_ = 1;
+            center.animation_start_ = AnimationTimeMs() - 1000;
+            check(center.Render(false), "render maximum recent history before clearing");
+            const bool acrylic = center.acrylic_;
+            auto* const render_bitmap = center.render_bitmap_.get();
+            auto* const readback_bitmap = center.readback_bitmap_.get();
+            auto* const backdrop_bitmap = center.backdrop_.plate_.get();
+            const auto begin = std::chrono::steady_clock::now();
+            center.Invoke(0);
+            const double clear_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            check(center.cards_animating_ && center.tasks_.size() == (keep_active ? 1u : 0u),
+                "clear retains active work and starts removal at maximum history");
+            check(!center.departing_cards_.empty() && center.departing_cards_.size() <= 8,
+                "only visible removed cards are captured when clearing long history");
+            const auto prefix = L"clear-" + std::to_wstring(static_cast<int>(scale * 100)) +
+                (dark ? L"-dark" : L"-light") + (keep_active ? L"-active" : L"-empty") + (scrolled ? L"-scrolled" : L"-top");
+            double total_ms = 0, worst_ms = 0;
+            bool resources_reused = render_bitmap && readback_bitmap;
+            for (int frame = 0; frame <= 14; ++frame) {
+                const auto elapsed = static_cast<ULONGLONG>(frame * 16);
+                center.card_animation_start_ = center.resize_start_ = AnimationTimeMs() - elapsed;
+                const auto start = std::chrono::steady_clock::now();
+                center.Tick();
+                resources_reused &= center.render_bitmap_.get() == render_bitmap &&
+                    center.readback_bitmap_.get() == readback_bitmap &&
+                    center.backdrop_.plate_.get() == backdrop_bitmap;
+                const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                total_ms += ms; worst_ms = (std::max)(worst_ms, ms);
+                if (frame == 0 || frame == 7 || frame == 14)
+                    check(SaveDib(center, output / (prefix + L"-" + std::to_wstring(frame) + L".png")), "save clear animation frame");
+            }
+            check(!center.cards_animating_ && !center.resizing_ && center.height_ == center.target_height_ &&
+                center.departing_cards_.empty() && center.scroll_ == 0,
+                "long-history clear settles with no stale images or scroll offset");
+            check(resources_reused, "clear reuses render, readback and acrylic surfaces through every shrinking frame");
+            std::printf("[TIMING] dpi=%.0f dark=%d active=%d scrolled=%d acrylic=%d clear=%.2fms frame_avg=%.2fms frame_max=%.2fms\n",
+                scale * 100, dark, keep_active, scrolled, acrylic, clear_ms, total_ms / 15, worst_ms);
+        }
+        center.Hide(false);
+        std::printf("Operation center clear: %d failure(s)\n", failures);
+        return failures ? 1 : 0;
+    }
+
     static bool SaveDib(const OperationCenter& center, const std::filesystem::path& path) {
+        if (bench::StreamSnapshots()) return center.bits_ && bench::EmitSnapshot(path,
+            static_cast<UINT>(center.dib_width_), static_cast<UINT>(center.dib_height_),
+            static_cast<UINT>(center.dib_width_ * 4), static_cast<BYTE*>(center.bits_));
         ComPtr<IWICImagingFactory> factory;
         ComPtr<IWICStream> stream;
         ComPtr<IWICBitmapEncoder> encoder;
@@ -87,7 +274,7 @@ struct OperationCenterTestPeer {
             "multiple tasks respect the opening height and monitor limits and retain scrolling");
         const int expanded_height = center.height_;
         center.open_ = true; center.visibility_ = 1;
-        center.animation_from_ = 1; center.animation_start_ = GetTickCount64() - 1000;
+        center.animation_from_ = 1; center.animation_start_ = AnimationTimeMs() - 1000;
         center.Scroll(1e6f);
         auto clearing_callbacks = callbacks;
         clearing_callbacks.clear_finished = [&] { ++clears; center.Update({}); };
@@ -100,8 +287,8 @@ struct OperationCenterTestPeer {
             "clearing finished rows retargets the visible popup to its default empty height and resets scrolling");
         check(center.AnimationsEnabled() ? center.resizing_ && center.height_ == expanded_height : center.height_ == empty_height,
             "clear begins from the displayed height or settles immediately when motion is disabled");
-        center.resize_start_ = GetTickCount64() - 100;
-        center.card_animation_start_ = GetTickCount64() - 100;
+        center.resize_start_ = AnimationTimeMs() - 100;
+        center.card_animation_start_ = AnimationTimeMs() - 100;
         const auto resize_start = center.resize_start_;
         center.Update({});
         check(center.resize_start_ == resize_start, "repeated status updates do not restart the same height transition");
@@ -115,8 +302,8 @@ struct OperationCenterTestPeer {
             (center.AnimationsEnabled() ? center.height_ == intermediate_height : center.height_ == expanded_height),
             "new work reverses the transition continuously from the displayed height");
         center.Update({});
-        center.resize_start_ = GetTickCount64() - 250;
-        center.card_animation_start_ = GetTickCount64() - 250;
+        center.resize_start_ = AnimationTimeMs() - 250;
+        center.card_animation_start_ = AnimationTimeMs() - 250;
         center.Tick();
         check(center.height_ == empty_height && !center.resizing_ && center.buttons_.empty(),
             "clear settles at the default height with no stale card actions");
@@ -463,22 +650,22 @@ struct OperationCenterTestPeer {
             std::printf("[SKIP] acrylic material: Windows transparency disabled or high contrast enabled\n");
         }
         center.open_ = true; center.closing_ = false; center.visibility_ = 0;
-        center.animation_from_ = 0; center.animation_start_ = GetTickCount64() - 80;
+        center.animation_from_ = 0; center.animation_start_ = AnimationTimeMs() - 80;
         center.Tick();
         check(center.AnimationsEnabled() ? center.visibility_ > 0.5f && center.visibility_ < 1 : center.visibility_ == 1,
             "opening uses eased opacity or settles immediately when system motion is disabled");
-        center.animation_start_ = GetTickCount64() - 200; center.Tick();
+        center.animation_start_ = AnimationTimeMs() - 200; center.Tick();
         check(center.visibility_ == 1 && center.open_, "opening settles fully visible");
-        center.closing_ = true; center.animation_from_ = 1; center.animation_start_ = GetTickCount64() - 50;
+        center.closing_ = true; center.animation_from_ = 1; center.animation_start_ = AnimationTimeMs() - 50;
         center.Tick();
         check(center.AnimationsEnabled() ? center.visibility_ > 0.5f && center.visibility_ < 1 : !center.open_,
             "closing uses eased opacity or dismisses immediately when system motion is disabled");
-        center.animation_start_ = GetTickCount64() - 200; center.Tick();
+        center.animation_start_ = AnimationTimeMs() - 200; center.Tick();
         check(!center.open_ && !IsWindowVisible(center.hwnd_), "closing completes without a residual popup");
         center.open_ = true; center.closing_ = true; center.visibility_ = 0.4f;
         // Simulate rapid reversal without showing a foreground window.
         center.closing_ = false; center.animation_from_ = center.visibility_;
-        center.animation_start_ = GetTickCount64() - 80; center.Tick();
+        center.animation_start_ = AnimationTimeMs() - 80; center.Tick();
         check(center.AnimationsEnabled() ? center.visibility_ > 0.4f && center.visibility_ < 1 : center.visibility_ == 1,
             "rapid reversal preserves continuous opacity or respects disabled motion");
         SendMessageW(center.hwnd_, WM_CANCELMODE, 0, 0);
@@ -513,7 +700,7 @@ struct OperationCenterTestPeer {
             center.width_ = static_cast<int>(496 * scale); center.height_ = static_cast<int>(624 * scale);
             center.Layout(); center.UpdateHeight(false);
             center.open_ = true; center.closing_ = false; center.visibility_ = 1;
-            center.animation_from_ = 1; center.animation_start_ = GetTickCount64() - 1000;
+            center.animation_from_ = 1; center.animation_start_ = AnimationTimeMs() - 1000;
             center.force_solid_ = true;
             check(center.Render(), "render two real cards before removal");
             const float previous_top = center.cards_.back().bounds.top;
@@ -538,8 +725,8 @@ struct OperationCenterTestPeer {
             bool unclipped = true;
             for (int frame = 0; frame <= 14; ++frame) {
                 const auto elapsed = static_cast<ULONGLONG>(frame * 16);
-                center.card_animation_start_ = GetTickCount64() - elapsed;
-                center.resize_start_ = GetTickCount64() - elapsed;
+                center.card_animation_start_ = AnimationTimeMs() - elapsed;
+                center.resize_start_ = AnimationTimeMs() - elapsed;
                 center.Tick();
                 if (frame == 7) midway_top = center.cards_.front().bounds.top;
                 for (const auto& button : center.buttons_) if (button.action != OperationCenter::Action::Clear)
@@ -559,7 +746,7 @@ struct OperationCenterTestPeer {
             }
             check(hits_follow, "live card actions follow the animated layout");
             center.Update({});
-            center.card_animation_start_ = GetTickCount64() - 80; center.Tick();
+            center.card_animation_start_ = AnimationTimeMs() - 80; center.Tick();
             center.Update({survivor});
             check(std::none_of(center.departing_cards_.begin(), center.departing_cards_.end(), [&](const auto& card) {
                 return card.task_id == survivor.task_id;
@@ -572,12 +759,12 @@ struct OperationCenterTestPeer {
         }
         center.motion_override_ = 1;
         center.open_ = true; center.visibility_ = 0; center.BeginVisibility(false);
-        center.animation_start_ = GetTickCount64() - 60; center.Tick();
+        center.animation_start_ = AnimationTimeMs() - 60; center.Tick();
         const float opening = center.visibility_;
         center.Hide();
         check(center.closing_ && center.animation_from_ == opening && center.Hit(40, 40) == -1,
             "closing mid-open continues from the current opacity and immediately disables interaction");
-        center.animation_start_ = GetTickCount64() - 50; center.Tick();
+        center.animation_start_ = AnimationTimeMs() - 50; center.Tick();
         const float closing = center.visibility_;
         center.BeginVisibility(false);
         check(!center.closing_ && center.animation_from_ == closing,
@@ -630,10 +817,10 @@ struct OperationCenterTestPeer {
 };
 } // namespace pulse::ui
 
-int RunOperationCenterUiTest() {
+int RunOperationCenterUiTest(std::string_view mode) {
     using namespace pulse::ui;
     const auto output = std::filesystem::absolute(L"bench_data/operation-center-ui");
-    std::filesystem::create_directories(output);
+    if (!pulse::bench::StreamSnapshots()) std::filesystem::create_directories(output);
     HWND owner = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Operation center isolated fixture",
         WS_OVERLAPPEDWINDOW, -20000, -20000, 960, 720, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!owner) return 2;
@@ -643,17 +830,28 @@ int RunOperationCenterUiTest() {
         if (compositor.Init(owner)) {
             compositor.RecreateTextFormats(1);
             OperationCenter center;
-            if (center.Create(owner, &compositor)) result = OperationCenterTestPeer::Run(center, output);
+            if (center.Create(owner, &compositor)) {
+                if (mode == "--clear-performance") result = OperationCenterTestPeer::RunClearPerformance(center, output);
+                else if (mode == "--visibility-performance") result = OperationCenterTestPeer::RunVisibilityPerformance(center);
+                else if (mode == "--smooth-scroll") result = OperationCenterTestPeer::RunSmoothScroll(center,output);
+                else result = OperationCenterTestPeer::Run(center, output);
+            }
         }
     }
     DestroyWindow(owner);
     return result;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const int result = RunOperationCenterUiTest();
+    int result = 2;
+    try {
+        result = RunOperationCenterUiTest(argc == 2 ? std::string_view(argv[1]) : std::string_view{});
+    } catch (const std::exception& error) {
+        std::printf("[FAIL] fixture initialization: %s\n", error.what());
+    }
     if (SUCCEEDED(initialized)) CoUninitialize();
     return result;
 }

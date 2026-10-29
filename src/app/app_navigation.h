@@ -6,6 +6,8 @@
 namespace pulse {
 std::vector<std::wstring> CollectPanePaths(const AppState& s);
 std::vector<ui::ViewMode> CollectPaneViews(const AppState& s);
+int CollectFocusedPaneIndex(const AppState& s);
+void ToggleWorkspacePin(AppState& s, const std::wstring& root);
 bool IsUncPath(const std::wstring& p);
 void PumpUncProbe(AppState& s);
 void ApplyUncProbeResult(AppState& s, const fs::UncProbeResult& result);
@@ -31,12 +33,15 @@ void AcceptIndexProviderResult(AppState& s, uint32_t id,
                                       index::SearchResult&& result, bool network);
 void MaybePrefetchSearchPage(AppState& s);
 void CancelActiveContentSearch(AppState& s, app::Tab& tab);
-enum class PathLoadReason { Navigate, RestoreSession };
+void TeardownTabSearch(AppState& s, const app::Tab& tab);
+enum class PathLoadReason { Navigate, RestoreSession, NetworkRetry };
 void MarkContentSearchStopped(app::Tab& tab);
 void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path,
                      PathLoadReason reason = PathLoadReason::Navigate);
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path,
                       PathLoadReason reason = PathLoadReason::Navigate);
+void ResumeTransferredTab(AppState& s, app::Tab& tab);
+void CancelTransferredListing(AppState& s, const app::Tab& tab);
 void ApplyWorkerResult(AppState& s, app::WorkResult& res);
 void ProcessPendingResults(AppState& s);
 void CaptureListingSelection(app::Tab& tab);
@@ -75,6 +80,7 @@ void OpenTabAt(AppState& s, const std::wstring& path);
 void NewTab(AppState& s, const std::wstring& path);
 void OpenSettingsTab(AppState& s, int page);
 void CloseLayoutTab(AppState& s, size_t idx);
+void ResetLastTabToHome(AppState& s);
 void CloseActiveTab(AppState& s);
 void SwitchTab(AppState& s, size_t idx);
 bool ActivateExistingFolderTab(AppState& s, const std::wstring& path);

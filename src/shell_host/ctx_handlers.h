@@ -37,6 +37,7 @@ struct CtxHandlerSlot {
     UINT id_last = 0;
     std::wstring clsid;
     std::wstring name;
+    bool preserve_builtin = false;
 };
 
 struct CtxBind {

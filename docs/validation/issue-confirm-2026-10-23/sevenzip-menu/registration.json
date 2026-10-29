@@ -1,0 +1,7 @@
+{
+  "Clsid": "{23170F69-40C1-278A-1000-000100020000}",
+  "FileRegistration": "{23170F69-40C1-278A-1000-000100020000}",
+  "DirectoryRegistration": "{23170F69-40C1-278A-1000-000100020000}",
+  "Dll": "E:\\Applications\\7-Zip\\7-zip.dll",
+  "ThreadingModel": "Apartment"
+}

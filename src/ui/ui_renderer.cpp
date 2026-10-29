@@ -42,6 +42,13 @@ MainRenderer::~MainRenderer() {
 }
 
 void MainRenderer::SetCompositor(Compositor* comp) {
+    details_open_motion_ = {};
+    details_motion_window_width_ = 0;
+    details_exit_commands_.reset();
+    page_surface_.Reset();
+    settings_content_surface_.Reset();
+    for (auto& surface : pane_surfaces_) surface.Reset();
+    hover_tracks_.clear();
     RefreshMotionPreferences();
     paneHeaderStroke_.reset();
     ClearTextWidthCache();
@@ -99,6 +106,10 @@ void MainRenderer::SetIconNotifyWindow(HWND hwnd) {
 
 void MainRenderer::SetScale(float scale) {
     if (scale_ != scale) {
+        details_open_motion_ = {};
+        details_exit_commands_.reset();
+        details_scroll_x_.Reset();
+        details_scroll_y_.Reset();
         preview_mono_format_.reset();
         sized_icon_formats_.clear();
         ClearTextWidthCache();
@@ -123,7 +134,7 @@ void MainRenderer::SetScale(float scale) {
 float MainRenderer::EffectiveSidebarWidth(float window_width) const {
     const float window_dip = window_width / scale_;
     if (window_dip < kSidebarRailWindowDip) return kSidebarRailWidthDip * scale_;
-    const bool details_open = details_visible_ && window_dip >= kDetailsVisibleWindowDip;
+    const bool details_open = DetailsPanelWidth(window_width) > 0;
     const float max_dip = MaxSidebarWidthDip(window_dip, details_width_, details_open,
                                              2.0f * margin_ / scale_);
     return (std::min)(sidebar_width_dip_, max_dip) * scale_;
@@ -132,8 +143,13 @@ float MainRenderer::EffectiveSidebarWidth(float window_width) const {
 // The preferred width is only capped while drawing, so narrowing the window pushes
 // the panel back temporarily and widening it restores what the user dragged.
 float MainRenderer::DetailsPanelWidth(float window_w) const {
+    const float progress = details_open_motion_.initialized ? details_open_motion_.value : (details_visible_ ? 1.0f : 0.0f);
+    return DetailsPanelTargetWidth(window_w) * progress;
+}
+
+float MainRenderer::DetailsPanelTargetWidth(float window_w) const {
     const float window_dip = window_w / scale_;
-    if (!details_visible_ || window_dip < kDetailsVisibleWindowDip) return 0.0f;
+    if (window_dip < kDetailsVisibleWindowDip) return 0.0f;
     const float max_dip = MaxDetailsWidthDip(window_dip, sidebar_width_dip_,
                                              window_dip < kSidebarRailWindowDip,
                                              2.0f * margin_ / scale_);
@@ -142,7 +158,7 @@ float MainRenderer::DetailsPanelWidth(float window_w) const {
 
 float MainRenderer::SidebarMaxWidthDip(float window_w) const {
     const float window_dip = window_w / scale_;
-    const bool details_open = details_visible_ && window_dip >= kDetailsVisibleWindowDip;
+    const bool details_open = DetailsPanelWidth(window_w) > 0;
     return MaxSidebarWidthDip(window_dip, details_width_, details_open, 2.0f * margin_ / scale_);
 }
 
@@ -186,7 +202,7 @@ float MainRenderer::NewButtonWidthPx(bool compact) const {
 void MainRenderer::BreadcrumbLayout(const PaneViewModel& vm, float w,
                                     std::vector<BreadcrumbPlaced>& out) const {
     out.clear();
-    auto segments = SplitBreadcrumb(vm.path);
+    auto segments = SplitBreadcrumb(vm.path, vm.header_text);
     if (segments.empty()) return;
     D2D1_RECT_F addr = AddressBarRect(w);
     const float segPad = 8.0f * scale_;
@@ -321,6 +337,23 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           const Theme& theme) {
     if (!compositor_ || !compositor_->Dc()) return;
     details_content_animating_ = false;
+    surface_animating_ = false;
+    for (auto it = hover_tracks_.begin(); it != hover_tracks_.end();) {
+        if (it->second.frame != settings_switch_frame_) it = hover_tracks_.erase(it);
+        else ++it;
+    }
+    settings_switch_animating_ = false;
+    if (!vm.settings_open || settings_switch_page_ != vm.settings_page) settings_switch_tracks_.clear();
+    settings_switch_page_ = vm.settings_open ? vm.settings_page : -1;
+    for (auto it = settings_switch_tracks_.begin(); it != settings_switch_tracks_.end();) {
+        if (it->second.frame != settings_switch_frame_) it = settings_switch_tracks_.erase(it);
+        else ++it;
+    }
+    ++settings_switch_frame_;
+    settings_switch_now_ = AnimationTimeMs();
+    if (!vm.details_motion_sampled)
+        TickDetailsPanelAnimation(settings_switch_now_, rect.right, motion_enabled_ && !IsHighContrast());
+    surface_animating_ |= details_open_motion_.Pending();
     if (vm.settings_open || !vm.details_visible) details_content_reveal_.Reset();
     ThumbnailCache::FrameScope thumbnail_frame(thumbnail_cache_);
     for (auto& names : painted_name_truncation_) names.clear();
@@ -377,20 +410,26 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     }
 
     DrawTitleBar(vm, rect, theme);
+    const auto page_bounds = D2D1::RectF(rect.left, title_bar_height_, rect.right,
+                                       rect.bottom - status_height_);
+    page_surface_.Paint(dc, page_bounds, vm.settings_open ? L"settings" : L"files", true,
+        settings_switch_now_, motion_enabled_ && !IsHighContrast(),
+        (vm.settings_open ? 18 : -18) * scale_, 240, [&] {
     if (vm.settings_open) {
         preview_handler_.Sync(notify_hwnd_, {}, L"", 0, 0, 0, 0, vm.dark,
                               theme.bg, theme.text, false);
         DrawSettings(vm, rect, theme);
-        DrawStatusBar(vm, rect, theme);
     } else {
         DrawToolbar(vm, rect, theme);
         DrawSidebar(vm, rect, theme);
         DrawPane(vm, rect, theme);
-        if (vm.details_visible) DrawDetailsPanel(vm, rect, theme);
+        if (DetailsPanelWidth(rect.right) > 0) DrawAnimatedDetailsPanel(vm, rect, theme);
         else preview_handler_.Sync(notify_hwnd_, {}, L"", 0, 0, 0, 0, vm.dark,
                                    theme.bg, theme.text, false);
-        DrawStatusBar(vm, rect, theme);
     }
+    });
+    surface_animating_ |= page_surface_.pending;
+    DrawStatusBar(vm, rect, theme);
 
     // Drag action badge (ui.md §7.8): tooltip-style flyout near the cursor.
     if (!vm.drag_badge.empty()) {
@@ -431,31 +470,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         content.top = rc.bottom - 38 * scale_; content.bottom = rc.bottom - 8 * scale_;
         painter_.DrawText(pulse::l10n::Get(pulse::l10n::StringId::ChangeView), content, compositor_->TextFormat(), theme.accent);
     }
-    if (!vm.change_popover.visible && vm.drag_badge.empty() && !vm.tooltip_text.empty()) {
-        IDWriteTextFormat* fmt = compositor_->SmallFormat();
-        const float tw = MeasureLayoutText(compositor_, compositor_->DwriteFactory(), fmt,
-                                           vm.tooltip_text);
-        const float bw = std::min(tw + 20.0f * scale_, rect.right - 16.0f * scale_);
-        const float bh = 28.0f * scale_;
-        const float bx = std::clamp(vm.tooltip_x + 12.0f * scale_, 8.0f * scale_,
-            std::max(8.0f * scale_, rect.right - bw - 8.0f * scale_));
-        const float tipY = vm.hover_region == HitTestResult::StatusBarCancelSearch
-            ? rect.bottom - status_height_ - bh - 8.0f * scale_ : vm.tooltip_y + 18.0f * scale_;
-        const float by = std::clamp(tipY, 8.0f * scale_,
-            std::max(8.0f * scale_, rect.bottom - bh - 8.0f * scale_));
-        const D2D1_RECT_F tipRc = D2D1::RectF(bx, by, bx + bw, by + bh);
-        MakeBrush(dc, theme.surface_flyout, brFillHover_);
-        FillRoundedRect(dc, brFillHover_.get(), bx, by, bw, bh, 4.0f * scale_);
-        MakeBrush(dc, theme.stroke_card, brStrokeCard_);
-        dc->DrawRoundedRectangle(D2D1::RoundedRect(tipRc, 4.0f * scale_, 4.0f * scale_),
-            brStrokeCard_.get(), 1.0f);
-        MakeBrush(dc, theme.text, brText_);
-        const D2D1_COLOR_F saved_tip_bg = text_background_;
-        text_background_ = BlendOver(theme.surface_flyout, theme.bg);
-        DrawTextRect(dc, fmt, brText_.get(), vm.tooltip_text,
-            bx + 10.0f * scale_, by, bw - 20.0f * scale_, bh);
-        text_background_ = saved_tip_bg;
-    }
+    DrawTooltip(vm, rect, theme);
 
 }
 
@@ -967,6 +982,7 @@ MainRenderer::TabStripMetrics MainRenderer::ComputeTabStrip(
     scroll.offset = std::clamp(scroll.offset, 0.0f, m.scroll_max);
     const bool layout_changed = scroll.active != active || scroll.count != vm.tabs.size() ||
         scroll.viewport_w != viewport_w || scroll.content_w != content_w || scroll.scale != scale_;
+    if (layout_changed || vm.tab_drag_index >= 0) scroll.animation.Reset();
     if (layout_changed && vm.tab_drag_index < 0) {
         float reveal_left = 0.0f, reveal_right = 0.0f;
         if (active >= 0) {
@@ -1037,11 +1053,29 @@ bool MainRenderer::ScrollTabStrip(const WindowViewModel& vm, float window_w, flo
     const auto strip = ComputeTabStrip(vm, window_w);
     const float step = std::max(1.0f,
         (strip.viewport.right - strip.viewport.left) * 0.75f);
-    const float offset = std::clamp(strip.scroll_offset + step * steps,
-        0.0f, strip.scroll_max);
-    if (offset == tab_strip_scroll_.offset) return false;
-    tab_strip_scroll_.offset = offset;
-    return true;
+    const float previous = tab_strip_scroll_.offset;
+    tab_strip_scroll_.animation.ScrollBy(tab_strip_scroll_.offset, step * steps,
+        strip.scroll_max, strip.viewport.right - strip.viewport.left,
+        AnimationTimeMs(), MotionEnabled());
+    return previous != tab_strip_scroll_.offset || tab_strip_scroll_.animation.Pending();
+}
+
+bool MainRenderer::TickSurfaceScroll(uint64_t now) {
+    auto& strip = tab_strip_scroll_;
+    bool changed = strip.animation.Tick(strip.offset,
+        std::max(0.0f, strip.content_w - strip.viewport_w), now, MotionEnabled());
+    const bool preview_scrollable = details_preview_ready_ && !details_viewport_.image &&
+        !DetailsPreviewPointerActive();
+    if (!preview_scrollable) {
+        details_scroll_x_.Reset();
+        details_scroll_y_.Reset();
+    } else {
+        changed |= details_scroll_x_.Tick(details_viewport_.x, details_viewport_.MaxX(),
+            now, MotionEnabled());
+        changed |= details_scroll_y_.Tick(details_viewport_.y, details_viewport_.MaxY(),
+            now, MotionEnabled());
+    }
+    return changed;
 }
 
 D2D1_RECT_F MainRenderer::TabStripViewportRect(const WindowViewModel& vm, float window_w) const {

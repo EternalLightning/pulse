@@ -1,0 +1,66 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.41
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+CMake is re-running because E:/Projects/pulse/build_audit_msbuild_20261025/CMakeFiles/generate.stamp is out-of-date.
+  the file 'E:/Projects/pulse/CMakeLists.txt'
+  is newer than 'E:/Projects/pulse/build_audit_msbuild_20261025/CMakeFiles/generate.stamp.depend'
+  result='-1'
+-- Selecting Windows SDK version 10.0.26100.0 to target Windows 6.2.9200.
+-- Pulse text renderer: installed LumaText shared library
+-- Configuring done (0.4s)
+-- Generating done (1.2s)
+-- Build files have been written to: E:/Projects/pulse/build_audit_msbuild_20261025
+
+  Checking File Globs
+  Building Custom Rule E:/Projects/pulse/CMakeLists.txt
+  system_ctx_transaction_console_test.cpp
+  system_ctx_registry.cpp
+  正在生成代码...
+  pulse_system_ctx_transaction_console_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_transaction_console_test.exe
+
+  Checking File Globs
+  system_ctx_exchange_test.cpp
+  pulse_system_ctx_exchange_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_exchange_test.exe
+
+  Checking File Globs
+  system_ctx_registry.cpp
+  system_ctx_test.cpp
+  正在生成代码...
+  pulse_system_ctx_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_test.exe
+
+  Checking File Globs
+  pulse_localization.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_localization.lib
+  pulse_user_storage.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_user_storage.lib
+  system_ctx_model.cpp
+  system_ctx_registry.cpp
+  system_ctx_model_test.cpp
+  正在生成代码...
+  pulse_system_ctx_model_test.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_system_ctx_model_test.exe
+
+  Checking File Globs
+  pulse_localization.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_localization.lib
+  pulse_crash_reporter.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_crash_reporter.lib
+  pulse_document.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Document.exe
+  pulse_text.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_text.lib
+  pulse_document_reader.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_document_reader.lib
+  pulse_fs_watch.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_fs_watch.lib
+  pulse_content_task.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_content_task.lib
+  pulse_sqlite.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_sqlite.lib
+  pulse_user_storage.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_user_storage.lib
+  pulse_index.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Index.exe
+  system_ctx_registry.cpp
+  main.cpp
+  正在生成代码...
+  pulse_integration.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\pulse_integration.exe
+  pulse_preview.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Preview.exe
+  pulse_shell.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.Shell.exe
+  app_runtime.cpp
+  settings_controller.cpp
+  system_ctx_model.cpp
+  system_ctx_preview_drag.cpp
+  system_ctx_registry.cpp
+  system_ctx_settings.cpp
+  正在生成代码...
+  pulse.vcxproj -> E:\Projects\pulse\build_audit_msbuild_20261025\Release\Pulse.exe

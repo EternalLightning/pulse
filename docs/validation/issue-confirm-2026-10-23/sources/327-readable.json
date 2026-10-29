@@ -1,0 +1,15 @@
+{
+  "number": 327,
+  "title": "修改系统右键后，不能正常展示",
+  "body": "在系统右键菜单里面修改了右键显示的菜单，但是去到文件、文件夹上右键并不能显示出来。\n\n<img width=\"2309\" height=\"1139\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f7994d32-8a02-4f0a-953b-820eab68268d\" />\n\n<img width=\"621\" height=\"913\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/ec704647-bd92-4959-9a4f-a0161a028717\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/327",
+  "captured_at": "2026-10-23T03:10:07.132390+00:00",
+  "updated_at": "2026-10-19T13:17:49Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

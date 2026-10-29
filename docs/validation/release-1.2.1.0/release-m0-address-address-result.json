@@ -1,0 +1,10 @@
+{
+  "label": "release-m0-address",
+  "kind": "address",
+  "pid": 30840,
+  "samples": 136,
+  "unexpected": 0,
+  "worst_difference": 16,
+  "width": 417,
+  "height": 20
+}

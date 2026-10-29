@@ -1,5 +1,7 @@
 #include "../index/index_protocol.h"
 #include "../index/index_service_start.h"
+#include "../index/index_transport_security.h"
+#include "../index/folder_size_protocol.h"
 #include "../ipc/protocol.h"
 
 #include <windows.h>

@@ -1,0 +1,15 @@
+{
+  "number": 314,
+  "title": "exFAT 分区显示索引数量增加，但搜索不到任何文件",
+  "body": "环境\nPulse 版本：v1.0.56\n\nWindows 版本：（Windows 11 24H2）\n\n磁盘类型：exFAT 外置/可移动卷（G:）\n\n问题描述\nexFAT 分区上的搜索功能不可用。在 设置 → 搜索与索引 → 本地磁盘 中，该盘被识别为“非NTFS”，搜索框输入任何内容都搜不到该分区上的文件，即使手动添加了该分区下的文件夹也一样。\n\n复现步骤\n接入一个 exFAT 格式的卷（如 G:）。\n\n打开 设置 → 搜索与索引 → 本地磁盘，该盘显示为“非NTFS”。\n\n点击“添加文件夹”选择整个盘（G:），弹出错误：\n\n“全机索引，操作未完成。管理员授权可能已取消或索引服务无法更新配置。”\n\n改为单独添加该盘下的具体文件夹（G:\\test），可以看到索引数字有变化，说明文件被扫描到了。\n\n在文件浏览器中打开 G:\\test，在搜索框输入任意内容，搜不到任何结果。\n\n在 exFAT 分区上打开文件夹进行搜索时，还会提示：\n\n“此文件夹不在共用搜索范围内，请在【存储与维护】中检查……”\n\n期望行为\n以下任一种即可：\n\nexFAT 卷能通过降级/直接扫描模式被搜索到；\n\n或者 UI 明确提示非 NTFS 卷不支持搜索，而不是先显示索引数量增加、让人误以为可以搜。\n\n实际行为\n添加 G:\\test 后索引计数增加，但搜索无结果。\n\n“不在共用搜索范围内”的提示说明该卷被排除在有效搜索索引之外。\n\n添加整个盘符时报错，说明索引服务无法注册非 NTFS 位置。\n\n补充信息\n根据公开介绍，Pulse 的快速搜索依赖 NTFS 的 MFT/USN 日志，而 exFAT 不提供该机制。测试源码（如 search_audit_test.cpp、content_search_test.cpp）中可以看到存在瞬态/直接扫描路径（request.indexed = false），说明引擎层似乎具备非索引回退能力，但 UI 层没有对非 NTFS 卷启用它。\n\n想确认的问题\n是否有计划支持 exFAT（或非 NTFS）搜索？\n\n如果暂不支持，能否避免对无法搜索的卷显示误导性的索引计数？\n\n是否存在隐藏设置，可以强制对非 NTFS 文件夹启用直接/瞬态扫描？\n\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/314",
+  "captured_at": "2026-10-23T03:10:07.137108+00:00",
+  "updated_at": "2026-10-19T02:02:59Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

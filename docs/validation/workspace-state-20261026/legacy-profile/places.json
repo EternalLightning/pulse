@@ -1,0 +1,38 @@
+{
+  "active_workspace": 0,
+  "workspaces": [
+    {
+      "panes": [
+        "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects"
+      ],
+      "root": "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects\\pulse",
+      "name": "pulse",
+      "views": [
+        "details"
+      ],
+      "layout": 0
+    },
+    {
+      "panes": [
+        "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects"
+      ],
+      "root": "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects\\Thesis",
+      "name": "Thesis",
+      "views": [
+        "details"
+      ],
+      "layout": 0
+    },
+    {
+      "panes": [
+        "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects"
+      ],
+      "root": "E:\\Projects\\pulse\\bench_data\\workspace-state-20261026\\Projects\\Camp",
+      "name": "Camp",
+      "views": [
+        "details"
+      ],
+      "layout": 0
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-23",
+  "confirmed_local_bug": true,
+  "tests": [
+    {
+      "log": "docs/validation/issue-confirm-2026-10-23/sevenzip-menu/policy-after.log",
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "log": "docs/validation/issue-confirm-2026-10-23/sevenzip-menu/after-final.log",
+      "passed": 73,
+      "failed": 0
+    },
+    {
+      "log": "docs/validation/issue-confirm-2026-10-23/sevenzip-menu/loading-after.log",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "log": "docs/validation/issue-confirm-2026-10-23/sevenzip-menu/composition-after-prefs-fix.log",
+      "passed": 172,
+      "failed": 0
+    }
+  ],
+  "production_pulse_sha256": "646fbbd8dd64c46e49b2c40b00988f0355f511e8d58b7449850d828a556077dc",
+  "actual_preferences_unchanged": {
+    "Path": "D:\\AppData\\Pulse\\context_menu.json",
+    "Before": "96FC981897AB3DC39CC371BCC89B5A432C3D29CA2B865E32A167034E2A382948",
+    "After": "96FC981897AB3DC39CC371BCC89B5A432C3D29CA2B865E32A167034E2A382948",
+    "Unchanged": true
+  },
+  "installed_payload_changed": false,
+  "index_files_cleaned": false,
+  "query_summary": [
+    {
+      "Case": "single",
+      "FirstSevenZipMs": 1317,
+      "FinalMs": 3069,
+      "TotalRows": 22,
+      "SevenZipRows": 17,
+      "DefaultPrefsPass": 17,
+      "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+      "Providers": [
+        "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+        "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+        "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+        "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+      ],
+      "ErrorEvents": 0
+    },
+    {
+      "Case": "multiple",
+      "FirstSevenZipMs": 1090,
+      "FinalMs": 2397,
+      "TotalRows": 22,
+      "SevenZipRows": 17,
+      "DefaultPrefsPass": 17,
+      "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+      "Providers": [
+        "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+        "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+        "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+        "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+      ],
+      "ErrorEvents": 0
+    },
+    {
+      "Case": "mixed",
+      "FirstSevenZipMs": 1447,
+      "FinalMs": 2647,
+      "TotalRows": 22,
+      "SevenZipRows": 17,
+      "DefaultPrefsPass": 17,
+      "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+      "Providers": [
+        "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+        "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+        "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+        "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+      ],
+      "ErrorEvents": 0
+    },
+    {
+      "Case": "directory",
+      "FirstSevenZipMs": 1087,
+      "FinalMs": 2286,
+      "TotalRows": 21,
+      "SevenZipRows": 17,
+      "DefaultPrefsPass": 17,
+      "Commands": "513,514,515,518,519,520,521,522,523,524,525,526,527,528,529,530",
+      "Providers": [
+        "{23170f69-40c1-278a-1000-000100020000}, 7-Zip",
+        "{3dad6c5d-2167-4cae-9914-f99e41c12cfa}, Library Location",
+        "{7ba4c740-9e81-11cf-99d3-00aa004ae837}, SendTo",
+        "{c5269811-4a29-4818-a4bb-111f9fc63a5f}, Foxit_ConvertToPDF"
+      ],
+      "ErrorEvents": 0
+    }
+  ],
+  "markdown_lines": [
+    "本节处理用户新增的“单选和多选时 7-Zip 菜单消失”。只修改已证实的偏好策略和菜单组成，不将此前大压缩包调用卡住的未决问题记为修复。安装版未替换。",
+    "",
+    "**现场根因已确认：实际配置中 7-Zip 的项目开关为开启，但 CLSID 慢调用记录是 `timeout=3, deferred=true, disabled=true`。** 实际配置通过存储位置注册表只读定位到 `D:/AppData/Pulse/context_menu.json`，并非默认 AppData 目录。旧 `RecordComTiming` 把成功但超过 1000 ms 的回复累计为“超时”，第三次直接禁用；宿主又把已完成且耗时超过 1000 ms 的处理器报作 slow CLSID。因此插件即使正常返回，后续仍被跳过。[配置窄化证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/preferences-narrow.json)。",
+    "",
+    "另一层已复现的问题是所有第三方 Shell 菜单都被收进“更多选项”。现在将非背景选择的 7-Zip 子菜单放到最外层，在固定内置项之后；保留原始子命令、偏好筛选和当前会话绑定，迟到回复仍能更新已打开的菜单。其他软件入口保留。",
+    "",
+    "慢调用只保留统计和 deferred 标记，继续使用已有异步加载，不再根据成功调用耗时自动禁用。配置保存版本升为 2；加载旧版本中 `disabled=true && timeout>=3` 的记录时在内存中恢复。明确的 `items[h:CLSID].enabled=false` 仍有效，版本 2 显式禁用可往返保存。旧版本同一条慢调用记录无法再区分自动禁用后又手动设 disabled 的操作，迁移按旧阈值证据恢复；明确的项目关闭不会被覆盖。",
+    "",
+    "### 本机实际查询与耗时",
+    "",
+    "隔离 ShellClient 查询本机注册的 7-Zip 26.04，使用专用微小夹具；只查询并关闭会话，没有执行压缩命令或改注册表。下列为本轮构建的独立 Shell 宿主端到端回调时间，安装版二进制哈希不同，不能把它视为安装版精确耗时。",
+    "",
+    "| 选择 | 首次含 7-Zip 的回复 / ms | 所有扩展最终回复 / ms | 7-Zip 子命令 |",
+    "|---|---:|---:|---:|",
+    "| 单个 TXT | 1317 | 3069 | 16 |",
+    "| 两个 TXT | 1090 | 2397 | 16 |",
+    "| TXT + ZIP | 1447 | 2647 | 16 |",
+    "| 单目录 | 1087 | 2286 | 16 |",
+    "",
+    "最终回复时间包含其他扩展；不能全归因于 7-Zip，也不是压缩执行时间。7-Zip 到达后即可显示，无需等待所有扩展结束。[查询汇总](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/summary.json)。",
+    "",
+    "另做一次独立分段测量，使用同一专用单文件夹具：",
+    "",
+    "| 测量段 | 耗时 / ms | 边界 |",
+    "|---|---:|---|",
+    "| 生产 Shell 宿主启动、连接及 Ping 提交 | 66.94 | 不包含 Ping 回复往返 |",
+    "| 私有 STA 的生产 BindCtxSelection | 91.83 | 独立探针，非生产并发工作线程现场 |",
+    "| 7-Zip CoCreateInstance | 0.97 | 独立探针 |",
+    "| 7-Zip Initialize | 0.15 | 独立探针 |",
+    "| 7-Zip QueryContextMenu | 0.68 | 独立探针；HRESULT=18 为成功命令范围计数 |",
+    "| 生产 CollectHandlerItems | 0.05 | 独立探针；取得父项及 16 子项 |",
+    "",
+    "这次独立测量中，7-Zip 自身生成菜单不到 1 ms。它不能解释上表生产回调首次出现的约 1.1～1.45 秒延迟，也不能把两组测量拼接相加。生产并发宿主内剩余耗时尚未归因；本轮没有宣称菜单延迟已经优化。自动禁用策略的确定缺陷可以独立修复，无须把耗时直接归咎于 7-Zip。",
+    "",
+    "### 定向验证与限制",
+    "",
+    "- 修复前同一回归夹具出现 15 条菜单断言失败、4 条慢调用策略断言失败；修复后策略 10 PASS、单选/多选/混合选择及真实 FluentMenu 刷新渲染 73 PASS、原异步菜单边界 9 PASS，均为 0 FAIL。缓存结果在当前会话验证前保持不可调用，验证后按新命令 ID 绑定。",
+    "- 用实际配置经生产 FromJson 解析、重放四类真实 Shell 回调的 172 条检查通过；恢复后不再向宿主传入 7-Zip 跳过 CLSID，每个含 7-Zip 的阶段均恰好有一个最外层入口及 16 个对应的有效会话命令。该夹具重放先前已取得的真实回调，并未冒充修复后重新完成安装版交互。[配置与回调对照](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/composition-after-prefs-fix.log)。",
+    "- 生成 24 张深浅主题、100%/150% 的根菜单及子菜单截图，标签裁切检查通过；人工查看其中 4 张代表截图，未见裁切或重叠。截图子命令使用受控注入数据，不是安装版真实菜单截图。[单选根菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/single-100-dark.png)、[多选根菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light.png)、[子菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light-children.png)。",
+    "- 仅构建 `pulse` 和 `pulse_context_menu_loading_test`，无新增编译警告；最终 `Pulse.exe` SHA256 `646fbbd8dd64c46e49b2c40b00988f0355f511e8d58b7449850d828a556077dc`。同步更新已有 selftest 的旧策略断言，但没有运行完整 selftest/release。",
+    "- 实际配置 SHA256 前后相同：`96fc981897ab3dc39cc371bcc89b5a432c3d29ca2b865e32a167034e2a382948`。没有修改用户配置、安装目录、服务、ACL 或真实索引；现场恢复须使用更新后的程序加载配置。没有验证实际 7-Zip 命令执行或解决此前压缩包调用卡住的问题。",
+    "",
+    "本轮索引优化进度仍为：停写停读派生分卷查询副本的源码及隔离定向验证完成，快照逻辑大小减少 50.8%；真实 exFAT U 盘后端 29 项通过。安装版未替换，2.16G 现场目录未清理；下一节保留详细说明。"
+  ],
+  "source_sha256": {
+    "src\\app\\context_menu_controller.cpp": "710666286be84894d4e29f19bd5871b8a26dadf57e0a14ea99ba3069329f5ac0",
+    "src\\app\\context_menu_prefs.cpp": "6b1a4396929403e61bb4157fb3a6564fe07ac70bbbe4d918a276ed437ffb5ab4",
+    "src\\app\\context_menu_prefs.h": "434d8d1cb02fbea544b542a6b137ea4d052cd34ab2e38ab99d7be2f4bf8405c9",
+    "src\\app\\selftest_1b2.cpp": "791d6d879fc33cb107fd1260ad81d05c18a2e3c6179b7da32ec11b053802ac5c",
+    "src\\bench\\context_menu_loading_test.cpp": "a37416a87083c7e5226afcdda937c7100636e1a61c42e510aa0470859654af93",
+    "src\\bench\\context_menu_sevenzip_cases.h": "213ece2ba6102f67e2531136d26ad0bd8694a9332920f0dfc249385d59a6c5e9"
+  },
+  "evidence_sha256": {
+    "policy-before.log": "347e23774cf8b27e8d29280df14a7019d81eb86d44ad09b466add973035404d9",
+    "policy-after.log": "fcd96e5583f2bde31f19ead6a039186d25a9d43aa96dd5c1141757d10b56962f",
+    "before.log": "3d3f721d79268940e5e8c7f2bd83b83a0103e118e0720f2ec04a8e10b7fce214",
+    "after-final.log": "afdaf5f3ac583f72ec25125514da972167cc641b4bc1fb8decd7761a2082bcb5",
+    "loading-after.log": "b7cf5f0f87c867f3ff63e32045c7bcc160c71b5f7ecc382c8eb6077d6764f49f",
+    "composition-before-prefs-fix.log": "34ea51926682cd24abe99705aa8e7c4e471333b41c1a45f119a0eaea48205c1a",
+    "composition-after-prefs-fix.log": "f3c30e3c94a73e4f7928ba2d9ab53168456b88e313d806f2265cf52aff44657c",
+    "summary.json": "722896979c6b0f091739aa3d033b221e36c1092ddb1d184bece396d932d173e6",
+    "preferences-narrow.json": "68412aaa324e0c4ca0d34a6a53f3bb5b850fb34ee4c84fce692d376836674b01",
+    "preferences-integrity-after.json": "4dacdfb8b356e35ca96d7d392bfb9d5645853cd327d1b799b26ac78f4a13c288",
+    "registration.json": "b648984ea7b6b361d05cbaffd2c24a53e4c3e2baf58747f6a6c26a59caed7d8d",
+    "payloads.json": "b9ea9fb6a1a8907bfa80c3941fe5496be60e63857ddd8432ba8690ddf32381d2",
+    "stages-single.jsonl": "4cca7e9efa6a068df2d6da219daacb0fd37680a2d47a2060d2aa521872b594ee",
+    "single-100-dark.png": "cc88f461084cb47a395e17ddcfa990855668283f93d08579ca9cfa91603d0f7f",
+    "single-100-dark-children.png": "81f2455e9cf8025168473946e7b156d82719b0c7ac96bc0da75df22bd5ae88c6",
+    "multi-150-light.png": "bfaddcaca2d70715db5809b2e8304d47b368871154b9469195618a3ec830a60f",
+    "multi-150-light-children.png": "2bcb0f0027abc615139aa9108fc7b21539459e1e30cbc1f2367aeb7343e89984"
+  }
+}

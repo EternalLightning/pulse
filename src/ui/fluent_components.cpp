@@ -570,7 +570,7 @@ void Painter::DrawWrappedCaption(std::wstring_view text, D2D1_POINT_2F origin, f
     if (!dc_) return;
     IDWriteTextLayout* layout = GetWrappedTextLayout(compositor_, CaptionFormat(), text, width);
     ID2D1SolidColorBrush* brush = ScratchBrush(color);
-    if (layout && brush) dc_->DrawTextLayout(origin, layout, brush);
+    if (layout && brush) compositor_->DrawTextLayout(origin, layout, brush);
 }
 
 void Painter::DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
@@ -928,7 +928,7 @@ void Painter::DrawButton(const ButtonSpec& spec) {
                 center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_LEADING);
             DWRITE_TEXT_METRICS metrics{};
             if (layout && SUCCEEDED(layout->GetMetrics(&metrics)))
-                dc_->DrawTextLayout(D2D1::Point2F(left,
+                compositor_->DrawTextLayout(D2D1::Point2F(left,
                     content.top + std::max(0.0f, (Height(content) - metrics.height) * 0.5f)),
                     layout, ScratchBrush(foreground), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         } else {
@@ -1188,51 +1188,59 @@ void Painter::DrawSwitch(const D2D1_RECT_F& bounds, std::wstring_view text,
     const float top = std::round(bounds.top + (Height(bounds) - switch_height) * 0.5f);
     const float left = std::round(bounds.left);
     const auto track = D2D1::RectF(left, top, left + switch_width, top + switch_height);
-    D2D1_COLOR_F fill;
-    D2D1_COLOR_F border;
-    D2D1_COLOR_F knob;
-    if (high_contrast_) {
-        fill = !state.enabled ? theme_->fill_input
-               : state.checked ? theme_->accent : theme_->fill_input;
-        border = !state.enabled ? theme_->text_disabled
-                 : state.checked ? theme_->accent : theme_->stroke_input_bottom;
-        knob = !state.enabled ? theme_->text_disabled
-               : state.checked ? theme_->accent_text : theme_->text;
-    } else if (state.checked) {
-        const AccentShades shades = DeriveAccentShades(theme_->accent);
-        fill = !state.enabled ? (dark_ ? Rgba(0xFFFFFF, 41) : Rgba(0x000000, 56))
-               : state.pressed ? shades.light2
-               : state.hovered ? shades.light1 : theme_->accent;
-        border = state.enabled ? fill : Rgba(0x000000, 0);
-        knob = !state.enabled ? (dark_ ? Rgba(0xFFFFFF, 77) : HexColor(0xFFFFFF))
-                              : dark_ ? HexColor(0x000000) : HexColor(0xFFFFFF);
-    } else if (dark_) {
-        fill = !state.enabled ? Rgba(0x000000, 0)
-               : state.pressed ? Rgba(0xFFFFFF, 18)
-               : state.hovered ? Rgba(0xFFFFFF, 10) : Rgba(0x000000, 0);
-        border = state.enabled ? Rgba(0xFFFFFF, 153) : Rgba(0xFFFFFF, 41);
-        knob = state.enabled ? Rgba(0xFFFFFF, 201) : Rgba(0xFFFFFF, 96);
-    } else {
-        fill = !state.enabled ? Rgba(0x000000, 0)
-               : state.pressed ? Rgba(0x000000, 23)
-               : state.hovered ? Rgba(0x000000, 15) : Rgba(0x000000, 0);
-        border = state.enabled ? Rgba(0x000000, 133) : Rgba(0x000000, 56);
-        knob = state.enabled ? Rgba(0x000000, 156) : Rgba(0x000000, 91);
-    }
+    const auto colors = [&](bool checked) {
+        D2D1_COLOR_F fill;
+        D2D1_COLOR_F border;
+        D2D1_COLOR_F knob;
+        if (high_contrast_) {
+            fill = !state.enabled ? theme_->fill_input
+                   : checked ? theme_->accent : theme_->fill_input;
+            border = !state.enabled ? theme_->text_disabled
+                     : checked ? theme_->accent : theme_->stroke_input_bottom;
+            knob = !state.enabled ? theme_->text_disabled
+                   : checked ? theme_->accent_text : theme_->text;
+        } else if (checked) {
+            const AccentShades shades = DeriveAccentShades(theme_->accent);
+            fill = !state.enabled ? (dark_ ? Rgba(0xFFFFFF, 41) : Rgba(0x000000, 56))
+                   : state.pressed ? shades.light2
+                   : state.hovered ? shades.light1 : theme_->accent;
+            border = state.enabled ? fill : Rgba(0x000000, 0);
+            knob = !state.enabled ? (dark_ ? Rgba(0xFFFFFF, 77) : HexColor(0xFFFFFF))
+                                  : dark_ ? HexColor(0x000000) : HexColor(0xFFFFFF);
+        } else if (dark_) {
+            fill = !state.enabled ? Rgba(0x000000, 0)
+                   : state.pressed ? Rgba(0xFFFFFF, 18)
+                   : state.hovered ? Rgba(0xFFFFFF, 10) : Rgba(0x000000, 0);
+            border = state.enabled ? Rgba(0xFFFFFF, 153) : Rgba(0xFFFFFF, 41);
+            knob = state.enabled ? Rgba(0xFFFFFF, 201) : Rgba(0xFFFFFF, 96);
+        } else {
+            fill = !state.enabled ? Rgba(0x000000, 0)
+                   : state.pressed ? Rgba(0x000000, 23)
+                   : state.hovered ? Rgba(0x000000, 15) : Rgba(0x000000, 0);
+            border = state.enabled ? Rgba(0x000000, 133) : Rgba(0x000000, 56);
+            knob = state.enabled ? Rgba(0x000000, 156) : Rgba(0x000000, 91);
+        }
+        return std::array{fill, border, knob};
+    };
+    const float position = high_contrast_ || state.check_progress < 0.0f
+                               ? (state.checked ? 1.0f : 0.0f)
+                               : Clamp01(state.check_progress);
+    const auto off = colors(false), on = colors(true);
+    const auto blend = [position](D2D1_COLOR_F a, D2D1_COLOR_F b) {
+        return D2D1::ColorF(a.r + (b.r - a.r) * position, a.g + (b.g - a.g) * position,
+            a.b + (b.b - a.b) * position, a.a + (b.a - a.a) * position);
+    };
     const float stroke = std::max(1.0f, std::round(Px(1.0f)));
     const auto painted_track = Inset(track, stroke);
     const float radius = Height(painted_track) * 0.5f;
-    FillRoundedRect(painted_track, radius, fill);
-    StrokeRoundedRect(painted_track, radius - stroke * 0.5f, border, stroke);
-    const float position = state.check_progress < 0.0f
-                               ? (state.checked ? 1.0f : 0.0f)
-                               : Clamp01(state.check_progress);
+    FillRoundedRect(painted_track, radius, blend(off[0], on[0]));
+    StrokeRoundedRect(painted_track, radius - stroke * 0.5f, blend(off[1], on[1]), stroke);
     const float knob_radius = Px(6.0f);
     const float knob_x = painted_track.left + radius +
         (Width(painted_track) - 2.0f * radius) * position;
     dc_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knob_x, top + switch_height * 0.5f),
                                    knob_radius, knob_radius),
-                     ScratchBrush(knob));
+                     ScratchBrush(blend(off[2], on[2])));
     DrawText(text,
              D2D1::RectF(track.right + Px(12.0f), bounds.top, bounds.right, bounds.bottom),
              BodyFormat(), state.enabled ? theme_->text : theme_->text_disabled);
@@ -1423,7 +1431,7 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
             glyphLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             glyphLayout->SetFontSize(iconFormat->GetFontSize() * glyph_scale,
                                      DWRITE_TEXT_RANGE{0, length});
-            dc_->DrawTextLayout(D2D1::Point2F(icon_bounds.left, icon_bounds.top),
+            compositor_->DrawTextLayout(D2D1::Point2F(icon_bounds.left, icon_bounds.top),
                                 glyphLayout.get(), ScratchBrush(foreground),
                                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
         } else {
@@ -1520,7 +1528,7 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
         body->SetWordWrapping(old_wrap);
     }
     if (spec.separator_after) {
-        const float y = spec.bounds.bottom - 0.5f;
+        const float y = std::floor(MenuSeparatorCenter(spec.bounds.bottom, scale_)) + 0.5f;
         dc_->DrawLine(D2D1::Point2F(spec.bounds.left + Px(12.0f), y),
                       D2D1::Point2F(spec.bounds.right - Px(12.0f), y),
                       Brush(BrushId::Divider), 1.0f);
@@ -2700,7 +2708,7 @@ void Painter::DrawInfoBar(const InfoBarSpec& spec) {
                 Width(text_bounds), Height(text_bounds) - Px(36.0f), &layout))) {
             layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
             layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-            dc_->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top + Px(32.0f)),
+            compositor_->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top + Px(32.0f)),
                                 layout.get(), ScratchBrush(theme_->text_secondary), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
     } else {

@@ -4,6 +4,7 @@
 #include "../common/windows_compat.h"
 #include "../ui/dialog_lifecycle.h"
 #include "../ui/ui_compositor.h"
+#include "snapshot_output.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -79,26 +80,40 @@ bool CaptureFixture(HWND window, const wchar_t* filename) {
                 if (bytes[index * 4] > 24 || bytes[index * 4 + 1] > 24 ||
                     bytes[index * 4 + 2] > 24) ++colored;
             }
-            std::error_code error;
-            const std::filesystem::path folder = L"bench_data/dialog_fade";
-            std::filesystem::create_directories(folder, error);
-            const auto output = folder / filename;
-            HANDLE file = error ? INVALID_HANDLE_VALUE : CreateFileW(output.c_str(),
-                GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (file != INVALID_HANDLE_VALUE) {
-                const DWORD byte_count = static_cast<DWORD>(count * 4);
-                BITMAPFILEHEADER header{};
-                header.bfType = 0x4d42;
-                header.bfOffBits = sizeof(header) + sizeof(info.bmiHeader);
-                header.bfSize = header.bfOffBits + byte_count;
-                DWORD written = 0;
-                good = WriteFile(file, &header, sizeof(header), &written, nullptr) &&
-                    written == sizeof(header) &&
-                    WriteFile(file, &info.bmiHeader, sizeof(info.bmiHeader), &written, nullptr) &&
-                    written == sizeof(info.bmiHeader) &&
-                    WriteFile(file, pixels, byte_count, &written, nullptr) && written == byte_count &&
-                    colored > count / 2;
-                CloseHandle(file);
+            wchar_t fixture_root[32768]{};
+            GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+            const std::filesystem::path folder = fixture_root[0] ?
+                std::filesystem::path(fixture_root) : std::filesystem::path(L"bench_data/dialog_fade");
+            auto output = folder / filename;
+            if (pulse::bench::StreamSnapshots()) {
+                output.replace_extension(L".png");
+                auto* opaque_pixels = static_cast<BYTE*>(pixels);
+                for (size_t index = 0; index < count; ++index) opaque_pixels[index * 4 + 3] = 255;
+                const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                good = colored > count / 2 && pulse::bench::EmitSnapshot(output,
+                    static_cast<UINT>(width), static_cast<UINT>(height),
+                    static_cast<UINT>(width) * 4, opaque_pixels);
+                if (SUCCEEDED(initialized)) CoUninitialize();
+            } else {
+                std::error_code error;
+                std::filesystem::create_directories(folder, error);
+                HANDLE file = error ? INVALID_HANDLE_VALUE : CreateFileW(output.c_str(),
+                    GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (file != INVALID_HANDLE_VALUE) {
+                    const DWORD byte_count = static_cast<DWORD>(count * 4);
+                    BITMAPFILEHEADER header{};
+                    header.bfType = 0x4d42;
+                    header.bfOffBits = sizeof(header) + sizeof(info.bmiHeader);
+                    header.bfSize = header.bfOffBits + byte_count;
+                    DWORD written = 0;
+                    good = WriteFile(file, &header, sizeof(header), &written, nullptr) &&
+                        written == sizeof(header) &&
+                        WriteFile(file, &info.bmiHeader, sizeof(info.bmiHeader), &written, nullptr) &&
+                        written == sizeof(info.bmiHeader) &&
+                        WriteFile(file, pixels, byte_count, &written, nullptr) && written == byte_count &&
+                        colored > count / 2;
+                    CloseHandle(file);
+                }
             }
         }
         SelectObject(memory, previous);
@@ -111,15 +126,27 @@ bool CaptureFixture(HWND window, const wchar_t* filename) {
 
 struct Samples {
     std::vector<BYTE> alpha;
+    std::vector<BYTE> dim_alpha;
+    bool closing_seen = false;
+    bool composed_close_seen = false;
     bool capture_attempted = false;
     bool capture_ok = false;
 };
 
 std::thread Sample(HWND window, std::atomic_bool& stop, std::atomic_bool& ready,
-    Samples& samples, const wchar_t* screenshot) {
-    return std::thread([window, &stop, &ready, &samples, screenshot] {
+    Samples& samples, const wchar_t* screenshot, HWND dim = nullptr) {
+    return std::thread([window, &stop, &ready, &samples, screenshot, dim] {
         ready.store(true, std::memory_order_release);
         while (!stop.load(std::memory_order_acquire)) {
+            if (GetPropW(window, L"Pulse.DialogClosing")) {
+                samples.closing_seen = true;
+                samples.composed_close_seen |= pulse::ui::IsDialogSurfaceFading(window) &&
+                    !(GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_LAYERED);
+                BYTE dim_alpha = 0;
+                DWORD dim_flags = 0;
+                if (dim && GetLayeredWindowAttributes(dim, nullptr, &dim_alpha, &dim_flags) &&
+                    dim_alpha > 0 && dim_alpha < 64) samples.dim_alpha.push_back(dim_alpha);
+            }
             BYTE alpha = 0;
             DWORD flags = 0;
             if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) &&
@@ -197,8 +224,22 @@ void RunNative(HWND owner, bool animations) {
         Check(showing.alpha.empty(), "disabled animations show immediately without layered transition");
         std::printf("[SKIP] Intermediate alpha/screenshot sampling: system animations disabled or high contrast enabled.\n");
     }
+    stop.store(false, std::memory_order_release);
+    ready.store(false, std::memory_order_release);
+    Samples closing;
+    helper = Sample(window, stop, ready, closing, L"native-close-midpoint.bmp");
+    while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
     pulse::ui::DestroyDialogWithFade(window);
+    stop.store(true, std::memory_order_release);
+    helper.join();
     Check(!IsWindow(window), "closing destroys native dialog before returning");
+    if (animations) {
+        Check(closing.closing_seen && closing.alpha.size() > 1 &&
+            closing.alpha.front() > closing.alpha.back(),
+            "fade-out presents intermediate frames with decreasing native opacity");
+        Check(closing.capture_attempted && closing.capture_ok,
+            "close midpoint: save nonblack native client screenshot before destruction");
+    } else Check(closing.alpha.empty(), "disabled animations close immediately without layered transition");
 
     window = CreateWindowExW(WS_EX_TOOLWINDOW, kFixtureClass, L"Pulse quick close fixture",
         WS_POPUP, 160, 160, 320, 180, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -263,12 +304,15 @@ void RunLayered(HWND owner) {
     Check(GetLayeredWindowAttributes(window, &restored_key, &restored_alpha, &restored_flags) &&
         restored_key == key && restored_alpha == 192 && restored_flags == (LWA_ALPHA | LWA_COLORKEY),
         "fade restores existing layered alpha and color key");
+    Check(!GetPropW(window, L"Pulse.DialogFadeState") && !GetPropW(window, L"Pulse.DialogClosing"),
+        "completed close removes fade timer state and reentrancy guard");
     pulse::ui::ShowDialogWithFade(window);
     Check(IsWindowVisible(window) != FALSE, "hidden dialog can fade in again");
     pulse::ui::DestroyDialogWithFade(window);
 }
 
 void RunComposed(HWND owner, bool animations) {
+    ShowWindow(owner, SW_SHOWNOACTIVATE);
     HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
         kFixtureClass, L"Pulse composition fade fixture", WS_POPUP, 160, 160, 320, 180,
         owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -291,6 +335,7 @@ void RunComposed(HWND owner, bool animations) {
             DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop))) &&
             SetPropW(window, L"Pulse.DialogBackdrop", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(backdrop)));
         for (int pass = 0; pass < 2; ++pass) {
+            pulse::ui::OwnerDimScope dim(owner);
             pulse::ui::ShowDialogWithFade(window);
             Check(IsWindowVisible(window) && GetWindowLongPtrW(window, GWL_EXSTYLE) == style,
                 "composition fade-in preserves no-redirection style without layering");
@@ -305,11 +350,29 @@ void RunComposed(HWND owner, bool animations) {
                     "completed fade restores the DWM backdrop");
             }
             EnableWindow(owner, FALSE);
+            const HWND overlay = reinterpret_cast<HWND>(GetPropW(owner, L"Pulse.OwnerDimOverlay"));
+            std::atomic_bool stop = false, ready = false;
+            Samples closing;
+            auto helper = Sample(window, stop, ready, closing, nullptr, overlay);
+            while (!ready.load(std::memory_order_acquire)) std::this_thread::yield();
             pulse::ui::HideComposedDialog(window, owner);
+            stop.store(true, std::memory_order_release);
+            helper.join();
             Check(!IsWindowVisible(window) && IsWindow(window) && IsWindowEnabled(owner),
                 "composition fade-out hides surface and restores modal owner");
             Check(!pulse::ui::IsDialogSurfaceFading(window),
                 "hiding cancels transient backdrop painting");
+            Check(!GetPropW(window, L"Pulse.DialogFadeState") && !GetPropW(window, L"Pulse.DialogClosing") &&
+                GetPropW(window, L"Pulse.DialogComposition.Visual") &&
+                GetWindowLongPtrW(window, GWL_EXSTYLE) == style,
+                "composition close clears transient state while retaining compositor binding and window style");
+            if (pass == 0 && animations) {
+                Check(closing.closing_seen && closing.dim_alpha.size() > 1 &&
+                    closing.dim_alpha.front() > closing.dim_alpha.back(),
+                    "composition close keeps the owner dim fading through intermediate exit frames");
+                if (backdrop_supported) Check(closing.composed_close_seen,
+                    "composition exit suppresses backdrop without adding incompatible layered style");
+            }
         }
     }
     pulse::ui::ShowDialogWithFade(window, SW_SHOWNOACTIVATE);
@@ -318,6 +381,7 @@ void RunComposed(HWND owner, bool animations) {
         "compositor shutdown cancels pending fade before releasing borrowed resources");
     Check(!GetPropW(window, L"Pulse.DialogComposition.Visual"), "shutdown removes borrowed visual binding");
     DestroyWindow(window);
+    ShowWindow(owner, SW_HIDE);
 }
 
 struct Search { HWND owner = nullptr; HWND dialog = nullptr; };

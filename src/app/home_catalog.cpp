@@ -1,6 +1,8 @@
 #include "home_catalog.h"
+#include "app_model.h"
 #include "places.h"
 #include "../model/drive_labels.h"
+#include "../common/drive_display_name.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
 #include "../ipc/shell_query_client.h"
@@ -13,17 +15,20 @@ namespace {
 void ReadDriveMetadata(ui::HomeCardView& card) {
     using I = l10n::StringId;
     wchar_t name[MAX_PATH + 1]{};
-    if (GetVolumeInformationW(card.path.c_str(), name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0) && name[0])
+    if (card.group == 2) {
+        if (const auto label = path::ReadMappedDriveLabel(card.path))
+            card.label = model::DriveDisplayName(card.path, *label);
+        else {
+            ipc::ShellQueryRequest request;
+            request.kind = ipc::ShellQueryKind::DisplayName;
+            request.path = card.path;
+            ipc::ShellQueryResult result;
+            if (ipc::QueryShell(request, result) && SUCCEEDED(result.error) && !result.text.empty())
+                card.label = std::move(result.text);
+        }
+    } else if (GetVolumeInformationW(card.path.c_str(), name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0) && name[0])
         card.label = std::wstring(name) + L" (" + card.path.substr(0, 2) + L")";
-    else if (card.group == 1) card.label = l10n::Get(I::LocalDisk) + L" (" + card.path.substr(0, 2) + L")";
-    else {
-        ipc::ShellQueryRequest request;
-        request.kind = ipc::ShellQueryKind::DisplayName;
-        request.path = card.path;
-        ipc::ShellQueryResult result;
-        if (ipc::QueryShell(request, result) && SUCCEEDED(result.error) && !result.text.empty())
-            card.label = std::move(result.text);
-    }
+    else card.label = l10n::Get(I::LocalDisk) + L" (" + card.path.substr(0, 2) + L")";
     ULARGE_INTEGER available{}, total{}, free{};
     if (GetDiskFreeSpaceExW(card.path.c_str(), &available, &total, &free) && total.QuadPart) {
         card.used_ratio = static_cast<float>(static_cast<double>(total.QuadPart - std::min(total.QuadPart, free.QuadPart)) / static_cast<double>(total.QuadPart));
@@ -130,6 +135,18 @@ bool HomeCatalog::ConsumeUpdate() {
 bool HomeCatalog::Loading() const {
     std::lock_guard lock(state_->mutex);
     return state_->loading;
+}
+void HomeCatalog::FillDriveLabels(SidebarModel& sidebar) const {
+    std::lock_guard lock(state_->mutex);
+    for (auto& drive : sidebar.drives) {
+        for (const auto& card : state_->cards) {
+            if (card.group != 0 && path::EqualInsensitive(
+                    path::StripExtendedPathPrefix(drive.path), card.path)) {
+                drive.label = card.label;
+                break;
+            }
+        }
+    }
 }
 void HomeCatalog::Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* places) const {
     if (!pane.is_home) return;

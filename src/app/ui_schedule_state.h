@@ -17,12 +17,21 @@ struct UiDeadlinePlan {
 };
 
 struct UiScheduleState {
+    static constexpr uint64_t kQuietAfterMs = 5000;
+    uint64_t last_activity = 0;
     uint64_t deadline = 0;
     uint64_t tooltip_checked_since = 0;
     uint64_t options_due = 0;
     bool stopped = false;
     uint32_t maintenance_ms = 0;
     bool animation_active = false;
+
+    void NoteActivity(uint64_t now) noexcept { last_activity = now; }
+    uint32_t MaintenanceInterval(bool visible, bool exiting, uint64_t now) const noexcept {
+        if (exiting) return 200;
+        if (!visible) return 1000;
+        return now >= last_activity && now - last_activity >= kQuietAfterMs ? 500 : 100;
+    }
 };
 
 } // namespace pulse::app

@@ -1,0 +1,309 @@
+{
+  "version": "1.2.1.0",
+  "status": "released-and-installed",
+  "default_composed_edits": true,
+  "validation": {
+    "DefaultComposed": true,
+    "PrototypeFlagRequired": false,
+    "UserAcceptance": "User approved composition prototype and authorized release 1.2.1.0",
+    "DesktopCases": [
+      {
+        "label": "release-m0-address",
+        "kind": "address",
+        "pid": 30840,
+        "samples": 136,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 0,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          580,
+          580
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "release-m0-rename",
+        "kind": "rename",
+        "pid": 3260,
+        "samples": 143,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 376,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 0,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1788,
+          1787
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "release-m1-address",
+        "kind": "address",
+        "pid": 43216,
+        "samples": 135,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          495,
+          495
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "release-m1-rename",
+        "kind": "rename",
+        "pid": 43928,
+        "samples": 140,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 380,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 1,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1494,
+          1499
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "release-m2-address",
+        "kind": "address",
+        "pid": 12620,
+        "samples": 137,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 417,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 2,
+        "long_text": false,
+        "theme": 2,
+        "endpoint_ink_pixels": [
+          580,
+          580
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      },
+      {
+        "label": "release-m2-rename",
+        "kind": "rename",
+        "pid": 34504,
+        "samples": 142,
+        "unexpected": 0,
+        "worst_difference": 16,
+        "width": 376,
+        "height": 20,
+        "presentation": "current",
+        "composed_verified": true,
+        "mode": 2,
+        "long_text": true,
+        "theme": 1,
+        "endpoint_ink_pixels": [
+          1788,
+          1787
+        ],
+        "text_visible": true,
+        "accepted": true,
+        "limits": "One editor sample using synchronous key messages; not physical input, IME or full visual acceptance."
+      }
+    ],
+    "DesktopSamples": 833.0,
+    "BehaviorTests": [
+      {
+        "Name": "child-auto",
+        "ExitCode": 0,
+        "Pass": 153,
+        "Fail": 0
+      },
+      {
+        "Name": "child-sharp",
+        "ExitCode": 0,
+        "Pass": 153,
+        "Fail": 0
+      },
+      {
+        "Name": "child-smooth",
+        "ExitCode": 0,
+        "Pass": 153,
+        "Fail": 0
+      },
+      {
+        "Name": "dialog-auto",
+        "ExitCode": 0,
+        "Pass": 425,
+        "Fail": 0
+      },
+      {
+        "Name": "dialog-sharp",
+        "ExitCode": 0,
+        "Pass": 425,
+        "Fail": 0
+      },
+      {
+        "Name": "dialog-smooth",
+        "ExitCode": 0,
+        "Pass": 425,
+        "Fail": 0
+      }
+    ],
+    "SettingsTest": {
+      "Name": "settings",
+      "ExitCode": 0,
+      "Pass": 493,
+      "Fail": 0
+    },
+    "HistoricalGdiFixture": {
+      "Accepted": false,
+      "Reason": "Pixels() captures GetDC(edit) with BitBlt. Composed edits deliberately cover immediate native GDI drawing using a separate topmost DComposition target. GDI backing pixels do not represent the visible composed text. Original failures retained; no assertions weakened. Real desktop cases verify visible default-channel output separately.",
+      "Fail": 48,
+      "Pass": 505
+    },
+    "Limits": [
+      "Desktop samples use synchronous key messages; do not cover all physical input or IMEs.",
+      "No full historical regression or installation wizard run."
+    ],
+    "Utc": "2026-10-24T09:24:08.4419230Z"
+  },
+  "deployment": {
+    "RecoveryError": null,
+    "Success": true,
+    "Deferred": [
+      {
+        "Reason": "Access to the path 'D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-ec809c08c2d24d3ca1a7069bcf263b69' is denied.",
+        "SHA256": "230F8BBA417D259B6ACF914002D71426861DC1345D6B481E098896702CF0029F",
+        "Path": "D:\\Applications\\Pulse\\Pulse.Index.exe.quality-old-ec809c08c2d24d3ca1a7069bcf263b69"
+      }
+    ],
+    "BackupFiles": 71,
+    "Phase": "complete",
+    "BackupDirectory": "E:\\Projects\\pulse\\dist\\rollback-before-1.2.1.0-20261024-172300",
+    "Error": null,
+    "ChangedFiles": [
+      "Pulse.exe",
+      "Pulse.Index.exe",
+      "Pulse.Shell.exe",
+      "Pulse.Preview.exe",
+      "Pulse.Document.exe"
+    ],
+    "BackupVerified": true,
+    "Utc": "2026-10-24T09:24:53.2694618Z"
+  },
+  "installed_verification": {
+    "IndexHosts": [
+      {
+        "ProcessId": 35356,
+        "CreationDate": "2026-10-24T15:47:08.939665+08:00",
+        "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+        "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+      }
+    ],
+    "Version": "1.2.1.0",
+    "UI": [
+      {
+        "IntegrityRid": 8192,
+        "CreationDate": "2026-10-24T17:25:33.279243+08:00",
+        "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+        "ProcessId": 47748
+      }
+    ],
+    "Success": true,
+    "Files": [
+      {
+        "SHA256": "70C2E3EF8FAD6FBFF89FB62F2EB7C8D6A78F6C525F2091BE9EE5E7868DEC9A29",
+        "Relative": "Pulse.exe",
+        "Version": "1.2.1.0",
+        "Match": true
+      },
+      {
+        "SHA256": "191B83F6EC7851FEA64448C88B1ED34660E2D83391DA87AA5EEF3DB436FD85F1",
+        "Relative": "Pulse.Index.exe",
+        "Version": "1.2.1.0",
+        "Match": true
+      },
+      {
+        "SHA256": "ED483B21E1CE232E599A0B88817D660821FA6D6F56493270C93479624FE02088",
+        "Relative": "Pulse.Shell.exe",
+        "Version": "1.2.1.0",
+        "Match": true
+      },
+      {
+        "SHA256": "471D8C58BE7DCC936853F610F2F658BF29FFF73E78BA73286EB483C1B3F5ADED",
+        "Relative": "Pulse.Preview.exe",
+        "Version": "1.2.1.0",
+        "Match": true
+      },
+      {
+        "SHA256": "F55481938E4EB6352946E2C64EE2B009C20813291139D111B602DDD0AB4C1D5A",
+        "Relative": "Pulse.Document.exe",
+        "Version": "1.2.1.0",
+        "Match": true
+      },
+      {
+        "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+        "Relative": "lumatext.dll",
+        "Version": null,
+        "Match": true
+      },
+      {
+        "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+        "Relative": "pdfium.dll",
+        "Version": "155.0.8044.0",
+        "Match": true
+      }
+    ],
+    "Service": {
+      "State": "Running",
+      "StartMode": "Auto",
+      "ProcessId": 2188,
+      "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+    },
+    "Utc": "2026-10-24T09:25:35.3908480Z"
+  },
+  "markdown_lines": [
+    "**当前状态：用户已手动认可持久合成原型，授权正式引入、升级为 1.2.1.0 并替换安装版。本轮已完成。**",
+    "",
+    "- 正式行为：移除生产代码的 `PULSE_TEST_COMPOSED_EDIT` 门控，透明合成宿主默认创建持久编辑表面；继续保留呈现不可用或失败时的原生回退。文字自动、清晰、平滑三选项保留。版本单一来源为 `version.txt=1.2.1.0`。",
+    "- 定向验证：子编辑框自动／清晰／平滑各 153 PASS，真实高级搜索和批量重命名对话框各模式 425 PASS，文字设置 493 PASS，合计 2227 PASS / 0 FAIL。子编辑框检查含持续合成标记、键盘不切换原生 redraw、隐藏／显示、销毁、呈现失败后回退及 Unicode 编辑。",
+    "- 保留失败证据：首次清晰模式只失败前台窗口保持断言，后续同样断言复测通过，未证明首次焦点变化根因。设置测试的低完整性构建副本无法准备或写入截图目录；使用 SHA256 完全一致的普通完整性副本后 493 项通过。测试入口补充标准异常报告，避免异常终止掩盖夹具错误。",
+    "- 历史 GDI 像素夹具为 505 PASS / 48 FAIL，**没有计为通过，也没有删除或弱化断言**。其 `Pixels()` 用 `GetDC(edit)` + `BitBlt` 读取原生 EDIT 表面；新通道在其上方另有持久 DirectComposition 表面，底层即时 GDI 像素不能代表用户看见的文字。48 项集中于原生表面的松手／方向键字形断言，原日志见 `docs/validation/release-1.2.1.0/hosted.log`。",
+    "- 实际桌面复核：正式默认通道不设置原型环境变量，三模式 × 路径栏短文本／重命名长文本共 6 组、833 个采样，均确认合成标记、可见字形，未采到第三种异常文字帧；查看了启动及编辑窗口截图。使用同步方向键消息，不能替代所有物理拖动、输入法、设备重建和跨屏 DPI 验证；用户本人对原型的手动确认单独记录，不包装成自动化结论。",
+    "- 发布核验：五个生产 EXE 的文件／产品版本均为 1.2.1.0；便携 ZIP 的 40 项载荷、文件名、哈希、许可证和无 selftest 检查通过。运行依赖检查要求静态 MSVC 运行库，新增必需 MSVC DLL 为 0。便携包 `dist/Pulse-1.2.1.0-portable-win-x64.zip`，SHA256 `FF8E78A7DAF39622CEC2B12E72B74B4C4D227645D92668864339A452370FF608`；安装包 `dist/PulseSetup-1.2.1.0.exe`，SHA256 `107668FB75EB710F1E1D9817E3EED149F0AC7107DDCB1C0CAB4D0885620C81F4`。",
+    "- 安装替换：`D:\\Applications\\Pulse` 的 71 个原文件完整备份并逐项哈希验证；仅替换 5 个变化的 EXE。回退目录 `E:\\Projects\\pulse\\dist\\rollback-before-1.2.1.0-20261024-172300`。旧 UI 经原有托盘“退出”正常结束，未强杀；服务恢复原 Running / Auto、注册路径不变，索引 ACL 未改，原网络代理继续运行。",
+    "- 原网络代理仍映射的旧 Index 映像暂留安装目录，具体路径见部署结果的 Deferred；没有为删除映像而结束代理。设置和索引目录未作迁移或清理。",
+    "- 安装后生产程序实际启动、截图、正常退出 0；随后以普通 Medium 权限重新打开正式 UI。计划中的 7 个载荷哈希和版本匹配。发布采用备份后载荷替换，安装向导本轮没有运行；未声称执行完整历史回归。",
+    "- 证据统一位于 `docs/validation/release-1.2.1.0/`：`validation.json`、`artifacts.json`、`deployment-result.json`、`final-installed-verification.json`、测试日志及截图。本节合并到现有唯一报告，不另生成一份完整报告。"
+  ]
+}

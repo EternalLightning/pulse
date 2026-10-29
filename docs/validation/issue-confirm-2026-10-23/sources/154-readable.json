@@ -1,0 +1,55 @@
+{
+  "number": 154,
+  "title": "新版本中，zip文件右键时找不到解压缩选项",
+  "body": "默认下，发现一个zip文件右键菜单中找不到解压缩选项，即便在设置中重新修改勾选，也不显示。\n\n<img width=\"2988\" height=\"1347\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/84cf3b48-04ea-40fb-bfa0-5936e9f63c54\" />\n<img width=\"917\" height=\"662\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/d1c0b7ff-ab5f-4b88-95b6-87aa0555d75c\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/154",
+  "captured_at": "2026-10-23T03:10:07.203789+00:00",
+  "updated_at": "2026-10-22T06:29:41Z",
+  "comments": [
+    {
+      "body": "我也是",
+      "bodyHTML": "<p dir=\"auto\">我也是</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOBklygg",
+        "login": "Treeeeeeeeeeeer",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/105476738?v=4",
+        "profileUrl": "https://github.com/Treeeeeeeeeeeer",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/154#issuecomment-6118483461"
+    },
+    {
+      "body": "已修复。\n\n右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。\n\nzip 文件右键里，Windows 自带的「全部解压缩(T)...」和压缩软件的解压项（测试机用 Bandizip：解压到当前文件夹、智能解压、选择解压路径等）都正常显示。\n\n将在下个版本发布。如果新版本中你的 zip（截图里关联的是 NanaZip）仍然缺项，请附上截图，我们继续跟进。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复。</p>\n<p dir=\"auto\">右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。</p>\n<p dir=\"auto\">zip 文件右键里，Windows 自带的「全部解压缩(T)...」和压缩软件的解压项（测试机用 Bandizip：解压到当前文件夹、智能解压、选择解压路径等）都正常显示。</p>\n<p dir=\"auto\">将在下个版本发布。如果新版本中你的 zip（截图里关联的是 NanaZip）仍然缺项，请附上截图，我们继续跟进。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/154#issuecomment-6180325554"
+    },
+    {
+      "body": "1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。\n",
+      "bodyHTML": "<p dir=\"auto\">1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/154#issuecomment-6334342089"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoS6i2fgAqjYxMTg0ODM0NjE=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJNFAgBqzMzOTIwODc4NjIy"
+  }
+}

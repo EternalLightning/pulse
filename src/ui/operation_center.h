@@ -80,6 +80,8 @@ private:
         float opacity = 1;
     };
     static constexpr float kOpenDurationMs = 200, kCloseDurationMs = 140, kCardDurationMs = 220;
+    // A 16 ms WM_TIMER request can round up to two system clock ticks.
+    static constexpr UINT kAnimationIntervalMs = USER_TIMER_MINIMUM;
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
     void Layout();
     void Position(RECT anchor);
@@ -93,7 +95,10 @@ private:
     void AnimateCardLayout();
     void DrawDepartingCards();
     void FinishCardTransition();
-    void Scroll(float delta);
+    void Scroll(float delta, bool smooth = false);
+    bool TickScroll(uint64_t now);
+    void SetScrollOffset(float value);
+    void StopScroll();
     void ScrollAt(float y);
     void FocusButton(int direction);
     void Invoke(int index);
@@ -117,6 +122,8 @@ private:
     std::vector<DepartingCard> departing_cards_;
     MenuBackdropSource backdrop_source_;
     MenuBackdrop backdrop_;
+    ComPtr<ID2D1Device> render_device_;
+    ComPtr<ID2D1Bitmap1> render_bitmap_, readback_bitmap_;
     HDC memory_ = nullptr;
     HBITMAP dib_ = nullptr;
     void* bits_ = nullptr;
@@ -126,7 +133,9 @@ private:
     float scale_ = 1, scroll_ = 0, content_height_ = 0, body_height_ = 0;
     bool dark_ = false, open_ = false, closing_ = false, snapshot_ = false, acrylic_ = false;
     bool force_solid_ = false;
-    bool dragging_scrollbar_ = false;
+    bool dragging_scrollbar_ = false, scroll_animating_ = false;
+    float scroll_from_ = 0, scroll_target_ = 0;
+    uint64_t scroll_started_ = 0;
     bool resizing_ = false;
     bool cards_animating_ = false, card_scroll_pending_ = false;
     float card_progress_ = 1, card_scroll_from_ = 0;

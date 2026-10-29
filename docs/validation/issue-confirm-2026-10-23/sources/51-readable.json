@@ -1,0 +1,68 @@
+{
+  "number": 51,
+  "title": "大码流的视频几乎都没有办法播放，能不能调用 Quick Look？",
+  "body": "我这边测试几乎所有的视频文件都没有办法播放，可能是因为我这边都是相机拍的原生素材吗？主要设备就是用索尼相机拍的素材。我查了一下，可能是因为素材的码流太大了，所以就不支持播放了。但是我如果用 Windows 自带的预览，或者说 quick Look，就可以播放",
+  "url": "https://github.com/jimmgreen/pulse/issues/51",
+  "captured_at": "2026-10-23T03:10:07.223358+00:00",
+  "updated_at": "2026-10-08T06:55:57Z",
+  "comments": [
+    {
+      "body": "感谢反馈！Pulse 的视频预览目前使用 Windows 的 Media Foundation 播放。索尼 XAVC S / XAVC HS 的 4K、10bit、4:2:2 素材，系统自带解码器经常不支持或者打开很慢。为了定位，麻烦提供：\n1. 相机型号和录制格式（XAVC S / S-I / HS，分辨率、帧率，是否 10bit / 4:2:2）；\n2. Pulse 预览里显示的内容（是否提示缺少解码器，或者报错的截图）；\n3. 方便的话，提供一段几秒钟的原始片段。\n确认原因后会考虑换用支持硬件解码的播放方式。Quick Look 是第三方程序，暂不计划直接调用；在这之前可以双击文件，用系统默认播放器打开。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈！Pulse 的视频预览目前使用 Windows 的 Media Foundation 播放。索尼 XAVC S / XAVC HS 的 4K、10bit、4:2:2 素材，系统自带解码器经常不支持或者打开很慢。为了定位，麻烦提供：</p>\n<ol dir=\"auto\">\n<li>相机型号和录制格式（XAVC S / S-I / HS，分辨率、帧率，是否 10bit / 4:2:2）；</li>\n<li>Pulse 预览里显示的内容（是否提示缺少解码器，或者报错的截图）；</li>\n<li>方便的话，提供一段几秒钟的原始片段。<br>\n确认原因后会考虑换用支持硬件解码的播放方式。Quick Look 是第三方程序，暂不计划直接调用；在这之前可以双击文件，用系统默认播放器打开。</li>\n</ol>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/51#issuecomment-5919939788"
+    },
+    {
+      "body": "对的 就是 4K 422\n10 比特",
+      "bodyHTML": "<p dir=\"auto\">对的 就是 4K 422<br>\n10 比特</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOEb4RKA",
+        "login": "akahoz94",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/297668904?u=7c13d5709b18135b26056d4fbec38a0e44afa58c&v=4",
+        "profileUrl": "https://github.com/akahoz94",
+        "name": "一个成熟的剪辑猿"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/51#issuecomment-5920887155"
+    },
+    {
+      "body": "视频解码可以使用这个项目吗\nhttps://github.com/Nevcairiel/LAVFilters",
+      "bodyHTML": "<p dir=\"auto\">视频解码可以使用这个项目吗<br>\n<a href=\"https://github.com/Nevcairiel/LAVFilters\">https://github.com/Nevcairiel/LAVFilters</a></p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOC3kjow",
+        "login": "xy9861",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/192488355?v=4",
+        "profileUrl": "https://github.com/xy9861",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/51#issuecomment-5923960987"
+    },
+    {
+      "body": "已更新最新版，下载快速预览里的扩展包，仍然无法预览。\n画面比例　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 16:9\n帧率模式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 恒定\n帧率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 50.000 FPS\n色彩空间　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : YUV\n色度抽样　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 4:2:2\n位深　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 10 位\n扫描类型　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 逐行扫描\nＢｉｔｓ／（像素＊帧）　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 0.482\n流大小　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 183 MiB \n(72%)\n\n格式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : XAVC\n编解码器　ＩＤ　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : XAVC (XAVC/mp42/iso6)\n文件大小　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 256 MiB\n时长　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 7 秒 680 毫秒\n总体码率模式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 可变码率\n总体码率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 280 Mb/s\n帧率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 50.000 FPS\n编码日期　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 2026-09-24 02:34:47 UTC\n标记日期　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 2026-09-24 02:34:47 UTC",
+      "bodyHTML": "<p dir=\"auto\">已更新最新版，下载快速预览里的扩展包，仍然无法预览。<br>\n画面比例　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 16:9<br>\n帧率模式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 恒定<br>\n帧率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 50.000 FPS<br>\n色彩空间　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : YUV<br>\n色度抽样　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 4:2:2<br>\n位深　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 10 位<br>\n扫描类型　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 逐行扫描<br>\nＢｉｔｓ／（像素＊帧）　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 0.482<br>\n流大小　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 183 MiB<br>\n(72%)</p>\n<p dir=\"auto\">格式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : XAVC<br>\n编解码器　ＩＤ　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : XAVC (XAVC/mp42/iso6)<br>\n文件大小　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 256 MiB<br>\n时长　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 7 秒 680 毫秒<br>\n总体码率模式　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 可变码率<br>\n总体码率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 280 Mb/s<br>\n帧率　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 50.000 FPS<br>\n编码日期　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 2026-09-24 02:34:47 UTC<br>\n标记日期　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 : 2026-09-24 02:34:47 UTC</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOEb4RKA",
+        "login": "akahoz94",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/297668904?u=7c13d5709b18135b26056d4fbec38a0e44afa58c&v=4",
+        "profileUrl": "https://github.com/akahoz94",
+        "name": "一个成熟的剪辑猿"
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/51#issuecomment-6054303019"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoPQwkjgAqjU5MTk5Mzk3ODg=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoRpLh8AAqjYwNTQzMDMwMTk="
+  }
+}

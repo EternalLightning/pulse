@@ -6,12 +6,21 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include "home_settings_animation_cases.h"
+#include "search_interaction_animation_cases.h"
+#include "address_path_animation_cases.h"
+#include "page_scroll_cases.h"
+#include "column_scroll_cases.h"
+#include "surface_scroll_cases.h"
+#include "navigation_motion_cases.h"
+#include "additional_motion_cases.h"
+#include "interaction_feedback_cases.h"
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 bool RunContentRevealUiChecks(pulse::AppState& s, const std::filesystem::path& root);
 
-int main() {
+int RunAnimationFixture(int argc, char** argv) {
     using namespace pulse;
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     OleInitialize(nullptr);
@@ -21,7 +30,10 @@ int main() {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", message);
         if (!passed) ++failures;
     };
-    const std::filesystem::path root = L"bench_data/pane_animation_ui";
+    wchar_t fixture_root[32768]{};
+    const DWORD fixture_length = GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+    if (fixture_length >= ARRAYSIZE(fixture_root)) return 2;
+    const std::filesystem::path root = fixture_length ? fixture_root : L"bench_data/pane_animation_ui";
     std::filesystem::create_directories(root);
     auto owned = std::make_unique<AppState>();
     auto& s = *owned;
@@ -53,6 +65,32 @@ int main() {
     entries->front().attrs = FILE_ATTRIBUTE_NORMAL;
     tab.snapshot = entries;
     tab.loading = false;
+
+    const bool search_only = argc == 2 && std::string_view(argv[1]) == "--search-interaction-only";
+    const bool path_only = argc == 2 && std::string_view(argv[1]) == "--address-path-only";
+    const bool page_scroll = argc == 2 && std::string_view(argv[1]) == "--page-scroll-only";
+    const bool column_scroll = argc == 2 && std::string_view(argv[1]) == "--column-scroll-only";
+    const bool surface_scroll = argc == 2 && std::string_view(argv[1]) == "--surface-scroll";
+    const bool navigation_motion = argc == 2 && std::string_view(argv[1]) == "--navigation-motion-only";
+    const bool additional_motion = argc == 2 && std::string_view(argv[1]) == "--additional-motion-only";
+    const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
+    if (search_only || path_only || page_scroll || column_scroll || surface_scroll || navigation_motion || additional_motion || feedback_only ||
+        (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
+        const bool passed = feedback_only ? ui::InteractionFeedbackUiTest::Run(s, root) :
+            additional_motion ? ui::AdditionalMotionUiTest::Run(s, root) :
+            navigation_motion ? ui::NavigationMotionUiTest::Run(s, root) :
+            page_scroll ? RunPageScrollChecks(s) :
+            column_scroll ? RunColumnScrollChecks(s, root) :
+            surface_scroll ? ui::SurfaceScrollUiTest::Run() == 0 :
+            path_only ? RunAddressPathAnimationChecks(s, root) :
+            search_only ? RunSearchInteractionAnimationChecks(s, root) : RunHomeSettingsAnimationChecks(s, root);
+        s.watches.Stop();
+        DestroyWindow(s.hwnd);
+        s.hwnd = nullptr;
+        owned.reset();
+        OleUninitialize();
+        return passed ? 0 : 1;
+    }
 
     check(!Render(s), "initial production render settles without a frame chain");
     ShowFilterEditor(s);
@@ -98,7 +136,7 @@ int main() {
     s.addressLiveContext = L"pulse:stale-search";
     s.addressHistoryPath = L"pulse:stale-history";
     WndProc(s.hwnd, WM_NULL, 0, 0);
-    check(s.ui_schedule.deadline == s.addressLiveDue && s.ui_schedule.maintenance_ms == 200,
+    check(s.ui_schedule.deadline == s.addressLiveDue && s.ui_schedule.maintenance_ms == 1000,
           "message completion arms the earliest deadline separately from hidden maintenance");
     s.addressLiveDue = wall_now + 160;
     WndProc(s.hwnd, WM_NULL, 0, 0);
@@ -270,4 +308,12 @@ int main() {
     owned.reset();
     OleUninitialize();
     return failures ? 1 : 0;
+}
+
+int main(int argc, char** argv) {
+    try { return RunAnimationFixture(argc, argv); }
+    catch (const std::exception& error) {
+        std::fprintf(stderr, "[FAIL] animation fixture initialization: %s\n", error.what());
+        return 2;
+    }
 }

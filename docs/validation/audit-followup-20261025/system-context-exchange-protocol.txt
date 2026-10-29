@@ -1,0 +1,19 @@
+[SKIP] protected production ACL creation (protocol-only mode)
+[PASS] create an exclusive private batch and ready result before launch
+[PASS] preexisting batch directory is never reused
+[PASS] held batch denies a second writer throughout execution
+[PASS] helper can read the held immutable batch
+[PASS] held result and directory cannot be removed or replaced by path
+[PASS] a different batch token is rejected before mutations
+[PASS] helper opens the precreated owned ready channel
+[PASS] partial success survives the owned helper channel in batch order
+[PASS] success and partial-failure exit codes must agree with result contents
+[PASS] valid results with wrong exit or token are not accepted
+[PASS] an already completed result cannot authorize another apply
+[PASS] unwritable result channel aborts before the first mutation
+[PASS] final write failure after mutation yields an unknown outcome, never false success
+[PASS] a running journal cannot be classified as an untouched rejected batch
+[PASS] preexisting plausible legacy success results are rejected without deletion
+[PASS] rejecting an outsider result preserves its original bytes and length
+[PASS] all owned fixture files and directories are removed
+ALL PASSED (0 failures)

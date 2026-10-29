@@ -1,0 +1,42 @@
+{
+  "number": 236,
+  "title": "对局域网网络文件夹支持不是很友好",
+  "body": "如题，网络文件夹内看不到局域网的其他电脑，我手动固定了一个局域网的D盘，结果还取消不了了，固定的那个D盘上点右键也没有菜单出来",
+  "url": "https://github.com/jimmgreen/pulse/issues/236",
+  "captured_at": "2026-10-23T03:10:07.178525+00:00",
+  "updated_at": "2026-10-15T02:39:12Z",
+  "comments": [
+    {
+      "body": "感谢反馈！这个 issue 里的三个问题，先修好了后两个：\n\n**固定的网络位置取消不了、右键没有菜单 — 已修复**\n\n**原因**：侧栏「网络位置」里的项（通过分区标题上的「+」或右键「钉为网络位置」添加）只有添加入口，没有任何移除入口：侧栏上右键没有对应的菜单；设置里「移除服务器」也只移除了它的网络索引，侧栏那一项还在。\n\n**修复**：在侧栏已钉住的网络位置上右键，会出现「打开 / 取消钉住」，点「取消钉住」就能移除；如果「网络」页面开着，也会同步刷新。已在本机实测：钉住一个局域网共享 → 右键出现菜单 → 取消钉住后侧栏立即移除。\n\n将在下个版本发布。\n\n**「网络」里看不到局域网其他电脑 — 还没有做**\n\n目前 Pulse 的网络位置只显示你钉住的位置和 Windows 里已有的网络位置，还不会像资源管理器那样自动发现局域网里的电脑。这个我会单独跟进。在那之前，可以在地址栏直接输入 `\\\\电脑名` 或 `\\\\IP地址`（例如 `\\\\192.168.1.10`）打开对方的共享，再钉住常用的共享。\n",
+      "bodyHTML": "<p dir=\"auto\">感谢反馈！这个 issue 里的三个问题，先修好了后两个：</p>\n<p dir=\"auto\"><strong>固定的网络位置取消不了、右键没有菜单 — 已修复</strong></p>\n<p dir=\"auto\"><strong>原因</strong>：侧栏「网络位置」里的项（通过分区标题上的「+」或右键「钉为网络位置」添加）只有添加入口，没有任何移除入口：侧栏上右键没有对应的菜单；设置里「移除服务器」也只移除了它的网络索引，侧栏那一项还在。</p>\n<p dir=\"auto\"><strong>修复</strong>：在侧栏已钉住的网络位置上右键，会出现「打开 / 取消钉住」，点「取消钉住」就能移除；如果「网络」页面开着，也会同步刷新。已在本机实测：钉住一个局域网共享 → 右键出现菜单 → 取消钉住后侧栏立即移除。</p>\n<p dir=\"auto\">将在下个版本发布。</p>\n<p dir=\"auto\"><strong>「网络」里看不到局域网其他电脑 — 还没有做</strong></p>\n<p dir=\"auto\">目前 Pulse 的网络位置只显示你钉住的位置和 Windows 里已有的网络位置，还不会像资源管理器那样自动发现局域网里的电脑。这个我会单独跟进。在那之前，可以在地址栏直接输入 <code class=\"notranslate\">\\\\电脑名</code> 或 <code class=\"notranslate\">\\\\IP地址</code>（例如 <code class=\"notranslate\">\\\\192.168.1.10</code>）打开对方的共享，再钉住常用的共享。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/236#issuecomment-6181769190"
+    },
+    {
+      "body": "感谢大佬跟进，不得不说，换了这么多资源管理器，就PULSE是让我眼前一亮的，已经把家里和公司的电脑全换成PULSE了，静待大佬更新",
+      "bodyHTML": "<p dir=\"auto\">感谢大佬跟进，不得不说，换了这么多资源管理器，就PULSE是让我眼前一亮的，已经把家里和公司的电脑全换成PULSE了，静待大佬更新</p>",
+      "author": {
+        "__typename": "User",
+        "id": "MDQ6VXNlcjE0OTI5NjM0",
+        "login": "VisJoker",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/14929634?v=4",
+        "profileUrl": "https://github.com/VisJoker",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/236#issuecomment-6183146924"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoT0HQQAAqjYxODE3NjkxOTA=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoT7oj9gBqzMzMzE4MjA4NTA2"
+  }
+}

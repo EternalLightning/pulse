@@ -1,0 +1,13 @@
+{
+  "parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+  "executable": "D:\\AppData\\Temp\\PulseFileOperationValidation-3a8a431d07e141b489439e44e05af09f\\pulse_permanent_fileop_console_test.exe",
+  "sha256": "C7103D7436BB78F270BF6305C7D1953CE83620BEBC319E9D7E56C32FC7DE7E49",
+  "exit_code": 0,
+  "passed": 26,
+  "failed": 0,
+  "skipped": 1,
+  "fixture": [
+    "[INFO] exclusive fixture=E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console\\permanent-fileop-console-41400-24987000"
+  ],
+  "timestamp": "2026-10-25T16:26:37.3440869+08:00"
+}

@@ -19,6 +19,22 @@ int ClampCap(int v, int lo, int hi, int fallback) {
     return v;
 }
 
+constexpr const wchar_t* kOrderKeys[] = {L"item", L"background", L"row_buttons"};
+static_assert(sizeof(kOrderKeys) / sizeof(kOrderKeys[0]) == static_cast<size_t>(BuiltinMenuSurface::Count));
+
+bool IsLegacyQuickAccessKey(std::wstring_view key) {
+    return key == L"pulse:quick-access";
+}
+
+constexpr uint32_t kRetiredBuiltinBits = BuiltinMenuBit(BuiltinMenuItem::NewFolder) |
+    BuiltinMenuBit(BuiltinMenuItem::NewTextFile);
+constexpr uint32_t kActiveBuiltinMask = kBuiltinMenuMask & ~kRetiredBuiltinBits;
+
+BuiltinMenuItem CurrentBuiltinItem(BuiltinMenuItem item) {
+    return item == BuiltinMenuItem::NewFolder || item == BuiltinMenuItem::NewTextFile
+        ? BuiltinMenuItem::NewMenu : item;
+}
+
 } // namespace
 
 void ContextMenuPrefs::ResetToDefaults() {
@@ -36,6 +52,7 @@ void ContextMenuPrefs::ResetToDefaults() {
     explorer_cap = ipc::kDefaultExplorerCap;
     open_with_mru = 2;
     builtin_hidden = 0;
+    ResetBuiltinOrder();
     item_enabled.clear();
     seen.clear();
     disabled_com.clear();
@@ -55,20 +72,42 @@ bool ContextMenuPrefs::CategoryEnabled(ipc::CtxMenuCategory c) const {
 }
 
 bool ContextMenuPrefs::BuiltinItemEnabled(BuiltinMenuItem item) const {
-    return !(builtin_hidden & BuiltinMenuBit(item));
+    return !(builtin_hidden & BuiltinMenuBit(CurrentBuiltinItem(item)));
 }
 
 void ContextMenuPrefs::SetBuiltinItemEnabled(BuiltinMenuItem item, bool enabled) {
+    item = CurrentBuiltinItem(item);
+    builtin_hidden &= ~kRetiredBuiltinBits;
     if (enabled) builtin_hidden &= ~BuiltinMenuBit(item);
     else builtin_hidden |= BuiltinMenuBit(item);
 }
 
 bool ContextMenuPrefs::BuiltinGroupEnabled() const {
-    return (builtin_hidden & kBuiltinMenuMask) != kBuiltinMenuMask;
+    return (builtin_hidden & kActiveBuiltinMask) != kActiveBuiltinMask;
 }
 
 void ContextMenuPrefs::SetBuiltinGroupEnabled(bool enabled) {
-    builtin_hidden = enabled ? 0u : kBuiltinMenuMask;
+    builtin_hidden = enabled ? 0u : kActiveBuiltinMask;
+}
+
+BuiltinMenuOrder ContextMenuPrefs::BuiltinOrder(BuiltinMenuSurface surface) const {
+    if (surface >= BuiltinMenuSurface::Count) return {};
+    return NormalizeBuiltinMenuOrder(surface, builtin_order[static_cast<size_t>(surface)]);
+}
+
+bool ContextMenuPrefs::BuiltinOrderCustom(BuiltinMenuSurface surface) const {
+    return surface < BuiltinMenuSurface::Count && BuiltinOrder(surface) != BuiltinMenuDefaultOrder(surface);
+}
+
+void ContextMenuPrefs::SetBuiltinOrder(BuiltinMenuSurface surface, const BuiltinMenuOrder& order) {
+    if (surface >= BuiltinMenuSurface::Count) return;
+    auto normalized = NormalizeBuiltinMenuOrder(surface, order);
+    if (normalized == BuiltinMenuDefaultOrder(surface)) normalized.clear();
+    builtin_order[static_cast<size_t>(surface)] = std::move(normalized);
+}
+
+void ContextMenuPrefs::ResetBuiltinOrder() {
+    for (auto& order : builtin_order) order.clear();
 }
 
 bool ContextMenuPrefs::GroupEnabled(ipc::CtxMenuGroup g) const {
@@ -96,14 +135,46 @@ void ContextMenuPrefs::SetGroupEnabled(ipc::CtxMenuGroup g, bool on) {
 
 bool ContextMenuPrefs::ItemEnabled(const std::wstring& key, ipc::CtxMenuCategory c,
                                    bool from_com) const {
+    if (IsLegacyQuickAccessKey(key)) return BuiltinItemEnabled(BuiltinMenuItem::QuickAccess);
     const auto it = item_enabled.find(key);
     if (it != item_enabled.end()) return it->second;
     if (c == ipc::CtxMenuCategory::OpenWith && from_com) return open_with_com;
     return CategoryEnabled(c);
 }
 
+bool ContextMenuPrefs::RowEnabled(const std::wstring& key, ipc::CtxMenuCategory c, bool from_com) const {
+    return ItemEnabled(key, c, from_com) && !ComDisabled(key);
+}
+
+bool ContextMenuPrefs::CatalogItemVisible(const std::wstring& key) const {
+    if (IsLegacyQuickAccessKey(key)) return BuiltinItemEnabled(BuiltinMenuItem::QuickAccess);
+    for (const auto& item : seen)
+        if (item.key == key) return RowEnabled(item.key, item.category, item.from_com);
+    const auto override = item_enabled.find(key);
+    return (override == item_enabled.end() || override->second) && !ComDisabled(key);
+}
+
+std::vector<std::wstring> ContextMenuPrefs::HiddenCatalogKeys() const {
+    std::vector<std::wstring> keys;
+    for (const auto& item : seen)
+        if (!IsLegacyQuickAccessKey(item.key) && !RowEnabled(item.key, item.category, item.from_com))
+            keys.push_back(item.key);
+    for (const auto& [key, enabled] : item_enabled)
+        if (!enabled && !IsLegacyQuickAccessKey(key)) keys.push_back(key);
+    for (const auto& key : disabled_com)
+        if (!IsLegacyQuickAccessKey(key)) keys.push_back(key);
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
 void ContextMenuPrefs::SetItemEnabled(const std::wstring& key, bool on) {
     if (key.empty()) return;
+    if (IsLegacyQuickAccessKey(key)) {
+        SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, on);
+        MigrateBuiltinCatalog(kBuiltinMenuMask);
+        return;
+    }
     item_enabled[key] = on;
     if (on) SetComDisabled(key, false);
 }
@@ -138,7 +209,7 @@ std::vector<std::wstring> ContextMenuPrefs::DisabledHandlerClsids() const {
 
 bool ContextMenuPrefs::RecordSeen(const std::wstring& key, const std::wstring& text,
                                   bool flyout, ipc::CtxMenuCategory category, bool from_com) {
-    if (key.empty() || text.empty()) return false;
+    if (key.empty() || text.empty() || IsLegacyQuickAccessKey(key)) return false;
     for (const auto& item : seen)
         if (item.key == key) return false;
     if (seen.size() >= 400) return false;
@@ -153,11 +224,16 @@ bool ContextMenuPrefs::RecordSeen(const std::wstring& key, const std::wstring& t
 }
 
 bool ContextMenuPrefs::ComDisabled(const std::wstring& key) const {
+    if (IsLegacyQuickAccessKey(key)) return !BuiltinItemEnabled(BuiltinMenuItem::QuickAccess);
     return disabled_com.contains(key);
 }
 
 void ContextMenuPrefs::SetComDisabled(const std::wstring& key, bool on) {
     if (key.empty()) return;
+    if (IsLegacyQuickAccessKey(key)) {
+        SetItemEnabled(key, !on);
+        return;
+    }
     if (on) disabled_com.insert(key);
     else disabled_com.erase(key);
 }
@@ -194,7 +270,24 @@ std::wstring ContextMenuPrefs::ToJson() const {
         out += BuiltinItemEnabled(item) ? L"\":true" : L"\":false";
         out += index + 1 == kBuiltinMenuItemCount ? L"\n" : L",\n";
     }
-    out += L"  },\n  \"items\":{\n";
+    out += L"  },\n  \"pulse_order\":{";
+    bool first_order = true;
+    for (int index = 0; index < static_cast<int>(BuiltinMenuSurface::Count); ++index) {
+        const auto surface = static_cast<BuiltinMenuSurface>(index);
+        if (!BuiltinOrderCustom(surface)) continue;
+        out += first_order ? L"\n    \"" : L",\n    \"";
+        out += kOrderKeys[index];
+        out += L"\":\"";
+        bool first_key = true;
+        for (const auto item : BuiltinOrder(surface)) {
+            if (!first_key) out += L",";
+            out += BuiltinMenuKey(item);
+            first_key = false;
+        }
+        out += L"\"";
+        first_order = false;
+    }
+    out += first_order ? L"},\n  \"items\":{\n" : L"\n  },\n  \"items\":{\n";
     size_t n = 0;
     for (const auto& kv : item_enabled) {
         std::wstring key;
@@ -249,10 +342,39 @@ bool ContextMenuPrefs::FromJson(const std::wstring& json) {
     builtin_hidden = 0;
     const auto builtin = ExtractObject(doc, L"pulse_items");
     const pulse::json::Document builtin_doc(builtin);
+    uint32_t explicit_builtin_items = 0;
     for (int index = 0; index < kBuiltinMenuItemCount; ++index) {
         const auto item = static_cast<BuiltinMenuItem>(index);
+        if (BuiltinMenuBit(item) & kRetiredBuiltinBits) continue;
+        const auto* value = builtin_doc.Find(BuiltinMenuKey(item));
+        if (value && value->kind == pulse::json::Kind::Boolean)
+            explicit_builtin_items |= BuiltinMenuBit(item);
         SetBuiltinItemEnabled(item, pulse::json::ExtractBool(
             builtin_doc, std::wstring(BuiltinMenuKey(item)), true));
+    }
+    if ((explicit_builtin_items & BuiltinMenuBit(BuiltinMenuItem::NewMenu)) == 0 &&
+        !pulse::json::ExtractBool(builtin_doc, L"new_folder", true) &&
+        !pulse::json::ExtractBool(builtin_doc, L"new_text", true)) {
+        SetBuiltinItemEnabled(BuiltinMenuItem::NewMenu, false);
+    }
+    ResetBuiltinOrder();
+    const auto* orders = doc.Find(L"pulse_order");
+    if (orders && orders->kind == pulse::json::Kind::Object) {
+        for (int index = 0; index < static_cast<int>(BuiltinMenuSurface::Count); ++index) {
+            const std::wstring keys = pulse::json::String(orders->Find(kOrderKeys[index]));
+            BuiltinMenuOrder order;
+            for (size_t at = 0; at < keys.size();) {
+                size_t end = keys.find(L',', at);
+                if (end == std::wstring::npos) end = keys.size();
+                const std::wstring_view key(keys.data() + at, end - at);
+                for (int item = 0; item < kBuiltinMenuItemCount; ++item) {
+                    const auto builtin_item = static_cast<BuiltinMenuItem>(item);
+                    if (BuiltinMenuKey(builtin_item) == key) order.push_back(builtin_item);
+                }
+                at = end + 1;
+            }
+            SetBuiltinOrder(static_cast<BuiltinMenuSurface>(index), order);
+        }
     }
     explorer_cap = ClampCap(pulse::json::ExtractInt(doc, L"explorer_cap", ipc::kDefaultExplorerCap),
                             1, 48, ipc::kDefaultExplorerCap);
@@ -291,9 +413,6 @@ bool ContextMenuPrefs::FromJson(const std::wstring& json) {
         if (!item.key.empty() && !item.text.empty()) seen.push_back(std::move(item));
     }
 
-    MigrateSeenKeys();
-    CoalesceCompressCatalog();
-
     disabled_com.clear();
     if (const auto* slow = doc.Find(L"slow_ext"); slow && slow->kind == pulse::json::Kind::Object) {
         for (const auto& item : slow->children) {
@@ -306,7 +425,25 @@ bool ContextMenuPrefs::FromJson(const std::wstring& json) {
             if (disabled) disabled_com.insert(item.name);
         }
     }
+    MigrateBuiltinCatalog(explicit_builtin_items);
+    MigrateSeenKeys();
+    CoalesceCompressCatalog();
     return true;
+}
+
+void ContextMenuPrefs::MigrateBuiltinCatalog(uint32_t explicit_items) {
+    constexpr const wchar_t* key = L"pulse:quick-access";
+    const auto choice = item_enabled.find(key);
+    const auto bit = BuiltinMenuBit(BuiltinMenuItem::QuickAccess);
+    if ((explicit_items & bit) == 0) {
+        if (choice != item_enabled.end())
+            SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, choice->second);
+        else if (disabled_com.contains(key))
+            SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, false);
+    }
+    item_enabled.erase(key);
+    disabled_com.erase(key);
+    std::erase_if(seen, [](const auto& item) { return IsLegacyQuickAccessKey(item.key); });
 }
 
 // Older builds keyed the catalog by raw display text, so one verb showed up once
@@ -315,6 +452,9 @@ bool ContextMenuPrefs::FromJson(const std::wstring& json) {
 // CatalogKey, merge the duplicates, and move the stored overrides onto the
 // normalized keys so a switch the user already flipped keeps applying.
 void ContextMenuPrefs::MigrateSeenKeys() {
+    // Only explicit Pulse identities can be retired safely. A caption-derived
+    // v:/f: key may belong to an independent Shell extension with the same label.
+    MigrateBuiltinCatalog(kBuiltinMenuMask);
     std::vector<SeenMenuItem> merged;
     merged.reserve(seen.size());
     for (auto& item : seen) {

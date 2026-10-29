@@ -1,0 +1,15 @@
+{
+  "number": 194,
+  "title": "小窗模式下，会出现顶部标签页与设置、明暗按钮的UI重叠",
+  "body": "<img width=\"1844\" height=\"1192\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8e316e4a-a60e-4f5d-8d66-a51eac1b6189\" />\n\n如图，小窗模式下，会出现顶部标签页与设置、明暗按钮的UI重叠，此时只能点击关闭顶部标签，无法打开设置。必须关闭部分标签或者最大化，重叠现象才会消失。",
+  "url": "https://github.com/jimmgreen/pulse/issues/194",
+  "captured_at": "2026-10-23T03:10:07.192943+00:00",
+  "updated_at": "2026-10-10T06:32:39Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

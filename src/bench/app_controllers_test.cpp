@@ -1,6 +1,10 @@
 #include "../app/settings_controller.h"
+#include "change_tracking_menu_test.h"
+#include "folder_actions_menu_cases.h"
+#include "session_layout_cases.h"
 #include "../app/session.h"
 #include "../app/context_menu_controller.h"
+#include "../app/quick_access_menu.h"
 #include "../app/single_instance_coordinator.h"
 #include "../app/tray_controller.h"
 #include "../app/blank_pane_click.h"
@@ -417,65 +421,66 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
 
 #include "context_menu_refresh_cases.h"
 #include "context_menu_overflow_cases.h"
+#include "builtin_menu_contract_cases.h"
 
-bool RunSessionLayoutTests() {
-    bool passed = true;
-    pulse::app::LayoutTabSnapshot saved;
-    saved.pinned = true;
-    saved.marker_rgb = 0x0078D4;
-    saved.group = 4;
-    saved.layout = 1;
-    saved.focused = 1;
-    saved.panes.push_back({ L"C:\\first", pulse::ui::ViewMode::Tiles, { 0.2f, 0.5f, 0.8f }, {} });
-    saved.panes.push_back({ L"D:\\loose", pulse::ui::ViewMode::Details, {}, {} });
-    saved.panes.push_back({ L"", pulse::ui::ViewMode::Details, {}, {} });
-    pulse::app::LayoutTab restored;
-    std::vector<std::wstring> loaded_paths;
-    pulse::app::RestoreLayoutTab(restored, saved,
-        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-            loaded_paths.push_back(loaded);
-        });
-    passed &= Report("session layout restore skips empty panes and grows to the preset",
-        restored.pinned && restored.tab_group == 0 &&
-        restored.layout == pulse::app::LayoutPreset::TwoVertical &&
-        restored.panes.size() == 2 && restored.focused_index == 1 &&
-        loaded_paths.size() >= 2 && loaded_paths[0] == L"C:\\first");
-    const auto captured = pulse::app::CaptureLayoutTab(restored);
-    passed &= Report("session layout restore and capture preserve the tab marker",
-        restored.marker_rgb == 0x0078D4 && captured.marker_rgb == 0x0078D4);
-    passed &= Report("session layout capture preserves folder presentation state",
-        captured.pinned && captured.layout == 1 && captured.panes.size() == 2 &&
-        captured.panes[0].view == pulse::ui::ViewMode::Tiles &&
-        captured.panes[0].columns[1] == 0.5f);
-    pulse::app::LayoutTab empty_restored;
-    pulse::app::RestoreLayoutTab(empty_restored, {},
-        [](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-        });
-    passed &= Report("session layout restore supplies a usable fallback folder",
-        empty_restored.panes.size() == 1 &&
-        empty_restored.panes[0]->view.current_path == pulse::path::DefaultNavigationRoot());
-    pulse::app::WindowTabs restored_tabs;
-    std::vector<pulse::app::GroupSessionSnapshot> groups{
-        { 4, L"work", 0x00112233, false },
-        { 4, L"duplicate", 0x00445566, true },
-        { -1, L"invalid", 0, false },
-    };
-    saved.pinned = false;
-    saved.group = 4;
-    pulse::app::RestoreWindowTabs(restored_tabs, { saved }, groups, 0,
-        [&](pulse::app::Tab& tab, const std::wstring& loaded) {
-            tab.current_path = loaded;
-        });
-    passed &= Report("session window tabs restore validates groups",
-        restored_tabs.tab_groups.size() == 1 &&
-        restored_tabs.next_tab_group_id == 5 && restored_tabs.items.size() == 1 &&
-        restored_tabs.items[0]->tab_group == 4);
-    return passed;
-}
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--folder-actions-menu") {
+        int failures = 0;
+        RunFolderActionsMenuChecks([&](bool passed, const char* message) {
+            if (!Report(message, passed)) ++failures;
+        });
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--recent-changes-menu") {
+        int failures = 0;
+        RunRecentChangesMenuChecks([&](bool passed, const char* message) {
+            if (!Report(message, passed)) ++failures;
+        });
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--builtin-menu-contract") {
+        pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+        return RunBuiltinMenuContractChecks();
+    }
+    if (argc == 2 && std::wstring(argv[1]) == L"--context-settings-save") {
+        using namespace pulse::app;
+        bool passed = true;
+        AppPrefs prefs;
+        prefs.persist = false;
+        ContextMenuPrefs context;
+        context.persist = true;
+        const auto handler = pulse::ipc::HandlerCatalogKey(L"{11111111-2222-3333-4444-555555555555}");
+        context.RecordSeen(handler, L"Example handler", false, pulse::ipc::CtxMenuCategory::Software, true);
+        context.SetComDisabled(handler, true);
+        pulse::index::IndexClient index;
+        pulse::index::NetworkAgentClient network;
+        SettingsController settings;
+        int effects = 0;
+        SettingsController::UiCallbacks callbacks;
+        callbacks.apply_effects = [&](SettingsEffect effect) { if (effect != SettingsEffect::None) ++effects; };
+        settings.BindUi(prefs, context, index, network, std::move(callbacks));
+        const std::wstring before = context.ToJson();
+        settings.ToggleUi(kBuiltinGroupToggle);
+        passed &= Report("builtin group save failure preserves menu settings and reports an error",
+                         context.ToJson() == before && !settings.error().empty() && effects == 0);
+        settings.ToggleUi(10);
+        passed &= Report("category save failure preserves menu settings",
+                         context.ToJson() == before && !settings.error().empty());
+        settings.ToggleUi(100 + static_cast<int>(context.seen.size()));
+        passed &= Report("builtin row save failure preserves menu settings and effects",
+                         context.ToJson() == before && !settings.error().empty() && effects == 0);
+        settings.ToggleUi(100);
+        passed &= Report("handler save failure preserves both its row override and skip marker",
+                         context.ToJson() == before && context.ComDisabled(handler) && !settings.error().empty());
+        context.persist = false;
+        settings.ToggleUi(100);
+        passed &= Report("one successful toggle restores a skipped handler and clears the save error",
+                         context.RowEnabled(handler, pulse::ipc::CtxMenuCategory::Software, true) &&
+                         !context.ComDisabled(handler) && settings.error().empty());
+        settings.ResetUi();
+        return passed ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-overflow") {
         pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
         return RunContextMenuOverflowTests() ? 0 : 1;
@@ -524,7 +529,7 @@ int wmain(int argc, wchar_t** argv) {
         return passed ? 0 : 1;
     }
     if (argc == 2 && std::wstring(argv[1]) == L"--session-layout")
-        return RunSessionLayoutTests() ? 0 : 1;
+        return pulse::bench::RunSessionLayoutTests() ? 0 : 1;
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-refresh") {
         pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
         return RunContextMenuRefreshTests() ? 0 : 1;
@@ -612,6 +617,39 @@ int wmain(int argc, wchar_t** argv) {
             display.size() == 2 && display.back().children.size() == 1 && display.back().children.front().command == unknown.command);
         ContextMenuPrefs prefs;
         prefs.persist = false;
+        PlacesCatalog places;
+        places.persist = false;
+        const std::vector<std::wstring> folders{L"C:\\one", L"C:\\two"};
+        passed &= Report("load conflicting legacy and current menu configuration",
+            prefs.FromJson(LR"({"pulse_items":{"quick_access":true},"items":{"pulse:quick-access":{"enabled":false}}})"));
+        display.clear();
+        const auto rebuild_quick_access = [&] {
+            AppendQuickAccessMenuCommand(display, places, folders);
+            display = ApplyBuiltinMenuPrefs(std::move(display), prefs, BuiltinMenuSurface::Item);
+        };
+        rebuild_quick_access();
+        passed &= Report("enabled built-in pin survives a disabled obsolete catalog switch",
+            display.size() == 1 && display.front().command == CmdPinQuickAccess &&
+            display.front().text == L"固定到快速访问" && prefs.seen.empty());
+        rebuild_quick_access();
+        passed &= Report("rebuilding pin does not duplicate the command", display.size() == 1);
+        places.SetQuickAccessPinned({folders.front()}, true);
+        rebuild_quick_access();
+        passed &= Report("mixed folder pin state offers pin", display.size() == 1 &&
+            display.front().command == CmdPinQuickAccess);
+        places.SetQuickAccessPinned(folders, true);
+        rebuild_quick_access();
+        passed &= Report("all pinned folders offer unpin", display.size() == 1 &&
+            display.front().command == CmdUnpinQuickAccess);
+        prefs.SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, false);
+        rebuild_quick_access();
+        passed &= Report("current built-in switch hides the pin command", display.empty());
+        prefs.SetBuiltinItemEnabled(BuiltinMenuItem::QuickAccess, true);
+        rebuild_quick_access();
+        passed &= Report("current built-in switch restores unpin despite the obsolete override",
+            display.size() == 1 && display.front().command == CmdUnpinQuickAccess);
+        AppendQuickAccessMenuCommand(display, places, {});
+        passed &= Report("ineligible selection clears a stale pin command", display.empty());
         ContextMenuController controller;
         ContextMenuController::ShellOperations operations;
         operations.query = [](auto, HWND, bool, bool, auto) { return 19u; };
@@ -1064,7 +1102,7 @@ int wmain(int argc, wchar_t** argv) {
     passed &= Report("settings UI controller has explicit binding lifecycle",
         !settings_ui.ui_bound());
 
-    passed &= RunSessionLayoutTests();
+    passed &= pulse::bench::RunSessionLayoutTests();
 
     passed &= RunContextMenuComTests(context);
 

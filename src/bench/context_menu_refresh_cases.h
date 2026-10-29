@@ -142,20 +142,44 @@ bool RunContextMenuRefreshTests() {
     StaticVerb openas; openas.verb = L"openas"; openas.display = pulse::l10n::Get(pulse::l10n::StringId::ShellOpenWith);
     controller.CompleteStaticVerbs(L".txt", {app, openas});
     controller.StartQuery(prefs, nullptr, {L"C:\\one.txt"}, false, L".txt", false, {}, {});
-    controller.CompleteComQuery(4, {}, GetTickCount64()); controller.OpenMenu({});
-    live = controller.BuildDisplay(prefs, {}, changed);
-    passed &= Report("Open With retains one chooser entrance alongside registered applications",
-        live.size() == 1 && ShellSection(live).size() == 2 &&
-        ShellSection(live)[0].text == app.display && ShellSection(live)[1].text == openas.display);
+    pulse::ui::FluentMenuItem open;
+    open.command = CmdOpen; open.text = L"Open"; open.separator_after = true;
+    pulse::ui::FluentMenuItem properties;
+    properties.command = CmdProperties; properties.text = L"Properties";
+    controller.OpenMenu({open, properties});
+    const auto file_base = controller.base_items();
+    const auto chooser_command = CmdShellStaticBase + pulse::ipc::kStaticVerbStride;
+    live = controller.BuildDisplay(prefs, file_base, changed);
+    passed &= Report("Open With appears directly after Open before the Shell query completes",
+        live.size() == 4 && live[0].command == CmdOpen && live[1].command == chooser_command &&
+        live[1].text == openas.display && live[1].enabled && live[1].children.empty() &&
+        !live[0].separator_after && live[1].separator_after && live[2].command == CmdProperties);
+    controller.CompleteComQuery(4, {}, GetTickCount64());
+    live = controller.BuildDisplay(prefs, file_base, changed);
+    passed &= Report("More options retains registered applications without duplicating the chooser",
+        live.size() == 4 && live[1].command == chooser_command && ShellSection(live).size() == 1 &&
+        ShellSection(live)[0].text == app.display);
+    prefs.open_with = false;
+    const auto hidden_chooser = controller.BuildDisplay(prefs, file_base, changed);
+    passed &= Report("Open With category preference still hides the promoted chooser",
+        hidden_chooser.size() == 2 && hidden_chooser[0].separator_after && ShellSection(hidden_chooser).empty());
+    prefs.open_with = true;
+    const auto chooser_key = pulse::ipc::CatalogKey(openas.display, false);
+    prefs.SetItemEnabled(chooser_key, false);
+    const auto hidden_item = controller.BuildDisplay(prefs, file_base, changed);
+    passed &= Report("individual chooser preference does not hide registered applications",
+        hidden_item.size() == 3 && ShellSection(hidden_item).size() == 1 &&
+        ShellSection(hidden_item)[0].text == app.display);
+    prefs.item_enabled.erase(chooser_key);
     StaticVerb replacement; replacement.verb = L"replacement"; replacement.display = L"New association";
     passed &= Report("registry refresh is cached without replacing open static command bindings",
         !controller.CompleteStaticVerbs(L".txt", {replacement, app, openas}));
-    const auto static_live = controller.BuildDisplay(prefs, {}, changed);
+    const auto static_live = controller.BuildDisplay(prefs, file_base, changed);
     passed &= Report("late registry entries keep the current menu captions and row count",
         static_live.size() == live.size() && ShellSection(static_live).size() == ShellSection(live).size() &&
-        ShellSection(static_live)[0].text == ShellSection(live)[0].text &&
-        ShellSection(static_live)[1].text == ShellSection(live)[1].text);
-    controller.CloseMenu(); controller.ExecuteShellCommand(CmdShellStaticBase + pulse::ipc::kStaticVerbStride, {}, {});
+        static_live[1].command == chooser_command && static_live[1].text == openas.display &&
+        ShellSection(static_live)[0].text == ShellSection(live)[0].text);
+    controller.CloseMenu(); controller.ExecuteShellCommand(chooser_command, {}, {});
     passed &= Report("single chooser entrance delegates through the existing openas shell operation",
         executed_path == L"C:\\one.txt" && executed_verb == L"openas");
     next_token = 5;

@@ -1,0 +1,32 @@
+[
+  {
+    "log": "menu-actions.log",
+    "passed": 32,
+    "failed": 0,
+    "skipped": 0
+  },
+  {
+    "log": "separator-centering.log",
+    "passed": 25,
+    "failed": 0,
+    "skipped": 0
+  },
+  {
+    "log": "folder-actions.log",
+    "passed": 21,
+    "failed": 0,
+    "skipped": 1
+  },
+  {
+    "log": "mutation-undo.log",
+    "passed": 180,
+    "failed": 0,
+    "skipped": 0
+  },
+  {
+    "log": "json-parser.log",
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0
+  }
+]

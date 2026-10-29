@@ -1,11 +1,13 @@
 #include "archive_navigation.h"
 #include "shell_registry_watch_context.h"
-#include "../ui/shortcut_help.h"
 // app_commands.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
 #include "app_column_view.h"
 #include "../ui/toolbar_layout.h"
 #include "app_internal.h"
+#include "device_navigation.h"
+#include "cloud_commands.h"
+#include "cloud_root_catalog.h"
 #include "global_search_controller.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -61,6 +63,8 @@ app::CommandContext BuildCommandContext(AppState& s) {
     context.can_view = tab != nullptr;
     if (!tab) return context;
     context.selected_count = tab->SelectedCount();
+    context.can_group_selection = CanGroupSelection(tab);
+    context.can_dissolve_selection = CanDissolveSelection(tab);
     context.archive_view = IsArchiveView(tab->current_path);
     context.read_only = tab->net_readonly;
     context.filesystem_folder = !tab->current_path.empty() &&
@@ -80,6 +84,15 @@ app::CommandContext BuildCommandContext(AppState& s) {
             });
         context.selection_has_drive_root = std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath);
     }
+    if (app::HasDeviceSelection(*tab)) {
+        context.device_selection = true;
+        context.selection_filesystem = !app::DeviceSelectedIds(*tab).empty();
+        context.selection_has_drive_root = false;
+    }
+    if (app::IsDeviceTab(tab)) {
+        context.filesystem_folder = app::DeviceRegistry::Instance().FolderWritable(tab->current_path);
+        context.read_only = !context.filesystem_folder;
+    }
     context.can_paste = CanPasteIntoCurrent(s, false);
     context.has_target = s.targetPane && s.targetPane != s.pane;
     if (context.has_target) {
@@ -97,6 +110,13 @@ app::CommandContext BuildCommandContext(AppState& s) {
 }
 
 namespace {
+void SetMenuToggleRect(AppState& s, const D2D1_RECT_F& bounds) {
+    RECT rect{static_cast<LONG>(bounds.left), static_cast<LONG>(bounds.top),
+        static_cast<LONG>(bounds.right), static_cast<LONG>(bounds.bottom)};
+    MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&rect), 2);
+    s.menu->SetToggleRect(rect);
+}
+
 std::wstring TagLabel(l10n::StringId id, const std::wstring& name, size_t count = 0) {
     const auto& pattern = l10n::Get(id);
     const int length = _scwprintf(pattern.c_str(), name.c_str(), count);
@@ -137,7 +157,8 @@ void CopySelectedPath(AppState& s) {
 void CreateNewItem(AppState& s, bool folder, bool arbitrary_file) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || tab->current_path.empty() || IsArchiveView(tab->current_path) ||
-        fs::IsVirtualPath(tab->current_path) || tab->net_readonly) return;
+        (fs::IsVirtualPath(tab->current_path) && !app::IsDeviceTab(tab)) || tab->net_readonly) return;
+    if (app::IsDeviceTab(tab) && !folder) return;
     const std::wstring parent_path = tab->current_path;
     std::wstring name;
     const auto title = folder ? l10n::StringId::NewFolder
@@ -151,6 +172,10 @@ void CreateNewItem(AppState& s, bool folder, bool arbitrary_file) {
             !folder && !arbitrary_file ? 251 : 255)) return;
     if (!folder && !arbitrary_file && name.find(L'.') == std::wstring::npos) {
         name += L".txt";
+    }
+    if (fs::IsDevicePath(parent_path)) {
+        app::QueueDeviceOperation(s, L"newfolder", {app::DeviceRegistry::Instance().FolderShellId(parent_path)}, name);
+        return;
     }
     std::wstring full = parent_path;
     if (!full.ends_with(L"\\")) full += L"\\";
@@ -493,6 +518,15 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
 }
 
 void DispatchMenuCommand(AppState& s, int cmd) {
+    if (HandleCloudCommand(s, cmd)) return;
+    if (const auto* tab = ActiveTab(s); tab && app::HasDeviceSelection(*tab)) {
+        if (cmd == app::CmdProperties) {
+            app::QueueDeviceOperation(s, L"properties", app::DeviceSelectedIds(*tab)); return;
+        }
+        if (cmd == app::CmdCut || cmd == app::CmdDelete || cmd == app::CmdRename ||
+            cmd == app::CmdBatchRename || cmd == app::CmdCopyPath || cmd == app::CmdOpenPath ||
+            cmd == app::CmdOpenTerminal || cmd == app::CmdCopyToTarget || cmd == app::CmdMoveToTarget) return;
+    }
     const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab || cmd==app::CmdRename || cmd==app::CmdOpenTerminal;
     if(needs_files && DeferContentSelection(s,[cmd](AppState& v){DispatchMenuCommand(v,cmd);},
         cmd == app::CmdOpenTerminal)) return;
@@ -513,11 +547,12 @@ void DispatchMenuCommand(AppState& s, int cmd) {
             SetGroup(s, modes[cmd - app::CmdGroupAuto], tab->group_direction);
         }
         break;
-    case app::CmdGroupDirection:
+    case app::CmdGroupAscending:
+    case app::CmdGroupDescending:
         if (const auto* tab = ActiveTab(s); tab && tab->group_mode != ui::GroupMode::Auto &&
             tab->group_mode != ui::GroupMode::None)
-            SetGroup(s, tab->group_mode, tab->group_direction == ui::SortDirection::Asc
-                ? ui::SortDirection::Desc : ui::SortDirection::Asc);
+            SetGroup(s, tab->group_mode, cmd == app::CmdGroupAscending
+                ? ui::SortDirection::Asc : ui::SortDirection::Desc);
         break;
     case app::CmdExtract: ExtractArchiveSelection(s, false); return;
     case app::CmdExtractAll: ExtractArchiveSelection(s, true); return;
@@ -682,6 +717,8 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         if (s.ops.CanUndo()) s.ops.Undo();
         break;
     case app::CmdNewFolder: CreateNewItem(s, true); break;
+    case app::CmdNewFolderWithSelection: GroupSelectionIntoFolder(s); break;
+    case app::CmdUngroupFolder: DissolveSelectedFolders(s); break;
     case app::CmdNewFile: CreateNewItem(s, false, true); break;
     case app::CmdNewTextFile: CreateNewItem(s, false); break;
     case app::CmdTags: {
@@ -690,9 +727,6 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         ShowTagPicker(s, point);
         break;
     }
-    case app::CmdShortcutHelp:
-        ui::ShowShortcutHelp(s.hwnd, s.darkMode, s.accentColor);
-        break;
     case app::CmdColumnLayout:
         ToggleColumnLayout(s,-1);
         break;
@@ -708,15 +742,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     case app::CmdCopyToTarget: TransferToTarget(s, false); break;
     case app::CmdMoveToTarget: TransferToTarget(s, true); break;
     case app::CmdPinWorkspace: {
-        std::wstring root = PinCandidate(s);
-        if (!root.empty() && !fs::IsVirtualPath(root)) {
-            if (s.places.FindWorkspace(root) >= 0) {
-                s.places.UnpinWorkspace(root);
-            } else {
-                s.places.PinWorkspace(root, L"", static_cast<int>(LayoutOf(s)), CollectPanePaths(s),
-                                      CollectPaneViews(s));
-            }
-        }
+        ToggleWorkspacePin(s, PinCandidate(s));
         break;
     }
     case app::CmdPinNetwork: {
@@ -768,8 +794,8 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 
-void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s) {
-    const std::wstring root = PinCandidate(s);
+void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s,
+                            const std::wstring& root) {
     const bool pinned = !root.empty() && !fs::IsVirtualPath(root) &&
         s.places.FindWorkspace(root) >= 0;
     for (auto& item : items) {
@@ -783,8 +809,19 @@ void ApplyWorkspacePinLabel(std::vector<ui::FluentMenuItem>& items, AppState& s)
 std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         AppState& s, bool can_undo, const std::wstring& undo_label) {
     if (IsRecycleTab(ActiveTab(s)))
-        return app::FilterBuiltinMenuItems(app::BuildRecycleItemMenu(can_undo, undo_label),
-                                            s.ctxMenuPrefs.builtin_hidden);
+        return app::BuildRecycleItemMenu(can_undo, undo_label);
+    if (const auto* phone = ActiveTab(s); phone && app::HasDeviceSelection(*phone)) {
+        std::vector<ui::FluentMenuItem> items;
+        if (phone->SelectedCount() == 1 && phone->EntryAt(
+                static_cast<size_t>(phone->SelectedIndices().front())).is_dir) {
+            ui::FluentMenuItem item;
+            item.command = app::CmdOpenInNewTab;
+            item.text = l10n::Get(l10n::StringId::OpenNewTab);
+            item.glyph = L"\xE8A7";
+            items.push_back(std::move(item));
+        }
+        return items;
+    }
     bool folder = false;
     if (const app::Tab* tab = ActiveTab(s); tab && tab->snapshot) {
         for (int index : tab->SelectedIndices()) {
@@ -800,8 +837,9 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         app::AppendTextCompareCommands(items, s.appPrefs.text_compare_enabled,
             app::TextCompareMenuPath(*tab), s.text_compare_selection.ready());
     if (const auto* tab = ActiveTab(s))
-        app::AppendRecentChangesCommand(items, app::RecentChangesMenuPath(*tab, false));
-    ApplyWorkspacePinLabel(items, s);
+        app::AppendRecentChangesCommand(items, app::RecentChangesMenuPath(*tab, false),
+            s.appPrefs.change_tracking_enabled);
+    ApplyWorkspacePinLabel(items, s, PinCandidate(s));
     AppendQuickAccessCommand(s, items, QuickAccessTargets(ActiveTab(s), false));
     const std::vector<std::wstring> paths = ActiveTab(s)
         ? SelectedFullPaths(*ActiveTab(s)) : std::vector<std::wstring>{};
@@ -843,10 +881,16 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         batch.shortcut = L"Ctrl+Shift+R";
         items.insert(items.begin() + 1, std::move(batch));
     }
+    const auto context = BuildCommandContext(s);
+    if (context.can_group_selection)
+        items.push_back(app::BuildCommandMenuItem(app::CmdNewFolderWithSelection, context));
+    if (context.can_dissolve_selection)
+        items.push_back(app::BuildCommandMenuItem(app::CmdUngroupFolder, context));
     if (std::any_of(paths.begin(), paths.end(), pulse::path::IsDriveRootPath))
         app::RestrictDriveItemMenu(items, paths.size() == 1);
+    if (tab) AppendCloudCommands(s, *tab, items);
     app::OrganizeItemMenu(items);
-    return app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
+    return items;
 }
 
 // Lowercased common extension of the selection; "" for folders / mixed types.
@@ -986,10 +1030,26 @@ void SeedShellVerbCache(AppState& s) {
 // Fluent menu fades in.
 void StartCtxQuery(AppState& s, std::vector<std::wstring> paths,
                           bool background, const std::wstring& ext) {
+    std::wstring query_key = ext;
+    bool device_context = false;
+    if (const auto* tab = ActiveTab(s)) {
+        if (background && app::IsDeviceTab(tab)) {
+            paths = {app::DeviceRegistry::Instance().FolderShellId(tab->current_path)};
+            device_context = true;
+        } else if (app::HasDeviceSelection(*tab)) {
+            paths = app::DeviceSelectedIds(*tab);
+            device_context = true;
+        }
+    }
+    if (device_context) {
+        std::erase(paths, std::wstring{});
+        if (paths.empty()) { s.context_menu.Close(); return; }
+        query_key = L":device:" + paths.front();
+    }
     s.context_menu.StartQuery(s.ctxMenuPrefs, s.hwnd, std::move(paths),
-        background, ext, (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+        background, query_key, (GetKeyState(VK_SHIFT) & 0x8000) != 0,
         ClipboardPath, [&s](const std::wstring& extension) {
-            PrefetchStaticVerbs(s, extension);
+            if (!extension.starts_with(L":device:")) PrefetchStaticVerbs(s, extension);
         }, ActiveTab(s) ? ActiveTab(s)->view_generation : 0);
     PumpShellMenuMessages(s);
 }
@@ -998,7 +1058,7 @@ void MaybePrefetchCtxMenu(AppState& s) {
     if (s.context_menu.menu_open() || s.safeMode || GetForegroundWindow() != s.hwnd) return;
     if (s.hoverRow < 0) {
         const auto* tab = ActiveTab(s);
-        if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) ||
+        if (!tab || tab->current_path.empty() || (fs::IsVirtualPath(tab->current_path) && !app::IsDeviceTab(tab)) ||
             IsArchiveView(tab->current_path)) {
             s.context_menu.Close();
             return;
@@ -1010,7 +1070,7 @@ void MaybePrefetchCtxMenu(AppState& s) {
     if (s.ctxHoverSince == 0 || now - s.ctxHoverSince < 150) return;
     app::Pane* pane = s.hoverPaneIndex >= 0 ? PaneAtSlot(s, s.hoverPaneIndex) : s.pane;
     app::Tab* tab = pane ? pane->ActiveTab() : nullptr;
-    if (!tab || !tab->snapshot || fs::IsVirtualPath(tab->current_path)) return;
+    if (!tab || !tab->snapshot || (fs::IsVirtualPath(tab->current_path) && !app::IsDeviceTab(tab))) return;
     if (s.hoverRow >= tab->CountBound()) return;
     std::wstring path = EntryFullPath(*tab, s.hoverRow);
     if (path.empty()) return;
@@ -1045,7 +1105,7 @@ void WaitForShellMenuReady(AppState& s) {
 
 void ScheduleFolderRefresh(AppState& s) {
     app::Tab* tab = ActiveTab(s);
-    if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path)) return;
+    if (!tab || tab->current_path.empty() || (fs::IsVirtualPath(tab->current_path) && !app::IsDeviceTab(tab))) return;
     s.store.MarkDirty(tab->current_path);
     RefreshActiveTab(s);
     // Bandizip / 7-Zip often return from InvokeCommand before the archive
@@ -1062,7 +1122,7 @@ std::vector<ui::FluentMenuItem> ExplorerMenu(
     bool changed = false;
     auto display = s.context_menu.BuildDisplay(s.ctxMenuPrefs, base, changed);
     if (changed) s.ctxMenuPrefs.Save();
-    return app::FilterBuiltinMenuItems(std::move(display), s.ctxMenuPrefs.builtin_hidden);
+    return display;
 }
 
 void RefreshOpenCtxMenu(AppState& s) {
@@ -1096,7 +1156,8 @@ void ShowItemContextMenu(AppState& s, POINT screen_pt) {
     const auto quick_paths = QuickAccessTargets(tab, false);
     auto base_items = BuildFinderItemMenu(s, s.ops.CanUndo(), undoLabel);
     s.context_menu.OpenMenu(base_items);
-    auto display = IsRecycleTab(tab) ? std::move(base_items)
+    auto display = IsRecycleTab(tab) ? app::ApplyBuiltinMenuPrefs(std::move(base_items),
+                                         s.ctxMenuPrefs, app::BuiltinMenuSurface::Item)
                                      : ExplorerMenu(s, s.context_menu.base_items());
     const int quick_count = std::min(7, static_cast<int>(s.places.tags.size()));
 
@@ -1114,6 +1175,15 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     if (!EnsureMenu(s)) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
+    if (app::IsDeviceTab(tab)) {
+        StartCtxQuery(s, {tab->current_path}, true, L":device:background");
+        s.context_menu.OpenMenu({});
+        const int cmd = s.menu->TrackPopup(screen_pt, ExplorerMenu(s, {}));
+        s.context_menu.CloseMenu();
+        if (HandleShellMenuCommand(s, cmd)) return;
+        if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
+        return;
+    }
     std::wstring kind;
     app::ParsePulsePath(tab->current_path, &kind, nullptr);
     app::BackgroundViewOptions view_options;
@@ -1121,15 +1191,18 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     view_options.sort_column = tab->sort_column;
     view_options.sort_direction = tab->sort_direction;
     view_options.folder_sort = s.appPrefs.folder_sort_mode;
+    view_options.group_mode = tab->group_mode;
+    view_options.group_direction = tab->group_direction;
     view_options.details_panel = s.showDetailsPanel;
     view_options.can_sort = kind != L"starred" && kind != L"recent";
     view_options.indexed_search = (kind == L"search" || kind == L"saved-search") && !tab->content_results;
     view_options.show_path = kind == L"search" || kind == L"saved-search" || kind == L"recycle";
     view_options.filesystem = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
+    const auto workspace_path = view_options.filesystem ? tab->current_path : std::wstring{};
     if (kind == L"home") {
         s.context_menu.Close();
-        auto items = app::FilterBuiltinMenuItems(app::BuildHomeBackgroundMenu(),
-                                                s.ctxMenuPrefs.builtin_hidden);
+        auto items = app::ApplyBuiltinMenuPrefs(app::BuildHomeBackgroundMenu(),
+            s.ctxMenuPrefs, app::BuiltinMenuSurface::Background);
         const int cmd = s.menu->TrackPopup(screen_pt, std::move(items));
         if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
         return;
@@ -1139,7 +1212,7 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
         const std::wstring undoLabel = s.ops.UndoLabel();
         auto items = app::BuildRecycleBackgroundMenu(s.ops.CanUndo(), undoLabel, can_empty);
         app::AppendBackgroundViewCommands(items, view_options);
-        items = app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
+        items = app::ApplyBuiltinMenuPrefs(std::move(items), s.ctxMenuPrefs, app::BuiltinMenuSurface::Background);
         s.context_menu.OpenMenu(std::move(items));
         const int cmd = s.menu->TrackPopup(screen_pt, s.context_menu.base_items());
         s.context_menu.CloseMenu();
@@ -1157,12 +1230,11 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     auto base_items = app::BuildBackgroundMenu(canPaste, s.ops.CanUndo(), undoLabel);
     if (terminal_path.empty())
         std::erase_if(base_items, [](const auto& item) { return item.command == app::CmdOpenTerminal; });
-    app::AppendRecentChangesCommand(base_items, recent_changes_path);
+    app::AppendRecentChangesCommand(base_items, recent_changes_path, s.appPrefs.change_tracking_enabled);
     app::AppendBackgroundViewCommands(base_items, view_options);
-    ApplyWorkspacePinLabel(base_items, s);
+    ApplyWorkspacePinLabel(base_items, s, workspace_path);
     const auto quick_paths = QuickAccessTargets(tab, true);
     AppendQuickAccessCommand(s, base_items, quick_paths);
-    base_items = app::FilterBuiltinMenuItems(std::move(base_items), s.ctxMenuPrefs.builtin_hidden);
     s.context_menu.OpenMenu(std::move(base_items));
     auto display = ExplorerMenu(s, s.context_menu.base_items());
 
@@ -1171,6 +1243,7 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     if (HandleShellMenuCommand(s, cmd)) return;
     if (HandleQuickAccessCommand(s, cmd, quick_paths)) return;
     if (cmd == app::CmdViewRecentChanges) { OpenChangeView(s, recent_changes_path); return; }
+    if (cmd == app::CmdPinWorkspace) { ToggleWorkspacePin(s, workspace_path); return; }
     if (cmd == app::CmdOpenTerminal) {
         if (!terminal_path.empty()) s.ops.OpenTerminal(ClipboardPath(terminal_path));
         return;
@@ -1184,9 +1257,14 @@ void ShowNewDropdown(AppState& s) {
     if (!EnsureMenu(s)) return;
     const auto anchor = s.renderer.NewCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
     ClientToScreen(s.hwnd, &pt);
+    if (app::IsDeviceTab(tab)) {
+        if (app::DeviceRegistry::Instance().FolderWritable(tab->current_path)) CreateNewItem(s, true);
+        return;
+    }
     if (tab->current_path.empty() || fs::IsVirtualPath(tab->current_path)) return;
+    SetMenuToggleRect(s, anchor);
     if (s.safeMode) {
-        const int cmd = s.menu->TrackPopup(pt, app::BuildNewMenu());
+        const int cmd = s.menu->TrackToolbarPopup(pt, app::BuildNewMenu());
         if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
         return;
     }
@@ -1198,7 +1276,7 @@ void ShowNewDropdown(AppState& s) {
     create.children = app::BuildNewMenu();
     create.live_update = true;
     s.context_menu.OpenMenu({ std::move(create) }, true);
-    const int cmd = s.menu->TrackPopup(pt, ExplorerMenu(s, s.context_menu.base_items()));
+    const int cmd = s.menu->TrackToolbarPopup(pt, ExplorerMenu(s, s.context_menu.base_items()));
     s.context_menu.CloseMenu();
     if (HandleShellMenuCommand(s, cmd)) return;
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
@@ -1210,7 +1288,8 @@ void ShowSplitDropdown(AppState& s) {
     if (!EnsureMenu(s)) return;
     const auto anchor = s.renderer.SplitCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
     ClientToScreen(s.hwnd, &pt);
-    int cmd = s.menu->TrackPopup(pt, app::BuildSplitMenu(static_cast<int>(LayoutOf(s))));
+    SetMenuToggleRect(s, anchor);
+    int cmd = s.menu->TrackToolbarPopup(pt, app::BuildSplitMenu(static_cast<int>(LayoutOf(s))));
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
 }
 
@@ -1218,7 +1297,37 @@ void ShowSplitDropdown(AppState& s) {
 // Browser-style tab groups: named + colored; strip chips open the group popup.
 // ---------------------------------------------------------------------------
 void RefreshSidebarModel(AppState& s) {
+    auto system_networks = std::move(s.sidebar.system_networks);
     s.sidebar = app::BuildSidebarModel(&s.recycle_info);
+    s.sidebar.system_networks = std::move(system_networks);
+    if (const auto roots = app::CloudRootCatalog()) {
+        s.sidebar.cloud.clear();
+        for (const auto& root : *roots) {
+            app::SidebarEntry entry;
+            entry.path = root.path;
+            entry.label = root.label;
+            entry.glyph = L"\xE753";
+            entry.fallback = L"Cloud";
+            entry.color = ui::HexColor(app::CloudRootColor(root));
+            s.sidebar.cloud.push_back(std::move(entry));
+        }
+    }
+    s.home_catalog.Refresh();
+    s.home_catalog.FillDriveLabels(s.sidebar);
+    for (const auto& device : app::DeviceRegistry::Instance().Devices()) {
+        app::SidebarEntry entry;
+        entry.label = device.name;
+        entry.path = fs::DeviceOpenTarget(device);
+        entry.glyph = L"\xE8EA";
+        entry.fallback = L"MTP";
+        entry.color = ui::HexColor(0x38BDF8);
+        if (device.locked) {
+            entry.badge = l10n::Get(l10n::StringId::DeviceLocked);
+            entry.badge_rgb = 0xD97706;
+            entry.detail = l10n::Get(l10n::StringId::DeviceLockedMessage);
+        }
+        s.sidebar.drives.push_back(std::move(entry));
+    }
     SyncSavedSearchSidebar(s);
 }
 
@@ -1371,7 +1480,7 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
         (recent_item && recent_item->kind == app::PlaceItemKind::Folder) ||
         (!fs::IsVirtualPath(path) && QuickAccessEntryForPath(s, path));
     if (known_folder) AppendQuickAccessCommand(s, items, {path});
-    items = app::FilterBuiltinMenuItems(std::move(items), s.ctxMenuPrefs.builtin_hidden);
+    items = app::ApplyBuiltinMenuPrefs(std::move(items), s.ctxMenuPrefs, app::BuiltinMenuSurface::Item);
     const int cmd = s.menu->TrackPopup(screen_pt, std::move(items));
     if (HandleQuickAccessCommand(s, cmd, known_folder ? std::vector<std::wstring>{path}
                                                                    : std::vector<std::wstring>{})) return;
@@ -1426,9 +1535,10 @@ void ShowCuratedItemMenu(AppState& s, const std::wstring& path,
 }
 
 // Drop groups with no remaining members (after mass closes / leave operations).
-void SetViewMode(AppState& s, ui::ViewMode mode) {
+void SetViewMode(AppState& s, ui::ViewMode mode, bool direct_manipulation) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
+    tab->view_mode_direct = direct_manipulation;
     if (s.appPrefs.folder_views.Set(tab->current_path, mode)) s.appPrefs.Save();
     if (tab->view_mode == mode) return;
     if (s.renameIndex >= 0) HideRenameOverlay(s, false);
@@ -1459,9 +1569,8 @@ void ShowViewDropdown(AppState& s, int pane_index) {
     POINT anchor{ static_cast<LONG>(button.left), static_cast<LONG>(button.bottom) };
     ClientToScreen(s.hwnd, &anchor);
     auto items = app::BuildViewMenu(tab->view_mode, s.showDetailsPanel);
-    items.back().separator_after=true;
-    items.push_back(app::BuildShortcutHints());
-    const int cmd = s.menu->TrackPopup(anchor, items);
+    SetMenuToggleRect(s, button);
+    const int cmd = s.menu->TrackToolbarPopup(anchor, items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
 }
 
@@ -1490,7 +1599,7 @@ void ShowSortDropdown(AppState& s) {
         static_cast<LONG>(layout.sort.right), static_cast<LONG>(layout.sort.bottom)};
     MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
     s.menu->SetToggleRect(toggle);
-    const int cmd = s.menu->TrackPopup(anchor, items);
+    const int cmd = s.menu->TrackToolbarPopup(anchor, items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s,cmd);
 }
 
@@ -1509,7 +1618,7 @@ void ShowGroupDropdown(AppState& s) {
         static_cast<LONG>(layout.group.right), static_cast<LONG>(layout.group.bottom)};
     MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);
     s.menu->SetToggleRect(toggle);
-    const int cmd = s.menu->TrackPopup(anchor,items);
+    const int cmd = s.menu->TrackToolbarPopup(anchor,items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s,cmd);
 }
 
@@ -1550,14 +1659,13 @@ void ShowToolbarMore(AppState& s) {
     column.command=app::CmdColumnLayout;
     column.text=l10n::Get(l10n::StringId::ColumnLayout);
     column.checked=tab->column_layout;
-    column.separator_after=true;
     items.push_back(std::move(column));
-    items.push_back(app::BuildShortcutHints());
     const auto layout=ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
         s.renderer.NewButtonWidthPx(true),left);
     POINT anchor{static_cast<LONG>(layout.overflow.left),static_cast<LONG>(layout.overflow.bottom)};
     ClientToScreen(s.hwnd,&anchor);
-    const int cmd=s.menu->TrackPopup(anchor,items);
+    SetMenuToggleRect(s, layout.overflow);
+    const int cmd=s.menu->TrackToolbarPopup(anchor,items);
     if (cmd!=app::CmdNone) DispatchMenuCommand(s,cmd);
 }
 
@@ -1846,7 +1954,7 @@ namespace {
 bool QuickPreviewItemAt(AppState& s, const app::Tab& tab, int index, ui::QuickPreviewItem& item) {
     if (!tab.snapshot || index < 0 || index >= static_cast<int>(tab.EntryCount())) return false;
     const fs::DirEntry& entry = tab.EntryAt(static_cast<size_t>(index));
-    if (entry.is_dir) return false;
+    if (entry.is_dir || entry.pc_device || fs::IsDevicePath(entry.full_path)) return false;
     item.path = EntryFullPath(tab, index);
     item.name = entry.name;
     item.attrs = entry.attrs;
@@ -1880,6 +1988,12 @@ bool SelectedQuickPreviewItem(AppState& s, ui::QuickPreviewItem& item) {
     return tab && QuickPreviewItemAt(s, *tab, tab->selected_index, item);
 }
 
+void EnsureQuickPreviewWindow(AppState& s) {
+    if (s.quickPreview.hwnd() || s.exit_requested || s.ui_schedule.stopped || !s.hwnd) return;
+    s.quickPreview.Initialize(s.hwnd, WM_QUICK_PREVIEW_NAVIGATE,
+        WM_QUICK_PREVIEW_OPEN, WM_QUICK_PREVIEW_COMMAND, s.renderer.SharedThumbnailCache());
+}
+
 void ToggleQuickPreview(AppState& s) {
     if (s.quickPreview.visible()) {
         s.quickPreview.Close();
@@ -1888,6 +2002,7 @@ void ToggleQuickPreview(AppState& s) {
     if(DeferContentSelection(s,[](AppState& v){ToggleQuickPreview(v);},true)) return;
     ui::QuickPreviewItem item;
     if (SelectedQuickPreviewItem(s, item)) {
+        EnsureQuickPreviewWindow(s);
         const auto effect = s.appPrefs.background_image.empty()
             ? ui::WindowEffectFromId(s.appPrefs.window_effect)
             : ui::WindowEffect::None;

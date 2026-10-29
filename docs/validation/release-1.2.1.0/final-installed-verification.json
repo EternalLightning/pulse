@@ -1,0 +1,71 @@
+{
+  "IndexHosts": [
+    {
+      "ProcessId": 35356,
+      "CreationDate": "2026-10-24T15:47:08.939665+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.Index.exe",
+      "CommandLine": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --network-agent"
+    }
+  ],
+  "Version": "1.2.1.0",
+  "UI": [
+    {
+      "IntegrityRid": 8192,
+      "CreationDate": "2026-10-24T17:25:33.279243+08:00",
+      "ExecutablePath": "D:\\Applications\\Pulse\\Pulse.exe",
+      "ProcessId": 47748
+    }
+  ],
+  "Success": true,
+  "Files": [
+    {
+      "SHA256": "70C2E3EF8FAD6FBFF89FB62F2EB7C8D6A78F6C525F2091BE9EE5E7868DEC9A29",
+      "Relative": "Pulse.exe",
+      "Version": "1.2.1.0",
+      "Match": true
+    },
+    {
+      "SHA256": "191B83F6EC7851FEA64448C88B1ED34660E2D83391DA87AA5EEF3DB436FD85F1",
+      "Relative": "Pulse.Index.exe",
+      "Version": "1.2.1.0",
+      "Match": true
+    },
+    {
+      "SHA256": "ED483B21E1CE232E599A0B88817D660821FA6D6F56493270C93479624FE02088",
+      "Relative": "Pulse.Shell.exe",
+      "Version": "1.2.1.0",
+      "Match": true
+    },
+    {
+      "SHA256": "471D8C58BE7DCC936853F610F2F658BF29FFF73E78BA73286EB483C1B3F5ADED",
+      "Relative": "Pulse.Preview.exe",
+      "Version": "1.2.1.0",
+      "Match": true
+    },
+    {
+      "SHA256": "F55481938E4EB6352946E2C64EE2B009C20813291139D111B602DDD0AB4C1D5A",
+      "Relative": "Pulse.Document.exe",
+      "Version": "1.2.1.0",
+      "Match": true
+    },
+    {
+      "SHA256": "E2EA232486CCFE0E3BC382BB7FBC7BD498C99ADCAD9ABD2B737601BA89EE7911",
+      "Relative": "lumatext.dll",
+      "Version": null,
+      "Match": true
+    },
+    {
+      "SHA256": "04100C03E41CAC1F979E36E5E26FB860BCB5A7461F53830D3C098716624A27A9",
+      "Relative": "pdfium.dll",
+      "Version": "155.0.8044.0",
+      "Match": true
+    }
+  ],
+  "Service": {
+    "State": "Running",
+    "StartMode": "Auto",
+    "ProcessId": 2188,
+    "PathName": "\"D:\\Applications\\Pulse\\Pulse.Index.exe\" --service"
+  },
+  "Utc": "2026-10-24T09:25:35.3908480Z"
+}

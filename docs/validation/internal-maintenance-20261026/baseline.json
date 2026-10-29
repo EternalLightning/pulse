@@ -1,0 +1,18 @@
+[
+  {
+    "Path": "E:\\Projects\\pulse\\bench_data\\internal-maintenance-20261026\\baseline\\tab-transfer.before.cpp",
+    "Hash": "12E2A42781137E43F2B886BB701DF5ADDFF029D4654F716DD3F0E118C65A8B49"
+  },
+  {
+    "Path": "E:\\Projects\\pulse\\bench_data\\internal-maintenance-20261026\\baseline\\window-transfer-test.before.cpp",
+    "Hash": "CFB7FC4FBDEEF5AEFD8CC86AD5B25E6368B5E92072E0880B7A3C7E20936A9969"
+  },
+  {
+    "Path": "E:\\Projects\\pulse\\bench_data\\internal-maintenance-20261026\\baseline\\shell-client.before.cpp",
+    "Hash": "8CEB28A4F4F1F235DEEE970989F5C9313B1D6110742BBFB910943584630E40F2"
+  },
+  {
+    "Path": "E:\\Projects\\pulse\\bench_data\\internal-maintenance-20261026\\baseline\\shell-launch-test.before.cpp",
+    "Hash": "4454EF2110E411F41988C27DF33F2058942DEE828BBC145CACC1EE042F509FC5"
+  }
+]

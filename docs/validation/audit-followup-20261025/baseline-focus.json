@@ -1,0 +1,52 @@
+[
+  {
+    "Path": "src/app/system_ctx_registry.cpp",
+    "Hash": "98FAC3AC3B2734D78116B052D3D9A87468D7923C489C616EC8C8B22C45626544",
+    "LastWrite": "2026-10-25T04:46:27.3433975Z"
+  },
+  {
+    "Path": "src/app/system_ctx_registry.h",
+    "Hash": "3AEC074DD57773EC0D52F1A4F3714D8D429391F9F362FA31700E4870E829ECEF",
+    "LastWrite": "2026-10-25T04:30:30.6558382Z"
+  },
+  {
+    "Path": "src/app/system_ctx_model.cpp",
+    "Hash": "A87CB3758D1661C44ACAC895DCFB5082623F32512D05AF8FD8AFFC2BCAED7018",
+    "LastWrite": "2026-10-25T04:43:40.3417828Z"
+  },
+  {
+    "Path": "src/app/system_ctx_model.h",
+    "Hash": "5C49BD2B8B81CC8CC2136CE170270FF2E8BFE5DACF8C032A5283772D8224683B",
+    "LastWrite": "2026-10-25T04:33:37.0460552Z"
+  },
+  {
+    "Path": "src/app/system_ctx_apply.h",
+    "Hash": "8044F03E41270EFE0668370CA90F85AFF11D906B83C5306FBEFFE707CBF63D0F",
+    "LastWrite": "2026-10-25T04:37:39.0622815Z"
+  },
+  {
+    "Path": "src/app/settings_controller.cpp",
+    "Hash": "0BBDA96151078B3283D2C50258FC410DFF0D20EA70B8952AAFBD6BA2340D0BB2",
+    "LastWrite": "2026-10-25T04:32:20.688457Z"
+  },
+  {
+    "Path": "src/app/context_menu_prefs.cpp",
+    "Hash": "CAA4015115A3B871CC7F42789395A76E7F5BB5FE3D4DB37A668DC3C02CA1BC46",
+    "LastWrite": "2026-10-25T04:35:52.7800972Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_test.cpp",
+    "Hash": "E9A829A83034E87AB1C7FB74A84CFCC2FE466936AD83BD652C4BAF57F67E441B",
+    "LastWrite": "2026-10-25T04:42:37.4207487Z"
+  },
+  {
+    "Path": "src/bench/system_ctx_model_test.cpp",
+    "Hash": "FDC7D60391A190892B7B8E5A1A02BA306F030335B775C9D6A9016531091B2BB1",
+    "LastWrite": "2026-10-25T04:44:38.6557255Z"
+  },
+  {
+    "Path": "CMakeLists.txt",
+    "Hash": "1F72910C9C3A27F6D912E46891C37A0DD532897C01B018E8A1ED9E6FF4764C58",
+    "LastWrite": "2026-10-25T04:49:05.500393Z"
+  }
+]

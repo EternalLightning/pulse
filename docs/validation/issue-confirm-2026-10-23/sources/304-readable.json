@@ -1,0 +1,15 @@
+{
+  "number": 304,
+  "title": "两个问题：右键【使用小米互传发送】显示【无法启动此菜单命令】；【排序方式】【分组依据】和查看中的【大图标】无法同时生效",
+  "body": "<img width=\"224\" height=\"184\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/084d4b69-291b-48fb-bc16-e2e2e5927d3b\" />\n<img width=\"300\" height=\"918\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/b0ef17b9-4f82-4357-85d1-500a74cfc1c4\" />\n\n1、如图所示，小米互传的右键发送完全失效了，在win11的资源管理器里可以正常使用，在pulse里无法使用\n2、【排序方式】【分组依据】和查看中的【大图标】无法同时生效。\n选择【大图标】，所有文件挤在一起了；选择【排序方式】【分组依据】查看时，有变成小图标列表显示了，不如win11资源管理器同时生效时一目了然\n",
+  "url": "https://github.com/jimmgreen/pulse/issues/304",
+  "captured_at": "2026-10-23T03:10:07.139323+00:00",
+  "updated_at": "2026-10-18T05:49:03Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}

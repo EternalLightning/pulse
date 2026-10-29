@@ -1,5 +1,6 @@
 #include "operation_center.h"
 #include "operation_center_layout.h"
+#include "animation_clock.h"
 #include <algorithm>
 #include <cmath>
 
@@ -7,17 +8,65 @@ namespace pulse::ui {
 using operation_center_layout::kMargin;
 using operation_center_layout::kHeader;
 namespace {
+constexpr fluent::MotionSpec kScrollMotion{160.0f,fluent::EasingCurve::OutCubic};
 float Smooth(float value) {
     value = std::clamp(value, 0.0f, 1.0f);
     return value * value * (3 - 2 * value);
 }
 }
 
+void OperationCenter::StopScroll() {
+    scroll_animating_=false;
+    scroll_from_=scroll_target_=scroll_;
+}
+
+void OperationCenter::SetScrollOffset(float value) {
+    value=std::clamp(value,0.0f,(std::max)(0.0f,content_height_-body_height_));
+    if(value==scroll_) return;
+    scroll_=value;
+    hover_=pressed_=-1;
+    Layout();
+}
+
+bool OperationCenter::TickScroll(uint64_t now) {
+    if(!scroll_animating_) return false;
+    const float previous=scroll_;
+    const float elapsed=static_cast<float>(now>=scroll_started_ ? now-scroll_started_ : 0);
+    const float progress=fluent::EvaluateMotion(kScrollMotion,elapsed);
+    SetScrollOffset(progress>=1 ? scroll_target_ : scroll_from_+(scroll_target_-scroll_from_)*progress);
+    if(progress>=1) StopScroll();
+    return scroll_!=previous;
+}
+
+void OperationCenter::Scroll(float delta,bool smooth) {
+    if(smooth && (!open_ || closing_ || dragging_scrollbar_)) return;
+    const uint64_t now=AnimationTimeMs();
+    const bool advanced=smooth && TickScroll(now);
+    const bool continuing=smooth && scroll_animating_ && (scroll_target_-scroll_)*delta>0;
+    const float target=std::clamp((continuing ? scroll_target_ : scroll_)+delta,0.0f,
+        (std::max)(0.0f,content_height_-body_height_));
+    if(!smooth || !AnimationsEnabled()) {
+        const float previous=scroll_;
+        StopScroll();SetScrollOffset(target);StopScroll();
+        if(advanced || previous!=scroll_) Redraw();
+        return;
+    }
+    const bool timer_running=scroll_animating_;
+    scroll_from_=scroll_;scroll_target_=target;scroll_started_=now;
+    scroll_animating_=scroll_target_!=scroll_;
+    if(!scroll_animating_) StopScroll();
+    else if(!timer_running && !SetTimer(hwnd_,1,kAnimationIntervalMs,nullptr)) {
+        SetScrollOffset(target);StopScroll();Redraw();
+        return;
+    }
+    if(advanced) Redraw();
+}
+
 void OperationCenter::BeginVisibility(bool closing) {
     closing_ = closing;
     animation_from_ = visibility_;
-    animation_start_ = GetTickCount64();
-    SetTimer(hwnd_, 1, 16, nullptr);
+    animation_start_ = AnimationTimeMs();
+    SetTimer(hwnd_, 1, kAnimationIntervalMs, nullptr);
 }
 
 void OperationCenter::FinishCardTransition() {
@@ -36,6 +85,7 @@ void OperationCenter::PrepareCardTransition(const std::vector<ops::OpStatus>& ne
     std::erase_if(departing_cards_, [&](const auto& card) { return retained(card.task_id); });
     if (std::none_of(tasks_.begin(), tasks_.end(), [&](const auto& task) { return !retained(task.task_id); })) return;
 
+    StopScroll();
     const float previous_fade = 1 - Smooth(card_progress_ / 0.7f);
     for (auto& card : departing_cards_) {
         card.opacity *= previous_fade;
@@ -72,7 +122,7 @@ void OperationCenter::PrepareCardTransition(const std::vector<ops::OpStatus>& ne
     cards_animating_ = card_scroll_pending_ = true;
     card_scroll_from_ = scroll_;
     card_progress_ = 0;
-    card_animation_start_ = GetTickCount64();
+    card_animation_start_ = AnimationTimeMs();
 }
 
 void OperationCenter::AnimateCardLayout() {

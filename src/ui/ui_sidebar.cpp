@@ -176,7 +176,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             const D2D1_RECT_F icon_rc = D2D1::RectF(slot.rc.left + pad_x, slot.rc.top + pad_y,
                                                     slot.rc.right - pad_x, slot.rc.bottom - pad_y);
             if (item.use_path_icon &&
-                icon_cache_.Draw(dc, icon_rc, item.path, item.label, true,
+                icon_cache_.Draw(dc, icon_rc, item.icon_path.empty() ? item.path : item.icon_path, item.label, true,
                                  FILE_ATTRIBUTE_DIRECTORY)) {
                 continue;
             }
@@ -259,7 +259,6 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         fluent::ControlState state;
         state.selected = PathIsSelfOrChild(item.path, vm.pane.path);
         state.hovered = IsHovered(vm, HitTestResult::SidebarItem, slot.run) ||
-            IsHovered(vm, HitTestResult::SidebarItemAction, slot.run) ||
             IsHovered(vm, HitTestResult::SidebarItemExpand, slot.run);
         // Rows of the section being reordered stay lit like its header, and the
         // dragged pin row reads as held.
@@ -356,19 +355,14 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             const int row_svg = item.is_tag ? 0 : FluentSvgIdForGlyph(item.icon_glyph);
             row.skip_glyph = item.use_path_icon ||
                 (!IsHighContrast() && row_svg != 0 && EnsureFluentSvg(row_svg, true));
-            const bool unpin = SidebarItemHasUnpin(item);
-            const auto unpin_rc = WorkspaceUnpinRect(slot.rc, scale_);
             const auto expand_rc = SidebarExpandRect(slot.rc, scale_);
-            if (unpin)
-                row.trailing_reserve = (std::max)(0.0f,
-                    (slot.rc.right - unpin_rc.left) - 6.0f * scale_);
-            else if (item.expandable)
+            if (item.expandable)
                 row.trailing_reserve = (std::max)(0.0f,
                     (slot.rc.right - expand_rc.left) - 4.0f * scale_);
             painter_.DrawSidebarItem(row);
             if (item.use_path_icon) {
                 const D2D1_RECT_F icon = painter_.SidebarItemIconRect(slot.rc, item.status_dot);
-                if (!icon_cache_.Draw(dc, icon, item.path, item.label, true,
+                if (!icon_cache_.Draw(dc, icon, item.icon_path.empty() ? item.path : item.icon_path, item.label, true,
                                       FILE_ATTRIBUTE_DIRECTORY)) {
                     DrawIconText(icon.left, icon.top, icon.right - icon.left,
                                  icon.bottom - icon.top, item.icon_glyph,
@@ -392,18 +386,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                     painter_.DrawTextFieldFrame(cell, field);
                 }
             }
-            if (unpin) {
-                const bool unpin_hot = IsHovered(vm, HitTestResult::SidebarItemAction, slot.run);
-                if (unpin_hot) {
-                    MakeBrush(dc, WithAlpha(theme.accent, vm.dark ? 0.22f : 0.16f), brFillHover_);
-                    FillRoundedRect(dc, brFillHover_.get(), unpin_rc.left, unpin_rc.top,
-                        unpin_rc.right - unpin_rc.left, unpin_rc.bottom - unpin_rc.top,
-                        4.0f * scale_);
-                }
-                DrawIconText(unpin_rc.left, unpin_rc.top,
-                    unpin_rc.right - unpin_rc.left, unpin_rc.bottom - unpin_rc.top,
-                             kIconPinFilled, L"P", unpin_hot ? theme.accent_hover : theme.accent, 0.72f);
-            } else if (item.expandable) {
+            if (item.expandable) {
                 const bool expand_hot = IsHovered(vm, HitTestResult::SidebarItemExpand, slot.run);
                 if (expand_hot) {
                     MakeBrush(dc, theme.fill_hover, brFillHover_);
@@ -641,7 +624,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
                 bl->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 bl->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 bl->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, {0, static_cast<UINT32>(cutLabel.size())});
-                dc->DrawTextLayout(D2D1::Point2F(bx, by), bl.get(),
+                compositor_->DrawTextLayout(D2D1::Point2F(bx, by), bl.get(),
                     color(vm.dark ? rgba(0xFFB454, 1.0f) : rgba(0xB25E00, 1.0f)));
             }
         }

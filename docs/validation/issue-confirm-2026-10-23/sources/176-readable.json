@@ -1,0 +1,42 @@
+{
+  "number": 176,
+  "title": "右键菜单设置与实际显示不一致",
+  "body": "如图，设置了右键菜单项之后，在实际菜单显示中并不一致。勾选的选项并没有显示出来。\n\n<img width=\"1434\" height=\"1275\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9c3dec5c-81c2-4dcf-97ee-30c130cb3d75\" />",
+  "url": "https://github.com/jimmgreen/pulse/issues/176",
+  "captured_at": "2026-10-23T03:10:07.198998+00:00",
+  "updated_at": "2026-10-22T06:29:36Z",
+  "comments": [
+    {
+      "body": "已修复。\n\n原因：旧版「本地右键菜单」设置页的列表，是根据过去右键时见过的条目累积出来的，并不等于当前系统里实际注册的扩展，所以会出现开关打开、菜单却不显示的情况。\n\n修复：设置里新增了「系统右键菜单」页，第三方扩展统一在这里管理，列表直接读取系统当前注册的扩展，开关和实际菜单一致。另外，右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。\n\n将在下个版本发布。\n",
+      "bodyHTML": "<p dir=\"auto\">已修复。</p>\n<p dir=\"auto\">原因：旧版「本地右键菜单」设置页的列表，是根据过去右键时见过的条目累积出来的，并不等于当前系统里实际注册的扩展，所以会出现开关打开、菜单却不显示的情况。</p>\n<p dir=\"auto\">修复：设置里新增了「系统右键菜单」页，第三方扩展统一在这里管理，列表直接读取系统当前注册的扩展，开关和实际菜单一致。另外，右键菜单已经重构。我在测试机上用对比工具，把 Pulse 的右键菜单和 Explorer 原生菜单逐行比对，覆盖 zip、图片、文本、exe、快捷方式、pdf、文件夹和磁盘根目录：原生菜单里的每一项在 Pulse 中都能显示，Pulse 也不会多出原生没有的扩展项。</p>\n<p dir=\"auto\">将在下个版本发布。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/176#issuecomment-6180326993"
+    },
+    {
+      "body": "1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。\n",
+      "bodyHTML": "<p dir=\"auto\">1.0.56 已经包含这个修复，先关闭。更新后如果还有问题，欢迎重新打开或新开 issue。</p>",
+      "author": {
+        "__typename": "User",
+        "id": "U_kgDOCDdfGA",
+        "login": "jimmgreen",
+        "avatarUrl": "https://avatars.githubusercontent.com/u/137846552?v=4",
+        "profileUrl": "https://github.com/jimmgreen",
+        "name": null
+      },
+      "url": "https://github.com/jimmgreen/pulse/issues/176#issuecomment-6334341158"
+    }
+  ],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "Y3Vyc29yOnYyOpPPAAABoTyiHmAAqjYxODAzMjY5OTM=",
+    "endCursor": "Y3Vyc29yOnYyOpPPAAABoWJNAIABqzMzOTIwODczMzA4"
+  }
+}

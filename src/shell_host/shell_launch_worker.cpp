@@ -3,6 +3,7 @@
 #include "ctx_session_process.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
+#include "../common/command_line.h"
 #include "../ops/image_open.h"
 #ifdef PULSE_SHELL_LAUNCH_TESTING
 #include "../common/utf8_file.h"
@@ -155,28 +156,25 @@ bool SplitLaunchCommand(const std::wstring& command, std::wstring& executable,
         executable = command.substr(begin + 1, end - begin - 1);
         ++end;
     } else {
-        // CreateProcess also accepts unquoted executable paths containing spaces.
-        // Resolve candidates in its prefix order before separating the raw arguments.
-        for (;;) {
-            end = command.find_first_of(L" \t", end);
-            const auto candidate = command.substr(begin, end == std::wstring::npos
-                ? std::wstring::npos : end - begin);
-            const DWORD capacity = SearchPathW(nullptr, candidate.c_str(), L".exe", 0, nullptr, nullptr);
-            if (capacity) {
-                std::wstring resolved(capacity, L'\0');
-                const DWORD length = SearchPathW(nullptr, candidate.c_str(), L".exe", capacity,
-                    resolved.data(), nullptr);
-                if (length && length < capacity) {
-                    resolved.resize(length);
-                    const DWORD attributes = GetFileAttributesW(resolved.c_str());
-                    if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                        executable = std::move(resolved);
-                        break;
-                    }
-                }
-            }
-            if (end == std::wstring::npos) return false;
-            ++end;
+        end = command.find_first_of(L" \t", begin);
+        executable = command.substr(begin, end == std::wstring::npos ? end : end - begin);
+        if (executable.find(L'"') != std::wstring::npos) return false;
+        const bool path = executable.find_first_of(L"\\/:") != std::wstring::npos;
+        if (path) {
+            // Never probe whitespace prefixes of an unquoted registry path.
+            // Such paths must name their executable extension in this token.
+            const auto extension = executable.find_last_of(L'.');
+            if (extension == std::wstring::npos ||
+                    (_wcsicmp(executable.c_str() + extension, L".exe") != 0 &&
+                     _wcsicmp(executable.c_str() + extension, L".com") != 0)) return false;
+        } else {
+            const DWORD capacity = SearchPathW(nullptr, executable.c_str(), L".exe", 0, nullptr, nullptr);
+            if (!capacity) return false;
+            std::wstring resolved(capacity, L'\0');
+            const DWORD length = SearchPathW(nullptr, executable.c_str(), L".exe", capacity, resolved.data(), nullptr);
+            if (!length || length >= capacity) return false;
+            resolved.resize(length);
+            executable = std::move(resolved);
         }
     }
     const auto arguments = end == std::wstring::npos ? end : command.find_first_not_of(L" \t", end);
@@ -194,17 +192,18 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
         // Registry verbs carry a complete expanded command line, including its own quoting.
         std::wstring command = request.executable;
         if (!request.parameters.empty()) command += L" " + request.parameters;
-        auto process_command = command;
+        std::wstring executable, parameters;
+        if (!SplitLaunchCommand(command, executable, parameters)) return E_INVALIDARG;
+        auto process_command = QuoteWindowsArgument(executable);
+        if (!parameters.empty()) process_command += L" " + parameters;
         STARTUPINFOW startup{sizeof(startup)};
         startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
         startup.wShowWindow = SW_SHOWNORMAL;
         PROCESS_INFORMATION child{};
-        if (!CreateProcessW(nullptr, process_command.data(), nullptr, nullptr, FALSE,
+        if (!CreateProcessW(executable.c_str(), process_command.data(), nullptr, nullptr, FALSE,
                 0, nullptr, request.directory.empty() ? nullptr : request.directory.c_str(), &startup, &child)) {
             const DWORD error = GetLastError();
             if (error != ERROR_ELEVATION_REQUIRED) return HRESULT_FROM_WIN32(error ? error : ERROR_GEN_FAILURE);
-            std::wstring executable, parameters;
-            if (!SplitLaunchCommand(command, executable, parameters)) return HRESULT_FROM_WIN32(error);
             SHELLEXECUTEINFOW elevated{sizeof(elevated)};
             elevated.hwnd = owner;
             elevated.lpVerb = L"runas";

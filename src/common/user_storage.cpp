@@ -382,7 +382,7 @@ bool ApplyConfiguration(std::wstring& error) {
     }
     // Path-only validation must be repeated while ancestor leases prevent replacement.
     if (!Validate(value, target, error)) return fail();
-    const wchar_t* names[] = {L"app.json", L"session.json", L"places.json", L"tags.json", L"context_menu.json", L"saved_searches.json", L"search_history.json", L"folder_sizes.json", L"operations.json", L"network-index.json", L"content-index.config"};
+    const wchar_t* names[] = {L"app.json", L"session.json", L"preferences.json", L"places.json", L"tags.json", L"context_menu.json", L"saved_searches.json", L"search_history.json", L"folder_sizes.json", L"operations.json", L"network-index.json", L"content-index.config"};
     std::vector<fs::path> inputs;
     for (auto name : names) inputs.push_back(fs::path(source) / name);
     const auto modern_content = fs::path(source) / L"content-index.config";

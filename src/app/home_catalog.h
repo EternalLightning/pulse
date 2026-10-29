@@ -7,12 +7,14 @@
 namespace pulse::model { class PlacesCatalog; }
 
 namespace pulse::app {
+struct SidebarModel;
 class HomeCatalog {
 public:
     void Refresh();
     void UpdateDriveLabel(const std::wstring& root, const std::wstring& label);
     bool ConsumeUpdate();
     bool Loading() const;
+    void FillDriveLabels(SidebarModel& sidebar) const;
     void Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* places = nullptr) const;
 private:
     struct State {

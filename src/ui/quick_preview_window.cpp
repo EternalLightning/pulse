@@ -2,6 +2,7 @@
 #include "legacy_icons.h"
 #include "../common/windows_compat.h"
 #include "quick_preview_window.h"
+#include "../fs/cloud_state.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
 #include "../ipc/preview_protocol.h"
@@ -25,15 +26,13 @@ namespace pulse::ui {
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"Pulse.QuickPreview";
-constexpr DWORD kRecallOnOpen = 0x00040000;
-constexpr DWORD kRecallOnData = 0x00400000;
-constexpr DWORD kPinned = 0x00080000;
 constexpr float kCloseButtonWidth = 46.0f;
 constexpr float kChromeButtonWidth = 40.0f;   // prev / next / more, left of close
 constexpr float kCloseGlyphSize = 16.0f * 0.66f;
 constexpr float kFindBarHeight = 44.0f;
 constexpr float kHudHeight = 28.0f;
 constexpr UINT_PTR kAnimationTimer = 7;
+constexpr UINT_PTR kTextScrollTimer = 10;
 constexpr float kMaxDecodedZoom = 4.0f;
 constexpr size_t kFindQueryLimit = 256;
 constexpr wchar_t kSearchGlyph[] = L"\xE721";
@@ -50,6 +49,12 @@ constexpr wchar_t kStarFilledGlyph[] = L"\xE735";
 constexpr wchar_t kRenameGlyph[] = L"\xE8AC";
 constexpr wchar_t kDeleteGlyph[] = L"\xE74D";
 constexpr wchar_t kPropertiesGlyph[] = L"\xE946";
+
+bool AnimateTextScroll() {
+    BOOL enabled = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+    return enabled && !IsHighContrast();
+}
 
 enum {
     kTextCmdCopy = 1,
@@ -127,6 +132,7 @@ bool QuickPreviewWindow::Initialize(HWND owner, UINT navigate_message, UINT open
 }
 
 void QuickPreviewWindow::ResetTextState() {
+    ResetTextScroll();
     preview_text_.clear();
     text_layout_.reset();
     text_layout_width_ = 0.0f;
@@ -135,6 +141,28 @@ void QuickPreviewWindow::ResetTextState() {
     sel_anchor_ = sel_focus_ = 0;
     selecting_ = false;
     CloseFind();
+}
+
+void QuickPreviewWindow::ResetTextScroll() {
+    text_smooth_scroll_.Reset();
+    if (hwnd_) KillTimer(hwnd_, kTextScrollTimer);
+}
+
+float QuickPreviewWindow::TextScrollMaximum() const {
+    DWRITE_TEXT_METRICS metrics{};
+    if (!text_layout_.get() || FAILED(text_layout_->GetMetrics(&metrics))) return 0.0f;
+    const auto content = ContentRect();
+    const float view = (std::max)(1.0f, content.bottom - content.top - 20.0f * scale_);
+    return (std::max)(0.0f, metrics.height - view);
+}
+
+void QuickPreviewWindow::UpdateTextScrollTimer() {
+    if (!hwnd_) return;
+    if (text_smooth_scroll_.Pending()) {
+        if (!SetTimer(hwnd_, kTextScrollTimer, 15, nullptr))
+            text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(), false);
+    }
+    else KillTimer(hwnd_, kTextScrollTimer);
 }
 
 void QuickPreviewWindow::ResetView() {
@@ -269,10 +297,11 @@ bool QuickPreviewWindow::visible() const noexcept {
 }
 
 bool QuickPreviewWindow::OfflinePlaceholder() const noexcept {
-    return (item_.attrs & (kRecallOnOpen | kRecallOnData)) && !(item_.attrs & kPinned);
+    return pulse::fs::IsCloudPlaceholder(item_.attrs);
 }
 
 void QuickPreviewWindow::Resize() {
+    ResetTextScroll();
     if (!hwnd_ || !compositor_.Dc()) return;
     RECT rect{};
     GetClientRect(hwnd_, &rect);
@@ -519,12 +548,14 @@ void QuickPreviewWindow::DrawHud(ID2D1DeviceContext* dc, const D2D1_RECT_F& cont
 
 void QuickPreviewWindow::EnsureTextLayout(const std::wstring& text, bool hex, float width) {
     if (text.empty() || !compositor_.DwriteFactory() || !preview_text_format_.get()) {
+        ResetTextScroll();
         text_layout_.reset();
         return;
     }
     if (text_layout_.get() && text == preview_text_ && hex == text_layout_hex_ &&
         std::abs(width - text_layout_width_) < 0.5f &&
         std::abs(scale_ - text_layout_scale_) < 0.001f) return;
+    ResetTextScroll();
     preview_text_ = text;
     text_layout_.reset();
     preview_text_format_->SetWordWrapping(
@@ -831,6 +862,7 @@ void QuickPreviewWindow::UpdateFindMatches() {
 }
 
 void QuickPreviewWindow::ScrollMatchIntoView(uint32_t start) {
+    ResetTextScroll();
     if (!text_layout_.get()) return;
     FLOAT x = 0, y = 0;
     DWRITE_HIT_TEST_METRICS metrics{};
@@ -894,15 +926,11 @@ void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT
                                           ID2D1SolidColorBrush* text_brush) {
     if (!text_layout_.get() || !dc) return;
     const bool high_contrast = IsHighContrast();
+    text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(), AnimateTextScroll());
+    UpdateTextScrollTimer();
     const float pad = 20.0f * scale_;
     const float origin_x = pad;
     const float origin_y = content.top + pad - text_scroll_;
-    DWRITE_TEXT_METRICS metrics{};
-    if (SUCCEEDED(text_layout_->GetMetrics(&metrics))) {
-        const float view = (std::max)(1.0f, content.bottom - content.top - pad);
-        const float max_scroll = (std::max)(0.0f, metrics.height - view);
-        text_scroll_ = std::clamp(text_scroll_, 0.0f, max_scroll);
-    }
     if (find_open_ && !find_query_.empty() && !find_matches_.empty()) {
         ComPtr<ID2D1SolidColorBrush> match_brush;
         ComPtr<ID2D1SolidColorBrush> current_brush;
@@ -1311,8 +1339,14 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         if (native_kind_ == NativeKind::Bitmap) {
             ZoomAt(static_cast<float>(cursor.x), static_cast<float>(cursor.y),
                    std::pow(1.15f, steps));
+        } else if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex) {
+            const auto content = ContentRect();
+            text_smooth_scroll_.ScrollBy(text_scroll_, -steps * 56.0f * scale_,
+                TextScrollMaximum(), content.bottom - content.top, GetTickCount64(),
+                AnimateTextScroll());
+            UpdateTextScrollTimer();
         } else {
-            text_scroll_ = (std::max)(0.0f, text_scroll_ - steps * 56.0f * scale_);
+            break;
         }
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
@@ -1344,6 +1378,7 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
             pan_start_x_ = pan_x_;
             pan_start_y_ = pan_y_;
         } else if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex) {
+            ResetTextScroll();
             uint32_t index = 0;
             if (HitTestText(static_cast<float>(point.x), static_cast<float>(point.y), index)) {
                 selecting_ = true;
@@ -1468,6 +1503,17 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         return 0;
     }
     case WM_TIMER:
+        if (wparam == kTextScrollTimer) {
+            if (!visible() || (native_kind_ != NativeKind::Text && native_kind_ != NativeKind::Hex)) {
+                ResetTextScroll();
+                return 0;
+            }
+            if (text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(),
+                                        AnimateTextScroll()))
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            UpdateTextScrollTimer();
+            return 0;
+        }
         if (wparam == 9) {
             TickPlaybackSeek();
             return 0;
@@ -1675,6 +1721,7 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         Close();
         return 0;
     case WM_DESTROY:
+        ResetTextScroll();
         ResetPlayback();
         ResetAnimation();
         handler_.Reset();

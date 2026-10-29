@@ -34,6 +34,31 @@ void Pump(DWORD milliseconds) {
         Sleep(10);
     } while (GetTickCount64() < end);
 }
+bool SelectionMarkerMatches(pulse::GlobalSearchWindowTestPeer::State& state, int row) {
+    state.selected = row;
+    state.Paint();
+    auto* dc = state.compositor.Dc();
+    if (!dc) return false;
+    Microsoft::WRL::ComPtr<ID2D1Image> source;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap, sample;
+    dc->GetTarget(&source);
+    HRESULT result = source.As(&bitmap);
+    const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    if (SUCCEEDED(result)) result = dc->CreateBitmap(D2D1::SizeU(1, 1), nullptr, 0, properties, &sample);
+    const UINT y = static_cast<UINT>(std::floor(136 + static_cast<float>(row) * 88 - state.scroll_y + 14));
+    const D2D1_RECT_U area{6, y, 7, y + 1};
+    if (SUCCEEDED(result)) result = sample->CopyFromBitmap(nullptr, bitmap.Get(), &area);
+    D2D1_MAPPED_RECT pixel{};
+    if (SUCCEEDED(result)) result = sample->Map(D2D1_MAP_OPTIONS_READ, &pixel);
+    if (FAILED(result)) return false;
+    const auto accent = state.Theme().accent;
+    const bool matches = std::abs(static_cast<int>(pixel.bits[0]) - static_cast<int>(std::lround(accent.b * 255))) <= 5 &&
+        std::abs(static_cast<int>(pixel.bits[1]) - static_cast<int>(std::lround(accent.g * 255))) <= 5 &&
+        std::abs(static_cast<int>(pixel.bits[2]) - static_cast<int>(std::lround(accent.r * 255))) <= 5;
+    sample->Unmap();
+    return matches;
+}
 bool Capture(pulse::GlobalSearchWindowTestPeer::State& state, const std::wstring& path) {
     Pump(30);
     const UINT width = static_cast<UINT>(state.Px(state.width)), height = static_cast<UINT>(state.Px(state.height));
@@ -107,7 +132,8 @@ int wmain(int argc, wchar_t** argv) {
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const bool routing_only = (argc > 1 && std::wstring_view(argv[1]) == L"--routing-only") ||
         (argc > 2 && std::wstring_view(argv[2]) == L"--routing-only");
-    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only"
+    const bool smooth_only = argc > 1 && std::wstring_view(argv[1]) == L"--smooth-scroll";
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only
         ? argv[1] : L"bench_data/global-search-window";
     std::filesystem::create_directories(output);
     const auto profile = output / L"profile";
@@ -115,6 +141,81 @@ int wmain(int argc, wchar_t** argv) {
     SetEnvironmentVariableW(L"LOCALAPPDATA", profile.c_str());
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
+    if (smooth_only) {
+        pulse::index::IndexClient filenames;
+        pulse::index::NetworkAgentClient network;
+        uint32_t request = 0;
+        pulse::GlobalSearchWindow fixture;
+        fixture.BindFilenameClients(filenames, network, request);
+        auto& state = pulse::GlobalSearchWindowTestPeer::Get(fixture);
+        // Use the production window procedure and compositor without Show(),
+        // whose normal lifecycle starts the independent content search client.
+        WNDCLASSW cls{};
+        cls.lpfnWndProc = pulse::GlobalSearchWindowTestPeer::State::WindowProc;
+        cls.hInstance = GetModuleHandleW(nullptr);
+        cls.lpszClassName = L"Pulse.GlobalSearch.SmoothFixture";
+        RegisterClassW(&cls);
+        state.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP, cls.lpszClassName, L"",
+            WS_POPUP | WS_CLIPCHILDREN, 100, 100, 780, 488, nullptr, nullptr, cls.hInstance, &state);
+        state.edit = pulse::ui::CreateChildEdit(state.hwnd);
+        check(state.hwnd && state.edit, "create real popup controls without starting search workers");
+        if (state.hwnd && state.edit) {
+            ShowWindow(state.hwnd, SW_SHOWNOACTIVATE);
+            state.Layout();
+            state.motion_override = 1;
+            for (int i = 0; i < 30; ++i)
+                state.rows.push_back({L"Result " + std::to_wstring(i), L"C:\\fixture\\result.txt", {}, false});
+            const auto start = pulse::ui::AnimationTimeMs();
+            SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-15)), 0);
+            check(state.scroll_motion.Pending() && state.scroll_y < 33.0f,
+                "partial wheel starts continuous scrolling instead of discarding delta");
+            state.TickScroll(start + 80);
+            check(state.scroll_y > 14.0f && state.scroll_y < 33.0f && state.scroll_motion.Pending(),
+                "popup has a fractional intermediate frame before the 33 DIP target");
+            check(SelectionMarkerMatches(state, 1), "painted selection marker follows the actual fractional offset");
+            const auto settle = [&](uint64_t now) {
+                for (uint64_t step = 1; step <= 30 && state.scroll_motion.Pending(); ++step)
+                    state.TickScroll(now + step * 50);
+            };
+            settle(start + 80);
+            check(std::abs(state.scroll_y - 33.0f) < 0.1f && !state.scroll_motion.Pending() &&
+                !KillTimer(state.hwnd, pulse::kScrollTimer), "partial wheel settles exactly and releases its timer");
+
+            state.scroll_y = 0; state.StopScroll();
+            SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-15)), 0);
+            state.TickScroll(pulse::ui::AnimationTimeMs() + 80);
+            state.Paint();
+            const int expected = static_cast<int>((80.0f + state.scroll_y) / 88.0f);
+            SendMessageW(state.hwnd, WM_LBUTTONDOWN, 0, MAKELPARAM(80, 216));
+            check(expected == 1 && state.selected == expected && !state.scroll_motion.Pending(),
+                "click selects the displayed partial row and cancels scrolling");
+
+            state.scroll_y = state.MaxScroll() - 1.0f;
+            state.StopScroll();
+            SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
+            settle(pulse::ui::AnimationTimeMs());
+            check(state.scroll_y == state.MaxScroll() && !state.scroll_motion.Pending(),
+                "scrolling clamps at the lower content boundary and stops");
+            state.motion_override = 0;
+            SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(WHEEL_DELTA)), 0);
+            check(!state.scroll_motion.Pending() && std::abs(state.scroll_y - (state.MaxScroll() - 264.0f)) < 0.1f,
+                "disabled motion applies the complete wheel delta immediately");
+
+            state.motion_override = 1;
+            SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-15)), 0);
+            check(state.scroll_motion.Pending(), "start momentum before replacing search results");
+            state.local_result.hits = {{L"C:\\fixture\\new.txt", L"new.txt", false}};
+            state.local_result.total = 1;
+            state.local_ready = state.network_ready = true;
+            state.MergeFilenames();
+            state.TickScroll(pulse::ui::AnimationTimeMs() + 1000);
+            check(state.rows.size() == 1 && state.scroll_y == 0 && !state.scroll_motion.Pending() &&
+                !KillTimer(state.hwnd, pulse::kScrollTimer), "replacing results clamps the offset and cancels momentum");
+        }
+        fixture.Shutdown();
+        CoUninitialize();
+        return failed ? 1 : 0;
+    }
     pulse::GlobalSearchWindow window;
     const auto shared_lifecycle = [&] {
         pulse::index::IndexClient shared_filenames;
@@ -179,12 +280,13 @@ int wmain(int argc, wchar_t** argv) {
     state.content_mode = false;
     for (int i = 0; i < 14; ++i) state.rows.push_back({L"预算文档 " + std::to_wstring(i) + L".txt", L"D:\\工作\\财务\\预算文档.txt", L"", false});
     state.total = state.rows.size(); state.selected = static_cast<int>(state.rows.size()) - 1; state.ClampSelection();
-    check(state.first > 0 && state.selected < state.first + state.PageSize(), "Keyboard selection scrolls into viewport");
+    check(state.scroll_y > 0 && static_cast<float>(state.selected + 1) * 88 <= state.scroll_y + state.ViewHeight() + 0.1f,
+        "Keyboard selection scrolls into viewport");
     check(Capture(state, (output / L"filename-light-150.png").wstring()), "Capture filename scrolling");
-    state.content_mode = true; state.selected = state.first = 0;
+    state.content_mode = true; state.selected = 0; state.scroll_y = 0; state.motion_override = 0;
     SendMessageW(state.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)), 0);
-    const int scrolled_first = state.first;
-    check(scrolled_first > 0, "Mouse wheel scrolls away from selected first result");
+    const float scrolled_offset = state.scroll_y;
+    check(scrolled_offset > 0, "Mouse wheel scrolls away from selected first result");
     for (int phase = 0; phase < 3; ++phase) {
         pulse::index::ContentSearchUpdate update;
         update.progress.generation = state.generation;
@@ -196,12 +298,14 @@ int wmain(int argc, wchar_t** argv) {
         }
         pulse::index::ContentRefreshTestPeer::Queue(state.contents, std::move(update));
         SendMessageW(state.hwnd, pulse::kContentResult, 0, 0);
-        check(state.first == scrolled_first && state.selected == 0,
+        check(state.scroll_y == scrolled_offset && state.selected == 0,
             "Content progress, appended hits and completion preserve mouse scroll");
     }
     state.Key(VK_DOWN);
-    check(state.selected >= state.first && state.selected < state.first + state.PageSize(),
+    check(static_cast<float>(state.selected) * 88 >= state.scroll_y &&
+        static_cast<float>(state.selected + 1) * 88 <= state.scroll_y + state.ViewHeight() + 0.1f,
         "Keyboard navigation still reveals selection after mouse scrolling");
+    state.motion_override = -1;
     state.rows.clear(); state.total = 0; state.busy = true;
     check(Capture(state, (output / L"loading-light-150.png").wstring()), "Capture loading");
     state.busy = false;

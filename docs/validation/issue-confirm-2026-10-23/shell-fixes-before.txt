@@ -1,0 +1,18 @@
+[PASS] F01 partial reply remains usable in its current session
+[PASS] F01 previous complete snapshot still seeds
+[FAIL] F01 partial reply cannot replace the next session's complete cache
+[FAIL] F01 cached commands stay disabled until current session validates them
+[PASS] F01 empty final result clears old complete cache
+[FAIL] F01 cold partial reply creates no reusable cache
+[FAIL] F03 real ordinary batch opens resolve sibling data and helper in each target folder
+[FAIL] F03 multi-path ordinary launch chooses each path's parent
+[PASS] F03 explicitly requested working directory takes precedence
+[PASS] F03 virtual shell parsing names receive no filesystem working directory
+[FAIL] F03 extended path prefix is removed for Shell working directory
+[FAIL] F03 UNC parent is selected lexically without accessing share
+[FAIL] F03 drive root remains a valid working directory
+[FAIL] F14 command error 740 retries exactly once through runas without real elevation
+[FAIL] F14 fallback preserves quoted executable, original arguments and working directory
+[FAIL] F14 cancelled elevation preserves cancellation result
+[PASS] F14 non-740 command errors never trigger elevation
+RESULT checks=17 failures=11 fixture=E:\Projects\pulse\bench_data\issue-confirm-shell-fixes\run-22324

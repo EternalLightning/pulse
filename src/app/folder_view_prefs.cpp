@@ -41,7 +41,7 @@ std::wstring GroupJsonKey(ui::GroupMode mode, model::SortDirection direction) {
         (direction == model::SortDirection::Desc ? L"_desc" : L"_asc");
 }
 
-bool ValidColumns(const std::array<float, 3>& columns) {
+bool ValidColumns(const std::array<float, 4>& columns) {
     // Legacy ratios (0..1) remain valid automatic widths. Manual widths use
     // DIP in the current renderer; reject corrupt or unbounded persisted data.
     return std::all_of(columns.begin(), columns.end(), [](float v) {
@@ -104,12 +104,12 @@ bool FolderViewPrefs::SetGroup(const std::wstring& path, ui::GroupMode mode,
     return true;
 }
 
-std::optional<std::array<float, 3>> FolderViewPrefs::FindColumns(const std::wstring& path) const {
+std::optional<std::array<float, 4>> FolderViewPrefs::FindColumns(const std::wstring& path) const {
     const auto it = columns_.find(FolderKey(path));
     return it == columns_.end() ? std::nullopt : std::optional(it->second);
 }
 
-bool FolderViewPrefs::SetColumns(const std::wstring& path, const std::array<float, 3>& columns) {
+bool FolderViewPrefs::SetColumns(const std::wstring& path, const std::array<float, 4>& columns) {
     const auto key = FolderKey(path);
     if (key.empty() || !ValidColumns(columns)) return false;
     const auto [it, inserted] = columns_.try_emplace(key, columns);
@@ -208,10 +208,11 @@ void FolderViewPrefs::ReadJson(const std::wstring& input) {
             const auto* path = item.Find(L"path");
             const auto* widths = item.Find(L"widths");
             if (!path || path->kind != json::Kind::String || !widths ||
-                widths->kind != json::Kind::Array || widths->children.size() != 3) continue;
-            std::array<float, 3> columns{};
+                widths->kind != json::Kind::Array ||
+                (widths->children.size() != 3 && widths->children.size() != 4)) continue;
+            std::array<float, 4> columns{};
             bool valid = true;
-            for (size_t i = 0; i < columns.size(); ++i) {
+            for (size_t i = 0; i < widths->children.size(); ++i) {
                 const auto& value = widths->children[i];
                 wchar_t* end = nullptr;
                 columns[i] = std::wcstof(value.text.c_str(), &end);

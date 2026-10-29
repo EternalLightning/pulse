@@ -679,6 +679,49 @@ std::wstring NetworkIndex::ConfigurationError() const {
     return config_error_;
 }
 
+void NetworkIndex::RefreshConfiguration() {
+    const auto path = NetworkConfigPath();
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    const bool exists = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) != FALSE;
+    const DWORD error = exists ? ERROR_SUCCESS : GetLastError();
+    if (!exists && error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return;
+    const uint64_t stamp = exists ? (static_cast<uint64_t>(attributes.ftLastWriteTime.dwHighDateTime) << 32) |
+        attributes.ftLastWriteTime.dwLowDateTime : 0;
+    const uint64_t size = exists ? (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) | attributes.nFileSizeLow : 0;
+    std::lock_guard lock(mu_);
+    if (configuration_path_ == path && configuration_stamp_ == stamp && configuration_size_ == size) return;
+    std::vector<std::wstring> configured;
+    if (!LoadNetworkRoots(configured, &config_error_)) return;
+    configuration_path_ = path;
+    configuration_stamp_ = stamp;
+    configuration_size_ = size;
+    const bool unchanged = configured.size() == roots_.size() &&
+        std::all_of(configured.begin(), configured.end(), [&](const auto& value) {
+            return std::any_of(roots_.begin(), roots_.end(), [&](const auto& root) { return EqualPath(root.info.path, value); });
+        });
+    if (unchanged) return;
+    std::vector<RootState> next;
+    for (const auto& value : configured) {
+        const auto previous = std::find_if(roots_.begin(), roots_.end(), [&](const auto& root) {
+            return EqualPath(root.info.path, value);
+        });
+        if (previous != roots_.end()) next.push_back(*previous);
+        else {
+            RootState root;
+            root.info.path = value;
+            root.info.state = L"等待扫描";
+            next.push_back(std::move(root));
+        }
+    }
+    roots_ = std::move(next);
+    dirty_roots_.clear();
+    for (const auto& root : roots_) dirty_roots_.insert(root.info.path);
+    ++generation_;
+    crawl_cv_.notify_one();
+    if (watch_wake_event_) SetEvent(watch_wake_event_);
+    NotifyStatus();
+}
+
 void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
     changes_.Open(NetworkDataDir());
     Stop();

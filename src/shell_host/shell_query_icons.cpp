@@ -1,5 +1,7 @@
 #include "shell_query_icons.h"
+#include "../fs/cloud_state.h"
 #include "../common/path_utils.h"
+#include "../common/shell_id.h"
 #include <commctrl.h>
 #include <commoncontrols.h>
 #include <shellapi.h>
@@ -103,19 +105,34 @@ bool ConvertShellIconPixels(HICON icon, uint32_t list_id, ipc::ShellIconPixels& 
 }
 
 void QueryShellIcons(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
-    const auto path = pulse::path::StripExtendedPathPrefix(request.path);
+    auto path = pulse::path::StripExtendedPathPrefix(request.path);
+    DWORD attributes = request.attributes;
+    bool use_attributes = request.use_attributes;
+    if (!use_attributes && !path.starts_with(L"::") && !path.starts_with(L"shell:")) {
+        const DWORD current = GetFileAttributesW(request.path.c_str());
+        if (current != INVALID_FILE_ATTRIBUTES && fs::IsCloudPlaceholder(current)) {
+            // Icon handlers can read content (notably .lnk and .exe). Never
+            // invoke them on placeholders, even if the queued attrs were local.
+            attributes = current & FILE_ATTRIBUTE_DIRECTORY ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+            const size_t dot = path.find_last_of(L'.');
+            const size_t slash = path.find_last_of(L"\\/");
+            path = L"dummy" + (dot != std::wstring::npos &&
+                (slash == std::wstring::npos || dot > slash) ? path.substr(dot) : L"");
+            use_attributes = true;
+        }
+    }
     SHFILEINFOW info{};
     UINT flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON;
     Pidl pidl;
     LPCWSTR query = path.c_str();
-    if (request.use_attributes) flags |= SHGFI_USEFILEATTRIBUTES;
+    if (use_attributes) flags |= SHGFI_USEFILEATTRIBUTES;
     else if (path.starts_with(L"::") || path.starts_with(L"shell:")) {
-        result.error = SHParseDisplayName(path.c_str(), nullptr, &pidl.value, 0, nullptr);
+        result.error = shell_id::ParseId(path, &pidl.value);
         if (FAILED(result.error)) return;
         query = reinterpret_cast<LPCWSTR>(pidl.value);
         flags |= SHGFI_PIDL;
     }
-    if (!SHGetFileInfoW(query, request.attributes, &info, sizeof(info), flags)) {
+    if (!SHGetFileInfoW(query, attributes, &info, sizeof(info), flags)) {
         result.error = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
         return;
     }

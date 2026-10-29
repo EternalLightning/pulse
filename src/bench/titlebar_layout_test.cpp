@@ -1,6 +1,7 @@
 #include "../ui/ui_renderer.h"
 #include "../ui/ui_compositor.h"
 #include "../ui/text_hit_ranges.h"
+#include "surface_scroll_cases.h"
 #include "../common/localization.h"
 #include <algorithm>
 #include <cmath>
@@ -154,6 +155,8 @@ void GeometryCases(pulse::ui::MainRenderer& renderer) {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     using namespace pulse;
+    if (argc == 2 && std::strcmp(argv[1], "--surface-scroll") == 0)
+        return ui::SurfaceScrollUiTest::Run();
     if (argc == 2 && std::strcmp(argv[1], "--preview-text-ranges") == 0) {
         ui::ComPtr<IDWriteFactory> factory;
         const HRESULT created = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,

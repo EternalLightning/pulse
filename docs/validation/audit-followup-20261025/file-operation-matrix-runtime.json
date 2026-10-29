@@ -1,0 +1,9 @@
+{
+  "executable": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\Release\\pulse_ops_test.exe",
+  "sha256": "2E2A584D6418E11F088A23843DAE765CFF10E85F61E267D8A7F02BA403ED403B",
+  "local_parent": "E:\\Projects\\pulse\\build_audit_msbuild_20261025\\console",
+  "network_parent": "Z:\\",
+  "exit_code": -1073741502,
+  "assertion_lines": 0,
+  "timestamp": "2026-10-25T16:18:19.1350424+08:00"
+}

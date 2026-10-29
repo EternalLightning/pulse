@@ -7,6 +7,9 @@ namespace pulse {
 // Keeps every visible pane's column listings in step with its folder and
 // selection. Cheap when nothing changed; starts async loads otherwise.
 void SyncColumnStrips(AppState& s);
+// Advances visible strips and returns whether another animation frame is needed.
+bool TickColumnStripScroll(AppState& s, uint64_t now);
+bool TickColumnStripScroll(AppState& s, ui::WindowViewModel& vm, uint64_t now);
 // Find a pending request retained by a column in another visible pane.
 uint64_t SharedColumnStripGeneration(AppState& s, const std::wstring& path,
                                     const app::Tab* excluding, uint64_t generation = 0);
@@ -28,7 +31,7 @@ void EndColumnStripResize(AppState& s);
 // the second click does not open whatever moved under the cursor.
 bool ColumnStripSwallowDoubleClick(const AppState& s);
 bool HandleColumnStripWheel(AppState& s, const ui::WindowViewModel& vm,
-                            const ui::HitTestResult& hit, int wheel_delta);
+                            const ui::HitTestResult& hit, int wheel_delta, bool horizontal = false);
 // Left/Right in the column view: go to the parent / enter the selected folder.
 bool HandleColumnArrowKey(AppState& s, bool right);
 void ToggleColumnLayout(AppState& s, int pane_index);

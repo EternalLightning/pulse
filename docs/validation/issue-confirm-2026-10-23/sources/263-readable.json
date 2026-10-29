@@ -1,0 +1,15 @@
+{
+  "number": 263,
+  "title": "[Bug] 命令行参数解析有问题",
+  "body": "正常来说，在命令行中执行 `explorer .` 就可以在命令行的当前目录打开文件夹，现在发现 cd 其他文件夹之后，`pulse .` 打开的还是最初进入命令行时候的文件夹。\n另外，在 Listary 中配置打开文件夹使用 pulse，参数是 %1，有些路径中带空格的就会解析错误，解析到 `System32` 下面的文件夹中。",
+  "url": "https://github.com/jimmgreen/pulse/issues/263",
+  "captured_at": "2026-10-23T03:10:07.147871+00:00",
+  "updated_at": "2026-10-15T07:39:35Z",
+  "comments": [],
+  "timeline_page_info": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": null,
+    "endCursor": null
+  }
+}
