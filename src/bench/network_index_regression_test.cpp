@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/network_index.h"
 #include <filesystem>
 #include <fstream>
@@ -22,6 +27,32 @@ struct NetworkIndexAccess {
         index.BuildRoot(path, index.generation_);
     }
     static const void* Shard(const NetworkIndex& index) { return index.roots_[0].shard.get(); }
+    static void Unavailable(NetworkIndex& index, const std::wstring& path, bool building = false) {
+        std::lock_guard lock(index.mu_);
+        NetworkIndex::RootState root;
+        root.info.path = path; root.info.building = building;
+        index.roots_.push_back(std::move(root));
+    }
+    static void Quality(NetworkIndex& index, bool online, bool building, bool failed) {
+        std::lock_guard lock(index.mu_);
+        auto& info = index.roots_[0].info;
+        info.online = online; info.building = building;
+        info.error = failed ? L"injected synchronization failure" : L"";
+    }
+    static SearchResult Search(NetworkIndex& index, const std::wstring& prefix) {
+        if (!index.search_thread_.joinable())
+            index.search_thread_ = std::thread([&] { index.SearchLoop(); });
+        static uint32_t id = 100;
+        Query query; query.path_prefix = prefix; query.limit = 100;
+        index.SearchAsync(query, ++id);
+        SearchResult result;
+        for (unsigned retry = 0; retry < 1000; ++retry) {
+            if (index.TakeResult(id, result)) return result;
+            Sleep(1);
+        }
+        result.error = ERROR_TIMEOUT; result.incomplete = true;
+        return result;
+    }
 };
 }
 
@@ -110,9 +141,7 @@ std::vector<char> Read(const std::wstring& path) {
 
 int RunNetworkIndexRegressionTests() {
     using namespace pulse::index::testing;
-    wchar_t temp[MAX_PATH]{};
-    if (!GetTempPathW(MAX_PATH, temp)) return 1;
-    const auto directory = std::filesystem::path(temp) /
+    const auto directory = std::filesystem::absolute(std::filesystem::path(L"bench_data")) /
         (L"pulse-network-scan-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
          std::to_wstring(GetTickCount64()));
     if (!std::filesystem::create_directory(directory)) return 1;
@@ -133,6 +162,40 @@ int RunNetworkIndexRegressionTests() {
         auto original_bytes = Read(old_path);
         Check(original && index.Roots()[0].indexed_items == 3 && !original_bytes.empty(),
               L"complete injected scan publishes three records");
+        auto result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && !result.incomplete && !result.error,
+              L"healthy root produces a complete query response");
+        NetworkIndexAccess::Unavailable(index, L"\\\\fixture.invalid\\offline");
+        result = NetworkIndexAccess::Search(index, L"");
+        Check(result.total == 3 && result.incomplete && result.error == ERROR_NETWORK_UNREACHABLE,
+              L"global query reports omitted offline coverage while retaining healthy hits");
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && !result.incomplete && !result.error,
+              L"healthy scoped query ignores unrelated offline root");
+        NetworkIndexAccess::Unavailable(index, root + L"2");
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && !result.incomplete && !result.error,
+              L"scope overlap respects the root path component boundary");
+        NetworkIndexAccess::Unavailable(index, L"\\\\fixture.invalid\\building", true);
+        result = NetworkIndexAccess::Search(index, L"\\\\fixture.invalid\\building");
+        Check(result.total == 0 && result.incomplete && result.error == ERROR_NOT_READY,
+              L"first build without a shard reports incomplete coverage instead of complete empty");
+        NetworkIndexAccess::Quality(index, true, true, false);
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && result.incomplete && result.error == ERROR_NOT_READY,
+              L"rebuilding root retains old hits and reports in-progress coverage");
+        NetworkIndexAccess::Quality(index, true, false, true);
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && result.incomplete && result.error == ERROR_READ_FAULT,
+              L"failed synchronization marks retained stale shard results incomplete");
+        NetworkIndexAccess::Quality(index, false, false, true);
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 0 && result.incomplete && result.error == ERROR_NETWORK_UNREACHABLE,
+              L"offline retained shard reports its missing query coverage");
+        NetworkIndexAccess::Quality(index, true, false, false);
+        result = NetworkIndexAccess::Search(index, root);
+        Check(result.total == 3 && !result.incomplete && !result.error,
+              L"successful recovery restores complete scoped coverage");
         for (const auto mode : {Scan::ChildDenied, Scan::NextFailed, Scan::MissingChild, Scan::RootDenied}) {
             scan = Scan::Complete;
             NetworkIndexAccess::Build(index, root);
@@ -171,7 +234,11 @@ int RunNetworkIndexRegressionTests() {
     Check(NormalizeNetworkRoot(L"\\\\?\\UNC\\server\\share\\folder") ==
           L"\\\\server\\share\\folder", L"preserve extended UNC normalization");
     SetNetworkIndexHooks(nullptr);
-    std::filesystem::remove_all(directory);
+    std::error_code cleanup;
+    std::filesystem::remove_all(directory, cleanup);
+    Check(!cleanup && !std::filesystem::exists(directory), L"remove and enumerate isolated network scan fixtures");
+    if (cleanup) std::fprintf(stderr, "[FAIL] network scan cleanup: error=%d %s\n",
+        cleanup.value(), cleanup.message().c_str());
     return failures ? 1 : 0;
 }
 

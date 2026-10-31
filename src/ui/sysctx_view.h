@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // sysctx_view.h — what Settings > 系统右键菜单 draws. Built by
 // app::SystemCtxModel on the UI thread from its last scan; immutable once
 // published, so view models share it instead of copying ~200 rows per frame.

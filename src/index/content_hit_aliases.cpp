@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_hit_aliases.h"
 #include "content_scope.h"
 #include "document_reader.h"
@@ -92,9 +97,7 @@ bool ContentHitAliases::Allowed(const std::wstring& path, const ContentHit& sour
     if ((!request_.candidate_paths.empty() && std::none_of(request_.candidate_paths.begin(), request_.candidate_paths.end(),
             [&](const auto& candidate) { return Key(candidate) == Key(path); })) || excluded_(path) ||
         (request_.skip_system_locations && SystemPath(path)) ||
-        (!request_.root.empty() && !Under(path, request_.root, request_.recursive)) ||
-        (!request_.roots.empty() && std::none_of(request_.roots.begin(), request_.roots.end(),
-            [&](const auto& root) { return Under(path, root, request_.recursive); }))) return false;
+        !ContentRequestIncludesPath(request_, path)) return false;
     const auto root = std::find_if(config_.roots.begin(), config_.roots.end(), [&](const auto& value) { return Under(path, value.path); });
     const auto original = std::find_if(config_.roots.begin(), config_.roots.end(), [&](const auto& value) { return Under(source.path, value.path); });
     const auto extension = Extension(path);

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // Isolated requested-heap/algorithm comparison; no service, pipes or user files.
 #include "../index/change_feed_history.h"
 #include "../index/index_memory_probe.h"

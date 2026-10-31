@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/content_index.h"
 #include "../index/content_agent.h"
 #include "../index/content_search_client.h"
@@ -1681,11 +1686,50 @@ int RunDeltaCacheTest(const std::filesystem::path& base) {
 }
 
 int RunInstantLifecycleTests(const std::filesystem::path& base);
+
+int RunInstantGapChild(const wchar_t* module, const std::filesystem::path& base, bool inject_stall = false) {
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    const bool bounded = job && SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+    Check(bounded, "create bounded cancellation fixture job");
+    if (!bounded) { if (job) CloseHandle(job); return 1; }
+    std::wstring command = L"\"" + std::wstring(module) + L"\" --instant-gaps-child \"" + base.wstring() + L"\"";
+    if (inject_stall) command += L" --stall-cancel";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    const bool started = CreateProcessW(module, command.data(), nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &child) != FALSE;
+    Check(started, "start isolated cancellation fixture");
+    if (!started) { CloseHandle(job); return 1; }
+    const bool assigned = AssignProcessToJobObject(job, child.hProcess) != FALSE;
+    Check(assigned, "own cancellation fixture before allowing it to run");
+    if (assigned) ResumeThread(child.hThread);
+    else TerminateProcess(child.hProcess, ERROR_ACCESS_DENIED);
+    CloseHandle(child.hThread);
+    const bool exited = WaitForSingleObject(child.hProcess, inject_stall ? 3000 : 20000) == WAIT_OBJECT_0;
+    DWORD code = STILL_ACTIVE;
+    GetExitCodeProcess(child.hProcess, &code);
+    if (!exited) {
+        std::fprintf(stderr, "[FAIL] instant cancellation child exceeded deadline; PID=%lu fixture=%ls\n", child.dwProcessId, base.c_str());
+        TerminateJobObject(job, ERROR_TIMEOUT);
+        WaitForSingleObject(child.hProcess, 5000);
+    }
+    CloseHandle(child.hProcess);
+    CloseHandle(job);
+    Check(assigned && exited && code == 0, "instant cancellation fixture completes within the parent deadline");
+    return assigned && exited && code == 0 ? 0 : 1;
+}
 int RunInstantGapTests(const std::filesystem::path& base);
 #include "content_contract_cases.h"
 #include "content_reconcile_capacity_cases.h"
 
 int wmain(int argc, wchar_t* argv[]) {
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--instant-gaps-child") {
+        if (argc == 4 && std::wstring_view(argv[3]) == L"--stall-cancel")
+            SetEnvironmentVariableW(L"PULSE_TEST_INSTANT_CANCEL_STALL", L"1");
+        return RunInstantGapTests(argv[2]);
+    }
     if (argc == 5 && std::wstring_view(argv[1]) == L"--capacity-agent-child")
         return index::RunPersistentContentAgent(argv[2], wcstoul(argv[3], nullptr, 10), index::ContentAgentMode::LegacyWriter, argv[4]);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--client-lifecycle-child") {
@@ -1696,10 +1740,24 @@ int wmain(int argc, wchar_t* argv[]) {
     if (GetEnvironmentVariableW(L"PULSE_TEST_CLIENT_LIFECYCLE", nullptr, 0)) return RunClientLifecycleTest(module);
     const auto base = std::filesystem::path(module).parent_path().parent_path() / L"bench_data" /
         (L"content-index-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    std::error_code create_error;
+    std::filesystem::create_directories(base.parent_path(), create_error);
+    if (create_error || !CreateDirectoryW(base.c_str(), nullptr)) {
+        Check(false, "create a new process-owned content index fixture");
+        return 1;
+    }
     struct CleanupFixture {
         std::filesystem::path path;
-        ~CleanupFixture() { std::error_code error; std::filesystem::remove_all(path, error); }
+        bool succeeded = false;
+        ~CleanupFixture() {
+            std::error_code error;
+            if (succeeded) std::filesystem::remove_all(path, error);
+            else if (std::filesystem::exists(path, error)) wprintf(L"Fixture retained: %s\n", path.c_str());
+            if (error) fwprintf(stderr, L"Fixture cleanup error: %s: %hs\n", path.c_str(), error.message().c_str());
+        }
     } cleanup_fixture{base};
+    const int result = [&]() -> int {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--instant-gaps-timeout-probe") return RunInstantGapChild(module, base, true);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--content-contract") return RunContentContractCases(base);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--root-errors") return RunContentRootErrorCases(base);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--content-config-errors") return RunContentConfigErrorCases(base);
@@ -1707,7 +1765,7 @@ int wmain(int argc, wchar_t* argv[]) {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--agent-capacity") return RunContentCapacityCases(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_TASK_TEXT_BENCH_ROOT", nullptr, 0)) return RunTaskTextIoBenchmark(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_DELTA_CACHE", nullptr, 0)) return RunDeltaCacheTest(base);
-    if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_GAPS", nullptr, 0)) return RunInstantGapTests(base);
+    if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_GAPS", nullptr, 0)) return RunInstantGapChild(module, base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_MODE", nullptr, 0)) return RunInstantLifecycleTests(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_ZERO_REVISION", nullptr, 0)) return RunZeroRevisionSubscriptionTest(base);
     if (GetEnvironmentVariableW(L"PULSE_TEST_TASK_LIVE", nullptr, 0)) return RunTaskLiveTest();
@@ -1930,8 +1988,8 @@ int wmain(int argc, wchar_t* argv[]) {
     Check(text::Decode({0xb1, 0xa8, 0xb8, 0xe6}, decoded, text::Encoding::Gb18030) && decoded == L"报告", "explicit GB18030 decoding");
     Check(text::Decode({0xef, 0xbb, 0xbf}, decoded) && decoded.empty(), "empty UTF-8 BOM");
     printf("%d passed, %d failed\n", passed, failed);
-    // This PID/tick-specific directory was created by this executable only.
-    if (!failed) std::filesystem::remove_all(base);
-    else wprintf(L"Fixture retained: %s\n", base.c_str());
     return failed ? 1 : 0;
+    }();
+    cleanup_fixture.succeeded = result == 0;
+    return result;
 }

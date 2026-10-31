@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "search_query.h"
 #include "../common/path_utils.h"
 
@@ -77,42 +82,71 @@ std::wstring QuotePathQueryValue(std::wstring_view value) {
     return out;
 }
 
-DatePreset DetectDatePreset(std::wstring_view raw) {
-    DatePreset found = DatePreset::Any;
+struct ConstraintToken {
+    std::wstring raw;
+    std::wstring value;
+    bool size = false;
+    bool negated = false;
+};
+
+std::vector<ConstraintToken> ReadConstraints(std::wstring_view raw,
+    std::vector<ParsedSearchConstraints::Group>& groups) {
+    std::vector<ConstraintToken> tokens;
+    groups.emplace_back();
+    bool have_term = false;
+    bool pending_or = false;
     size_t i = 0;
     while (i < raw.size()) {
-        if (raw[i] == L'"') {
-            ++i;
-            while (i < raw.size() && raw[i] != L'"') ++i;
-            if (i < raw.size()) ++i;
-            continue;
-        }
-        if (raw[i] == L' ' || raw[i] == L'\t' || raw[i] == L'|') {
+        if (iswspace(raw[i])) { ++i; continue; }
+        if (raw[i] == L'|') {
+            pending_or = have_term;
             ++i;
             continue;
         }
-        size_t j = i;
-        while (j < raw.size() && raw[j] != L' ' && raw[j] != L'\t' && raw[j] != L'|' &&
-               raw[j] != L'"')
-            ++j;
-        const std::wstring tok = index::Fold(raw.substr(i, j - i));
-        if (found == DatePreset::Any) {
-            if (tok == L"dm:today" || tok == L"datemodified:today") found = DatePreset::Today;
-            else if (tok == L"dm:yesterday" || tok == L"datemodified:yesterday")
-                found = DatePreset::Yesterday;
-            else if (tok == L"dm:thisweek" || tok == L"datemodified:thisweek")
-                found = DatePreset::ThisWeek;
-            else if (tok == L"dm:thismonth" || tok == L"datemodified:thismonth")
-                found = DatePreset::ThisMonth;
-            else if (tok == L"dm:thisyear" || tok == L"datemodified:thisyear")
-                found = DatePreset::ThisYear;
-            else if (tok.starts_with(L"dm:") || tok.starts_with(L"datemodified:") ||
-                     tok.starts_with(L"\u4fee\u6539:") || tok.starts_with(L"\u65e5\u671f:"))
-                found = DatePreset::Custom;
+        const size_t start = i;
+        bool negated = false;
+        while (i < raw.size() && raw[i] == L'!') { negated = !negated; ++i; }
+        while (i < raw.size() && iswspace(raw[i])) ++i;
+        const size_t word = i;
+        const bool quoted = i < raw.size() && raw[i] == L'"';
+        bool in_quote = false;
+        while (i < raw.size()) {
+            if (raw[i] == L'"') in_quote = !in_quote;
+            else if (!in_quote && (iswspace(raw[i]) || raw[i] == L'|')) break;
+            ++i;
         }
-        i = j;
+        // Content and global flags do not create filename predicate groups.
+        if (!index::ParseQuery(raw.substr(start, i - start)).groups.empty()) {
+            if (pending_or) groups.emplace_back();
+            pending_or = false;
+            have_term = true;
+        }
+        if (quoted) continue;
+        const auto text = raw.substr(word, i - word);
+        const size_t colon = text.find_first_of(L":：");
+        if (colon == std::wstring_view::npos) continue;
+        const auto key = index::Fold(text.substr(0, colon));
+        const bool size = key == L"size" || key == L"大小";
+        if (!size && key != L"dm" && key != L"datemodified" && key != L"修改" && key != L"日期")
+            continue;
+        auto& query = size ? groups.back().size_query : groups.back().date_query;
+        if (!query.empty()) query.push_back(L' ');
+        query.append(raw.substr(start, i - start));
+        tokens.push_back({std::wstring(raw.substr(start, i - start)),
+            std::wstring(text.substr(colon + 1)), size, negated});
     }
-    return found;
+    if (tokens.empty()) groups.clear();
+    return tokens;
+}
+
+DatePreset DatePresetFor(std::wstring_view value) {
+    const auto folded = index::Fold(value);
+    if (folded == L"today") return DatePreset::Today;
+    if (folded == L"yesterday") return DatePreset::Yesterday;
+    if (folded == L"thisweek") return DatePreset::ThisWeek;
+    if (folded == L"thismonth") return DatePreset::ThisMonth;
+    if (folded == L"thisyear") return DatePreset::ThisYear;
+    return DatePreset::Custom;
 }
 
 } // namespace
@@ -178,7 +212,12 @@ std::wstring CompileSearchQuery(const AdvancedSearchSpec& spec) {
     if (!folder.empty()) {
         append(L"path:" + QuotePathQueryValue(folder));
     }
-    switch (spec.date) {
+    const auto& retained = spec.parsed_constraints;
+    const bool retain_date = !retained.groups.empty() && spec.date == retained.date &&
+        spec.date_from == retained.date_from && spec.date_to == retained.date_to;
+    const bool retain_size = !retained.groups.empty() && spec.size == retained.size &&
+        spec.size_custom == retained.size_custom;
+    if (!retain_date) switch (spec.date) {
     case DatePreset::Today: append(L"dm:today"); break;
     case DatePreset::Yesterday: append(L"dm:yesterday"); break;
     case DatePreset::ThisWeek: append(L"dm:thisweek"); break;
@@ -194,7 +233,7 @@ std::wstring CompileSearchQuery(const AdvancedSearchSpec& spec) {
     }
     default: break;
     }
-    switch (spec.size) {
+    if (!retain_size) switch (spec.size) {
     case SizePreset::Empty: append(L"size:empty"); break;
     case SizePreset::Lt1MB: append(L"size:<1mb"); break;
     case SizePreset::From1To10MB: append(L"size:>=1mb") ; append(L"size:<=10mb"); break;
@@ -203,8 +242,11 @@ std::wstring CompileSearchQuery(const AdvancedSearchSpec& spec) {
         std::wstring custom = spec.size_custom;
         Trim(custom);
         if (!custom.empty()) {
-            if (custom.find(L"size:") == std::wstring::npos &&
-                custom.find(L"大小:") == std::wstring::npos)
+            std::vector<ParsedSearchConstraints::Group> custom_groups;
+            const auto custom_tokens = ReadConstraints(custom, custom_groups);
+            bool has_size_token = false;
+            for (const auto& token : custom_tokens) has_size_token |= token.size;
+            if (!has_size_token)
                 append(L"size:" + custom);
             else
                 append(custom);
@@ -237,7 +279,22 @@ std::wstring CompileSearchQuery(const AdvancedSearchSpec& spec) {
     if (spec.whole_word) append(L"ww:");
     if (spec.case_sensitive) append(L"case:");
     if (!spec.pinyin_enabled) append(L"nopinyin:");
-    return q;
+    if ((!retain_date && !retain_size) || retained.groups.empty()) return q;
+    std::wstring combined;
+    for (const auto& group : retained.groups) {
+        std::wstring branch = q;
+        auto append_filter = [&](std::wstring_view filter) {
+            if (filter.empty()) return;
+            if (!branch.empty()) branch.push_back(L' ');
+            branch.append(filter);
+        };
+        if (retain_date) append_filter(group.date_query);
+        if (retain_size) append_filter(group.size_query);
+        if (branch.empty()) return q;
+        if (!combined.empty()) combined.append(L" | ");
+        combined.append(branch);
+    }
+    return combined;
 }
 
 AdvancedSearchSpec ParseSearchQuery(std::wstring_view raw, std::wstring_view current_folder) {
@@ -261,8 +318,10 @@ AdvancedSearchSpec ParseSearchQuery(std::wstring_view raw, std::wstring_view cur
     bool saw_name = false;
     bool saw_ge_1mb = false;
     bool saw_le_10mb = false;
+    size_t size_count = 0;
     for (const auto& group : compiled.groups) {
         for (const auto& term : group) {
+            if (term.size_how != index::SizeHow::Any) ++size_count;
             if (term.folder && term.name_how == index::NameHow::Any && term.exts.empty())
                 spec.kind = index::SearchKind::Folder;
             if (!term.exts.empty() && spec.kind != index::SearchKind::Folder) {
@@ -312,8 +371,43 @@ AdvancedSearchSpec ParseSearchQuery(std::wstring_view raw, std::wstring_view cur
             }
         }
     }
-    if (saw_ge_1mb && saw_le_10mb) spec.size = SizePreset::From1To10MB;
-    spec.date = DetectDatePreset(raw);
+    const auto tokens = ReadConstraints(raw, spec.parsed_constraints.groups);
+    size_t date_count = 0;
+    bool size_negated = false;
+    for (const auto& token : tokens) {
+        if (token.size) {
+            if (!spec.size_custom.empty()) spec.size_custom.push_back(L' ');
+            spec.size_custom.append(token.raw);
+            size_negated |= token.negated;
+        } else {
+            ++date_count;
+            spec.date = token.negated ? DatePreset::Custom : DatePresetFor(token.value);
+            if (!token.negated && spec.date == DatePreset::Custom) {
+                const size_t dots = token.value.find(L"..");
+                spec.date_from = token.value.substr(0, dots);
+                if (dots != std::wstring::npos) spec.date_to = token.value.substr(dots + 2);
+            }
+        }
+    }
+    const bool single_group = spec.parsed_constraints.groups.size() == 1;
+    if (single_group && !size_negated && size_count == 2 && saw_ge_1mb && saw_le_10mb)
+        spec.size = SizePreset::From1To10MB;
+    else if (size_count && (!single_group || size_negated || size_count > 1))
+        spec.size = SizePreset::Custom;
+    if (size_count == 1 && !size_negated) {
+        for (const auto& token : tokens) if (token.size) spec.size_custom = token.value;
+    }
+    if (date_count > 1 || (date_count && !single_group)) {
+        spec.date = DatePreset::Custom;
+        spec.date_from.clear();
+        spec.date_to.clear();
+    }
+    auto& retained = spec.parsed_constraints;
+    retained.size = spec.size;
+    retained.size_custom = spec.size_custom;
+    retained.date = spec.date;
+    retained.date_from = spec.date_from;
+    retained.date_to = spec.date_to;
     return spec;
 }
 

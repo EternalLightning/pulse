@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "edit_host.h"
 #include "../common/localization.h"
 // fluent_menu.cpp — See fluent_menu.h for the contract.
@@ -6,6 +11,7 @@
 #include "FluentTokens.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
+#include "../common/windows_compat.h"
 
 #include <windowsx.h>
 #include <commctrl.h>
@@ -320,6 +326,15 @@ bool FluentMenu::Create(HWND owner, Compositor* compositor, float scale) {
     painter_.SetCompositor(compositor);
     painter_.SetScale(scale);
     return EnsureWindow();
+}
+
+void FluentMenu::SetScale(float scale) {
+    if (scale <= 0.0f || scale_ == scale) return;
+    scale_ = scale;
+    painter_.SetScale(scale_);
+    // The edit survives popup invocations, while its font is measured in pixels.
+    if (edit_) SendMessageW(edit_, WM_SETFONT, 0, FALSE);
+    if (edit_font_) { DeleteObject(edit_font_); edit_font_ = nullptr; }
 }
 
 void FluentMenu::SetTheme(bool dark, D2D1_COLOR_F accent) {
@@ -1134,7 +1149,10 @@ bool FluentMenu::EnsureFilterEdit() {
     }
     if (edit_brush_) { DeleteObject(edit_brush_); edit_brush_ = nullptr; }
     edit_brush_ = CreateSolidBrush(dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
-    if (edit_) return true;
+    if (edit_) {
+        SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(edit_font_), TRUE);
+        return true;
+    }
 
     edit_ = CreateChildEdit(hwnd_);
     if (!edit_) return false;
@@ -1624,6 +1642,8 @@ int FluentMenu::TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> ite
 int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
                            FilterFn filter, bool top_center, CommandFn command) {
     if (open_) return 0;
+    if (owner_ && IsWindow(owner_))
+        SetScale(static_cast<float>(pulse::compat::WindowDpi(owner_)) / 96.0f);
     deferred_clicks_.clear();
     if (!EnsureWindow()) {
         toggle_rect_ = {};

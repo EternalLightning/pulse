@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "explorer_window_takeover.h"
 #include "explorer_takeover_policy.h"
 #include "default_file_manager.h"
@@ -70,7 +75,6 @@ struct ObservationEvents {
         : shared(std::move(state)) {}
     std::shared_ptr<ExplorerWindowTakeover::Shared> shared;
     std::set<HWND> ignored;
-    std::set<HWND> exposed;
     std::map<HWND, uint64_t> generations;
     std::map<HWND, DWORD> first_observed;
     uint64_t next_generation = 0;
@@ -100,8 +104,6 @@ void CALLBACK ObserveWindow(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG object, 
     const HWND root = GetAncestor(hwnd, GA_ROOT);
     wchar_t cls[64]{};
     if (!root || !GetClassNameW(root, cls, 64) || wcscmp(cls, L"CabinetWClass")) return;
-    if (event == EVENT_SYSTEM_FOREGROUND || (event == EVENT_OBJECT_SHOW && hwnd == root))
-        observer->exposed.insert(root);
     if (event == EVENT_OBJECT_CREATE && hwnd == root) {
         const bool known = observer->generations.contains(root);
         observer->Generation(root);
@@ -168,12 +170,10 @@ struct Candidate {
     ULONGLONG stable_since = 0;
     ULONGLONG view_ready_at = 0;
     uint64_t window_generation = 0;
-    DWORD input_at_discovery = 0;
-    bool input_known = false;
-    bool exposed = false;
     Snapshot snapshot;
     uint64_t token = 0;
     uint64_t replaces_token = 0;
+    bool delivered = false;
 };
 class Events final : public IDispatch {
 public:
@@ -233,12 +233,6 @@ uint32_t NativeTabs(HWND root) {
     }, reinterpret_cast<LPARAM>(&count));
     return count;
 }
-bool ReadInputTime(DWORD& time) {
-    LASTINPUTINFO input{sizeof(input)};
-    if (!GetLastInputInfo(&input)) return false;
-    time = input.dwTime;
-    return true;
-}
 using BrowserMap = std::map<HWND, std::vector<ComPtr<IWebBrowserApp>>>;
 HRESULT ReadBrowsers(IShellWindows* windows, ExplorerWindowTakeover::Shared& shared,
                      BrowserMap& browsers, bool& complete) {
@@ -283,21 +277,14 @@ bool SameIdentity(const Candidate& candidate, ObservationEvents& observer) {
 }
 explorer_takeover::SourceObservation ObserveSource(const Candidate& candidate,
     ObservationEvents& observer, const BrowserMap& browsers, bool complete, bool native_required,
-    const Snapshot* snapshot, ULONGLONG now) {
+    const Snapshot* snapshot) {
     explorer_takeover::SourceObservation result;
     result.same_identity = SameIdentity(candidate, observer);
     result.single_tab = result.same_identity && SingleTab(candidate, browsers, complete, native_required);
     result.supported = snapshot && ScopeAllows(*observer.shared, candidate.id, snapshot);
     result.same_folder = snapshot && SameFolder(snapshot->folder, candidate.snapshot.folder);
     result.same_selection = snapshot && snapshot->selected == candidate.snapshot.selected;
-    result.visible = candidate.exposed || observer.exposed.contains(candidate.id.hwnd) ||
-        IsWindowVisible(candidate.id.hwnd) != FALSE;
-    DWORD input = 0;
-    result.input_unchanged = candidate.input_known && ReadInputTime(input) && input == candidate.input_at_discovery;
     result.shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-    result.submitted_empty_selection = candidate.snapshot.selected.empty();
-    result.current_selection_nonempty = snapshot && !snapshot->selected.empty();
-    result.view_age_ms = candidate.view_ready_at ? now - candidate.view_ready_at : 0;
     return result;
 }
 void CancelToken(ExplorerWindowTakeover::Shared& shared, uint64_t token, bool cancelled = true) {
@@ -354,7 +341,7 @@ bool FreshSource(IShellWindows* windows, Candidate& candidate, ObservationEvents
     // ReadBrowser can enter COM and dispatch events. Check the identity and
     // native tab tree after it, including for the final successful ACK.
     observation = ObserveSource(candidate, observer, current, complete, native_required,
-        readable ? &snapshot : nullptr, GetTickCount64());
+        readable ? &snapshot : nullptr);
     return readable;
 }
 void ReplaceCandidate(Candidate& candidate, Snapshot snapshot,
@@ -363,8 +350,9 @@ void ReplaceCandidate(Candidate& candidate, Snapshot snapshot,
     CancelToken(shared, old_token);
     candidate.token = 0;
     candidate.replaces_token = old_token;
+    candidate.delivered = false;
     candidate.snapshot = std::move(snapshot);
-    candidate.stable_since = now;
+    candidate.stable_since = candidate.discovered = now;
 }
 HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
                         std::map<HWND, Candidate>& candidates, bool native_required) {
@@ -386,18 +374,13 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
         candidate.browser = views.front();
         candidate.discovered = now;
         candidate.window_generation = observer.Generation(hwnd);
-        candidate.input_known = ReadInputTime(candidate.input_at_discovery);
-        candidate.exposed = observer.exposed.contains(hwnd) || IsWindowVisible(hwnd) != FALSE;
         candidates.emplace(hwnd, std::move(candidate));
     }
     for (auto it = candidates.begin(); it != candidates.end();) {
         auto& candidate = it->second;
         bool completed = false;
-        candidate.exposed |= IsWindowVisible(candidate.id.hwnd) != FALSE;
-        DWORD input = 0;
         bool retire = shared.stop || !SameIdentity(candidate, observer) ||
             now - candidate.discovered >= explorer_takeover::kCandidateTimeoutMs ||
-            !candidate.input_known || !ReadInputTime(input) || input != candidate.input_at_discovery ||
             (GetAsyncKeyState(VK_SHIFT) & 0x8000);
         const auto found = browsers.find(it->first);
         const bool single = !retire && SingleTab(candidate, browsers, complete, native_required);
@@ -414,10 +397,9 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
             readable = ReadBrowser(candidate.browser.Get(), snapshot);
             if (readable && !ScopeAllows(shared, candidate.id, &snapshot)) retire = true;
         }
-        if (!retire && !readable && candidate.token) retire = true;
         if (!retire && readable) {
-            auto observation = ObserveSource(candidate, observer, browsers, complete, native_required, &snapshot, now);
-            if (!observation.same_identity || !observation.single_tab || !observation.input_unchanged ||
+            auto observation = ObserveSource(candidate, observer, browsers, complete, native_required, &snapshot);
+            if (!observation.same_identity || !observation.single_tab ||
                 observation.shift || shared.stop) retire = true;
             else if (!candidate.view_ready_at) {
                 candidate.view_ready_at = now;
@@ -440,34 +422,35 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
                     }
                     if (answered) {
                         if (!delivered) retire = true;
-                        else {
-                            Snapshot final_snapshot;
-                            explorer_takeover::SourceObservation final_observation;
-                            FreshSource(windows, candidate, observer, native_required,
-                                final_snapshot, final_observation);
-                            const auto final_decision = explorer_takeover::DecidePending(final_observation);
-                            if (final_decision == explorer_takeover::PendingDecision::Replace && !shared.stop) {
-                                ReplaceCandidate(candidate, std::move(final_snapshot), shared, GetTickCount64());
-                            } else {
-                                if (explorer_takeover::CanCloseAfterAcknowledgment(final_observation, true, shared.stop) &&
-                                    CommitClose(shared, candidate.token)) {
-                                    const HRESULT closed = candidate.browser->Quit();
-                                    shared.error = closed;
-                                    if (FAILED(closed)) ++shared.close_failures;
-                                    else completed = true;
-                                }
-                                retire = true;
+                        else candidate.delivered = true;
+                    }
+                    if (!retire && candidate.delivered) {
+                        Snapshot final_snapshot;
+                        explorer_takeover::SourceObservation final_observation;
+                        const bool final_readable = FreshSource(windows, candidate, observer, native_required,
+                            final_snapshot, final_observation);
+                        const auto final_decision = explorer_takeover::DecidePending(final_observation);
+                        if (!final_readable && final_observation.same_identity && final_observation.single_tab &&
+                            !final_observation.shift && !shared.stop) {
+                            // Navigation can be busy after ACK. Keep that ACK
+                            // until a readable current snapshot can be checked.
+                        } else if (final_decision == explorer_takeover::PendingDecision::Replace && !shared.stop) {
+                            ReplaceCandidate(candidate, std::move(final_snapshot), shared, GetTickCount64());
+                        } else {
+                            if (explorer_takeover::CanCloseAfterAcknowledgment(final_observation, true, shared.stop) &&
+                                CommitClose(shared, candidate.token)) {
+                                const HRESULT closed = candidate.browser->Quit();
+                                shared.error = closed;
+                                if (FAILED(closed)) ++shared.close_failures;
+                                else completed = true;
                             }
+                            retire = true;
                         }
                     }
                 }
-            } else if (!SameFolder(snapshot.folder, candidate.snapshot.folder)) {
-                // A navigation after the first readable folder belongs to the
-                // source window, even while Pulse has not received a token yet.
-                retire = true;
             } else if (snapshot != candidate.snapshot) {
                 candidate.snapshot = std::move(snapshot);
-                candidate.stable_since = now;
+                candidate.stable_since = candidate.discovered = now;
             }
             const ULONGLONG decision_now = GetTickCount64();
             if (!retire && !candidate.token && candidate.view_ready_at &&
@@ -480,10 +463,10 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
                     final_observation.same_selection && !shared.stop) {
                     retire = !SubmitCandidate(shared, candidate);
                 } else if (final_observation.same_identity && final_observation.single_tab &&
-                    final_observation.supported && final_observation.same_folder &&
-                    final_observation.input_unchanged && !final_observation.shift && !shared.stop) {
-                    // A selection arriving during final validation has not been
-                    // submitted yet. Give that complete snapshot its stable time.
+                    final_observation.supported &&
+                    !final_observation.shift && !shared.stop) {
+                    // Navigation or selection can finish during final COM
+                    // validation. Stabilize the latest snapshot before submission.
                     candidate.snapshot = std::move(final_snapshot);
                     candidate.stable_since = GetTickCount64();
                 } else retire = true;
@@ -495,7 +478,6 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
             it = candidates.erase(it);
         } else ++it;
     }
-    std::erase_if(observer.exposed, [](HWND hwnd) { return !IsWindow(hwnd); });
     std::erase_if(observer.generations, [](const auto& item) { return !IsWindow(item.first); });
     std::erase_if(observer.first_observed, [&](const auto& item) { return !observer.generations.contains(item.first); });
     return S_OK;

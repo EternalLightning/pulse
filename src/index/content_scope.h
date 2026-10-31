@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "content_index.h"
 #include "index_config.h"
@@ -14,6 +19,27 @@ inline std::wstring ContentScopeKey(std::wstring path) {
 inline bool ContentPathUnder(std::wstring_view path, std::wstring_view root) {
     return path == root || (path.size() > root.size() && path.starts_with(root) &&
         (root.ends_with(L'\\') || path[root.size()] == L'\\'));
+}
+template<class Predicate>
+inline bool AnyContentRequestRoot(const ContentSearchRequest& request, Predicate predicate) {
+    if (!request.roots.empty()) return std::any_of(request.roots.begin(), request.roots.end(), predicate);
+    return request.root.empty() || predicate(request.root);
+}
+inline bool ContentRequestIncludesPath(const ContentSearchRequest& request, const std::wstring& path) {
+    const auto key = ContentScopeKey(path);
+    return AnyContentRequestRoot(request, [&](const auto& root) {
+        const auto base = ContentScopeKey(root);
+        if (!ContentPathUnder(key, base)) return false;
+        if (request.recursive || key == base) return true;
+        return key.find(L'\\', base.size() + (base.ends_with(L'\\') ? 0 : 1)) == std::wstring::npos;
+    });
+}
+inline bool ContentRequestIntersectsPath(const ContentSearchRequest& request, const std::wstring& path) {
+    const auto key = ContentScopeKey(path);
+    return AnyContentRequestRoot(request, [&](const auto& root) {
+        const auto base = ContentScopeKey(root);
+        return ContentPathUnder(base, key) || (request.recursive && ContentPathUnder(key, base));
+    });
 }
 inline bool ContentPathExcluded(const ContentIndexConfig& config, const std::wstring& path) {
     const auto key = ContentScopeKey(path);

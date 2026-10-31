@@ -1,11 +1,10 @@
+@rem SPDX-License-Identifier: Apache-2.0
+@rem Pulse project; see LICENSE and NOTICE for licensing and attribution.
+@rem Modified by EternalLightning for this independent distribution, including licensing notices.
+@rem Existing third-party notices and license terms remain applicable.
+
 @echo off
 setlocal
 cd /d "%~dp0"
-call "%~dp0scripts\vcvars.bat"
-if errorlevel 1 exit /b 1
-call "%~dp0scripts\prepare_nmake.bat" build-d2d
-if errorlevel 1 exit /b 1
-cmake %PULSE_CMAKE_FRESH% -S . -B build-d2d -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
-if errorlevel 1 exit /b 1
-cmake --build build-d2d --target pulse_d2d_list
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" -BuildDir build-d2d -Targets pulse_d2d_list -Configure
 exit /b %errorlevel%

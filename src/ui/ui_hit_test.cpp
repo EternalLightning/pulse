@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "search_banner_layout.h"
 #include "banner_reveal.h"
 #include "toolbar_layout.h"
@@ -694,6 +699,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 slot.kind == SidebarSlot::Tag) {
                 if (slot.group >= 0 && slot.item >= 0) {
                     const auto& item = vm.sidebar[slot.group].items[slot.item];
+                    if (item.exiting || y >= slot.rc.top +
+                        (slot.rc.bottom - slot.rc.top) * item.presence) continue;
                     if (!compact && item.expandable &&
                         RectContains(SidebarExpandRect(slot.rc, scale_), x, y)) {
                         r.region = HitTestResult::SidebarItemExpand;
@@ -973,6 +980,15 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 out.region=HitTestResult::Pane; return out;
             }
             if (idx >= 0) {
+                const D2D1_RECT_F list_bounds = PaneListRect(paneRc, extra, paneVm.view_mode);
+                if (const auto* transition = ViewModeTransitionFor(paneVm, list_bounds)) {
+                    if (transition->HitTest(x, y) == idx) {
+                        out.region = HitTestResult::Row; out.index = idx; return out;
+                    }
+                }
+                if (const auto* reflow = ItemReflowFor(paneVm, list_bounds)) {
+                    if (reflow->HitTest(x, y) != idx) { out.region = HitTestResult::Pane; return out; }
+                }
                 if (idx != paneVm.rename_index) {
                     int viewRow = paneVm.ViewIndex(idx);
                     if (viewRow >= 0 && compositor_ && compositor_->DwriteFactory()) {

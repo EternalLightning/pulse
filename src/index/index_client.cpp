@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // index_client.cpp — Connect to Pulse.Index (service or spawned helper).
 #include "../common/command_line.h"
 #include "index_client.h"
@@ -100,14 +105,9 @@ bool IndexClient::EnsureConnected() {
         if (connection_) return true;
     }
     auto try_open = [&]() -> HANDLE {
-        HANDLE h = CreateFileW(pipe_name_.c_str(), transport::kClientPipeAccess, 0, nullptr,
-                               OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+        HANDLE h = transport::OpenVerifiedIndexPipe(pipe_name_, ExePath());
         if (h == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
         transport::Handle candidate(h);
-        if (!transport::VerifyIndexServer(h, ExePath(), transport::Identity::Current())) {
-            SetLastError(ERROR_ACCESS_DENIED);
-            return INVALID_HANDLE_VALUE;
-        }
         DWORD mode = PIPE_READMODE_BYTE;
         if (!SetNamedPipeHandleState(h, &mode, nullptr, nullptr)) return INVALID_HANDLE_VALUE;
         candidate.release();

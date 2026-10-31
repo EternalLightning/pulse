@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "system_integration.h"
 #include "shell_window_registry.h"
 #include "explorer_window_takeover.h"
@@ -371,9 +376,9 @@ bool SystemIntegration::Tick(AppState& s) {
         if (previous != ui_->takeover_destinations.end()) {
             const auto destination = previous->second;
             ui_->takeover_destinations.erase(previous);
-            if (destination.key) {
+            if (destination.key && SameShellPath(destination.folder, request.folder)) {
                 const auto located = FindTab(s, *ui_, destination.key, false);
-                if (located.tab && SameShellPath(destination.folder, request.folder) &&
+                if (located.tab &&
                     !ShellSelectionIsStale(*located.tab, destination.folder,
                         destination.generation, destination.view_generation) &&
                     QueueSelection(s, *ui_, destination.key, request.token,
@@ -404,23 +409,34 @@ bool SystemIntegration::Tick(AppState& s) {
     for (auto it = ui_->selections.begin(); it != ui_->selections.end();) {
         auto located = FindTab(s, *ui_, it->key, false);
         Tab* tab = located.tab;
-        bool finished = !tab || ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation) ||
-            now >= it->deadline ||
-            (it->token && (!s.appPrefs.experimental_explorer_takeover ||
-                !TakeoverActive(shared_, it->token)));
+        const auto delivery_invalid = [&] {
+            return !tab || !SameShellPath(tab->current_path, it->folder) ||
+                tab->view_generation != it->view_generation || GetTickCount64() >= it->deadline ||
+                (!it->token && ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation)) ||
+                (it->token && (!s.appPrefs.experimental_explorer_takeover ||
+                    !TakeoverActive(shared_, it->token)));
+        };
+        bool finished = delivery_invalid();
         bool delivered = false;
         if (!finished && !tab->loading && !tab->pending_generation) {
-            finished = true;
-            std::vector<int> rows;
             located = FindTab(s, *ui_, it->key, true);
             tab = located.tab;
-            // Activation can schedule a refresh. Recheck after it, before ACK;
-            // a previously selected cached row is not a completed delivery.
-            delivered = tab && !ShellSelectionIsStale(*tab, it->folder, it->generation, it->view_generation) &&
-                ApplyShellSelection(*tab, s.places, it->paths, it->flags, rows);
-            if (delivered) {
-                if (!rows.empty()) EnsureRowVisible(*located.window, *tab, rows.back());
-                InvalidateRect(located.window->hwnd, nullptr, FALSE); changed = true;
+            finished = delivery_invalid();
+            if (!finished) {
+                // Activation and background refreshes can replace the listing
+                // without changing the destination. Wait for the final snapshot.
+                it->generation = tab->pending_generation ? tab->pending_generation : tab->applied_generation;
+                if (!tab->loading && !tab->pending_generation) {
+                    finished = true;
+                    std::vector<int> rows;
+                    delivered = ApplyShellSelection(*tab, s.places, it->paths, it->flags, rows);
+                    if (delivered) {
+                        if (auto binding = ui_->takeover_destinations.find(it->token);
+                            binding != ui_->takeover_destinations.end()) binding->second.generation = it->generation;
+                        if (!rows.empty()) EnsureRowVisible(*located.window, *tab, rows.back());
+                        InvalidateRect(located.window->hwnd, nullptr, FALSE); changed = true;
+                    }
+                }
             }
         }
         if (finished) {

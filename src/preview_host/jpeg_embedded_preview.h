@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // jpeg_embedded_preview.h - the preview pictures cameras store inside their
 // JPEGs. Some cameras append an MPF "large thumbnail" after the main picture
 // or store a smaller JPEG in the Exif block. These can avoid decoding the

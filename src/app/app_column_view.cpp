@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "../ui/column_strip_layout.h"
@@ -272,7 +277,8 @@ bool ClickRow(AppState& s, app::Tab& tab, int column_id, int row) {
     if (source < 0 || static_cast<size_t>(source) >= col->rows_snapshot->size()) return false;
     const std::wstring name = (*col->rows_snapshot)[static_cast<size_t>(source)].name;
     const std::wstring folder = col->path; // col is invalidated by navigation
-    if (!SamePath(folder, tab.current_path)) NavigateTo(s, folder);
+    if (!SamePath(folder, tab.current_path)) NavigateTo(s, folder,
+        column_id == ui::kColumnStripChildId ? ui::SurfaceMotion::Forward : ui::SurfaceMotion::Backward);
     if (app::Tab* active = ActiveTab(s)) SelectByName(s, *active, name);
     s.stripClickTick = GetTickCount64();
     return true;
@@ -611,7 +617,7 @@ bool HandleColumnArrowKey(AppState& s, bool right) {
     }
     const std::wstring folder = SelectedFolder(*tab);
     if (folder.empty()) return false;
-    NavigateTo(s, folder);
+    NavigateTo(s, folder, ui::SurfaceMotion::Forward);
     return true;
 }
 

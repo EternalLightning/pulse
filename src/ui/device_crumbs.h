@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_crumbs.h - Phone names for the breadcrumb (plan: 手机 D3).
 //
 // SplitBreadcrumb turns pulse:device:<key>\... into 此电脑 › 手机名 › ... The

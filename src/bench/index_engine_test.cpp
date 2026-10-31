@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/index_engine.h"
 #include "../index/usn_stream.h"
 #include <cstring>
@@ -5,6 +10,8 @@
 #include "../index/index_paths.h"
 #include "../index/index_delta.h"
 #include "../index/index_mft.h"
+#include "../index/usn_catch_up.h"
+#include "../index/index_fallback_metadata.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +33,7 @@ struct EngineTestAccess {
 #include "index_engine_outstanding_cases.h"
 #include "index_engine_exclusions_cases.h"
 #include "index_ingest_boundary_cases.h"
+#include "index_engine_remaining_cases.h"
 
     static bool InvalidMemoryParentFixture() {
         Engine engine;
@@ -279,13 +287,17 @@ struct EngineTestAccess {
                 page.records.front().kind == event.kind, "512-event page preserves cursor and rename payload");
             check(engine.ReadFeed(true, L"", arm.epoch, 100020).done, "caught-up consumer returns done");
             const auto path = (dir / L"snapshot.bin").wstring();
+            const auto snapshot = engine.ReadFeed(false, L"", 0, 0);
             check(Save(engine, path), "save isolated feed-generation snapshot");
             {
                 std::unique_lock lock(engine.mutex_);
                 check(Load(engine, path), "replace mapped snapshot under engine lock");
             }
-            check(engine.ReadFeed(true, L"", arm.epoch, 100020).gap, "old generation still requires resynchronization");
-            check(engine.feed_changes_.Size() == 0, "snapshot replacement releases unreachable old-generation feed");
+            check(!engine.ReadFeed(true, L"", arm.epoch, 100020).gap,
+                "ordinary snapshot replacement preserves change-stream continuity");
+            check(engine.feed_changes_.Size() == 100000, "snapshot replacement retains bounded change history");
+            check(engine.ReadFeed(false, L"", snapshot.epoch, snapshot.next).gap,
+                "snapshot replacement invalidates row-ordinal pagination");
             arm = engine.ReadFeed(true, L"", 0, 0);
             check(arm.ready && arm.done && arm.records.empty() && arm.next == 100020,
                 "new subscription keeps monotonic sequence after generation change");
@@ -293,8 +305,6 @@ struct EngineTestAccess {
             const auto next = engine.ReadFeed(true, L"", arm.epoch, arm.next);
             check(!next.gap && next.done && next.records.size() == 1 && next.records[0].id == 100021,
                 "new-generation event remains readable without false gaps");
-            check(engine.changes_.Details(L"feed-fixture", L"C:\\feed-fixture", 0, 0, 200).records.size() == 1,
-                "feed retirement does not discard persisted change history");
             auto& memory = engine.filename_timing_.Memory();
             engine.changes_.Flush(true, &memory);
             engine.changes_.Flush(false, &memory);
@@ -304,7 +314,7 @@ struct EngineTestAccess {
                 memory.retained.flush_snapshot_records == 1 && memory.retained.history_records == 1,
                 "memory sampling preserves sixty-second batching and snapshot record counts");
             engine.CaptureMemoryState();
-            check(memory.retained.feed_records == 1 && memory.retained.feed_page_capacity_bytes >= 65536 &&
+            check(memory.retained.feed_records == ChangeFeedHistory::kMaxRecords && memory.retained.feed_page_capacity_bytes >= 65536 &&
                 memory.retained.aggregate_mapped_file_bytes > 0,
                 "memory diagnostics distinguish feed capacity from mapped file size");
             engine.filename_timing_.Flush(true);
@@ -315,6 +325,17 @@ struct EngineTestAccess {
                 line.find("\"change_flush_snapshot\":") != std::string::npos &&
                 memory.At(IndexMemoryPoint::TimingFlush).failures == 0,
                 "existing timing log retains stages and adds sampled memory points");
+            engine.GapFeed();
+            check(engine.ReadFeed(true, L"", arm.epoch, next.next).gap,
+                "genuine coverage loss still invalidates the change stream");
+            engine.CaptureMemoryState();
+            check(memory.retained.feed_records == ChangeFeedHistory::kMaxRecords,
+                "coverage gaps retain bounded diagnostic history");
+            const auto rearmed = engine.ReadFeed(true, L"", 0, 0);
+            check(rearmed.epoch != arm.epoch && rearmed.next == next.next && rearmed.records.empty(),
+                "new subscription starts beyond the uncertain history after a gap");
+            check(engine.changes_.Details(L"feed-fixture", L"C:\\feed-fixture", 0, 0, 200).records.size() == 1,
+                "feed retirement does not discard persisted change history");
             engine.Stop();
         }
         SetActiveIndexDirectory(L"");
@@ -334,6 +355,40 @@ struct EngineTestAccess {
             (L"filename-maintenance-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
         std::filesystem::create_directories(dir);
         SetActiveIndexDirectory(dir.wstring());
+        {
+            Engine engine;
+            engine.running_ = true;
+            engine.ready_ = true;
+            engine.AddForTest(L"Q:\\tiny\\one.txt", L"one.txt", false);
+            const std::wstring name = L"one.txt";
+            std::vector<BYTE> bytes(offsetof(FILE_NOTIFY_INFORMATION, FileName) + name.size() * sizeof(wchar_t));
+            auto* removed = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(bytes.data());
+            removed->Action = FILE_ACTION_REMOVED;
+            removed->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
+            std::memcpy(removed->FileName, name.data(), removed->FileNameLength);
+            check(engine.ApplyNotifyLocked(L"Q:\\tiny", bytes.data(), static_cast<DWORD>(bytes.size())) == 1 &&
+                engine.deleted_ == 1 && engine.LiveCount() < 10,
+                "one real delete notification crosses the tiny-index deletion ratio");
+            engine.last_struct_tick_ = engine.last_merge_tick_ = 1000;
+            check(engine.MaintenanceMergeReason(1001, 0) == nullptr &&
+                engine.MaintenanceMergeReason(600999, 0) == nullptr,
+                "deletion ratio cannot rewrite a recent snapshot on the event path");
+            const auto reason = engine.MaintenanceMergeReason(601000, 0);
+            check(reason && std::strcmp(reason, "deleted_ratio") == 0,
+                "pending deletion ratio becomes eligible at the normal merge interval");
+            engine.struct_changes_ = 100000;
+            const auto structural = engine.MaintenanceMergeReason(1001, 0);
+            check(structural && std::strcmp(structural, "structural_threshold") == 0,
+                "hard structural budget still compacts within the normal interval");
+            engine.struct_changes_ = 1;
+            const auto delta = engine.MaintenanceMergeReason(1001, 64ull * 1024 * 1024);
+            check(delta && std::strcmp(delta, "delta_threshold") == 0,
+                "hard delta budget still compacts within the normal interval");
+            const auto feed = engine.ReadFeed(true, L"", engine.feed_epoch_.load(), 0);
+            check(engine.IsTomb(engine.LiveCount() - 1) && feed.records.size() == 1 &&
+                feed.records[0].kind == ChangeKind::Deleted && !feed.gap,
+                "deferred compaction retains deletion state and continuous path events");
+        }
         {
             Engine engine;
             check(Build(engine), "build isolated maintenance fixture");
@@ -1521,6 +1576,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc > 1 && std::wstring_view(argv[1]) == L"--name-pool-only") return EngineTestAccess::NamePoolFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--folder-sizes-only") return EngineTestAccess::FolderSizesFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--startup-catch-up-only") return EngineTestAccess::StartupCatchUpFixture() ? 0 : 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--fallback-metadata-only") return EngineTestAccess::FallbackMetadataFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--usn-only") return EngineTestAccess::UsnQueueFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--feed-only") return EngineTestAccess::FeedFixture() ? 0 : 1;
     if (argc > 1 && std::wstring_view(argv[1]) == L"--maintenance-only") return EngineTestAccess::MaintenanceFixture() ? 0 : 1;

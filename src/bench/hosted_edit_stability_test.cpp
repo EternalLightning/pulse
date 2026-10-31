@@ -1,7 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../common/localization.h"
 #include "../ui/edit_host.h"
 #include "../ui/typography.h"
+#include "bitmap_artifact.h"
 #include <iostream>
 #include <fstream>
 #include <dwmapi.h>
@@ -66,25 +72,18 @@ size_t DifferentPixels(const std::vector<std::uint32_t>& a, const std::vector<st
     }
     return count;
 }
-void SavePixels(const std::vector<std::uint32_t>& pixels, int width, int height, const std::string& filename) {
-    if (pixels.empty()) return;
-    BITMAPFILEHEADER header{};
-    header.bfType = 0x4d42;
-    header.bfOffBits = sizeof(header) + sizeof(BITMAPINFOHEADER);
-    header.bfSize = header.bfOffBits + static_cast<DWORD>(pixels.size() * sizeof(pixels[0]));
-    BITMAPINFOHEADER info{};
-    info.biSize = sizeof(info);
-    info.biWidth = width;
-    info.biHeight = -height;
-    info.biPlanes = 1;
-    info.biBitCount = 32;
+pulse::bench::BitmapArtifactResult SavePixels(const std::vector<std::uint32_t>& pixels,
+    int width, int height, const std::string& filename) {
     const auto mode = pulse::ui::typography::CurrentTextRenderMode();
     const std::string mode_name = mode == pulse::ui::typography::TextRenderMode::Sharp ? "sharp-" :
         mode == pulse::ui::typography::TextRenderMode::Smooth ? "smooth-" : "auto-";
-    std::ofstream output("bench_data/edit-surface-20261024/" + mode_name + filename, std::ios::binary);
-    output.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    output.write(reinterpret_cast<const char*>(&info), sizeof(info));
-    output.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size() * sizeof(pixels[0])));
+    auto result = pulse::bench::SaveBitmapArtifact(pixels, width, height,
+        std::filesystem::path("bench_data/edit-surface-20261024") / (mode_name + filename));
+    if (!result.saved) {
+        std::cerr << "[ARTIFACT_ERROR] " << pulse::bench::BitmapArtifactPath(result) << ": " << result.error << '\n';
+        Check(false, "diagnostic bitmap is saved completely");
+    }
+    return result;
 }
 void SaveSurface(HWND hwnd, const std::string& filename, bool desktop = false) {
     RECT rect{}; GetClientRect(hwnd, &rect);
@@ -132,7 +131,7 @@ int main(int argc, char** argv) {
     using namespace pulse;
     std::cout << std::unitbuf;
     bool chinese = false, desktop = false;
-    std::string kind_filter, text_mode = "auto";
+    std::string kind_filter;
     int scale_filter = 0, theme_filter = -1;
     for (int i = 1; i < argc; ++i) {
         const std::string argument(argv[i]);
@@ -140,10 +139,8 @@ int main(int argc, char** argv) {
         desktop |= argument == "--desktop-smoke";
         if (argument == "--sharp") {
             ui::typography::SetTextRenderMode(ui::typography::TextRenderMode::Sharp);
-            text_mode = "sharp";
         } else if (argument == "--smooth") {
             ui::typography::SetTextRenderMode(ui::typography::TextRenderMode::Smooth);
-            text_mode = "smooth";
         } else if (argument.starts_with("--kind=")) kind_filter = argument.substr(7);
         else if (argument.starts_with("--scale=")) scale_filter = std::atoi(argument.c_str() + 8);
         else if (argument == "--light") theme_filter = 0;
@@ -325,10 +322,10 @@ int main(int argc, char** argv) {
                     SavePixels(key_pixels, cell.right, cell.bottom,
                         sample_name + "-key-" + std::to_string(frame) + ".bmp");
                     if (failed_frame) {
-                        const auto failure_name = text_mode + '-' + sample_name + "-failure-key-" + std::to_string(frame);
-                        SavePixels(key_pixels, cell.right, cell.bottom, failure_name + ".bmp");
+                        const auto failure_name = sample_name + "-failure-key-" + std::to_string(frame);
+                        const auto failure = SavePixels(key_pixels, cell.right, cell.bottom, failure_name + ".bmp");
                         SavePixels(key_origin, cell.right, cell.bottom, failure_name + "-origin.bmp");
-                        std::cout << "[ARTIFACT] bench_data/edit-surface-20261024/" << failure_name << ".bmp\n";
+                        if (failure.saved) std::cout << "[ARTIFACT] " << bench::BitmapArtifactPath(failure) << '\n';
                     }
                 }
             }

@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "batch_rename.h"
+#include "../common/file_identity.h"
 #include "../fs/fs_enum.h"
 #include <algorithm>
 #include <cwctype>
@@ -205,7 +211,7 @@ std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>&
         item.new_name = ApplyBatchRenameRule(item.original_name, i, rule);
         if (item.new_name.empty()) item.status = BatchRenameStatus::Empty;
         else if (!IsValidFileName(item.new_name)) item.status = BatchRenameStatus::Invalid;
-        else if (_wcsicmp(item.new_name.c_str(), item.original_name.c_str()) == 0)
+        else if (item.new_name == item.original_name)
             item.status = BatchRenameStatus::Unchanged;
         items.push_back(std::move(item));
         if (items.back().status == BatchRenameStatus::Ok) {
@@ -229,7 +235,11 @@ std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>&
             : GetFileAttributesW(normalized.c_str()) != INVALID_FILE_ATTRIBUTES;
         if (!present) continue;
         const std::wstring source = fs::NormalizePath(item.source_path);
-        if (_wcsicmp(normalized.c_str(), source.c_str()) != 0)
+        FileIdentity source_identity, destination_identity;
+        if (_wcsicmp(normalized.c_str(), source.c_str()) != 0 ||
+            !ReadPathFileIdentity(source, source_identity) || !source_identity.Valid() ||
+            !ReadPathFileIdentity(normalized, destination_identity) ||
+            source_identity != destination_identity)
             item.status = BatchRenameStatus::Collision;
     }
     return items;

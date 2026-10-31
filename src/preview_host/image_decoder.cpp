@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "image_decoder.h"
 #include "../fs/cloud_state.h"
 #include "../ipc/preview_protocol.h"
@@ -7,6 +12,18 @@
 
 namespace pulse::preview {
 using Microsoft::WRL::ComPtr;
+namespace {
+uint32_t ReadOrientation(IWICBitmapFrameDecode* frame) {
+    ComPtr<IWICMetadataQueryReader> metadata;
+    if (FAILED(frame->GetMetadataQueryReader(&metadata))) return 1;
+    PROPVARIANT value{};
+    const HRESULT result = metadata->GetMetadataByName(L"/app1/ifd/{ushort=274}", &value);
+    const uint32_t orientation = SUCCEEDED(result) && value.vt == VT_UI2
+        ? value.uiVal : 1;
+    PropVariantClear(&value);
+    return orientation >= 1 && orientation <= 8 ? orientation : 1;
+}
+}
 
 bool DecodeImage(const std::wstring& path, DWORD attrs, UINT pixels,
                  std::vector<uint8_t>& out, UINT& width, UINT& height, UINT& stride,
@@ -36,6 +53,8 @@ bool DecodeImage(const std::wstring& path, DWORD attrs, UINT pixels,
     } else if (FAILED(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
                     WICDecodeMetadataCacheOnDemand, &decoder))) return false;
     if (FAILED(decoder->GetFrame(0, &frame))) return false;
+    // Embedded previews already carry the main frame's explicit orientation.
+    if (!embedded) orientation = ReadOrientation(frame.Get());
     UINT source_w = 0, source_h = 0;
     if (FAILED(frame->GetSize(&source_w, &source_h)) || !source_w || !source_h) return false;
     IWICBitmapSource* source = frame.Get();

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "app_network_access.h"
 #include "app_network_locations.h"
@@ -386,6 +391,11 @@ void ApplySearchHits(app::Tab& tab, const std::wstring& rest,
     }
     if (tab.selected_index >= 0 && static_cast<size_t>(tab.selected_index) < tab.EntryCount())
         tab.search_preserve_selection = tab.EntryAt(static_cast<size_t>(tab.selected_index)).full_path;
+    if (tab.search_retaining_results) {
+        tab.content_results.reset();
+        tab.content_selection_restore.reset();
+        tab.content_count_final = false;
+    }
     tab.search_retaining_results = false;
     const size_t offset = tab.pending_search_offset;
     if (!tab.search_entries || offset == 0) {
@@ -670,6 +680,10 @@ void ApplyContentSearchUpdate(AppState& s, index::ContentSearchUpdate update) {
                    static_cast<unsigned long long>(update.progress.scanned_files));
         target->virtual_title += scanned;
     } else {
+        if (target->search_retaining_results && target->snapshot_path != target->current_path) {
+            target->content_results.reset();
+            target->SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
+        }
         target->loading = false;
         target->search_retaining_results = false;
         target->search_content_active = false;
@@ -840,7 +854,7 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
         swprintf_s(title, l10n::Get(l10n::StringId::SearchLoadingFormat).c_str(),
                    rest.c_str());
         tab.virtual_title = title;
-        tab.view_mode = ui::ViewMode::Details;
+        if (reason != PathLoadReason::SearchInput) tab.view_mode = ui::ViewMode::Details;
         if (reason == PathLoadReason::RestoreSession && app::SplitSearchQueryText(rest).content.present()) {
             tab.search_input_content = true;
             tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
@@ -952,6 +966,9 @@ static void CancelUnsharedListing(AppState& s, const app::Tab& tab) {
 }
 
 void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, PathLoadReason reason) {
+    const auto retained_snapshot = reason == PathLoadReason::SearchInput ? tab.snapshot : nullptr;
+    const auto retained_content = reason == PathLoadReason::SearchInput ? tab.content_results : nullptr;
+    const auto retained_path = reason == PathLoadReason::SearchInput ? tab.snapshot_path : std::wstring{};
     CancelNetworkAuthenticationForTab(s, tab);
     if (reason != PathLoadReason::NetworkRetry) tab.pending_network_pin.clear();
     if (reason == PathLoadReason::Navigate && !s.shot.active &&
@@ -967,6 +984,10 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.search_retaining_results = false;
     std::wstring normalized = fs::NormalizePath(path);
     if (!IsArchiveView(normalized)) tab.ClearArchiveView();
+    if (normalized != tab.current_path) {
+        tab.navigation_motion = ui::SurfaceMotion::Fade;
+        ++tab.navigation_revision;
+    }
     bool downloads = false;
     for (const auto& entry : s.sidebar.quick_access) {
         if (entry.builtin == static_cast<int>(app::BuiltinQuickAccess::Downloads) &&
@@ -999,7 +1020,8 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.pending_generation = 0;
     tab.applied_generation = 0;
     const auto history_viewport = tab.pending_history_viewport;
-    tab.scroll_y = history_viewport ? history_viewport->y : 0.0f;
+    if (reason != PathLoadReason::SearchInput)
+        tab.scroll_y = history_viewport ? history_viewport->y : 0.0f;
     if (history_viewport) tab.scroll_x = history_viewport->x;
     tab.pending_history_viewport.reset();
     if (ActiveTab(s) == &tab) {
@@ -1050,6 +1072,16 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     }
     if (fs::IsVirtualPath(normalized)) {
         LoadVirtualView(s, tab, normalized, reason);
+        // Start the new producer before restoring published rows, so it cannot
+        // reuse a result store belonging to a different query.
+        if (reason == PathLoadReason::SearchInput && tab.pending_generation &&
+            (retained_snapshot || retained_content)) {
+            tab.content_results = retained_content;
+            tab.SetSnapshot(retained_snapshot);
+            tab.snapshot_path = retained_path;
+            tab.search_retaining_results = true;
+            tab.loading = true;
+        }
         return;
     }
     tab.virtual_title.clear();
@@ -1744,7 +1776,7 @@ void RestoreNavigationReturnSelection(AppState& s, app::Tab& tab,
     }
 }
 
-void NavigateTo(AppState& s, const std::wstring& path) {
+void NavigateTo(AppState& s, const std::wstring& path, ui::SurfaceMotion motion) {
     if (path == kConnectServerPath) { ShowConnectServer(s); return; }
     if (OpenSystemNetworkShortcut(s, path)) return;
     app::Tab* tab = ActiveTab(s);
@@ -1752,7 +1784,7 @@ void NavigateTo(AppState& s, const std::wstring& path) {
     std::wstring normalized = fs::NormalizePath(path);
     const std::wstring returnedChild =
         app::NavigationReturnChildName(tab->current_path, normalized);
-    if (!tab->NavigateTo(normalized)) return;
+    if (!tab->NavigateTo(normalized, motion)) return;
     RecordSearchHistory(s, normalized);
     StartLoadingPath(s, *tab, normalized);
     RestoreNavigationReturnSelection(s, *tab, returnedChild);
@@ -1944,9 +1976,9 @@ void OpenSelected(AppState& s) {
             if (row.pc_device) {
                 const auto where = fs::ParseDevicePath(row.full_path);
                 if (where) for (const auto& device : app::DeviceRegistry::Instance().Devices())
-                    if (device.key == where->device) { NavigateTo(s, fs::DeviceOpenTarget(device)); return; }
+                    if (device.key == where->device) { NavigateTo(s, fs::DeviceOpenTarget(device), ui::SurfaceMotion::Forward); return; }
             }
-            if (row.is_dir) { NavigateTo(s, row.full_path); return; }
+            if (row.is_dir) { NavigateTo(s, row.full_path, ui::SurfaceMotion::Forward); return; }
         }
         app::QueueDeviceOperation(s, L"open", app::DeviceSelectedIds(*tab));
         return;
@@ -1956,13 +1988,17 @@ void OpenSelected(AppState& s) {
         RestoreSelected(s);
         return;
     }
+    std::wstring virtual_kind;
+    app::ParsePulsePath(tab->current_path, &virtual_kind, nullptr);
+    const auto motion = virtual_kind == L"search" || virtual_kind == L"saved-search"
+        ? ui::SurfaceMotion::Fade : ui::SurfaceMotion::Forward;
     const auto indices = tab->SelectedIndices();
     if (indices.empty()) return;
     if (indices.size() == 1) {
         const fs::DirEntry& e = tab->EntryAt(static_cast<size_t>(indices[0]));
         if (e.change_record_only) return;
         if (!e.link_target.empty()) {
-            if (e.link_target_is_dir) NavigateTo(s, e.link_target);
+            if (e.link_target_is_dir) NavigateTo(s, e.link_target, motion);
             else {
                 s.ops.OpenWith(e.link_target);
                 RecordRecentOpen(s, e.link_target, app::PlaceItemKind::File);
@@ -1970,8 +2006,8 @@ void OpenSelected(AppState& s) {
             return;
         }
         std::wstring full = EntryFullPath(*tab, indices[0]);
-        if (e.is_dir) NavigateTo(s, full);
-        else if (ops::IsArchivePath(full)) NavigateTo(s, ArchiveViewPath(full));
+        if (e.is_dir) NavigateTo(s, full, motion);
+        else if (ops::IsArchivePath(full)) NavigateTo(s, ArchiveViewPath(full), motion);
         else {
             s.ops.OpenWith(full);
             RecordRecentOpen(s, full, app::PlaceItemKind::File);
@@ -2001,15 +2037,15 @@ void GoUp(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     if (app::IsDeviceTab(tab)) {
-        NavigateTo(s, app::DeviceParent(tab->current_path));
+        NavigateTo(s, app::DeviceParent(tab->current_path), ui::SurfaceMotion::Backward);
         return;
     }
     if (IsRecycleTab(tab)) {
-        NavigateTo(s, L"");
+        NavigateTo(s, L"", ui::SurfaceMotion::Backward);
         return;
     }
     if (IsArchiveView(tab->current_path)) {
-        NavigateTo(s, ArchiveParent(tab->current_path));
+        NavigateTo(s, ArchiveParent(tab->current_path), ui::SurfaceMotion::Backward);
         return;
     }
     if (fs::IsVirtualPath(tab->current_path)) {
@@ -2017,8 +2053,8 @@ void GoUp(AppState& s) {
         return;
     }
     const std::wstring up = fs::ParentPath(tab->current_path);
-    if (_wcsicmp(up.c_str(), tab->current_path.c_str()) != 0) NavigateTo(s, up);
-    else if (!tab->current_path.empty()) NavigateTo(s, L""); // drive root -> This PC
+    if (_wcsicmp(up.c_str(), tab->current_path.c_str()) != 0) NavigateTo(s, up, ui::SurfaceMotion::Backward);
+    else if (!tab->current_path.empty()) NavigateTo(s, L"", ui::SurfaceMotion::Backward); // drive root -> This PC
 }
 
 void GoBack(AppState& s) {

@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "snapshot_patch.h"
+#include "link_resolve.h"
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
@@ -54,6 +60,7 @@ ResolvedDirNotifies ResolveDirNotifies(const std::wstring& folder,
             resolved.entries[index] = std::move(entry);
         }
     }
+    ResolveLinksInPlace(folder, resolved.entries, {});
     resolved.status = NotifyPatch::Applied;
     return resolved;
 }

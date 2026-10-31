@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "home_layout.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
@@ -8,19 +13,24 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
     auto* dc = compositor_->Dc();
     painter_.BeginFrame(theme, IsHighContrast());
     dc->PushAxisAlignedClip(bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    const auto pane_fill = vm.dark && !IsHighContrast()
-        ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
-        : WithAlpha(theme.surface_card, card_alpha_);
-    painter_.FillRoundedRect(bounds, theme.radius_control * scale_, pane_fill);
     const D2D1_RECT_F body = bounds;
     dc->PushAxisAlignedClip(body, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     const HomeLayout layout = MakeHomeLayout(pane, bounds, scale_);
+    const auto prefix = L"home:" + std::to_wstring(pane_index) + L":";
+    const auto blend = [](D2D1_COLOR_F from, D2D1_COLOR_F to, float progress) {
+        return D2D1::ColorF(from.r + (to.r - from.r) * progress,
+            from.g + (to.g - from.g) * progress, from.b + (to.b - from.b) * progress,
+            from.a + (to.a - from.a) * progress);
+    };
     const l10n::StringId headings[] = {l10n::StringId::HomeLibraries, l10n::StringId::HomeDrives, l10n::StringId::SidebarNetworkLocations};
     for (int group = 0; group < 3; ++group) {
         const auto& header = layout.headings[group];
         const float expansion = HomeGroupExpansion(pane, group);
         const bool header_hover = vm.hover_region == HitTestResult::HomeGroup && vm.hover_control_index == group && vm.hover_pane_index == pane_index;
-        if (header_hover) painter_.FillRoundedRect(header, theme.radius_control * scale_, theme.fill_hover);
+        auto header_fill = theme.fill_hover;
+        header_fill.a *= HoverOpacity(prefix + L"group:" + std::to_wstring(group), header_hover);
+        if (header_fill.a > 0.0f)
+            painter_.FillRoundedRect(header, theme.radius_control * scale_, header_fill);
         D2D1_MATRIX_3X2_F transform;
         dc->GetTransform(&transform);
         dc->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion,
@@ -42,7 +52,8 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         if (group == 2 && pane.network_discovery_disabled && layout.network_notice.right > layout.network_notice.left) {
             const auto& notice = layout.network_notice;
             const bool hover = vm.hover_region == HitTestResult::HomeNetworkSettings && vm.hover_pane_index == pane_index;
-            painter_.FillRoundedRect(notice, theme.radius_control * scale_, hover ? theme.fill_hover : theme.fill_input);
+            const float hot = HoverOpacity(prefix + L"network-notice", hover);
+            painter_.FillRoundedRect(notice, theme.radius_control * scale_, blend(theme.fill_input, theme.fill_hover, hot));
             painter_.DrawText(l10n::Get(l10n::StringId::NetworkDiscoveryDisabled),
                 D2D1::RectF(notice.left + 12 * scale_, notice.top + 4 * scale_, notice.right - 12 * scale_, notice.top + 28 * scale_),
                 compositor_->TextFormat(), theme.text_secondary);
@@ -67,8 +78,9 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
             const auto& r = placed.rect;
             if (r.bottom < body.top || r.top > body.bottom) continue;
             const bool hover = vm.hover_region == HitTestResult::HomeCard && vm.hover_control_index == placed.index && vm.hover_pane_index == pane_index;
-            painter_.FillRoundedRect(r, theme.radius_control * scale_, hover ? theme.fill_hover : theme.fill_input);
-            painter_.StrokeRoundedRect(r, theme.radius_control * scale_, hover ? theme.accent : theme.stroke_card);
+            const float hot = HoverOpacity(prefix + L"card:" + std::to_wstring(group) + L":" + card.path, hover);
+            painter_.FillRoundedRect(r, theme.radius_control * scale_, blend(theme.fill_input, theme.fill_hover, hot));
+            painter_.StrokeRoundedRect(r, theme.radius_control * scale_, blend(theme.stroke_card, theme.accent, hot));
             const float icon_top = card.group == 0 ? (r.top + r.bottom - 28 * scale_) * 0.5f : r.top + 8 * scale_;
             const auto icon = D2D1::RectF(r.left + 14 * scale_, icon_top, r.left + 42 * scale_, icon_top + 28 * scale_);
             const int svg = FluentSvgIdForGlyph(card.glyph);
@@ -92,9 +104,6 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         dc->PopAxisAlignedClip();
     }
     dc->PopAxisAlignedClip();
-    D2D1_RECT_F track{}, thumb{}; float max_scroll = 0;
-    if (PaneScrollbarGeometry(pane, bounds, track, thumb, max_scroll))
-        painter_.FillRoundedRect(D2D1::RectF(thumb.left + 4 * scale_, thumb.top, thumb.right - 4 * scale_, thumb.bottom), 3 * scale_, theme.text_secondary);
     dc->PopAxisAlignedClip();
 }
 }

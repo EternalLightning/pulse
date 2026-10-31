@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "content_search.h"
 #include "../common/text_decode.h"
@@ -48,6 +53,7 @@ ContentIndexConfig LoadContentIndexConfig();
 bool LoadContentIndexConfig(ContentIndexConfig& config);
 bool LoadContentIndexConfig(const std::wstring& database_path, ContentIndexConfig& config);
 bool SaveInstantContentConfig(ContentIndexConfig& config);
+bool SaveInstantContentConfig(const std::wstring& database_path, ContentIndexConfig& config);
 bool IsInternalContentPath(const std::wstring& path);
 // Immutable per-index scan hooks; callbacks execute on the indexing worker.
 struct ContentIndexScanHooks {

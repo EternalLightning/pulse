@@ -2,11 +2,11 @@
 
 **为 Windows 打造的文件管理器，让浏览、搜索和整理文件更顺手。**
 
-Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。当前版本为 1.2.1.1，面向 Windows 10 和 Windows 11 x64。
+Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。
 
 本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
 
-源码采用 [Apache License 2.0](LICENSE)，发行版说明见 [NOTICE](NOTICE)。第三方组件遵循各自许可证，免安装包附带 `licenses` 目录。
+本项目自身的代码、脚本和文档采用 [Apache License 2.0](LICENSE)，发行版来源与修改说明见 [NOTICE](NOTICE)。第三方代码、图标、商标和运行库遵循各自条款，详见[第三方声明](THIRD_PARTY_NOTICES.md)。安装包与免安装包均附带许可证文件。
 
 [反馈问题](https://github.com/EternalLightning/pulse/issues)
 
@@ -65,7 +65,7 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 
 ## 从源码构建
 
-使用 Windows x64、Visual Studio C++ 工具（含 Windows SDK）、CMake 3.25+ 和 Ninja，并确保 `cmake`、`ninja` 可在命令行中找到。便携包、产物校验与 CI 脚本另需 PowerShell 7.2+（`pwsh`）；安装包需要 Inno Setup 6。
+使用 Windows 10 / 11 x64、Visual Studio 2022 v143 C++ 工具及 Windows SDK。构建入口会下载并校验 `scripts/build-tools.lock.json` 固定的 CMake 和 Ninja，缓存于 `.build-tools`。便携包、产物校验与 CI 脚本另需 PowerShell 7.2+（`pwsh`）；安装包需要 Inno Setup 6。
 
 在仓库根目录运行；脚本会自动查找并初始化 x64 Visual Studio 工具环境：
 
@@ -76,9 +76,9 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 
 默认使用 Ninja 目录 `build-release`，构建六个交付程序：`Pulse.exe`、`Pulse.Index.exe`、`Pulse.Document.exe`、`Pulse.Preview.exe`、`Pulse.Shell.exe` 和 `Pulse.Integration.exe`。发布构建选择静态 MSVC 运行库（`/MT`）、关闭内嵌自测（`PULSE_WITH_SELFTEST=OFF`），仅构建交付目标及其依赖，不运行测试。
 
-日常修改后，在已初始化的 x64 Visual Studio 开发者终端中只构建受影响目标，例如 `cmake --build build-release --target pulse`。`pulse` 会带上索引、Shell、预览、文档提取和集成程序；仅修改某个辅助模块时也可单独构建对应目标。
+日常修改后，使用 `.\scripts\build.ps1 -BuildDir build-release -Targets pulse` 只构建受影响目标；脚本负责初始化工具链并持有构建目录锁。`pulse` 会带上索引、Shell、预览、文档提取和集成程序；仅修改某个辅助模块时也可单独构建对应目标。
 
-清理并重新配置已有 Ninja 目录可用 `.\build_release.bat /clean`。已有 NMake 目录即使加 `/clean` 也会被脚本拒绝，应另选新的 Ninja 目录。自定义目录、LumaText SDK 和定向测试见[构建与打包指南](docs/build-and-package.md)。
+删除并重新配置构建目录可用 `.\build_release.bat /clean`，执行前请保存仍需保留的构建产物。普通构建不会自动转换已有的其他生成器缓存。自定义目录、LumaText SDK 和定向测试见[构建与打包指南](docs/build-and-package.md)。
 
 ## 打包安装包与免安装包
 
@@ -122,3 +122,11 @@ pwsh -NoProfile -File .\scripts\verify_release_artifacts.ps1 `
 技术栈为 C++20、Win32、Direct2D 和 DirectComposition。文件系统、索引、预览与 Shell 任务分别放在对应模块，避免阻塞界面。
 
 更多说明：[索引存储与迁移](docs/index-migration.md)
+
+## 许可证与再分发
+
+Apache-2.0 允许在遵守条款的前提下使用、修改和分发本项目，包括商业使用。分发源码或二进制时，应向接收者提供完整的 `LICENSE`，保留适用的版权、专利、商标及归属声明，并随附 `NOTICE` 中的适用归属信息；修改过的文件应带有醒目的修改声明。仅保留 Git 提交记录不能替代文件内的修改声明。
+
+本发行版在项目源码文件中添加许可标识和修改声明；原有第三方声明仍然保留。后续修改请继续遵守上述要求。提交并有意纳入本项目的贡献，除另有明确约定外，按 Apache-2.0 第 5 条提供；贡献者应确保有权提交相关内容。
+
+第三方组件及素材的许可证随仓库保存，并由打包脚本随发行文件附带。再分发时应同时检查[第三方声明](THIRD_PARTY_NOTICES.md)，尤其是 7-Zip 的 LGPL / unRAR 条款和 Microsoft 产品图标的专门使用条款。Apache-2.0 不授予项目或第三方的商标使用权。软件按原样提供，不作保证；完整权利、条件及责任限制以各许可证原文为准。

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // index_engine.h — Filename index: mmap base + heap delta (优化.md R1).
 //
 // V12 compresses filename postings with bucket-local delta varints. The base is read-only;
@@ -296,14 +301,16 @@ private:
     std::wstring fixture_root_;
     void StartJournalStreams();
     std::map<std::wstring, std::unique_ptr<UsnStream>> journal_streams_;
+    std::unordered_map<std::wstring, std::pair<uint64_t, int64_t>> journal_catch_up_targets_;
     HANDLE change_signal_ = nullptr;
     std::atomic<uint64_t> revision_{1};
     std::atomic<uint64_t> feed_epoch_{(GetTickCount64() << 20) ^ GetCurrentProcessId()};
+    uint64_t snapshot_epoch_ = feed_epoch_.load();
     uint64_t feed_sequence_ = 0;
     ChangeFeedHistory feed_changes_;
     void RecordFeed(const ChangeRecord& record);
     void CaptureMemoryState();
-    void GapFeed() { changes_.Gap(); ++feed_epoch_; folder_size_gap_ = true; }
+    void GapFeed() { changes_.Gap(); ++feed_epoch_; ++snapshot_epoch_; folder_size_gap_ = true; }
     void PinyinWorker();
     void RequestPinyinBuildLocked();
     void StopPinyinWorker();
@@ -372,6 +379,8 @@ private:
     uint64_t ApplyNotifyLocked(const std::wstring& root, const BYTE* buf, DWORD len);
 
     bool CatchUpVolume(VolState& v, bool* changed, bool* structural = nullptr);
+    DWORD ApplyUsnBatch(VolState& v, const BYTE* records, size_t bytes, int64_t next,
+                        bool* changed, bool* structural, uint64_t& applied);
     enum class UsnApply : uint8_t { None, Attr, Structure };
     UsnApply ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec);
     bool IsIndexNoiseLocked(const VolState& v, const USN_RECORD_V2* rec) const;

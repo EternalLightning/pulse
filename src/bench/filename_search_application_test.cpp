@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../app/search_query.h"
 #include "../common/localization.h"
@@ -114,15 +119,15 @@ int main() {
     check(!tab.loading && shown() == 1 && tab.EntryAt(0).name == L"budget.txt",
         "folder search displays only matching filenames inside its scope");
     const auto all = submit(L"budget", false);
-    check(tab.loading && shown() == 0 && !tab.search_retaining_results,
-        "switching to all disks hides results from the previous scope");
+    check(tab.loading && shown() == 1 && tab.search_retaining_results && tab.CountBound() == 0,
+        "switching scope retains published rows until replacement without enabling actions");
     check(s.pendingIndexSearches.at(all).query.path_prefix.empty(),
         "all-disk search removes the current-folder restriction");
     index::SearchResult stale;
     stale.total = 1;
     stale.hits.push_back(indexed[1]);
     AcceptIndexProviderResult(s, scoped, std::move(stale), false);
-    check(tab.pending_generation == all && shown() == 0, "late results cannot overwrite a new search scope");
+    check(tab.pending_generation == all && shown() == 1, "late results cannot overwrite a new search scope");
     publish(all);
     check(shown() == 2 && tab.search_total == 2 && !tab.loading,
         "all-disk search from a folder includes a match on another drive");
@@ -134,11 +139,12 @@ int main() {
         "refreshing the same query retains its matching results");
     publish(static_cast<uint32_t>(tab.pending_generation));
     const auto changed = submit(L"other", false);
-    check(tab.loading && shown() == 0, "changing the keyword hides previous matches while pending");
+    check(tab.loading && shown() == 2 && tab.search_retaining_results,
+        "changing the keyword retains published matches while pending");
     publish(changed);
     check(shown() == 1 && tab.EntryAt(0).name == L"other.txt", "changed query publishes only its own match");
     const auto empty = submit(L"missing-filename", false);
-    check(shown() == 0, "no-match query does not retain unrelated rows");
+    check(shown() == 1 && tab.CountBound() == 0, "unconfirmed matches remain visible without enabling actions");
     publish(empty);
     check(!tab.loading && shown() == 0 && tab.search_total == 0,
         "empty completion clears loading and displays no rows");

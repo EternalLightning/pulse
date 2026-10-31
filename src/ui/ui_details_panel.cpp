@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ui_details_panel.cpp — Details panel draw and content height.
 #include "ui_renderer.h"
 #include "animation_clock.h"
@@ -109,8 +114,10 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     };
     auto section = [&](const wchar_t* label, float y, int id) {
         const bool hovered = IsHovered(vm, HitTestResult::DetailsSection, id);
-        if (hovered) {
-            MakeBrush(dc, theme.fill_hover, brFillHover_);
+        const float hover = HoverOpacity(L"details-section-hover:" + std::to_wstring(id), hovered);
+        if (hover > 0.0f) {
+            auto fill = theme.fill_hover; fill.a *= hover;
+            MakeBrush(dc, fill, brFillHover_);
             FillRoundedRect(dc, brFillHover_.get(), panel.left + 6.0f * s, y,
                             panel.right - panel.left - 12.0f * s, 28.0f * s, 6.0f * s);
         }
@@ -120,17 +127,14 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         const float cx = panel.left + 17.0f * s;
         const float cy = y + 14.0f * s;
         const float t = 1.3f * s;
-        if (collapsed) {
-            dc->DrawLine(D2D1::Point2F(cx - 2.0f * s, cy - 4.0f * s),
-                         D2D1::Point2F(cx + 2.0f * s, cy), brText_.get(), t);
-            dc->DrawLine(D2D1::Point2F(cx + 2.0f * s, cy),
-                         D2D1::Point2F(cx - 2.0f * s, cy + 4.0f * s), brText_.get(), t);
-        } else {
-            dc->DrawLine(D2D1::Point2F(cx - 4.0f * s, cy - 2.0f * s),
-                         D2D1::Point2F(cx, cy + 2.0f * s), brText_.get(), t);
-            dc->DrawLine(D2D1::Point2F(cx, cy + 2.0f * s),
-                         D2D1::Point2F(cx + 4.0f * s, cy - 2.0f * s), brText_.get(), t);
-        }
+        const float expansion = DisclosureProgress(L"details-disclosure:" + std::to_wstring(id), !collapsed);
+        D2D1_MATRIX_3X2_F transform; dc->GetTransform(&transform);
+        dc->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion, D2D1::Point2F(cx, cy)) * transform);
+        dc->DrawLine(D2D1::Point2F(cx - 2.0f * s, cy - 4.0f * s),
+                     D2D1::Point2F(cx + 2.0f * s, cy), brText_.get(), t);
+        dc->DrawLine(D2D1::Point2F(cx + 2.0f * s, cy),
+                     D2D1::Point2F(cx - 2.0f * s, cy + 4.0f * s), brText_.get(), t);
+        dc->SetTransform(transform);
         text(label, D2D1::RectF(panel.left + 28.0f * s, y + 4.0f * s,
                                 panel.right - 12.0f * s, y + 24.0f * s),
              compositor_->SmallFormat(), theme.accent);
@@ -404,11 +408,16 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     const auto footer = MakePreviewFooterLayout(toggle, s);
     const float cx = footer.chevron.x;
     const float cy = footer.chevron.y;
-    const float direction = d.preview_only ? -1.0f : 1.0f;
+    D2D1_MATRIX_3X2_F arrow_transform; dc->GetTransform(&arrow_transform);
+    const float expansion = motion_enabled_ && !IsHighContrast() ? std::clamp(d.preview_expansion, 0.0f, 1.0f)
+        : (d.preview_only ? 1.0f : 0.0f);
+    dc->SetTransform(D2D1::Matrix3x2F::Rotation(180.0f * expansion, D2D1::Point2F(cx, cy)) * arrow_transform);
+    const float direction = 1.0f;
     dc->DrawLine(D2D1::Point2F(cx - 4 * s, cy - direction * 2 * s),
         D2D1::Point2F(cx, cy + direction * 2 * s), brText_.get(), 1.4f * s);
     dc->DrawLine(D2D1::Point2F(cx, cy + direction * 2 * s),
         D2D1::Point2F(cx + 4 * s, cy - direction * 2 * s), brText_.get(), 1.4f * s);
+    dc->SetTransform(arrow_transform);
     if (d.preview_only) {
         DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
             brText_.get(), d.name, footer.caption.left, footer.caption.top,

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // sidebar_sections.cpp — Section menu for the empty part of the sidebar.
 //
 // File Explorer puts a context menu on the navigation-pane background that decides

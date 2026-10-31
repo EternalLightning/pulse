@@ -1,11 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_search_client.h"
 #include "content_search_protocol.h"
 #include "content_config_storage.h"
+#include "../common/command_line.h"
 #include "../ipc/protocol.h"
 
 #include <objbase.h>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 
 namespace pulse::index {
 namespace {
@@ -94,6 +101,20 @@ std::wstring ContentSearchClient::ExePath() {
     const size_t slash = path.find_last_of(L"\\/");
     return slash == std::wstring::npos ? L"Pulse.Index.exe"
         : path.substr(0, slash + 1) + L"Pulse.Index.exe";
+}
+
+bool ContentSearchClient::SetDatabasePathForTesting(std::wstring database_path) {
+    if (running_) { SetLastError(ERROR_BUSY); return false; }
+    if (!database_path.empty() && (database_path.find(L'\0') != std::wstring::npos ||
+        database_path.find(L'"') != std::wstring::npos || !std::filesystem::path(database_path).is_absolute())) {
+        SetLastError(ERROR_INVALID_PARAMETER); return false;
+    }
+    database_path_for_testing_ = std::move(database_path);
+    return true;
+}
+
+std::wstring ContentSearchClient::DatabasePath() const {
+    return database_path_for_testing_.empty() ? config_storage::DatabasePath() : database_path_for_testing_;
 }
 
 void ContentSearchClient::Start(HWND notify, UINT update_message, bool persistent, bool read_only) {
@@ -204,6 +225,7 @@ bool ContentSearchClient::EnsurePersistent() {
     persistent_token_ = NewToken();
     const auto exe = ExePath();
     std::wstring command = L"\"" + exe + (mode_ == ContentAgentMode::Instant ? L"\" --content-instant-agent " : read_only_ ? L"\" --content-index-observer " : L"\" --content-index-agent ") + persistent_token_ + L" " + std::to_wstring(GetCurrentProcessId());
+    if (!database_path_for_testing_.empty()) command += L" " + QuoteWindowsArgument(database_path_for_testing_);
     STARTUPINFOW startup{sizeof(startup)}; startup.dwFlags = STARTF_FORCEOFFFEEDBACK; PROCESS_INFORMATION created{};
     if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &created)) {
         std::lock_guard lock(state_mu_); status_.error = GetLastError(); return false;
@@ -221,7 +243,8 @@ void ContentSearchClient::Control(const Command& command) {
     if (mode_ == ContentAgentMode::Instant && (command.type == content::REQ_STATUS || command.type == content::REQ_CONFIG)) {
         // Configuration is independent of the optional body cache and never starts an agent.
         ContentIndexConfig config;
-        if (command.type == content::REQ_STATUS && !LoadContentIndexConfig(config)) {
+        const auto database_path = DatabasePath();
+        if (command.type == content::REQ_STATUS && !LoadContentIndexConfig(database_path, config)) {
             const DWORD error = GetLastError();
             std::lock_guard lock(state_mu_); status_.error = error; return;
         }
@@ -229,13 +252,13 @@ void ContentSearchClient::Control(const Command& command) {
             ipc::PayloadReader reader(command.payload.data(), command.payload.size());
             // Acquire the shared configuration lock with cancellation before entering
             // the reentrant storage helper. Closing never waits out another writer.
-            HANDLE mutex = config_storage::NamedMutex(config_storage::DatabasePath(), L"config");
+            HANDLE mutex = config_storage::NamedMutex(database_path, L"config");
             if (!mutex) { std::lock_guard lock(state_mu_); status_.error = GetLastError(); return; }
             HANDLE waits[]{cancel_event_, mutex};
             const auto wait = WaitForMultipleObjects(2, waits, FALSE, 1000);
             if (wait != WAIT_OBJECT_0 + 1 && wait != WAIT_ABANDONED_0 + 1) { CloseHandle(mutex); return; }
             struct Release { HANDLE mutex; ~Release() { ReleaseMutex(mutex); CloseHandle(mutex); } } release{mutex};
-            if (!content::GetConfig(reader, config) || !SaveInstantContentConfig(config)) {
+            if (!content::GetConfig(reader, config) || !SaveInstantContentConfig(database_path, config)) {
                 std::lock_guard lock(state_mu_); status_.error = ERROR_WRITE_FAULT; return;
             }
         }

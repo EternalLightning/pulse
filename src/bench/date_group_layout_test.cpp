@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/date_groups.h"
 #include "../ui/view_layout.h"
 #include <d2d1helper.h>
@@ -73,7 +78,19 @@ int main() {
         scrolled.HitTest(80, 35) == 1 && visible_first <= 1 && visible_last >= 1 &&
         filtered_groups.size() == 3 && filtered_groups[0].first == 0 &&
         filtered_groups[1].first == 1 && filtered_groups[2].first == 2;
-    const bool ok = buckets && geometry && scrolled_and_filtered;
+    const std::vector<ui::DateGroup> stripe_groups{{0, 3, 0}, {3, 3, 1}};
+    ui::ViewLayout stripes(ui::ViewMode::Details, D2D1::RectF(0, 0, 600, 500),
+        6, 0, 0, 1, 34, &stripe_groups);
+    const std::vector<ui::DateGroup> reduced_groups{{0, 2, 0}, {2, 3, 1}};
+    ui::ViewLayout reduced(ui::ViewMode::Details, D2D1::RectF(0, 0, 600, 500),
+        5, 0, 75, 1, 34, &reduced_groups);
+    const bool stripe_parity = !stripes.IsStripedRow(0) && stripes.IsStripedRow(1) &&
+        !stripes.IsStripedRow(2) && !stripes.IsStripedRow(3) && stripes.IsStripedRow(4) &&
+        !stripes.IsStripedRow(5) && !reduced.IsStripedRow(2) && reduced.IsStripedRow(3) &&
+        !reduced.IsStripedRow(4) && !reduced.IsStripedRow(-1) && !reduced.IsStripedRow(5);
+    std::printf("[%s] zebra parity restarts within each group and survives odd-size edits and scrolling\n",
+        stripe_parity ? "PASS" : "FAIL");
+    const bool ok = buckets && geometry && scrolled_and_filtered && stripe_parity;
     std::printf("[%s] date buckets and grouped row hit testing\n", ok ? "PASS" : "FAIL");
     return ok && gutters ? 0 : 1;
 }

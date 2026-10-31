@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "drop_staging.h"
+#include "destination_guard.h"
 
 #include <windows.h>
 #include <atomic>
@@ -106,24 +112,44 @@ DWORD LinkOrCopyTree(const std::wstring& from, const std::wstring& to, std::wstr
     return CopyFileW(Long(from).c_str(), Long(to).c_str(), TRUE) ? ERROR_SUCCESS : GetLastError();
 }
 
-void RemoveTree(const std::wstring& path) {
+bool RemoveTree(const std::wstring& path, DestinationGuard& guard, const DropEnumerationApi& api = {}) {
+    std::wstring error;
+    if (!guard.Capture(Long(path), error) || !guard.PinDirectories(Long(Parent(path)), error)) return false;
     const std::wstring target = Long(path);
     const DWORD attrs = GetFileAttributesW(target.c_str());
-    if (attrs == INVALID_FILE_ATTRIBUTES) return;
+    if (attrs == INVALID_FILE_ATTRIBUTES) return false;
     if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
         if (!(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
-            ForEachChild(path, [&](const WIN32_FIND_DATAW& child) {
-                RemoveTree(Plain(path) + L"\\" + child.cFileName);
-                return true;
-            });
+            if (!guard.PinDirectories(target, error) || !guard.Check(target, error)) return false;
+            bool removed = true;
+            const DWORD enumerated = ForEachChild(path, [&](const WIN32_FIND_DATAW& child) {
+                const bool child_removed = RemoveTree(Plain(path) + L"\\" + child.cFileName, guard, api);
+                removed = child_removed && removed;
+                return child_removed;
+            }, api);
+            guard.ReleaseDirectory(target);
+            if (enumerated || !removed) return false;
         }
-        RemoveDirectoryW(target.c_str());
-        return;
     }
+    auto handle = guard.PinLeaf(target, error, nullptr, FILE_WRITE_ATTRIBUTES);
+    if (!handle) return false;
     // Read-only entries in a stage are copies (LinkOrCopyTree), not links.
-    if (attrs & FILE_ATTRIBUTE_READONLY)
-        SetFileAttributesW(target.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
-    DeleteFileW(target.c_str());
+    FILE_BASIC_INFO basic{};
+    if (!GetFileInformationByHandleEx(handle.get(), FileBasicInfo, &basic, sizeof(basic))) return false;
+    if (basic.FileAttributes & FILE_ATTRIBUTE_READONLY) {
+        basic.FileAttributes &= ~FILE_ATTRIBUTE_READONLY;
+        if (!basic.FileAttributes) basic.FileAttributes = FILE_ATTRIBUTE_NORMAL;
+        if (!SetFileInformationByHandle(handle.get(), FileBasicInfo, &basic, sizeof(basic))) return false;
+    }
+    return guard.DeleteOwnedLeaf(target, error, std::move(handle));
+}
+
+bool PinStageRoot(const std::wstring& root, DestinationGuard& guard) {
+    std::wstring error;
+    if (!guard.Capture(Long(root), error)) return false;
+    for (const auto& impact : guard.Impacts())
+        if (impact.kind != DestinationLinkKind::HardLink) return false;
+    return guard.PinDirectories(Long(root), error);
 }
 
 bool ProcessAlive(DWORD pid) {
@@ -163,13 +189,17 @@ static DropStageResult StageDropSourcesImpl(const std::vector<std::wstring>& sou
     staged = sources;
     auto candidate = sources;
     std::wstring stage;
+    DestinationGuard stage_guard;
+    DestinationGuard::Handle stage_handle;
+    bool stage_owned = false;
     bool any = false;
     for (size_t i = 0; i < sources.size(); ++i) {
         const std::wstring& source = sources[i];
         if (!IsTemporaryDropSource(source, temp_dir, stage_root)) continue;
         auto fail = [&](DWORD error, const std::wstring& failed_source) {
-            if (!stage.empty()) RemoveTree(stage);
-            return DropStageResult{false, error, failed_source};
+            stage_handle.reset();
+            const bool cleaned = stage.empty() || (stage_owned && RemoveTree(stage, stage_guard));
+            return DropStageResult{false, error, failed_source, static_cast<DWORD>(cleaned ? ERROR_SUCCESS : ERROR_FILE_INVALID)};
         };
         if (stage_root.empty()) return fail(ERROR_PATH_NOT_FOUND, source);
         if (stage.empty()) {
@@ -179,13 +209,19 @@ static DropStageResult StageDropSourcesImpl(const std::vector<std::wstring>& sou
             if (root_attrs == INVALID_FILE_ATTRIBUTES) return fail(GetLastError(), source);
             if (!(root_attrs & FILE_ATTRIBUTE_DIRECTORY) || (root_attrs & FILE_ATTRIBUTE_REPARSE_POINT))
                 return fail(ERROR_NOT_SUPPORTED, source);
+            if (!PinStageRoot(stage_root, stage_guard)) return fail(ERROR_FILE_INVALID, source);
             stage = Plain(stage_root) + L"\\" + std::to_wstring(GetCurrentProcessId()) + L"-" +
                     std::to_wstring(++counter) + L"-" + std::to_wstring(GetTickCount64());
-            if (!CreateDirectoryW(Long(stage).c_str(), nullptr)) {
+            std::wstring guard_error;
+            stage_handle = DestinationGuard::CreateDirectoryLeaf(Long(stage), false, guard_error);
+            if (!stage_handle) {
                 const DWORD error = GetLastError();
                 stage.clear(); // Never clean a pre-existing directory we did not create.
                 return fail(error, source);
             }
+            if (!stage_guard.AdoptCreatedLeaf(Long(stage), stage_handle.get(), guard_error))
+                return fail(ERROR_FILE_INVALID, source);
+            stage_owned = true;
         }
         // Named like the original parent (7zE44D7D628), which dialogs show.
         std::wstring parent = Leaf(Parent(source));
@@ -202,7 +238,8 @@ static DropStageResult StageDropSourcesImpl(const std::vector<std::wstring>& sou
         candidate[i] = target;
         any = true;
     }
-    if (!any && !stage.empty()) RemoveTree(stage);
+    stage_handle.reset();
+    if (!any && !stage.empty()) RemoveTree(stage, stage_guard);
     staged = std::move(candidate);
     return {any, ERROR_SUCCESS, {}};
 }
@@ -254,23 +291,34 @@ bool StageDropSources(const std::vector<std::wstring>& sources, const std::wstri
     return result.any;
 }
 
-void SweepDropStages(const std::wstring& stage_root, bool include_own) {
-    if (stage_root.empty()) return;
+bool SweepDropStages(const std::wstring& stage_root, bool include_own, const DropEnumerationApi& api) {
+    if (stage_root.empty()) return false;
+    DestinationGuard guard;
+    if (!PinStageRoot(stage_root, guard)) return false;
     const DWORD attrs = GetFileAttributesW(Long(stage_root).c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
-        (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return;
+        (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
     const DWORD self = GetCurrentProcessId();
     std::vector<std::wstring> doomed;
-    ForEachChild(stage_root, [&](const WIN32_FIND_DATAW& child) {
+    bool captured = true;
+    const DWORD enumerated = ForEachChild(stage_root, [&](const WIN32_FIND_DATAW& child) {
         if (!(child.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return true;
         wchar_t* end = nullptr;
         const unsigned long pid = wcstoul(child.cFileName, &end, 10);
         if (end == child.cFileName || *end != L'-') return true;  // not a stage folder
-        if (pid == self ? include_own : !ProcessAlive(static_cast<DWORD>(pid)))
-            doomed.push_back(Plain(stage_root) + L"\\" + child.cFileName);
+        if (pid == self ? include_own : !ProcessAlive(static_cast<DWORD>(pid))) {
+            const auto path = Plain(stage_root) + L"\\" + child.cFileName;
+            std::wstring error;
+            if (!guard.Capture(Long(path), error) ||
+                (!(child.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                 !guard.PinDirectories(Long(path), error))) captured = false;
+            else doomed.push_back(path);
+        }
         return true;
-    });
-    for (const auto& dir : doomed) RemoveTree(dir);
+    }, api);
+    bool removed = enumerated == ERROR_SUCCESS && captured;
+    for (const auto& dir : doomed) removed = RemoveTree(dir, guard, api) && removed;
+    return removed;
 }
 
 } // namespace pulse::ops

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // shell_client.h — Async client for Pulse.Shell.exe (UI-process side).
 //
 // Owns the child process lifetime: pipe connects to \\.\pipe\pulse_shell_<pid>;

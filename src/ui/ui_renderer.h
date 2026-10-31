@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ui_renderer.h — Full-window Fluent renderer (title bar, toolbar, sidebar, pane, tray).
 #pragma once
 #include <optional>
@@ -18,6 +23,8 @@
 #include "content_reveal_animation.h"
 #include "binary_transition.h"
 #include "surface_transition.h"
+#include "item_reflow_surface.h"
+#include "view_mode_transition.h"
 #include "smooth_scroll.h"
 #include "preview_handler_host.h"
 #include "sysctx_view.h"
@@ -165,6 +172,8 @@ struct PaneViewModel {
     using TagDots = std::unordered_map<int, std::vector<D2D1_COLOR_F>>;
 
     std::wstring path; // Navigation address; empty means This PC. Titles belong in header_text.
+    SurfaceMotion navigation_motion = SurfaceMotion::Fade;
+    uint64_t navigation_owner = 0, navigation_revision = 0;
     bool is_home = false;
     bool home_loading = false;
     unsigned home_collapsed_mask = 0;
@@ -226,10 +235,12 @@ struct PaneViewModel {
     std::wstring date_column_label;
     int selected_index = -1;
     int selected_count = 0;
+    uint64_t selection_revision = 0;
     bool all_selected = false;
     const std::unordered_set<int>* selected_indices = nullptr;
     int hover_index = -1;
     bool view_mode_direct = false;
+    uint64_t view_mode_revision = 0;
     uint32_t row_action_mask = 7u; // star, open in new tab, more
     int drop_target_index = -1;   // folder row under an OLE drag (accent 2px stroke)
     bool header_drop = false;     // pane title bar is a navigate-to-folder target
@@ -324,6 +335,9 @@ struct SidebarItem {
     bool starred_child = false;
     bool use_path_icon = false;
     std::wstring icon_path; // empty uses the navigation path
+    bool transient_project = false;
+    bool exiting = false;
+    float presence = 1.0f; // Shared opacity and layout fraction for contextual rows.
 };
 
 enum class SidebarAddAction { None, CreateTag, AddNetwork };
@@ -888,6 +902,7 @@ class MainRenderer {
     friend struct ContentRevealUiTest;
     friend struct NavigationMotionUiTest;
     friend struct AdditionalMotionUiTest;
+    friend struct ItemReflowUiTest;
     friend struct InteractionFeedbackUiTest;
     friend struct TabIndicatorUiTest;
     friend struct SurfaceScrollUiTest;
@@ -1259,6 +1274,8 @@ private:
 
     void DrawList(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
                   int hover_region = 0, int hover_control_index = -1, bool pane_focused = true);
+    void DrawListItems(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
+                       int hover_region, int hover_control_index, bool pane_focused);
     void DrawScrollbar(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme);
     // Scatter deck of staged files inside the tray panel (draw + hit-test
     // share the geometry helpers in ui_renderer.cpp).
@@ -1410,7 +1427,20 @@ private:
     int settings_switch_page_ = -1;
     bool settings_switch_animating_ = false;
     SurfaceTransition page_surface_;
+    SurfaceTransition address_path_surface_;
     std::array<SurfaceTransition, 8> pane_surfaces_;
+    std::array<SurfaceTransition, 8> pane_title_surfaces_;
+    std::array<ItemReflowSurface, 8> item_reflow_surfaces_;
+    std::array<ViewModeTransition, 8> view_mode_transitions_;
+    std::wstring ViewModeTransitionIdentity(const PaneViewModel& vm) const;
+    uint64_t ViewModeFrameSignature(const PaneViewModel& vm, const Theme& theme, bool focused,
+                                    int hover_region, int hover_control_index) const;
+    bool CanReuseViewModeFrame() const;
+    void RetainViewModeFrame(const PaneViewModel& vm, const ViewModeTransition& transition);
+    const ViewModeTransition* ViewModeTransitionFor(const PaneViewModel& vm, D2D1_RECT_F viewport) const;
+    bool item_reflow_dark_ = false;
+    static std::wstring ItemReflowContext(const PaneViewModel& vm);
+    const ItemReflowSurface* ItemReflowFor(const PaneViewModel& vm, D2D1_RECT_F viewport) const;
     SurfaceTransition settings_content_surface_;
     BinaryTransition details_open_motion_;
     float details_motion_window_width_ = 0;
@@ -1432,8 +1462,11 @@ private:
     struct HoverTrack { BinaryTransition animation; uint64_t frame = 0; };
     std::unordered_map<std::wstring, HoverTrack> hover_tracks_;
     std::array<BinaryTransition, 10> settings_nav_tracks_{};
-    float HoverOpacity(const std::wstring& key, bool hovered);
+    float HoverOpacity(const std::wstring& key, bool hovered, float enter_ms = 110.0f,
+                       float exit_ms = 150.0f);
+    float ControlHoverOpacity(const D2D1_RECT_F& bounds, bool hovered);
     float SelectionOpacity(const std::wstring& key, bool selected);
+    float DisclosureProgress(const std::wstring& key, bool expanded);
 
 };
 

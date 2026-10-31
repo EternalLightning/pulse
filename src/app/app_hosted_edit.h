@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_hosted_edit.h — Address/filter/rename overlay editors.
 #pragma once
 #include "app_runtime.h"
@@ -38,6 +43,7 @@ void ShowWildcardSelect(AppState& s);
 void HideFilterEditor(AppState& s, bool commit);
 void ClearPaneFilter(AppState& s);
 void SyncFilterEditor(AppState& s);
+bool TickFilterEditor(AppState& s, uint64_t now);
 void LayoutRenameOverlay(AppState& s);
 void ShowRenameOverlay(AppState& s);
 void HideRenameOverlay(AppState& s, bool commit);

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "index_transport_security.h"
 #include <winsvc.h>
@@ -52,6 +57,19 @@ inline bool VerifyIndexServer(HANDLE pipe, const std::wstring& helper_image, con
     return QueryServiceStatusEx(service.get(), SC_STATUS_PROCESS_INFO,
         reinterpret_cast<BYTE*>(&status), sizeof(status), &needed) &&
         IndexServiceOwnsEndpoint(pid, status, *config);
+}
+
+inline HANDLE OpenVerifiedIndexPipe(const std::wstring& pipe_name,
+                                    const std::wstring& helper_image = SiblingIndexImage()) {
+    Handle pipe(CreateFileW(pipe_name.c_str(), kClientPipeAccess, 0, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
+    if (pipe.get() == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+    if (!VerifyIndexServer(pipe.get(), helper_image, Identity::Current())) {
+        CloseHandle(pipe.release());
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+    return pipe.release();
 }
 
 } // namespace pulse::index::transport

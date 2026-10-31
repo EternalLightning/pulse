@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 // cloud_sync_probe.h - "syncing" / "sync error" for the rows of a cloud folder
 // that are actually on screen. File attributes already say online-only / local

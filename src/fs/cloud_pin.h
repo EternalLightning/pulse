@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 // cloud_pin.h - 始终保留在此设备上 / 释放空间 for Cloud Files items, the way
 // Explorer does it: only the PINNED / UNPINNED attributes change and the sync
@@ -8,6 +13,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include "cloud_state.h"
 
 namespace pulse::fs {
 
@@ -25,14 +31,19 @@ DWORD CloudPinAttrs(DWORD attrs, CloudPinAction action) noexcept;
 // Whether |action| would change anything for an item with |attrs|.
 bool CloudPinChanges(DWORD attrs, CloudPinAction action) noexcept;
 
-// Reparse tags owned by the Cloud Files filter (IO_REPARSE_TAG_CLOUD_0..F).
-constexpr bool IsCloudReparseTag(DWORD tag) noexcept { return (tag & 0xFFFF0FFFu) == 0x9000001Au; }
-
 struct CloudPinResult {
     size_t visited = 0; // items looked at
     size_t changed = 0; // items whose attributes were written
-    size_t failed = 0;  // SetFileAttributesW refused (in use, access denied, gone)
+    size_t failed = 0;  // failed probes, attribute writes, or directory enumerations
+    DWORD first_error = ERROR_SUCCESS;
+    std::wstring first_failed_path;
     bool cancelled = false;
+};
+
+struct CloudPinApi {
+    decltype(&FindFirstFileExW) first = ::FindFirstFileExW;
+    decltype(&FindNextFileW) next = ::FindNextFileW;
+    decltype(&SetFileAttributesW) set_attributes = ::SetFileAttributesW;
 };
 
 // Applies |action| to every path and, for folders, everything below them.
@@ -41,6 +52,6 @@ struct CloudPinResult {
 // enter folders that are still online-only placeholders (nothing local to free,
 // and listing them would make the provider fetch the listing).
 CloudPinResult ApplyCloudPin(const std::vector<std::wstring>& paths, CloudPinAction action,
-                             const std::atomic<bool>* cancel = nullptr);
+                             const std::atomic<bool>* cancel = nullptr, const CloudPinApi& api = {});
 
 } // namespace pulse::fs

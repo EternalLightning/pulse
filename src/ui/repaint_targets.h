@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <vector>
 
@@ -26,12 +33,15 @@ public:
         return windows_.size();
     }
     void InvalidateAll() const {
+        revision_.fetch_add(1, std::memory_order_relaxed);
         // InvalidateRect only marks the update region, so workers never call
         // into a window while holding this gate. Remove serializes teardown.
         std::lock_guard lock(mutex_);
         for (HWND hwnd : windows_) InvalidateRect(hwnd, nullptr, FALSE);
     }
+    uint64_t Revision() const { return revision_.load(std::memory_order_relaxed); }
 private:
+    mutable std::atomic<uint64_t> revision_{1};
     mutable std::mutex mutex_;
     std::vector<HWND> windows_;
 };

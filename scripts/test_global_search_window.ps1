@@ -1,4 +1,9 @@
-param([string]$BuildDir = 'build_realtime')
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
+param([string]$BuildDir = 'build_realtime', [string[]]$TestArguments = @())
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path $PSScriptRoot -Parent
 Push-Location $taskRoot
@@ -20,7 +25,8 @@ try {
     try {
         & link.exe /nologo '@global_search_window_fixture_link.rsp'
         if ($LASTEXITCODE) { throw 'Window fixture linking failed.' }
-        & '.\pulse_global_search_window_fixture.exe' (Join-Path $taskRoot 'bench_data/global-search-window')
+        if ($TestArguments.Count) { & '.\pulse_global_search_window_fixture.exe' @TestArguments }
+        else { & '.\pulse_global_search_window_fixture.exe' (Join-Path $taskRoot 'bench_data/global-search-window') }
         if ($LASTEXITCODE) { throw 'Window fixture failed.' }
     } finally { Pop-Location }
 } finally { Pop-Location }

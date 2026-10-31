@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // places.h — Workspaces, color tags, network pins (plan.md stage 2 / ui.md §7.5–7.7).
 #pragma once
 #include "../fs/fs_enum.h"

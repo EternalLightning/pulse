@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_task_search.h"
 #include "content_scope.h"
 #include "document_reader.h"
@@ -451,11 +456,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                         return true;
                     const auto root = std::find_if(config.roots.begin(), config.roots.end(),
                                                    [&](const auto &scope) { return InScope(path, scope.path, true); });
-                    if (root == config.roots.end() ||
-                        (request.roots.empty() && !request.root.empty() && !InScope(path, request.root, request.recursive)) ||
-                        (!request.roots.empty() &&
-                         std::none_of(request.roots.begin(), request.roots.end(),
-                                      [&](const auto &scope) { return InScope(path, scope, request.recursive); })))
+                    if (root == config.roots.end() || !ContentRequestIncludesPath(request, path))
                         return true;
                     const bool document = IsExtractedDocumentExtension(ext);
                     const auto maximum =
@@ -539,16 +540,10 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                                     FindClose(frame.find);
                         }
                     } close_finds{stack};
-                    auto intersects_scope = [&](const std::wstring &path, const std::wstring &scope) {
-                        const auto key = ContentScopeKey(path), base = ContentScopeKey(scope);
-                        return ContentPathUnder(base, key) || (request.recursive && ContentPathUnder(key, base));
-                    };
                     auto open = [&](const std::wstring &path) {
                         if (cache.excluded(path) || (request.skip_system_locations && SystemPath(path)))
                             return;
-                        if ((request.roots.empty() && !request.root.empty() && !intersects_scope(path, request.root)) ||
-                            (!request.roots.empty() && std::none_of(request.roots.begin(), request.roots.end(),
-                                [&](const auto &scope) { return intersects_scope(path, scope); })))
+                        if (!ContentRequestIntersectsPath(request, path))
                             return;
                         Frame frame;
                         frame.path = path;
@@ -612,19 +607,22 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
             wake.notify_all();
         });
         auto last_update = GetTickCount64() - 100;
+        std::vector<ContentHit> batch;
+        batch.reserve(64);
         for (;;) {
-            Result result;
-            bool have_result = false, finished = false;
+            bool finished = false;
             {
                 std::unique_lock lock(mutex);
                 wake.wait_for(lock, std::chrono::milliseconds(25), [&] {
                     return !results.empty() || interrupted() || (enumeration_done && scanned == total);
                 });
-                if (!results.empty()) {
-                    result = std::move(results.front());
+                while (!results.empty() && batch.size()<64 &&
+                    (!request.maximum_hits || hits<request.maximum_hits)) {
+                    batch.push_back(std::move(*results.front().hit));
                     results.pop_front();
-                    have_result = true;
+                    ++hits;
                 }
+                if (request.maximum_hits && hits>=request.maximum_hits) progress.truncated=true;
                 progress.scanned_files = scanned;
                 progress.scanned_bytes = read_bytes;
                 progress.total_files = enumeration_complete ? total : 0;
@@ -633,12 +631,12 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                 finished = enumeration_done && scanned == total && results.empty();
             }
             wake.notify_all();
-            if (have_result) {
+            if (!batch.empty() && (batch.size()>=64 || GetTickCount64()-last_update>=50 ||
+                finished || progress.truncated || interrupted())) {
                 last_update = GetTickCount64();
-                ++hits;
-                if (request.maximum_hits && hits >= request.maximum_hits) progress.truncated = true;
                 timing.FlushProgress(progress.scanned_files, progress.total_files, hits);
-                accepted = callback(progress, {std::move(*result.hit)});
+                accepted = callback(progress, std::move(batch));
+                batch.clear(); batch.reserve(64);
             } else if (GetTickCount64() - last_update >= 100) {
                 last_update = GetTickCount64();
                 timing.FlushProgress(progress.scanned_files, progress.total_files, hits);

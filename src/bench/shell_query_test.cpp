@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ipc/shell_query_client.cpp"
 #include "../shell_host/shell_query_metadata.h"
 #include "../common/path_utils.h"
@@ -164,6 +169,37 @@ bool SaveLink(const std::wstring& link_path, const std::wstring& target) {
 
 void ProtocolTests() {
     ShellQueryRequest parsed;
+    for (const DWORD attributes : {DWORD(FILE_ATTRIBUTE_NORMAL), DWORD(FILE_ATTRIBUTE_DIRECTORY),
+            DWORD(FILE_ATTRIBUTE_OFFLINE), pulse::fs::kAttrRecallOnOpen,
+            pulse::fs::kAttrRecallOnDataAccess | pulse::fs::kAttrPinned}) {
+        auto request = Request(ShellQueryKind::TypeName, L"C:\\fixture.txt");
+        request.attributes = attributes;
+        auto bytes = WriteShellQuery(request);
+        Check(ReadShellQuery(bytes.data(), bytes.size(), parsed) &&
+            parsed.kind == ShellQueryKind::TypeName && parsed.attributes == attributes && !parsed.use_attributes,
+            "type query preserves real file and cloud attributes through protocol validation");
+        request.use_attributes = true;
+        bytes = WriteShellQuery(request);
+        Check(!ReadShellQuery(bytes.data(), bytes.size(), parsed),
+            "type query still rejects the icon-only attribute mode flag");
+    }
+    for (const auto kind : {ShellQueryKind::Shortcut, ShellQueryKind::DisplayName, ShellQueryKind::ParsePidl,
+            ShellQueryKind::PidlName, ShellQueryKind::FolderIdentity, ShellQueryKind::InitializePreviewItem}) {
+        auto request = Request(kind, L"C:\\fixture.txt");
+        if (kind == ShellQueryKind::PidlName) { request.path.clear(); request.pidl = {0, 0}; }
+        if (kind == ShellQueryKind::InitializePreviewItem) request.marshal_blob = {1};
+        auto bytes = WriteShellQuery(request);
+        Check(ReadShellQuery(bytes.data(), bytes.size(), parsed), "non-attribute query fixture is otherwise valid");
+        request.attributes = FILE_ATTRIBUTE_NORMAL;
+        bytes = WriteShellQuery(request);
+        Check(!ReadShellQuery(bytes.data(), bytes.size(), parsed),
+            "non-attribute query kinds still reject injected attributes");
+        request.attributes = 0;
+        request.use_attributes = true;
+        bytes = WriteShellQuery(request);
+        Check(!ReadShellQuery(bytes.data(), bytes.size(), parsed),
+            "non-icon query kinds still reject the attribute mode flag");
+    }
     auto valid = WriteShellQuery(Request(ShellQueryKind::Shortcut, L"\\\\?\\C:\\long path\\sample.lnk"));
     Check(ReadShellQuery(valid.data(), valid.size(), parsed) && parsed.kind == ShellQueryKind::Shortcut,
         "versioned shortcut query roundtrips an extended path");
@@ -557,6 +593,11 @@ void LifecycleTests() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--protocol-only") {
+        ProtocolTests();
+        NamespaceProtocolTests();
+        return failures ? 1 : 0;
+    }
     if (argc == 3 && std::wstring_view(argv[1]) == L"--preview-provider") return RunPreviewFixture(argv[2]);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--cloud-metadata-only") {
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

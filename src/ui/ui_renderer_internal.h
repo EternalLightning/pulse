@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ui_renderer_internal.h — Draw + HitTest shared geometry (not a public API).
 #pragma once
 #include "ui_renderer.h"
@@ -318,10 +323,12 @@ void ClearTextWidthCache() {
     float SidebarRowsHeight(const SidebarGroup& group, const SidebarMetrics& m) {
         // Empty headers have no row spacing to reveal during a fold animation.
         if (group.items.empty()) return 0.0f;
-        float height = m.groupGap - m.itemGap;
-        for (const auto& item : group.items)
-            height += SidebarItemHeight(item, m) + m.itemGap;
-        return height;
+        float height = 0.0f, presence = 0.0f;
+        for (const auto& item : group.items) {
+            height += (SidebarItemHeight(item, m) + m.itemGap) * item.presence;
+            presence = std::max(presence, item.presence);
+        }
+        return height + (m.groupGap - m.itemGap) * presence;
     }
 
     float SidebarContentHeight(const WindowViewModel& vm, const SidebarMetrics& m) {
@@ -396,12 +403,14 @@ void ClearTextWidthCache() {
                     if (SidebarExpansion(group) <= 0.0f) continue;
                 }
                 const float rows_top = y;
-                const float rows_height = static_cast<float>(group.items.size()) * rowH;
+                float rows_height = 0.0f;
+                for (const auto& item : group.items) rows_height += rowH * item.presence;
                 const float reveal_bottom = rows_top + rows_height *
                     (group.header.empty() ? 1.0f : SidebarExpansion(group));
                 for (int i = 0; i < static_cast<int>(group.items.size()); ++i) {
                     if (group.items[i].starred_child) continue;
-                    if (y + rowH > sb.bottom - trayH || y + rowH > reveal_bottom) break;
+                    const float visible_height = rowH * group.items[i].presence;
+                    if (y + visible_height > sb.bottom - trayH || y + visible_height > reveal_bottom) break;
                     SidebarSlot slot;
                     slot.kind = group.items[i].is_drive ? SidebarSlot::Drive
                               : group.items[i].is_tag ? SidebarSlot::Tag : SidebarSlot::Item;
@@ -409,8 +418,8 @@ void ClearTextWidthCache() {
                     slot.group = g;
                     slot.item = i;
                     slot.run = run++;
-                    out.push_back(slot);
-                    y += rowH;
+                    if (visible_height > 0.0f) out.push_back(slot);
+                    y += visible_height;
                 }
                 y = reveal_bottom;
             }
@@ -481,10 +490,11 @@ void ClearTextWidthCache() {
                 slot.group = g;
                 slot.item = i;
                 slot.run = run++;
-                if (slot.rc.bottom > sb.top && slot.rc.bottom <= contentBottom &&
-                    slot.rc.bottom <= reveal_bottom)
+                const float visible_bottom = top + h * item.presence;
+                if (item.presence > 0.0f && visible_bottom > sb.top && visible_bottom <= contentBottom &&
+                    visible_bottom <= reveal_bottom)
                     out.push_back(slot);
-                y += h + m.itemGap;
+                y += (h + m.itemGap) * item.presence;
             }
             y = reveal_bottom;
             if (bands) bands->push_back({ g, band_top, std::min(y, contentBottom) });

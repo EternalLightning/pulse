@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_sort_sql.h"
 #include "content_config_storage.h"
 #include "content_task_search.h"
@@ -893,14 +898,25 @@ struct ContentIndex::Impl {
     void WatchFeed(ContentIndexConfig c) {
         IndexFeedConnection connection(feed_stop);
         uint64_t source_epoch=0,cursor=0;
+        bool rebase_pending=false;
         while(WaitForSingleObject(feed_stop,0)!=WAIT_OBJECT_0) {
             FileFeedPage page;
-            if(!connection.Request(true,L"",source_epoch,cursor,page) || !page.ready || page.gap) {
+            const bool received=connection.Request(true,L"",source_epoch,cursor,page);
+            if(!received || !page.ready || page.gap) {
+                const bool ready_gap=received && page.ready && page.gap;
+                const bool rebase_now=ready_gap && !rebase_pending;
+                rebase_pending=ready_gap;
+                if(ready_gap) TraceSearch("content_feed_gap",page.epoch);
                 {std::lock_guard lock(mu);feed_ready=false;dirty=true;}
+                cv.notify_all();
                 source_epoch=0;cursor=0;
+                // Rebase a ready source once without waiting for reconnect backoff.
+                // Repeated gaps before a continuous page still need throttling.
+                if(rebase_now) continue;
                 if(WaitForSingleObject(feed_stop,250)==WAIT_OBJECT_0) break;
                 continue;
             }
+            if(source_epoch) rebase_pending=false;
             {
                 std::unique_lock lock(mu);
                 if(!source_epoch) {feed_ready=true;feed_epoch=page.epoch;dirty=true;cv.notify_all();}
@@ -942,6 +958,7 @@ struct ContentIndex::Impl {
         ++epoch;
         IndexFeedConnection source(feed_stop);
         std::vector<uint64_t> cursors(c.roots.size());
+        std::vector<uint64_t> snapshot_epochs(c.roots.size());
         std::vector<bool> completed(c.roots.size());
         std::vector<DWORD> scan_errors(c.roots.size());
         std::vector<FileFeedPage> pages(c.roots.size());
@@ -962,11 +979,12 @@ struct ContentIndex::Impl {
                     scan_errors[i] = ERROR_NOT_READY; completed[i] = true; --remaining; continue;
                 }
                 auto& page = pages[i];
-                if(!loaded[i] && (!source.Request(false,root.path,source_epoch,cursors[i],page) || page.gap || !page.ready)) {
+                if(!loaded[i] && (!source.Request(false,root.path,snapshot_epochs[i],cursors[i],page) || page.gap || !page.ready)) {
                     std::lock_guard lock(mu);dirty=true;status.indexing=false;status.pending_files=1;
                     for(auto& state:status.root_status) {state.indexing=false;state.state=ContentIndexRootStatus::State::Recovering;}
                     return;
                 }
+                snapshot_epochs[i] = page.epoch;
                 loaded[i] = true;
                 {std::lock_guard lock(mu);status.current_root=root.path;}
                 reader_limit=root_readers[i];

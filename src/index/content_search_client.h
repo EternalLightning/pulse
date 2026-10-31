@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "content_search.h"
 #include "content_index.h"
@@ -21,6 +26,8 @@ public:
     ContentSearchClient& operator=(const ContentSearchClient&) = delete;
     void Start(HWND notify, UINT update_message, bool persistent = true, bool read_only = false);
     void Start(HWND notify, UINT update_message, ContentAgentMode mode);
+    // Call only while stopped; empty restores default storage. Retained across Start/Stop.
+    bool SetDatabasePathForTesting(std::wstring database_path);
     void Stop();
     void Suspend();
     void Resume();
@@ -55,6 +62,8 @@ private:
     void ShutdownAgent();
     void Publish(ContentSearchUpdate update);
     static std::wstring ExePath();
+    std::wstring DatabasePath() const;
+    std::wstring database_path_for_testing_;
     bool persistent_enabled_ = true;
     bool read_only_ = false;
     ContentAgentMode mode_ = ContentAgentMode::LegacyWriter;

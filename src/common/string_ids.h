@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #ifndef PULSE_STRING_IDS_H
 #define PULSE_STRING_IDS_H
 #define IDS_NETWORK_SEARCH_ADD                   2230

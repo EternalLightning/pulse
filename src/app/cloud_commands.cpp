@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "cloud_commands.h"
+#include "cloud_refresh_paths.h"
 #include "cloud_root_catalog.h"
 #include "cloud_sync_probe.h"
 #include "app_commands.h"
@@ -11,8 +17,7 @@
 namespace pulse {
 namespace {
 void RefreshCloudPaths(AppState& s, const std::vector<std::wstring>& paths) {
-    for (const auto& path : paths) {
-        const auto parent = fs::ParentPath(path);
+    for (const auto& parent : app::CloudRefreshParents(paths)) {
         s.store.MarkDirty(parent);
         RefreshPath(s, parent);
     }

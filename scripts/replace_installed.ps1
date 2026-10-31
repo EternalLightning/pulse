@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 #requires -Version 7.2
 [CmdletBinding()]
 param(
@@ -43,7 +48,8 @@ foreach ($pair in @(@($source, $install), @($source, $backupBase), @($install, $
     }
 }
 $roots = @('Pulse.exe', 'Pulse.Index.exe', 'Pulse.Document.exe', 'Pulse.Preview.exe',
-    'Pulse.Shell.exe', 'lumatext.dll', 'pdfium.dll', 'LICENSE', 'NOTICE', 'README.txt', 'Pulse.Integration.exe')
+    'Pulse.Shell.exe', 'lumatext.dll', 'pdfium.dll', 'LICENSE', 'NOTICE', 'README.txt', 'Pulse.Integration.exe',
+    'THIRD_PARTY_NOTICES.md')
 foreach ($required in $roots[0..6]) {
     if (!(Test-Path -LiteralPath (Join-Path $source $required) -PathType Leaf)) { throw "Missing payload: $required" }
 }

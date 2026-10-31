@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // thumbnail_disk_cache.h - Expensive grid thumbnails kept across sessions.
 //
 // %LOCALAPPDATA%\Pulse\thumbs\<xx>\<hash>.pt, one small file per thumbnail:
@@ -27,6 +32,7 @@ struct ThumbnailStoreKey {
     uint32_t pixels;
     uint64_t modified, size;
     bool keep_always = false;
+    HANDLE cancel = nullptr;
 };
 struct ThumbnailFileIdentity {
     uint64_t volume = 0, index = 0, modified = 0, size = 0;

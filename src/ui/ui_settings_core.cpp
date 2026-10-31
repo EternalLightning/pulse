@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "typography.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
@@ -68,13 +73,21 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
     };
     auto disclosure=[&](D2D1_RECT_F r,I title,I desc,const wchar_t* icon,int id,bool own_card) {
         if(own_card) draw_card(r);
-        if(IsHovered(vm,H::SettingsDisclosure,id)) {
-            MakeBrush(dc,theme.fill_hover,brFillHover_);
+        const float hover = ControlHoverOpacity(r, IsHovered(vm,H::SettingsDisclosure,id));
+        if(hover > 0.0f) {
+            auto fill = theme.fill_hover; fill.a *= hover;
+            MakeBrush(dc,fill,brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
         }
         label(r,l10n::Get(title),l10n::Get(desc),icon);
+        const float expansion = DisclosureProgress(L"settings-disclosure:" + std::to_wstring(vm.settings_page) +
+            L":" + std::to_wstring(id), (vm.settings_expanded&(1u<<id)) != 0);
+        D2D1_MATRIX_3X2_F transform; dc->GetTransform(&transform);
+        dc->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion,
+            D2D1::Point2F(r.right-29*scale_, r.top+31*scale_)) * transform);
         DrawIconText(r.right-38*scale_,r.top+22*scale_,18*scale_,18*scale_,
-            (vm.settings_expanded&(1u<<id)) ? L"\xE70D" : L"\xE76C",L"",theme.text_secondary,0.75f);
+            L"\xE76C",L"",theme.text_secondary,0.75f);
+        dc->SetTransform(transform);
     };
     auto section=[&](int i,I title) { text(l10n::Get(title),lay.section[i]); };
     auto segmented=[&](D2D1_RECT_F card,D2D1_RECT_F const* choices,const I* labels,const int* values,int current,H::Region hit,I title,I desc,float description_height=21.0f) {

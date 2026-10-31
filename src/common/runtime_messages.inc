@@ -1,4 +1,9 @@
-﻿// Single source for RC string tables and the C++ fallback before UI initialization.
+﻿// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
+// Single source for RC string tables and the C++ fallback before UI initialization.
 // Define PULSE_LOCALIZED_MESSAGE(id, zh, en) before including this file.
 
 // Common operation commands and state

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "edit_host.h"
 #include "../common/windows_compat.h"
 #include "batch_rename_dialog.h"
@@ -6,6 +11,7 @@
 #include "typography.h"
 #include "ui_compositor.h"
 #include "window_helpers.h"
+#include "dialog_keyboard.h"
 #include "smooth_scroll.h"
 #include "animation_clock.h"
 #include "../common/localization.h"
@@ -80,8 +86,6 @@ public:
 
         MSG message{};
         while (!done_ && GetModalMessage(message)) {
-            const bool edit_msg = EditId(message.hwnd) != 0;
-            if (!edit_msg && IsDialogMessageW(hwnd_, &message)) continue;
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -150,6 +154,36 @@ private:
         if (hwnd == edit_pattern_) return 3;
         if (hwnd == edit_number_) return 4;
         return 0;
+    }
+
+    void MoveFocus(bool backwards) {
+        std::vector<DialogFocusTarget> targets{{10, edit_find_}, {11, edit_replace_}, {4}, {12, edit_pattern_}};
+        if (UsesIndex()) targets.push_back({13, edit_number_});
+        for (int id : {5, 6, 7, 2}) targets.push_back({id});
+        if (can_apply_) targets.push_back({1});
+        targets.push_back({3});
+        MoveDialogFocus(hwnd_, focus_, targets, backwards);
+    }
+
+    void Activate(int hit) {
+        if (hit == 1) Complete(true);
+        else if (hit == 2 || hit == 3) Complete(false);
+        else if (hit == 4) {
+            rule_.replace_in_extension = !rule_.replace_in_extension;
+            SyncRuleFromEdits();
+        } else if (hit == 5) ApplyChip(kChipNumbered);
+        else if (hit == 6) ApplyChip(kChipPadded);
+        else if (hit == 7) ApplyChip(kChipExt);
+        if (hwnd_ && !done_) InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    D2D1_RECT_F FocusRect() const {
+        if (focus_ == 1) return ApplyRect();
+        if (focus_ == 2) return CancelRect();
+        if (focus_ == 3) return CloseRect();
+        if (focus_ == 4) return IncludeExtRect();
+        if (focus_ >= 5 && focus_ <= 7) return ChipRect(focus_ - 5);
+        return {};
     }
 
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
@@ -222,13 +256,7 @@ private:
                 return 0;
             }
             if (wparam == VK_TAB) {
-                const int id = self->EditId(hwnd);
-                const int dir = (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1;
-                const int last = self->UsesIndex() ? 4 : 3;
-                int next = id + dir;
-                if (next < 1) next = last;
-                if (next > last) next = 1;
-                if (HWND target = self->EditAt(next)) SetFocus(target);
+                self->MoveFocus(GetKeyState(VK_SHIFT) < 0);
                 return 0;
             }
             break;
@@ -372,7 +400,7 @@ private:
         } else KillTimer(hwnd_, 2);
     }
 
-    void Render() {
+    void Render(bool present = true) {
         if (compositor_.NeedsRecovery()) {
             if (!compositor_.Recover()) return;
             compositor_.RecreateTextFormats(scale_);
@@ -509,7 +537,9 @@ private:
                           can_apply_ ? theme.accent_text : theme.text_secondary,
                           fluent::HorizontalAlignment::Center);
 
-        pulse::ui::EndSurface(compositor_);
+        if (GetFocus() == hwnd_ && focus_) painter_.DrawFocusRing(FocusRect(), 4.0f * scale_);
+        if (present) pulse::ui::EndSurface(compositor_);
+        else compositor_.Dc()->EndDraw();
     }
 
     LRESULT Handle(UINT message, WPARAM wparam, LPARAM lparam) {
@@ -551,6 +581,12 @@ private:
             return 0;
         case WM_NCCALCSIZE:
             return 0;
+        case WM_GETMINMAXINFO: {
+            auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+            info->ptMinTrackSize = {static_cast<LONG>(std::ceil(kDlgW * scale_)),
+                static_cast<LONG>(std::ceil(kDlgH * scale_))};
+            return 0;
+        }
         case WM_NCHITTEST:
             return pulse::ui::BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
         case WM_SIZE:
@@ -562,6 +598,26 @@ private:
             LayoutEdits();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
+        case WM_DPICHANGED: {
+            scale_ = static_cast<float>(HIWORD(wparam)) / 96.0f;
+            HFONT next = typography::CreateEditFont(scale_);
+            if (next) {
+                for (HWND edit : {edit_find_, edit_replace_, edit_pattern_, edit_number_})
+                    if (edit) SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
+                if (font_) DeleteObject(font_);
+                font_ = next;
+            }
+            compositor_.RecreateTextFormats(scale_);
+            painter_.SetScale(scale_);
+            const auto* rect = reinterpret_cast<RECT*>(lparam);
+            SetWindowPos(hwnd_, nullptr, rect->left, rect->top,
+                (std::max)(rect->right - rect->left, static_cast<LONG>(std::ceil(kDlgW * scale_))),
+                (std::max)(rect->bottom - rect->top, static_cast<LONG>(std::ceil(kDlgH * scale_))),
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            LayoutEdits();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         case WM_MOVE:
             compositor_.UpdateTextRenderingParams(
                 MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
@@ -632,19 +688,14 @@ private:
             pressed_ = 0;
             ReleaseCapture();
             if (hit == pressed) {
-                if (hit == 1) Complete(true);
-                else if (hit == 2 || hit == 3) Complete(false);
-                else if (hit == 4) {
-                    rule_.replace_in_extension = !rule_.replace_in_extension;
-                    SyncRuleFromEdits();
-                } else if (hit == 5) ApplyChip(kChipNumbered);
-                else if (hit == 6) ApplyChip(kChipPadded);
-                else if (hit == 7) ApplyChip(kChipExt);
+                Activate(hit);
             }
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         case WM_KEYDOWN:
+            if (wparam == VK_TAB) { MoveFocus(GetKeyState(VK_SHIFT) < 0); return 0; }
+            if (wparam == VK_RETURN || wparam == VK_SPACE) { Activate(focus_); return 0; }
             if (wparam == VK_ESCAPE) {
                 Complete(false);
                 return 0;
@@ -657,6 +708,8 @@ private:
         case WM_CLOSE:
             Complete(false);
             return 0;
+        case WM_GETDLGCODE:
+            return DLGC_WANTALLKEYS;
         case WM_PAINT: {
             PAINTSTRUCT paint{};
             BeginPaint(hwnd_, &paint);
@@ -664,6 +717,11 @@ private:
             EndPaint(hwnd_, &paint);
             return 0;
         }
+#ifdef PULSE_UI_TEST_HOOKS
+        case WM_APP + 0x2B5:
+            Render(false);
+            return lparam && compositor_.SaveSnapshot(reinterpret_cast<const wchar_t*>(lparam));
+#endif
         case WM_ERASEBKGND:
             return 1;
         case WM_DESTROY:
@@ -712,6 +770,7 @@ private:
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;
     int pressed_ = 0;
+    int focus_ = 0;
     float scroll_ = 0.0f;
     SmoothScroll scroll_animation_;
     int rename_count_ = 0;

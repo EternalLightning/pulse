@@ -1,5 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../app/search_query.h"
+#include "content_search_fixture.h"
+#include "../index/search_trace.h"
+#include "../index/index_feed.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -8,22 +16,23 @@
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
     const std::wstring filter = argc == 2 ? argv[1] : L"all";
-    if (argc > 2 || (filter != L"all" && filter != L"content" && filter != L"filename" && filter != L"dedup")) {
-        std::cerr << "Usage: pulse_realtime_search_test.exe [all|content|filename|dedup]" << std::endl;
+    if (argc > 2 || (filter != L"all" && filter != L"content" && filter != L"content-instant" && filter != L"filename" && filter != L"dedup")) {
+        std::cerr << "Usage: pulse_realtime_search_test.exe [all|content|content-instant|filename|dedup]" << std::endl;
         return 2;
     }
-    const auto base = std::filesystem::absolute(std::filesystem::path(L"../bench_data") /
-        (L"realtime-search-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
+    bench::ContentSearchFixture fixture;
+    if (!fixture.Initialize(L"../bench_data", L"realtime-search")) {
+        std::cerr << "[FAIL] initialize private content database and storage sentinels" << std::endl;
+        std::cerr << "[INFO] fixture stage=" << fixture.Stage() << " error=" << GetLastError() << std::endl;
+        std::wcerr << L"[INFO] attempted=" << fixture.AttemptedPath() << L" fs_error=" << fixture.FilesystemError() << std::endl;
+        return 1;
+    }
+    const auto& base = fixture.Root();
     const auto root = base / L"files";
     const auto profile = base / L"profile";
     const auto filename_cache = base / L"name-index";
     std::filesystem::create_directories(root);
-    std::filesystem::create_directories(profile);
     std::filesystem::create_directories(filename_cache);
-    if (!SetEnvironmentVariableW(L"LOCALAPPDATA", profile.c_str())) {
-        std::cerr << "[FAIL] isolate profile error=" << GetLastError() << std::endl;
-        return 1;
-    }
     SetEnvironmentVariableW(L"PULSE_SEARCH_TRACE", (base / L"trace.csv").c_str());
     const auto token = std::to_wstring(GetCurrentProcessId());
     const auto pipe_name = L"\\\\.\\pipe\\PulseIndex.Test." + token;
@@ -44,6 +53,11 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(host.hThread);
     auto owned = std::make_unique<AppState>(); auto& s = *owned;
     s.isolatedTest = true; s.appPrefs.persist = false;
+    if (!s.contentSearch.SetDatabasePathForTesting(fixture.DatabasePath())) {
+        std::cerr << "[FAIL] bind realtime client to private content database" << std::endl;
+        TerminateProcess(host.hProcess, ERROR_CANCELLED); WaitForSingleObject(host.hProcess, 5000); CloseHandle(host.hProcess);
+        return 1;
+    }
     s.hwnd = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
     s.window_tabs.EnsureDefault(); s.pane = s.window_tabs.Active()->FocusedPane();
     auto& tab = *ActiveTab(s);
@@ -53,7 +67,8 @@ int wmain(int argc, wchar_t** argv) {
     index::ContentIndexConfig config; config.roots = {{root.wstring()}};
     config.shared_scope = true;
     if (filter != L"filename" && filter != L"dedup") {
-        s.contentSearch.Start(nullptr, 0);
+        s.contentSearch.Start(nullptr, 0, filter == L"content-instant" ?
+            index::ContentAgentMode::Instant : index::ContentAgentMode::LegacyWriter);
         s.contentSearch.Configure(config);
     }
     auto diagnose = [&](const char* stage) {
@@ -69,11 +84,15 @@ int wmain(int argc, wchar_t** argv) {
         std::wcout << L"[INFO] filename status=" << s.index.Status() << std::endl;
     };
     size_t results_taken = 0;
+    DWORD content_error = ERROR_SUCCESS;
     auto wait = [&](auto ready, DWORD timeout) {
         const auto until = GetTickCount64() + timeout;
         while (GetTickCount64() < until) {
             index::ContentSearchUpdate update;
-            while (s.contentSearch.TakeUpdate(update)) ApplyContentSearchUpdate(s, std::move(update));
+            while (s.contentSearch.TakeUpdate(update)) {
+                if (update.progress.error) content_error = update.progress.error;
+                ApplyContentSearchUpdate(s, std::move(update));
+            }
             std::vector<uint32_t> ids;
             for (const auto& [id,pending] : s.pendingIndexSearches) ids.push_back(id);
             for (auto id : ids) { index::SearchResult result; if(s.index.TakeResult(id,result)) { ++results_taken; AcceptIndexProviderResult(s,id,std::move(result),false); } }
@@ -99,21 +118,33 @@ int wmain(int argc, wchar_t** argv) {
     wchar_t baseline[8]{};
     const bool record_only = GetEnvironmentVariableW(L"PULSE_REALTIME_BASELINE", baseline, 8) != 0;
     const int repeats = record_only ? 10 : 100;
-    auto summarize = [&](std::vector<ULONGLONG> values, const char* label, ULONGLONG target) {
+    auto summarize = [&](std::vector<ULONGLONG> values, const char* label, ULONGLONG target,
+                         bool enforce = true, const char* unit = "ms") {
         if (values.empty()) { check(false, label); return; }
         std::sort(values.begin(), values.end());
         auto p = [&](size_t percent) { return values[(values.size() * percent + 99) / 100 - 1]; };
-        std::cout << "[INFO] " << label << " n=" << values.size() << " P50=" << p(50) << " P95=" << p(95) << " P99=" << p(99) << " ms" << std::endl;
-        if (!record_only) check(values.size() == 100 && p(95) <= target, label);
+        std::cout << "[INFO] " << label << " n=" << values.size() << " P50=" << p(50) << " P95=" << p(95) << " P99=" << p(99) << ' ' << unit << std::endl;
+        if (!record_only && enforce) check(values.size() == 100 && p(95) <= target, label);
     };
     if (connected && filter != L"filename" && filter != L"dedup") {
         check(wait([&] { auto status = s.contentSearch.GetStatus(); return s.contentSearch.ConfigurationReady() && !status.indexing && !status.pending_files && s.contentSearch.GetConfig().shared_scope && !s.contentSearch.GetConfig().roots.empty(); }, 30000), "isolated shared content agent becomes ready");
         { const auto status = s.contentSearch.GetStatus(); std::cout << "[INFO] status error=" << status.error << " indexed=" << status.indexed_files << " pending=" << status.pending_files << " ready=" << s.contentSearch.ConfigurationReady() << std::endl; }
+        if (filter == L"content-instant") {
+            index::IndexFeedConnection feed(nullptr);
+            check(wait([&] {
+                index::FileFeedPage page;
+                return feed.Request(false, root.wstring(), 0, 0, page) && page.ready && !page.gap;
+            }, 15000), "filename feed snapshot is ready for the instant initial scan");
+        }
         RequestSearchPage(s, tab, query, true);
-        check(wait([&] { return !tab.search_content_active; }, 10000), "initial query completes through IPC and application result handler");
-        std::vector<ULONGLONG> creates, removes;
+        const bool initial_ok = wait([&] { return !tab.search_content_active; }, 10000) && !content_error;
+        check(initial_ok, "initial query completes without error through IPC and application result handler");
+        if (!initial_ok) std::cout << "[INFO] initial content query error=" << content_error << std::endl;
+        std::vector<ULONGLONG> creates, removes, delete_calls;
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
         const auto file = root / L"live.txt";
-        for (int i = 0; i < repeats; ++i) {
+        for (int i = 0; initial_ok && i < repeats; ++i) {
             auto start = GetTickCount64();
             { std::ofstream out(file); out << "pulserealtime " << i; }
             bool ok = wait([&] { return !tab.search_content_active && tab.EntryCount() == 1; }, 5000);
@@ -121,8 +152,15 @@ int wmain(int argc, wchar_t** argv) {
             report << "text_create," << i << ',' << elapsed << ',' << ok << '\n';
             if (!ok) { check(false, "new text file appears without manual refresh"); break; }
             start = GetTickCount64();
+            index::TraceSearch("test_delete_begin", i, file.wstring());
+            LARGE_INTEGER delete_begin{}, delete_end{};
+            QueryPerformanceCounter(&delete_begin);
             const bool deleted = DeleteFileW(file.c_str()) != FALSE;
+            QueryPerformanceCounter(&delete_end);
+            delete_calls.push_back(static_cast<ULONGLONG>((delete_end.QuadPart - delete_begin.QuadPart) * 1000000 / frequency.QuadPart));
+            index::TraceSearch("test_delete_return", i, file.wstring());
             ok = deleted && wait([&] { return !tab.search_content_active && tab.EntryCount() == 0; }, 5000);
+            index::TraceSearch(ok ? "test_delete_visible" : "test_delete_timeout", i, file.wstring());
             elapsed = GetTickCount64() - start; removes.push_back(elapsed);
             report << "delete," << i << ',' << elapsed << ',' << ok << '\n';
             if (!ok) { check(false, "deleted file disappears without manual refresh"); break; }
@@ -130,6 +168,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         summarize(creates, "text save -> UI <= 1000 ms", 1000);
         summarize(removes, "delete -> UI <= 300 ms", 300);
+        summarize(delete_calls, "DeleteFileW call duration", 0, false, "us");
         s.contentSearch.Cancel(tab.search_session_id); tab.search_live_generation = 0;
     }
     if (connected && (filter == L"all" || filter == L"dedup")) {
@@ -171,7 +210,7 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& path : {a, b, c, d}) DeleteFileW(path.c_str());
         wait([&] { return tab.EntryCount() == 0; }, 5000);
     }
-    if (connected && filter != L"content" && filter != L"dedup") {
+    if (connected && filter != L"content" && filter != L"content-instant" && filter != L"dedup") {
         tab.current_path = app::MakeSearchPath(L"pulserealtime");
         RequestSearchPage(s,tab,L"pulserealtime",true);
         check(wait([&]{return !tab.loading && !tab.pending_generation;},10000),"filename subscription returns initial page");
@@ -205,6 +244,10 @@ int wmain(int argc, wchar_t** argv) {
     if(control!=INVALID_HANDLE_VALUE) { const auto header=index::MakeIndexHdr(index::REQ_IDX_TEST_SHUTDOWN,0,0); DWORD written=0; WriteFile(control,&header,sizeof(header),&written,nullptr); CloseHandle(control); }
     if(WaitForSingleObject(host.hProcess,5000)!=WAIT_OBJECT_0) { check(false,"test filename host shuts down cleanly"); diagnose("shutdown-timeout"); TerminateProcess(host.hProcess,ERROR_CANCELLED); WaitForSingleObject(host.hProcess,5000); }
     CloseHandle(host.hProcess);
+    if (filter != L"filename" && filter != L"dedup")
+        check(fixture.ConfigurationMatches(config), "realtime agent writes only the selected database configuration");
+    check(fixture.DefaultConfigurationUnchanged(), "private default configuration sentinel stays unchanged");
+    check(fixture.LocatorUnchanged(), "private file locator sentinel stays unchanged");
     std::wcout << L"[INFO] report: " << (base / L"latency.csv").wstring() << std::endl;
     return failures ? 1 : 0;
 }

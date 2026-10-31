@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/persistent_index_policy.h"
 #include "../index/content_scope.h"
 #include "../index/live_filename_search.h"
@@ -76,9 +81,14 @@ int main() {
     Check(TransientFilenameSearchRoot(L"\\\\server\\share\\child") == L"\\\\server\\share\\child", "UNC fallback preserved");
     CacheSearchDevices({});
     Check(!CachedTransientLocalSearch(L"G:\\child"), "refreshed volume list forgets removed drive letter");
+    wchar_t windows[32768]{}, system_root[32768]{};
+    const UINT windows_length = GetWindowsDirectoryW(windows, ARRAYSIZE(windows));
+    const bool system_resolved = windows_length && windows_length < ARRAYSIZE(windows) &&
+        GetVolumePathNameW(windows, system_root, ARRAYSIZE(system_root));
+    Check(system_resolved, "resolve the actual system-volume mount path");
     const auto actual_mounts = EnumerateSearchDeviceMounts();
-    Check(!actual_mounts.empty() && std::any_of(actual_mounts.begin(), actual_mounts.end(), [](const auto& device) {
-        return CompareStringOrdinal(device.mount_point.c_str(), -1, L"C:\\", -1, TRUE) == CSTR_EQUAL;
+    Check(system_resolved && std::any_of(actual_mounts.begin(), actual_mounts.end(), [&](const auto& device) {
+        return CompareStringOrdinal(device.mount_point.c_str(), -1, system_root, -1, TRUE) == CSTR_EQUAL;
     }), "background enumeration returns actual system-volume mount path");
     if (!actual_mounts.empty()) {
         auto known_device = actual_mounts.front();
@@ -90,15 +100,25 @@ int main() {
             return alias.id != known_device.id || (alias.kind == known_device.kind && alias.online == known_device.online);
         }), "known volume aliases reuse IPC classification and online state rather than probing again");
     }
-    for (const auto* path : {L"C:\\", L"E:\\"}) {
+    const auto project_path = std::filesystem::absolute(L"bench_data").wstring();
+    for (const auto& path : {std::wstring(system_root), project_path}) {
         const auto facts = ProbePersistentDevice(path);
         std::wcout << L"[PROBE] " << path << L" type=" << facts.drive_type << L" online=" << facts.online
             << L" bus_known=" << facts.bus_known << L" removable_bus=" << facts.removable_bus
             << L" system=" << facts.system_volume << L" allowed=" << AllowsPersistentIndex(facts) << L'\n';
-        Check(AllowsPersistentIndex(facts), "actual machine system/project disk remains eligible (read-only probe)");
+        const bool expected = facts.online && !facts.removable_bus && (facts.drive_type == DRIVE_RAMDISK ||
+            (facts.drive_type == DRIVE_FIXED && !facts.removable_bus && (facts.bus_known || facts.system_volume)));
+        Check(AllowsPersistentIndex(facts) == expected,
+            "read-only system/project probe follows detected device facts without a drive-letter assumption");
     }
-    const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data/issue-fixes-removable/fixture") /
-        std::to_wstring(GetCurrentProcessId()));
+    const auto parent = std::filesystem::absolute(L"bench_data/issue-fixes-removable/fixture");
+    std::filesystem::create_directories(parent);
+    const auto root = parent / (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    if (!CreateDirectoryW(root.c_str(), nullptr)) { Check(false, "create a new removable-policy fixture directory"); return 1; }
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { if (!failures) { std::error_code error; std::filesystem::remove_all(path, error); } }
+    } cleanup{root};
     std::filesystem::create_directories(root / L"child");
     for (int i = 0; i < 340; ++i) {
         std::ofstream file(root / (L"sample" + std::to_wstring(i) + L".txt")); file << "temporary sample";
@@ -117,7 +137,7 @@ int main() {
     Check(last.total == 341 && last.hits.size() == 1, "temporary scan preserves page offset");
     query.offset = 0; query.needle = L"nested";
     ScanLiveFilenames(query, root.wstring(), cancel, [&](SearchResult result) { last = std::move(result); });
-    Check(last.total == 1 && last.hits[0].name == L"nested.txt", "temporary scanner searches child directories");
+    Check(last.total == 1 && last.hits.size() == 1 && last.hits[0].name == L"nested.txt", "temporary scanner searches child directories");
     cancel = true; publications = 0;
     ScanLiveFilenames(query, root.wstring(), cancel, [&](SearchResult) { ++publications; });
     Check(publications == 1, "cancelled temporary scan never publishes final results");

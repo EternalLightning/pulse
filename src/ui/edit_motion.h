@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include <algorithm>
 #include <array>
@@ -34,6 +39,8 @@ struct EditCaretBlink {
     }
 };
 
+inline constexpr float kEditMotionDuration = 80;
+
 inline float EditMotionProgress(uint64_t now, uint64_t started, float duration) {
     const float t = std::clamp(static_cast<float>(now >= started ? now - started : 0) / duration, 0.0f, 1.0f);
     const float remaining = 1 - t;
@@ -53,7 +60,7 @@ struct EditCaretMotion {
             return;
         }
         if (pending) {
-            const float p = EditMotionProgress(now, started, 80);
+            const float p = EditMotionProgress(now, started, kEditMotionDuration);
             for (size_t i = 0; i < value.size(); ++i) value[i] = from[i] + (target[i] - from[i]) * p;
             if (p == 1) { value = target; pending = false; }
         }
@@ -72,7 +79,7 @@ struct EditTextMotion {
 
     void Sample(uint64_t now) {
         if (!pending) return;
-        progress = EditMotionProgress(now, started, 100);
+        progress = EditMotionProgress(now, started, kEditMotionDuration);
         pending = progress < 1;
     }
     void Begin(std::wstring_view before, std::wstring_view after, uint64_t now) {

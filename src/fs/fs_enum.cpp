@@ -1,5 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // fs_enum.cpp
 #include "fs_enum.h"
+#include "drive_kind.h"
 #include "../common/unique_resource.h"
 #include "../common/drive_display_name.h"
 #include <windows.h>
@@ -474,7 +480,8 @@ static bool EnumerateThisPc(std::vector<DirEntry>& out, const std::function<bool
         wchar_t root[4] = { wchar_t(L'A' + i), L':', L'\\', L'\0' };
         DirEntry e;
         e.drive_type = GetDriveTypeW(root);
-        if (e.drive_type == DRIVE_REMOTE) {
+        if (IsRemoteLikeDrive(root)) {
+            e.drive_type = DRIVE_REMOTE;
             const auto label = path::ReadMappedDriveLabel(root);
             e.name = label && !label->empty() ? *label + L" (" + std::wstring(root, 2) + L")"
                                              : std::wstring(root, 2);

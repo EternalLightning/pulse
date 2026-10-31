@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // server_address.h - What the user typed to reach a server: \\host\share,
 // //host/share, smb://user@host/share, a bare IP, or (in the connect flow) a
 // bare host name. Pure string work so the address bar and tests share it; no

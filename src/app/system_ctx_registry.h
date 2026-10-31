@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 // System (Explorer-wide) context menu entries: read-only enumeration (S1) and
@@ -24,6 +29,16 @@ struct ValueWriteFaultForTesting {
     size_t rollback_calls = 0;
 };
 
+struct TreeMoveFaultForTesting {
+    size_t fail_copy_call = 0;
+    size_t fail_delete_call = 0;
+    size_t fail_second_delete_call = 0;
+    size_t copy_calls = 0;
+    size_t delete_calls = 0;
+    bool partial_copy = false;
+    bool partial_delete = false;
+};
+
 // Where HKCR's two layers live. Tests point both at a scratch key under HKCU.
 struct Roots {
     HKEY user = HKEY_CURRENT_USER;
@@ -40,6 +55,7 @@ struct Roots {
     bool check_owner = true;     // TrustedInstaller lookups (slow on big scans)
     // Fault injection is ignored outside HKCU\Software\PulseTest\ scratch roots.
     std::shared_ptr<ValueWriteFaultForTesting> value_write_fault_for_testing;
+    std::shared_ptr<TreeMoveFaultForTesting> tree_move_fault_for_testing;
 };
 
 // Static verbs accept Position = Top / Bottom; Explorer orders everything
@@ -58,6 +74,8 @@ const std::vector<Scene>& BuiltinScenes();
 // ".png" -> SystemFileAssociations\.png plus the extension's ProgID.
 Scene ExtensionScene(const Roots& roots, std::wstring_view ext);
 Scene PerceivedScene(std::wstring_view type); // "image" -> SystemFileAssociations\image
+
+enum class TargetState { Unknown, Present, Missing, Unavailable };
 
 struct Item {
     Kind kind = Kind::Verb;
@@ -82,7 +100,9 @@ struct Item {
     Place position = Place::Default;  // verbs: Position = Top / Bottom
     bool is_protected = false;
     bool trusted_installer = false;
-    bool missing = false;          // command/handler points at a file that is gone
+    TargetState target_state = TargetState::Unknown;
+    TargetState icon_state = TargetState::Unknown;
+    bool missing = false;          // only a confirmed absent execution target
 };
 
 std::vector<Item> Enumerate(const Roots& roots, const Scene& scene);
@@ -148,6 +168,8 @@ struct Op {
     bool has_previous_values = false;
     bool restore_previous_values = false;
     DWORD plan_error = ERROR_SUCCESS;
+    // Only recovery records allow reconciling two copies after a partial move.
+    bool recover_tree = false;
 };
 
 enum class OpResult { Ok, NotFound, Conflict, AccessDenied, Unsupported, Failed, RecoveryRequired };

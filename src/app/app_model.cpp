@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_model.cpp
 #include "app_model.h"
 #include "cloud_root_catalog.h"
@@ -78,7 +83,7 @@ void RestoreHistoryEntry(Tab& tab, Tab::HistoryEntry entry) {
 }
 }
 
-bool Tab::NavigateTo(const std::wstring& path) {
+bool Tab::NavigateTo(const std::wstring& path, ui::SurfaceMotion motion) {
     if (fs::IsVirtualPath(path) || fs::IsVirtualPath(current_path)) {
         // Archive member names and search queries retain their case-sensitive identity.
         if (path == current_path) return false;
@@ -86,6 +91,8 @@ bool Tab::NavigateTo(const std::wstring& path) {
         return false;
     }
     ClearEntryRenameHints();
+    navigation_motion = motion;
+    ++navigation_revision;
     ++view_generation;
     back_stack.push(CurrentHistoryEntry(*this));
     forward_stack = {};
@@ -509,6 +516,8 @@ void Tab::RemapSelection(const std::vector<std::wstring>& names, const std::wstr
 
 std::wstring Tab::GoBack() {
     if (back_stack.empty()) return current_path;
+    navigation_motion = ui::SurfaceMotion::Backward;
+    ++navigation_revision;
     ClearEntryRenameHints();
     forward_stack.push(CurrentHistoryEntry(*this));
     ++view_generation;
@@ -524,6 +533,8 @@ std::wstring Tab::GoBack() {
 
 std::wstring Tab::GoForward() {
     if (forward_stack.empty()) return current_path;
+    navigation_motion = ui::SurfaceMotion::Forward;
+    ++navigation_revision;
     ClearEntryRenameHints();
     back_stack.push(CurrentHistoryEntry(*this));
     ++view_generation;
@@ -540,7 +551,7 @@ std::wstring Tab::GoForward() {
 std::wstring Tab::GoUp() {
     std::wstring parent = fs::ParentPath(current_path);
     if (parent == current_path) return current_path;
-    NavigateTo(parent);
+    NavigateTo(parent, ui::SurfaceMotion::Backward);
     return current_path;
 }
 
@@ -1319,29 +1330,14 @@ SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
     for (int i = 0; i < 26; ++i) {
         if (!(drives & (1 << i))) continue;
         wchar_t root[4] = { wchar_t(L'A' + i), L':', L'\\', L'\0' };
-        wchar_t volName[MAX_PATH + 1] = {};
-        DWORD sn = 0;
-        GetVolumeInformationW(root, volName, MAX_PATH, &sn, nullptr, nullptr, nullptr, 0);
-        ULARGE_INTEGER freeBytes{}, totalBytes{};
-        GetDiskFreeSpaceExW(root, &freeBytes, &totalBytes, nullptr);
         SidebarEntry e;
-        e.label = std::wstring(volName[0] ? volName : l10n::Get(l10n::StringId::LocalDisk).c_str()) +
-                  L" (" + root[0] + L":)";
-        uint64_t total = totalBytes.QuadPart;
-        uint64_t free = freeBytes.QuadPart;
-        uint64_t used = total > free ? total - free : 0;
-        e.detail = pulse::format::ByteSize(used, false, pulse::format::ByteSizeStyle::Compact)
-                 + L" / " + pulse::format::ByteSize(total, false,
-                                                     pulse::format::ByteSizeStyle::Compact);
+        e.label = std::wstring(root, 2);
+        e.detail = l10n::Get(l10n::StringId::HomeLoading);
         e.glyph = L"\xE7F1"; // HardDrive (Segoe Fluent Icons)
         e.fallback = L"Drive";
         e.path = fs::NormalizePath(std::wstring(root));
         e.is_drive = true;
         e.color = ui::HexColor(kDrivePalette[m.drives.size() % 4]);
-        if (total > 0) {
-            e.used_ratio = (float)((double)(total - free) / (double)total);
-            if ((double)free / (double)total < 0.10) e.danger = true;
-        }
         m.drives.push_back(std::move(e));
     }
     return m;
@@ -1565,6 +1561,9 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     // In particular, the empty address is the valid This PC destination.
     out.path = fs::IsVirtualPath(tab->current_path)
         ? tab->current_path : pulse::path::FriendlyPathText(tab->current_path);
+    out.navigation_motion = tab->navigation_motion;
+    out.navigation_owner = tab->network_identity;
+    out.navigation_revision = tab->navigation_revision;
     out.header_text = PaneHeaderText(*tab);
     out.filter_text = tab->filter_text;
     out.filter_error.clear();
@@ -1622,6 +1621,11 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
         ParsePulsePath(tab->current_path, nullptr, &rest);
         out.search_query = rest;
         out.is_content_search = SplitSearchQueryText(rest).content.present();
+        if (tab->search_retaining_results) {
+            std::wstring published_kind, published_query;
+            if (ParsePulsePath(tab->snapshot_path, &published_kind, &published_query) &&
+                published_kind == L"search") out.search_query = std::move(published_query);
+        }
     }
     out.content_results = tab->content_results;
     out.search_snippets = tab->search_snippets;
@@ -1635,12 +1639,14 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     }
     out.selected_index = tab->selected_index;
     out.selected_count = tab->SelectedCount();
+    out.selection_revision = tab->selection_revision;
     out.all_selected = tab->all_selected;
     out.selected_indices = tab->all_selected ? nullptr : &tab->selected;
     out.scroll_y = tab->scroll_y;
     out.scroll_x = tab->scroll_x;
     out.view_mode = tab->view_mode;
     out.view_mode_direct = tab->view_mode_direct;
+    out.view_mode_revision = tab->view_mode_revision;
     out.view_generation = tab->view_generation;
     out.sort_column = tab->sort_column;
     out.sort_direction = tab->sort_direction;
@@ -1912,6 +1918,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
         project.fallback_text = L"Repo";
         project.icon_color = ui::HexColor(0x34D399);
         project.badge = L"Git";
+        project.transient_project = true;
         access.items.push_back(std::move(project));
     }
     if (places) {

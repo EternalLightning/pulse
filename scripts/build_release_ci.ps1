@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 #requires -Version 7.2
 param(
     [string]$BuildDir = 'build-ci'
@@ -9,36 +14,21 @@ $build = [IO.Path]::GetFullPath((Join-Path $repo $BuildDir))
 if (-not $build.StartsWith($repo + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'BuildDir must be inside the repository'
 }
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) { throw 'Visual Studio 2022 C++ tools are required' }
-$vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 # The release tag pins the complete SDK; CI verifies it before configuring CMake.
 $sdkRoot = & (Join-Path $PSScriptRoot 'verify_lumatext_sdk.ps1')
 New-Item -ItemType Directory -Path $build -Force | Out-Null
 # Release verification is scoped to the changes being shipped. pulse already
-# depends on all three packaged hosts; standalone tests need explicit targets.
+# depends on all five packaged helpers; standalone tests need explicit targets.
 $testNames = @('pulse_rename_ops_test', 'pulse_child_edit_test', 'pulse_localization_test',
     'pulse_app_controllers_test',
     'pulse_change_tracking_polling_test', 'pulse_change_tracking_test',
     'pulse_change_tracking_memory_test', 'pulse_change_feed_memory_test', 'pulse_usn_packet_queue_test',
     'pulse_content_progress_ui_test', 'pulse_operation_presentation_test', 'pulse_column_strip_test')
 $testTargets = (@('pulse', 'pulse_index_engine_test', 'pulse_index_host_stress',
-    'pulse_preview_test', 'pulse_preview_handler_probe', 'pulse_playback_controls_test') + $testNames) -join ' '
-$batch = Join-Path $build 'compile-release.bat'
-@"
-@echo off
-call "$vcvars"
-if errorlevel 1 exit /b 1
-chcp 65001 >nul
-set "VSLANG=1033"
-cmake -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WITH_SELFTEST=ON -DPULSE_BUILD_PROGRESS_UI_TESTS=ON -DPULSE_WITH_LUMATEXT=ON -DLUMATEXT_SOURCE_DIR= -DCMAKE_PREFIX_PATH="$sdkRoot"
-if errorlevel 1 exit /b 1
-cmake --build "$build" --parallel 4 --target $testTargets
-exit /b %errorlevel%
-"@ | Set-Content -LiteralPath $batch -Encoding ascii
-& $batch
-if ($LASTEXITCODE -ne 0) { throw 'Release compilation failed' }
+    'pulse_preview_test', 'pulse_preview_handler_probe', 'pulse_playback_controls_test') + $testNames)
+$toolchainArgs = @('-DPULSE_BUILD_PROGRESS_UI_TESTS=ON', '-DPULSE_WITH_LUMATEXT=ON',
+    '-DLUMATEXT_SOURCE_DIR=', "-DCMAKE_PREFIX_PATH=$sdkRoot")
+& (Join-Path $PSScriptRoot 'build.ps1') -BuildDir $BuildDir -Configure -EnableSelfTests -Targets $testTargets -CMakeArgs $toolchainArgs
 foreach ($testName in $testNames) {
     & (Join-Path $build "$testName.exe")
     if ($LASTEXITCODE -ne 0) { throw "$testName failed" }
@@ -113,10 +103,7 @@ if (-not $liveDone -or $live.ExitCode -ne 0) {
 }
 Remove-Item Env:PULSE_LUMATEXT
 # Strip the embedded test suite from the shipped executable after verification.
-(Get-Content -LiteralPath $batch -Raw).Replace('-DPULSE_WITH_SELFTEST=ON', '-DPULSE_WITH_SELFTEST=OFF').Replace("--target $testTargets", '--target pulse') |
-    Set-Content -LiteralPath $batch -Encoding ascii
-& $batch
-if ($LASTEXITCODE -ne 0) { throw 'Production compilation failed' }
+& (Join-Path $PSScriptRoot 'build.ps1') -BuildDir $BuildDir -Configure -Targets pulse -CMakeArgs $toolchainArgs
 & (Join-Path $repo 'scripts/check_release_payload.ps1') -BuildDir $build
 $licenses = Join-Path $build 'licenses/LumaText'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null

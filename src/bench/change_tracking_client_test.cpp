@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // Standalone transport regression executable; includes the implementation to test
 // the wire decoder and bounded exchange without exposing test-only public APIs.
 #include "../index/change_tracking_client.cpp"

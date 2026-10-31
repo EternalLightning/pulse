@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ui/quick_preview_window.h"
 #include "../common/localization.h"
 #include <windowsx.h>
@@ -131,6 +136,19 @@ struct QuickPreviewPlaybackProbe {
         return failures ? 1 : 0;
     }
     static void Capture(QuickPreviewWindow& q, const wchar_t* name) {
+        static const auto capture_root = [] {
+            std::error_code error;
+            const auto parent = std::filesystem::absolute(L"bench_data/playback-captures", error);
+            if (error) return std::filesystem::path{};
+            std::filesystem::create_directories(parent, error);
+            const auto root = parent / (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+            if (error || !CreateDirectoryW(root.c_str(), nullptr)) return std::filesystem::path{};
+            std::wprintf(L"Capture directory: %s\n", root.c_str());
+            return root;
+        }();
+        Check(!capture_root.empty(), "create a new process-owned capture directory");
+        if (capture_root.empty()) return;
+        const auto output_path = capture_root / std::filesystem::path(name).filename();
         // Render the production controls/HUD into an isolated GPU target.
         // The live flip-discard swap-chain and GDI return blank after Present;
         // this captures the actual component painters, not the user's desktop.
@@ -176,13 +194,28 @@ struct QuickPreviewPlaybackProbe {
             info.biPlanes = 1; info.biBitCount = 32; info.biCompression = BI_RGB;
             BITMAPFILEHEADER file{}; file.bfType = 0x4d42;
             file.bfOffBits = sizeof(file) + sizeof(info); file.bfSize = file.bfOffBits + size.width * size.height * 4;
-            HANDLE output = CreateFileW(name, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
-            DWORD written = 0;
-            WriteFile(output, &file, sizeof(file), &written, nullptr);
-            WriteFile(output, &info, sizeof(info), &written, nullptr);
-            for (UINT y = 0; y < size.height; ++y)
-                WriteFile(output, mapped.bits + y * mapped.pitch, size.width * 4, &written, nullptr);
-            CloseHandle(output); readback->Unmap();
+            HANDLE output = CreateFileW(output_path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, 0, nullptr);
+            bool saved = output != INVALID_HANDLE_VALUE;
+            DWORD save_error = saved ? ERROR_SUCCESS : GetLastError();
+            const auto write = [&](const void* bytes, DWORD length) {
+                DWORD written = 0;
+                if (!WriteFile(output, bytes, length, &written, nullptr)) { save_error = GetLastError(); return false; }
+                if (written != length) { save_error = ERROR_WRITE_FAULT; return false; }
+                return true;
+            };
+            if (saved) {
+                saved = write(&file, sizeof(file)) && write(&info, sizeof(info));
+                for (UINT y = 0; saved && y < size.height; ++y)
+                    saved = write(mapped.bits + y * mapped.pitch, size.width * 4);
+                LARGE_INTEGER final_size{};
+                if (saved && !GetFileSizeEx(output, &final_size)) { save_error = GetLastError(); saved = false; }
+                if (saved && final_size.QuadPart != file.bfSize) { save_error = ERROR_WRITE_FAULT; saved = false; }
+                if (saved && !FlushFileBuffers(output)) { save_error = GetLastError(); saved = false; }
+                if (!CloseHandle(output) && saved) { save_error = GetLastError(); saved = false; }
+            }
+            if (!saved) std::fwprintf(stderr, L"Capture write failed: %s error=%lu\n", output_path.c_str(), save_error);
+            Check(saved, "write the complete BMP capture and verify its final length");
+            readback->Unmap();
         }
         if (readback) readback->Release();
         target->Release();

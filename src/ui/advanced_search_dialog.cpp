@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "edit_host.h"
 #include "../common/windows_compat.h"
 #include "advanced_search_dialog.h"
@@ -7,6 +12,7 @@
 #include "typography.h"
 #include "ui_compositor.h"
 #include "window_helpers.h"
+#include "dialog_keyboard.h"
 #include "../common/localization.h"
 #include "../ipc/shell_interaction_client.h"
 
@@ -69,6 +75,7 @@ std::wstring LocationLabel(model::LocationScope scope) {
 
 std::wstring DateLabel(model::DatePreset preset) {
     switch (preset) {
+    case model::DatePreset::Custom: return l10n::Get(l10n::StringId::KindCustom);
     case model::DatePreset::Today: return l10n::Get(l10n::StringId::DateToday);
     case model::DatePreset::Yesterday: return l10n::Get(l10n::StringId::DateYesterday);
     case model::DatePreset::ThisWeek: return l10n::Get(l10n::StringId::DateThisWeek);
@@ -80,6 +87,7 @@ std::wstring DateLabel(model::DatePreset preset) {
 
 std::wstring SizeLabel(model::SizePreset preset) {
     switch (preset) {
+    case model::SizePreset::Custom: return l10n::Get(l10n::StringId::KindCustom);
     case model::SizePreset::Empty: return l10n::Get(l10n::StringId::SizeEmpty);
     case model::SizePreset::Lt1MB: return l10n::Get(l10n::StringId::SizeLt1MB);
     case model::SizePreset::From1To10MB: return l10n::Get(l10n::StringId::Size1To10MB);
@@ -133,7 +141,6 @@ public:
 
         MSG message{};
         while (!done_ && GetModalMessage(message)) {
-            if (EditId(message.hwnd) == 0 && IsDialogMessageW(hwnd_, &message)) continue;
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -194,6 +201,36 @@ private:
         if (hwnd == edit_exclude_) return 3;
         if (hwnd == edit_exts_) return 4;
         return 0;
+    }
+
+    void MoveFocus(bool backwards) {
+        MoveDialogFocus(hwnd_, focus_, {{101, edit_name_}, {4}, {5}, {104, edit_exts_},
+            {6}, {7}, {8}, {9}, {102, edit_content_}, {10}, {103, edit_exclude_},
+            {11}, {12}, {13}, {2}, {1}, {3}}, backwards);
+    }
+
+    void Activate(int id) {
+        if (id == 1) Complete(true);
+        else if (id == 2 || id == 3) Complete(false);
+        else if (id == 7) {
+            std::wstring folder;
+            if (PickFolderPath(hwnd_, folder)) {
+                spec_.custom_folder = folder;
+                spec_.location = model::LocationScope::CustomFolder;
+                SyncFromEdits();
+            }
+        } else if (id >= 4 && id <= 13) Choose(id);
+        if (hwnd_ && !done_) InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    D2D1_RECT_F FocusRect() const {
+        switch (focus_) {
+        case 1: return SearchRect(); case 2: return CancelRect(); case 3: return CloseRect();
+        case 4: return NameHowRect(); case 5: return KindRect(); case 6: return LocationRect();
+        case 7: return BrowseRect(); case 8: return DateRect(); case 9: return SizeRect();
+        case 10: return ModeRect(); case 11: return WholeWordRect(); case 12: return MatchCaseRect();
+        case 13: return ResetRect(); default: return {};
+        }
     }
 
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
@@ -298,11 +335,7 @@ private:
                 return 0;
             }
             if (wparam == VK_TAB) {
-                int id = self->EditId(hwnd);
-                id += (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1;
-                if (id < 1) id = 4;
-                if (id > 4) id = 1;
-                if (HWND next = self->EditAt(id)) SetFocus(next);
+                self->MoveFocus(GetKeyState(VK_SHIFT) < 0);
                 return 0;
             }
             break;
@@ -451,7 +484,7 @@ private:
         painter_.DrawButton(spec);
     }
 
-    void Render() {
+    void Render(bool present = true) {
         if (!compositor_.Dc()) return;
         Theme theme = MakeTheme(dark_, accent_);
         if (IsHighContrast()) theme = MakeHighContrastTheme();
@@ -538,11 +571,18 @@ private:
         close_state.pressed = pressed_ == 3;
         painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
                                     {}, close_state);
-        EndSurface(compositor_);
+        if (GetFocus() == hwnd_ && focus_) painter_.DrawFocusRing(FocusRect(), 4.0f * scale_);
+        if (present) EndSurface(compositor_);
+        else compositor_.Dc()->EndDraw();
     }
 
     LRESULT Handle(UINT message, WPARAM wparam, LPARAM lparam) {
         switch (message) {
+#ifdef PULSE_UI_TEST_HOOKS
+        case WM_APP + 0x2B5:
+            Render(false);
+            return lparam && compositor_.SaveSnapshot(reinterpret_cast<const wchar_t*>(lparam));
+#endif
         case WM_CREATE: {
             if (!compositor_.Init(hwnd_)) return -1;
             compositor_.RecreateTextFormats(scale_);
@@ -669,26 +709,20 @@ private:
                 InvalidateRect(hwnd_, nullptr, FALSE);
                 return 0;
             }
-            if (id == 1) Complete(true);
-            else if (id == 2 || id == 3) Complete(false);
-            else if (id == 7) {
-                std::wstring folder;
-                if (PickFolderPath(hwnd_, folder)) {
-                    spec_.custom_folder = folder;
-                    spec_.location = model::LocationScope::CustomFolder;
-                    preview_ = model::CompileSearchQuery(spec_);
-                    InvalidateRect(hwnd_, nullptr, FALSE);
-                }
-            } else if (id >= 4) {
-                Choose(id);
-            }
+            Activate(id);
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) Complete(false);
-            else if (wparam == VK_RETURN) Complete(true);
+            else if (wparam == VK_TAB) MoveFocus(GetKeyState(VK_SHIFT) < 0);
+            else if (wparam == VK_RETURN || wparam == VK_SPACE ||
+                     ((wparam == VK_DOWN || wparam == VK_UP) &&
+                      (focus_ == 4 || focus_ == 5 || focus_ == 6 || focus_ == 8 || focus_ == 9 || focus_ == 10)))
+                Activate(focus_);
             return 0;
+        case WM_GETDLGCODE:
+            return DLGC_WANTALLKEYS;
         case WM_NCCALCSIZE:
             return 0;
         }
@@ -716,6 +750,7 @@ private:
     D2D1_COLOR_F accent_{};
     int hover_ = 0;
     int pressed_ = 0;
+    int focus_ = 0;
 };
 
 } // namespace

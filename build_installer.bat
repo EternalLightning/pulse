@@ -1,3 +1,8 @@
+@rem SPDX-License-Identifier: Apache-2.0
+@rem Pulse project; see LICENSE and NOTICE for licensing and attribution.
+@rem Modified by EternalLightning for this independent distribution, including licensing notices.
+@rem Existing third-party notices and license terms remain applicable.
+
 @echo off
 rem Build Release binaries, then compile dist\PulseSetup-<version>.exe.
 setlocal

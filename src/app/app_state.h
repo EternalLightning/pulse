@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_state.h — Window process state, shot request, and WM_APP message ids.
 #pragma once
 
@@ -18,6 +23,7 @@
 #include "device_navigation.h"
 #include "app_core.h"
 #include "sidebar_scrollbar_fade.h"
+#include "sidebar_project_animation.h"
 #include "ui_schedule_state.h"
 #include "home_catalog.h"
 #include "app_network_access.h"
@@ -37,6 +43,7 @@
 #include "tag_discovery_cache.h"
 #include "places.h"
 #include "details_meta.h"
+#include "details_attribute_toggle.h"
 #include "folder_sizes.h"
 #include "context_menu_prefs.h"
 #include "context_menu_controller.h"
@@ -113,6 +120,7 @@ constexpr UINT WM_DETACH_PANE = WM_APP + 78;
 constexpr UINT WM_CLOUD_DOWNLOAD = WM_APP + 110;
 constexpr UINT WM_CLOUD_PIN_DONE = WM_APP + 111;
 constexpr UINT WM_DROP_SHORTCUTS_RESULT = WM_APP + 79;
+constexpr UINT WM_DETAILS_ATTRIBUTE_RESULT = WM_APP + 80;
 constexpr UINT WM_UI_KICK = WM_APP + 106;
 constexpr UINT kTimerUi = 1;
 constexpr UINT kTimerUiDeadline = 2;
@@ -229,6 +237,8 @@ struct AppState : AppCoreOwner {
     std::shared_ptr<app::WindowResultMailbox<bool>> clipboard_paste_mailbox;
     std::shared_ptr<app::WindowResultMailbox<app::ShortcutDropResult>> shortcut_drop_mailbox;
     std::shared_ptr<app::WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
+    std::shared_ptr<app::WindowResultMailbox<app::DetailsAttributeResult>> details_attribute_mailbox;
+    std::unordered_map<std::wstring, size_t> details_attribute_pending;
     uint64_t external_open_issued_sequence = 0;
     uint64_t external_open_next_apply_sequence = 1;
     std::unordered_map<uint64_t, app::ExternalOpenResult> external_open_pending;
@@ -307,6 +317,7 @@ struct AppState : AppCoreOwner {
         ULONGLONG started = 0;
     };
     std::unordered_map<int, SidebarFoldTrack> sidebarFoldTracks;
+    app::SidebarProjectAnimation sidebarProjectAnimation;
     uint32_t sidebarHiddenMask = 0;  // Section menu: hidden groups are not drawn.
     // Section display order (logical SidebarSectionId values). Header drags
     // rewrite it; the masks above are indexed by id, so they survive a reorder.
@@ -560,6 +571,11 @@ struct AppState : AppCoreOwner {
     bool filterEditing = false;
     bool filterIgnoreKillFocus = false;
     bool filterFocusPending = false;
+    bool filterComposing = false;
+    uint64_t filterDue = 0;
+    app::Tab* filterTab = nullptr;
+    uint64_t filterGeneration = 0;
+    std::wstring filterContext;
     bool filterSelectMode = false;
     std::wstring filterSelectRestore;
     std::wstring filterCue;
@@ -661,6 +677,9 @@ struct AppState : AppCoreOwner {
     POINT dragStartPt{};
     int clickCollapseIndex = -1;
     bool clickToggleOnRelease = false;
+    app::Pane* clickPane = nullptr;
+    uint64_t clickTabIdentity = 0;
+    uint64_t clickViewGeneration = 0;
 
     // Tag drag-reorder gesture (sidebar 标签组), QFluentKit TabBar model:
     // the dragged tag follows cursor deltas 1:1, swaps with a sibling when its
@@ -787,6 +806,8 @@ struct AppState : AppCoreOwner {
     double trayLastTick = 0;
     int trayDeckOffset = 0;     // cyclic index of the top card (newest-first order)
     int trayWheelAccum = 0;     // sub-notch wheel delta accumulator
+    int viewWheelAccum = 0;
+    app::Tab* viewWheelTab = nullptr;
     size_t trayDeckLastTotal = 0; // collect detection (stack resets to newest)
 
     // Right details panel (view-menu toggle, session-persisted).

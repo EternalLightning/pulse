@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 // Stand-alone text compare window opened from the file context menu.
@@ -150,6 +155,7 @@ private:
     Hit hover_ = Hit::None;
     int hover_row_ = -1;
     Hit pressed_ = Hit::None;
+    Hit keyboard_focus_ = Hit::None;
     bool minimap_drag_ = false;
     bool tracking_leave_ = false;
     bool tooltip_visible_ = false;

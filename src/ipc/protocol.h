@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // protocol.h — Pulse UI process <-> Pulse.Shell.exe wire protocol (named pipe).
 //
 // Transport: named pipe `\\.\pipe\pulse_shell_<ui-pid>`, byte mode, blocking I/O.

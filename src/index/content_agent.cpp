@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_agent.h"
 #include "content_search.h"
 #include "content_search_protocol.h"
@@ -202,7 +207,7 @@ int RunPersistentContentAgent(const std::wstring& token, DWORD parent_pid, Conte
                             return SendBatch(pipe, progress, hits);
                         };
                         if (mode == ContentAgentMode::Instant) {
-                            ContentIndex query({}, ContentAgentMode::Instant);
+                            ContentIndex query(database_path, ContentAgentMode::Instant);
                             RunInstantContentSession(query, request, *cancel, send);
                             break;
                         }

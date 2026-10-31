@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "text_diff_window.h"
 
 #include "../common/localization.h"
@@ -851,18 +856,22 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
         seg.position = fluent::SegmentPosition::First;
         seg.state.selected = seg.state.checked = !unified_;
         seg.state.hovered = hover_ == Hit::ModeSplit;
+        seg.state.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == Hit::ModeSplit;
         painter_.DrawSegmentedItem(seg);
         seg.bounds = mode_unified_;
         seg.text = unified_text;
         seg.position = fluent::SegmentPosition::Last;
         seg.state.selected = seg.state.checked = unified_;
         seg.state.hovered = hover_ == Hit::ModeUnified;
+        seg.state.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == Hit::ModeUnified;
         painter_.DrawSegmentedItem(seg);
         auto check = [&](const D2D1_RECT_F& rc, Sid id, bool on, Hit hit) {
             fluent::ControlState cs{};
             cs.checked = on;
             cs.hovered = hover_ == hit;
             cs.pressed = pressed_ == hit;
+            cs.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == hit;
+            cs.focused = cs.keyboard_focus;
             painter_.DrawCheckBox(rc, Str(id), cs);
         };
         check(only_changes_rc_, Sid::DiffOnlyChanges, only_changes_, Hit::OnlyChanges);
@@ -875,6 +884,7 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
         button.glyph = L"\xE8AB";
         button.state.hovered = hover_ == Hit::Swap;
         button.state.pressed = pressed_ == Hit::Swap;
+        button.state.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == Hit::Swap;
         painter_.DrawButton(button);
         const bool has_hunks = Ready() && !result_.hunks.empty();
         fluent::ButtonSpec nav{};
@@ -884,11 +894,13 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
         nav.state.enabled = has_hunks;
         nav.state.hovered = hover_ == Hit::Prev;
         nav.state.pressed = pressed_ == Hit::Prev;
+        nav.state.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == Hit::Prev;
         painter_.DrawButton(nav);
         nav.bounds = next_rc_;
         nav.glyph = L"\xE70D";
         nav.state.hovered = hover_ == Hit::Next;
         nav.state.pressed = pressed_ == Hit::Next;
+        nav.state.keyboard_focus = GetFocus() == hwnd_ && keyboard_focus_ == Hit::Next;
         painter_.DrawButton(nav);
     }
     if (Ready()) {
@@ -1387,6 +1399,35 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         const bool shift = GetKeyState(VK_SHIFT) < 0;
         const float page = (std::max)(RowHeight(), body_.bottom - body_.top - RowHeight() * 2.0f);
         switch (wparam) {
+        case VK_TAB: {
+            const int last = Ready() && !result_.hunks.empty() ? static_cast<int>(Hit::Next)
+                : static_cast<int>(Hit::Swap);
+            int next = static_cast<int>(keyboard_focus_) + (shift ? -1 : 1);
+            if (next < 0) next = last;
+            if (next > last) next = 0;
+            keyboard_focus_ = static_cast<Hit>(next);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
+        case VK_SPACE:
+        case VK_RETURN: {
+            D2D1_RECT_F rect{};
+            switch (keyboard_focus_) {
+            case Hit::ModeSplit: rect = mode_split_; break;
+            case Hit::ModeUnified: rect = mode_unified_; break;
+            case Hit::OnlyChanges: rect = only_changes_rc_; break;
+            case Hit::IgnoreWs: rect = ignore_ws_rc_; break;
+            case Hit::IgnoreCase: rect = ignore_case_rc_; break;
+            case Hit::Swap: rect = swap_rc_; break;
+            case Hit::Prev: if (Ready() && !result_.hunks.empty()) rect = prev_rc_; break;
+            case Hit::Next: if (Ready() && !result_.hunks.empty()) rect = next_rc_; break;
+            default: break;
+            }
+            if (rect.right > rect.left && rect.bottom > rect.top)
+                OnClick((rect.left + rect.right) * 0.5f, (rect.top + rect.bottom) * 0.5f, false);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         case VK_F7: StepHunk(shift ? -1 : 1); return 0;
         case VK_ESCAPE: Close(); return 0;
         case VK_UP: WheelScroll(0, -RowHeight()); return 0;

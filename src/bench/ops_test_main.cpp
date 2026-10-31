@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ops_test_main.cpp — Stage 1B-1 ops-layer self test (console).
 //
 // Drives the full stack: OpsManager -> ShellClient -> pipe -> Pulse.Shell.exe
@@ -219,33 +224,79 @@ bool WaitOpDone(uint64_t prev_completed, int timeout_ms = 90000) {
     return false;
 }
 
-// Submit and wait; returns Status snapshot after completion.
-ops::OpStatus RunOp(ops::OpRequest req) {
-    uint64_t prev = g_ops.Status().completed_ops;
-    g_ops.Submit(std::move(req));
-    bool ok = WaitOpDone(prev);
-    if (!ok) fprintf(stderr, "[test] WaitOpDone TIMEOUT\n");
-    return g_ops.Status();
+struct OperationFixtureAborted {};
+[[noreturn]] void AbortOperationFixture(uint64_t task, const wchar_t* reason) {
+    Check(false, reason);
+    const auto status = g_ops.Status();
+    fwprintf(stderr, L"[test] task=%llu current=%llu phase=%d HRESULT=0x%08lX error=%s\n",
+        task, status.task_id, static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.last_error.c_str());
+    if (task) g_ops.CancelTask(task);
+    throw OperationFixtureAborted{};
+}
+std::optional<ops::OpStatus> FinishedTask(uint64_t task) {
+    for (const auto& status : g_ops.TaskStatuses()) {
+        if (status.task_id == task && !status.active &&
+            (status.phase == ops::OpPhase::Completed || status.phase == ops::OpPhase::Failed || status.phase == ops::OpPhase::Cancelled))
+            return status;
+    }
+    return std::nullopt;
+}
+
+// Return only the terminal status of this exact submission.
+ops::OpStatus RunOp(ops::OpRequest req, DWORD timeout_ms = 90000) {
+    const uint64_t task = g_ops.Submit(std::move(req));
+    if (!task) AbortOperationFixture(task, L"operation submission is accepted before waiting");
+    const auto deadline = GetTickCount64() + timeout_ms;
+    do {
+        if (const auto status = FinishedTask(task)) return *status;
+        Sleep(10);
+    } while (GetTickCount64() < deadline);
+    AbortOperationFixture(task, L"submitted operation reaches its own terminal state before the deadline");
 }
 
 ops::OpStatus RunConflictOp(ops::OpRequest req, ops::ConflictChoice choice,
-                            bool apply_to_all, size_t* resolved = nullptr) {
-    const uint64_t previous = g_ops.Status().completed_ops;
-    g_ops.Submit(std::move(req));
+                            bool apply_to_all, size_t* resolved = nullptr, DWORD timeout_ms = 30000) {
+    const uint64_t task = g_ops.Submit(std::move(req));
+    if (!task) AbortOperationFixture(task, L"conflict operation submission is accepted before waiting");
     uint64_t token = 0;
     size_t count = 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (g_ops.Status().completed_ops > previous) break;
-        if (const auto conflict = g_ops.PendingConflict(); conflict && conflict->token != token) {
+        if (const auto status = FinishedTask(task)) {
+            if (resolved) *resolved = count;
+            return *status;
+        }
+        if (const auto conflict = g_ops.PendingConflict(); conflict && conflict->task_id == task && conflict->token != token) {
             token = conflict->token;
             ++count;
             g_ops.ResolveConflict(token, choice, apply_to_all);
         }
         Sleep(1);
     }
-    if (resolved) *resolved = count;
-    return g_ops.Status();
+    AbortOperationFixture(task, L"conflict operation reaches its own terminal state before the deadline");
+}
+
+void RunIsolatedClipboardChild() {
+    wchar_t module[32768]{};
+    if (!GetModuleFileNameW(nullptr, module, ARRAYSIZE(module))) {
+        Check(false, L"resolve the isolated clipboard child executable");
+        return;
+    }
+    std::wstring command = L"\"" + std::wstring(module) + L"\" --filter clipboard-isolated";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    const bool started = CreateProcessW(module, command.data(), nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child) != FALSE;
+    Check(started, L"start a separate process for the private clipboard station");
+    if (!started) return;
+    CloseHandle(child.hThread);
+    const bool exited = WaitForSingleObject(child.hProcess, 10000) == WAIT_OBJECT_0;
+    DWORD code = STILL_ACTIVE;
+    GetExitCodeProcess(child.hProcess, &code);
+    if (!exited) { TerminateProcess(child.hProcess, ERROR_TIMEOUT); WaitForSingleObject(child.hProcess, 5000); }
+    CloseHandle(child.hProcess);
+    if (exited && code == 77) wprintf(L"[SKIP] private clipboard station unavailable; no interactive clipboard fallback\n");
+    else Check(exited && code == 0, L"private clipboard round-trips finish successfully within the child deadline");
 }
 
 ops::OpRequest SimpleOp(ops::OpType type, std::initializer_list<const wchar_t*> srcs,
@@ -1272,7 +1323,7 @@ int RunTransferUpdateRegressions() {
     return g_fail ? 1 : 0;
 }
 
-int wmain(int argc, wchar_t** argv) {
+int RunOpsTests(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--replacement-fixture-child") return 0;
     if (argc >= 2 && std::wstring_view(argv[1]) == L"--file-operation-matrix") {
         if (argc != 3 && argc != 4) {
@@ -1952,26 +2003,7 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     // --- 11. Clipboard round-trip -------------------------------------------
-    {
-        bool copy_round_trips = true;
-        bool cut_round_trips = true;
-        for (int i = 0; i < 20; ++i) {
-            ops::ClipboardData copy;
-            const bool copy_write = ops::WriteClipboard({ srcDir + L"\\d.txt" }, false);
-            const bool copy_read = ops::ReadClipboard(copy);
-            const bool copy_match = copy.paths.size() == 1 &&
-                copy.paths[0] == srcDir + L"\\d.txt" && !copy.cut;
-            copy_round_trips = copy_round_trips && copy_write && copy_read && copy_match;
-            ops::ClipboardData cut;
-            const bool cut_write = ops::WriteClipboard({ srcDir + L"\\d.txt" }, true);
-            const bool cut_read = ops::ReadClipboard(cut);
-            const bool cut_match = cut.paths.size() == 1 &&
-                cut.paths[0] == srcDir + L"\\d.txt" && cut.cut;
-            cut_round_trips = cut_round_trips && cut_write && cut_read && cut_match;
-        }
-        Check(copy_round_trips, L"clipboard CF_HDROP + drop-effect round-trip (20x)");
-        Check(cut_round_trips, L"clipboard cut effect round-trip (20x)");
-    }
+    RunIsolatedClipboardChild();
 
     TestTransferControl(srcDir, dstDir);
 
@@ -2083,4 +2115,14 @@ int wmain(int argc, wchar_t** argv) {
 
     wprintf(L"\n== ops self test: %d passed, %d failed ==\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
+}
+
+int wmain(int argc, wchar_t** argv) {
+    try { return RunOpsTests(argc, argv); }
+    catch (const OperationFixtureAborted&) {
+        g_ops.CancelCurrent();
+        g_ops.Stop();
+        fwprintf(stderr, L"[FAIL] operation fixture aborted; dependent steps were not executed\n");
+        return 1;
+    }
 }

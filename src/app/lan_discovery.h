@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // lan_discovery.h - 局域网设备: a short, passive-first look for file servers on
 // the current network. mDNS (_smb._tcp / _device-info) through
 // DnsServiceBrowse and WS-Discovery through Function Discovery. No subnet

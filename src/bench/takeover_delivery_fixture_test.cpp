@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../app/explorer_window_takeover.h"
 #include "../common/user_storage.h"
@@ -64,11 +69,15 @@ int main() {
     std::map<uint64_t, bool> answers;
     std::vector<app::ExplorerTakeoverRequest> requests;
     size_t routes = 0;
+    std::wstring routed_folder;
+    std::vector<std::wstring> routed_paths;
     app::SystemTakeoverTestCallbacks callbacks;
     callbacks.active = [&](uint64_t token) { return active.contains(token); };
     callbacks.acknowledge = [&](uint64_t token, bool delivered) { answers.insert_or_assign(token, delivered); };
     callbacks.drain = [&] { return std::exchange(requests, {}); };
-    callbacks.route = [&](const app::ExplorerTakeoverRequest&) { ++routes; return true; };
+    callbacks.route = [&](const app::ExplorerTakeoverRequest& request) {
+        ++routes; routed_folder = request.folder; routed_paths = request.selected_paths; return true;
+    };
     MemoryRegistry registry;
     Check(s.systemIntegration.StartForTesting(s, {nullptr, false, &registry}, std::move(callbacks)),
         "use isolated delivery callbacks without Explorer or real registry");
@@ -79,11 +88,15 @@ int main() {
         active.insert(token); requests.push_back({token, folder, std::move(paths), replaces});
         s.systemIntegration.Tick(s);
     };
-    auto complete = [&](uint64_t token) {
+    auto queue_completion = [&](uint64_t token, std::vector<std::wstring> paths = {}) {
         app::ExternalOpenResult result;
         result.takeover_token = token; result.target.folder = folder;
+        result.selected_paths = std::move(paths);
         result.selection_flags = SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE;
         s.systemIntegration.CompleteExternalOpen(s, &s, result, true);
+    };
+    auto complete = [&](uint64_t token) {
+        queue_completion(token);
         s.systemIntegration.Tick(s);
     };
     submit(1, 0, {});
@@ -112,6 +125,63 @@ int main() {
     submit(7, 6, {other});
     Check(routes == 3 && answers.contains(7) && !answers[7], "filtered-out late target rejects ACK without reopening a pane");
     tab->filter_text.clear();
+    tab->ClearSelection();
+    submit(8, 0, {launched});
+    tab->pending_generation = 51;
+    queue_completion(8, {launched});
+    tab->pending_generation = 52;
+    s.systemIntegration.Tick(s);
+    Check(!answers.contains(8) && !tab->IsSelected(1) && s.systemIntegration.IsExternalOpenActive(8),
+        "same-path refresh during delivery waits without selecting a cached row or rejecting the token");
+    tab->pending_generation = 0; tab->applied_generation = 52; tab->loading = true;
+    s.systemIntegration.Tick(s);
+    Check(!answers.contains(8), "delivery still waits while the refreshed snapshot is loading");
+    auto refreshed_listing = std::make_shared<std::vector<fs::DirEntry>>(*listing);
+    std::swap((*refreshed_listing)[0], (*refreshed_listing)[1]);
+    tab->SetSnapshot(refreshed_listing);
+    tab->loading = false;
+    s.systemIntegration.Tick(s);
+    Check(answers.contains(8) && answers[8] && tab->IsSelected(0),
+        "same-path refresh completes delivery against the final visible snapshot");
+    active.erase(8);
+    submit(9, 8, {other});
+    Check(answers.contains(9) && answers[9] && tab->IsSelected(1),
+        "refreshed delivery retains its final generation for a late replacement");
+    submit(10, 0, {launched});
+    tab->pending_generation = 53;
+    queue_completion(10, {launched});
+    ++tab->view_generation;
+    s.systemIntegration.Tick(s);
+    Check(answers.contains(10) && !answers[10] && tab->IsSelected(1),
+        "view changes during a pending refresh still reject delivery");
+    tab->pending_generation = 0;
+    submit(11, 0, {});
+    complete(11);
+    Check(answers.contains(11) && answers[11], "prepare a completed binding for source navigation");
+    active.erase(11);
+    const auto latest_folder = folder + L"\\latest";
+    const auto latest_path = latest_folder + L"\\launched.txt";
+    const auto routes_before_navigation = routes;
+    active.insert(12); requests.push_back({12, latest_folder, {latest_path}, 11});
+    s.systemIntegration.Tick(s);
+    Check(routes == routes_before_navigation + 1 && routed_folder == latest_folder &&
+        routed_paths == std::vector<std::wstring>{latest_path} && !answers.contains(12) &&
+        s.systemIntegration.IsExternalOpenActive(12),
+        "changed-folder replacement routes the latest source folder and selection instead of rejecting it");
+    auto latest_listing = std::make_shared<std::vector<fs::DirEntry>>(1);
+    (*latest_listing)[0].name = L"launched.txt";
+    (*latest_listing)[0].attrs = FILE_ATTRIBUTE_NORMAL;
+    (*latest_listing)[0].full_path = latest_path;
+    tab->ClearSelection(); tab->current_path = tab->snapshot_path = latest_folder;
+    tab->SetSnapshot(latest_listing); tab->applied_generation = 53;
+    app::ExternalOpenResult latest_result;
+    latest_result.takeover_token = 12; latest_result.target.folder = latest_folder;
+    latest_result.selected_paths = {latest_path};
+    latest_result.selection_flags = SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE;
+    s.systemIntegration.CompleteExternalOpen(s, &s, latest_result, true);
+    s.systemIntegration.Tick(s);
+    Check(answers.contains(12) && answers[12] && tab->IsSelected(0),
+        "changed-folder replacement acknowledges only after the latest destination is ready");
     s.systemIntegration.Stop();
     s.core.windows.Remove(s.hwnd); s.core.global_ui_owner = nullptr;
     s.window_tabs.items.clear(); s.pane = nullptr;

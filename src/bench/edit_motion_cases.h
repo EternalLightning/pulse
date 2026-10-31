@@ -1,6 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "../ui/edit_motion.h"
 #include "snapshot_output.h"
+#include <vector>
 
 inline void RunEditMotionChecks(HWND parent) {
     using namespace pulse::ui;
@@ -43,6 +49,11 @@ inline void RunEditMotionChecks(HWND parent) {
         "insertion preserves unchanged prefix and suffix");
     change.Sample(1050);
     Check(change.progress > 0 && change.progress < 1, "new glyph opacity has an intermediate value");
+    caret.Tick({0, 0, 20}, 1000, false);
+    caret.Tick({100, 0, 20}, 1000, true);
+    caret.Tick({100, 0, 20}, 1050, true);
+    Check(std::abs(caret.value[0] / 100 - change.progress) < 0.001f,
+        "text reveal and caret travel share the same progress");
     change.Sample(1100);
     Check(change.progress == 1 && !change.pending, "text animation terminates");
     change.Begin(L"A\xD83D\xDE00Z", L"A\xD83D\xDE01Z", 1200);
@@ -60,6 +71,7 @@ inline void RunEditMotionChecks(HWND parent) {
         ShowWindow(parent, SW_SHOWNOACTIVATE);
         SetFocus(edit);
         Check(GetFocus() == edit, "isolated text field owns thread focus");
+        std::vector<BYTE> frame;
         const auto draw = [&](const wchar_t* name) {
             RECT rc{}; GetClientRect(edit, &rc);
             BITMAPINFO info{};
@@ -78,6 +90,7 @@ inline void RunEditMotionChecks(HWND parent) {
             size_t ink = 0;
             if (ok && pixels) {
                 const auto* bytes = static_cast<const BYTE*>(pixels);
+                frame.assign(bytes, bytes + rc.right * rc.bottom * 4);
                 for (int i = 0; i < rc.right * rc.bottom * 4; i += 4)
                     if (dark ? bytes[i] > 200 : bytes[i] < 32) ++ink;
             }
@@ -185,6 +198,72 @@ inline void RunEditMotionChecks(HWND parent) {
         Check(draw(L"blink-refocus") > 0, "refocus restores the caret independently of its old phase");
         RemovePropW(edit, L"Pulse.Test.EditTime");
         RemovePropW(edit, L"Pulse.Test.EditBlinkInterval");
+        // Hold presentation time still: a committed edit's first frame must
+        // preserve the pixels that its moving caret is leaving behind.
+        RemovePropW(edit, L"Pulse.EditWrap");
+        uint64_t transition_time = 10000;
+        SetPropW(edit, L"Pulse.Test.EditTime", reinterpret_cast<HANDLE>(&transition_time));
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+        SetWindowTextW(edit, L"W");
+        SendMessageW(edit, EM_SETSEL, 1, 1);
+        draw(L"delete-last-before");
+        const auto before_delete = frame;
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(1));
+        SendMessageW(edit, WM_CHAR, VK_BACK, 0);
+        draw(L"delete-last-start");
+        const auto same_rgb = [](const auto& a, const auto& b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); ++i)
+                if (i % 4 != 3 && std::abs(static_cast<int>(a[i]) - b[i]) > 1) return false;
+            return true;
+        };
+        Check(same_rgb(before_delete, frame), "last glyph stays visible on the first backspace frame");
+        transition_time += 24;
+        draw(L"delete-last-middle");
+        Check(!same_rgb(before_delete, frame), "deleted glyph contracts while the caret travels");
+        transition_time += 56;
+        draw(L"delete-last-end");
+        Check(!GetPropW(edit, L"Pulse.EditMotionPending"), "deletion and caret settle together at 80 ms");
+        const auto before_insert = frame;
+        SendMessageW(edit, WM_CHAR, L'W', 0);
+        draw(L"append-start");
+        Check(same_rgb(before_insert, frame), "append reveals from the caret without a first-frame jump");
+        transition_time += 24;
+        draw(L"append-middle");
+        transition_time += 56;
+        draw(L"append-end");
+        Check(!GetPropW(edit, L"Pulse.EditMotionPending"), "appended glyph and caret settle together at 80 ms");
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+        SetWindowTextW(edit, L"WWW");
+        SendMessageW(edit, EM_SETSEL, 2, 2);
+        draw(nullptr);
+        const auto before_middle_delete = frame;
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(1));
+        SendMessageW(edit, WM_CHAR, VK_BACK, 0);
+        draw(L"delete-middle-start");
+        Check(same_rgb(before_middle_delete, frame), "middle backspace preserves the glyph and suffix on its first frame");
+        transition_time += 24;
+        draw(L"delete-middle-moving");
+        transition_time += 56;
+        draw(nullptr);
+        const auto before_forward_delete = frame;
+        SendMessageW(edit, WM_KEYDOWN, VK_DELETE, 0);
+        draw(L"forward-delete-start");
+        Check(same_rgb(before_forward_delete, frame), "forward delete preserves its outgoing glyph on the first frame");
+        transition_time += 80;
+        draw(nullptr);
+        Check(!GetPropW(edit, L"Pulse.EditMotionPending"), "forward deletion settles even with a stationary caret");
+        SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search"));
+        draw(nullptr);
+        const auto before_cue_delete = frame;
+        SendMessageW(edit, WM_CHAR, VK_BACK, 0);
+        draw(nullptr);
+        Check(same_rgb(before_cue_delete, frame), "placeholder waits for the last outgoing glyph instead of replacing it immediately");
+        transition_time += 80;
+        draw(L"delete-cue-end");
+        Check(!same_rgb(before_cue_delete, frame) && !GetPropW(edit, L"Pulse.EditMotionPending"),
+            "placeholder appears when the final deletion settles");
+        RemovePropW(edit, L"Pulse.Test.EditTime");
         DestroyWindow(edit);
     }
 }

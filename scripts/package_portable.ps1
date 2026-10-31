@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 #requires -Version 7.2
 param([string]$BuildDir = 'build-release')
 $ErrorActionPreference = 'Stop'
@@ -16,7 +21,7 @@ $stage = Join-Path $dist ("portable-stage-" + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $stage "Pulse-$version-portable"
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $build $file) -Destination (Join-Path $payload $file) }
-foreach ($file in @('LICENSE', 'NOTICE')) {
+foreach ($file in @('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $repo $file) -Destination (Join-Path $payload $file)
 }
 $archiveTools = Join-Path $build '7zip'
@@ -24,6 +29,11 @@ foreach ($file in @('7z.exe', '7z.dll', 'License.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $archiveTools $file))) { throw "Missing archive dependency: $file" }
 }
 Copy-Item -LiteralPath $archiveTools -Destination (Join-Path $payload '7zip') -Recurse
+# Take legal material and corresponding source from the repository even if
+# the build directory predates a licensing-only update.
+foreach ($file in @('License.txt', 'README.md', 'LGPL-2.1-or-later.txt', 'GPL-2.0-or-later.txt', '7z2603-src.7z')) {
+    Copy-Item -LiteralPath (Join-Path $repo "third_party/7zip/$file") -Destination (Join-Path $payload '7zip')
+}
 foreach ($license in @('PDFium', 'LumaText')) {
     $source = Join-Path $build "licenses/$license"
     if (-not (Test-Path -LiteralPath $source)) { throw "Missing licenses: $source" }
@@ -35,7 +45,11 @@ Copy-Item -LiteralPath (Join-Path $repo 'third_party/ib-pinyin-cpp/LICENSE.txt')
 New-Item -ItemType Directory -Path (Join-Path $payload 'licenses/FilesIcon') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/LICENSE-MIT.txt') -Destination (Join-Path $payload 'licenses/FilesIcon')
 Copy-Item -LiteralPath (Join-Path $repo 'third_party/files-icon/README.md') -Destination (Join-Path $payload 'licenses/FilesIcon')
-foreach ($license in @(@{Folder='MicrosoftBrand'; Source='assets/microsoft_brand'; Files=@('LICENSE.pdf','README.md')},
+foreach ($license in @(@{Folder='FilesToolbar'; Source='assets/files_toolbar'; Files=@('LICENSE-MIT')},
+                      @{Folder='d2d-mica'; Source='third_party/d2d-mica'; Files=@('LICENSE','README.pulse.md')},
+                      @{Folder='SQLite'; Source='third_party/sqlite'; Files=@('README.md')},
+                      @{Folder='ib-pinyin'; Source='third_party/ib-pinyin-cpp'; Files=@('README.pulse.txt')},
+                      @{Folder='MicrosoftBrand'; Source='assets/microsoft_brand'; Files=@('LICENSE.pdf','README.md')},
                       @{Folder='FluentSystemIcons'; Source='assets/fluent'; Files=@('LICENSE','SOURCES.md')})) {
     $destination = Join-Path $payload "licenses/$($license.Folder)"
     New-Item -ItemType Directory -Path $destination -Force | Out-Null

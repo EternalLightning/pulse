@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // selftest_1b2.cpp — Stage 1B-2 console self-test.
 //
 // Headless coverage for the parts `--shot` cannot reach (interactive menus,
@@ -70,6 +75,7 @@
 #include <dwrite_3.h>
 #include <wincodec.h>
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -202,6 +208,26 @@ struct FluentMenuTestPeer {
                 flyout.model.RowHeightPx() * 0.5f)}, true);
         return menu.result_ == 120;
     }
+    static bool CheckQuickStrip(const std::vector<FluentMenuItem>& items, float scale) {
+        FluentMenu menu;
+        menu.scale_ = scale;
+        menu.model_.SetItems(items);
+        menu.model_.Layout(nullptr, scale);
+        if (items.empty() || items[0].command != 0 || items[0].quick_swatches.empty() ||
+            menu.InvokeRow(0) != 0) return false;
+        for (size_t i = 0; i < items[0].quick_swatches.size(); ++i) {
+            bool hit = false;
+            for (int x = 0; x < menu.model_.WidthPx() + menu.kShadowMargin; ++x) {
+                if (menu.HitTestSwatch(0, static_cast<float>(x)) != static_cast<int>(i)) continue;
+                if (menu.InvokeAt(0, static_cast<float>(x)) != items[0].quick_swatches[i].command)
+                    return false;
+                hit = true;
+                break;
+            }
+            if (!hit) return false;
+        }
+        return true;
+    }
 };
 } // namespace pulse::ui
 
@@ -278,9 +304,37 @@ void Check(bool cond, const wchar_t* name) {
     }
 }
 
+void LogText(const wchar_t* text) {
+    LogLine(L"%ls", text);
+}
+
 bool Exists(const std::wstring& path) {
     return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
+
+class ScopedTempDirectory {
+public:
+    ScopedTempDirectory() {
+        wchar_t temp[32768]{};
+        const DWORD length = GetTempPathW(ARRAYSIZE(temp), temp);
+        GUID guid{};
+        wchar_t suffix[40]{};
+        if (!length || length >= ARRAYSIZE(temp) || FAILED(CoCreateGuid(&guid)) ||
+            !StringFromGUID2(guid, suffix, ARRAYSIZE(suffix))) return;
+        const auto candidate = std::wstring(temp, length) + L"PulseSelftest-" + suffix;
+        if (CreateDirectoryW(candidate.c_str(), nullptr)) path_ = candidate;
+    }
+    ~ScopedTempDirectory() {
+        if (path_.empty()) return;
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+    ScopedTempDirectory(const ScopedTempDirectory&) = delete;
+    ScopedTempDirectory& operator=(const ScopedTempDirectory&) = delete;
+    const std::wstring& Path() const { return path_; }
+private:
+    std::wstring path_;
+};
 
 ops::OpsManager g_ops;
 
@@ -400,7 +454,7 @@ void TestBreadcrumb() {
     cat.PinWorkspace(L"C:\\local", L"local", 0, { L"C:\\local" });
     cat.PinWorkspace(L"\\\\server\\share", L"nas", 0, { L"\\\\server\\share" });
     cat.workspaces[1].frequent.push_back({ L"\\\\server\\share\\sub", 3 });
-    pane.NavigateTo(L"\\\\server\\share");
+    pane.view.NavigateTo(L"\\\\server\\share");
     const auto wvm = BuildWindowViewModel(pane, sidebar, true, false, true, &cat, 0);
     const auto workspaces = std::find_if(wvm.sidebar.begin(), wvm.sidebar.end(),
         [](const auto& section) {
@@ -1463,6 +1517,8 @@ void TestContinuousSearch() {
 
 void TestLiveAddressSearch() {
     auto state = std::make_unique<AppState>();
+    state->isolatedTest = true;
+    state->appPrefs.persist = false;
     state->searchHistory.persist = false;
     state->places.persist = false;
     auto& pane = *state->window_tabs.NewTab(L"C:\\live-search-test").FocusedPane();
@@ -1513,11 +1569,28 @@ void TestLiveAddressSearch() {
     QueueAddressSearch(*state);
     TickAddressSearch(*state, state->addressLiveDue);
     Check(pane.view.current_path == MakeSearchPath(L"中文"), L"live search: committed IME text searches");
+    const auto cleared_generation = static_cast<uint32_t>(pane.view.pending_generation);
+    const auto history_count = state->searchHistory.entries.size();
+    Check(cleared_generation != 0 && state->pendingIndexSearches.contains(cleared_generation),
+          L"live search: clear fixture has an outstanding query to cancel");
     type(L"");
     TickAddressSearch(*state, state->addressLiveDue);
-    Check(pane.view.current_path == MakeSearchPath(L"") && state->addressHistoryDue == 0,
-          L"live search: clearing input updates results without recording an empty query");
+    Check(pane.view.current_path == L"C:\\live-search-test" && !state->addressSearching &&
+          !state->addressLiveDue && !state->addressHistoryDue &&
+          !state->pendingIndexSearches.contains(cleared_generation) &&
+          state->searchHistory.entries.size() == history_count,
+          L"live search: clearing restores the origin, cancels the query and saves no empty history");
+    const auto restored_snapshot = pane.view.snapshot;
+    const auto restored_generation = pane.view.pending_generation;
+    index::SearchResult late;
+    late.hits.push_back({L"C:\\live-search-test\\late.txt", L"late.txt", false});
+    DeliverIndexSearchResult(*state, cleared_generation, std::move(late));
+    Check(pane.view.current_path == L"C:\\live-search-test" &&
+          pane.view.snapshot == restored_snapshot && pane.view.pending_generation == restored_generation,
+          L"live search: a cancelled late response cannot replace the restored directory");
+    state->addressSearching = state->addressEditing = true;
     type(L"cancel-on-context-change");
+    Check(state->addressLiveDue != 0, L"live search: changed-context fixture has a pending debounce");
     pane.view.current_path = L"C:\\other";
     TickAddressSearch(*state, state->addressLiveDue);
     Check(pane.view.current_path == L"C:\\other", L"live search: pending input cannot search a changed context");
@@ -1909,12 +1982,26 @@ void TestMenuModel() {
         if (model.At(i)->separator_after) { sep_row = i; break; }
     float sep_y = model.RowTopPx(sep_row) + model.RowHeightPx() + 2.0f;
     Check(model.HitTestRow(sep_y) == -1, L"menu: separator is a dead zone");
-    int last = model.Count() - 1; // undo, disabled
-    Check(model.NextEnabled(last - 1, 1) == 0, L"menu: nav wraps and skips disabled undo");
-    Check(model.FirstEnabled() == 0, L"menu: first enabled is 打开");
+    const auto command_row = [&](int command) {
+        for (int i = 0; i < model.Count(); ++i)
+            if (model.At(i)->command == command) return i;
+        return -1;
+    };
+    const int undo_row = command_row(CmdUndo);
+    const int open_row = command_row(CmdOpen);
+    Check(undo_row > 0 && undo_row + 1 < model.Count() && !model.At(undo_row)->enabled &&
+          model.NextEnabled(undo_row - 1, 1) == undo_row + 1 &&
+          model.NextEnabled(undo_row + 1, -1) == undo_row - 1,
+          L"menu: navigation skips the actual disabled undo row in both directions");
+    Check(model.NextEnabled(model.Count() - 1, 1) == 0 && model.FirstEnabled() == 0 &&
+          model.At(0)->command == CmdNone && !model.At(0)->quick_swatches.empty(),
+          L"menu: navigation wraps to the common-action button strip");
+    Check(ui::FluentMenuTestPeer::CheckQuickStrip(items, 1.0f) &&
+          ui::FluentMenuTestPeer::CheckQuickStrip(items, 1.5f),
+          L"menu: strip row has no Open command and each button dispatches its own action");
 
     // Simulated dispatch: hit-test -> command id -> verb.
-    int row = model.HitTestRow(model.RowTopPx(0) + 1.0f);
+    int row = open_row >= 0 ? model.HitTestRow(model.RowTopPx(open_row) + 1.0f) : -1;
     int cmd = (row >= 0 && model.At(row)->enabled) ? model.At(row)->command : 0;
     Check(cmd == CmdOpen, L"menu: hit-test -> dispatch 打开");
 
@@ -2276,6 +2363,11 @@ void TestContextMenuPrefs() {
           filtered[1].text == L"合并 PDF",
           L"prefs: order is flyout then type verb");
 
+    prefs.SetGroupEnabled(ipc::CtxMenuGroup::Share, true);
+    const auto enabled_share = ApplyExplorerPrefs(prefs, raw);
+    Check(std::any_of(enabled_share.begin(), enabled_share.end(),
+              [](const auto& entry) { return entry.text == L"发送到"; }),
+          L"prefs: per-item override fixture first shows 发送到 in its enabled group");
     prefs.SetItemEnabled(ipc::CatalogKey(L"发送到", true), false);
     auto restored = ApplyExplorerPrefs(prefs, raw);
     bool sendto_back = false;
@@ -2292,8 +2384,8 @@ void TestContextMenuPrefs() {
     Check(loaded.FromJson(json) &&
           !loaded.item_enabled[ipc::CatalogKey(L"发送到", true)] &&
           loaded.seen.size() == 1 && loaded.seen[0].from_com &&
-          loaded.explorer_cap == ipc::kDefaultExplorerCap && !loaded.share && loaded.print,
-          L"prefs: JSON round-trip keeps override, seen, and defaults");
+          loaded.explorer_cap == ipc::kDefaultExplorerCap && loaded.share && loaded.print,
+          L"prefs: JSON round-trip keeps the enabled group, override, seen and other defaults");
 
     prefs.SetComDisabled(L".cad", true);
     const std::wstring json_slow = prefs.ToJson();
@@ -2365,18 +2457,18 @@ void DumpContextVerbs() {
     std::unordered_map<std::wstring, std::vector<StaticVerb>> machine;
     if (LoadMachineStaticVerbCache(machine)) {
         swprintf_s(line, L"[DUMP] machine cache: %zu extension(s)\n", machine.size());
-        LogLine(line);
+        LogText(line);
         const auto found = machine.find(L".xlsx");
         if (found == machine.end()) {
             LogLine(L"[DUMP] machine cache: no .xlsx entry\n");
         } else {
             swprintf_s(line, L"[DUMP] machine cache .xlsx: %zu verb(s)\n",
                        found->second.size());
-            LogLine(line);
+            LogText(line);
             for (const auto& verb : found->second) {
                 swprintf_s(line, L"[DUMP]   cached text=\"%ls\" verb=\"%ls\"\n",
                            verb.display.c_str(), verb.verb.c_str());
-                LogLine(line);
+                LogText(line);
             }
         }
     } else {
@@ -2386,13 +2478,13 @@ void DumpContextVerbs() {
     for (const auto& ext : extensions) {
         const auto verbs = EnumerateStaticVerbs(ext);
         swprintf_s(line, L"[DUMP] %ls: %zu static verb(s)\n", ext.c_str(), verbs.size());
-        LogLine(line);
+        LogText(line);
         for (const auto& verb : verbs) {
             swprintf_s(line,
                 L"[DUMP]   text=\"%ls\" verb=\"%ls\" cmd=%d app=%d children=%zu\n",
                 verb.display.c_str(), verb.verb.c_str(), verb.command.empty() ? 0 : 1,
                 verb.app_path.empty() ? 0 : 1, verb.children.size());
-            LogLine(line);
+            LogText(line);
         }
         ContextMenuPrefs prefs;
         prefs.persist = false;
@@ -2407,11 +2499,11 @@ void DumpContextVerbs() {
         const auto kept = ApplyExplorerPrefs(prefs, entries);
         swprintf_s(line, L"[DUMP] %ls: %zu kept after Explorer prefs\n", ext.c_str(),
                    kept.size());
-        LogLine(line);
+        LogText(line);
         for (const auto& entry : kept) {
             swprintf_s(line, L"[DUMP]   kept text=\"%ls\" verb=\"%ls\"\n",
                        entry.text.c_str(), entry.verb.c_str());
-            LogLine(line);
+            LogText(line);
         }
     }
 }
@@ -4269,19 +4361,18 @@ void TestRecycleAndBatchRename() {
               L"C:\\$Recycle.Bin\\sid\\$ixyz",
           L"recycle: lowercase $r maps to $i");
 
-    wchar_t temp[MAX_PATH]{};
-    GetTempPathW(MAX_PATH, temp);
-    const std::wstring suffix = std::to_wstring(GetCurrentProcessId()) + L"_" +
-                                std::to_wstring(GetTickCount64());
-    const std::wstring index_path = std::wstring(temp) + L"$Ipulse_test_" + suffix;
-    const std::wstring content_path = std::wstring(temp) + L"$Rpulse_test_" + suffix;
+    ScopedTempDirectory temp;
+    Check(!temp.Path().empty(), L"recycle/batch-rename: create exclusive temporary directory");
+    if (temp.Path().empty()) return;
+    const std::wstring index_path = temp.Path() + L"\\$Ipulse_test";
+    const std::wstring content_path = temp.Path() + L"\\$Rpulse_test";
     const std::wstring original = L"C:\\Users\\TestUser\\Desktop\\photo.jpg";
     FILETIME deleted{};
     deleted.dwLowDateTime = 1;
     deleted.dwHighDateTime = 2;
     {
         HANDLE file = CreateFileW(index_path.c_str(), GENERIC_WRITE, 0, nullptr,
-                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                  CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         Check(file != INVALID_HANDLE_VALUE, L"recycle: create temp $I file");
         if (file != INVALID_HANDLE_VALUE) {
             uint64_t ver = 2;
@@ -4308,7 +4399,7 @@ void TestRecycleAndBatchRename() {
           item.deleted.dwHighDateTime == 2,
           L"recycle: parse Windows $I v2 metadata");
 
-    const std::wstring fixture = std::wstring(temp) + L"PulseRecycleFixture_" + suffix;
+    const std::wstring fixture = temp.Path() + L"\\recycle";
     const std::wstring sid = pulse::CurrentUserSidString();
     const std::wstring own = fixture + L"\\" + sid;
     const std::wstring other = fixture + L"\\S-1-5-21-111-222-333-9999";
@@ -4356,8 +4447,9 @@ void TestRecycleAndBatchRename() {
     DeleteFileW(content_path.c_str());
 
     fs::RecycleBinInfo info;
-    fs::QueryRecycleBinInfo(info);
-    Check(true, L"recycle: SHQueryRecycleBin occupancy probe");
+    const bool occupancy_available = fs::QueryRecycleBinInfo(info) && info.valid;
+    LogLine(occupancy_available ? L"[INFO] recycle: SHQueryRecycleBin occupancy available\n" :
+        L"[SKIP] recycle: SHQueryRecycleBin occupancy unavailable in this environment\n");
 
     std::wstring stem, ext;
     SplitFileName(L"photo.jpg", stem, ext);
@@ -4434,18 +4526,20 @@ void TestRecycleAndBatchRename() {
               collided[0].new_name == L"same.txt",
           L"batch-rename: two files mapping to the same name collide");
 
-    const std::wstring a = std::wstring(temp) + L"pulse_batch_a.txt";
-    const std::wstring b = std::wstring(temp) + L"pulse_batch_b.txt";
-    HANDLE fa = CreateFileW(a.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    const std::wstring a = temp.Path() + L"\\pulse_batch_a.txt";
+    const std::wstring b = temp.Path() + L"\\pulse_batch_b.txt";
+    HANDLE fa = CreateFileW(a.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
-    HANDLE fb = CreateFileW(b.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    HANDLE fb = CreateFileW(b.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
+    const bool batch_files = fa != INVALID_HANDLE_VALUE && fb != INVALID_HANDLE_VALUE;
+    Check(batch_files, L"batch-rename: create both exclusive fixture files");
     if (fa != INVALID_HANDLE_VALUE) CloseHandle(fa);
     if (fb != INVALID_HANDLE_VALUE) CloseHandle(fb);
     rule = {};
     rule.prefix = L"renamed-";
     const auto preview = PreviewBatchRename({ a, b }, rule);
-    Check(preview.size() == 2 && preview[0].status == BatchRenameStatus::Ok &&
+    Check(batch_files && preview.size() == 2 && preview[0].status == BatchRenameStatus::Ok &&
           preview[1].status == BatchRenameStatus::Ok &&
           preview[0].new_name == L"renamed-pulse_batch_a.txt",
           L"batch-rename: preview two files");
@@ -4453,7 +4547,7 @@ void TestRecycleAndBatchRename() {
     rule.find = L"pulse_batch";
     rule.replace = L"pulse_batch";
     const auto unchanged = PreviewBatchRename({ a }, rule);
-    Check(!unchanged.empty() && unchanged[0].status == BatchRenameStatus::Unchanged,
+    Check(batch_files && !unchanged.empty() && unchanged[0].status == BatchRenameStatus::Unchanged,
           L"batch-rename: unchanged when name stays the same");
     DeleteFileW(a.c_str());
     DeleteFileW(b.c_str());
@@ -5858,9 +5952,10 @@ void TestLayoutOwnedTabs() {
 }
 
 void TestUtf8PersistFile() {
-    wchar_t temp_dir[MAX_PATH]{};
-    GetTempPathW(ARRAYSIZE(temp_dir), temp_dir);
-    const std::wstring path = std::wstring(temp_dir) + L"pulse-utf8-persist-test.json";
+    ScopedTempDirectory temp;
+    Check(!temp.Path().empty(), L"utf8file: create exclusive temporary directory");
+    if (temp.Path().empty()) return;
+    const std::wstring path = temp.Path() + L"\\pulse-utf8-persist-test.json";
     const std::wstring json =
         L"{\"name\":\"紧急修补\",\"unc\":\"\\\\192.0.2.10\\示例共享盘\"}\n";
     Check(WriteUtf8FileAtomic(path, json), L"utf8file: write Chinese JSON");
@@ -6152,6 +6247,17 @@ int RunSelfTest1B2() {
     g_skip_visual = GetEnvironmentVariableW(L"PULSE_SELFTEST_NO_SCREENSHOTS", skip_visual, ARRAYSIZE(skip_visual)) > 0;
     if (g_skip_visual) LogLine(L"[SKIP] Screenshot capture disabled\n");
     wchar_t test_case[64]{};
+    if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
+        wcscmp(test_case, L"audit-test-contracts") == 0) {
+        TestMenuModel();
+        TestContextMenuPrefs();
+        TestLiveAddressSearch();
+        TestRecycleAndBatchRename();
+        TestUtf8PersistFile();
+        LogText(L"[INFO] context verb literal-format probe: %s %n 100%\n");
+        if (g_log) { fclose(g_log); g_log = nullptr; }
+        return g_fail ? 1 : 0;
+    }
     if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
         wcscmp(test_case, L"settings-storage") == 0) {
         TestSettingsStorage();

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ops_manager.cpp — See ops_manager.h for the contract.
 #include "ops_manager.h"
 #include "transfer_rate.h"
@@ -373,7 +378,8 @@ bool ReadEntryMetadata(const std::wstring& path, TransferEntry& entry,
                        decltype(&GetFileInformationByHandleEx) identity_query = nullptr, bool require_file_identity = true) {
     WIN32_FILE_ATTRIBUTE_DATA data{};
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return false;
-    if (identity_query && (require_file_identity || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))) {
+    if (identity_query && (require_file_identity ||
+        (data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))) {
         entry.source_identity = FileObjectReference::Open(path, identity_query);
         if (!entry.source_identity.handle) return false;
         BY_HANDLE_FILE_INFORMATION held{};
@@ -387,6 +393,21 @@ bool ReadEntryMetadata(const std::wstring& path, TransferEntry& entry,
     }
     entry.directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     entry.reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    if (entry.reparse) {
+        DestinationGuard::Handle opened;
+        HANDLE handle = entry.source_identity.Get();
+        if (!handle) {
+            opened.reset(CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+            if (opened.get() == INVALID_HANDLE_VALUE) { opened.release(); return false; }
+            handle = opened.get();
+        }
+        FILE_ATTRIBUTE_TAG_INFO tag{};
+        if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag))) return false;
+        // Cloud placeholders transfer their data through CopyFile2/provider
+        // hydration. Copying the filter's private reparse payload is invalid.
+        entry.reparse = (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && !fs::IsCloudReparseTag(tag.ReparseTag);
+    }
     entry.attributes = data.dwFileAttributes;
     entry.created = data.ftCreationTime;
     entry.accessed = data.ftLastAccessTime;
@@ -1263,16 +1284,8 @@ bool OpsManager::ResolveConflicts(uint64_t token, const std::vector<ConflictReso
     {
         std::lock_guard<std::mutex> lock(transfer_control_mutex_);
         if (!pending_conflict_ || pending_conflict_->token != token || pending_conflict_->link_confirmation ||
-            transfer_cancel_.load() || stopping_.load() || pending_conflict_->rows.empty() ||
-            rows.size() != pending_conflict_->rows.size() || resolved_conflict_token_ == token) return false;
-        std::set<uint64_t> selected;
-        std::set<uint64_t> offered;
-        for (const auto& row : pending_conflict_->rows) offered.insert(row.row_id);
-        for (const auto& row : rows) {
-            if ((row.choice != ConflictChoice::Replace && row.choice != ConflictChoice::Skip &&
-                    row.choice != ConflictChoice::KeepBoth) || !selected.insert(row.row_id).second ||
-                !offered.contains(row.row_id)) return false;
-        }
+            transfer_cancel_.load() || stopping_.load() || resolved_conflict_token_ == token ||
+            !ValidConflictResolutions(pending_conflict_->rows, rows)) return false;
         resolved_conflict_rows_ = rows;
         resolved_conflict_token_ = token;
         resolved_conflict_apply_all_ = false;
@@ -2176,7 +2189,17 @@ void OpsManager::StartShellClient() {
                          uint32_t items_done, uint32_t total_items) {
         shell_activity_tick_ = GetTickCount64();
         SetStatus([&](OpStatus& st) {
-            ApplyShellProgress(st, pct, item, items_done, total_items, delete_active_.load());
+            if (!st.active) return;
+            const bool deleting = delete_active_.load();
+            if (deleting) {
+                // Authorized backends report this path only after its root
+                // has been removed; recursive work totals are not row counts.
+                if (items_done > 0) delete_item_progress_.Complete(item);
+                st.completed_items = delete_item_progress_.Completed();
+                pct = st.total_items ? 100.0f * static_cast<float>(st.completed_items) /
+                    static_cast<float>(st.total_items) : -1.0f;
+            }
+            ApplyShellProgress(st, pct, item, items_done, total_items, deleting);
         });
     };
     // Done results land here (reader thread) and RunShellOp waits on them.
@@ -3226,8 +3249,15 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             if (!failure.empty() || !guard_result(destination_guard.PinDirectories(ParentOf(entry.destination), failure), ParentOf(entry.destination)) ||
                 !guard_result(destination_guard.Check(entry.destination, failure), entry.destination)) break;
         }
-        const bool destination_reparse = destination_exists &&
-            (GetFileAttributesW(entry.destination.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        bool destination_reparse = false;
+        if (destination_exists) {
+            TransferEntry current;
+            if (!ReadEntryMetadata(entry.destination, current)) {
+                fail_win32(GetLastError(), entry.destination);
+                break;
+            }
+            destination_reparse = current.reparse;
+        }
         DestinationGuard::Handle replacement_leaf;
         if (conflict && choice == ConflictChoice::Replace) {
             DWORD pin_error = ERROR_SUCCESS;

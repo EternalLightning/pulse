@@ -1,8 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "file_identity.h"
 #include "file_object_reference.h"
 #include "../common/file_create.h"
+#include "../fs/cloud_state.h"
 
 #include <windows.h>
 #include <winioctl.h>
@@ -49,6 +55,9 @@ public:
         : identity_query_(identity_query), leases_(directory_leases ? std::move(directory_leases)
             : std::make_shared<DirectoryLeases>()) {}
     std::shared_ptr<DirectoryLeases> SharedDirectoryLeases() const { return leases_; }
+#ifdef PULSE_DESTINATION_GUARD_TESTING
+    static std::vector<std::wstring> ComponentsForTest(const std::wstring& path) { return Components(path); }
+#endif
     struct Snapshot {
         bool exists = false;
         bool directory = false;
@@ -201,7 +210,9 @@ public:
     }
 
     bool PinDirectories(const std::wstring& path, std::wstring& error) {
-        for (const auto& part : Components(path)) {
+        const auto parts = Components(path);
+        if (parts.empty()) return Fail(path, error);
+        for (const auto& part : parts) {
             const auto found = snapshots_.find(part);
             if (found == snapshots_.end()) return Fail(part, error);
             if (!found->second.exists) continue;
@@ -265,7 +276,9 @@ public:
     }
 
     bool Check(const std::wstring& path, std::wstring& error) const {
-        for (const auto& part : Components(path)) {
+        const auto parts = Components(path);
+        if (parts.empty()) return Fail(path, error);
+        for (const auto& part : parts) {
             const auto found = snapshots_.find(part);
             Snapshot current;
             if (found == snapshots_.end() || !Read(part, current) || !Same(found->second, current))
@@ -486,6 +499,10 @@ private:
         if (owned)
             result.reference = std::shared_ptr<void>(owned.release(), HandleCloser{});
         if (!(attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
+        // A Cloud Files tag is not a redirected name. Its provider payload can
+        // change during hydration; object identity and strict directory leases
+        // still protect this path. Every other reparse keeps its exact checks.
+        if (fs::IsCloudReparseTag(attributes.ReparseTag)) return true;
         result.reparse.resize(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
         DWORD bytes = 0;
         if (!DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, nullptr, 0, result.reparse.data(),
@@ -526,12 +543,17 @@ private:
         std::wstring name = std::filesystem::path(std::wstring(full.data(), length)).lexically_normal().wstring();
         std::replace(name.begin(), name.end(), L'/', L'\\');
         size_t root = 0;
-        if (name.starts_with(L"\\\\?\\UNC\\")) {
-            const size_t server = name.find(L'\\', 8);
-            root = server == std::wstring::npos ? 0 : name.find(L'\\', server + 1);
-        } else if (name.starts_with(L"\\\\" ) && !name.starts_with(L"\\\\?\\")) {
-            const size_t server = name.find(L'\\', 2);
-            root = server == std::wstring::npos ? 0 : name.find(L'\\', server + 1);
+        if (name.starts_with(L"\\\\?\\UNC\\") ||
+            (name.starts_with(L"\\\\") && !name.starts_with(L"\\\\?\\"))) {
+            const size_t begin = name.starts_with(L"\\\\?\\UNC\\") ? 8 : 2;
+            const size_t server = name.find(L'\\', begin);
+            if (server == std::wstring::npos || server == begin || server + 1 == name.size()) return {};
+            root = name.find(L'\\', server + 1);
+            if (root == server + 1) return {};
+            if (root == std::wstring::npos) {
+                root = name.size();
+                name.push_back(L'\\');
+            }
         } else {
             const size_t drive = name.starts_with(L"\\\\?\\") ? 4 : 0;
             if (name.size() >= drive + 3 && name[drive + 1] == L':' && name[drive + 2] == L'\\') root = drive + 2;

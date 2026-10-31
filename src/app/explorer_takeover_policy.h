@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include <cstdint>
@@ -8,7 +13,6 @@ inline constexpr uint32_t kIdlePollMs = 1000;
 inline constexpr uint32_t kCandidatePollMs = 80;
 inline constexpr uint32_t kStabilityMs = 450;
 inline constexpr uint32_t kInitialSelectionGraceMs = 800;
-inline constexpr uint32_t kLateSelectionGraceMs = 1500;
 inline constexpr uint32_t kCandidateTimeoutMs = 15000;
 
 struct TabObservation {
@@ -30,26 +34,15 @@ struct SourceObservation {
     bool supported = false;
     bool same_folder = false;
     bool same_selection = false;
-    bool visible = true;
-    bool input_unchanged = false;
     bool shift = false;
-    bool submitted_empty_selection = false;
-    bool current_selection_nonempty = false;
-    uint64_t view_age_ms = 0;
 };
 
 enum class PendingDecision { Wait, Retire, Replace };
 
 inline PendingDecision DecidePending(const SourceObservation& source) {
-    if (!source.same_identity || !source.single_tab || !source.supported ||
-        !source.same_folder || !source.input_unchanged || source.shift)
+    if (!source.same_identity || !source.single_tab || !source.supported || source.shift)
         return PendingDecision::Retire;
-    if (source.same_selection) return PendingDecision::Wait;
-    // A visible source may have been used through accessibility or another
-    // input path. Only an unexposed, short empty-to-selection update is retried.
-    return !source.visible && source.submitted_empty_selection &&
-        source.current_selection_nonempty && source.view_age_ms <= kLateSelectionGraceMs
-        ? PendingDecision::Replace : PendingDecision::Retire;
+    return source.same_folder && source.same_selection ? PendingDecision::Wait : PendingDecision::Replace;
 }
 
 inline bool CanCloseAfterAcknowledgment(const SourceObservation& source,

@@ -1,15 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 #requires -Version 7.2
 param(
     [Parameter(Mandatory = $true)]
     [string]$CodeSigningThumbprint,
     [Parameter(Mandatory = $true)]
-    [uri]$TimestampUrl
+    [uri]$TimestampUrl,
+    [string]$BuildDir = "build-release"
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content -LiteralPath (Join-Path $repo "version.txt") -TotalCount 1).Trim()
-$buildPath = [System.IO.Path]::GetFullPath((Join-Path $repo "build"))
+$buildPath = [System.IO.Path]::GetFullPath((Join-Path $repo $BuildDir))
 if ($TimestampUrl.Scheme -ne "https") {
     throw "TimestampUrl must use HTTPS"
 }
@@ -17,7 +23,7 @@ if ($CodeSigningThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
     throw "CodeSigningThumbprint must be a SHA-1 certificate thumbprint"
 }
 
-& (Join-Path $repo "build_release.bat")
+& (Join-Path $repo "build_release.bat") "" $BuildDir
 if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
 $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
@@ -29,13 +35,13 @@ foreach ($name in $binaries) {
     if ($LASTEXITCODE -ne 0) { throw "Code signing failed: $path" }
 }
 
-& (Join-Path $repo "build_installer.bat") /skipbuild
+& (Join-Path $repo "build_installer.bat") /skipbuild $BuildDir
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
 $installer = Join-Path $repo "dist\PulseSetup-$version.exe"
 & $signTool sign /sha1 $CodeSigningThumbprint /fd SHA256 /tr $TimestampUrl.AbsoluteUri /td SHA256 $installer
 if ($LASTEXITCODE -ne 0) { throw "Installer signing failed" }
 
-& (Join-Path $PSScriptRoot "archive_symbols.ps1") -BuildDir "build"
+& (Join-Path $PSScriptRoot "archive_symbols.ps1") -BuildDir $BuildDir
 if ($LASTEXITCODE -ne 0) { throw "Symbol archive failed" }
 
 $buildId = (Get-Content -LiteralPath (Join-Path $buildPath "pulse_build_id.txt") -TotalCount 1).Trim()

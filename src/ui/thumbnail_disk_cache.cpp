@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // thumbnail_disk_cache.cpp - see thumbnail_disk_cache.h.
 #include "thumbnail_disk_cache.h"
 #include "../fs/cloud_state.h"
@@ -8,6 +13,10 @@
 #include <objbase.h>
 #include <shlobj.h>
 #include <wincodec.h>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <thread>
 
 namespace pulse::ui {
 namespace {
@@ -231,27 +240,71 @@ bool IsTemporary(const std::wstring& path) {
     return path.size() > 4 && _wcsicmp(path.c_str() + path.size() - 4, L".tmp") == 0;
 }
 
+struct IdentityReadResult {
+    bool valid = false;
+    ThumbnailFileIdentity identity{};
+};
+
+IdentityReadResult BoundedIdentityRead(std::function<IdentityReadResult()> reader, HANDLE cancel) {
+    // A provider may ignore cancellation. Keep its immutable request and result
+    // alive independently; neither late completion nor teardown touches a cache.
+    struct Probe {
+        HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        IdentityReadResult result;
+        ~Probe() { if (ready) CloseHandle(ready); }
+    };
+    static auto* outstanding = new std::atomic<unsigned>{0};
+    if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return {};
+    if (outstanding->fetch_add(1) >= 4) { --*outstanding; return {}; }
+    auto probe = std::make_shared<Probe>();
+    if (!probe->ready) { --*outstanding; return {}; }
+    std::thread thread;
+    try {
+        thread = std::thread([probe, reader = std::move(reader)] {
+            try { probe->result = reader(); } catch (...) { probe->result = {}; }
+            SetEvent(probe->ready);
+            --*outstanding;
+        });
+    } catch (...) { --*outstanding; return {}; }
+    const HANDLE waits[]{cancel, probe->ready};
+    const DWORD waited = cancel ? WaitForMultipleObjects(2, waits, FALSE, 500)
+        : WaitForSingleObject(probe->ready, 500);
+    if (waited == (cancel ? WAIT_OBJECT_0 + 1 : WAIT_OBJECT_0)) {
+        thread.join();
+        return probe->result;
+    }
+    CancelSynchronousIo(thread.native_handle());
+    thread.detach();
+    return {};
+}
+
 
 
 } // namespace
 
 bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdentity& identity) {
     if (fs::IsCloudPlaceholder(key.attrs) || (key.attrs & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_DIRECTORY))) return false;
-    HANDLE handle = CreateFileW(key.path.c_str(), FILE_READ_ATTRIBUTES,
+    const auto result = BoundedIdentityRead([path = key.path] {
+    IdentityReadResult result;
+    HANDLE handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return false;
+    if (handle == INVALID_HANDLE_VALUE) return result;
     BY_HANDLE_FILE_INFORMATION info{};
     const bool valid = GetFileInformationByHandle(handle, &info) &&
         !fs::IsCloudPlaceholder(info.dwFileAttributes) &&
         !(info.dwFileAttributes & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_DIRECTORY));
     CloseHandle(handle);
-    if (!valid) return false;
-    identity = {info.dwVolumeSerialNumber,
+    if (!valid) return result;
+    result.valid = true;
+    result.identity = {info.dwVolumeSerialNumber,
         (static_cast<uint64_t>(info.nFileIndexHigh) << 32) | info.nFileIndexLow,
         FileTimeValue(info.ftLastWriteTime),
         (static_cast<uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow};
-    return identity.modified == key.modified && identity.size == key.size;
+    return result;
+    }, key.cancel);
+    identity = result.identity;
+    return result.valid && identity.modified == key.modified && identity.size == key.size;
 }
 
 ThumbnailDiskCache& ThumbnailDiskCache::Shared() {

@@ -1,5 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // fs_recycle.cpp
 #include "fs_recycle.h"
+#include "drive_kind.h"
 #include "../common/current_user_security.h"
 #include <shellapi.h>
 #include <algorithm>
@@ -77,13 +83,21 @@ DirEntry ToDirEntry(const RecycleItem& item) {
 
 bool QueryRecycleBinInfo(RecycleBinInfo& out) {
     out = {};
-    SHQUERYRBINFO info{};
-    info.cbSize = sizeof(info);
-    if (FAILED(SHQueryRecycleBinW(nullptr, &info))) return false;
-    out.bytes = static_cast<uint64_t>(info.i64Size);
-    out.items = static_cast<uint64_t>(info.i64NumItems);
-    out.valid = true;
-    return true;
+    const DWORD drives = GetLogicalDrives();
+    bool complete = drives != 0;
+    for (int i = 0; i < 26; ++i) {
+        if (!(drives & (1u << i))) continue;
+        const wchar_t root[] = {static_cast<wchar_t>(L'A' + i), L':', L'\\', 0};
+        const UINT type = GetDriveTypeW(root);
+        if ((type != DRIVE_FIXED && type != DRIVE_REMOVABLE) || IsRemoteLikeDrive(root)) continue;
+        SHQUERYRBINFO info{};
+        info.cbSize = sizeof(info);
+        if (FAILED(SHQueryRecycleBinW(root, &info))) { complete = false; continue; }
+        out.bytes += static_cast<uint64_t>(info.i64Size);
+        out.items += static_cast<uint64_t>(info.i64NumItems);
+    }
+    out.valid = complete;
+    return complete;
 }
 
 std::wstring RecycleIndexPath(const std::wstring& content_path) {
@@ -185,6 +199,7 @@ void EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo* info) {
         wchar_t root[4] = { static_cast<wchar_t>(L'A' + i), L':', L'\\', 0 };
         const UINT type = GetDriveTypeW(root);
         if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) continue;
+        if (IsRemoteLikeDrive(root)) continue;
         const std::wstring bin = NormalizePath(std::wstring(root) + L"$Recycle.Bin");
         if (!EnumerateRecycleBinAtRoot(bin, out)) complete = false;
     }

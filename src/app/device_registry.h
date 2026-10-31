@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_registry.h - The phones connected right now (plan: 手机 D1).
 //
 // Owns the device thread (fs::DeviceWorker) and the DeviceSource that runs
@@ -63,11 +68,12 @@ public:
     bool FolderWritable(const std::wstring& path) const;
 
 private:
+    friend struct DeviceRegistryTestPeer;
     DeviceRegistry();
     static void CALLBACK OnTimer(PTP_CALLBACK_INSTANCE, void*, PTP_TIMER);
     void ScheduleRefresh(uint32_t delay_ms);
-    void RefreshOnWorker();
-    void Publish(std::vector<fs::DeviceInfo> devices);
+    void RefreshOnWorker(uint64_t request);
+    void Publish(uint64_t request, std::vector<fs::DeviceInfo> devices);
     void RememberFolderIds(const std::wstring& folder, const std::wstring& folder_id,
                            const std::vector<fs::DirEntry>& rows);
 
@@ -84,6 +90,7 @@ private:
     // Lower-cased pulse:device: folder path -> shell parsing name (mutex_).
     std::unordered_map<std::wstring, std::wstring> folder_ids_;
     uint64_t revision_ = 0;
+    uint64_t refresh_request_ = 0;
     uint32_t locked_checks_ = 0;
     std::unique_ptr<fs::DeviceSource> source_;  // device thread only
     PTP_TIMER timer_ = nullptr;

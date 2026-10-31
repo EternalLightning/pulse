@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_model.h — Split tree, Pane, Tab, staging tray models.
 #pragma once
 #include "../fs/fs_enum.h"
@@ -49,6 +54,8 @@ struct Tab {
     };
 
     std::wstring current_path;
+    ui::SurfaceMotion navigation_motion = ui::SurfaceMotion::Fade;
+    uint64_t navigation_revision = 0;
     std::wstring archive_file, archive_prefix, archive_password;
     std::shared_ptr<std::atomic_bool> archive_cancel;
     std::shared_ptr<const ArchiveListing> archive_listing;
@@ -66,6 +73,7 @@ struct Tab {
     std::array<ui::BinaryTransition, 3> home_group_transitions{};
     ui::ViewMode view_mode = ui::ViewMode::Details;
     bool view_mode_direct = false;
+    uint64_t view_mode_revision = 0;
     uint64_t view_generation = 1;
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
@@ -240,7 +248,7 @@ struct Tab {
     // Navigation helpers.
     void ClearArchiveView();
     // Returns false when already at the destination, preserving the view and history.
-    bool NavigateTo(const std::wstring& path);
+    bool NavigateTo(const std::wstring& path, ui::SurfaceMotion motion = ui::SurfaceMotion::Fade);
     bool CanGoBack() const { return !back_stack.empty(); }
     bool CanGoForward() const { return !forward_stack.empty(); }
     std::wstring GoBack();

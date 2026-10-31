@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "ui_compositor.h"
 #include "preview_viewport.h"
@@ -43,9 +48,13 @@ public:
     // Reset is service-wide shutdown; Evict only cancels the named consumer.
     void Reset();
     void Warm();
+    // A replayed row still belongs to the current visible thumbnail working set.
+    void RetainThumbnail(const std::wstring& path, DWORD attrs, uint32_t pixels,
+                         uint64_t modified, uint64_t size);
     bool Prefetch(const std::wstring& path, DWORD attrs, uint32_t pixels,
                   uint64_t generation, uint64_t modified, uint64_t size);
     void Evict(Consumer consumer = Consumer::Main);
+    uint64_t ContentRevision() const { return content_revision_.load(std::memory_order_relaxed); }
     // pan_x/pan_y non-null: cover mode (fill dest, crop overflow) with a
     // draggable pan offset in DIPs; values are clamped and written back.
     // pan_max_x/pan_max_y (optional) receive the current pan limits.
@@ -164,6 +173,7 @@ private:
     std::list<std::wstring> lru_;
     size_t cache_bytes_ = 0;
     std::atomic<uint32_t> epoch_{1};
+    std::atomic<uint64_t> content_revision_{1};
     std::thread worker_;
     struct Host {
         HANDLE pipe = INVALID_HANDLE_VALUE;

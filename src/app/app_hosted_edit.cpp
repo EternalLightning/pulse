@@ -1,7 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "pane_animations.h"
 #include "../ui/edit_host.h"
 // app_hosted_edit.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
+#include "app_ui_schedule.h"
 #include "tab_shortcuts.h"
 #include "drive_label_rename.h"
 #include "../ui/address_search_layout.h"
@@ -279,18 +285,29 @@ void ShowWildcardSelect(AppState& s) {
 void SyncFilterEditor(AppState& s) {
     if (!s.filterEditing || s.filterIgnoreKillFocus || !s.hwndFilterEdit) return;
     if (auto* tab = ActiveTab(s)) {
-        wchar_t text[512]{};
-        GetWindowTextW(s.hwndFilterEdit, text, ARRAYSIZE(text));
-        if (tab->filter_text != text) {
-            CancelScrollAnimation(s);
-            tab->filter_text = text;
-            tab->scroll_y = 0;
-            tab->scroll_x = 0;
-            s.scrollTargetY = 0;
-        }
+        s.filterTab = tab;
+        s.filterGeneration = tab->view_generation;
+        s.filterContext = tab->current_path;
+        s.filterDue = GetTickCount64() + 250;
         if (!s.filterFocusPending) LayoutFilterEditor(s);
-        InvalidateRect(s.hwnd, nullptr, FALSE);
     }
+}
+
+bool TickFilterEditor(AppState& s, uint64_t now) {
+    if (!s.filterDue || now < s.filterDue || s.filterComposing) return false;
+    s.filterDue = 0;
+    auto* tab = ActiveTab(s);
+    if (!s.filterEditing || !s.hwndFilterEdit || !tab || tab != s.filterTab ||
+        tab->view_generation != s.filterGeneration || tab->current_path != s.filterContext) return false;
+    wchar_t text[512]{};
+    GetWindowTextW(s.hwndFilterEdit, text, ARRAYSIZE(text));
+    if (tab->filter_text == text) return false;
+    CancelScrollAnimation(s);
+    tab->filter_text = text;
+    tab->scroll_y = tab->scroll_x = 0;
+    s.scrollTargetY = 0;
+    if (tab->content_results) RefreshContentResults(s);
+    return true;
 }
 
 void ClearPaneFilter(AppState& s) {
@@ -309,6 +326,11 @@ void ClearPaneFilter(AppState& s) {
 
 void HideFilterEditor(AppState& s, bool commit) {
     if (!s.hwndFilterEdit || !s.filterEditing) return;
+    if (commit && !s.filterComposing) TickFilterEditor(s, UINT64_MAX);
+    s.filterDue = 0;
+    s.filterTab = nullptr;
+    s.filterContext.clear();
+    s.filterComposing = false;
     const bool owned_focus = GetFocus() == s.hwndFilterEdit;
     const bool select_mode = s.filterSelectMode;
     const std::wstring restore = s.filterSelectRestore;
@@ -642,6 +664,16 @@ LRESULT CALLBACK AddressEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 LRESULT CALLBACK FilterEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                        UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData) {
     AppState* s = reinterpret_cast<AppState*>(dwRefData);
+    if (s && msg == WM_IME_STARTCOMPOSITION) s->filterComposing = true;
+    if (s && msg == WM_IME_ENDCOMPOSITION) {
+        const LRESULT result = DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
+        s->filterComposing = false;
+        SyncFilterEditor(*s);
+        SyncUiScheduling(*s);
+        return result;
+    }
+    if (s && s->filterComposing && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_CHAR))
+        return DefPresentedHostedEditProc(s, hwnd, msg, wParam, lParam);
     LRESULT handled = 0;
     if (s && HandleHostedEditMessage(*s, hwnd, msg, wParam, lParam, handled)) return handled;
     switch (msg) {

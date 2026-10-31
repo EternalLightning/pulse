@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // svg_raster.cpp — Direct2D rasterization of SVG previews.
 //
 // The preview host decodes raster images through WIC, which has no SVG decoder.

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // fluent_menu.h — Fluent context menu / dropdown (ui.md §4 右键菜单/下拉, §6 动效).
 //
 // Rendering: a WS_EX_LAYERED popup with a sampled acrylic plate and an opaque
@@ -117,6 +122,7 @@ public:
     // owner: main window. compositor supplies the D2D device + DWrite factory
     // (drawing happens on the UI thread between its own BeginDraw/EndDraw).
     bool Create(HWND owner, Compositor* compositor, float scale);
+    void SetScale(float scale);
     void SetTheme(bool dark, D2D1_COLOR_F accent);
 
     // Modal; returns the invoked command id, or 0 when dismissed.

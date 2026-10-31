@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // places.cpp — Persist workspaces / tags / network pins + NTFS ADS.
 #include "places.h"
 #include "session.h"
@@ -1533,8 +1538,9 @@ bool WriteTagAdsV2(const std::wstring& path, const std::vector<TagAdsRecord>& ta
     std::wstring n = Norm(path);
     if (n.empty() || fs::IsVirtualPath(n)) return false;
     if (tags.empty()) {
-        DeleteFileW((n + kAdsSuffix).c_str());
-        return true;
+        if (DeleteFileW((n + kAdsSuffix).c_str())) return true;
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
     }
     std::wstring payload = L"PULSE_TAGS_V2\r\n";
     for (const auto& tag : tags) {

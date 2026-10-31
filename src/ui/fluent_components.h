@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "ui_compositor.h"
 
 #include <d2d1svg.h>
 #include <array>
+#include <functional>
 #include <cstddef>
 #include <string_view>
 
@@ -254,6 +260,7 @@ struct SidebarSectionHeaderSpec {
     bool skip_glyph = false;
     ControlState state{};
     bool expanded = true;
+    float expansion = -1.0f;
 };
 
 struct DriveSidebarItemSpec {
@@ -354,6 +361,9 @@ public:
     explicit Painter(Compositor* compositor = nullptr) noexcept;
 
     void SetCompositor(Compositor* compositor) noexcept;
+    // The owning renderer samples animation; standalone painters keep immediate feedback.
+    using HoverSampler = std::function<float(const D2D1_RECT_F&, bool)>;
+    void SetHoverSampler(HoverSampler sampler) { hover_sampler_ = std::move(sampler); }
     void SetScale(float scale) noexcept;
     void InvalidateTypography() noexcept;
     float Scale() const noexcept { return scale_; }
@@ -445,6 +455,8 @@ public:
     static bool Contains(const D2D1_RECT_F& bounds, float x, float y) noexcept;
 
 private:
+    HoverSampler hover_sampler_;
+    float HoverProgress(const D2D1_RECT_F& bounds, const ControlState& state) const;
     enum class BrushId : size_t {
         Background,
         Text,

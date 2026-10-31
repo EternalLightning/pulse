@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_fake.cpp - FakeDeviceSource: a local folder stands in for phones
 // (device_source.h). Tests only: the app builds it in isolated test instances
 // with PULSE_TEST_FAKE_DEVICE=<root>, never otherwise.

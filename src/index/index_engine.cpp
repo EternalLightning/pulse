@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "filename_pinyin.h"
 // index_engine.cpp — mmap v6 base + heap delta (优化.md).
 #include "index_engine.h"
@@ -9,6 +14,8 @@
 #include "persistent_index_policy.h"
 #include "index_query.h"
 #include "index_mft.h"
+#include "index_fallback_metadata.h"
+#include "usn_catch_up.h"
 #include "index_paths.h"
 #include "index_delta.h"
 #include "index_shard.h"
@@ -404,7 +411,7 @@ void Engine::CaptureMemoryState() {
 }
 FileFeedPage Engine::ReadFeed(bool changes, const std::wstring& root, uint64_t epoch, uint64_t cursor) const {
     std::shared_lock lock(mutex_);
-    FileFeedPage page; page.epoch=feed_epoch_; page.sequence=feed_sequence_;
+    FileFeedPage page; page.epoch=changes ? feed_epoch_.load() : snapshot_epoch_; page.sequence=feed_sequence_;
     page.ready=ready_ && !building_;
     if(epoch && epoch!=page.epoch) {page.gap=true;return page;}
     if(!page.ready) return page;
@@ -1972,10 +1979,9 @@ bool Engine::MapIndexFile(const std::wstring& path, std::unique_ptr<MappedFile>&
 }
 
 void Engine::AdoptMappedLocked(std::unique_ptr<MappedFile> mapped) {
-    ++feed_epoch_;
-    // Old subscribers must already resynchronize; these events cannot bridge
-    // the snapshot generation. Keep sequence IDs monotonic, not stale payloads.
-    feed_changes_.Clear();
+    // Row ordinals change during compaction; path-based change records remain
+    // continuous and must outlive ordinary persisted snapshot replacements.
+    ++snapshot_epoch_;
     pinyin_snapshot_ = nullptr;
     pinyin_version_ = 0;
     pinyin_chinese_ids_.clear();
@@ -2537,7 +2543,10 @@ bool Engine::CompactNamePoolLocked(ULONGLONG now) {
 const char* Engine::MaintenanceMergeReason(ULONGLONG now, uint64_t delta_bytes) const {
     if (now < merge_retry_after_tick_) return nullptr;
     const auto count = static_cast<size_t>(LiveCount());
-    if (count && deleted_ > count / 10) return "deleted_ratio";
+    // A ratio alone can mean one tombstone in a small index. Keep those
+    // rewrites off each notification while the hard budgets below stay urgent.
+    if (count && deleted_ > count / 10 &&
+        (!last_merge_tick_ || now - last_merge_tick_ >= kMinMergeIntervalMs)) return "deleted_ratio";
     if (struct_changes_ >= kMergeStructChanges) return "structural_threshold";
     if (delta_bytes >= kMergeDeltaBytes) return "delta_threshold";
     if (struct_changes_ && last_struct_tick_ && now - last_struct_tick_ >= kIdleMergeQuietMs &&
@@ -2945,6 +2954,44 @@ Engine::UsnApply Engine::ApplyUsnLocked(VolState& v, const USN_RECORD_V2* rec) {
     return UsnApply::Structure;
 }
 
+DWORD Engine::ApplyUsnBatch(VolState& v, const BYTE* records, size_t bytes, int64_t next,
+                            bool* changed, bool* structural, uint64_t& applied) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    if (!ValidateUsnRecords(records, bytes)) return ERROR_INVALID_DATA;
+    const BYTE* p = records;
+    size_t remaining = bytes;
+    bool any_struct = false;
+    bool any_attr = false;
+    while (remaining) {
+        if (!running_) return ERROR_OPERATION_ABORTED;
+        UsnRecordView view;
+        if (!ReadUsnRecord(p, remaining, view)) return ERROR_INVALID_DATA;
+        const UsnApply apply = ApplyUsnLocked(v, reinterpret_cast<const USN_RECORD_V2*>(p));
+        if (apply != UsnApply::None) ++applied;
+        if (v.journal_id == 0) return ERROR_INVALID_DATA;
+        if (apply == UsnApply::Structure) any_struct = true;
+        else if (apply == UsnApply::Attr) any_attr = true;
+        p += view.record.RecordLength;
+        remaining -= view.record.RecordLength;
+    }
+    // A checkpoint follows all patches for this validated packet. A later
+    // read/apply failure can replay only the uncommitted packet on restart.
+    v.next_usn = next;
+    if (DeltaLog* delta = DeltaFor(v.letter)) delta->QueueUsn(v.journal_id, v.next_usn);
+    indexed_.store(static_cast<size_t>(LiveCount()) > deleted_ ? LiveCount() - deleted_ : 0);
+    if (any_struct) {
+        ++struct_changes_;
+        last_struct_tick_ = GetTickCount64();
+        if (structural) *structural = true;
+    }
+    if (any_struct || any_attr) {
+        if (changed) *changed = true;
+        ++revision_;
+        TraceSearch("filename_commit", revision_.load());
+    }
+    return ERROR_SUCCESS;
+}
+
 bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
     if (!PersistentIndexPathAllowed(std::wstring(1, v.letter) + L":\\")) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
     const auto timing = FilenameTiming::Begin();
@@ -2969,123 +3016,63 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
         return false;
     }
 
-    READ_USN_JOURNAL_DATA_V0 rud{};
-    rud.StartUsn = start_usn;
-    rud.ReasonMask = 0xFFFFFFFF;
-    rud.UsnJournalID = journal_id;
-    std::vector<BYTE> blob;
-    std::vector<BYTE> buf;
-    if (stream == journal_streams_.end()) { blob.reserve(256 * 1024); buf.resize(256 * 1024); }
-    bool ok = true;
-    DWORD read_error = ERROR_SUCCESS;
-    USN last = start_usn;
-    if (stream != journal_streams_.end()) ok = stream->second->Take(blob, last);
-    else for (;;) {
-        if (!running_) { ok = false; break; }
-        DWORD br = 0;
-        if (!DeviceIoControl(h, FSCTL_READ_USN_JOURNAL, &rud, sizeof(rud),
-                             buf.data(), static_cast<DWORD>(buf.size()), &br, nullptr)) {
-            const DWORD error = GetLastError();
-            read_error = error;
-            if (error == ERROR_JOURNAL_ENTRY_DELETED || error == ERROR_JOURNAL_NOT_ACTIVE ||
-                error == ERROR_INVALID_PARAMETER) {
-                std::unique_lock<std::shared_mutex> state_lock(mutex_);
-                v.journal_id = 0;
-                v.next_usn = 0;
-                SetStatus(std::wstring(1, v.letter) + L": 的变更跟踪失效，正在重建索引…");
-            }
-            ok = false;
-            break;
+    uint64_t applied = 0;
+    auto commit = [&](const BYTE* records, size_t bytes, int64_t next) -> DWORD {
+        return ApplyUsnBatch(v, records, bytes, next, changed, structural, applied);
+    };
+    DWORD error = ERROR_SUCCESS;
+    bool current = false;
+    if (stream != journal_streams_.end()) {
+        std::vector<BYTE> blob;
+        USN last = start_usn;
+        if (!stream->second->Take(blob, last)) error = stream->second->Error();
+        else {
+            error = commit(blob.data(), blob.size(), last);
+            const auto target = journal_catch_up_targets_.find(v.volume_id);
+            current = target == journal_catch_up_targets_.end() ||
+                target->second.first != journal_id || last >= target->second.second;
+            if (current && target != journal_catch_up_targets_.end()) journal_catch_up_targets_.erase(target);
         }
-        if (br < sizeof(USN) || br > buf.size() ||
-            !ValidateUsnRecords(buf.data() + sizeof(USN), br - sizeof(USN))) {
-            read_error = ERROR_INVALID_DATA;
-            ok = false;
-            break;
+    } else {
+        uint64_t captured_journal = 0;
+        int64_t target = 0;
+        if (!QueryJournal(h, captured_journal, target)) error = GetLastError();
+        else if (captured_journal != journal_id || target < start_usn) error = ERROR_JOURNAL_ENTRY_DELETED;
+        else {
+            int64_t cursor = start_usn;
+            error = CatchUpUsnBatch(target, cursor,
+                [&](int64_t from, BYTE* buffer, DWORD capacity, DWORD& received) -> DWORD {
+                    READ_USN_JOURNAL_DATA_V0 request{};
+                    request.StartUsn = from;
+                    request.ReasonMask = 0xFFFFFFFF;
+                    request.UsnJournalID = journal_id;
+                    if (DeviceIoControl(h, FSCTL_READ_USN_JOURNAL, &request, sizeof(request),
+                        buffer, capacity, &received, nullptr)) return ERROR_SUCCESS;
+                    return GetLastError();
+                }, commit, [this] { return running_.load(); });
+            current = cursor >= target;
+            if (current) journal_catch_up_targets_.erase(v.volume_id);
+            else journal_catch_up_targets_[v.volume_id] = {journal_id, target};
         }
-        const USN next = *reinterpret_cast<USN*>(buf.data());
-        BYTE* p = buf.data() + sizeof(USN);
-        BYTE* end = buf.data() + br;
-        size_t nrec = 0;
-        while (p < end) {
-            UsnRecordView view;
-            if (!ReadUsnRecord(p, static_cast<size_t>(end - p), view)) {
-                read_error = ERROR_INVALID_DATA; ok = false; break;
-            }
-            blob.insert(blob.end(), p, p + view.record.RecordLength);
-            ++nrec;
-            p += view.record.RecordLength;
-        }
-        if (!ok) break;
-        rud.StartUsn = next;
-        last = next;
-        if (nrec == 0) break;
+        CloseHandle(h);
     }
-    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-    if (!ok || !running_) {
-        const DWORD error = read_error ? read_error :
-            (stream == journal_streams_.end() ? GetLastError() : stream->second->Error());
-        if (error == ERROR_INVALID_DATA) {
+    if (error || !running_) {
+        if (!error) error = ERROR_OPERATION_ABORTED;
+        if (error == ERROR_INVALID_DATA || error == ERROR_JOURNAL_ENTRY_DELETED ||
+            error == ERROR_JOURNAL_NOT_ACTIVE || error == ERROR_INVALID_PARAMETER) {
             std::unique_lock state_lock(mutex_);
             GapFeed();
             v.journal_id = 0;
-            SetStatus(std::wstring(1, letter) + L": 的文件变更记录损坏，正在重建索引…");
+            SetStatus(std::wstring(1, letter) + L": 的变更跟踪失效，正在重建索引…");
         }
-        SetLastError(error ? error : ERROR_OPERATION_ABORTED);
-        filename_timing_.End(FilenameStage::Journal, timing, 0, error ? error : ERROR_OPERATION_ABORTED, "read_failed", letter);
+        SetLastError(error);
+        filename_timing_.End(FilenameStage::Journal, timing, applied, error, "read_failed", letter);
         return false;
     }
-    if (blob.empty() && last == start_usn) {
+    {
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        v.folder_size_current = true;
-        filename_timing_.End(FilenameStage::Journal, timing, 0, ERROR_SUCCESS, "no_changes", letter);
-        return true;
+        v.folder_size_current = current;
     }
-
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    if (!ValidateUsnRecords(blob.data(), blob.size())) {
-        GapFeed();
-        v.journal_id = 0;
-        SetLastError(ERROR_INVALID_DATA);
-        filename_timing_.End(FilenameStage::Journal, timing, 0, ERROR_INVALID_DATA, "invalid_records", letter);
-        return false;
-    }
-    BYTE* p = blob.empty() ? nullptr : blob.data();
-    BYTE* end = p ? p + blob.size() : nullptr;
-    bool any_struct = false;
-    bool any_attr = false;
-    uint64_t applied = 0;
-    while (p && p < end) {
-        if (!running_) return false;
-        UsnRecordView view;
-        if (!ReadUsnRecord(p, static_cast<size_t>(end - p), view)) return false;
-        {
-            const UsnApply apply = ApplyUsnLocked(v, reinterpret_cast<USN_RECORD_V2*>(p));
-            if (apply != UsnApply::None) ++applied;
-            // An invalid parent relation needs a fresh volume snapshot, not a
-            // journal cursor advanced past a change we could not apply safely.
-            if (v.journal_id == 0) {
-                filename_timing_.End(FilenameStage::Journal, timing, applied, ERROR_INVALID_DATA, "invalid_parent", letter);
-                return false;
-            }
-            if (apply == UsnApply::Structure) any_struct = true;
-            else if (apply == UsnApply::Attr) any_attr = true;
-        }
-        p += view.record.RecordLength;
-    }
-    v.next_usn = last;
-    v.folder_size_current = true;
-    if (DeltaLog* delta = DeltaFor(v.letter)) delta->QueueUsn(v.journal_id, v.next_usn);
-    indexed_.store(static_cast<size_t>(LiveCount()) > deleted_ ? LiveCount() - deleted_ : 0);
-    if (any_struct) {
-        ++struct_changes_;
-        last_struct_tick_ = GetTickCount64();
-        if (changed) *changed = true;
-        if (structural) *structural = true;
-    } else if (any_attr) {
-        if (changed) *changed = true;
-    }
-    if (any_struct || any_attr) { ++revision_; TraceSearch("filename_commit", revision_.load()); }
     filename_timing_.End(FilenameStage::Journal, timing, applied, ERROR_SUCCESS, "apply", letter);
     return true;
 }
@@ -3181,6 +3168,12 @@ bool Engine::IndexVolumeMft(const VolumeInfo& volume) {
                 n.parent = rec->ParentFileReferenceNumber;
                 n.name.assign(view.name);
                 n.is_dir = (rec->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                if (!ReadMftFallbackMetadata(h, n.frn, n.is_dir, n.size, n.mtime)) {
+                    const DWORD error = GetLastError();
+                    CloseHandle(h);
+                    SetLastError(error);
+                    return false;
+                }
                 frn_nodes.push_back(std::move(n));
                 record_data += rec->RecordLength;
             }
@@ -3392,6 +3385,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
         build_ = std::move(replacement);
         build_vols_ = std::move(healthy);
         building_ = true;
+        GapFeed();
         indexed_.store(build_.nodes.size());
     }
     SetStatus(L"正在重建 " + volume.mount_point + L" 的索引…");
@@ -3497,6 +3491,7 @@ void Engine::FullRebuild(const char* reason) {
     const auto configured_volumes = ConfiguredVolumes(config);
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        GapFeed();
         excluded_paths_ = config.excluded_paths;
         build_.Clear();
         build_.pool.reserve(1u << 20);
@@ -3623,6 +3618,11 @@ bool Engine::NeedsSearchRebuildLocked() const {
 
 void Engine::StartJournalStreams() {
     journal_streams_.clear();
+    std::erase_if(journal_catch_up_targets_, [this](const auto& target) {
+        return std::none_of(vols_.begin(), vols_.end(), [&](const auto& volume) {
+            return volume.volume_id == target.first && volume.journal_id == target.second.first;
+        });
+    });
     if (delta_replay_failed_) return;
     for (const auto& volume : vols_) {
         if (volume.journal_id && !volume_retry_after_.contains(volume.volume_id)) journal_streams_[volume.volume_id] =

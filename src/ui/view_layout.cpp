@@ -1,8 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "view_layout.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
+#include <iterator>
 
 namespace pulse::ui {
 
@@ -149,6 +155,17 @@ D2D1_RECT_F ViewLayout::ItemRect(int index) const noexcept {
         top += static_cast<float>(end - date_groups_->begin()) * kDateGroupHeaderDip * scale_;
     }
     return D2D1_RECT_F{left, top, left + metrics_.cell_width, top + metrics_.cell_height};
+}
+
+bool ViewLayout::IsStripedRow(int index) const noexcept {
+    if (index < 0 || static_cast<size_t>(index) >= count_) return false;
+    int local = index;
+    if (date_groups_) {
+        const auto end = std::upper_bound(date_groups_->begin(), date_groups_->end(), index,
+            [](int value, const DateGroup& group) { return value < group.first; });
+        if (end != date_groups_->begin()) local -= std::prev(end)->first;
+    }
+    return (local & 1) != 0;
 }
 
 D2D1_RECT_F ViewLayout::IconRect(int index) const noexcept {

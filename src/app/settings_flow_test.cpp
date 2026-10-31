@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_internal.h"
 #include "app_input.h"
 #include "../ui/ui_renderer_internal.h"
@@ -93,7 +98,33 @@ int RunSettingsDropdownTest(AppState& s,const wchar_t* output) {
     s.settings.WindowEffect(ui::WindowEffectId(ui::WindowEffect::None));
     s.settings.Language(L"en-US");
     Render(s);check(s.compositor.SaveSnapshot((base/L"closed.png").c_str()),"closed dropdown screenshot captured");
-    for(int index=0;index<2;++index) {
+    const auto window=D2D1::RectF(0,0,static_cast<float>(s.compositor.Width()),static_cast<float>(s.compositor.Height()));
+    ui::fluent::Painter painter(&s.compositor);painter.SetScale(s.scale);
+    auto layout=[&] {
+        return ui::MakeSettingsLayout(BuildVm(s,false),window,s.scale,
+            s.renderer.TitleBarHeight(),28*s.scale,&painter);
+    };
+    auto scroll_to=[&](D2D1_RECT_F control) {
+        const float maximum=s.renderer.SettingsMaxScroll(BuildVm(s,false),window.right,window.bottom);
+        const auto content=layout().content;
+        s.settings.SetScroll(s.settings.scroll()+control.top-content.top-24*s.scale,maximum);
+    };
+    check(layout().effect_choice.right==0,"window material uses effect tiles without a duplicate dropdown");
+    for(int index:{1,2,3,0}) {
+        scroll_to(layout().effect_row[index]);
+        const auto tile=layout().effect_row[index];
+        const POINT center{static_cast<LONG>(std::lround((tile.left+tile.right)/2)),
+            static_cast<LONG>(std::lround((tile.top+tile.bottom)/2))};
+        const auto hit=s.renderer.HitTest(BuildVm(s,false),window,
+            static_cast<float>(center.x),static_cast<float>(center.y));
+        check(hit.region==H::SettingsEffect && hit.index==index,"effect tile hit target matches the rendered control");
+        HandleLButtonDown(&s,s.hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(center.x,center.y));
+        check(s.appPrefs.window_effect==ui::WindowEffectId(static_cast<ui::WindowEffect>(index)),
+            "clicking an effect tile applies the selected material");
+    }
+    Render(s);check(s.compositor.SaveSnapshot((base/L"effect-tiles.png").c_str()),"effect tile screenshot captured");
+    scroll_to(layout().language_choice);
+    for(int index:{1}) {
         const auto vm=BuildVm(s,false);
         const auto control=s.renderer.SettingsDropdownBounds(vm,index,
             static_cast<float>(s.compositor.Width()),static_cast<float>(s.compositor.Height()));
@@ -103,17 +134,20 @@ int RunSettingsDropdownTest(AppState& s,const wchar_t* output) {
         POINT origin{static_cast<LONG>(std::lround(control.left)),static_cast<LONG>(std::lround(control.bottom))};
         ClientToScreen(s.hwnd,&origin);
         static RECT popup{};popup={};
-        static int down=0;down=index;
-        const auto png=base/(index==0 ? L"effect-menu.png" : L"language-menu.png");
+        const auto png=base/L"language-menu.png";
         SetEnvironmentVariableW(L"PULSE_TEST_DROPDOWN_SHOT",png.c_str());
+        EnsureMenu(s);s.menu->SetHoverFirstOnOpen(true);
         SetTimer(s.hwnd,0x5347,350,[](HWND hwnd,UINT,UINT_PTR id,DWORD) {
             KillTimer(hwnd,id);
-            EnumThreadWindows(GetCurrentThreadId(),[](HWND window,LPARAM)->BOOL {
+            EnumThreadWindows(GetCurrentThreadId(),[](HWND window,LPARAM parameter)->BOOL {
                 wchar_t title[64]{};GetWindowTextW(window,title,64);
-                if(IsWindowVisible(window) && wcscmp(title,L"PulseMenu")==0) GetWindowRect(window,&popup);
+                DWORD process=0;GetWindowThreadProcessId(window,&process);
+                if(IsWindowVisible(window) && process==GetCurrentProcessId() &&
+                    GetWindow(window,GW_OWNER)==reinterpret_cast<HWND>(parameter) &&
+                    wcscmp(title,L"PulseMenu")==0) GetWindowRect(window,&popup);
                 return TRUE;
-            },0);
-            for(int i=0;i<down;++i) PostThreadMessageW(GetCurrentThreadId(),WM_KEYDOWN,VK_DOWN,0);
+            },reinterpret_cast<LPARAM>(hwnd));
+            PostThreadMessageW(GetCurrentThreadId(),WM_KEYDOWN,VK_DOWN,0);
             PostThreadMessageW(GetCurrentThreadId(),WM_KEYDOWN,VK_RETURN,0);
         });
         HandleSettingsControl(s,hit);

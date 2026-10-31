@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_input.h — Pointer, keyboard, marquee, and drag/drop input.
 #pragma once
 #include "app_runtime.h"
@@ -34,6 +39,8 @@ void ResetMarquee(AppState& s);
 void ApplyMarqueeSelection(AppState& s);
 void HandleListRowClick(AppState& s, int index, bool ctrl, bool shift);
 void FinishListRowClick(AppState& s);
+void CancelPendingListRowClick(AppState& s);
+void ReceiveDetailsAttributeResult(AppState& s, WPARAM identity);
 void CancelRenameClick(AppState& s);
 bool PointInHitItemName(AppState& s, const ui::WindowViewModel& vm,
                                const ui::HitTestResult& hit, float x, float y);

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // shell_icons.h — isolated Windows Shell icon pixels for file rows.
 #pragma once
 #include "ui_compositor.h"
@@ -47,6 +52,7 @@ public:
         uint32_t limit = 0;
     };
     static ResourceUsage Resources();
+    uint64_t ContentRevision() const { return notify_->Revision(); }
 #ifdef PULSE_SHELL_ICONS_TESTING
     static void SetQueryHookForTest(std::function<int(const std::wstring&)> hook);
 #endif

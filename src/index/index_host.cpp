@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // index_host.cpp — Pulse.Index.exe: index + query server (helper or service).
 //
 // UI (asInvoker) never hosts Engine::Start. This process owns MFT/USN or the
@@ -35,6 +40,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -1201,9 +1207,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
     if (a1 == L"--network-agent") return RunNetworkAgent();
     if (a1 == L"--test-network-agent" && args.size() == 3) return RunNetworkAgentFixture(args[2]);
-    if (a1 == L"--content-instant-agent" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10), ContentAgentMode::Instant);
-    if (a1 == L"--content-index-agent" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10));
-    if (a1 == L"--content-index-observer" && args.size() == 4) return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10), true);
+    if (a1 == L"--content-instant-agent" || a1 == L"--content-index-agent" || a1 == L"--content-index-observer") {
+        if (args.size() != 4 && args.size() != 5) return ERROR_INVALID_PARAMETER;
+        const auto database_path = args.size() == 5 ? args[4] : std::wstring{};
+        if (args.size() == 5 && (database_path.empty() || database_path.find(L'"') != std::wstring::npos ||
+            !std::filesystem::path(database_path).is_absolute())) return ERROR_INVALID_PARAMETER;
+        const auto mode = a1 == L"--content-instant-agent" ? ContentAgentMode::Instant
+            : a1 == L"--content-index-observer" ? ContentAgentMode::Observer : ContentAgentMode::LegacyWriter;
+        return RunPersistentContentAgent(args[2], wcstoul(args[3].c_str(), nullptr, 10), mode, database_path);
+    }
     if (a1 == L"--content-agent" && args.size() == 3) return RunContentAgent(args[2]);
     if (a1 == L"--test-host" && args.size() >= 3) {
         const std::wstring& token = args[2];

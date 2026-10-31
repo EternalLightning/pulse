@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // connect_server_dialog.h - 连接服务器 (pulse_network_design.html §02): one
 // address field with a live preview, server suggestions and pin after connecting.
 // The same window, in rename mode,

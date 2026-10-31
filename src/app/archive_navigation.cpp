@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "archive_dialog.h"
 #include "archive_operation_ui.h"
@@ -253,7 +258,8 @@ bool OpenArchiveSelection(AppState& s) {
     const auto indices = tab->SelectedIndices();
     if (indices.size() != 1) return true;
     const auto entry = tab->EntryAt(static_cast<size_t>(indices.front()));
-    if (entry.is_dir) NavigateTo(s, ArchiveViewPath(tab->archive_file, tab->archive_prefix + entry.name + L"/"));
+    if (entry.is_dir) NavigateTo(s, ArchiveViewPath(tab->archive_file, tab->archive_prefix + entry.name + L"/"),
+        ui::SurfaceMotion::Forward);
     else {
         // Opening a member uses a private temporary extraction, never the source folder.
         const auto file = tab->archive_file, password = tab->archive_password;

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "FluentTokens.h"
@@ -76,6 +81,8 @@ private:
     void ScrollFailureDetails(float delta, bool animate = true);
     void UpdateFailureScrollTimer();
     int HitTestControl(float x, float y) const;
+    void ActivateControl(int id);
+    bool ControlEnabled(int id) const;
     void RequestClose();
     void RequestCancel();
     void RefreshAnimationSettings();
@@ -108,6 +115,7 @@ private:
     D2D1_COLOR_F accent_ = HexColor(0x0078D4);
     int hover_ = 0;
     int pressed_ = 0;
+    int focus_ = 0;
 };
 
 struct ConflictDialogResult {

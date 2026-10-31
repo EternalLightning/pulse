@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // index_client.h — UI-side connection to Pulse.Index.exe (never blocks the UI
 // thread on a search: SearchAsync + WM callback).
 #pragma once

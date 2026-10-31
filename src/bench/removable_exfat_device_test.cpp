@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/content_config_storage.h"
 #include "../index/content_scope.h"
 #include "../index/content_search_session.h"
@@ -6,6 +11,8 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <cstdio>
+#include <string_view>
 #include <objbase.h>
 
 using namespace pulse::index;
@@ -75,13 +82,34 @@ Device FindDevice() {
 }
 }
 int wmain(int argc, wchar_t** argv) {
+    fs::path explicit_output;
+    bool probe_only = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::wstring_view(argv[i]) == L"--output" && i + 1 < argc) explicit_output = argv[++i];
+        else if (std::wstring_view(argv[i]) == L"--probe") probe_only = true;
+        else {
+            std::cerr << "usage: pulse_removable_exfat_device_test [--probe] [--output path]\n";
+            return 2;
+        }
+    }
+    SYSTEMTIME now{}; GetSystemTime(&now);
+    char timestamp[40]{};
+    std::snprintf(timestamp, sizeof(timestamp), "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds);
+    std::string revision = "unavailable";
+    std::ifstream head(L".git/HEAD");
+    if (!std::getline(head, revision)) revision = "unavailable";
+    else if (revision.starts_with("ref: ")) {
+        std::ifstream ref(fs::path(L".git") / fs::path(revision.substr(5)));
+        if (!std::getline(ref, revision)) revision = "unavailable (packed ref or worktree)";
+    }
     const auto device = FindDevice();
     std::cout << "[DEVICE] root=" << Utf8(device.root) << " filesystem=" << Utf8(device.filesystem)
         << " serial=" << std::hex << device.serial << std::dec << " guid=" << Utf8(device.guid)
         << " drive_type=" << device.facts.drive_type << " online=" << device.facts.online
         << " bus_known=" << device.facts.bus_known << " removable_bus=" << device.facts.removable_bus
         << " bus_type=" << device.bus_type << " descriptor_error=" << device.descriptor_error << std::endl;
-    if (argc > 1 && std::wstring(argv[1]) == L"--probe") return device.root.empty() ? 2 : 0;
+    if (probe_only) return device.root.empty() ? 2 : 0;
     Check(!device.root.empty(), "actual online exFAT removable device discovered with Win32 APIs");
     if (device.root.empty()) return 2;
     Check(device.facts.online && KnownRemovableDevice(device.facts), "production probe classifies actual device as online removable");
@@ -89,8 +117,10 @@ int wmain(int argc, wchar_t** argv) {
     GUID guid{}; CoCreateGuid(&guid); wchar_t unique[64]{}; StringFromGUID2(guid, unique, ARRAYSIZE(unique));
     const auto name = L"PulseExfatValidation-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::wstring(unique);
     const fs::path fixture = fs::path(device.root) / name;
-    const auto private_root = fs::absolute(fs::path(L"bench_data/issue-fixes-removable") / (L"exfat-run-" + std::to_wstring(GetCurrentProcessId())));
-    fs::create_directories(private_root);
+    const auto parent = fs::absolute(fs::path(L"bench_data/issue-fixes-removable"));
+    fs::create_directories(parent);
+    const auto private_root = parent / (L"exfat-run-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::wstring(unique));
+    if (!CreateDirectoryW(private_root.c_str(), nullptr)) return 1;
     SetEnvironmentVariableW(L"LOCALAPPDATA", private_root.c_str());
     const std::string marker = Utf8(name);
     const bool created = CreateDirectoryW(fixture.c_str(), nullptr) != FALSE;
@@ -182,7 +212,8 @@ int wmain(int argc, wchar_t** argv) {
     const auto passed = std::count_if(checks.begin(), checks.end(), [](const auto& check) { return check.passed; });
     const auto failed = checks.size() - static_cast<size_t>(passed);
     std::ostringstream evidence;
-    evidence << "{\n  \"date\": \"2026-10-23\",\n  \"device\": {\"root\":" << Json(Utf8(device.root)) << ",\"filesystem\":" << Json(Utf8(device.filesystem))
+    evidence << "{\n  \"date\":" << Json(std::string(timestamp, 10)) << ",\n  \"run_time_utc\":" << Json(timestamp)
+        << ",\n  \"source_revision\":" << Json(revision) << ",\n  \"source_revision_scope\":\"HEAD only; worktree changes are not represented\",\n  \"device\": {\"root\":" << Json(Utf8(device.root)) << ",\"filesystem\":" << Json(Utf8(device.filesystem))
         << ",\"serial_decimal\":" << device.serial << ",\"volume_guid\":" << Json(Utf8(device.guid)) << ",\"drive_type\":" << device.facts.drive_type
         << ",\"online\":" << device.facts.online << ",\"bus_known\":" << device.facts.bus_known << ",\"removable_bus\":" << device.facts.removable_bus
         << ",\"bus_type\":" << device.bus_type << ",\"descriptor_removable\":" << device.descriptor_removable << ",\"descriptor_error\":" << device.descriptor_error << "},\n"
@@ -192,8 +223,9 @@ int wmain(int argc, wchar_t** argv) {
         << ",\n  \"passed\":" << passed << ",\n  \"failed\":" << failed << ",\n  \"checks\":[\n";
     for (size_t i = 0; i < checks.size(); ++i) evidence << "    {\"name\":" << Json(checks[i].name) << ",\"passed\":" << (checks[i].passed ? "true" : "false") << "}" << (i + 1 < checks.size() ? "," : "") << '\n';
     evidence << "  ],\n  \"limitations\":[\"Backend and policy validation only; no manual installed UI validation or physical unplug performed\",\"No whole-device scan; only eleven small fixture data files and owner marker\",\"Persistence rejection observed only at private test paths; inaccessible production index storage was not monitored\",\"Cancellation and stale generation verified deterministically at callbacks/session boundary\"]\n}\n";
-    fs::create_directories(L"docs/validation/issue-confirm-2026-10-23");
-    const bool written = Write(L"docs/validation/issue-confirm-2026-10-23/exfat-device-validation.json", evidence.str());
+    const auto output = explicit_output.empty() ? private_root / L"exfat-device-validation.json" : explicit_output;
+    const bool written = Write(output, evidence.str());
+    std::cout << "evidence=" << Utf8(output.wstring()) << std::endl;
     std::cout << passed << " PASS / " << failed << " FAIL; evidence_written=" << written << std::endl;
     return failed || !written ? 1 : 0;
 }

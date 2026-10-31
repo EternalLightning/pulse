@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ui_renderer.cpp — Chrome orchestration (title, toolbar, status, render).
 #include "legacy_icons.h"
 #include "ui_renderer.h"
@@ -46,8 +51,12 @@ void MainRenderer::SetCompositor(Compositor* comp) {
     details_motion_window_width_ = 0;
     details_exit_commands_.reset();
     page_surface_.Reset();
+    address_path_surface_.Reset();
     settings_content_surface_.Reset();
     for (auto& surface : pane_surfaces_) surface.Reset();
+    for (auto& surface : pane_title_surfaces_) surface.Reset();
+    for (auto& surface : item_reflow_surfaces_) surface.Reset();
+    for (auto& surface : view_mode_transitions_) surface.Reset();
     hover_tracks_.clear();
     RefreshMotionPreferences();
     paneHeaderStroke_.reset();
@@ -67,6 +76,9 @@ void MainRenderer::SetCompositor(Compositor* comp) {
     compositor_ = comp;
     material_.SetCompositor(comp);
     painter_.SetCompositor(comp);
+    painter_.SetHoverSampler([this](const D2D1_RECT_F& bounds, bool hovered) {
+        return ControlHoverOpacity(bounds, hovered);
+    });
     if (!comp) {
         // Shared icons outlive this window; its context is never retained.
         thumbnail_cache_.Evict();
@@ -86,6 +98,8 @@ void MainRenderer::RefreshMotionPreferences() {
 }
 
 void MainRenderer::InvalidateTypography() {
+    for (auto& surface : view_mode_transitions_) surface.Reset();
+    for (auto& surface : item_reflow_surfaces_) surface.Reset();
     ClearTextWidthCache();
     auto_widths_scale_ = 0.0f;
     details_text_layout_.reset();
@@ -324,8 +338,14 @@ void MainRenderer::DrawButton(const D2D1_RECT_F& rc, const Theme& theme, const D
     const std::wstring& glyph, const std::wstring& fallback,
     const D2D1_COLOR_F& fg, bool /*round_right*/, bool /*round_left*/, float size_factor) {
     ID2D1DeviceContext* dc = compositor_->Dc();
-    if (bg.a > 0.0f) { // transparent = resting state; hover fill is drawn on interaction only
-        MakeBrush(dc, bg, brFillHover_);
+    const bool hover_fill = bg.a == 0.0f ||
+        (bg.r == theme.fill_hover.r && bg.g == theme.fill_hover.g &&
+         bg.b == theme.fill_hover.b && bg.a == theme.fill_hover.a);
+    const float hover = ControlHoverOpacity(rc, bg.a > 0.0f && hover_fill);
+    auto fill = hover_fill ? theme.fill_hover : bg;
+    if (hover_fill) fill.a *= hover;
+    if (fill.a > 0.0f) {
+        MakeBrush(dc, fill, brFillHover_);
         float r = theme.radius_control * scale_;
         FillRoundedRect(dc, brFillHover_.get(), rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, r);
     }
@@ -338,6 +358,11 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     if (!compositor_ || !compositor_->Dc()) return;
     details_content_animating_ = false;
     surface_animating_ = false;
+    if (vm.settings_open || vm.dark != item_reflow_dark_) {
+        for (auto& surface : item_reflow_surfaces_) surface.Reset();
+        for (auto& surface : view_mode_transitions_) surface.Reset();
+    }
+    item_reflow_dark_ = vm.dark;
     for (auto it = hover_tracks_.begin(); it != hover_tracks_.end();) {
         if (it->second.frame != settings_switch_frame_) it = hover_tracks_.erase(it);
         else ++it;
@@ -356,7 +381,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     surface_animating_ |= details_open_motion_.Pending();
     if (vm.settings_open || !vm.details_visible) details_content_reveal_.Reset();
     ThumbnailCache::FrameScope thumbnail_frame(thumbnail_cache_);
-    for (auto& names : painted_name_truncation_) names.clear();
+    if (vm.settings_open) for (auto& names : painted_name_truncation_) names.clear();
     ID2D1DeviceContext* dc = compositor_->Dc();
     icon_cache_.SetDeviceContext(compositor_->Dc());
     icon_cache_.SetScale(scale_);
@@ -518,13 +543,15 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             FillChromeTab(dc, brFillSelected_.get(), tabRc, shape);
         } else {
             // Grouped tabs get a tinted body; ungrouped keep the stock look.
+            const float hot = ControlHoverOpacity(tabRc, hovered);
             const bool has_color = vm.tabs[i].color_rgb != 0;
             if (has_color) {
                 D2D1_COLOR_F tint = HexColor(vm.tabs[i].color_rgb);
-                tint.a *= hovered ? 0.16f : 0.10f;
+                tint.a *= 0.10f + 0.06f * hot;
                 MakeBrush(dc, tint, brFillHover_);
             } else {
-                MakeBrush(dc, hovered ? theme.fill_hover : kTransparent, brFillHover_);
+                auto fill = theme.fill_hover; fill.a *= hot;
+                MakeBrush(dc, fill, brFillHover_);
             }
             FillChromeTab(dc, brFillHover_.get(), tabRc, shape);
         }
@@ -582,8 +609,11 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         if (show_close) {
             const float closeY = tabY + (tabH - closeSz) * 0.5f;
             const float closeX = left + tabW - closePad - closeSz;
-            if (IsHovered(vm, HitTestResult::TabClose, static_cast<int>(i))) {
-                MakeBrush(dc, theme.fill_hover, brFillPressed_);
+            auto close_fill = theme.fill_hover;
+            close_fill.a *= ControlHoverOpacity(D2D1::RectF(closeX, closeY, closeX + closeSz, closeY + closeSz),
+                IsHovered(vm, HitTestResult::TabClose, static_cast<int>(i)));
+            if (close_fill.a > 0.0f) {
+                MakeBrush(dc, close_fill, brFillPressed_);
                 FillRoundedRect(dc, brFillPressed_.get(), closeX, closeY, closeSz, closeSz, r);
             }
             DrawIconText(closeX, closeY, closeSz, closeSz,
@@ -621,8 +651,8 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         const bool chip_hovered = IsHovered(vm, HitTestResult::TabGroup, chip.group);
         const bool named = !gv.name.empty();
         D2D1_COLOR_F fill = gc;
-        fill.a *= named ? (chip_hovered ? 0.42f : 0.32f)
-                        : (chip_hovered ? 1.0f : 0.85f);
+        const float chip_hot = ControlHoverOpacity(rc, chip_hovered);
+        fill.a *= named ? (0.32f + 0.10f * chip_hot) : (0.85f + 0.15f * chip_hot);
         MakeBrush(dc, fill, brFillHover_);
         FillRoundedRect(dc, brFillHover_.get(), rc.left, rc.top, chip.width, ch,
                         5.0f * scale_);
@@ -747,8 +777,10 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     drawScroll(strip.scroll_right, false, strip.scroll_offset < strip.scroll_max);
     const D2D1_RECT_F newRc = strip.new_button;
     dc->PushAxisAlignedClip(newRc, D2D1_ANTIALIAS_MODE_ALIASED);
-    if (IsHovered(vm, HitTestResult::TabNew)) {
-        MakeBrush(dc, theme.fill_hover, brFillHover_);
+    auto newRcFill = theme.fill_hover;
+    newRcFill.a *= ControlHoverOpacity(newRc, IsHovered(vm, HitTestResult::TabNew));
+    if (newRcFill.a > 0.0f) {
+        MakeBrush(dc, newRcFill, brFillHover_);
         FillRoundedRect(dc, brFillHover_.get(), newRc.left, newRc.top,
             newRc.right - newRc.left, newRc.bottom - newRc.top, theme.radius_control * scale_);
     }
@@ -772,16 +804,20 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
     float cx = right;
     cx -= ctrlW;
     D2D1_RECT_F closeRc = D2D1::RectF(cx, ctrlY, cx + ctrlW, ctrlY + ctrlH);
-    if (IsHovered(vm, HitTestResult::Close)) {
-        MakeBrush(dc, theme.danger, brDanger_);
+    auto closeRcFill = theme.danger;
+    closeRcFill.a *= ControlHoverOpacity(closeRc, IsHovered(vm, HitTestResult::Close));
+    if (closeRcFill.a > 0.0f) {
+        MakeBrush(dc, closeRcFill, brDanger_);
         FillRect(dc, brDanger_.get(), closeRc.left, closeRc.top, ctrlW, ctrlH);
     }
     DrawIconText(closeRc.left, closeRc.top, ctrlW, ctrlH, kIconClose, L"x",
         IsHovered(vm, HitTestResult::Close) ? HexColor(0xFFFFFF) : theme.text, 0.85f);
     cx -= ctrlW;
     D2D1_RECT_F maxRc = D2D1::RectF(cx, ctrlY, cx + ctrlW, ctrlY + ctrlH);
-    if (IsHovered(vm, HitTestResult::Maximize)) {
-        MakeBrush(dc, theme.fill_hover, brFillHover_);
+    auto maxRcFill = theme.fill_hover;
+    maxRcFill.a *= ControlHoverOpacity(maxRc, IsHovered(vm, HitTestResult::Maximize));
+    if (maxRcFill.a > 0.0f) {
+        MakeBrush(dc, maxRcFill, brFillHover_);
         FillRect(dc, brFillHover_.get(), maxRc.left, maxRc.top, ctrlW, ctrlH);
     }
     DrawIconText(maxRc.left, maxRc.top, ctrlW, ctrlH,
@@ -789,8 +825,10 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
         theme.text, 0.85f);
     cx -= ctrlW;
     D2D1_RECT_F minRc = D2D1::RectF(cx, ctrlY, cx + ctrlW, ctrlY + ctrlH);
-    if (IsHovered(vm, HitTestResult::Minimize)) {
-        MakeBrush(dc, theme.fill_hover, brFillHover_);
+    auto minRcFill = theme.fill_hover;
+    minRcFill.a *= ControlHoverOpacity(minRc, IsHovered(vm, HitTestResult::Minimize));
+    if (minRcFill.a > 0.0f) {
+        MakeBrush(dc, minRcFill, brFillHover_);
         FillRect(dc, brFillHover_.get(), minRc.left, minRc.top, ctrlW, ctrlH);
     }
     DrawIconText(minRc.left, minRc.top, ctrlW, ctrlH, kIconMinimize, L"_", theme.text, 0.85f);

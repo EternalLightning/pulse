@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "content_search.h"
 #include "../fs/fs_enum.h"
@@ -15,6 +20,7 @@ public:
     struct Selection {
         std::vector<std::pair<size_t, Row>> rows;
         std::vector<int> matches;
+        uint64_t page_epoch = UINT64_MAX;
         DWORD error = 0;
     };
     static constexpr size_t kPageSize = 256, kCachePages = 8;
@@ -40,11 +46,15 @@ public:
     void FindPath(std::wstring path,std::function<void(int)> complete);
     void FindIdentity(uint64_t file_id,std::function<void(int)> complete);
     void Match(Filter filter,std::function<void(Selection)> complete);
+    // The callback may update selection fields, but must not access cached pages.
+    bool ApplyMatches(const Selection& selection,
+                      const std::function<void(const std::vector<int>&)>& apply) const;
     void Sum(std::vector<int> indices,bool all,size_t count,std::function<void(uint64_t,DWORD)> complete);
     size_t CachedRows() const;
     std::wstring CachePath() const;
 private:
-    bool UpsertChanges(const std::vector<ContentHit>& hits, ContentResultSort sort, bool descending, bool streaming);
+    bool UpsertChanges(const std::vector<ContentHit>& hits, ContentResultSort sort, bool descending,
+                       bool streaming, bool retain_order = false);
     struct Impl;
     std::shared_ptr<Impl> impl_;
 };

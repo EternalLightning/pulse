@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include <windows.h>
 #include <string>
@@ -28,6 +33,7 @@ struct DropStageResult {
     bool any = false;
     unsigned long error = 0;
     std::wstring source;
+    unsigned long cleanup_error = 0; // refused cleanup leaves the owned stage for a later sweep
     operator bool() const { return any; }
 };
 DropStageResult StageDropSources(const std::vector<std::wstring>& sources, const std::wstring& temp_dir,
@@ -62,6 +68,7 @@ DropStageResult SubmitStagedDrop(const std::vector<std::wstring>& sources,
 
 // Removes stage folders whose process has exited, and this process's own
 // folders as well when `include_own` (at exit).
-void SweepDropStages(const std::wstring& stage_root, bool include_own);
+// False leaves a changed, locked or incompletely enumerated stage in place.
+bool SweepDropStages(const std::wstring& stage_root, bool include_own, const DropEnumerationApi& api = {});
 
 } // namespace pulse::ops

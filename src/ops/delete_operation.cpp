@@ -1,7 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "delete_operation.h"
 #include "produced_undo.h"
 #include "../shell_host/delete_fileop.h"
 #include "../fs/fs_recycle.h"
+#include "../fs/drive_kind.h"
 #include "../ipc/shell_client.h"
 #include "../ipc/delete_plan_protocol.h"
 #include "../common/localization.h"
@@ -101,6 +107,7 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
             const wchar_t root[] = {static_cast<wchar_t>(L'A' + i), L':', L'\\', 0};
             const UINT type = GetDriveTypeW(root);
             if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) continue;
+            if (fs::IsRemoteLikeDrive(root)) continue;
             if (!fs::EnumerateRecycleBinAtRoot(std::wstring(root) + L"$Recycle.Bin", entries)) complete = false;
         }
         if (!complete) { error = L"Unable to enumerate the entire current-user Recycle Bin; nothing was deleted."; return plan; }
@@ -345,6 +352,7 @@ void OpsManager::RunDelete(const QueueItem& item,
     {
         std::lock_guard<std::mutex> lock(mutex_);
         delete_active_.store(true);
+        delete_item_progress_.Reset({});
         delete_cancel_.store(stopping_.load() || lock_retry_cancel_.load());
     }
     shell_cancel_requested_.store(false);
@@ -492,7 +500,10 @@ void OpsManager::RunDelete(const QueueItem& item,
         finish(L"", {}, false, false, {}, {}, true); return;
     }
     SetStatus([&](OpStatus& status) {
-        status.phase = OpPhase::Running; status.total_items = accepted->targets.size();
+        delete_item_progress_.Reset(*accepted, prior_deleted.size() + prior_recycled.size());
+        status.phase = OpPhase::Running;
+        status.total_items = delete_item_progress_.Total();
+        status.completed_items = delete_item_progress_.Completed();
         status.summary = l10n::Get(recycle ? l10n::StringId::Delete : l10n::StringId::PermanentDelete);
     });
     std::vector<std::wstring> actual, recycled, recycle_destinations;

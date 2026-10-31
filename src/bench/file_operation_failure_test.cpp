@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
@@ -17,6 +22,12 @@
 
 namespace pulse::ui {
 struct FileOperationFailureProbe {
+    struct Pixels {
+        UINT width = 0;
+        UINT height = 0;
+        UINT stride = 0;
+        std::vector<BYTE> bytes;
+    };
     static HWND Window(const FileOperationWindow& window) { return window.hwnd_; }
     static bool Detailed(const FileOperationWindow& window) { return window.detailed_; }
     static const ops::OpStatus& Status(const FileOperationWindow& window) { return window.status_; }
@@ -71,7 +82,9 @@ struct FileOperationFailureProbe {
         return 216 * window.scale_ + text_height <=
             static_cast<float>(window.compositor_.Height()) - 64 * window.scale_;
     }
-    static bool Capture(FileOperationWindow& window, const std::filesystem::path& path) {
+    static bool Capture(FileOperationWindow& window, const std::filesystem::path& path,
+                        Pixels* captured = nullptr) {
+        if (captured) *captured = {};
         window.Render(false);
         // Capture before Present rotates the swap chain; reject blank frames.
         ComPtr<ID2D1Image> image;
@@ -96,6 +109,12 @@ struct FileOperationFailureProbe {
             }
         }
         if (!has_content) return false;
+        if (captured) {
+            captured->width = size.width;
+            captured->height = size.height;
+            captured->stride = pixels.pitch;
+            captured->bytes.assign(pixels.bits, pixels.bits + static_cast<size_t>(pixels.pitch) * size.height);
+        }
         if (bench::StreamSnapshots())
             return bench::EmitSnapshot(path, size.width, size.height, pixels.pitch, pixels.bits);
         ComPtr<IWICImagingFactory> wic;
@@ -387,31 +406,16 @@ static int RunCompletionTests(HWND owner) {
     return failures;
 }
 
-static bool ZigzagPeaksConnected(const std::filesystem::path& path, float scale) {
-    using namespace pulse::ui;
-    ComPtr<IWICImagingFactory> wic;
-    ComPtr<IWICBitmapDecoder> decoder;
-    ComPtr<IWICBitmapFrameDecode> frame;
-    ComPtr<IWICFormatConverter> converter;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(&wic))) ||
-        FAILED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-            WICDecodeMetadataCacheOnLoad, &decoder)) || FAILED(decoder->GetFrame(0, &frame)) ||
-        FAILED(wic->CreateFormatConverter(&converter)) ||
-        FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
-            WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) return false;
-    UINT width = 0, height = 0;
-    converter->GetSize(&width, &height);
-    std::vector<BYTE> pixels(static_cast<size_t>(width) * height * 4);
-    if (FAILED(converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(pixels.size()), pixels.data())))
-        return false;
+static bool ZigzagPeaksConnected(const pulse::ui::FileOperationFailureProbe::Pixels& pixels, float scale) {
+    if (pixels.stride < static_cast<size_t>(pixels.width) * 4 ||
+        pixels.bytes.size() < static_cast<size_t>(pixels.stride) * pixels.height) return false;
     // The outside of each sharp peak must be covered by the joined cyan stroke.
     // Separate butt-ended segments leave this row above the vertex unpainted.
     const UINT y = static_cast<UINT>(std::floor(214.0f * scale - 0.5f * scale));
     for (UINT i = 2; i < 118; i += 2) {
         const UINT x = static_cast<UINT>((30.0f + 400.0f * i / 119.0f) * scale);
-        if (x >= width || y >= height) return false;
-        const auto* pixel = pixels.data() + (static_cast<size_t>(y) * width + x) * 4;
+        if (x >= pixels.width || y >= pixels.height) return false;
+        const auto* pixel = pixels.bytes.data() + static_cast<size_t>(y) * pixels.stride + x * 4;
         if (static_cast<int>(pixel[0]) - pixel[2] < 50 ||
             static_cast<int>(pixel[1]) - pixel[2] < 30) return false;
     }
@@ -479,7 +483,8 @@ static int RunMotionTests(HWND owner) {
             FileOperationFailureProbe::SetZigzag(window);
             const auto image = output / (std::wstring(L"rate-zigzag-") + (dark ? L"dark-" : L"light-") +
                 std::to_wstring(dpi) + L".png");
-            check(FileOperationFailureProbe::Capture(window, image) && ZigzagPeaksConnected(image, scale),
+            FileOperationFailureProbe::Pixels pixels;
+            check(FileOperationFailureProbe::Capture(window, image, &pixels) && ZigzagPeaksConnected(pixels, scale),
                 "dense sharp rate peaks remain connected in the actual rendered image");
         }
     }

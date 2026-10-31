@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // fs_watch.h — ReadDirectoryChangesW directory watcher.
 // UNC opens, identity probes and cancellation completion run only in a worker.
 #pragma once

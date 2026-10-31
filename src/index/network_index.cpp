@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "network_index.h"
 #include "index_transport_security.h"
 #include "index_config.h"
@@ -1163,6 +1168,7 @@ void NetworkIndex::SearchLoop() {
     while (running_) {
         Query query;
         uint32_t id = 0;
+        std::vector<RootState> roots;
         std::vector<std::shared_ptr<Shard>> shards;
         {
             std::unique_lock<std::mutex> lock(mu_);
@@ -1171,11 +1177,24 @@ void NetworkIndex::SearchLoop() {
             query = pending_query_;
             id = pending_id_;
             have_pending_search_ = false;
-            for (const auto& root : roots_)
-                if (root.info.online && root.shard) shards.push_back(root.shard);
+            roots = roots_;
         }
         SearchResult result;
         const CompiledQuery compiled = ParseQuery(query.needle);
+        const auto& prefix = query.path_prefix.empty() ? compiled.path_prefix : query.path_prefix;
+        for (const auto& root : roots) {
+            if (!StartsWithPath(root.info.path, prefix) && !StartsWithPath(prefix, root.info.path))
+                continue;
+            if (root.info.building || !root.info.online || !root.shard || !root.info.error.empty()) {
+                result.incomplete = true;
+                if (!result.error) {
+                    result.error = root.info.building ? ERROR_NOT_READY :
+                        !root.info.online ? ERROR_NETWORK_UNREACHABLE :
+                        !root.shard ? ERROR_NOT_READY : ERROR_READ_FAULT;
+                }
+            }
+            if (root.info.online && root.shard) shards.push_back(root.shard);
+        }
         struct Candidate {
             const Shard* shard = nullptr;
             const NetworkRecord* record = nullptr;
@@ -1228,7 +1247,7 @@ void NetworkIndex::SearchLoop() {
                 if ((i & 4095u) == 0 && latest_search_id_.load() != id) break;
                 const auto& record = shard->records[i];
                 const std::wstring_view path(shard->pool + record.path_off, record.path_len);
-                if (!StartsWithPath(path, query.path_prefix)) continue;
+                if (!StartsWithPath(path, prefix)) continue;
                 const std::wstring_view name(path.data() + record.name_off, record.name_len);
                 if (!MatchNetworkRecord(record, path, name, compiled, query.folders_only)) continue;
                 Candidate candidate{shard.get(), &record, shard_index, i,

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "operation_center.h"
 #include "operation_center_layout.h"
 #include "animation_clock.h"
@@ -8,7 +13,7 @@ namespace pulse::ui {
 using operation_center_layout::kMargin;
 using operation_center_layout::kHeader;
 namespace {
-constexpr fluent::MotionSpec kScrollMotion{160.0f,fluent::EasingCurve::OutCubic};
+constexpr float kScrollDurationMs = 160;
 float Smooth(float value) {
     value = std::clamp(value, 0.0f, 1.0f);
     return value * value * (3 - 2 * value);
@@ -18,6 +23,7 @@ float Smooth(float value) {
 void OperationCenter::StopScroll() {
     scroll_animating_=false;
     scroll_from_=scroll_target_=scroll_;
+    scroll_velocity_=scroll_initial_velocity_=0;
 }
 
 void OperationCenter::SetScrollOffset(float value) {
@@ -25,23 +31,33 @@ void OperationCenter::SetScrollOffset(float value) {
     if(value==scroll_) return;
     scroll_=value;
     hover_=pressed_=-1;
-    Layout();
+    // Cards stay in content coordinates. Only action hit rectangles use viewport coordinates.
+    const float offset=(kMargin+kHeader)*scale_-scroll_;
+    for(auto& button:buttons_) if(button.action!=Action::Clear) {
+        button.bounds.top=button.content_top+offset;button.bounds.bottom=button.content_bottom+offset;
+    }
 }
 
 bool OperationCenter::TickScroll(uint64_t now) {
     if(!scroll_animating_) return false;
     const float previous=scroll_;
     const float elapsed=static_cast<float>(now>=scroll_started_ ? now-scroll_started_ : 0);
-    const float progress=fluent::EvaluateMotion(kScrollMotion,elapsed);
-    SetScrollOffset(progress>=1 ? scroll_target_ : scroll_from_+(scroll_target_-scroll_from_)*progress);
-    if(progress>=1) StopScroll();
+    const float t=std::clamp(elapsed/kScrollDurationMs,0.0f,1.0f);
+    const float distance=scroll_target_-scroll_from_;
+    const float tangent=scroll_initial_velocity_*kScrollDurationMs;
+    const float t2=t*t,t3=t2*t;
+    // Hermite interpolation retains velocity when consecutive wheel input extends the target.
+    scroll_velocity_=(distance*(6*t-6*t2)+tangent*(3*t2-4*t+1))/kScrollDurationMs;
+    SetScrollOffset(t>=1 ? scroll_target_ : scroll_from_+distance*(3*t2-2*t3)+tangent*(t3-2*t2+t));
+    if(t>=1) StopScroll();
     return scroll_!=previous;
 }
 
 void OperationCenter::Scroll(float delta,bool smooth) {
     if(smooth && (!open_ || closing_ || dragging_scrollbar_)) return;
     const uint64_t now=AnimationTimeMs();
-    const bool advanced=smooth && TickScroll(now);
+    const bool reversing=smooth && scroll_animating_ && (scroll_target_-scroll_)*delta<0;
+    const bool advanced=smooth && !reversing && TickScroll(now);
     const bool continuing=smooth && scroll_animating_ && (scroll_target_-scroll_)*delta>0;
     const float target=std::clamp((continuing ? scroll_target_ : scroll_)+delta,0.0f,
         (std::max)(0.0f,content_height_-body_height_));
@@ -52,7 +68,10 @@ void OperationCenter::Scroll(float delta,bool smooth) {
         return;
     }
     const bool timer_running=scroll_animating_;
+    const float velocity=continuing ? scroll_velocity_ : 0;
     scroll_from_=scroll_;scroll_target_=target;scroll_started_=now;
+    const float limit=3*std::abs(scroll_target_-scroll_from_)/kScrollDurationMs;
+    scroll_velocity_=scroll_initial_velocity_=std::clamp(velocity,-limit,limit);
     scroll_animating_=scroll_target_!=scroll_;
     if(!scroll_animating_) StopScroll();
     else if(!timer_running && !SetTimer(hwnd_,1,kAnimationIntervalMs,nullptr)) {

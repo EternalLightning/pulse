@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 #requires -Version 7.2
 <#
 .SYNOPSIS
@@ -16,7 +21,7 @@ $version = (Get-Content ./version.txt -Raw).Trim()
 #>
 [CmdletBinding()]
 param(
-    [string]$BuildDir = 'build',
+    [string]$BuildDir = 'build-release',
     [Parameter(Mandatory)][string]$ZipPath,
     [string]$InstallerPath,
     [Parameter(Mandatory)][string]$OutputJson,
@@ -71,13 +76,22 @@ try {
     if ($ExpectedVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw 'Invalid expected version' }
     $build = (Resolve-Path -LiteralPath $BuildDir).Path
     foreach ($file in ($executables + @('lumatext.dll', 'pdfium.dll'))) { Add-ExpectedFile $file (Join-Path $build $file) }
-    foreach ($file in @('LICENSE', 'NOTICE')) { Add-ExpectedFile $file (Join-Path $repo $file) }
+    foreach ($file in @('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md')) { Add-ExpectedFile $file (Join-Path $repo $file) }
     foreach ($file in @('7z.exe', '7z.dll', 'License.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $build "7zip/$file") -PathType Leaf)) { throw "Missing archive dependency: $file" }
     }
     Add-ExpectedTree '7zip' (Join-Path $build '7zip')
+    foreach ($file in @('License.txt', 'README.md', 'LGPL-2.1-or-later.txt', 'GPL-2.0-or-later.txt', '7z2603-src.7z')) {
+        [void]$expected.Remove("7zip/$file")
+        Add-ExpectedFile "7zip/$file" (Join-Path $repo "third_party/7zip/$file")
+    }
     foreach ($license in @('PDFium', 'LumaText')) { Add-ExpectedTree "licenses/$license" (Join-Path $build "licenses/$license") }
     foreach ($mapping in @(
+        @('licenses/FilesToolbar/LICENSE-MIT', 'assets/files_toolbar/LICENSE-MIT'),
+        @('licenses/d2d-mica/LICENSE', 'third_party/d2d-mica/LICENSE'),
+        @('licenses/d2d-mica/README.pulse.md', 'third_party/d2d-mica/README.pulse.md'),
+        @('licenses/SQLite/README.md', 'third_party/sqlite/README.md'),
+        @('licenses/ib-pinyin/README.pulse.txt', 'third_party/ib-pinyin-cpp/README.pulse.txt'),
         @('licenses/ib-pinyin/LICENSE.txt', 'third_party/ib-pinyin-cpp/LICENSE.txt'),
         @('licenses/FilesIcon/LICENSE-MIT.txt', 'third_party/files-icon/LICENSE-MIT.txt'),
         @('licenses/FilesIcon/README.md', 'third_party/files-icon/README.md'),

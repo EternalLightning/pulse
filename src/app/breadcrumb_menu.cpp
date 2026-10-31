@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_internal.h"
 #include "context_menu.h"
 #include "../fs/fs_enum.h"
@@ -20,7 +25,7 @@ void ShowBreadcrumbMenu(AppState& s, std::wstring path, POINT screen_pt) {
         NewTab(s, path);
         break;
     case app::CmdOpen:
-        NavigateTo(s, path);
+        NavigateTo(s, path, ui::SurfaceMotion::Backward);
         break;
     case app::CmdCopyPath:
         ops::WriteClipboardText(shell_path);

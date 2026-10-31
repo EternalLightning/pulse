@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_ui_schedule.h"
 #include "app_internal.h"
 
@@ -30,6 +35,7 @@ void SyncUiScheduling(AppState& s) {
     plan.Include(s.ui_schedule.options_due);
     if (!s.exit_requested) {
         if (!s.addressSearchComposing) plan.Include(s.addressLiveDue);
+        if (!s.filterComposing) plan.Include(s.filterDue);
         plan.Include(s.addressHistoryDue);
         if (s.renameClickCandidate) plan.Include(s.renameClickDue);
         plan.Include(s.context_menu.NextRefreshDeadline());
@@ -50,6 +56,7 @@ void SyncUiScheduling(AppState& s) {
 
 bool RunUiDeadlines(AppState& s, uint64_t now) {
     bool dirty = TickAddressSearchDeadlines(s, now);
+    dirty |= TickFilterEditor(s, now);
     const int refreshes = s.context_menu.ConsumeDueRefreshes(now);
     for (int i = 0; i < refreshes; ++i) {
         RefreshActiveTab(s, RefreshReason::ShellNotification);

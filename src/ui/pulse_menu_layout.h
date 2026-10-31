@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // Included inside ui_renderer_internal.h's anonymous namespace.
 inline model::BuiltinMenuSurface PulseMenuSurface(const WindowViewModel& vm) {
     return vm.settings_context_tab == 1 ? model::BuiltinMenuSurface::Background

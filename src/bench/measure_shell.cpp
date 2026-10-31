@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // measure_shell.cpp — Stage 0 Shell icon/thumbnail cost benchmark
 // Usage: pulse_bench_shell [dir] [N]
 //   dir: directory to sample (default: C:\Windows\System32)
@@ -17,6 +22,8 @@
 #include <iomanip>
 #include <filesystem>
 #include <cmath>
+#include <limits>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -90,22 +97,39 @@ static void time_sysiconindex(const std::wstring& path, double& ms) {
     ms = millis(t1 - t0);
 }
 
-static void time_thumbnail(const std::wstring& path, double& ms, bool& ok) {
+static void time_thumbnail(const std::wstring& path, double& ms, bool& ok, bool& object_created,
+                            decltype(&SHCreateItemFromParsingName) create = SHCreateItemFromParsingName) {
+    ms = 0;
     ok = false;
+    object_created = false;
+    const auto start = std::chrono::steady_clock::now();
     IShellItemImageFactory* factory = nullptr;
-    HRESULT hr = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&factory));
-    if (SUCCEEDED(hr)) {
+    HRESULT hr = create(path.c_str(), nullptr, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr) && factory) {
+        object_created = true;
         HBITMAP hbmp = nullptr;
-        auto t0 = std::chrono::steady_clock::now();
         hr = factory->GetImage({256, 256}, SIIGBF_THUMBNAILONLY, &hbmp);
-        auto t1 = std::chrono::steady_clock::now();
-        ms = millis(t1 - t0);
-        if (SUCCEEDED(hr) && hbmp) {
-            ok = true;
-            DeleteObject(hbmp);
-        }
-        factory->Release();
+        ok = SUCCEEDED(hr) && hbmp;
+        if (hbmp) DeleteObject(hbmp);
     }
+    if (factory) factory->Release();
+    ms = millis(std::chrono::steady_clock::now() - start);
+}
+
+static HRESULT WINAPI FailThumbnailFactory(PCWSTR, IBindCtx*, REFIID, void** factory) {
+    *factory = nullptr;
+    return E_FAIL;
+}
+
+static int TestThumbnailCreationFailure() {
+    double ms = std::numeric_limits<double>::quiet_NaN();
+    bool ok = true, created = true;
+    time_thumbnail(L"isolated injected creation failure", ms, ok, created, FailThumbnailFactory);
+    const bool passed = std::isfinite(ms) && ms >= 0 && !ok && !created;
+    std::cout << (passed ? "[PASS] " : "[FAIL] ")
+        << "thumbnail creation failure records finite total-attempt time and a visible failure category; ms="
+        << ms << " create_failed=" << !created << '\n';
+    return passed ? 0 : 1;
 }
 
 static void run_for_directory(const std::wstring& dir, int64_t n) {
@@ -120,21 +144,24 @@ static void run_for_directory(const std::wstring& dir, int64_t n) {
     std::vector<double> t1, t2, t3;
     std::vector<double> t3_success;
     int thumbs_hit = 0;
+    size_t create_failures = 0;
+    size_t image_failures = 0;
 
     for (size_t i = 0; i < files.size(); ++i) {
         const auto& p = files[i];
-        double a, b, c;
-        bool ok;
+        double a = 0, b = 0, c = 0;
+        bool ok = false, object_created = false;
         time_smallicon(p, a);
         time_sysiconindex(p, b);
-        time_thumbnail(p, c, ok);
+        time_thumbnail(p, c, ok, object_created);
         t1.push_back(a);
         t2.push_back(b);
         t3.push_back(c);
         if (ok) {
             t3_success.push_back(c);
             ++thumbs_hit;
-        }
+        } else if (!object_created) ++create_failures;
+        else ++image_failures;
         if ((i + 1) % 50 == 0) {
             std::wcout << L"  processed " << (i + 1) << L" / " << files.size() << L"\n";
         }
@@ -142,13 +169,14 @@ static void run_for_directory(const std::wstring& dir, int64_t n) {
 
     report_times("SHGFI_ICON|SMALLICON", t1, 100000);
     report_times("SHGFI_SYSICONINDEX", t2, 100000);
-    report_times("IShellItemImageFactory thumb", t3, 100000);
+    report_times("thumbnail total attempt", t3, 100000);
     if (!t3_success.empty()) {
-        report_times("thumbnail (hits only)", t3_success, 100000);
+        report_times("thumbnail total (hits)", t3_success, 100000);
     }
     std::cout << "  thumbnail hit rate: " << thumbs_hit << " / " << files.size()
               << " (" << std::fixed << std::setprecision(1)
               << (100.0 * thumbs_hit / files.size()) << "%)\n";
+    std::cout << "  thumbnail failures: create=" << create_failures << " image=" << image_failures << '\n';
 }
 
 static int usage(const char* argv0) {
@@ -168,6 +196,7 @@ int main() {
 
 int wmain(int argc, wchar_t* argv[]) {
     std::ios::sync_with_stdio(false);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--failure-only") return TestThumbnailCreationFailure();
 
     int64_t n = 200;
 

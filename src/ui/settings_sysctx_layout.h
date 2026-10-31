@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // settings_sysctx_layout.h — Settings > 右键菜单 > 系统 (internal page 5): texts, geometry
 // and hit testing. Included by ui_renderer_internal.h inside its anonymous
 // namespace (like settings_layout_sections.h), so no includes here. Drawing:

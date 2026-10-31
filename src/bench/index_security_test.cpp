@@ -1,8 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/index_caller_visibility.h"
 #include "../index/index_raw_storage_security.h"
 #include "../index/index_request_limits.h"
 #include "../index/network_agent_protocol.h"
 #include "../index/index_server_auth.h"
+#include "../index/index_feed.h"
 #include "../index/index_protocol.h"
 #include "../index/change_tracking.h"
 #include <filesystem>
@@ -34,6 +40,51 @@ void Touch(const std::wstring& path) {
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::index;
     std::cout << std::unitbuf;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--feed-auth-only") {
+        const DWORD old_size = GetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", nullptr, 0);
+        std::wstring old_name(old_size, L'\0');
+        if (old_size) {
+            GetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", old_name.data(), old_size);
+            old_name.resize(old_size - 1);
+        }
+        const auto identity = transport::Identity::Current();
+        transport::LogonSecurity security(identity);
+        for (const bool folders : {false, true}) {
+            const auto name = L"\\\\.\\pipe\\PulseFeedAuthFixture." +
+                std::to_wstring(GetCurrentProcessId()) + L"." + (folders ? L"folders" : L"changes");
+            transport::Handle server(CreateNamedPipeW(name.c_str(),
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1, 4096, 4096, 0, security.get()));
+            transport::Handle cancel(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+            Check(server.get() != INVALID_HANDLE_VALUE && cancel.get() && security.get(),
+                "create isolated foreign-image endpoint");
+            if (server.get() == INVALID_HANDLE_VALUE || !cancel.get() || !security.get()) continue;
+            Check(SetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", name.c_str()) != FALSE,
+                "set isolated feed endpoint");
+            std::thread cancellation([&] { Sleep(100); SetEvent(cancel.get()); });
+            bool accepted = false;
+            {
+                IndexFeedConnection feed(cancel.get());
+                if (folders) {
+                    std::vector<IndexedFolderSize> sizes;
+                    accepted = feed.FolderSizes({L"C:\\private-fixture"}, sizes);
+                } else {
+                    FileFeedPage page;
+                    accepted = feed.Request(true, L"C:\\private-fixture", 0, 0, page);
+                }
+            }
+            cancellation.join();
+            DWORD available = 0;
+            const bool peeked = PeekNamedPipe(server.get(), nullptr, 0, nullptr, &available, nullptr) != FALSE;
+            const bool no_request = peeked ? available == 0 : GetLastError() == ERROR_BROKEN_PIPE;
+            Check(!accepted && no_request, folders
+                ? "folder-size client rejects foreign image before sending paths"
+                : "feed client rejects foreign image before sending paths");
+        }
+        SetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", old_size ? old_name.c_str() : nullptr);
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--installed-service-auth-only") {
         transport::Handle pipe(CreateFileW(kPipeName, transport::kClientPipeAccess, 0,
             nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
@@ -92,6 +143,20 @@ int wmain(int argc, wchar_t** argv) {
         Check(!transport::VerifyIndexServer(client.get(), image, different), "different effective caller grants are rejected");
         Check(!transport::VerifyIndexServer(INVALID_HANDLE_VALUE, image, identity) &&
               !transport::VerifyIndexServer(client.get(), image, {}), "missing endpoint or caller identity fails closed");
+        for (const bool correct_image : {false, true}) {
+            const auto open_name = name + (correct_image ? L".accepted" : L".rejected");
+            transport::Handle endpoint(CreateNamedPipeW(open_name.c_str(),
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1, 512, 512, 0, security.get()));
+            Check(endpoint.get() != INVALID_HANDLE_VALUE, "create verified-open endpoint fixture");
+            if (endpoint.get() == INVALID_HANDLE_VALUE) continue;
+            transport::Handle opened(transport::OpenVerifiedIndexPipe(open_name,
+                correct_image ? image : image + L".wrong"));
+            Check((opened.get() != INVALID_HANDLE_VALUE) == correct_image, correct_image
+                ? "shared open accepts exact helper image and identity"
+                : "shared open rejects foreign helper image");
+        }
         return failures ? 1 : 0;
     }
     if (argc > 1 && (std::wstring_view(argv[1]) == L"--metadata-budget-only" || std::wstring_view(argv[1]) == L"--visibility-bench")) {

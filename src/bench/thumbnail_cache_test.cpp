@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ui/thumbnail_cache.h"
 #include <cstdio>
 #include <functional>
@@ -21,7 +26,9 @@ struct ThumbnailCacheTestAccess {
                              const std::function<void(HANDLE, HANDLE, const ipc::PreviewRequest&)>& send,
                              bool reset = false, bool success = false,
                              ipc::PreviewRequestKind kind = ipc::PreviewRequestKind::Content,
-                             bool accepted_failure = false, bool pause_body = false) {
+                             bool accepted_failure = false, bool pause_body = false,
+                             ipc::PreviewContentKind expected_kind = ipc::PreviewContentKind::None,
+                             const wchar_t* expected_text = L"", size_t expected_properties = 0) {
             ThumbnailCache cache;
             const std::wstring pipe_name = L"\\\\.\\pipe\\PulsePreviewTransportTest-" +
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(cache.pipe_token_);
@@ -89,15 +96,15 @@ struct ThumbnailCacheTestAccess {
                         if (auto item = cache.items_.find(req.key); item != cache.items_.end()) {
                             completed = true;
                             const auto& response = item->second;
-                            bool payload_ok = true;
-                            if (success && response.kind == ipc::PreviewContentKind::Bitmap)
-                                payload_ok = response.pixels.size() == 4 &&
+                            bool payload_ok = response.kind == expected_kind && response.text == expected_text &&
+                                response.properties.size() == expected_properties;
+                            if (success && expected_kind == ipc::PreviewContentKind::Bitmap)
+                                payload_ok &= response.w == 1 && response.h == 1 && response.stride == 4 && response.pixels.size() == 4 &&
                                     std::all_of(response.pixels.begin(), response.pixels.end(), [](uint8_t b) { return b == 0x7f; });
-                            if (success && (response.kind == ipc::PreviewContentKind::Text || response.kind == ipc::PreviewContentKind::Hex))
-                                payload_ok = response.text.empty() || response.text == L"ok";
-                            if (success && kind == ipc::PreviewRequestKind::Properties)
-                                payload_ok = response.properties.empty() || (response.properties.size() == 1 &&
-                                    response.properties[0].label == L"ok" && response.properties[0].value == L"ok");
+                            else if (success) payload_ok &= response.pixels.empty();
+                            if (success && expected_properties == 1)
+                                payload_ok &= response.properties.size() == 1 &&
+                                    response.properties[0].label == L"ok" && response.properties[0].value == L"ok";
                             result_ok = success ? !item->second.failed && payload_ok :
                                 item->second.failed && (accepted_failure || item->second.cost == 0);
                             break;
@@ -159,19 +166,19 @@ struct ThumbnailCacheTestAccess {
                 auto response = text_header(req); response.kind = kind; response.text_chars = 2;
                 const wchar_t body[] = L"ok";
                 ipc::WriteAll(pipe, &response, sizeof(response)); ipc::WriteAll(pipe, body, 2 * sizeof(wchar_t));
-            }, false, true);
+            }, false, true, ipc::PreviewRequestKind::Content, false, false, kind, L"ok");
         }
         run("empty text content is a valid completed response", [&](HANDLE pipe, HANDLE, const auto& req) {
             auto response = text_header(req); response.text_chars = 0;
             ipc::WriteAll(pipe, &response, sizeof(response));
-        }, false, true);
+        }, false, true, ipc::PreviewRequestKind::Content, false, false, ipc::PreviewContentKind::Text);
         run("properties admit bounded labels and values", [&](HANDLE pipe, HANDLE, const auto& req) {
             ipc::PreviewResponse response; response.request_id = req.request_id; response.generation = req.generation;
             response.property_count = 1;
             const uint32_t chars = 2; const wchar_t text[] = L"ok";
             ipc::WriteAll(pipe, &response, sizeof(response));
             for (int i = 0; i < 2; ++i) { ipc::WriteAll(pipe, &chars, sizeof(chars)); ipc::WriteAll(pipe, text, 2 * sizeof(wchar_t)); }
-        }, false, true, ipc::PreviewRequestKind::Properties);
+        }, false, true, ipc::PreviewRequestKind::Properties, false, false, ipc::PreviewContentKind::None, L"", 1);
         run("empty property list completes normally", [&](HANDLE pipe, HANDLE, const auto& req) {
             ipc::PreviewResponse response; response.request_id = req.request_id; response.generation = req.generation;
             ipc::WriteAll(pipe, &response, sizeof(response));
@@ -196,7 +203,7 @@ struct ThumbnailCacheTestAccess {
             uint8_t ack = 0; const bool acknowledged = ipc::ReadAll(pipe, &ack, 1) && ack == 1;
             check(mapping && pixels && acknowledged, "bitmap ACK arrives before producer releases mapping");
             if (pixels) UnmapViewOfFile(pixels); if (mapping) CloseHandle(mapping);
-        }, false, true);
+        }, false, true, ipc::PreviewRequestKind::Content, false, false, ipc::PreviewContentKind::Bitmap);
         run("embedded NUL mapping name rejects before opening mapping", [&](HANDLE pipe, HANDLE, const auto& req) {
             std::wstring name = L"Local\\PulsePreviewMap-"; name.push_back(L'\0'); name += L"foreign";
             auto response = text_header(req); response.kind = ipc::PreviewContentKind::Bitmap; response.text_chars = 0;

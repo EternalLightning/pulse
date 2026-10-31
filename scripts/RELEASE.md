@@ -49,13 +49,13 @@ pwsh -NoProfile -File .\scripts\build_release_ci.ps1 -BuildDir build-ci
 
 ## 可选签名
 
-`scripts/package_release.ps1` 的原意是使用证书指纹和 HTTPS 时间戳服务完成 Authenticode 签名，但当前仍将签名、构建 ID 和符号来源固定为 `build`，调用的构建和安装脚本却默认使用 `build-release`。它可能读取缺失或过时文件，不能直接当作当前可用的签名发布入口。
+`scripts/package_release.ps1` 使用证书指纹和 HTTPS 时间戳服务完成 Authenticode 签名。构建、签名、安装包和符号归档均使用同一 `-BuildDir` 参数，默认 `build-release`。本轮仅检查了脚本语法和目录传递，未使用真实证书验证签名流程。
 
-有签名需求时，在配置好 `signtool.exe`、代码签名证书及时间戳服务后，对已确认的同一构建目录执行：签署六个生产 EXE → 用该目录 `/skipbuild` 编译安装器 → 签署安装器 → 从已签名的构建目录生成便携包 → 重新校验最终产物并生成 SHA-256。签名会改变文件哈希，旧校验文件必须更新。修复签名脚本的目录一致性后才能改回自动入口。
+有签名需求时，在配置好 `signtool.exe`、代码签名证书及时间戳服务后，对已确认的同一构建目录执行：签署六个生产 EXE → 用该目录 `/skipbuild` 编译安装器 → 签署安装器 → 从已签名的构建目录生成便携包 → 重新校验最终产物并生成 SHA-256。签名会改变文件哈希，旧校验文件必须更新。自动入口仍需在具备证书的环境中验证签名与符号归档前提。
 
 ## 可选符号归档
 
-`scripts/archive_symbols.ps1` 默认读取 `build`，应显式指定实际目录，例如：
+`scripts/archive_symbols.ps1` 默认读取 `build-release`，应显式指定实际目录，例如：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\archive_symbols.ps1 -BuildDir build-release

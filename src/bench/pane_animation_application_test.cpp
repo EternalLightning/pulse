@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../app/pane_animations.h"
 #include "../app/app_ui_schedule.h"
@@ -72,11 +77,21 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool column_scroll = argc == 2 && std::string_view(argv[1]) == "--column-scroll-only";
     const bool surface_scroll = argc == 2 && std::string_view(argv[1]) == "--surface-scroll";
     const bool navigation_motion = argc == 2 && std::string_view(argv[1]) == "--navigation-motion-only";
+    const bool empty_navigation = argc == 2 && std::string_view(argv[1]) == "--navigation-empty-viewport-only";
     const bool additional_motion = argc == 2 && std::string_view(argv[1]) == "--additional-motion-only";
+    const bool home_hover_only = argc == 2 && std::string_view(argv[1]) == "--home-hover-only";
+    const bool hover_only = argc == 2 && std::string_view(argv[1]) == "--control-hover-only";
+    const bool list_hover_only = argc == 2 && std::string_view(argv[1]) == "--list-hover-only";
+    const bool disclosure_only = argc == 2 && std::string_view(argv[1]) == "--sidebar-disclosure-only";
     const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
-    if (search_only || path_only || page_scroll || column_scroll || surface_scroll || navigation_motion || additional_motion || feedback_only ||
+    if (empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || surface_scroll || navigation_motion || additional_motion || feedback_only ||
         (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
-        const bool passed = feedback_only ? ui::InteractionFeedbackUiTest::Run(s, root) :
+        const bool passed = empty_navigation ? ui::NavigationMotionUiTest::RunEmptyViewport(s) :
+            disclosure_only ? ui::InteractionFeedbackUiTest::RunDisclosure(s, root) :
+            list_hover_only ? ui::InteractionFeedbackUiTest::RunListHover(s, root) :
+            home_hover_only ? ui::InteractionFeedbackUiTest::RunHomeHover(s, root) :
+            hover_only ? ui::InteractionFeedbackUiTest::RunHover(s, root) :
+            feedback_only ? ui::InteractionFeedbackUiTest::Run(s, root) :
             additional_motion ? ui::AdditionalMotionUiTest::Run(s, root) :
             navigation_motion ? ui::NavigationMotionUiTest::Run(s, root) :
             page_scroll ? RunPageScrollChecks(s) :

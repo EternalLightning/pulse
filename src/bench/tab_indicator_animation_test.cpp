@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ui/tab_indicator_animation.h"
 #include "../ui/tab_close_animation.h"
 #include <cmath>
@@ -120,8 +125,9 @@ int main() {
         line.Tick(&tab_b, 616, 784, 1100, true);
         bool continuous = true;
         float previous_left = line.left, previous_right = line.right;
-        for (int frame = 1; ; ++frame) {
-            const uint64_t now = 1100 + static_cast<uint64_t>(frame * 1000 / hz);
+        const int max_frames = hz * 2;
+        for (int frame = 1; frame <= max_frames; ++frame) {
+            const uint64_t now = 1100 + static_cast<uint64_t>(frame) * 1000 / hz;
             line.Tick(&tab_b, 616, 784, now, true);
             continuous &= line.left >= previous_left && line.right >= previous_right &&
                 line.left <= line.right && (line.left > previous_left || line.right > previous_right);
@@ -129,7 +135,8 @@ int main() {
             previous_right = line.right;
             if (!line.pending) break;
         }
-        Check(continuous && line.left == 616 && line.right == 784,
+        if (line.pending) std::printf("[DIAG] hz=%d left=%f right=%f pending=1 after 2000 ms\n", hz, line.left, line.right);
+        Check(continuous && !line.pending && line.left == 616 && line.right == 784,
             "display-paced samples advance continuously and stop exactly at the target");
     }
     using pulse::ui::TabCloseAnimation;
@@ -159,13 +166,14 @@ int main() {
         spans = rest; close.Apply(spans, 1000, 960, 1, true);
         float previous = spans[1].left;
         bool monotonic = true;
-        for (int frame = 1; close.Pending(); ++frame) {
+        for (int frame = 1; close.Pending() && frame <= hz * 2; ++frame) {
             spans = rest;
-            close.Apply(spans, 1000 + static_cast<uint64_t>(frame * 1000 / hz), 960, 1, true);
+            close.Apply(spans, 1000 + static_cast<uint64_t>(frame) * 1000 / hz, 960, 1, true);
             monotonic &= spans[1].left < previous && spans[1].right >= spans[1].left;
             previous = spans[1].left;
         }
-        Check(monotonic && spans == rest, "close timing is independent of sampling frequency");
+        if (close.Pending()) std::printf("[DIAG] close hz=%d remains pending after 2000 ms\n", hz);
+        Check(monotonic && !close.Pending() && spans == rest, "close timing is independent of sampling frequency");
     }
     for (int cancel = 0; cancel != 5; ++cancel) {
         close.Capture(four, 960, 1);

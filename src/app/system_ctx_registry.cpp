@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "system_ctx_registry.h"
 #include "system_ctx_exchange.h"
 
@@ -177,13 +182,26 @@ std::wstring ResolveFile(const std::wstring& raw) {
     if (raw.empty()) return {};
     if (IsAbsolute(raw)) return FileExists(raw) ? raw : std::wstring{};
     wchar_t found[MAX_PATH];
-    if (SearchPathW(nullptr, raw.c_str(), nullptr, ARRAYSIZE(found), found, nullptr) > 0) return found;
+    const DWORD length = SearchPathW(nullptr, raw.c_str(), nullptr, ARRAYSIZE(found), found, nullptr);
+    if (length > 0 && length < ARRAYSIZE(found)) return found;
     return {};
 }
 
-bool PointsAtMissingFile(const std::wstring& value) {
+TargetState FileState(const std::wstring& value) {
     const std::wstring raw = RawPath(value);
-    return IsAbsolute(raw) && !FileExists(raw);
+    if (raw.empty()) return TargetState::Unknown;
+    if (!IsAbsolute(raw)) return ResolveFile(raw).empty() ? TargetState::Unknown : TargetState::Present;
+    const DWORD attributes = GetFileAttributesW(raw.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES)
+        return attributes & FILE_ATTRIBUTE_DIRECTORY ? TargetState::Unavailable : TargetState::Present;
+    const DWORD error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? TargetState::Missing
+                                                                                     : TargetState::Unavailable;
+}
+
+void SetTarget(Item& item, const std::wstring& value) {
+    item.target_state = FileState(value);
+    item.missing = item.target_state == TargetState::Missing;
 }
 
 bool IsProtectedVerb(std::wstring_view verb) {
@@ -235,9 +253,14 @@ bool VelocitySupported() {
 }
 
 // HKCR view of a class key: the user layer wins.
+LSTATUS OpenMergedStatus(const Roots& roots, const std::wstring& rel, Key& key) {
+    const LSTATUS user = Open(roots.user, FullPath(roots, Root::User, rel), KEY_READ, key);
+    if (user != ERROR_FILE_NOT_FOUND && user != ERROR_PATH_NOT_FOUND) return user;
+    return Open(roots.machine, FullPath(roots, Root::Machine, rel), KEY_READ, key);
+}
+
 bool OpenMerged(const Roots& roots, const std::wstring& rel, Key& key) {
-    if (Open(roots.user, FullPath(roots, Root::User, rel), KEY_READ, key) == ERROR_SUCCESS) return true;
-    return Open(roots.machine, FullPath(roots, Root::Machine, rel), KEY_READ, key) == ERROR_SUCCESS;
+    return OpenMergedStatus(roots, rel, key) == ERROR_SUCCESS;
 }
 
 // HKCR merges per value: an HKCU key with an empty default (common for .png
@@ -277,8 +300,12 @@ std::vector<std::wstring> ExtensionProgIds(const Roots& roots, const std::wstrin
 
 void FillHandler(const Roots& roots, Item& it) {
     Key cls;
-    if (it.clsid.empty() || !OpenMerged(roots, L"CLSID\\" + it.clsid, cls)) {
-        it.missing = !it.clsid.empty();
+    if (it.clsid.empty()) return;
+    const LSTATUS status = OpenMergedStatus(roots, L"CLSID\\" + it.clsid, cls);
+    if (status != ERROR_SUCCESS) {
+        it.target_state = status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND
+                              ? TargetState::Missing : TargetState::Unavailable;
+        it.missing = it.target_state == TargetState::Missing;
         return;
     }
     std::wstring name;
@@ -288,7 +315,7 @@ void FillHandler(const Roots& roots, Item& it) {
     std::wstring dll;
     if (Open(cls.h, L"InprocServer32", KEY_READ, inproc) == ERROR_SUCCESS && ReadString(inproc.h, nullptr, dll)) {
         it.file = ResolveFile(RawPath(dll));
-        if (it.file.empty() && PointsAtMissingFile(dll)) it.missing = true;
+        SetTarget(it, dll);
     }
 }
 
@@ -318,7 +345,8 @@ void ScanVerbs(const Roots& roots, const Scene& scene, const std::wstring& cls, 
         if (Open(v.h, L"command", KEY_READ, cmd) == ERROR_SUCCESS) ReadString(cmd.h, nullptr, it.command);
         it.file = ResolveFile(RawPath(it.command));
         if (it.file.empty() && !it.icon.empty()) it.file = ResolveFile(RawPath(it.icon));
-        it.missing = PointsAtMissingFile(it.command) || PointsAtMissingFile(it.icon);
+        SetTarget(it, it.command);
+        it.icon_state = FileState(it.icon);
         it.extended = HasValue(v.h, L"Extended");
         it.position = ReadPlace(v.h);
         it.legacy_disable = HasValue(v.h, L"LegacyDisable");
@@ -405,7 +433,7 @@ void ScanShellNew(const Roots& roots, const Scene& scene, std::vector<Item>& out
             }
             std::wstring resolved = text.empty() ? std::wstring() : ResolveIndirect(roots, text);
             it.display = resolved.empty() || resolved[0] == L'@' ? cls : resolved;
-            if (!it.command.empty()) it.missing = PointsAtMissingFile(it.command);
+            SetTarget(it, it.command);
             out.push_back(std::move(it));
         }
     };
@@ -476,7 +504,7 @@ void ScanOpenWith(const Roots& roots, const Scene& scene, std::vector<Item>& out
             it.key_path = L"Applications\\" + exe;
             ReadString(cmd.h, nullptr, it.command);
             it.file = ResolveFile(RawPath(it.command));
-            it.missing = PointsAtMissingFile(it.command);
+            SetTarget(it, it.command);
             std::wstring friendly;
             if (ReadString(ak.h, L"FriendlyAppName", friendly) && !friendly.empty())
                 it.display = ResolveIndirect(roots, friendly);
@@ -562,6 +590,10 @@ unsigned SnapshotValueBit(ValueName name) {
 }
 
 bool ValidSnapshots(const Op& op) {
+    if (op.recover_tree && (op.planned || op.has_previous_values ||
+        !((op.action == Action::Delete || op.action == Action::Restore) ||
+          ((op.kind == Kind::ShellEx || op.kind == Kind::DragDrop) &&
+           (op.action == Action::Enable || op.action == Action::Disable))))) return false;
     if (!op.has_previous_values) return op.previous_values.empty() && !op.restore_previous_values;
     if (!op.planned || op.kind != Kind::Verb || op.previous_values.size() > 5) return false;
     unsigned expected = 0;
@@ -734,45 +766,197 @@ bool IsEmptyKey(HKEY base, const std::wstring& path) {
     return subkeys == 0 && values == 0;
 }
 
-// Moves the key `src` to `dst` (full paths under `base`), keeping values and
-// subkeys. `dst` must not exist yet.
-OpResult MoveTree(HKEY base, const std::wstring& src, const std::wstring& dst) {
-    Key s;
-    LSTATUS st = Open(base, src, KEY_READ, s);
-    if (st != ERROR_SUCCESS) return FromStatus(st);
-    {
-        Key probe;
-        if (Open(base, dst, KEY_READ, probe) == ERROR_SUCCESS) return OpResult::Conflict;
+bool MissingKey(LSTATUS status) {
+    return status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND;
+}
+
+bool ScratchTreeFault(const Roots& roots, Root root, const std::wstring& src, const std::wstring& dst) {
+    constexpr std::wstring_view prefix = L"Software\\PulseTest\\";
+    const auto scratch = [&](std::wstring_view path) {
+        return path.size() > prefix.size() && IEquals(path.substr(0, prefix.size()), prefix);
+    };
+    return roots.tree_move_fault_for_testing && RootKey(roots, root) == HKEY_CURRENT_USER &&
+           scratch(src) && scratch(dst);
+}
+
+LSTATUS CopyTree(const Roots& roots, Root root, const std::wstring& src, const std::wstring& dst,
+                 HKEY source, HKEY target) {
+    auto* fault = ScratchTreeFault(roots, root, src, dst) ? roots.tree_move_fault_for_testing.get() : nullptr;
+    if (fault && ++fault->copy_calls == fault->fail_copy_call) {
+        if (fault->partial_copy) {
+            DWORD type = 0, bytes = 0;
+            if (RegQueryValueExW(source, nullptr, nullptr, &type, nullptr, &bytes) == ERROR_SUCCESS) {
+                std::vector<BYTE> data(bytes);
+                if (RegQueryValueExW(source, nullptr, nullptr, &type, data.data(), &bytes) == ERROR_SUCCESS)
+                    RegSetValueExW(target, nullptr, 0, type, data.data(), bytes);
+            }
+        }
+        return ERROR_WRITE_FAULT;
     }
-    Key d;
-    DWORD disposition = 0;
-    st = RegCreateKeyExW(base, dst.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, nullptr, &d.h,
-                         &disposition);
-    if (st != ERROR_SUCCESS) return FromStatus(st);
-    // A destination can appear after the probe. Never merge into that tree.
-    if (disposition != REG_CREATED_NEW_KEY) return OpResult::Conflict;
-    st = RegCopyTreeW(s.h, nullptr, d.h);
-    if (st != ERROR_SUCCESS) {
-        RegCloseKey(d.h);
-        d.h = nullptr;
-        RegDeleteTreeW(base, dst.c_str());
-        return FromStatus(st);
+    return RegCopyTreeW(source, nullptr, target);
+}
+
+LSTATUS DeleteTree(const Roots& roots, Root root, const std::wstring& src, const std::wstring& dst,
+                   const std::wstring& path) {
+    auto* fault = ScratchTreeFault(roots, root, src, dst) ? roots.tree_move_fault_for_testing.get() : nullptr;
+    if (fault) ++fault->delete_calls;
+    if (fault && (fault->delete_calls == fault->fail_delete_call ||
+                  fault->delete_calls == fault->fail_second_delete_call)) {
+        if (fault->partial_delete) {
+            Key key;
+            if (Open(RootKey(roots, root), path, KEY_READ | KEY_WRITE, key) == ERROR_SUCCESS) {
+                RegDeleteValueW(key.h, nullptr);
+                wchar_t name[256];
+                DWORD length = ARRAYSIZE(name);
+                if (RegEnumKeyExW(key.h, 0, name, &length, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS)
+                    RegDeleteTreeW(key.h, name);
+            }
+        }
+        return ERROR_ACCESS_DENIED;
     }
-    RegCloseKey(s.h);
-    s.h = nullptr;
-    // RegDeleteTreeW with a subkey name removes that key itself as well.
-    st = RegDeleteTreeW(base, src.c_str());
-    if (st != ERROR_SUCCESS) {
-        // The delete may have stopped half way: rebuild the original from the
-        // copy before dropping the copy, so nothing is lost either way.
+    return RegDeleteTreeW(RootKey(roots, root), path.c_str());
+}
+
+struct TreeValue {
+    DWORD type = REG_NONE;
+    std::vector<BYTE> data;
+    bool operator==(const TreeValue&) const = default;
+};
+struct TreeNode {
+    std::map<std::wstring, TreeValue> values;
+    std::vector<BYTE> security;
+};
+using TreeSnapshot = std::map<std::wstring, TreeNode>;
+
+// Recovery compares raw values, empty keys and security before merging. Failed
+// reads and symbolic links never qualify as an absent or matching tree.
+LSTATUS CaptureTree(HKEY key, const std::wstring& path, TreeSnapshot& tree, size_t& bytes, size_t depth = 0) {
+    if (depth > 64 || tree.size() >= 4096) return ERROR_FILE_TOO_LARGE;
+    auto& node = tree[path];
+    DWORD size = 0;
+    constexpr SECURITY_INFORMATION information = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
+                                                  DACL_SECURITY_INFORMATION;
+    LSTATUS status = RegGetKeySecurity(key, information, nullptr, &size);
+    if (status != ERROR_INSUFFICIENT_BUFFER) return status == ERROR_SUCCESS ? ERROR_INVALID_DATA : status;
+    if (size > 1024 * 1024 || bytes > 16 * 1024 * 1024 - size) return ERROR_FILE_TOO_LARGE;
+    node.security.resize(size);
+    status = RegGetKeySecurity(key, information, reinterpret_cast<PSECURITY_DESCRIPTOR>(node.security.data()), &size);
+    if (status != ERROR_SUCCESS) return status;
+    node.security.resize(size);
+    bytes += size;
+    for (DWORD i = 0;; ++i) {
+        std::wstring name(16384, L'\0');
+        DWORD length = static_cast<DWORD>(name.size()), type = 0, count = 0;
+        status = RegEnumValueW(key, i, name.data(), &length, nullptr, &type, nullptr, &count);
+        if (status == ERROR_NO_MORE_ITEMS) break;
+        if (status != ERROR_SUCCESS) return status;
+        if (type == REG_LINK) return ERROR_NOT_SUPPORTED;
+        if (count > 16 * 1024 * 1024 || bytes > 16 * 1024 * 1024 - count || i >= 65536)
+            return ERROR_FILE_TOO_LARGE;
+        TreeValue value{type, std::vector<BYTE>(count)};
+        status = RegQueryValueExW(key, name.c_str(), nullptr, &value.type, value.data.data(), &count);
+        if (status != ERROR_SUCCESS || count > value.data.size()) return status == ERROR_SUCCESS ? ERROR_MORE_DATA : status;
+        value.data.resize(count);
+        bytes += count;
+        node.values.emplace(Lower(std::wstring_view(name).substr(0, length)), std::move(value));
+    }
+    for (DWORD i = 0;; ++i) {
+        wchar_t name[256];
+        DWORD length = ARRAYSIZE(name);
+        status = RegEnumKeyExW(key, i, name, &length, nullptr, nullptr, nullptr, nullptr);
+        if (status == ERROR_NO_MORE_ITEMS) return ERROR_SUCCESS;
+        if (status != ERROR_SUCCESS) return status;
+        Key child;
+        status = RegOpenKeyExW(key, name, REG_OPTION_OPEN_LINK, KEY_READ, &child.h);
+        if (status != ERROR_SUCCESS) return status;
+        status = CaptureTree(child.h, Join(path, Lower(std::wstring_view(name, length))), tree, bytes, depth + 1);
+        if (status != ERROR_SUCCESS) return status;
+    }
+}
+
+bool TreeSubset(const TreeSnapshot& partial, const TreeSnapshot& full) {
+    for (const auto& [path, node] : partial) {
+        const auto found = full.find(path);
+        if (found == full.end() || node.security != found->second.security) return false;
+        for (const auto& [name, value] : node.values) {
+            const auto other = found->second.values.find(name);
+            if (other == found->second.values.end() || value != other->second) return false;
+        }
+    }
+    return true;
+}
+
+OpResult MoveFailure(LSTATUS status, bool recovered) {
+    SetLastError(status); // retain the original failure after rollback/cleanup APIs
+    return recovered ? FromStatus(status) : OpResult::RecoveryRequired;
+}
+
+// A recovery inverse may see both the partial original and its complete copy.
+// Reconcile only compatible trees; differing values/security retain both copies.
+OpResult MoveTree(const Roots& roots, Root root, const std::wstring& src, const std::wstring& dst,
+                  bool recovery) {
+    HKEY base = RootKey(roots, root);
+    Key s, d;
+    const DWORD options = recovery ? REG_OPTION_OPEN_LINK : 0;
+    const LSTATUS source_status = RegOpenKeyExW(base, src.c_str(), options, KEY_READ, &s.h);
+    const LSTATUS target_status = RegOpenKeyExW(base, dst.c_str(), options, KEY_READ, &d.h);
+    if (source_status != ERROR_SUCCESS) {
+        if (recovery && MissingKey(source_status) && target_status == ERROR_SUCCESS) return OpResult::Ok;
+        return FromStatus(source_status);
+    }
+    if (target_status != ERROR_SUCCESS && !MissingKey(target_status)) return FromStatus(target_status);
+    bool existing = target_status == ERROR_SUCCESS;
+    bool copy = true;
+    if (existing) {
+        if (!recovery) return OpResult::Conflict;
+        TreeSnapshot source, target;
+        size_t bytes = 0;
+        LSTATUS status = CaptureTree(s.h, L"", source, bytes);
+        if (status == ERROR_SUCCESS) status = CaptureTree(d.h, L"", target, bytes);
+        if (status != ERROR_SUCCESS) return MoveFailure(status, false);
+        if (TreeSubset(source, target)) copy = false;
+        else if (!TreeSubset(target, source)) return OpResult::Conflict;
+        RegCloseKey(d.h); d.h = nullptr;
+        status = Open(base, dst, KEY_ALL_ACCESS, d);
+        if (status != ERROR_SUCCESS) return FromStatus(status);
+    } else {
+        DWORD disposition = 0;
+        const LSTATUS status = RegCreateKeyExW(base, dst.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE,
+                                               KEY_ALL_ACCESS, nullptr, &d.h, &disposition);
+        if (status != ERROR_SUCCESS) return FromStatus(status);
+        if (disposition != REG_CREATED_NEW_KEY) return OpResult::Conflict;
+    }
+    LSTATUS status = copy ? CopyTree(roots, root, src, dst, s.h, d.h) : ERROR_SUCCESS;
+    if (status != ERROR_SUCCESS) {
+        if (existing) return MoveFailure(status, false);
+        RegCloseKey(d.h); d.h = nullptr;
+        const LSTATUS cleanup = DeleteTree(roots, root, src, dst, dst);
+        return MoveFailure(status, cleanup == ERROR_SUCCESS || MissingKey(cleanup));
+    }
+    if (existing) {
+        TreeSnapshot source, target;
+        size_t bytes = 0;
+        status = CaptureTree(s.h, L"", source, bytes);
+        if (status == ERROR_SUCCESS) status = CaptureTree(d.h, L"", target, bytes);
+        if (status != ERROR_SUCCESS) return MoveFailure(status, false);
+        if (!TreeSubset(source, target)) return MoveFailure(ERROR_TRANSACTIONAL_CONFLICT, false);
+    }
+    RegCloseKey(s.h); s.h = nullptr;
+    status = DeleteTree(roots, root, src, dst, src);
+    if (status != ERROR_SUCCESS) {
+        // An existing recovery destination is the tree we are restoring. Keep
+        // it even if retiring the recovery copy only partially succeeds.
+        if (existing) return MoveFailure(status, false);
         Key back;
         bool restored = RegCreateKeyExW(base, src.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS,
                                         nullptr, &back.h, nullptr) == ERROR_SUCCESS &&
-                        RegCopyTreeW(d.h, nullptr, back.h) == ERROR_SUCCESS;
-        RegCloseKey(d.h);
-        d.h = nullptr;
-        if (restored) RegDeleteTreeW(base, dst.c_str());
-        return FromStatus(st);
+                        CopyTree(roots, root, src, dst, d.h, back.h) == ERROR_SUCCESS;
+        RegCloseKey(d.h); d.h = nullptr;
+        if (restored) {
+            const LSTATUS cleanup = DeleteTree(roots, root, src, dst, dst);
+            restored = cleanup == ERROR_SUCCESS || MissingKey(cleanup);
+        }
+        return MoveFailure(status, restored);
     }
     return OpResult::Ok;
 }
@@ -789,10 +973,10 @@ void PruneEmptyParents(HKEY base, std::wstring path, const std::wstring& stop) {
 }
 
 // Moves <parent>\\<from>\\<name> to <parent>\\<to>\\<name>, keeping values and subkeys.
-OpResult MoveKey(const Roots& roots, Root root, const std::wstring& src_rel, const std::wstring& dst_rel) {
+OpResult MoveKey(const Roots& roots, Root root, const std::wstring& src_rel, const std::wstring& dst_rel, bool recovery) {
     HKEY base = RootKey(roots, root);
     const std::wstring src = FullPath(roots, root, src_rel);
-    const OpResult moved = MoveTree(base, src, FullPath(roots, root, dst_rel));
+    const OpResult moved = MoveTree(roots, root, src, FullPath(roots, root, dst_rel), recovery);
     if (moved != OpResult::Ok) return moved;
     // An emptied (-)ContextMenuHandlers group goes too, so a round trip leaves
     // no trace.
@@ -815,14 +999,14 @@ OpResult ApplyTrash(const Roots& roots, const Op& op) {
     const std::wstring trash = Join(trash_base, op.key_path);
     if (op.action == Action::Delete) {
         // Keep an earlier deletion available to its original undo operation.
-        const OpResult moved = MoveTree(base, live, trash);
+        const OpResult moved = MoveTree(roots, op.root, live, trash, op.recover_tree);
         if (moved != OpResult::Ok) return moved;
         // Like MoveKey: an emptied shell / ContextMenuHandlers group goes too.
         const std::wstring group = live.substr(0, live.rfind(L'\\'));
         if (IsEmptyKey(base, group)) RegDeleteKeyW(base, group.c_str());
         return OpResult::Ok;
     }
-    const OpResult moved = MoveTree(base, trash, live);
+    const OpResult moved = MoveTree(roots, op.root, trash, live, op.recover_tree);
     if (moved == OpResult::Ok) PruneEmptyParents(base, trash, trash_base);
     return moved;
 }
@@ -1310,7 +1494,7 @@ OpResult Apply(const Roots& roots, const Op& op) {
     case Kind::DragDrop: {
         const std::wstring target = KeyPathAfter(op);
         if (IEquals(target, op.key_path)) return OpResult::Ok;  // already in the requested state
-        return MoveKey(roots, op.root, op.key_path, target);
+        return MoveKey(roots, op.root, op.key_path, target, op.recover_tree);
     }
     default: return OpResult::Unsupported;  // ShellNew / SendTo / OpenWith: S3
     }
@@ -1363,7 +1547,7 @@ std::wstring SerializeBatch(const std::vector<Op>& ops) {
         } else if (op.kind == Kind::Verb && op.planned) {
             if (op.mask > 0xF) return {};
             out += std::to_wstring(op.mask);
-        } else out += L'-';
+        } else out += op.recover_tree ? L"recover" : L"-";
         out += L'\t';
         AppendSnapshot(out, op);
         out += L'\n';
@@ -1433,6 +1617,8 @@ bool ParseBatch(std::wstring_view text, std::vector<Op>& ops) {
                 if (!ParsePlace(parameter.substr(comma + 1), op.prev_place)) return false;
                 op.planned = true;
             }
+        } else if (!legacy && parameter == L"recover") {
+            op.recover_tree = true;
         } else if (!parameter.empty() && (legacy || parameter != L"-")) {
             DWORD mask = 0;
             if (parameter.size() > 2 || !ParseUnsigned(parameter, mask) || mask > 0xF) return false;
@@ -1442,6 +1628,7 @@ bool ParseBatch(std::wstring_view text, std::vector<Op>& ops) {
         if ((op.planned || op.action == Action::Position) && op.kind != Kind::Verb) return false;
         if (op.planned && (op.action == Action::Delete || op.action == Action::Restore)) return false;
         if (!legacy && !ParseSnapshot(fields[5], op)) return false;
+        if (!ValidSnapshots(op)) return false;
         parsed.push_back(std::move(op));
     }
     if (!header) return false;
@@ -1463,7 +1650,25 @@ std::wstring ExportReg(const Roots& roots, const std::vector<Op>& ops) {
         const auto previous = locations.find(key);
         // RestoreAll can reverse several moves of the same registration. A
         // later source then refers to the original tree exported earlier.
-        const std::wstring original = previous == locations.end() ? path : previous->second;
+        std::wstring original = previous == locations.end() ? path : previous->second;
+        const std::wstring recovery_target = op.action == Action::Delete ? Join(TrashBase(roots, op.root), op.key_path)
+                                            : op.action == Action::Restore ? FullPath(roots, op.root, op.key_path)
+                                            : FullPath(roots, op.root, KeyPathAfter(op));
+        if (op.recover_tree && previous == locations.end()) {
+            Key probe;
+            const LSTATUS source_status = Open(root, path, KEY_READ, probe);
+            if (MissingKey(source_status)) original = recovery_target;
+            else if (source_status != ERROR_SUCCESS) { SetLastError(source_status); return {}; }
+            Key target;
+            const LSTATUS target_status = Open(root, recovery_target, KEY_READ, target);
+            if (target_status == ERROR_SUCCESS) {
+                const std::wstring target_key = RootName(root) + L"\\" + Lower(recovery_target);
+                if (!exported.contains(target_key) && !ExportKey(root, recovery_target, out, error)) {
+                    SetLastError(error); return {};
+                }
+                exported.insert(target_key);
+            } else if (!MissingKey(target_status)) { SetLastError(target_status); return {}; }
+        }
         if (original.empty()) { SetLastError(ERROR_FILE_NOT_FOUND); return {}; }
         const std::wstring export_key = RootName(root) + L"\\" + Lower(original);
         if (!exported.contains(export_key) && !ExportKey(root, original, out, error)) {

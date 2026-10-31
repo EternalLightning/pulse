@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "shell_query_client.h"
 #include <array>
 #include <atomic>
@@ -141,6 +146,8 @@ bool Connect(Lease& lease, const std::function<bool()>& cancelled, ULONGLONG dea
             if (GetNamedPipeServerProcessId(slot.pipe, &pid) && pid == slot.pid) return true;
             SetLastError(ERROR_ACCESS_DENIED); return false;
         }
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PIPE_BUSY) return false;
         Sleep(10);
     }
     return false;
@@ -242,6 +249,7 @@ bool QueryShell(const ShellQueryRequest& request, ShellQueryResult& result,
             error = GetLastError();
             Retire(*lease.slot);
             if (error == ERROR_CANCELLED || error == ERROR_TIMEOUT || error == ERROR_INVALID_DATA ||
+                error == ERROR_ACCESS_DENIED || error == ERROR_INVALID_NAME ||
                 lease.slot->poisoned) break;
             if (Cancelled(cancelled, deadline)) { error = GetLastError(); break; }
         }

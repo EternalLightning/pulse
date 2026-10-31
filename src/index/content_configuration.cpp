@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_config_storage.h"
 #include "content_scope.h"
 #include "../../third_party/sqlite/sqlite3.h"
@@ -137,7 +142,11 @@ ContentIndexConfig LoadContentIndexConfig() {
     return config;
 }
 bool SaveInstantContentConfig(ContentIndexConfig& config) {
+    return SaveInstantContentConfig(config_storage::DatabasePath(), config);
+}
+bool SaveInstantContentConfig(const std::wstring& database_path, ContentIndexConfig& config) {
+    if (database_path.empty()) { SetLastError(ERROR_PATH_NOT_FOUND); return false; }
     if (!NormalizeConfig(config)) return false;
-    return config_storage::WriteConfigFile(config_storage::DatabasePath(), config);
+    return config_storage::WriteConfigFile(database_path, config);
 }
 }

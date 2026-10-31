@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ops/operation_presentation.h"
+#include "../ops/delete_item_progress.h"
 #include <cstdio>
 #include <limits>
 
@@ -30,6 +36,43 @@ int main() {
         check(progress.percent == -1.0f && progress.summary == L"Deleting",
               "unknown or invalid progress removes the stale detail percentage");
     }
+    pulse::ops::DeletePlan delete_plan;
+    for (int i = 0; i < 22; ++i) {
+        const auto file = L"C:\\fixture\\file-" + std::to_wstring(i);
+        delete_plan.targets.push_back({file, {file}, pulse::ops::DeleteDisposition::Permanent, {}});
+    }
+    pulse::ops::DeleteItemProgress deletion;
+    deletion.Reset(delete_plan);
+    bool running_count = deletion.Total() == 22 && deletion.Completed() == 0;
+    for (int i = 21; i >= 0; --i) {
+        const auto done = deletion.Complete(delete_plan.targets[static_cast<size_t>(i)].path);
+        running_count &= done == static_cast<uint64_t>(22 - i) && deletion.Total() == 22;
+    }
+    check(running_count, "22 selected rows advance one by one even when backend completion is out of order");
+    check(deletion.Complete(delete_plan.targets.front().path) == 22 &&
+        deletion.Complete(L"C:\\unrelated") == 22,
+        "repeated or unknown delete progress cannot double-count a selected row");
+    pulse::ops::DeletePlan recycle_plan;
+    recycle_plan.targets.push_back({L"C:\\original", {L"C:\\fixture\\$Rpayload", L"C:\\fixture\\$Imetadata"},
+        pulse::ops::DeleteDisposition::Permanent, {}});
+    deletion.Reset(recycle_plan);
+    check(deletion.Complete(L"C:\\fixture\\$Rpayload\\child") == 0 &&
+        deletion.Complete(L"C:\\fixture\\$Imetadata") == 0 && deletion.Total() == 1,
+        "recursive children and recycle metadata do not inflate logical delete counts");
+    check(deletion.Complete(L"\\\\?\\C:\\fixture\\$Rpayload") == 1 &&
+        deletion.Complete(L"C:\\fixture\\$Rpayload") == 1,
+        "confirmed primary root counts once across extended path spelling");
+    deletion.Reset(delete_plan);
+    deletion.Complete(delete_plan.targets.front().path);
+    check(deletion.Completed() == 1 && deletion.Total() == 22,
+        "partial failure or cancellation retains actual completed count instead of forcing total");
+    deletion.Reset(recycle_plan, 3);
+    check(deletion.Total() == 4 && deletion.Completed() == 3 &&
+        deletion.Complete(L"C:\\fixture\\$Rpayload") == 4,
+        "remaining delete batches retain already completed logical rows");
+    deletion.Reset({});
+    check(deletion.Complete(L"C:\\fixture\\$Rpayload") == 0 && deletion.Total() == 0,
+        "a new delete task discards the previous progress identities");
     check(FriendlyPathText(L"删除 \\\\?\\C:\\文件 完成") == L"删除 C:\\文件 完成", "embedded extended drive path");
     check(FriendlyPathText(L"\\??\\C:\\文件") == L"C:\\文件", "NT drive path");
     check(FriendlyPathText(L"\\\\?\\UNC\\server\\share\\文件") == L"\\\\server\\share\\文件", "extended UNC path");

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "edit_host.h"
 // color_picker.cpp — QFluent DropDownColorPickerButton popup replica.
 //
@@ -18,6 +23,7 @@
 #include "color_picker.h"
 #include "popup_origin.h"
 #include "dialog_lifecycle.h"
+#include "animation_clock.h"
 
 #include "fluent_components.h"
 #include "fluent_menu.h"
@@ -168,6 +174,7 @@ struct State {
     bool syncing = false;
     bool done = false;
     bool accepted = false;
+    ULONGLONG animation_start = 0;
 
     int base_x = 0;
     int base_y = 0;
@@ -983,6 +990,25 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (!s) return DefWindowProcW(hwnd, msg, wp, lp);
     switch (msg) {
+    case WM_TIMER:
+        if (wp == 1 && s->animation_start) {
+            BOOL enabled = TRUE;
+            SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+            const float elapsed = static_cast<float>(AnimationTimeMs() - s->animation_start);
+            constexpr fluent::MotionSpec slide{170.0f, fluent::EasingCurve::OutCubic};
+            if (!enabled || IsHighContrast() || elapsed >= slide.duration_ms) {
+                KillTimer(hwnd, 1);
+                s->animation_start = 0;
+                Present(*s, 255, 0);
+                ShowEdits(*s);
+            } else {
+                const float progress = fluent::EvaluateMotion(slide, elapsed);
+                Present(*s, static_cast<BYTE>(std::clamp(elapsed / 120.0f, 0.0f, 1.0f) * 255.0f),
+                    static_cast<int>(std::lround((1.0f - progress) * 10.0f * s->scale)));
+            }
+            return 0;
+        }
+        break;
     case WM_ERASEBKGND:
         return 1;
     case WM_CTLCOLOREDIT: {
@@ -1257,32 +1283,23 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     CreateEdits(s);
     SyncEdits(s, -1);
 
-    // 120ms fade + 10px slide from the right, 170ms OutCubic (QFluent execAt).
+    // Advance the entrance through the same message loop that handles cancellation.
     if (Render(s)) {
+        BOOL enabled = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        if (enabled && !IsHighContrast()) {
+            s.animation_start = AnimationTimeMs();
+            if (!SetTimer(s.hwnd, 1, USER_TIMER_MINIMUM, nullptr)) s.animation_start = 0;
+        }
+        Present(s, s.animation_start ? 0 : 255,
+            s.animation_start ? static_cast<int>(std::lround(10.0f * s.scale)) : 0);
         ShowWindow(s.hwnd, SW_SHOW);
         SetForegroundWindow(s.hwnd);
-        const auto t0 = std::chrono::steady_clock::now();
-        constexpr fluent::MotionSpec slide{ 170.0f, fluent::EasingCurve::OutCubic };
-        for (;;) {
-            const float elapsed = static_cast<float>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - t0)
-                    .count());
-            if (elapsed >= slide.duration_ms) break;
-            const float p = fluent::EvaluateMotion(slide, elapsed);
-            const int dx = static_cast<int>(std::lround((1.0f - p) * 10.0f * s.scale));
-            const BYTE alpha = static_cast<BYTE>(
-                std::clamp(elapsed / 120.0f, 0.0f, 1.0f) * 255.0f);
-            Present(s, alpha, dx);
-            Sleep(10);
-        }
-        Present(s, 255, 0);
     } else {
         ShowWindow(s.hwnd, SW_SHOW);
         SetForegroundWindow(s.hwnd);
     }
-    ShowEdits(s);
-    Repaint(s);
+    if (!s.animation_start) ShowEdits(s);
 
     MSG msg{};
     while (!s.done && GetModalMessage(msg)) {
@@ -1296,6 +1313,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
         DispatchMessageW(&msg);
     }
 
+    KillTimer(s.hwnd, 1);
     HideComposedDialog(s.hwnd);
     for (HWND e : s.edits) {
         if (e) DestroyWindow(e); // subclass is removed with the window

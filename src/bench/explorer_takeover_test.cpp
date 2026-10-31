@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/explorer_takeover_policy.h"
 #include "../app/explorer_window_takeover.h"
 #include <windows.h>
@@ -52,66 +57,44 @@ void Pause(DWORD duration) {
 policy::SourceObservation HealthySource() {
     policy::SourceObservation source;
     source.same_identity = source.single_tab = source.supported = true;
-    source.same_folder = source.same_selection = source.input_unchanged = true;
-    source.view_age_ms = 1000;
+    source.same_folder = source.same_selection = true;
     return source;
 }
 void PolicyCases() {
     using policy::PendingDecision;
     policy::TabObservation tab{true, true, 1, 1};
-    Check(policy::IsSingleTabSafe(tab), "one Shell view and one native tab authorize a single-tab source");
+    Check(policy::IsSingleTabSafe(tab), "single-tab source may be transferred");
     tab.native_tab_count = 2;
-    Check(!policy::IsSingleTabSafe(tab), "two native tabs reject whole-window closure even with one Shell view");
+    Check(!policy::IsSingleTabSafe(tab), "multiple native tabs cannot authorize whole-window close");
     tab.native_tab_count = 0;
-    Check(!policy::IsSingleTabSafe(tab), "unknown Windows 11 tab structure fails closed");
-    tab.native_tab_count = 1; tab.shell_view_count = 2;
-    Check(!policy::IsSingleTabSafe(tab), "multiple enumerated views reject whole-window closure");
-    tab.shell_view_count = 1; tab.enumeration_complete = false;
-    Check(!policy::IsSingleTabSafe(tab), "incomplete Shell enumeration cannot authorize closure");
+    Check(!policy::IsSingleTabSafe(tab), "unknown tab structure does not authorize closure");
+    tab = {true, true, 2, 1};
+    Check(!policy::IsSingleTabSafe(tab), "multiple enumerated views cannot authorize whole-window close");
+    tab = {true, false, 1, 1};
+    Check(!policy::IsSingleTabSafe(tab), "incomplete enumeration waits for a safe source");
     tab = {false, true, 1, 0};
-    Check(policy::IsSingleTabSafe(tab), "legacy single-view Explorer does not require the Windows 11 native tab class");
-    auto source = HealthySource();
-    Check(policy::DecidePending(source) == PendingDecision::Wait &&
-        policy::CanCloseAfterAcknowledgment(source, true, false), "unchanged single-tab source may close after a successful ACK");
-    Check(!policy::CanCloseAfterAcknowledgment(source, false, false), "failed ACK preserves the source");
-    Check(!policy::CanCloseAfterAcknowledgment(source, true, true), "Stop prevents closure even after successful delivery");
-    struct Guard { bool policy::SourceObservation::* member; const char* label; };
-    for (const Guard guard : {
-            Guard{&policy::SourceObservation::same_identity, "changed HWND/process creation identity retires the request"},
-            Guard{&policy::SourceObservation::single_tab, "a tab added during handoff cancels the pending whole-window close"},
-            Guard{&policy::SourceObservation::supported, "unsupported or unreadable source preserves Explorer"},
-            Guard{&policy::SourceObservation::same_folder, "active navigation cancels the pending request"},
-            Guard{&policy::SourceObservation::input_unchanged, "new user input cancels pending takeover"}}) {
-        auto changed = source;
-        changed.*(guard.member) = false;
-        Check(policy::DecidePending(changed) == PendingDecision::Retire &&
-            !policy::CanCloseAfterAcknowledgment(changed, true, false), guard.label);
-    }
-    auto changed = source; changed.shift = true;
+    Check(policy::IsSingleTabSafe(tab), "legacy single-view source remains supported");
+    const auto source = HealthySource();
+    Check(policy::CanCloseAfterAcknowledgment(source, true, false), "successful current delivery authorizes close");
+    Check(!policy::CanCloseAfterAcknowledgment(source, false, false), "failed delivery preserves the source");
+    Check(!policy::CanCloseAfterAcknowledgment(source, true, true), "stopping the service prevents close");
+    auto changed = source; changed.same_identity = false;
+    Check(policy::DecidePending(changed) == PendingDecision::Retire, "destroyed or reused source identity is rejected");
+    changed = source; changed.shift = true;
     Check(policy::DecidePending(changed) == PendingDecision::Retire &&
-        !policy::CanCloseAfterAcknowledgment(changed, true, false), "Shift bypass also rejects a stale successful ACK");
-    changed = source; changed.same_selection = false;
-    changed.submitted_empty_selection = changed.current_selection_nonempty = true;
-    Check(policy::DecidePending(changed) == PendingDecision::Retire,
-        "late selection in a visible source preserves Explorer rather than guessing user intent");
-    changed.visible = false;
+        !policy::CanCloseAfterAcknowledgment(changed, true, false), "explicit Shift bypass rejects even a late success ACK");
+    changed = source; changed.same_folder = false;
     Check(policy::DecidePending(changed) == PendingDecision::Replace &&
-        !policy::CanCloseAfterAcknowledgment(changed, true, false),
-        "bounded unexposed empty-to-selection update replaces delivery without authorizing the old ACK");
-    changed.view_age_ms = policy::kLateSelectionGraceMs + 1;
-    Check(policy::DecidePending(changed) == PendingDecision::Retire, "late selection beyond the grace period retires the request");
-    changed.view_age_ms = 1000; changed.submitted_empty_selection = false;
-    Check(policy::DecidePending(changed) == PendingDecision::Retire, "changing an existing selection never enters the late-selection retry");
-    changed.submitted_empty_selection = true; changed.current_selection_nonempty = false;
-    Check(policy::DecidePending(changed) == PendingDecision::Retire, "deselecting items is not a late initial selection");
-    changed.current_selection_nonempty = true; changed.input_unchanged = false;
-    Check(policy::DecidePending(changed) == PendingDecision::Retire, "input changes reject even the narrow unexposed late-selection retry");
+        !policy::CanCloseAfterAcknowledgment(changed, true, false), "navigation transfers the latest folder instead of abandoning takeover");
+    changed = source; changed.same_selection = false;
+    Check(policy::DecidePending(changed) == PendingDecision::Replace &&
+        !policy::CanCloseAfterAcknowledgment(changed, true, false), "changed or cleared selection replaces delivery and rejects the old ACK");
     Check(!policy::CanSubmit(449, 1000, true) && policy::CanSubmit(450, 450, true),
-        "selected source retains the full 450 ms stability boundary");
+        "selected snapshots retain their stability boundary independently of user input");
     Check(!policy::CanSubmit(450, 799, false) && policy::CanSubmit(450, 800, false),
-        "initial empty selection waits for the 800 ms selection grace");
+        "empty snapshots wait for initial programmatic selection");
     Check(policy::NextScanDelay(false) == 1000 && policy::NextScanDelay(true) == 80,
-        "empty watcher uses low-frequency scans while a candidate uses bounded short polling");
+        "watcher returns to low-frequency polling after handoff");
 }
 struct Identity {
     HWND hwnd = nullptr;
@@ -275,7 +258,7 @@ void RealCases(const std::filesystem::path& root) {
     const auto run = root / (L"run-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     std::filesystem::create_directories(run);
     bool environment_ready = true;
-    for (const std::wstring scenario : {L"ack-failure", L"ack-success", L"navigate-cancel", L"selection-cancel", L"stop"}) {
+    for (const std::wstring scenario : {L"startup-input", L"post-submit-input", L"ack-failure", L"ack-success", L"navigate-replace", L"selection-replace", L"stop"}) {
         const auto folder = run / scenario;
         const auto next = run / (scenario + L"-next");
         std::filesystem::create_directories(folder);
@@ -286,6 +269,8 @@ void RealCases(const std::filesystem::path& root) {
         OwnedSource source;
         if (!source.Create(folder.wstring())) { environment_ready = false; break; }
         source.permitted_folders.push_back(next.wstring());
+        if (scenario == L"startup-input")
+            Check(source.Select((folder / L"selected.txt").wstring()), "opening scenario selects its fixture file before takeover");
         const LONG_PTR style = GetWindowLongPtrW(source.identity.hwnd, GWL_STYLE);
         const LONG_PTR extended = GetWindowLongPtrW(source.identity.hwnd, GWL_EXSTYLE);
         unsigned native_tabs = 0;
@@ -295,6 +280,24 @@ void RealCases(const std::filesystem::path& root) {
         ExplorerWindowTakeover worker;
         Check(worker.StartForTesting(owner, kWake, {source.identity.hwnd}, {folder.wstring(), next.wstring()}),
             "start worker with only this new window identity and isolated folders allowed");
+        if (scenario == L"startup-input") {
+            Check(Until([&] { return worker.Stats().scans != 0; }), "watcher discovers the opening source before simulated input");
+            Pause(100);
+            Check(worker.Stats().submitted == 0, "opening input occurs before the initial stable handoff");
+            LASTINPUTINFO before{sizeof(before)};
+            GetLastInputInfo(&before);
+            // A zero-displacement mouse event updates the input timestamp
+            // without clicking, typing into another app or moving the pointer.
+            INPUT opening_input{};
+            opening_input.type = INPUT_MOUSE;
+            opening_input.mi.dwFlags = MOUSEEVENTF_MOVE;
+            Check(SendInput(1, &opening_input, sizeof(opening_input)) == 1,
+                "simulate opening-time mouse input without changing the pointer position");
+            Check(Until([&] {
+                LASTINPUTINFO after{sizeof(after)};
+                return GetLastInputInfo(&after) && after.dwTime != before.dwTime;
+            }, 1000), "opening input changes the timestamp observed by the production watcher");
+        }
         ExplorerTakeoverRequest request;
         const bool received = WaitRequest(worker, request);
         std::printf("[DIAG] scenario=%ls error=0x%08lX scans=%llu request=%llu\n", scenario.c_str(),
@@ -305,10 +308,10 @@ void RealCases(const std::filesystem::path& root) {
             GetLastInputInfo(&input_after);
             std::printf("[DIAG] native_tabs=%u last_input_before=%lu after=%lu\n", native_tabs,
                 input_before.dwTime, input_after.dwTime);
-            if (!native_tabs || input_before.dwTime != input_after.dwTime) {
+            if (!native_tabs) {
                 Check(worker.Stats().close_attempts == 0 && source.SameIdentity(),
-                    "unsupported tab structure or changed input leaves the isolated source open");
-                Limit("real handoff was not exercised with unknown native tabs or concurrent user input");
+                    "unsupported tab structure leaves the isolated source open");
+                Limit("real handoff was not exercised with unknown native tabs");
                 worker.Stop(); environment_ready = false; break;
             }
         }
@@ -318,7 +321,17 @@ void RealCases(const std::filesystem::path& root) {
         worker.Acknowledge(request.token + 1000000, true);
         Pause(150);
         Check(worker.IsRequestActive(request.token) && source.SameIdentity(), "unknown or old ACK token cannot close the current source");
-        if (scenario == L"ack-success") {
+        if (scenario == L"post-submit-input") {
+            INPUT input{}; input.type = INPUT_MOUSE; input.mi.dwFlags = MOUSEEVENTF_MOVE;
+            Check(SendInput(1, &input, sizeof(input)) == 1, "send ordinary input while Pulse is delivering the folder");
+            Pause(200);
+            Check(worker.IsRequestActive(request.token) && source.SameIdentity(),
+                "ordinary input after submission does not abandon or duplicate takeover");
+        }
+        if (scenario == L"ack-success" || scenario == L"startup-input" || scenario == L"post-submit-input") {
+            if (scenario == L"startup-input")
+                Check(request.selected_paths == std::vector<std::wstring>{(folder / L"selected.txt").wstring()},
+                    "opening-time input still delivers the exact selected file after settling");
             worker.Acknowledge(request.token, true);
             Check(Until([&] { return !source.SameIdentity(); }), "successful current ACK closes the verified single-tab fixture source");
             Check(worker.Stats().close_attempts == 1, "successful handoff attempts one source close");
@@ -335,18 +348,24 @@ void RealCases(const std::filesystem::path& root) {
             const auto scans = worker.Stats().scans - before;
             std::printf("[DIAG] idle scans over 2300 ms=%llu\n", static_cast<unsigned long long>(scans));
             Check(scans <= 5, "retired source returns to low-frequency idle scanning");
-        } else if (scenario == L"navigate-cancel") {
-            Check(source.Navigate(next.wstring()), "fixture actively navigates only its own source to another allowed folder");
-            Check(Until([&] { return !worker.IsRequestActive(request.token); }), "active source navigation cancels the pending request");
-            worker.Acknowledge(request.token, true); Pause(200);
-            Check(source.SameIdentity() && SamePath(FolderPath(source.browser.Get()), next.wstring()) &&
-                worker.Stats().close_attempts == 0, "late ACK after navigation leaves the source at its new destination");
-        } else if (scenario == L"selection-cancel") {
-            Check(source.Select((folder / L"selected.txt").wstring()), "programmatic late selection targets only the fixture Shell view");
-            Check(Until([&] { return !worker.IsRequestActive(request.token); }), "late selection in a visible source cancels the old token");
-            worker.Acknowledge(request.token, true); Pause(200);
-            Check(VisibleUnchanged(source, style, extended) && worker.Stats().close_attempts == 0,
-                "stale ACK cannot discard a visible source after selection changed");
+        } else if (scenario == L"navigate-replace" || scenario == L"selection-replace") {
+            const bool navigation = scenario == L"navigate-replace";
+            Check(navigation ? source.Navigate(next.wstring()) : source.Select((folder / L"selected.txt").wstring()),
+                "change the source folder or selection during handoff");
+            ExplorerTakeoverRequest replacement;
+            const bool replaced = WaitRequest(worker, replacement);
+            Check(replaced && replacement.replaces_token == request.token && replacement.token != request.token &&
+                SamePath(replacement.folder, (navigation ? next : folder).wstring()),
+                "source changes replace the pending request with the latest folder and selection");
+            if (!navigation)
+                Check(replacement.selected_paths == std::vector<std::wstring>{(folder / L"selected.txt").wstring()},
+                    "replacement transfers the newly selected file");
+            worker.Acknowledge(request.token, true); Pause(150);
+            Check(source.SameIdentity() && worker.Stats().close_attempts == 0,
+                "old ACK cannot close the source before the latest snapshot is delivered");
+            if (replaced) worker.Acknowledge(replacement.token, true);
+            Check(Until([&] { return !source.SameIdentity(); }) && worker.Stats().close_attempts == 1,
+                "latest successful delivery closes the source after navigation or selection updates");
         } else {
             worker.Stop();
             worker.Acknowledge(request.token, true); Pause(150);

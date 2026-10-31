@@ -1,3 +1,8 @@
+; SPDX-License-Identifier: Apache-2.0
+; Pulse project; see LICENSE and NOTICE for licensing and attribution.
+; Modified by EternalLightning for this independent distribution, including licensing notices.
+; Existing third-party notices and license terms remain applicable.
+
 ; Pulse installer â€” single-file exe setup via Inno Setup 6.
 ; build_installer.bat uses build-release\ by default and passes BuildDir.
 ; Builds dist\PulseSetup-<version>.exe. See docs/build-and-package.md.
@@ -66,7 +71,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "å
 [Files]
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\files_toolbar\LICENSE-MIT"; DestDir: "{app}\licenses\FilesToolbar"; Flags: ignoreversion
+Source: "third_party\d2d-mica\LICENSE"; DestDir: "{app}\licenses\d2d-mica"; Flags: ignoreversion
+Source: "third_party\d2d-mica\README.pulse.md"; DestDir: "{app}\licenses\d2d-mica"; Flags: ignoreversion
+Source: "third_party\sqlite\README.md"; DestDir: "{app}\licenses\SQLite"; Flags: ignoreversion
+Source: "third_party\ib-pinyin-cpp\README.pulse.txt"; DestDir: "{app}\licenses\ib-pinyin"; Flags: ignoreversion
+Source: "{#BuildDir}\7zip\*"; DestDir: "{app}\7zip"; Excludes: "License.txt,README.md,LGPL-2.1-or-later.txt,GPL-2.0-or-later.txt,7z2603-src.7z"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "third_party\7zip\*.txt"; DestDir: "{app}\7zip"; Flags: ignoreversion
+Source: "third_party\7zip\README.md"; DestDir: "{app}\7zip"; Flags: ignoreversion
+Source: "third_party\7zip\7z2603-src.7z"; DestDir: "{app}\7zip"; Flags: ignoreversion
 #ifdef AppLocalRuntime
 ; Local MD builds bundle the matching CRT; CI uses the static runtime.
 Source: "{#BuildDir}\msvc-runtime\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist

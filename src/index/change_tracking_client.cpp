@@ -1,6 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "change_tracking_client.h"
 #include "index_protocol.h"
 #include "network_agent_protocol.h"
+#include "index_server_auth.h"
 #include <algorithm>
 #include <chrono>
 #include <atomic>
@@ -232,8 +238,7 @@ void ChangeTrackingClient::Worker() {
             network_renew_at = GetTickCount64() + 10000;
         }
         if (pipe == INVALID_HANDLE_VALUE && (request.pending || changed || GetTickCount64() >= renew_at)) {
-            pipe = CreateFileW(kPipeName, transport::kClientPipeAccess, 0, nullptr,
-                               OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+            pipe = transport::OpenVerifiedIndexPipe(kPipeName);
             renew_at = GetTickCount64() + 10000;
         }
         if (pipe != INVALID_HANDLE_VALUE && (!leased || GetTickCount64() >= renew_at)) {

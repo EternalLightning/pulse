@@ -1,9 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 # Run from an x64 Visual Studio developer prompt. Reuse the application objects
 # so the test exercises the real timer/navigation path without a second UI build.
 param(
     [ValidateSet('content_refresh', 'rename_overlay', 'shared_settings', 'realtime_search', 'content_interaction', 'content_progress_ui', 'address_edit_stability', 'content_lifecycle', 'global_search_settings_ui', 'duplicate_settings_ui', 'duplicate_interaction', 'delete_integration', 'delete_backend', 'sidebar_tray_ui', 'recycle_backend', 'settings_value_ui')][string]$Fixture = 'content_refresh',
-    [ValidateSet('all', 'content', 'filename', 'dedup', 'automatic-refresh')][string]$Filter = 'all',
-    [string]$BuildDir = 'build',
+    [ValidateSet('all', 'content', 'content-instant', 'filename', 'dedup', 'automatic-refresh')][string]$Filter = 'all',
+    [string]$BuildDir = 'build-release',
     [switch]$SkipBuild,
     [string[]]$TestArguments = @()
 )

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ops_manager.h — Operation queue, progress status, undo stack (UI-process side).
 //
 // Queued operations are serialized on the operation worker. Copy/move/rename
@@ -19,6 +24,7 @@
 #include "file_lock_owner.h"
 #include "recycle_undo_validation.h"
 #include "file_object_reference.h"
+#include "delete_item_progress.h"
 #include "../common/shell_menu_item.h"
 #include "../ipc/shell_client.h"
 #include <windows.h>
@@ -68,6 +74,20 @@ struct ConflictResolution {
     uint64_t row_id = 0;
     ConflictChoice choice = ConflictChoice::Skip;
 };
+
+inline bool ValidConflictResolutions(const std::vector<ConflictRowInfo>& offered_rows,
+                                    const std::vector<ConflictResolution>& resolutions) {
+    if (offered_rows.empty() || resolutions.size() != offered_rows.size()) return false;
+    std::set<uint64_t> offered, selected;
+    for (const auto& row : offered_rows)
+        if (!row.row_id || !offered.insert(row.row_id).second) return false;
+    for (const auto& row : resolutions) {
+        if ((row.choice != ConflictChoice::Replace && row.choice != ConflictChoice::Skip &&
+             row.choice != ConflictChoice::KeepBoth) || !selected.insert(row.row_id).second ||
+            !offered.contains(row.row_id)) return false;
+    }
+    return true;
+}
 
 struct ConflictItemInfo {
     uint64_t token = 0;
@@ -451,6 +471,7 @@ private:
     std::mutex delete_wait_mutex_;
     std::condition_variable delete_wait_cv_;
     std::atomic<bool> delete_active_{false};
+    DeleteItemProgress delete_item_progress_; // guarded by mutex_, like status_
     std::atomic<bool> delete_cancel_{false};
     struct ShellCompletion {
         uint32_t hr = 0;

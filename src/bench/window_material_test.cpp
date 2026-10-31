@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ui/window_material.h"
 
 #include <chrono>
@@ -217,12 +222,14 @@ int wmain() {
         const ULONGLONG deadline = GetTickCount64() + 1000;
         while (material->DecodeAttemptsForTesting() == before && GetTickCount64() < deadline)
             Sleep(1);
+        const bool entered = material->DecodeAttemptsForTesting() == before + 1;
+        passed &= Report("stalled decode request enters the worker before destruction", entered);
         const auto start = std::chrono::steady_clock::now();
         delete material;
         const double elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - start).count();
         std::printf("[INFO] destructor during 1500 ms stall %.3f ms\n", elapsed);
-        passed &= Report("destructor is bounded during stalled decode", elapsed < 300.0);
+        passed &= Report("destructor is bounded during stalled decode", entered && elapsed < 300.0);
         Sleep(1550);
     }
 

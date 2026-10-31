@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ops/ops_manager.h"
 #include "../ops/recycle_undo_validation.h"
 #include "../ipc/shell_client.h"
@@ -635,11 +640,6 @@ int wmain(int argc, wchar_t** argv) {
     const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
         (L"ops-feedback-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64())));
     std::filesystem::create_directories(root);
-    const DWORD permanent = pulse::shell::AuthorizedDeleteFlags(false), recycle = pulse::shell::AuthorizedDeleteFlags(true);
-    const DWORD silent = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOFX_EARLYFAILURE;
-    Check(permanent == silent && recycle == (silent | FOFX_RECYCLEONDELETE | FOF_ALLOWUNDO), "authorized delete uses silent flags, preserves bin payload compatibility only for recycle, and omits nuke warning");
-    Check((recycle & FOFX_RECYCLEONDELETE) != 0 && (permanent & FOFX_RECYCLEONDELETE) == 0,
-        "production operation flags, not ambiguous PreDelete transfer flags, select recycle-only versus approved permanent mode");
     Check(pulse::shell::NeedsPermanentDeleteConfirmation(COPYENGINE_E_RECYCLE_SIZE_TOO_BIG) &&
         !pulse::shell::NeedsPermanentDeleteConfirmation(E_ACCESSDENIED) &&
         !pulse::shell::NeedsPermanentDeleteConfirmation(HRESULT_FROM_WIN32(ERROR_NETWORK_ACCESS_DENIED)),

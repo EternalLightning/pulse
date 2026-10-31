@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // context_menu.h — Built-in Fluent context menu verbs (stage 1B-2).
 //
 // Built-in verbs only; third-party IContextMenu stays in pulse_shell and is

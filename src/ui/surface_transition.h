@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 #include "ui_compositor.h"
 #include <algorithm>
@@ -6,18 +11,30 @@
 
 namespace pulse::ui {
 
+enum class SurfaceMotion { Fade, Forward, Backward };
+
 // Retain drawing commands rather than copying directory models or GPU pixels.
 // Only the previous and current visible surfaces are retained per pane.
 class SurfaceTransition {
+    friend struct NavigationMotionUiTest;
 public:
     bool pending = false;
 
-    void Reset() { current_.reset(); previous_.reset(); key_.clear(); variant_.clear(); pending = false; }
+    bool MatchesNavigation(const std::wstring& key, uint64_t owner, uint64_t revision) const {
+        return current_.get() && key == key_ && owner == owner_ && revision == revision_;
+    }
+
+    void Reset() {
+        current_.reset(); previous_.reset(); key_.clear(); variant_.clear(); pending = false;
+        owner_ = revision_ = 0;
+        waiting_ = false;
+    }
 
     template<class Draw>
     void Paint(ID2D1DeviceContext* dc, D2D1_RECT_F bounds, const std::wstring& key,
                bool ready, uint64_t now, bool animate, float distance, float duration, Draw draw,
-               std::wstring_view variant = {}, bool direct_variant = false) {
+               std::wstring_view variant = {}, bool direct_variant = false,
+               SurfaceMotion motion = SurfaceMotion::Forward, uint64_t owner = 0, uint64_t revision = 0) {
         if (!animate) { Reset(); draw(); return; }
         if (bounds.left != bounds_.left || bounds.top != bounds_.top ||
             bounds.right != bounds_.right || bounds.bottom != bounds_.bottom) Reset();
@@ -29,17 +46,23 @@ public:
             pending = false;
             variant_ = variant;
         }
-        if (key != key_ || variant != variant_ || (ready && !ready_ && !waiting_)) {
+        const bool owner_changed = owner != owner_;
+        const bool navigated = key != key_ || owner_changed || revision != revision_;
+        if (navigated || variant != variant_) {
             // A rapid second navigation starts from the last composed frame.
             previous_ = std::move(current_);
-            direction_ = key == key_ ? 0.0f : !key_.empty() && key_.starts_with(key) ? -1.0f : 1.0f;
+            // Navigation commands own direction. A tab switch or a view change
+            // must not replay the last navigation stored on the destination tab.
+            direction_ = !navigated || owner_changed || motion == SurfaceMotion::Fade ? 0.0f :
+                motion == SurfaceMotion::Backward ? -1.0f : 1.0f;
             key_ = key;
             variant_ = variant;
+            owner_ = owner;
+            revision_ = revision;
             started_ = now;
             waiting_ = !ready;
             pending = previous_.get() != nullptr;
         }
-        ready_ = ready;
         if (waiting_ && ready) { waiting_ = false; started_ = now; }
         const auto elapsed = now >= started_ ? now - started_ : 0;
         // Brief enumerations keep the old visual; slow folders reveal their
@@ -83,9 +106,9 @@ private:
     std::wstring variant_;
     D2D1_RECT_F bounds_{};
     uint64_t started_ = 0;
+    uint64_t owner_ = 0, revision_ = 0;
     float direction_ = 1.0f;
     bool waiting_ = false;
-    bool ready_ = false;
 
     static void Image(ID2D1DeviceContext* dc, ID2D1Image* image, D2D1_RECT_F bounds,
                       float opacity, float offset) {

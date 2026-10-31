@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // tab_shape.cpp — Chromium HorizontalTabStyleViews::GetPath, in D2D.
 // Active tabs: convex top corners + concave bottom shoulders so the tab
 // grows out of the toolbar. Inactive tabs stay a detached rounded rect.

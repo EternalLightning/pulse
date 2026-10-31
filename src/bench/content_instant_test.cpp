@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/content_search_client.h"
 #include "../index/content_scope.h"
 #include "../index/content_config_storage.h"
@@ -42,8 +47,9 @@ uint64_t Cpu() {
 int RunInstantDirectoryTests(const std::filesystem::path& base) {
     const auto logs = base / L"directory-logs";
     SetEnvironmentVariableW(L"PULSE_CONTENT_TIMING_DIR", logs.c_str());
-    for (bool ancestor : {false, true}) {
-        const auto fixture = base / (ancestor ? L"ancestor-import" : L"directory-replace");
+    for (int mode : {0, 1, 2}) {
+        const bool ancestor = mode != 0;
+        const auto fixture = base / (mode == 2 ? L"configured-root-ancestor" : ancestor ? L"ancestor-import" : L"directory-replace");
         const auto root = fixture / L"files", profile = fixture / L"profile";
         const auto slot = root / L"slot";
         const auto scope = ancestor ? slot / L"mid" / L"leaf" : root;
@@ -55,7 +61,7 @@ int RunInstantDirectoryTests(const std::filesystem::path& base) {
             Write(slot / L"changed.txt", "directory_marker before");
         }
         ContentIndex index((profile / L"content.sqlite").wstring(), ContentAgentMode::Instant);
-        ContentIndexConfig config; config.roots = {{root.wstring()}};
+        ContentIndexConfig config; config.roots = {{(mode == 2 ? scope : root).wstring()}};
         config.excluded_directories = {L"excluded"};
         const bool configured = index.Configure(config);
         Check(configured, "directory delta fixture has isolated instant configuration");
@@ -218,12 +224,19 @@ int RunInstantGapTests(const std::filesystem::path& base) {
         const bool accepted = callback(progress, {}); started = true; return accepted;
     };
     ContentSearchRequest request; request.generation = ++generation; request.subscribe = true;
-    std::thread active([&] { RunInstantContentSession(index, request, cancel, [](const auto&, auto) { return true; }, &hooks); exited = true; });
+    std::thread active([&] {
+        if (GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_CANCEL_STALL", nullptr, 0)) {
+            started = true;
+            Sleep(INFINITE); // The parent job must terminate this deliberate cancellation regression.
+        }
+        RunInstantContentSession(index, request, cancel, [](const auto&, auto) { return true; }, &hooks);
+        exited = true;
+    });
     Check(Await([&] { return started.load(); }), "subscribed fixture reaches its idle wait");
     const auto stop_started = GetTickCount64(); cancel = true;
     const bool stopped = Await([&] { return exited.load(); }, 2000);
-    active.join();
     Check(stopped && GetTickCount64() - stop_started < 2000, "cancellation interrupts a paused notification wait within two seconds");
+    active.join(); // This entire child is subject to the owning parent's deadline.
     size_t log_rows = 0;
     bool private_text = false, phases = false;
     for (const auto& entry : std::filesystem::directory_iterator(logs)) {
@@ -239,8 +252,12 @@ int RunInstantGapTests(const std::filesystem::path& base) {
     return failures ? 1 : 0;
 }
 int RunInstantLifecycleTests(const std::filesystem::path& base) {
-    const auto profile = base / L"profile", files = base / L"files";
+    const bool multi_root = GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_MULTIROOT", nullptr, 0) != 0;
+    const auto profile = base / L"profile", scope_base = base / L"files";
+    const auto files = multi_root ? scope_base / L"second" : scope_base;
+    const auto first_root = scope_base / L"first";
     std::filesystem::create_directories(profile); std::filesystem::create_directories(files);
+    if (multi_root) std::filesystem::create_directories(first_root);
     SetEnvironmentVariableW(L"LOCALAPPDATA", profile.c_str());
     SetEnvironmentVariableW(L"PULSE_DOCUMENT_ADMISSION_DIR", profile.c_str());
     const auto logs = base / L"logs";
@@ -261,7 +278,7 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
         SetEnvironmentVariableW(L"PULSE_INDEX_FEED_PIPE", (L"\\\\.\\pipe\\PulseIndex.Test." + token).c_str());
         wchar_t module[32768]{}; GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
         const auto exe = std::filesystem::path(module).parent_path() / L"Pulse.Index.exe";
-        std::wstring command = L"\"" + exe.wstring() + L"\" --test-host " + token + L" \"" + files.wstring() + L"\" \"" + (base / L"filename-cache").wstring() + L"\"";
+        std::wstring command = L"\"" + exe.wstring() + L"\" --test-host " + token + L" \"" + scope_base.wstring() + L"\" \"" + (base / L"filename-cache").wstring() + L"\"";
         STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
         if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) {
             Check(false, "isolated filename feed host launches"); return 1;
@@ -274,9 +291,10 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     client.Start(nullptr, 0, ContentAgentMode::Instant);
     Check(Await([&] { return client.ConfigurationReady(); }), "instant config loads without starting a writer");
     ContentIndexConfig config; config.roots = {{files.wstring()}};
+    if (multi_root) config.roots.push_back({first_root.wstring()});
     config.shared_scope = shared;
     client.Configure(config);
-    Check(Await([&] { return client.GetConfig().roots.size() == 1; }), "instant scope can be saved without a body database");
+    Check(Await([&] { return client.GetConfig().roots.size() == config.roots.size(); }), "instant scope can be saved without a body database");
     Check(Children().empty() && !std::filesystem::exists(cache), "startup/configuration have no content process or body database");
     wchar_t seconds[16]{}; GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_IDLE_SECONDS", seconds, ARRAYSIZE(seconds));
     const DWORD idle_ms = wcstoul(seconds, nullptr, 10) * 1000;
@@ -291,6 +309,7 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     }
     ContentSearchRequest request; request.generation = 990001; request.session_id = 1;
     request.root = files.wstring(); request.needle = L"instant_marker"; request.task_scan = true; request.subscribe = true;
+    if (multi_root) { request.root=first_root.wstring(); request.roots={first_root.wstring(),files.wstring()}; }
     std::map<std::wstring, ContentHit> visible;
     size_t completed = 0, delta_count = 0;
     DWORD last_error = 0;
@@ -335,6 +354,13 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     std::filesystem::remove(files / L"renamed.txt");
     Check(Await([&] { pump(); return visible.empty(); }), "deleted file is removed by a delta");
     Check(completed == 1 && delta_count >= 4, "changes never restart the full search");
+    if (multi_root) {
+        Write(first_root / L"first.txt", "instant_marker");
+        Check(Await([&] { pump(); return visible.size()==1 && visible.contains(ContentScopeKey((first_root/L"first.txt").wstring())); }),
+            "first requested root remains live alongside the second root");
+        std::filesystem::remove(first_root/L"first.txt");
+        Check(Await([&] { pump(); return visible.empty(); }), "deleting in the first requested root converges");
+    }
     const auto before_delta = delta_count;
     Write(nested / L"z-trigger.txt", "instant_marker");
     Check(Await([&] { pump(); return visible.size() == 1; }) && delta_count - before_delta <= 3,
@@ -396,15 +422,17 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     ContentSearchClient scoped;
     scoped.Start(nullptr, 0, ContentAgentMode::Instant); Await([&] { return scoped.ConfigurationReady(); });
     Write(nested / L"scoped.txt", "instant_marker");
-    auto scoped_request = request; scoped_request.root = nested.wstring(); scoped_request.generation += 500;
+    auto scoped_request = request; scoped_request.roots.clear(); scoped_request.root = nested.wstring(); scoped_request.generation += 500;
     scoped.SearchAsync(scoped_request); bool scoped_hit = false, scoped_removed = false, scoped_done = false;
-    const bool rename_after_complete = GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_RENAME_AFTER_COMPLETE", nullptr, 0) != 0;
     auto scoped_pump = [&] { ContentSearchUpdate update; while (scoped.TakeUpdate(update)) {
         scoped_done |= update.progress.done && !update.progress.delta;
         for (const auto& hit : update.hits) { scoped_hit |= !hit.removed; scoped_removed |= hit.removed; }
     } };
-    Check(Await([&] { scoped_pump(); return scoped_hit && (!rename_after_complete || scoped_done); }),
-        rename_after_complete ? "scoped query completes within nested requested root" : "scoped query searches within nested requested root");
+    // Windows can reject an ancestor rename while the initial scan still has
+    // descendant enumeration/read handles. Exercise the subscription after its
+    // completion barrier so a failed file operation cannot mask delta handling.
+    Check(Await([&] { scoped_pump(); return scoped_hit && scoped_done; }),
+        "scoped query completes within nested requested root");
     std::error_code rename_error;
     std::filesystem::rename(files / L"parent", files / L"renamed-parent", rename_error);
     if (rename_error) printf("ANCESTOR_RENAME error=%d message=%s\n", rename_error.value(), rename_error.message().c_str());

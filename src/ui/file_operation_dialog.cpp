@@ -1,5 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../common/windows_compat.h"
 #include "file_operation_dialog.h"
+#include "dialog_keyboard.h"
 #include "../ops/operation_presentation.h"
 #include "../common/localization.h"
 #include "../common/text_format.h"
@@ -477,6 +483,12 @@ private:
             return 0;
         case WM_NCCALCSIZE:
             return 0;
+        case WM_GETMINMAXINFO: {
+            auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+            info->ptMinTrackSize = {static_cast<LONG>(std::ceil(480.0f * scale_)),
+                static_cast<LONG>(std::ceil((details_ ? 538.0f : 428.0f) * scale_))};
+            return 0;
+        }
         case WM_NCHITTEST:
             return pulse::ui::BorderlessHitTest(hwnd_, lparam, 44 * scale_, CloseRect());
         case WM_SIZE:
@@ -1378,6 +1390,7 @@ void FileOperationWindow::Render(bool present) {
     close.hovered = hover_ == 1;
     close.pressed = pressed_ == 1;
     painter_.DrawTitleBarButton(chrome.close, fluent::TitleBarButtonRole::Close, {}, close);
+    if (GetFocus() == hwnd_ && focus_ == 1) painter_.DrawFocusRing(chrome.close, 4.0f * scale_);
     painter_.FillRoundedRect(D2D1::RectF(0, ScaleDip(scale_, kTitleH), width,
                                          ScaleDip(scale_, kTitleH) + 1.0f), 0, theme.stroke_divider);
 
@@ -1610,6 +1623,7 @@ void FileOperationWindow::Render(bool present) {
     fluent::ControlState detail_state{};
     detail_state.hovered = hover_ == 5;
     detail_state.pressed = pressed_ == 5;
+    detail_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 5;
     painter_.DrawButton({ chrome.details, labels.details,
         detailed_ ? L"\xE70E" : L"\xE70D", fluent::ButtonKind::Transparent, detail_state });
     if (labels.show_pause) {
@@ -1618,6 +1632,7 @@ void FileOperationWindow::Render(bool present) {
             && status_.phase != ops::OpPhase::WaitingForConflict;
         pause_state.hovered = hover_ == 3;
         pause_state.pressed = pressed_ == 3;
+        pause_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 3;
         painter_.DrawButton({ chrome.pause, labels.pause, {},
                               fluent::ButtonKind::Standard, pause_state });
     }
@@ -1625,6 +1640,7 @@ void FileOperationWindow::Render(bool present) {
     cancel_state.enabled = status_.phase != ops::OpPhase::Cancelling && !(cancel_requested_ && status_.active);
     cancel_state.hovered = hover_ == 4;
     cancel_state.pressed = pressed_ == 4;
+    cancel_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 4;
     painter_.DrawButton({ chrome.cancel, labels.cancel, {},
                           fluent::ButtonKind::Standard, cancel_state });
 #ifdef PULSE_UI_TEST_HOOKS
@@ -1677,6 +1693,31 @@ void FileOperationWindow::ScrollFailureDetails(float delta, bool animate) {
         AnimationTimeMs(), animate && animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
     UpdateFailureScrollTimer();
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+bool FileOperationWindow::ControlEnabled(int id) const {
+    if (id == 1 || id == 5) return true;
+    if (id == 4) return status_.phase != ops::OpPhase::Cancelling && !(cancel_requested_ && status_.active);
+    const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
+    return id == 3 && labels.show_pause && status_.active && !cancel_requested_ &&
+        status_.phase != ops::OpPhase::Failed && status_.phase != ops::OpPhase::Cancelling &&
+        status_.phase != ops::OpPhase::WaitingForConflict;
+}
+
+void FileOperationWindow::ActivateControl(int id) {
+    if (!ControlEnabled(id)) return;
+    if (id == 1) RequestClose();
+    else if (id == 4) RequestCancel();
+    else if (id == 3) {
+        if (status_.phase == ops::OpPhase::Paused) {
+            if (callbacks_.resume) callbacks_.resume();
+        } else if (callbacks_.pause) callbacks_.pause();
+    } else if (id == 5) {
+        failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
+        KillTimer(hwnd_, kScrollTimer);
+        detailed_ = !detailed_;
+        ResizeForDetails(true);
+    }
 }
 
 LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
@@ -1789,22 +1830,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         pressed_ = 0;
         ReleaseCapture();
         if (hit == pressed) {
-            if (hit == 1) {
-                RequestClose();
-            } else if (hit == 4) {
-                RequestCancel();
-            } else if (hit == 3 && status_.active && !cancel_requested_ &&
-                     status_.phase != ops::OpPhase::WaitingForConflict &&
-                     status_.phase != ops::OpPhase::Cancelling) {
-                if (status_.phase == ops::OpPhase::Paused) {
-                    if (callbacks_.resume) callbacks_.resume();
-                } else if (callbacks_.pause) callbacks_.pause();
-            } else if (hit == 5) {
-                failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
-                KillTimer(hwnd_, kScrollTimer);
-                detailed_ = !detailed_;
-                ResizeForDetails(true);
-            }
+            ActivateControl(hit);
         }
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
@@ -1816,6 +1842,17 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         }
         break;
     case WM_KEYDOWN:
+        if (wparam == VK_TAB) {
+            std::vector<DialogFocusTarget> targets;
+            for (int id : {5, 3, 4, 1}) if (ControlEnabled(id)) targets.push_back({id});
+            MoveDialogFocus(hwnd_, focus_, targets, GetKeyState(VK_SHIFT) < 0);
+            return 0;
+        }
+        if (wparam == VK_SPACE || wparam == VK_RETURN) {
+            ActivateControl(focus_);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         if (wparam == VK_ESCAPE) {
             RequestClose();
             return 0;

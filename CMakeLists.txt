@@ -1,7 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 cmake_minimum_required(VERSION 3.25)
 # Compiler detection and every later dependency scan must use the same language.
 set(ENV{VSLANG} "1033")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" PULSE_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt")
 project(Pulse VERSION ${PULSE_VERSION} LANGUAGES C CXX)
 if(NOT DEFINED PROJECT_VERSION_TWEAK OR PROJECT_VERSION_TWEAK STREQUAL "")
     set(PROJECT_VERSION_TWEAK 0)
@@ -601,6 +607,12 @@ if(PULSE_SHELL_SOURCES)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/shell_host/shell_host.manifest")
 endif()
 
+add_executable(pulse_shell_request_ownership_test EXCLUDE_FROM_ALL
+    src/bench/shell_request_ownership_test.cpp src/shell_host/deletion_identity.cpp)
+target_compile_options(pulse_shell_request_ownership_test PRIVATE /Gy /Gw)
+target_link_options(pulse_shell_request_ownership_test PRIVATE /OPT:REF /INCREMENTAL:NO)
+target_link_libraries(pulse_shell_request_ownership_test PRIVATE ole32 shell32 uuid advapi32 user32 shlwapi)
+
 # ---- Pulse.Preview.exe: thumbnail decoding / Shell provider isolation ----
 add_executable(pulse_preview WIN32 src/preview_host/main.cpp src/preview_host/video_codec.cpp
     src/preview_host/svg_raster.cpp src/preview_host/metafile_raster.cpp
@@ -814,20 +826,21 @@ foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold drive_view b
     add_executable(pulse_${model_fixture}_test
         src/bench/${model_fixture}_test.cpp src/bench/localization_test.rc
         src/app/app_model.cpp src/app/places.cpp src/app/entry_sort.cpp
-        src/app/entry_order_hold.cpp src/app/snapshot_patch.cpp
+        src/app/entry_order_hold.cpp src/app/snapshot_patch.cpp src/app/link_resolve.cpp
         src/app/date_groups.cpp src/ui/view_layout.cpp src/model/search_query.cpp
         src/app/column_view_model.cpp src/index/index_query.cpp src/index/search_kinds.cpp
         src/fs/fs_enum.cpp src/index/content_result_store.cpp src/model/item_filter.cpp src/index/filename_pinyin.cpp)
+    target_sources(pulse_${model_fixture}_test PRIVATE src/app/cloud_roots.cpp src/app/cloud_root_catalog.cpp)
     target_compile_options(pulse_${model_fixture}_test PRIVATE /W4 /permissive- /utf-8)
     target_link_options(pulse_${model_fixture}_test PRIVATE /MANIFEST:NO)
     target_link_libraries(pulse_${model_fixture}_test PRIVATE
-        pulse_sqlite pulse_localization pulse_text shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+        pulse_sqlite pulse_localization pulse_text pulse_shell_query_client shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
 endforeach()
 get_target_property(controller_model_sources pulse_quick_access_badges_test SOURCES)
 list(FILTER controller_model_sources EXCLUDE REGEX "(quick_access_badges_test\\.cpp|localization_test\\.rc|view_layout\\.cpp|index_query\\.cpp|search_kinds\\.cpp)$")
 target_sources(pulse_app_controllers_test PRIVATE ${controller_model_sources}
     src/app/cloud_roots.cpp src/app/cloud_root_catalog.cpp)
-target_link_libraries(pulse_app_controllers_test PRIVATE pulse_sqlite pulse_text secur32 bcrypt netapi32)
+target_link_libraries(pulse_app_controllers_test PRIVATE pulse_sqlite pulse_text pulse_shell_query_client secur32 bcrypt netapi32)
 target_sources(pulse_folder_grouping_test PRIVATE src/app/folder_view_prefs.cpp)
 target_sources(pulse_drive_view_test PRIVATE src/app/context_menu.cpp src/app/command_catalog.cpp)
 
@@ -835,7 +848,7 @@ get_target_property(command_catalog_model_sources pulse_drive_view_test SOURCES)
 list(FILTER command_catalog_model_sources EXCLUDE REGEX "drive_view_test\\.cpp$")
 add_executable(pulse_command_catalog_test src/bench/command_catalog_test.cpp ${command_catalog_model_sources})
 target_link_options(pulse_command_catalog_test PRIVATE /MANIFEST:NO)
-target_link_libraries(pulse_command_catalog_test PRIVATE pulse_sqlite pulse_localization pulse_text
+target_link_libraries(pulse_command_catalog_test PRIVATE pulse_sqlite pulse_localization pulse_text pulse_shell_query_client
     shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
 
 add_executable(pulse_item_filter_test src/bench/item_filter_test.cpp src/model/item_filter.cpp
@@ -846,7 +859,7 @@ get_target_property(text_compare_model_sources pulse_drive_view_test SOURCES)
 list(FILTER text_compare_model_sources EXCLUDE REGEX "drive_view_test\\.cpp$")
 target_sources(pulse_text_compare_test PRIVATE ${text_compare_model_sources})
 target_link_libraries(pulse_text_compare_test PRIVATE
-    pulse_sqlite pulse_localization shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+    pulse_sqlite pulse_localization pulse_shell_query_client shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
 
 add_executable(pulse_smooth_scroll_test src/bench/smooth_scroll_test.cpp)
 
@@ -859,7 +872,7 @@ target_link_libraries(pulse_text_diff_ui_test PRIVATE pulse_text pulse_localizat
 pulse_enable_lumatext(pulse_text_diff_ui_test)
 target_sources(pulse_breadcrumb_test PRIVATE src/ui/breadcrumb.cpp)
 target_sources(pulse_staging_tray_test PRIVATE src/app/tray_metadata.cpp src/app/app_worker.cpp
-    src/app/link_resolve.cpp src/fs/fs_snapshot.cpp src/fs/fs_recycle.cpp src/fs/fs_net_cache.cpp)
+    src/fs/fs_snapshot.cpp src/fs/fs_recycle.cpp src/fs/fs_net_cache.cpp)
 target_link_libraries(pulse_staging_tray_test PRIVATE pulse_shell_query_client)
 add_executable(pulse_json_utils_test src/bench/json_utils_test.cpp)
 add_executable(pulse_utf8_atomic_test src/bench/utf8_atomic_test.cpp)
@@ -871,7 +884,7 @@ add_executable(pulse_json_persistence_test src/bench/json_persistence_test.cpp $
     src/app/folder_view_prefs.cpp src/app/context_menu_prefs.cpp
     src/app/builtin_menu_items.cpp src/model/builtin_menu_items.cpp)
 target_link_libraries(pulse_json_persistence_test PRIVATE
-    pulse_sqlite pulse_localization pulse_text pulse_user_storage
+    pulse_sqlite pulse_localization pulse_text pulse_user_storage pulse_shell_query_client
     shell32 ole32 uuid shlwapi netapi32 bcrypt secur32 advapi32 user32)
 get_target_property(session_windows_sources pulse_json_persistence_test SOURCES)
 list(FILTER session_windows_sources EXCLUDE REGEX "json_persistence_test\\.cpp$")
@@ -884,7 +897,19 @@ add_executable(pulse_session_layout_test src/bench/session_layout_test.cpp ${jso
 target_compile_options(pulse_session_layout_test PRIVATE /Gy /Gw)
 target_link_options(pulse_session_layout_test PRIVATE /OPT:REF /INCREMENTAL:NO)
 target_link_libraries(pulse_session_layout_test PRIVATE
-    pulse_sqlite pulse_localization pulse_text pulse_user_storage shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+    pulse_sqlite pulse_localization pulse_text pulse_user_storage pulse_shell_query_client shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
+
+add_executable(pulse_snapshot_patch_link_test EXCLUDE_FROM_ALL
+    src/bench/snapshot_patch_link_test.cpp src/app/snapshot_patch.cpp
+    src/app/link_resolve.cpp src/fs/fs_enum.cpp)
+target_compile_options(pulse_snapshot_patch_link_test PRIVATE /W4 /permissive- /utf-8)
+target_link_libraries(pulse_snapshot_patch_link_test PRIVATE netapi32)
+
+add_executable(pulse_app_integrations_lifecycle_test EXCLUDE_FROM_ALL
+    src/bench/app_integrations_lifecycle_test.cpp src/app/device_registry.cpp
+    src/fs/device_path.cpp src/fs/fs_enum.cpp)
+target_compile_options(pulse_app_integrations_lifecycle_test PRIVATE /W4 /permissive- /utf-8)
+target_link_libraries(pulse_app_integrations_lifecycle_test PRIVATE user32 netapi32)
 target_sources(pulse_ops_test PRIVATE src/bench/json_undo_parser_test.cpp)
 
 add_executable(pulse_file_lock_owner_test
@@ -1150,6 +1175,73 @@ add_executable(pulse_content_paging_test src/bench/content_paging_test.cpp
 target_link_libraries(pulse_content_paging_test PRIVATE pulse_sqlite pulse_text bcrypt ole32)
 add_dependencies(pulse_content_paging_test pulse_index)
 
+add_executable(pulse_content_stream_scaling_test EXCLUDE_FROM_ALL
+    src/bench/content_stream_scaling_test.cpp src/index/content_result_store.cpp)
+target_link_libraries(pulse_content_stream_scaling_test PRIVATE pulse_sqlite advapi32 ole32 user32)
+
+add_executable(pulse_app_core_remaining_test EXCLUDE_FROM_ALL src/bench/app_core_remaining_test.cpp)
+target_link_libraries(pulse_app_core_remaining_test PRIVATE user32 shell32 ole32 advapi32 uuid)
+
+add_executable(pulse_app_integrations_recovery_test EXCLUDE_FROM_ALL
+    src/bench/app_integrations_recovery_test.cpp src/app/system_ctx_registry.cpp
+    src/app/system_ctx_model.cpp src/app/places.cpp src/fs/fs_enum.cpp src/ui/view_layout.cpp)
+target_compile_options(pulse_app_integrations_recovery_test PRIVATE /Gy /Gw)
+target_link_options(pulse_app_integrations_recovery_test PRIVATE /OPT:REF)
+target_link_libraries(pulse_app_integrations_recovery_test PRIVATE
+    advapi32 shell32 shlwapi ole32 version uuid user32 mpr netapi32)
+
+add_executable(pulse_audit_common_remaining_test EXCLUDE_FROM_ALL
+    src/bench/audit_common_remaining_test.cpp src/model/search_query.cpp src/model/batch_rename.cpp
+    src/fs/fs_enum.cpp src/index/index_query.cpp src/index/search_kinds.cpp src/index/filename_pinyin.cpp)
+target_link_libraries(pulse_audit_common_remaining_test PRIVATE ole32 shell32 uuid shlwapi netapi32)
+
+add_executable(pulse_jpeg_orientation_test EXCLUDE_FROM_ALL
+    src/bench/jpeg_orientation_test.cpp src/preview_host/image_decoder.cpp)
+target_link_libraries(pulse_jpeg_orientation_test PRIVATE ole32 windowscodecs uuid)
+
+add_executable(pulse_audit_ui_identity_ime_test EXCLUDE_FROM_ALL src/bench/audit_ui_identity_ime_test.cpp)
+target_compile_options(pulse_audit_ui_identity_ime_test PRIVATE /Gy /Gw)
+target_link_options(pulse_audit_ui_identity_ime_test PRIVATE /OPT:REF)
+target_link_libraries(pulse_audit_ui_identity_ime_test PRIVATE
+    user32 gdi32 comctl32 ole32 shell32 uuid windowscodecs)
+
+add_executable(pulse_delete_confirmation_owner_test EXCLUDE_FROM_ALL src/bench/delete_confirmation_owner_test.cpp)
+target_link_libraries(pulse_delete_confirmation_owner_test PRIVATE user32)
+
+add_executable(pulse_bitmap_artifact_test EXCLUDE_FROM_ALL src/bench/bitmap_artifact_test.cpp)
+target_link_libraries(pulse_bitmap_artifact_test PRIVATE ole32)
+
+add_executable(pulse_audit_ui_remaining_test EXCLUDE_FROM_ALL
+    src/bench/audit_ui_remaining_test.cpp src/bench/audit_ui_remaining_test.rc
+    src/ui/advanced_search_dialog.cpp src/ui/batch_rename_dialog.cpp
+    src/ui/connect_server_dialog.cpp src/ui/file_operation_dialog.cpp src/ui/text_diff_window.cpp
+    src/ui/quick_preview_window.cpp src/ui/quick_preview_playback.cpp src/ui/preview_handler_host.cpp
+    src/ui/video_preview.cpp src/ui/thumbnail_cache.cpp src/ui/thumbnail_disk_cache.cpp
+    src/ui/color_picker.cpp src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/typography.cpp
+    src/ui/ui_compositor.cpp src/ui/window_material.cpp src/ui/window_helpers.cpp
+    src/ui/dialog_lifecycle.cpp src/ui/tab_shape.cpp src/ui/edit_host.cpp src/ui/svg_bitmap.cpp
+    src/model/batch_rename.cpp src/model/search_query.cpp src/index/index_query.cpp
+    src/index/search_kinds.cpp src/index/filename_pinyin.cpp src/fs/fs_enum.cpp
+    src/common/localization.cpp src/common/text_decode.cpp src/app/text_diff.cpp
+    src/ops/file_lock_owner.cpp src/ops/clipboard.cpp src/ipc/shell_interaction_client.cpp
+    src/ipc/shell_query_client.cpp src/ipc/shell_client.cpp)
+target_include_directories(pulse_audit_ui_remaining_test PRIVATE src "${CMAKE_BINARY_DIR}/generated")
+target_compile_definitions(pulse_audit_ui_remaining_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_compile_options(pulse_audit_ui_remaining_test PRIVATE /Gy /Gw)
+target_link_options(pulse_audit_ui_remaining_test PRIVATE /OPT:REF /MANIFEST:NO)
+target_link_libraries(pulse_audit_ui_remaining_test PRIVATE
+    d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 oleaut32 shell32 uuid comctl32
+    user32 gdi32 windowscodecs advapi32 shlwapi netapi32 rstrtmgr mfuuid propsys bcrypt)
+pulse_enable_lumatext(pulse_audit_ui_remaining_test)
+
+add_executable(pulse_content_search_isolation_test EXCLUDE_FROM_ALL
+    src/bench/content_search_isolation_test.cpp src/index/content_search_client.cpp
+    src/index/content_search_session.cpp src/index/content_result_store.cpp)
+target_link_libraries(pulse_content_search_isolation_test PRIVATE
+    pulse_user_storage pulse_sqlite pulse_localization pulse_text
+    advapi32 shlwapi ole32 shell32 user32 uuid)
+add_dependencies(pulse_content_search_isolation_test pulse_index)
+
 foreach(content_client_target pulse pulse_content_search_test pulse_content_index_test pulse_content_paging_test)
     target_link_libraries(${content_client_target} PRIVATE pulse_user_storage)
     target_sources(${content_client_target} PRIVATE src/index/content_search_session.cpp)
@@ -1402,6 +1494,35 @@ get_target_property(feature_sync_sources pulse SOURCES)
 add_executable(pulse_feature_sync_application_test EXCLUDE_FROM_ALL
     src/bench/feature_sync_application_test.cpp ${feature_sync_sources})
 get_target_property(feature_sync_libraries pulse LINK_LIBRARIES)
+
+add_executable(pulse_item_reflow_animation_test EXCLUDE_FROM_ALL
+    src/bench/item_reflow_animation_test.cpp)
+target_compile_options(pulse_item_reflow_animation_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_item_reflow_geometry_test EXCLUDE_FROM_ALL src/bench/item_reflow_geometry_test.cpp)
+target_compile_options(pulse_item_reflow_geometry_test PRIVATE /W4 /permissive- /utf-8)
+add_executable(pulse_shell_query_connection_test EXCLUDE_FROM_ALL src/bench/shell_query_connection_test.cpp)
+target_compile_options(pulse_shell_query_connection_test PRIVATE /W4 /permissive- /utf-8)
+add_executable(pulse_item_reflow_rows_test EXCLUDE_FROM_ALL src/bench/item_reflow_rows_test.cpp)
+target_compile_options(pulse_item_reflow_rows_test PRIVATE /W4 /permissive- /utf-8)
+add_executable(pulse_item_reflow_bitmap_test EXCLUDE_FROM_ALL
+    src/bench/item_reflow_bitmap_test.cpp src/ui/animation_image_cache.cpp)
+target_compile_options(pulse_item_reflow_bitmap_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_view_mode_scroll_anchor_test EXCLUDE_FROM_ALL
+    src/bench/view_mode_scroll_anchor_test.cpp src/ui/view_layout.cpp)
+target_compile_options(pulse_view_mode_scroll_anchor_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_item_reflow_ui_test EXCLUDE_FROM_ALL
+    src/bench/item_reflow_ui_test.cpp ${feature_sync_sources})
+target_link_libraries(pulse_item_reflow_ui_test PRIVATE ${feature_sync_libraries})
+foreach(reflow_fixture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
+    get_target_property(reflow_fixture_value pulse ${reflow_fixture_property})
+    if(reflow_fixture_value)
+        set_property(TARGET pulse_item_reflow_ui_test PROPERTY ${reflow_fixture_property} "${reflow_fixture_value}")
+    endif()
+endforeach()
+
 target_link_libraries(pulse_feature_sync_application_test PRIVATE ${feature_sync_libraries})
 foreach(feature_sync_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
     get_target_property(feature_sync_value pulse ${feature_sync_property})

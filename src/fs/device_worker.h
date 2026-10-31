@@ -1,11 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_worker.h - The thread every DeviceSource call runs on.
 //
 // One STA thread, created on demand and gone after `idle_exit_ms` without
 // work, so a PC without a phone never has it. A Shell / MTP call cannot be
 // interrupted: when a task overruns its budget the thread is abandoned (it
 // exits once that call returns, without running anything else) and the
-// queued tasks move to a fresh thread, so one stuck phone call never blocks
-// the next request. The UI only ever posts and gets results back by message.
+// queued tasks move to a fresh thread. At most four timed-out calls may remain
+// alive: when saturated, requests are rejected through on_stuck until a retired
+// call returns. The UI only ever posts and gets results back by message.
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -21,7 +27,7 @@ public:
     DeviceWorker& operator=(const DeviceWorker&) = delete;
 
     // Runs `task` on the STA thread, in posting order. With a budget, a task
-    // still running after budget_ms abandons its thread and `on_stuck` runs
+    // still running budget_ms after execution starts abandons its thread and `on_stuck` runs
     // on a pool thread (the task itself keeps running until its call returns).
     void Post(std::function<void()> task, uint32_t budget_ms = 0,
               std::function<void()> on_stuck = {});

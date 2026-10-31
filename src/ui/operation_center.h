@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "fluent_components.h"
@@ -61,7 +66,13 @@ public:
 
 private:
     enum class Action { Clear, Details, Cancel, Pause, Resume, Destination, ReturnToTray, ResumeIncomplete };
-    struct Button { D2D1_RECT_F bounds{}; Action action{}; uint64_t task_id = 0; std::wstring text, path; };
+    struct Button {
+        D2D1_RECT_F bounds{};
+        Action action{};
+        uint64_t task_id = 0;
+        std::wstring text, path;
+        float content_top = 0, content_bottom = 0;
+    };
     struct Card {
         size_t task = 0;
         D2D1_RECT_F bounds{};
@@ -135,6 +146,7 @@ private:
     bool force_solid_ = false;
     bool dragging_scrollbar_ = false, scroll_animating_ = false;
     float scroll_from_ = 0, scroll_target_ = 0;
+    float scroll_velocity_ = 0, scroll_initial_velocity_ = 0;
     uint64_t scroll_started_ = 0;
     bool resizing_ = false;
     bool cards_animating_ = false, card_scroll_pending_ = false;

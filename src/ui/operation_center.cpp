@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "operation_center.h"
 #include "operation_center_layout.h"
 #include "animation_clock.h"
@@ -295,6 +300,7 @@ void OperationCenter::Layout() {
         if(target==scroll_) StopScroll();
         else if(target!=scroll_target_) {
             scroll_from_=scroll_;scroll_target_=target;scroll_started_=AnimationTimeMs();
+            scroll_velocity_=scroll_initial_velocity_=0;
         }
     } else {
         scroll_from_=scroll_target_=scroll_;
@@ -302,6 +308,7 @@ void OperationCenter::Layout() {
     AnimateCardLayout();
     const float offset = margin + kHeader * s - scroll_;
     for (auto& button : buttons_) if (button.action != Action::Clear) {
+        button.content_top = button.bounds.top; button.content_bottom = button.bounds.bottom;
         button.bounds.top += offset; button.bounds.bottom += offset;
     }
 }
@@ -591,6 +598,7 @@ bool OperationCenter::Render(bool allow_capture) {
         for (size_t i = 0; i < buttons_.size(); ++i) {
             const auto& button = buttons_[i];
             if (button.action == Action::Clear) continue;
+            if (button.bounds.bottom < viewport.top || button.bounds.top > viewport.bottom) continue;
             fluent::ButtonSpec spec;
             spec.bounds = button.bounds; spec.text = button.text;
             spec.kind = fluent::ButtonKind::Standard;

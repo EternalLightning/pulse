@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // index_mft.h — Sequential NTFS $MFT reader (plan.md 阶段 2.5 C).
 // Names, parent FRN, directory flag, data size and last-write time from
 // STANDARD_INFORMATION + FILE_NAME + unnamed $DATA. Used instead of

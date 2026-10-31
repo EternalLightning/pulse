@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_internal.h"
 #include "change_time.h"
 #include "change_tracking_polling.h"
@@ -374,9 +379,19 @@ bool HandleChangeClick(AppState& s, const ui::HitTestResult& hit, POINT point) {
         item.text = time ? DaysText(i == 0 ? 1 : i == 1 ? 3 : 7) : KindText(i == 0 ? UINT32_MAX : i - 1);
         items.push_back(std::move(item));
     }
+    const auto tab_id = tab->network_identity;
+    const auto generation = tab->view_generation;
+    const auto path = tab->current_path;
     ClientToScreen(s.hwnd, &point);
     const int choice = s.menu->TrackPopup(point, std::move(items));
     if (choice > 0) {
+        tab = nullptr;
+        ForEachPane(s, [&](app::Pane& pane) {
+            auto* current = pane.ActiveTab();
+            if (current && current->network_identity == tab_id && current->view_generation == generation &&
+                current->current_path == path) tab = current;
+        });
+        if (!tab) return true;
         if (time) tab->change_days = choice == 1 ? 1 : choice == 2 ? 3 : 7;
         else tab->change_kind = choice == 1 ? UINT32_MAX : choice - 2;
         LoadChangeView(s, *tab, RootOf(*tab));

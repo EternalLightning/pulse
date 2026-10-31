@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_worker.cpp - On-demand STA thread for device calls (device_worker.h).
 #include "device_worker.h"
 
@@ -16,6 +21,8 @@ namespace {
 struct Task {
     uint64_t seq = 0;
     std::function<void()> run;
+    uint32_t budget_ms = 0;
+    std::function<void()> on_stuck;
 };
 
 // One thread's queue. A lane is abandoned when its running task overran its
@@ -39,9 +46,30 @@ struct DeviceWorker::Core {
     uint64_t next_seq = 0;
     uint32_t started = 0;
     uint32_t abandoned = 0;
+    uint32_t retired = 0;
 };
 
 namespace {
+
+constexpr uint32_t kMaxRetiredLanes = 4;
+struct BudgetCheck {
+    std::weak_ptr<DeviceWorker::Core> core;
+    std::weak_ptr<Lane> lane;
+    uint64_t seq = 0;
+    std::function<void()> on_stuck;
+};
+void CALLBACK BudgetExpired(PTP_CALLBACK_INSTANCE, void*, PTP_TIMER);
+
+void CALLBACK RejectedTask(PTP_CALLBACK_INSTANCE, void* context) {
+    std::unique_ptr<std::function<void()>> callback(static_cast<std::function<void()>*>(context));
+    if (*callback) (*callback)();
+}
+
+void Reject(std::function<void()> callback) {
+    if (!callback) return;
+    auto owned = std::make_unique<std::function<void()>>(std::move(callback));
+    if (TrySubmitThreadpoolCallback(RejectedTask, owned.get(), nullptr)) owned.release();
+}
 
 void LaneLoop(std::shared_ptr<DeviceWorker::Core> core, std::shared_ptr<Lane> lane) {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -58,13 +86,39 @@ void LaneLoop(std::shared_ptr<DeviceWorker::Core> core, std::shared_ptr<Lane> la
         Task task = std::move(lane->queue.front());
         lane->queue.pop_front();
         lane->running = task.seq;
+        BudgetCheck check{core, lane, task.seq, std::move(task.on_stuck)};
+        PTP_TIMER timer = task.budget_ms ? CreateThreadpoolTimer(BudgetExpired, &check, nullptr) : nullptr;
+        if (task.budget_ms && !timer) {
+            lane->running = 0;
+            lock.unlock();
+            Reject(std::move(check.on_stuck));
+            task.run = nullptr;
+            lock.lock();
+            continue; // Never run a budgeted call without its watchdog.
+        }
+        if (timer) {
+            ULARGE_INTEGER due{};
+            due.QuadPart = static_cast<ULONGLONG>(-static_cast<LONGLONG>(task.budget_ms) * 10000);
+            FILETIME ft{due.LowPart, due.HighPart};
+            SetThreadpoolTimer(timer, &ft, 0, 0);
+        }
         lock.unlock();
         if (task.run) task.run();
         task.run = nullptr;  // captured state is released on this thread
         lock.lock();
         lane->running = 0;
+        lock.unlock();
+        // The callback takes core->mutex. Drain it while unlocked before its
+        // stack context disappears or the next task uses this lane.
+        if (timer) {
+            SetThreadpoolTimer(timer, nullptr, 0, 0);
+            WaitForThreadpoolTimerCallbacks(timer, TRUE);
+            CloseThreadpoolTimer(timer);
+        }
+        lock.lock();
     }
     lane->exited = true;
+    if (lane->abandoned) --core->retired;
     if (core->live == lane) core->live.reset();
     core->exited_cv.notify_all();
     lock.unlock();
@@ -80,37 +134,32 @@ std::shared_ptr<Lane> StartLaneLocked(const std::shared_ptr<DeviceWorker::Core>&
     return lane;
 }
 
-struct BudgetCheck {
-    std::weak_ptr<DeviceWorker::Core> core;
-    std::weak_ptr<Lane> lane;
-    uint64_t seq = 0;
-    std::function<void()> on_stuck;
-};
-
-void CALLBACK BudgetExpired(PTP_CALLBACK_INSTANCE, void* context, PTP_TIMER timer) {
-    std::unique_ptr<BudgetCheck> check(static_cast<BudgetCheck*>(context));
-    CloseThreadpoolTimer(timer);  // allowed from the callback
-    auto core = check->core.lock();
-    auto lane = check->lane.lock();
+void CALLBACK BudgetExpired(PTP_CALLBACK_INSTANCE, void* context, PTP_TIMER) {
+    const auto& check = *static_cast<BudgetCheck*>(context);
+    auto core = check.core.lock();
+    auto lane = check.lane.lock();
     if (!core || !lane) return;
     bool stuck = false;
+    std::deque<Task> rejected;
     {
         std::lock_guard<std::mutex> lock(core->mutex);
-        if (lane->running == check->seq && !lane->abandoned && !lane->exited) {
+        if (lane->running == check.seq && !lane->abandoned && !lane->exited) {
             stuck = true;
             lane->abandoned = true;
             ++core->abandoned;
+            ++core->retired;
             std::deque<Task> pending = std::move(lane->queue);
             lane->queue.clear();
             if (core->live == lane) core->live.reset();
-            if (!pending.empty()) {
+            if (!pending.empty() && core->retired < kMaxRetiredLanes) {
                 auto fresh = StartLaneLocked(core);
                 fresh->queue = std::move(pending);
                 fresh->cv.notify_one();
-            }
+            } else rejected = std::move(pending);
         }
     }
-    if (stuck && check->on_stuck) check->on_stuck();
+    if (stuck && check.on_stuck) check.on_stuck();
+    for (auto& task : rejected) if (task.on_stuck) task.on_stuck();
 }
 
 } // namespace
@@ -122,31 +171,18 @@ DeviceWorker::DeviceWorker(uint32_t idle_exit_ms) : core_(std::make_shared<Core>
 DeviceWorker::~DeviceWorker() { Stop(0); }
 
 void DeviceWorker::Post(std::function<void()> task, uint32_t budget_ms, std::function<void()> on_stuck) {
-    std::shared_ptr<Lane> lane;
-    uint64_t seq = 0;
     {
         std::lock_guard<std::mutex> lock(core_->mutex);
-        seq = ++core_->next_seq;
-        lane = core_->live && !core_->live->exited && !core_->live->exit_requested
+        if (core_->retired >= kMaxRetiredLanes) {
+            Reject(std::move(on_stuck));
+            return;
+        }
+        const auto seq = ++core_->next_seq;
+        auto lane = core_->live && !core_->live->exited && !core_->live->exit_requested
             ? core_->live : StartLaneLocked(core_);
-        lane->queue.push_back({seq, std::move(task)});
+        lane->queue.push_back({seq, std::move(task), budget_ms, std::move(on_stuck)});
         lane->cv.notify_one();
     }
-    if (budget_ms == 0) return;
-    // The budget counts from the post: a task queued behind a slow one is
-    // only abandoned for its own overrun (running == seq when this fires).
-    auto check = std::make_unique<BudgetCheck>();
-    check->core = core_;
-    check->lane = lane;
-    check->seq = seq;
-    check->on_stuck = std::move(on_stuck);
-    PTP_TIMER timer = CreateThreadpoolTimer(BudgetExpired, check.get(), nullptr);
-    if (!timer) return;
-    check.release();
-    ULARGE_INTEGER due{};
-    due.QuadPart = static_cast<ULONGLONG>(-static_cast<LONGLONG>(budget_ms) * 10000);
-    FILETIME ft{due.LowPart, due.HighPart};
-    SetThreadpoolTimer(timer, &ft, 0, 0);
 }
 
 void DeviceWorker::Stop(uint32_t wait_ms) {

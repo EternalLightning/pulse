@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "ui_renderer_internal.h"
 #include "toolbar_layout.h"
 #include "address_search_layout.h"
@@ -64,38 +69,55 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                     dc->DrawRoundedRectangle(
                         D2D1::RoundedRect(seg.rc, theme.radius_control * scale_, theme.radius_control * scale_),
                         brAccent_.get(), 2.0f * scale_);
-                } else if ((int)i == vm.breadcrumb_hover) {
-                    MakeBrush(dc, theme.fill_hover, brFillHover_);
+                }
+                auto hover_fill = theme.fill_hover;
+                hover_fill.a *= ControlHoverOpacity(seg.rc, (int)i == vm.breadcrumb_hover);
+                if ((int)i != vm.breadcrumb_drop && hover_fill.a > 0.0f) {
+                    MakeBrush(dc, hover_fill, brFillHover_);
                     FillRoundedRect(dc, brFillHover_.get(), seg.rc.left, seg.rc.top,
                         seg.rc.right - seg.rc.left, seg.rc.bottom - seg.rc.top,
                         theme.radius_control * scale_);
                 }
-                if (i > 0) {
-                    // Chevron separator.
-                    float chX = seg.rc.left - 14.0f * scale_;
-                    DrawIconText(chX, addrRc.top, 14.0f * scale_, addrRc.bottom - addrRc.top,
-                        kIconChevronRight, L">", theme.text_secondary, 0.55f);
-                }
-                MakeBrush(dc, theme.text, brText_);
-                // Width measured exactly; let the ink use the right padding as slack
-                // so the trailing glyph is not shaved by the clip rect.
-                DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), seg.text,
-                    seg.rc.left + 8 * scale_, seg.rc.top, seg.rc.right - seg.rc.left - 8 * scale_,
-                    seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            }
-            if (placed.empty() && !vm.pane.path.empty()) {
-                MakeBrush(dc, theme.text, brText_);
-                DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), vm.pane.path,
-                    addrRc.left + 12.0f * scale_, addrRc.top,
-                    addrRc.right - addrRc.left - 18.0f * scale_,
-                    addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
             dc->SetTransform(transform);
             dc->PopLayer();
-        }
+            const std::wstring path_key = vm.pane.is_home ? L"pulse:home" :
+                vm.pane.is_query_search ? L"pulse:search" : vm.pane.path;
+            address_path_surface_.Paint(dc, addrRc, path_key, true, settings_switch_now_,
+                motion_enabled_ && !IsHighContrast() && !vm.address_editing &&
+                    path_progress == 0.0f && address_opacity == 1.0f,
+                8 * scale_, 180, [&] {
+                    dc->PushLayer(D2D1::LayerParameters(addrRc, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                        D2D1::Matrix3x2F::Identity(), breadcrumb_opacity), nullptr);
+                    dc->SetTransform(D2D1::Matrix3x2F::Translation(-6.0f * scale_ * path_progress, 0) * transform);
+                    for (size_t i = 0; i < placed.size(); ++i) {
+                        const auto& seg = placed[i];
+                        if (i > 0) {
+                            const float chX = seg.rc.left - 14.0f * scale_;
+                            DrawIconText(chX, addrRc.top, 14.0f * scale_, addrRc.bottom - addrRc.top,
+                                kIconChevronRight, L">", theme.text_secondary, 0.55f);
+                        }
+                        MakeBrush(dc, theme.text, brText_);
+                        // Keep the right padding available for the final glyph.
+                        DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), seg.text,
+                            seg.rc.left + 8 * scale_, seg.rc.top, seg.rc.right - seg.rc.left - 8 * scale_,
+                            seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+                    if (placed.empty() && !vm.pane.path.empty()) {
+                        MakeBrush(dc, theme.text, brText_);
+                        DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), vm.pane.path,
+                            addrRc.left + 12.0f * scale_, addrRc.top,
+                            addrRc.right - addrRc.left - 18.0f * scale_,
+                            addrRc.bottom - addrRc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+                    dc->SetTransform(transform);
+                    dc->PopLayer();
+            }, {}, false, vm.pane.navigation_motion, vm.pane.navigation_owner, vm.pane.navigation_revision);
+            surface_animating_ |= address_path_surface_.pending;
+        } else address_path_surface_.Reset();
         dc->PopAxisAlignedClip();
         if (address_opacity < 1.0f) dc->PopLayer();
-    }
+    } else address_path_surface_.Reset();
     DrawAddressSearchChrome(vm, rect.right, theme);
     const auto operation_color = vm.operation_count > 0 || vm.operation_center_open
         ? theme.accent : theme.text_secondary;

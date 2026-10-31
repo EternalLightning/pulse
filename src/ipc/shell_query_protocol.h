@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "protocol.h"
@@ -97,7 +102,9 @@ inline bool ReadShellQuery(const uint8_t* bytes, size_t size, ShellQueryRequest&
         static_cast<size_t>(pidl_size) + marshal_size != reader.remaining()) return false;
     decoded.kind = static_cast<ShellQueryKind>(kind);
     decoded.use_attributes = flags != 0;
-    if (decoded.kind != ShellQueryKind::Icon && (flags || decoded.attributes)) return false;
+    if (decoded.kind != ShellQueryKind::Icon && flags) return false;
+    if (decoded.kind != ShellQueryKind::Icon && decoded.kind != ShellQueryKind::TypeName &&
+        decoded.attributes) return false;
     if (decoded.kind == ShellQueryKind::PidlName) {
         if (marshal_size || !decoded.path.empty() || !ValidShellPidl(bytes + size - pidl_size, pidl_size)) return false;
         try { decoded.pidl.assign(bytes + size - pidl_size, bytes + size); }

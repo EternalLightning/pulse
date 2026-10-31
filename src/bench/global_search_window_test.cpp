@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include <windows.h>
 #include <memory>
 #include <string>
 #include <string_view>
 #include "../app/global_search_window.h"
 #include "../app/global_search_window.cpp"
+#include "content_search_fixture.h"
 #include <wincodec.h>
 #include <iostream>
 #include <filesystem>
@@ -13,6 +19,10 @@ namespace pulse {
 struct GlobalSearchWindowTestPeer {
     using State = GlobalSearchWindow::Impl;
     static State& Get(GlobalSearchWindow& window) { return *window.impl_; }
+    static bool BindDatabase(GlobalSearchWindow& window, const std::wstring& database_path) {
+        if (!window.impl_) window.impl_ = std::make_unique<State>();
+        return window.impl_->contents.SetDatabasePathForTesting(database_path);
+    }
 };
 }
 
@@ -133,19 +143,32 @@ int wmain(int argc, wchar_t** argv) {
     const bool routing_only = (argc > 1 && std::wstring_view(argv[1]) == L"--routing-only") ||
         (argc > 2 && std::wstring_view(argv[2]) == L"--routing-only");
     const bool smooth_only = argc > 1 && std::wstring_view(argv[1]) == L"--smooth-scroll";
-    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only
+    const bool storage_isolation_only = argc > 1 && std::wstring_view(argv[1]) == L"--storage-isolation-only";
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only
         ? argv[1] : L"bench_data/global-search-window";
-    std::filesystem::create_directories(output);
-    const auto profile = output / L"profile";
-    std::filesystem::create_directories(profile);
-    SetEnvironmentVariableW(L"LOCALAPPDATA", profile.c_str());
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
+    pulse::bench::ContentSearchFixture isolation;
+    if (!isolation.Initialize(output, L"isolation")) {
+        check(false, "initialize private content database and storage sentinels");
+        std::cerr << "[INFO] fixture stage=" << isolation.Stage() << " error=" << GetLastError() << std::endl;
+        std::wcerr << L"[INFO] attempted=" << isolation.AttemptedPath() << L" fs_error=" << isolation.FilesystemError() << std::endl;
+        CoUninitialize(); return 1;
+    }
+    std::wcout << L"[INFO] private content fixture: " << isolation.Root() << '\n';
+    const auto check_sentinels = [&] {
+        check(isolation.DefaultConfigurationUnchanged(), "private default configuration sentinel stays unchanged");
+        check(isolation.LocatorUnchanged(), "private file locator sentinel stays unchanged");
+    };
     if (smooth_only) {
         pulse::index::IndexClient filenames;
         pulse::index::NetworkAgentClient network;
         uint32_t request = 0;
         pulse::GlobalSearchWindow fixture;
+        if (!pulse::GlobalSearchWindowTestPeer::BindDatabase(fixture, isolation.DatabasePath())) {
+            check(false, "bind smooth-scroll client to private content database");
+            CoUninitialize(); return 1;
+        }
         fixture.BindFilenameClients(filenames, network, request);
         auto& state = pulse::GlobalSearchWindowTestPeer::Get(fixture);
         // Use the production window procedure and compositor without Show(),
@@ -213,6 +236,7 @@ int wmain(int argc, wchar_t** argv) {
                 !KillTimer(state.hwnd, pulse::kScrollTimer), "replacing results clamps the offset and cancels momentum");
         }
         fixture.Shutdown();
+        check_sentinels();
         CoUninitialize();
         return failed ? 1 : 0;
     }
@@ -221,6 +245,10 @@ int wmain(int argc, wchar_t** argv) {
         pulse::index::IndexClient shared_filenames;
         pulse::index::NetworkAgentClient shared_network;
         uint32_t next_request = 100;
+        if (!pulse::GlobalSearchWindowTestPeer::BindDatabase(window, isolation.DatabasePath())) {
+            check(false, "bind borrowed popup client to private content database");
+            return;
+        }
         window.BindFilenameClients(shared_filenames, shared_network, next_request);
         check(window.Show(nullptr, true, 1, output.wstring()), "Show supports borrowed filename clients");
         auto& shared_state = pulse::GlobalSearchWindowTestPeer::Get(window);
@@ -243,8 +271,46 @@ int wmain(int argc, wchar_t** argv) {
     };
     if (routing_only) {
         shared_lifecycle();
+        check_sentinels();
         CoUninitialize();
         return failed ? 1 : 0;
+    }
+    if (storage_isolation_only) {
+        pulse::index::IndexClient filenames;
+        pulse::index::NetworkAgentClient network;
+        uint32_t next_request = 0;
+        window.BindFilenameClients(filenames, network, next_request);
+        if (!pulse::GlobalSearchWindowTestPeer::BindDatabase(window, isolation.DatabasePath())) {
+            check(false, "bind popup client to private content database");
+            CoUninitialize(); return 1;
+        }
+        check(window.Show(nullptr, true, 1, output.wstring()), "Show starts isolated Instant content client");
+        auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
+        const auto files = isolation.Root() / L"files";
+        std::filesystem::create_directories(files);
+        std::ofstream(files / L"needle.txt") << "A real global-search-fixture-needle text document.";
+        pulse::index::ContentIndexConfig config; config.roots = {{files.wstring()}};
+        state.contents.Resume(); state.contents.Configure(config);
+        const auto config_deadline = GetTickCount64() + 5000;
+        while ((!state.contents.ConfigurationReady() || !pulse::index::config_storage::SameConfig(state.contents.GetConfig(), config)) &&
+            GetTickCount64() < config_deadline) Pump(30);
+        check(isolation.ConfigurationMatches(config), "Instant popup writes only the selected database configuration");
+        state.current_folder = files.wstring(); state.content_mode = true; state.current_only = true;
+        SetWindowTextW(state.edit, L"global-search-fixture-needle");
+        state.Search();
+        const auto query_deadline = GetTickCount64() + 15000;
+        while (state.busy && GetTickCount64() < query_deadline) Pump(30);
+        check(!state.busy && state.rows.size() == 1 && state.rows[0].name == L"needle.txt" &&
+            state.rows[0].snippet.find(L"global-search-fixture-needle") != std::wstring::npos,
+            "real Instant helper queries the selected private content configuration");
+        window.Shutdown();
+        shared_lifecycle();
+        check_sentinels();
+        CoUninitialize(); return failed ? 1 : 0;
+    }
+    if (!pulse::GlobalSearchWindowTestPeer::BindDatabase(window, isolation.DatabasePath())) {
+        check(false, "bind popup client to private content database");
+        CoUninitialize(); return 1;
     }
     check(window.Show(nullptr, true, 1, output.wstring()), "Show creates independent visible window");
     auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
@@ -364,7 +430,7 @@ int wmain(int argc, wchar_t** argv) {
     state.MergeFilenames();
     check(state.rows.size() == 2 && state.total == 2 && !state.busy, "Local and network merge deduplicates Windows paths");
     state.error.clear(); state.content_mode = true; state.current_only = true;
-    const auto files = output / L"files";
+    const auto files = isolation.Root() / L"files";
     std::filesystem::create_directories(files);
     std::ofstream(files / L"needle.txt") << "A real global-search-fixture-needle text document.";
     state.current_folder = files.wstring();
@@ -390,7 +456,9 @@ int wmain(int argc, wchar_t** argv) {
     check(window.Show(nullptr, true, 1, output.wstring()), "Show resumes after cancellation");
     state.Cancel(); window.Shutdown();
     check(!window.Visible(), "Shutdown releases window");
+    check(isolation.ConfigurationMatches(config), "Instant popup writes only the selected database configuration");
     shared_lifecycle();
+    check_sentinels();
     CoUninitialize();
     return failed ? 1 : 0;
 }

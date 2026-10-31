@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "pane_animations.h"
 #include "app_internal.h"
 #include "../index/content_scope.h"
@@ -166,7 +171,7 @@ void QueueAddressSearch(AppState& s) {
         s.appPrefs.address_search_content = s.addressSearchContent;
         if (!s.isolatedTest) s.appPrefs.Save();
     }
-    s.addressLiveDue = GetTickCount64() + (s.addressSearchContent ? 150 : 100);
+    s.addressLiveDue = GetTickCount64() + 250;
     tab->search_allow_scan = false;
     s.addressHistoryDue = 0;
 }
@@ -237,7 +242,7 @@ void SubmitAddressSearch(AppState& s, bool live) {
         ++tab->view_generation;
         tab->current_path = path;
     } else tab->NavigateTo(path);
-    StartLoadingPath(s, *tab, path);
+    StartLoadingPath(s, *tab, path, continuing ? PathLoadReason::SearchInput : PathLoadReason::Navigate);
     if (!query.empty()) {
         if (live) {
             s.addressHistoryPath = path;

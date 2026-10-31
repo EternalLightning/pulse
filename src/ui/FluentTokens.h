@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // FluentTokens.h — Win11 Fluent design tokens (ui.md §3).
 // Dark / light / high-contrast instances; runtime switches by pointer.
 #pragma once
@@ -109,6 +114,7 @@ struct Theme {
     D2D1_COLOR_F text;
     D2D1_COLOR_F text_secondary;
     D2D1_COLOR_F text_disabled;
+    D2D1_COLOR_F text_selected;
 
     D2D1_COLOR_F fill_hover;
     D2D1_COLOR_F fill_pressed;
@@ -383,6 +389,7 @@ inline Theme MakeHighContrastTheme() noexcept {
     t.text = sys(COLOR_WINDOWTEXT);
     t.text_secondary = sys(COLOR_GRAYTEXT);
     t.text_disabled = sys(COLOR_GRAYTEXT);
+    t.text_selected = sys(COLOR_HIGHLIGHTTEXT);
 
     t.fill_hover = sys(COLOR_HIGHLIGHT);
     t.fill_pressed = sys(COLOR_HIGHLIGHT);

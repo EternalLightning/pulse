@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ops/ops_manager.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
@@ -14,6 +19,7 @@
 #include <commctrl.h>
 #include <shlobj.h>
 #include <winnetwk.h>
+#include <tlhelp32.h>
 
 namespace pulse::ops {
 struct DeleteIntegrationProbe {
@@ -22,6 +28,20 @@ struct DeleteIntegrationProbe {
 }
 
 namespace {
+std::vector<DWORD> OwnedShellProcesses() {
+    std::vector<DWORD> hosts;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    PROCESSENTRY32W entry{sizeof(entry)};
+    if (snapshot != INVALID_HANDLE_VALUE && Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ParentProcessID == GetCurrentProcessId() && _wcsicmp(entry.szExeFile, L"Pulse.Shell.exe") == 0)
+                hosts.push_back(entry.th32ProcessID);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
+    return hosts;
+}
+
 int RunConfirmationIdentity() {
     using namespace pulse;
     const auto parent = std::filesystem::absolute(L"bench_data").lexically_normal();
@@ -259,13 +279,6 @@ BOOL WINAPI EmptyDeletionIdentityQuery(HANDLE, FILE_INFO_BY_HANDLE_CLASS, LPVOID
     ZeroMemory(data, size);
     return TRUE;
 }
-bool transitioned_deletion_identity = false;
-BOOL WINAPI TransitionDeletionIdentityQuery(HANDLE handle, FILE_INFO_BY_HANDLE_CLASS info, LPVOID data, DWORD size) {
-    if (!GetFileInformationByHandleEx(handle, info, data, size)) return FALSE;
-    if (info == FileIdInfo && transitioned_deletion_identity)
-        static_cast<FILE_ID_INFO*>(data)->FileId.Identifier[15] ^= 0x40;
-    return TRUE;
-}
 
 int RunDeletionIdentity() {
     using pulse::shell::IsSameDeletionItem;
@@ -297,26 +310,6 @@ int RunDeletionIdentity() {
     check(!IsSameDeletionItem(file, (root / L"other.txt").wstring()), "different path is rejected");
     check(!IsSameDeletionItem((root / L"missing.txt").wstring(), (root / L"MISSING.TXT").wstring()),
         "unverifiable casing change is rejected");
-    {
-        pulse::FileIdentity expected;
-        pulse::ReadPathFileIdentity(file, expected);
-        pulse::shell::DeletionReference reference;
-        check(reference.Capture(file, expected, TransitionDeletionIdentityQuery),
-            "deletion retains the exact admitted object before Shell parsing");
-        transitioned_deletion_identity = true;
-        check(reference.Matches(file, TransitionDeletionIdentityQuery),
-            "live object comparison accepts a provider index transition during Shell parsing");
-        const auto displaced = (root / L"displaced.txt").wstring();
-        check(MoveFileW(file.c_str(), displaced.c_str()) != FALSE,
-            "retain the original object while replacing the admitted name");
-        std::ofstream(file) << "replacement must survive";
-        check(!reference.Matches(file, TransitionDeletionIdentityQuery),
-            "provider index transition never authorizes a different same-name replacement");
-        deletion_identity_query_error = ERROR_ACCESS_DENIED;
-        check(!reference.Matches(file, DeletionIdentityQuery),
-            "failed identity queries still refuse deletion");
-        transitioned_deletion_identity = false;
-    }
     const auto sensitive = (root / L"sensitive").wstring();
     const HANDLE directory = CreateFileW(sensitive.c_str(), FILE_WRITE_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
@@ -487,11 +480,6 @@ int RunNetworkDeletion() {
     if (!error.empty() || plan.targets.size() != 2 || plan.targets[1].reason.empty())
         std::cout << "[INFO] preparation error=" << Utf8(error) << " targets=" << plan.targets.size()
             << " network reason=" << Utf8(l10n::Get(l10n::StringId::DeleteReasonNetwork)) << std::endl;
-    request.sources = {L"Z:\\Pulse-read-only-plan-check.txt"};
-    const auto mapped_plan = ops::BuildDeletePlan(request, 2, error);
-    check(error.empty() && mapped_plan.targets.size() == 1 &&
-        mapped_plan.targets[0].disposition == ops::DeleteDisposition::Permanent,
-        "current mapped Z drive is classified without reading or deleting user files");
     if (GetFileAttributesW(unc.c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::cout << "[SKIP] localhost share unavailable, Win32 error=" << GetLastError() << std::endl;
         std::filesystem::remove_all(root); return failures ? 1 : 0;
@@ -507,7 +495,7 @@ int RunNetworkDeletion() {
     if (connected == NO_ERROR) {
         request.sources = {std::wstring(drive) + network_file.substr(2)};
         const auto mapped = ops::BuildDeletePlan(request, 3, error);
-        check(error.empty() && mapped.targets[0].disposition == ops::DeleteDisposition::Permanent,
+        check(error.empty() && mapped.targets.size() == 1 && mapped.targets[0].disposition == ops::DeleteDisposition::Permanent,
             "temporary mapped share uses Pulse permanent confirmation");
     } else std::cout << "[SKIP] temporary drive mapping unavailable, Win32 error=" << connected << std::endl;
     request.sources = {local, connected == NO_ERROR ? std::wstring(drive) + network_file.substr(2) : unc};
@@ -524,17 +512,18 @@ int RunNetworkDeletion() {
     std::atomic<bool> stop{false}, native_warning{false};
     std::thread observer([&] {
         while (!stop.load()) {
-            struct Context { const std::wstring& leaf; std::atomic<bool>& warned; } context{network_file, native_warning};
+            const auto hosts = OwnedShellProcesses();
+            struct Context { const std::wstring& leaf; std::atomic<bool>& warned; const std::vector<DWORD>& hosts; } context{network_file, native_warning, hosts};
             EnumWindows([](HWND window, LPARAM param) -> BOOL {
                 if (!IsWindowVisible(window)) return TRUE;
                 DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
-                if (pid == GetCurrentProcessId()) return TRUE;
+                auto& value = *reinterpret_cast<Context*>(param);
+                if (std::find(value.hosts.begin(), value.hosts.end(), pid) == value.hosts.end()) return TRUE;
                 std::wstring text;
                 EnumChildWindows(window, [](HWND child, LPARAM result) -> BOOL {
                     wchar_t label[2048]{}; GetWindowTextW(child, label, ARRAYSIZE(label));
                     *reinterpret_cast<std::wstring*>(result) += label; return TRUE;
                 }, reinterpret_cast<LPARAM>(&text));
-                auto& value = *reinterpret_cast<Context*>(param);
                 if (text.find(std::filesystem::path(value.leaf).filename().wstring()) != std::wstring::npos &&
                     (text.find(L"永久") != std::wstring::npos || text.find(L"permanent") != std::wstring::npos)) {
                     value.warned.store(true);
@@ -647,6 +636,84 @@ int RunLockedError() {
 }
 }
 
+int RunUncConfirmation(bool accept) {
+    using namespace pulse;
+    namespace fs = std::filesystem;
+    const auto parent = fs::absolute(L"bench_data");
+    std::error_code error;
+    fs::create_directories(parent, error);
+    const auto root = parent / (L"unc-confirmation-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    if (error || !CreateDirectoryW(root.c_str(), nullptr)) return 2;
+    const auto file = root / L"owned.txt";
+    { std::ofstream output(file, std::ios::binary); output << "only this newly created UNC fixture";
+      if (!output.good()) return 2; }
+    const auto local = file.wstring();
+    const auto unc = L"\\\\localhost\\" + local.substr(0, 1) + L"$" + local.substr(2);
+    if (GetFileAttributesW(unc.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::cout << "[SKIP] localhost share unavailable; Win32 error=" << GetLastError() << "; no deletion submitted\n";
+        DeleteFileW(file.c_str()); RemoveDirectoryW(root.c_str());
+        return 77;
+    }
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::cout << (ok ? "[PASS] " : "[FAIL] ") << text << std::endl;
+        failures += !ok;
+    };
+    HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse owned UNC confirmation", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, nullptr, nullptr);
+    check(owner != nullptr, "create the owned UNC confirmation window");
+    if (!owner) return 1;
+    ops::OpsManager manager;
+    manager.SetUiWindow(owner); manager.Start([] {});
+    const auto wait = [&](const auto& ready) {
+        const auto deadline = GetTickCount64() + 15000;
+        do {
+            if (ready()) return true;
+            MSG msg{};
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+            Sleep(5);
+        } while (GetTickCount64() < deadline);
+        return ready();
+    };
+    ops::OpRequest request; request.type = ops::OpType::RecycleDelete; request.sources = {unc};
+    const uint64_t task = manager.Submit(request);
+    const bool awaiting = task && wait([&] { return manager.PendingDeleteConfirmation().has_value() || !manager.HasPendingFileOperations(); });
+    const auto pending = manager.PendingDeleteConfirmation();
+    const bool exact_plan = awaiting && pending && pending->token && pending->plan.task_id == task &&
+        pending->plan.targets.size() == 1 && pending->plan.targets[0].path == unc &&
+        pending->plan.targets[0].physical_paths == std::vector<std::wstring>{unc} &&
+        pending->plan.targets[0].disposition == ops::DeleteDisposition::Permanent && fs::exists(file) &&
+        manager.Status().phase == ops::OpPhase::WaitingForDeleteConfirmation;
+    check(exact_plan, "Pulse confirms the exact task, token and newly created UNC path before mutation");
+    bool resolved = false;
+    if (exact_plan) {
+        manager.ResolveDeleteConfirmation(pending->token + 1, accept);
+        const auto unchanged = manager.PendingDeleteConfirmation();
+        check(unchanged && unchanged->token == pending->token && fs::exists(file) &&
+            manager.Status().phase == ops::OpPhase::WaitingForDeleteConfirmation,
+            "a stale UNC confirmation token leaves the owned request pending");
+        manager.ResolveDeleteConfirmation(pending->token, accept);
+        resolved = true;
+    } else manager.CancelCurrent();
+    const bool finished = wait([&] { const auto status = manager.Status(); return status.task_id == task && !status.active &&
+        (status.phase == ops::OpPhase::Completed || status.phase == ops::OpPhase::Cancelled || status.phase == ops::OpPhase::Failed); });
+    const auto status = manager.Status();
+    const auto completed = manager.DrainCompletions();
+    if (accept) check(resolved && finished && status.phase == ops::OpPhase::Completed && !fs::exists(file) &&
+        completed.size() == 1 && completed[0].task_id == task && completed[0].type == ops::OpType::RealDelete &&
+        completed[0].sources == std::vector<std::wstring>{unc} && !manager.CanUndo(),
+        "accepting the owned Pulse token records permanent deletion without recycle Undo");
+    else check(resolved && finished && status.phase == ops::OpPhase::Cancelled && fs::exists(file) && completed.empty() && !manager.CanUndo(),
+        "rejecting the owned Pulse token preserves the file without completion or Undo");
+    if (failures) std::wcerr << L"[DIAG] task=" << task << L" HRESULT=" << status.failure_hr << L" " << status.last_error << L" fixture=" << root << std::endl;
+    manager.CancelCurrent(); manager.Stop(); DestroyWindow(owner);
+    if (!failures) {
+        if (fs::exists(file)) check(DeleteFileW(file.c_str()) != FALSE, "remove only the owned cancelled UNC leaf");
+        check(RemoveDirectoryW(root.c_str()) != FALSE, "remove only the newly created UNC fixture directory");
+    }
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
     using namespace pulse;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -660,13 +727,13 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--permanent-from-bin") return RunPermanentFromBin();
     if (argc == 2 && std::string_view(argv[1]) == "--identity-only") return RunDeletionIdentity();
     if (argc == 2 && std::string_view(argv[1]) == "--network-delete") return RunNetworkDeletion();
+    if (argc == 2 && std::string_view(argv[1]) == "--unc-warning-accept") return RunUncConfirmation(true);
+    if (argc == 2 && std::string_view(argv[1]) == "--unc-warning-cancel") return RunUncConfirmation(false);
     wchar_t module[32768]{};
     if (!GetModuleFileNameW(nullptr, module, ARRAYSIZE(module))) return 2;
     const auto root = std::filesystem::path(module).parent_path().parent_path() /
         L"bench_data/review-changes/recycle-feedback-fixture";
-    const bool accept_unc = argc == 2 && std::string_view(argv[1]) == "--unc-warning-accept";
-    const bool cancel_unc = argc == 2 && std::string_view(argv[1]) == "--unc-warning-cancel";
-    const auto file = (root / (accept_unc ? L"unc-accepted.txt" : L"recycle-me.txt")).lexically_normal().wstring();
+    const auto file = (root / L"recycle-me.txt").lexically_normal().wstring();
     if (GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::cout << "[FAIL] dedicated recycle input missing; no operation submitted\n"; return 2;
     }
@@ -688,70 +755,6 @@ int main(int argc, char** argv) {
         }
         return manager.Status().completed_ops == previous + 1;
     };
-    if (accept_unc || cancel_unc) {
-        // Existing localhost administrative share only, dedicated test root only.
-        // No new shares, credentials or bin configuration are created.
-        const auto unc_file = L"\\\\localhost\\" + file.substr(0, 1) + L"$" + file.substr(2, file.size() - 2);
-        if (GetFileAttributesW(unc_file.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            std::cout << "[FAIL] localhost UNC fixture unavailable; no deletion requested\n";
-            manager.Stop(); DestroyWindow(owner); return 2;
-        }
-        std::atomic<bool> stop{false}, warned{false};
-        std::thread warning_driver([&] {
-            while (!stop.load()) {
-                struct Context { const std::wstring& file; std::atomic<bool>& warned; bool accept; } context{file, warned, accept_unc};
-                EnumWindows([](HWND window, LPARAM param) -> BOOL {
-                    auto& value = *reinterpret_cast<Context*>(param);
-                    if (!IsWindowVisible(window)) return TRUE;
-                    DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
-                    if (pid == GetCurrentProcessId()) return TRUE;
-                    std::wstring text;
-                    EnumChildWindows(window, [](HWND child, LPARAM result) -> BOOL {
-                        wchar_t content[2048]{}; GetWindowTextW(child, content, ARRAYSIZE(content));
-                        *reinterpret_cast<std::wstring*>(result) += content;
-                        return TRUE;
-                    }, reinterpret_cast<LPARAM>(&text));
-                    const std::wstring leaf = std::filesystem::path(value.file).filename().wstring();
-                    if (text.find(leaf) != std::wstring::npos &&
-                        (text.find(L"永久") != std::wstring::npos || text.find(L"permanent") != std::wstring::npos)) {
-                        value.warned.store(true);
-                        if (value.accept) {
-                            struct Button { HWND yes = nullptr; } button;
-                            EnumChildWindows(window, [](HWND child, LPARAM param) -> BOOL {
-                                wchar_t caption[128]{}; GetWindowTextW(child, caption, ARRAYSIZE(caption));
-                                const std::wstring label(caption);
-                                if (label.find(L"是") != std::wstring::npos || label.find(L"Yes") != std::wstring::npos)
-                                    reinterpret_cast<Button*>(param)->yes = child;
-                                return TRUE;
-                            }, reinterpret_cast<LPARAM>(&button));
-                            if (button.yes) PostMessageW(button.yes, BM_CLICK, 0, 0);
-                        } else {
-                            PostMessageW(window, WM_KEYDOWN, VK_ESCAPE, 0);
-                            PostMessageW(window, WM_CLOSE, 0, 0);
-                        }
-                    }
-                    return TRUE;
-                }, reinterpret_cast<LPARAM>(&context));
-                Sleep(30);
-            }
-        });
-        ops::OpRequest unc_request; unc_request.type = ops::OpType::RecycleDelete; unc_request.sources = {unc_file};
-        const auto before = manager.Status().completed_ops;
-        manager.Submit(std::move(unc_request));
-        const bool finished = wait(before);
-        if (!finished) manager.CancelCurrent();
-        stop.store(true); warning_driver.join();
-        check(warned.load(), "UNC non-recyclable item shows a Windows permanent-delete warning");
-        const auto results = manager.DrainCompletions();
-        if (accept_unc) {
-            check(finished && GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES &&
-                manager.Status().phase == ops::OpPhase::Completed && results.size() == 1 &&
-                results[0].type == ops::OpType::RealDelete && results[0].sources == std::vector<std::wstring>{unc_file} &&
-                !manager.CanUndo(), "explicitly accepting the Windows warning records permanent deletion, never false recycle Undo");
-        } else check(finished && GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES && results.empty(),
-            "declining the Windows permanent warning preserves the original dedicated file");
-        manager.Stop(); DestroyWindow(owner); return failed ? 1 : 0;
-    }
     ops::OpRequest request;
     request.type = ops::OpType::RecycleDelete; request.sources = {file};
     auto previous = manager.Status().completed_ops;

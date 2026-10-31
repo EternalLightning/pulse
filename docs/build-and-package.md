@@ -4,13 +4,13 @@
 
 ## 环境与目录
 
-- Visual Studio C++ 工具及 Windows SDK；批处理通过 `scripts/vcvars.bat` 查找已安装工具链并初始化 x64 环境。CI 另限定为 Visual Studio 2022 v143。
-- CMake 3.25+、Ninja，均需可从命令行找到。
+- Visual Studio 2022 v143 C++ 工具及 Windows SDK；本地与 CI 均通过 `scripts/vcvars.bat` 选择 VS2022 并初始化 x64 环境。
+- 项目使用 `scripts/build-tools.lock.json` 固定 CMake 3.31.10 和 Ninja 1.13.2。首次构建自动下载至 `.build-tools` 并验证 SHA256，不依赖 PATH 中其他软件附带的版本；后续可复用已验证的本地工具。
 - PowerShell 7.2+（`pwsh`）用于便携包、产物校验及 CI；安装批处理内部还调用系统 Windows PowerShell。
 - Inno Setup 6 用于编译安装包。`build_installer.bat` 先查找 PATH 中的 `ISCC.exe`，再查找 Program Files 和当前用户的标准安装位置。
 - 保留仓库中的第三方二进制及许可证：`third_party/lumatext`、`third_party/pdfium`、`third_party/7zip` 等由构建或打包脚本使用。
 
-`build-release` 是本地生产构建目录，`build-test` 可用于独立测试配置，`build-ci` 是 CI 默认目录。`dist` 存放交付物和便携包暂存目录，`docs/validation` 存放按日期区分的验证记录。
+`build-release` 是本地生产构建目录，`build-test` 用于独立测试配置，`build-ci` 是 CI 默认目录。`scripts/build.ps1` 为每个目录持有独占构建锁；同目录构建串行执行，不同目录可以并行。工具和临时文件放在 `.build-tools`，避免构建目录清理后工具失效，也不继承全局临时目录和隐藏的 CL/LINK 参数。`dist` 存放交付物和便携包暂存目录，`docs/validation` 存放按日期区分的验证记录。
 
 ## 生产构建
 
@@ -19,7 +19,7 @@
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 ```
 
-脚本配置 Ninja / Release、`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`、`PULSE_WITH_SELFTEST=OFF`，以并行度 4 构建 `pulse`、`pulse_index`、`pulse_shell`、`pulse_preview`、`pulse_document`。`pulse_integration` 由 `pulse` 的依赖带上，得到六个程序：
+脚本配置 Ninja / Release、`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`、`PULSE_WITH_SELFTEST=OFF`，以并行度 4 构建 `pulse` 及其五个生产依赖，得到六个程序：
 
 | CMake 目标 | 交付文件 | 用途 |
 | --- | --- | --- |
@@ -40,23 +40,27 @@ if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 .\build_installer.bat /skipbuild build-custom
 ```
 
-`/clean` 对已有 Ninja 目录执行重新配置（`--fresh`）和清理后构建（`--clean-first`）。脚本会先拒绝非 Ninja 缓存，不能靠 `/clean` 将旧 NMake 目录转换为 Ninja；应选新目录，保留仍有用途的旧构建文件。
+`/clean` 会在取得该目录构建锁后删除并重建指定构建目录，包含其中的旧二进制，请先保存需要的产物。清理目标必须在仓库内的 `build*` 或 `out` 目录下，且不能经过重解析点。普通配置不会将其他生成器的缓存静默转换为 Ninja。
 
 ## 日常增量构建与定向验证
 
-在已初始化的 x64 Visual Studio 开发者终端中，仅构建本次受影响目标：
+从 PowerShell 使用统一入口，仅构建本次受影响目标；脚本负责初始化 VS2022 x64、固定工具和构建锁：
 
 ```powershell
-cmake --build build-release --target pulse
+& .\scripts\build.ps1 -BuildDir build-release -Targets pulse
 # 若本次只涉及文档提取模块，可单独构建
-cmake --build build-release --target pulse_document
+& .\scripts\build.ps1 -BuildDir build-release -Targets pulse_document
 ```
 
 `pulse` 会构建索引、Shell、预览、文档提取和集成依赖；其中 `pulse_document` 的依赖关系由 CMake 的 `foreach(document_target ...)` 声明。生产交付前使用 `build_release.bat` 更新完整交付目标。
 
 需要测试时显式构建相关测试目标，按该目标提供的筛选选项运行；不要把无目标的 `cmake --build` 或 CI 全流程当作默认检查。内嵌自测仅在专用目录配置 `PULSE_WITH_SELFTEST=ON` 后可用，运行时应选择与本次改动相关的用例并等待进程退出。此类程序不能交付，生产包需要重新以 `OFF` 构建。
 
-`build_d2d.bat` 是单独的 `pulse_d2d_list` 开发入口，使用 `build-d2d` 和 NMake，不是产品发布构建入口。
+`build_d2d.bat` 使用同一工具入口和 Ninja，在独立 `build-d2d` 目录构建 `pulse_d2d_list`。
+
+测试配置示例：`& .\scripts\build.ps1 -BuildDir build-test -Configure -ArchitectureFixtures -Targets pulse_pane_animation_application_test`。内嵌自测另外显式指定 `-EnableSelfTests`。`-CMakeArgs` 支持显式指定 LumaText 源码树或 SDK；脚本不再自动借用相邻项目的 `_deps` 缓存。
+
+直接运行 CMake/Ninja 会绕过构建锁，避免同时对同一目录使用直接命令和统一入口。环境专项检查：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_build_environment.ps1`。
 
 ## 一次构建生成安装包和便携包
 
@@ -90,7 +94,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Portable packaging failed' }
 | 便携包 | `dist/Pulse-<version>-portable-win-x64.zip` |
 | 便携包暂存载荷 | `dist/portable-stage-<guid>/Pulse-<version>-portable/` |
 
-暂存目录会保留。便携包及安装包包括六个程序、`lumatext.dll`、`pdfium.dll`、`7zip`、LICENSE、NOTICE 和第三方许可证；ZIP 另生成 README.txt。包内文件数以实际许可证树为准，不固定为某个历史验证记录的数量。
+暂存目录会保留。便携包及安装包包括六个程序、`lumatext.dll`、`pdfium.dll`、`7zip`、LICENSE、NOTICE、THIRD_PARTY_NOTICES.md 和第三方许可证；ZIP 另生成 README.txt。包内文件数以实际许可证树为准，不固定为某个历史验证记录的数量。
+
+许可打包修改（EternalLightning，2026-10-30）：两种打包路径均从仓库直接补齐 7-Zip 的完整许可文本及 `7zip/7z2603-src.7z` 对应源码，避免复用旧构建目录时漏带新增许可材料。工具栏图标、d2d-mica 适配代码、SQLite 和拼音数据的许可或来源说明也随包分发，清单见[第三方声明](../THIRD_PARTY_NOTICES.md)。更新 7-Zip 二进制时，必须同时更新源码归档、校验值和脚本中的固定版本文件名。
 
 ## 产物校验与 SHA-256
 

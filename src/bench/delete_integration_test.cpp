@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/app_internal.h"
 #include "../ops/delete_operation.h"
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include "../ipc/ctx_menu_util.h"
 #include "../ipc/delete_plan_protocol.h"
+#include "owned_test_window.h"
 #include <iostream>
 #include <stdexcept>
 #include <filesystem>
@@ -30,7 +36,7 @@ struct DeleteIntegrationProbe {
     static void Notify(OpsManager& manager, std::function<void()> notify) {
         manager.notify_ = std::move(notify);
     }
-    static std::wstring Journal(const OpsManager& manager) { return manager.JournalJsonLocked(); }
+    static std::wstring Journal(const OpsManager& manager) { return manager.JournalJsonLocked(L""); }
     static void UncertainResult(OpsManager& manager, OpRequest request) {
         OpsManager::QueueItem item;
         item.seq = manager.next_seq_++; item.req = std::move(request);
@@ -61,6 +67,9 @@ int dialog_key = VK_ESCAPE;
 bool saw_dialog = false;
 std::wstring network_capture;
 bool network_capture_ok = false;
+bool IsOwnedConfirmation(HWND dialog, HWND owner) {
+    return pulse::bench::IsOwnedThreadWindow(dialog, owner, L"PulseConfirmWindow");
+}
 bool CaptureConfirmation(HWND window) {
 #ifdef PULSE_UI_TEST_HOOKS
     return SendMessageW(window, pulse::ui::kConfirmSnapshotMessage, 0,
@@ -71,14 +80,16 @@ bool CaptureConfirmation(HWND window) {
 #endif
 }
 void CALLBACK RejectDialog(HWND owner, UINT, UINT_PTR id, DWORD) {
-    HWND dialog = FindWindowW(L"PulseConfirmWindow", nullptr);
+    const HWND dialog = pulse::bench::FindOwnedThreadWindow(owner, L"PulseConfirmWindow");
     if (!dialog) return;
     saw_dialog = true;
     KillTimer(owner, id);
     if (!network_capture.empty()) {
+        if (!IsOwnedConfirmation(dialog, owner)) return;
         RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-        network_capture_ok = CaptureConfirmation(dialog);
+        if (IsOwnedConfirmation(dialog, owner)) network_capture_ok = CaptureConfirmation(dialog);
     }
+    if (!IsOwnedConfirmation(dialog, owner)) return;
     if (dialog_key == WM_CLOSE) PostMessageW(dialog, WM_CLOSE, 0, 0);
     else PostMessageW(dialog, WM_KEYDOWN, dialog_key, 0);
 }
@@ -107,6 +118,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--network-confirmation") {
         using Probe = ops::DeleteIntegrationProbe;
         auto state = std::make_unique<AppState>(); auto& s = *state;
+        s.ops.SetJournalPaths({});
         s.isolatedTest = true; s.appPrefs.persist = false; s.searchHistory.persist = false;
         s.hwnd = owner; s.ops.SetUiWindow(owner);
         s.operationWindow = std::make_unique<ui::FileOperationWindow>();
@@ -208,6 +220,7 @@ int main(int argc, char** argv) {
         check(!ui::ShowConfirmDialog(owner, spec, true, ui::HexColor(0x0078D4)), "expired modal confirmation rejects without presenter input");
     }
     auto state = std::make_unique<AppState>(); auto& s = *state;
+    s.ops.SetJournalPaths({});
     s.isolatedTest = true; s.appPrefs.persist = false; s.searchHistory.persist = false;
     s.hwnd = owner; SetWindowLongPtrW(owner, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&s));
     s.window_tabs.EnsureDefault(); s.pane = s.window_tabs.Active()->FocusedPane();

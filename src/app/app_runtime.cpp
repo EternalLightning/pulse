@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "shell_selection.h"
 #include "../ops/archive.h"
@@ -270,6 +275,7 @@ void SyncVisibleWatches(AppState& s) {
 }
 
 void BindCurrentLayout(AppState& s) {
+    CancelPendingListRowClick(s);
     CancelAppSurfaceScroll(s);
     app::LayoutTab* tab = s.window_tabs.Active();
     if (!tab || tab->panes.empty()) {
@@ -1666,6 +1672,10 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     }
     const ULONGLONG fold_now = app::PaneAnimationTimeMs();
     for (auto& group : vm.sidebar) {
+        if (group.id == static_cast<int>(app::SidebarSectionId::QuickAccess)) {
+            s.sidebarProjectAnimation.Apply(group, fold_now,
+                s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
+        }
         group.expansion = group.collapsed ? 0.0f : 1.0f;
         if (const auto it = s.sidebarFoldTracks.find(group.id); it != s.sidebarFoldTracks.end()) {
             const float t = std::clamp(static_cast<float>(fold_now - it->second.started) / 180.0f, 0.0f, 1.0f);

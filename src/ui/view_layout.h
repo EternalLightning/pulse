@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 
 #include "../model/view_mode.h"
@@ -62,6 +67,7 @@ public:
     D2D1_RECT_F IconRect(int view_index) const noexcept;
     D2D1_RECT_F NameRect(int view_index) const noexcept;
     D2D1_RECT_F FolderSizeRect(int view_index) const noexcept;
+    bool IsStripedRow(int view_index) const noexcept;
     int HitTest(float x, float y) const noexcept;
     std::pair<int, int> VisibleRange() const noexcept;
     int MoveIndex(int current, int dx, int dy) const noexcept;

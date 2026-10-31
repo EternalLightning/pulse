@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "context_menu_settings_drag.h"
 #include "system_ctx_preview_drag.h"
@@ -7,6 +12,7 @@
 #include "tab_shortcuts.h"
 #include "tab_transfer.h"
 #include "app_internal.h"
+#include "app_hover.h"
 #include "app_network_locations.h"
 #include "app_column_view.h"
 #include "app_surface_scroll.h"
@@ -30,6 +36,8 @@
 #include "context_menu.h"
 #include "batch_rename.h"
 #include "blank_pane_click.h"
+#include "details_attribute_toggle.h"
+#include "../common/file_operation_error.h"
 #include "link_resolve.h"
 #include "header_drop_effect.h"
 #include "app_drop_shortcuts.h"
@@ -331,7 +339,7 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
             s.springEntered = true;
             s.springRow = -1;
             if (hitPane && hitPane != s.pane) FocusPane(s, hitPane);
-            NavigateTo(s, full);
+            NavigateTo(s, full, ui::SurfaceMotion::Forward);
             return DROPEFFECT_NONE;
         }
     } else if (hit.region == ui::HitTestResult::BreadcrumbSegment && !hit.path.empty()) {
@@ -655,6 +663,9 @@ void HandleListRowClick(AppState& s, int index, bool ctrl, bool shift) {
     if (!tab) return;
     s.clickCollapseIndex = -1;
     s.clickToggleOnRelease = false;
+    s.clickPane = s.pane;
+    s.clickTabIdentity = tab->network_identity;
+    s.clickViewGeneration = tab->view_generation;
     if (shift) {
         const int anchor = tab->selection_anchor >= 0 ? tab->selection_anchor
             : (tab->selected_index >= 0 ? tab->selected_index : index);
@@ -677,13 +688,27 @@ void HandleListRowClick(AppState& s, int index, bool ctrl, bool shift) {
     }
 }
 
+bool ListRowClickMatches(const AppState& s) {
+    const app::Tab* tab = s.pane ? s.pane->ActiveTab() : nullptr;
+    return tab && s.pane == s.clickPane && tab->network_identity == s.clickTabIdentity &&
+        tab->view_generation == s.clickViewGeneration;
+}
+
+void CancelPendingListRowClick(AppState& s) {
+    s.clickCollapseIndex = -1;
+    s.clickToggleOnRelease = false;
+    s.clickPane = nullptr;
+    s.clickTabIdentity = 0;
+    s.clickViewGeneration = 0;
+    s.dragPending = false;
+}
+
 void FinishListRowClick(AppState& s) {
-    if (app::Tab* tab = ActiveTab(s); tab && s.clickCollapseIndex >= 0) {
+    if (app::Tab* tab = ActiveTab(s); ListRowClickMatches(s) && s.clickCollapseIndex >= 0) {
         if (s.clickToggleOnRelease) tab->ToggleSelect(s.clickCollapseIndex);
         else tab->SelectOnly(s.clickCollapseIndex);
     }
-    s.clickCollapseIndex = -1;
-    s.clickToggleOnRelease = false;
+    CancelPendingListRowClick(s);
 }
 
 // ---- Sidebar section header drag: reorders the sections ---------------------
@@ -714,6 +739,77 @@ void ResetSidebarPinDrag(AppState& s) {
     s.pinDragToIndex = -1;
     s.pinGapVisible = false;
     s.pinGapLineY = 0.0f;
+}
+
+bool CancelSidebarReorder(AppState& s) {
+    const bool pending = s.groupDragPending || s.groupDragActive ||
+        s.pinDragPending || s.pinDragActive || s.starDragPending || s.starDragActive ||
+        s.tagDragPending || s.tagDragActive;
+    if (!pending) return false;
+    ResetSidebarGroupDrag(s);
+    ResetSidebarPinDrag(s);
+    s.starDragPending = false;
+    s.starDragActive = false;
+    s.starDragPath.clear();
+    s.dropSidebar = -1;
+    if (s.tagDragPending || s.tagDragActive) {
+        s.tagDragPending = false;
+        s.tagDragActive = false;
+        s.tagDragTag = -1;
+        s.tagDragPath.clear();
+        s.tagOrder.clear();
+        s.tagGapVisible = false;
+        s.tagGapFrom = s.tagGapTo = s.tagGapLineY = 0.0f;
+        s.tagTracks.clear();
+        s.tagOffsets.clear();
+    }
+    if (GetCapture() == s.hwnd) ReleaseCapture();
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+    return true;
+}
+
+void QueueDetailsAttributeToggle(AppState& s, const std::wstring& path, DWORD flag) {
+    const auto* tab = ActiveTab(s);
+    if (!tab || !s.pane || !s.details_attribute_mailbox) return;
+    app::DetailsAttributeResult result;
+    result.pane = s.pane;
+    result.pane_lifetime = s.pane->lifetime_token;
+    result.tab_identity = tab->network_identity;
+    result.view_generation = tab->view_generation;
+    result.path = path;
+    const auto mailbox = s.details_attribute_mailbox;
+    ++s.details_attribute_pending[path];
+    if (s.worker.EnqueueIo([mailbox, result = std::move(result), flag]() mutable {
+            result.error = app::ToggleDetailsAttribute(result.path, flag);
+            mailbox->Publish(std::move(result));
+        })) return;
+    if (--s.details_attribute_pending[path] == 0) s.details_attribute_pending.erase(path);
+    s.notification_toast.ShowError(s.hwnd, l10n::Get(l10n::StringId::DetailsAttributes),
+        format::FileOperationErrorText(HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA)));
+}
+
+void ReceiveDetailsAttributeResult(AppState& s, WPARAM identity) {
+    if (!s.details_attribute_mailbox) return;
+    for (auto& result : s.details_attribute_mailbox->Take(identity)) {
+        bool finished = true;
+        if (const auto pending = s.details_attribute_pending.find(result.path);
+            pending != s.details_attribute_pending.end()) {
+            finished = --pending->second == 0;
+            if (finished) s.details_attribute_pending.erase(pending);
+        }
+        if (result.error != ERROR_SUCCESS) {
+            s.notification_toast.ShowError(s.hwnd, l10n::Get(l10n::StringId::DetailsAttributes),
+                result.path + L"\n" + format::FileOperationErrorText(HRESULT_FROM_WIN32(result.error)));
+        }
+        const auto lifetime = result.pane_lifetime.lock();
+        const auto* tab = ActiveTab(s);
+        if (finished && lifetime && s.pane == result.pane &&
+            s.pane->lifetime_token == lifetime && tab &&
+            tab->network_identity == result.tab_identity &&
+            tab->view_generation == result.view_generation &&
+            BuildVm(s, false).details.path == result.path)
+            RefreshActiveTab(s, RefreshReason::FileChange);
+    }
 }
 
 // Insertion slot for any row, measured against all visible quick-access rows.
@@ -1673,8 +1769,8 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
         // Drag-out threshold (1B-2): left button held after a row click.
         if (s->dragPending) {
-            if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
-                s->dragPending = false;
+            if (!ListRowClickMatches(*s) || (GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
+                CancelPendingListRowClick(*s);
                 if (s->renameClickCandidate && s->renameClickDue == 0)
                     CancelRenameClick(*s);
             } else if (std::abs(mx - s->dragStartPt.x) >= GetSystemMetrics(SM_CXDRAG) ||
@@ -1914,31 +2010,9 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         const ui::WindowViewModel& vm = HitTestVm(*s);
         D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult hit = s->renderer.HitTest(vm, rect, (float)mx, (float)my);
-        const int newRegion = static_cast<int>(hit.region);
-        if (newRegion != s->hoverRegion || hit.index != s->hoverControlIndex ||
-            hit.sub_index != s->hoverSubIndex ||
-            hit.pane_index != s->hoverPaneIndex) {
-            ApplyHoverTarget(*s, hit);
+        if (UpdateHoverFromHit(*s, hit, POINT{mx, my})) {
             if (hit.region == ui::HitTestResult::SidebarItem && fs::IsUncPath(hit.path))
                 RequestUncProbe(*s, hit.path);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        int newHover = (hit.region == ui::HitTestResult::Row ||
-                        hit.region == ui::HitTestResult::RowStar ||
-                        hit.region == ui::HitTestResult::RowFolderSize ||
-                        hit.region == ui::HitTestResult::RowNewTab ||
-                        hit.region == ui::HitTestResult::ChangeBadge ||
-                        hit.region == ui::HitTestResult::RowMore) ? hit.index : -1;
-        if (newHover != s->hoverRow || hit.pane_index != s->hoverPaneIndex) {
-            s->hoverRow = newHover;
-            s->hoverPaneIndex = hit.pane_index;
-            s->ctxHoverSince = GetTickCount64();
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        int newCrumb = (hit.region == ui::HitTestResult::BreadcrumbSegment) ? hit.index : -1;
-        UpdateChangeHover(*s, hit, POINT{mx, my});
-        if (newCrumb != s->breadcrumbHover) {
-            s->breadcrumbHover = newCrumb;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         const D2D1_RECT_F list = ListRect(*s);
@@ -2452,7 +2526,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
         } else if (hit.region == ui::HitTestResult::BreadcrumbSegment) {
             // Empty path is the This PC segment; NavigateTo handles it.
-            NavigateTo(*s, hit.path);
+            NavigateTo(*s, hit.path, ui::SurfaceMotion::Backward);
         } else if (hit.region == ui::HitTestResult::Copy) {
             CollectToTray(*s, false);
         } else if (hit.region == ui::HitTestResult::Cut) {
@@ -2608,12 +2682,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                        (hit.index == 0 || hit.index == 1)) {
                 const DWORD flag = hit.index == 0 ? FILE_ATTRIBUTE_READONLY
                                                   : FILE_ATTRIBUTE_HIDDEN;
-                DWORD attrs = GetFileAttributesW(vm.details.path.c_str());
-                if (attrs != INVALID_FILE_ATTRIBUTES) {
-                    attrs = (attrs & flag) ? (attrs & ~flag) : (attrs | flag);
-                    if (SetFileAttributesW(vm.details.path.c_str(), attrs))
-                        RefreshActiveTab(*s, RefreshReason::FileChange);
-                }
+                QueueDetailsAttributeToggle(*s, vm.details.path, flag);
             }
         } else if (hit.region == ui::HitTestResult::DetailsSecurityChange) {
             DispatchMenuCommand(*s, app::CmdProperties);
@@ -3643,16 +3712,23 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         }
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
         app::Tab* wheelTab = ActiveTab(*s);
-        if (msg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0) {
+        if (msg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wParam) & (MK_CONTROL | MK_SHIFT)) != 0) {
             if (wheelTab) {
-                const int direction = delta > 0 ? -1 : 1;
-                const int next = std::clamp(ui::ViewModeIndex(wheelTab->view_mode) + direction, 0, 7);
-                SetViewMode(*s, ui::ViewModeFromIndex(next), true);
+                if (s->viewWheelTab != wheelTab) s->viewWheelAccum = 0;
+                s->viewWheelTab = wheelTab;
+                const int accumulated = s->viewWheelAccum + delta;
+                const int steps = accumulated / WHEEL_DELTA;
+                s->viewWheelAccum = accumulated % WHEEL_DELTA;
+                if (steps) {
+                    const int next = std::clamp(ui::ViewModeIndex(wheelTab->view_mode) - steps, 0, 7);
+                    SetViewMode(*s, ui::ViewModeFromIndex(next), true);
+                }
             }
             return 0;
         }
-        if (wheelTab && (wheelTab->view_mode == ui::ViewMode::List || msg == WM_MOUSEHWHEEL ||
-            (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT) != 0)) {
+        s->viewWheelAccum = 0;
+        s->viewWheelTab = nullptr;
+        if (wheelTab && (wheelTab->view_mode == ui::ViewMode::List || msg == WM_MOUSEHWHEEL)) {
             ui::PaneViewModel pane;
             app::FillPaneViewModel(pane, *s->pane, &s->places);
             const float maxX = s->renderer.MaxScrollXForPane(pane, FocusedPaneRect(*s));
@@ -3682,6 +3758,7 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
         if (wParam == VK_ESCAPE && (SysCtxPreviewDragCancel(*s) || PulseMenuPreviewDragCancel(*s))) return 0;
         if (wParam == VK_ESCAPE && CancelWindowTransferDrag(*s)) return 0;
+        if (wParam == VK_ESCAPE && CancelSidebarReorder(*s)) return 0;
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
         app::Tab* tab = ActiveTab(*s);
@@ -3695,6 +3772,7 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         if (app::IsTabShortcut(static_cast<UINT>(wParam), ctrl, shift, alt)) {
             const auto target = app::TabShortcutTarget(s->window_tabs, shift);
             if (target && *target != s->window_tabs.active) {
+                CancelPendingListRowClick(*s);
                 if (s->renameIndex >= 0) HideRenameOverlay(*s, false);
                 if (!s->tagRenameId.empty()) HideTagRenameOverlay(*s, false);
                 if (s->filterEditing) HideFilterEditor(*s, true);

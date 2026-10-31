@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "thumbnail_cache.h"
 #include "thumbnail_disk_cache.h"
 #include "../fs/cloud_state.h"
@@ -44,6 +49,12 @@ void ThumbnailCache::EndFrame(Consumer consumer) {
 void ThumbnailCache::KeepVisible(Consumer consumer, const std::wstring& key) {
     auto& state = consumers_[static_cast<size_t>(consumer)];
     if (state.painting) state.frame_keys.insert(key);
+}
+void ThumbnailCache::RetainThumbnail(const std::wstring& path, DWORD attrs, uint32_t pixels,
+                                    uint64_t modified, uint64_t size) {
+    std::lock_guard lock(mutex_);
+    KeepVisible(Consumer::Main, Key(path, pixels, modified, size) +
+        (fs::IsCloudPlaceholder(attrs) ? L":thumbnail:cloud-cache" : L":thumbnail"));
 }
 void ThumbnailCache::SetDeviceContext(ID2D1DeviceContext* dc, Consumer consumer) {
     std::lock_guard lock(mutex_);
@@ -110,6 +121,7 @@ void ThumbnailCache::CancelInterests(Consumer consumer, bool details_only) {
     }
 }
 void ThumbnailCache::Evict(Consumer consumer) {
+    content_revision_.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard lock(mutex_);
     auto& state = consumers_[static_cast<size_t>(consumer)];
     for (auto it = items_.begin(); it != items_.end();) {
@@ -468,6 +480,7 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
     lru_.push_back(req.key);
     result.lru_position = std::prev(lru_.end());
     items_.emplace(req.key, std::move(result));
+    content_revision_.fetch_add(1, std::memory_order_relaxed);
     if (retry) {
         Request next = req;
         next.id = next_id_++;
@@ -621,6 +634,7 @@ void ThumbnailCache::Worker(size_t lane) {
         Item result;
         const bool grid = req.kind == ipc::PreviewRequestKind::Thumbnail;
         ThumbnailStoreKey disk_key{req.path, req.attrs, req.pixels, req.modified, req.size};
+        disk_key.cancel = stop_event_;
         ThumbnailFileIdentity before{};
         const bool verified = grid && ReadThumbnailFileIdentity(disk_key, before);
         StoredThumbnail stored;

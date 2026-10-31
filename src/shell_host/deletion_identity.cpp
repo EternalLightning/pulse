@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "deletion_identity.h"
 #include "../common/file_identity.h"
 #include "../common/path_utils.h"
@@ -19,33 +24,6 @@ bool ReadIdentity(std::wstring_view path, FileIdentity& identity,
     CloseHandle(file);
     return read;
 }
-}
-
-bool DeletionReference::Capture(const std::wstring& path, const FileIdentity& expected,
-    decltype(&GetFileInformationByHandleEx) query) {
-    handle_.reset();
-    const HANDLE handle = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return false;
-    std::shared_ptr<void> reference(handle, [](void* value) { CloseHandle(value); });
-    FileIdentity current;
-    if (!expected.Valid() || !ReadFileIdentity(handle, current, query) || current != expected) return false;
-    handle_ = std::move(reference);
-    return true;
-}
-
-bool DeletionReference::Matches(const std::wstring& path,
-    decltype(&GetFileInformationByHandleEx) query) const {
-    if (!handle_) return false;
-    const HANDLE handle = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return false;
-    std::shared_ptr<void> reference(handle, [](void* value) { CloseHandle(value); });
-    FileIdentity retained, current;
-    // RaiDrive may replace a provisional index when Shell enumerates the item.
-    // Compare the retained object with the current path, never adopt a new path's ID.
-    return ReadFileIdentity(handle_.get(), retained, query) && retained.Valid() &&
-        ReadFileIdentity(handle, current, query) && retained == current;
 }
 
 bool IsSameDeletionItem(std::wstring_view requested, std::wstring_view resolved,

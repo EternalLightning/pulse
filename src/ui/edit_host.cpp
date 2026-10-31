@@ -1,6 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "edit_host.h"
 #include "edit_composition.h"
 #include "edit_motion.h"
+#include "edit_ime_transaction.h"
 #include "FluentTokens.h"
 #include "typography.h"
 #include <commctrl.h>
@@ -183,16 +189,7 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
 }
 
 LRESULT DefPresentedChildEditProc(Compositor& compositor, IDWriteTextFormat* format, D2D1_COLOR_F foreground, D2D1_COLOR_F background, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_IME_STARTCOMPOSITION) {
-        // Start every composition from a caret, not a selection. When a word
-        // replaced the selected stem (F2 selects it), Microsoft Pinyin then
-        // moved the caret back to the start of the field, so the next word
-        // went in front of the first (#116, #162, #211). Deleting the
-        // selection first is what the result would do anyway.
-        DWORD from = 0, to = 0;
-        SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&from), reinterpret_cast<LPARAM>(&to));
-        if (from != to) SendMessageW(hwnd, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L""));
-    }
+    edit_ime::BeforeDefault(hwnd, msg, lParam);
     const bool changes_visual = msg == WM_SETTEXT || msg == EM_SETSEL || msg == EM_REPLACESEL ||
         msg == WM_KEYDOWN || msg == WM_CHAR || msg == WM_CUT || msg == WM_PASTE ||
         msg == WM_CLEAR || msg == WM_UNDO || msg == EM_UNDO || msg == WM_IME_COMPOSITION ||
@@ -202,6 +199,7 @@ LRESULT DefPresentedChildEditProc(Compositor& compositor, IDWriteTextFormat* for
     const bool suppress_native = custom_paint && !compositor.UsesComposedEdits(hwnd);
     if (suppress_native) SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
     const LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
+    edit_ime::AfterDefault(hwnd, msg);
     if (changes_visual) compositor.SynchronizeEditSelection(hwnd, msg, wParam, lParam);
     if (custom_paint) {
         if (suppress_native) SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);

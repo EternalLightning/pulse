@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // search_query.h — Structured advanced-search form ↔ Everything-style query.
 #pragma once
 #include "../index/index_query.h"
 #include "../index/search_kinds.h"
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulse::model {
 
@@ -11,6 +17,19 @@ enum class NameMatchHow : uint8_t { Contains, StartsWith, Exact };
 enum class LocationScope : uint8_t { Indexed, CurrentFolder, CustomFolder };
 enum class SizePreset : uint8_t { Any, Empty, Lt1MB, From1To10MB, Gt10MB, Custom };
 enum class DatePreset : uint8_t { Any, Today, Yesterday, ThisWeek, ThisMonth, ThisYear, Custom };
+
+struct ParsedSearchConstraints {
+    struct Group {
+        std::wstring size_query;
+        std::wstring date_query;
+    };
+    std::vector<Group> groups;
+    SizePreset size = SizePreset::Any;
+    std::wstring size_custom;
+    DatePreset date = DatePreset::Any;
+    std::wstring date_from;
+    std::wstring date_to;
+};
 
 struct AdvancedSearchSpec {
     std::wstring name;
@@ -32,6 +51,8 @@ struct AdvancedSearchSpec {
     bool whole_word = false;
     bool case_sensitive = false;
     std::wstring exclude_name;
+    // Keep bounds the form cannot express until that field is explicitly edited.
+    ParsedSearchConstraints parsed_constraints;
 };
 
 struct SplitSearchQuery {

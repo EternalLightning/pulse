@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // settings_transfer.h - Settings > 关于与诊断 > 备份与迁移: one JSON file that
 // carries the preferences and the user's own lists to another PC, or back.
 //

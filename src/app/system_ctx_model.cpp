@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "system_ctx_model.h"
 #include "system_ctx_exchange.h"
 
@@ -42,7 +47,9 @@ bool Toggleable(const Item& item) {
 
 // 删除残留项: the program behind the entry is gone and its key is one Pulse
 // may write (the switch's own rules).
-bool Deletable(const Item& item) { return item.missing && Toggleable(item); }
+bool Deletable(const Item& item) {
+    return item.target_state == sysctx::TargetState::Missing && item.missing && Toggleable(item);
+}
 
 std::wstring Expand(const std::wstring& s) {
     if (s.find(L'%') == std::wstring::npos) return s;
@@ -893,7 +900,12 @@ void SystemCtxModel::RunJob(std::vector<Op> ops, size_t pop_undo, bool record_un
             auto collect = [&](const std::vector<Op>& list, const std::vector<OpResult>& results) {
                 for (size_t i = 0; i < list.size() && i < results.size(); ++i) {
                     if (results[i] == OpResult::Ok) done.push_back(list[i]);
-                    else if (results[i] == OpResult::RecoveryRequired) recovery.push_back(list[i]);
+                    else if (results[i] == OpResult::RecoveryRequired) {
+                        Op op = list[i];
+                        if (op.action == Action::Delete || op.action == Action::Restore ||
+                            op.kind == Kind::ShellEx || op.kind == Kind::DragDrop) op.recover_tree = true;
+                        recovery.push_back(std::move(op));
+                    }
                     else ++failed;
                 }
             };
@@ -947,12 +959,18 @@ void SystemCtxModel::RunJob(std::vector<Op> ops, size_t pop_undo, bool record_un
                 changes_.push_back(std::move(change));
             }
             // A partial undo retains precisely the changes still to reverse.
-            if (!record_undo && !done.empty()) {
+            if (!record_undo && (!done.empty() || !recovery.empty())) {
                 std::vector<bool> consumed(done.size(), false);
                 size_t change_index = changes_.size();
                 const size_t first = undo_.size() > pop_undo ? undo_.size() - pop_undo : 0;
                 for (size_t n = undo_.size(); n > first; --n) {
                     auto& original = undo_[n - 1].ops;
+                    for (Op& op : original) {
+                        const Op inverse = sysctx::Inverse(op);
+                        for (const Op& pending : recovery)
+                            if (PendingKey(inverse) == PendingKey(pending) && inverse.action == pending.action)
+                                op.recover_tree = pending.recover_tree;
+                    }
                     std::erase_if(original, [&](const Op& op) {
                         const Op inverse = sysctx::Inverse(op);
                         for (size_t i = 0; i < done.size(); ++i) {
@@ -1162,6 +1180,10 @@ std::shared_ptr<const ui::SysCtxView> SystemCtxModel::View() {
             } else {
                 row.subtitle = KindLabel(item.kind);
             }
+            if (item.target_state == sysctx::TargetState::Unavailable)
+                row.subtitle += l10n::Pick(L" · 无法读取程序位置", L" · Program location unavailable");
+            else if (!item.missing && item.icon_state == sysctx::TargetState::Missing)
+                row.subtitle += l10n::Pick(L" · 图标已不存在", L" · Icon missing");
             row.icon_path = e.icon;
             row.glyph = KindGlyph(item.kind);
             row.on = on;

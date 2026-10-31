@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #pragma once
 // cloud_state.h - what the Cloud Files attributes on a listed item say about
 // where its content lives. Pure attribute decoding: no I/O, so asking can never
@@ -12,6 +17,9 @@ inline constexpr DWORD kAttrRecallOnOpen = 0x00040000;       // FILE_ATTRIBUTE_R
 inline constexpr DWORD kAttrPinned = 0x00080000;             // FILE_ATTRIBUTE_PINNED
 inline constexpr DWORD kAttrUnpinned = 0x00100000;           // FILE_ATTRIBUTE_UNPINNED
 inline constexpr DWORD kAttrRecallOnDataAccess = 0x00400000; // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+
+// Cloud Files tags describe provider state, not name redirection.
+constexpr bool IsCloudReparseTag(DWORD tag) noexcept { return (tag & 0xFFFF0FFFu) == 0x9000001Au; }
 
 enum class CloudState : uint8_t {
     Local,  // content present, may be freed again

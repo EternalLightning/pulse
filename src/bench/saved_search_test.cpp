@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../app/saved_search.h"
 
 #include <windows.h>
@@ -17,9 +22,16 @@ void Check(bool condition, const wchar_t* name) {
 
 int wmain() {
     wchar_t temp[MAX_PATH]{};
-    GetTempPathW(ARRAYSIZE(temp), temp);
-    const std::wstring path = std::wstring(temp) + L"pulse-saved-search-test.json";
-    DeleteFileW(path.c_str());
+    const DWORD length = GetTempPathW(ARRAYSIZE(temp), temp);
+    if (!length || length >= ARRAYSIZE(temp)) return 2;
+    const auto directory = std::filesystem::path(temp) / (L"pulse-saved-search-" +
+        std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    if (!CreateDirectoryW(directory.c_str(), nullptr)) return 2;
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::error_code error; std::filesystem::remove_all(path, error); }
+    } cleanup{directory};
+    const std::wstring path = (directory / L"searches.json").wstring();
 
     SavedSearchStore store;
     Check(store.Add({L"源码内容", SavedSearchMode::Content, L"C:\\src", L"TODO", true}),
@@ -35,9 +47,9 @@ int wmain() {
     SavedSearchStore restored;
     Check(restored.LoadFrom(path), L"load schema v1");
     Check(restored.items().size() == 2, L"restore saved search count");
-    Check(restored.items()[0].name == L"源码内容" && restored.items()[0].recursive,
+    Check(restored.items().size() == 2 && restored.items()[0].name == L"源码内容" && restored.items()[0].recursive,
           L"restore Unicode fields and options");
-    Check(restored.items()[1].mode == SavedSearchMode::Duplicates,
+    Check(restored.items().size() == 2 && restored.items()[1].mode == SavedSearchMode::Duplicates,
           L"restore duplicate mode");
     Check(restored.Remove(0) && restored.items().size() == 1, L"remove saved search");
 

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../index/content_search.h"
 #include "../index/content_search_client.h"
 #include "../common/text_decode.h"
@@ -26,7 +31,8 @@ std::wstring FixtureRoot() {
     wchar_t module[32768]{};
     const DWORD length = GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
     const auto build = std::filesystem::path(std::wstring(module, length)).parent_path();
-    return (build.parent_path() / L"bench_data" / L"contenttest").wstring();
+    return (build.parent_path() / L"bench_data" / (L"contenttest-" +
+        std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()))).wstring();
 }
 
 bool WriteBytes(const std::wstring& path, const std::vector<uint8_t>& bytes) {
@@ -125,8 +131,20 @@ int wmain(int argc, wchar_t** argv) {
     namespace fs = std::filesystem;
     const std::wstring root = FixtureRoot();
     std::error_code ignored;
-    fs::remove_all(root, ignored);
-    fs::create_directories(fs::path(root) / L"nested", ignored);
+    fs::create_directories(fs::path(root).parent_path(), ignored);
+    if (ignored || !CreateDirectoryW(root.c_str(), nullptr)) {
+        Check(false, L"create a new process-owned content search fixture");
+        return 1;
+    }
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() {
+            if (failed) { wprintf(L"Fixture retained: %s\n", path.c_str()); return; }
+            std::error_code error; fs::remove_all(path, error);
+        }
+    } cleanup{root};
+    Check(fs::create_directory(fs::path(root) / L"nested", ignored) && !ignored,
+        L"create nested content search fixture");
 
     const std::vector<uint8_t> utf8{
         0xEF, 0xBB, 0xBF, 'f', 'i', 'r', 's', 't', '\n',
@@ -329,8 +347,8 @@ int wmain(int argc, wchar_t** argv) {
     Check(shared_hits == 2 && shared_group != 0, L"two roots with the same content share a group");
 
     Check(text::IsOfflinePlaceholder(0x00400000), L"unpinned recall file is offline");
-    Check(!text::IsOfflinePlaceholder(0x00400000 | 0x00080000),
-          L"pinned recall file is searchable");
+    Check(text::IsOfflinePlaceholder(0x00400000 | 0x00080000),
+          L"pinning intent does not authorize reading a recall placeholder");
 
     const fs::path cycle = fs::path(root) / L"cycle";
     fs::create_directories(cycle / L"inner", ignored);
@@ -502,7 +520,6 @@ int wmain(int argc, wchar_t** argv) {
     Check(!std::filesystem::exists(isolated_profile / L"Pulse" / L"ContentIndex"), L"transient-only client never starts persistent index" );
     SetEnvironmentVariableW(L"LOCALAPPDATA", saved_length ? saved_local_appdata : nullptr);
 
-    fs::remove_all(root, ignored);
     wprintf(L"%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

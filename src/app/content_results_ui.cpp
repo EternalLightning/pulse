@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "app_internal.h"
 #include "content_results_ui.h"
 #include "search_query.h"
@@ -76,6 +81,7 @@ bool RefreshContentResults(AppState& s) {
     }
     ForEachPane(s,[&](app::Pane& pane) {
         auto* tab=pane.ActiveTab(); if(!tab || !tab->content_results) return;
+        if (tab->search_retaining_results && tab->snapshot_path != tab->current_path) return;
         auto& store=*tab->content_results;
         if(tab->content_filter!=tab->filter_text) {
             tab->content_filter=tab->filter_text;
@@ -196,7 +202,7 @@ void CompleteContentSelection(AppState& s) {
     auto* tab=ActiveTab(s); auto store=job->store.lock();
     if(job->pattern) {
         if(tab && store && tab->content_results==store && tab->selection_revision==job->selection && !result->error) {
-            tab->SelectIndices(result->matches);
+            if(!store->ApplyMatches(*result,[tab](const auto& matches) { tab->SelectIndices(matches); })) return;
             if(tab->selected_index>=0) EnsureRowVisible(s,*tab,tab->selected_index);
             InvalidateRect(s.hwnd,nullptr,FALSE);
         }

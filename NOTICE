@@ -12,8 +12,15 @@ release packaging. It is not an official release of the upstream project.
 The source history in this distribution's repository records these changes.
 
 Third-party components retain their respective licenses and notices.
-See third_party and assets in the source tree, and licenses and
-7zip/License.txt in the portable package.
+See THIRD_PARTY_NOTICES.md, third_party and assets in the source tree,
+and licenses and 7zip/License.txt in both installer and portable payloads.
+The material graph in src/ui/window_material.cpp is adapted from d2d-mica,
+Copyright (C) 2022 by wangwenx190 (Yuhang Zhao), under the MIT License.
+Files Community toolbar artwork is used under the MIT License.
+
+Project source files carry licensing and modification notices added by
+EternalLightning for this independent distribution. Existing third-party
+notices remain applicable. These notices do not change any license terms.
 
 本程序是基于 Pulse 的独立修改发行版，由 EternalLightning 维护，
 不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发。

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "content_instant_session.h"
 #include "content_scope.h"
 #include "document_reader.h"
@@ -99,10 +104,14 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
             std::any_of(config.roots.begin(), config.roots.end(), [&](const auto& root) { return Under(path, root.path); });
     };
     const auto included = [&](const std::wstring& path) {
-        return configured(path) && (request.root.empty() || Under(path, request.root));
+        return configured(path) && ContentRequestIncludesPath(request, path);
     };
     const auto ancestor = [&](const std::wstring& path) {
-        return !request.root.empty() && Under(request.root, path) && configured(path);
+        return !path.empty() && !IsInternalContentPath(path) && !ContentPathExcluded(config,path) &&
+            ContentRequestIntersectsPath(request,path) &&
+            std::any_of(config.roots.begin(),config.roots.end(),[&](const auto& root) {
+                return Under(root.path,path) || Under(path,root.path);
+            });
     };
     auto enqueue = [&](const std::wstring& path, bool imported = false) {
         if (!included(path) && !ancestor(path)) return;
@@ -168,7 +177,9 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
                 enqueue(event.old_path);
             }
             cursor = page.next;
-            if (page.done && WaitForSingleObject(changes.stop, 150) == WAIT_OBJECT_0) return;
+            // The server already long-polls empty pages. A second debounce here
+            // delays deletes before the consumer's editor-event coalescing.
+            if (page.done && WaitForSingleObject(changes.stop, 10) == WAIT_OBJECT_0) return;
         }
     });
     struct Stop {

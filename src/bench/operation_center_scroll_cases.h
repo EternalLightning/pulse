@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // Included inside OperationCenterTestPeer.
 static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path& output) {
     int failures=0,checks=0;
@@ -53,9 +58,12 @@ static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path&
         wheel(-WHEEL_DELTA);
         check(center.scroll_target_==target+72*scale && center.scroll_<center.scroll_target_,
             "successive wheel input accumulates distance without snapping to the target");
+        check(center.scroll_initial_velocity_>0 && center.scroll_initial_velocity_==center.scroll_velocity_,
+            "successive wheel input preserves the displayed scrolling velocity");
         const float before_reverse=center.scroll_;
         wheel(WHEEL_DELTA);
         check(center.scroll_target_<before_reverse,"reverse wheel targets the opposite direction from the displayed offset");
+        check(center.scroll_initial_velocity_==0,"reverse wheel discards forward momentum before easing in the new direction");
         center.scroll_started_=AnimationTimeMs()-40;center.Tick();
         check(center.scroll_<before_reverse,"reverse wheel changes direction on the next frame");
         check(first>0,"forward input advanced before reversing");
@@ -129,13 +137,22 @@ static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path&
         reset();center.Render(false);wheel(-WHEEL_DELTA);
         const auto deadline=AnimationTimeMs()+1200;
         int intermediate=0,frames=0;bool monotonic=true;
+        using Clock=std::chrono::steady_clock;
+        auto last_frame=Clock::now();
+        double total_interval=0,worst_interval=0,total_dispatch=0;
         float previous=0;
         while(center.scroll_animating_ && AnimationTimeMs()<deadline) {
             MsgWaitForMultipleObjectsEx(0,nullptr,10,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
             MSG message{};
             while(PeekMessageW(&message,center.hwnd_,0,0,PM_REMOVE)) {
+                const auto before=Clock::now();
                 DispatchMessageW(&message);
                 if(message.message==WM_TIMER) {
+                    const auto after=Clock::now();
+                    const double interval=std::chrono::duration<double,std::milli>(after-last_frame).count();
+                    total_interval+=interval;worst_interval=(std::max)(worst_interval,interval);
+                    total_dispatch+=std::chrono::duration<double,std::milli>(after-before).count();
+                    last_frame=after;
                     ++frames;intermediate+=center.scroll_>0 && center.scroll_<72*scale;
                     monotonic&=center.scroll_>=previous;previous=center.scroll_;
                 }
@@ -144,6 +161,8 @@ static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path&
         check(monotonic && intermediate>=2 && !center.scroll_animating_ && center.scroll_==72*scale,
             "production timer presents multiple intermediate frames and settles without indeterminate tasks");
         std::printf("[FRAMES] dpi=%.0f dark=%d dispatched=%d intermediate=%d\n",scale*100,dark,frames,intermediate);
+        if(frames) std::printf("[TIMING] dpi=%.0f dark=%d interval_avg=%.2fms interval_max=%.2fms dispatch_avg=%.2fms\n",
+            scale*100,dark,total_interval/frames,worst_interval,total_dispatch/frames);
 
         reset();wheel(-WHEEL_DELTA);
         const std::wstring prefix=L"scroll-"+std::to_wstring(static_cast<int>(scale*100))+(dark?L"-dark-":L"-light-");
@@ -157,5 +176,74 @@ static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path&
     }
     center.Hide(false);center.motion_override_=-1;center.force_solid_=false;
     std::printf("[SUMMARY] Operation center smooth scroll: %d PASS / %d FAIL\n",checks-failures,failures);
+    return failures?1:0;
+}
+
+static int RunScrollPerformance(OperationCenter& center) {
+    using Clock=std::chrono::steady_clock;
+    int failures=0;
+    int queries=0;
+    OperationCenterCallbacks callbacks;
+    callbacks.can_return_to_tray=[&](uint64_t) { ++queries;return true; };
+    callbacks.return_to_tray=[](uint64_t) {};
+    center.SetCallbacks(std::move(callbacks));
+    center.force_solid_=true;
+    center.motion_override_=1;
+    for(float scale:{1.0f,1.5f,2.0f}) for(bool dark:{false,true}) for(int count:{18,64}) {
+        center.Hide(false);
+        center.scale_=scale;center.painter_.SetScale(scale);
+        center.compositor_->RecreateTextFormats(scale);
+        center.SetTheme(dark,HexColor(0x0078D4));
+        std::vector<ops::OpStatus> tasks;
+        for(int id=1;id<=count;++id) {
+            ops::OpStatus task;
+            task.task_id=id;task.type=ops::OpType::Copy;task.phase=ops::OpPhase::Completed;
+            task.summary=L"复制文件完成";task.percent=100;
+            task.source_label=L"C:\\Fixture\\项目资料\\source-"+std::to_wstring(id);
+            task.destination_label=L"D:\\Fixture\\归档备份\\target-"+std::to_wstring(id);
+            tasks.push_back(std::move(task));
+        }
+        center.Update(std::move(tasks));
+        center.width_=static_cast<int>(496*scale);center.height_=static_cast<int>(440*scale);
+        center.target_height_=center.height_;center.resizing_=false;
+        center.work_area_={0,0,4000,4000};
+        center.open_=true;center.closing_=false;center.visibility_=center.animation_from_=1;
+        center.animation_start_=AnimationTimeMs()-1000;
+        center.scroll_=0;center.StopScroll();center.Layout();center.Redraw();
+        const auto before_cards=center.cards_;
+        const auto before_buttons=center.buttons_;
+        const int before_queries=queries;
+        double total=0,worst=0;
+        for(int frame=0;frame<32;++frame) {
+            const auto started=Clock::now();
+            center.SetScrollOffset((frame+1)*3.25f*scale);center.Redraw();
+            const double elapsed=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+            total+=elapsed;worst=(std::max)(worst,elapsed);
+        }
+        const bool no_layout=queries==before_queries;
+        bool geometry=center.cards_.size()==before_cards.size() && center.buttons_.size()==before_buttons.size();
+        if(geometry) {
+            for(size_t i=0;i<before_cards.size();++i)
+                geometry&=center.cards_[i].bounds.top==before_cards[i].bounds.top;
+            for(size_t i=0;i<before_buttons.size();++i)
+                geometry&=std::abs(center.buttons_[i].bounds.top-(before_buttons[i].bounds.top-center.scroll_))<0.02f;
+        }
+        failures+=!no_layout;failures+=!geometry;
+        std::printf("[%s] scroll-only frames avoid task action queries (dpi=%.0f dark=%d cards=%d queries=%d)\n",
+            no_layout?"PASS":"FAIL",scale*100,dark,count,queries-before_queries);
+        std::printf("[%s] content geometry stays fixed and action hit rectangles follow the scroll\n",geometry?"PASS":"FAIL");
+        std::printf("[SCROLL COST] dpi=%.0f dark=%d cards=%d frame_avg=%.2fms frame_max=%.2fms\n",
+            scale*100,dark,count,total/32,worst);
+        const float maximum=center.content_height_-center.body_height_;
+        for(int frame=0;frame<2000;++frame)
+            center.SetScrollOffset(std::fmod(frame*3.14159f,maximum));
+        bool stable=true;
+        for(size_t i=0;i<before_buttons.size();++i)
+            stable&=std::abs(center.buttons_[i].bounds.top-(before_buttons[i].bounds.top-center.scroll_))<0.02f;
+        failures+=!stable;
+        std::printf("[%s] repeated fractional scrolling retains precise action hit rectangles\n",stable?"PASS":"FAIL");
+    }
+    center.Hide(false);center.motion_override_=-1;center.force_solid_=false;
+    std::printf("[SUMMARY] Operation center scroll performance: %d failure(s)\n",failures);
     return failures?1:0;
 }

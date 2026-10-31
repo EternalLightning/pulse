@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "operation_elevation_adapter.h"
 #include "operation_presentation.h"
 #include "../common/localization.h"
@@ -12,7 +17,7 @@
 
 namespace pulse::ops {
 namespace {
-constexpr uint32_t kVersion = 1, kRequestMagic = 0x31514550, kSnapshotMagic = 0x31534550,
+constexpr uint32_t kVersion = 2, kRequestMagic = 0x31514550, kSnapshotMagic = 0x31534550,
                    kControlMagic = 0x31434550;
 constexpr uint32_t kMaxCount = 65536, kMaxString = 32767;
 struct InvalidPayload {};
@@ -578,6 +583,19 @@ void WriteConflict(Writer& w, const ConflictItemInfo& value) {
     w.String(value.link_impact.path);
     w.String(value.link_impact.resolved_path);
     w.Number<uint32_t>(value.link_impact.link_count);
+    w.List(value.rows, [&](const ConflictRowInfo& row) {
+        w.Number<uint64_t>(row.row_id);
+        w.String(row.source);
+        w.String(row.destination);
+        w.Number<uint64_t>(row.source_size);
+        w.Number<uint64_t>(row.destination_size);
+        w.Time(row.source_modified);
+        w.Time(row.destination_modified);
+        w.Bool(row.source_is_directory);
+        w.Bool(row.destination_is_directory);
+        w.Bool(row.source_is_reparse);
+        w.Bool(row.destination_is_reparse);
+    });
 }
 ConflictItemInfo ReadConflict(Reader& r) {
     ConflictItemInfo value;
@@ -585,7 +603,6 @@ ConflictItemInfo ReadConflict(Reader& r) {
     value.task_id = r.Number<uint64_t>();
     value.source = r.String();
     value.destination = r.String();
-    Path(value.source);
     Path(value.destination);
     value.source_size = r.Number<uint64_t>();
     value.destination_size = r.Number<uint64_t>();
@@ -595,12 +612,33 @@ ConflictItemInfo ReadConflict(Reader& r) {
     value.destination_is_directory = r.Bool();
     value.remaining = static_cast<size_t>(r.Number<uint64_t>());
     value.link_confirmation = r.Bool();
+    Path(value.source, value.link_confirmation);
     value.link_impact.kind = r.Enum(DestinationLinkKind::HardLink);
     value.link_impact.path = r.String();
     value.link_impact.resolved_path = r.String();
     value.link_impact.link_count = r.Number<uint32_t>();
-    Path(value.link_impact.path, true);
+    Path(value.link_impact.path, !value.link_confirmation);
     Path(value.link_impact.resolved_path, true);
+    std::set<uint64_t> row_ids;
+    value.rows = r.List<ConflictRowInfo>([&] {
+        ConflictRowInfo row;
+        row.row_id = r.Number<uint64_t>();
+        if (!row.row_id || !row_ids.insert(row.row_id).second) throw InvalidPayload{};
+        row.source = r.String();
+        row.destination = r.String();
+        Path(row.source);
+        Path(row.destination);
+        row.source_size = r.Number<uint64_t>();
+        row.destination_size = r.Number<uint64_t>();
+        row.source_modified = r.Time();
+        row.destination_modified = r.Time();
+        row.source_is_directory = r.Bool();
+        row.destination_is_directory = r.Bool();
+        row.source_is_reparse = r.Bool();
+        row.destination_is_reparse = r.Bool();
+        return row;
+    });
+    if (value.link_confirmation && !value.rows.empty()) throw InvalidPayload{};
     if (!value.token)
         throw InvalidPayload{};
     return value;
@@ -716,6 +754,7 @@ struct Control {
     uint64_t conflict_token = 0;
     ConflictChoice choice = ConflictChoice::Cancel;
     bool apply_all = false;
+    std::vector<ConflictResolution> conflict_rows;
     uint64_t delete_token = 0;
     bool delete_accepted = false;
 };
@@ -728,6 +767,10 @@ std::vector<uint8_t> EncodeControl(const Control& value) {
     w.Number<uint64_t>(value.conflict_token);
     w.Number<uint32_t>(static_cast<uint32_t>(value.choice));
     w.Bool(value.apply_all);
+    w.List(value.conflict_rows, [&](const ConflictResolution& row) {
+        w.Number<uint64_t>(row.row_id);
+        w.Number<uint32_t>(static_cast<uint32_t>(row.choice));
+    });
     w.Number<uint64_t>(value.delete_token);
     w.Bool(value.delete_accepted);
     return std::move(w.bytes);
@@ -741,6 +784,18 @@ Control DecodeControl(std::span<const uint8_t> bytes) {
     value.conflict_token = r.Number<uint64_t>();
     value.choice = r.Enum(ConflictChoice::Continue);
     value.apply_all = r.Bool();
+    std::set<uint64_t> row_ids;
+    value.conflict_rows = r.List<ConflictResolution>([&] {
+        ConflictResolution row;
+        row.row_id = r.Number<uint64_t>();
+        row.choice = r.Enum(ConflictChoice::Continue);
+        if (!row.row_id || !row_ids.insert(row.row_id).second ||
+            (row.choice != ConflictChoice::Replace && row.choice != ConflictChoice::Skip &&
+             row.choice != ConflictChoice::KeepBoth)) throw InvalidPayload{};
+        return row;
+    });
+    if (!value.conflict_rows.empty() && (!value.conflict_token || value.apply_all || value.cancel))
+        throw InvalidPayload{};
     value.delete_token = r.Number<uint64_t>();
     value.delete_accepted = r.Bool();
     r.End();
@@ -889,6 +944,7 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
                 token = manager.next_conflict_token_++;
                 manager.pending_conflict_->token = token;
                 manager.resolved_conflict_token_ = 0;
+                manager.resolved_conflict_rows_.clear();
                 manager.pending_conflict_->still_valid = [&manager, task = state.item.seq, token] {
                     std::lock_guard guard(manager.transfer_control_mutex_);
                     return manager.pending_conflict_ && manager.pending_conflict_->task_id == task &&
@@ -905,6 +961,8 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
                 control.cancel = ParentCancelled(raw);
                 control.choice = control.cancel ? ConflictChoice::Cancel : manager.resolved_conflict_choice_;
                 control.apply_all = !control.cancel && manager.resolved_conflict_apply_all_;
+                if (!control.cancel) control.conflict_rows = std::move(manager.resolved_conflict_rows_);
+                manager.resolved_conflict_rows_.clear();
                 manager.pending_conflict_.reset();
             }
         }
@@ -1378,7 +1436,13 @@ OperationElevationResult OperationElevationAdapter::ExecuteWorker(void* raw, std
                     manager.CancelCurrent();
                     break;
                 }
-                manager.ResolveConflict(control.conflict_token, control.choice, control.apply_all);
+                if (!control.conflict_rows.empty()) {
+                    if (!manager.ResolveConflicts(control.conflict_token, control.conflict_rows)) {
+                        disconnected = true;
+                        manager.CancelCurrent();
+                        break;
+                    }
+                } else manager.ResolveConflict(control.conflict_token, control.choice, control.apply_all);
             }
             if (control.delete_token) {
                 if (!snapshot.deletion || control.delete_token != snapshot.deletion->token) {
@@ -1713,7 +1777,7 @@ bool OperationElevationAdapter::CodecChecksForTest() {
         if (!rejects(changed))
             return false;
         changed = valid;
-        changed[4] = 2;
+        changed[4] = static_cast<uint8_t>(kVersion + 1);
         if (!rejects(changed))
             return false;
         changed = valid;
@@ -1750,6 +1814,79 @@ bool OperationElevationAdapter::CodecChecksForTest() {
             return false;
         } catch (...) {
         }
+        ConflictItemInfo conflict;
+        conflict.token = 5;
+        conflict.task_id = 7;
+        conflict.source = L"E:\\fixture\\a";
+        conflict.destination = L"E:\\fixture\\destination\\a";
+        ConflictRowInfo row;
+        row.row_id = 11;
+        row.source = conflict.source;
+        row.destination = conflict.destination;
+        row.source_size = 123;
+        row.destination_size = 456;
+        row.source_modified = {1, 2};
+        row.destination_modified = {3, 4};
+        row.source_is_directory = true;
+        row.destination_is_reparse = true;
+        conflict.rows.push_back(row);
+        row.row_id = 22;
+        row.source = L"E:\\fixture\\b";
+        row.destination = L"E:\\fixture\\destination\\b";
+        conflict.rows.push_back(row);
+        snapshot.status.percent = 0;
+        snapshot.conflict = conflict;
+        const auto round_trip = DecodeSnapshot(EncodeSnapshot(snapshot));
+        if (!round_trip.conflict || round_trip.conflict->rows.size() != 2 ||
+            round_trip.conflict->rows[0].row_id != 11 || round_trip.conflict->rows[1].source != row.source ||
+            round_trip.conflict->rows[0].source_size != 123 ||
+            round_trip.conflict->rows[0].destination_size != 456 ||
+            round_trip.conflict->rows[0].source_modified.dwHighDateTime != 2 ||
+            round_trip.conflict->rows[0].destination_modified.dwHighDateTime != 4 ||
+            !round_trip.conflict->rows[0].source_is_directory ||
+            !round_trip.conflict->rows[0].destination_is_reparse) return false;
+        control = {};
+        control.conflict_token = conflict.token;
+        control.conflict_rows = {{11, ConflictChoice::Replace}, {22, ConflictChoice::KeepBoth}};
+        const auto decisions = DecodeControl(EncodeControl(control));
+        if (decisions.conflict_rows.size() != 2 || decisions.conflict_rows[0].row_id != 11 ||
+            decisions.conflict_rows[1].choice != ConflictChoice::KeepBoth) return false;
+        if (!ValidConflictResolutions(conflict.rows, decisions.conflict_rows)) return false;
+        const auto rejects_control = [&](const Control& invalid) {
+            try { (void)DecodeControl(EncodeControl(invalid)); return false; } catch (...) { return true; }
+        };
+        control.conflict_rows[1].row_id = 11;
+        if (!rejects_control(control) || ValidConflictResolutions(conflict.rows, control.conflict_rows)) return false;
+        control.conflict_rows[1].row_id = 33;
+        if (ValidConflictResolutions(conflict.rows, control.conflict_rows)) return false;
+        control.conflict_rows[1].row_id = 22;
+        control.conflict_rows[1].choice = ConflictChoice::Continue;
+        if (!rejects_control(control)) return false;
+        control.conflict_rows[1].choice = ConflictChoice::Skip;
+        control.conflict_token = 0;
+        if (!rejects_control(control)) return false;
+        snapshot.conflict->rows[1].row_id = 11;
+        try { (void)DecodeSnapshot(EncodeSnapshot(snapshot)); return false; } catch (...) {}
+        const auto rejects_snapshot = [&](const Snapshot& invalid) {
+            try { (void)DecodeSnapshot(EncodeSnapshot(invalid)); return false; } catch (...) { return true; }
+        };
+        snapshot.conflict = conflict;
+        snapshot.conflict->source.clear();
+        if (!rejects_snapshot(snapshot)) return false; // Ordinary conflicts require a source.
+        snapshot.conflict->link_confirmation = true;
+        snapshot.conflict->rows.clear();
+        snapshot.conflict->link_impact.path = conflict.destination;
+        const auto link = DecodeSnapshot(EncodeSnapshot(snapshot));
+        if (!link.conflict || !link.conflict->link_confirmation || !link.conflict->source.empty() ||
+            link.conflict->link_impact.path != conflict.destination) return false;
+        snapshot.conflict->source = L"relative\\source";
+        if (!rejects_snapshot(snapshot)) return false;
+        snapshot.conflict->source.clear();
+        snapshot.conflict->destination = L"relative\\destination";
+        if (!rejects_snapshot(snapshot)) return false;
+        snapshot.conflict->destination = conflict.destination;
+        snapshot.conflict->link_impact.path.clear();
+        if (!rejects_snapshot(snapshot)) return false;
         return true;
     } catch (...) {
         return false;

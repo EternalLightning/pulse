@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "shell_registry_watch_context.h"
 // app_commands.cpp — extracted from app_main.cpp.
@@ -27,6 +32,7 @@
 #include "session.h"
 #include "context_menu.h"
 #include "app_change_tracking.h"
+#include "view_mode_scroll_anchor.h"
 #include "batch_rename.h"
 #include "new_item_dialog.h"
 #include "search_query.h"
@@ -1345,23 +1351,36 @@ app::SidebarEntry* QuickAccessEntryForPath(AppState& s,
 
 void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
                                     POINT screen_pt) {
-    const app::StarredItem* initial = s.places.FindStarred(path);
-    app::SidebarEntry* quick_access = QuickAccessEntryForPath(s, path);
+    const std::wstring target_path = path;
+    const app::StarredItem* initial = s.places.FindStarred(target_path);
+    app::SidebarEntry* quick_access = QuickAccessEntryForPath(s, target_path);
     if ((!initial && !quick_access) || !EnsureMenu(s)) return;
+    const bool starred = initial != nullptr;
     constexpr int kCustomColor = 30100;
-    const auto* saved_badge = s.places.FindQuickAccessBadge(path);
+    const auto* saved_badge = s.places.FindQuickAccessBadge(target_path);
     uint32_t color = initial ? initial->badge_rgb : saved_badge ? saved_badge->badge_rgb : quick_access->badge_rgb;
     std::wstring current_text = initial ? initial->badge : saved_badge ? saved_badge->badge : quick_access->badge;
     s.menu->SetFilterPlaceholder(l10n::Get(l10n::StringId::BadgeTextHint));
     s.menu->SetInitialFilterText(current_text);
     s.menu->SetFilterMinWidth(260.0f);
+    auto apply_badge = [&](const std::wstring& text) {
+        if (starred) {
+            if (!s.places.FindStarred(target_path)) return false;
+            s.places.SetStarredBadge(target_path, text, color);
+        } else {
+            auto* current = QuickAccessEntryForPath(s, target_path);
+            if (!current) return false;
+            current->badge = text.substr(0, 12);
+            current->badge_rgb = color;
+            s.places.SetQuickAccessBadge(target_path, text, color);
+        }
+        return true;
+    };
     auto build = [&](const std::wstring& query) {
         current_text = query.substr(0, 12);
-        if (initial) s.places.SetStarredBadge(path, query, color);
-        else {
-            quick_access->badge = query.substr(0, 12);
-            quick_access->badge_rgb = color;
-            s.places.SetQuickAccessBadge(path, current_text, color);
+        if (!apply_badge(query)) {
+            s.menu->Dismiss();
+            return std::vector<ui::FluentMenuItem>{};
         }
         InvalidateRect(s.hwnd, nullptr, FALSE);
         std::vector<ui::FluentMenuItem> items;
@@ -1386,16 +1405,13 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
     };
     auto apply_color = [&](uint32_t next) {
         color = next;
-        if (initial) s.places.SetStarredBadge(path, current_text, color);
-        else {
-            quick_access->badge = current_text;
-            quick_access->badge_rgb = color;
-            s.places.SetQuickAccessBadge(path, current_text, color);
-        }
+        return apply_badge(current_text);
     };
     for (;;) {
+        auto items = build(current_text);
+        if (items.empty()) break;
         const int cmd = s.menu->TrackPopup(screen_pt,
-            build(current_text),
+            std::move(items),
             [&](const std::wstring& query) { return build(query); });
         const auto& palette = TagColorPalette(s);
         if (cmd >= app::CmdTabColorBase &&
@@ -1407,7 +1423,7 @@ void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
             uint32_t picked = color;
             if (ui::ColorPickerPopup::Pick(s.hwnd, &s.compositor, s.menu.get(),
                                            s.scale, screen_pt, picked, s.darkMode, picked)) {
-                apply_color(picked);
+                if (!apply_color(picked)) break;
                 AppendCustomTagColor(s, picked);
                 continue;
             }
@@ -1539,17 +1555,42 @@ void SetViewMode(AppState& s, ui::ViewMode mode, bool direct_manipulation) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     tab->view_mode_direct = direct_manipulation;
+    if (!direct_manipulation) {
+        s.viewWheelAccum = 0;
+        s.viewWheelTab = nullptr;
+    }
     if (s.appPrefs.folder_views.Set(tab->current_path, mode)) s.appPrefs.Save();
     if (tab->view_mode == mode) return;
     if (s.renameIndex >= 0) HideRenameOverlay(s, false);
+    const auto before = BuildVm(s, false);
+    const auto bounds = FocusedPaneRect(s);
+    const auto& old_pane = before.pane;
+    const auto anchor = old_pane.is_home ? app::ViewModeScrollAnchor{}
+        : app::CaptureViewModeScrollAnchor(old_pane.view_mode,
+            s.renderer.PaneListRect(old_pane, bounds), old_pane.ViewIndex(tab->selected_index),
+            s.renderer.VisibleRangeInPane(old_pane, bounds),
+            [&](int view) { return s.renderer.ItemRectInPane(old_pane, bounds, view); },
+            [&](int view) { return old_pane.SourceIndex(view); });
     tab->view_mode = mode;
+    ++tab->view_mode_revision;
     ++tab->view_generation;
     tab->scroll_x = 0.0f;
     tab->scroll_y = 0.0f;
-    s.scrollTargetY = 0.0f;
-    s.scrollAnimating = false;
-    if (tab->selected_index >= 0) EnsureRowVisible(s, *tab, tab->selected_index);
-    ClampScroll(s);
+    CancelScrollAnimation(s);
+    s.horizontalScrollMotion.Reset();
+    if (anchor.source_index >= 0) {
+        const auto after = BuildVm(s, false);
+        const auto& pane = after.pane;
+        const int view = pane.ViewIndex(anchor.source_index);
+        if (view >= 0 && view < static_cast<int>(pane.EntryCount())) {
+            const auto scroll = app::RestoreViewModeScrollAnchor(anchor, mode,
+                s.renderer.PaneListRect(pane, bounds), s.renderer.ItemRectInPane(pane, bounds, view),
+                s.renderer.MaxScrollXForPane(pane, bounds), s.renderer.MaxScrollForPane(pane, bounds));
+            tab->scroll_x = scroll.x;
+            tab->scroll_y = scroll.y;
+        }
+    }
+    s.scrollTargetY = tab->scroll_y;
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 

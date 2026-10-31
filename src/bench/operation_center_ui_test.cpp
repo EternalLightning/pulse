@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ui/operation_center.h"
 #include "../common/localization.h"
 #include "../ui/animation_clock.h"
@@ -834,6 +839,7 @@ int RunOperationCenterUiTest(std::string_view mode) {
                 if (mode == "--clear-performance") result = OperationCenterTestPeer::RunClearPerformance(center, output);
                 else if (mode == "--visibility-performance") result = OperationCenterTestPeer::RunVisibilityPerformance(center);
                 else if (mode == "--smooth-scroll") result = OperationCenterTestPeer::RunSmoothScroll(center,output);
+                else if (mode == "--scroll-performance") result = OperationCenterTestPeer::RunScrollPerformance(center);
                 else result = OperationCenterTestPeer::Run(center, output);
             }
         }

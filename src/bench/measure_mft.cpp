@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // measure_mft.cpp — Stage 0 MFT / USN journal benchmark
 // Usage: pulse_bench_mft [drive_letter]
 //   drive_letter: e.g. C (default C)
@@ -14,6 +19,8 @@
 #include <iomanip>
 #include <cstdint>
 #include <cctype>
+#include <cstring>
+#include "../index/usn_record.h"
 
 #pragma comment(lib, "advapi32.lib")
 
@@ -153,7 +160,77 @@ static void read_usn_journal(HANDLE hvol, int64_t limit_records) {
     if (ms > 0) std::wcout << L"rate         = " << (records * 1000.0 / ms) << L" rec/s\n";
 }
 
-static void enum_mft(HANDLE hvol, wchar_t /*letter*/) {
+static bool ReadMftPage(const BYTE* data, size_t size, DWORDLONG previous,
+                        DWORDLONG& next, int64_t& count) {
+    if (!data || size < sizeof(next)) return false;
+    DWORDLONG cursor = 0;
+    std::memcpy(&cursor, data, sizeof(cursor));
+    if (cursor <= previous) return false;
+    data += sizeof(cursor);
+    size -= sizeof(cursor);
+    int64_t records = 0;
+    while (size) {
+        pulse::index::UsnRecordView view;
+        if (!pulse::index::ReadUsnRecord(data, size, view)) return false;
+        ++records;
+        data += view.record.RecordLength;
+        size -= view.record.RecordLength;
+    }
+    next = cursor;
+    count = records;
+    return true;
+}
+
+static int TestMftPages() {
+    const DWORDLONG cursor = 99;
+    std::vector<BYTE> page(sizeof(cursor));
+    std::memcpy(page.data(), &cursor, sizeof(cursor));
+    for (const DWORDLONG reference : {DWORDLONG{7}, DWORDLONG{42}}) {
+        constexpr size_t fixed = offsetof(USN_RECORD_V2, FileName);
+        constexpr size_t length = (fixed + sizeof(wchar_t) + 7) & ~size_t{7};
+        USN_RECORD_V2 record{};
+        record.RecordLength = static_cast<DWORD>(length);
+        record.MajorVersion = 2;
+        record.FileReferenceNumber = reference;
+        record.FileNameOffset = static_cast<WORD>(fixed);
+        record.FileNameLength = sizeof(wchar_t);
+        const size_t offset = page.size();
+        page.resize(offset + length);
+        std::memcpy(page.data() + offset, &record, fixed);
+        const wchar_t name = L'x';
+        std::memcpy(page.data() + offset + fixed, &name, sizeof(name));
+    }
+    int failures = 0;
+    const auto check = [&](bool ok, const wchar_t* label) {
+        std::wcout << (ok ? L"[PASS] " : L"[FAIL] ") << label << L'\n';
+        failures += !ok;
+    };
+    DWORDLONG next = 0;
+    int64_t count = 0;
+    check(ReadMftPage(page.data(), page.size(), 0, next, count) && next == 99 && count == 2,
+        L"MFT page skips its continuation header and counts both validated records");
+    check(!ReadMftPage(page.data(), sizeof(cursor) - 1, 0, next, count), L"MFT rejects a truncated cursor");
+    check(!ReadMftPage(page.data(), page.size(), cursor, next, count), L"MFT rejects an unchanged cursor");
+    check(!ReadMftPage(page.data(), page.size(), cursor + 1, next, count), L"MFT rejects a backwards cursor");
+    check(!ReadMftPage(page.data(), page.size() - 1, 0, next, count), L"MFT rejects a truncated record");
+    auto bad = page;
+    const DWORD zero_length = 0;
+    std::memcpy(bad.data() + sizeof(cursor), &zero_length, sizeof(zero_length));
+    check(!ReadMftPage(bad.data(), bad.size(), 0, next, count), L"MFT rejects zero-length records");
+    bad = page;
+    const WORD unsupported_version = 3;
+    std::memcpy(bad.data() + sizeof(cursor) + offsetof(USN_RECORD_V2, MajorVersion),
+        &unsupported_version, sizeof(unsupported_version));
+    check(!ReadMftPage(bad.data(), bad.size(), 0, next, count), L"MFT rejects unsupported record versions");
+    bad = page;
+    const WORD bad_name_offset = 0;
+    std::memcpy(bad.data() + sizeof(cursor) + offsetof(USN_RECORD_V2, FileNameOffset),
+        &bad_name_offset, sizeof(bad_name_offset));
+    check(!ReadMftPage(bad.data(), bad.size(), 0, next, count), L"MFT rejects invalid filename bounds");
+    return failures ? 1 : 0;
+}
+
+static bool enum_mft(HANDLE hvol, wchar_t /*letter*/) {
     std::wcout << L"\n=== Full MFT Enumeration (FSCTL_ENUM_USN_DATA) ===\n";
 
     MFT_ENUM_DATA_V0 med{};
@@ -165,6 +242,7 @@ static void enum_mft(HANDLE hvol, wchar_t /*letter*/) {
     std::vector<BYTE> buffer(buf_size);
     int64_t records = 0;
     bool truncated = false;
+    bool complete = true;
 
     const auto max_duration = std::chrono::minutes(5);
     auto t0 = std::chrono::steady_clock::now();
@@ -179,24 +257,23 @@ static void enum_mft(HANDLE hvol, wchar_t /*letter*/) {
             DWORD err = GetLastError();
             if (err == ERROR_HANDLE_EOF || err == ERROR_NO_MORE_ITEMS) break;
             std::wcout << L"FSCTL_ENUM_USN_DATA error=" << err << L"\n";
+            complete = false;
             break;
         }
-        if (bytes_read == 0) break;
-
-        PUSN_RECORD_V2 rec = reinterpret_cast<PUSN_RECORD_V2>(buffer.data());
-        DWORD remaining = bytes_read;
-        while (remaining > 0) {
-            if (rec->RecordLength == 0 || rec->RecordLength > remaining) break;
-            ++records;
-            remaining -= rec->RecordLength;
-            med.StartFileReferenceNumber = rec->FileReferenceNumber;
-            rec = reinterpret_cast<PUSN_RECORD_V2>(reinterpret_cast<BYTE*>(rec) + rec->RecordLength);
+        DWORDLONG next = 0;
+        int64_t page_records = 0;
+        if (!ReadMftPage(buffer.data(), bytes_read, med.StartFileReferenceNumber, next, page_records)) {
+            std::wcout << L"[FAIL] invalid MFT page or non-progressing continuation cursor\n";
+            complete = false;
+            break;
         }
-        if (truncated) break;
+        records += page_records;
+        med.StartFileReferenceNumber = next;
 
         auto elapsed = std::chrono::steady_clock::now() - t0;
         if (elapsed > max_duration) {
             truncated = true;
+            complete = false;
             std::wcout << L"  stopped at 5-minute budget.\n";
             break;
         }
@@ -205,14 +282,14 @@ static void enum_mft(HANDLE hvol, wchar_t /*letter*/) {
     double ms = millis(t1 - t0);
 
     std::wcout << std::fixed << std::setprecision(2);
-    std::wcout << L"records enum = " << records << (truncated ? L" (truncated)" : L"") << L"\n";
+    std::wcout << L"records enum = " << records << (truncated ? L" (truncated)" : complete ? L"" : L" (incomplete)") << L"\n";
     std::wcout << L"time         = " << ms << L" ms\n";
     if (ms > 0) std::wcout << L"rate         = " << (records * 1000.0 / ms) << L" rec/s\n";
 
     double rec_per_s = (ms > 0) ? (records * 1000.0 / ms) : 0;
     // Rough guess: a consumer C: drive commonly holds ~1.0M files+dirs.
     const int64_t estimated_total = 1'000'000;
-    if (records > 0 && rec_per_s > 0) {
+    if ((complete || truncated) && records > 0 && rec_per_s > 0) {
         if (truncated) {
             double build_s = estimated_total / rec_per_s;
             std::wcout << L"  estimated full build time for " << estimated_total
@@ -226,8 +303,9 @@ static void enum_mft(HANDLE hvol, wchar_t /*letter*/) {
                        << (records * 80 / (1024.0 * 1024.0)) << L" MB\n";
         }
     } else {
-        std::wcout << L"  (no records enumerated; cannot estimate rate/memory)\n";
+        std::wcout << L"  (incomplete or empty enumeration; cannot estimate full build time/memory)\n";
     }
+    return complete;
 }
 
 static int usage(const char* argv0) {
@@ -249,6 +327,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::ios::sync_with_stdio(false);
 
     if (argc > 2) return usage("pulse_bench_mft");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--parser-only") return TestMftPages();
 
     wchar_t drive = L'C';
     if (argc == 2 && argv[1][0] != 0) {
@@ -271,8 +350,8 @@ int wmain(int argc, wchar_t* argv[]) {
     query_usn_journal(hvol);
     read_usn_journal(hvol, 10000);
 
-    enum_mft(hvol, drive);
+    const bool complete = enum_mft(hvol, drive);
 
     CloseHandle(hvol);
-    return 0;
+    return complete ? 0 : 1;
 }

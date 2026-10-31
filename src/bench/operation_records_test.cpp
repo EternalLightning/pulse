@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "../ops/ops_manager.h"
 #include "../ops/operation_presentation.h"
 #include <algorithm>
@@ -201,6 +206,11 @@ void BatchAndOutcomeFixtures() {
             accepted_token = pending->token; ++dialogs;
             std::set<uint64_t> ids;
             metadata_ok = pending->rows.size() == 3;
+            if (!metadata_ok) {
+                Check(false, "batch fixture receives exactly three immutable conflict rows before mutating answers");
+                manager.ResolveConflict(pending->token, ConflictChoice::Cancel, false);
+                return;
+            }
             for (const auto& row : pending->rows) {
                 metadata_ok = metadata_ok && ids.insert(row.row_id).second && row.source_size > 3 &&
                     row.destination_size == 3 && !row.source_is_directory && !row.destination_is_directory;

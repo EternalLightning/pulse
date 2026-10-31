@@ -1,47 +1,14 @@
+@rem SPDX-License-Identifier: Apache-2.0
+@rem Pulse project; see LICENSE and NOTICE for licensing and attribution.
+@rem Modified by EternalLightning for this independent distribution, including licensing notices.
+@rem Existing third-party notices and license terms remain applicable.
+
 @echo off
 setlocal
 cd /d "%~dp0"
-call "%~dp0scripts\vcvars.bat"
-if errorlevel 1 exit /b 1
 set "PULSE_RELEASE_BUILD=%~2"
 if not defined PULSE_RELEASE_BUILD set "PULSE_RELEASE_BUILD=build-release"
-where ninja >nul 2>&1
-if errorlevel 1 (
-    echo Ninja is required. Run from an x64 Visual Studio developer prompt.
-    exit /b 1
-)
-set "PULSE_CMAKE_FRESH="
-if /i "%~1"=="/clean" set "PULSE_CMAKE_FRESH=--fresh"
-if exist "%PULSE_RELEASE_BUILD%\CMakeCache.txt" (
-    findstr /x /c:"CMAKE_GENERATOR:INTERNAL=Ninja" "%PULSE_RELEASE_BUILD%\CMakeCache.txt" >nul
-    if errorlevel 1 (
-        echo Use a fresh Ninja build directory; old NMake header dependencies may be incomplete.
-        exit /b 1
-    )
-)
-rem Keep compiler output consistent across localized MSVC installs.
-chcp 65001 >nul
-set "VSLANG=1033"
-set "PULSE_LUMATEXT_PREBUILT="
-if exist "%~dp0third_party\lumatext\bin\lumatext.dll" set "PULSE_LUMATEXT_PREBUILT=1"
-if not defined LUMATEXT_SOURCE_DIR if not defined PULSE_LUMATEXT_PREBUILT if exist "%~dp0..\lumatext\CMakeLists.txt" set "LUMATEXT_SOURCE_DIR=%~dp0..\lumatext"
-set "PULSE_CMAKE_CLEAN="
-if /i "%~1"=="/clean" (
-    set "PULSE_CMAKE_CLEAN=--clean-first"
-)
-set "PULSE_DEPS="
-set PULSE_BUILD_CONFIG=-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DPULSE_WITH_SELFTEST=OFF
-if exist "%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\harfbuzz-src\src\harfbuzz.cc" set PULSE_DEPS=-DFETCHCONTENT_SOURCE_DIR_HARFBUZZ="%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\harfbuzz-src" -DFETCHCONTENT_SOURCE_DIR_FREETYPE="%LUMATEXT_SOURCE_DIR%\build-vs18\_deps\freetype-src"
-if defined LUMATEXT_SOURCE_DIR (
-    cmake %PULSE_CMAKE_FRESH% -S . -B "%PULSE_RELEASE_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DLUMATEXT_SOURCE_DIR="%LUMATEXT_SOURCE_DIR%" -DPULSE_WITH_LUMATEXT=ON %PULSE_DEPS% %PULSE_BUILD_CONFIG%
-) else if defined PULSE_LUMATEXT_PREBUILT (
-    rem -DLUMATEXT_SOURCE_DIR= clears a cached source tree; CMakeLists.txt picks
-    rem up the committed third_party\lumatext package on its own.
-    cmake %PULSE_CMAKE_FRESH% -S . -B "%PULSE_RELEASE_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DLUMATEXT_SOURCE_DIR= -DPULSE_WITH_LUMATEXT=ON %PULSE_BUILD_CONFIG%
-) else (
-    cmake %PULSE_CMAKE_FRESH% -S . -B "%PULSE_RELEASE_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release %PULSE_BUILD_CONFIG%
-)
-if errorlevel 1 exit /b 1
-cmake --build "%PULSE_RELEASE_BUILD%" %PULSE_CMAKE_CLEAN% --parallel 4 --target pulse pulse_index pulse_shell pulse_preview pulse_document
-if errorlevel 1 exit /b 1
-exit /b 0
+set "PULSE_CLEAN_ARG="
+if /i "%~1"=="/clean" set "PULSE_CLEAN_ARG=-Clean"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" -BuildDir "%PULSE_RELEASE_BUILD%" -Configure %PULSE_CLEAN_ARG%
+exit /b %errorlevel%

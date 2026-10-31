@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // app_navigation.h — Navigation, watches, search, and virtual places.
 #pragma once
 #include "app_runtime.h"
@@ -34,7 +39,7 @@ void AcceptIndexProviderResult(AppState& s, uint32_t id,
 void MaybePrefetchSearchPage(AppState& s);
 void CancelActiveContentSearch(AppState& s, app::Tab& tab);
 void TeardownTabSearch(AppState& s, const app::Tab& tab);
-enum class PathLoadReason { Navigate, RestoreSession, NetworkRetry };
+enum class PathLoadReason { Navigate, RestoreSession, NetworkRetry, SearchInput };
 void MarkContentSearchStopped(app::Tab& tab);
 void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path,
                      PathLoadReason reason = PathLoadReason::Navigate);
@@ -59,7 +64,8 @@ void QueueSizePatch(AppState& s, const std::wstring& path, const std::wstring& n
 void DrainDirNotifies(AppState& s);
 void RestoreNavigationReturnSelection(AppState& s, app::Tab& tab,
                                              const std::wstring& childName, bool ensure_visible = true);
-void NavigateTo(AppState& s, const std::wstring& path);
+void NavigateTo(AppState& s, const std::wstring& path,
+                ui::SurfaceMotion motion = ui::SurfaceMotion::Fade);
 void FocusPane(AppState& s, app::Pane* p);
 void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset);
 void TransferToTarget(AppState& s, bool move);

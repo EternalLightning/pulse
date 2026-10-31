@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // ui_sidebar.cpp — Sidebar and staging-tray deck.
 #include "ui_renderer.h"
 #include "home_layout.h"
@@ -20,6 +25,25 @@
 namespace pulse::ui {
 
 namespace {
+
+class SidebarRowLayer {
+public:
+    SidebarRowLayer(ID2D1DeviceContext* dc, D2D1_RECT_F bounds, float presence)
+        : dc_(presence < 1.0f ? dc : nullptr) {
+        if (!dc_) return;
+        bounds.bottom = bounds.top + (bounds.bottom - bounds.top) * presence;
+        dc_->PushAxisAlignedClip(bounds, D2D1_ANTIALIAS_MODE_ALIASED);
+        dc_->PushLayer(D2D1::LayerParameters1(bounds, nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), presence), nullptr);
+    }
+    ~SidebarRowLayer() {
+        if (!dc_) return;
+        dc_->PopLayer();
+        dc_->PopAxisAlignedClip();
+    }
+private:
+    ID2D1DeviceContext* dc_;
+};
 
 // Accent insertion indicator shared by the two sidebar reorders (sections and
 // quick-access pins).
@@ -76,8 +100,11 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     const auto home = HomeButtonRect(EffectiveSidebarWidth(rect.right), title_bar_height_ + margin_, scale_);
     const bool home_hover = vm.hover_region == HitTestResult::HomeButton;
     const bool home_selected = vm.pane.is_home;
-    if (home_hover || home_selected)
-        painter_.FillRoundedRect(home, theme.radius_control * scale_, home_selected ? theme.fill_selected : theme.fill_hover);
+    auto home_fill = home_selected ? theme.fill_selected : theme.fill_hover;
+    const float home_hot = ControlHoverOpacity(home, home_hover);
+    if (!home_selected) home_fill.a *= home_hot;
+    if (home_fill.a > 0.0f)
+        painter_.FillRoundedRect(home, theme.radius_control * scale_, home_fill);
     const bool home_rail = SidebarRailLayout(EffectiveSidebarWidth(rect.right), scale_);
     const float home_icon_size = (home_rail ? 20 : 16) * scale_;
     const float home_icon_left = home_rail ? (home.left + home.right - home_icon_size) * 0.5f : home.left + 10 * scale_;
@@ -159,8 +186,9 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             }
             if (slot.group < 0 || slot.item < 0) continue;
             const auto& item = vm.sidebar[slot.group].items[slot.item];
-            const bool selected = PathIsSelfOrChild(item.path, vm.pane.path);
-            const bool hovered = IsHovered(vm, HitTestResult::SidebarItem, slot.run);
+            SidebarRowLayer row_layer(dc, slot.rc, item.presence);
+            const bool selected = item.exiting || PathIsSelfOrChild(item.path, vm.pane.path);
+            const bool hovered = !item.exiting && IsHovered(vm, HitTestResult::SidebarItem, slot.run);
             if (selected || hovered || slot.run == vm.sidebar_drop_index) {
                 MakeBrush(dc, selected ? theme.fill_selected : theme.fill_hover, brFillSelected_);
                 FillRoundedRect(dc, brFillSelected_.get(), slot.rc.left, slot.rc.top,
@@ -211,6 +239,8 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             header.bounds = slot.rc;
             header.text = vm.sidebar[slot.group].header;
             header.expanded = !vm.sidebar[slot.group].collapsed;
+            header.expansion = motion_enabled_ ? SidebarExpansion(vm.sidebar[slot.group]) :
+                (header.expanded ? 1.0f : 0.0f);
             header.glyph = vm.sidebar[slot.group].icon_glyph;
             const int header_svg = FluentSvgIdForGlyph(header.glyph);
             header.skip_glyph =
@@ -256,10 +286,11 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         if (slot.group < 0 || slot.item < 0) continue;
 
         const auto& item = vm.sidebar[slot.group].items[slot.item];
+        SidebarRowLayer row_layer(dc, slot.rc, item.presence);
         fluent::ControlState state;
-        state.selected = PathIsSelfOrChild(item.path, vm.pane.path);
-        state.hovered = IsHovered(vm, HitTestResult::SidebarItem, slot.run) ||
-            IsHovered(vm, HitTestResult::SidebarItemExpand, slot.run);
+        state.selected = item.exiting || PathIsSelfOrChild(item.path, vm.pane.path);
+        state.hovered = !item.exiting && (IsHovered(vm, HitTestResult::SidebarItem, slot.run) ||
+            IsHovered(vm, HitTestResult::SidebarItemExpand, slot.run));
         // Rows of the section being reordered stay lit like its header, and the
         // dragged pin row reads as held.
         if (vm.sidebar_group_drag_id >= 0 &&
@@ -388,16 +419,26 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             }
             if (item.expandable) {
                 const bool expand_hot = IsHovered(vm, HitTestResult::SidebarItemExpand, slot.run);
-                if (expand_hot) {
-                    MakeBrush(dc, theme.fill_hover, brFillHover_);
+                const float hot = ControlHoverOpacity(expand_rc, expand_hot);
+                if (hot > 0.0f) {
+                    auto fill = theme.fill_hover;
+                    fill.a *= hot;
+                    MakeBrush(dc, fill, brFillHover_);
                     FillRoundedRect(dc, brFillHover_.get(), expand_rc.left, expand_rc.top,
                         expand_rc.right - expand_rc.left, expand_rc.bottom - expand_rc.top,
                         4.0f * scale_);
                 }
+                const float expansion = DisclosureProgress(L"sidebar-disclosure:" +
+                    std::to_wstring(vm.sidebar[slot.group].id) + L":" + item.path, item.expanded);
+                D2D1_MATRIX_3X2_F transform;
+                dc->GetTransform(&transform);
+                dc->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion,
+                    D2D1::Point2F((expand_rc.left + expand_rc.right) * 0.5f,
+                        (expand_rc.top + expand_rc.bottom) * 0.5f)) * transform);
                 DrawIconText(expand_rc.left, expand_rc.top,
                     expand_rc.right - expand_rc.left, expand_rc.bottom - expand_rc.top,
-                    item.expanded ? kIconChevronDown : kIconChevronRight,
-                    item.expanded ? L"v" : L">", theme.text_secondary, 0.68f);
+                    kIconChevronRight, L">", theme.text_secondary, 0.68f);
+                dc->SetTransform(transform);
             }
         }
     }

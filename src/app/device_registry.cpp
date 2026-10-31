@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_registry.cpp - Connected phones (device_registry.h).
 #include "device_registry.h"
 #include "device_messages.h"
@@ -67,10 +72,17 @@ void WriteTestDeviceList(const std::vector<fs::DeviceInfo>& devices, uint64_t re
 
 } // namespace
 
-void CALLBACK DeviceRegistry::OnTimer(PTP_CALLBACK_INSTANCE, void*, PTP_TIMER) {
+void CALLBACK DeviceRegistry::OnTimer(PTP_CALLBACK_INSTANCE, void* context, PTP_TIMER) {
     // A stuck list call (driver not answering) keeps the last list; the next
     // arrival or locked re-check asks again on a fresh thread.
-    Instance().worker_.Post([] { Instance().RefreshOnWorker(); }, kListBudgetMs);
+    auto& registry = *static_cast<DeviceRegistry*>(context);
+    uint64_t request = 0;
+    {
+        std::lock_guard<std::mutex> lock(registry.mutex_);
+        if (registry.stopped_) return;
+        request = ++registry.refresh_request_;
+    }
+    registry.worker_.Post([&registry, request] { registry.RefreshOnWorker(request); }, kListBudgetMs);
 }
 
 DeviceRegistry& DeviceRegistry::Instance() {
@@ -99,7 +111,7 @@ void DeviceRegistry::Start(HWND notify) {
         filter.dbcc_classguid = kWpdInterfaceClass;
         if (notify && !test_source_)
             registration_ = RegisterDeviceNotificationW(notify, &filter, DEVICE_NOTIFY_WINDOW_HANDLE);
-        timer_ = CreateThreadpoolTimer(OnTimer, nullptr, nullptr);
+        timer_ = CreateThreadpoolTimer(OnTimer, this, nullptr);
     }
     if (test_source_ || fs::AnyPortableDevicePresent()) ScheduleRefresh(0);
 }
@@ -169,15 +181,15 @@ fs::DeviceSource* DeviceRegistry::SourceOnWorker() {
     return source.get();
 }
 
-void DeviceRegistry::RefreshOnWorker() {
+void DeviceRegistry::RefreshOnWorker(uint64_t request) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (stopped_) return;
+        if (stopped_ || request != refresh_request_) return;
     }
-    Publish(SourceOnWorker()->ListDevices());
+    Publish(request, SourceOnWorker()->ListDevices());
 }
 
-void DeviceRegistry::Publish(std::vector<fs::DeviceInfo> devices) {
+void DeviceRegistry::Publish(uint64_t request, std::vector<fs::DeviceInfo> devices) {
     bool changed = false;
     bool recheck = false;
     bool poll = false;
@@ -185,7 +197,7 @@ void DeviceRegistry::Publish(std::vector<fs::DeviceInfo> devices) {
     uint64_t revision = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (stopped_) return;
+        if (stopped_ || request != refresh_request_) return;
         changed = devices != devices_ || revision_ == 0;
         if (changed) {
             devices_ = devices;

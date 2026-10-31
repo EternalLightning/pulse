@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pulse project; see LICENSE and NOTICE for licensing and attribution.
+# Modified by EternalLightning for this independent distribution, including licensing notices.
+# Existing third-party notices and license terms remain applicable.
+
 """Paired read-only benchmarks. Extracted text stays in memory, never in reports."""
 import collections, hashlib, json, os, re, subprocess, sys, time
 from pathlib import Path

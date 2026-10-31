@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "legacy_icons.h"
 #include "command_icons.h"
 #include "../common/resource_ids.h"
@@ -68,9 +73,15 @@ float MeasureTextWidth(Compositor* compositor, IDWriteTextFormat* format,
     return typography::MeasureLine(compositor, format, text);
 }
 
+D2D1_COLOR_F InterpolateColor(D2D1_COLOR_F from, D2D1_COLOR_F to, float progress) noexcept {
+    return D2D1::ColorF(from.r + (to.r - from.r) * progress,
+        from.g + (to.g - from.g) * progress, from.b + (to.b - from.b) * progress,
+        from.a + (to.a - from.a) * progress);
+}
+
 D2D1_COLOR_F TextFieldFillColor(const Theme& theme, const ControlState& state,
                                 bool /*dark*/, bool high_contrast,
-                                bool hosted_edit) noexcept {
+                                bool hosted_edit, float hover = -1.0f) noexcept {
     if (high_contrast) return theme.fill_input;
     if (hosted_edit) {
         // Layered EDIT paints an opaque #1E1E1E / white plate. Rest fill_input
@@ -79,8 +90,8 @@ D2D1_COLOR_F TextFieldFillColor(const Theme& theme, const ControlState& state,
     }
     if (!state.enabled) return theme.fill_input_disabled;
     if (state.focused) return theme.fill_input_focus;
-    if (state.hovered) return theme.fill_input_hover;
-    return theme.fill_input;
+    const float progress = hover < 0.0f ? (state.hovered ? 1.0f : 0.0f) : hover;
+    return InterpolateColor(theme.fill_input, theme.fill_input_hover, progress);
 }
 
 struct TextLayoutKey {
@@ -758,6 +769,12 @@ void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius) {
     StrokeRounded(Inflate(bounds, Px(1.0f)), radius + Px(1.0f), BrushId::Accent, width);
 }
 
+float Painter::HoverProgress(const D2D1_RECT_F& bounds, const ControlState& state) const {
+    const bool hot = state.enabled && state.hovered;
+    const float progress = hover_sampler_ ? hover_sampler_(bounds, hot) : (hot ? 1.0f : 0.0f);
+    return !state.enabled ? 0.0f : state.pressed ? 1.0f : progress;
+}
+
 void Painter::DrawButton(const ButtonSpec& spec) {
     if (!theme_ || !compositor_) {
         return;
@@ -874,6 +891,28 @@ void Painter::DrawButton(const ButtonSpec& spec) {
                 : state.pressed ? MultiplyAlpha(theme_->text, 0.72f) : theme_->text;
         }
     }
+    const float hover = HoverProgress(spec.bounds, state);
+    if (!high_contrast_ && state.enabled && !state.pressed) {
+        if (transparent && !primary && !danger) {
+            fill.a *= hover;
+            draw_fill = hover > 0.0f;
+        } else {
+            D2D1_COLOR_F resting = fill, hot = fill;
+            if (danger) {
+                resting = theme_->danger; hot = theme_->danger_hover;
+            } else if (primary) {
+                const auto shades = DeriveAccentShades(theme_->accent);
+                resting = theme_->accent; hot = dark_ ? shades.dark1 : shades.light1;
+            } else {
+                resting = dark_ ? RgbaF(0xFFFFFF, 0.0605f) : RgbaF(0xFFFFFF, 0.70f);
+                hot = dark_ ? RgbaF(0xFFFFFF, 0.0837f) : RgbaF(0xF9F9F9, 0.50f);
+            }
+            fill = D2D1::ColorF(resting.r + (hot.r - resting.r) * hover,
+                resting.g + (hot.g - resting.g) * hover,
+                resting.b + (hot.b - resting.b) * hover,
+                resting.a + (hot.a - resting.a) * hover);
+        }
+    }
     if (draw_fill) {
         FillRoundedRect(spec.bounds, radius, fill);
     }
@@ -951,8 +990,8 @@ void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& 
     }
 
     const float radius = Px(theme_->radius_control);
-    const D2D1_COLOR_F fill = TextFieldFillColor(*theme_, state, dark_, high_contrast_,
-                                                hosted_edit);
+    const float hover = state.focused || hosted_edit ? 0.0f : HoverProgress(bounds, state);
+    const auto fill = TextFieldFillColor(*theme_, state, dark_, high_contrast_, hosted_edit, hover);
     D2D1_COLOR_F border;
     D2D1_COLOR_F bottom;
     if (high_contrast_) {
@@ -967,6 +1006,8 @@ void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& 
         bottom = state.focused ? theme_->accent : theme_->stroke_input_bottom;
     }
 
+    if (!high_contrast_ && state.enabled && !state.focused && !hosted_edit)
+        border = InterpolateColor(border, theme_->stroke_input_bottom, hover * 0.25f);
     FillRoundedRect(bounds, radius, fill);
     StrokeRoundedRect(bounds, radius, border);
 
@@ -1048,7 +1089,8 @@ void Painter::DrawTextField(const TextFieldSpec& spec) {
         const bool is_placeholder = spec.text.empty();
         const D2D1_COLOR_F luma_bg = BlendOver(
             TextFieldFillColor(*theme_, spec.state, dark_, high_contrast_,
-                               spec.hosted_edit), theme_->bg);
+                spec.hosted_edit, spec.state.focused || spec.hosted_edit ? 0.0f :
+                    HoverProgress(spec.bounds, spec.state)), theme_->bg);
         DrawText(is_placeholder ? spec.placeholder : spec.text, content,
                  BodyFormat(), is_placeholder ? placeholder_color : foreground,
                  HorizontalAlignment::Left, luma_bg);
@@ -1383,13 +1425,16 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
         }
         FillRoundedRect(item, Px(5.0f), interaction);
     }
-    D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text
+    const bool highlighted = high_contrast_ && spec.state.enabled &&
+        (spec.state.hovered || spec.state.selected || spec.state.pressed);
+    D2D1_COLOR_F foreground = highlighted ? theme_->text_selected : spec.state.enabled ? theme_->text
                                                   : dark_ ? RgbaF(0xFFFFFF, 0.40f)
                                                           : Rgba(0x000000, 112);
-    if (spec.state.enabled && spec.state.pressed) {
+    if (high_contrast_ && !spec.state.enabled) foreground = theme_->text_disabled;
+    if (spec.state.enabled && spec.state.pressed && !high_contrast_) {
         foreground = MultiplyAlpha(foreground, 0.70f);
     }
-    if (spec.secondary && spec.state.enabled) foreground = theme_->text_secondary;
+    if (spec.secondary && spec.state.enabled && !highlighted) foreground = theme_->text_secondary;
     // Menu padding is horizontal. Applying it vertically as well leaves only
     // 8-12 px for a 13 px body font at common DPI scales and clips CJK glyphs.
     auto content = item;
@@ -1501,7 +1546,7 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
             cap->SetTrimming(&trim, ellipsis_sign_.get());
         }
         DrawText(spec.shortcut, shortcut_bounds,
-                 cap, theme_->text_secondary,
+                 cap, highlighted ? foreground : theme_->text_secondary,
                  spec.shortcut_inline ? HorizontalAlignment::Left : HorizontalAlignment::Right);
         if (cap) {
             cap->SetTrimming(&old_trim, old_sign.get());
@@ -1577,13 +1622,15 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     if (!theme_ || !compositor_) {
         return;
     }
+    const float hover = HoverProgress(spec.bounds, spec.state);
     const float radius = Px(theme_->radius_flyout);
     if (spec.state.selected) {
         FillRoundedRect(spec.bounds, radius,
                         dark_ ? Rgba(0xFFFFFF, 26) : Rgba(0x000000, 20));
-    } else if (spec.state.enabled && (spec.state.hovered || spec.state.pressed)) {
-        FillRounded(spec.bounds, radius,
-                    spec.state.pressed ? BrushId::Pressed : BrushId::Hover);
+    } else {
+        auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
+        fill.a *= hover;
+        if (fill.a > 0.0f) FillRoundedRect(spec.bounds, radius, fill);
     }
     if (spec.drop_target) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));
@@ -1925,7 +1972,8 @@ void Painter::DrawSplitter(const SplitterSpec& spec) {
     if (!theme_ || !dc_ || Width(spec.bounds) <= 0.0f || Height(spec.bounds) <= 0.0f) {
         return;
     }
-    if (!spec.state.hovered && !spec.state.pressed) return;
+    const float hover = HoverProgress(spec.bounds, spec.state);
+    if (hover <= 0.0f) return;
 
     const float cx = (spec.bounds.left + spec.bounds.right) * 0.5f;
     const float cy = (spec.bounds.top + spec.bounds.bottom) * 0.5f;
@@ -1934,9 +1982,9 @@ void Painter::DrawSplitter(const SplitterSpec& spec) {
     const float handle_thickness = Px(4.0f);
     const float handle_radius = Px(2.0f);
 
-    if (spec.state.hovered || spec.state.pressed) {
+    {
         const float alpha = spec.state.pressed ? (23.0f / 255.0f) : (15.0f / 255.0f);
-        const D2D1_COLOR_F track = dark_ ? RgbaF(0xFFFFFF, alpha) : RgbaF(0x000000, alpha);
+        const D2D1_COLOR_F track = dark_ ? RgbaF(0xFFFFFF, alpha * hover) : RgbaF(0x000000, alpha * hover);
         D2D1_RECT_F line;
         if (spec.vertical) {
             line = D2D1::RectF(cx - line_thickness * 0.5f, spec.bounds.top,
@@ -1958,7 +2006,7 @@ void Painter::DrawSplitter(const SplitterSpec& spec) {
         handle = D2D1::RectF(cx - handle_length * 0.5f, cy - handle_thickness * 0.5f,
                              cx + handle_length * 0.5f, cy + handle_thickness * 0.5f);
     }
-    FillRoundedRect(handle, handle_radius, grip);
+    FillRoundedRect(handle, handle_radius, MultiplyAlpha(grip, hover));
 }
 
 void Painter::DrawSplitButton(const SplitButtonSpec& spec) {
@@ -2266,10 +2314,10 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
     if (!theme_ || Width(spec.bounds) <= 0.0f || Height(spec.bounds) <= 0.0f) {
         return;
     }
-    if (spec.state.enabled && (spec.state.hovered || spec.state.pressed)) {
-        FillRounded(spec.bounds, Px(theme_->radius_control),
-                    spec.state.pressed ? BrushId::Pressed : BrushId::Hover);
-    }
+    const float hover = HoverProgress(spec.bounds, spec.state);
+    auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
+    fill.a *= hover;
+    if (fill.a > 0.0f) FillRoundedRect(spec.bounds, Px(theme_->radius_control), fill);
     const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text_secondary
                                                         : theme_->text_disabled;
     // Optional leading icon; the embedded vector variant is painted by the
@@ -2287,23 +2335,31 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
              D2D1::RectF(text_left, spec.bounds.top,
                         spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.bottom),
              NavFormat(), foreground);
-    DrawGlyphWithFormat(spec.expanded ? kChevronDown : kChevronRight,
-                        D2D1::RectF(spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.top,
-                                    spec.bounds.right - Px(8.0f), spec.bounds.bottom),
-                        foreground, SmallIconFormat());
+    const auto arrow = D2D1::RectF(spec.bounds.right - chevron_slot - Px(8.0f), spec.bounds.top,
+        spec.bounds.right - Px(8.0f), spec.bounds.bottom);
+    const float expansion = spec.expansion < 0.0f || high_contrast_
+        ? (spec.expanded ? 1.0f : 0.0f) : std::clamp(spec.expansion, 0.0f, 1.0f);
+    D2D1_MATRIX_3X2_F transform;
+    dc_->GetTransform(&transform);
+    dc_->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion,
+        D2D1::Point2F((arrow.left + arrow.right) * 0.5f, (arrow.top + arrow.bottom) * 0.5f)) * transform);
+    DrawGlyphWithFormat(kChevronRight, arrow, foreground, SmallIconFormat());
+    dc_->SetTransform(transform);
 }
 
 void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     if (!theme_ || !dc_ || Width(spec.bounds) <= 0.0f || Height(spec.bounds) <= 0.0f) {
         return;
     }
+    const float hover = HoverProgress(spec.bounds, spec.state);
     const float radius = Px(theme_->radius_flyout);
     if (spec.state.selected) {
         FillRoundedRect(spec.bounds, radius,
                         dark_ ? Rgba(0xFFFFFF, 18) : Rgba(0x000000, 14));
-    } else if (spec.state.enabled && (spec.state.hovered || spec.state.pressed)) {
-        FillRounded(spec.bounds, radius,
-                    spec.state.pressed ? BrushId::Pressed : BrushId::Hover);
+    } else {
+        auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
+        fill.a *= hover;
+        if (fill.a > 0.0f) FillRoundedRect(spec.bounds, radius, fill);
     }
     if (spec.drop_target) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));

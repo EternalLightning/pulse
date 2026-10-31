@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 // device_shell.cpp - ShellDeviceSource: phones through the This PC namespace,
 // the same items File Explorer shows (device_source.h). Runs on the device
 // STA thread only.
@@ -73,19 +78,30 @@ std::wstring StringProperty(IShellItem* item, const PROPERTYKEY& key) {
     return text;
 }
 
+// S_OK is complete EOF; S_FALSE means the visitor stopped. Preserve provider
+// failures and cancellation instead of turning a partial list into success.
 template <typename Visit>
-bool ForEachChild(IShellItem* folder, const std::atomic_bool* cancel, Visit&& visit) {
+HRESULT ForEachChild(IShellItem* folder, const std::atomic_bool* cancel, Visit&& visit) {
     ComPtr<IEnumShellItems> children;
-    if (FAILED(folder->BindToHandler(nullptr, BHID_EnumItems, IID_PPV_ARGS(&children))) || !children)
-        return false;
+    const HRESULT bound = folder->BindToHandler(nullptr, BHID_EnumItems, IID_PPV_ARGS(&children));
+    if (FAILED(bound)) return bound;
+    if (!children) return E_UNEXPECTED;
     for (;;) {
-        if (cancel && cancel->load()) return true;
+        if (cancel && cancel->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         ComPtr<IShellItem> child;
         const HRESULT hr = children->Next(1, &child, nullptr);
-        if (hr != S_OK || !child) break;
-        if (!visit(child.Get())) break;
+        if (hr == S_FALSE) return S_OK;
+        if (FAILED(hr)) return hr;
+        if (hr != S_OK || !child) return E_UNEXPECTED;
+        if (!visit(child.Get())) return S_FALSE;
     }
-    return true;
+}
+
+DeviceError EnumerationFailure(HRESULT error) {
+    if (error == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return DeviceError::Cancelled;
+    if (error == HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_CONNECTED) ||
+        error == HRESULT_FROM_WIN32(ERROR_DEV_NOT_EXIST)) return DeviceError::Disconnected;
+    return DeviceError::Failed;
 }
 
 // MTP / PTP devices in This PC: folders that are not file system items and
@@ -107,9 +123,10 @@ public:
         ComPtr<IShellItem> computer;
         if (FAILED(SHGetKnownFolderItem(FOLDERID_ComputerFolder, KF_FLAG_DEFAULT, nullptr,
                                         IID_PPV_ARGS(&computer))) || !computer)
-            return devices;
+            return last_devices_;
         std::unordered_map<std::wstring, std::wstring> parsing_by_key;
-        ForEachChild(computer.Get(), nullptr, [&](IShellItem* child) {
+        bool discovery_error = false;
+        const HRESULT listed = ForEachChild(computer.Get(), nullptr, [&](IShellItem* child) {
             std::wstring parsing;
             if (!IsPortableDeviceItem(child, &parsing)) return true;
             DeviceInfo device;
@@ -119,7 +136,7 @@ public:
             // Apple's USB vendor id: iPhone / iPad, read-only (DCIM only).
             const std::wstring lower = Lower(parsing);
             device.kind = lower.find(L"vid_05ac") != std::wstring::npos ? DeviceKind::IPhone : DeviceKind::Android;
-            ForEachChild(child, nullptr, [&](IShellItem* storage_item) {
+            const HRESULT storages = ForEachChild(child, nullptr, [&](IShellItem* storage_item) {
                 SFGAOF attrs = 0;
                 if (FAILED(storage_item->GetAttributes(SFGAO_FOLDER, &attrs)) || !(attrs & SFGAO_FOLDER))
                     return true;
@@ -135,12 +152,19 @@ public:
                 if (!storage.name.empty()) device.storages.push_back(std::move(storage));
                 return true;
             });
+            // A failed storage listing says nothing about trust/lock state.
+            // Keep the last complete snapshot until discovery succeeds again.
+            if (FAILED(storages)) { discovery_error = true; return false; }
             device.locked = device.storages.empty();
             parsing_by_key[device.key] = parsing;
             devices.push_back(std::move(device));
             return true;
         });
+        if (listed != S_OK || discovery_error) {
+            return last_devices_;
+        }
         parsing_by_key_ = std::move(parsing_by_key);
+        last_devices_ = devices;
         return devices;
     }
 
@@ -157,7 +181,7 @@ public:
         std::vector<DirEntry> batch;
         batch.reserve(kDeviceBatchSize);
         bool stopped = false;
-        const bool listed = ForEachChild(item.Get(), &cancel, [&](IShellItem* child) {
+        const HRESULT listed = ForEachChild(item.Get(), &cancel, [&](IShellItem* child) {
             DirEntry entry;
             entry.name = ItemName(child);
             if (entry.name.empty()) return true;
@@ -190,8 +214,9 @@ public:
             return true;
         });
         if (cancel.load()) return DeviceError::Cancelled;
-        if (!listed) return StillConnected(folder.device) ? DeviceError::Failed : DeviceError::Disconnected;
-        if (!stopped && !batch.empty()) sink(std::move(batch));
+        if (FAILED(listed)) return EnumerationFailure(listed);
+        if (stopped || listed == S_FALSE) return DeviceError::Cancelled;
+        if (!batch.empty() && !sink(std::move(batch))) return DeviceError::Cancelled;
         return DeviceError::None;
     }
 
@@ -236,11 +261,6 @@ private:
         return it == parsing_by_key_.end() ? std::wstring() : it->second;
     }
 
-    bool StillConnected(const std::wstring& key) {
-        ListDevices();
-        return parsing_by_key_.contains(key);
-    }
-
     // Device item by its parsing name, then one child per segment matched by
     // name (a folder's children stay cached while it is open: D3).
     DeviceError Resolve(const DevicePath& path, ComPtr<IShellItem>* out) {
@@ -255,13 +275,13 @@ private:
         for (size_t i = 0; i < segments.size(); ++i) {
             ComPtr<IShellItem> found;
             const bool storage_level = i == 0;
-            const bool listed = ForEachChild(item.Get(), nullptr, [&](IShellItem* child) {
+            const HRESULT listed = ForEachChild(item.Get(), nullptr, [&](IShellItem* child) {
                 const std::wstring name = storage_level ? DisplayName(child, SIGDN_NORMALDISPLAY) : ItemName(child);
                 if (_wcsicmp(name.c_str(), segments[i]->c_str()) != 0) return true;
                 found = child;
                 return false;
             });
-            if (!listed && storage_level) return DeviceError::Locked;
+            if (FAILED(listed)) return EnumerationFailure(listed);
             if (!found) return DeviceError::NotFound;
             item = std::move(found);
         }
@@ -270,6 +290,7 @@ private:
     }
 
     std::unordered_map<std::wstring, std::wstring> parsing_by_key_;
+    std::vector<DeviceInfo> last_devices_;
     std::wstring last_listed_;     // pulse:device: path of the last Enumerate
     std::wstring last_listed_id_;  // and its shell id (ID list)
 };

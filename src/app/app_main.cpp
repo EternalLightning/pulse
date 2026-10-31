@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "archive_navigation.h"
 #include "context_menu_settings_drag.h"
 #include "system_ctx_preview_drag.h"
@@ -15,6 +20,8 @@
 #include "app_visual_animation.h"
 #include "app_ui_schedule.h"
 #include "app_surface_scroll.h"
+#include "frame_profile.h"
+#include "app_hover.h"
 #include "app_column_view.h"
 #include "../ui/animation_clock.h"
 #include "sidebar_resize.h"
@@ -168,6 +175,7 @@ static bool IndexStatusVisible(AppState& s) {
 }
 
 bool Render(AppState& s) {
+    app::FrameProfileProbe frame_profile;
     auto t0 = std::chrono::steady_clock::now();
 
     if (s.compositor.NeedsRecovery()) {
@@ -217,9 +225,10 @@ bool Render(AppState& s) {
     PrepareFolderSizes(s, vm);
     s.sidebarScroll = vm.sidebar_scroll;
     vm.backdrop_enabled = !hc && s.compositor.UsesTransparentComposition() && s.backdropActive;
-    vm.pane.hover_index = s.hoverRow;
+    RefreshStationaryHover(s, vm);
 
     D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s.compositor.Width(), (float)s.compositor.Height());
+    frame_profile.Mark(app::FramePhase::Prepare);
     s.renderer.Render(vm, rect, theme);
     s.hitTestVm = std::move(vm);
     s.hitTestVmWidth = s.compositor.Width();
@@ -228,7 +237,11 @@ bool Render(AppState& s) {
     s.notification_toast.SetMotionEnabled(s.renderer.MotionEnabled());
     s.notification_toast.Draw(s.compositor, theme, s.scale, hc);
 
+    frame_profile.Mark(app::FramePhase::Paint);
+
     const HRESULT end_hr = dc->EndDraw();
+    frame_profile.Submitted(end_hr);
+    frame_profile.Mark(app::FramePhase::Submit);
     const auto draw_end = std::chrono::steady_clock::now();
     s.timing.draw_ms = std::chrono::duration<double, std::milli>(draw_end - draw_start).count();
     if (end_hr == D2DERR_RECREATE_TARGET || end_hr == DXGI_ERROR_DEVICE_REMOVED ||
@@ -243,6 +256,8 @@ bool Render(AppState& s) {
         hidden_frame[0] == L'1';
     // An occluded flip chain advances to an unpainted buffer after Present.
     if (!hidden_capture) s.compositor.Present();
+    frame_profile.Presented(!hidden_capture && s.compositor.CanScheduleAnimationFrame());
+    frame_profile.Mark(app::FramePhase::Present);
     s.first_frame_drawn = true;
     const auto present_end = std::chrono::steady_clock::now();
     s.timing.present_ms = std::chrono::duration<double, std::milli>(present_end - present_start).count();
@@ -282,10 +297,12 @@ bool Render(AppState& s) {
         s.lastFps = 0;
     }
     s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating ||
+        s.sidebarProjectAnimation.Pending() ||
         address_animating || s.scrollAnimating || surface_scroll_animating || column_scroll_animating ||
         s.renderer.SurfaceScrollAnimating() || s.renderer.TabIndicatorAnimating() || s.renderer.TabCloseAnimating() ||
         s.renderer.DetailsPreviewAnimating() || s.renderer.SettingsSwitchAnimating() ||
         s.renderer.SurfaceAnimating() || s.notification_toast.Animating();
+    frame_profile.Finish();
     return s.ui_schedule.animation_active;
 }
 
@@ -400,6 +417,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->shell_verbs_mailbox = std::make_shared<app::WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
         s->shell_registry_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
         s->clipboard_paste_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_CLIPBOARD_PASTE_RESULT);
+        s->details_attribute_mailbox = std::make_shared<app::WindowResultMailbox<app::DetailsAttributeResult>>(hwnd, WM_DETAILS_ATTRIBUTE_RESULT);
         s->shortcut_drop_mailbox = std::make_shared<app::WindowResultMailbox<app::ShortcutDropResult>>(hwnd, WM_DROP_SHORTCUTS_RESULT);
         s->external_open_mailbox = std::make_shared<app::WindowResultMailbox<app::ExternalOpenResult>>(
             hwnd, WM_EXTERNAL_OPEN_READY);
@@ -1402,9 +1420,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             ShowOmnibar(*s, OmnibarMode::Path);
             return 0;
         }
-        // Alt+Enter arrives as WM_SYSKEYDOWN, so HandleKeyDown's advertised
-        // Properties shortcut (alt && VK_RETURN) was unreachable.
-        if (s && wParam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
+        if (s && (wParam == VK_RETURN || wParam == VK_UP || wParam == VK_LEFT || wParam == VK_RIGHT) &&
+            (GetKeyState(VK_MENU) & 0x8000))
             return HandleKeyDown(s, hwnd, msg, wParam, lParam);
         break;
 
@@ -1654,6 +1671,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
 
+    case WM_DETAILS_ATTRIBUTE_RESULT:
+        if (s) ReceiveDetailsAttributeResult(*s, wParam);
+        return 0;
+
     case WM_CLIPBOARD_PASTE_RESULT:
         if (s && s->clipboard_paste_mailbox) {
             for (const bool success : s->clipboard_paste_mailbox->Take(wParam)) {
@@ -1886,6 +1907,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
             if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
             if (s->clipboard_paste_mailbox) s->clipboard_paste_mailbox->Close();
+            if (s->details_attribute_mailbox) s->details_attribute_mailbox->Close();
             if (s->shortcut_drop_mailbox) s->shortcut_drop_mailbox->Close();
             if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
@@ -1921,6 +1943,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->shell_verbs_mailbox) s->shell_verbs_mailbox->Close();
             if (s->shell_registry_mailbox) s->shell_registry_mailbox->Close();
             if (s->clipboard_paste_mailbox) s->clipboard_paste_mailbox->Close();
+            if (s->details_attribute_mailbox) s->details_attribute_mailbox->Close();
             if (s->shortcut_drop_mailbox) s->shortcut_drop_mailbox->Close();
             if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
@@ -2211,7 +2234,8 @@ int ShotModeMain(AppState& state, HWND hwnd) {
                 state.timing.first_frame_ms, state.timing.sort_done_ms);
             if (n > 0) {
                 DWORD written = 0;
-                WriteFile(f, buf, (DWORD)n, &written, nullptr);
+                const auto size = static_cast<DWORD>(std::min(static_cast<size_t>(n), sizeof(buf) - 1));
+                WriteFile(f, buf, size, &written, nullptr);
             }
             CloseHandle(f);
         }

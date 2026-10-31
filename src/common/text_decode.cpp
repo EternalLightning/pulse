@@ -1,14 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "text_decode.h"
+#include "../fs/cloud_state.h"
 
 #include <algorithm>
 #include <cwctype>
 
 namespace pulse::text {
 namespace {
-
-constexpr DWORD kRecallOnOpen = 0x00040000;
-constexpr DWORD kRecallOnData = 0x00400000;
-constexpr DWORD kPinned = 0x00080000;
 
 bool IsOneOf(std::wstring_view extension,
              std::initializer_list<std::wstring_view> values) noexcept {
@@ -18,7 +20,7 @@ bool IsOneOf(std::wstring_view extension,
 } // namespace
 
 bool IsOfflinePlaceholder(DWORD attributes) noexcept {
-    return (attributes & (kRecallOnOpen | kRecallOnData)) && !(attributes & kPinned);
+    return fs::IsCloudPlaceholder(attributes);
 }
 
 bool IsKnownTextExtension(std::wstring_view extension) noexcept {

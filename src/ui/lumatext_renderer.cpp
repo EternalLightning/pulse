@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pulse project; see LICENSE and NOTICE for licensing and attribution.
+// Modified by EternalLightning for this independent distribution, including licensing notices.
+// Existing third-party notices and license terms remain applicable.
+
 #include "lumatext_renderer.h"
 #include "optional_lumatext.h"
 #include "typography.h"
@@ -1579,9 +1584,61 @@ struct LumaTextRenderer::Impl {
                 selection_drawn = true;
             }
         }
+        // Keep removed clusters in the same transition as the moving caret.
+        // Dropping the old layout here made backspace erase first, then move.
+        const bool previous_frame = motion.change.pending && motion.change_layout && motion.change.progress == 0;
+        if (motion.change.pending && motion.change_layout && brush &&
+            (previous_frame || motion.change.old_end > motion.change.prefix)) {
+            const auto& change = motion.change;
+            auto* old_layout = motion.change_layout.Get();
+            DWRITE_TEXT_METRICS old_metrics{};
+            old_layout->GetMetrics(&old_metrics);
+            const auto old_origin = D2D1::Point2F(std::round(pad - motion.change_scroll),
+                std::round((static_cast<float>(h) - old_metrics.height) * 0.5f) - old_metrics.top);
+            auto color = foreground;
+            color.a *= 1 - change.progress;
+            brush->SetColor(color);
+            blit_dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            blit_dc->SetTextRenderingParams(params);
+            const auto draw_previous = [&] {
+                const bool luma = typography::UseLumaTextForUi() &&
+                    DrawLayoutOn(edit_renderer, blit_dc.Get(), old_origin, old_layout, color, false);
+                if (luma) ++stats.edit_lumatext_draws;
+                else blit_dc->DrawTextLayout(old_origin, old_layout, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
+            };
+            // At zero progress, retain the exact shaped layout, including
+            // fractional cluster edges that range clips would round away.
+            if (previous_frame) draw_previous();
+            UINT32 count = 0;
+            if (!previous_frame)
+                old_layout->HitTestTextRange(static_cast<UINT32>(change.prefix),
+                    static_cast<UINT32>(change.old_end - change.prefix), old_origin.x, old_origin.y,
+                    nullptr, 0, &count);
+            std::vector<DWRITE_HIT_TEST_METRICS> regions(count);
+            if (count && SUCCEEDED(old_layout->HitTestTextRange(static_cast<UINT32>(change.prefix),
+                static_cast<UINT32>(change.old_end - change.prefix), old_origin.x, old_origin.y,
+                regions.data(), count, &count))) {
+                for (const auto& region : regions) {
+                    auto clip = D2D1::RectF(region.left, region.top,
+                        region.left + region.width, region.top + region.height);
+                    // The first glyph's antialiased edge can overhang its
+                    // hit-test box by a pixel, even for an upright face.
+                    if (change.prefix == 0) clip.left = std::min(0.0f, clip.left);
+                    if (!wraps) {
+                        const float new_end = std::round(pad - scroll) + caret_origin(static_cast<int>(change.new_end));
+                        clip.right = std::min(clip.right, new_end + motion.suffix_dx * (1 - change.progress));
+                    }
+                    if (clip.right <= clip.left) continue;
+                    blit_dc->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+                    draw_previous();
+                    blit_dc->PopAxisAlignedClip();
+                }
+            }
+            blit_dc->SetTextRenderingParams(nullptr);
+        }
         std::wstring visible = text;
         D2D1_COLOR_F visible_color = foreground;
-        if (visible.empty()) {
+        if (visible.empty() && !motion.change.pending) {
             wchar_t cue[256]{};
             if (SendMessageW(hwnd, EM_GETCUEBANNER, reinterpret_cast<WPARAM>(cue),
                              ARRAYSIZE(cue)) && cue[0] != 0) {
@@ -1590,8 +1647,8 @@ struct LumaTextRenderer::Impl {
                                              foreground.a * 0.45f);
             }
         }
-        bool text_drawn = visible.empty();
-        if (!visible.empty()) {
+        bool text_drawn = visible.empty() || previous_frame;
+        if (!visible.empty() && !previous_frame) {
             // Same layout, params and grayscale AA as the surrounding UI text.
             const auto visible_layout = visible == text && dw_layout
                 ? dw_layout : DwEditLayout(visible, format, static_cast<float>(h));
@@ -1650,7 +1707,7 @@ struct LumaTextRenderer::Impl {
                                 auto clip = D2D1::RectF(region.left + shift_x - dx, region.top + shift_y - dy,
                                     region.left + region.width + shift_x - dx, region.top + region.height + shift_y - dy);
                                 if (!suffix && start == motion.change.prefix && end == motion.change.new_end &&
-                                    end < text.size() && motion.change_layout) {
+                                    motion.change_layout) {
                                     float old_x = 0, old_y = 0, new_x = 0, new_y = 0;
                                     DWRITE_HIT_TEST_METRICS old_hit{}, new_hit{};
                                     motion.change_layout->HitTestTextPosition(static_cast<UINT32>(motion.change.old_end),

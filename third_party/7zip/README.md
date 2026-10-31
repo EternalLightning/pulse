@@ -17,3 +17,23 @@ The upstream source is available at https://www.7-zip.org/download.html.
 Pulse starts this executable directly with hidden windows, argument quoting,
 UTF-8 output, and EOF on standard input. This dependency is used exclusively
 for archive listing and extraction; it must accompany releases in `7zip/`.
+
+## License texts and corresponding source
+
+Licensing material added by EternalLightning for this independent Pulse
+distribution; the upstream runtime binaries and License.txt are unchanged.
+The full LGPL 2.1 and GPL 2 texts are included as
+`LGPL-2.1-or-later.txt` and `GPL-2.0-or-later.txt` (copied from the SPDX
+license-list-data text directory). The BSD and unRAR notices remain in
+`License.txt`.
+
+The official corresponding source archive for the bundled 26.03 runtime is
+included unmodified as `7z2603-src.7z`, obtained from
+https://www.7-zip.org/a/7z2603-src.7z on 2026-10-30. Both Pulse packaging
+paths include it alongside the runtime and license texts, so recipients
+receive the source rather than having to rely on a third-party download link.
+Extract this archive with 7-Zip to obtain the upstream source and build files.
+Archive SHA-256: `41e2a7c0e9f838351c625e01f0f581a2188bb3dda10c8e0b4a852da26546ffe2`.
+Its `C/7zVersion.h` identifies version 26.03, matching the bundled runtime.
+When updating the runtime, update this archive, its hash, and both packaging
+paths together; do not pair a new runtime with this old source archive.
