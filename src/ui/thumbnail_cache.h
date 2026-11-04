@@ -6,6 +6,7 @@
 #pragma once
 #include "ui_compositor.h"
 #include "preview_viewport.h"
+#include "image_cache_budget.h"
 #include "../ipc/preview_protocol.h"
 #include <array>
 #include <atomic>
@@ -147,6 +148,7 @@ private:
     void CancelInterests(Consumer consumer, bool details_only);
     void QueueRequest(Request request, Consumer consumer);
     void Trim();
+    void SetCacheBytes(size_t bytes) { cache_bytes_ = bytes; memory_charge_.SetBytes(bytes); }
     void StartWorkers();
     std::deque<Request>::iterator NextRequest(size_t lane, ULONGLONG now);
     void Worker(size_t lane = 0);
@@ -172,6 +174,7 @@ private:
     std::unordered_map<std::wstring, Item> items_;
     std::list<std::wstring> lru_;
     size_t cache_bytes_ = 0;
+    ImageCacheCharge memory_charge_{ThumbnailImageBudget()};
     std::atomic<uint32_t> epoch_{1};
     std::atomic<uint64_t> content_revision_{1};
     std::thread worker_;

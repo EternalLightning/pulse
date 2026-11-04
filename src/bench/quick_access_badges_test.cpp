@@ -72,6 +72,72 @@ std::wstring GetPulseDataDir() { return data_dir; }
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--order-layout-only") {
+        l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+        app::Pane pane;
+        pane.NewTab(L"C:\\fixture");
+        app::SidebarModel sidebar;
+        const std::vector<std::wstring> paths{L"pulse:recent", L"C:\\fixture\\Alpha",
+            L"\\\\server\\share", L"C:\\fixture\\" + std::wstring(280, L'x')};
+        for (const auto& path : paths) {
+            app::SidebarEntry entry;
+            entry.path = path; entry.label = path;
+            sidebar.quick_access.push_back(std::move(entry));
+        }
+        app::PlacesCatalog places;
+        places.persist = false;
+        const auto rows = [&] {
+            const auto vm = app::BuildWindowViewModel(pane, sidebar, false, false, false, &places);
+            std::vector<std::wstring> result;
+            for (const auto& group : vm.sidebar)
+                if (group.id == static_cast<int>(app::SidebarSectionId::QuickAccess))
+                    for (const auto& item : group.items) result.push_back(item.path);
+            return result;
+        };
+        int failures = 0;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            failures += !passed;
+        };
+        check(rows() == paths, "default quick access keeps original mixed-path order");
+        places.quick_access_order = {paths[2], L"c:\\fixture\\ALPHA"};
+        check(rows() == std::vector<std::wstring>{paths[2], paths[1], paths[0], paths[3]},
+            "saved order matches path case and leaves unranked rows stable");
+        places.quick_access_order.clear();
+        check(rows() == paths, "removing saved order immediately restores original order");
+        sidebar.quick_access[1].badge = L"Built-in";
+        sidebar.quick_access[1].badge_rgb = 0x123456;
+        app::SidebarEntry cloud_entry;
+        cloud_entry.path = L"C:\\fixture\\Cloud";
+        cloud_entry.badge = L"Account";
+        cloud_entry.badge_rgb = 0x654321;
+        sidebar.cloud.push_back(cloud_entry);
+        const auto badges_match = [&](const wchar_t* quick_text, uint32_t quick_rgb,
+                                      const wchar_t* cloud_text, uint32_t cloud_rgb) {
+            const auto vm = app::BuildWindowViewModel(pane, sidebar, false, false, false, &places);
+            const auto matches = [&](const std::wstring& path, const wchar_t* text, uint32_t rgb) {
+                const auto* item = SidebarItemFor(vm, path);
+                const auto color = ui::HexColor(rgb);
+                return item && item->badge == text && item->badge_color.r == color.r &&
+                    item->badge_color.g == color.g && item->badge_color.b == color.b;
+            };
+            return matches(paths[1], quick_text, quick_rgb) &&
+                matches(cloud_entry.path, cloud_text, cloud_rgb);
+        };
+        check(places.quick_access_badges.empty() &&
+              badges_match(L"Built-in", 0x123456, L"Account", 0x654321),
+            "empty badge catalog preserves quick access and cloud defaults");
+        places.SetQuickAccessBadge(paths[1], L"Override", 0xABCDEF);
+        places.SetQuickAccessBadge(cloud_entry.path, L"Cloud saved", 0xFEDCBA);
+        check(badges_match(L"Override", 0xABCDEF, L"Cloud saved", 0xFEDCBA),
+            "nonempty badge catalog applies quick access and cloud overrides");
+        places.quick_access_badges.clear();
+        check(badges_match(L"Built-in", 0x123456, L"Account", 0x654321),
+            "clearing badge catalog immediately restores both default badges");
+        sidebar.quick_access.clear();
+        check(rows().empty(), "empty quick access stays empty");
+        return failures ? 1 : 0;
+    }
     Fixture fixture;
     if (data_dir.empty()) {
         std::printf("[FAIL] create isolated badge fixture\n");

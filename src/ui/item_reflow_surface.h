@@ -218,7 +218,7 @@ public:
         capture_ids.reserve(pictures_.size());
         for (auto& [key, picture] : pictures_) {
             if (!eligible(key, picture)) continue;
-            slices.push_back({picture.commands.get(), picture.bounds, {}, {}});
+            slices.push_back({picture.commands.get(), picture.bounds, {}, {}, {}});
             selected.push_back(&picture);
             capture_ids.push_back(picture.capture_id);
         }
@@ -226,13 +226,15 @@ public:
         if (capture_ids == atlas_attempt_) return;
         atlas_attempt_ = std::move(capture_ids);
         ComPtr<ID2D1Bitmap1> unused_background;
-        if (!image_cache_.Build(dc, nullptr, {0, 0, 1, 1}, slices, unused_background)) return;
+        std::shared_ptr<ImageCacheCharge> unused_charge;
+        if (!image_cache_.Build(dc, nullptr, {0, 0, 1, 1}, slices, unused_background, unused_charge)) return;
         // Keep one atlas generation. Offscreen commands remain available for
         // fallback or repacking when their sampled bounds enter the viewport.
-        for (auto& [_, picture] : pictures_) picture.bitmap.reset();
+        for (auto& [_, picture] : pictures_) { picture.bitmap.reset(); picture.bitmap_charge.reset(); }
         for (size_t i = 0; i < selected.size(); ++i) {
             auto& picture = *selected[i];
             picture.bitmap = std::move(slices[i].bitmap);
+            picture.bitmap_charge = std::move(slices[i].bitmap_charge);
             picture.bitmap_source = slices[i].source;
             picture.bitmap_source.right = picture.bitmap_source.left + picture.bounds.right - picture.bounds.left;
             picture.bitmap_source.bottom = picture.bitmap_source.top + picture.bounds.bottom - picture.bounds.top;
@@ -244,6 +246,7 @@ private:
     struct Picture {
         ComPtr<ID2D1CommandList> commands;
         D2D1_RECT_F bounds{};
+        std::shared_ptr<ImageCacheCharge> bitmap_charge;
         ComPtr<ID2D1Bitmap1> bitmap;
         D2D1_RECT_F bitmap_source{};
         uint64_t capture_id = 0;

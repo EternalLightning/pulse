@@ -174,11 +174,12 @@ static bool IndexStatusVisible(AppState& s) {
     return visible;
 }
 
-bool Render(AppState& s) {
+bool Render(AppState& s, bool schedule_frame) {
     app::FrameProfileProbe frame_profile;
     auto t0 = std::chrono::steady_clock::now();
 
     if (s.compositor.NeedsRecovery()) {
+        s.ui_schedule.frame_pending = s.ui_schedule.frame_ready = false;
         if (!s.compositor.Recover()) return false;
         s.compositor.RecreateTextFormats(s.scale);
         s.renderer.SetCompositor(&s.compositor);
@@ -195,8 +196,11 @@ bool Render(AppState& s) {
         }
     }
 
+    if (schedule_frame && !BeginUiFrame(s)) return false;
+
     ID2D1DeviceContext* dc = s.compositor.Dc();
     const auto draw_start = std::chrono::steady_clock::now();
+    app::BeginFrameDrawProfile();
     dc->BeginDraw();
     dc->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
@@ -240,6 +244,7 @@ bool Render(AppState& s) {
     frame_profile.Mark(app::FramePhase::Paint);
 
     const HRESULT end_hr = dc->EndDraw();
+    app::EndFrameDrawProfile(end_hr);
     frame_profile.Submitted(end_hr);
     frame_profile.Mark(app::FramePhase::Submit);
     const auto draw_end = std::chrono::steady_clock::now();
@@ -878,7 +883,24 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
     }
 
+    case WM_ENTERSIZEMOVE:
+    case WM_ENTERMENULOOP:
+        // Native modal loops do not run the top-level swap-chain wait.
+        if (s) s->ui_schedule.frame_wait_suspended = true;
+        break;
+
+    case WM_EXITMENULOOP:
+        if (s) {
+            s->ui_schedule.frame_wait_suspended = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        break;
+
     case WM_EXITSIZEMOVE:
+        if (s) {
+            s->ui_schedule.frame_wait_suspended = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         if (s && s->window_caption_dragging) {
             s->window_caption_dragging = false;
             const bool accepted = EndWindowCaptionTransfer(hwnd);
@@ -1114,11 +1136,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
-        const bool animating = s && Render(*s);
+        const bool animating = s && Render(*s, true);
         EndPaint(hwnd, &ps);
-        // Present throttles animations to the display. Queue the next low-priority
-        // paint after EndPaint so high-refresh monitors are not capped by WM_TIMER.
-        if (s && (s->scrollAnimating || animating) && s->compositor.CanScheduleAnimationFrame() &&
+        // Queue after EndPaint; a deferred waitable frame is re-invalidated by
+        // the message pump when its swap chain becomes ready.
+        if (s && !s->ui_schedule.frame_pending && (s->scrollAnimating || animating) && s->compositor.CanScheduleAnimationFrame() &&
             IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
             // Make due timers eligible before another low-priority paint is queued.
             MSG timer{};
@@ -2693,9 +2715,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     }
 
     MSG msg{};
-    BOOL ret;
-    while ((ret = GetMessageW(&msg, nullptr, 0, 0)) != 0) {
-        if (ret == -1) break;
+    for (;;) {
+        if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            WaitForUiFrameOrMessage(state.core);
+            continue;
+        }
+        if (msg.message == WM_QUIT) break;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
         // Retired child states survive reentrant DestroyWindow calls until the

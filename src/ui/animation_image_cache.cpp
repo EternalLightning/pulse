@@ -14,7 +14,8 @@ bool AnimationPixelCacheEnabled() {
 }
 
 bool AnimationImageCache::Build(ID2D1DeviceContext* source, ID2D1CommandList* decoration,
-    D2D1_RECT_F viewport, std::vector<AnimationImageSlice>& slices, ComPtr<ID2D1Bitmap1>& background) {
+    D2D1_RECT_F viewport, std::vector<AnimationImageSlice>& slices, ComPtr<ID2D1Bitmap1>& background,
+    std::shared_ptr<ImageCacheCharge>& background_charge) {
     if (!AnimationPixelCacheEnabled()) return false;
     if (!context_.get()) {
         ComPtr<ID2D1Device> device;
@@ -28,12 +29,15 @@ bool AnimationImageCache::Build(ID2D1DeviceContext* source, ID2D1CommandList* de
     if (width > maximum || height > maximum || static_cast<uint64_t>(width) * height > 8u * 1024u * 1024u) return false;
     const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+    std::shared_ptr<ImageCacheCharge> incoming_charge;
     ComPtr<ID2D1Bitmap1> incoming;
     ComPtr<IDWriteRenderingParams> text_parameters;
     source->GetTextRenderingParams(&text_parameters);
     dc->SetTextRenderingParams(text_parameters.get());
     dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     if (decoration) {
+        incoming_charge = std::make_shared<ImageCacheCharge>(AnimationBitmapBudget());
+        if (!incoming_charge->TrySetBytes(BitmapPayloadBytes(width, height))) return false;
         if (FAILED(dc->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties, &incoming))) return false;
         dc->SetTarget(incoming.get());
         dc->BeginDraw(); dc->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
@@ -43,7 +47,11 @@ bool AnimationImageCache::Build(ID2D1DeviceContext* source, ID2D1CommandList* de
         dc->SetTarget(nullptr);
         if (FAILED(background_result)) return false;
     }
-    if (slices.empty()) { background = std::move(incoming); return true; }
+    if (slices.empty()) {
+        background = std::move(incoming);
+        background_charge = std::move(incoming_charge);
+        return true;
+    }
 
     UINT32 total_width = 0, widest = 0;
     for (const auto& slice : slices) {
@@ -64,6 +72,8 @@ bool AnimationImageCache::Build(ID2D1DeviceContext* source, ID2D1CommandList* de
     }
     const UINT32 atlas_height = y + row_height;
     if (atlas_height > maximum || static_cast<uint64_t>(atlas_width) * atlas_height > 4u * 1024u * 1024u) return false;
+    auto atlas_charge = std::make_shared<ImageCacheCharge>(AnimationBitmapBudget());
+    if (!atlas_charge->TrySetBytes(BitmapPayloadBytes(atlas_width, atlas_height))) return false;
     ComPtr<ID2D1Bitmap1> atlas;
     if (FAILED(dc->CreateBitmap(D2D1::SizeU(atlas_width, atlas_height), nullptr, 0, properties, &atlas))) return false;
     dc->SetTarget(atlas.get());
@@ -79,8 +89,10 @@ bool AnimationImageCache::Build(ID2D1DeviceContext* source, ID2D1CommandList* de
     dc->SetTarget(nullptr);
     if (FAILED(atlas_result)) return false;
     background = std::move(incoming);
+    background_charge = std::move(incoming_charge);
     for (auto& slice : slices) {
         atlas->AddRef(); slice.bitmap.p = atlas.get();
+        slice.bitmap_charge = atlas_charge;
     }
     return true;
 }

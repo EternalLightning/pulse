@@ -7,6 +7,7 @@
 #include "banner_reveal.h"
 // ui_pane_list.cpp — Pane, list, empty states, columns, and icons.
 #include "ui_renderer.h"
+#include "../app/frame_profile.h"
 #include "cloud_status.h"
 #include "../app/cloud_sync_probe.h"
 #include "ui_renderer_internal.h"
@@ -1513,6 +1514,8 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                                 const Theme& theme, int hover_region, int hover_control_index,
                                 bool pane_focused) {
     painted_name_truncation_[painted_name_pane_].clear();
+    app::PaintProfileProbe paint_profile;
+    app::PaintProfileProbe list_profile;
     ID2D1DeviceContext* dc = compositor_->Dc();
     auto& reflow = item_reflow_surfaces_[painting_pane_];
     const auto highlight_terms = NameHighlightTerms(vm.filter_text, vm.is_search ? vm.search_query : L" ");
@@ -1531,6 +1534,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
     ViewLayout layout(vm.view_mode, viewport, entryCount, vm.scroll_x, vm.scroll_y, scale_,
                       ListRowHeightDip(vm, viewport), vm.date_groups.get());
     const auto [startIdx, endIdx] = layout.VisibleRange();
+    list_profile.Mark(app::PaintPhase::ListLayout);
     // One neighboring page supplies old positions for rows crossing the viewport
     // edge. Never retain or materialize an entire large directory for motion.
     const int page = std::max(1, endIdx - startIdx + 1);
@@ -1589,6 +1593,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             }
         }
     }
+    list_profile.Mark(app::PaintPhase::ListSlots);
     reflow.Begin(motion_slots, motion_context, viewport, settings_switch_now_, animate_items);
     reflow.SetRevision(vm.snapshot.get(), vm.filter_map.get(), entryCount, revision);
     const uint64_t paint_revision = (icon_cache_.ContentRevision() * 1099511628211ull) ^
@@ -1596,6 +1601,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
     reflow.SetPaintRevision(paint_revision);
     if (reflow.Pending()) view_transition.SuppressCapture();
     surface_animating_ |= reflow.Pending();
+    list_profile.Mark(app::PaintPhase::ListMotion);
     const DetailsColumnLayout detailsColumns = DetailsColumns(viewport, vm);
     const bool detailsView = vm.view_mode == ViewMode::Details;
     const bool iconGrid = vm.view_mode == ViewMode::ExtraLargeIcons ||
@@ -1603,7 +1609,9 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                           vm.view_mode == ViewMode::MediumIcons;
     D2D1_COLOR_F zebraColor = theme.text;
     zebraColor.a = (theme.bg.r < 0.5f) ? 0.035f : 0.025f;
+    list_profile.Mark(app::PaintPhase::ListColumns);
 
+    paint_profile.Mark(app::PaintPhase::ListSetup);
     // Background shades are sampled independently of cached icons/text. Their
     // target parity belongs to the row within its own group, not to the file.
     if (detailsView && list_zebra_ && !IsHighContrast()) {
@@ -2203,6 +2211,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         }
         dc->PopAxisAlignedClip();
     }
+    paint_profile.Mark(app::PaintPhase::ListRows);
 
 }
 

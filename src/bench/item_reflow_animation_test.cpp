@@ -6,6 +6,8 @@
 #include "../ui/item_reflow_animation.h"
 #include <cmath>
 #include <cstdio>
+#include <chrono>
+#include <string_view>
 
 namespace {
 
@@ -593,7 +595,64 @@ void ReplacementPage() {
 
 } // namespace
 
-int main() {
+void RepeatedScrollReset() {
+    ItemReflowAnimation animation;
+    for (int frame = 0; frame < 80; ++frame) {
+        std::vector<ItemReflowSlot> slots;
+        for (int i = frame % 12; i < frame % 12 + 48; ++i) {
+            const auto key = L"C:\\scroll\\item-" + std::to_wstring(i);
+            auto slot = Slot(key.c_str(), 0, i * 20.0f - frame * 0.375f, frame + i);
+            slot.stripe = static_cast<float>(i % 2);
+            slots.push_back(std::move(slot));
+        }
+        animation.Update(slots, static_cast<uint64_t>(frame), true, true);
+        bool matches = !animation.Pending() && animation.Visuals().size() == slots.size();
+        for (const auto& slot : slots) {
+            const auto visual = animation.Visual(slot.key);
+            matches &= Near(visual.bounds.top, slot.bounds.top) && Near(visual.opacity, 1) &&
+                Near(visual.stripe, slot.stripe) && visual.source == slot.source && !visual.exiting;
+        }
+        Check(matches, "scroll reset keeps exact current geometry and removes departed identities");
+    }
+    const std::vector<ItemReflowSlot> origin{Slot(L"same", 0, 0)};
+    const std::vector<ItemReflowSlot> moved{Slot(L"same", 0, 100)};
+    animation.Update(origin, 100, true, true);
+    animation.Update(moved, 110, true);
+    animation.Update(moved, 170, true);
+    animation.Update(origin, 180, true, true);
+    animation.Update(moved, 190, true);
+    Check(Near(animation.Visual(L"same").bounds.top, 0) && animation.Pending(),
+        "a reset discards old velocity before a later animated change");
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--profile-reset") {
+        using Clock = std::chrono::steady_clock;
+        std::printf("[REFLOW_WORKLOAD] samples=1000 batch=16 repeats=3 reset=true elapsed-time-only\n");
+        for (int count : {48, 120, 480}) for (int repeat = 0; repeat < 3; ++repeat) {
+            ItemReflowAnimation animation;
+            std::vector<ItemReflowSlot> slots;
+            for (int i = 0; i < count; ++i) {
+                const auto key = L"C:\\profile\\item-" + std::to_wstring(i);
+                slots.push_back(Slot(key.c_str(), 0, static_cast<float>(i * 20), i));
+            }
+            std::vector<double> samples;
+            double checksum = 0;
+            for (int sample = -32; sample < 1000; ++sample) {
+                const auto began = Clock::now();
+                for (int step = 0; step < 16; ++step) {
+                    for (auto& slot : slots) { slot.bounds.top -= 0.375f; slot.bounds.bottom -= 0.375f; }
+                    animation.Update(slots, 0, true, true);
+                    checksum += animation.Visual(slots.front().key).bounds.top + animation.Visuals().size();
+                }
+                if (sample >= 0) samples.push_back(std::chrono::duration<double, std::micro>(Clock::now() - began).count() / 16);
+            }
+            std::sort(samples.begin(), samples.end());
+            std::printf("[REFLOW_PROFILE] slots=%d repeat=%d samples=%zu p50_us=%.4f p95_us=%.4f p99_us=%.4f checksum=%.1f\n",
+                count, repeat, samples.size(), samples[499], samples[949], samples[989], checksum);
+        }
+        return 0;
+    }
     MiddleInsertAndDelete();
     NonadjacentChanges();
     GridAndRapidChanges();
@@ -605,5 +664,6 @@ int main() {
     ZebraTransitions();
     Capacity();
     ReplacementPage();
+    RepeatedScrollReset();
     return failures == 0 ? 0 : 1;
 }

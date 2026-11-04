@@ -382,17 +382,28 @@ private:
     }
 
     void Snap(const std::vector<ItemReflowSlot>& slots) {
-        states_.clear();
-        visuals_.clear();
+        // Scrolling resets geometry every frame; keep nodes for surviving files.
+        for (auto& [_, state] : states_) state.present = false;
+        size_t admitted = 0;
         for (const auto& slot : slots) {
-            if (states_.size() >= kMaxSlots) break;
+            if (admitted >= kMaxSlots) break;
+            auto& retained = states_[slot.key];
+            admitted += !retained.present;
             State state;
             state.visual = {slot.bounds, 1.0f, slot.source, false, ClampStripe(slot.stripe)};
             state.from_bounds = slot.bounds;
             state.target_bounds = slot.bounds;
             state.from_stripe = state.target_stripe = state.visual.stripe;
-            states_[slot.key] = state;
+            state.present = true;
+            retained = state;
             visuals_[slot.key] = state.visual;
+        }
+        for (auto it = states_.begin(); it != states_.end();) {
+            if (it->second.present) ++it;
+            else {
+                visuals_.erase(it->first);
+                it = states_.erase(it);
+            }
         }
         initialized_ = true;
         pending_ = false;

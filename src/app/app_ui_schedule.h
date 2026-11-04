@@ -5,9 +5,13 @@
 
 #pragma once
 #include <cstdint>
+#include <windows.h>
 
 namespace pulse {
 struct AppState;
+struct AppCore;
+bool BeginUiFrame(AppState& s);
+DWORD WaitForUiFrameOrMessage(AppCore& core, DWORD timeout = INFINITE);
 void SyncUiScheduling(AppState& s);
 void StopUiScheduling(AppState& s);
 bool RunUiDeadlines(AppState& s, uint64_t now);

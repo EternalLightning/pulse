@@ -35,6 +35,18 @@ class LumaTextRenderer;
 class EditComposition;
 struct LumaTextStats;
 
+struct PresentationStatistics {
+    UINT last_present_count = 0;
+    DXGI_FRAME_STATISTICS frame{};
+    DXGI_FRAME_STATISTICS_MEDIA media{};
+    DXGI_SWAP_CHAIN_DESC1 description{};
+    HRESULT last_present_result = DXGI_ERROR_INVALID_CALL;
+    HRESULT frame_result = DXGI_ERROR_INVALID_CALL;
+    HRESULT media_interface_result = E_NOINTERFACE;
+    HRESULT media_result = E_NOINTERFACE;
+    HRESULT description_result = DXGI_ERROR_INVALID_CALL;
+};
+
 template <typename T>
 struct ComPtr {
     T* p = nullptr;
@@ -60,6 +72,10 @@ public:
     void Shutdown();
     void Resize(int width, int height);
     void Present();
+    HANDLE FrameLatencyWaitableObject() const { return device_lost_ ? nullptr : frame_latency_waitable_; }
+    bool WaitableFramePacingEnabled() const { return FrameLatencyWaitableObject() != nullptr; }
+    void DisableFrameLatencyWait();
+    PresentationStatistics ReadPresentationStatistics() const;
     // A hidden window has no DWM open transition. Fade the composed visual in
     // on its next presented frame instead of popping into view.
     void QueueShowTransition();
@@ -137,6 +153,8 @@ private:
     ComPtr<ID3D11Device> d3dDevice_;
     ComPtr<IDXGIDevice1> dxgiDevice_;
     ComPtr<IDXGISwapChain1> swapChain_;
+    HANDLE frame_latency_waitable_ = nullptr;
+    UINT swap_chain_flags_ = 0;
     ComPtr<IDCompositionDevice> compositionDevice_;
     ComPtr<IDCompositionTarget> compositionTarget_;
     ComPtr<IDCompositionVisual> compositionVisual_;

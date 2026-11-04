@@ -191,6 +191,7 @@ public:
 private:
     struct Picture {
         ComPtr<ID2D1CommandList> commands;
+        std::shared_ptr<ImageCacheCharge> bitmap_charge;
         ComPtr<ID2D1Bitmap1> bitmap;
         D2D1_RECT_F bitmap_source{};
         D2D1_RECT_F bounds{}, image_bounds{};
@@ -199,6 +200,7 @@ private:
     };
     struct Frame {
         ComPtr<ID2D1CommandList> decoration;
+        std::shared_ptr<ImageCacheCharge> decoration_charge;
         ComPtr<ID2D1Bitmap1> decoration_bitmap;
         D2D1_RECT_F decoration_bounds{};
         std::unordered_map<std::wstring, Picture> icons;
@@ -224,13 +226,15 @@ private:
         slices.reserve(frame.icons.size()); pictures.reserve(frame.icons.size());
         for (auto& [_, picture] : frame.icons) {
             if (picture.bitmap.get()) continue;
-            slices.push_back({picture.commands.get(), picture.image_bounds, {}, {}});
+            slices.push_back({picture.commands.get(), picture.image_bounds, {}, {}, {}});
             pictures.push_back(&picture);
         }
-        if (!image_cache_.Build(dc, frame.decoration.get(), viewport_, slices, frame.decoration_bitmap)) return;
+        if (!image_cache_.Build(dc, frame.decoration.get(), viewport_, slices, frame.decoration_bitmap,
+                frame.decoration_charge)) return;
         frame.decoration_bounds = viewport_;
         for (size_t i = 0; i < pictures.size(); ++i) {
             pictures[i]->bitmap = std::move(slices[i].bitmap);
+            pictures[i]->bitmap_charge = std::move(slices[i].bitmap_charge);
             pictures[i]->bitmap_source = slices[i].source;
         }
     }
@@ -258,6 +262,7 @@ private:
         auto* bitmap = source.bitmap.get();
         if (bitmap) bitmap->AddRef();
         destination.bitmap.reset(); destination.bitmap.p = bitmap;
+        destination.bitmap_charge = source.bitmap_charge;
         destination.bitmap_source = source.bitmap_source;
     }
     static bool Intersects(D2D1_RECT_F a, D2D1_RECT_F b) {

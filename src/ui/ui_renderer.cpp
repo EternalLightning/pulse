@@ -6,6 +6,7 @@
 // ui_renderer.cpp — Chrome orchestration (title, toolbar, status, render).
 #include "legacy_icons.h"
 #include "ui_renderer.h"
+#include "../app/frame_profile.h"
 #include "command_icons.h"
 #include "toolbar_layout.h"
 #include "ui_renderer_internal.h"
@@ -354,6 +355,7 @@ void MainRenderer::DrawButton(const D2D1_RECT_F& rc, const Theme& theme, const D
 void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           const Theme& theme) {
     if (!compositor_ || !compositor_->Dc()) return;
+    app::PaintProfileProbe paint_profile;
     details_content_animating_ = false;
     surface_animating_ = false;
     if (vm.settings_open || vm.dark != item_reflow_dark_) {
@@ -387,6 +389,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     text_background_ = theme.bg;
     painter_.BeginFrame(theme, IsHighContrast());
 
+    paint_profile.Mark(app::PaintPhase::Setup);
     // None effect + selected image: the (optionally blurred) wallpaper covers
     // the window base; the title scrim, one shared sheet and the pane cards
     // stack over it with the opacities from ComputeLayerAlphas.
@@ -432,27 +435,37 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         tint_background({rect.left, sheetTop, rect.right, rect.bottom}, theme.surface_sheet, sheet_alpha_);
     }
 
+    paint_profile.Mark(app::PaintPhase::Backdrop);
     DrawTitleBar(vm, rect, theme);
+    paint_profile.Mark(app::PaintPhase::Title);
     const auto page_bounds = D2D1::RectF(rect.left, title_bar_height_, rect.right,
                                        rect.bottom - status_height_);
     page_surface_.Paint(dc, page_bounds, vm.settings_open ? L"settings" : L"files", true,
         settings_switch_now_, motion_enabled_ && !IsHighContrast(),
         (vm.settings_open ? 18 : -18) * scale_, 240, [&] {
+    paint_profile.Mark(app::PaintPhase::Other);
     if (vm.settings_open) {
         preview_handler_.Sync(notify_hwnd_, {}, L"", 0, 0, 0, 0, vm.dark,
                               theme.bg, theme.text, false);
         DrawSettings(vm, rect, theme);
+        paint_profile.Mark(app::PaintPhase::Settings);
     } else {
         DrawToolbar(vm, rect, theme);
+        paint_profile.Mark(app::PaintPhase::Toolbar);
         DrawSidebar(vm, rect, theme);
+        paint_profile.Mark(app::PaintPhase::Sidebar);
         DrawPane(vm, rect, theme);
+        paint_profile.Mark(app::PaintPhase::Pane);
         if (DetailsPanelWidth(rect.right) > 0) DrawAnimatedDetailsPanel(vm, rect, theme);
         else preview_handler_.Sync(notify_hwnd_, {}, L"", 0, 0, 0, 0, vm.dark,
                                    theme.bg, theme.text, false);
+        paint_profile.Mark(app::PaintPhase::Details);
     }
     });
+    paint_profile.Mark(app::PaintPhase::Other);
     surface_animating_ |= page_surface_.pending;
     DrawStatusBar(vm, rect, theme);
+    paint_profile.Mark(app::PaintPhase::Status);
 
     // Drag action badge (ui.md §7.8): tooltip-style flyout near the cursor.
     if (!vm.drag_badge.empty()) {
@@ -494,6 +507,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         painter_.DrawText(pulse::l10n::Get(pulse::l10n::StringId::ChangeView), content, compositor_->TextFormat(), theme.accent);
     }
     DrawTooltip(vm, rect, theme);
+    paint_profile.Mark(app::PaintPhase::Overlays);
 
 }
 

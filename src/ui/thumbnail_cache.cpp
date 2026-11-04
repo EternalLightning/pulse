@@ -64,9 +64,9 @@ void ThumbnailCache::SetDeviceContext(ID2D1DeviceContext* dc, Consumer consumer)
     state.dc = dc;
     for (auto& [_, item] : items_) {
         if (item.bitmaps[index].get()) {
-            const size_t bytes = static_cast<size_t>(item.stride) * item.h;
+            const size_t bytes = BitmapPayloadBytes(item.w, item.h);
             item.cost -= bytes;
-            cache_bytes_ -= bytes;
+            SetCacheBytes(cache_bytes_ - bytes);
             item.bitmaps[index].reset();
         }
     }
@@ -98,7 +98,7 @@ void ThumbnailCache::Reset() {
     for (auto& host : hosts_) if (host.worker.joinable()) host.worker.join();
     for (size_t lane = 0; lane < lane_count_; ++lane) StopChild(lane);
     std::lock_guard lock(mutex_); queue_.clear(); pending_.clear(); items_.clear(); lru_.clear();
-    cache_bytes_ = 0;
+    SetCacheBytes(0);
     for (auto& state : consumers_) {
         state.dc = nullptr; state.hwnd = nullptr;
         state.details_identity.clear(); state.details_generation = 0; ++state.epoch;
@@ -127,7 +127,7 @@ void ThumbnailCache::Evict(Consumer consumer) {
     for (auto it = items_.begin(); it != items_.end();) {
         if (it->second.failed && it->second.retryable &&
             (state.visible_keys.contains(it->first) || state.frame_keys.contains(it->first))) {
-            cache_bytes_ -= it->second.cost;
+            SetCacheBytes(cache_bytes_ - it->second.cost);
             lru_.erase(it->second.lru_position);
             it = items_.erase(it);
         } else ++it;
@@ -146,7 +146,7 @@ void ThumbnailCache::SelectDetails(Consumer consumer, const std::wstring& identi
     for (auto it = items_.begin(); it != items_.end();) {
         if (it->second.failed && it->second.retryable &&
             it->second.animation_identity == identity) {
-            cache_bytes_ -= it->second.cost;
+            SetCacheBytes(cache_bytes_ - it->second.cost);
             lru_.erase(it->second.lru_position);
             it = items_.erase(it);
         } else ++it;
@@ -320,8 +320,8 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
                 if (SUCCEEDED(dc->CreateBitmap(D2D1::SizeU(item.w, item.h),
                         item.pixels.data(), item.stride, &props, &bitmap))) {
                     // Keep CPU pixels for the other D2D device and device-loss recovery.
-                    const size_t bytes = static_cast<size_t>(item.stride) * item.h;
-                    item.cost += bytes; cache_bytes_ += bytes;
+                    const size_t bytes = BitmapPayloadBytes(item.w, item.h);
+                    item.cost += bytes; SetCacheBytes(cache_bytes_ + bytes);
                 }
             }
             if (bitmap.get()) {
@@ -454,7 +454,7 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
     const uint32_t attempts = result.failure_attempts;
 
     if (auto old = items_.find(req.key); old != items_.end()) {
-        cache_bytes_ -= old->second.cost;
+        SetCacheBytes(cache_bytes_ - old->second.cost);
         lru_.erase(old->second.lru_position);
         items_.erase(old);
     }
@@ -468,7 +468,7 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
                 auto cached = items_.find(*lru);
                 if (cached->second.frame_count > 1 &&
                     cached->second.animation_identity == req.identity) {
-                    cache_bytes_ -= cached->second.cost;
+                    SetCacheBytes(cache_bytes_ - cached->second.cost);
                     items_.erase(cached);
                     lru_.erase(lru);
                     break;
@@ -476,7 +476,7 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
             }
         }
     }
-    cache_bytes_ += result.cost;
+    SetCacheBytes(cache_bytes_ + result.cost);
     lru_.push_back(req.key);
     result.lru_position = std::prev(lru_.end());
     items_.emplace(req.key, std::move(result));
@@ -501,7 +501,9 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
 }
 void ThumbnailCache::Trim() {
     constexpr size_t kCacheBudget = 16ull * 1024ull * 1024ull;
-    while (!lru_.empty() && (lru_.size() > 128 || cache_bytes_ > kCacheBudget)) {
+    // Reclaim this window's idle payloads under process-wide pressure; other
+    // windows keep their visible sets without taking cross-cache locks.
+    while (!lru_.empty() && (lru_.size() > 128 || cache_bytes_ > kCacheBudget || ThumbnailImageBudget().OverBudget())) {
         const auto victim = std::find_if(lru_.begin(), lru_.end(), [&](const std::wstring& key) {
             return std::none_of(consumers_.begin(), consumers_.end(), [&](const ConsumerState& state) {
                 return state.visible_keys.contains(key) || state.frame_keys.contains(key);
@@ -511,7 +513,7 @@ void ThumbnailCache::Trim() {
         // would alternate every redraw between covers and Shell icons.
         if (victim == lru_.end()) break;
         auto oldest = items_.find(*victim);
-        cache_bytes_ -= oldest->second.cost;
+        SetCacheBytes(cache_bytes_ - oldest->second.cost);
         items_.erase(oldest);
         lru_.erase(victim);
     }
@@ -577,9 +579,9 @@ bool ThumbnailCache::FetchResponse(const Request& req, Item& result, size_t lane
         result.frame_count = response.frame_count; result.frame_delay_ms = response.frame_delay_ms;
         result.loop_count = response.loop_count; result.frame_index = req.frame_index;
         result.source_width = response.source_width; result.source_height = response.source_height;
-        result.cost = result.pixels.size() + (result.text.size() + result.error.size()) * sizeof(wchar_t);
+        result.cost = result.pixels.capacity() + (result.text.capacity() + result.error.capacity()) * sizeof(wchar_t);
         for (const auto& property : result.properties)
-            result.cost += (property.label.size() + property.value.size()) * sizeof(wchar_t);
+            result.cost += (property.label.capacity() + property.value.capacity()) * sizeof(wchar_t);
         result.failed = response.status != 0;
         result.retryable = result.failed && (response.status == 2 || result.error == L"provider-failed" ||
             result.error == L"path-unavailable" || result.error == L"image-decode-failed" ||
@@ -645,7 +647,7 @@ void ThumbnailCache::Worker(size_t lane) {
             result.pixels = std::move(stored.pixels);
             result.w = stored.width; result.h = stored.height; result.stride = stored.width * 4;
             result.source_width = stored.source_width; result.source_height = stored.source_height;
-            result.kind = ipc::PreviewContentKind::Bitmap; result.cost = result.pixels.size();
+            result.kind = ipc::PreviewContentKind::Bitmap; result.cost = result.pixels.capacity();
         } else ok = Connect(lane) && FetchResponse(req, result, lane);
         if (!running_) break;
         {

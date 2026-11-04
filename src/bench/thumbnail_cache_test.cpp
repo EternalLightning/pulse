@@ -551,7 +551,7 @@ struct ThumbnailCacheTestAccess {
                     item.pixels.assign(static_cast<size_t>(item.stride) * item.h, 255);
                     item.cost = item.pixels.size();
                     item.kind = ipc::PreviewContentKind::Bitmap;
-                    cache.StoreResult(request(cache.Key(L"image", 200, 0, 0)), std::move(item));
+                    cache.StoreResult(request(cache.Key(L"image", 200, 0, 0) + L":thumbnail"), std::move(item));
                     for (float offset : {0.0f, 50.0f, 100.0f, 200.0f}) {
                         float x = offset, y = offset;
                         context->BeginDraw();
@@ -559,7 +559,8 @@ struct ThumbnailCacheTestAccess {
                         const auto result = cache.Draw(context.get(), D2D1::RectF(0, 0, 100, 100),
                             L"image", 0, 200, 0, 0, 0, 1.0f, nullptr, nullptr, nullptr,
                             false, nullptr, &x, &y);
-                        bool filled = result == PreviewDrawResult::Bitmap && SUCCEEDED(context->EndDraw());
+                        const HRESULT draw_result = context->EndDraw();
+                        bool filled = result == PreviewDrawResult::Bitmap && SUCCEEDED(draw_result);
                         filled = filled && SUCCEEDED(readback->CopyFromBitmap(nullptr, target.get(), nullptr));
                         D2D1_MAPPED_RECT mapped{};
                         if (filled && SUCCEEDED(readback->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
@@ -578,7 +579,7 @@ struct ThumbnailCacheTestAccess {
                 shared_image.w = shared_image.h = 100; shared_image.stride = 400;
                 shared_image.pixels.assign(40000, 255); shared_image.cost = 40000;
                 shared_image.kind = ipc::PreviewContentKind::Bitmap;
-                const auto image_key = cache.Key(L"shared-image", 100, 0, 0);
+                const auto image_key = cache.Key(L"shared-image", 100, 0, 0) + L":thumbnail";
                 cache.StoreResult(request(image_key), std::move(shared_image));
                 auto draw_shared = [&](ID2D1DeviceContext* dc, ThumbnailCache::Consumer consumer) {
                     dc->BeginDraw();
@@ -586,7 +587,8 @@ struct ThumbnailCacheTestAccess {
                         L"shared-image", 0, 100, 0, 0, 0, 1.0f, nullptr, nullptr, nullptr,
                         false, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr,
                         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, consumer);
-                    return result == PreviewDrawResult::Bitmap && SUCCEEDED(dc->EndDraw());
+                    const HRESULT draw_result = dc->EndDraw();
+                    return result == PreviewDrawResult::Bitmap && SUCCEEDED(draw_result);
                 };
                 check(draw_shared(context.get(), main) && cache.items_.at(image_key).pixels.size() == 40000 &&
                       cache.cache_bytes_ == 80000, "CPU pixels remain available and first GPU copy is budgeted");
@@ -664,7 +666,7 @@ struct ThumbnailCacheTestAccess {
                 check(stable && cache.items_.size() == visible_count && cache.pending_.empty() &&
                       cache.queue_.empty() && cache.cache_bytes_ > 16ull * 1024ull * 1024ull,
                       "visible video covers above idle budget remain bitmaps for 80 redraws without redecoding");
-                const auto cover_key = cache.Key(L"video-0.mp4", 256, 0, 0);
+                const auto cover_key = cache.Key(L"video-0.mp4", 256, 0, 0) + L":thumbnail";
                 {
                     ThumbnailCache::FrameScope frame(cache, quick);
                     context->BeginDraw();

@@ -70,6 +70,7 @@ bool Compositor::Init(HWND hwnd) {
 
 void Compositor::Shutdown() {
     animation_frames_paused_ = true;
+    DisableFrameLatencyWait();
     BindDialogComposition(hwnd_, nullptr, nullptr);
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
@@ -84,6 +85,7 @@ void Compositor::Shutdown() {
     compositionTarget_.reset();
     compositionDevice_.reset();
     swapChain_.reset();
+    swap_chain_flags_ = 0;
     dc_.reset();
     d2dDevice_.reset();
     d2dFactory_.reset();
@@ -321,6 +323,10 @@ bool Compositor::CreateSwapChain() {
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+    wchar_t pacing[16]{};
+    if (GetEnvironmentVariableW(L"PULSE_FRAME_PACING", pacing, ARRAYSIZE(pacing)) == 8 &&
+        wcscmp(pacing, L"waitable") == 0)
+        desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
     HRESULT hr = DCompositionCreateDevice(dxgiDevice_.get(), __uuidof(IDCompositionDevice),
         reinterpret_cast<void**>(&compositionDevice_));
@@ -330,6 +336,11 @@ bool Compositor::CreateSwapChain() {
         if (FAILED(hr) && desc.SwapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD) {
             swapChain_.reset();
             desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+            hr = factory->CreateSwapChainForComposition(d3dDevice_.get(), &desc, nullptr, &swapChain_);
+        }
+        if (FAILED(hr) && desc.Flags) {
+            swapChain_.reset();
+            desc.Flags = 0;
             hr = factory->CreateSwapChainForComposition(d3dDevice_.get(), &desc, nullptr, &swapChain_);
         }
     }
@@ -354,11 +365,58 @@ bool Compositor::CreateSwapChain() {
         desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
         hr = factory->CreateSwapChainForHwnd(d3dDevice_.get(), hwnd_, &desc,
             nullptr, nullptr, &swapChain_);
+        if (FAILED(hr) && desc.Flags) {
+            swapChain_.reset();
+            desc.Flags = 0;
+            hr = factory->CreateSwapChainForHwnd(d3dDevice_.get(), hwnd_, &desc,
+                nullptr, nullptr, &swapChain_);
+        }
         if (!CheckGraphics(hr, L"CreateSwapChainForHwnd")) return false;
     }
 
-    dxgiDevice_->SetMaximumFrameLatency(1);
+    swap_chain_flags_ = desc.Flags;
+    if (swap_chain_flags_ & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
+        wchar_t latency[4]{};
+        const UINT requested_latency = GetEnvironmentVariableW(L"PULSE_FRAME_LATENCY", latency, ARRAYSIZE(latency)) == 1 &&
+            latency[0] == L'2' ? 2 : 1;
+        UINT actual_latency = 0;
+        ComPtr<IDXGISwapChain2> chain;
+        if (SUCCEEDED(swapChain_->QueryInterface(&chain))) {
+            if (SUCCEEDED(chain->SetMaximumFrameLatency(requested_latency)) &&
+                SUCCEEDED(chain->GetMaximumFrameLatency(&actual_latency)) && actual_latency == requested_latency)
+                frame_latency_waitable_ = chain->GetFrameLatencyWaitableObject();
+            if (!frame_latency_waitable_) chain->SetMaximumFrameLatency(1);
+        }
+    }
+    if (!frame_latency_waitable_) {
+        dxgiDevice_->SetMaximumFrameLatency(1);
+    }
     return true;
+}
+
+void Compositor::DisableFrameLatencyWait() {
+    if (frame_latency_waitable_) {
+        CloseHandle(frame_latency_waitable_);
+        ComPtr<IDXGISwapChain2> chain;
+        if (swapChain_.get() && SUCCEEDED(swapChain_->QueryInterface(&chain)))
+            chain->SetMaximumFrameLatency(1);
+        if (dxgiDevice_.get()) dxgiDevice_->SetMaximumFrameLatency(1);
+    }
+    frame_latency_waitable_ = nullptr;
+}
+
+PresentationStatistics Compositor::ReadPresentationStatistics() const {
+    PresentationStatistics result;
+    if (!swapChain_.get()) return result;
+    result.last_present_result = swapChain_->GetLastPresentCount(&result.last_present_count);
+    result.frame_result = swapChain_->GetFrameStatistics(&result.frame);
+    result.description_result = swapChain_->GetDesc1(&result.description);
+    ComPtr<IDXGISwapChainMedia> media;
+    result.media_interface_result = swapChain_->QueryInterface(&media);
+    result.media_result = result.media_interface_result;
+    if (SUCCEEDED(result.media_interface_result))
+        result.media_result = media->GetFrameStatisticsMedia(&result.media);
+    return result;
 }
 
 void Compositor::ResizeSwapChain() {
@@ -368,7 +426,7 @@ void Compositor::ResizeSwapChain() {
     targetBitmap_.reset();
     dc_->SetTarget(nullptr);
     HRESULT hr = swapChain_->ResizeBuffers(0, (UINT)width_, (UINT)height_,
-        DXGI_FORMAT_UNKNOWN, 0);
+        DXGI_FORMAT_UNKNOWN, swap_chain_flags_);
     if (FAILED(hr)) {
         CheckGraphics(hr, L"ResizeBuffers");
         if (IsDeviceLost(hr)) NotifyDeviceLost(hr);

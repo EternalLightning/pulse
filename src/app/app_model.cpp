@@ -1935,16 +1935,18 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             item.use_path_icon = true;
             access.items.push_back(std::move(item));
         }
-        std::stable_sort(access.items.begin(), access.items.end(), [&](const auto& left, const auto& right) {
-            return places->QuickAccessRank(left.path) < places->QuickAccessRank(right.path);
-        });
+        if (!places->quick_access_order.empty()) {
+            std::stable_sort(access.items.begin(), access.items.end(), [&](const auto& left, const auto& right) {
+                return places->QuickAccessRank(left.path) < places->QuickAccessRank(right.path);
+            });
+        }
     }
     savedSearches = ConvertGroup(l10n::Get(l10n::StringId::SidebarSavedSearches),
                                  sidebar.saved_searches, false);
     // The title is only used by the section menus: the pane itself shows the
     // account rows without a header (see IsHeaderlessSection).
     cloud = ConvertGroup(L"OneDrive", sidebar.cloud, false);
-    if (places) for (auto* group : {&access, &cloud}) {
+    if (places && !places->quick_access_badges.empty()) for (auto* group : {&access, &cloud}) {
         for (auto& item : group->items) {
             if (const auto* saved = places->FindQuickAccessBadge(item.path)) {
                 item.badge = saved->badge;

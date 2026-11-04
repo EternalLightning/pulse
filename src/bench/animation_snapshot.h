@@ -11,6 +11,12 @@
 #include <filesystem>
 #include <vector>
 
+inline void ConfigureAnimationTestOutput(bool buffered = false) {
+    wchar_t transport[2]{};
+    buffered |= GetEnvironmentVariableW(L"PULSE_TEST_SNAPSHOT_STDOUT", transport, 2) == 1 && transport[0] == L'1';
+    std::setvbuf(stdout, nullptr, buffered ? _IOFBF : _IONBF, buffered ? 65536 : 0);
+}
+
 // Send PNGs to the fixture launcher when native UI processes cannot write files.
 inline bool WriteAnimationSnapshot(pulse::ui::Compositor& compositor, const std::filesystem::path& path) {
     wchar_t transport[4]{};

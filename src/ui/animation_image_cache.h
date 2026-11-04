@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "ui_compositor.h"
+#include "image_cache_budget.h"
+#include <memory>
 #include <vector>
 
 namespace pulse::ui {
@@ -10,6 +12,7 @@ bool AnimationPixelCacheEnabled();
 struct AnimationImageSlice {
     ID2D1CommandList* commands = nullptr;
     D2D1_RECT_F bounds{};
+    std::shared_ptr<ImageCacheCharge> bitmap_charge;
     ComPtr<ID2D1Bitmap1> bitmap;
     D2D1_RECT_F source{};
 };
@@ -19,7 +22,8 @@ struct AnimationImageSlice {
 class AnimationImageCache {
 public:
     bool Build(ID2D1DeviceContext* source, ID2D1CommandList* decoration, D2D1_RECT_F viewport,
-               std::vector<AnimationImageSlice>& slices, ComPtr<ID2D1Bitmap1>& background);
+               std::vector<AnimationImageSlice>& slices, ComPtr<ID2D1Bitmap1>& background,
+               std::shared_ptr<ImageCacheCharge>& background_charge);
     void Reset() { context_.reset(); }
 private:
     ComPtr<ID2D1DeviceContext> context_;

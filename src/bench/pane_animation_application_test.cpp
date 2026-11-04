@@ -8,6 +8,7 @@
 #include "../app/app_ui_schedule.h"
 #include "../app/app_visual_animation.h"
 #include "../common/localization.h"
+#include "tray_deck_window_cases.h"
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -26,7 +27,7 @@ bool RunContentRevealUiChecks(pulse::AppState& s, const std::filesystem::path& r
 
 int RunAnimationFixture(int argc, char** argv) {
     using namespace pulse;
-    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    ConfigureAnimationTestOutput();
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     int failures = 0;
@@ -323,6 +324,7 @@ int RunAnimationFixture(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--tray-window-only") return RunTrayDeckWindowChecks();
     try { return RunAnimationFixture(argc, argv); }
     catch (const std::exception& error) {
         std::fprintf(stderr, "[FAIL] animation fixture initialization: %s\n", error.what());

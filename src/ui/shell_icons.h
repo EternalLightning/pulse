@@ -8,6 +8,7 @@
 #include "ui_compositor.h"
 #include "d2d_device_binding.h"
 #include "repaint_targets.h"
+#include "image_cache_budget.h"
 #include "../ipc/shell_query_protocol.h"
 
 #include <string>
@@ -115,7 +116,14 @@ private:
 #ifdef PULSE_SHELL_ICONS_TESTING
     ComPtr<IWICImagingFactory> wic_;
 #endif
-    std::unordered_map<uint64_t, ComPtr<ID2D1Bitmap>> bitmaps_;
+    struct Bitmap {
+        ComPtr<ID2D1Bitmap> bitmap;
+        size_t bytes = 0;
+        uint64_t last_used = 0;
+    };
+    std::unordered_map<uint64_t, Bitmap> bitmaps_;
+    ImageCacheCharge bitmap_memory_{ShellBitmapBudget()};
+    uint64_t bitmap_access_clock_ = 0;
     std::shared_ptr<WorkerState> worker_;
     uint64_t bitmap_eviction_generation_ = 0;
 };

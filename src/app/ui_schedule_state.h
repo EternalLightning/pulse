@@ -30,6 +30,10 @@ struct UiScheduleState {
     bool stopped = false;
     uint32_t maintenance_ms = 0;
     bool animation_active = false;
+    bool frame_pending = false;
+    bool frame_ready = false;
+    bool frame_wait_suspended = false;
+    uint64_t frame_wait_started = 0;
 
     void NoteActivity(uint64_t now) noexcept { last_activity = now; }
     uint32_t MaintenanceInterval(bool visible, bool exiting, uint64_t now) const noexcept {

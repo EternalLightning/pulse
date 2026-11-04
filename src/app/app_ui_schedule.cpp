@@ -8,11 +8,79 @@
 
 namespace pulse {
 
+bool BeginUiFrame(AppState& s) {
+    auto& schedule = s.ui_schedule;
+    const HANDLE handle = s.compositor.FrameLatencyWaitableObject();
+    if (!handle || schedule.frame_wait_suspended || !IsWindowVisible(s.hwnd) || IsIconic(s.hwnd)) {
+        schedule.frame_pending = schedule.frame_ready = false;
+        return true;
+    }
+    if (schedule.frame_ready) {
+        schedule.frame_ready = schedule.frame_pending = false;
+        return true;
+    }
+    const DWORD result = WaitForSingleObject(handle, 0);
+    if (result == WAIT_OBJECT_0) {
+        schedule.frame_pending = false;
+        return true;
+    }
+    if (result != WAIT_TIMEOUT) {
+        s.compositor.DisableFrameLatencyWait();
+        schedule.frame_pending = false;
+        return true;
+    }
+    if (!schedule.frame_pending) schedule.frame_wait_started = GetTickCount64();
+    schedule.frame_pending = true;
+    return false;
+}
+
+DWORD WaitForUiFrameOrMessage(AppCore& core, DWORD timeout) {
+    HANDLE handles[MAXIMUM_WAIT_OBJECTS - 1]{};
+    AppState* windows[MAXIMUM_WAIT_OBJECTS - 1]{};
+    DWORD count = 0;
+    const auto ready = [](AppState& s) {
+        s.ui_schedule.frame_pending = false;
+        s.ui_schedule.frame_ready = true;
+        InvalidateRect(s.hwnd, nullptr, FALSE);
+    };
+    core.windows.ForEach([&](HWND hwnd, AppState& s) {
+        if (!s.ui_schedule.frame_pending) return;
+        if (s.ui_schedule.stopped || !IsWindow(hwnd) || !IsWindowVisible(hwnd) || IsIconic(hwnd)) {
+            s.ui_schedule.frame_pending = s.ui_schedule.frame_ready = false;
+            return;
+        }
+        const HANDLE handle = s.compositor.FrameLatencyWaitableObject();
+        if (!handle || GetTickCount64() - s.ui_schedule.frame_wait_started >= 1000 ||
+            count == ARRAYSIZE(handles)) {
+            // A stalled/unsupported wait must not keep a dirty window blank.
+            s.compositor.DisableFrameLatencyWait();
+            ready(s);
+            return;
+        }
+        handles[count] = handle;
+        windows[count++] = &s;
+    });
+    // Bound a stalled driver's wait independently of refresh rate. UI input and
+    // timer messages still wake this wait immediately.
+    const DWORD result = MsgWaitForMultipleObjectsEx(count, handles,
+        count ? (std::min)(timeout, DWORD{1000}) : timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    if (result < WAIT_OBJECT_0 + count) {
+        ready(*windows[result - WAIT_OBJECT_0]);
+    } else if (result == WAIT_FAILED) {
+        for (DWORD i = 0; i < count; ++i) {
+            windows[i]->compositor.DisableFrameLatencyWait();
+            ready(*windows[i]);
+        }
+    }
+    return result;
+}
+
 void StopUiScheduling(AppState& s) {
     KillTimer(s.hwnd, kTimerUi);
     KillTimer(s.hwnd, kTimerUiDeadline);
     KillTimer(s.hwnd, kTimerDeferredStartup);
     s.ui_schedule.stopped = true;
+    s.ui_schedule.frame_pending = s.ui_schedule.frame_ready = false;
     s.ui_schedule.options_due = 0;
     s.ui_schedule.deadline = 0;
     s.ui_schedule.maintenance_ms = 0;

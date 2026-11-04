@@ -79,7 +79,10 @@ ShellIconCache::~ShellIconCache() {
 }
 
 void ShellIconCache::SetDeviceContext(ID2D1DeviceContext* dc) {
-    if (device_binding_.Bind(dc)) bitmaps_.clear();
+    if (device_binding_.Bind(dc)) {
+        bitmaps_.clear();
+        bitmap_memory_.SetBytes(0);
+    }
     dc_ = device_binding_.Dc();
 }
 
@@ -177,6 +180,8 @@ void ShellIconCache::Reset() {
         pool.ReapLocked();
     }
     bitmaps_.clear();
+    bitmap_memory_.SetBytes(0);
+    bitmap_access_clock_ = 0;
     bitmap_eviction_generation_ = 0;
 #ifdef PULSE_SHELL_ICONS_TESTING
     wic_.reset();
@@ -405,7 +410,9 @@ bool ShellIconCache::PruneStaleBitmaps() {
     std::lock_guard lock(worker_->mutex);
     // Index IDs are never reused: a removed CPU index cannot produce another hit.
     std::erase_if(bitmaps_, [&](const auto& entry) {
-        return !worker_->pixels.contains(static_cast<int>(static_cast<uint32_t>(entry.first)));
+        if (worker_->pixels.contains(static_cast<int>(static_cast<uint32_t>(entry.first)))) return false;
+        bitmap_memory_.SetBytes(bitmap_memory_.Bytes() - entry.second.bytes);
+        return true;
     });
     bitmap_eviction_generation_ = worker_->eviction_generation.load(std::memory_order_relaxed);
     return true;
@@ -416,7 +423,10 @@ ID2D1Bitmap* ShellIconCache::BitmapForIndex(int index, int list_id) {
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(list_id)) << 32) |
         static_cast<uint32_t>(index);
     auto it = bitmaps_.find(key);
-    if (it != bitmaps_.end()) return it->second.get();
+    if (it != bitmaps_.end()) {
+        it->second.last_used = ++bitmap_access_clock_;
+        return it->second.bitmap.get();
+    }
     if (!worker_) return nullptr;
     std::shared_ptr<const std::vector<ipc::ShellIconPixels>> pixels;
     {
@@ -429,15 +439,27 @@ ID2D1Bitmap* ShellIconCache::BitmapForIndex(int index, int list_id) {
         return item.list_id == static_cast<uint32_t>(list_id);
     });
     if (icon == pixels->end()) return nullptr;
+    const size_t bytes = BitmapPayloadBytes(icon->width, icon->height);
+    if (bytes > ShellBitmapBudget().Limit()) return nullptr;
+    while (bitmaps_.size() >= kBitmapCacheLimit ||
+           !bitmap_memory_.TrySetBytes(bitmap_memory_.Bytes() + bytes)) {
+        if (bitmaps_.empty()) return nullptr;
+        const auto victim = std::min_element(bitmaps_.begin(), bitmaps_.end(),
+            [](const auto& a, const auto& b) { return a.second.last_used < b.second.last_used; });
+        bitmap_memory_.SetBytes(bitmap_memory_.Bytes() - victim->second.bytes);
+        bitmaps_.erase(victim);
+    }
     ComPtr<ID2D1Bitmap> bitmap;
     const auto properties = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
     dc_->CreateBitmap(D2D1::SizeU(icon->width, icon->height), icon->pixels.data(),
                        icon->stride, &properties, &bitmap);
-    if (!bitmap.get()) return nullptr;
+    if (!bitmap.get()) {
+        bitmap_memory_.SetBytes(bitmap_memory_.Bytes() - bytes);
+        return nullptr;
+    }
     ID2D1Bitmap* raw = bitmap.get();
-    if (bitmaps_.size() >= kBitmapCacheLimit) bitmaps_.erase(bitmaps_.begin());
-    bitmaps_[key] = std::move(bitmap);
+    bitmaps_[key] = {std::move(bitmap), bytes, ++bitmap_access_clock_};
     return raw;
 }
 

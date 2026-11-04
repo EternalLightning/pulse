@@ -127,13 +127,15 @@ inline bool RunHomeSettingsAnimationChecks(pulse::AppState& s, const std::filesy
         frame.pane_slots.front().pane = frame.pane;
         draw(L"home-closed");
         frame.settings_open = true;
-        frame.settings_page = 0;
+        frame.settings_page = 8;
         frame.settings_scroll = 0;
         ui::fluent::Painter measuring(&s.compositor);
         measuring.SetScale(scale);
         measuring.BeginFrame(theme);
         const auto settings_layout = ui::MakeSettingsLayout(frame, rect, scale,
             s.renderer.TitleBarHeight(), 28 * scale, &measuring);
+        check(settings_layout.startup_row[1].bottom > settings_layout.startup_row[1].top,
+            "settings animation fixture includes the keep-running switch");
         frame.settings_scroll = std::max(0.0f, settings_layout.startup_row[1].top - settings_layout.content.top - 140 * scale);
         frame.settings_keep_running = false;
         draw(L"switch-off");

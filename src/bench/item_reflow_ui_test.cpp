@@ -28,6 +28,7 @@ struct ItemReflowUiTest {
     static int RunViewModeFeedback(const std::filesystem::path& output);
     static int RunWheelFeedback(const std::filesystem::path& output);
     static int RunFrameProfile(bool presented);
+    static int RunVmProfile();
     static const ViewModeTransition& ViewTransition(const MainRenderer& renderer) {
         return renderer.view_mode_transitions_[0];
     }
@@ -187,11 +188,18 @@ void Profile(pulse::ui::Compositor& compositor, pulse::ui::MainRenderer& rendere
 
 int main(int argc, char** argv) {
     using namespace pulse;
-    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    const auto profile_option = [](const char* arg) { return std::string_view(arg).starts_with("--frame-profile-"); };
+    ConfigureAnimationTestOutput((argc > 1 && profile_option(argv[1])) || (argc > 2 && profile_option(argv[2])));
     if (argc > 2 && std::string_view(argv[2]) == "--search-filter-only")
         std::printf("[TEST] starting search/filter fixture\n");
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc > 1 && (std::string_view(argv[1]) == "--frame-profile-vm-only" ||
+        (argc > 2 && std::string_view(argv[2]) == "--frame-profile-vm-only"))) {
+        const int result = ui::ItemReflowUiTest::RunVmProfile();
+        OleUninitialize();
+        return result;
+    }
     if (argc > 2 && std::string_view(argv[2]) == "--header-icon-clip-only") {
         const int result = ui::ItemReflowUiTest::RunHeaderIconClip(std::filesystem::path(argv[1]));
         OleUninitialize();

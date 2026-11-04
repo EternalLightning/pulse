@@ -863,6 +863,9 @@ target_link_libraries(pulse_text_compare_test PRIVATE
 
 add_executable(pulse_smooth_scroll_test src/bench/smooth_scroll_test.cpp)
 
+add_executable(pulse_frame_profile_test EXCLUDE_FROM_ALL src/bench/frame_profile_test.cpp)
+target_compile_options(pulse_frame_profile_test PRIVATE /W4 /permissive- /utf-8)
+
 add_executable(pulse_text_diff_ui_test src/bench/text_diff_ui_test.cpp
     src/bench/localization_test.rc src/app/text_diff.cpp src/ui/text_diff_window.cpp
     src/ui/ui_compositor.cpp src/ui/fluent_components.cpp src/ui/typography.cpp
@@ -1551,6 +1554,20 @@ endforeach()
 
 add_executable(pulse_startup_idle_test EXCLUDE_FROM_ALL src/bench/startup_idle_test.cpp)
 target_link_libraries(pulse_startup_idle_test PRIVATE user32)
+
+add_executable(pulse_frame_pacing_application_test EXCLUDE_FROM_ALL
+    src/bench/frame_pacing_application_test.cpp ${startup_idle_sources})
+target_link_libraries(pulse_frame_pacing_application_test PRIVATE ${startup_idle_libraries})
+foreach(pacing_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
+    get_target_property(pacing_value pulse ${pacing_property})
+    if(pacing_value)
+        set_property(TARGET pulse_frame_pacing_application_test PROPERTY ${pacing_property} "${pacing_value}")
+    endif()
+endforeach()
+
+add_executable(pulse_image_cache_budget_test EXCLUDE_FROM_ALL
+    src/bench/image_cache_budget_test.cpp src/ui/thumbnail_cache.cpp src/ui/thumbnail_disk_cache.cpp)
+target_link_libraries(pulse_image_cache_budget_test PRIVATE ole32 shell32 windowscodecs uuid)
 
 add_executable(pulse_thumbnail_pipeline_test EXCLUDE_FROM_ALL
     src/bench/thumbnail_pipeline_test.cpp src/ui/thumbnail_cache.cpp src/ui/thumbnail_disk_cache.cpp)

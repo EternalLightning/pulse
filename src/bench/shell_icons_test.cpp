@@ -366,8 +366,71 @@ struct ShellIconCacheTestAccess {
             state.RemovePixels(1);
         }
         check(!cache.PruneStaleBitmaps(), "missing CPU index does not trigger a scan");
+
+        const size_t baseline = ShellBitmapBudget().Bytes() - cache.bitmap_memory_.Bytes();
+        cache.SetDeviceContext(nullptr);
+        check(cache.bitmaps_.empty() && cache.bitmap_memory_.Bytes() == 0 &&
+              ShellBitmapBudget().Bytes() == baseline,
+              "detaching a device releases retained icon bitmap bytes");
+        cache.SetDeviceContext(context.get());
+        constexpr size_t bitmap_bytes = 1024u * 1024u * 4u;
+        check(ShellBitmapBudget().Limit() == 4 * bitmap_bytes,
+              "GPU icon budget fixture covers the configured sixteen MiB limit");
+        for (int index = 10; index < 15; ++index) {
+            ipc::ShellIconPixels icon;
+            icon.list_id = 0;
+            icon.width = icon.height = 1024;
+            icon.stride = 4096;
+            icon.pixels.assign(bitmap_bytes, 255);
+            state.pixel_bytes += icon.pixels.size();
+            std::vector<ipc::ShellIconPixels> icons;
+            icons.push_back(std::move(icon));
+            state.pixels[index] = std::make_shared<const std::vector<ipc::ShellIconPixels>>(std::move(icons));
+        }
+        bool filled = true;
+        for (int index = 10; index < 14; ++index) filled &= cache.BitmapForIndex(index, 0) != nullptr;
+        check(filled && cache.bitmaps_.size() == 4 && cache.bitmap_memory_.Bytes() == 4 * bitmap_bytes &&
+              ShellBitmapBudget().Bytes() == baseline + 4 * bitmap_bytes,
+              "four full-resolution WARP bitmaps fill the byte budget below the entry limit");
+        auto* recent = cache.BitmapForIndex(10, 0);
+        check(recent && cache.BitmapForIndex(14, 0) && cache.bitmaps_.size() == 4 &&
+              cache.bitmaps_.contains(10) && !cache.bitmaps_.contains(11) && cache.bitmaps_.contains(14) &&
+              cache.BitmapForIndex(10, 0) == recent && cache.bitmap_memory_.Bytes() == 4 * bitmap_bytes,
+              "a fifth bitmap evicts the least recently used entry and preserves the touched bitmap");
+
+        ShellIconCache later;
+        later.SetDeviceContext(context.get());
+        later.worker_ = std::make_shared<ShellIconCache::WorkerState>();
+        ipc::ShellIconPixels tiny_icon;
+        tiny_icon.list_id = 0; tiny_icon.width = tiny_icon.height = 1; tiny_icon.stride = 4;
+        tiny_icon.pixels = {255, 255, 255, 255};
+        std::vector<ipc::ShellIconPixels> small_icons;
+        small_icons.push_back(std::move(tiny_icon));
+        later.worker_->pixel_bytes = 4;
+        later.worker_->pixels[1] =
+            std::make_shared<const std::vector<ipc::ShellIconPixels>>(std::move(small_icons));
+        check(!later.BitmapForIndex(1, 0) && later.bitmaps_.empty() && later.bitmap_memory_.Bytes() == 0,
+              "an independent synthetic cache cannot exceed bytes retained by the shared owner");
+        cache.SetDeviceContext(nullptr);
+        check(cache.bitmaps_.empty() && cache.bitmap_memory_.Bytes() == 0 &&
+              ShellBitmapBudget().Bytes() == baseline,
+              "device detachment releases all large bitmap charges");
+        check(later.BitmapForIndex(1, 0) && later.bitmap_memory_.Bytes() == 4 &&
+              ShellBitmapBudget().Bytes() == baseline + 4,
+              "an independent cache immediately recovers when shared budget bytes become available");
+        cache.SetDeviceContext(context.get());
+        check(cache.BitmapForIndex(10, 0) && cache.bitmap_memory_.Bytes() == bitmap_bytes,
+              "device rebinding recreates an icon from retained CPU pixels");
         // This synthetic state owns no worker-pool slot.
         cache.worker_.reset();
+        cache.Reset();
+        check(cache.bitmaps_.empty() && cache.bitmap_memory_.Bytes() == 0 &&
+              ShellBitmapBudget().Bytes() == baseline + 4,
+              "Reset releases its GPU budget without releasing another cache's bitmap");
+        later.worker_.reset();
+        later.Reset();
+        check(ShellBitmapBudget().Bytes() == baseline,
+              "resetting both synthetic owners restores the shared GPU budget");
         return ok;
     }
     static bool SavePng(ShellIconCache& cache, IWICBitmapSource* source, const std::wstring& path) {
