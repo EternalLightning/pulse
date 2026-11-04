@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string_view>
+#include "tray_card_motion_cases.h"
 
 LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
@@ -287,6 +288,12 @@ int main(int argc, char** argv) try {
     compat::EnableDpiAwareness();
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     const auto previous_mode = ui::typography::CurrentTextRenderMode();
+    if (argc == 2 && std::string_view(argv[1]) == "--tray-card-motion") {
+        const int result = ui::TrayCardMotionTest::Run();
+        ui::typography::SetTextRenderMode(previous_mode);
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--plain-text-only") {
         const int result = PlainTextBackendTest();
         ui::typography::SetTextRenderMode(previous_mode);

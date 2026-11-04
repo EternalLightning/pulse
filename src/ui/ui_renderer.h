@@ -907,6 +907,7 @@ class MainRenderer {
     friend struct TabIndicatorUiTest;
     friend struct SurfaceScrollUiTest;
     friend struct TooltipMotionUiTest;
+    friend struct TrayCardMotionTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);

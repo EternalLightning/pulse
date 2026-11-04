@@ -308,8 +308,7 @@ static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap, bool 
       << L",\n";
     f << L"  \"detailsPreviewOnly\":" << (snap.details_preview_only ? L"true" : L"false") << L",\n";
     f << L"  \"detailsPreview\":" << (snap.details_preview ? L"true" : L"false") << L",\n";
-    f << L"  \"tray\":" << trayJson << L",\n";
-    f << L"  \"undo\":" << (snap.undo_json.empty() ? L"[]" : snap.undo_json);
+    f << L"  \"tray\":" << trayJson;
     if (navigation) {
         f << L",\n  \"activeTab\":" << snap.active_layout_tab << L",\n";
         f << L"  \"tabGroups\":" << TabGroupsToJson(snap.tab_groups) << L",\n";
@@ -397,7 +396,6 @@ static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapsh
 
     const auto tray_json = pulse::json::ExtractRaw(doc, L"tray", pulse::json::Kind::Array);
     if (!tray_json.empty()) snap.tray.FromJson(tray_json);
-    snap.undo_json = pulse::json::ExtractRaw(doc, L"undo", pulse::json::Kind::Array);
 
     if (!navigation) return true;
     snap.active_layout_tab = pulse::json::ExtractInt(doc, L"activeTab");

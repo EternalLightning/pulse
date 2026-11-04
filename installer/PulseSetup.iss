@@ -32,8 +32,8 @@ AppVerName=Pulse {#AppVersion}
 DefaultDirName={code:DefaultPulseDirectory}
 DefaultGroupName=Pulse
 ; Reuse the existing installation directory and task selections when this is
-; an upgrade. AppId is intentionally stable so the previous install can be
-; located and removed before the new files are copied.
+; an upgrade. The stable AppId lets Inno update the existing uninstall log.
+; Same-directory upgrades must not uninstall shortcuts and taskbar pins.
 UsePreviousAppDir=yes
 UsePreviousTasks=yes
 UsePreviousGroup=yes
@@ -590,9 +590,9 @@ begin
   Result := FileName <> '';
 end;
 
-function UninstallPreviousVersion: String;
+function PreparePreviousVersion: String;
 var
-  CommandLine, FileName, Params: String;
+  CommandLine, FileName, Params, PreviousDir, IndexExe: String;
   ResultCode: Integer;
 begin
   Result := '';
@@ -609,9 +609,30 @@ begin
     Exit;
   end;
 
-  { Silent upgrades keep user data; an interactive uninstall still lets the
-    user choose cleanup through the checkbox above. }
-  CaptureUpgradePrefs(AddBackslash(ExtractFileDir(FileName)) + 'Pulse.exe');
+  PreviousDir := RemoveBackslashUnlessRoot(ExpandFileName(ExtractFileDir(FileName)));
+  CaptureUpgradePrefs(AddBackslash(PreviousDir) + 'Pulse.exe');
+  if CompareText(PreviousDir,
+    RemoveBackslashUnlessRoot(ExpandFileName(ExpandConstant('{app}')))) = 0 then
+  begin
+    { Uninstalling shortcuts also unpins them. Inno can update this directory
+      in place while retaining its uninstall log and existing shortcuts. }
+    Log('Upgrading Pulse in place; preserving shortcuts and taskbar pins.');
+    { Keep the previous service lifecycle, including removal when the new
+      installation has the indexservice task unchecked. }
+    IndexExe := AddBackslash(PreviousDir) + 'Pulse.Index.exe';
+    ResultCode := -1;
+    if not FileExists(IndexExe) then
+      Result := '找不到旧版索引程序，安装已停止。 / The previous index helper could not be found.'
+    else if not Exec(IndexExe, '--uninstall', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      Result := '旧版索引服务移除失败（错误码 ' + IntToStr(ResultCode) +
+        '），安装已停止。 / Could not remove the previous index service (exit code ' +
+        IntToStr(ResultCode) + ').';
+    Exit;
+  end;
+
+  { A directory change still removes the old payload. Silent removal keeps
+    user data; an interactive uninstall offers the cleanup checkbox above. }
   if not Exec(FileName,
     Trim(Params + ' /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
@@ -699,7 +720,7 @@ begin
     leaves the user-mode network agent holding Pulse.Index.exe. }
   StopPulseApps;
   WaitUntilPulseIndexGone;
-  PreviousUninstallError := UninstallPreviousVersion;
+  PreviousUninstallError := PreparePreviousVersion;
   StopPulseApps;
   WaitUntilPulseIndexGone;
   WaitUntilPulseIndexServiceGone;

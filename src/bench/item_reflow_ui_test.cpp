@@ -24,6 +24,7 @@ struct ItemReflowUiTest {
     static int RunBulk(const std::filesystem::path& output);
     static int RunSearchContinuity(const std::filesystem::path& output);
     static int RunViewModes(const std::filesystem::path& output);
+    static int RunHeaderIconClip(const std::filesystem::path& output);
     static int RunViewModeFeedback(const std::filesystem::path& output);
     static int RunWheelFeedback(const std::filesystem::path& output);
     static int RunFrameProfile(bool presented);
@@ -71,6 +72,7 @@ struct ItemReflowUiTest {
 #include "item_reflow_bulk_cases.h"
 #include "search_continuity_cases.h"
 #include "view_mode_transition_cases.h"
+#include "header_icon_clip_cases.h"
 #include "view_mode_transition_feedback_cases.h"
 #include "view_mode_wheel_feedback_cases.h"
 #include "animation_frame_profile_cases.h"
@@ -190,6 +192,11 @@ int main(int argc, char** argv) {
         std::printf("[TEST] starting search/filter fixture\n");
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc > 2 && std::string_view(argv[2]) == "--header-icon-clip-only") {
+        const int result = ui::ItemReflowUiTest::RunHeaderIconClip(std::filesystem::path(argv[1]));
+        OleUninitialize();
+        return result;
+    }
     if (argc > 2 && (std::string_view(argv[2]) == "--frame-profile-hidden" ||
                     std::string_view(argv[2]) == "--frame-profile-presented")) {
         const int result = ui::ItemReflowUiTest::RunFrameProfile(std::string_view(argv[2]) == "--frame-profile-presented");

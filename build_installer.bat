@@ -22,13 +22,6 @@ call "%~dp0build_release.bat" "" "%PULSE_BUILD_DIR%" || exit /b 1
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\check_release_payload.ps1" -BuildDir "%PULSE_BUILD_DIR%" || exit /b 1
 
-for %%F in (Pulse.exe Pulse.Index.exe Pulse.Document.exe Pulse.Preview.exe Pulse.Shell.exe lumatext.dll) do (
-    if not exist "%PULSE_BUILD_DIR%\%%F" (
-        echo Missing build output: %PULSE_BUILD_DIR%\%%F
-        exit /b 1
-    )
-)
-
 set "ISCC="
 where ISCC.exe >nul 2>&1 && set "ISCC=ISCC.exe"
 if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"

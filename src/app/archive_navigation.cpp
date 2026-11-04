@@ -65,7 +65,6 @@ fs::SnapshotPtr BuildArchiveSnapshot(const app::ArchiveListing& listing, const s
         if (cancel.load()) return {};
         if (!item.path.starts_with(prefix)) continue;
         const auto tail = item.path.substr(prefix.size());
-        if (tail.empty()) continue;
         const auto slash = tail.find(L'/');
         const auto name = tail.substr(0, slash);
         if (name.empty()) continue;

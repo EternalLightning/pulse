@@ -67,7 +67,7 @@ void Touch(const Item& item, CloudPinAction action, CloudPinResult& result, cons
 }
 
 bool Enter(const Item& item, CloudPinAction action) {
-    if (!(item.attrs & FILE_ATTRIBUTE_DIRECTORY) || Foreign(item)) return false;
+    if (!(item.attrs & FILE_ATTRIBUTE_DIRECTORY)) return false;
     if (action == CloudPinAction::Free && IsCloudPlaceholder(item.attrs)) return false;
     return true;
 }

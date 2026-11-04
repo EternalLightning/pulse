@@ -60,8 +60,7 @@ DWORD Extract(const std::wstring& path, uint64_t maximum_bytes, std::wstring& bo
     } else if (ext == L".pdf") {
         const bool filter_only = begin.engine == 2;
         if (!filter_only) {
-            try { hr = pulse::index::ExtractPdfiumText(file, file_bytes, body, stop_needle, case_sensitive, metrics); }
-            catch (const std::bad_alloc&) { hr = E_OUTOFMEMORY; }
+            hr = pulse::index::ExtractPdfiumText(file, file_bytes, body, stop_needle, case_sensitive, metrics);
         }
         // Retry compatibility failures, not ordinary nonmatches or image-only documents.
         const bool fallback = !filter_only && begin.config_mode != 1 &&

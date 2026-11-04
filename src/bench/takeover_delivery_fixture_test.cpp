@@ -5,6 +5,7 @@
 
 #include "../app/app_internal.h"
 #include "../app/explorer_window_takeover.h"
+#include "../app/shell_selection.h"
 #include "../common/user_storage.h"
 #include "../common/localization.h"
 #include <shlobj.h>
@@ -71,11 +72,15 @@ int main() {
     size_t routes = 0;
     std::wstring routed_folder;
     std::vector<std::wstring> routed_paths;
+    bool route_external = false;
     app::SystemTakeoverTestCallbacks callbacks;
     callbacks.active = [&](uint64_t token) { return active.contains(token); };
     callbacks.acknowledge = [&](uint64_t token, bool delivered) { answers.insert_or_assign(token, delivered); };
     callbacks.drain = [&] { return std::exchange(requests, {}); };
     callbacks.route = [&](const app::ExplorerTakeoverRequest& request) {
+        if (route_external) return RouteExternalFolderOpen(s,
+            request.folder.empty() ? app::kThisPcParsingName : request.folder,
+            request.token, request.selected_paths, SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE);
         ++routes; routed_folder = request.folder; routed_paths = request.selected_paths; return true;
     };
     MemoryRegistry registry;
@@ -182,6 +187,42 @@ int main() {
     s.systemIntegration.Tick(s);
     Check(answers.contains(12) && answers[12] && tab->IsSelected(0),
         "changed-folder replacement acknowledges only after the latest destination is ready");
+    route_external = true;
+    s.external_open_mailbox = std::make_shared<app::WindowResultMailbox<app::ExternalOpenResult>>(
+        s.hwnd, WM_EXTERNAL_OPEN_READY);
+    Check(s.worker.Start([&](app::WorkResult result) { PostWorkerResult(s, std::move(result)); }),
+        "start production workers for routed delivery");
+    const auto routed = output / L"routed";
+    std::filesystem::create_directories(routed);
+    const auto routed_file = routed / L"selected.txt";
+    HANDLE created = CreateFileW(routed_file.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (created != INVALID_HANDLE_VALUE) CloseHandle(created);
+    s.appPrefs.external_open_mode = app::ExternalOpenMode::Tab;
+    active.insert(13); requests.push_back({13, routed.wstring(), {routed_file.wstring()}, 0});
+    s.systemIntegration.Tick(s);
+    const auto routed_deadline = GetTickCount64() + 8000;
+    while (!answers.contains(13) && GetTickCount64() < routed_deadline) {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.hwnd == s.hwnd && message.message == WM_EXTERNAL_OPEN_READY)
+                ApplyExternalOpenResults(s, message.wParam);
+            else if (message.hwnd == s.hwnd && message.message == WM_WORKER_RESULT)
+                ProcessPendingResults(s);
+            else { TranslateMessage(&message); DispatchMessageW(&message); }
+        }
+        s.systemIntegration.Tick(s);
+        Sleep(10);
+    }
+    tab = ActiveTab(s);
+    std::printf("[DIAG] routed token=13 answer=%d delivered=%d loading=%d pending=%llu entries=%zu\n",
+        answers.contains(13), answers.contains(13) && answers[13], tab->loading,
+        static_cast<unsigned long long>(tab->pending_generation), tab->EntryCount());
+    Check(answers.contains(13) && answers[13] && tab->SelectedCount() == 1 &&
+        app::SameShellPath(app::ShellEntryPath(*tab, tab->selected_index), routed_file.wstring()),
+        "production route and directory enumeration acknowledge the visible selected file");
+    s.external_open_mailbox->Close();
+    s.worker.Stop();
     s.systemIntegration.Stop();
     s.core.windows.Remove(s.hwnd); s.core.global_ui_owner = nullptr;
     s.window_tabs.items.clear(); s.pane = nullptr;

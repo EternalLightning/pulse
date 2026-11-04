@@ -57,18 +57,17 @@ bool LooksBinary(const std::vector<uint8_t>& bytes) noexcept {
         if (c == 0) return true;
         if (c < 0x09 || (c > 0x0D && c < 0x20)) ++controls;
     }
-    return sample > 0 && controls * 20 > sample;
+    return controls * 20 > sample;
 }
 
 bool Decode(const std::vector<uint8_t>& bytes, std::wstring& output, Encoding encoding) {
     output.clear();
-    if (bytes.empty()) return true;
     size_t offset = 0;
     if (bytes.size() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
         if (bytes.size() % 2) return false;
         offset = 2;
         output.reserve((bytes.size() - offset) / 2);
-        for (size_t i = offset; i + 1 < bytes.size(); i += 2)
+        for (size_t i = offset; i < bytes.size(); i += 2)
             output.push_back(static_cast<wchar_t>(bytes[i] | (bytes[i + 1] << 8)));
         return true;
     }
@@ -76,7 +75,7 @@ bool Decode(const std::vector<uint8_t>& bytes, std::wstring& output, Encoding en
         if (bytes.size() % 2) return false;
         offset = 2;
         output.reserve((bytes.size() - offset) / 2);
-        for (size_t i = offset; i + 1 < bytes.size(); i += 2)
+        for (size_t i = offset; i < bytes.size(); i += 2)
             output.push_back(static_cast<wchar_t>((bytes[i] << 8) | bytes[i + 1]));
         return true;
     }

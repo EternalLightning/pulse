@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "animation_clock.h"
 #include "text_diff_window.h"
 
 #include "../common/localization.h"
@@ -624,7 +625,7 @@ void TextDiffWindow::UpdateScrollTimer() {
     if (!hwnd_) return;
     if (smooth_scroll_y_.Pending() || smooth_scroll_x_.Pending()) {
         if (!SetTimer(hwnd_, kScrollTimer, 15, nullptr)) {
-            const auto now = GetTickCount64();
+            const auto now = AnimationTimeMs();
             smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, false);
             smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, false);
         }
@@ -633,7 +634,7 @@ void TextDiffWindow::UpdateScrollTimer() {
 }
 
 void TextDiffWindow::WheelScroll(float dx, float dy) {
-    const auto now = GetTickCount64();
+    const auto now = AnimationTimeMs();
     const bool animate = AnimateDiffScroll();
     if (dx != 0.0f)
         smooth_scroll_x_.ScrollBy(scroll_x_, dx, ScrollMaximumX(),
@@ -799,7 +800,7 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
     GetClientRect(hwnd_, &client);
     compositor_.Resize((std::max)(1L, client.right), (std::max)(1L, client.bottom));
     Layout();
-    const auto now = GetTickCount64();
+    const auto now = AnimationTimeMs();
     const bool animate = AnimateDiffScroll();
     smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, animate);
     smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, animate);
@@ -1332,7 +1333,7 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
                 ResetScrollAnimation();
                 return 0;
             }
-            const auto now = GetTickCount64();
+            const auto now = AnimationTimeMs();
             const bool animate = AnimateDiffScroll();
             const bool changed_x = smooth_scroll_x_.Tick(scroll_x_, ScrollMaximumX(), now, animate);
             const bool changed_y = smooth_scroll_y_.Tick(scroll_y_, ScrollMaximumY(), now, animate);

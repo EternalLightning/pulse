@@ -65,6 +65,18 @@ inline int RunSmoothScrollChecks() {
     for (uint64_t now = 11008; now <= 11096; now += 8) fast.Tick(a, 1000, now, true);
     slow.Tick(b, 1000, 11096, true);
     check(std::abs(a - b) < 0.01f, "equal elapsed time gives the same position across frame rates");
+    for (const uint64_t interval : {4ull, 7ull, 8ull, 16ull, 33ull}) {
+        pulse::ui::SmoothScroll regular, stalled;
+        float regular_value = 0, stalled_value = 0;
+        regular.ScrollBy(regular_value, 300, 1000, 400, 12000, true);
+        stalled.ScrollBy(stalled_value, 300, 1000, 400, 12000, true);
+        for (uint64_t elapsed = interval; elapsed < 330; elapsed += interval)
+            regular.Tick(regular_value, 1000, 12000 + elapsed, true);
+        regular.Tick(regular_value, 1000, 12330, true);
+        stalled.Tick(stalled_value, 1000, 12330, true);
+        check(std::abs(regular_value - stalled_value) < 0.01f,
+            "a delayed frame catches up to the same elapsed-time position");
+    }
     std::printf("[RESULT] smooth scroll failures=%d\n", failures);
     return failures;
 }

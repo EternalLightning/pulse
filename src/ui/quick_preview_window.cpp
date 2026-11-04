@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "animation_clock.h"
 #include "edit_host.h"
 #include "legacy_icons.h"
 #include "../common/windows_compat.h"
@@ -165,7 +166,7 @@ void QuickPreviewWindow::UpdateTextScrollTimer() {
     if (!hwnd_) return;
     if (text_smooth_scroll_.Pending()) {
         if (!SetTimer(hwnd_, kTextScrollTimer, 15, nullptr))
-            text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(), false);
+            text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), AnimationTimeMs(), false);
     }
     else KillTimer(hwnd_, kTextScrollTimer);
 }
@@ -934,7 +935,7 @@ void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT
                                           ID2D1SolidColorBrush* text_brush) {
     if (!text_layout_.get() || !dc) return;
     const bool high_contrast = IsHighContrast();
-    text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(), AnimateTextScroll());
+    text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), AnimationTimeMs(), AnimateTextScroll());
     UpdateTextScrollTimer();
     const float pad = 20.0f * scale_;
     const float origin_x = pad;
@@ -1350,7 +1351,7 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         } else if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex) {
             const auto content = ContentRect();
             text_smooth_scroll_.ScrollBy(text_scroll_, -steps * 56.0f * scale_,
-                TextScrollMaximum(), content.bottom - content.top, GetTickCount64(),
+                TextScrollMaximum(), content.bottom - content.top, AnimationTimeMs(),
                 AnimateTextScroll());
             UpdateTextScrollTimer();
         } else {
@@ -1516,7 +1517,7 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
                 ResetTextScroll();
                 return 0;
             }
-            if (text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), GetTickCount64(),
+            if (text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), AnimationTimeMs(),
                                         AnimateTextScroll()))
                 InvalidateRect(hwnd_, nullptr, FALSE);
             UpdateTextScrollTimer();

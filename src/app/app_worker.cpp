@@ -203,7 +203,7 @@ void WorkerPool::Stop() {
         g_worker_budget_changed.wait_for(lock, std::chrono::milliseconds(100), [&] { return state->live == 0; });
     }
     // Blocked provider calls retain only the mailbox, never the destroyed pool/UI.
-    for (auto& thread : state->threads) if (thread.joinable()) thread.detach();
+    for (auto& thread : state->threads) thread.detach();
     state->threads.clear();
 }
 
@@ -222,7 +222,7 @@ uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
     item.cache_write_ticket = cache_write_ticket;
     item.cached_snapshot = std::move(cached);
     item.provider_request = fs::IsUncPath(path) || fs::IsRecycleViewPath(path) || fs::IsDevicePath(path);
-    if (!fs::IsVirtualPath(path) && !fs::IsRecycleViewPath(path)) {
+    if (!fs::IsVirtualPath(path)) {
         std::shared_ptr<DirectoryWork> group;
         const auto previous = state->LatestDirectory(path);
         if (previous && std::none_of(previous->projections.begin(), previous->projections.end(),
@@ -591,11 +591,9 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state, bool local_owner) {
             if (queued != state->queue.end()) {
                 item = std::move(*queued);
                 state->queue.erase(queued);
-            } else if (!local_owner && !state->io_queue.empty()) {
+            } else {
                 io_task = std::move(state->io_queue.front());
                 state->io_queue.pop();
-            } else {
-                continue;
             }
         }
         if (io_task.run) {

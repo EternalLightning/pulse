@@ -63,7 +63,7 @@ std::uint64_t Generation() noexcept;
 void ClearMeasurementCache() noexcept;
 
 // Pulse lays out in physical pixels on a 96-DPI D2D target. Keep vertical
-// text boxes stable while preserving the selected mode's horizontal metrics.
+// text origins stable while preserving box height and horizontal metrics.
 D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept;
 
 // Dest rects clip ink, not advance. Leave room for glyph overhang beyond

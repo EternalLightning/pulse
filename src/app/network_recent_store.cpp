@@ -16,7 +16,7 @@ NetworkRecentStore::~NetworkRecentStore() {
         stopping_ = true;
     }
     wake_.notify_all();
-    if (worker_.joinable()) worker_.join();
+    worker_.join();
 }
 void NetworkRecentStore::Touch(std::wstring path, uint64_t now) {
     {
@@ -62,7 +62,7 @@ void NetworkRecentStore::Run() {
         {
             std::unique_lock lock(mutex_);
             wake_.wait(lock, [&] { return stopping_ || !pending_.empty(); });
-            if (pending_.empty() && stopping_) break;
+            if (pending_.empty()) break;
             visits.swap(pending_);
             target = submitted_;
         }

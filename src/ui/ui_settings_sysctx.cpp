@@ -51,32 +51,20 @@ IDWriteTextFormat* MainRenderer::SysCtxTitleFormat() {
 void MainRenderer::DrawCtxLayerCards(const D2D1_RECT_F& pulse, const D2D1_RECT_F& system, bool system_current,
                                      bool other_hovered, const Theme& theme) {
     const float s = scale_;
-    const bool dark = IsDark(theme);
-    const D2D1_COLOR_F subtle = WithAlpha(theme.text, dark ? 0.06f : 0.05f);
-    IDWriteTextFormat* title_format = SysCtxTitleFormat();
-    auto layer = [&](const D2D1_RECT_F& r, const wchar_t* glyph, const wchar_t* title, const wchar_t* caption,
-                     const wchar_t* tag, bool current, bool hover) {
-        if (r.right <= r.left) return;
-        painter_.FillRoundedRect(r, 10 * s, current ? WithAlpha(theme.accent, 0.14f) : hover ? theme.fill_input_hover
-                                                                                             : theme.fill_input);
-        painter_.StrokeRoundedRect(r, 10 * s, current ? WithAlpha(theme.accent, 0.55f) : theme.stroke_card, 1);
-        const auto content = LayoutCtxLayerCard(r, caption, &painter_, s);
-        const auto& box = content.icon;
-        painter_.FillRoundedRect(box, 8 * s, subtle);
-        DrawIconText(box.left + 7 * s, box.top + 7 * s, 16 * s, 16 * s, glyph, L"", theme.text, 0.8f);
-        painter_.DrawText(title, content.title, title_format, theme.text);
-        painter_.DrawWrappedCaption(caption, D2D1::Point2F(content.caption.left, content.caption.top),
-                                    content.caption.right - content.caption.left, theme.text_secondary);
-        painter_.DrawText(tag, content.tag, compositor_->SmallFormat(), theme.text_secondary,
-                          fluent::HorizontalAlignment::Right);
-    };
-    // The current page's card is accented; the other one is the way there.
-    layer(pulse, L"\xE8FD", sysctx_text::LocalTitle(), sysctx_text::LocalCaption(),
-          system_current ? sysctx_text::LocalTag() : sysctx_text::Current(), !system_current,
-          system_current && other_hovered);
-    layer(system, L"\xE7F4", sysctx_text::SystemTitle(), sysctx_text::SystemCaption(),
-          system_current ? sysctx_text::Current() : sysctx_text::LocalTag(), system_current,
-          !system_current && other_hovered);
+    painter_.DrawSegmentedTrack(D2D1::RectF(pulse.left, pulse.top, system.right, system.bottom));
+    for (int i = 0; i < 2; ++i) {
+        fluent::SegmentedItemSpec item{};
+        item.bounds = i == 0 ? pulse : system;
+        item.text = i == 0 ? sysctx_text::LocalTitle() : sysctx_text::SystemTitle();
+        item.state.checked = (i == 1) == system_current;
+        item.state.hovered = !item.state.checked && other_hovered;
+        item.shared_track = true;
+        item.position = i == 0 ? fluent::SegmentPosition::First : fluent::SegmentPosition::Last;
+        painter_.DrawSegmentedItem(item);
+    }
+    const auto caption = CtxLayerCaptionBounds(pulse, system, &painter_, s);
+    painter_.DrawWrappedCaption(system_current ? sysctx_text::SystemCaption() : sysctx_text::LocalCaption(),
+        D2D1::Point2F(caption.left, caption.top), caption.right - caption.left, theme.text_secondary);
 }
 
 void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {

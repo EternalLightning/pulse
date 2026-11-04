@@ -10,13 +10,13 @@
 // app/settings_ui.cpp; data: app::SystemCtxModel.
 //
 // Layout follows the prototype (pulse_system_ctx_manager.html): intro with
-// the page commands, the 本地 / 系统 layer cards, then scene list | entries |
+// the page commands, the Pulse / 系统 layer selector, then scene list | entries |
 // preview & details. Narrow windows drop the third column and open the
 // details under the selected row instead.
 
 namespace sysctx_text {
 inline const wchar_t* Title() { return l10n::Pick(L"系统右键菜单", L"System context menu"); }
-// The layer cards switch between Pulse's own menu (page 2) and the system
+// The layer selector switches between Pulse's own menu (page 2) and the system
 // handlers (page 5), sharing the same sidebar entry and page heading.
 inline const wchar_t* PageTitle() { return l10n::Pick(L"右键菜单", L"Context menu"); }
 inline const wchar_t* Intro() { return l10n::Pick(
@@ -29,12 +29,10 @@ inline const wchar_t* RestoreAll() { return l10n::Pick(L"全部还原…", L"Res
 inline const wchar_t* LocalTitle() { return l10n::Pick(L"Pulse 右键菜单", L"Pulse context menu"); }
 inline const wchar_t* LocalCaption() { return l10n::Pick(L"只影响 Pulse · 不需要权限 · 随时恢复",
                                                          L"Only inside Pulse · no permission needed · always reversible"); }
-inline const wchar_t* LocalTag() { return l10n::Pick(L"切换 →", L"Switch →"); }
 inline const wchar_t* SystemTitle() { return l10n::Pick(L"系统右键菜单", L"System context menu"); }
 inline const wchar_t* SystemCaption() { return l10n::Pick(
     L"管理 Windows 菜单 · 应用后生效 · 所有用户范围需要管理员权限",
     L"Manage Windows menus · apply to save · all-user changes require admin permission"); }
-inline const wchar_t* Current() { return l10n::Pick(L"当前", L"Current"); }
 inline const wchar_t* Group(int g) {
     return g == 0 ? l10n::Pick(L"基本对象", L"Basic objects")
          : g == 1 ? l10n::Pick(L"特定类型", L"Specific types")
@@ -235,45 +233,24 @@ inline float SysCtxWrappedHeight(const fluent::Painter* painter, std::wstring_vi
     return (std::max)(18 * s, painter ? painter->MeasureWrappedCaptionHeight(text, width) : 36 * s);
 }
 
-struct CtxLayerCardLayout {
-    D2D1_RECT_F icon{}, title{}, caption{}, tag{};
-};
-
-inline CtxLayerCardLayout LayoutCtxLayerCard(const D2D1_RECT_F& card, std::wstring_view caption,
-                                            const fluent::Painter* painter, float s) {
-    CtxLayerCardLayout o;
-    const float text_left = card.left + 56 * s, text_right = card.right - 14 * s;
-    // Reserve either state label so changing layers cannot shift the title.
-    const float tag_w = (std::max)(SysCtxTextWidth(painter, sysctx_text::Current(), s),
-                                  SysCtxTextWidth(painter, sysctx_text::LocalTag(), s));
-    o.icon = D2D1::RectF(card.left + 14 * s, card.top + 14 * s, card.left + 44 * s, card.top + 44 * s);
-    o.title = D2D1::RectF(text_left, card.top + 12 * s, text_right - tag_w - 8 * s, card.top + 32 * s);
-    o.tag = D2D1::RectF(text_right - tag_w, o.title.top, text_right, o.title.bottom);
-    const float caption_h = SysCtxWrappedHeight(painter, caption, (std::max)(1.0f, text_right - text_left), s);
-    o.caption = D2D1::RectF(text_left, o.title.bottom + 2 * s, text_right, o.title.bottom + 2 * s + caption_h);
-    return o;
+inline D2D1_RECT_F CtxLayerCaptionBounds(const D2D1_RECT_F& local, const D2D1_RECT_F& system,
+                                        const fluent::Painter* painter, float s) {
+    const float width = (std::max)(1.0f, system.right - local.left);
+    const float height = (std::max)(SysCtxWrappedHeight(painter, sysctx_text::LocalCaption(), width, s),
+                                    SysCtxWrappedHeight(painter, sysctx_text::SystemCaption(), width, s));
+    return D2D1::RectF(local.left, system.bottom + 8 * s, system.right, system.bottom + 8 * s + height);
 }
 
 inline float LayoutCtxLayerCards(D2D1_RECT_F& local, D2D1_RECT_F& system, float left, float right, float y,
                                  const fluent::Painter* painter, float s) {
-    const float gap = 10 * s, width = (std::max)(1.0f, right - left);
-    const bool stacked = (width - gap) * 0.5f < 360 * s;
-    const float card_w = stacked ? width : (width - gap) * 0.5f;
-    const auto local_content = LayoutCtxLayerCard(D2D1::RectF(left, y, left + card_w, y),
-        sysctx_text::LocalCaption(), painter, s);
-    const auto system_content = LayoutCtxLayerCard(D2D1::RectF(left, y, left + card_w, y),
-        sysctx_text::SystemCaption(), painter, s);
-    const float local_h = local_content.caption.bottom - y + 12 * s;
-    const float system_h = system_content.caption.bottom - y + 12 * s;
-    if (stacked) {
-        local = D2D1::RectF(left, y, right, y + local_h);
-        system = D2D1::RectF(left, local.bottom + gap, right, local.bottom + gap + system_h);
-    } else {
-        const float height = (std::max)(local_h, system_h);
-        local = D2D1::RectF(left, y, left + card_w, y + height);
-        system = D2D1::RectF(local.right + gap, y, right, y + height);
-    }
-    return system.bottom + 12 * s;
+    const float width = (std::max)(1.0f, right - left);
+    const float local_w = painter ? painter->MeasureButtonWidth(sysctx_text::LocalTitle()) : 170 * s;
+    const float system_w = painter ? painter->MeasureButtonWidth(sysctx_text::SystemTitle()) : 170 * s;
+    const float factor = (std::min)(1.0f, width / (local_w + system_w));
+    const float start = right - (local_w + system_w) * factor;
+    local = D2D1::RectF(start, y, start + local_w * factor, y + 36 * s);
+    system = D2D1::RectF(local.right, y, local.right + system_w * factor, local.bottom);
+    return CtxLayerCaptionBounds(local, system, painter, s).bottom + 16 * s;
 }
 
 // Details of `row` laid out in [left, right] from `top`; returns the bottom.

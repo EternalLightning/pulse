@@ -60,14 +60,14 @@ inline const KnownFolderLabel* FindKnownFolderChildLabel(std::wstring_view paren
         parent.find(L'/') == std::wstring_view::npos &&
         !parent.starts_with(L"\\\\?\\UNC\\") && !name.empty() &&
         name.find_first_of(L"\\/") == std::wstring_view::npos) {
-        const bool separator = !parent.empty() && parent.back() != L'\\';
+        const bool separator = parent.back() != L'\\';
         const size_t prefix_size = parent.size() + (separator ? 1 : 0);
         for (const auto& folder : folders) {
             if (folder.path.size() != prefix_size + name.size()) continue;
             if (separator && folder.path[parent.size()] != L'\\') continue;
-            if ((!parent.empty() && CompareStringOrdinal(parent.data(),
+            if (CompareStringOrdinal(parent.data(),
                     static_cast<int>(parent.size()), folder.path.data(),
-                    static_cast<int>(parent.size()), TRUE) != CSTR_EQUAL) ||
+                    static_cast<int>(parent.size()), TRUE) != CSTR_EQUAL ||
                 CompareStringOrdinal(name.data(), static_cast<int>(name.size()),
                     folder.path.data() + prefix_size, static_cast<int>(name.size()), TRUE) != CSTR_EQUAL)
                 continue;

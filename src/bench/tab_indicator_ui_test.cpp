@@ -5,6 +5,8 @@
 
 #include "../app/app_internal.h"
 #include "../ui/animation_clock.h"
+#include "../app/context_menu.h"
+#include "snapshot_output.h"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +14,18 @@
 LRESULT CALLBACK WndProcImpl(HWND, UINT, WPARAM, LPARAM);
 
 namespace pulse::ui {
+struct FluentMenuTestPeer {
+    inline static FluentMenu* menu = nullptr;
+    inline static std::vector<int> commands;
+    static void CALLBACK Choose(HWND, UINT, UINT_PTR, DWORD) {
+        if (!menu || !menu->IsOpen() || menu->animating_out_ || commands.empty()) return;
+        const int command = commands.front();
+        commands.erase(commands.begin());
+        if (command) menu->InvokeCommand(command);
+        else menu->RequestDismiss();
+    }
+};
+
 struct TabIndicatorUiTest {
     inline static int failures = 0;
     inline static int timers = 0;
@@ -43,6 +57,103 @@ struct TabIndicatorUiTest {
         auto& line = s.renderer.tab_indicator_;
         line.Tick(line.identity, tab.left + 16 * s.scale, tab.right - 16 * s.scale,
             AnimationTimeMs() + 1000, true);
+    }
+    static void StripMenuChecks(AppState& s, const std::filesystem::path& output) {
+        FluentMenu menu;
+        if (!menu.Create(s.hwnd, &s.compositor, 1)) {
+            Check(false, "initialize production tab context menu");
+            return;
+        }
+        int captures = 0;
+        std::function<void()> mutation_probe;
+        app::TabController::Callbacks callbacks;
+        callbacks.invalidate = [&] {
+            s.hitTestVmValid = false;
+            InvalidateRect(s.hwnd, nullptr, FALSE);
+            if (mutation_probe) mutation_probe();
+        };
+        callbacks.layout_changed = [&] { BindCurrentLayout(s); };
+        callbacks.will_change_tab_strip = [&] { ++captures; CaptureTabStripLayout(s); };
+        s.tabs.SetCallbacks(std::move(callbacks));
+        const int commands[] = {app::CmdTabClose, app::CmdTabCloseOthers, app::CmdTabCloseRight,
+            app::CmdTabGroupClose, app::CmdTabAddToNewGroup, app::CmdTabJoinGroupBase + 1,
+            app::CmdTabRemoveFromGroup, app::CmdTabGroupUngroup, app::CmdTabPin, 0, 0};
+        const char* labels[] = {"context close", "context close others", "context close right",
+            "context close group", "context create group", "context join group",
+            "context remove from group", "context ungroup", "context pin", "collapse group", "expand group"};
+        for (size_t scenario = 0; scenario < std::size(commands); ++scenario) {
+            s.renderer.tab_close_.Reset();
+            s.window_tabs = app::WindowTabs{};
+            for (int i = 0; i < 4; ++i) s.window_tabs.NewTab(app::MakeHomePath());
+            s.window_tabs.tab_groups = {{7, L"First", 0x0080FF, scenario == 10}, {8, L"Second", 0xFF8000, false}};
+            s.window_tabs.items[0]->tab_group = s.window_tabs.items[1]->tab_group = 7;
+            s.window_tabs.items[3]->tab_group = 8;
+            BindCurrentLayout(s);
+            Render(s); Settle(s); Render(s);
+            const auto before = s.renderer.ComputeTabStrip(BuildVm(s, false), 1100);
+            const int previous_captures = captures;
+            MainRenderer::TabStripMetrics creation_frame;
+            bool creation_sampled = false, creation_animating = false;
+            mutation_probe = {};
+            if (scenario == 4) {
+                // The rename palette runs while the new group is already animating.
+                mutation_probe = [&] {
+                    if (creation_sampled) return;
+                    creation_sampled = true;
+                    creation_frame = s.renderer.ComputeTabStrip(BuildVm(s, false), 1100);
+                    creation_animating = s.renderer.TabCloseAnimating();
+                    Sleep(90); Render(s);
+                    Check(bench::SaveSnapshot(s.compositor, output / L"group-create-middle.png"),
+                        "save production group-transition intermediate frame");
+                };
+            }
+            if (scenario >= 9) {
+                s.tabs.ToggleGroupCollapse(s.window_tabs, 7);
+            } else {
+                FluentMenuTestPeer::menu = &menu;
+                FluentMenuTestPeer::commands = {commands[scenario]};
+                if (scenario == 4) FluentMenuTestPeer::commands.push_back(0);
+                const auto timer = SetTimer(nullptr, 0, 15, FluentMenuTestPeer::Choose);
+                if (!timer) { Check(false, "start deterministic context-menu selection timer"); return; }
+                if (scenario == 3 || scenario == 7)
+                    s.tabs.ShowGroupMenu(s.window_tabs, 7, POINT{80, 80}, menu);
+                else
+                    s.tabs.ShowTabMenu(s.window_tabs, scenario == 0 ? 0 : scenario == 2 ? 1 : scenario == 6 ? 3 : 2,
+                        POINT{80, 80}, menu);
+                KillTimer(nullptr, timer);
+                FluentMenuTestPeer::menu = nullptr;
+                Check(FluentMenuTestPeer::commands.empty(), "requested context-menu command was dispatched");
+            }
+            std::printf("[SCENARIO] %s\n", labels[scenario]);
+            Check(captures > previous_captures, "tab-strip mutation captures the displayed geometry before changing the model");
+            mutation_probe = {};
+            const auto after = scenario == 4 ? creation_frame : s.renderer.ComputeTabStrip(BuildVm(s, false), 1100);
+            Check(scenario == 4 ? creation_sampled && creation_animating : s.renderer.TabCloseAnimating(),
+                "tab-strip mutation schedules the existing reflow animation");
+            bool continuous = true;
+            for (const auto& item : after.items) {
+                const auto old = std::find_if(before.items.begin(), before.items.end(),
+                    [&](const auto& candidate) { return candidate.SameKey(item); });
+                if (old != before.items.end())
+                    continuous &= std::abs(item.left - old->left) < 3 && std::abs(item.right - old->right) < 3;
+            }
+            Check(continuous, "surviving tab, chip and plus-button spans begin at their displayed positions");
+            Sleep(90); Render(s);
+            if (scenario == 7) {
+                Check(bench::SaveSnapshot(s.compositor, output / L"group-ungroup-middle.png"),
+                    "save production group-transition intermediate frame");
+            }
+            Sleep(140); Render(s);
+            Check(!s.renderer.TabCloseAnimating(), "tab-strip mutation settles and releases frame scheduling");
+        }
+        s.renderer.motion_enabled_ = false;
+        s.tabs.ToggleGroupCollapse(s.window_tabs, 7);
+        Render(s);
+        Check(!s.renderer.TabCloseAnimating(), "group mutations respect disabled motion");
+        s.renderer.motion_enabled_ = true;
+        s.tabs.SetCallbacks({});
+        s.window_tabs.tab_groups.clear();
+        for (auto& tab : s.window_tabs.items) tab->tab_group = 0;
     }
     static int Run() {
         const auto output = std::filesystem::absolute(L"bench_data/tab-indicator-followup");
@@ -87,7 +198,7 @@ struct TabIndicatorUiTest {
         Render(s);
         Check(line.pending && line.left > before_left && line.right > before_right,
             "both edges advance during the real new-tab transition");
-        Check(s.compositor.SaveSnapshot((output / L"new-tab-middle.png").c_str()), "save new-tab intermediate frame");
+        Check(bench::SaveSnapshot(s.compositor, output / L"new-tab-middle.png"), "save new-tab intermediate frame");
         Settle(s);
         Render(s);
         Check(!line.pending, "new-tab transition releases frame scheduling at rest");
@@ -185,7 +296,7 @@ struct TabIndicatorUiTest {
             line.right >= std::min(frame_before.right, frame_after.right) - 16 - 0.01f &&
             line.right <= std::max(frame_before.right, frame_after.right) - 16 + 0.01f,
             "active underline follows the closing reflow without a second chase animation");
-        Check(s.compositor.SaveSnapshot((output / L"close-left-middle.png").c_str()),
+        Check(bench::SaveSnapshot(s.compositor, output / L"close-left-middle.png"),
             "save production close intermediate frame");
         CloseLayoutTab(s, 0); Render(s);
         Check(s.renderer.TabCloseAnimating() && s.window_tabs.items.size() == 2,
@@ -251,6 +362,8 @@ struct TabIndicatorUiTest {
         Check(paints >= 3 && timers >= 3, "continuous production WM_PAINT delivers due timers without starving them");
         std::printf("[PERF] continuous tab transitions: paints=%d timers=%d\n", paints, timers);
         Settle(s);
+        for (int frame = 0; frame < 30 && Render(s); ++frame) Sleep(20);
+        Check(!Render(s), "earlier page transitions settle before the isolated toast check");
         s.notification_toast.SetMotionEnabled(true);
         s.notification_toast.Show(s.hwnd, L"Animation", L"Display-paced toast", false);
         ValidateRect(s.hwnd, nullptr);
@@ -259,12 +372,24 @@ struct TabIndicatorUiTest {
             "toast lifetime timer cannot duplicate the owner's reveal frame scheduling");
         Check(Render(s) && s.notification_toast.Animating(), "toast entrance joins display-paced frame scheduling");
         Sleep(180);
-        Check(!Render(s) && !s.notification_toast.Animating(), "toast settles without a permanent render loop");
+        const bool toast_frame = Render(s);
+        if (toast_frame || s.notification_toast.Animating())
+            std::printf("[TOAST] toast=%d tab=%d close=%d surface=%d settings=%d\n",
+                s.notification_toast.Animating(), s.renderer.TabIndicatorAnimating(), s.renderer.TabCloseAnimating(),
+                s.renderer.SurfaceAnimating(), s.renderer.SettingsSwitchAnimating());
+        Check(!toast_frame && !s.notification_toast.Animating(), "toast settles without a permanent render loop");
         s.notification_toast.HandleMessage(s.hwnd, WM_KEYDOWN, VK_ESCAPE, 0);
         ShowWindow(s.hwnd, SW_HIDE);
         ValidateRect(s.hwnd, nullptr);
         WndProcImpl(s.hwnd, WM_PAINT, 0, 0);
         Check(!GetUpdateRect(s.hwnd, nullptr, FALSE), "hidden window does not queue animation frames");
+        s.shot.active = true;
+        SetWindowPos(s.hwnd, nullptr, 0, 0, 1100, 640, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        s.compositor.Resize(1100, 640);
+        SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", L"1");
+        ShowWindow(s.hwnd, SW_SHOWNOACTIVATE);
+        StripMenuChecks(s, output);
+        ShowWindow(s.hwnd, SW_HIDE);
         SetWindowLongPtrW(s.hwnd, GWLP_USERDATA, 0);
         DestroyWindow(s.hwnd); s.hwnd = nullptr;
         s.renderer.SetCompositor(nullptr);

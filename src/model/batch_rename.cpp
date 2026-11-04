@@ -45,7 +45,6 @@ wchar_t Fold(wchar_t c) {
 
 std::wstring ReplaceInsensitive(const std::wstring& text, const std::wstring& find,
                                 const std::wstring& replace) {
-    if (find.empty()) return text;
     std::wstring out;
     out.reserve(text.size());
     size_t i = 0;
@@ -78,7 +77,6 @@ std::wstring FormatNumber(int64_t value, int digits) {
 }
 
 bool ConsumeToken(std::wstring_view pattern, size_t& i, std::wstring_view token) {
-    if (pattern.size() - i < token.size()) return false;
     if (pattern.substr(i, token.size()) != token) return false;
     i += token.size();
     return true;
@@ -103,7 +101,7 @@ std::wstring ExpandPattern(std::wstring_view pattern, std::wstring_view stem,
                 out += FormatNumber(value, 0);
                 continue;
             }
-            if (pattern.size() - i >= 3 && pattern.substr(i, 3) == L"{n:") {
+            if (pattern.substr(i, 3) == L"{n:") {
                 size_t j = i + 3;
                 int pad = 0;
                 while (j < pattern.size() && pattern[j] >= L'0' && pattern[j] <= L'9') {
@@ -112,7 +110,7 @@ std::wstring ExpandPattern(std::wstring_view pattern, std::wstring_view stem,
                 }
                 if (j < pattern.size() && pattern[j] == L'}') {
                     i = j + 1;
-                    out += FormatNumber(value, std::clamp(pad, 0, 9));
+                    out += FormatNumber(value, pad);
                     continue;
                 }
             }
@@ -128,7 +126,7 @@ bool PatternUsesIndex(std::wstring_view pattern) {
         if (ConsumeToken(pattern, i, L"{name}") || ConsumeToken(pattern, i, L"{ext}"))
             continue;
         if (ConsumeToken(pattern, i, L"{n}")) return true;
-        if (pattern.size() - i >= 3 && pattern.substr(i, 3) == L"{n:") {
+        if (pattern.substr(i, 3) == L"{n:") {
             size_t j = i + 3;
             while (j < pattern.size() && pattern[j] >= L'0' && pattern[j] <= L'9') ++j;
             if (j < pattern.size() && pattern[j] == L'}') return true;
@@ -154,7 +152,7 @@ void SplitFileName(const std::wstring& name, std::wstring& stem, std::wstring& e
 }
 
 bool IsValidFileName(const std::wstring& name) {
-    if (name.empty() || name == L"." || name == L"..") return false;
+    if (name.empty()) return false;
     if (name.back() == L' ' || name.back() == L'.') return false;
     for (const wchar_t c : name) {
         if (c < 32) return false;

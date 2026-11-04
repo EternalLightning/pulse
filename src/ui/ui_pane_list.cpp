@@ -983,7 +983,8 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
     }
     // Focus changes affect controls; navigation affects only the title text.
     const bool split = vm.pane_slots.size() > 1;
-    const float textLeft = bounds.left + 8.0f * scale_;
+    // Keep every view aligned with the Details name-column heading.
+    const float textLeft = DetailsContentRect(bounds, scale_).left + margin_ + 8.0f * scale_;
     const float textRight = std::max(textLeft, detailsRc.left - 8.0f * scale_);
     const auto titleBadge = ChangeTitleRect(bounds, textRight, pane_header_height_, pane.title_change_badge, scale_, compositor_, pane.header_text);
     const float textWidth = (titleBadge.right > titleBadge.left ? titleBadge.left - 4 * scale_ : textRight) - textLeft;
@@ -1269,14 +1270,11 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
         y += column_header_height_;
     }
     auto& surface = pane_surfaces_[painting_pane_];
-    const bool navigating = surface.pending || !surface.MatchesNavigation(
-        navigation_key, pane.navigation_owner, pane.navigation_revision);
     const float rows_top = y;
     const auto rows_viewport = D2D1::RectF(x, rows_top, x + w, bottom);
-    // Column labels stay outside item transitions. View-mode changes retain
-    // their wider icon viewport when navigation is idle.
-    dc->PushAxisAlignedClip(navigating ? rows_viewport : transition_viewport,
-        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    // Icon command lists replay after the row-recording clip has been popped.
+    // Keep that replay below the column labels, including during scrolling.
+    dc->PushAxisAlignedClip(rows_viewport, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     surface.Paint(dc, pane_rect, navigation_key, navigation_ready, settings_switch_now_,
         motion_enabled_ && !IsHighContrast(), 16 * scale_, 200, [&] {
             view_transition.Paint(dc, ViewModeTransitionIdentity(pane), pane.view_mode, transition_viewport,

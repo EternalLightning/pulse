@@ -947,8 +947,7 @@ void StartSmoothScroll(AppState& s, float delta) {
     }
     if (!s.scrollAnimating) {
         s.scrollVelocityY = 0.0f;
-        s.scrollLastUpdateTime = std::chrono::steady_clock::now() -
-            std::chrono::milliseconds(8);
+        s.scrollLastUpdateTime = std::chrono::steady_clock::now();
     }
     // Each wheel event adds momentum. Reversing direction should respond to
     // the new gesture immediately instead of first coasting the old way.
@@ -972,9 +971,8 @@ void UpdateSmoothScroll(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) { CancelScrollAnimation(s); return; }
     auto now = std::chrono::steady_clock::now();
-    const double elapsed = std::clamp(
-        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count(),
-        0.0, 100.0);
+    const double elapsed = std::max(0.0,
+        std::chrono::duration<double, std::milli>(now - s.scrollLastUpdateTime).count());
     s.scrollLastUpdateTime = now;
 
     const float maxScroll = SmoothScrollMaximum(s);

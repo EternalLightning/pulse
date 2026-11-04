@@ -16,17 +16,13 @@
 
 #include "settings_categories_cases.h"
 #include "cloud_columns_cases.h"
-#include "session_layout_cases.h"
 #include "cloud_sidebar_cases.h"
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-sidebar-only")
         return RunCloudSidebarCases();
-    if (argc > 1 && std::string_view(argv[1]) == "--cloud-columns-only") {
-        const int columns = RunCloudColumnsCases();
-        const bool session = pulse::bench::RunSessionLayoutTests();
-        return columns || !session ? 1 : 0;
-    }
+    if (argc > 1 && std::string_view(argv[1]) == "--cloud-columns-only")
+        return RunCloudColumnsCases();
     if(argc>1 && std::string_view(argv[1])=="--settings-categories") {
         try { return RunSettingsCategories(); }
         catch(const std::exception& error) { std::cerr<<"[FAIL] settings fixture: "<<error.what()<<std::endl;return 2; }

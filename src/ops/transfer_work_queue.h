@@ -58,7 +58,7 @@ public:
             closing_ = true;
         }
         cv_.notify_all();
-        for (auto& thread : threads_) if (thread.joinable()) thread.join();
+        for (auto& thread : threads_) thread.join();
         threads_.clear();
     }
 private:

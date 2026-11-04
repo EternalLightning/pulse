@@ -35,7 +35,6 @@ void Engine::RefreshSubtreeVisibilityLocked(int32_t root, DeltaLog* delta) {
         auto visit = [&](int32_t id) {
             if (IsTomb(id) || !visited.insert(id).second) return;
             const Node node = NodeAt(id);
-            if (node.parent != parent) return;
             uint8_t flags = node.flags & static_cast<uint8_t>(~kFlagHidden);
             if ((parent_node.parent >= 0 && (parent_node.flags & kFlagHidden)) ||
                 ShouldSkipName(NameOf(id)) || IsExcludedPath(BuildPathLocked(id)))

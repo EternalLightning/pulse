@@ -22,7 +22,7 @@ bool ConsistentEta(const pulse::ops::TransferRateEstimator& rate, uint64_t bytes
 }
 }
 
-int main() {
+int RunTransferRateChecks() {
     using pulse::ops::TransferRateEstimator;
     constexpr uint64_t mib = 1024ull * 1024;
     constexpr uint64_t total = 22ull * 1024 * mib;

@@ -7,7 +7,7 @@
 #include "../ops/drop_staging.h"
 #include "../ops/delete_operation.h"
 #include "../fs/fs_recycle.h"
-#include "permanent_fileop_fixture.h"
+#include "../shell_host/permanent_fileop.h"
 #include "../common/current_user_security.h"
 #include "../common/localization.h"
 #include <filesystem>
@@ -231,7 +231,6 @@ void UndoRetention(const fs::path& root) {
 }
 void PermanentDeletion(const fs::path& root) {
     using namespace pulse;
-    bench::RunPermanentFileopFixture(root, Check);
     FileIdentity identity;
     const auto nested = root / L"nested-selection", nested_child = nested / L"child.txt";
     fs::create_directories(nested); std::ofstream(nested_child) << "nested root fixture";

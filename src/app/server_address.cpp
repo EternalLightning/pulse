@@ -61,7 +61,6 @@ std::wstring PercentDecode(const std::wstring& text) {
             if (cp >= 0x10000) {
                 cp -= 0x10000;
                 wide[static_cast<size_t>(written++)] = static_cast<wchar_t>(0xD800 + (cp >> 10));
-                if (static_cast<size_t>(written) >= wide.size()) wide.resize(wide.size() + 1);
                 wide[static_cast<size_t>(written++)] = static_cast<wchar_t>(0xDC00 + (cp & 0x3FF));
             } else {
                 wide[static_cast<size_t>(written++)] = static_cast<wchar_t>(cp);
@@ -241,7 +240,7 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
     if (text.size() >= 2 && text[1] == L':') return out;  // C:\..., shell:...
     std::wstring host, rest;
     SplitHost(text, host, rest);
-    if (IsIPv4(host) || (allow_bare_host && ValidHost(host) && host.find(L'@') == std::wstring::npos))
+    if (IsIPv4(host) || (allow_bare_host && ValidHost(host)))
         return FromParts(host, rest);
     return out;
 }
@@ -268,9 +267,7 @@ std::wstring NetworkRecentRoot(std::wstring_view input) {
     const size_t host_end = path.find(L'\\', 2);
     if (host_end == std::wstring::npos) return path;
     const size_t share_end = path.find(L'\\', host_end + 1);
-    std::wstring root = path.substr(0, share_end);
-    while (root.size() > 2 && root.back() == L'\\') root.pop_back();
-    return root;
+    return path.substr(0, share_end);
 }
 
 } // namespace pulse::app

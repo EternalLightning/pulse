@@ -25,7 +25,6 @@ void AddQuarterArc(ID2D1GeometrySink* sink, D2D1_POINT_2F end, float radius,
 
 HRESULT CreateChromeTabGeometry(ID2D1Factory* factory, const D2D1_RECT_F& bounds,
                                 const ChromeTabShape& shape, ID2D1Geometry** out) {
-    if (!factory || !out) return E_POINTER;
     *out = nullptr;
 
     const float w = bounds.right - bounds.left;
@@ -39,7 +38,7 @@ HRESULT CreateChromeTabGeometry(ID2D1Factory* factory, const D2D1_RECT_F& bounds
             D2D1::RoundedRect(bounds, top_r, top_r), &rounded);
         if (FAILED(hr)) return hr;
         *out = rounded.get();
-        if (*out) (*out)->AddRef();
+        (*out)->AddRef();
         return S_OK;
     }
 
@@ -72,7 +71,7 @@ HRESULT CreateChromeTabGeometry(ID2D1Factory* factory, const D2D1_RECT_F& bounds
     if (FAILED(hr)) return hr;
 
     *out = geometry.get();
-    if (*out) (*out)->AddRef();
+    (*out)->AddRef();
     return S_OK;
 }
 
@@ -86,8 +85,7 @@ void FillChromeTab(ID2D1DeviceContext* dc, ID2D1Brush* brush,
     if (!factory.get()) return;
 
     ComPtr<ID2D1Geometry> geometry;
-    if (FAILED(CreateChromeTabGeometry(factory.get(), bounds, shape, &geometry)) ||
-        !geometry.get()) {
+    if (FAILED(CreateChromeTabGeometry(factory.get(), bounds, shape, &geometry))) {
         return;
     }
     dc->FillGeometry(geometry.get(), brush);
@@ -102,7 +100,7 @@ void FillChromeTabAccent(ID2D1DeviceContext* dc, ID2D1Brush* brush,
     if (!factory.get()) return;
 
     ComPtr<ID2D1Geometry> tab;
-    if (FAILED(CreateChromeTabGeometry(factory.get(), bounds, shape, &tab)) || !tab.get())
+    if (FAILED(CreateChromeTabGeometry(factory.get(), bounds, shape, &tab)))
         return;
 
     const D2D1_RECT_F strip = bottom

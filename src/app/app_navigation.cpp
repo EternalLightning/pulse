@@ -2156,6 +2156,18 @@ void ResetLastTabToHome(AppState& s) {
     s.hitTestVmValid = false;
 }
 
+void CaptureTabStripLayout(AppState& s) {
+    s.hitTestVmValid = false;
+    if (s.renderer.MotionEnabled() && !s.shot_high_contrast && !s.tabDragging &&
+        s.tabTracks.empty() && s.chipTracks.empty()) {
+        // Capture chrome only; strip mutations must not rebuild the folder's file rows.
+        ui::WindowViewModel tabs;
+        app::FillWindowTabStrip(tabs, s.window_tabs);
+        tabs.show_pinned_tab_names = s.appPrefs.show_pinned_tab_names;
+        s.renderer.CaptureTabCloseLayout(tabs, static_cast<float>(s.compositor.Width()));
+    }
+}
+
 void CloseLayoutTab(AppState& s, size_t idx) {
     if (idx >= s.window_tabs.items.size()) return;
     if (s.window_tabs.items[idx]->pinned) return;
@@ -2166,14 +2178,7 @@ void CloseLayoutTab(AppState& s, size_t idx) {
         if (s.appPrefs.close_last_tab_window) PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
         return;
     }
-    if (s.renderer.MotionEnabled() && !s.shot_high_contrast && !s.tabDragging &&
-        s.tabTracks.empty() && s.chipTracks.empty()) {
-        // Capture chrome only; closing must not rebuild the folder's file rows.
-        ui::WindowViewModel tabs;
-        app::FillWindowTabStrip(tabs, s.window_tabs);
-        tabs.show_pinned_tab_names = s.appPrefs.show_pinned_tab_names;
-        s.renderer.CaptureTabCloseLayout(tabs, static_cast<float>(s.compositor.Width()));
-    }
+    CaptureTabStripLayout(s);
     RememberLayoutFocus(s);
     s.window_tabs.CloseTab(idx);
     s.hitTestVmValid = false;

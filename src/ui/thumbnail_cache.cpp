@@ -368,7 +368,7 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
                 }
                 D2D1_RECT_F fitted = dest;
                 const float sourceAspect = static_cast<float>(item.w) /
-                                           static_cast<float>(std::max(1u, item.h));
+                                           static_cast<float>(item.h);
                 const float destAspect = destW / destH;
                 if (sourceAspect > destAspect) {
                     const float height = destW / sourceAspect;

@@ -277,7 +277,7 @@ std::vector<PreviewPropertyValue> ReadProperties(const std::wstring& path) {
     } else if (IsOneOf(extension, {L".mp4", L".mkv", L".mov", L".avi", L".webm", L".wmv", L".m4v"})) {
         AddProperty(store.Get(), PKEY_Media_Duration, L"时长", out);
         uint32_t width = 0, height = 0;
-        if (out.size() < ipc::kPreviewMaxPropertyCount && ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
+        if (ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
             ReadUintProperty(store.Get(), PKEY_Video_FrameHeight, height) &&
             width > 0 && height > 0) {
             wchar_t dims[64];
@@ -665,8 +665,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         if (current_attrs != INVALID_FILE_ATTRIBUTES) req.attrs |= current_attrs;
         if (req.kind == ipc::PreviewRequestKind::Properties) {
             if (!IsOfflinePlaceholder(req.attrs)) properties = ReadProperties(path);
-            if (properties.size() > ipc::kPreviewMaxPropertyCount)
-                properties.resize(ipc::kPreviewMaxPropertyCount);
             for (auto& property : properties) {
                 ipc::TruncatePreviewString(property.label, ipc::kPreviewMaxPropertyLabelChars, true);
                 ipc::TruncatePreviewString(property.value, ipc::kPreviewMaxPropertyValueChars, true);
@@ -697,7 +695,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);
                 const bool thumbnail = req.kind == ipc::PreviewRequestKind::Thumbnail;
-                if (thumbnail && !gif && !IsOfflinePlaceholder(req.attrs)) {
+                if (thumbnail && !gif) {
                     made = MakeShellThumbnail(path, req.attrs, cap, pixels, w, h, stride, true);
                     if (!made && IsOneOf(extension, {L".jpg", L".jpeg", L".jpe", L".jfif"})) {
                         preview::JpegEmbeddedPreview embedded;
@@ -724,7 +722,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 response.loop_count = loop_count;
                 if (made) {
                     response.kind = ipc::PreviewContentKind::Bitmap;
-                } else if (!IsOfflinePlaceholder(req.attrs)) {
+                } else {
                     // WIC has no decoder for every format in the list on every
                     // machine: WMF/EMF only decode when the metafile codec is
                     // present, and AVIF/HEIC need the store extension. Fall back
@@ -740,20 +738,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                     } else {
                         errorText = L"image-decode-failed";
                     }
-                } else {
-                    errorText = L"image-decode-failed";
                 }
             } else if (preview::IsVectorExtension(extension)) {
                 // WIC has no SVG decoder, so these render through Direct2D into
                 // the same premultiplied BGRA pixels the raster path returns.
-                if (!IsOfflinePlaceholder(req.attrs)) {
-                    made = preview::RasterizeSvgFile(path,
-                        ipc::ClampPreviewPixelSize(req.pixel_size, false),
-                        pixels, w, h, stride, source_w, source_h, &errorText);
-                }
+                made = preview::RasterizeSvgFile(path,
+                    ipc::ClampPreviewPixelSize(req.pixel_size, false),
+                    pixels, w, h, stride, source_w, source_h, &errorText);
                 if (made) {
                     response.kind = ipc::PreviewContentKind::Bitmap;
-                } else if (!IsOfflinePlaceholder(req.attrs)) {
+                } else {
                     // No Direct2D SVG support (Windows before 1703), a document
                     // too large to parse, or damaged markup: keep the previous
                     // behaviour and show the file as text instead of an empty
@@ -766,11 +760,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             } else if (preview::IsMetaFileExtension(extension)) {
                 // WMF/EMF: WIC decodes them only when its codec is installed,
                 // and the shell has no thumbnail provider, so GDI renders them.
-                if (!IsOfflinePlaceholder(req.attrs)) {
-                    made = preview::RasterizeMetaFile(path,
-                        ipc::ClampPreviewPixelSize(req.pixel_size, false),
-                        pixels, w, h, stride, source_w, source_h, &errorText);
-                }
+                made = preview::RasterizeMetaFile(path,
+                    ipc::ClampPreviewPixelSize(req.pixel_size, false),
+                    pixels, w, h, stride, source_w, source_h, &errorText);
                 if (made) response.kind = ipc::PreviewContentKind::Bitmap;
             } else if (IsKnownShellPreview(extension)) {
                 made = MakeShellThumbnail(path, req.attrs,

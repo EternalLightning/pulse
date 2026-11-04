@@ -143,7 +143,14 @@ struct Fixture {
         s.compositor.Dc()->BeginDraw();
         s.renderer.Render(vm, window, ui::MakeTheme(s.darkMode, s.accentColor));
         Check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "production context settings renderer completes");
-        if (!file.empty()) Check(bench::SaveSnapshot(s.compositor, output / file), "save production context settings screenshot");
+        if (!file.empty()) {
+            // Capture the settled page after its 170 ms production transition.
+            Sleep(200);
+            s.compositor.Dc()->BeginDraw();
+            s.renderer.Render(vm, window, ui::MakeTheme(s.darkMode, s.accentColor));
+            Check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "settled context settings renderer completes");
+            Check(bench::SaveSnapshot(s.compositor, output / file), "save production context settings screenshot");
+        }
     }
 };
 
@@ -264,43 +271,24 @@ void SidebarChecks(Fixture& f, const ui::WindowViewModel& vm) {
 
 void LayerCardChecks(Fixture& f, const D2D1_RECT_F& local, const D2D1_RECT_F& system,
                      float controls_top, bool system_current) {
-    auto& s = f.State();
-    const float scale = s.scale;
-    const bool narrow = f.window.right / scale == 760;
-    Check(narrow ? system.top >= local.bottom + 9 * scale && std::abs(local.left - system.left) <= 1 &&
-        std::abs(local.right - system.right) <= 1 : std::abs(local.top - system.top) <= 1 &&
-        system.left >= local.right + 9 * scale,
-        "layer cards stack at 760 DIP and remain separate side by side at 1100 DIP");
-    Check(controls_top >= std::max(local.bottom, system.bottom) + 11 * scale,
-        "the following settings controls begin below both complete layer cards");
-    ui::ComPtr<IDWriteTextFormat> title_format;
-    Check(SUCCEEDED(ui::typography::CreateTextFormat(s.compositor.DwriteFactory(),
-        {ui::typography::FontRole::Text, 13.0f * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD}, &title_format)),
-        "create the production layer-card title typography for text-fit checks");
-    if (!title_format.get()) return;
-    const std::array<D2D1_RECT_F, 2> cards{local, system};
+    const float scale = f.State().scale;
+    Check(std::abs(local.top - system.top) <= 1 && std::abs(local.right - system.left) <= 1 &&
+        std::abs(local.bottom - local.top - 36 * scale) <= 1 &&
+        std::abs(system.bottom - system.top - 36 * scale) <= 1,
+        "both menu layers use one compact segmented control at wide and narrow widths");
+    const auto caption = ui::CtxLayerCaptionBounds(local, system, f.painter.get(), scale);
+    Check(controls_top >= caption.bottom + 15 * scale,
+        "following settings controls begin below the shared layer explanation");
+    const std::array<D2D1_RECT_F, 2> choices{local, system};
     const wchar_t* titles[] = {ui::sysctx_text::LocalTitle(), ui::sysctx_text::SystemTitle()};
-    const wchar_t* captions[] = {ui::sysctx_text::LocalCaption(), ui::sysctx_text::SystemCaption()};
-    for (size_t i = 0; i < cards.size(); ++i) {
-        const auto content = ui::LayoutCtxLayerCard(cards[i], captions[i], f.painter.get(), scale);
-        const wchar_t* tag = (i == 1) == system_current ? ui::sysctx_text::Current() : ui::sysctx_text::LocalTag();
-        Check(Within(content.icon, cards[i]) && Within(content.title, cards[i]) &&
-            Within(content.caption, cards[i]) && Within(content.tag, cards[i]),
-            "layer-card icon, full title, description and state label stay inside the card");
-        Check(content.icon.right + 11 * scale <= content.title.left &&
-            content.title.right + 7 * scale <= content.tag.left && content.caption.top >= content.title.bottom + scale &&
-            content.caption.left >= content.icon.right + 11 * scale,
-            "layer-card title, wrapped description, icon and state label do not overlap");
-        Check(ui::typography::MeasureLine(&s.compositor, title_format.get(), titles[i]) <=
-            content.title.right - content.title.left + 1,
-            "each complete localized layer-card title fits without ellipsis");
-        Check(ui::typography::MeasureLine(&s.compositor, s.compositor.SmallFormat(), tag) <=
-            content.tag.right - content.tag.left + 1,
-            "the current or switch label fits its reserved title-row space");
-        Check(f.painter->MeasureWrappedCaptionHeight(captions[i], content.caption.right - content.caption.left) <=
-            content.caption.bottom - content.caption.top + 1 && content.caption.bottom + 11 * scale <= cards[i].bottom,
-            "the complete localized description fits with bottom padding after wrapping");
+    for (size_t i = 0; i < choices.size(); ++i) {
+        Check(f.painter->MeasureButtonWidth(titles[i]) <= choices[i].right - choices[i].left + 1,
+            "each localized menu-layer title fits the compact segmented choice");
     }
+    const auto* text = system_current ? ui::sysctx_text::SystemCaption() : ui::sysctx_text::LocalCaption();
+    Check(f.painter->MeasureWrappedCaptionHeight(text, caption.right - caption.left) <=
+        caption.bottom - caption.top + 1,
+        "current layer explanation fits below the compact switch without overlap");
 }
 
 void GeometryChecks(Fixture& f, ui::WindowViewModel vm) {
@@ -309,6 +297,10 @@ void GeometryChecks(Fixture& f, ui::WindowViewModel vm) {
     auto layout = f.Layout(vm);
     SidebarChecks(f, vm);
     LayerCardChecks(f, layout.ctx_layer[0], layout.ctx_layer[1], layout.pulse_card.top, false);
+    Check(std::abs(layout.ctx_layer[1].right - (layout.content.right - 20 * scale)) <= 1 &&
+        std::abs(layout.pulse_preset[3].right - (layout.pulse_card.right - 16 * scale)) <= 1 &&
+        std::abs(layout.pulse_tabs.right - (layout.pulse_card.right - 16 * scale)) <= 1,
+        "layer, preset and surface selectors align with their content's right padding");
     Check(HasArea(layout.pulse_preview) && layout.pulse_preview.left >= layout.content.left &&
         layout.pulse_preview.right <= layout.content.right - 16 * scale,
         "live preview is retained within the settings width at both DPI scales");
@@ -328,11 +320,22 @@ void GeometryChecks(Fixture& f, ui::WindowViewModel vm) {
         Check(Within(tile, visible.content), "every preset is scrollable inside the visible content");
         if (i < 3) f.HitCheck(shown, tile, H::SettingsToggle, 60 + i, "production preset hit matches its controller action");
         else Check(f.Hit(shown, tile).region != H::SettingsToggle, "custom preset remains a display-only state");
-        static constexpr l10n::StringId descriptions[] = {l10n::StringId::ContextPresetSlimDesc,
-            l10n::StringId::ContextPresetStandardDesc, l10n::StringId::ContextPresetFullDesc, l10n::StringId::ContextPresetCustomDesc};
-        Check(f.painter->MeasureWrappedCaptionHeight(l10n::Get(descriptions[i]), tile.right - tile.left - 20 * scale) <=
-            tile.bottom - tile.top - 29 * scale + 1, "localized preset caption fits its wrapped tile");
+        Check(std::abs(tile.bottom - tile.top - 34 * scale) <= 1 &&
+            tile.right - tile.left <= 120 * scale,
+            "presets use bounded compact controls instead of full-width description tiles");
+        static constexpr l10n::StringId names[] = {l10n::StringId::ContextPresetSlim,
+            l10n::StringId::ContextPresetStandard, l10n::StringId::ContextPresetFull, l10n::StringId::ContextPresetCustom};
+        Check(f.painter->MeasureButtonWidth(l10n::Get(names[i])) <= tile.right - tile.left + 1,
+            "each localized preset name fits the compact choice");
     }
+    static constexpr l10n::StringId descriptions[] = {l10n::StringId::ContextPresetSlimDesc,
+        l10n::StringId::ContextPresetStandardDesc, l10n::StringId::ContextPresetFullDesc, l10n::StringId::ContextPresetCustomDesc};
+    const auto active = static_cast<int>(model::BuiltinMenuPresetFor(vm.settings_builtin_hidden));
+    const auto caption = layout.pulse_preset_description;
+    Check(f.painter->MeasureWrappedCaptionHeight(l10n::Get(descriptions[active]), caption.right - caption.left) <=
+        caption.bottom - caption.top + 1 && caption.top >= layout.pulse_preset[3].bottom + 7 * scale &&
+        layout.pulse_tabs.top >= caption.bottom + 15 * scale,
+        "active preset explanation fits between the compact selector and surface tabs");
     for (int tab = 0; tab < 3; ++tab) {
         auto shown = vm;
         const auto visible = f.Reach(shown, [tab](const auto& l) { return l.pulse_tab[tab]; });
@@ -412,6 +415,8 @@ void SystemChecks(Fixture& f, const ui::WindowViewModel& base, const std::wstrin
             if (state == 0) {
                 SidebarChecks(f, vm);
                 LayerCardChecks(f, layout.sysctx.local_card, layout.sysctx.system_card, layout.sysctx.list_card.top, true);
+                Check(std::abs(layout.sysctx.system_card.right - (layout.content.right - 20 * f.State().scale)) <= 1,
+                    "system layer selector shares the page's right alignment");
             }
             Check(HasArea(layout.sysctx.empty) == (state != 3), "system loading, empty and error views reserve an explicit empty-state area");
             if (state == 2) Check(HasArea(layout.sysctx.notice), "system error is visible in the production notice layout");
@@ -527,6 +532,13 @@ int main(int argc, char** argv) {
                     SystemChecks(fixture, fixture.Vm(), prefix, width == 1100 && scale == 1.0f);
                     if (!screenshots_only) RowActionChecks(fixture);
                 }
+                for (float scale : {1.0f, 1.5f}) {
+                    fixture.Resize(1100, scale, true);
+                    ActiveTab(fixture.State())->current_path = app::MakeSettingsPath(L"files");
+                    fixture.Render(fixture.Vm(), std::wstring(language) + L"-1100-" +
+                        std::to_wstring(static_cast<int>(scale * 100)) + L"-dark-file-list-heading.png");
+                }
+                ActiveTab(fixture.State())->current_path = app::MakeSettingsPath(L"context");
             }
             Check(!fixture.State().settings.SystemCtxLoaded(), "all system display fixtures avoid real registry scanning and mutation");
             result = failures ? 1 : 0;

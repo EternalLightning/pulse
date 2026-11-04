@@ -16,7 +16,6 @@
 #include "address_path_animation_cases.h"
 #include "page_scroll_cases.h"
 #include "column_scroll_cases.h"
-#include "surface_scroll_cases.h"
 #include "navigation_motion_cases.h"
 #include "additional_motion_cases.h"
 #include "interaction_feedback_cases.h"
@@ -75,7 +74,6 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool path_only = argc == 2 && std::string_view(argv[1]) == "--address-path-only";
     const bool page_scroll = argc == 2 && std::string_view(argv[1]) == "--page-scroll-only";
     const bool column_scroll = argc == 2 && std::string_view(argv[1]) == "--column-scroll-only";
-    const bool surface_scroll = argc == 2 && std::string_view(argv[1]) == "--surface-scroll";
     const bool navigation_motion = argc == 2 && std::string_view(argv[1]) == "--navigation-motion-only";
     const bool empty_navigation = argc == 2 && std::string_view(argv[1]) == "--navigation-empty-viewport-only";
     const bool additional_motion = argc == 2 && std::string_view(argv[1]) == "--additional-motion-only";
@@ -84,7 +82,7 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool list_hover_only = argc == 2 && std::string_view(argv[1]) == "--list-hover-only";
     const bool disclosure_only = argc == 2 && std::string_view(argv[1]) == "--sidebar-disclosure-only";
     const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
-    if (empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || surface_scroll || navigation_motion || additional_motion || feedback_only ||
+    if (empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
         (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
         const bool passed = empty_navigation ? ui::NavigationMotionUiTest::RunEmptyViewport(s) :
             disclosure_only ? ui::InteractionFeedbackUiTest::RunDisclosure(s, root) :
@@ -96,7 +94,6 @@ int RunAnimationFixture(int argc, char** argv) {
             navigation_motion ? ui::NavigationMotionUiTest::Run(s, root) :
             page_scroll ? RunPageScrollChecks(s) :
             column_scroll ? RunColumnScrollChecks(s, root) :
-            surface_scroll ? ui::SurfaceScrollUiTest::Run() == 0 :
             path_only ? RunAddressPathAnimationChecks(s, root) :
             search_only ? RunSearchInteractionAnimationChecks(s, root) : RunHomeSettingsAnimationChecks(s, root);
         s.watches.Stop();

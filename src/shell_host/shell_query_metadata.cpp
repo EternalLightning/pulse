@@ -66,7 +66,6 @@ void QueryShellName(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult
 void QueryShellNamespace(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
     Pidl pidl;
     if (request.kind == ipc::ShellQueryKind::PidlName) {
-        if (!ipc::ValidShellPidl(request.pidl)) { result.error = E_INVALIDARG; return; }
         pidl.value = static_cast<PIDLIST_ABSOLUTE>(CoTaskMemAlloc(request.pidl.size()));
         if (!pidl.value) { result.error = E_OUTOFMEMORY; return; }
         std::memcpy(pidl.value, request.pidl.data(), request.pidl.size());
@@ -103,9 +102,6 @@ void QueryShellNamespace(const ipc::ShellQueryRequest& request, ipc::ShellQueryR
 }
 
 void InitializePreviewItem(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
-    if (request.marshal_blob.empty() || request.marshal_blob.size() > ipc::kShellQueryMarshalLimit) {
-        result.error = E_INVALIDARG; return;
-    }
     ComPtr<IStream> stream;
     result.error = CreateStreamOnHGlobal(nullptr, TRUE, &stream);
     if (FAILED(result.error)) return;

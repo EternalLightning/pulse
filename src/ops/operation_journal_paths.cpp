@@ -13,7 +13,6 @@ namespace pulse::ops {
 namespace {
 
 std::wstring Join(const std::wstring& directory, const std::wstring& name) {
-    if (directory.empty()) return {};
     return directory + (directory.back() == L'\\' ? L"" : L"\\") + name;
 }
 

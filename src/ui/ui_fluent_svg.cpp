@@ -233,10 +233,7 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
         return drawn;
     }
     if (!EnsureFluentSvg(resource_id, colorful)) return false;
-    const auto it = fluent_svgs_.find(resource_id);
-    if (it == fluent_svgs_.end() || !it->second.get() || !empty_state_svg_dc_.get()) return false;
-
-    ID2D1SvgDocument* svg = it->second.get();
+    ID2D1SvgDocument* svg = fluent_svgs_.at(resource_id).get();
     ComPtr<ID2D1SvgElement> root;
     svg->GetRoot(&root);
     if (root.get())
@@ -249,9 +246,7 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
             fill->SetColor(foreground);
     }
 
-    const float available_width = std::max(0.0f, bounds.right - bounds.left);
-    const float available_height = std::max(0.0f, bounds.bottom - bounds.top);
-    const float art = std::min(available_width, available_height);
+    const float art = std::min(bounds.right - bounds.left, bounds.bottom - bounds.top);
     if (art <= 1.0f) return false;
     const float left = (bounds.left + bounds.right - art) * 0.5f;
     const float top = (bounds.top + bounds.bottom - art) * 0.5f;

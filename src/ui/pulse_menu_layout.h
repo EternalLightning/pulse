@@ -154,35 +154,48 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
     l.pulse_description = D2D1::RectF(caption_left, top + 40 * s, right - 16 * s, top + 40 * s + caption_h);
     y = std::max(top + 72 * s, l.pulse_description.bottom + 14 * s);
 
+    static constexpr I kPresetName[] = {I::ContextPresetSlim, I::ContextPresetStandard,
+        I::ContextPresetFull, I::ContextPresetCustom};
     static constexpr I kPresetDesc[] = {I::ContextPresetSlimDesc, I::ContextPresetStandardDesc,
         I::ContextPresetFullDesc, I::ContextPresetCustomDesc};
-    const int columns = available >= 560 * s ? 4 : available >= 280 * s ? 2 : 1;
-    const float preset_gap = 8 * s, preset_w = (available - (columns - 1) * preset_gap) / columns;
+    float preset_w = 64 * s;
+    for (const auto name : kPresetName) preset_w = std::max(preset_w, text_width(l10n::Get(name)));
+    const int columns = available >= 4 * preset_w ? 4 : available >= 2 * preset_w ? 2 : 1;
+    preset_w = std::min(preset_w, available / columns);
     for (int first = 0; first < 4; first += columns) {
-        float height = 50 * s;
         const int count = std::min(columns, 4 - first);
-        for (int i = 0; i < count; ++i)
-            height = std::max(height, 29 * s + SettingsCaptionHeight(l10n::Get(kPresetDesc[first + i]), preset_w - 20 * s, s, painter));
         for (int i = 0; i < count; ++i) {
-            const float x = body_left + i * (preset_w + preset_gap);
-            l.pulse_preset[first + i] = D2D1::RectF(x, y, x + preset_w, y + height);
+            const float x = body_right - count * preset_w + i * preset_w;
+            l.pulse_preset[first + i] = D2D1::RectF(x, y, x + preset_w, y + 34 * s);
         }
-        y += height + preset_gap;
+        y += 34 * s + (first + columns < 4 ? 6 * s : 0);
     }
-    y += 4 * s;
+    const auto active = static_cast<int>(model::BuiltinMenuPresetFor(vm.settings_builtin_hidden));
+    const float caption_left_preset = l.pulse_preset[0].left;
+    const float preset_caption_h = SettingsCaptionHeight(l10n::Get(kPresetDesc[active]), body_right - caption_left_preset, s, painter);
+    l.pulse_preset_description = D2D1::RectF(caption_left_preset, y + 8 * s, body_right, y + 8 * s + preset_caption_h);
+    y = l.pulse_preset_description.bottom + 16 * s;
     static constexpr I kTabs[] = {I::ContextTabItem, I::ContextTabBackground, I::ContextTabRow};
     const float tabs_top = y;
-    float tx = body_left + 3 * s;
-    for (int i = 0; i < 3; ++i) {
-        const float tab_w = std::min(available - 6 * s, std::max(72 * s, text_width(l10n::Get(kTabs[i]))));
-        if (i > 0 && tx + tab_w > body_right - 3 * s) {
-            tx = body_left + 3 * s;
-            y += 36 * s;
+    float tab_widths[3]{};
+    for (int i = 0; i < 3; ++i)
+        tab_widths[i] = std::min(available, std::max(72 * s, text_width(l10n::Get(kTabs[i]))));
+    float tabs_left = body_right;
+    for (int first = 0; first < 3;) {
+        int last = first;
+        float row_width = tab_widths[first];
+        while (last < 2 && row_width + tab_widths[last + 1] <= available)
+            row_width += tab_widths[++last];
+        float tx = body_right - row_width;
+        tabs_left = std::min(tabs_left, tx);
+        for (int i = first; i <= last; ++i) {
+            l.pulse_tab[i] = D2D1::RectF(tx, y, tx + tab_widths[i], y + 36 * s);
+            tx += tab_widths[i];
         }
-        l.pulse_tab[i] = D2D1::RectF(tx, y + 3 * s, tx + tab_w, y + 33 * s);
-        tx += tab_w;
+        first = last + 1;
+        if (first < 3) y += 42 * s;
     }
-    l.pulse_tabs = D2D1::RectF(body_left, tabs_top, body_right, y + 36 * s);
+    l.pulse_tabs = D2D1::RectF(tabs_left, tabs_top, body_right, y + 36 * s);
     y += 52 * s;
 
     l.context_rows.resize(vm.settings_items.size());

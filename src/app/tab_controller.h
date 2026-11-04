@@ -22,6 +22,7 @@ public:
         std::function<std::wstring()> new_tab_path;
         std::function<bool()> close_window_with_last_tab;
         std::function<void()> close_window;
+        std::function<void()> will_change_tab_strip;
     };
 
     explicit TabController(Callbacks callbacks = {}) : callbacks_(std::move(callbacks)) {}
@@ -46,6 +47,7 @@ private:
     void Changed() const;
     void LayoutChanged() const;
     void WillChangeLayout() const;
+    void WillChangeTabStrip() const;
 
     Callbacks callbacks_;
 };

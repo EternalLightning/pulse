@@ -288,7 +288,7 @@ void WriteJson(const std::wstring& stem, EXCEPTION_POINTERS* exception,
 LONG WriteReport(EXCEPTION_POINTERS* exception, const char* context,
                  bool recoverable) noexcept {
     if (!g_initialized || g_diagnostics_root.empty())
-        return recoverable ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_EXECUTE_HANDLER;
+        return EXCEPTION_EXECUTE_HANDLER;
     long expected = 0;
     if (!g_report_active.compare_exchange_strong(expected, 1, std::memory_order_acq_rel))
         return EXCEPTION_EXECUTE_HANDLER;

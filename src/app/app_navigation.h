@@ -85,6 +85,7 @@ std::wstring NewTabPath(const AppState& s);
 void OpenTabAt(AppState& s, const std::wstring& path);
 void NewTab(AppState& s, const std::wstring& path);
 void OpenSettingsTab(AppState& s, int page);
+void CaptureTabStripLayout(AppState& s);
 void CloseLayoutTab(AppState& s, size_t idx);
 void ResetLastTabToHome(AppState& s);
 void CloseActiveTab(AppState& s);

@@ -851,11 +851,8 @@ DWORD WINAPI HandlerWorkerThread(LPVOID param) {
 
 void JoinHandlerWorkers(std::vector<std::unique_ptr<HandlerWorker>>& workers) {
     for (auto& w : workers)
-        if (w && w->exit_event) SetEvent(w->exit_event);
-    for (auto& w : workers) {
-        if (!w) continue;
-        w->Stop();
-    }
+        SetEvent(w->exit_event);
+    for (auto& w : workers) w->Stop();
     workers.clear();
 }
 
@@ -952,18 +949,17 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
     if (start_gate->event) SetEvent(start_gate->event);
 
     auto worker_done = [](const HandlerWorker& w) {
-        return w.done_event && WaitForSingleObject(w.done_event, 0) == WAIT_OBJECT_0;
+        return WaitForSingleObject(w.done_event, 0) == WAIT_OBJECT_0;
     };
     auto all_workers_done = [&] {
-        if (workers.empty()) return true;
         for (const auto& w : workers)
-            if (w && !worker_done(*w)) return false;
+            if (!worker_done(*w)) return false;
         return true;
     };
     auto collect_items = [&] {
         std::vector<CtxItemOut> out;
         for (const auto& w : workers) {
-            if (!w || !worker_done(*w)) continue;
+            if (!worker_done(*w)) continue;
             out.insert(out.end(), w->items.begin(), w->items.end());
         }
         return out;
@@ -971,7 +967,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
     auto collect_slow = [&] {
         std::vector<std::wstring> slow;
         for (const auto& w : workers) {
-            if (!w || !worker_done(*w) || w->elapsed_ms < 1000) continue;
+            if (!worker_done(*w) || w->elapsed_ms < 1000) continue;
             if (!w->desc.clsid_text.empty()) slow.push_back(w->desc.clsid_text);
         }
         return slow;
@@ -985,7 +981,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
             if (SessionCloseRequested(sid) || pending_invoke) break;
             const ULONGLONG elapsed = GetTickCount64() - started;
             const size_t completed_workers = static_cast<size_t>(std::count_if(workers.begin(), workers.end(),
-                [&](const auto& worker) { return worker && worker_done(*worker); }));
+                [&](const auto& worker) { return worker_done(*worker); }));
             if (elapsed >= kFastBudgetMs && (!sent_partial || completed_workers != published_workers)) {
                 items = collect_items();
                 SendCtxItems(sid, items, CTX_ITEMS_PARTIAL);
@@ -995,13 +991,11 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
             std::vector<HANDLE> waits;
             waits.reserve(workers.size());
             for (const auto& w : workers)
-                if (w && w->done_event && !worker_done(*w)) waits.push_back(w->done_event);
+                if (!worker_done(*w)) waits.push_back(w->done_event);
             if (waits.empty()) break;
             DWORD timeout = 200;
             if (!sent_partial) {
-                const ULONGLONG left = elapsed >= kFastBudgetMs ? 1 : (kFastBudgetMs - elapsed);
-                timeout = left > 0xFFFFFFFFULL ? 200 : static_cast<DWORD>(left);
-                if (timeout == 0) timeout = 1;
+                timeout = elapsed >= kFastBudgetMs ? 1 : static_cast<DWORD>(kFastBudgetMs - elapsed);
             }
             MsgWaitForMultipleObjects(static_cast<DWORD>(waits.size()), waits.data(),
                                       FALSE, timeout, QS_ALLINPUT);
@@ -1020,7 +1014,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
     if (elapsed >= 500) {
         wchar_t slow[192];
         swprintf_s(slow, L"slow handler %ums path=%ls", elapsed,
-                   data->paths.empty() ? L"" : data->paths.front().c_str());
+                   data->paths.front().c_str());
         HostLog(slow);
     }
     SendCtxItems(sid, items, 0, collect_slow());
@@ -1032,7 +1026,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
         if (!workers.empty()) {
             HandlerWorker* target = nullptr;
             for (auto& w : workers) {
-                if (w && live >= w->id_first && live <= w->id_last) {
+                if (live >= w->id_first && live <= w->id_last) {
                     target = w.get();
                     break;
                 }

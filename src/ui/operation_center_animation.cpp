@@ -63,7 +63,7 @@ void OperationCenter::Scroll(float delta,bool smooth) {
         (std::max)(0.0f,content_height_-body_height_));
     if(!smooth || !AnimationsEnabled()) {
         const float previous=scroll_;
-        StopScroll();SetScrollOffset(target);StopScroll();
+        SetScrollOffset(target);StopScroll();
         if(advanced || previous!=scroll_) Redraw();
         return;
     }

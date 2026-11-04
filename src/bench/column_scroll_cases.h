@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
+#include "../ui/animation_clock.h"
 #include "../app/app_column_view.h"
 #include <cmath>
 #include <cstdio>
@@ -59,7 +60,7 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     hit.sub_index = 7;
     auto vm = make_frame();
     auto& col = tab.column_strip.ancestors.back();
-    uint64_t now = GetTickCount64();
+    uint64_t now = pulse::ui::AnimationTimeMs();
     check(HandleColumnStripWheel(s, vm, hit, -WHEEL_DELTA) && col.scroll_dip == 0 && col.scroll_motion.Pending(),
         "column wheel starts a frame chain without jumping to its endpoint");
     check(TickColumnStripScroll(s, vm, now + 35) && col.scroll_dip > 0 &&
@@ -68,17 +69,17 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     const float first_middle = col.scroll_dip;
     vm = make_frame();
     HandleColumnStripWheel(s, vm, hit, -WHEEL_DELTA);
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     check(col.scroll_dip > first_middle && col.scroll_motion.Pending(),
         "continuous column wheel input extends movement from the current offset");
     const float middle = col.scroll_dip;
     vm = make_frame();
     HandleColumnStripWheel(s, vm, hit, WHEEL_DELTA);
     check(col.scroll_motion.Pending(), "reverse column input retains an active frame chain");
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     check(col.scroll_dip < middle && col.scroll_dip >= 0,
         "reverse column input moves toward the new direction");
-    now = GetTickCount64();
+    now = pulse::ui::AnimationTimeMs();
     for (uint64_t frame = 1; frame <= 30; ++frame) TickColumnStripScroll(s, vm, now + frame * 100);
     check(!col.scroll_motion.Pending() && col.scroll_dip >= 0,
         "column motion reaches a bounded endpoint and releases its frame chain");
@@ -86,7 +87,7 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     hit.sub_index = ui::kColumnStripChildId;
     vm = make_frame();
     HandleColumnStripWheel(s, vm, hit, -WHEEL_DELTA);
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     check(tab.column_strip.child.scroll_dip > 0 && tab.column_strip.child.scroll_motion.Pending(),
         "selected-folder column uses the same smooth vertical input path");
     tab.column_strip.child.scroll_motion.Reset();
@@ -97,7 +98,7 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     vm = make_frame();
     HandleColumnStripWheel(s, vm, hit, -WHEEL_DELTA);
     vm.pane_slots.front().rect.bottom = 20000;
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     check(col.scroll_dip == 0 && !col.scroll_motion.Pending(),
         "shrinking column scroll range clamps the offset and cancels momentum");
     vm = make_frame();
@@ -105,21 +106,21 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     InvalidateColumnStripPath(s, col.path, std::make_shared<std::vector<fs::DirEntry>>());
     SyncColumnStrips(s);
     vm = make_frame();
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     check(col.rows && col.rows->empty() && col.scroll_dip == 0 && !col.scroll_motion.Pending(),
         "replacement with an empty column cancels old content motion");
 
     vm = make_frame();
     hit.region = ui::HitTestResult::ColumnStripHScroll;
     HandleColumnStripWheel(s, vm, hit, WHEEL_DELTA);
-    TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
     auto& strip = tab.column_strip;
     check(strip.scroll_from_right_dip > 0 && strip.scroll_from_right_dip < 96 && strip.horizontal_motion.Pending(),
         "horizontal strip wheel passes through an intermediate frame");
     const float horizontal_middle = strip.scroll_from_right_dip;
     vm = make_frame();
     HandleColumnStripWheel(s, vm, hit, WHEEL_DELTA, true);
-    TickColumnStripScroll(s, vm, GetTickCount64() + 15);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 15);
     check(strip.scroll_from_right_dip < horizontal_middle,
         "native horizontal wheel reverses toward the right");
     vm = make_frame();
@@ -135,7 +136,7 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
         UpdateColumnStripResize(s, s.stripResizeStartX - 20);
         const float dragged = strip.scroll_from_right_dip;
         vm = make_frame();
-        TickColumnStripScroll(s, vm, GetTickCount64() + 40);
+        TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 40);
         check(dragged > drag_start && strip.scroll_from_right_dip == dragged && !strip.horizontal_motion.Pending(),
             "thumb dragging moves immediately and leaves no animated drift");
         EndColumnStripResize(s);
@@ -147,12 +148,12 @@ inline bool RunColumnScrollChecks(pulse::AppState& s, const std::filesystem::pat
     layout = s.renderer.ColumnStripGeometry(vm.pane_slots.front().pane, vm.pane_slots.front().rect);
     if (s.renderer.ColumnStripHScrollRects(layout, track, thumb)) {
         HandleColumnStripMouseDown(s, vm, hit, static_cast<int>(track.left + 1));
-        TickColumnStripScroll(s, vm, GetTickCount64() + 35);
+        TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 35);
         check(strip.scroll_from_right_dip > 0 && strip.scroll_from_right_dip < layout.viewport.right - layout.viewport.left &&
             strip.horizontal_motion.Pending(), "horizontal track paging animates between page endpoints");
     }
     s.shot_high_contrast = true;
-    TickColumnStripScroll(s, vm, GetTickCount64() + 50);
+    TickColumnStripScroll(s, vm, pulse::ui::AnimationTimeMs() + 50);
     check(!strip.horizontal_motion.Pending(), "disabled motion settles an existing horizontal frame chain");
     strip.scroll_from_right_dip = 0;
     vm = make_frame();

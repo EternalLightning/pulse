@@ -33,7 +33,7 @@ inline void FitDetailsMetadata(std::array<float, N>& widths, int count,
         if (available >= fixed + compact_type) {
             fitted[1] = available - fixed;
         } else {
-            const float factor = desired > 0.0f ? available / desired : 0.0f;
+            const float factor = available / desired;
             for (float& width : fitted) width *= factor;
         }
     }

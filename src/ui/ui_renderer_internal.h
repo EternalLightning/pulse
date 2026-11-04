@@ -1515,7 +1515,7 @@ struct SettingsLayout {
         context_toggle[kContextCards]{}, context_empty[kContextCards]{}, context_restore{};
     std::vector<D2D1_RECT_F> context_rows;
     D2D1_RECT_F ctx_intro{}, ctx_error{}, ctx_layer[2]{};
-    D2D1_RECT_F pulse_card{}, pulse_title{}, pulse_description{}, pulse_restore{}, pulse_preset[4]{},
+    D2D1_RECT_F pulse_card{}, pulse_title{}, pulse_description{}, pulse_restore{}, pulse_preset[4]{}, pulse_preset_description{},
         pulse_tabs{}, pulse_tab[3]{}, pulse_fixed[2]{}, pulse_preview{}, pulse_order_reset{};
     D2D1_RECT_F duplicate_options{};
     D2D1_RECT_F section[4]{}, group[4]{}, footer{};

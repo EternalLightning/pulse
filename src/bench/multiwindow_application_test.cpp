@@ -634,6 +634,87 @@ int RunSessionChecks() {
     return failures ? 1 : 0;
 }
 
+int RunUndoLifecycleChecks() {
+    const auto press_undo = [](HWND window) {
+        BYTE previous[256]{};
+        if (!GetKeyboardState(previous)) return false;
+        BYTE keys[256]{};
+        keys[VK_CONTROL] = 0x80;
+        if (!SetKeyboardState(keys)) return false;
+        SendMessageW(window, WM_KEYDOWN, L'Z', 0);
+        return SetKeyboardState(previous) != FALSE;
+    };
+    const auto root = std::filesystem::absolute(L"bench_data/undo-lifecycle") /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root / L"folder");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    const auto original = root / L"folder" / L"original.txt";
+    const auto renamed = root / L"folder" / L"renamed.txt";
+    std::ofstream(original) << "undo lifecycle fixture";
+    for (int launch = 0; launch < 2; ++launch) {
+        AppState state;
+        state.isolatedTest = true;
+        state.open_path = original.parent_path().wstring();
+        const HWND window = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+            wc.lpszClassName, L"Pulse undo lifecycle fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+            -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+        Check(window && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+            "undo lifecycle initializes a real window with an isolated profile");
+        if (!window) return 1;
+        Check(!state.ops.CanUndo(), "each fresh application launch starts without undo history");
+        if (launch == 0) {
+            const auto rename = [&] {
+                ops::OpRequest request;
+                request.type = ops::OpType::Rename;
+                request.sources = {original.wstring()};
+                request.new_name = renamed.filename().wstring();
+                state.ops.Submit(std::move(request));
+                return Wait([&] { return !state.ops.HasPendingFileOperations() && state.ops.CanUndo(); }) &&
+                    std::filesystem::exists(renamed) && !std::filesystem::exists(original);
+            };
+            Check(rename(), "a real completed rename creates usable undo history");
+            const auto undo_before_hide = state.ops.UndoToJson();
+            state.appPrefs.keep_running_on_close = true;
+            ShowWindow(window, SW_SHOWNOACTIVATE);
+            SendMessageW(window, WM_CLOSE, 0, 0);
+            Check(IsWindow(window) && !IsWindowVisible(window) && !state.exit_requested &&
+                state.ops.CanUndo() && state.ops.UndoToJson() == undo_before_hide,
+                "closing to the tray retains the running window and its exact undo history");
+            SendMessageW(window, app::TrayController::kCallbackMessage, 0, WM_LBUTTONUP);
+            Check(IsWindowVisible(window) && state.ops.CanUndo(),
+                "restoring from the tray keeps undo available");
+            Check(press_undo(window), "dispatch Ctrl+Z through the production window input handler");
+            Check(Wait([&] { return !state.ops.HasPendingFileOperations() && !state.ops.CanUndo(); }) &&
+                std::filesystem::exists(original) && !std::filesystem::exists(renamed),
+                "undo after restoring the tray really restores the original filename");
+            Check(rename(), "prepare completed work before explicitly exiting the application");
+        } else {
+            Check(press_undo(window), "dispatch Ctrl+Z again after application relaunch");
+            Check(!state.ops.HasPendingFileOperations() && std::filesystem::exists(renamed) &&
+                !std::filesystem::exists(original), "undo after relaunch cannot reverse the previous application's rename");
+        }
+        // Use the same exit handler invoked by the tray menu, and enable the
+        // production preference writer only after the isolated window is ready.
+        state.isolatedTest = false;
+        RequestApplicationExit(state);
+        Check(Wait([&] { return state.core.windows.Count() == 0; }),
+            "explicit application exit closes its retained background window");
+        std::wstring saved;
+        Check(ReadUtf8File((root / L"profile" / L"preferences.json").wstring(), saved) &&
+            json::Document(saved).Is(json::Kind::Object) && !json::Document(saved).Find(L"undo"),
+            "application exit writes preferences without completed-operation undo history");
+        Pump();
+    }
+    std::printf("undo lifecycle: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
+
 int RunActivationChecks() {
     HANDLE token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -914,6 +995,11 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string(argv[1]) == "--app-lifecycle-only") {
         const int result = RunAppLifecycleChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--undo-lifecycle-only") {
+        const int result = RunUndoLifecycleChecks();
         OleUninitialize();
         return result;
     }

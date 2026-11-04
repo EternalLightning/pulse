@@ -258,15 +258,15 @@ HRESULT ReadBrowsers(IShellWindows* windows, ExplorerWindowTakeover::Shared& sha
     }
     return S_OK;
 }
-bool SingleTab(const Candidate& candidate, const BrowserMap& browsers, bool complete,
-                bool native_required) {
+explorer_takeover::TabObservation ObserveTabs(const Candidate& candidate, const BrowserMap& browsers,
+                                             bool complete, bool native_required) {
     const auto found = browsers.find(candidate.id.hwnd);
     explorer_takeover::TabObservation observation;
     observation.tab_structure_required = native_required;
     observation.enumeration_complete = complete;
     observation.shell_view_count = found == browsers.end() ? 0 : static_cast<uint32_t>(found->second.size());
     observation.native_tab_count = NativeTabs(candidate.id.hwnd);
-    return explorer_takeover::IsSingleTabSafe(observation);
+    return observation;
 }
 bool SameIdentity(const Candidate& candidate, ObservationEvents& observer) {
     WindowId current;
@@ -280,7 +280,9 @@ explorer_takeover::SourceObservation ObserveSource(const Candidate& candidate,
     const Snapshot* snapshot) {
     explorer_takeover::SourceObservation result;
     result.same_identity = SameIdentity(candidate, observer);
-    result.single_tab = result.same_identity && SingleTab(candidate, browsers, complete, native_required);
+    const auto tabs = ObserveTabs(candidate, browsers, complete, native_required);
+    result.single_tab = result.same_identity && explorer_takeover::IsSingleTabSafe(tabs);
+    result.enumeration_pending = result.same_identity && explorer_takeover::CanRetryEnumeration(tabs);
     result.supported = snapshot && ScopeAllows(*observer.shared, candidate.id, snapshot);
     result.same_folder = snapshot && SameFolder(snapshot->folder, candidate.snapshot.folder);
     result.same_selection = snapshot && snapshot->selected == candidate.snapshot.selected;
@@ -383,8 +385,12 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
             now - candidate.discovered >= explorer_takeover::kCandidateTimeoutMs ||
             (GetAsyncKeyState(VK_SHIFT) & 0x8000);
         const auto found = browsers.find(it->first);
-        const bool single = !retire && SingleTab(candidate, browsers, complete, native_required);
+        const auto tabs = ObserveTabs(candidate, browsers, complete, native_required);
+        const bool single = !retire && explorer_takeover::IsSingleTabSafe(tabs);
         if (!retire && !single) {
+            // Unrelated Shell clients can disappear during enumeration; retry
+            // without discarding a handoff that is already opening in Pulse.
+            if (explorer_takeover::CanRetryEnumeration(tabs)) { ++it; continue; }
             // A not-yet-created Win11 tab can become readable later. It never
             // authorizes submission/close; losing an established guard retires.
             retire = candidate.token || candidate.view_ready_at || found == browsers.end() ||
@@ -430,10 +436,11 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
                         const bool final_readable = FreshSource(windows, candidate, observer, native_required,
                             final_snapshot, final_observation);
                         const auto final_decision = explorer_takeover::DecidePending(final_observation);
-                        if (!final_readable && final_observation.same_identity && final_observation.single_tab &&
-                            !final_observation.shift && !shared.stop) {
-                            // Navigation can be busy after ACK. Keep that ACK
-                            // until a readable current snapshot can be checked.
+                        if (final_decision == explorer_takeover::PendingDecision::Retry ||
+                            (!final_readable && final_observation.same_identity && final_observation.single_tab &&
+                                !final_observation.shift && !shared.stop)) {
+                            // Keep the ACK through a busy view or incomplete
+                            // enumeration until the current source can be checked.
                         } else if (final_decision == explorer_takeover::PendingDecision::Replace && !shared.stop) {
                             ReplaceCandidate(candidate, std::move(final_snapshot), shared, GetTickCount64());
                         } else {
@@ -459,7 +466,10 @@ HRESULT ScanCandidates(IShellWindows* windows, ObservationEvents& observer,
                 Snapshot final_snapshot;
                 explorer_takeover::SourceObservation final_observation;
                 FreshSource(windows, candidate, observer, native_required, final_snapshot, final_observation);
-                if (explorer_takeover::DecidePending(final_observation) == explorer_takeover::PendingDecision::Wait &&
+                const auto final_decision = explorer_takeover::DecidePending(final_observation);
+                if (final_decision == explorer_takeover::PendingDecision::Retry) {
+                    // Wait for a complete source enumeration before submitting.
+                } else if (final_decision == explorer_takeover::PendingDecision::Wait &&
                     final_observation.same_selection && !shared.stop) {
                     retire = !SubmitCandidate(shared, candidate);
                 } else if (final_observation.same_identity && final_observation.single_tab &&

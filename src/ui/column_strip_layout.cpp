@@ -41,7 +41,7 @@ ColumnStripLayout LayoutColumnStrip(const D2D1_RECT_F& pane_bounds, float top,
     float child_w = 0.0f;
     if (child_slot) {
         const float w = ColumnStripWidthDip(widths_dip, 0) * unit;
-        if (w + std::min(parent_w, content) <= available) child_w = w;
+        if (w + parent_w <= available) child_w = w;
     }
     // Ancestors get at most half of what the child column leaves (never less
     // than the parent's width); the rest scrolls so the list stays readable.

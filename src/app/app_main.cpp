@@ -220,7 +220,7 @@ bool Render(AppState& s) {
     PrepareViewState(s);
     ui::WindowViewModel vm = BuildVm(s);
     const bool surface_scroll_animating = TickAppSurfaceScroll(s, vm, ui::AnimationTimeMs());
-    const bool column_scroll_animating = TickColumnStripScroll(s, vm, GetTickCount64());
+    const bool column_scroll_animating = TickColumnStripScroll(s, vm, ui::AnimationTimeMs());
     s.renderer.TickSurfaceScroll(ui::AnimationTimeMs());
     PrepareFolderSizes(s, vm);
     s.sidebarScroll = vm.sidebar_scroll;
@@ -313,7 +313,6 @@ static void RestoreWindowPreferences(AppState& state, const app::WindowSessionSn
     state.sidebarOrder = session.sidebar_order.empty() ? app::DefaultSidebarOrder() : session.sidebar_order;
     state.sidebarQuickAccessHiddenMask = static_cast<uint32_t>(session.quick_access_hidden);
     state.starredExpanded = session.starred_expanded;
-    state.pending_undo_json = session.undo_json;
     state.showDetailsPanel = session.details_panel;
     state.detailsPreviewOnly = session.details_preview_only;
     state.detailsPreviewEnabled = session.details_preview;
@@ -332,7 +331,6 @@ static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwn
     }
     snap.dark = s.darkMode;
     snap.tray = s.tray;
-    snap.undo_json = s.ops.UndoToJson();
     snap.sidebar_collapsed = static_cast<int>(s.sidebarCollapsedMask);
     snap.sidebar_hidden = static_cast<int>(s.sidebarHiddenMask);
     snap.sidebar_order = app::NormalizeSidebarOrder(s.sidebarOrder);
@@ -464,12 +462,13 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         BindCurrentLayout(*s);
         s->tabs.SetCallbacks({
             [s](app::Tab& tab) { StartLoadingPath(*s, tab, tab.current_path); },
-            [hwnd] { InvalidateRect(hwnd, nullptr, FALSE); },
+            [s, hwnd] { s->hitTestVmValid = false; InvalidateRect(hwnd, nullptr, FALSE); },
             [s] { BindCurrentLayout(*s); },
             [s] { CancelNetworkAuthentication(*s); RememberLayoutFocus(*s); },
             [s] { return NewTabPath(*s); },
             [s] { return s->appPrefs.close_last_tab_window; },
             [s] { CloseLayoutTab(*s, 0); },
+            [s] { CaptureTabStripLayout(*s); },
         });
         if (s->isolatedTest) {
             s->places.persist = false;
@@ -677,7 +676,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                               reinterpret_cast<LPARAM>(payload)))
                 delete payload;
         });
-        if (!s->pending_undo_json.empty()) s->ops.UndoFromJson(s->pending_undo_json);
         // OLE drop target: list rows, pane headers, breadcrumbs, sidebar, tray.
         {
             ui::DropTargetCallbacks dcb;

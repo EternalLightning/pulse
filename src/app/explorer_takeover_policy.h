@@ -28,6 +28,10 @@ inline bool IsSingleTabSafe(const TabObservation& source) {
         (!source.tab_structure_required || source.native_tab_count == 1);
 }
 
+inline bool CanRetryEnumeration(const TabObservation& source) {
+    return !source.enumeration_complete && source.shell_view_count <= 1 && source.native_tab_count <= 1;
+}
+
 struct SourceObservation {
     bool same_identity = false;
     bool single_tab = false;
@@ -35,12 +39,16 @@ struct SourceObservation {
     bool same_folder = false;
     bool same_selection = false;
     bool shift = false;
+    bool enumeration_pending = false;
 };
 
-enum class PendingDecision { Wait, Retire, Replace };
+enum class PendingDecision { Wait, Retire, Replace, Retry };
 
 inline PendingDecision DecidePending(const SourceObservation& source) {
-    if (!source.same_identity || !source.single_tab || !source.supported || source.shift)
+    if (!source.same_identity || source.shift)
+        return PendingDecision::Retire;
+    if (source.enumeration_pending) return PendingDecision::Retry;
+    if (!source.single_tab || !source.supported)
         return PendingDecision::Retire;
     return source.same_folder && source.same_selection ? PendingDecision::Wait : PendingDecision::Replace;
 }

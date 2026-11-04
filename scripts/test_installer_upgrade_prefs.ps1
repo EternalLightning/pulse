@@ -9,16 +9,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $source = Get-Content -LiteralPath (Join-Path $repo 'installer/PulseSetup.iss') -Raw
-$out = Join-Path $repo 'build/installer-prefs-test'
+$out = Join-Path $repo ("bench_data/installer-upgrade-prefs-$PID-" + [DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $prefs = [regex]::Match($source, '(?s)function FolderClass\(.*?(?=function IsChinese:)').Value
 $cleanup = [regex]::Match($source, '(?s)procedure DeleteFolderOpenOverride\(.*?(?=\r?\nconst\r?\n)').Value
-if (!$prefs -or !$cleanup) { throw 'Installer procedure boundaries changed; update the harness.' }
-$code = $prefs + $cleanup
-foreach ($name in @('RegQueryStringValue', 'RegWriteStringValue', 'RegDeleteValue', 'RegDeleteKeyIncludingSubkeys', 'ExpandConstant', 'CleanupPulseData', 'UninstallSilent')) {
+$upgrade = [regex]::Match($source, '(?s)function SplitCommandLine\(.*?(?=function PulseImageRunning\()').Value
+if (!$prefs -or !$cleanup -or !$upgrade) { throw 'Installer procedure boundaries changed; update the harness.' }
+$code = $prefs + $cleanup + $upgrade
+foreach ($name in @('RegQueryStringValue', 'RegWriteStringValue', 'RegDeleteValue', 'RegDeleteKeyIncludingSubkeys', 'ExpandConstant', 'CleanupPulseData', 'UninstallSilent', 'ReadPreviousUninstallCommand', 'FileExists', 'Exec', 'Log')) {
     $code = $code -replace "\b$name\b", "Mock$name"
 }
-if ($code -match '\b(Reg\w+|Exec|ShellExec|DeleteFile|DelTree|ExpandConstant|CleanupPulseData)\s*\(') {
+if ($code -match '\b(Reg\w+|Exec|ShellExec|DeleteFile|DelTree|ExpandConstant|CleanupPulseData|ReadPreviousUninstallCommand|FileExists|Log)\s*\(') {
     throw 'Unmocked external operation in extracted installer code.'
 }
 $report = (Join-Path $out 'result.txt').Replace("'", "''")
@@ -39,6 +40,9 @@ var
   UpgradeFolderCommands: array[0..1] of String;
   Keys, Values: array[0..63] of String;
   Count, Failures, DataCleanups: Integer;
+  PreviousCommand, ExecutedFile, ExecutedParams: String;
+  UninstallerExists, IndexHelperExists, ExecSucceeds: Boolean;
+  ExecCount, ExecExitCode: Integer;
 
 function FindKey(const Key, Name: String): Integer;
 var I: Integer;
@@ -86,6 +90,25 @@ begin
     Restoring an erroneous "if not UninstallSilent" guard must fail the test. }
   Result := True;
 end;
+function MockReadPreviousUninstallCommand(var CommandLine: String): Boolean;
+begin
+  CommandLine := PreviousCommand; Result := CommandLine <> '';
+end;
+function MockFileExists(const FileName: String): Boolean;
+begin
+  if CompareText(ExtractFileName(FileName), 'Pulse.Index.exe') = 0 then
+    Result := IndexHelperExists
+  else Result := UninstallerExists;
+end;
+function MockExec(const FileName, Params, WorkingDir: String; ShowCmd: Integer;
+  Wait: TExecWait; var ResultCode: Integer): Boolean;
+begin
+  ExecCount := ExecCount + 1; ExecutedFile := FileName; ExecutedParams := Params;
+  ResultCode := ExecExitCode; Result := ExecSucceeds;
+end;
+procedure MockLog(const MessageText: String);
+begin
+end;
 procedure Check(Condition: Boolean; const LabelText: String);
 begin
   if Condition then Report := Report + '[PASS] ' + LabelText + #13#10
@@ -101,11 +124,14 @@ begin
   UpgradeStartupCommand := ''; UpgradePreviousExe := '';
   UpgradeFolderCommands[0] := ''; UpgradeFolderCommands[1] := '';
   AppPath := 'C:\New Pulse'; CleanupUserData := False; DataCleanups := 0;
+  PreviousCommand := ''; ExecutedFile := ''; ExecutedParams := '';
+  UninstallerExists := True; IndexHelperExists := True; ExecSucceeds := True;
+  ExecCount := 0; ExecExitCode := 0;
 end;
 '@
 $tests = @'
 function InitializeSetup: Boolean;
-var RunKey, DirKey, DriveKey: String;
+var RunKey, DirKey, DriveKey, ErrorText: String;
 begin
   RunKey := 'Software\Microsoft\Windows\CurrentVersion\Run';
   DirKey := 'Software\Classes\Directory\shell';
@@ -147,6 +173,56 @@ begin
   Check(DataCleanups = 0, 'silent uninstall keeps user data when cleanup is disabled');
   CleanupUserData := True; CurUninstallStepChanged(usPostUninstall);
   Check(DataCleanups = 1, 'explicit data cleanup reaches mock only');
+  Reset;
+  Check((PreparePreviousVersion = '') and (ExecCount = 0) and not UpgradePrefsCaptured,
+    'fresh installation does not invoke any old program');
+  Reset;
+  PreviousCommand := '"C:\New Pulse\unins000.exe"';
+  MockRegWriteStringValue(HKCU, RunKey, 'Pulse', '"C:\New Pulse\Pulse.exe" --background');
+  ErrorText := PreparePreviousVersion;
+  Check((ErrorText = '') and (ExecCount = 1) and
+    (ExecutedFile = 'C:\New Pulse\Pulse.Index.exe') and (ExecutedParams = '--uninstall'),
+    'same-directory upgrade removes only the index service and never runs the shortcut-removing uninstaller');
+  Check(UpgradePrefsCaptured and UpgradeStartupPresent and
+    (UpgradeStartupCommand = '"C:\New Pulse\Pulse.exe" --background'),
+    'in-place upgrade still captures existing startup preferences');
+  Reset;
+  AppPath := 'c:\NEW PULSE\'; PreviousCommand := '"C:\New Pulse\unins000.exe"';
+  ErrorText := PreparePreviousVersion;
+  Check((ErrorText = '') and (CompareText(ExtractFileName(ExecutedFile), 'Pulse.Index.exe') = 0),
+    'directory comparison ignores case and a trailing slash');
+  Reset;
+  PreviousCommand := '"C:\Old Pulse\unins000.exe" /LOG';
+  ErrorText := PreparePreviousVersion;
+  Check((ErrorText = '') and (ExecutedFile = 'C:\Old Pulse\unins000.exe') and
+    (Pos('/LOG /VERYSILENT /SUPPRESSMSGBOXES /NORESTART', ExecutedParams) = 1),
+    'relocating installation still removes the previous payload with its original parameters');
+  Reset;
+  PreviousCommand := '"C:\New Pulse old\unins000.exe"';
+  ErrorText := PreparePreviousVersion;
+  Check((ErrorText = '') and (ExecutedFile = 'C:\New Pulse old\unins000.exe'),
+    'a directory sharing the same prefix is not treated as an in-place upgrade');
+  Reset;
+  PreviousCommand := '"C:\New Pulse\unins000.exe"'; UninstallerExists := False;
+  Check((PreparePreviousVersion <> '') and (ExecCount = 0),
+    'missing previous uninstaller stops preparation without running anything');
+  Reset;
+  PreviousCommand := '"C:\New Pulse\unins000.exe"'; IndexHelperExists := False;
+  Check((PreparePreviousVersion <> '') and (ExecCount = 0),
+    'missing index helper cannot silently bypass service cleanup');
+  Reset;
+  PreviousCommand := '"C:\New Pulse\unins000.exe"'; ExecExitCode := 5;
+  Check(PreparePreviousVersion <> '', 'failed index-service removal stops in-place preparation');
+  Reset;
+  PreviousCommand := '"C:\New Pulse\unins000.exe"'; ExecSucceeds := False;
+  Check(PreparePreviousVersion <> '', 'index-helper launch failure stops in-place preparation');
+  Reset;
+  PreviousCommand := '"C:\Old Pulse\unins000.exe"'; ExecExitCode := 5;
+  Check(PreparePreviousVersion <> '', 'failed relocation uninstall still stops preparation');
+  Reset;
+  PreviousCommand := '"C:\Old Pulse\unins000.exe';
+  Check((PreparePreviousVersion <> '') and (ExecCount = 0),
+    'malformed uninstall command stops preparation without running anything');
   { Returning False prevents installation, file deployment, and uninstall registration. }
   Result := False;
 '@
@@ -162,4 +238,4 @@ if (!(Test-Path -LiteralPath (Join-Path $out 'result.txt'))) { throw "Harness pr
 $result = Get-Content -LiteralPath (Join-Path $out 'result.txt') -Raw
 Write-Output $result
 if ($result -match '\[FAIL\]') { throw 'Installer preference regression failed.' }
-if (($result -split '\[PASS\]').Count -ne 11) { throw 'Unexpected number of completed assertions.' }
+if (($result -split '\[PASS\]').Count -ne 23) { throw 'Unexpected number of completed assertions.' }

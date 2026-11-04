@@ -117,11 +117,12 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     const auto& title = l10n::Get(page_title_id);
     ComPtr<IDWriteTextFormat> title_format;
     typography::CreateTextFormat(compositor_->DwriteFactory(),
-        {typography::FontRole::Display, 26*scale_, DWRITE_FONT_WEIGHT_SEMI_BOLD}, &title_format);
+        {typography::FontRole::Display, 22*scale_, DWRITE_FONT_WEIGHT_NORMAL}, &title_format);
     if (title_format.get()) {
         title_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         title_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        painter_.DrawText(title, D2D1::RectF(lay.content.left+pad,origin+pad,
+        // Keep heading outlines on DirectWrite's antialiased path over translucent content.
+        painter_.DrawTextNative(title, D2D1::RectF(lay.content.left+pad,origin+pad,
             lay.content.right-pad,origin+pad+40*scale_),title_format.get(),theme.text);
     }
     if (vm.settings_page == 0 || vm.settings_page == 1)

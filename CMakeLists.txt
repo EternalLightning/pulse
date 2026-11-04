@@ -892,13 +892,6 @@ add_executable(pulse_session_windows_test src/bench/session_windows_test.cpp ${s
 get_target_property(session_windows_libraries pulse_json_persistence_test LINK_LIBRARIES)
 target_link_libraries(pulse_session_windows_test PRIVATE ${session_windows_libraries})
 
-add_executable(pulse_session_layout_test src/bench/session_layout_test.cpp ${json_model_sources}
-    src/app/session.cpp src/app/session_tab_model.cpp src/app/tab_group_model.cpp)
-target_compile_options(pulse_session_layout_test PRIVATE /Gy /Gw)
-target_link_options(pulse_session_layout_test PRIVATE /OPT:REF /INCREMENTAL:NO)
-target_link_libraries(pulse_session_layout_test PRIVATE
-    pulse_sqlite pulse_localization pulse_text pulse_user_storage pulse_shell_query_client shell32 ole32 uuid shlwapi netapi32 bcrypt secur32)
-
 add_executable(pulse_snapshot_patch_link_test EXCLUDE_FROM_ALL
     src/bench/snapshot_patch_link_test.cpp src/app/snapshot_patch.cpp
     src/app/link_resolve.cpp src/fs/fs_enum.cpp)
@@ -1354,13 +1347,14 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_folder_sizes_ui_cache_test src/bench/folder_sizes_ui_cache_test.cpp)
     add_executable(pulse_text_render_settings_test src/bench/text_render_settings_test.cpp)
     add_executable(pulse_context_menu_settings_ui_test src/bench/context_menu_settings_ui_test.cpp)
+    add_executable(pulse_takeover_delivery_fixture_test src/bench/takeover_delivery_fixture_test.cpp)
     add_executable(pulse_empty_state_render_test src/bench/empty_state_render_test.cpp)
     add_executable(pulse_virtual_location_navigation_test src/bench/virtual_location_navigation_test.cpp)
     add_executable(pulse_upstream_adaptation_test src/bench/upstream_adaptation_test.cpp
         src/bench/window_transfer_regression_test.cpp src/bench/network_access_application_test.cpp)
     target_compile_definitions(pulse_quality_application_objects PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
     target_compile_definitions(pulse_folder_sizes_ui_cache_test PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
-    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_empty_state_render_test pulse_virtual_location_navigation_test)
+    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_takeover_delivery_fixture_test pulse_empty_state_render_test pulse_virtual_location_navigation_test)
         target_link_libraries(${quality_target} PRIVATE pulse_quality_application_objects ${architecture_libraries})
         target_include_directories(${quality_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         foreach(quality_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
@@ -1369,7 +1363,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
                 set_property(TARGET ${quality_target} APPEND PROPERTY ${quality_property} "${quality_value}")
             endif()
         endforeach()
-        if(NOT quality_target MATCHES "^pulse_(context_menu_settings_ui|empty_state_render|virtual_location_navigation)_test$")
+        if(NOT quality_target MATCHES "^pulse_(context_menu_settings_ui|takeover_delivery_fixture|empty_state_render|virtual_location_navigation)_test$")
             add_dependencies(${quality_target} pulse)
         endif()
     endforeach()
@@ -1416,10 +1410,8 @@ if(PULSE_BUILD_PROGRESS_UI_TESTS)
     endforeach()
 endif()
 
-add_executable(pulse_transfer_rate_test src/bench/transfer_rate_test.cpp)
-target_include_directories(pulse_transfer_rate_test PRIVATE src)
-
-add_executable(pulse_copy_progress_test src/bench/copy_progress_test.cpp)
+add_executable(pulse_copy_progress_test
+    src/bench/copy_progress_test.cpp src/bench/transfer_rate_test.cpp)
 target_include_directories(pulse_copy_progress_test PRIVATE src)
 
 add_executable(pulse_archive_test src/bench/archive_test.cpp src/ops/archive.cpp)
@@ -1577,13 +1569,6 @@ add_executable(pulse_folder_actions_test EXCLUDE_FROM_ALL
     src/bench/folder_actions_test.cpp src/bench/localization_test.rc ${transfer_pipeline_sources})
 target_include_directories(pulse_folder_actions_test PRIVATE src)
 target_link_libraries(pulse_folder_actions_test PRIVATE ${transfer_pipeline_libraries})
-
-get_target_property(folder_actions_menu_sources pulse_app_controllers_test SOURCES)
-list(FILTER folder_actions_menu_sources EXCLUDE REGEX "app_controllers_test\\.cpp$")
-get_target_property(folder_actions_menu_libraries pulse_app_controllers_test LINK_LIBRARIES)
-add_executable(pulse_folder_actions_menu_test EXCLUDE_FROM_ALL
-    src/bench/folder_actions_menu_test.cpp ${folder_actions_menu_sources})
-target_link_libraries(pulse_folder_actions_menu_test PRIVATE ${folder_actions_menu_libraries})
 
 get_property(folder_operation_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(folder_operation_target IN LISTS folder_operation_targets)

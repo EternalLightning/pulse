@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import statistics
 import subprocess
-import sys
 import threading
 import time
 import zipfile
@@ -35,8 +34,6 @@ def command(exe=after, paths=manifest, threads=6, rounds=3, needle='3d3s', cance
     return args
 
 def run(name, args, extra=None):
-    if '--concurrent-only' in sys.argv and name != 'idle-contender-office':
-        return json.loads((base / f'{name}.json').read_text(encoding='utf-8'))
     result = subprocess.run(args, env=dict(env, **(extra or {})), capture_output=True, timeout=90)
     value = json.loads(result.stdout)
     value['exit_code'] = result.returncode

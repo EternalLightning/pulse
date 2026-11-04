@@ -74,6 +74,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
         std::vector<uint8_t> payload;
         DWORD owner_pid = 0;
         uint64_t owner_created = 0;
+        ipc::ShellLaunchKind kind = ipc::ShellLaunchKind::Execute;
     };
     std::wstring executable;
     Reply reply;
@@ -111,17 +112,12 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
     }
 
     void Run(uint32_t id, std::shared_ptr<Session> session, std::vector<uint8_t> payload,
-             DWORD owner_pid, uint64_t owner_created) {
-        ipc::ShellLaunchRequest request;
-        if (!ipc::ReadShellLaunch(payload.data(), payload.size(), request)) {
-            Send(id, Result(E_INVALIDARG, false, L"Invalid Shell request."));
-            return;
-        }
-        const bool picker = request.kind == ipc::ShellLaunchKind::PickFile ||
-            request.kind == ipc::ShellLaunchKind::PickFolder;
+             DWORD owner_pid, uint64_t owner_created, ipc::ShellLaunchKind kind) {
+        const bool picker = kind == ipc::ShellLaunchKind::PickFile ||
+            kind == ipc::ShellLaunchKind::PickFolder;
         // Consent runs on a separate desktop. Preserve waiting for the user's
         // answer; process death, explicit cancellation and shutdown still end it.
-        const DWORD idle_timeout = request.kind == ipc::ShellLaunchKind::ElevatedWait ? INFINITE : kNoWindowTimeoutMs;
+        const DWORD idle_timeout = kind == ipc::ShellLaunchKind::ElevatedWait ? INFINITE : kNoWindowTimeoutMs;
         WorkerProcess process(retirements, session->retirement_pending);
         Handle pipe;
         pipe.value = INVALID_HANDLE_VALUE;
@@ -226,7 +222,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
                 ++active_count;
             }
             try {
-                Run(work.id, work.session, std::move(work.payload), work.owner_pid, work.owner_created);
+                Run(work.id, work.session, std::move(work.payload), work.owner_pid, work.owner_created, work.kind);
             } catch (...) {
                 // Run's process guard reaps the worker before stack unwinding reaches here.
                 try {
@@ -291,7 +287,7 @@ void ShellLaunchProcesses::Submit(uint32_t id, std::vector<uint8_t> payload) {
         } else if (!core_->stopping && core_->job.value && session->stop.value && !core_->runners.empty()) {
             try {
                 core_->sessions.emplace(id, session);
-                core_->waiting.push_back(Core::Work{id, session, std::move(payload), core_->ui_pid, core_->ui_created});
+                core_->waiting.push_back(Core::Work{id, session, std::move(payload), core_->ui_pid, core_->ui_created, request.kind});
                 admitted = true;
             } catch (...) {
                 core_->sessions.erase(id);

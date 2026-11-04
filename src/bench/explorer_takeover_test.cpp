@@ -10,6 +10,7 @@
 #include <ocidl.h>
 #include <oleauto.h>
 #include <exdisp.h>
+#include <shlobj.h>
 #include <shldisp.h>
 #include <shlwapi.h>
 #include <wrl/client.h>
@@ -72,6 +73,11 @@ void PolicyCases() {
     Check(!policy::IsSingleTabSafe(tab), "multiple enumerated views cannot authorize whole-window close");
     tab = {true, false, 1, 1};
     Check(!policy::IsSingleTabSafe(tab), "incomplete enumeration waits for a safe source");
+    Check(policy::CanRetryEnumeration(tab), "transient incomplete enumeration retains the pending handoff");
+    tab.shell_view_count = 2;
+    Check(!policy::CanRetryEnumeration(tab), "known multiple Shell views retire even during incomplete enumeration");
+    tab.shell_view_count = 1; tab.native_tab_count = 2;
+    Check(!policy::CanRetryEnumeration(tab), "known multiple native tabs retire even during incomplete enumeration");
     tab = {false, true, 1, 0};
     Check(policy::IsSingleTabSafe(tab), "legacy single-view source remains supported");
     const auto source = HealthySource();
@@ -80,6 +86,13 @@ void PolicyCases() {
     Check(!policy::CanCloseAfterAcknowledgment(source, true, true), "stopping the service prevents close");
     auto changed = source; changed.same_identity = false;
     Check(policy::DecidePending(changed) == PendingDecision::Retire, "destroyed or reused source identity is rejected");
+    changed = source; changed.single_tab = changed.supported = false; changed.enumeration_pending = true;
+    Check(policy::DecidePending(changed) == PendingDecision::Retry &&
+        !policy::CanCloseAfterAcknowledgment(changed, true, false),
+        "incomplete final ACK validation retries without closing or abandoning the source");
+    changed.shift = true;
+    Check(policy::DecidePending(changed) == PendingDecision::Retire,
+        "Shift still retires a handoff while enumeration is incomplete");
     changed = source; changed.shift = true;
     Check(policy::DecidePending(changed) == PendingDecision::Retire &&
         !policy::CanCloseAfterAcknowledgment(changed, true, false), "explicit Shift bypass rejects even a late success ACK");
@@ -165,7 +178,7 @@ public:
             static_cast<unsigned long>(location_hr), url ? url : L"", current.c_str());
         if (url) SysFreeString(url);
     }
-    bool Create(const std::wstring& path) {
+    bool Create(const std::wstring& path, const std::function<void()>& before_show = {}) {
         std::set<HWND> existing;
         EnumWindows(CollectCabinets, reinterpret_cast<LPARAM>(&existing));
         HRESULT hr = CoCreateInstance(CLSID_ShellBrowserWindow, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&browser));
@@ -184,6 +197,7 @@ public:
         std::printf("[DIAG] fixture HWND=%p pid=%lu creation=%llu path=%ls\n", static_cast<void*>(root), identity.process,
             static_cast<unsigned long long>(identity.created), folder.c_str());
         Trace("new-identity-verified");
+        if (before_show) before_show();
         SetWindowPos(root, nullptr, -20000, -20000, 900, 600, SWP_NOACTIVATE | SWP_NOZORDER);
         const HRESULT shown = browser->put_Visible(VARIANT_TRUE);
         Trace("show-new-source", shown);
@@ -202,6 +216,46 @@ public:
         const bool ready = SUCCEEDED(hr) && Until([&] { return SamePath(FolderPath(browser.Get()), path); });
         Trace(ready ? "navigation-ready" : "navigation-not-ready", hr);
         return ready;
+    }
+    bool OpenSelected(const std::wstring& path, const std::wstring& selected_path) {
+        std::set<HWND> existing;
+        EnumWindows(CollectCabinets, reinterpret_cast<LPARAM>(&existing));
+        PIDLIST_ABSOLUTE directory = nullptr, selected = nullptr;
+        HRESULT hr = SHParseDisplayName(path.c_str(), nullptr, &directory, 0, nullptr);
+        if (SUCCEEDED(hr)) hr = SHParseDisplayName(selected_path.c_str(), nullptr, &selected, 0, nullptr);
+        if (SUCCEEDED(hr)) {
+            PCUITEMID_CHILD child = ILFindLastID(selected);
+            hr = SHOpenFolderAndSelectItems(directory, 1, &child, 0);
+        }
+        CoTaskMemFree(directory); CoTaskMemFree(selected);
+        std::printf("[DIAG] isolated SHOpenFolderAndSelectItems=0x%08lX\n", static_cast<unsigned long>(hr));
+        if (FAILED(hr)) { Limit("isolated Shell folder-and-select launch is unavailable"); return false; }
+        ComPtr<IShellWindows> windows;
+        if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows)))) return false;
+        const bool found = Until([&] {
+            long count = 0;
+            if (FAILED(windows->get_Count(&count))) return false;
+            for (long i = 0; i < count; ++i) {
+                VARIANT index{}; index.vt = VT_I4; index.lVal = i;
+                ComPtr<IDispatch> dispatch;
+                ComPtr<IWebBrowser2> candidate;
+                SHANDLE_PTR handle = 0;
+                if (FAILED(windows->Item(index, &dispatch)) || !dispatch || FAILED(dispatch.As(&candidate)) ||
+                    FAILED(candidate->get_HWND(&handle))) continue;
+                const HWND root = GetAncestor(reinterpret_cast<HWND>(handle), GA_ROOT);
+                if (!root || existing.contains(root) || !SamePath(FolderPath(candidate.Get()), path)) continue;
+                Identity source;
+                if (!ReadIdentity(root, source)) continue;
+                identity = source; browser = std::move(candidate);
+                return true;
+            }
+            return false;
+        });
+        if (!found) { Limit("Shell folder-and-select launch did not expose a new allowlisted source"); return false; }
+        folder = path; permitted_folders = {path};
+        SetWindowPos(identity.hwnd, nullptr, -20000, -20000, 900, 600, SWP_NOACTIVATE | SWP_NOZORDER);
+        Trace("folder-and-select-ready");
+        return true;
     }
     bool Select(const std::wstring& path) {
         if (!SameIdentity() || !SamePath(FolderPath(browser.Get()), folder)) return false;
@@ -258,7 +312,7 @@ void RealCases(const std::filesystem::path& root) {
     const auto run = root / (L"run-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     std::filesystem::create_directories(run);
     bool environment_ready = true;
-    for (const std::wstring scenario : {L"startup-input", L"post-submit-input", L"ack-failure", L"ack-success", L"navigate-replace", L"selection-replace", L"stop"}) {
+    for (const std::wstring scenario : {L"shell-select", L"initializing-source", L"startup-input", L"post-submit-input", L"ack-failure", L"ack-success", L"navigate-replace", L"selection-replace", L"stop"}) {
         const auto folder = run / scenario;
         const auto next = run / (scenario + L"-next");
         std::filesystem::create_directories(folder);
@@ -267,7 +321,17 @@ void RealCases(const std::filesystem::path& root) {
             CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
         OwnedSource source;
-        if (!source.Create(folder.wstring())) { environment_ready = false; break; }
+        ExplorerWindowTakeover worker;
+        const auto start_worker = [&] {
+            Check(worker.StartForTesting(owner, kWake, {source.identity.hwnd}, {folder.wstring(), next.wstring()}),
+                "start worker with only this new window identity and isolated folders allowed");
+        };
+        const bool initializing = scenario == L"initializing-source";
+        const bool shell_select = scenario == L"shell-select";
+        if (!(shell_select ? source.OpenSelected(folder.wstring(), (folder / L"selected.txt").wstring())
+            : source.Create(folder.wstring(), initializing ? start_worker : std::function<void()>{}))) {
+            environment_ready = false; break;
+        }
         source.permitted_folders.push_back(next.wstring());
         if (scenario == L"startup-input")
             Check(source.Select((folder / L"selected.txt").wstring()), "opening scenario selects its fixture file before takeover");
@@ -277,9 +341,7 @@ void RealCases(const std::filesystem::path& root) {
         EnumChildWindows(source.identity.hwnd, CountNativeTabs, reinterpret_cast<LPARAM>(&native_tabs));
         LASTINPUTINFO input_before{sizeof(input_before)};
         GetLastInputInfo(&input_before);
-        ExplorerWindowTakeover worker;
-        Check(worker.StartForTesting(owner, kWake, {source.identity.hwnd}, {folder.wstring(), next.wstring()}),
-            "start worker with only this new window identity and isolated folders allowed");
+        if (!initializing) start_worker();
         if (scenario == L"startup-input") {
             Check(Until([&] { return worker.Stats().scans != 0; }), "watcher discovers the opening source before simulated input");
             Pause(100);
@@ -328,8 +390,8 @@ void RealCases(const std::filesystem::path& root) {
             Check(worker.IsRequestActive(request.token) && source.SameIdentity(),
                 "ordinary input after submission does not abandon or duplicate takeover");
         }
-        if (scenario == L"ack-success" || scenario == L"startup-input" || scenario == L"post-submit-input") {
-            if (scenario == L"startup-input")
+        if (shell_select || initializing || scenario == L"ack-success" || scenario == L"startup-input" || scenario == L"post-submit-input") {
+            if (shell_select || scenario == L"startup-input")
                 Check(request.selected_paths == std::vector<std::wstring>{(folder / L"selected.txt").wstring()},
                     "opening-time input still delivers the exact selected file after settling");
             worker.Acknowledge(request.token, true);

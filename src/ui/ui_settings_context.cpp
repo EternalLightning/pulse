@@ -69,26 +69,34 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
     for(int i=0;i<4;++i) {
         const auto r=l.pulse_preset[i];
         const bool on=static_cast<int>(active)==i;
-        const bool dim=i==3 && !on;
-        if(i<3 && IsHovered(vm,HitTestResult::SettingsToggle,60+i) && !on) fill(r,6*s,theme.fill_hover);
-        stroke(r,6*s,on ? theme.accent : theme.stroke_card,on ? 1.5f*s : 1.0f);
-        const auto name_color=dim ? theme.text_disabled : on ? theme.accent : theme.text;
-        painter_.DrawText(l10n::Get(kPresetName[i]),D2D1::RectF(r.left+10*s,r.top+5*s,r.right-6*s,r.top+25*s),compositor_->TextFormat(),name_color);
-        painter_.DrawWrappedCaption(l10n::Get(kPresetDesc[i]),D2D1::Point2F(r.left+10*s,r.top+25*s),
-            r.right-r.left-20*s,dim ? theme.text_disabled : theme.text_secondary);
+        if(i==0 || r.top!=l.pulse_preset[i-1].top) {
+            int last=i;
+            while(last<3 && l.pulse_preset[last+1].top==r.top) ++last;
+            painter_.DrawSegmentedTrack(D2D1::RectF(r.left,r.top,l.pulse_preset[last].right,r.bottom));
+        }
+        fluent::SegmentedItemSpec item{};
+        item.bounds=r;item.text=l10n::Get(kPresetName[i]);item.shared_track=true;
+        item.state.checked=on;item.state.enabled=i<3 || on;
+        item.state.hovered=i<3 && IsHovered(vm,HitTestResult::SettingsToggle,60+i);
+        painter_.DrawSegmentedItem(item);
     }
+    painter_.DrawWrappedCaption(l10n::Get(kPresetDesc[static_cast<int>(active)]),
+        D2D1::Point2F(l.pulse_preset_description.left,l.pulse_preset_description.top),
+        l.pulse_preset_description.right-l.pulse_preset_description.left,theme.text_secondary);
     // Surface tabs.
-    fill(l.pulse_tabs,7*s,theme.fill_hover);
     static constexpr I kTabs[]={I::ContextTabItem,I::ContextTabBackground,I::ContextTabRow};
     for(int i=0;i<3;++i) {
         const auto r=l.pulse_tab[i];
+        if(i==0 || r.top!=l.pulse_tab[i-1].top) {
+            int last=i;
+            while(last<2 && l.pulse_tab[last+1].top==r.top) ++last;
+            painter_.DrawSegmentedTrack(D2D1::RectF(r.left,r.top,l.pulse_tab[last].right,r.bottom));
+        }
         const bool on=vm.settings_context_tab==i;
-        if(on) {fill(r,5*s,theme.fill_input);stroke(r,5*s,theme.stroke_card,1);}
-        else if(IsHovered(vm,HitTestResult::SettingsToggle,64+i)) fill(r,5*s,theme.fill_pressed);
-        const auto label=l10n::Get(kTabs[i]);
-        const float w=CellTextWidth(label);
-        const float x=r.left+std::max(0.0f,(r.right-r.left-w)*0.5f);
-        painter_.DrawText(label,D2D1::RectF(x,r.top,r.right,r.bottom),compositor_->TextFormat(),on ? theme.accent : theme.text);
+        fluent::SegmentedItemSpec item{};
+        item.bounds=r;item.text=l10n::Get(kTabs[i]);item.shared_track=true;
+        item.state.checked=on;item.state.hovered=IsHovered(vm,HitTestResult::SettingsToggle,64+i);
+        painter_.DrawSegmentedItem(item);
     }
     // Rows (list order = menu order of the selected surface).
     const auto rows=model::BuiltinMenuOrderedRows(PulseMenuSurface(vm),PulseMenuOrder(vm));

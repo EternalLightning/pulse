@@ -47,7 +47,7 @@ inline bool ApplyShellSelection(Tab& tab, const PlacesCatalog& places,
     }
     return std::all_of(rows.begin(), rows.end(), [&](int row) {
         return tab.EntryVisible(row) && (!select || tab.IsSelected(row)) &&
-            (!deselect || !tab.IsSelected(row)) && std::find(visible.begin(), visible.end(), row) != visible.end();
+            (!deselect || !tab.IsSelected(row));
     });
 }
 inline bool ShellSelectionIsStale(const Tab& tab, std::wstring_view folder,

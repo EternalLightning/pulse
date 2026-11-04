@@ -32,11 +32,19 @@ static int RunSessionPreferencesChecks() {
     full.sidebar_hidden = 1;
     full.layout_tabs.resize(1);
     full.layout_tabs.front().panes.push_back({full.active_path});
-    check(app::SaveSession(full), "write an isolated legacy complete session");
+    auto legacy_json = app::SessionToJson(full);
+    const std::wstring legacy_undo = LR"("undo":[{"type":2,"sup":true,"dest":"","name":"renamed.txt","src":["C:\\fixture\\original.txt"]}],)";
+    legacy_json.insert(legacy_json.find(L'{') + 1, legacy_undo);
+    check(WriteUtf8FileAtomic((root / L"session.json").wstring(), legacy_json),
+        "write an isolated legacy session with a completed rename in undo history");
     app::WindowSessionSnapshot preferences;
     check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1 &&
         preferences.active_path.empty() && preferences.layout_tabs.empty(),
         "preferences migrate legacy settings without restoring navigation");
+    const auto migrated_json = app::SessionPreferencesToJson(preferences);
+    const json::Document migrated(migrated_json);
+    check(migrated.Is(json::Kind::Object) && !migrated.Find(L"undo"),
+        "legacy session undo history is discarded during preference migration");
     std::wstring original_session;
     check(ReadUtf8File((root / L"session.json").wstring(), original_session),
         "capture the complete legacy session before saving preferences");
@@ -50,12 +58,25 @@ static int RunSessionPreferencesChecks() {
     const json::Document doc(saved_preferences);
     check(doc.Is(json::Kind::Object) && !doc.Find(L"path") && !doc.Find(L"layoutTabs") && !doc.Find(L"windows"),
         "the preference schema contains no navigation state");
+    check(!doc.Find(L"undo"), "saved preferences contain no undo history");
     check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 && preferences.active_path.empty(),
         "the new preference file takes precedence over legacy values");
     app::SessionSnapshot restored;
     check(app::LoadSession(restored) && restored.active_path == full.active_path && restored.layout_tabs.size() == 1,
         "complete session remains readable after preference updates");
-    preferences.undo_json = L"[\"" + std::wstring(json::kMaxDocumentChars, L'a') + L"\"]";
+    const auto restored_json = app::SessionToJson(restored);
+    const json::Document restored_session(restored_json);
+    check(restored_session.Is(json::Kind::Object) && !restored_session.Find(L"undo") &&
+        !restored_session.Find(L"windows")->children.front().Find(L"undo"),
+        "complete session snapshots discard legacy undo in every window");
+    auto legacy_preferences = saved_preferences;
+    legacy_preferences.insert(legacy_preferences.find(L'{') + 1, legacy_undo);
+    check(WriteUtf8FileAtomic((root / L"preferences.json").wstring(), legacy_preferences) &&
+        app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 &&
+        app::SaveSessionPreferences(preferences) &&
+        ReadUtf8File((root / L"preferences.json").wstring(), saved_session) && saved_session == saved_preferences,
+        "reopening old preferences forgets undo history and preserves other settings");
+    preferences.tray.Collect({L"C:\\" + std::wstring(json::kMaxDocumentChars, L'a')}, false);
     check(!app::SaveSessionPreferences(preferences) &&
         ReadUtf8File((root / L"preferences.json").wstring(), saved_session) && saved_session == saved_preferences,
         "oversized preferences fail before replacing the previous file");

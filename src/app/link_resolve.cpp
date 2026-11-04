@@ -30,9 +30,7 @@ bool ResolveLink(const std::wstring& lnk_path, fs::DirEntry& e,
     if (!ipc::QueryShell(request, result, cancel) || FAILED(result.error) ||
         result.text.empty() || (cancel && cancel())) return false;
 
-    const std::wstring target = fs::NormalizePath(result.text);
-    if (target.empty()) return false;
-    e.link_target = target;
+    e.link_target = fs::NormalizePath(result.text);
     e.link_target_is_dir = result.target_is_dir;
     e.link_target_size = result.target_size;
     e.link_target_mtime = result.target_mtime;

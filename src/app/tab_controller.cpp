@@ -58,9 +58,14 @@ void TabController::WillChangeLayout() const {
     if (callbacks_.will_change_layout) callbacks_.will_change_layout();
 }
 
+void TabController::WillChangeTabStrip() const {
+    if (callbacks_.will_change_tab_strip) callbacks_.will_change_tab_strip();
+}
+
 void TabController::ToggleGroupCollapse(WindowTabs& tabs, int group_id) {
     TabGroup* group = FindGroup(tabs, group_id);
     if (!group) return;
+    WillChangeTabStrip();
     group->collapsed = !group->collapsed;
     if (group->collapsed && tabs.active < tabs.items.size() &&
         tabs.items[tabs.active]->tab_group == group_id) {
@@ -105,6 +110,7 @@ void TabController::CreateGroupAndEdit(WindowTabs& tabs, int tab_index, POINT sc
     group.id = AllocateTabGroupId(tabs);
     if (group.id == 0) return;
     group.color_rgb = FirstUnusedColor(tabs);
+    WillChangeTabStrip();
     tabs.tab_groups.push_back(group);
     tabs.items[static_cast<size_t>(tab_index)]->tab_group = group.id;
     Changed();
@@ -122,6 +128,7 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
     const auto build = [&](const std::wstring& query) {
         TabGroup* current = FindGroup(tabs, id);
         if (current && current->name != query) {
+            WillChangeTabStrip();
             current->name = query;
             Changed();
         }
@@ -168,8 +175,10 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
             }
         }
     } else if (command == CmdTabGroupUngroup) {
+        WillChangeTabStrip();
         RemoveGroup(tabs, id);
     } else if (command == CmdTabGroupClose) {
+        WillChangeTabStrip();
         WillChangeLayout();
         for (int i = static_cast<int>(tabs.items.size()) - 1; i >= 0; --i) {
             if (tabs.items[static_cast<size_t>(i)]->tab_group == id) {
@@ -216,6 +225,7 @@ void TabController::CloseTab(WindowTabs& tabs, size_t index) const {
 }
 
 void TabController::CloseTabs(WindowTabs& tabs, int first, int last, int except) const {
+    WillChangeTabStrip();
     WillChangeLayout();
     for (int i = std::min(last, static_cast<int>(tabs.items.size()) - 1); i >= std::max(0, first); --i) {
         if (i == except || tabs.items[static_cast<size_t>(i)]->pinned) continue;
@@ -237,6 +247,7 @@ void TabController::TogglePin(WindowTabs& tabs, int index) {
         ++first_unpinned;
     }
     const bool pin = !tab.pinned;
+    WillChangeTabStrip();
     if (pin) tab.tab_group = 0;
     tab.pinned = pin;
     if (pin && tab.marker_rgb == 0) {
@@ -344,6 +355,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         CreateGroupAndEdit(tabs, tab_index, screen_pt, menu);
         return;
     } else if (command == CmdTabRemoveFromGroup) {
+        WillChangeTabStrip();
         tab.tab_group = 0;
         NormalizeGroupRuns(tabs);
         PruneEmptyGroups(tabs);
@@ -355,6 +367,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         CloseTabs(tabs, tab_index + 1, static_cast<int>(tabs.items.size()) - 1);
     } else if (command >= CmdTabJoinGroupBase &&
                command < CmdTabJoinGroupBase + static_cast<int>(tabs.tab_groups.size())) {
+        WillChangeTabStrip();
         tab.tab_group = tabs.tab_groups[static_cast<size_t>(command - CmdTabJoinGroupBase)].id;
         NormalizeGroupRuns(tabs);
     }

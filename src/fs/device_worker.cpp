@@ -62,7 +62,7 @@ void CALLBACK BudgetExpired(PTP_CALLBACK_INSTANCE, void*, PTP_TIMER);
 
 void CALLBACK RejectedTask(PTP_CALLBACK_INSTANCE, void* context) {
     std::unique_ptr<std::function<void()>> callback(static_cast<std::function<void()>*>(context));
-    if (*callback) (*callback)();
+    (*callback)();
 }
 
 void Reject(std::function<void()> callback) {

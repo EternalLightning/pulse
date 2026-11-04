@@ -54,7 +54,7 @@ AppState* PostOpenFolderInNewWindow(AppState& s, const std::wstring& raw) {
 AppState* PostOpenFolderInNewWindow(AppState& s, const ResolvedOpenTarget& target) {
     HWND hwnd = s.core.windows.MostRecentHwnd();
     if (!hwnd) hwnd = s.hwnd;
-    if (!hwnd || !IsWindow(hwnd)) return nullptr;
+    if (!IsWindow(hwnd)) return nullptr;
     std::unique_ptr<ResolvedOpenTarget> open_target(
         new (std::nothrow) ResolvedOpenTarget(target));
     if (!open_target) return nullptr;

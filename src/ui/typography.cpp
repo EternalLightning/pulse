@@ -69,11 +69,10 @@ const wchar_t* ResolveFamily(IDWriteFactory2* factory, FontRole role) {
     return L"Segoe UI";
 }
 
-bool BuildFallback(IDWriteFactory2* factory, IDWriteFontFallback** fallback) {
-    if (!factory || !fallback) return false;
+void BuildFallback(IDWriteFactory2* factory, IDWriteFontFallback** fallback) {
     *fallback = nullptr;
     IDWriteFontFallbackBuilder* builder = nullptr;
-    if (FAILED(factory->CreateFontFallbackBuilder(&builder)) || !builder) return false;
+    if (FAILED(factory->CreateFontFallbackBuilder(&builder)) || !builder) return;
 
     const DWRITE_UNICODE_RANGE cjk[] = {
         {0x2E80, 0x303F}, {0x3400, 0x4DBF}, {0x4E00, 0x9FFF},
@@ -91,13 +90,11 @@ bool BuildFallback(IDWriteFactory2* factory, IDWriteFontFallback** fallback) {
         builder->AddMappings(system);
         system->Release();
     }
-    const HRESULT result = builder->CreateFontFallback(fallback);
+    builder->CreateFontFallback(fallback);
     builder->Release();
-    return SUCCEEDED(result) && *fallback;
 }
 
 void ApplyFallbackInternal(IDWriteFactory2* factory, IDWriteTextFormat* format) {
-    if (!factory || !format) return;
     std::lock_guard lock(g_fallback_mutex);
     if (g_fallback_factory != factory || !g_fallback) {
         Release(g_fallback);
@@ -262,7 +259,8 @@ std::uint64_t Generation() noexcept {
 D2D1_RECT_F SnapVerticalBounds(const D2D1_RECT_F& bounds) noexcept {
     D2D1_RECT_F snapped = bounds;
     snapped.top = std::round(bounds.top);
-    snapped.bottom = std::max(snapped.top + 1.0f, std::round(bounds.bottom));
+    // Moving a centered line must not alternate its height as each edge crosses a pixel.
+    snapped.bottom = snapped.top + std::max(1.0f, bounds.bottom - bounds.top);
     return snapped;
 }
 

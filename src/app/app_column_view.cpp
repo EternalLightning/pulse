@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../ui/animation_clock.h"
 #include "app_internal.h"
 #include "app_column_view.h"
 #include "../ui/column_strip_layout.h"
@@ -244,7 +245,7 @@ bool ScrollStripBy(AppState& s, const ui::WindowViewModel& vm, int pane_index, f
     float& offset = tab->column_strip.scroll_from_right_dip;
     tab->column_strip.horizontal_motion.ScrollBy(offset, delta_dip,
         layout.max_scroll_px / scale, (layout.viewport.right - layout.viewport.left) / scale,
-        GetTickCount64(), s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
+        ui::AnimationTimeMs(), s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
     InvalidateRect(s.hwnd, nullptr, FALSE);
     return true;
 }
@@ -598,7 +599,7 @@ bool HandleColumnStripWheel(AppState& s, const ui::WindowViewModel& vm,
         }
         col->auto_scroll = false;
         col->scroll_motion.ScrollBy(col->scroll_dip, -step / scale, max_scroll / scale,
-            view_h / scale, GetTickCount64(),
+            view_h / scale, ui::AnimationTimeMs(),
             s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast());
         InvalidateRect(s.hwnd, nullptr, FALSE);
         break;

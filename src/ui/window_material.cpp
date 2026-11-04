@@ -23,7 +23,6 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -269,8 +268,8 @@ DecodedPixels DecodeImageFile(const std::wstring& path) {
     IWICBitmapSource* source = pixels;
     if (width > kMaxSource || height > kMaxSource) {
         const float scale = (std::min)(
-            static_cast<float>(kMaxSource) / static_cast<float>((std::max)(1u, width)),
-            static_cast<float>(kMaxSource) / static_cast<float>((std::max)(1u, height)));
+            static_cast<float>(kMaxSource) / static_cast<float>(width),
+            static_cast<float>(kMaxSource) / static_cast<float>(height));
         width = (std::max)(1u, static_cast<UINT>(width * scale));
         height = (std::max)(1u, static_cast<UINT>(height * scale));
         hr = wic->CreateBitmapScaler(&scaler);
@@ -284,21 +283,15 @@ DecodedPixels DecodeImageFile(const std::wstring& path) {
         source = scaler.get();
     }
 
-    const uint64_t stride = static_cast<uint64_t>(width) * 4u;
-    const uint64_t bytes = stride * static_cast<uint64_t>(height);
-    if (stride > (std::numeric_limits<UINT>::max)() ||
-        bytes > (std::numeric_limits<UINT>::max)() ||
-        bytes > (std::numeric_limits<size_t>::max)()) {
-        decoded.result = E_OUTOFMEMORY;
-        return decoded;
-    }
+    const UINT stride = width * 4u;
+    const UINT bytes = stride * height;
     try {
         decoded.pixels.resize(static_cast<size_t>(bytes));
     } catch (...) {
         decoded.result = E_OUTOFMEMORY;
         return decoded;
     }
-    hr = source->CopyPixels(nullptr, static_cast<UINT>(stride), static_cast<UINT>(bytes),
+    hr = source->CopyPixels(nullptr, stride, bytes,
                             decoded.pixels.data());
     if (FAILED(hr)) {
         decoded.pixels.clear();
@@ -307,7 +300,7 @@ DecodedPixels DecodeImageFile(const std::wstring& path) {
     }
     decoded.width = width;
     decoded.height = height;
-    decoded.stride = static_cast<UINT>(stride);
+    decoded.stride = stride;
     decoded.result = S_OK;
     return decoded;
 }

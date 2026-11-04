@@ -221,13 +221,11 @@ void MainRenderer::BreadcrumbLayout(const PaneViewModel& vm, float w,
     D2D1_RECT_F addr = AddressBarRect(w);
     const float segPad = 8.0f * scale_;
     const float chevronW = 14.0f * scale_;
-    const float hint = 0.0f;
-    const float avail = std::max(0.0f, addr.right - addr.left - 2 * margin_ - hint);
+    const float avail = std::max(0.0f, addr.right - addr.left - 2 * margin_);
 
     IDWriteFactory2* dwrite = compositor_ ? compositor_->DwriteFactory() : nullptr;
     IDWriteTextFormat* fmt = compositor_ ? compositor_->AddressFormat() : nullptr;
 
-    struct Measured { float w; };
     std::vector<float> widths(segments.size(), 0.0f);
     float total = 0.0f;
     for (size_t i = 0; i < segments.size(); ++i) {

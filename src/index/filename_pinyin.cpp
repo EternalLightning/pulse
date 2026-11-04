@@ -152,7 +152,7 @@ PinyinPairMask PinyinCandidatePairs(std::wstring_view name) {
     return pairs;
 }
 PinyinMatch FindPinyinMatch(std::wstring_view name, std::wstring_view query) {
-    if (query.empty() || !PinyinEligible(query) || !HasPinyinCharacters(name)) return {};
+    if (!PinyinEligible(query) || !HasPinyinCharacters(name)) return {};
     auto full = Match(name, query, false);
     return full ? full : Match(name, query, true);
 }

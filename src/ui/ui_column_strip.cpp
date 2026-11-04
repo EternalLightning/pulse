@@ -84,7 +84,7 @@ bool MainRenderer::ColumnStripHScrollRects(const ColumnStripLayout& layout, D2D1
 
 float MainRenderer::ColumnStripMaxScrollPx(const ColumnStripColumnView& column, float view_h) const {
     const float content = static_cast<float>(StripRowCount(column)) * row_height_;
-    return std::max(0.0f, content - std::max(0.0f, view_h));
+    return std::max(0.0f, content - view_h);
 }
 
 float MainRenderer::ColumnStripScrollPx(const ColumnStripColumnView& column, float view_h) const {
@@ -100,8 +100,7 @@ float MainRenderer::ColumnStripScrollPx(const ColumnStripColumnView& column, flo
 
 void MainRenderer::DrawColumnStrip(const WindowViewModel& vm, const PaneViewModel& pane,
                                    const D2D1_RECT_F& bounds, int pane_index, const Theme& theme) {
-    ID2D1DeviceContext* dc = compositor_ ? compositor_->Dc() : nullptr;
-    if (!dc) return;
+    ID2D1DeviceContext* dc = compositor_->Dc();
     const ColumnStripLayout strip = ColumnStripGeometry(pane, bounds);
     if (!strip.active) return;
     const ColumnStripView& cs = pane.column_strip;

@@ -25,7 +25,7 @@ public:
             Reset();
             return value != before;
         }
-        const float elapsed = static_cast<float>(std::min<uint64_t>(now >= last_tick_ ? now - last_tick_ : 0, 100));
+        const float elapsed = static_cast<float>(now >= last_tick_ ? now - last_tick_ : 0);
         const float decay = animate ? std::exp(-elapsed / kResponseMs) : 0.0f;
         const float next = value + velocity_ * kResponseMs * (1.0f - decay);
         value = std::clamp(next, 0.0f, maximum);

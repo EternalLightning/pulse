@@ -11,7 +11,7 @@
 
 namespace pulse::ui {
 
-// Capture the displayed strip before deletion, then move surviving spans to
+// Capture the displayed strip before a mutation, then move surviving spans to
 // their new layout. Positions and widths share one timeline, including chips
 // and the plus button. The renderer also uses these spans for hit testing.
 class TabCloseAnimation {

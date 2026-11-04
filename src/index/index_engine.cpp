@@ -118,9 +118,6 @@ bool EqualsI(std::wstring_view a, std::wstring_view b) {
 
 uint32_t NameHash(std::wstring_view name) {
     uint32_t h = 2166136261u;
-    // Empty MSVC vectors yield data()==nullptr; a corrupted view can also be
-    // {nullptr, n>0}. Never walk a null pointer.
-    if (!name.data() || name.empty()) return h;
     for (wchar_t c : name) {
         h ^= FoldChar(c);
         h *= 16777619u;
@@ -2431,7 +2428,7 @@ void Engine::ReplayDeltasLocked() {
             return;
         }
         if (op == DeltaOp::Tomb) {
-            if (idx < 0 || idx >= LiveCount() || IsTomb(idx)) return;
+            if (IsTomb(idx)) return;
             ChildMapRemove(NodeAt(idx).parent, NameOf(idx), idx);
             tombstones_.insert(idx);
             ++deleted_;
@@ -2442,12 +2439,10 @@ void Engine::ReplayDeltasLocked() {
                 valid = false;
                 return;
             }
-            if (!name.data() && !name.empty()) return;
             AddNodeLocked(live_, parent, name, flags, frn, size, UnixToFt(mtime), true, vol);
             return;
         }
-        if (op == DeltaOp::Patch && idx >= 0) {
-            if (idx >= LiveCount()) return;
+        if (op == DeltaOp::Patch) {
             Patch& p = patches_[idx];
             if (which & static_cast<uint8_t>(PatchBits::Meta)) {
                 if (idx < BaseCount() && NodeAt(idx).parent != parent) base_parent_changed_ = true;
@@ -2463,7 +2458,6 @@ void Engine::ReplayDeltasLocked() {
                 // Attribute-only records preserve the existing parent and flags.
             }
             if (which & static_cast<uint8_t>(PatchBits::Name)) {
-                if (!name.data() && !name.empty()) return;
                 if (p.has_name) pool_waste_ += p.len;
                 p.off = static_cast<uint32_t>(live_.pool.size());
                 p.len = static_cast<uint16_t>(name.size());

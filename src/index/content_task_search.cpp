@@ -282,11 +282,11 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
     MEMORYSTATUSEX memory{};
     memory.dwLength = sizeof(memory);
     GlobalMemoryStatusEx(&memory);
-    const unsigned cpu = (std::max)(1u, std::thread::hardware_concurrency());
+    const unsigned cpu = std::thread::hardware_concurrency();
     // One reserved worker per category. Extra slots require both CPU and RAM.
     const auto memory_slots =
         static_cast<unsigned>((std::min)(uint64_t{6}, memory.ullAvailPhys / (256ull * 1024 * 1024)));
-    const unsigned slots = (std::max)(3u, (std::min)({6u, cpu, (std::max)(3u, memory_slots)}));
+    const unsigned slots = (std::max)(3u, (std::min)(cpu, memory_slots));
     std::array<unsigned, 3> lane_slots{1, 1, 1};
     for (unsigned i = 3; i < slots; ++i)
         ++lane_slots[(i - 3) % 3];

@@ -97,6 +97,9 @@ int MainRenderer::TrayDeckCapacity(float window_w) const {
 void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     ID2D1DeviceContext* dc = compositor_->Dc();
     painter_.BeginFrame(theme, IsHighContrast());
+    const auto settings = SidebarSettingsRect(rect.right, rect.bottom);
+    auto settings_fill = theme.fill_hover;
+    settings_fill.a *= ControlHoverOpacity(settings, IsHovered(vm, HitTestResult::SettingsButton));
     const auto home = HomeButtonRect(EffectiveSidebarWidth(rect.right), title_bar_height_ + margin_, scale_);
     const bool home_hover = vm.hover_region == HitTestResult::HomeButton;
     const bool home_selected = vm.pane.is_home;
@@ -216,13 +219,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             }
         }
         dc->PopAxisAlignedClip();
-        const D2D1_RECT_F settings = SidebarSettingsRect(rect.right, rect.bottom);
-        if (IsHovered(vm, HitTestResult::SettingsButton)) {
-            MakeBrush(dc, theme.fill_hover, brFillHover_);
-            FillRoundedRect(dc, brFillHover_.get(), settings.left, settings.top,
-                settings.right - settings.left, settings.bottom - settings.top,
-                theme.radius_control * scale_);
-        }
+        painter_.FillRoundedRect(settings, theme.radius_control * scale_, settings_fill);
         DrawIconText(settings.left, settings.top, settings.right - settings.left,
             settings.bottom - settings.top, kIconSettings, L"", theme.text_secondary, 0.86f);
         return;
@@ -457,14 +454,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
 
     painter_.DrawScrollbar(SidebarScrollbarSpec(vm, sb, scale_));
     dc->PopAxisAlignedClip();
-    const D2D1_RECT_F settings = SidebarSettingsRect(rect.right, rect.bottom);
-    const bool hovered = IsHovered(vm, HitTestResult::SettingsButton);
-    if (hovered) {
-        MakeBrush(dc, theme.fill_hover, brFillHover_);
-        FillRoundedRect(dc, brFillHover_.get(), settings.left, settings.top,
-            settings.right - settings.left, settings.bottom - settings.top,
-            theme.radius_control * scale_);
-    }
+    painter_.FillRoundedRect(settings, theme.radius_control * scale_, settings_fill);
     DrawIconText(settings.left + 8.0f * scale_, settings.top, 24.0f * scale_,
         settings.bottom - settings.top, kIconSettings, L"", theme.text_secondary, 0.78f);
     painter_.DrawText(l10n::Get(l10n::StringId::Settings),
@@ -475,7 +465,6 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
 
 void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& panel_rc,
                                 const Theme& theme) {
-    if (!compositor_ || !compositor_->Dc()) return;
     ID2D1DeviceContext* dc = compositor_->Dc();
     IDWriteFactory2* factory = compositor_->DwriteFactory();
     const TrayDeckView& deck = vm.tray_deck;
@@ -577,17 +566,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
     const float stack_opacity = deck.live_count == 0 && ghost_alpha > 0.005f
         ? ghost_alpha : 1.0f;
 
-    auto draw_card = [&](const TrayCardView& card, bool is_top) {
-        TrayCardPose pose = TrayCardPoseOf(g, card, deck.spread);
-        pose.opacity = std::clamp(pose.opacity / stack_opacity, 0.0f, 1.0f);
-        if (pose.opacity <= 0.005f) return;
-        dc->SetTransform(pose.m * old);
-        const bool layered = pose.opacity < 0.995f;
-        if (layered) {
-            dc->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr,
-                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), pose.opacity),
-                nullptr);
-        }
+    auto draw_card_content = [&](const TrayCardView& card, bool is_top, float dim) {
         const D2D1_RECT_F rc = g.card;
         // Soft shadow: a few widening translucent layers below the card.
         if (!hc) {
@@ -688,8 +667,8 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         }
 
         // Peeking layers read as "further away": dim them.
-        if (pose.dim > 0.001f && !hc) {
-            FillRoundedRect(dc, color(rgba(0x000000, pose.dim * (vm.dark ? 0.22f : 0.035f))),
+        if (dim > 0.001f && !hc) {
+            FillRoundedRect(dc, color(rgba(0x000000, dim * (vm.dark ? 0.22f : 0.035f))),
                             rc.left, rc.top, cw, ch, g.radius);
         }
 
@@ -706,6 +685,31 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
             glyph.a *= h;
             DrawIconText(c.x - r, c.y - r, r * 2.0f, r * 2.0f, kIconCloseSmall, L"x", glyph, 0.55f);
         }
+    };
+    auto draw_card = [&](const TrayCardView& card, bool is_top) {
+        TrayCardPose pose = TrayCardPoseOf(g, card, deck.spread);
+        pose.opacity = std::clamp(pose.opacity / stack_opacity, 0.0f, 1.0f);
+        if (pose.opacity <= 0.005f) return;
+        ComPtr<ID2D1Image> target;
+        ComPtr<ID2D1CommandList> commands;
+        dc->GetTarget(&target);
+        bool recorded = SUCCEEDED(dc->CreateCommandList(&commands));
+        if (recorded) {
+            // Apply the drag pose once to the whole card, including every text backend.
+            dc->SetTarget(commands.get());
+            dc->SetTransform(D2D1::Matrix3x2F::Identity());
+            draw_card_content(card, is_top, pose.dim);
+            dc->SetTarget(target.get());
+            recorded = SUCCEEDED(commands->Close());
+        }
+        dc->SetTransform(pose.m * old);
+        const bool layered = pose.opacity < 0.995f;
+        if (layered) {
+            dc->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr,
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), pose.opacity), nullptr);
+        }
+        if (recorded) dc->DrawImage(commands.get());
+        else draw_card_content(card, is_top, pose.dim);
         if (layered) dc->PopLayer();
         dc->SetTransform(old);
     };

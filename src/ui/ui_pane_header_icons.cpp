@@ -11,8 +11,7 @@ namespace pulse::ui {
 
 void MainRenderer::DrawPaneHeaderIcon(const D2D1_RECT_F& rc, PaneHeaderIcon icon,
                                       const D2D1_COLOR_F& color) {
-    auto* dc = compositor_ ? compositor_->Dc() : nullptr;
-    if (!dc) return;
+    auto* dc = compositor_->Dc();
     if (!paneHeaderStroke_.get()) command_icons::CreateStrokeStyle(dc, &paneHeaderStroke_);
     using I = command_icons::Icon;
     I command = I::None;

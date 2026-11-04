@@ -16,6 +16,19 @@ inline bool RunPageScrollChecks(pulse::AppState& s) {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
         failures += !passed;
     };
+    for (const float height : {31.2f, 46.8f}) {
+        const auto initial = ui::typography::SnapVerticalBounds(D2D1::RectF(0, 100, 200, 100 + height));
+        bool stable = true;
+        float previous = initial.top;
+        for (int frame = 1; frame <= 80; ++frame) {
+            const float top = 100.0f - frame * 0.05f;
+            const auto moved = ui::typography::SnapVerticalBounds(D2D1::RectF(0, top, 200, top + height));
+            stable &= std::abs((moved.bottom - moved.top) - (initial.bottom - initial.top)) < 0.001f;
+            stable &= moved.top <= previous && previous - moved.top <= 1.0f;
+            previous = moved.top;
+        }
+        check(stable, "subpixel scroll keeps centered text height stable and moves its origin monotonically");
+    }
     s.compositor.Resize(1100, 700);
     for (int i = 0; i < 60; ++i) {
         app::SidebarEntry entry;
@@ -57,6 +70,17 @@ inline bool RunPageScrollChecks(pulse::AppState& s) {
     s.horizontalScrollMotion.ScrollBy(tab.scroll_x, 50, 1000, 400, 1000, true);
     s.horizontalScrollTab = &tab;
     s.horizontalScrollPath = L"C:\\OldFolder";
+    auto rows = std::make_shared<std::vector<fs::DirEntry>>(200);
+    tab.snapshot = rows;
+    tab.loading = false;
+    tab.scroll_y = 0;
+    CancelScrollAnimation(s);
+    StartSmoothScroll(s, 300);
+    s.scrollLastUpdateTime -= std::chrono::milliseconds(330);
+    UpdateSmoothScroll(s);
+    check(tab.scroll_y > 280 && tab.scroll_y < 300,
+        "main list catches up after a delayed frame instead of stretching the gesture");
+    CancelScrollAnimation(s);
     auto vm = BuildVm(s, false);
     TickAppSurfaceScroll(s, vm, 1016);
     check(!s.horizontalScrollMotion.Pending(), "navigation cancels horizontal momentum from the old folder");

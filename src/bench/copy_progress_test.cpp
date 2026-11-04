@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <string>
 
+int RunTransferRateChecks();
+
 namespace {
 int failures = 0;
 constexpr uint64_t mib = 1024ull * 1024;
@@ -167,5 +169,7 @@ int wmain(int argc, wchar_t** argv) {
     if (argc == 5 && std::wstring(argv[1]) == L"--probe")
         return CopyProbe(argv[2], argv[3], std::stoull(argv[4]));
     if (argc != 1) return 2;
-    return RegressionTests();
+    const int rate = RunTransferRateChecks();
+    const int progress = RegressionTests();
+    return rate || progress ? 1 : 0;
 }

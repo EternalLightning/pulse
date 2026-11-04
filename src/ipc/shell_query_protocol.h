@@ -182,14 +182,14 @@ inline bool ReadShellQueryResult(const uint8_t* bytes, size_t size, ShellQueryRe
             if (!fields.GetU32(icon.list_id) || !fields.GetU32(icon.width) ||
                 !fields.GetU32(icon.height) || !fields.GetU32(icon.stride) ||
                 !fields.GetU32(pixel_bytes) || pixel_bytes > fields.remaining() ||
-                icon.list_id > 4 || (seen & (1u << icon.list_id)) ||
+                (icon.list_id != 0 && icon.list_id != 1 && icon.list_id != 2 && icon.list_id != 4) ||
+                (seen & (1u << icon.list_id)) ||
                 !icon.width || !icon.height || icon.width > kShellQueryPixelLimit ||
                 icon.height > kShellQueryPixelLimit || icon.stride != icon.width * 4 ||
                 pixel_bytes != static_cast<uint64_t>(icon.stride) * icon.height) return false;
             offset += 20;
             icon.pixels.assign(bytes + offset, bytes + offset + pixel_bytes);
             offset += pixel_bytes;
-            if (!ValidShellIconPixels(icon)) return false;
             seen |= 1u << icon.list_id;
             decoded.icons.push_back(std::move(icon));
         }
