@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bcrypt.h>
+#include <chrono>
 #include <cstdio>
 #include <fcntl.h>
 #include <io.h>
@@ -172,8 +173,8 @@ struct Session {
         manager.UndoFromJson(L"[]");
         manager.ClearFinishedTasks();
     }
-    bool Wait(uint64_t before, uint64_t id, bool accept_delete, ConflictChoice choice) {
-        const auto deadline = GetTickCount64() + 45000;
+    bool Wait(uint64_t before, uint64_t id, bool accept_delete, ConflictChoice choice, DWORD timeout_ms) {
+        const auto deadline = GetTickCount64() + timeout_ms;
         while (GetTickCount64() < deadline) {
             if (const auto pending = manager.PendingDeleteConfirmation()) {
                 bool owned = !pending->plan.targets.empty();
@@ -207,22 +208,25 @@ struct Session {
             }
             Sleep(5);
         }
-        result.Check(false, L"operation reached the 45 second deadline");
+        result.Check(false, L"operation reached its deadline");
         manager.CancelCurrent();
         usable = false;
         return false;
     }
     bool Run(OpRequest request, const wchar_t* label, bool accept_delete = true,
-             ConflictChoice choice = ConflictChoice::Cancel, OpPhase expected = OpPhase::Completed) {
+             ConflictChoice choice = ConflictChoice::Cancel, OpPhase expected = OpPhase::Completed,
+             DWORD timeout_ms = 45000) {
         if (!usable) { result.Block(label, ERROR_CANCELLED); return false; }
         confirmations = conflicts = 0; permanent = false;
         const auto before = manager.Status().completed_ops;
+        const auto start = GetTickCount64();
         const auto id = manager.Submit(std::move(request));
-        const bool finished = id && Wait(before, id, accept_delete, choice);
+        const bool finished = id && Wait(before, id, accept_delete, choice, timeout_ms);
         const auto status = manager.Status();
         const bool ok = finished && status.phase == expected &&
             (expected != OpPhase::Completed || (SUCCEEDED(status.failure_hr) && status.last_error.empty()));
         result.Check(ok, label);
+        wprintf(L"[TIME] [%ls] %ls ms=%llu\n", result.group, label, GetTickCount64() - start);
         return ok;
     }
     bool Undo(const wchar_t* label) {
@@ -399,14 +403,69 @@ bool NoStaging(const fs::path& root) {
     fs::recursive_directory_iterator it(root, error), end;
     while (!error && it != end) {
         const auto name = it->path().filename().wstring();
-        if (name.starts_with(L".pulse-") && name != L".pulse-test-owner") return false;
+        if (name.find(L".pulse-copy-") != std::wstring::npos ||
+            name.find(L".pulse-backup-") != std::wstring::npos) return false;
         it.increment(error);
     }
     return !error;
 }
+
+void MeasureTransfers(Session& session, const fs::path& source, const fs::path& destination) {
+    using Clock = std::chrono::steady_clock;
+    if (!CreateDirectoryW(source.c_str(), nullptr) || !CreateDirectoryW(destination.c_str(), nullptr)) {
+        session.result.Block(L"cannot prepare performance directories", GetLastError());
+        return;
+    }
+    const bool remote = GetDriveTypeW(source.root_path().c_str()) == DRIVE_REMOTE ||
+        GetDriveTypeW(destination.root_path().c_str()) == DRIVE_REMOTE;
+    for (const unsigned count : {remote ? 64u : 256u, 1u}) {
+        const uint64_t bytes = count == 1 ? 64 * 1024 * 1024 + 137 : 4096;
+        OpRequest request;
+        request.type = OpType::Copy;
+        for (unsigned i = 0; i < count; ++i) {
+            const auto path = source / (std::to_wstring(count) + L"-" + std::to_wstring(i) + L".bin");
+            if (!PatternFile(path, bytes, i, true)) {
+                session.result.Block(L"cannot prepare performance source", GetLastError());
+                return;
+            }
+            request.sources.push_back(path.wstring());
+        }
+        for (unsigned trial = 0; trial < 2; ++trial) {
+            // Alternate order to avoid always running one implementation with a warm source cache.
+            for (const bool pulse_copy : {trial == 0, trial != 0}) {
+                const auto folder = destination / (std::to_wstring(count) + L"-" +
+                    std::to_wstring(trial) + (pulse_copy ? L"-pulse" : L"-win32"));
+                if (!CreateDirectoryW(folder.c_str(), nullptr)) {
+                    session.result.Block(L"cannot prepare performance destination", GetLastError());
+                    return;
+                }
+                request.dest_dir = folder.wstring();
+                std::vector<fs::path> products;
+                for (const auto& path : request.sources) products.push_back(folder / fs::path(path).filename());
+                const auto start = Clock::now();
+                bool copied = true;
+                if (pulse_copy) copied = session.Run(request, L"timed Pulse copy completes", true,
+                    ConflictChoice::Cancel, OpPhase::Completed, 180000);
+                else {
+                    COPYFILE2_EXTENDED_PARAMETERS parameters{};
+                    parameters.dwSize = sizeof(parameters);
+                    parameters.dwCopyFlags = COPY_FILE_FAIL_IF_EXISTS;
+                    for (unsigned i = 0; copied && i < count; ++i)
+                        copied = SUCCEEDED(CopyFile2(request.sources[i].c_str(), products[i].c_str(), &parameters));
+                }
+                const auto elapsed = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+                wprintf(L"[PERF] [%ls] %ls trial=%u files=%u bytes=%llu ms=%.2f\n",
+                    session.result.group, pulse_copy ? L"Pulse" : L"CopyFile2", trial + 1, count,
+                    static_cast<unsigned long long>(bytes * count), elapsed);
+                for (unsigned i = 0; copied && i < count; ++i) copied = PatternFile(products[i], bytes, i);
+                session.result.Check(copied, L"timed copy preserves the complete contents of every file");
+            }
+        }
+    }
+}
 }
 
-int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent) {
+int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent, bool performance) {
     _setmode(_fileno(stdout), _O_U8TEXT);
     setvbuf(stdout, nullptr, _IONBF, 0);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -419,13 +478,14 @@ int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network
     const auto owner_error = owner ? ERROR_SUCCESS : GetLastError();
     const auto within = [&](OwnedFixture& fixture, Results& result, bool remote) {
         if (!owner) { result.Block(L"cannot create operation owner window", owner_error); return; }
-        {
+        if (!performance) {
             Session session(owner, result, fixture, fixture);
             Mutations(session, fixture.root, remote);
         }
         {
             Session session(owner, result, fixture, fixture);
-            Transfers(session, fixture.root / L"transfer-source", fixture.root / L"transfer-destination");
+            const auto run = performance ? MeasureTransfers : Transfers;
+            run(session, fixture.root / L"transfer-source", fixture.root / L"transfer-destination");
         }
         result.Check(NoStaging(fixture.root), L"no transfer staging or backup files remain");
     };
@@ -438,7 +498,8 @@ int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network
         }
         {
             Session session(owner, result, from, to);
-            Transfers(session, from.root / (std::wstring(name) + L"-source"),
+            const auto run = performance ? MeasureTransfers : Transfers;
+            run(session, from.root / (std::wstring(name) + L"-source"),
                 to.root / (std::wstring(name) + L"-destination"));
         }
         result.Check(NoStaging(from.root) && NoStaging(to.root), L"no cross-volume staging or backups remain");

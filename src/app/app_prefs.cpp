@@ -89,6 +89,7 @@ void AppPrefs::ResetToDefaults() {
     list_smart_date = true;
     list_zebra_rows = true;
     list_size_bar = false;
+    auto_folder_size = true;
     folder_sort_mode = 0;
     folder_views.Clear();
     search_pinyin = false;
@@ -161,6 +162,8 @@ std::wstring AppPrefs::ToJson() const {
     out += list_zebra_rows ? L"true" : L"false";
     out += L",\n  \"list_size_bar\":";
     out += list_size_bar ? L"true" : L"false";
+    out += L",\n  \"auto_folder_size\":";
+    out += auto_folder_size ? L"true" : L"false";
     out += L",\n  \"folder_sort_mode\":";
     out += std::to_wstring(folder_sort_mode >= 0 && folder_sort_mode <= 2 ? folder_sort_mode : 0);
     out += L",\n  \"show_hidden_files\":";
@@ -262,6 +265,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     list_smart_date = pulse::json::ExtractBool(doc, L"list_smart_date", true);
     list_zebra_rows = pulse::json::ExtractBool(doc, L"list_zebra_rows", true);
     list_size_bar = pulse::json::ExtractBool(doc, L"list_size_bar", false);
+    auto_folder_size = pulse::json::ExtractBool(doc, L"auto_folder_size", true);
     folder_sort_mode = pulse::json::ExtractInt(doc, L"folder_sort_mode", 0);
     if (folder_sort_mode < 0 || folder_sort_mode > 2) folder_sort_mode = 0;
     search_pinyin = pulse::json::ExtractBool(doc, L"search_pinyin", false);

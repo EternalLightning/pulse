@@ -6,6 +6,7 @@
 #pragma once
 #include <windows.h>
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <unordered_set>
 namespace pulse::ops {
@@ -37,8 +38,9 @@ inline std::wstring ListingPattern(std::wstring folder) {
 // case-sensitive folders right.
 class TransferTargetListing {
 public:
-    TransferTargetListing(const std::wstring& folder, size_t items) {
-        if (items < 16) return;
+    TransferTargetListing(const std::wstring& folder, size_t items,
+                          const std::function<bool()>& cancelled = {}) {
+        if (items < 16 || (cancelled && cancelled())) return;
         const std::wstring pattern = ListingPattern(folder);
         if (pattern.empty()) return;
         WIN32_FIND_DATAW data{};
@@ -50,6 +52,7 @@ public:
         size_t budget = (std::max)(size_t{4096}, items * 64);
         bool complete = false;
         for (;;) {
+            if (cancelled && cancelled()) break;
             names_.insert(Map(data.cFileName, LCMAP_UPPERCASE));
             // Custom DOS aliases need not contain '~'. Include aliases so an
             // existing destination cannot become an absence hint through one.
@@ -61,8 +64,8 @@ public:
             }
         }
         FindClose(find);
-        if (!complete) names_.clear();
-        valid_ = complete;
+        valid_ = complete && !(cancelled && cancelled());
+        if (!valid_) names_.clear();
     }
 
     // True: absent in this listing snapshot. Every mutation still checks the

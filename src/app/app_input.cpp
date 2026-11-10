@@ -293,8 +293,9 @@ bool QueueHeaderDrop(AppState& s, const std::vector<std::wstring>& sources,
 // Resolves the drop target under pt (client coords), updates feedback state,
 // and returns the DROPEFFECT_* to report back. Also drives the 800ms
 // spring-loaded folder enter and Esc-back.
-DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
-                               POINT pt, DWORD key_state, DWORD allowed, DWORD preferred) {
+static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>& sources,
+                                  POINT pt, DWORD key_state, DWORD allowed, DWORD preferred,
+                                  bool virtual_files) {
     s.dropRow = -1;
     s.dropPaneIndex = -1;
     s.dropHeader = false;
@@ -379,7 +380,8 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
                PointOnPaneHeader(s, vm, hit.pane_index,
                                  static_cast<float>(pt.x), static_cast<float>(pt.y))) {
         // Drag a folder onto a pane title bar (path + nav/view) to open it there.
-        const std::wstring folder = app::ShortcutDropRequested(key_state) ? std::wstring() : HeaderDropHint(s, sources);
+        const std::wstring folder = virtual_files || app::ShortcutDropRequested(key_state)
+            ? std::wstring() : HeaderDropHint(s, sources);
         if (!folder.empty()) {
             s.dropHeader = true;
             s.dropPaneIndex = hit.pane_index;
@@ -429,7 +431,8 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
         return DROPEFFECT_NONE;
     }
 
-    DWORD effect = FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
+    DWORD effect = virtual_files ? (allowed & DROPEFFECT_COPY)
+        : FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
     if (effect == DROPEFFECT_NONE) s.dropBadge.clear();
     else s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
         effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() :
@@ -438,6 +441,25 @@ DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
     s.dropBadgeY = (float)pt.y;
     InvalidateRect(s.hwnd, nullptr, FALSE);
     return effect;
+}
+
+DWORD ResolveDropTarget(AppState& s, const std::vector<std::wstring>& sources,
+                        POINT pt, DWORD key_state, DWORD allowed, DWORD preferred) {
+    return ResolveDropTargetImpl(s, sources, pt, key_state, allowed, preferred, false);
+}
+
+std::wstring ResolveVirtualDropTarget(AppState& s, POINT pt, DWORD key_state,
+                                      DWORD allowed, DWORD preferred) {
+    if (allowed & DROPEFFECT_COPY) {
+        const DWORD effect = ResolveDropTargetImpl(s, {}, pt, key_state, allowed, preferred, true);
+        const auto* pane = s.dropSidebar >= 0 ? nullptr : PaneAtSlot(s, s.dropPaneIndex);
+        const auto* tab = pane ? pane->ActiveTab() : nullptr;
+        if (effect == DROPEFFECT_COPY && !s.dropTray && !s.dropHeader &&
+            !s.dropDestDir.empty() && !fs::IsVirtualPath(s.dropDestDir) &&
+            (!tab || !tab->net_readonly)) return s.dropDestDir;
+    }
+    ClearDropFeedback(s);
+    return {};
 }
 
 DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,

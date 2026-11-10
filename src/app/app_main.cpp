@@ -94,6 +94,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <sherrors.h>
 #include <shlwapi.h>
 #include <algorithm>
 #include <array>
@@ -335,7 +336,6 @@ static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwn
         snap.maximized = IsZoomed(hwnd) || app::WindowPlacementRestoresMaximized(wp);
     }
     snap.dark = s.darkMode;
-    snap.tray = s.tray;
     snap.sidebar_collapsed = static_cast<int>(s.sidebarCollapsedMask);
     snap.sidebar_hidden = static_cast<int>(s.sidebarHiddenMask);
     snap.sidebar_order = app::NormalizeSidebarOrder(s.sidebarOrder);
@@ -696,6 +696,18 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                               DWORD keys, DWORD allowed, DWORD preferred) -> DWORD {
                 AppState* st = GetAppState(hwnd);
                 return st ? DropExecute(*st, srcs, pt, keys, allowed, preferred) : DROPEFFECT_NONE;
+            };
+            dcb.virtual_destination = [hwnd](POINT pt, DWORD keys, DWORD allowed, DWORD preferred) {
+                AppState* st = GetAppState(hwnd);
+                return st ? ResolveVirtualDropTarget(*st, pt, keys, allowed, preferred) : std::wstring{};
+            };
+            dcb.virtual_complete = [hwnd](HRESULT result) {
+                if (FAILED(result) && result != E_ABORT && result != COPYENGINE_E_USER_CANCELLED &&
+                    result != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                    if (AppState* st = GetAppState(hwnd)) st->notification_toast.Show(hwnd,
+                        l10n::Get(l10n::StringId::OpCopyFailed),
+                        l10n::Get(l10n::StringId::OperationFailedMessage));
+                }
             };
             s->dropTarget = new ui::WindowDropTarget(hwnd, std::move(dcb));
             RegisterDragDrop(hwnd, s->dropTarget);
@@ -1110,12 +1122,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_MOVE:
         if (s) {
-            if (s->operationCenter) s->operationCenter->Hide(false);
+            if (s->operationCenter && s->operationCenter->IsVisible()) s->operationCenter->Hide(false);
             s->compositor.UpdateTextRenderingParams(
                 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
             s->renderer.NotifyPreviewOwnerMoved();
         }
-        InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
     case WM_SIZE: {
@@ -2367,7 +2378,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     app::WindowSessionSnapshot session;
     if (!state.isolatedTest && app::LoadSessionPreferences(session)) {
         RestoreWindowPreferences(state, session);
-        state.tray = session.tray;
     }
 
     bool startup_launch = false;

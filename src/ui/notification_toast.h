@@ -5,10 +5,11 @@
 
 #pragma once
 #include "fluent_components.h"
-#include "content_reveal_animation.h"
+#include "binary_transition.h"
 
 namespace pulse::ui {
 class NotificationToast {
+    friend struct NotificationToastTestPeer;
 public:
     void Show(HWND owner, std::wstring title, std::wstring message, bool persistent = true, UINT action_message = 0);
     void ShowError(HWND owner, std::wstring title, std::wstring message);
@@ -16,13 +17,13 @@ public:
     bool HandleMessage(HWND owner, UINT message, WPARAM wparam, LPARAM lparam);
     void Draw(Compositor& compositor, const Theme& theme, float scale, bool high_contrast);
     bool IsVisible() const noexcept { return visible_; }
-    bool Animating() const noexcept { return visible_ && reveal_.pending; }
+    bool Animating() const noexcept { return reveal_.Pending(); }
     D2D1_RECT_F Bounds() const noexcept { return card_; }
 private:
     void Dismiss(HWND owner);
     static constexpr UINT_PTR timer = 0x50554C54;
     fluent::Painter painter_;
-    ContentRevealAnimation reveal_;
+    BinaryTransition reveal_;
     bool motion_enabled_ = true;
     std::wstring title_, message_;
     UINT action_message_ = 0;

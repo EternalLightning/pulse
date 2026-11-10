@@ -24,6 +24,7 @@
 #include "../ipc/ctx_menu_util.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
@@ -34,9 +35,6 @@
 
 namespace pulse::app {
 
-std::wstring GetPulseDataDir() {
-    return {};
-}
 struct SettingsControllerTestPeer {
     static bool Start(SettingsController& controller, SettingsTask task,
                       SettingsTaskOperation operation, SettingsTaskCompletion completion) {
@@ -426,10 +424,17 @@ bool RunContextMenuSafetyTests(pulse::app::ContextMenuPrefs& context) {
 
 #include "context_menu_refresh_cases.h"
 #include "context_menu_overflow_cases.h"
+#include "context_menu_registry_cases.h"
 #include "builtin_menu_contract_cases.h"
 
 
 int wmain(int argc, wchar_t** argv) {
+    pulse::storage::OverrideDefaultRootForTesting((std::filesystem::current_path() / L"bench_data" /
+        (L"controller-config-" + std::to_wstring(GetCurrentProcessId()))).wstring());
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--context-menu-registry")
+        return RunContextMenuRegistryTests() ? 0 : 1;
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--context-menu-registry-invoke")
+        return std::ofstream(std::filesystem::path(argv[2]).concat(L".invoked")).good() ? 0 : 1;
     if (argc == 2 && std::wstring(argv[1]) == L"--folder-actions-menu") {
         int failures = 0;
         RunFolderActionsMenuChecks([&](bool passed, const char* message) {

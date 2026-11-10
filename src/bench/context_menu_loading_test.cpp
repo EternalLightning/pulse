@@ -4,20 +4,31 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../app/context_menu_controller.h"
+#include "../app/device_menu.h"
 #include "../common/localization.h"
 #include "../ipc/shell_client.h"
+#include "../ui/typography.h"
+#include "../ui/notification_toast.h"
+#include "../ui/animation_clock.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <commctrl.h>
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <wrl/client.h>
 
 namespace pulse::app {
 std::wstring GetPulseDataDir() { return {}; }
 }
 
 namespace pulse::ui {
+struct NotificationToastTestPeer {
+    static float Opacity(const NotificationToast& toast) { return toast.reveal_.value; }
+    static void Advance(NotificationToast& toast, uint64_t elapsed) { toast.reveal_.started = AnimationTimeMs() - elapsed; }
+    static void Expire(NotificationToast& toast) { toast.remaining_ = 0; }
+};
 struct FluentMenuTestPeer {
     static void Begin(FluentMenu& menu, std::vector<FluentMenuItem> items) {
         menu.model_.SetItems(std::move(items));
@@ -41,6 +52,20 @@ struct FluentMenuTestPeer {
             if (menu.model_.LabelTruncated(row)) return false;
         return true;
     }
+    static bool ShortcutsFit(const FluentMenu& menu) {
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> caption;
+        auto* factory = menu.compositor_->DwriteFactory();
+        if (FAILED(typography::CreateTextFormat(factory,
+                {typography::FontRole::Text, 12.0f * menu.scale_, DWRITE_FONT_WEIGHT_NORMAL}, &caption))) return false;
+        const float available = std::max(24.0f * menu.scale_,
+            menu.model_.WidthPx() - 148.0f * menu.scale_);
+        for (int row = 0; row < menu.model_.Count(); ++row) {
+            const auto* item = menu.model_.At(row);
+            if (!item->shortcut.empty() && typography::MeasureAdvance(factory, caption.Get(), item->shortcut) +
+                    4.0f * menu.scale_ > available) return false;
+        }
+        return true;
+    }
     static void OpenOverflow(FluentMenu& menu) {
         for (int row = 0; row < menu.model_.Count(); ++row)
             if (menu.model_.At(row)->glyph == L"\xE712") menu.OpenSubmenu(row);
@@ -53,6 +78,154 @@ int failures = 0;
 void Check(bool passed, const char* name) {
     std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", name);
     if (!passed) ++failures;
+}
+
+void RunToastAnimation(HWND owner, pulse::ui::Compositor& compositor, const std::filesystem::path& output) {
+    using namespace pulse::ui;
+    std::filesystem::create_directories(output);
+    for (float scale : {1.0f, 1.5f}) for (bool dark : {false, true}) {
+        compositor.RecreateTextFormats(scale);
+        NotificationToast toast;
+        const auto theme = MakeTheme(dark, D2D1::ColorF(0x0078D4));
+        const auto draw = [&](const wchar_t* phase, bool high_contrast = false) {
+            auto* dc = compositor.Dc();
+            dc->BeginDraw(); dc->Clear(theme.bg);
+            toast.Draw(compositor, theme, scale, high_contrast);
+            Check(SUCCEEDED(dc->EndDraw()), "toast animation frame renders");
+            const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                std::to_wstring(static_cast<int>(scale * 100)) + L"-" + phase + L".png";
+            Check(compositor.SaveSnapshot((output / name).c_str()), "save toast animation frame");
+        };
+        toast.Show(owner, L"无法完成复制", L"操作失败。", false);
+        Sleep(180);
+        draw(L"enter-start");
+        Check(toast.Animating() && NotificationToastTestPeer::Opacity(toast) == 0,
+            "delayed first paint still starts the entry transition at zero opacity");
+        NotificationToastTestPeer::Advance(toast, 70);
+        draw(L"enter-middle");
+        Check(toast.Animating() && NotificationToastTestPeer::Opacity(toast) > 0 &&
+            NotificationToastTestPeer::Opacity(toast) < 1, "entry has an intermediate frame");
+        NotificationToastTestPeer::Advance(toast, 200);
+        draw(L"shown");
+        Check(!toast.Animating() && toast.IsVisible(), "settled toast releases animation frames");
+        const auto bounds = toast.Bounds();
+        const auto close = MAKELPARAM(static_cast<int>(bounds.right - 16 * scale),
+            static_cast<int>((bounds.top + bounds.bottom) * 0.5f));
+        toast.HandleMessage(owner, WM_LBUTTONDOWN, 0, close);
+        toast.HandleMessage(owner, WM_LBUTTONUP, 0, close);
+        Check(!toast.IsVisible() && toast.Animating(), "close retains the painted toast for its exit transition");
+        NotificationToastTestPeer::Advance(toast, 60);
+        draw(L"exit-middle");
+        Check(toast.Animating() && NotificationToastTestPeer::Opacity(toast) > 0 &&
+            NotificationToastTestPeer::Opacity(toast) < 1, "exit has an intermediate frame");
+        NotificationToastTestPeer::Advance(toast, 200);
+        draw(L"hidden");
+        Check(!toast.Animating(), "exit stops requesting frames at zero opacity");
+        toast.Show(owner, L"Status", L"Auto close", false);
+        draw(L"auto-start");
+        NotificationToastTestPeer::Advance(toast, 200);
+        draw(L"auto-shown");
+        NotificationToastTestPeer::Expire(toast);
+        toast.HandleMessage(owner, WM_TIMER, 0x50554C54, 0);
+        Check(!toast.IsVisible() && toast.Animating(), "automatic expiry uses the same exit transition");
+        toast.Show(owner, L"Status", L"Replacement", true);
+        draw(L"replacement");
+        Check(toast.IsVisible() && toast.Animating(), "a new toast replaces an exiting toast");
+        toast.SetMotionEnabled(false);
+        draw(L"no-motion");
+        toast.HandleMessage(owner, WM_KEYDOWN, VK_ESCAPE, 0);
+        Check(!toast.IsVisible() && !toast.Animating(), "disabled motion dismisses immediately");
+        toast.SetMotionEnabled(true);
+        toast.Show(owner, L"Status", L"High contrast", true);
+        draw(L"high-contrast", true);
+        Check(!toast.Animating(), "high contrast settles the reveal immediately");
+    }
+}
+
+void RunDeviceMenus(HWND owner, pulse::ui::Compositor& compositor,
+                    const std::filesystem::path& output) {
+    using namespace pulse;
+    std::filesystem::create_directories(output);
+    const auto enabled = [](const auto& items, int command) {
+        for (const auto& row : items) if (row.command == command) return row.enabled;
+        return false;
+    };
+    app::CommandContext context;
+    context.selected_count = 1;
+    context.selection_filesystem = context.device_selection = true;
+    context.filesystem_folder = context.can_paste = true;
+    app::ContextMenuPrefs prefs;
+    prefs.persist = false;
+    app::ContextMenuController controller;
+    uint32_t token = 0;
+    app::ContextMenuController::ShellOperations operations;
+    operations.query = [&](auto, HWND, bool, bool, auto) { return ++token; };
+    operations.close = [](uint32_t) {};
+    controller.SetShellOperations(std::move(operations));
+    bool changed = false;
+    for (const auto* language : {L"zh-CN", L"en-US"}) {
+        l10n::SetLanguage(language);
+        const auto file = app::BuildDeviceItemMenu(context, false);
+        const auto folder = app::BuildDeviceItemMenu(context, true);
+        const auto background = app::BuildDeviceBackgroundMenu(context);
+        Check(file.size() == 3 && enabled(file, app::CmdOpen) && enabled(file, app::CmdCopy) &&
+            enabled(file, app::CmdProperties) && file[1].shortcut == L"Ctrl+C",
+            "phone file menu exposes Open, Copy and Properties before any Shell reply");
+        Check(folder.size() == 4 && enabled(folder, app::CmdOpenInNewTab),
+            "phone folder menu retains Open in new tab");
+        context.selected_count = 2;
+        const auto multiple = app::BuildDeviceItemMenu(context, true);
+        Check(multiple.size() == 3 && enabled(multiple, app::CmdCopy) &&
+            !enabled(multiple, app::CmdOpenInNewTab), "phone multi-selection can copy without single-folder actions");
+        context.selected_count = 1;
+        Check(background.size() == 2 && enabled(background, app::CmdPaste) &&
+            enabled(background, app::CmdNewFolder) && background[0].shortcut == L"Ctrl+V",
+            "writable phone background exposes Paste and New folder");
+        context.can_paste = false;
+        auto unavailable = app::BuildDeviceBackgroundMenu(context);
+        Check(!enabled(unavailable, app::CmdPaste) && enabled(unavailable, app::CmdNewFolder),
+            "empty clipboard disables Paste while preserving New folder");
+        context.read_only = true;
+        context.filesystem_folder = false;
+        unavailable = app::BuildDeviceBackgroundMenu(context);
+        Check(!enabled(unavailable, app::CmdPaste) && !enabled(unavailable, app::CmdNewFolder) &&
+            enabled(app::BuildDeviceItemMenu(context, false), app::CmdCopy),
+            "read-only phone or device root disables writes while preserving Copy");
+        context.read_only = false;
+        context.filesystem_folder = context.can_paste = true;
+        for (const auto& rows : {file, folder, background, unavailable}) {
+            controller.StartQuery(prefs, owner, {L"::pidl:fixture"}, rows.size() == 2,
+                L":device:fixture", false, {}, {});
+            controller.OpenMenu(rows);
+            const auto pending = controller.BuildDisplay(prefs, rows, changed);
+            Check(enabled(pending, rows[0].command) == rows[0].enabled,
+                "device actions remain available while the Shell menu is loading");
+            controller.CompleteComQuery(token, {}, GetTickCount64());
+            const auto display = controller.BuildDisplay(prefs, rows, changed);
+            Check(display.size() == rows.size(), "menu composition keeps all built-in device actions without Shell items");
+            for (const auto& row : rows)
+                Check(std::count_if(display.begin(), display.end(), [&](const auto& item) {
+                    return item.command == row.command && item.enabled == row.enabled;
+                }) == 1,
+                    "device action identity and availability survive menu composition");
+            for (const float scale : {1.0f, 1.5f}) for (const bool dark : {false, true}) {
+                compositor.RecreateTextFormats(scale);
+                ui::FluentMenu menu;
+                Check(menu.Create(owner, &compositor, scale), "create production device menu renderer");
+                menu.SetTheme(dark, D2D1::ColorF(0.0f, 0.47f, 0.84f));
+                const auto name = std::wstring(language) + L"-" +
+                    (rows.size() == 4 ? L"folder" : rows.size() == 3 ? L"file" :
+                        rows[0].enabled ? L"background" : L"readonly") +
+                    (dark ? L"-dark-" : L"-light-") + std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                Check(menu.SaveDebugSnapshot((output / name).c_str(), display),
+                    "render phone actions through the production popup");
+                Check(ui::FluentMenuTestPeer::LabelsFit(menu), "phone menu labels fit at tested theme and DPI");
+                Check(ui::FluentMenuTestPeer::ShortcutsFit(menu), "phone menu shortcuts fit without ellipsizing");
+            }
+            controller.CloseMenu();
+            controller.Close();
+        }
+    }
 }
 
 constexpr UINT kReply = WM_APP + 51;
@@ -331,7 +504,9 @@ int wmain(int argc, wchar_t** argv) {
         pulse::ui::Compositor compositor;
         Check(owner && compositor.Init(owner), "initialize isolated production compositor");
         if (!failures) {
-            if (argc == 3 && wcscmp(argv[1], L"--open-with") == 0) RunOpenWith(owner, compositor, argv[2]);
+            if (argc == 3 && wcscmp(argv[1], L"--toast-animation") == 0) RunToastAnimation(owner, compositor, argv[2]);
+            else if (argc == 3 && wcscmp(argv[1], L"--device-menus") == 0) RunDeviceMenus(owner, compositor, argv[2]);
+            else if (argc == 3 && wcscmp(argv[1], L"--open-with") == 0) RunOpenWith(owner, compositor, argv[2]);
             else if (argc == 3 && wcscmp(argv[1], L"--run-as") == 0) {
                 for (const auto* language : {L"zh-CN", L"en-US"}) {
                     pulse::l10n::SetLanguage(language);

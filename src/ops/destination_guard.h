@@ -321,6 +321,13 @@ public:
         return true;
     }
 
+    bool ExpectAbsentLeaf(const std::wstring& path, std::wstring& error) {
+        const auto parts = Components(path);
+        if (parts.empty()) return Fail(path, error);
+        snapshots_[parts.back()] = {};
+        return true;
+    }
+
     bool SetDirectoryMetadata(const std::wstring& path, const FILETIME& created,
                               const FILETIME& accessed, const FILETIME& modified,
                               DWORD source_attributes, std::wstring& error) {
@@ -390,10 +397,21 @@ public:
     bool RenameLeaf(HANDLE handle, const std::wstring& destination) const {
         const auto parts = Components(destination);
         if (parts.size() < 2) { SetLastError(ERROR_INVALID_NAME); return false; }
-        const auto& parent_path = parts[parts.size() - 2];
-        const auto snapshot = snapshots_.find(parent_path);
+        auto parent_path = parts[parts.size() - 2];
+        auto snapshot = snapshots_.find(parent_path);
         if (!leases_->handles.contains(parent_path) || snapshot == snapshots_.end()) {
             SetLastError(ERROR_INVALID_HANDLE); return false;
+        }
+        if (!snapshot->second.reparse.empty()) {
+            // Keep the junction pinned and commit under its already admitted target.
+            const auto resolved = Components(snapshot->second.resolved_path);
+            if (resolved.empty()) { SetLastError(ERROR_INVALID_NAME); return false; }
+            parent_path = resolved.back();
+            snapshot = snapshots_.find(parent_path);
+            if (!leases_->handles.contains(parent_path) || snapshot == snapshots_.end() ||
+                !snapshot->second.reparse.empty()) {
+                SetLastError(ERROR_INVALID_HANDLE); return false;
+            }
         }
         // Rename opens the target parent for adding a name. Permit that access
         // only on this pinned object and commit relative to its handle. Ancestors
@@ -486,16 +504,21 @@ private:
             owned.reset(handle);
         }
         FILE_ATTRIBUTE_TAG_INFO attributes{};
-        FILE_STANDARD_INFO standard{};
         if (!ReadFileIdentity(handle, result.id, identity_query_) ||
-            !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
-            !GetFileInformationByHandleEx(handle, FileStandardInfo, &standard, sizeof(standard))) {
+            !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes, sizeof(attributes))) {
             result.error_code = GetLastError();
             return false;
         }
         result.exists = true;
         result.directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-        result.links = result.directory ? 0 : standard.NumberOfLinks;
+        if (!result.directory) {
+            FILE_STANDARD_INFO standard{};
+            if (!GetFileInformationByHandleEx(handle, FileStandardInfo, &standard, sizeof(standard))) {
+                result.error_code = GetLastError();
+                return false;
+            }
+            result.links = standard.NumberOfLinks;
+        }
         if (owned)
             result.reference = std::shared_ptr<void>(owned.release(), HandleCloser{});
         if (!(attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;

@@ -197,6 +197,37 @@ struct ThumbnailPipelineTestAccess {
         StoredThumbnail loaded;
         check(store.Load(key, loaded) && loaded.pixels == thumb.pixels && loaded.source_width == 1024,
             "persistent transparent PNG thumbnail round-trips");
+        HANDLE writer = CreateFileW(fixture.c_str(), GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        bool source_writing = false;
+        ThumbnailFileIdentity busy_identity{};
+        check(writer != INVALID_HANDLE_VALUE &&
+            !ReadThumbnailFileIdentity(key, busy_identity, &source_writing) && source_writing,
+            "thumbnail generation detects an active writer without reading its content");
+        if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+        check(ReadThumbnailFileIdentity(key, busy_identity, &source_writing) && !source_writing,
+            "closing the writer makes the thumbnail eligible again");
+        const auto cache_bytes = store.BytesOnDisk();
+        HANDLE edited = CreateFileW(fixture.c_str(), FILE_WRITE_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        ULARGE_INTEGER next_time{};
+        next_time.QuadPart = modified + 10000000;
+        FILETIME edited_time{next_time.LowPart, next_time.HighPart};
+        const bool changed = edited != INVALID_HANDLE_VALUE && SetFileTime(edited, nullptr, nullptr, &edited_time);
+        if (edited != INVALID_HANDLE_VALUE) CloseHandle(edited);
+        ThumbnailStoreKey updated_key{fixture, data.dwFileAttributes, 64, next_time.QuadPart, bytes};
+        store.Save(updated_key, 100, thumb);
+        check(changed && store.BytesOnDisk() == cache_bytes && store.Load(updated_key, loaded),
+            "an updated file replaces its persistent thumbnail instead of adding another version");
+        check(!store.Load(key, loaded) && store.Load(updated_key, loaded),
+            "a stale lookup cannot delete the newer thumbnail");
+        edited = CreateFileW(fixture.c_str(), FILE_WRITE_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (edited != INVALID_HANDLE_VALUE) {
+            SetFileTime(edited, nullptr, nullptr, &data.ftLastWriteTime);
+            CloseHandle(edited);
+        }
+        store.Save(key, 100, thumb, &identity);
         const std::wstring extended = L"\\\\?\\" + fixture;
         ThumbnailStoreKey extended_key{extended, data.dwFileAttributes, 64, modified, bytes};
         store.Save(extended_key, 100, thumb, &identity);

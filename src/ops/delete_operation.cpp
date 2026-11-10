@@ -52,10 +52,9 @@ bool CoveredPermanentTarget(const DeleteTarget& child, const DeleteTarget& paren
 bool IsNetworkDeletionPath(std::wstring_view path) {
     const auto parsed = pulse::path::StripExtendedPathPrefix(path);
     if (parsed.starts_with(L"\\\\")) return true;
+    if (fs::IsRemoteLikeDrive(parsed)) return true;
     if (parsed.size() < 3 || parsed[1] != L':') return false;
     const wchar_t drive[] = {parsed[0], L':', 0};
-    const wchar_t root[] = {parsed[0], L':', L'\\', 0};
-    if (GetDriveTypeW(root) == DRIVE_REMOTE) return true;
     wchar_t remote[32768]{};
     DWORD size = ARRAYSIZE(remote);
     return WNetGetConnectionW(drive, remote, &size) == NO_ERROR;

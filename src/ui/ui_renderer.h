@@ -659,6 +659,7 @@ struct WindowViewModel {
     bool settings_list_smart_date = true;
     bool settings_list_zebra_rows = true;
     bool settings_list_size_bar = false;
+    bool settings_auto_folder_size = true;
     int settings_folder_sort = 0; // 0 folders first, 1 follow direction, 2 mixed
     bool settings_open_folders = false;
     bool settings_take_over_win_e = false;

@@ -587,6 +587,8 @@ enum class StringId : UINT {
     ListZebraRowsDesc = IDS_LIST_ZEBRA_DESC,
     ListSizeBar = IDS_LIST_SIZE_BAR,
     ListSizeBarDesc = IDS_LIST_SIZE_BAR_DESC,
+    AutoFolderSize = IDS_AUTO_FOLDER_SIZE,
+    AutoFolderSizeDesc = IDS_AUTO_FOLDER_SIZE_DESC,
     SettingsFolderSort = IDS_SETTINGS_FOLDER_SORT,
     SettingsFolderSortDesc = IDS_SETTINGS_FOLDER_SORT_DESC,
     FolderSortTop = IDS_FOLDER_SORT_TOP,

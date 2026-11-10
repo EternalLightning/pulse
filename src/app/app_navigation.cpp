@@ -2009,7 +2009,7 @@ void OpenSelected(AppState& s) {
         if (e.is_dir) NavigateTo(s, full, motion);
         else if (ops::IsArchivePath(full)) NavigateTo(s, ArchiveViewPath(full), motion);
         else {
-            s.ops.OpenWith(full);
+            OpenFileInCurrentView(s, full);
             RecordRecentOpen(s, full, app::PlaceItemKind::File);
         }
         return;
@@ -2027,7 +2027,7 @@ void OpenSelected(AppState& s) {
         if (e.is_dir) continue;
         std::wstring full = EntryFullPath(*tab, index);
         if (!full.empty()) {
-            s.ops.OpenWith(full);
+            OpenFileInCurrentView(s, full);
             RecordRecentOpen(s, full, app::PlaceItemKind::File);
         }
     }

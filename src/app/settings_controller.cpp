@@ -560,6 +560,9 @@ void SettingsController::ToggleUi(int index) {
     } else if (index == 19) {
         prefs_->list_size_bar = !prefs_->list_size_bar;
         SaveAndApply(SettingsEffect::ListStyle);
+    } else if (index == 35) {
+        prefs_->auto_folder_size = !prefs_->auto_folder_size;
+        SaveAndApply(SettingsEffect::FolderSizes);
     } else if (index == 15) {
         prefs_->global_search_enabled = !prefs_->global_search_enabled;
         if (!prefs_->Save()) {

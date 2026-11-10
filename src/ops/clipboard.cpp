@@ -11,6 +11,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <cstring>
+#include <wrl/client.h>
 
 namespace pulse::ops {
 
@@ -161,8 +162,145 @@ bool ReadClipboard(ClipboardData& out) {
 }
 
 namespace {
-bool DropShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_effect) {
+// Hiding async capability makes the destination complete descriptor-only
+// transfers before Drop returns, while all provider work stays on the STA worker.
+class SynchronousShellData final : public IDataObject {
+public:
+    SynchronousShellData(IDataObject* data, const std::atomic_bool* cancelled)
+        : data_(data), cancelled_(cancelled) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (id != IID_IUnknown && id != IID_IDataObject) return E_NOINTERFACE;
+        *out = static_cast<IDataObject*>(this); AddRef(); return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const auto refs = InterlockedDecrement(&refs_);
+        if (!refs) delete this;
+        return refs;
+    }
+    HRESULT STDMETHODCALLTYPE GetData(FORMATETC* format, STGMEDIUM* medium) override {
+        return Cancelled() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : data_->GetData(format, medium);
+    }
+    HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC* format, STGMEDIUM* medium) override {
+        return Cancelled() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : data_->GetDataHere(format, medium);
+    }
+    HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* format) override { return data_->QueryGetData(format); }
+    HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC* in, FORMATETC* out) override {
+        return data_->GetCanonicalFormatEtc(in, out);
+    }
+    HRESULT STDMETHODCALLTYPE SetData(FORMATETC* format, STGMEDIUM* medium, BOOL release) override {
+        return data_->SetData(format, medium, release);
+    }
+    HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override {
+        return data_->EnumFormatEtc(direction, out);
+    }
+    HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC* format, DWORD flags, IAdviseSink* sink, DWORD* token) override {
+        return data_->DAdvise(format, flags, sink, token);
+    }
+    HRESULT STDMETHODCALLTYPE DUnadvise(DWORD token) override { return data_->DUnadvise(token); }
+    HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA** out) override { return data_->EnumDAdvise(out); }
+private:
+    bool Cancelled() const { return cancelled_ && cancelled_->load(); }
+    LONG refs_ = 1;
+    Microsoft::WRL::ComPtr<IDataObject> data_;
+    const std::atomic_bool* cancelled_;
+};
+
+class ShellTransferProgress final : public IFileOperationProgressSink {
+public:
+    explicit ShellTransferProgress(const std::atomic_bool* cancelled) : cancelled_(cancelled) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
+        if (!out) return E_POINTER;
+        *out = nullptr;
+        if (id != IID_IUnknown && id != IID_IFileOperationProgressSink) return E_NOINTERFACE;
+        *out = static_cast<IFileOperationProgressSink*>(this); AddRef(); return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const auto refs = InterlockedDecrement(&refs_);
+        if (!refs) delete this;
+        return refs;
+    }
+    HRESULT Check() const { return cancelled_ && cancelled_->load() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : S_OK; }
+    HRESULT Result() const { return result_; }
+    HRESULT Record(HRESULT result) { if (FAILED(result) && SUCCEEDED(result_)) result_ = result; return Check(); }
+    HRESULT STDMETHODCALLTYPE StartOperations() override { return Check(); }
+    HRESULT STDMETHODCALLTYPE FinishOperations(HRESULT result) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PreRenameItem(DWORD, IShellItem*, LPCWSTR) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PreMoveItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PostMoveItem(DWORD, IShellItem*, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PreCopyItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem*, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD, IShellItem*) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PostDeleteItem(DWORD, IShellItem*, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PreNewItem(DWORD, IShellItem*, LPCWSTR) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PostNewItem(DWORD, IShellItem*, LPCWSTR, LPCWSTR, DWORD, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE UpdateProgress(UINT, UINT) override { return Check(); }
+    HRESULT STDMETHODCALLTYPE ResetTimer() override { return Check(); }
+    HRESULT STDMETHODCALLTYPE PauseTimer() override { return Check(); }
+    HRESULT STDMETHODCALLTYPE ResumeTimer() override { return Check(); }
+private:
+    LONG refs_ = 1;
+    const std::atomic_bool* cancelled_;
+    HRESULT result_ = S_OK;
+};
+} // namespace
+
+bool HasShellFileData(IDataObject* data) {
     if (!data) return false;
+    for (const auto* name : {CFSTR_SHELLIDLIST, CFSTR_FILEDESCRIPTORW}) {
+        FORMATETC format{static_cast<CLIPFORMAT>(RegisterClipboardFormatW(name)), nullptr,
+            DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        if (SUCCEEDED(data->QueryGetData(&format))) return true;
+    }
+    return false;
+}
+
+HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_effect,
+                      const std::atomic_bool* cancelled) {
+    if (!data || (preferred_effect != DROPEFFECT_COPY && preferred_effect != DROPEFFECT_MOVE)) return E_INVALIDARG;
+    if (cancelled && cancelled->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    Microsoft::WRL::ComPtr<IDataObject> synchronous;
+    synchronous.Attach(new SynchronousShellData(data, cancelled));
+    data = synchronous.Get();
+    Microsoft::WRL::ComPtr<IShellItemArray> items;
+    if (SUCCEEDED(SHCreateShellItemArrayFromDataObject(data, IID_PPV_ARGS(&items)))) {
+        Microsoft::WRL::ComPtr<IShellItem> destination;
+        HRESULT hr = shell_id::CreateItem(path::StripExtendedPathPrefix(dir), IID_PPV_ARGS(&destination));
+        Microsoft::WRL::ComPtr<IFileOperation> operation;
+        if (SUCCEEDED(hr)) hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&operation));
+        DWORD flags = FOF_NOCONFIRMMKDIR;
+        DWORD count = 0;
+        bool same_folder = SUCCEEDED(hr) && SUCCEEDED(items->GetCount(&count)) && count != 0;
+        for (UINT i = 0; same_folder && i < count; ++i) {
+            Microsoft::WRL::ComPtr<IShellItem> item, parent;
+            int order = 1;
+            same_folder = SUCCEEDED(items->GetItemAt(i, &item)) && SUCCEEDED(item->GetParent(&parent)) &&
+                SUCCEEDED(parent->Compare(destination.Get(), SICHINT_CANONICAL, &order)) && order == 0;
+        }
+        if (same_folder && !PreferredEffectIsCut(preferred_effect)) flags |= FOF_RENAMEONCOLLISION;
+        if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(flags);
+        Microsoft::WRL::ComPtr<ShellTransferProgress> progress;
+        progress.Attach(new ShellTransferProgress(cancelled));
+        DWORD cookie = 0;
+        if (SUCCEEDED(hr)) hr = operation->Advise(progress.Get(), &cookie);
+        if (SUCCEEDED(hr)) hr = PreferredEffectIsCut(preferred_effect)
+            ? operation->MoveItems(items.Get(), destination.Get())
+            : operation->CopyItems(items.Get(), destination.Get());
+        // A drop target may return while a provider is still transferring data.
+        // Keep the source alive and report only the file operation's terminal result.
+        if (SUCCEEDED(hr)) hr = operation->PerformOperations();
+        BOOL aborted = FALSE;
+        if (SUCCEEDED(hr)) hr = operation->GetAnyOperationsAborted(&aborted);
+        if (operation && cookie) operation->Unadvise(cookie);
+        if (SUCCEEDED(hr) && FAILED(progress->Result())) hr = progress->Result();
+        if (aborted || (cancelled && cancelled->load())) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        return hr;
+    }
     IDropTarget* drop = nullptr;
     IShellItem* folder = nullptr;
     const std::wstring shell_path = path::StripExtendedPathPrefix(dir);
@@ -171,25 +309,25 @@ bool DropShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_e
         folder->Release();
     }
 
-    bool ok = false;
+    HRESULT result = E_NOINTERFACE;
     if (drop) {
         const DWORD wanted = PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
         DWORD effect = wanted;
+        const DWORD keys = MK_LBUTTON | (wanted == DROPEFFECT_MOVE ? MK_SHIFT : MK_CONTROL);
         POINTL point{0, 0};
-        if (SUCCEEDED(drop->DragEnter(data, MK_LBUTTON, point, &effect))) {
+        if (SUCCEEDED(drop->DragEnter(data, keys, point, &effect))) {
             if (effect & wanted) {
                 effect = wanted;
-                ok = SUCCEEDED(drop->Drop(data, MK_LBUTTON, point, &effect)) &&
-                    effect != DROPEFFECT_NONE;
+                result = drop->Drop(data, keys, point, &effect);
+                if (SUCCEEDED(result) && effect != wanted) result = E_FAIL;
             } else {
                 drop->DragLeave();
             }
         }
         drop->Release();
     }
-    return ok;
+    return cancelled && cancelled->load() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : result;
 }
-} // namespace
 
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
     const HRESULT ole = OleInitialize(nullptr);
@@ -219,7 +357,8 @@ bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
         }
         ReleaseStgMedium(&medium);
     }
-    const bool ok = DropShellData(data, dir, preferred_effect);
+    const bool ok = SUCCEEDED(PasteShellData(data, dir,
+        PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY));
     data->Release();
     return ok;
 }
@@ -229,7 +368,8 @@ bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t 
     const HRESULT ole = OleInitialize(nullptr);
     if (FAILED(ole)) return false;
     struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
-    return DropShellData(data, dir, preferred_effect);
+    return SUCCEEDED(PasteShellData(data, dir,
+        PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY));
 }
 #endif
 

@@ -69,6 +69,8 @@ Tests are custom `[PASS]/[FAIL]` executables. Put preview cases in `src/bench/pr
 
 Verify both function and design within this scope; do not stop at a successful compile for functional changes. Fix regressions caused by the current change and repeat the affected checks. Exercise loading, empty, error, cancellation, rapid-switching, theme, DPI, and narrow-layout states only when relevant. Do not approve visible UI changes with clipping, overlap, inconsistent controls, or unexplained fallback behavior. Report the checks actually run and any relevant verification limits; do not describe skipped or deleted tests as passed.
 
+Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining
+
 ## Commit & Pull Request Guidelines
 
 Use imperative, scoped commit subjects such as `preview: decode UTF-16 BE text`. When a pull request is requested, explain behavior and risk, list actual test results, and link issues when available. For visible UI changes, include before/after screenshots when capture is available; otherwise disclose the visual verification limit. Do not expand testing solely to fill a PR template.

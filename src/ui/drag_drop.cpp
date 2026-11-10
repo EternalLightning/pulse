@@ -6,6 +6,7 @@
 // drag_drop.cpp — See drag_drop.h for the contract.
 #include "drag_drop.h"
 #include "../ipc/shell_query_client.h"
+#include "../ops/clipboard.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -17,6 +18,7 @@
 #include <cwctype>
 #include <thread>
 #include <vector>
+#include <wrl/client.h>
 
 namespace pulse::ui {
 
@@ -28,6 +30,60 @@ struct ShellIdListState {
 };
 
 namespace {
+
+HRESULT CopyVirtualDrop(HWND owner, IDataObject* data, const std::wstring& destination) {
+    IStream* marshaled = nullptr;
+    HRESULT result = CoMarshalInterThreadInterfaceInStream(IID_IDataObject, data, &marshaled);
+    if (FAILED(result)) return result;
+    HANDLE finished = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!finished) {
+        const auto error = GetLastError();
+        CoReleaseMarshalData(marshaled); marshaled->Release();
+        return HRESULT_FROM_WIN32(error);
+    }
+    std::atomic_bool cancelled = false;
+    bool consumed = false;
+    std::thread worker;
+    try {
+        worker = std::thread([&] {
+            const HRESULT initialized = OleInitialize(nullptr);
+            result = initialized;
+            if (SUCCEEDED(initialized)) {
+                Microsoft::WRL::ComPtr<IDataObject> source;
+                consumed = true;
+                result = CoGetInterfaceAndReleaseStream(marshaled, IID_PPV_ARGS(&source));
+                if (SUCCEEDED(result)) {
+                    try {
+                        result = ops::PasteShellData(source.Get(), destination, DROPEFFECT_COPY, &cancelled);
+                    } catch (...) { result = E_FAIL; }
+                }
+                source.Reset();
+                OleUninitialize();
+            }
+            SetEvent(finished);
+        });
+    } catch (...) {
+        CoReleaseMarshalData(marshaled); marshaled->Release(); CloseHandle(finished);
+        return E_OUTOFMEMORY;
+    }
+    // Keep the OLE source alive until completion. Pump COM and window messages
+    // so external providers, paint, Escape and owner shutdown remain responsive.
+    while (WaitForSingleObject(finished, 0) != WAIT_OBJECT_0) {
+        if ((owner && !IsWindow(owner)) || (GetAsyncKeyState(VK_ESCAPE) & 0x8000))
+            cancelled.store(true);
+        DWORD index = 0;
+        CoWaitForMultipleHandles(COWAIT_DISPATCH_CALLS | COWAIT_DISPATCH_WINDOW_MESSAGES,
+            50, 1, &finished, &index);
+    }
+    worker.join();
+    if (!consumed) { CoReleaseMarshalData(marshaled); marshaled->Release(); }
+    CloseHandle(finished);
+    return result;
+}
+
+bool VirtualCopyAllowed(DWORD keys, DWORD allowed) {
+    return (allowed & DROPEFFECT_COPY) && !(keys & (MK_SHIFT | 0x20u));
+}
 
 HGLOBAL BuildShellIdList(const std::vector<std::wstring>& paths);
 std::atomic_bool shell_worker_busy = false;
@@ -650,13 +706,16 @@ HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt
                                     DWORD* effect) {
     if (!effect) return E_POINTER;
     sources_.clear();
+    virtual_files_ = false;
     preferred_ = 0;
     drag_allowed_ = DROPEFFECT_NONE;
-    if (!ExtractHDropPaths(obj, sources_)) {
+    if (virtual_drop_active_) { *effect = DROPEFFECT_NONE; return S_OK; }
+    if (!ExtractHDropPaths(obj, sources_)) virtual_files_ = ops::HasShellFileData(obj);
+    if (sources_.empty() && !virtual_files_) {
         *effect = DROPEFFECT_NONE;
         return S_OK;
     }
-    preferred_ = PreferredDropEffect(obj);
+    if (!virtual_files_) preferred_ = PreferredDropEffect(obj);
     drag_point_ = ClientPoint(pt);
     drag_keys_ = key_state | ((GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u);
     drag_allowed_ = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
@@ -666,7 +725,7 @@ HRESULT WindowDropTarget::DragEnter(IDataObject* obj, DWORD key_state, POINTL pt
 
 HRESULT WindowDropTarget::DragOver(DWORD key_state, POINTL pt, DWORD* effect) {
     if (!effect) return E_POINTER;
-    if (sources_.empty()) {
+    if (sources_.empty() && !virtual_files_) {
         *effect = DROPEFFECT_NONE;
         return S_OK;
     }
@@ -679,6 +738,12 @@ HRESULT WindowDropTarget::DragOver(DWORD key_state, POINTL pt, DWORD* effect) {
 
 DWORD WindowDropTarget::RefreshDragFeedback() {
     drag_keys_ = (drag_keys_ & ~0x20u) | ((GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u);
+    if (virtual_files_) {
+        const DWORD allowed = VirtualCopyAllowed(drag_keys_, drag_allowed_) ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return cb_.virtual_destination &&
+            !cb_.virtual_destination(drag_point_, drag_keys_, allowed, DROPEFFECT_COPY).empty()
+            ? allowed : DROPEFFECT_NONE;
+    }
     return !sources_.empty() && drag_allowed_ && cb_.drag_over
         ? cb_.drag_over(sources_, drag_point_, drag_keys_, drag_allowed_, preferred_) & drag_allowed_
         : DROPEFFECT_NONE;
@@ -686,6 +751,7 @@ DWORD WindowDropTarget::RefreshDragFeedback() {
 
 HRESULT WindowDropTarget::DragLeave() {
     sources_.clear();
+    virtual_files_ = false;
     preferred_ = 0;
     drag_allowed_ = DROPEFFECT_NONE;
     if (cb_.drag_leave) cb_.drag_leave();
@@ -694,16 +760,34 @@ HRESULT WindowDropTarget::DragLeave() {
 
 HRESULT WindowDropTarget::Drop(IDataObject* obj, DWORD key_state, POINTL pt, DWORD* effect) {
     if (!effect) return E_POINTER;
+    if (virtual_drop_active_) { *effect = DROPEFFECT_NONE; return S_OK; }
     const DWORD allowed = *effect & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
     std::vector<std::wstring> sources;
-    if (!allowed || !ExtractHDropPaths(obj, sources)) {
+    const bool paths = allowed && ExtractHDropPaths(obj, sources);
+    key_state |= (GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u;
+    if (!paths && VirtualCopyAllowed(key_state, allowed) &&
+        cb_.virtual_destination && ops::HasShellFileData(obj)) {
+        const auto destination = cb_.virtual_destination(ClientPoint(pt), key_state,
+            DROPEFFECT_COPY, DROPEFFECT_COPY);
+        if (!destination.empty()) {
+            AddRef();
+            virtual_drop_active_ = true;
+            DragLeave();
+            const HRESULT result = CopyVirtualDrop(hwnd_, obj, destination);
+            virtual_drop_active_ = false;
+            *effect = SUCCEEDED(result) ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+            if (cb_.virtual_complete && (!hwnd_ || IsWindow(hwnd_))) cb_.virtual_complete(result);
+            Release();
+            return S_OK;
+        }
+    }
+    if (!paths) {
         *effect = DROPEFFECT_NONE;
         DragLeave();
         return S_OK;
     }
     // The dropped object may differ from the object passed to DragEnter.
     const DWORD preferred = PreferredDropEffect(obj);
-    key_state |= (GetKeyState(VK_MENU) & 0x8000) ? 0x20u : 0u;
     DWORD performed = cb_.drop ? cb_.drop(sources, ClientPoint(pt), key_state, allowed, preferred) & allowed
                                : DROPEFFECT_NONE;
     *effect = performed;

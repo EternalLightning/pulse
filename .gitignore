@@ -95,3 +95,6 @@ __pycache__/
 # Raw local validation captures; keep the curated index in source control.
 /docs/validation/*
 !/docs/validation/README.md
+
+# Downloaded third-party design reference assets (local only; see docs/design-references/README.md)
+/docs/design-references/assets/

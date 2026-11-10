@@ -52,6 +52,7 @@ constexpr SettingDestination destinations[]={
     {I::SettingsLanguage,0,0},{I::SettingsTextRender,0,0},
     {I::SettingsBlankClickBack,6,0},{I::SettingsShowHidden,6,0},{I::SettingsShowProtected,6,0},
     {I::SettingsFolderSort,6,0},{I::SettingsRowHeight,6,0},{I::ListSmartDate,6,0},
+    {I::AutoFolderSize,6,0},
     {I::ListZebraRows,6,0},{I::ListSizeBar,6,0},{I::SettingsShowPerformance,6,0},
     {I::SettingsNewTabHome,7,0},{I::SettingsExternalOpen,7,0},{I::PinnedNames,7,0},
     {I::CloseLastTabWindow,7,0},{I::SettingsMatchBackground,7,0},{I::SettingsLockWindowSize,7,0},

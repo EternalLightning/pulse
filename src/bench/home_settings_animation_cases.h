@@ -72,9 +72,13 @@ inline bool RunHomeSettingsAnimationChecks(pulse::AppState& s, const std::filesy
                     (card.rect.top + card.rect.bottom) / 2) != card.index;
             }
             check(safe, "retracting cards cannot receive navigation clicks");
-            if (group == 2) check(!ui::HitHomeNetworkSettings(home, bounds, scale,
-                partial.network_notice.left + scale, partial.network_notice.top + scale),
-                "retracting network notice cannot open settings");
+            if (group == 2) {
+                auto empty_home = home;
+                std::erase_if(empty_home.home_cards, [](const auto& card) { return card.group == 2; });
+                const auto notice = ui::MakeHomeLayout(empty_home, bounds, scale).network_notice;
+                check(notice.right > notice.left && !ui::HitHomeNetworkSettings(empty_home, bounds, scale,
+                    notice.left + scale, notice.top + scale), "retracting network notice cannot open settings");
+            }
         }
     }
 

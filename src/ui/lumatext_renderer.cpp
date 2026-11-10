@@ -8,7 +8,8 @@
 #include "typography.h"
 #include "edit_word_range.h"
 #include "edit_motion.h"
-#include "animation_clock.h"
+#include "edit_frame_scheduler.h"
+#include <chrono>
 #include "FluentTokens.h"
 
 #include <windows.h>
@@ -47,14 +48,15 @@ float EditScrollForTest(HWND hwnd) {
 namespace {
 
 #if defined(PULSE_HAS_LUMATEXT)
-uint64_t EditPresentationTime(HWND hwnd) {
+double EditPresentationTime(HWND hwnd) {
 #ifdef PULSE_TEST_EDIT_VIEWPORT
-    if (const auto* time = reinterpret_cast<const uint64_t*>(GetPropW(hwnd, L"Pulse.Test.EditTime")))
+    if (const auto* time = reinterpret_cast<const double*>(GetPropW(hwnd, L"Pulse.Test.EditTime")))
         return *time;
 #else
     (void)hwnd;
 #endif
-    return AnimationTimeMs();
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 bool IsEditCaretActivity(UINT message) {
@@ -216,6 +218,7 @@ struct LumaTextRenderer::Impl {
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> target_dc;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> recording_dc;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> blit_dc;
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> edit_brush;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> blit_target;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> blit_staging;
     int blit_w = 0;
@@ -243,6 +246,8 @@ struct LumaTextRenderer::Impl {
     int mouse_word_start = 0;
     int mouse_word_end = 0;
     std::unordered_map<HWND, std::pair<int, int>> edit_selections;
+    HWND keyboard_selection_hwnd = nullptr;
+    bool setting_keyboard_selection = false;
     // Horizontal scroll persists like native EDIT's offset: the text moves
     // only when the caret would leave the field. Paint and mouse hit-testing
     // share it so the pointer maps to the characters actually on screen.
@@ -266,15 +271,23 @@ struct LumaTextRenderer::Impl {
     struct EditMotionState {
         EditCaretMotion caret;
         EditTextMotion change;
+        std::pair<int, int> selection{};
+        std::array<float, 8> text_colors{};
+        Microsoft::WRL::ComPtr<IDWriteRenderingParams> text_params;
+        typography::TextRenderMode text_mode = typography::TextRenderMode::Auto;
         std::wstring text;
         Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
         IDWriteTextFormat* format = nullptr;
         Microsoft::WRL::ComPtr<IDWriteTextLayout> change_layout;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> text_surface, interrupted_surface;
+        bool text_surface_valid = false;
+        bool interrupted = false;
         float change_scroll = 0;
         float scroll = 0, suffix_dx = 0;
         int width = 0, height = 0;
     };
     std::unordered_map<HWND, EditMotionState> edit_motion;
+    EditFrameScheduler edit_frames;
     std::unordered_map<HWND, EditCaretBlink> edit_blinks;
     // Up/Down keep the column they started from across short lines.
     HWND line_goal_hwnd = nullptr;
@@ -668,6 +681,7 @@ struct LumaTextRenderer::Impl {
         dw_params_monitor = nullptr;
         blit_target.Reset();
         blit_staging.Reset();
+        edit_brush.Reset();
         blit_dc.Reset();
         blit_w = 0;
         blit_h = 0;
@@ -1180,7 +1194,9 @@ struct LumaTextRenderer::Impl {
         else if (target_y >= metrics.height) target = length;
         else target = DwHitIndex(layout, x, length, target_y);
         if (!extend) anchor = target;
+        setting_keyboard_selection = true;
         SendMessageW(hwnd, EM_SETSEL, static_cast<WPARAM>(anchor), static_cast<LPARAM>(target));
+        setting_keyboard_selection = false;
         line_goal_hwnd = hwnd;
         line_goal_caret = target;
         line_goal_x = x;
@@ -1390,6 +1406,35 @@ struct LumaTextRenderer::Impl {
         if (IsWindow(hwnd)) SetMouseSelection(hwnd);
     }
 
+    void SyncNativeEditSelection(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+        const bool navigation = message == WM_KEYDOWN && (wparam == VK_LEFT || wparam == VK_RIGHT ||
+            wparam == VK_UP || wparam == VK_DOWN || wparam == VK_HOME || wparam == VK_END ||
+            wparam == VK_PRIOR || wparam == VK_NEXT);
+        if (navigation || (message == EM_SETSEL && setting_keyboard_selection)) keyboard_selection_hwnd = hwnd;
+        else if (message != WM_KEYDOWN && keyboard_selection_hwnd == hwnd) keyboard_selection_hwnd = nullptr;
+        DWORD lo = 0, hi = 0;
+        SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&lo), reinterpret_cast<LPARAM>(&hi));
+        int anchor = static_cast<int>(lo), caret = static_cast<int>(hi);
+        if (message == EM_SETSEL && static_cast<int>(wparam) >= 0) {
+            const int length = GetWindowTextLengthW(hwnd);
+            anchor = std::clamp(static_cast<int>(wparam), 0, length);
+            caret = lparam < 0 ? length : std::clamp(static_cast<int>(lparam), 0, length);
+        } else if (lo != hi) {
+            const auto saved = edit_selections.find(hwnd);
+            if (navigation && (GetKeyState(VK_SHIFT) & 0x8000) && saved != edit_selections.end() &&
+                (saved->second.first == static_cast<int>(lo) || saved->second.first == static_cast<int>(hi))) {
+                // Reversing Shift+Arrow shrinks the moving end; it does not swap the anchor.
+                anchor = saved->second.first;
+                caret = anchor == static_cast<int>(lo) ? static_cast<int>(hi) : static_cast<int>(lo);
+            } else if ((message == WM_KEYDOWN && (wparam == VK_LEFT || wparam == VK_HOME || wparam == VK_UP)) ||
+                (mouse_hwnd == hwnd && mouse_anchor == static_cast<int>(hi))) {
+                anchor = static_cast<int>(hi); caret = static_cast<int>(lo);
+            }
+        }
+        mouse_hwnd = hwnd; mouse_anchor = anchor; mouse_caret = caret;
+        edit_selections[hwnd] = {anchor, caret};
+    }
+
     void SetMouseSelection(HWND hwnd) {
         setting_mouse_selection = true;
         SendMessageW(hwnd, EM_SETSEL, static_cast<WPARAM>(mouse_anchor), static_cast<LPARAM>(mouse_caret));
@@ -1497,24 +1542,50 @@ struct LumaTextRenderer::Impl {
         const float scroll = wraps ? 0.0f : mouse_scroll_hwnd == hwnd && painted_scroll != edit_scrolls.end()
             ? painted_scroll->second : EditScroll(hwnd, dw_layout.Get(), caret_x, static_cast<float>(w));
         edit_scrolls[hwnd] = scroll;
-        const uint64_t now = EditPresentationTime(hwnd);
+        const double now = EditPresentationTime(hwnd);
+        const auto blink_now = static_cast<uint64_t>(now);
         BOOL system_motion = TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &system_motion, 0);
 #ifdef PULSE_TEST_EDIT_VIEWPORT
         if (const auto policy = reinterpret_cast<ULONG_PTR>(GetPropW(hwnd, L"Pulse.Test.EditMotion")))
             system_motion = policy == 1;
 #endif
-        const bool animate = system_motion && !IsHighContrast() && GetFocus() == hwnd &&
-            sel_lo == sel_hi && !GetPropW(hwnd, L"Pulse.EditComposing");
+        const bool motion_enabled = system_motion && !IsHighContrast() && GetFocus() == hwnd &&
+            !GetPropW(hwnd, L"Pulse.EditComposing");
+        const bool keyboard_selection = keyboard_selection_hwnd == hwnd;
+        const bool animate = motion_enabled && (sel_lo == sel_hi || keyboard_selection);
         auto& motion = edit_motion[hwnd];
         if (motion.width != w || motion.height != h || motion.format != format) motion = {};
+        const std::pair selection{sel_lo, sel_hi};
+        const bool selection_changed = selection != motion.selection &&
+            (sel_lo != sel_hi || motion.selection.first != motion.selection.second);
+        const std::array colors{foreground.r, foreground.g, foreground.b, foreground.a,
+            background.r, background.g, background.b, background.a};
+        const auto text_mode = typography::CurrentTextRenderMode();
+        const bool text_frame_changed = !motion.text_surface_valid || motion.text != text || selection_changed ||
+            motion.scroll != scroll || motion.layout.Get() != dw_layout.Get() || motion.text_colors != colors ||
+            motion.text_params.Get() != params || motion.text_mode != text_mode;
+        const bool blend_selection = motion_enabled && keyboard_selection && selection_changed &&
+            motion.text == text && motion.text_surface_valid;
         auto& caret_blink = edit_blinks[hwnd];
         const std::array<float, 3> caret_target{std::floor(pad + caret_x - scroll), caret_top, caret_bottom};
         if (!motion.caret.initialized || motion.text != text || motion.caret.target != caret_target)
-            caret_blink.Reset(now);
+            caret_blink.Reset(blink_now);
+        const bool interrupted = motion.change.pending && motion.text_surface_valid;
+        if (blend_selection || (motion.text != text && animate && motion.layout && interrupted)) {
+            if (!motion.interrupted_surface) {
+                const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+                    blit_target->GetPixelFormat(), 96, 96);
+                if (FAILED(blit_dc->CreateBitmap(blit_target->GetPixelSize(), nullptr, 0,
+                    &properties, &motion.interrupted_surface))) return false;
+            }
+            if (FAILED(motion.interrupted_surface->CopyFromBitmap(nullptr,
+                motion.text_surface.Get(), nullptr))) return false;
+        }
         motion.change.Sample(now);
         if (motion.text != text) {
             if (animate && motion.layout) {
+                motion.interrupted = interrupted;
                 const float carried = motion.change.pending ? motion.suffix_dx * (1 - motion.change.progress) : 0;
                 motion.change_layout = motion.layout;
                 motion.change_scroll = motion.scroll;
@@ -1547,26 +1618,46 @@ struct LumaTextRenderer::Impl {
                 if (wraps) motion.suffix_dx = 0;
                 if (metrics.maxBidiReorderingDepth > 1) motion.change = {};
             } else motion.change = {};
-        }
+        } else if (blend_selection) {
+            motion.change = {};
+            motion.change.started = now;
+            motion.change.progress = 0;
+            motion.change.pending = true;
+            motion.interrupted = true;
+        } else if (selection_changed) motion.change = {};
         if (!animate) motion.change = {};
+        if (!motion.change.pending) motion.interrupted = false;
         motion.caret.Tick(caret_target, now, animate);
         motion.text = text; motion.layout = dw_layout; motion.scroll = scroll;
+        motion.selection = selection;
         motion.format = format; motion.width = w; motion.height = h;
         const bool motion_pending = motion.caret.pending || motion.change.pending;
-        caret_blink.Sample(now, motion_pending);
-        if (motion_pending) SetTimer(hwnd, kEditMotionTimer, 16, nullptr);
-        else KillTimer(hwnd, kEditMotionTimer);
-        if (motion_pending) SetPropW(hwnd, L"Pulse.EditMotionPending", reinterpret_cast<HANDLE>(1));
-        else RemovePropW(hwnd, L"Pulse.EditMotionPending");
+        caret_blink.Sample(blink_now, motion_pending);
+        if (motion_pending) {
+            const auto backend = reinterpret_cast<UINT_PTR>(GetPropW(hwnd, L"Pulse.EditMotionPending"));
+            if (edit_frames.Request(hwnd)) {
+                if (backend == 2) KillTimer(hwnd, kEditMotionTimer);
+                SetPropW(hwnd, L"Pulse.EditMotionPending", reinterpret_cast<HANDLE>(1));
+            } else if (backend == 2 || SetTimer(hwnd, kEditMotionTimer, 16, nullptr)) {
+                SetPropW(hwnd, L"Pulse.EditMotionPending", reinterpret_cast<HANDLE>(2));
+            }
+        } else {
+            edit_frames.Cancel(hwnd);
+            if (RemovePropW(hwnd, L"Pulse.EditMotionPending")) KillTimer(hwnd, kEditMotionTimer);
+            motion.change_layout.Reset();
+        }
 #ifdef PULSE_TEST_EDIT_VIEWPORT
         observed_edit_scroll[hwnd] = scroll;
 #endif
 
+        if (!edit_brush && FAILED(blit_dc->CreateSolidColorBrush(background, &edit_brush))) {
+            motion.text_surface_valid = false;
+            return false;
+        }
+        const auto& brush = edit_brush;
         blit_dc->SetTarget(blit_target.Get());
         blit_dc->BeginDraw();
         blit_dc->Clear(background);
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
-        blit_dc->CreateSolidColorBrush(background, &brush);
         bool selection_drawn = sel_hi <= sel_lo || GetFocus() != hwnd;
         if (sel_hi > sel_lo && GetFocus() == hwnd && brush) {
             brush->SetColor(D2D1::ColorF(0.0f, 0.47f, 0.83f, 0.35f));
@@ -1586,8 +1677,8 @@ struct LumaTextRenderer::Impl {
         }
         // Keep removed clusters in the same transition as the moving caret.
         // Dropping the old layout here made backspace erase first, then move.
-        const bool previous_frame = motion.change.pending && motion.change_layout && motion.change.progress == 0;
-        if (motion.change.pending && motion.change_layout && brush &&
+        const bool previous_frame = !motion.interrupted && motion.change.pending && motion.change_layout && motion.change.progress == 0;
+        if (!motion.interrupted && motion.change.pending && motion.change_layout && brush &&
             (previous_frame || motion.change.old_end > motion.change.prefix)) {
             const auto& change = motion.change;
             auto* old_layout = motion.change_layout.Get();
@@ -1636,13 +1727,15 @@ struct LumaTextRenderer::Impl {
             }
             blit_dc->SetTextRenderingParams(nullptr);
         }
-        std::wstring visible = text;
+        std::wstring_view visible = text;
+        std::wstring cue_text;
         D2D1_COLOR_F visible_color = foreground;
         if (visible.empty() && !motion.change.pending) {
             wchar_t cue[256]{};
             if (SendMessageW(hwnd, EM_GETCUEBANNER, reinterpret_cast<WPARAM>(cue),
                              ARRAYSIZE(cue)) && cue[0] != 0) {
-                visible = cue;
+                cue_text = cue;
+                visible = cue_text;
                 visible_color = D2D1::ColorF(foreground.r, foreground.g, foreground.b,
                                              foreground.a * 0.45f);
             }
@@ -1657,6 +1750,7 @@ struct LumaTextRenderer::Impl {
                 if (FAILED(visible_layout->GetMetrics(&metrics))) {
                     blit_dc->EndDraw();
                     blit_dc->SetTarget(nullptr);
+                    motion.text_surface_valid = false;
                     return false;
                 }
                 const float y = std::round((static_cast<float>(h) - metrics.height) * 0.5f) - metrics.top;
@@ -1673,7 +1767,7 @@ struct LumaTextRenderer::Impl {
                     if (luma) ++stats.edit_lumatext_draws;
                     else blit_dc->DrawTextLayout(point, visible_layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
                 };
-                if (motion.change.pending && visible == text) {
+                if (!motion.interrupted && motion.change.pending && visible == text) {
                     const auto range = [&](size_t start, size_t end, float opacity, float dx, float dy, bool suffix = false) {
                         if (end <= start || opacity <= 0) return;
                         UINT32 count = 0;
@@ -1686,8 +1780,10 @@ struct LumaTextRenderer::Impl {
                             for (const auto& region : regions) {
                                 float shift_x = dx, shift_y = dy;
                                 float range_opacity = opacity;
-                                if (wraps && suffix && motion.change_layout) {
-                                    const size_t old_position = motion.change.old_end + region.textPosition - motion.change.new_end;
+                                if (wraps && motion.change_layout && (suffix || end == motion.change.prefix)) {
+                                    const size_t old_position = suffix
+                                        ? motion.change.old_end + region.textPosition - motion.change.new_end
+                                        : region.textPosition;
                                     float old_x = 0, old_y = 0;
                                     DWRITE_HIT_TEST_METRICS old_hit{};
                                     motion.change_layout->HitTestTextPosition(static_cast<UINT32>(old_position),
@@ -1736,23 +1832,56 @@ struct LumaTextRenderer::Impl {
                 text_drawn = true;
             }
         }
+        // Keep the caret-free frame ready for Shift selection without recopying unchanged glyphs.
+        if (motion_enabled && (text_frame_changed || interrupted || motion.change.pending)) {
+            motion.text_surface_valid = false;
+            const HRESULT text_end = blit_dc->EndDraw();
+            blit_dc->SetTarget(nullptr);
+            if (FAILED(text_end)) return false;
+            if (!motion.text_surface) {
+                const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+                    blit_target->GetPixelFormat(), 96, 96);
+                if (FAILED(blit_dc->CreateBitmap(blit_target->GetPixelSize(), nullptr, 0,
+                    &properties, &motion.text_surface))) return false;
+            }
+            if (motion.interrupted) {
+                blit_dc->SetTarget(motion.text_surface.Get());
+                blit_dc->BeginDraw();
+                const auto bounds = D2D1::RectF(0, 0, static_cast<float>(w), static_cast<float>(h));
+                // Blend premultiplied pixels linearly; source-over would dim unchanged glyphs.
+                blit_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+                blit_dc->DrawBitmap(motion.interrupted_surface.Get(), bounds, 1 - motion.change.progress,
+                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+                blit_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_ADD);
+                blit_dc->DrawBitmap(blit_target.Get(), bounds, motion.change.progress,
+                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+                blit_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+                const HRESULT blended = blit_dc->EndDraw();
+                blit_dc->SetTarget(nullptr);
+                if (FAILED(blended) || FAILED(blit_target->CopyFromBitmap(nullptr,
+                    motion.text_surface.Get(), nullptr))) return false;
+            } else if (FAILED(motion.text_surface->CopyFromBitmap(nullptr, blit_target.Get(), nullptr))) return false;
+            motion.text_surface_valid = true;
+            motion.text_colors = colors; motion.text_params = params; motion.text_mode = text_mode;
+            blit_dc->SetTarget(blit_target.Get());
+            blit_dc->BeginDraw();
+        } else if (!motion_enabled) motion.text_surface_valid = false;
         UINT blink = GetCaretBlinkTime();
 #ifdef PULSE_TEST_EDIT_VIEWPORT
         if (const auto interval = reinterpret_cast<ULONG_PTR>(GetPropW(hwnd, L"Pulse.Test.EditBlinkInterval")))
             blink = static_cast<UINT>(interval);
 #endif
         const bool caret_on = GetFocus() == hwnd && GetCapture() != hwnd &&
-            caret_blink.Visible(now, blink);
-        const UINT blink_delay = caret_blink.NextDelay(now, blink);
+            caret_blink.Visible(blink_now, blink);
+        const UINT blink_delay = caret_blink.NextDelay(blink_now, blink);
         if (GetFocus() == hwnd && blink_delay) SetTimer(hwnd, kEditCaretTimer, blink_delay, nullptr);
         else KillTimer(hwnd, kEditCaretTimer);
         if (caret_on && brush) {
             brush->SetColor(foreground);
-            // Fill whole pixels: a half-pixel origin splits the caret into two
-            // half-intensity columns that blend into the first placeholder glyph.
+            // Subpixel coverage smooths motion; snap the resting caret to keep it crisp.
             DWORD caret_width = 1;
             SystemParametersInfoW(SPI_GETCARETWIDTH, 0, &caret_width, 0);
-            const float x = std::floor(motion.caret.value[0]);
+            const float x = motion.caret.pending ? motion.caret.value[0] : std::floor(motion.caret.value[0]);
             blit_dc->FillRectangle(
                 D2D1::RectF(x, motion.caret.value[1], x + static_cast<float>(std::max<DWORD>(1, caret_width)),
                             motion.caret.value[2]),
@@ -1760,7 +1889,10 @@ struct LumaTextRenderer::Impl {
         }
         const HRESULT end = blit_dc->EndDraw();
         blit_dc->SetTarget(nullptr);
-        if (FAILED(end) || !text_drawn || !selection_drawn || !brush) return false;
+        if (FAILED(end) || !text_drawn || !selection_drawn || !brush) {
+            motion.text_surface_valid = false;
+            return false;
+        }
         ++stats.edit_directwrite_draws;
         stats.edit_rendering_mode = params->GetRenderingMode();
         bool presented = true;
@@ -1769,10 +1901,14 @@ struct LumaTextRenderer::Impl {
             (*bitmap)->AddRef();
         } else {
             if (FAILED(blit_staging->CopyFromBitmap(nullptr, blit_target.Get(), nullptr))) {
+                motion.text_surface_valid = false;
                 return false;
             }
             D2D1_MAPPED_RECT mapped{};
-            if (FAILED(blit_staging->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return false;
+            if (FAILED(blit_staging->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
+                motion.text_surface_valid = false;
+                return false;
+            }
             const size_t row_bytes = static_cast<size_t>(w) * 4u;
             const void* dib_bits = mapped.bits;
             std::vector<std::uint8_t> tight_pixels;
@@ -1809,6 +1945,7 @@ struct LumaTextRenderer::Impl {
             ImmSetCandidateWindow(imc, &candidate);
             ImmReleaseContext(hwnd, imc);
         }
+        if (!presented) motion.text_surface_valid = false;
         return presented;
     }
 #else
@@ -1828,15 +1965,24 @@ void LumaTextRenderer::TrackEdit(HWND hwnd) {
 LRESULT CALLBACK LumaTextRenderer::EditSelectionProc(HWND hwnd, UINT message, WPARAM wparam,
                                                     LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
     auto* self = reinterpret_cast<LumaTextRenderer*>(data);
-    if (message == WM_TIMER && wparam == kEditMotionTimer) {
+    const bool frame_message = message == EditMotionFrameMessage();
+#if defined(PULSE_HAS_LUMATEXT)
+    if (frame_message && (!self->impl_ || !self->impl_->edit_frames.Consume(hwnd, wparam))) return 0;
+#endif
+    if (frame_message || (message == WM_TIMER && wparam == kEditMotionTimer)) {
         if (GetFocus() == hwnd && IsWindowVisible(hwnd) && GetPropW(hwnd, L"Pulse.EditMotionPending") &&
-            !GetPropW(hwnd, L"Pulse.NativeEditFallback") && !GetPropW(hwnd, L"Pulse.NativeEditPolicy"))
+            !GetPropW(hwnd, L"Pulse.NativeEditFallback") && !GetPropW(hwnd, L"Pulse.NativeEditPolicy")) {
             InvalidateRect(hwnd, nullptr, FALSE);
-        else {
+            // A continuously animating parent must not starve the child's WM_PAINT.
+            UpdateWindow(hwnd);
+        } else {
             KillTimer(hwnd, kEditMotionTimer);
             RemovePropW(hwnd, L"Pulse.EditMotionPending");
 #if defined(PULSE_HAS_LUMATEXT)
-            if (self->impl_) self->impl_->edit_motion.erase(hwnd);
+            if (self->impl_) {
+                self->impl_->edit_frames.Cancel(hwnd);
+                self->impl_->edit_motion.erase(hwnd);
+            }
 #endif
         }
         return 0;
@@ -1879,14 +2025,16 @@ void LumaTextRenderer::SyncEditSelection(HWND hwnd, UINT message, WPARAM wparam,
     if (!impl_) return;
     if (!impl_->applying_mouse_selection && !impl_->setting_mouse_selection &&
         GetFocus() == hwnd && IsEditCaretActivity(message))
-        impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
+        impl_->edit_blinks[hwnd].Reset(static_cast<uint64_t>(EditPresentationTime(hwnd)));
     if (message == WM_SETTEXT || message == WM_SIZE || message == WM_SETFONT ||
         message == WM_IME_STARTCOMPOSITION || message == WM_KILLFOCUS || message == WM_NCDESTROY) {
+        impl_->edit_frames.Cancel(hwnd);
         impl_->edit_motion.erase(hwnd);
         KillTimer(hwnd, kEditMotionTimer);
         RemovePropW(hwnd, L"Pulse.EditMotionPending");
     }
     if (message == WM_NCDESTROY || message == WM_KILLFOCUS) {
+        if (impl_->keyboard_selection_hwnd == hwnd) impl_->keyboard_selection_hwnd = nullptr;
         impl_->edit_blinks.erase(hwnd);
         KillTimer(hwnd, kEditCaretTimer);
         if (impl_->mouse_scroll_hwnd == hwnd) impl_->mouse_scroll_hwnd = nullptr;
@@ -1909,22 +2057,7 @@ void LumaTextRenderer::SyncEditSelection(HWND hwnd, UINT message, WPARAM wparam,
         message != WM_PASTE && message != WM_CLEAR && message != WM_UNDO && message != EM_UNDO &&
         message != WM_IME_COMPOSITION && message != WM_IME_ENDCOMPOSITION) return;
     if (impl_->mouse_scroll_hwnd == hwnd) impl_->mouse_scroll_hwnd = nullptr;
-    DWORD lo = 0, hi = 0;
-    SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&lo), reinterpret_cast<LPARAM>(&hi));
-    int anchor = static_cast<int>(lo), caret = static_cast<int>(hi);
-    if (message == EM_SETSEL && static_cast<int>(wparam) >= 0) {
-        const int length = GetWindowTextLengthW(hwnd);
-        anchor = std::clamp(static_cast<int>(wparam), 0, length);
-        caret = lparam < 0 ? length : std::clamp(static_cast<int>(lparam), 0, length);
-    } else if (lo != hi) {
-        if (message == WM_KEYDOWN && (wparam == VK_LEFT || wparam == VK_HOME || wparam == VK_UP)) {
-            anchor = static_cast<int>(hi); caret = static_cast<int>(lo);
-        } else if (impl_->mouse_hwnd == hwnd && impl_->mouse_anchor == static_cast<int>(hi)) {
-            anchor = static_cast<int>(hi); caret = static_cast<int>(lo);
-        }
-    }
-    impl_->mouse_hwnd = hwnd; impl_->mouse_anchor = anchor; impl_->mouse_caret = caret;
-    impl_->edit_selections[hwnd] = {anchor, caret};
+    impl_->SyncNativeEditSelection(hwnd, message, wparam, lparam);
 #else
     (void)hwnd; (void)message; (void)wparam; (void)lparam;
 #endif
@@ -1934,7 +2067,7 @@ void LumaTextRenderer::SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wPar
 #if defined(PULSE_HAS_LUMATEXT)
     if (!impl_ || impl_->setting_mouse_selection) return;
     if (GetFocus() == hwnd && IsEditCaretActivity(msg))
-        impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
+        impl_->edit_blinks[hwnd].Reset(static_cast<uint64_t>(EditPresentationTime(hwnd)));
     if (impl_->mouse_scroll_hwnd == hwnd) impl_->mouse_scroll_hwnd = nullptr;
     if (msg == WM_NCDESTROY || msg == WM_KILLFOCUS) {
         impl_->edit_blinks.erase(hwnd);
@@ -1942,20 +2075,7 @@ void LumaTextRenderer::SynchronizeEditSelection(HWND hwnd, UINT msg, WPARAM wPar
         if (impl_->mouse_hwnd == hwnd) impl_->mouse_hwnd = nullptr;
         return;
     }
-    DWORD lo = 0, hi = 0;
-    SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&lo), reinterpret_cast<LPARAM>(&hi));
-    int anchor = static_cast<int>(lo), caret = static_cast<int>(hi);
-    if (msg == EM_SETSEL && static_cast<int>(wParam) >= 0) {
-        const int length = GetWindowTextLengthW(hwnd);
-        anchor = std::min(static_cast<int>(wParam), length);
-        caret = static_cast<int>(lParam) < 0 ? length : std::min(static_cast<int>(lParam), length);
-    } else if (lo != hi && impl_->mouse_hwnd == hwnd && impl_->mouse_anchor == static_cast<int>(hi)) {
-        anchor = static_cast<int>(hi);
-        caret = static_cast<int>(lo);
-    }
-    impl_->mouse_hwnd = hwnd;
-    impl_->mouse_anchor = anchor;
-    impl_->mouse_caret = caret;
+    impl_->SyncNativeEditSelection(hwnd, msg, wParam, lParam);
 #else
     (void)hwnd; (void)msg; (void)wParam; (void)lParam;
 #endif
@@ -1966,8 +2086,10 @@ LRESULT LumaTextRenderer::CallEditDefaultMouse(HWND hwnd, UINT msg, WPARAM wPara
 #if defined(PULSE_HAS_LUMATEXT)
     if (format && impl_ && impl_->renderer) {
         TrackEdit(hwnd);
-        if (msg != WM_MOUSEMOVE || GetCapture() == hwnd)
-            impl_->edit_blinks[hwnd].Reset(EditPresentationTime(hwnd));
+        if (msg != WM_MOUSEMOVE || GetCapture() == hwnd) {
+            if (impl_->keyboard_selection_hwnd == hwnd) impl_->keyboard_selection_hwnd = nullptr;
+            impl_->edit_blinks[hwnd].Reset(static_cast<uint64_t>(EditPresentationTime(hwnd)));
+        }
         struct MouseSelectionGuard {
             Impl& state;
             HWND window;
@@ -2019,6 +2141,9 @@ bool LumaTextRenderer::Init(IDWriteFactory* dwrite, ID2D1RenderTarget* target) {
 }
 
 void LumaTextRenderer::Shutdown() noexcept {
+#if defined(PULSE_HAS_LUMATEXT)
+    if (impl_) impl_->edit_frames.Cancel();
+#endif
     for (HWND hwnd : tracked_edits_) {
         KillTimer(hwnd, kEditCaretTimer);
         KillTimer(hwnd, kEditMotionTimer);
@@ -2033,6 +2158,8 @@ void LumaTextRenderer::Shutdown() noexcept {
         impl_->edit_scrolls.clear();
         impl_->edit_motion.clear();
         impl_->edit_blinks.clear();
+        impl_->keyboard_selection_hwnd = nullptr;
+        impl_->setting_keyboard_selection = false;
         impl_->mouse_hwnd = nullptr;
         impl_->mouse_scroll_hwnd = nullptr;
         impl_->mouse_selection_deferred = false;

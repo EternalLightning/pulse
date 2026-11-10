@@ -13,6 +13,7 @@
 #include <wincodec.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <commoncontrols.h>
 #include <cstdio>
 #include <chrono>
@@ -23,6 +24,10 @@
 #include <vector>
 #include <algorithm>
 #include <array>
+
+// The private overlay fixture uses ImageList_CoCreateInstance from Comctl32 v6.
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' " \
+    "version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
@@ -517,6 +522,104 @@ struct ShellIconCacheTestAccess {
         DeleteObject(color);
         return icon;
     }
+    static bool Overlays() {
+        bool ok = true;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            ok &= passed;
+        };
+        for (const auto& [id, size] : std::array<std::pair<uint32_t, UINT>, 4>{
+                {{1, 16}, {0, 32}, {2, 48}, {4, 256}}}) {
+            ComPtr<IImageList2> list;
+            bool ready = SUCCEEDED(ImageList_CoCreateInstance(CLSID_ImageList, nullptr,
+                IID_PPV_ARGS(&list))) && SUCCEEDED(list->Initialize(static_cast<int>(size),
+                    static_cast<int>(size), ILC_COLOR32 | ILC_MASK, 2, 1));
+            HICON base_icon = MakeIcon(size, RECT{static_cast<LONG>(size / 4),
+                static_cast<LONG>(size / 8), static_cast<LONG>(size * 3 / 4),
+                static_cast<LONG>(size * 7 / 8)});
+            HICON overlay_icon = MakeIcon(size, RECT{0, static_cast<LONG>(size * 3 / 4),
+                static_cast<LONG>(size / 4), static_cast<LONG>(size)});
+            int base = -1, overlay = -1;
+            ready = ready && base_icon && overlay_icon &&
+                SUCCEEDED(list->ReplaceIcon(-1, base_icon, &base)) &&
+                SUCCEEDED(list->ReplaceIcon(-1, overlay_icon, &overlay)) &&
+                SUCCEEDED(list->SetOverlayImage(overlay, 3));
+            if (base_icon) DestroyIcon(base_icon);
+            if (overlay_icon) DestroyIcon(overlay_icon);
+            ipc::ShellIconPixels plain, composed;
+            const bool converted = ready && shell::ReadShellImageListIconPixels(list.get(), base, id, plain) &&
+                shell::ReadShellImageListIconPixels(list.get(), base | (3 << 24), id, composed);
+            check(converted && composed.width == size && composed.height == size && composed.list_id == id,
+                "packed overlay index preserves each native image-list resolution");
+            const size_t badge = (static_cast<size_t>(size * 7 / 8) * size + size / 8) * 4;
+            check(converted && plain.pixels[badge + 3] == 0 && composed.pixels[badge + 3] == 255 &&
+                composed.pixels[3] == 0 && composed.pixels != plain.pixels,
+                "registered overlay slot composites badge pixels and preserves surrounding transparency");
+        }
+
+        wchar_t target[MAX_PATH]{};
+        wchar_t link[MAX_PATH]{};
+        const auto relative = L"bench_data\\shell-overlay-" + std::to_wstring(GetCurrentProcessId()) + L".lnk";
+        const DWORD length = GetFullPathNameW(relative.c_str(), MAX_PATH, link, nullptr);
+        const bool absent = length && length < MAX_PATH && GetFileAttributesW(link) == INVALID_FILE_ATTRIBUTES;
+        ComPtr<IShellLinkW> shortcut;
+        ComPtr<IPersistFile> persist;
+        const bool saved = absent && GetModuleFileNameW(nullptr, target, MAX_PATH) &&
+            SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shortcut))) &&
+            SUCCEEDED(shortcut->SetPath(target)) && SUCCEEDED(shortcut->QueryInterface(IID_PPV_ARGS(&persist))) &&
+            SUCCEEDED(persist->Save(link, TRUE));
+        check(saved, "create isolated shortcut with a native Shell overlay");
+        if (saved) {
+            SHFILEINFOW info{};
+            const auto queried = SHGetFileInfoW(link, 0, &info, sizeof(info), SHGFI_SYSICONINDEX |
+                SHGFI_SMALLICON | SHGFI_ICON | SHGFI_ADDOVERLAYS | SHGFI_OVERLAYINDEX);
+            if (info.hIcon) DestroyIcon(info.hIcon);
+            ipc::ShellQueryRequest request;
+            request.kind = ipc::ShellQueryKind::Icon;
+            request.path = link;
+            ipc::ShellQueryResult result;
+            const bool loaded = ipc::QueryShell(request, result) && SUCCEEDED(result.error);
+            check(queried && (static_cast<uint32_t>(info.iIcon) >> 24) != 0,
+                "Windows discovers the shortcut overlay slot");
+            bool matches = loaded && result.icons.size() == 4;
+            if (!matches) std::printf("    shortcut host loaded=%d HRESULT=0x%08lX sizes=%zu packed_index=0x%08X\n",
+                loaded, static_cast<unsigned long>(result.error), result.icons.size(),
+                static_cast<unsigned int>(info.iIcon));
+            ipc::ShellQueryResult local;
+            for (const auto& pixels : result.icons) {
+                ComPtr<IImageList> list;
+                HICON icon = nullptr;
+                ipc::ShellIconPixels reference;
+                const uint32_t packed = static_cast<uint32_t>(info.iIcon);
+                const bool converted = SUCCEEDED(SHGetImageList(static_cast<int>(pixels.list_id),
+                    IID_PPV_ARGS(&list))) && SUCCEEDED(list->GetIcon(static_cast<int>(packed & 0x00ffffffu),
+                    ILD_TRANSPARENT | INDEXTOOVERLAYMASK(packed >> 24), &icon)) &&
+                    shell::ConvertShellIconPixels(icon, pixels.list_id, reference);
+                if (icon) DestroyIcon(icon);
+                const bool same = converted && pixels.width == reference.width && pixels.height == reference.height &&
+                    pixels.pixels == reference.pixels;
+                matches &= same;
+                if (!same) {
+                    if (local.icons.empty()) shell::QueryShellIcons(request, local);
+                    const auto direct = std::find_if(local.icons.begin(), local.icons.end(),
+                        [&](const auto& item) { return item.list_id == pixels.list_id; });
+                    size_t changed = 0;
+                    for (size_t offset = 0; offset < std::min(pixels.pixels.size(), reference.pixels.size()); ++offset)
+                        if (pixels.pixels[offset] != reference.pixels[offset]) ++changed;
+                    std::printf("    list=%u host=%ux%u reference=%ux%u converted=%d changed_bytes=%zu "
+                        "local=%ux%u local_matches_reference=%d local_matches_host=%d\n",
+                        pixels.list_id, pixels.width, pixels.height, reference.width, reference.height, converted, changed,
+                        direct == local.icons.end() ? 0u : direct->width,
+                        direct == local.icons.end() ? 0u : direct->height,
+                        direct != local.icons.end() && direct->pixels == reference.pixels,
+                        direct != local.icons.end() && direct->pixels == pixels.pixels);
+                }
+            }
+            check(matches, "isolated Shell query returns native composited shortcut pixels in all four sizes");
+            check(DeleteFileW(link) != FALSE, "remove isolated shortcut overlay fixture");
+        }
+        return ok;
+    }
     static bool PaddedIcons(bool native_archives = false) {
         ComPtr<ID3D11Device> d3d;
         ComPtr<IDXGIDevice> dxgi;
@@ -942,6 +1045,9 @@ int main(int argc, char** argv) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&controls);
     bool ok = false;
+    if (argc == 2 && std::strcmp(argv[1], "--overlays") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::Overlays();
+    } else
     if (argc == 2 && std::strcmp(argv[1], "--cloud-placeholders") == 0) {
         ok = pulse::ui::ShellIconCacheTestAccess::CloudPlaceholders();
     } else

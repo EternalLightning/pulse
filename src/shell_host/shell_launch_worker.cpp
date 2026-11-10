@@ -260,7 +260,8 @@ HRESULT Execute(const ipc::ShellLaunchRequest& request, HWND owner, ComPtr<IData
             (request.flags & ipc::kShellLaunchImageNeighbors)) {
             auto session = std::make_unique<ops::ImageOpenSession>();
             image_sessions.push_back(std::move(session));
-            if (ops::TryOpenImageWithNeighbors(owner, original, {}, image_sessions.back().get())) continue;
+            if (ops::TryOpenImageWithNeighbors(owner, original, {}, image_sessions.back().get(),
+                                               request.image_context)) continue;
             image_sessions.pop_back();
         }
         SHELLEXECUTEINFOW shell{sizeof(shell)};

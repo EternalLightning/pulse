@@ -1061,10 +1061,11 @@ uint64_t OpsManager::Submit(OpRequest req) {
     return seq;
 }
 
-void OpsManager::OpenWith(const std::wstring& path) {
+void OpsManager::OpenWith(const std::wstring& path, std::function<ImageOpenContext()> image_context) {
     QueueItem item;
     item.open_path = path;
     item.open_verb = L"open";
+    item.image_context = std::move(image_context);
     EnqueueOpen(std::move(item));
 }
 
@@ -2132,6 +2133,7 @@ void OpsManager::OpenThread(std::shared_ptr<OpenMailbox> mailbox) {
         request.owner_hwnd = reinterpret_cast<uintptr_t>(mailbox->owner.load());
         request.verb = item.open_verb;
         request.parameters = std::move(item.open_args);
+        if (item.image_context) request.image_context = item.image_context();
         if (item.open_verb == L"__cmdline") {
             request.kind = ipc::ShellLaunchKind::Command;
             request.executable = std::move(item.open_file);
@@ -2598,7 +2600,8 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             if (root != prior_plan.end()) root_destination_preexisting[i] = root->destination_preexisting;
         }
     } else if (failure.empty() && !cancelled) {
-        TransferTargetListing target_listing(req.dest_dir, req.sources.size());
+        TransferTargetListing target_listing(req.dest_dir, req.sources.size(),
+            [&] { return transfer_cancel_.load() || stopping_.load(); });
         for (size_t source_index = 0; source_index < req.sources.size(); ++source_index) {
             if (transfer_cancel_.load() || stopping_.load()) { cancelled = true; break; }
             const auto& source = req.sources[source_index];
@@ -2981,7 +2984,13 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         return snapshots;
     };
 
+    // For tiny files, committing temporary names costs more than the copy itself.
+    const bool tiny_copy_batch = req.type == OpType::Copy &&
+        std::all_of(entries.begin(), entries.end(), [](const auto& entry) {
+            return !entry.reparse && entry.bytes <= 4 * 1024;
+        });
     const auto prepare_copies = [&](size_t first) {
+        if (first + 1 == entries.size() || tiny_copy_batch) return;
         // Preparing copies is optional. Allocation/queue admission failure must
         // leave every retained job submitted, so the serial waiter can finish.
         try {
@@ -3085,7 +3094,12 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                                 }
                             }
                         } catch (...) { copy->result = E_OUTOFMEMORY; }
-                        copy->finished.store(true);
+                        {
+                            // Publish under the wait mutex to avoid losing the completion wakeup.
+                            std::lock_guard lock(transfer_control_mutex_);
+                            copy->finished.store(true);
+                        }
+                        transfer_control_cv_.notify_all();
                     });
                 } catch (...) {
                     // Submit either enqueues completely or throws before admission.
@@ -3284,7 +3298,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             }
             replacement_backups.push_back({entry.destination, backup, std::move(replacement_leaf)});
             if (!guard_result(destination_guard.AdoptCreatedLeaf(backup, replacement_backups.back().leaf.get(), failure), backup) ||
-                !guard_result(destination_guard.RefreshOwnedLeaf(entry.destination, failure), entry.destination)) break;
+                !guard_result(destination_guard.ExpectAbsentLeaf(entry.destination, failure), entry.destination)) break;
             destination_exists = false;
             destination_is_directory = false;
         }
@@ -3383,9 +3397,9 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 (destination_exists || old->second->destination != entry.destination)) {
             // A late collision/Keep Both decision invalidates speculative work.
             // Only the serial path may decide how the new target is handled.
-            while (!old->second->finished.load()) {
+            {
                 std::unique_lock lock(transfer_control_mutex_);
-                transfer_control_cv_.wait_for(lock, std::chrono::milliseconds(50));
+                transfer_control_cv_.wait(lock, [&] { return old->second->finished.load(); });
             }
             std::wstring ignored;
             if (old->second->context.destination_handle &&
@@ -3422,13 +3436,13 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             publish_progress(entry, done, actual_total, processed_items);
         };
 
-        auto cleanup_temporary = [&] {
+        auto cleanup_temporary = [&](DestinationGuard::Handle handle = {}) {
             std::wstring ignored;
             if (context.destination_handle) {
                 if (!destination_guard.AdoptCopyLeaf(copy_destination, context.destination_handle.get(), ignored)) return;
                 context.destination_handle.reset();
             }
-            destination_guard.DeleteOwnedLeaf(copy_destination, ignored);
+            destination_guard.DeleteOwnedLeaf(copy_destination, ignored, std::move(handle));
         };
         HRESULT copy_result = E_FAIL;
         bool resume = false;
@@ -3452,7 +3466,9 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 }
                 if (!paused_status) publish_progress(entry, 0, 0, processed_items);
                 std::unique_lock lock(transfer_control_mutex_);
-                transfer_control_cv_.wait_for(lock, std::chrono::milliseconds(50));
+                transfer_control_cv_.wait_for(lock, std::chrono::milliseconds(50), [&] {
+                    return prepared->finished.load() || transfer_pause_.load() != paused_status;
+                });
             }
             publish_progress(entry, 0, 0, processed_items);
             copy_result = prepared->result;
@@ -3575,8 +3591,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             SetStatus([&](OpStatus& st) { st.phase = OpPhase::Running; });
         }
 
-        if (!guard_result(destination_guard.Check(copy_destination, failure), copy_destination) ||
-            !guard_result(destination_guard.Check(entry.destination, failure), entry.destination)) {
+        if (!guard_result(destination_guard.Check(copy_destination, failure), copy_destination)) {
             cleanup_temporary();
             break;
         }
@@ -3594,14 +3609,10 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             }
             replacement_backups.push_back({entry.destination, backup, std::move(replacement_leaf)});
             if (!guard_result(destination_guard.AdoptCreatedLeaf(backup, replacement_backups.back().leaf.get(), failure), backup) ||
-                !guard_result(destination_guard.RefreshOwnedLeaf(entry.destination, failure), entry.destination)) {
+                !guard_result(destination_guard.ExpectAbsentLeaf(entry.destination, failure), entry.destination)) {
                 cleanup_temporary();
                 break;
             }
-        }
-        if (!guard_result(destination_guard.Check(entry.destination, failure), entry.destination)) {
-            cleanup_temporary();
-            break;
         }
         if (temporary_copy) {
             DWORD pin_error = ERROR_SUCCESS;
@@ -3611,11 +3622,14 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 cleanup_temporary();
                 break;
             }
-            if (!guard_result(destination_guard.Check(entry.destination, failure), entry.destination)) { cleanup_temporary(); break; }
+            if (!guard_result(destination_guard.Check(entry.destination, failure), entry.destination)) {
+                cleanup_temporary(std::move(temporary));
+                break;
+            }
             if (!destination_guard.RenameLeaf(temporary.get(), entry.destination)) {
                 const DWORD error = GetLastError();
                 fail_win32(error, entry.destination);
-                cleanup_temporary();
+                cleanup_temporary(std::move(temporary));
                 break;
             }
 
@@ -3738,7 +3752,10 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             removed = {};
             // Handle deletion removes a file/reparse name or an empty directory.
             // Never recursively delete a renamed directory's unverified children.
-            if (!destination_guard.DeleteOwnedLeaf(it->backup, cleanup_error, std::move(it->leaf))) retain_backup();
+            // Reopen the checked backup: rclone can still delete the original
+            // name when disposition is set on the handle used for its rename.
+            it->leaf.reset();
+            if (!destination_guard.DeleteOwnedLeaf(it->backup, cleanup_error)) retain_backup();
         } else {
             if (!destination_guard.Check(it->original, cleanup_error)) { retain_backup(); continue; }
             if (PathExists(it->original) &&

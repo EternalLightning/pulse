@@ -32,6 +32,7 @@ struct FolderSizesUiCache {
     std::vector<app::FolderSizeRequest> requests;
     std::vector<std::wstring> roots;
     std::wstring details_path;
+    bool automatic = true;
     std::vector<SortStamp> sorts;
     uint64_t revision = 0;
 #ifdef PULSE_FOLDER_SIZES_TESTING
@@ -176,6 +177,7 @@ void FillFolderSizesImpl(AppState& s, ui::WindowViewModel& vm, bool prepare_requ
     const auto details_path = vm.details.is_dir && !fs::IsVirtualPath(vm.details.path)
         ? vm.details.path : std::wstring();
     if (prepare_requests) {
+        const bool automatic = s.appPrefs.auto_folder_size;
         interests_changed |= cache.details_path != details_path;
         if (interests_changed) {
             cache.requests.clear();
@@ -190,14 +192,15 @@ void FillFolderSizesImpl(AppState& s, ui::WindowViewModel& vm, bool prepare_requ
                 cache.roots.push_back(details_path);
             }
         }
-        if (interests_changed || s.folderSizes.NeedsWorker()) {
+        if (interests_changed || cache.automatic != automatic || s.folderSizes.NeedsWorker()) {
+            cache.automatic = automatic;
             if (!s.isolatedTest && !s.shot.active)
                 s.folderSizes.SetCachePath([] {
                     const auto dir = app::GetPulseDataDir();
                     return dir.empty() ? std::wstring() : dir + L"\\folder_sizes.json";
                 });
             s.folderSizes.SetIndexEnabled(!s.isolatedTest && !s.shot.active);
-            s.folderSizes.Sync(cache.requests, cache.roots);
+            s.folderSizes.Sync(cache.requests, cache.roots, automatic);
 #ifdef PULSE_FOLDER_SIZES_TESTING
             ++cache.stats.syncs;
 #endif

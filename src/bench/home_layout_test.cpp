@@ -67,11 +67,32 @@ int main() {
             check(ui::MakeHomeLayout(pane, bounds, scale).cards.empty(), "all collapsed groups retain headings without card targets");
             pane.home_collapsed_mask = 0;
             pane.network_discovery_disabled = true;
+            const auto populated = ui::MakeHomeLayout(pane, bounds, scale);
+            bool unchanged = populated.network_notice.right == 0 && populated.height == layout.height;
+            for (size_t i = 0; i < layout.cards.size(); ++i) {
+                const auto& before = layout.cards[i].rect;
+                const auto& after = populated.cards[i].rect;
+                unchanged &= before.left == after.left && before.top == after.top &&
+                    before.right == after.right && before.bottom == after.bottom;
+            }
+            check(unchanged, "existing network cards retain their layout without a discovery notice or extra spacing");
+            const auto saved_cards = pane.home_cards;
+            std::erase_if(pane.home_cards, [](const auto& card) { return card.group == 2; });
+            pane.network_discovery_disabled = false;
+            const auto empty_layout = ui::MakeHomeLayout(pane, bounds, scale);
+            check(empty_layout.empty[2] && empty_layout.network_notice.right == 0,
+                "empty network group with discovery enabled retains its ordinary empty state");
+            pane.network_discovery_disabled = true;
             const auto notice_layout = ui::MakeHomeLayout(pane, bounds, scale);
             const auto notice = notice_layout.network_notice;
             check(notice.right <= bounds.right && notice.left >= bounds.left &&
-                notice.bottom > notice.top && notice_layout.height > layout.height,
-                "network discovery notice reserves space within narrow and scaled home layouts");
+                notice.bottom > notice.top && notice_layout.empty[2] &&
+                std::abs(notice_layout.height - empty_layout.height - 30 * scale) < 0.01f,
+                "discovery notice replaces the empty state without reserving a second empty row");
+            pane.home_loading = true;
+            check(ui::MakeHomeLayout(pane, bounds, scale).network_notice.right == 0,
+                "loading an empty network group does not flash a discovery notice");
+            pane.home_loading = false;
             pane.scroll_y = std::max(0.0f, notice.top - bounds.top - 12 * scale);
             const auto visible_notice = ui::MakeHomeLayout(pane, bounds, scale).network_notice;
             check(ui::HitHomeNetworkSettings(pane, bounds, scale, visible_notice.left + scale,
@@ -82,6 +103,9 @@ int main() {
             check(ui::MakeHomeLayout(pane, bounds, scale).network_notice.right == 0,
                 "collapsed network group hides its settings notice");
             pane.home_collapsed_mask = 0;
+            pane.home_cards = saved_cards;
+            check(!ui::HitHomeNetworkSettings(pane, bounds, scale, visible_notice.left + scale,
+                visible_notice.top + scale), "network card arrival removes the stale settings hit target");
             pane.scroll_y = 0;
             pane.network_discovery_disabled = false;
         }

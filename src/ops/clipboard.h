@@ -6,6 +6,7 @@
 // clipboard.h — System clipboard interop with Explorer (CF_HDROP + drop effect).
 #pragma once
 #include <windows.h>
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -34,8 +35,9 @@ bool WriteClipboardText(const std::wstring& text);
 bool ReadClipboard(ClipboardData& out);
 
 // Shell virtual files (for example files copied from RDP, archives or Outlook)
-// have no filesystem paths. Paste them through the destination's shell drop
-// target. Call from an STA worker; the shell may perform provider I/O here.
+// have no filesystem paths. Shell items use IFileOperation through completion;
+// descriptor-only data uses the destination's drop target. Call from an STA
+// worker; the shell may perform provider I/O here.
 inline bool ClipboardHasShellFiles() {
     return IsClipboardFormatAvailable(RegisterClipboardFormatW(L"Shell IDList Array")) ||
            IsClipboardFormatAvailable(RegisterClipboardFormatW(L"FileGroupDescriptorW"));
@@ -46,6 +48,12 @@ inline bool ClipboardHasPasteableFiles() {
 }
 
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
+
+bool HasShellFileData(IDataObject* data);
+// STA worker only. Returns after the transfer completes; cancellation/failure
+// never authorizes a move. The requested effect must be COPY or MOVE.
+HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD effect,
+                      const std::atomic_bool* cancelled = nullptr);
 
 #ifdef PULSE_CLIPBOARD_TESTING
 bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t preferred_effect);

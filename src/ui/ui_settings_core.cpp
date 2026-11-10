@@ -305,6 +305,8 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const int folder_sort_values[] = {0, 1, 2};
             segmented(lay.folder_sort_card, lay.folder_sort_row, folder_sort, folder_sort_values,
                       vm.settings_folder_sort, H::SettingsFolderSort, I::SettingsFolderSort, I::SettingsFolderSortDesc);
+            toggle(lay.auto_folder_size_row, I::AutoFolderSize, I::AutoFolderSizeDesc, L"\xE8B7",
+                   vm.settings_auto_folder_size, 35);
             toggle(lay.performance_row, I::SettingsShowPerformance, I::SettingsShowPerformanceDesc, L"\xE946",
                    vm.settings_show_performance, 4);
         } else if (vm.settings_page == 7) {

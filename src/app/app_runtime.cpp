@@ -1707,6 +1707,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.settings_list_smart_date = s.appPrefs.list_smart_date;
     vm.settings_list_zebra_rows = s.appPrefs.list_zebra_rows;
     vm.settings_list_size_bar = s.appPrefs.list_size_bar;
+    vm.settings_auto_folder_size = s.appPrefs.auto_folder_size;
     vm.settings_folder_sort = s.appPrefs.folder_sort_mode;
     vm.sidebar_scroll = s.sidebarScroll;
     vm.sidebar_scrollbar_opacity = s.sidebarScrollbarFade.opacity;

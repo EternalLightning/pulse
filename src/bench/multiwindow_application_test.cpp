@@ -634,6 +634,60 @@ int RunSessionChecks() {
     return failures ? 1 : 0;
 }
 
+int RunTrayLifecycleChecks() {
+    const auto root = std::filesystem::absolute(L"bench_data/tray-lifecycle") /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root / L"profile");
+    storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
+    l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpfnWndProc = WndProc;
+    wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
+    RegisterClassW(&wc);
+    const auto staged = root / L"staged.txt";
+    std::ofstream(staged) << "staging tray lifecycle fixture";
+    for (int launch = 0; launch < 2; ++launch) {
+        AppState state;
+        state.isolatedTest = true;
+        const HWND window = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+            wc.lpszClassName, L"Pulse staging tray lifecycle fixture", WS_OVERLAPPEDWINDOW & ~WS_CAPTION,
+            -20000, -20000, 1080, 760, nullptr, nullptr, wc.hInstance, &state);
+        Check(window && Wait([&] { return ActiveTab(state) && !ActiveTab(state)->loading; }),
+            "staging tray lifecycle initializes a real window with an isolated profile");
+        if (!window) return 1;
+        Check(state.tray.batches().empty(), "each fresh application starts with an empty staging tray");
+        if (launch == 0) {
+            state.tray.Collect({staged.wstring()}, true);
+            std::wstring before_hide, after_restore;
+            state.tray.ToJson(before_hide);
+            state.appPrefs.keep_running_on_close = true;
+            ShowWindow(window, SW_SHOWNOACTIVATE);
+            SendMessageW(window, WM_CLOSE, 0, 0);
+            state.tray.ToJson(after_restore);
+            Check(IsWindow(window) && !IsWindowVisible(window) && !state.exit_requested &&
+                !state.tray.batches().empty() && after_restore == before_hide,
+                "closing to the system tray retains staged files and their move intent");
+            SendMessageW(window, app::TrayController::kCallbackMessage, 0, WM_LBUTTONUP);
+            state.tray.ToJson(after_restore);
+            Check(IsWindowVisible(window) && after_restore == before_hide,
+                "restoring the background window retains its exact staging tray");
+        }
+        state.isolatedTest = false;
+        RequestApplicationExit(state);
+        Check(Wait([&] { return state.core.windows.Count() == 0; }),
+            "explicit application exit closes the staging tray owner");
+        std::wstring saved;
+        Check(ReadUtf8File((root / L"profile" / L"preferences.json").wstring(), saved) &&
+            json::Document(saved).Is(json::Kind::Object) && !json::Document(saved).Find(L"tray"),
+            "application exit writes preferences without the staging tray");
+        Check(std::filesystem::exists(staged), "discarding the staging tray preserves its source file");
+        Pump();
+    }
+    std::printf("staging tray lifecycle: %d failures\n", failures);
+    return failures ? 1 : 0;
+}
+
 int RunUndoLifecycleChecks() {
     const auto press_undo = [](HWND window) {
         BYTE previous[256]{};
@@ -995,6 +1049,11 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string(argv[1]) == "--app-lifecycle-only") {
         const int result = RunAppLifecycleChecks();
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--tray-lifecycle-only") {
+        const int result = RunTrayLifecycleChecks();
         OleUninitialize();
         return result;
     }

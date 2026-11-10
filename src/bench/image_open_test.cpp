@@ -4,7 +4,10 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../ops/image_open.cpp"
+#include "../ipc/shell_launch_protocol.h"
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 
 int wmain(int argc, wchar_t** argv) {
     if (argc == 2 && wcscmp(argv[1], L"--viewer-launcher") == 0) return 0;
@@ -15,6 +18,104 @@ int wmain(int argc, wchar_t** argv) {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", name);
         if (!passed) ++failures;
     };
+    {
+        using namespace pulse;
+        using namespace pulse::ops;
+        wchar_t temp[MAX_PATH]{};
+        GetTempPathW(ARRAYSIZE(temp), temp);
+        const auto root = std::filesystem::path(temp) /
+            (L"Pulse-image-order-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        std::error_code error;
+        const bool created = std::filesystem::create_directory(root, error);
+        check(created, "Create an isolated image order fixture");
+        if (created) {
+            for (const auto* name : {L"a.jpg", L"b.jpg", L"c.jpg", L"hidden.jpg"}) {
+                std::ofstream(root / name).put('x');
+            }
+            const auto selected_path = (root / L"b.jpg").wstring();
+            PIDLIST_ABSOLUTE raw = nullptr;
+            const HRESULT parsed = SHParseDisplayName(selected_path.c_str(), nullptr, &raw, 0, nullptr);
+            Pidl target(raw);
+            const auto verify = [&](ImageOpenContext context, const std::vector<std::wstring>& expected,
+                                    REFPROPERTYKEY key, SORTDIRECTION direction, const char* label) {
+                ipc::ShellLaunchRequest request;
+                request.paths = {selected_path};
+                request.image_context = std::move(context);
+                const auto payload = ipc::WriteShellLaunch(request);
+                ipc::ShellLaunchRequest decoded;
+                bool valid = SUCCEEDED(parsed) && ipc::ReadShellLaunch(payload.data(), payload.size(), decoded);
+                auto contents = std::make_shared<FolderContents>();
+                valid = valid && PrepareContents(target.get(), *contents);
+                contents->context = decoded.image_context;
+                const auto site = Make<ImageOpenSite>(nullptr, contents);
+                int count = -1;
+                valid = valid && SUCCEEDED(site->ItemCount(SVGIO_ALLVIEW, &count)) &&
+                    count == static_cast<int>(expected.size());
+                ComPtr<IEnumIDList> enumerator;
+                valid = valid && SUCCEEDED(site->Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER,
+                    IID_PPV_ARGS(&enumerator)));
+                for (const auto& name : expected) {
+                    PITEMID_CHILD child_raw = nullptr;
+                    if (!enumerator || enumerator->Next(1, &child_raw, nullptr) != S_OK) { valid = false; break; }
+                    Pidl child(child_raw);
+                    ComPtr<IShellItem> item;
+                    PWSTR filename = nullptr;
+                    const HRESULT item_hr = SHCreateItemWithParent(contents->folder.get(), nullptr,
+                        child.get(), IID_PPV_ARGS(&item));
+                    const HRESULT name_hr = SUCCEEDED(item_hr) ? item->GetDisplayName(SIGDN_PARENTRELATIVEPARSING, &filename) : item_hr;
+                    valid = valid && SUCCEEDED(name_hr) && filename && name == filename;
+                    CoTaskMemFree(filename);
+                }
+                SORTCOLUMN sort{};
+                int focus = -1;
+                site->GetFocusedItem(&focus);
+                valid = valid && SUCCEEDED(site->GetSortColumns(&sort, 1)) &&
+                    IsEqualPropertyKey(sort.propkey, key) && sort.direction == direction &&
+                    focus >= 0 && focus < count && contents->MatchesSelected(contents->items[focus].pidl.get());
+                UINT columns = 0;
+                std::vector<PROPERTYKEY> keys(2);
+                valid = valid && SUCCEEDED(site->GetColumnCount(CM_ENUM_VISIBLE, &columns)) &&
+                    SUCCEEDED(site->GetColumns(CM_ENUM_VISIBLE, keys.data(), columns));
+                bool includes_sort = false;
+                for (UINT i = 0; i < columns; ++i) includes_sort |= IsEqualPropertyKey(keys[i], sort.propkey);
+                check(valid && includes_sort, label);
+            };
+            ImageOpenContext descending;
+            descending.paths = {(root / L"c.jpg").wstring(), selected_path, (root / L"a.jpg").wstring()};
+            descending.direction = model::SortDirection::Desc;
+            verify(descending, {L"c.jpg", L"b.jpg", L"a.jpg"}, PKEY_ItemNameDisplay, SORT_DESCENDING,
+                "Name descending survives IPC and enumerates neighbors in visible order");
+            ImageOpenContext modified;
+            modified.paths = {(root / L"a.jpg").wstring(), (root / L"c.jpg").wstring(), selected_path};
+            modified.column = model::SortColumn::Mtime;
+            modified.direction = model::SortDirection::Desc;
+            verify(modified, {L"a.jpg", L"c.jpg", L"b.jpg"}, PKEY_DateModified, SORT_DESCENDING,
+                "Date ordering remains distinct from name order and reports DateModified descending");
+            ImageOpenContext filtered;
+            filtered.paths = {(root / L"c.jpg").wstring(), selected_path};
+            filtered.direction = model::SortDirection::Desc;
+            verify(filtered, {L"c.jpg", L"b.jpg"}, PKEY_ItemNameDisplay, SORT_DESCENDING,
+                "Filtered neighbors do not reintroduce other existing files");
+            verify({}, {L"a.jpg", L"b.jpg", L"c.jpg", L"hidden.jpg"}, PKEY_ItemNameDisplay, SORT_ASCENDING,
+                "An external open without view context retains Shell name order fallback");
+            ipc::ShellLaunchRequest invalid;
+            invalid.paths = {selected_path};
+            invalid.image_context.paths = {std::wstring(L"bad\0name", 8)};
+            auto payload = ipc::WriteShellLaunch(invalid);
+            ipc::ShellLaunchRequest decoded;
+            check(!ipc::ReadShellLaunch(payload.data(), payload.size(), decoded), "Reject embedded NUL in image context paths");
+            invalid.image_context = descending;
+            invalid.image_context.column = static_cast<model::SortColumn>(99);
+            payload = ipc::WriteShellLaunch(invalid);
+            check(!ipc::ReadShellLaunch(payload.data(), payload.size(), decoded), "Reject unknown image context sort columns");
+            invalid.image_context = descending;
+            invalid.verb = L"properties";
+            payload = ipc::WriteShellLaunch(invalid);
+            check(!ipc::ReadShellLaunch(payload.data(), payload.size(), decoded), "Reject view context on non-open shell requests");
+            std::filesystem::remove_all(root, error);
+            check(!error, "Remove the isolated image order fixture");
+        }
+    }
     {
         using namespace pulse::ops;
         wchar_t executable[32768]{};

@@ -314,7 +314,8 @@ public:
     std::vector<DeleteOutcome> DrainDeleteOutcomes();
 
     // Queued Shell launch; execution lives in an isolated Pulse.Shell session.
-    void OpenWith(const std::wstring& path);
+    void OpenWith(const std::wstring& path,
+                  std::function<ImageOpenContext()> image_context = {});
     void RevealInExplorer(const std::wstring& path);
     std::vector<std::wstring> DrainShellLaunchErrors();
 
@@ -389,6 +390,7 @@ private:
         std::wstring open_args;   // e.g. -d "<dir>" for wt.exe
         std::wstring open_file;   // explicit program (empty => open_path is the file)
         std::vector<std::wstring> open_paths; // multi-item "properties"
+        std::function<ImageOpenContext()> image_context;
         uint64_t seq = 0;
         ULONGLONG enqueued_at = 0; // diagnostics: queue wait vs shell cost
         uint64_t recovery_sequence = 0; // retained until deletion is admitted

@@ -149,6 +149,7 @@ struct FolderSizes::Impl {
     UiChangeSignal changed;
     bool dirty = false;
     bool index_enabled = true;
+    bool automatic_enabled = true;
     HANDLE index_cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 #ifdef PULSE_FOLDER_SIZES_TESTING
     std::function<void(const std::wstring&)> scan_hook;
@@ -351,12 +352,15 @@ struct FolderSizes::Impl {
                 if (job->done) {
                     std::lock_guard lock(mutex);
                     auto it = cache.find(job->path);
-                    if (it != cache.end() && it->second.epoch == job->epoch && wanted.contains(job->path)) {
+                    const auto request = wanted.find(job->path);
+                    if (it != cache.end() && it->second.epoch == job->epoch && request != wanted.end()) {
                         auto& e = it->second;
                         // A failed refresh retains the cached value and labels it incomplete.
                         if (!job->result.has_value && e.value.has_value) e.value.state = FolderSizeState::Cached;
                         else e.value = job->result;
                         e.completed = GetTickCount64();
+                        // With automatic scanning off, a manual request is for one calculation.
+                        if (!automatic_enabled && manual.erase(job->path)) request->second = false;
                         dirty = true; changed = true;
                     }
                 } else jobs.push_back(std::move(job));
@@ -387,13 +391,17 @@ bool FolderSizes::NeedsWorker() const {
     return !impl_->stopping && !impl_->worker.joinable() &&
         !impl_->wanted.empty() && live_workers.load() < kWorkerLimit;
 }
-void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> roots) {
+void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> roots,
+                       bool allow_automatic) {
     auto& s = *impl_;
     std::lock_guard lock(s.mutex);
     if (s.stopping) return;
     // A refused worker must still be retried when another window releases a
     // worker slot. Otherwise identical interests have no state to synchronize.
-    if (s.worker.joinable() && visible == s.last_requests && roots == s.last_roots) return;
+    if (!allow_automatic) roots.clear();
+    if (s.worker.joinable() && allow_automatic == s.automatic_enabled &&
+        visible == s.last_requests && roots == s.last_roots) return;
+    s.automatic_enabled = allow_automatic;
     s.last_requests = visible;
     s.last_roots = roots;
 #ifdef PULSE_FOLDER_SIZES_TESTING
@@ -403,15 +411,19 @@ void FolderSizes::Sync(std::vector<FolderSizeRequest> visible, std::vector<std::
     std::set<std::wstring> require_counts;
     for (const auto& request : visible) {
         const auto key = Key(request.path);
-        wanted[key] |= (request.automatic && (!s.blocked_auto.contains(key) || request.require_counts)) || s.manual.contains(key);
+        wanted[key] |= s.manual.contains(key) || (allow_automatic && request.automatic &&
+            (!s.blocked_auto.contains(key) || request.require_counts));
         if (request.require_counts) require_counts.insert(key);
         s.cache[key].used = GetTickCount64();
     }
     bool cancelled = false;
-    for (const auto& [p, automatic] : s.wanted) if (!wanted.contains(p)) {
-        ++s.cache[p].epoch;
-        s.manual.erase(p);
-        cancelled |= automatic;
+    for (const auto& [p, automatic] : s.wanted) {
+        const auto next = wanted.find(p);
+        if (next == wanted.end() || (automatic && !next->second)) {
+            ++s.cache[p].epoch;
+            if (next == wanted.end()) s.manual.erase(p);
+            cancelled |= automatic;
+        }
     }
     s.wanted = std::move(wanted);
     s.require_counts = std::move(require_counts);

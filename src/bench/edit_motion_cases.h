@@ -5,6 +5,8 @@
 
 #pragma once
 #include "../ui/edit_motion.h"
+#include "../ui/animation_clock.h"
+#include "../ui/edit_frame_scheduler.h"
 #include "snapshot_output.h"
 #include <vector>
 
@@ -91,8 +93,9 @@ inline void RunEditMotionChecks(HWND parent) {
             if (ok && pixels) {
                 const auto* bytes = static_cast<const BYTE*>(pixels);
                 frame.assign(bytes, bytes + rc.right * rc.bottom * 4);
+                // A moving one-pixel caret shares coverage across adjacent columns.
                 for (int i = 0; i < rc.right * rc.bottom * 4; i += 4)
-                    if (dark ? bytes[i] > 200 : bytes[i] < 32) ++ink;
+                    ink += static_cast<size_t>(dark ? std::max(0, static_cast<int>(bytes[i]) - 31) : 255 - bytes[i]);
             }
             if (name && ok) {
                 auto* bytes = static_cast<BYTE*>(pixels);
@@ -105,6 +108,22 @@ inline void RunEditMotionChecks(HWND parent) {
             return ink;
         };
         draw(nullptr);
+        const auto draws_before_key = compositor.GetLumaTextStats()->edit_directwrite_draws;
+        PostMessageW(edit, WM_CHAR, L'X', 0);
+        SendMessageW(edit, WM_KEYDOWN, L'X', 0);
+        Check(compositor.GetLumaTextStats()->edit_directwrite_draws == draws_before_key,
+            "ordinary keydown leaves drawing to the queued character message");
+        MSG character{};
+        const bool queued = PeekMessageW(&character, edit, WM_CHAR, WM_CHAR, PM_REMOVE) != FALSE;
+        if (queued) DispatchMessageW(&character);
+        Check(queued && compositor.GetLumaTextStats()->edit_directwrite_draws == draws_before_key + 1,
+            "a text key and its queued character need only one presentation");
+        SetWindowTextW(edit, L"File name.txt");
+        SendMessageW(edit, EM_SETSEL, 0, 0);
+        const auto draws_before_arrow = compositor.GetLumaTextStats()->edit_directwrite_draws;
+        SendMessageW(edit, WM_KEYDOWN, VK_RIGHT, 0);
+        Check(compositor.GetLumaTextStats()->edit_directwrite_draws > draws_before_arrow &&
+            GetPropW(edit, L"Pulse.EditMotionPending"), "arrow keys still start caret motion immediately");
         SendMessageW(edit, EM_SETSEL, 5, 5); Sleep(120); draw(L"initial");
         SendMessageW(edit, WM_CHAR, L'新', 0);
         Check(GetPropW(edit, L"Pulse.EditMotionPending") != nullptr, "typing starts text/caret motion");
@@ -153,7 +172,32 @@ inline void RunEditMotionChecks(HWND parent) {
             Sleep(1);
         }
         Check(!GetPropW(edit, L"Pulse.EditMotionPending"), "motion timer advances rapid typing and stops without manual paints");
-        uint64_t edit_time = 1500;
+        if (scale == 1.0f && !dark) {
+            int motion_ticks = 0;
+            const auto deadline = AnimationTimeMs() + 240;
+            bool presented = true;
+            while (AnimationTimeMs() < deadline) {
+                MSG message{};
+                while (PeekMessageW(&message, edit, 0, 0, PM_REMOVE)) {
+                    if (message.message == EditMotionFrameMessage() ||
+                        (message.message == WM_TIMER && message.wParam == kEditMotionTimer)) ++motion_ticks;
+                    DispatchMessageW(&message);
+                }
+                SendMessageW(edit, WM_CHAR, L' ', 0);
+                presented &= compositor.PresentLumaEdit(edit, compositor.TextFormat(),
+                    D2D1::ColorF(1, 1, 1), D2D1::ColorF(0, 1.0f));
+                Sleep(1);
+            }
+            std::printf("[METRIC] motion ticks during continuous repaint: %d\n", motion_ticks);
+            Check(presented && motion_ticks > 0,
+                "continuous input and repaint do not postpone the animation timer");
+            ValidateRect(edit, nullptr);
+            const auto draws = compositor.GetLumaTextStats()->edit_directwrite_draws;
+            SendMessageW(edit, WM_TIMER, kEditMotionTimer, 0);
+            Check(compositor.GetLumaTextStats()->edit_directwrite_draws > draws,
+                "a motion tick presents the editor without waiting behind unrelated paints");
+        }
+        double edit_time = 1500;
         SetPropW(edit, L"Pulse.Test.EditTime", reinterpret_cast<HANDLE>(&edit_time));
         SetPropW(edit, L"Pulse.Test.EditBlinkInterval", reinterpret_cast<HANDLE>(500));
         SetWindowTextW(edit, L"   ");
@@ -201,7 +245,7 @@ inline void RunEditMotionChecks(HWND parent) {
         // Hold presentation time still: a committed edit's first frame must
         // preserve the pixels that its moving caret is leaving behind.
         RemovePropW(edit, L"Pulse.EditWrap");
-        uint64_t transition_time = 10000;
+        double transition_time = 10000;
         SetPropW(edit, L"Pulse.Test.EditTime", reinterpret_cast<HANDLE>(&transition_time));
         SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
         SetWindowTextW(edit, L"W");
@@ -263,6 +307,92 @@ inline void RunEditMotionChecks(HWND parent) {
         draw(L"delete-cue-end");
         Check(!same_rgb(before_cue_delete, frame) && !GetPropW(edit, L"Pulse.EditMotionPending"),
             "placeholder appears when the final deletion settles");
+        RemovePropW(edit, L"Pulse.EditWrap");
+        SetWindowPos(edit, nullptr, 0, 0, static_cast<int>(320 * scale), static_cast<int>(32 * scale),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        for (const bool erase : {false, true}) {
+            SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+            SetWindowTextW(edit, L"AZ");
+            SendMessageW(edit, EM_SETSEL, 1, 1);
+            draw(nullptr);
+            SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(1));
+            transition_time += 1000;
+            SendMessageW(edit, WM_CHAR, L'W', 0);
+            transition_time += 24;
+            draw(nullptr);
+            const auto interrupted = frame;
+            SendMessageW(edit, WM_CHAR, erase ? VK_BACK : L'W', 0);
+            draw(erase ? L"rapid-delete-start" : L"rapid-insert-start");
+            Check(same_rgb(interrupted, frame), erase
+                ? "backspace during text reveal preserves the actually displayed first frame"
+                : "typing during text reveal preserves the actually displayed first frame");
+            transition_time += 16;
+            draw(nullptr);
+            const auto mixed = frame;
+            SendMessageW(edit, WM_CHAR, L'X', 0);
+            draw(nullptr);
+            Check(same_rgb(mixed, frame), "a third input retargets from the mixed frame, not from an old target");
+            const auto repeated = frame;
+            draw(nullptr);
+            Check(same_rgb(repeated, frame), "painting an interrupted transition twice at the same time is stable");
+            transition_time += 80;
+            draw(nullptr);
+            const auto settled = frame;
+            Check(!GetPropW(edit, L"Pulse.EditMotionPending"), "interrupted typing still settles at its final target");
+            SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+            draw(nullptr);
+            Check(same_rgb(settled, frame), "interrupted motion ends at the exact unanimated pixels");
+        }
+        SetPropW(edit, L"Pulse.EditWrap", reinterpret_cast<HANDLE>(1));
+        SetWindowPos(edit, nullptr, 0, 0, static_cast<int>(130 * scale), static_cast<int>(90 * scale),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+        SetWindowTextW(edit, L"ABC");
+        SendMessageW(edit, EM_SETSEL, 3, 3);
+        draw(nullptr);
+        const auto first_ink_column = [&]() -> LONG {
+            RECT bounds{}; GetClientRect(edit, &bounds);
+            const int background = dark ? 31 : 255;
+            for (int x = 0; x < bounds.right; ++x) for (int y = 0; y < bounds.bottom; ++y)
+                if (std::abs(static_cast<int>(frame[(y * bounds.right + x) * 4]) - background) > 48) return x;
+            return bounds.right;
+        };
+        const int prefix_before = first_ink_column();
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(1));
+        transition_time += 1000;
+        SendMessageW(edit, WM_CHAR, L'W', 0);
+        transition_time += 0.5;
+        draw(L"centered-prefix-start");
+        Check(std::abs(first_ink_column() - prefix_before) <= std::ceil(scale),
+            "centered unchanged prefix does not jump to its target on the first motion frame");
+        transition_time += 80;
+        draw(nullptr);
+        Check(std::abs(first_ink_column() - prefix_before) > 2 * scale,
+            "centered prefix fixture exercises a visible final displacement");
+        RemovePropW(edit, L"Pulse.EditWrap");
+        SetWindowPos(edit, nullptr, 0, 0, static_cast<int>(320 * scale), static_cast<int>(32 * scale),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+        SetWindowTextW(edit, L"        ");
+        SendMessageW(edit, EM_SETSEL, 0, 0);
+        draw(nullptr);
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(1));
+        transition_time += 1000;
+        SendMessageW(edit, EM_SETSEL, 1, 1);
+        const auto caret_energy = draw(nullptr);
+        const auto caret_start = frame;
+        transition_time += 0.5;
+        const auto moving_energy = draw(L"subpixel-caret");
+        Check(!same_rgb(caret_start, frame), "moving caret preserves fractional time and subpixel coverage");
+        Check(caret_energy > 0 && std::abs(static_cast<double>(moving_energy) - static_cast<double>(caret_energy))
+            <= static_cast<double>(caret_energy) * 0.01 + 2,
+            "subpixel movement preserves caret contrast instead of fading it away");
+        transition_time += 80;
+        draw(nullptr);
+        const auto caret_settled = frame;
+        SetPropW(edit, L"Pulse.Test.EditMotion", reinterpret_cast<HANDLE>(2));
+        draw(nullptr);
+        Check(same_rgb(caret_settled, frame), "resting caret keeps the exact sharp unanimated pixels");
         RemovePropW(edit, L"Pulse.Test.EditTime");
         DestroyWindow(edit);
     }

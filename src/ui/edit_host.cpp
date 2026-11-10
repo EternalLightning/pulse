@@ -204,8 +204,11 @@ LRESULT DefPresentedChildEditProc(Compositor& compositor, IDWriteTextFormat* for
     if (custom_paint) {
         if (suppress_native) SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
         HideCaret(hwnd);
-        PresentEdit(compositor, hwnd, format,
-            foreground, background);
+        // TranslateMessage queues WM_CHAR before dispatching a text key.
+        MSG character{};
+        if (msg == WM_KEYDOWN && PeekMessageW(&character, hwnd, WM_CHAR, WM_CHAR, PM_NOREMOVE))
+            InvalidateRect(hwnd, nullptr, FALSE);
+        else PresentEdit(compositor, hwnd, format, foreground, background);
     } else if (msg == WM_KILLFOCUS && compositor.UsesComposedEdits(hwnd) &&
         IsWindowVisible(hwnd) && CustomEdit(compositor, hwnd)) {
         PresentEdit(compositor, hwnd, format, foreground, background);

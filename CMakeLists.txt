@@ -694,7 +694,7 @@ add_executable(pulse_app_controllers_test
     src/app/system_ctx_model.cpp src/app/system_ctx_registry.cpp
     src/app/context_menu_controller.cpp
     src/shell_host/ctx_handlers.cpp
-    src/app/session_tab_model.cpp
+    src/app/session.cpp src/app/session_tab_model.cpp
     src/app/tab_group_model.cpp
     src/app/single_instance_coordinator.cpp
     src/app/tray_controller.cpp
@@ -938,9 +938,10 @@ add_executable(pulse_dialog_text_fit_test src/bench/dialog_text_fit_test.cpp)
 add_executable(pulse_clipboard_availability_test src/bench/clipboard_availability_test.cpp)
 target_compile_options(pulse_clipboard_availability_test PRIVATE /W4 /permissive- /utf-8)
 add_executable(pulse_virtual_clipboard_test src/bench/virtual_clipboard_test.cpp
-    src/ops/clipboard.cpp)
+    src/ops/clipboard.cpp src/ui/drag_drop.cpp)
 target_compile_definitions(pulse_virtual_clipboard_test PRIVATE PULSE_CLIPBOARD_TESTING=1)
-target_link_libraries(pulse_virtual_clipboard_test PRIVATE shell32 ole32 oleaut32 uuid user32 shlwapi)
+target_link_libraries(pulse_virtual_clipboard_test PRIVATE
+    shell32 ole32 oleaut32 uuid user32 shlwapi advapi32 pulse_shell_query_client)
 add_executable(pulse_window_result_mailbox_test src/bench/window_result_mailbox_test.cpp)
 target_compile_options(pulse_window_result_mailbox_test PRIVATE /W4 /permissive- /utf-8)
 target_link_libraries(pulse_window_result_mailbox_test PRIVATE user32)
@@ -1005,6 +1006,8 @@ pulse_enable_lumatext(pulse_menu_text_test)
 
 add_executable(pulse_context_menu_loading_test
     src/bench/context_menu_loading_test.cpp src/bench/localization_test.rc
+    src/ui/notification_toast.cpp
+    src/app/command_catalog.cpp
     src/app/context_menu_controller.cpp src/app/context_menu_prefs.cpp
     src/app/builtin_menu_items.cpp
     src/model/builtin_menu_items.cpp src/ipc/shell_client.cpp

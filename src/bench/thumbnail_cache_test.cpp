@@ -28,7 +28,8 @@ struct ThumbnailCacheTestAccess {
                              ipc::PreviewRequestKind kind = ipc::PreviewRequestKind::Content,
                              bool accepted_failure = false, bool pause_body = false,
                              ipc::PreviewContentKind expected_kind = ipc::PreviewContentKind::None,
-                             const wchar_t* expected_text = L"", size_t expected_properties = 0) {
+                             const wchar_t* expected_text = L"", size_t expected_properties = 0,
+                             bool evict_during_body = false) {
             ThumbnailCache cache;
             const std::wstring pipe_name = L"\\\\.\\pipe\\PulsePreviewTransportTest-" +
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(cache.pipe_token_);
@@ -70,10 +71,11 @@ struct ThumbnailCacheTestAccess {
                 }
             });
             std::atomic<bool> body_entered{false};
-            if (pause_body) cache.before_response_body_ = [&] {
+            if (pause_body || evict_during_body) cache.before_response_body_ = [&] {
                 body_entered = true;
+                if (evict_during_body) cache.Evict();
                 SetEvent(header_sent);
-                WaitForSingleObject(cache.stop_event_, 1500);
+                if (pause_body) WaitForSingleObject(cache.stop_event_, 1500);
             };
             cache.running_ = true;
             const ULONGLONG started = GetTickCount64();
@@ -93,7 +95,14 @@ struct ThumbnailCacheTestAccess {
                 while (GetTickCount64() - started < 1400) {
                     {
                         std::lock_guard lock(cache.mutex_);
-                        if (auto item = cache.items_.find(req.key); item != cache.items_.end()) {
+                        if (evict_during_body && body_entered &&
+                            !PeekNamedPipe(server, nullptr, 0, nullptr, nullptr, nullptr)) {
+                            completed = true;
+                            result_ok = GetLastError() == ERROR_BROKEN_PIPE && body_entered &&
+                                cache.pending_.empty() && cache.queue_.empty() && cache.items_.empty();
+                            break;
+                        }
+                        if (auto item = cache.items_.find(req.key); !evict_during_body && item != cache.items_.end()) {
                             completed = true;
                             const auto& response = item->second;
                             bool payload_ok = response.kind == expected_kind && response.text == expected_text &&
@@ -132,6 +141,10 @@ struct ThumbnailCacheTestAccess {
         run("header-only live peer obeys whole-frame deadline", [&](HANDLE pipe, HANDLE, const auto& req) {
             auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
         });
+        run("cancelled request retires timed-out transport without caching a stale result", [&](HANDLE pipe, HANDLE, const auto& req) {
+            auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
+        }, false, false, ipc::PreviewRequestKind::Content, false, false,
+            ipc::PreviewContentKind::None, L"", 0, true);
         run("partial body live peer obeys whole-frame deadline", [&](HANDLE pipe, HANDLE, const auto& req) {
             auto response = text_header(req); ipc::WriteAll(pipe, &response, sizeof(response));
             const wchar_t part = L'a'; ipc::WriteAll(pipe, &part, sizeof(part));
@@ -365,6 +378,13 @@ struct ThumbnailCacheTestAccess {
         cache.Reset();
         insert(L"cold", 8 * 1024 * 1024);
         insert(L"hot", 8 * 1024 * 1024);
+        cache.running_ = true; // deterministic prefetch admission without starting workers
+        cache.lane_count_ = 2;
+        check(cache.cache_bytes_ == 16ull * 1024ull * 1024ull &&
+              cache.Prefetch(L"full-idle.png", 0, 256, 1, 0, 0) &&
+              cache.queue_.size() == 1 && cache.queue_.front().prefetch,
+              "prefetch can replace idle entries when cache is exactly at its byte budget");
+        cache.CancelInterests(ThumbnailCache::Consumer::Main, false);
         cache.Touch(cache.items_.at(L"cold"));
         insert(L"new", 1);
         check(cache.items_.contains(L"cold") && !cache.items_.contains(L"hot") &&
@@ -634,6 +654,7 @@ struct ThumbnailCacheTestAccess {
                       "GPU allocation triggers the same total byte budget after drawing");
                 cache.Reset();
                 cache.running_ = true;
+                cache.lane_count_ = 2;
                 constexpr int visible_count = 40;
                 {
                     ThumbnailCache::FrameScope frame(cache);
@@ -666,6 +687,36 @@ struct ThumbnailCacheTestAccess {
                 check(stable && cache.items_.size() == visible_count && cache.pending_.empty() &&
                       cache.queue_.empty() && cache.cache_bytes_ > 16ull * 1024ull * 1024ull,
                       "visible video covers above idle budget remain bitmaps for 80 redraws without redecoding");
+                const auto before_prefetch = cache.ContentRevision();
+                const auto visible_bytes = cache.cache_bytes_;
+                const auto offscreen_key = cache.Key(L"offscreen.png", 256, 0, 0) + L":thumbnail";
+                const bool admitted = cache.Prefetch(L"offscreen.png", 0, 256, 1, 0, 0);
+                check(!admitted && visible_bytes == 20ull * 1024ull * 1024ull &&
+                      cache.queue_.empty() && cache.pending_.empty() &&
+                      cache.cache_bytes_ == visible_bytes && cache.ContentRevision() == before_prefetch,
+                      "visible cache above byte budget defers new offscreen prefetch without queue or revision changes");
+                if (!cache.queue_.empty()) {
+                    // Complete a wrongly admitted request to expose its discarded payload before cleanup.
+                    const auto decode = std::move(cache.queue_.front());
+                    cache.queue_.pop_front();
+                    ThumbnailCache::Item cover;
+                    cover.w = cover.h = 256; cover.stride = 1024;
+                    cover.pixels.assign(256 * 1024, 255);
+                    cover.cost = cover.pixels.size();
+                    cover.kind = ipc::PreviewContentKind::Bitmap;
+                    const bool prefetch_stored = cache.StoreResult(decode, std::move(cover));
+                    std::printf("[INFO] over-budget prefetch admitted=%d stored=%d retained=%d bytes=%zu revision_changed=%d\n",
+                        admitted, prefetch_stored, cache.items_.contains(offscreen_key), cache.cache_bytes_,
+                        cache.ContentRevision() != before_prefetch);
+                }
+                const auto foreground_key = cache.Key(L"foreground.png", 256, 0, 0) + L":thumbnail";
+                const auto foreground = cache.Draw(context.get(), D2D1::RectF(0, 0, 100, 100),
+                    L"foreground.png", 0, 256, 1, 0, 0);
+                check(foreground == PreviewDrawResult::Pending && cache.queue_.size() == 1 &&
+                      !cache.queue_.front().prefetch && cache.pending_.contains(foreground_key) &&
+                      cache.Prefetch(L"foreground.png", 0, 256, 1, 0, 0) && cache.queue_.size() == 1,
+                      "over-budget visible requests still queue and existing pending prefetch hits remain successful");
+                cache.CancelInterests(main, false);
                 const auto cover_key = cache.Key(L"video-0.mp4", 256, 0, 0) + L":thumbnail";
                 {
                     ThumbnailCache::FrameScope frame(cache, quick);
@@ -686,6 +737,11 @@ struct ThumbnailCacheTestAccess {
                 check(cache.items_.contains(cover_key) && cache.items_.at(cover_key).bitmaps[1].get(),
                       "main view detachment retains the quick preview's visible cover");
                 cache.Evict(quick);
+                check(cache.cache_bytes_ <= 16ull * 1024ull * 1024ull &&
+                      cache.Prefetch(L"offscreen.png", 0, 256, 1, 0, 0) &&
+                      cache.queue_.size() == 1 && cache.queue_.front().prefetch &&
+                      cache.pending_.contains(offscreen_key),
+                      "offscreen prefetch resumes after visible cache pressure is released");
                 cache.running_ = false;
                 context->SetTarget(nullptr);
             }

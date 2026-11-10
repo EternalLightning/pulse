@@ -62,12 +62,15 @@ bool SameShellItem(IShellFolder* folder, PCUIDLIST_RELATIVE left, PCUIDLIST_RELA
 struct ViewItem { Pidl pidl; SFGAOF attributes = 0; };
 struct FolderContents;
 HRESULT ReadContents(PCIDLIST_ABSOLUTE target, FolderContents& contents, HWND owner);
+HRESULT ReadViewContents(PCIDLIST_ABSOLUTE target, FolderContents& contents,
+                         const ImageOpenContext& context);
 struct FolderContents {
     std::shared_ptr<void> lifetime;
     Pidl folder, selected;
     mutable std::vector<ViewItem> items;
     mutable int focused = -1;
     bool lazy = false;
+    ImageOpenContext context;
     mutable std::once_flag read_once;
     mutable HRESULT read_result = E_PENDING;
     HRESULT EnsureContents() const {
@@ -78,7 +81,9 @@ struct FolderContents {
                     Pidl target(ILCombine(folder.get(), selected.get()));
                     if (!target) return E_OUTOFMEMORY;
                     FolderContents loaded;
-                    const HRESULT hr = ReadContents(target.get(), loaded, nullptr);
+                    const HRESULT hr = context.paths.empty()
+                        ? ReadContents(target.get(), loaded, nullptr)
+                        : ReadViewContents(target.get(), loaded, context);
                     if (FAILED(hr)) return hr;
                     items = std::move(loaded.items);
                     focused = loaded.focused;
@@ -87,6 +92,15 @@ struct FolderContents {
             });
             return read_result;
         });
+    }
+    PROPERTYKEY SortKey() const {
+        switch (context.column) {
+        case model::SortColumn::Mtime: return PKEY_DateModified;
+        case model::SortColumn::Type: return PKEY_ItemTypeText;
+        case model::SortColumn::Size: return PKEY_Size;
+        case model::SortColumn::Path: return PKEY_ItemFolderPathDisplay;
+        default: return PKEY_ItemNameDisplay;
+        }
     }
     // Bind on the calling apartment. No apartment-bound Shell objects are kept
     // in the free-threaded site if the handler retains it after activation.
@@ -283,23 +297,31 @@ public:
         if (!out) return E_POINTER;
         *out = 0;
         if (flags != CM_ENUM_ALL && flags != CM_ENUM_VISIBLE) return E_INVALIDARG;
-        *out = 1;
+        *out = IsEqualPropertyKey(contents_->SortKey(), PKEY_ItemNameDisplay) ? 1 : 2;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetColumns(CM_ENUM_FLAGS flags, PROPERTYKEY* out, UINT count) override {
         if (!out) return E_POINTER;
-        if ((flags != CM_ENUM_ALL && flags != CM_ENUM_VISIBLE) || count != 1) return E_INVALIDARG;
+        UINT columns = 0;
+        if (FAILED(GetColumnCount(flags, &columns)) || count != columns) return E_INVALIDARG;
         *out = PKEY_ItemNameDisplay;
+        if (columns == 2) out[1] = contents_->SortKey();
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetColumnInfo(REFPROPERTYKEY key, CM_COLUMNINFO* out) override {
         if (!out) return E_POINTER;
-        if (out->cbSize != sizeof(*out) || !IsEqualPropertyKey(key, PKEY_ItemNameDisplay)) return E_INVALIDARG;
+        const bool name = IsEqualPropertyKey(key, PKEY_ItemNameDisplay);
+        if (out->cbSize != sizeof(*out) || (!name && !IsEqualPropertyKey(key, contents_->SortKey()))) return E_INVALIDARG;
         if (out->dwMask & CM_MASK_STATE) out->dwState = CM_STATE_VISIBLE | CM_STATE_ALWAYSVISIBLE;
         if (out->dwMask & CM_MASK_WIDTH) out->uWidth = 180;
         if (out->dwMask & CM_MASK_DEFAULTWIDTH) out->uDefaultWidth = 180;
         if (out->dwMask & CM_MASK_IDEALWIDTH) out->uIdealWidth = 180;
-        if (out->dwMask & CM_MASK_NAME) wcscpy_s(out->wszName, L"Name");
+        if (out->dwMask & CM_MASK_NAME) {
+            const wchar_t* label = name ? L"Name" : contents_->context.column == model::SortColumn::Mtime
+                ? L"Date modified" : contents_->context.column == model::SortColumn::Size
+                ? L"Size" : contents_->context.column == model::SortColumn::Type ? L"Type" : L"Path";
+            wcscpy_s(out->wszName, label);
+        }
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE SetColumnInfo(REFPROPERTYKEY, const CM_COLUMNINFO*) override { return E_NOTIMPL; }
@@ -426,7 +448,8 @@ public:
     HRESULT STDMETHODCALLTYPE GetSortColumns(SORTCOLUMN* out, int count) override {
         if (!out) return E_POINTER;
         if (count != 1) return E_INVALIDARG;
-        *out = {PKEY_ItemNameDisplay, SORT_ASCENDING};
+        *out = {contents_->SortKey(), contents_->context.direction == model::SortDirection::Desc
+            ? SORT_DESCENDING : SORT_ASCENDING};
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetCurrentViewMode(UINT* out) override { if (!out) return E_POINTER; *out = FVM_DETAILS; return S_OK; }
@@ -519,6 +542,41 @@ HRESULT ReadContents(PCIDLIST_ABSOLUTE target, FolderContents& contents, HWND ow
     }
     return S_OK;
 }
+
+HRESULT ReadViewContents(PCIDLIST_ABSOLUTE target, FolderContents& contents,
+                         const ImageOpenContext& context) {
+    if (!PrepareContents(target, contents)) return E_OUTOFMEMORY;
+    contents.lazy = false;
+    contents.context.column = context.column;
+    contents.context.direction = context.direction;
+    for (const auto& path : context.paths) {
+        PIDLIST_ABSOLUTE raw = nullptr;
+        const auto shell_path = pulse::path::StripExtendedPathPrefix(path);
+        SFGAOF attributes = SFGAO_FOLDER;
+        const HRESULT parsed = SHParseDisplayName(shell_path.c_str(), nullptr, &raw, attributes, &attributes);
+        Pidl item(raw);
+        if (FAILED(parsed) || (attributes & SFGAO_FOLDER)) continue;
+        Pidl parent(ILCloneFull(item.get()));
+        if (!parent) return E_OUTOFMEMORY;
+        if (!ILRemoveLastID(parent.get()) || !contents.MatchesFolder(parent.get())) continue;
+        Pidl child(ILClone(ILFindLastID(item.get())));
+        if (!child) return E_OUTOFMEMORY;
+        if (contents.MatchesSelected(child.get())) {
+            contents.focused = static_cast<int>(contents.items.size());
+            contents.selected.reset(ILClone(child.get()));
+            if (!contents.selected) return E_OUTOFMEMORY;
+        }
+        contents.items.push_back({std::move(child), attributes});
+    }
+    // Never broaden a filtered view if a stale row disappeared after the click.
+    if (contents.focused < 0) {
+        Pidl selected(ILClone(contents.selected.get()));
+        if (!selected) return E_OUTOFMEMORY;
+        contents.focused = static_cast<int>(contents.items.size());
+        contents.items.push_back({std::move(selected), 0});
+    }
+    return S_OK;
+}
 }
 
 struct ImageOpenSession::State {
@@ -535,7 +593,8 @@ bool ImageOpenSession::ViewerRunning() noexcept {
 }
 
 bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
-                               std::shared_ptr<void> lifetime, ImageOpenSession* session) noexcept {
+                               std::shared_ptr<void> lifetime, ImageOpenSession* session,
+                               const ImageOpenContext& context) noexcept {
     try {
         const std::wstring shell_path = pulse::path::StripExtendedPathPrefix(path);
         if (!IsImagePath(shell_path)) return false;
@@ -548,6 +607,7 @@ bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
         // Identity and selection are enough to activate the viewer. Enumerate
         // siblings only if the handler requests the folder view, once per site.
         if (!PrepareContents(target.get(), *contents)) return false;
+        contents->context = context;
         const auto site = Make<ImageOpenSite>(owner, contents);
         if (!site) return false;
         std::unique_ptr<ImageOpenSession::State> retained;

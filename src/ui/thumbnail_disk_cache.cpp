@@ -112,8 +112,6 @@ uint64_t KeyHash(const ThumbnailStoreKey& key) {
         const wchar_t lower = static_cast<wchar_t>(std::towlower(c));
         mix(&lower, sizeof(lower));
     }
-    mix(&key.size, sizeof(key.size));
-    mix(&key.modified, sizeof(key.modified));
     mix(&key.pixels, sizeof(key.pixels));
     return hash;
 }
@@ -242,6 +240,7 @@ bool IsTemporary(const std::wstring& path) {
 
 struct IdentityReadResult {
     bool valid = false;
+    bool writing = false;
     ThumbnailFileIdentity identity{};
 };
 
@@ -282,14 +281,19 @@ IdentityReadResult BoundedIdentityRead(std::function<IdentityReadResult()> reade
 
 } // namespace
 
-bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdentity& identity) {
+bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdentity& identity,
+                               bool* source_writing) {
+    if (source_writing) *source_writing = false;
     if (fs::IsCloudPlaceholder(key.attrs) || (key.attrs & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_DIRECTORY))) return false;
-    const auto result = BoundedIdentityRead([path = key.path] {
+    const auto result = BoundedIdentityRead([path = key.path, require_idle = source_writing != nullptr] {
     IdentityReadResult result;
-    HANDLE handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+    HANDLE handle = CreateFileW(path.c_str(), require_idle ? GENERIC_READ : FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_DELETE | (require_idle ? 0 : FILE_SHARE_WRITE), nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return result;
+    if (handle == INVALID_HANDLE_VALUE) {
+        result.writing = require_idle && GetLastError() == ERROR_SHARING_VIOLATION;
+        return result;
+    }
     BY_HANDLE_FILE_INFORMATION info{};
     const bool valid = GetFileInformationByHandle(handle, &info) &&
         !fs::IsCloudPlaceholder(info.dwFileAttributes) &&
@@ -304,6 +308,7 @@ bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdenti
     return result;
     }, key.cancel);
     identity = result.identity;
+    if (source_writing) *source_writing = result.writing;
     return result.valid && identity.modified == key.modified && identity.size == key.size;
 }
 
@@ -369,8 +374,7 @@ bool ThumbnailDiskCache::Load(const ThumbnailStoreKey& key, StoredThumbnail& out
     ThumbnailFileIdentity after{};
     if (header.identity == identity && Decode(entry, key, out) &&
         ReadThumbnailFileIdentity(key, after) && identity == after) return true;
-    // Damaged, or another file's entry under the same hash.
-    DeleteFileW(file.c_str());
+    // Another version may have replaced this entry while it was being read.
     return false;
 }
 

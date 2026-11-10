@@ -39,7 +39,8 @@ public:
     FolderSizes& operator=(const FolderSizes&) = delete;
     void SetCachePath(std::function<std::wstring()> path);
     void SetIndexEnabled(bool enabled);
-    void Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> watch_roots);
+    void Sync(std::vector<FolderSizeRequest> visible, std::vector<std::wstring> watch_roots,
+              bool allow_automatic = true);
     bool NeedsWorker() const;
     void Calculate(const std::wstring& path);
     FolderSizeValue Get(const std::wstring& path) const;

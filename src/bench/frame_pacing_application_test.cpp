@@ -20,6 +20,7 @@ int main(int argc, char** argv) {
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
     const bool latency_two_only = argc == 2 && std::string_view(argv[1]) == "--latency-two-only";
+    const bool move_only = argc == 2 && std::string_view(argv[1]) == "--move-only";
     SetEnvironmentVariableW(L"PULSE_FRAME_PACING", L"waitable");
     SetEnvironmentVariableW(L"PULSE_FRAME_LATENCY", latency_two_only ? L"2" : L"1");
     wchar_t fixture_root[32768]{};
@@ -61,6 +62,41 @@ int main(int argc, char** argv) {
         if (a) DestroyWindow(a);
         if (b) DestroyWindow(b);
         second.reset(); first.reset(); OleUninitialize(); return 2;
+    }
+    if (move_only) {
+        InitializeOperationCenter(*first);
+        check(first->operationCenter && !first->operationCenter->IsVisible(),
+            "operation center exists and is closed before the move");
+        ShowWindow(a, SW_SHOWNOACTIVATE);
+        UpdateWindow(a);
+        const auto settle_started = GetTickCount64();
+        const auto settle_deadline = settle_started + 2000;
+        MSG message{};
+        do {
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            WaitForUiFrameOrMessage(first->core, 10);
+        } while (GetTickCount64() < settle_deadline &&
+            (GetTickCount64() - settle_started < 250 || first->ui_schedule.animation_active ||
+             first->ui_schedule.frame_pending || GetUpdateRect(a, nullptr, FALSE)));
+        check(!first->ui_schedule.animation_active && !first->ui_schedule.frame_pending,
+            "startup content animations settle before testing unchanged movement");
+        ValidateRect(a, nullptr);
+        SendMessageW(a, WM_MOVE, 0, MAKELPARAM(10, 10));
+        check(!GetUpdateRect(a, nullptr, FALSE), "moving on the same monitor does not redraw unchanged content");
+        const int old_width = first->compositor.Width();
+        const bool resized = SetWindowPos(a, nullptr, 0, 0, 680, 520,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+        RECT client{};
+        GetClientRect(a, &client);
+        check(resized && first->compositor.Width() != old_width &&
+            first->compositor.Width() == client.right && first->compositor.Height() == client.bottom,
+            "a real resize still updates the render target to the client dimensions");
+        DestroyWindow(b); DestroyWindow(a);
+        second.reset(); first.reset(); OleUninitialize();
+        return failures ? 1 : 0;
     }
     const HANDLE first_handle = first->compositor.FrameLatencyWaitableObject();
     const HANDLE second_handle = second->compositor.FrameLatencyWaitableObject();

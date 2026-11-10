@@ -8,6 +8,7 @@
 #include <string>
 #include <memory>
 #include <windows.h>
+#include "../common/image_open_context.h"
 
 namespace pulse::ops {
 
@@ -21,7 +22,7 @@ public:
 
 private:
     friend bool TryOpenImageWithNeighbors(HWND, const std::wstring&,
-        std::shared_ptr<void>, ImageOpenSession*) noexcept;
+        std::shared_ptr<void>, ImageOpenSession*, const ImageOpenContext&) noexcept;
     struct State;
     std::unique_ptr<State> state_;
 };
@@ -30,6 +31,7 @@ private:
 // an image or Shell folder activation is unavailable; the caller uses ShellExecute.
 bool TryOpenImageWithNeighbors(HWND owner, const std::wstring& path,
                                std::shared_ptr<void> lifetime = {},
-                               ImageOpenSession* session = nullptr) noexcept;
+                               ImageOpenSession* session = nullptr,
+                               const ImageOpenContext& context = {}) noexcept;
 
 } // namespace pulse::ops

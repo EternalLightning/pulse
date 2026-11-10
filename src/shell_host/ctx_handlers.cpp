@@ -11,6 +11,7 @@
 
 #include <shlwapi.h>
 #include <shobjidl.h>
+#include <wrl/client.h>
 
 #include <cwctype>
 #include <unordered_set>
@@ -148,6 +149,68 @@ std::wstring PerceivedType(const std::wstring& ext) {
     return type;
 }
 
+HRESULT CreateGenericStaticMenu(const CtxBind& bind, HWND owner, CtxHandlerSlot& slot) {
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IShellItemArray> selection;
+    HRESULT hr = SHCreateShellItemArrayFromDataObject(bind.data, IID_PPV_ARGS(&selection));
+    if (FAILED(hr)) return hr;
+    DWORD count = 0;
+    hr = selection->GetCount(&count);
+    if (FAILED(hr) || !count) return FAILED(hr) ? hr : E_INVALIDARG;
+    CtxParsedSelection parsed;
+    std::vector<PCUITEMID_CHILD> children;
+    bool all_files = true;
+    bool same_parent = bind.folder != nullptr;
+    for (DWORD i = 0; i < count; ++i) {
+        ComPtr<IShellItem> item;
+        PIDLIST_ABSOLUTE pidl = nullptr;
+        hr = selection->GetItemAt(i, &item);
+        if (SUCCEEDED(hr)) hr = SHGetIDListFromObject(item.Get(), &pidl);
+        if (FAILED(hr) || !pidl) return FAILED(hr) ? hr : E_FAIL;
+        parsed.pidls.push_back(pidl);
+        const auto child = bind.folder ? ILFindChild(bind.folder, pidl) : nullptr;
+        same_parent = same_parent && child;
+        children.push_back(reinterpret_cast<PCUITEMID_CHILD>(child));
+        SFGAOF attributes = 0;
+        hr = item->GetAttributes(SFGAO_FOLDER | SFGAO_STREAM, &attributes);
+        if (FAILED(hr)) return hr;
+        all_files = all_files && (!(attributes & SFGAO_FOLDER) || (attributes & SFGAO_STREAM));
+    }
+    ComPtr<IShellFolder> folder;
+    if (same_parent) {
+        hr = SHBindToObject(nullptr, bind.folder, nullptr, IID_PPV_ARGS(&folder));
+    } else {
+        hr = SHGetDesktopFolder(&folder);
+        for (size_t i = 0; i < parsed.pidls.size(); ++i)
+            children[i] = reinterpret_cast<PCUITEMID_CHILD>(parsed.pidls[i]);
+    }
+    if (FAILED(hr)) return hr;
+    for (const auto* name : {L"*", L"AllFilesystemObjects"}) {
+        if (!all_files && name[0] == L'*') continue;
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(HKEY_CLASSES_ROOT, name, 0, KEY_READ, &key) == ERROR_SUCCESS)
+            slot.class_keys.push_back(key);
+    }
+    // An empty class list lets Shell infer file-type associations instead.
+    if (slot.class_keys.empty()) return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    DEFCONTEXTMENU context{};
+    context.hwnd = owner;
+    context.pidlFolder = same_parent ? bind.folder : nullptr;
+    context.psf = folder.Get();
+    context.cidl = count;
+    context.apidl = children.data();
+    context.cKeys = static_cast<UINT>(slot.class_keys.size());
+    context.aKeys = slot.class_keys.data();
+    hr = SHCreateDefaultContextMenu(&context, IID_PPV_ARGS(&slot.menu));
+    if (FAILED(hr)) return hr;
+    ComPtr<IDefaultFolderMenuInitialize> initialize;
+    hr = slot.menu->QueryInterface(IID_PPV_ARGS(&initialize));
+    if (FAILED(hr)) return hr;
+    // Shell retains the full selection and applies MultiSelectModel at query/invoke.
+    return initialize->SetMenuRestrictions(static_cast<DEFAULT_FOLDER_MENU_RESTRICTIONS>(
+        DFMR_STATIC_VERBS_ONLY | DFMR_NO_RESOURCE_VERBS));
+}
+
 bool SafeGetVerbW(IContextMenu* menu, UINT offset, wchar_t* buf, UINT cch) {
     __try {
         return SUCCEEDED(menu->GetCommandString(offset, GCS_VERBW, nullptr,
@@ -250,6 +313,8 @@ void ReleaseHandlerSlot(CtxHandlerSlot& slot) noexcept {
     if (slot.menu3) slot.menu3->Release();
     if (slot.menu2) slot.menu2->Release();
     if (slot.menu) slot.menu->Release();
+    for (const auto key : slot.class_keys) RegCloseKey(key);
+    slot.class_keys.clear();
     slot.hmenu = nullptr;
     slot.menu3 = nullptr;
     slot.menu2 = nullptr;
@@ -266,11 +331,7 @@ std::vector<CtxHandlerDesc> EnumerateCtxHandlers(
     };
     if (background) {
         add(L"Directory\\Background\\shellex\\ContextMenuHandlers");
-        add(L"Directory\\shellex\\ContextMenuHandlers");
-        add(L"Folder\\shellex\\ContextMenuHandlers");
         add(L"LibraryFolder\\Background\\shellex\\ContextMenuHandlers");
-        add(L"Drive\\shellex\\ContextMenuHandlers");
-        add(L"*\\shellex\\ContextMenuHandlers");
         return out;
     }
     add(L"*\\shellex\\ContextMenuHandlers");
@@ -295,6 +356,8 @@ std::vector<CtxHandlerDesc> EnumerateCtxHandlers(
             add(key.c_str());
         }
     }
+    // The native fallback already provides static verbs when no handler is registered.
+    if (!seen.empty()) out.push_back({{}, {}, {}, true});
     return out;
 }
 
@@ -374,30 +437,37 @@ HRESULT QueryOneHandler(const CtxHandlerDesc& handler, const CtxBind& bind,
     slot.clsid = handler.clsid_text;
     slot.name = handler.name;
 
-    IUnknown* unk = nullptr;
-    HRESULT hr = CoCreateInstance(handler.clsid, nullptr, CLSCTX_INPROC_SERVER,
-                                  IID_IUnknown, reinterpret_cast<void**>(&unk));
-    if (FAILED(hr) || !unk) return FAILED(hr) ? hr : E_FAIL;
+    HRESULT hr = S_OK;
+    if (handler.generic_static) {
+        hr = CreateGenericStaticMenu(bind, owner, slot);
+        if (FAILED(hr)) {
+            ReleaseHandlerSlot(slot);
+            return hr;
+        }
+    } else {
+        IUnknown* unk = nullptr;
+        hr = CoCreateInstance(handler.clsid, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_IUnknown, reinterpret_cast<void**>(&unk));
+        if (FAILED(hr) || !unk) return FAILED(hr) ? hr : E_FAIL;
 
-    IShellExtInit* init = nullptr;
-    if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&init))) && init) {
-        init->Initialize(bind.folder, bind.data, bind.assoc);
-        init->Release();
-    }
-    hr = unk->QueryInterface(IID_PPV_ARGS(&slot.menu));
-    unk->Release();
-    if (FAILED(hr) || !slot.menu) {
-        slot.menu = nullptr;
-        return FAILED(hr) ? hr : E_FAIL;
+        IShellExtInit* init = nullptr;
+        if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&init))) && init) {
+            init->Initialize(bind.folder, bind.data, bind.assoc);
+            init->Release();
+        }
+        hr = unk->QueryInterface(IID_PPV_ARGS(&slot.menu));
+        unk->Release();
+        if (FAILED(hr) || !slot.menu) {
+            slot.menu = nullptr;
+            return FAILED(hr) ? hr : E_FAIL;
+        }
     }
 
     slot.hmenu = CreatePopupMenu();
     if (!slot.hmenu) {
-        slot.menu->Release();
-        slot.menu = nullptr;
+        ReleaseHandlerSlot(slot);
         return E_OUTOFMEMORY;
     }
-    (void)owner;
     hr = SafeQueryContextMenu(slot.menu, slot.hmenu, 0, id_first, id_last, qcm_flags);
     if (FAILED(hr)) {
         ReleaseHandlerSlot(slot);

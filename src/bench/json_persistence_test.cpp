@@ -34,7 +34,9 @@ static int RunSessionPreferencesChecks() {
     full.layout_tabs.front().panes.push_back({full.active_path});
     auto legacy_json = app::SessionToJson(full);
     const std::wstring legacy_undo = LR"("undo":[{"type":2,"sup":true,"dest":"","name":"renamed.txt","src":["C:\\fixture\\original.txt"]}],)";
-    legacy_json.insert(legacy_json.find(L'{') + 1, legacy_undo);
+    const std::wstring legacy_tray = LR"("tray":[{"move":true,"items":["C:\\fixture\\staged.txt"]}],)";
+    legacy_json.insert(legacy_json.find(L'{') + 1, legacy_undo + legacy_tray);
+    legacy_json.insert(legacy_json.find(L'{', legacy_json.find(L"\"windows\"")) + 1, legacy_tray);
     check(WriteUtf8FileAtomic((root / L"session.json").wstring(), legacy_json),
         "write an isolated legacy session with a completed rename in undo history");
     app::WindowSessionSnapshot preferences;
@@ -45,6 +47,7 @@ static int RunSessionPreferencesChecks() {
     const json::Document migrated(migrated_json);
     check(migrated.Is(json::Kind::Object) && !migrated.Find(L"undo"),
         "legacy session undo history is discarded during preference migration");
+    check(!migrated.Find(L"tray"), "legacy session staging tray is discarded during preference migration");
     std::wstring original_session;
     check(ReadUtf8File((root / L"session.json").wstring(), original_session),
         "capture the complete legacy session before saving preferences");
@@ -59,6 +62,7 @@ static int RunSessionPreferencesChecks() {
     check(doc.Is(json::Kind::Object) && !doc.Find(L"path") && !doc.Find(L"layoutTabs") && !doc.Find(L"windows"),
         "the preference schema contains no navigation state");
     check(!doc.Find(L"undo"), "saved preferences contain no undo history");
+    check(!doc.Find(L"tray"), "saved preferences contain no staging tray");
     check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 && preferences.active_path.empty(),
         "the new preference file takes precedence over legacy values");
     app::SessionSnapshot restored;
@@ -69,14 +73,17 @@ static int RunSessionPreferencesChecks() {
     check(restored_session.Is(json::Kind::Object) && !restored_session.Find(L"undo") &&
         !restored_session.Find(L"windows")->children.front().Find(L"undo"),
         "complete session snapshots discard legacy undo in every window");
+    check(!restored_session.Find(L"tray") &&
+        !restored_session.Find(L"windows")->children.front().Find(L"tray"),
+        "complete session snapshots discard the legacy staging tray in every window");
     auto legacy_preferences = saved_preferences;
-    legacy_preferences.insert(legacy_preferences.find(L'{') + 1, legacy_undo);
+    legacy_preferences.insert(legacy_preferences.find(L'{') + 1, legacy_undo + legacy_tray);
     check(WriteUtf8FileAtomic((root / L"preferences.json").wstring(), legacy_preferences) &&
         app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 &&
         app::SaveSessionPreferences(preferences) &&
         ReadUtf8File((root / L"preferences.json").wstring(), saved_session) && saved_session == saved_preferences,
-        "reopening old preferences forgets undo history and preserves other settings");
-    preferences.tray.Collect({L"C:\\" + std::wstring(json::kMaxDocumentChars, L'a')}, false);
+        "reopening old preferences forgets undo and staging tray while preserving other settings");
+    preferences.sidebar_order.assign(json::kMaxDocumentChars / 2, 0);
     check(!app::SaveSessionPreferences(preferences) &&
         ReadUtf8File((root / L"preferences.json").wstring(), saved_session) && saved_session == saved_preferences,
         "oversized preferences fail before replacing the previous file");
@@ -97,6 +104,26 @@ int main(int argc, char** argv) {
     auto check = [&](bool ok, const char* name) {
         std::cout << (ok ? "[PASS] " : "[FAIL] ") << name << '\n'; failures += !ok;
     };
+    if (argc == 2 && std::string_view(argv[1]) == "--folder-size-preferences") {
+        app::AppPrefs prefs;
+        check(prefs.auto_folder_size && prefs.FromJson(L"{}") && prefs.auto_folder_size,
+            "new and legacy preferences keep automatic folder size enabled");
+        prefs.auto_folder_size = false;
+        const app::FolderSortPrefs this_pc{ui::SortColumn::Name, ui::SortDirection::Desc};
+        const app::FolderSortPrefs folder{ui::SortColumn::Mtime, ui::SortDirection::Asc};
+        const auto path = LR"(C:\fixture)";
+        check(prefs.folder_views.SetSort(L"", this_pc.column, this_pc.direction) &&
+            prefs.folder_views.SetSort(path, folder.column, folder.direction),
+            "This PC and an ordinary directory accept independent sort preferences");
+        app::AppPrefs loaded;
+        check(loaded.FromJson(prefs.ToJson()) && !loaded.auto_folder_size &&
+            loaded.folder_views.FindSort(L"") == this_pc && loaded.folder_views.FindSort(path) == folder,
+            "disabled automatic size and separate sort preferences survive JSON round trip");
+        loaded.ResetToDefaults();
+        check(loaded.auto_folder_size && !loaded.folder_views.FindSort(L""),
+            "reset restores automatic folder size and the default This PC sort");
+        return failures ? 1 : 0;
+    }
     {
         app::LayoutTabSnapshot saved;
         saved.panes.push_back({});

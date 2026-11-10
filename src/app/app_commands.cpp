@@ -11,9 +11,11 @@
 #include "../ui/toolbar_layout.h"
 #include "app_internal.h"
 #include "device_navigation.h"
+#include "device_menu.h"
 #include "cloud_commands.h"
 #include "cloud_root_catalog.h"
 #include "global_search_controller.h"
+#include "folder_sizes_ui.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
@@ -26,6 +28,7 @@
 #include "../common/localization.h"
 #include "../common/text_format.h"
 #include "../common/path_utils.h"
+#include "../common/preview_extensions.h"
 #include "../common/diagnostics_exporter.h"
 #include "snapshot_patch.h"
 #include "entry_sort.h"
@@ -59,6 +62,49 @@
 using namespace pulse;
 
 namespace pulse {
+void OpenFileInCurrentView(AppState& s, const std::wstring& path) {
+    ui::PaneViewModel pane;
+    if (s.pane) app::FillPaneViewModel(pane, *s.pane, &s.places);
+    if (!pane.snapshot || pane.content_results || (!pane.filter_map && !pane.filter_text.empty())) {
+        s.ops.OpenWith(path);
+        return;
+    }
+    s.ops.OpenWith(path, [snapshot = pane.snapshot, order = pane.filter_map,
+        column = pane.sort_column, direction = pane.sort_direction, path] {
+        std::wstring extension = PathFindExtensionW(path.c_str());
+        for (auto& ch : extension) ch = static_cast<wchar_t>(std::towlower(ch));
+        if (!preview::IsImageExtension(extension)) {
+            PERCEIVED perceived = PERCEIVED_TYPE_UNSPECIFIED;
+            PERCEIVEDFLAG flags = 0;
+            if (extension.empty() || FAILED(AssocGetPerceivedType(extension.c_str(), &perceived, &flags, nullptr)) ||
+                perceived != PERCEIVED_TYPE_IMAGE) return ImageOpenContext{};
+        }
+        ImageOpenContext context;
+        context.column = column;
+        context.direction = direction;
+        const auto parent = fs::ParentPath(path);
+        size_t bytes = 0;
+        bool contains_target = false;
+        const size_t count = order ? order->size() : snapshot->size();
+        constexpr size_t max_ipc_array_items = 65536;
+        for (size_t row = 0; row < count; ++row) {
+            const size_t index = order ? static_cast<size_t>((*order)[row]) : row;
+            if (index >= snapshot->size()) continue;
+            const auto& entry = (*snapshot)[index];
+            if (entry.is_dir || entry.change_record_only || entry.full_path.empty() ||
+                !pulse::path::EqualInsensitive(fs::ParentPath(entry.full_path), parent)) continue;
+            bytes += sizeof(uint32_t) + entry.full_path.size() * sizeof(wchar_t);
+            // Keep a complete view or the normal Shell fallback, never a truncated list.
+            if (bytes > kMaxImageOpenContextBytes || context.paths.size() == max_ipc_array_items)
+                return ImageOpenContext{};
+            contains_target |= pulse::path::EqualInsensitive(entry.full_path, path);
+            context.paths.push_back(entry.full_path);
+        }
+        if (!contains_target) return ImageOpenContext{};
+        return context;
+    });
+}
+
 HANDLE g_shell_watch_stop = nullptr;
 HANDLE g_shell_watch_thread = nullptr;
 
@@ -817,16 +863,9 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
     if (IsRecycleTab(ActiveTab(s)))
         return app::BuildRecycleItemMenu(can_undo, undo_label);
     if (const auto* phone = ActiveTab(s); phone && app::HasDeviceSelection(*phone)) {
-        std::vector<ui::FluentMenuItem> items;
-        if (phone->SelectedCount() == 1 && phone->EntryAt(
-                static_cast<size_t>(phone->SelectedIndices().front())).is_dir) {
-            ui::FluentMenuItem item;
-            item.command = app::CmdOpenInNewTab;
-            item.text = l10n::Get(l10n::StringId::OpenNewTab);
-            item.glyph = L"\xE8A7";
-            items.push_back(std::move(item));
-        }
-        return items;
+        const bool folder = phone->SelectedCount() == 1 && phone->EntryAt(
+            static_cast<size_t>(phone->SelectedIndices().front())).is_dir;
+        return app::BuildDeviceItemMenu(BuildCommandContext(s), folder);
     }
     bool folder = false;
     if (const app::Tab* tab = ActiveTab(s); tab && tab->snapshot) {
@@ -1183,8 +1222,8 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     if (!tab) return;
     if (app::IsDeviceTab(tab)) {
         StartCtxQuery(s, {tab->current_path}, true, L":device:background");
-        s.context_menu.OpenMenu({});
-        const int cmd = s.menu->TrackPopup(screen_pt, ExplorerMenu(s, {}));
+        s.context_menu.OpenMenu(app::BuildDeviceBackgroundMenu(BuildCommandContext(s)));
+        const int cmd = s.menu->TrackPopup(screen_pt, ExplorerMenu(s, s.context_menu.base_items()));
         s.context_menu.CloseMenu();
         if (HandleShellMenuCommand(s, cmd)) return;
         if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
@@ -2212,6 +2251,10 @@ static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects)
     if (app::HasEffect(effects, app::SettingsEffect::ListStyle))
         s.renderer.SetListStyle(s.appPrefs.list_smart_date, s.appPrefs.list_zebra_rows,
                                 s.appPrefs.list_size_bar);
+    if (app::HasEffect(effects, app::SettingsEffect::FolderSizes)) {
+        auto vm = BuildVm(s, false);
+        PrepareFolderSizes(s, vm);
+    }
     if (app::HasEffect(effects, app::SettingsEffect::FolderSort)) {
         // Cached snapshots hold the previous order; drop and re-sort what is visible.
         for (const auto& path : VisibleFolderPaths(s)) {

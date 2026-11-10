@@ -9,6 +9,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <string_view>
 
 namespace {
 int failures = 0;
@@ -41,8 +45,74 @@ pulse::ui::WindowViewModel View(pulse::AppState& state, bool labels = true) {
     }
     return vm;
 }
+void CheckAutomaticPreference(const std::filesystem::path& root) {
+    using namespace pulse;
+    using S = app::FolderSizeState;
+    auto state = std::make_unique<AppState>();
+    state->isolatedTest = true;
+    state->appPrefs.persist = false;
+    state->appPrefs.auto_folder_size = false;
+    state->window_tabs.EnsureDefault();
+    auto& tab = state->window_tabs.Active()->panes[0]->view;
+    tab.current_path = root.wstring();
+    auto snapshot = std::make_shared<std::vector<fs::DirEntry>>(1);
+    snapshot->front().name = L"a-large";
+    snapshot->front().is_dir = true;
+    tab.SetSnapshot(snapshot);
+    const auto list_path = (root / L"a-large").wstring();
+    const auto details_path = (root / L"z-small").wstring();
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered = false, release = false;
+    state->folderSizes.SetScanHookForTest([&](const std::wstring& path) {
+        if (!path.ends_with(L"\\z-small")) return;
+        std::unique_lock lock(mutex);
+        entered = true;
+        changed.notify_one();
+        changed.wait(lock, [&] { return release; });
+    });
+    auto vm = View(*state);
+    vm.details.path = details_path;
+    vm.details.is_dir = true;
+    PrepareFolderSizes(*state, vm);
+    Check(state->folderSizes.Get(list_path).state == S::Manual &&
+        state->folderSizes.Get(details_path).state == S::Manual &&
+        vm.pane_slots[0].pane.folder_size_actions.contains(0) && !vm.details.size_pending,
+        "disabled automatic size leaves both list and details ready for manual calculation");
+
+    state->appPrefs.auto_folder_size = true;
+    PrepareFolderSizes(*state, vm);
+    {
+        std::unique_lock lock(mutex);
+        Check(changed.wait_for(lock, std::chrono::seconds(6), [&] { return entered; }),
+            "enabling automatic size starts a details scan");
+    }
+    state->appPrefs.auto_folder_size = false;
+    PrepareFolderSizes(*state, vm);
+    state->folderSizes.Calculate(list_path);
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    changed.notify_one();
+    Check(Wait([&] { return state->folderSizes.Get(list_path).state == S::Ready; }) &&
+        state->folderSizes.Get(list_path).bytes == 1000,
+        "manual list calculation completes with automatic size disabled");
+    Check(state->folderSizes.Get(details_path).state == S::Manual &&
+        !state->folderSizes.Get(details_path).has_value,
+        "a cancelled automatic details scan cannot publish after switching off");
+    state->folderSizes.Calculate(details_path);
+    Check(Wait([&] { return state->folderSizes.Get(details_path).state == S::Ready; }) &&
+        state->folderSizes.Get(details_path).bytes == 10 &&
+        state->folderSizes.Get(details_path).counts_valid,
+        "manual details calculation still returns bytes and counts");
+    state->folderSizes.Invalidate(details_path);
+    Check(state->folderSizes.Get(details_path).state == S::Cached,
+        "a completed manual request does not restart when its cached value becomes stale");
+    state->folderSizes.Stop();
 }
-int main() {
+}
+int main(int argc, char** argv) {
     using namespace pulse;
     namespace disk = std::filesystem;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -55,6 +125,12 @@ int main() {
     disk::create_directory(root / L"z-small");
     Write(root / L"a-large" / L"data.bin", 1000);
     Write(root / L"z-small" / L"data.bin", 10);
+    if (argc == 2 && std::string_view(argv[1]) == "--automatic-only") {
+        CheckAutomaticPreference(root);
+        disk::remove_all(root);
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     auto snapshot = std::make_shared<std::vector<fs::DirEntry>>();
     fs::DirEntry large; large.name = L"a-large"; large.is_dir = true;
     snapshot->push_back(large);

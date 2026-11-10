@@ -14,6 +14,7 @@
 #include "../app/folder_sizes_ui.h"
 #include "terminal_menu_cases.h"
 #include "../common/localization.h"
+#include "../ui/ui_renderer_internal.h"
 #include <algorithm>
 #include <cstdio>
 #include <condition_variable>
@@ -30,12 +31,15 @@ int main(int argc, char** argv) {
         return RunTerminalMenuChecks();
     const bool directory_projection_only = argc == 2 && std::string_view(argv[1]) == "--directory-projection-only";
     const bool view_preparation_only = argc == 2 && std::string_view(argv[1]) == "--view-preparation-only";
+    const bool this_pc_sort_only = argc == 2 && std::string_view(argv[1]) == "--this-pc-sort-only";
+    const bool folder_size_setting_only = argc == 2 && std::string_view(argv[1]) == "--folder-size-setting-only";
     const bool details_worker_only = argc == 2 && std::string_view(argv[1]) == "--details-worker-only";
     const bool drag_hints_only = argc == 2 && std::string_view(argv[1]) == "--drag-hints-only";
     const bool network_state_only = argc == 2 && std::string_view(argv[1]) == "--network-state-only";
     const bool shared_column_only = argc == 2 && std::string_view(argv[1]) == "--shared-column-cancel-only";
     const bool shared_requests_only = argc == 2 && std::string_view(argv[1]) == "--shared-requests-only";
-    if (argc != 1 && !shared_column_only && !shared_requests_only && !network_state_only && !directory_projection_only && !drag_hints_only && !view_preparation_only && !details_worker_only) {
+    if (argc != 1 && !shared_column_only && !shared_requests_only && !network_state_only && !directory_projection_only && !drag_hints_only && !view_preparation_only && !details_worker_only &&
+        !this_pc_sort_only && !folder_size_setting_only) {
         std::fputs("Unknown directory-contract test selector\n", stderr);
         return 2;
     }
@@ -64,6 +68,65 @@ int main(int argc, char** argv) {
     s.renderer.SetCompositor(&s.compositor);
     s.window_tabs.EnsureDefault();
     s.pane = s.window_tabs.Active()->FocusedPane();
+    if (this_pc_sort_only || folder_size_setting_only) {
+        auto& tab = *ActiveTab(s);
+        if (this_pc_sort_only) {
+            const auto folder = fs::NormalizePath(LR"(C:\pulse-sort-fixture)");
+            s.appPrefs.folder_views.SetSort(folder, ui::SortColumn::Mtime, ui::SortDirection::Asc);
+            StartLoadingPath(s, tab, L"");
+            SetSort(s, ui::SortColumn::Name, ui::SortDirection::Desc);
+            StartLoadingPath(s, tab, folder);
+            check(tab.sort_column == ui::SortColumn::Mtime && tab.sort_direction == ui::SortDirection::Asc,
+                "leaving This PC loads the directory's own sort order");
+            check(s.appPrefs.FromJson(s.appPrefs.ToJson()), "reload the saved sort preferences");
+            StartLoadingPath(s, tab, L"");
+            check(tab.current_path.empty() && tab.sort_column == ui::SortColumn::Name &&
+                tab.sort_direction == ui::SortDirection::Desc,
+                "returning to This PC restores its separate sort order");
+        } else {
+            l10n::SetLanguage(L"zh-CN");
+            tab.current_path = app::MakeSettingsPath(app::SettingsController::PageName(6));
+            s.settings.SelectPage(6);
+            app::SettingsEffect effect = app::SettingsEffect::None;
+            app::SettingsController::UiCallbacks callbacks;
+            callbacks.apply_effects = [&](auto value) { effect = value; };
+            s.settings.BindUi(s.appPrefs, s.ctxMenuPrefs, s.index, s.networkIndex, std::move(callbacks));
+            s.scale = 1.5f;
+            s.renderer.SetScale(s.scale);
+            s.compositor.RecreateTextFormats(s.scale);
+            const auto rect = D2D1::RectF(0, 0, 1080, 1260);
+            s.compositor.Resize(static_cast<UINT>(rect.right), static_cast<UINT>(rect.bottom));
+            ui::fluent::Painter painter(&s.compositor);
+            painter.SetScale(s.scale);
+            auto vm = BuildVm(s, false);
+            vm.settings_scroll = s.renderer.SettingsDestinationOffset(vm,
+                static_cast<int>(l10n::StringId::AutoFolderSize), rect.right, rect.bottom);
+            const auto layout = ui::MakeSettingsLayout(vm, rect, s.scale,
+                s.renderer.TitleBarHeight(), 28 * s.scale, &painter);
+            const auto& row = layout.auto_folder_size_row;
+            const auto hit = s.renderer.HitTest(vm, rect, (row.left + row.right) / 2, (row.top + row.bottom) / 2);
+            check(vm.settings_auto_folder_size && row.top >= layout.folder_sort_card.bottom &&
+                row.bottom <= layout.density_card.top && row.bottom > row.top &&
+                hit.region == ui::HitTestResult::SettingsToggle && hit.index == 35 &&
+                !l10n::Get(l10n::StringId::AutoFolderSize).empty(),
+                "automatic folder size has a visible, localized toggle and hit target at 150 percent");
+            s.settings.ToggleUi(hit.index);
+            vm.settings_auto_folder_size = BuildVm(s, false).settings_auto_folder_size;
+            check(!vm.settings_auto_folder_size && app::HasEffect(effect, app::SettingsEffect::FolderSizes),
+                "the rendered control disables automatic folder size and applies it across windows");
+            const auto theme = ui::MakeTheme(false, ui::HexColor(0x0078D4));
+            s.compositor.Dc()->BeginDraw();
+            s.renderer.Render(vm, rect, theme);
+            check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "render the narrow Chinese file-list settings");
+            check(s.compositor.SaveSnapshot(L"folder-size-settings-zh-150.png"),
+                "save the disabled toggle for visual review");
+            s.settings.ResetUi();
+        }
+        s.watches.Stop();
+        DestroyWindow(s.hwnd); s.hwnd = nullptr;
+        owned.reset(); OleUninitialize();
+        return failures ? 1 : 0;
+    }
     if (network_state_only || directory_projection_only || drag_hints_only || view_preparation_only || details_worker_only) {
         const int result = details_worker_only ? RunDetailsWorkerCases(s)
             : view_preparation_only ? RunViewPreparationCases(s)

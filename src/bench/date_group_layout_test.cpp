@@ -36,10 +36,45 @@ int main() {
         gutters &= grid.HitTest(gutter_x, 5) == -1 && grid.HitTest(5, 5) == 0;
         ui::ViewLayout list(ui::ViewMode::List, bounds, 20, 0, 0, scale);
         const float gutter_y = list.Metrics().rows_per_column * list.Metrics().cell_height + 1;
-        gutters &= list.HitTest(5, gutter_y) == -1 && list.HitTest(5, 5) == 0;
+        gutters &= list.HitTest(5 * scale, gutter_y) == -1 && list.HitTest(5 * scale, 5 * scale) == 0;
     }
     std::printf("[%s] unused grid columns and list rows do not select another item\n",
         gutters ? "PASS" : "FAIL");
+    bool marquee_gutters = true;
+    for (const auto mode : {ui::ViewMode::SmallIcons, ui::ViewMode::List, ui::ViewMode::Tiles}) {
+        for (const float scale : {1.0f, 1.5f, 2.0f}) {
+            const auto bounds = D2D1::RectF(20 * scale, 30 * scale, 600 * scale, 234 * scale);
+            const ui::ViewLayout filled(mode, bounds, 100, 0, 0, scale);
+            const auto cell = filled.ItemRect(0);
+            const auto icon = filled.IconRect(0);
+            const auto name = filled.NameRect(0);
+            bool hit = filled.HitTest(cell.left + scale, (cell.top + cell.bottom) * 0.5f) == -1 &&
+                filled.HitTest(cell.right - scale, (cell.top + cell.bottom) * 0.5f) == -1 &&
+                filled.HitTest((cell.left + cell.right) * 0.5f, cell.top + scale) == -1 &&
+                filled.HitTest((cell.left + cell.right) * 0.5f, cell.bottom - scale) == -1 &&
+                filled.HitTest((icon.left + icon.right) * 0.5f, (icon.top + icon.bottom) * 0.5f) == 0 &&
+                filled.HitTest(name.left + scale, (name.top + name.bottom) * 0.5f) == 0;
+            const bool horizontal = mode == ui::ViewMode::List;
+            const ui::ViewLayout scrolled(mode, bounds, 100,
+                horizontal ? filled.Metrics().cell_width : 0,
+                horizontal ? 0 : filled.Metrics().cell_height, scale);
+            const int next = horizontal ? filled.Metrics().rows_per_column : filled.Metrics().columns;
+            const auto next_cell = scrolled.ItemRect(next);
+            const auto next_icon = scrolled.IconRect(next);
+            hit &= scrolled.HitTest(next_cell.left + scale, (next_cell.top + next_cell.bottom) * 0.5f) == -1 &&
+                scrolled.HitTest((next_icon.left + next_icon.right) * 0.5f,
+                    (next_icon.top + next_icon.bottom) * 0.5f) == next;
+            const auto narrow_bounds = D2D1::RectF(0, 0, 3 * scale, 3 * scale);
+            const ui::ViewLayout narrow(mode, narrow_bounds, 100, 0, 0, scale);
+            hit &= narrow.HitTest(0.25f * scale, 1.5f * scale) == -1 &&
+                narrow.HitTest(1.5f * scale, 1.5f * scale) == 0 &&
+                narrow.HitTest(3 * scale, 1.5f * scale) == -1;
+            if (!hit) std::printf("[FAIL] marquee gutter mode=%d scale=%.1f\n", static_cast<int>(mode), scale);
+            marquee_gutters &= hit;
+        }
+    }
+    std::printf("[%s] filled small-icon, list and tile cells preserve marquee gutters and content hits across DPI and scrolling\n",
+        marquee_gutters ? "PASS" : "FAIL");
     auto entries = std::make_shared<std::vector<fs::DirEntry>>();
     for (const auto& date : {std::tuple{2026, 9, 29}, {2026, 9, 28},
                              {2026, 9, 23}, {2026, 9, 22},
@@ -92,5 +127,5 @@ int main() {
         stripe_parity ? "PASS" : "FAIL");
     const bool ok = buckets && geometry && scrolled_and_filtered && stripe_parity;
     std::printf("[%s] date buckets and grouped row hit testing\n", ok ? "PASS" : "FAIL");
-    return ok && gutters ? 0 : 1;
+    return ok && gutters && marquee_gutters ? 0 : 1;
 }

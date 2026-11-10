@@ -15,6 +15,7 @@ namespace {
 std::atomic<uint32_t> g_preview_cache_sequence{1};
 constexpr uint32_t kMaxFailureAttempts = 3;
 constexpr ULONGLONG kFailureRetryDelayMs = 2000;
+constexpr size_t kCacheBudget = 16ull * 1024ull * 1024ull;
 }
 
 ThumbnailCache::ThumbnailCache() {
@@ -168,6 +169,18 @@ void ThumbnailCache::QueueRequest(Request request, Consumer consumer) {
         }
         return;
     }
+    if (request.kind == ipc::PreviewRequestKind::Thumbnail) {
+        const auto path_prefix = request.path + L"\n0:";
+        for (auto pending = pending_.begin(); pending != pending_.end();) {
+            if (pending->first.ends_with(L":thumbnail") &&
+                pending->second.identity.starts_with(path_prefix) &&
+                pending->second.identity != request.identity) {
+                const auto id = pending->second.id;
+                std::erase_if(queue_, [id](const Request& queued) { return queued.id == id; });
+                pending = pending_.erase(pending);
+            } else ++pending;
+        }
+    }
     request.id = next_id_++;
     request.epoch = epoch_.load(std::memory_order_relaxed);
     Pending pending;
@@ -216,7 +229,8 @@ bool ThumbnailCache::Prefetch(const std::wstring& path, DWORD attrs, uint32_t pi
     std::lock_guard lock(mutex_);
     const auto key = Key(path, pixels, modified, size) + L":thumbnail";
     if (items_.contains(key) || pending_.contains(key)) return true;
-    if (queue_.size() >= 64 || lane_count_ < 2) return false;
+    // An over-budget visible set would immediately evict new offscreen results.
+    if (cache_bytes_ > kCacheBudget || queue_.size() >= 64 || lane_count_ < 2) return false;
     Request req;
     req.path = path; req.attrs = attrs; req.pixels = pixels; req.generation = generation;
     req.modified = modified; req.size = size;
@@ -500,7 +514,6 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
     return true;
 }
 void ThumbnailCache::Trim() {
-    constexpr size_t kCacheBudget = 16ull * 1024ull * 1024ull;
     // Reclaim this window's idle payloads under process-wide pressure; other
     // windows keep their visible sets without taking cross-cache locks.
     while (!lru_.empty() && (lru_.size() > 128 || cache_bytes_ > kCacheBudget || ThumbnailImageBudget().OverBudget())) {
@@ -638,7 +651,18 @@ void ThumbnailCache::Worker(size_t lane) {
         ThumbnailStoreKey disk_key{req.path, req.attrs, req.pixels, req.modified, req.size};
         disk_key.cancel = stop_event_;
         ThumbnailFileIdentity before{};
-        const bool verified = grid && ReadThumbnailFileIdentity(disk_key, before);
+        bool source_writing = false;
+        const bool verified = grid && ReadThumbnailFileIdentity(disk_key, before, &source_writing);
+        if (source_writing) {
+            std::lock_guard lock(mutex_);
+            const auto pending = pending_.find(req.key);
+            if (running_ && req.epoch == epoch_.load(std::memory_order_relaxed) &&
+                pending != pending_.end() && pending->second.id == req.id) {
+                req.retry_due = GetTickCount64() + 1000;
+                queue_.push_back(std::move(req));
+            }
+            continue;
+        }
         StoredThumbnail stored;
         bool disk_hit = verified && ThumbnailDiskCache::Shared().Load(disk_key, stored);
         const auto started = GetTickCount64();
@@ -650,11 +674,17 @@ void ThumbnailCache::Worker(size_t lane) {
             result.kind = ipc::PreviewContentKind::Bitmap; result.cost = result.pixels.capacity();
         } else ok = Connect(lane) && FetchResponse(req, result, lane);
         if (!running_) break;
+        bool stale = false;
         {
             std::lock_guard lock(mutex_);
             const auto pending = pending_.find(req.key);
-            if (req.epoch != epoch_.load(std::memory_order_relaxed) || pending == pending_.end() ||
-                pending->second.id != req.id) continue;
+            stale = req.epoch != epoch_.load(std::memory_order_relaxed) || pending == pending_.end() ||
+                pending->second.id != req.id;
+        }
+        if (stale) {
+            // Cancellation does not make a failed transport reusable by the next request.
+            if (!ok) StopChild(lane);
+            continue;
         }
         if (verified) {
             ThumbnailFileIdentity after{};

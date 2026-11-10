@@ -40,10 +40,6 @@ inline HomeLayout MakeHomeLayout(const PaneViewModel& pane, D2D1_RECT_F bounds, 
         const float expansion = HomeGroupExpansion(pane, group);
         if (expansion <= 0.0f) { y += 12 * scale; continue; }
         const float content_top = y;
-        if (group == 2 && pane.network_discovery_disabled) {
-            out.network_notice = D2D1::RectF(left, y, left + width, y + 52 * scale);
-            y += 64 * scale;
-        }
         int count = 0;
         for (int i = 0; i < static_cast<int>(pane.home_cards.size()); ++i) {
             if (pane.home_cards[static_cast<size_t>(i)].group != group) continue;
@@ -54,7 +50,12 @@ inline HomeLayout MakeHomeLayout(const PaneViewModel& pane, D2D1_RECT_F bounds, 
         }
         out.empty[group] = count == 0;
         const int rows = (count + columns - 1) / columns;
-        y += rows ? static_cast<float>(rows) * (card_height + gap) : 34 * scale;
+        if (group == 2 && out.empty[group] && !pane.home_loading && pane.network_discovery_disabled) {
+            out.network_notice = D2D1::RectF(left, y, left + width, y + 52 * scale);
+            y += 64 * scale;
+        } else {
+            y += rows ? static_cast<float>(rows) * (card_height + gap) : 34 * scale;
+        }
         const float content_height = y - content_top;
         out.content_clips[group] = D2D1::RectF(bounds.left, content_top - scale, bounds.right, content_top + content_height * expansion);
         y = content_top + 12 * scale + (content_height + 12 * scale) * expansion;

@@ -616,7 +616,11 @@ ops::OpStatus RunLinkOp(ops::OpRequest req, bool accept, bool all,
         g_ops.CancelCurrent();
         Check(WaitOpDone(previous, 5000), L"link regression finishes before timeout");
     }
-    return g_ops.Status();
+    const auto status = g_ops.Status();
+    if (status.phase == ops::OpPhase::Failed)
+        wprintf(L"[DIAG] link operation hr=0x%08lX path=%ls error=%ls\n",
+            static_cast<unsigned long>(status.failure_hr), status.failed_path.c_str(), status.last_error.c_str());
+    return status;
 }
 
 bool MakeJunction(const std::wstring& link, const std::wstring& target) {
@@ -762,6 +766,12 @@ int RunReviewRegressions(const std::wstring& filter) {
             Check(links == 1 && status.last_error.empty() &&
                   FileHash(outside + L"\\nested.txt") == FileHash(src + L"\\folder\\nested.txt"),
                   L"directory junction continuation writes actual target");
+            MakeFile(src + L"\\folder\\nested.txt", old_data, sizeof(old_data));
+            status = RunLinkOp(SimpleOp(ops::OpType::Copy,
+                {(src + L"\\folder").c_str()}, dst.c_str()), true, true, &links);
+            Check(links == 1 && status.phase == ops::OpPhase::Completed &&
+                  FileHash(outside + L"\\nested.txt") == FileHash(src + L"\\folder\\nested.txt"),
+                  L"replacing a file under a junction commits to the admitted target");
             status = RunLinkOp(SimpleOp(ops::OpType::Copy,
                 {(src + L"\\folder").c_str()}, dst.c_str()), true, true, &links, nullptr, [&] {
                     Check(RemoveDirectoryW(junction.c_str()) && MakeJunction(junction, redirect),
@@ -1169,6 +1179,87 @@ int RunDirectorySkipRegressions() {
     return g_fail ? 1 : 0;
 }
 
+int RunBatchReplacementRegressions(const std::wstring& parent = {}) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    const auto base = parent.empty() ? std::filesystem::path(SandboxRoot()).parent_path()
+                                   : std::filesystem::path(parent);
+    const auto root = base / (L"batch-replacement-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    const auto src = root / L"src", dst = root / L"dst";
+    std::filesystem::create_directories(base);
+    if (!std::filesystem::create_directory(root)) return 2;
+    std::filesystem::create_directory(src);
+    std::filesystem::create_directory(dst);
+    const auto source_a = (src / L"期中试卷A卷.pdf").wstring();
+    const auto source_b = (src / L"期中试卷B卷.pdf").wstring();
+    const auto target_a = (dst / L"期中试卷A卷.pdf").wstring();
+    const auto target_b = (dst / L"期中试卷B卷.pdf").wstring();
+    g_ops.Start([] {});
+    for (int round = 0; round < 3; ++round) {
+        const auto payload = std::string(static_cast<size_t>(177 + round), static_cast<char>('A' + round));
+        Check(MakeFile(source_a, payload.data(), static_cast<DWORD>(payload.size())) &&
+            MakeFile(source_b, payload.data(), static_cast<DWORD>(payload.size())),
+            L"create two PDF sources for repeated replacement");
+        auto request = SimpleOp(ops::OpType::Copy, {source_a.c_str(), source_b.c_str()}, dst.c_str());
+        ops::OpStatus status;
+        if (round == 0) status = RunOp(std::move(request));
+        else if (round == 1) {
+            size_t resolved = 0;
+            status = RunConflictOp(std::move(request), ops::ConflictChoice::Replace, true, &resolved);
+            Check(resolved == 1, L"replace-all resolves both PDF conflicts in one dialog");
+        } else {
+            const auto task = g_ops.Submit(std::move(request));
+            const auto deadline = GetTickCount64() + 30000;
+            bool resolved = false, finished = false;
+            do {
+                if (const auto terminal = FinishedTask(task)) {
+                    status = *terminal;
+                    finished = true;
+                    break;
+                }
+                if (!resolved) {
+                    if (const auto conflict = g_ops.PendingConflict(); conflict && conflict->task_id == task) {
+                        std::vector<ops::ConflictResolution> rows;
+                        for (const auto& row : conflict->rows) rows.push_back({row.row_id, ops::ConflictChoice::Replace});
+                        resolved = rows.size() == 2 && g_ops.ResolveConflicts(conflict->token, rows);
+                    }
+                }
+                Sleep(1);
+            } while (GetTickCount64() < deadline);
+            if (!finished) AbortOperationFixture(task, L"batch PDF replacement finishes before deadline");
+            Check(resolved, L"batch row decisions replace both PDF conflicts");
+        }
+        if (status.phase != ops::OpPhase::Completed)
+            wprintf(L"[diagnostic] batch round=%d phase=%d hr=0x%08lX path=%s error=%s\n", round,
+                static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr),
+                status.failed_path.c_str(), status.last_error.c_str());
+        Check(status.phase == ops::OpPhase::Completed && status.last_error.empty(),
+            L"two-file copy or replacement reports completion");
+        Check(Exists(target_a) && Exists(target_b) && FileHash(source_a) == FileHash(target_a) &&
+            FileHash(source_b) == FileHash(target_b), L"replacement retains exact PDF filenames and new contents");
+        size_t files = 0;
+        bool exact_names = true;
+        for (const auto& entry : std::filesystem::directory_iterator(dst)) {
+            ++files;
+            const auto name = entry.path().filename();
+            if (name != std::filesystem::path(target_a).filename() && name != std::filesystem::path(target_b).filename()) {
+                exact_names = false;
+                wprintf(L"[diagnostic] unexpected destination: %s\n", name.c_str());
+            }
+        }
+        Check(files == 2 && exact_names, L"completed replacement leaves exactly two PDFs without backup or copy names");
+    }
+    g_ops.Stop();
+    std::error_code error;
+    const auto cleanup = std::filesystem::absolute(root).lexically_normal();
+    if (cleanup.parent_path() != std::filesystem::absolute(base).lexically_normal() ||
+        std::filesystem::is_symlink(cleanup)) return 2;
+    std::filesystem::remove_all(cleanup, error);
+    Check(!error && !Exists(root.wstring()), L"isolated batch replacement fixture cleaned");
+    wprintf(L"== batch replacement: %d passed, %d failed ==\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
 int RunTransferUpdateRegressions() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const auto root = SandboxRoot() + L"-transfer-updates-" + std::to_wstring(GetCurrentProcessId());
@@ -1279,8 +1370,8 @@ int RunTransferUpdateRegressions() {
     MakeDir(retry_dir_a); MakeDir(retry_dir_b);
     MakeFile(retry_dir_a + L"\\leaf.txt", new_data, sizeof(new_data));
     MakeFile(retry_dir_b + L"\\leaf.txt", new_data, sizeof(new_data));
-    locked = CreateFileW((retry_dir_b + L"\\leaf.txt").c_str(), GENERIC_READ, FILE_SHARE_READ,
-        nullptr, OPEN_EXISTING, 0, nullptr);
+    locked = CreateFileW(retry_dir_b.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     auto retry_move = SimpleOp(ops::OpType::Move, {retry_dir_a.c_str(), retry_dir_b.c_str()}, dst.c_str());
     retry_move.collision_policy = ops::CollisionPolicy::KeepBoth;
     status = RunOp(std::move(retry_move));
@@ -1325,12 +1416,16 @@ int RunTransferUpdateRegressions() {
 
 int RunOpsTests(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--replacement-fixture-child") return 0;
-    if (argc >= 2 && std::wstring_view(argv[1]) == L"--file-operation-matrix") {
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--batch-replacement-parent")
+        return RunBatchReplacementRegressions(argv[2]);
+    if (argc >= 2 && (std::wstring_view(argv[1]) == L"--file-operation-matrix" ||
+                      std::wstring_view(argv[1]) == L"--file-operation-perf")) {
         if (argc != 3 && argc != 4) {
-            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix LOCAL_PARENT [NETWORK_PARENT]\n");
+            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix|--file-operation-perf LOCAL_PARENT [NETWORK_PARENT]\n");
             return 2;
         }
-        return pulse::bench::RunFileOperationMatrix(argv[2], argc == 4 ? argv[3] : L"");
+        return pulse::bench::RunFileOperationMatrix(argv[2], argc == 4 ? argv[3] : L"",
+            std::wstring_view(argv[1]) == L"--file-operation-perf");
     }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--json-parser-only")
         return RunJsonUndoParserRegressions();
@@ -1441,6 +1536,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
     }
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
+        if (filter == L"batch-replacement") return RunBatchReplacementRegressions();
         if (filter == L"open-workers") return RunMultiwindowOpenWorkers();
         if (filter == L"clipboard-isolated") return ops::RunClipboardIsolationRegressions();
         if (filter == L"delete-progress") {
@@ -1701,6 +1797,10 @@ int RunOpsTests(int argc, wchar_t** argv) {
     MakeFile(srcDir + L"\\b.txt", payload, sizeof(payload) - 1);
     MakeFile(srcDir + L"\\d.txt", payload, sizeof(payload) - 1);
 
+    const HWND owner = CreateWindowExW(0, L"STATIC", L"Ops deletion fixture", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    if (!owner) return 2;
+    g_ops.SetUiWindow(owner);
     std::atomic<bool> notified{false};
     g_ops.Start([&] {
         notified = true;
@@ -1708,6 +1808,14 @@ int RunOpsTests(int argc, wchar_t** argv) {
         {
             std::lock_guard<std::mutex> lock(g_status_mutex);
             g_status_history.push_back(status);
+        }
+        if (const auto pending = g_ops.PendingDeleteConfirmation()) {
+            const bool owned = !pending->plan.targets.empty() && std::all_of(pending->plan.targets.begin(),
+                pending->plan.targets.end(), [&](const auto& target) {
+                    return target.disposition == ops::DeleteDisposition::Permanent && target.physical_paths.size() == 1 &&
+                        std::filesystem::path(path::StripExtendedPathPrefix(target.physical_paths.front())).parent_path() == srcDir;
+                });
+            g_ops.ResolveDeleteConfirmation(pending->token, owned);
         }
         if (g_pause_when_active.load() && status.active &&
             status.phase == ops::OpPhase::Scanning) {
@@ -2112,6 +2220,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
     }
 
     g_ops.Stop();
+    DestroyWindow(owner);
 
     wprintf(L"\n== ops self test: %d passed, %d failed ==\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -2123,6 +2232,12 @@ int wmain(int argc, wchar_t** argv) {
         g_ops.CancelCurrent();
         g_ops.Stop();
         fwprintf(stderr, L"[FAIL] operation fixture aborted; dependent steps were not executed\n");
+        return 1;
+    }
+    catch (const std::exception& error) {
+        g_ops.CancelCurrent();
+        g_ops.Stop();
+        fprintf(stderr, "[FAIL] operation fixture exception: %s\n", error.what());
         return 1;
     }
 }

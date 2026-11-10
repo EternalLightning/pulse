@@ -198,6 +198,9 @@ void FluentMenuModel::Layout(IDWriteFactory2* dwrite, float scale, float min_wid
         } else if (!it.badge_text.empty()) {
             w += shortcut_gap + MeasureWidth(compositor, dwrite, caption.get(), it.badge_text) + 14.0f * scale_;
         } else if (!it.shortcut.empty()) {
+            // DrawMenuItem reserves at least 80 DIP for the label beside a shortcut.
+            if (!it.shortcut_inline)
+                w = std::max(w, radio_col + left_chrome + 80.0f * scale_ + right_chrome);
             w += shortcut_gap + MeasureWidth(compositor, dwrite, caption.get(), it.shortcut);
         }
         if (!it.quick_swatches.empty())

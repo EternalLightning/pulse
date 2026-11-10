@@ -146,6 +146,10 @@ struct DropTargetCallbacks {
     // Returns the performed effect.
     std::function<DWORD(const std::vector<std::wstring>& sources, POINT pt,
                         DWORD key_state, DWORD allowed, DWORD preferred)> drop;
+    // Virtual files have no source paths. Resolve a writable filesystem folder;
+    // the target copies on an STA worker and reports completion on this thread.
+    std::function<std::wstring(POINT, DWORD, DWORD, DWORD)> virtual_destination;
+    std::function<void(HRESULT)> virtual_complete;
 };
 
 class WindowDropTarget final : public IDropTarget {
@@ -172,6 +176,8 @@ private:
     POINT drag_point_{};
     DWORD drag_keys_ = 0;
     DWORD drag_allowed_ = DROPEFFECT_NONE;
+    bool virtual_files_ = false;
+    bool virtual_drop_active_ = false;
 };
 
 } // namespace pulse::ui

@@ -19,6 +19,7 @@ struct CtxHandlerDesc {
     CLSID clsid{};
     std::wstring clsid_text;
     std::wstring name;
+    bool generic_static = false;
 };
 
 struct CtxItemOut {
@@ -43,6 +44,7 @@ struct CtxHandlerSlot {
     std::wstring clsid;
     std::wstring name;
     bool preserve_builtin = false;
+    std::vector<HKEY> class_keys;
 };
 
 struct CtxBind {

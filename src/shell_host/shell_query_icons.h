@@ -8,6 +8,7 @@
 #include "../ipc/shell_query_protocol.h"
 
 struct IWICBitmapSource;
+struct IImageList;
 
 namespace pulse::shell {
 
@@ -16,6 +17,9 @@ bool ConvertShellBitmapPixels(IWICBitmapSource* source, uint32_t list_id, ipc::S
 // Caller owns the icon and initializes COM. This conversion also normalizes
 // small legacy artwork embedded in a padded jumbo canvas.
 bool ConvertShellIconPixels(HICON icon, uint32_t list_id, ipc::ShellIconPixels& pixels);
+// icon_index includes SHGFI_OVERLAYINDEX's overlay slot in its upper byte.
+bool ReadShellImageListIconPixels(IImageList* list, int icon_index, uint32_t list_id,
+    ipc::ShellIconPixels& pixels);
 void QueryShellIcons(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result);
 
 } // namespace pulse::shell

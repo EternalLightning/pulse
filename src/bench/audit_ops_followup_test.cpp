@@ -244,6 +244,43 @@ void PermanentDeletion(const fs::path& root) {
     const auto result = shell::DeletePermanentAuthorized({nested.wstring()}, {identity}, {});
     Check(SUCCEEDED(result.error) && !fs::exists(nested), "normalized search or tray selection deletes its nonempty parent without handle conflicts");
 }
+void RemoteLikeDeletionPlan() {
+    using namespace pulse;
+    wchar_t windows[MAX_PATH]{};
+    const UINT length = GetWindowsDirectoryW(windows, ARRAYSIZE(windows));
+    if (!length || length >= ARRAYSIZE(windows) || windows[1] != L':') {
+        Check(false, "test has a drive-letter system volume");
+        return;
+    }
+    const wchar_t drive[]{windows[0], L'\0'};
+    const std::wstring fixture = std::wstring(drive) + L":\\Pulse-remote-like-plan-fixture\\file.txt";
+    ops::OpRequest request;
+    request.type = ops::OpType::RecycleDelete;
+    request.sources = {fixture};
+
+    SetEnvironmentVariableW(L"PULSE_TEST_REMOTE_LIKE_DRIVES", nullptr);
+    std::wstring error;
+    const auto local = ops::BuildDeletePlan(request, 1, error);
+    Check(error.empty() && local.targets.size() == 1 &&
+        local.targets.front().disposition == ops::DeleteDisposition::RecycleRequested,
+        "ordinary fixed volume keeps recycle intent");
+
+    const bool configured = SetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", L"delete-plan-fixture") &&
+        SetEnvironmentVariableW(L"PULSE_TEST_REMOTE_LIKE_DRIVES", drive);
+    Check(configured, "test process simulates a remote-like mount on the same fixed drive");
+    error.clear();
+    const auto remote = ops::BuildDeletePlan(request, 2, error);
+    Check(error.empty() && remote.targets.size() == 1 &&
+        remote.targets.front().disposition == ops::DeleteDisposition::Permanent &&
+        remote.targets.front().physical_paths == request.sources && !remote.targets.front().reason.empty(),
+        "remote-like mounted volume produces an exact permanent-delete plan with a reason");
+    ops::DeleteService gate;
+    const auto decision = gate.Prepare(remote);
+    Check(decision.decision == ops::DeleteDecision::AwaitingConfirmation &&
+        !gate.TakeAccepted(decision.token) && !gate.Resolve(decision.token + 1, true) &&
+        gate.Resolve(decision.token, false) && !gate.TakeAccepted(decision.token),
+        "simulated mount deletion cannot execute without exact explicit confirmation");
+}
 void StagedTray(const fs::path& root) {
     const auto temp = root / L"temp", stages = temp / L"PulseDrop", source = temp / L"provider" / L"item.txt";
     fs::create_directories(source.parent_path()); std::ofstream(source) << "provider bytes";
@@ -259,6 +296,10 @@ void StagedTray(const fs::path& root) {
 
 int wmain(int argc, wchar_t** argv) {
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--remote-like-plan") {
+        RemoteLikeDeletionPlan();
+        return failures ? 1 : 0;
+    }
     const auto parent = fs::absolute(L"bench_data").lexically_normal();
     const auto root = parent / (L"audit-ops-followup-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     fs::create_directories(root);

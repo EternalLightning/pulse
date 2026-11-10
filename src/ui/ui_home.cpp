@@ -60,14 +60,9 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
             painter_.DrawText(l10n::Get(l10n::StringId::OpenNetworkSettings),
                 D2D1::RectF(notice.left + 12 * scale_, notice.top + 27 * scale_, notice.right - 12 * scale_, notice.bottom - 3 * scale_),
                 compositor_->SmallFormat(), theme.accent);
-        }
-        if (layout.empty[group]) {
+        } else if (layout.empty[group]) {
             auto empty_text = layout.headings[group];
             empty_text.top += 36 * scale_; empty_text.bottom += 38 * scale_;
-            if (group == 2 && layout.network_notice.right > layout.network_notice.left) {
-                empty_text.top += 64 * scale_;
-                empty_text.bottom += 64 * scale_;
-            }
             painter_.DrawText(l10n::Get(pane.home_loading ? l10n::StringId::HomeLoading :
                 group == 2 ? l10n::StringId::HomeNetworkEmpty : l10n::StringId::HomeCapacityUnavailable),
                 empty_text, compositor_->SmallFormat(), theme.text_secondary);

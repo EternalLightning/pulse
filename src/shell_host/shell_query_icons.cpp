@@ -109,6 +109,17 @@ bool ConvertShellIconPixels(HICON icon, uint32_t list_id, ipc::ShellIconPixels& 
         ConvertShellBitmapPixels(bitmap.Get(), list_id, pixels);
 }
 
+bool ReadShellImageListIconPixels(IImageList* list, int icon_index, uint32_t list_id,
+    ipc::ShellIconPixels& pixels) {
+    if (!list) return false;
+    const uint32_t packed = static_cast<uint32_t>(icon_index);
+    const int base = static_cast<int>(packed & 0x00ffffffu);
+    const uint32_t overlay = packed >> 24;
+    Icon icon;
+    return SUCCEEDED(list->GetIcon(base, ILD_TRANSPARENT | INDEXTOOVERLAYMASK(overlay), &icon.value)) &&
+        ConvertShellIconPixels(icon.value, list_id, pixels);
+}
+
 void QueryShellIcons(const ipc::ShellQueryRequest& request, ipc::ShellQueryResult& result) {
     auto path = pulse::path::StripExtendedPathPrefix(request.path);
     DWORD attributes = request.attributes;
@@ -131,13 +142,19 @@ void QueryShellIcons(const ipc::ShellQueryRequest& request, ipc::ShellQueryResul
     Pidl pidl;
     LPCWSTR query = path.c_str();
     if (use_attributes) flags |= SHGFI_USEFILEATTRIBUTES;
-    else if (path.starts_with(L"::") || path.starts_with(L"shell:")) {
-        result.error = shell_id::ParseId(path, &pidl.value);
-        if (FAILED(result.error)) return;
-        query = reinterpret_cast<LPCWSTR>(pidl.value);
-        flags |= SHGFI_PIDL;
+    else {
+        // Resolve registered, path-dependent overlays inside the isolated host.
+        flags |= SHGFI_ICON | SHGFI_ADDOVERLAYS | SHGFI_OVERLAYINDEX;
+        if (path.starts_with(L"::") || path.starts_with(L"shell:")) {
+            result.error = shell_id::ParseId(path, &pidl.value);
+            if (FAILED(result.error)) return;
+            query = reinterpret_cast<LPCWSTR>(pidl.value);
+            flags |= SHGFI_PIDL;
+        }
     }
-    if (!SHGetFileInfoW(query, attributes, &info, sizeof(info), flags)) {
+    const auto queried = SHGetFileInfoW(query, attributes, &info, sizeof(info), flags);
+    Icon small_icon{info.hIcon};
+    if (!queried) {
         result.error = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
         return;
     }
@@ -146,10 +163,9 @@ void QueryShellIcons(const ipc::ShellQueryRequest& request, ipc::ShellQueryResul
     for (const uint32_t id : {1u, 0u, 2u, 4u}) {
         ComPtr<IImageList> list;
         if (FAILED(SHGetImageList(static_cast<int>(id), IID_PPV_ARGS(&list)))) continue;
-        Icon icon;
-        if (FAILED(list->GetIcon(info.iIcon, ILD_TRANSPARENT, &icon.value))) continue;
         ipc::ShellIconPixels pixels;
-        if (ConvertShellIconPixels(icon.value, id, pixels)) result.icons.push_back(std::move(pixels));
+        if (ReadShellImageListIconPixels(list.Get(), info.iIcon, id, pixels))
+            result.icons.push_back(std::move(pixels));
     }
     result.error = result.icons.empty() ? E_FAIL : S_OK;
 }

@@ -1002,7 +1002,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
         }
         pump_session_messages();
         items = collect_items();
-    } else {
+    } else if (!data->background || data->paths.front().starts_with(L"::")) {
         BuildCtxMenu(*data, &fallback_menu, &fallback_hmenu, items);
     }
 

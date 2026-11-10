@@ -7,6 +7,7 @@
 #include "../common/localization.h"
 #include "../ui/home_layout.h"
 #include "../index/content_search_session.h"
+#include "animation_snapshot.h"
 #include <cstdio>
 #include <filesystem>
 #include <string_view>
@@ -107,17 +108,28 @@ int HomeNoticeChecks() {
             const int width = scale > 1 ? 760 : 1000;
             SetWindowPos(s.hwnd, nullptr, 0, 0, width, 800, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
             s.compositor.Resize(width, 800);
-            const auto vm = BuildVm(s, false);
-            bool hit = false;
+            auto vm = BuildVm(s, false);
             const auto bounds = D2D1::RectF(0, 0, static_cast<float>(width), 800);
-            for (float y = 0; y < 800 && !hit; y += 4)
-                for (float x = 0; x < static_cast<float>(width) && !hit; x += 4)
-                    hit = s.renderer.HitTest(vm, bounds, x, y).region == ui::HitTestResult::HomeNetworkSettings;
-            check(hit, "production Home network notice is visible and hit-testable in light/dark and narrow/scaled views");
-            Render(s);
-            const auto filename = output / ((dark ? std::wstring(L"dark-") : L"light-") +
-                (scale > 1 ? L"150.png" : L"100.png"));
-            check(s.compositor.SaveSnapshot(filename.c_str()), "capture production Home network notice");
+            vm.pane.home_cards.clear();
+            vm.pane.home_loading = false;
+            vm.pane.home_cards.push_back({L"Documents", L"", LR"(C:\Fixture\Documents)", L"", 0});
+            vm.pane.home_cards.push_back({L"Local disk", L"100 GB free", LR"(C:\)", L"", 1, 0.4f});
+            for (const bool populated : {false, true}) {
+                if (populated)
+                    vm.pane.home_cards.push_back({L"Tbox (Z:)", L"808.6 GB free, 1.0 TB total", LR"(Z:\)", L"", 2, 0.2f});
+                for (auto& slot : vm.pane_slots) slot.pane = vm.pane;
+                bool hit = false;
+                for (float y = 0; y < 800 && !hit; y += 4)
+                    for (float x = 0; x < static_cast<float>(width) && !hit; x += 4)
+                        hit = s.renderer.HitTest(vm, bounds, x, y).region == ui::HitTestResult::HomeNetworkSettings;
+                check(hit == !populated, "production Home settings target appears only for an empty network group");
+                s.compositor.Dc()->BeginDraw();
+                s.renderer.Render(vm, bounds, ui::MakeTheme(dark, s.accentColor));
+                check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "render Home network cards and empty state without D2D errors");
+                const auto filename = output / ((dark ? std::wstring(L"dark-") : L"light-") +
+                    (scale > 1 ? L"150-" : L"100-") + (populated ? L"cards.png" : L"empty.png"));
+                check(WriteAnimationSnapshot(s.compositor, filename), "capture production Home network cards and empty state");
+            }
         }
     }
     CancelNetworkAccess(s);

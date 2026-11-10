@@ -41,7 +41,7 @@ struct EditCaretBlink {
 
 inline constexpr float kEditMotionDuration = 80;
 
-inline float EditMotionProgress(uint64_t now, uint64_t started, float duration) {
+inline float EditMotionProgress(double now, double started, float duration) {
     const float t = std::clamp(static_cast<float>(now >= started ? now - started : 0) / duration, 0.0f, 1.0f);
     const float remaining = 1 - t;
     return t >= 1 ? 1 : 1 - remaining * remaining * remaining;
@@ -49,11 +49,11 @@ inline float EditMotionProgress(uint64_t now, uint64_t started, float duration) 
 
 struct EditCaretMotion {
     std::array<float, 3> value{}, from{}, target{};
-    uint64_t started = 0;
+    double started = 0;
     bool initialized = false;
     bool pending = false;
 
-    void Tick(std::array<float, 3> next, uint64_t now, bool animate) {
+    void Tick(std::array<float, 3> next, double now, bool animate) {
         if (!initialized || !animate) {
             initialized = true; pending = false;
             value = from = target = next;
@@ -73,16 +73,16 @@ struct EditCaretMotion {
 
 struct EditTextMotion {
     size_t prefix = 0, old_end = 0, new_end = 0;
-    uint64_t started = 0;
+    double started = 0;
     float progress = 1;
     bool pending = false;
 
-    void Sample(uint64_t now) {
+    void Sample(double now) {
         if (!pending) return;
         progress = EditMotionProgress(now, started, kEditMotionDuration);
         pending = progress < 1;
     }
-    void Begin(std::wstring_view before, std::wstring_view after, uint64_t now) {
+    void Begin(std::wstring_view before, std::wstring_view after, double now) {
         prefix = 0;
         while (prefix < before.size() && prefix < after.size() && before[prefix] == after[prefix]) ++prefix;
         size_t suffix = 0;

@@ -25,8 +25,8 @@ void NotificationToast::Show(HWND owner, std::wstring title, std::wstring messag
     visible_ = true;
     hovered_ = pressed_close_ = pressed_card_ = false;
     born_ = last_tick_ = GetTickCount64();
-    reveal_.Reset();
-    reveal_.Tick(true, AnimationTimeMs(), motion_enabled_);
+    reveal_ = {};
+    reveal_.Tick(false, AnimationTimeMs(), false, 160.0f);
     remaining_ = 6000;
     // The owner schedules reveal frames; this timer only measures lifetime.
     if (persistent_) KillTimer(owner, timer);
@@ -40,6 +40,7 @@ void NotificationToast::ShowError(HWND owner, std::wstring title, std::wstring m
 }
 void NotificationToast::Dismiss(HWND owner) {
     visible_ = false;
+    reveal_.Tick(false, AnimationTimeMs(), motion_enabled_, 140.0f);
     pressed_close_ = pressed_card_ = hovered_ = false;
     KillTimer(owner, timer);
     InvalidateRect(owner, nullptr, FALSE);
@@ -104,7 +105,10 @@ bool NotificationToast::HandleMessage(HWND owner, UINT message, WPARAM wparam, L
     return false;
 }
 void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float scale, bool high_contrast) {
-    if (!visible_) return;
+    if (!visible_ && !reveal_.Pending()) return;
+    // Start on the first painted frame, not while the owner is still handling the command.
+    reveal_.Tick(visible_, AnimationTimeMs(), motion_enabled_ && !high_contrast, visible_ ? 160.0f : 140.0f);
+    if (!visible_ && !reveal_.Pending()) return;
     painter_.SetCompositor(&compositor);
     painter_.SetScale(scale);
     if (!painter_.BeginFrame(theme, high_contrast)) return;
@@ -123,8 +127,7 @@ void NotificationToast::Draw(Compositor& compositor, const Theme& theme, float s
     }
     const float height = std::min(std::max(72 * scale, body_height + 44 * scale),
         std::max(72 * scale, compositor.Height() - 110 * scale));
-    reveal_.Sample(AnimationTimeMs(), motion_enabled_ && !high_contrast);
-    const float opacity = reveal_.opacity;
+    const float opacity = reveal_.value;
     const float slide = 6 * scale * (1 - opacity);
     const float right = top_center_ ? (compositor.Width() + width) * 0.5f : compositor.Width() - margin;
     const float top = top_center_ ? 64 * scale - slide : compositor.Height() - 48 * scale + slide - height;

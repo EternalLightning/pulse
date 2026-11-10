@@ -25,6 +25,12 @@ std::wstring FolderKey(const std::wstring& path) {
     return key;
 }
 
+std::wstring SortKey(const std::wstring& path) {
+    // This PC uses an empty navigation path; only its sort order is persisted.
+    if (path.empty() || path == L"pulse:thispc") return L"pulse:thispc";
+    return FolderKey(path);
+}
+
 std::wstring JsonKey(ui::ViewMode mode) {
     return std::wstring(L"folder_view_") + ui::ViewModeName(mode);
 }
@@ -76,13 +82,13 @@ bool FolderViewPrefs::Set(const std::wstring& path, ui::ViewMode mode) {
 }
 
 std::optional<FolderSortPrefs> FolderViewPrefs::FindSort(const std::wstring& path) const {
-    const auto it = sorts_.find(FolderKey(path));
+    const auto it = sorts_.find(SortKey(path));
     return it == sorts_.end() ? std::nullopt : std::optional(it->second);
 }
 
 bool FolderViewPrefs::SetSort(const std::wstring& path, model::SortColumn column,
                              model::SortDirection direction) {
-    const auto key = FolderKey(path);
+    const auto key = SortKey(path);
     if (key.empty() || static_cast<unsigned>(column) >= std::size(kSortColumns) ||
         (direction != model::SortDirection::Asc && direction != model::SortDirection::Desc)) return false;
     const FolderSortPrefs sort{column, direction};

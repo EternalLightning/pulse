@@ -9,8 +9,8 @@
 // JPEG (quality 90) for opaque pictures, PNG when there is transparency. Only
 // results that were slow to make are written (video posters, HEIC, RAW, PDF,
 // large photos, files on network shares); cheap ones are faster to decode
-// again than to read back. The key holds the path, file size, modification
-// time and pixel size, so an edited file simply misses. Nothing is written for
+// again than to read back. Entries are replaced per path and pixel size;
+// stored metadata rejects an old file version. Nothing is written for
 // EFS-encrypted files or removable media. Least recently used entries go once
 // the folder passes 512 MB (thumbnail performance plan in plans/).
 // PULSE_TEST_THUMB_CACHE=off disables it; any other value is the folder.
@@ -38,7 +38,8 @@ struct ThumbnailFileIdentity {
     uint64_t volume = 0, index = 0, modified = 0, size = 0;
     bool operator==(const ThumbnailFileIdentity&) const = default;
 };
-bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdentity& identity);
+bool ReadThumbnailFileIdentity(const ThumbnailStoreKey& key, ThumbnailFileIdentity& identity,
+                               bool* source_writing = nullptr);
 class ThumbnailDiskCache final {
 public:
     static constexpr uint64_t kBudgetBytes = 512ull << 20;

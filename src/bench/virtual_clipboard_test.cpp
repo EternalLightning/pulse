@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../ops/clipboard.h"
+#include "../ui/drag_drop.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <wrl/client.h>
 
 namespace {
 int failures = 0;
@@ -179,6 +181,50 @@ bool ReadEquals(const std::filesystem::path& path, const std::string& expected) 
     const std::string actual((std::istreambuf_iterator<char>(input)), {});
     return input.good() || input.eof() ? actual == expected : false;
 }
+
+void VirtualDrop(const std::filesystem::path& dir, const std::string& payload) {
+    constexpr DWORD both = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    const auto destination = dir / L"virtual-fixture.txt";
+    HRESULT result = E_UNEXPECTED;
+    unsigned completions = 0;
+    pulse::ui::DropTargetCallbacks callbacks;
+    callbacks.virtual_destination = [&](POINT, DWORD, DWORD allowed, DWORD) {
+        return allowed == DROPEFFECT_COPY ? dir.wstring() : std::wstring{};
+    };
+    callbacks.virtual_complete = [&](HRESULT status) { result = status; ++completions; };
+    auto* target = new pulse::ui::WindowDropTarget(nullptr, std::move(callbacks));
+    auto* source = new VirtualFileData(payload);
+    DWORD effect = both;
+    Check(SUCCEEDED(target->DragEnter(source, 0, {}, &effect)) && effect == DROPEFFECT_COPY &&
+        !std::filesystem::exists(destination), "virtual hover offers copy without downloading the file");
+    effect = both;
+    Check(SUCCEEDED(target->DragOver(MK_SHIFT, {}, &effect)) && effect == DROPEFFECT_NONE,
+        "virtual files do not advertise move on Shift");
+    effect = DROPEFFECT_MOVE;
+    Check(SUCCEEDED(target->Drop(source, 0, {}, &effect)) && effect == DROPEFFECT_NONE &&
+        !completions && !std::filesystem::exists(destination), "a move-only virtual drop never materializes data");
+    effect = both;
+    Check(SUCCEEDED(target->Drop(source, 0, {}, &effect)) && effect == DROPEFFECT_COPY &&
+        completions == 1 && SUCCEEDED(result) && ReadEquals(destination, payload) && source->SourceStillReadable(),
+        "virtual Drop returns copy only after cross-STA materialization and preserves the source");
+    source->Release();
+    std::filesystem::remove(destination);
+
+    auto* corrupt = new VirtualFileData(payload, true);
+    effect = both;
+    Check(SUCCEEDED(target->Drop(corrupt, 0, {}, &effect)) && effect == DROPEFFECT_NONE &&
+        completions == 2 && FAILED(result) && !std::filesystem::exists(destination),
+        "malformed virtual Drop reports failure and no performed effect");
+    corrupt->Release();
+
+    auto* cancelled = new VirtualFileData(payload);
+    const std::atomic_bool stop = true;
+    Check(pulse::ops::PasteShellData(cancelled, dir.wstring(), DROPEFFECT_COPY, &stop) ==
+        HRESULT_FROM_WIN32(ERROR_CANCELLED) && !std::filesystem::exists(destination) && cancelled->SourceStillReadable(),
+        "cancelled Shell transfer keeps the virtual source and creates no destination");
+    cancelled->Release();
+    target->Release();
+}
 }
 
 int wmain() {
@@ -231,6 +277,40 @@ int wmain() {
     corrupt->Release();
     Check(!std::filesystem::exists(destination),
           "malformed virtual descriptor is rejected without creating a file");
+
+    const auto same_folder_source = root / L"same-folder.txt";
+    std::ofstream(same_folder_source, std::ios::binary) << payload;
+    Microsoft::WRL::ComPtr<IShellItem> source_item;
+    Microsoft::WRL::ComPtr<IShellItemArray> source_array;
+    Microsoft::WRL::ComPtr<IDataObject> source_data;
+    const bool source_ready = SUCCEEDED(SHCreateItemFromParsingName(same_folder_source.c_str(), nullptr,
+        IID_PPV_ARGS(&source_item))) && SUCCEEDED(SHCreateShellItemArrayFromShellItem(source_item.Get(),
+        IID_PPV_ARGS(&source_array))) && SUCCEEDED(source_array->BindToHandler(nullptr, BHID_DataObject,
+        IID_PPV_ARGS(&source_data)));
+    const bool same_folder_copy = source_ready && pulse::ops::PasteShellDataForTest(
+        source_data.Get(), root.wstring(), DROPEFFECT_COPY);
+    size_t copies = 0;
+    for (const auto& file : std::filesystem::directory_iterator(root))
+        if (file.is_regular_file() && ReadEquals(file.path(), payload)) ++copies;
+    Check(same_folder_copy && copies == 2 && ReadEquals(same_folder_source, payload),
+        "Ctrl-copy into the source folder creates a second file and preserves the original");
+    const auto copied_folder = root / L"copied";
+    std::filesystem::create_directory(copied_folder);
+    Check(source_ready && pulse::ops::PasteShellDataForTest(source_data.Get(), copied_folder.wstring(),
+        DROPEFFECT_COPY) && ReadEquals(copied_folder / same_folder_source.filename(), payload) &&
+        ReadEquals(same_folder_source, payload),
+        "Shell item copy returns only after destination contents are complete and keeps the source");
+    const auto moved_folder = root / L"moved";
+    std::filesystem::create_directory(moved_folder);
+    Check(source_ready && pulse::ops::PasteShellDataForTest(source_data.Get(), moved_folder.wstring(),
+        DROPEFFECT_MOVE) && ReadEquals(moved_folder / same_folder_source.filename(), payload) &&
+        !std::filesystem::exists(same_folder_source),
+        "only explicit cut moves a Shell item and waits for destination completion");
+    source_data.Reset(); source_array.Reset(); source_item.Reset();
+
+    const auto drag_folder = root / L"drag";
+    std::filesystem::create_directory(drag_folder);
+    VirtualDrop(drag_folder, payload);
 
     error.clear();
     std::filesystem::remove_all(root, error);

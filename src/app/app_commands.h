@@ -11,6 +11,7 @@
 
 namespace pulse {
 app::CommandContext BuildCommandContext(AppState& s);
+void OpenFileInCurrentView(AppState& s, const std::wstring& path);
 bool EnsureMenu(AppState& s);
 void CopySelectedPath(AppState& s);
 void CreateNewItem(AppState& s, bool folder, bool arbitrary_file = false);

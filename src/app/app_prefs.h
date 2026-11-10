@@ -35,6 +35,7 @@ struct AppPrefs {
     bool list_smart_date = true;
     bool list_zebra_rows = true;
     bool list_size_bar = false;
+    bool auto_folder_size = true;
     // 0 folders first, 1 follow the sort direction, 2 mixed with files
     int folder_sort_mode = 0;
     FolderViewPrefs folder_views;

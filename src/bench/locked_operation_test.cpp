@@ -336,7 +336,8 @@ int wmain(int argc, wchar_t** argv) {
         request.sources = {a.wstring(), b.wstring()}; request.dest_dir = destination.wstring();
         TransferIntegrationProbe::Run(manager, request, 100);
         auto failed = manager.Status();
-        Check(failed.phase == OpPhase::Failed && !failed.lock_owners.empty() &&
+        Check(failed.phase == OpPhase::Failed && failed.lock_retry_available && failed.lock_owners.empty() &&
+            failed.failed_path == b.wstring() &&
             Read(destination / L"A.txt") == "original A", "copy A completes before locked B fails");
         Check(!manager.RetryLockedOperation(99, false), "stale task IDs cannot queue a retry");
         Check(!manager.RetryLockedOperation(100, true), "Pulse itself is never terminated by a retry");

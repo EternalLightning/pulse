@@ -317,6 +317,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         l.hidden_files_row=toggle_row(I::SettingsShowHiddenDesc);
         l.protected_files_row=toggle_row(I::SettingsShowProtectedDesc);
         l.folder_sort_card=row(narrow ? 98.0f : 64.0f); segments(l.folder_sort_card,l.folder_sort_row,3,282);
+        l.auto_folder_size_row=toggle_row(I::AutoFolderSizeDesc);
         section(I::SettingsSecListLook);
         l.density_card=row(narrow ? 98.0f : 64.0f); segments(l.density_card,l.density_row,3,282);
         const I list_descriptions[] = {I::ListSmartDateDesc, I::ListZebraRowsDesc, I::ListSizeBarDesc};

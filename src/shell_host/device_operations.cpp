@@ -13,6 +13,13 @@ namespace pulse::shell {
 using Microsoft::WRL::ComPtr;
 
 HRESULT ExecuteDeviceOperation(const DeviceOperation& request) {
+    // Clipboard providers must remain on an OLE-initialized STA after copy returns.
+    struct OleSession {
+        HRESULT result = OleInitialize(nullptr);
+        ~OleSession() { if (SUCCEEDED(result)) OleUninitialize(); }
+    };
+    thread_local OleSession ole;
+    if (FAILED(ole.result)) return ole.result;
     if (request.ids.empty() || request.ids.size() > 4096) return E_INVALIDARG;
     const auto& verb = request.verb;
     if (verb != L"copy" && verb != L"cut" && verb != L"paste" && verb != L"open" &&
@@ -78,12 +85,13 @@ HRESULT ExecuteDeviceOperation(const DeviceOperation& request) {
             ReleaseStgMedium(&medium);
         }
         DWORD effect = wanted;
+        const DWORD keys = MK_LBUTTON | (wanted == DROPEFFECT_MOVE ? MK_SHIFT : MK_CONTROL);
         POINTL point{};
-        hr = target->DragEnter(data.Get(), MK_LBUTTON, point, &effect);
+        hr = target->DragEnter(data.Get(), keys, point, &effect);
         if (FAILED(hr)) return hr;
         if (!(effect & wanted)) { target->DragLeave(); return E_ACCESSDENIED; }
         effect = wanted;
-        hr = target->Drop(data.Get(), MK_LBUTTON, point, &effect);
+        hr = target->Drop(data.Get(), keys, point, &effect);
         return SUCCEEDED(hr) && effect == DROPEFFECT_NONE ? E_FAIL : hr;
     }
     ComPtr<IContextMenu> menu;

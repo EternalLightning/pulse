@@ -57,7 +57,6 @@ struct WindowSessionSnapshot {
     bool maximized = false;
     bool dark = false; // legacy serialization/migration, projected from window appearance
     std::wstring active_path;
-    StagingTray tray;
     int sidebar_collapsed = 0; // bitmask indexed by SidebarSectionId
     int sidebar_hidden = 0;    // same ids; hidden sections are not drawn at all
     std::vector<int> sidebar_order; // display order, empty = DefaultSidebarOrder()
@@ -80,9 +79,9 @@ struct SessionSnapshot : WindowSessionSnapshot {
 std::wstring GetPulseDataDir();
 bool SaveSession(const SessionSnapshot& snap);
 bool LoadSession(SessionSnapshot& snap);
-// preferences.json retains appearance and tray. Legacy session.json is read
-// only when no preferences file exists; undo history belongs to the live window.
-// Startup never restores navigation or undo history.
+// preferences.json retains appearance. Legacy session.json is read only when
+// no preferences file exists; staging tray and undo history stay in memory.
+// Startup never restores navigation, staging tray, or undo history.
 bool SaveSessionPreferences(const WindowSessionSnapshot& snap);
 std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap);
 bool LoadSessionPreferences(WindowSessionSnapshot& snap);

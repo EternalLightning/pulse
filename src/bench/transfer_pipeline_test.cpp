@@ -112,11 +112,12 @@ bool RenameFixtureObject(const fs::path& source, const fs::path& destination) {
     SetLastError(error);
     return renamed;
 }
-enum class Mode { Normal, Cancel, Fail, ReplaceSource, IdentityMismatch, ReplaceDestination };
+enum class Mode { Normal, Cancel, Fail, ReplaceSource, IdentityMismatch, ReplaceDestination, OccupyVacatedName };
 struct CopyState {
     Mode mode = Mode::Normal;
     OpsManager* manager = nullptr;
     fs::path destination;
+    fs::path replacement_backup;
     std::atomic<int> active{0}, maximum{0}, large_active{0}, large_maximum{0};
     std::atomic<int> calls{0};
     std::atomic<DWORD> injection_error{ERROR_SUCCESS};
@@ -131,6 +132,9 @@ struct CopyState {
 };
 CopyState* state = nullptr; // one synchronous RunTransfer; it joins all workers before returning
 BOOL WINAPI ControlledIdentityQuery(HANDLE handle, FILE_INFO_BY_HANDLE_CLASS info_class, LPVOID output, DWORD size) {
+    if (info_class == FileIdInfo && state && state->mode == Mode::OccupyVacatedName &&
+            fs::exists(state->replacement_backup) && !state->injected.exchange(true))
+        Write(state->destination / L"0.bin", 29, 'D');
     BOOL result = GetFileInformationByHandleEx(handle, info_class, output, size);
     if (info_class != FileIdInfo || size < sizeof(FILE_ID_INFO)) return result;
     if (!result) {
@@ -205,7 +209,8 @@ HRESULT WINAPI ControlledCopy(PCWSTR source, PCWSTR destination, COPYFILE2_EXTEN
         if (read == INVALID_HANDLE_VALUE) observed.retained_copy_read_error.store(GetLastError());
         else CloseHandle(read);
     }
-    if (SUCCEEDED(result) && observed.mode == Mode::ReplaceDestination && !observed.injected.exchange(true))
+    if (SUCCEEDED(result) && observed.mode == Mode::ReplaceDestination &&
+            fs::path(source).filename() == L"0.bin" && !observed.injected.exchange(true))
         Write(observed.destination / fs::path(source).filename(), 29, 'D');
     if (SUCCEEDED(result) && observed.mode == Mode::Fail) return E_ACCESSDENIED;
     return result;
@@ -256,7 +261,8 @@ void Configure(OpsManager& manager, CopyState& observed, const Case& test, bool 
         throw std::runtime_error("identity mismatch fixture cannot identify source");
     state = &observed;
     TransferIntegrationProbe::Initialize(manager, ControlledCopy, move, verify);
-    if (observed.mode == Mode::IdentityMismatch) TransferIntegrationProbe::IdentityQuery(manager, ControlledIdentityQuery);
+    if (observed.mode == Mode::IdentityMismatch || observed.mode == Mode::OccupyVacatedName)
+        TransferIntegrationProbe::IdentityQuery(manager, ControlledIdentityQuery);
     TransferIntegrationProbe::Notify(manager, [&manager, &observed, case_name = test.root.filename().wstring()] {
         const auto status = manager.Status();
         if (status.phase == OpPhase::Running) {
@@ -280,20 +286,57 @@ void Configure(OpsManager& manager, CopyState& observed, const Case& test, bool 
         }
     });
 }
+void RunListingTests(const fs::path& fixture) {
+    const auto folder = fixture / L"listing";
+    fs::create_directories(folder);
+    Write(folder / L"Present.txt", 17, 'L');
+    TransferTargetListing listing(folder.wstring(), 16);
+    Check(listing.SurelyAbsent(L"missing.txt") && !listing.SurelyAbsent(L"present.TXT") &&
+        !listing.SurelyAbsent(L"missing.txt.") && !listing.SurelyAbsent(L"MISSING~1.TXT") &&
+        !listing.SurelyAbsent(L"missing:stream"), "bulk target listing keeps case aliases and ambiguous Win32 names conservative");
+    listing.Added(L"arrived.txt");
+    Check(!listing.SurelyAbsent(L"ARRIVED.txt") &&
+        !TransferTargetListing(folder.wstring(), 1).SurelyAbsent(L"missing.txt"),
+        "bulk target listing tracks admitted names and small batches use direct probes");
+
+    unsigned checks = 0;
+    TransferTargetListing cancelled(folder.wstring(), 16, [&] { ++checks; return true; });
+    cancelled.Added(L"arrived.txt");
+    Check(checks == 1 && !cancelled.SurelyAbsent(L"missing.txt"),
+        "already-cancelled target listing stops before opening and never claims absence");
+    for (unsigned i = 0; i < 32; ++i) Write(folder / (std::to_wstring(i) + L".txt"), 1, 'C');
+    DWORD handles_before = 0, handles_after = 0;
+    const bool counted_before = GetProcessHandleCount(GetCurrentProcess(), &handles_before) != FALSE;
+    bool bounded = true, unknown = true;
+    for (unsigned i = 0; i < 64; ++i) {
+        checks = 0;
+        TransferTargetListing partial(folder.wstring(), 16, [&] { return ++checks == 6; });
+        bounded &= checks == 6;
+        unknown &= !partial.SurelyAbsent(L"missing.txt") && !partial.SurelyAbsent(L"Present.txt");
+    }
+    const bool counted_after = GetProcessHandleCount(GetCurrentProcess(), &handles_after) != FALSE;
+    Check(bounded && unknown, "mid-listing cancellation stops within its checkpoint and discards partial absence hints");
+    Check(counted_before && counted_after && handles_after <= handles_before,
+        "repeated cancellation closes every target enumeration handle");
+    TransferTargetListing resumed(folder.wstring(), 16, [] { return false; });
+    bool present = !resumed.SurelyAbsent(L"present.TXT");
+    for (unsigned i = 0; i < 32; ++i) present &= !resumed.SurelyAbsent(std::to_wstring(i) + L".txt");
+    Check(present && resumed.SurelyAbsent(L"missing.txt"),
+        "new uncancelled listing remains complete after earlier cancellations");
+}
+
 void RunTests(const fs::path& fixture) {
     constexpr size_t mib = 1024 * 1024;
+    RunListingTests(fixture);
     {
-        const auto folder = fixture / L"listing";
-        fs::create_directories(folder);
-        Write(folder / L"Present.txt", 17, 'L');
-        TransferTargetListing listing(folder.wstring(), 16);
-        Check(listing.SurelyAbsent(L"missing.txt") && !listing.SurelyAbsent(L"present.TXT") &&
-            !listing.SurelyAbsent(L"missing.txt.") && !listing.SurelyAbsent(L"MISSING~1.TXT") &&
-            !listing.SurelyAbsent(L"missing:stream"), "bulk target listing keeps case aliases and ambiguous Win32 names conservative");
-        listing.Added(L"arrived.txt");
-        Check(!listing.SurelyAbsent(L"ARRIVED.txt") &&
-            !TransferTargetListing(folder.wstring(), 1).SurelyAbsent(L"missing.txt"),
-            "bulk target listing tracks admitted names and small batches use direct probes");
+        Case test(fixture, L"tiny-copy-cancel", {4096, 4096});
+        OpsManager manager;
+        CopyState observed;
+        observed.mode = Mode::Cancel;
+        Configure(manager, observed, test);
+        TransferIntegrationProbe::Run(manager, test.request);
+        Check(manager.Status().phase == OpPhase::Cancelled && observed.calls == 1 && test.Sources() &&
+            fs::is_empty(test.destination), "cancelling a direct tiny batch removes its partial copy without starting the next file");
     }
     {
         Case test(fixture, L"parallel", {12001, 25003, 33007, 8101, 9001, 18001});
@@ -374,15 +417,32 @@ void RunTests(const fs::path& fixture) {
             "source-only identity mismatch rejects parallel move and preserves sources without committed copies");
     }
     {
-        Case test(fixture, L"destination-change", {37003});
+        Case test(fixture, L"destination-change", {37003, 19001});
         OpsManager manager;
         CopyState observed;
         observed.mode = Mode::ReplaceDestination;
         Configure(manager, observed, test);
         TransferIntegrationProbe::Run(manager, test.request);
         Check(manager.Status().phase == OpPhase::Failed && test.Sources() &&
-            Content(test.destination / L"0.bin", 29, 'D') && test.NoTemporary(),
+            Content(test.destination / L"0.bin", 29, 'D') && !fs::exists(test.destination / L"1.bin") && test.NoTemporary(),
             "late destination creation rejects commit without overwriting the new object");
+    }
+    {
+        Case test(fixture, L"destination-occupied-after-backup", {37003});
+        test.request.collision_policy = CollisionPolicy::Replace;
+        Write(test.destination / L"0.bin", 11, 'X');
+        OpsManager manager;
+        CopyState observed;
+        observed.mode = Mode::OccupyVacatedName;
+        const auto suffix = std::to_wstring(GetCurrentProcessId()) + L"-41-0";
+        observed.replacement_backup = test.destination / (L"0.bin.pulse-backup-" + suffix);
+        Configure(manager, observed, test);
+        TransferIntegrationProbe::Run(manager, test.request);
+        Check(observed.injected && manager.Status().phase == OpPhase::Failed && test.Sources() &&
+            Content(test.destination / L"0.bin", 29, 'D') && Content(observed.replacement_backup, 11, 'X') &&
+            manager.Status().last_error.find(observed.replacement_backup.wstring()) != std::wstring::npos &&
+            !fs::exists(test.destination / (L"0.bin.pulse-copy-" + suffix)),
+            "rollback preserves a new occupant of the vacated name and retains the original backup");
     }
     for (const bool verify : {false, true}) {
         Case test(fixture, verify ? L"verify" : L"conflict", {31003, 17011, 23003});
@@ -402,16 +462,20 @@ void RunTests(const fs::path& fixture) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const bool listing_only = argc == 2 && std::strcmp(argv[1], "--listing-only") == 0;
     const auto parent = (fs::current_path() / L"bench_data").lexically_normal();
     const auto fixture = parent / (L"transfer-pipeline-" + std::to_wstring(GetCurrentProcessId()) +
         L"-" + std::to_wstring(GetTickCount64()));
     try {
         fs::create_directories(parent);
         if (!fs::create_directory(fixture)) throw std::runtime_error("fixture already exists");
-        const auto policy = TransferPolicy(fixture.wstring(), fixture.wstring());
-        Check(policy.threads >= 2, "fixture storage admits at least two copy lanes");
-        if (policy.threads >= 2) RunTests(fixture);
+        if (listing_only) RunListingTests(fixture);
+        else {
+            const auto policy = TransferPolicy(fixture.wstring(), fixture.wstring());
+            Check(policy.threads >= 2, "fixture storage admits at least two copy lanes");
+            if (policy.threads >= 2) RunTests(fixture);
+        }
     } catch (const std::exception& error) {
         Check(false, error.what());
     }

@@ -90,6 +90,8 @@ bool HasRenderedText(pulse::ui::Compositor& compositor, HWND edit) {
 }
 }
 #include "edit_motion_cases.h"
+#include "edit_frame_profile_cases.h"
+#include "edit_selection_motion_cases.h"
 
 int wmain(int argc, wchar_t** argv) {
     for (int i = 1; i < argc; ++i) {
@@ -100,8 +102,49 @@ int wmain(int argc, wchar_t** argv) {
     }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const HWND foreground = GetForegroundWindow();
-    HWND parent = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE, L"STATIC", L"",
-        WS_POPUP, -30000, -30000, 700, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const bool profiling = argc >= 2 && std::wstring_view(argv[1]) == L"--frame-profile";
+    const bool foreground_profile = profiling && argc == 3 && std::wstring_view(argv[2]) == L"--foreground";
+    WNDCLASSW profile_class{};
+    profile_class.lpfnWndProc = DefWindowProcW;
+    profile_class.hInstance = GetModuleHandleW(nullptr);
+    profile_class.lpszClassName = L"Pulse.ResourceProfile";
+    if (foreground_profile && !RegisterClassW(&profile_class)) {
+        Check(false, "register interactive resource-profile window");
+        CoUninitialize();
+        return 1;
+    }
+    HWND parent = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | (foreground_profile ? 0 : WS_EX_NOACTIVATE),
+        foreground_profile ? profile_class.lpszClassName : L"STATIC",
+        foreground_profile ? L"Pulse resource benchmark - synthetic text only" : L"",
+        foreground_profile ? WS_OVERLAPPEDWINDOW : WS_POPUP,
+        foreground_profile ? 100 : -30000, foreground_profile ? 100 : -30000,
+        700, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--selection-motion") {
+        RunEditSelectionMotionChecks(parent);
+        const HWND during = GetForegroundWindow();
+        DestroyWindow(parent);
+        const HWND after = GetForegroundWindow();
+        if (after != foreground) {
+            DWORD before_process = 0, during_process = 0, after_process = 0;
+            GetWindowThreadProcessId(foreground, &before_process);
+            GetWindowThreadProcessId(during, &during_process);
+            GetWindowThreadProcessId(after, &after_process);
+            std::printf("[DIAG] foreground before=%p/%lu during=%p/%lu after=%p/%lu test_process=%lu\n",
+                foreground, before_process, during, during_process, after, after_process, GetCurrentProcessId());
+        }
+        Check(after == foreground, "selection tests preserve the foreground window");
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
+    if (profiling) {
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        std::printf("[DIAG] resource profile argc=%d foreground=%d\n", argc, foreground_profile);
+        RunEditFrameProfile(parent, foreground_profile);
+        DestroyWindow(parent);
+        if (!foreground_profile) Check(GetForegroundWindow() == foreground, "frame profile preserves the foreground window");
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--motion") {
         RunEditMotionChecks(parent);
         DestroyWindow(parent);
