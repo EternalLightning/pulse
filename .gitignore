@@ -83,6 +83,7 @@ CONERR$
 /tools/_split_tus.py
 
 # Local tool state
+/.tmp/
 /.pnpm-store/
 /.summary.jsonl
 /.c2c.json

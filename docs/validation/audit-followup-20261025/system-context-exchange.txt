@@ -1,2 +1,0 @@
-[FAIL] create an exclusive private batch and ready result before launch
-[DIAG] channel creation error=5

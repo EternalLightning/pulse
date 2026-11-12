@@ -27,15 +27,15 @@
 
 为排除仅为离屏夹具现象，已从上游正式发布资产下载1.0.56便携包，并在隔离配置、隔离文件目录内启动两个真实程序窗口。对相同短文本 Pulse_中文_123.txt、方向键切换与父窗口重绘作独立桌面采样：原版161帧中28帧超出端点像素阈值，本地147帧中5帧超出；两者最坏帧均为文字整行暂时消失，最大差异均620像素。采样调度与次数不同，这些数字不用于比较哪一版更严重，也不等同用户正常操作中的闪烁频率；它们确认当前165 Hz宿主环境下原版也可出现空白帧。脚本只修改隔离路径内的输入文字，以Esc取消，未操作用户文件。
 
-另对本地主窗口永久绑定的透明度effect作单变量A/B：移除绑定后的完整Sharp桌面矩阵仍为89 PASS／4 FAIL，未改善，临时改动已撤回。不能将这一差异列为已确认根因，也不保留无效补丁。原版与本地都存在的短WM_SETREDRAW与layered child呈现时序仍需修复；恢复上游本身不足以保证高刷新率无闪烁。[实机对照脚本](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/live_compare.py)、[有效显示参数](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/effective-display-settings.json)、[原版坏帧](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/upstream-text-address-worst.png)、[本地坏帧](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/local-text-address-worst.png)。
+另对本地主窗口永久绑定的透明度effect作单变量A/B：移除绑定后的完整Sharp桌面矩阵仍为89 PASS／4 FAIL，未改善，临时改动已撤回。不能将这一差异列为已确认根因，也不保留无效补丁。原版与本地都存在的短WM_SETREDRAW与layered child呈现时序仍需修复；恢复上游本身不足以保证高刷新率无闪烁。实机对照脚本（历史本地附件：`bench_data/edit-upstream-ab-20261024/live_compare.py`）、有效显示参数（历史本地附件：`bench_data/edit-upstream-ab-20261024/effective-display-settings.json`）、原版坏帧（历史本地附件：`bench_data/edit-upstream-ab-20261024/upstream-text-address-worst.png`）、本地坏帧（历史本地附件：`bench_data/edit-upstream-ab-20261024/local-text-address-worst.png`）。
 
-**更好呈现方式的隔离对照：**本轮未改产品源码、安装版或系统设置。165 Hz宿主、清晰模式、同一短文本路径栏：现有方式131帧／4异常；仅将测试进程的子窗口切为完整位图上传150帧／0异常，但左右端点截图均无文字，已判不可用，不能将全空白算作无闪烁；使用现有原生回退，两轮124及137帧／均0异常，文字可见。它们是同步方向键与父窗口重绘压力采样，不能当作正常操作闪烁率，也没有覆盖真实鼠标、长路径、重命名或输入法。原生绘制可作为稳定性优先的备选，但会改变自绘选区及三模式文字效果的一致性。建议优先验证：原生EDIT继续负责输入、撤销和IME，自绘画面作为主窗口DirectComposition树中的持久编辑层，上一幅完整画面保留到下一幅准备好，再替换；避免更新时隐藏可见表面，也有机会省去每次GPU读回和GDI搬运。这只是待验证架构方案，尚未实施，需证明输入焦点、候选框、裁切、DPI、设备重建及原生回退正确。[隔离对照数据](E:/Projects/pulse/bench_data/edit-upstream-ab-20261024/presentation-investigation.json)。
+**更好呈现方式的隔离对照：**本轮未改产品源码、安装版或系统设置。165 Hz宿主、清晰模式、同一短文本路径栏：现有方式131帧／4异常；仅将测试进程的子窗口切为完整位图上传150帧／0异常，但左右端点截图均无文字，已判不可用，不能将全空白算作无闪烁；使用现有原生回退，两轮124及137帧／均0异常，文字可见。它们是同步方向键与父窗口重绘压力采样，不能当作正常操作闪烁率，也没有覆盖真实鼠标、长路径、重命名或输入法。原生绘制可作为稳定性优先的备选，但会改变自绘选区及三模式文字效果的一致性。建议优先验证：原生EDIT继续负责输入、撤销和IME，自绘画面作为主窗口DirectComposition树中的持久编辑层，上一幅完整画面保留到下一幅准备好，再替换；避免更新时隐藏可见表面，也有机会省去每次GPU读回和GDI搬运。这只是待验证架构方案，尚未实施，需证明输入焦点、候选框、裁切、DPI、设备重建及原生回退正确。隔离对照数据（历史本地附件：`bench_data/edit-upstream-ab-20261024/presentation-investigation.json`）。
 
 **持久合成原型验证（2026-10-24）：**已实现并构建仅由测试进程环境变量 PULSE_TEST_COMPOSED_EDIT=1 启用的原型；默认通道、安装版及 E:/Projects/TestPrograms/Pulse 均未替换。EDIT保持可见、继续负责输入和IME，主窗口同一设备增加位于子HWND上方的持久编辑合成层，完整GPU画面准备后提交；新通道不使用WM_SETREDRAW开关，也跳过CPU读回与GDI呈现。补齐失焦更新、隐藏/销毁移除、位置尺寸同步和失败回退。最终三模式各153 PASS／0 FAIL，默认通道133 PASS／0 FAIL；覆盖原生Unicode编辑/撤销、拖选提交、100%/150%及部分125%文字路径、模式切换、隐藏重建和强制失败回退。另一次早期Auto仅前台保持断言失败，后续通过，原因未定，旧日志保留。
 
 当前165 Hz桌面上，三模式的暗色路径栏短文本和浅色重命名栏长文本共825帧，另对清晰模式补充浅色路径栏和暗色重命名栏282帧；**最终共1107帧／0超阈值异常**，端点均有文字，并逐次检查合成标记，未以原生回退或全空白误判通过。已查看浅色路径栏及暗色长文本重命名的完整窗口截图，所查看画面位置、裁切和背景正常。这是同步方向键＋父窗口重绘采样，不代表正常操作闪烁率，更不是物理键鼠验收。
 
-**原型仍未完成的验收：** 真实SendInput多次未能打开编辑框（一次受限桌面失焦安全退出，其余焦点检查正确但F4后无EDIT）；扫描码版本相同，关闭原型的默认通道对照也相同。未确定具体原因，未按通过处理。实际中文输入法候选交互、物理鼠标拖选、辅助功能、设备丢失重建和跨屏DPI仍未验收；本轮没有据此切换默认实现或发布安装包。[原型证据](E:/Projects/pulse/bench_data/composed-edit-prototype-20261024/validation.json)、[隔离原型启动脚本](E:/Projects/pulse/bench_data/composed-edit-prototype-20261024/launch-prototype.ps1)。
+**原型仍未完成的验收：** 真实SendInput多次未能打开编辑框（一次受限桌面失焦安全退出，其余焦点检查正确但F4后无EDIT）；扫描码版本相同，关闭原型的默认通道对照也相同。未确定具体原因，未按通过处理。实际中文输入法候选交互、物理鼠标拖选、辅助功能、设备丢失重建和跨屏DPI仍未验收；本轮没有据此切换默认实现或发布安装包。原型证据（历史本地附件：`bench_data/composed-edit-prototype-20261024/validation.json`）、隔离原型启动脚本（历史本地附件：`bench_data/composed-edit-prototype-20261024/launch-prototype.ps1`）。
 
 **模式与设置：** 设置页增加三段选择，保存到 app.json 的 text_render（0／1／2）；缺省或非法值回到自动。选择后更新现有窗口、编辑框、文字格式、布局和测量缓存，无须重启。自动沿用上游可用的 LumaText 普通界面路径；清晰与平滑使用 DirectWrite 的对应参数。编辑框沿用上游 DirectWrite／Direct2D 自绘和原生 EDIT 输入、撤销与 IME，并未因为模式名称而改成另一套输入控件。
 
@@ -59,7 +59,7 @@
 
 **剩余问题与边界：** 屏幕坏帧可见编辑表面下方窗口内容，且同步记录到短 WM_SETREDRAW 中 WS_VISIBLE 改变。上游源码同样保留这个短 guard，并强制 LWA_ALPHA 重定向子表面；后续正式便携包实机对照也已捕获到空白帧，见前述数据。尝试仅在重绘开关同步调用中拦截 WM_STYLECHANGING，没有阻止可见位变化，候选已移除。没有留下无效补丁，也没有引入全桌面 LockWindowUpdate、额外 overlay 或新的输入／呈现双窗口架构。此项需要后续单独处理；当前恢复上游与三模式接入不代表它已修复。
 
-证据：[最终结果](E:/Projects/pulse/bench_data/sharp-spacing-20261024/final-results.json)、[设置验证](E:/Projects/pulse/bench_data/sharp-spacing-20261024/settings.log)、[三模式字距画面对照](E:/Projects/pulse/bench_data/text-render-settings-20261024/mode-spacing-comparison.png)、[实际列表截图](E:/Projects/pulse/bench_data/text-render-settings-20261024/file-list-zh-CN-100-dark-1.png)。本节继续合并在唯一报告中。
+证据：最终结果（历史本地附件：`bench_data/sharp-spacing-20261024/final-results.json`）、设置验证（历史本地附件：`bench_data/sharp-spacing-20261024/settings.log`）、三模式字距画面对照（历史本地附件：`bench_data/text-render-settings-20261024/mode-spacing-comparison.png`）、实际列表截图（历史本地附件：`bench_data/text-render-settings-20261024/file-list-zh-CN-100-dark-1.png`）。本节继续合并在唯一报告中。
 
 **以下“尚未修改产品”等结论为此前只读调查的历史状态；本轮代码及验证状态以本节为准。**
 
@@ -77,7 +77,7 @@
 
 **后续实现约束：** 保留自动、清晰、平滑的选择及持久化，沿用上游的完整编辑选区与表面逻辑。清晰模式的测宽、排版、裁切、省略、着色分段、光标命中与缓存失效须使用同一度量策略；可比较 GDI-compatible排版配GDI_CLASSIC，或Natural排版配NATURAL+gridfit。不要只改单个DrawText调用，也不要把列表和编辑框永久强制为同一种渲染后端。不同策略的清晰度和字距需要实际主程序画面对照后再定稿。
 
-主程序未构建、安装版未改。证据：[对照源码](E:/Projects/pulse/bench_data/sharp-spacing-20261024/probe.cpp)、[appcompat放大对比](E:/Projects/pulse/bench_data/sharp-spacing-20261024/comparison-appcompat.png)、[Downloaded Program Files放大对比](E:/Projects/pulse/bench_data/sharp-spacing-20261024/comparison-downloaded.png)、[逐字符位置](E:/Projects/pulse/bench_data/sharp-spacing-20261024/positions.csv)、[截图二值核验](E:/Projects/pulse/bench_data/sharp-spacing-20261024/screenshot-match.json)。本节仍合并在唯一报告中。
+主程序未构建、安装版未改。证据：对照源码（历史本地附件：`bench_data/sharp-spacing-20261024/probe.cpp`）、appcompat放大对比（历史本地附件：`bench_data/sharp-spacing-20261024/comparison-appcompat.png`）、Downloaded Program Files放大对比（历史本地附件：`bench_data/sharp-spacing-20261024/comparison-downloaded.png`）、逐字符位置（历史本地附件：`bench_data/sharp-spacing-20261024/positions.csv`）、截图二值核验（历史本地附件：`bench_data/sharp-spacing-20261024/screenshot-match.json`）。本节仍合并在唯一报告中。
 
 ## 上游 1.0.56 编辑框实现对照（2026-10-24）
 
@@ -103,17 +103,17 @@
 
 验收应比较同机上游与修复版，在中文、当前缩放/主题下使用真实路径栏和真实文件重命名，覆盖长短文本、方向键/Shift、快速双向拖动、越界后释放、双击选词、输入法替换；观察连续实际桌面帧，确认没有整行空白、第三种文字帧或释放后原点跳动。历史553项和192帧结果不充当本次验收。本轮只读，不运行这些功能验收，也不宣称已修好。
 
-证据：[固定源码与比较元数据](E:/Projects/pulse/docs/validation/upstream-edit-review-20261024/outcome.json)；固定源码快照位于 `bench_data/upstream-edit-review-20261024/pulse-c4fe01ed82fe091f495f531972a854aa32caac2b`。本节合并在唯一报告中。
+证据：[固定源码与比较元数据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/upstream-edit-review-20261024/outcome.json)；固定源码快照位于 `bench_data/upstream-edit-review-20261024/pulse-c4fe01ed82fe091f495f531972a854aa32caac2b`。本节合并在唯一报告中。
 
 ## 1.2.0.3 剩余轻微闪烁与实际字体核查
 
 **当前问题状态：用户确认 1.2.0.3 仍有整行文字或选区一起轻微闪烁；根因尚未确认，本轮不标记修复完成。安装版保持 1.2.0.3，本轮仅增加诊断测试和证据，没有更改产品字体或替换安装文件。**
-- 字体核实：中文界面使用 Microsoft YaHei UI（微软雅黑 UI），普通字重 400，字符高度 14 DIP 随缩放换算；英文界面指定 Segoe UI Variable Text。生产宿主中文夹具在 100%/150%/200% 下的 GetTextFaceW 均确认实际选中 Microsoft YaHei UI；另用相同 CreateFontW 参数查询系统，三个候选字体均未发生字体替换。代码位于 src/app/app_hosted_edit.cpp:124 和 src/ui/typography.cpp:126；[系统映射证据](validation/font-flicker-20261024/native-font-resolution.json)。
+- 字体核实：中文界面使用 Microsoft YaHei UI（微软雅黑 UI），普通字重 400，字符高度 14 DIP 随缩放换算；英文界面指定 Segoe UI Variable Text。生产宿主中文夹具在 100%/150%/200% 下的 GetTextFaceW 均确认实际选中 Microsoft YaHei UI；另用相同 CreateFontW 参数查询系统，三个候选字体均未发生字体替换。代码位于 src/app/app_hosted_edit.cpp:124 和 src/ui/typography.cpp:126；[系统映射证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/font-flicker-20261024/native-font-resolution.json)。
 - 1.2.0.3 编辑文字改为 GDI/原生 EDIT，字体质量参数为 ANTIALIASED_QUALITY；这一绘制方式变化可能解释与正文文字的观感差异，尚不能以此解释用户所见整行闪烁。字体核查结论与闪烁根因分开记录。
 - 新增诊断发现，每 10 个父窗口渲染帧，路径/搜索/筛选仍有 20 次 WM_WINDOWPOSCHANGING，重命名/标签有 10 次；同一观察区间 WM_PAINT 和 WM_ERASEBKGND 均为 0。确认存在冗余布局调用，但尚无证据证明它造成所报闪烁，未以此作推测性产品修复。
 - 中文定向路径检查 553 PASS / 0 FAIL；之后补齐测试父窗口与生产一致的擦除、绘制及通知处理，移除夹具独有的 WS_CLIPCHILDREN，加入独立线程从桌面采样。中文、100%、深浅主题、路径与重命名、方向键与框内拖选共采集 192 个桌面帧，未观察到预期两个选区/光标画面之外的第三帧；该有限范围检查为 93 PASS / 0 FAIL，不代替用户实际使用条件。
 - 拖选诊断首轮为 92 PASS / 1 FAIL，抓到第三个选区画面；隔离脚本拖选期间 Windows 补发的真实指针移动后，93 PASS / 0 FAIL。原失败日志和截图保留，不将这一测试输入隔离调整算作产品 bug 修复。
-- [中文字体与路径日志](../bench_data/edit-surface-20261024/font-trace-zh.log)、[独立桌面采样](../bench_data/edit-surface-20261024/selection-isolated.log)、[原失败日志](../bench_data/edit-surface-20261024/selection-before.log)、[原失败截图](validation/font-flicker-20261024/selection-before-worst.bmp)。尚未稳定捕获用户所见闪烁；没有据自动检查通过宣称现场问题已消除。
+- 中文字体与路径日志（历史本地附件：`bench_data/edit-surface-20261024/font-trace-zh.log`）、独立桌面采样（历史本地附件：`bench_data/edit-surface-20261024/selection-isolated.log`）、原失败日志（历史本地附件：`bench_data/edit-surface-20261024/selection-before.log`）、[原失败截图](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/font-flicker-20261024/selection-before-worst.bmp)。尚未稳定捕获用户所见闪烁；没有据自动检查通过宣称现场问题已消除。
 
 **1.2.0.3 已发布和已通过上述自动化检查，不代表用户反馈的轻微闪烁已经解决。当前问题状态以本节为准。**
 
@@ -126,20 +126,20 @@
 
 | 定向验证 | 结果 | 实际覆盖 |
 |---|---:|---|
-| 五种实际生产宿主编辑框 | 553 PASS / 0 FAIL | 深浅主题，100%/150%/200%，连续父窗口渲染，方向键中间画面、短文本字形稳定、长文本拖选/松手、真实活动光标、中文插入和撤销、保留标签快捷键。[日志](E:/Projects/pulse/bench_data/edit-surface-20261024/corrected.log) |
-| 真实桌面合成复核 | 85 PASS / 0 FAIL | 独立临时窗口中的路径栏和重命名栏，深浅主题、100%；从桌面取像素，原生表面与桌面一致，父窗口合成后可见，方向键只改变光标像素。包含重复基础断言，不叠加声称 85 个新场景。[日志](E:/Projects/pulse/bench_data/edit-surface-20261024/desktop.log) |
-| 实时搜索编辑 | 11 PASS / 0 FAIL | 连续查询更新、连续输入、文本中部插入、鼠标落点后的输入顺序。[日志](E:/Projects/pulse/bench_data/edit-surface-20261024/address-final.log) |
+| 五种实际生产宿主编辑框 | 553 PASS / 0 FAIL | 深浅主题，100%/150%/200%，连续父窗口渲染，方向键中间画面、短文本字形稳定、长文本拖选/松手、真实活动光标、中文插入和撤销、保留标签快捷键。日志（历史本地附件：`bench_data/edit-surface-20261024/corrected.log`） |
+| 真实桌面合成复核 | 85 PASS / 0 FAIL | 独立临时窗口中的路径栏和重命名栏，深浅主题、100%；从桌面取像素，原生表面与桌面一致，父窗口合成后可见，方向键只改变光标像素。包含重复基础断言，不叠加声称 85 个新场景。日志（历史本地附件：`bench_data/edit-surface-20261024/desktop.log`） |
+| 实时搜索编辑 | 11 PASS / 0 FAIL | 连续查询更新、连续输入、文本中部插入、鼠标落点后的输入顺序。日志（历史本地附件：`bench_data/edit-surface-20261024/address-final.log`） |
 
 - 像素证据：五类 × 两主题 × 三缩放共 30 组，方向键的原生中间表面与最终表面差异均为 0 像素；拖选松手差异也均为 0 像素。短文本方向键最大变化分别为 38/56/74 像素，恰好是两个位置的一像素宽光标，未发现字形位置变化。
 - 测试诊断保留：原始修复前日志为 375 PASS / 58 FAIL；最初修复后为 521 PASS / 32 FAIL，未据此交付。逐帧位图证明其中 28 项来自截图抗锯齿颜色通道仅差 1/255；另 4 项集中在深浅主题的 200% 搜索框（各含短文本和拖选断言），测试仍固定为 1100 物理像素、输入区仅宽 48 像素，出现正常溢出滚动及越界拖选返回空选区，不适用“短文本字形不动”和最终选区必非空的前提。最终测试固定 1100 DIP，只忽略一色阶量化差异，保留光标/字形位移检测。没有删除失败日志或跳过断言；修改了测试条件，因此不将前后通过数视为完全相同测试集的对比。
-- 历史失败和逐帧证据：[修复前](E:/Projects/pulse/bench_data/edit-surface-20261024/before.log)、[首轮修复后](E:/Projects/pulse/bench_data/edit-surface-20261024/after.log)、[量化与窄框诊断](E:/Projects/pulse/bench_data/edit-surface-20261024/diagnostic.log)。没有运行全部历史回归或完整 selftest；旧 rename selftest 同步改为检查原生光标和实际选区表面，本轮未独立运行该旧入口。中文字符插入验证不等于各输入法候选窗口均已验收。
+- 历史失败和逐帧证据：修复前（历史本地附件：`bench_data/edit-surface-20261024/before.log`）、首轮修复后（历史本地附件：`bench_data/edit-surface-20261024/after.log`）、量化与窄框诊断（历史本地附件：`bench_data/edit-surface-20261024/diagnostic.log`）。没有运行全部历史回归或完整 selftest；旧 rename selftest 同步改为检查原生光标和实际选区表面，本轮未独立运行该旧入口。中文字符插入验证不等于各输入法候选窗口均已验收。
 
 - [1.2.0.3 便携包](E:/Projects/pulse/dist/Pulse-1.2.0.3-portable-win-x64.zip)：SHA256 `0F895CE698E91DE0DD87806BF94A68B72A960800736BD3D4D94B3762146F2635`。
 - [1.2.0.3 安装包](E:/Projects/pulse/dist/PulseSetup-1.2.0.3.exe)：SHA256 `BE09607D4F8027D5C0BAF720C1A23F165862CF7ABF7642287AFE2C11D2B0A7E6`。
-- 发布核验：40 项便携载荷逐项匹配，五个生产 EXE 均为 1.2.0.3，原始文件名、运行库和许可证检查通过。安装包已编译并记录文件身份，本轮通过保留状态的载荷替换更新现有安装，没有运行安装向导。[发布证据](E:/Projects/pulse/docs/validation/edit-surface-20261024/artifacts.json)。
+- 发布核验：40 项便携载荷逐项匹配，五个生产 EXE 均为 1.2.0.3，原始文件名、运行库和许可证检查通过。安装包已编译并记录文件身份，本轮通过保留状态的载荷替换更新现有安装，没有运行安装向导。[发布证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/edit-surface-20261024/artifacts.json)。
 - 安装目录 `D:\Applications\Pulse`：只替换 5 个发生变化的 EXE；完整 70 文件备份逐项验证，回退目录 `E:\Projects\pulse\dist\edit-surface-1.2.0.3-rollback-20261024-140547`。旧界面经正常托盘退出；没有强杀。设置、索引数据和索引目录权限保留，服务恢复原 Running / Auto，原网络代理继续运行。
-- 原网络代理仍映射的上一版 Index 映像暂留安装目录，未为清理该映像而结束代理；本轮不改索引策略。[完整部署与保留项记录](E:/Projects/pulse/docs/validation/edit-surface-20261024/deployment-result.json)。
-- 安装后生产程序实际启动、截图、正常退出 0，随后重新打开普通 Medium 界面；7 项计划载荷哈希匹配。[安装后核验](E:/Projects/pulse/docs/validation/edit-surface-20261024/final-installed-verification.json)、[生产启动证据](E:/Projects/pulse/docs/validation/edit-surface-20261024/installed-smoke-result.json)。实际桌面定向检查使用同源生产宿主函数的隔离夹具，没有宣称已经完成用户本人手动验收或所有动画检查。
+- 原网络代理仍映射的上一版 Index 映像暂留安装目录，未为清理该映像而结束代理；本轮不改索引策略。[完整部署与保留项记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/edit-surface-20261024/deployment-result.json)。
+- 安装后生产程序实际启动、截图、正常退出 0，随后重新打开普通 Medium 界面；7 项计划载荷哈希匹配。[安装后核验](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/edit-surface-20261024/final-installed-verification.json)、[生产启动证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/edit-surface-20261024/installed-smoke-result.json)。实际桌面定向检查使用同源生产宿主函数的隔离夹具，没有宣称已经完成用户本人手动验收或所有动画检查。
 
 **用户已确认 1.2.0.2 仍有闪烁和晃动，旧轮测试不足以验收该问题。下文旧版“修正”仅为历史记录，当前结论以本节为准。**
 
@@ -150,15 +150,15 @@
 - 确认原因：长文本已经水平滚动时，鼠标命中会舍入到视口边缘之外；原先每次命中和重绘都跟随选区活动端调整水平偏移，造成下一次命中使用不同文字原点，快速往返拖选出现左右晃动。路径栏和重命名栏共用该编辑呈现实现。
 - 改动：捕获鼠标拖选期间保持框内视口固定；仅指针越出客户区时由输入事件调整滚动，重绘本身不推进滚动。文本修改和松开鼠标后的光标跟随继续工作。此前原生编辑与自绘表面交替造成的闪烁修复继续保留。
 - 复现与回归：已滚动长文本在 100% / 150% 缩放、两种窗口呈现模式中，修正前出现 4 项文字原点稳定性失败；修正后正式 pulse_child_edit_test 为 **113 PASS / 0 FAIL**。覆盖快速往返拖选、原生选区更新、左右越界滚动、无新输入的重复重绘、松开后光标移动和短文本重置。
-- [原失败日志](../bench_data/quality-release-1.2.0.1/drag-viewport-scrolled-before.log)、[修正后日志](../bench_data/drag-viewport-1.2.0.2/hosted-edit.log)、[退出记录](validation/drag-viewport-1.2.0.2/hosted-edit-exit.json)。这些是直接调用生产编辑控件与绘制路径的自动测试，未宣称完成真实鼠标手动验收或所有动画检查。
+- 原失败日志（历史本地附件：`bench_data/quality-release-1.2.0.1/drag-viewport-scrolled-before.log`）、修正后日志（历史本地附件：`bench_data/drag-viewport-1.2.0.2/hosted-edit.log`）、[退出记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/hosted-edit-exit.json)。这些是直接调用生产编辑控件与绘制路径的自动测试，未宣称完成真实鼠标手动验收或所有动画检查。
 - 从已有完整 Ninja Release 目录仅构建受影响编辑目标；版本资源统一后构建五个生产交付目标。未运行所有历史回归或完整自测。构建依赖与本地化编译修正沿用上一轮，未复用有空依赖的旧 NMake 对象。
 
 - [1.2.0.2 便携包](../dist/Pulse-1.2.0.2-portable-win-x64.zip)：12,405,203 B；SHA256 `BE451CCF29708C9681F43731D0FA5C87D55435C6B264924B479D7ACAB65F6C61`。
 - [1.2.0.2 安装包](../dist/PulseSetup-1.2.0.2.exe)：10,076,101 B；SHA256 `BDD609D0BC8F66496A6F8EEAC4D244BED2A1143F3E8E121B64C908D5506D3FFA`。
-- [发布核验](validation/drag-viewport-1.2.0.2/artifacts.json)：40 项便携载荷逐项匹配，五个 EXE 版本与原始文件名一致，无测试和调试文件混入，运行库与许可证检查通过。安装包已编译并记录文件身份，未运行安装向导或单独解包核对。
-- [安装前生产启动](validation/drag-viewport-1.2.0.2/preinstall-smoke-result.json)：使用与构建文件哈希一致的普通 Medium 副本，实际启动、截图并正常退出 0；截图已查看。截图检查只证明启动和静态布局，不代替拖选动态测试。
+- [发布核验](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/artifacts.json)：40 项便携载荷逐项匹配，五个 EXE 版本与原始文件名一致，无测试和调试文件混入，运行库与许可证检查通过。安装包已编译并记录文件身份，未运行安装向导或单独解包核对。
+- [安装前生产启动](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/preinstall-smoke-result.json)：使用与构建文件哈希一致的普通 Medium 副本，实际启动、截图并正常退出 0；截图已查看。截图检查只证明启动和静态布局，不代替拖选动态测试。
 - 安装目录 `D:\Applications\Pulse` 已更新为 **1.2.0.2**，只替换 5 项变化文件。完整 70 文件回退备份逐项哈希验证，保存在 `E:\Projects\pulse\dist\drag-viewport-1.2.0.2-rollback-20261024-121648`。
-- 正常托盘退出旧 UI，未强杀用户程序；保留设置、索引数据和索引目录权限，PulseIndex 恢复原来的 Running / Auto 状态。所有计划载荷与安装文件哈希相同，随后以普通用户重新打开界面；[部署记录](validation/drag-viewport-1.2.0.2/deployment-result.json)、[安装后核验](validation/drag-viewport-1.2.0.2/final-installed-verification.json)、[安装后启动](validation/drag-viewport-1.2.0.2/installed-smoke-result.json)。
+- 正常托盘退出旧 UI，未强杀用户程序；保留设置、索引数据和索引目录权限，PulseIndex 恢复原来的 Running / Auto 状态。所有计划载荷与安装文件哈希相同，随后以普通用户重新打开界面；[部署记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/deployment-result.json)、[安装后核验](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/final-installed-verification.json)、[安装后启动](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/drag-viewport-1.2.0.2/installed-smoke-result.json)。
 - 安装目录中仍由原网络代理映射的历史旧映像保持原样；没有为清理备份而终止代理。此轮没有更改索引或搜索算法，也未重复运行索引性能测试。
 
 **下文 1.2.0.1 及更早版本保留当轮结果；当前安装与发布状态以上节为准。**
@@ -185,14 +185,14 @@
 
 | 检查 | 结果 | 日志 |
 |---|---:|---|
-| 正式编辑框 / 主题缩放 | 313 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/hosted-edit.log) |
-| 正式地址栏持续输入 | 11 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/address-edit.log) |
-| 正式 USB IPC 搜索路由 | 11 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/removable-routing.log) |
-| 正式目录尺寸缓存 / 排序 | 15 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/folder-sizes-ui.log) |
-| 正式设备策略 / 挂载枚举 | 43 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/removable-policy.log) |
-| 生产模式候选缓存 / 名称池 | 62 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-cache.log) |
-| 旧分卷与 aggregate 对照 | 42 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-storage.log) |
-| 压缩 / 损坏拒绝 / A/B 恢复 | 45 PASS / 0 FAIL | [日志](../bench_data/quality-release-1.2.0.1/index-compaction.log) |
+| 正式编辑框 / 主题缩放 | 313 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/hosted-edit.log`） |
+| 正式地址栏持续输入 | 11 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/address-edit.log`） |
+| 正式 USB IPC 搜索路由 | 11 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/removable-routing.log`） |
+| 正式目录尺寸缓存 / 排序 | 15 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/folder-sizes-ui.log`） |
+| 正式设备策略 / 挂载枚举 | 43 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/removable-policy.log`） |
+| 生产模式候选缓存 / 名称池 | 62 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/index-cache.log`） |
+| 旧分卷与 aggregate 对照 | 42 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/index-storage.log`） |
+| 压缩 / 损坏拒绝 / A/B 恢复 | 45 PASS / 0 FAIL | 日志（历史本地附件：`bench_data/quality-release-1.2.0.1/index-compaction.log`） |
 
 本轮子任务先前已完成：导航模型 69/0；冷菜单 runas 10/0；7-Zip/显式禁用兼容 10/0；离线保留 15/0；旧格式修复 44/0；主机目录尺寸协议 5/0；扫描 23/0、2 SKIP。前三项只保留在子任务工具输出，没有落盘日志，不伪造日志链接或为重复计数重跑；其余日志分别在 bench_data/quality-offline-retention.log、quality-legacy-repair.log、quality-host-folder-sizes-medium.log、folder-sizes-quality/scan-results.log。各测试范围有重叠，不相加宣称覆盖率。
 
@@ -210,22 +210,22 @@
 
 - [便携包](../dist/Pulse-1.2.0.1-portable-win-x64.zip)：12,405,127 B；SHA256 `A121ECF14E2FFA7DEA7A68A27E76C200CB40064AC33A0E24E87888F5A4E16A3D`。
 - [安装包](../dist/PulseSetup-1.2.0.1.exe)：10,073,545 B；SHA256 `5632538DEE84F40F5FDE84C2706DFF37F5CE8C4379CA323B259B2B94D75F7EBD`。
-- [逐项核验](validation/quality-release-1.2.0.1/artifacts.json)：40 项便携载荷与 build/仓库资源大小和 SHA256 全匹配，五个 EXE FileVersion/ProductVersion/OriginalFilename 正确，无测试或调试文件混入，无内置自测，路径与许可证检查通过。安装包编译成功并记录身份，未单独解包比对或运行安装向导。
+- [逐项核验](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/quality-release-1.2.0.1/artifacts.json)：40 项便携载荷与 build/仓库资源大小和 SHA256 全匹配，五个 EXE FileVersion/ProductVersion/OriginalFilename 正确，无测试或调试文件混入，无内置自测，路径与许可证检查通过。安装包编译成功并记录身份，未单独解包比对或运行安装向导。
 
 ### 安装与验证边界
 
 - 完整备份并核验 69 个原安装文件，恢复目录 `E:\Projects\pulse\dist\quality-release-1.2.0.1-final-rollback-20261024-115519`；实际替换 `Pulse.exe, Pulse.Index.exe, Pulse.Shell.exe, Pulse.Preview.exe, Pulse.Document.exe`。其余原文件按备份哈希逐项核对。
 - 安装版采用正常托盘退出、管理员原位替换和恢复原 PulseIndex 启动/运行状态；没有运行会卸载旧版的安装向导，不改索引格式、索引位置或用户配置，不重建索引。
-- [部署结果](validation/quality-release-1.2.0.1/deployment-result.json)，保留仍被旧进程占用的已知哈希映像：1 项。
-- 安装路径隔离截图启动：退出码 0；结果见 [记录](validation/quality-release-1.2.0.1/installed-smoke-result.json)。静态截图不能替代物理拖选及动画连续帧验收。
-- 普通用户界面及网络代理恢复状态见 [记录](validation/quality-release-1.2.0.1/user-ui-restored.json)。
+- [部署结果](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/quality-release-1.2.0.1/deployment-result.json)，保留仍被旧进程占用的已知哈希映像：1 项。
+- 安装路径隔离截图启动：退出码 0；结果见 [记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/quality-release-1.2.0.1/installed-smoke-result.json)。静态截图不能替代物理拖选及动画连续帧验收。
+- 普通用户界面及网络代理恢复状态见 [记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/quality-release-1.2.0.1/user-ui-restored.json)。
 - 原网络代理保持原进程，不强制终止；它占用的一份旧Index映像按已知哈希保留。磁盘上五个正式程序均为1.2.0.1，服务已重启加载新程序；旧代理下一次正常退出后该退休映像才可回收。
-- [最终安装核验](validation/quality-release-1.2.0.1/final-installed-verification.json)记录五EXE版本、七项载荷SHA256、Running/Auto服务及持续运行主界面。
+- [最终安装核验](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/quality-release-1.2.0.1/final-installed-verification.json)记录五EXE版本、七项载荷SHA256、Running/Auto服务及持续运行主界面。
 - USB 实际目录挂载/热插拔、真实 UAC 菜单命令与第三方菜单 Invoke、路径栏物理拖选未作为本轮运行验收。设备验证包括真实系统卷枚举与模拟别名经过生产 IPC 处理和路由。
 - 本轮改的是代码质量及验收口径，没有承诺把宽泛百万匹配查询压到 150 ms。安装后性能如仍超预算应按实际日志保留失败，不能以协议成功或单词毫秒级响应掩盖。
 
 实际安装服务6词×5次共30次观测，全部完整且无协议错误：True；质量与时间预算分开输出。enforce退出码1，宽泛a/ab的p95预算未通过，不能称速度全部达标。
-[实际搜索原始样本](../bench_data/quality-release-1.2.0.1/installed-search.log)。本轮a中位291.68ms、ab中位26.22ms，abc/report/pdf中位约6.05/2.08/2.05ms；五样本分位不代表长期p95。
+实际搜索原始样本（历史本地附件：`bench_data/quality-release-1.2.0.1/installed-search.log`）。本轮a中位291.68ms、ab中位26.22ms，abc/report/pdf中位约6.05/2.08/2.05ms；五样本分位不代表长期p95。
 
 **以下代码质量审查保留修复前状态；当前改动、验证与安装状态以本节为准。**
 
@@ -257,11 +257,11 @@ BuildDisplay 可以把晚到的 COM runas 插入 Open 后，而 ReplaceLiveItems
 
 常规 pulse_index_engine_test 仍调用已不存在的 PreserveOfflineVolumesLocked；pulse_index_host_stress 缺少它直接使用的 transport 与 folder-size 协议头。它们仍是 CMake 常规可构建目标，现有日志已经记录编译失败。私有驱动补头或抽取单一 fixture 可以支持局部验证，不能替代正式入口可构建。
 
-最小建议：按当前行为改写旧离线卷测试，补齐直接依赖；不要删测试或用空实现恢复编译。只构建并运行相关目标，不因此重跑全部历史回归。**本轮检查当前源码并复核既有失败日志，没有重新构建。** 证据：[引擎失败日志](../bench_data/finish-all-20261023/build-intern-all-paths.log)、[主机失败日志](../bench_data/filename-index-only-20261023/host-stress-build.log)。
+最小建议：按当前行为改写旧离线卷测试，补齐直接依赖；不要删测试或用空实现恢复编译。只构建并运行相关目标，不因此重跑全部历史回归。**本轮检查当前源码并复核既有失败日志，没有重新构建。** 证据：引擎失败日志（历史本地附件：`bench_data/finish-all-20261023/build-intern-all-paths.log`）、主机失败日志（历史本地附件：`bench_data/filename-index-only-20261023/host-stress-build.log`）。
 
 ### 4. P2：新增回归依赖被忽略的临时构建环境，不能随源码稳定复现
 
-位置：[hosted_edit_stability_test.cpp](../src/bench/hosted_edit_stability_test.cpp)、[.gitignore:73](../.gitignore#L73)、[CMakeLists.txt](../CMakeLists.txt)、[临时构建器](../bench_data/hosted-edit-flicker-20261023/build_probe.py)。
+位置：[hosted_edit_stability_test.cpp](../src/bench/hosted_edit_stability_test.cpp)、[.gitignore:73](../.gitignore#L73)、[CMakeLists.txt](../CMakeLists.txt)、临时构建器（历史本地附件：`bench_data/hosted-edit-flicker-20261023/build_probe.py`）。
 
 hosted_edit_stability_test.cpp、address_edit_stability_test.cpp 等没有对应 CMake 注册。前者的实际构建脚本从 build/CMakeFiles/pulse.dir/objects1.rsp 和另一轮 bench_data/issue-confirm-external/libraries.rsp 拼接链接输入，脚本本身也被 /bench_data/* 忽略。当前机器能够运行，不代表干净检出能构建；测试与修复的长期绑定不足。
 
@@ -351,7 +351,7 @@ index_changed 已没有任何赋值，却继续输出并被测试断言为 false
 
 - 新 Pulse.exe SHA256：`C313945F5827CB72741484413BA2D4A114F4BF7D807CC6330878206CC7E536E1`；完整安装备份 `E:\Projects\pulse\dist\hosted-edit-flicker-20261023-213021`，69 个原有文件核验，包含上一轮仍驻留映像的恢复副本。只替换主程序，索引服务 PID 1100 全程保持 Running / Auto。
 - 首次维护因主程序仍驻留而安全停止，未覆盖任何程序。普通权限未看到真实窗口；随后管理员枚举实际进程，通过已有托盘 Exit 处理器正常退出，成功更新后用普通用户重新打开。未强杀主程序或服务。
-- [最终定向验证](../bench_data/hosted-edit-flicker-20261023/verified.log)、[修复前对照](../bench_data/hosted-edit-flicker-20261023/exact-before.log)、[安装结果](../bench_data/hosted-edit-flicker-20261023/deployment-result.json)、[原重命名回归](../bench_data/hosted-edit-flicker-20261023/rename-regression.log)。
+- 最终定向验证（历史本地附件：`bench_data/hosted-edit-flicker-20261023/verified.log`）、修复前对照（历史本地附件：`bench_data/hosted-edit-flicker-20261023/exact-before.log`）、安装结果（历史本地附件：`bench_data/hosted-edit-flicker-20261023/deployment-result.json`）、原重命名回归（历史本地附件：`bench_data/hosted-edit-flicker-20261023/rename-regression.log`）。
 
 ## 文件名搜索策略更新（用户明确授权）
 
@@ -379,7 +379,7 @@ index_changed 已没有任何赋值，却继续输出并被测试断言为 false
 
 恢复备份：`E:\Projects\pulse\dist\filename-index-only-20261023-210737`。新索引程序 SHA256：`908A7A4455468DA65135FF90E7214241AC7C42F9073D71B97AA19BA2E47E22ED`。
 
-[测量和部署证据](../bench_data/filename-index-only-20261023/)；[定向回归](../bench_data/filename-index-only-20261023/search-cache.log)；[实际服务更新前](../bench_data/filename-index-only-20261023/installed-before.log)；[实际服务更新后](../bench_data/filename-index-only-20261023/installed-after.log)。
+测量和部署证据（历史本地附件：`bench_data/filename-index-only-20261023`）；定向回归（历史本地附件：`bench_data/filename-index-only-20261023/search-cache.log`）；实际服务更新前（历史本地附件：`bench_data/filename-index-only-20261023/installed-before.log`）；实际服务更新后（历史本地附件：`bench_data/filename-index-only-20261023/installed-after.log`）。
 
 **下文逐候选鉴权、约 2 秒且不完整的结论是策略更新前的历史测量；当前文件名搜索以上节为准。**
 
@@ -464,7 +464,7 @@ pulse-no-match-9f64b73ad180     6.47      6.47         0          0       0     
 - 最终在线目录清单只记录长度；运行中的 WAL 不做共享冲突下的哈希。WAL 字节一致性使用停服维护证据。最终核验脚本最初遇到在线 WAL 共享冲突、随后遇到 Windows PowerShell 5 对 hashtable 的 Measure-Object 兼容问题，两次失败记录均保留，修正采集与汇总方式后完成核验。
 - 仍需真实用户场景才可验收：微信菜单调用、当前不在线 USB 的物理拔插、真实鼠标/IME 重命名观感、系统提示音听验，以及第三方菜单实际命令。MTP 是未实现能力。未确认的 issue 按原选择和证据保留，不因“完成所有任务”擅自修复推测问题。
 
-证据：[最终安装及目录核验](E:/Projects/pulse/bench_data/finish-all-20261023/final-inventory-result.json)；[最终维护与回滚](E:/Projects/pulse/bench_data/finish-all-20261023/final-pass/maintenance-result.json)；[安装菜单查询](E:/Projects/pulse/bench_data/finish-all-20261023/installed-menu-result.json)；[安装版渲染](E:/Projects/pulse/bench_data/finish-all-20261023/installed-smoke.png)；[搜索与名称池](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/search-finish.json)；[集成验证](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/integration-finish.json)。
+证据：最终安装及目录核验（历史本地附件：`bench_data/finish-all-20261023/final-inventory-result.json`）；最终维护与回滚（历史本地附件：`bench_data/finish-all-20261023/final-pass/maintenance-result.json`）；安装菜单查询（历史本地附件：`bench_data/finish-all-20261023/installed-menu-result.json`）；安装版渲染（历史本地附件：`bench_data/finish-all-20261023/installed-smoke.png`）；[搜索与名称池](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/search-finish.json)；[集成验证](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/integration-finish.json)。
 
 **下文各轮“未部署”“未清理”“线上收益未知”等为当轮历史状态，当前安装和现场容量以上节为准；历史测试及失败记录继续保留。**
 
@@ -511,7 +511,7 @@ Pulse **已经使用 basename + 父节点编号**，不是每项都保存完整�
 4. **恢复策略：**保留 A/B；若未来改成更小的前代/增量恢复，必须单独验证断电、损坏、WAL 重放及版本回滚。本轮不删除恢复快照。
 
 官方来源：[作者的索引算法说明](https://www.voidtools.com/forum/viewtopic.php?p=60222)、[历史 DB 格式](https://www.voidtools.com/support/everything/db/)、[可选索引](https://www.voidtools.com/support/everything/indexes/)、[INI 设置](https://www.voidtools.com/support/everything/ini/)。
-[Everything 本地与格式证据](E:/Projects/pulse/bench_data/everything-size-20261023/evidence.json)；[官方页面时间与哈希](E:/Projects/pulse/bench_data/everything-size-20261023/official-sources.json)。
+Everything 本地与格式证据（历史本地附件：`bench_data/everything-size-20261023/evidence.json`）；官方页面时间与哈希（历史本地附件：`bench_data/everything-size-20261023/official-sources.json`）。
 
 ### 2. 卡巴斯基首次成本与美化菜单关闭状态
 
@@ -535,8 +535,8 @@ Pulse **已经使用 basename + 父节点编号**，不是每项都保存完整�
 Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首次初始化成本。可行方向是**在隔离宿主中有界复用进程/空闲预热**：保留一个受控 STA，菜单对象仍逐会话创建关闭；进程卡死可终止，保留会话所有权、取消、当前用户令牌和资源释放边界。新 STA 对照证明同进程可保留热态收益，但还不是生产宿主复用验证。不能把扩展移进 UI 线程，也不能把超时自动禁用当成性能优化。
 
 前轮 PIDL 只解析一次的修复解决约 1 秒的重复 Shell 解析；这轮调查解释剩下的另一段首次成本。前轮最终共享构建中 7-Zip 首次结果约 323–353 ms，全部扩展完成约 1.53–1.56 秒。两者是不同阶段，不重复累计为同一个根因。安装版 Shell 尚未替换；这轮没有禁用杀毒、美化扩展或任何处理器，也没有执行扩展菜单命令。
-[新 STA 对照](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/new-sta-same-process.jsonl)；[有限栈摘要](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/stack64-summary.json)；[矩阵运行记录](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/run-results.json)。
-[卡巴斯基完整结构化证据](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/evidence.json)。
+新 STA 对照（历史本地附件：`bench_data/kaspersky-latency-20261023/new-sta-same-process.jsonl`）；有限栈摘要（历史本地附件：`bench_data/kaspersky-latency-20261023/stack64-summary.json`）；矩阵运行记录（历史本地附件：`bench_data/kaspersky-latency-20261023/run-results.json`）。
+卡巴斯基完整结构化证据（历史本地附件：`bench_data/kaspersky-latency-20261023/evidence.json`）。
 
 **针对“没有开启右键菜单功能”的追加核实：**
 
@@ -546,7 +546,7 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 - 只做一次当前版本的新进程对照：首次 QueryContextMenu **767.04 ms**（目标线程 CPU 718.75 ms），同进程重复 **1.72 ms**。7 次有限栈样本均有卡巴斯基/Windows.Storage，未捕获两个 MTool 模块；探针退出和清理正常。首次成本在当前样本中仍存在，尚无受控开关 A/B，不能把 1.2 秒到 0.77 秒的差异归因于升级或关闭菜单。
 - 配置检查只读取了 config.mcfg 的格式和元数据，未输出私人配置内容、未读取账号令牌；其为专有 dmresv2 格式，未解码出菜单开关。因此保留用户“未开启”的现场说明，不声称独立读取到了该布尔值，也不修改设置进行试验。
 
-[关闭功能追加核实](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json)；[配置检查边界](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-config-inspection.json)；[官方发布页面取证](E:/Projects/pulse/bench_data/kaspersky-latency-20261023/mtool-release-source.json)。
+关闭功能追加核实（历史本地附件：`bench_data/kaspersky-latency-20261023/mtool-disabled-followup.json`）；配置检查边界（历史本地附件：`bench_data/kaspersky-latency-20261023/mtool-config-inspection.json`）；官方发布页面取证（历史本地附件：`bench_data/kaspersky-latency-20261023/mtool-release-source.json`）。
 
 ### 3. 搜索提速应先改结果生成流程
 
@@ -589,7 +589,7 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 
 原始候选缓存、授权遍历停止及缩小查询取消已实现并验证；缩短持锁时间、分阶段首屏和其他算法调整尚未实施。本轮没有替换安装版索引服务，不能用合成缓存样本承诺现场达到 50 ms，预算内的逐候选权限成本仍在。
 
-[实际服务与质量标志](E:/Projects/pulse/bench_data/search-latency-20261023/installed-before-quality.log)；[独立权限夹具](E:/Projects/pulse/bench_data/search-latency-20261023/visibility-fixture-before.log)；[改进后的诊断工具](E:/Projects/pulse/src/bench/index_perf_main.cpp)。
+实际服务与质量标志（历史本地附件：`bench_data/search-latency-20261023/installed-before-quality.log`）；独立权限夹具（历史本地附件：`bench_data/search-latency-20261023/visibility-fixture-before.log`）；[改进后的诊断工具](E:/Projects/pulse/src/bench/index_perf_main.cpp)。
 权限对照来源：[官方作者 2019-03-15 回复](https://www.voidtools.com/forum/viewtopic.php?p=25276)、[Everything Service Security](https://www.voidtools.com/support/everything/everything_service/)。
 
 ### 本轮实际验证与限制
@@ -597,7 +597,7 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 - 本轮 pulse_index_search_cache_test **29 PASS / 0 FAIL**；70,000 候选合成样本冷查询 1,852 μs、缓存查询 5 μs，仅说明该隔离样本的候选复用效果，不是现场总体搜索延迟。新 pulse_index 与安全夹具目标均构建成功，未部署。
 - 新增 --metadata-acl-only 入口复用已有元数据安全用例，普通 Medium 令牌 S-1-16-8192 下 **24 PASS / 0 FAIL**，覆盖父目录撤权、子项属性拒绝、目录快照失效、恢复及超时，夹具清理通过；不运行无关队列、追踪或 raw-tree 测试。初次沙盒运行设置 ACL 返回 Win32=5，保留全部失败记录；同一组用例未删除、未弱化。
 - 新目标初次因 NMake 尚未再生成规则而不可用，随后只重新生成既有构建目录。服务初次链接又遇到旧 index_folder_sizes 对象引用旧 Search 签名；显式重编该对象及另外两个依赖 Engine 布局的实现对象后，受影响目标构建通过。未做全量清理或全量构建。
-[本轮搜索优化与构建证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/search-optimization-outcomes.json)；[普通用户 ACL 回归](E:/Projects/pulse/bench_data/search-latency-20261023/metadata-acl-after-medium.log)；[初次沙盒失败记录](E:/Projects/pulse/bench_data/search-latency-20261023/metadata-acl-after.log)。
+[本轮搜索优化与构建证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/search-optimization-outcomes.json)；普通用户 ACL 回归（历史本地附件：`bench_data/search-latency-20261023/metadata-acl-after-medium.log`）；初次沙盒失败记录（历史本地附件：`bench_data/search-latency-20261023/metadata-acl-after.log`）。
 
 - 已定向构建 pulse_index_perf 与 pulse_index_security_test，完成实际服务 6 个词的单次诊断和 --visibility-bench；未运行完整安全套件、全量 release/selftest 或实际 GUI 搜索验收。诊断检查错误与完整性后显示的是性能/质量失败，没有以退出码 0 替代通过结论。
 - 只读阶段探针已构建，设计为读取实际 v12 快照，分别测无授权、只构造路径和真实用户授权；不启动引擎、不写快照或 WAL、不返回名字。
@@ -627,7 +627,7 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 - 同时停止生产模式写入和读取派生分卷查询副本，查询使用 aggregate。主快照 A/B、卷身份/FRN、元数据、卷检查点、拼音侧缓存及真实增量 WAL 保留。v12 读取器兼容 v7–v11，v11 不因纯编码版本升级强制全盘重扫。旧程序不读 v12，回滚必须同时匹配程序与快照/WAL。
 - 冻结的 60,050 节点夹具单份快照从 **15,865,312 → 8,675,344 B，减少 45.32%**。严格加载校验样本约 **0.82 → 4.79 ms**；查询中位数相近。这是定向样本，未作冷缓存、常驻内存或所有查询加速承诺。
 
-[压缩实现及来源证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/snapshot-postings-compaction.json)。
+[压缩实现及来源证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/snapshot-postings-compaction.json)。
 
 ### 实际验证、安装及恢复
 
@@ -639,13 +639,13 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 
 最终完整回滚位置：`E:\Projects\pulse\dist\index-maintenance-20261023-04`。含全量安装文件与停服时全部原始索引，逐文件哈希验证；最终又复核 21 个索引备份文件。先前原版程序与 v11 索引备份另保留在 `dist/index-maintenance-20261023-02`。备份位于 E 盘并继续占空间，上述节省指 D 盘现场索引目录，不是所有磁盘合计释放量。
 
-[现场维护结果](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/maintenance-result.json)；[最终原生检查](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/final-check.json)；[安装文件核对](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/installed-payload-after.json)。
+现场维护结果（历史本地附件：`bench_data/index-live-cleanup-20261023/maintenance-result.json`）；最终原生检查（历史本地附件：`bench_data/index-live-cleanup-20261023/final-check.json`）；安装文件核对（历史本地附件：`bench_data/index-live-cleanup-20261023/installed-payload-after.json`）。
 
 ### 实际服务搜索：功能返回，性能预算仍未达标
 
 更新前后均向实际服务进行 a / ab / abc / report / pdf 各 5 次查询；25 次回复均成功，p95 更新前约 2,102–3,881 ms，更新后约 2,108–3,755 ms，仍全部超过工具的 50–150 ms 预算。工具未启用 --enforce 时退出码 0 不代表性能通过。本轮不宣称搜索加速；现场数据会变化，结果数不同也不能直接用于同数据集等价证明。状态显示 count=0 是服务 StatusPayload 主动隐藏机器总条数的既有协议行为，不是空索引；实际快照约 246 万节点且查询有返回。
 
-[更新前搜索](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/query-before.log)；[更新后搜索](E:/Projects/pulse/bench_data/index-live-cleanup-20261023/query-after.log)。
+更新前搜索（历史本地附件：`bench_data/index-live-cleanup-20261023/query-before.log`）；更新后搜索（历史本地附件：`bench_data/index-live-cleanup-20261023/query-after.log`）。
 
 ### 右键菜单慢：两段原因及修复状态
 
@@ -663,7 +663,7 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 
 **右键修复目前是已构建验证的源码，未部署到安装版。** `Pulse.Shell.exe` 共享构建 SHA256 为 `557846B94CE8D4F021E81539F28B46FD7C4F91C41BD98473BB3E2F60FFCB9D01`；安装版 UI 与 Shell 仍运行原版本，不能声称用户现用菜单已达到表中速度。此前 7-Zip 自动禁用迁移/最外层入口等 UI 改动也仍需后续受控更新。
 
-[共享 Shell 复核](E:/Projects/pulse/bench_data/menu-latency-20261023/shared-build-check/validation.json)；[并发根因跟踪](E:/Projects/pulse/bench_data/menu-latency-20261023/validation.json)；[卡巴斯基注册信息](E:/Projects/pulse/bench_data/menu-latency-20261023/remaining-handler-registration.json)。
+共享 Shell 复核（历史本地附件：`bench_data/menu-latency-20261023/shared-build-check/validation.json`）；并发根因跟踪（历史本地附件：`bench_data/menu-latency-20261023/validation.json`）；卡巴斯基注册信息（历史本地附件：`bench_data/menu-latency-20261023/remaining-handler-registration.json`）。
 
 以下保留各轮审计和验证的历史记录；“未部署”“未清理”等状态仅适用于其所在轮次，当前现场状态以上节为准。
 
@@ -677,24 +677,24 @@ Pulse 每次菜单使用新的隔离进程，会重复付出这次进程内首�
 
 | 编号 / Issue | 实际改动 | 定向验证 | 限制 |
 |---|---|---|---|
-| F01 / #59 | 仅最终COM菜单快照进入跨会话缓存。 | Shell29/0；有修复前失败对照。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 原第三方扩展/完整桌面菜单未验收。 |
-| F02 / #250、#248 | 忽略末尾 -Embedding 等开关，避免将其作为目录。 | 命令行22/0；实际隐藏主程序前后启动对照。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-main.json)） | 仅参数误当路径子项。 |
-| F03 / #49 | 普通打开逐文件提供其父目录为工作目录。 | Shell29/0，含真实私有批处理。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 完整UI/IPC双击链未验收；UNC仅参数验证。 |
-| F04 / #235 | 文件拖出允许COPY/MOVE/LINK。 | UI22/0；实际CF_HDROP、本地LINK-only COM目标。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 原PDF软件和外部OLE拖动未验收。 |
-| F05 / #106 | 回收站列宽调整使用渲染的同一列宽数组。 | UI22/0；回收站及搜索视图对照。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 隐藏窗口合成输入。 |
-| F08 / #213 | 保留Shell缩略图alpha类型，RGB忽略无意义alpha。 | 真实DIB经生产WIC转换4/0。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 原PSD/7Z样本、第三方provider/IPC未验收；仅RGB边界。 |
-| F09 / #197 | 恢复窗口矩形约束到当前显示器工作区。 | 矩形10/0，含实际只读显示器查询。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 未物理拔屏或移动用户窗口。 |
-| F14 / #86 | CreateProcess错误740时以原程序、参数、目录重试runas。 | Shell29/0，API拦截覆盖740、取消与非740。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 未启动实际提权程序或HiBit。 |
-| F16 / #372 | Medium/Large图标格边缘预留4DIP框选起点。 | UI22/0，图标中心为选择对照。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 未验收物理指针整段框选。 |
-| F17 / #188、#187、#186、#185、#183 | 清空搜索取消请求、清除延迟历史并返回原目录。 | 导航31/0，含四组合、迟到结果、composing守卫。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 只修复清空搜索子项，未覆盖各混合报告全部现象。 |
-| F18 / #136 | 长行内编辑保留水平视口，重复点击不漂移。 | UI22/0，caret182→182。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 未验证真实IME或前台物理输入。 |
-| F19 / #169、#129 | 后退/前进保留两轴滚动，异步发布及选择恢复保持视口。 | 导航31/0，Details2168→2168、LargeIcons1632→1632。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 真实私有目录worker；非安装版人工验收。 |
-| F20 / #236、#87 | 网络侧栏固定项提供取消固定菜单。 | UI22/0，取消和取消固定均验证。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 虚构UNC且不持久化；不删除网络索引根。 |
-| F23 / #173 | 最后一列外边缘支持调整，移动增量只应用一次。 | UI22/0，三次移动共缩小30px。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 隐藏窗口合成输入，未覆盖物理拖动/多DPI。 |
-| F24 / #334 | 窄盘名采用单行字符省略号。 | UI22/0；184/320px截图目视。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 浅色100%DPI；过长末尾盘符仍可被省略。 |
-| F25 / #229 | 通知/显式刷新使本地图标缓存失效，拒绝迟到回复。 | 生产worker定向7/0。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 完整Shell/IPC首次加载1PASS/1FAIL；未到图标替换步骤，不算整链通过。 |
-| F26 / #263 | 相对路径在调用方目录内转绝对路径后再IPC转发。 | 命令行22/0，跨不同目录编码/解码。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-main.json)） | Listary未引号空格参数拆分尚未确认。 |
-| F27 / #58 | 目录总量参与大小排序，保持选择/视口，交互期间延期。 | 真实目录统计排序30/0；三策略×两方向及节流/取消。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 仅普通物理目录，未扩展搜索/压缩包/回收站。 |
+| F01 / #59 | 仅最终COM菜单快照进入跨会话缓存。 | Shell29/0；有修复前失败对照。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 原第三方扩展/完整桌面菜单未验收。 |
+| F02 / #250、#248 | 忽略末尾 -Embedding 等开关，避免将其作为目录。 | 命令行22/0；实际隐藏主程序前后启动对照。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-main.json)） | 仅参数误当路径子项。 |
+| F03 / #49 | 普通打开逐文件提供其父目录为工作目录。 | Shell29/0，含真实私有批处理。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 完整UI/IPC双击链未验收；UNC仅参数验证。 |
+| F04 / #235 | 文件拖出允许COPY/MOVE/LINK。 | UI22/0；实际CF_HDROP、本地LINK-only COM目标。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 原PDF软件和外部OLE拖动未验收。 |
+| F05 / #106 | 回收站列宽调整使用渲染的同一列宽数组。 | UI22/0；回收站及搜索视图对照。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 隐藏窗口合成输入。 |
+| F08 / #213 | 保留Shell缩略图alpha类型，RGB忽略无意义alpha。 | 真实DIB经生产WIC转换4/0。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 原PSD/7Z样本、第三方provider/IPC未验收；仅RGB边界。 |
+| F09 / #197 | 恢复窗口矩形约束到当前显示器工作区。 | 矩形10/0，含实际只读显示器查询。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 未物理拔屏或移动用户窗口。 |
+| F14 / #86 | CreateProcess错误740时以原程序、参数、目录重试runas。 | Shell29/0，API拦截覆盖740、取消与非740。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-shell.json)） | 未启动实际提权程序或HiBit。 |
+| F16 / #372 | Medium/Large图标格边缘预留4DIP框选起点。 | UI22/0，图标中心为选择对照。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 未验收物理指针整段框选。 |
+| F17 / #188、#187、#186、#185、#183 | 清空搜索取消请求、清除延迟历史并返回原目录。 | 导航31/0，含四组合、迟到结果、composing守卫。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 只修复清空搜索子项，未覆盖各混合报告全部现象。 |
+| F18 / #136 | 长行内编辑保留水平视口，重复点击不漂移。 | UI22/0，caret182→182。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 未验证真实IME或前台物理输入。 |
+| F19 / #169、#129 | 后退/前进保留两轴滚动，异步发布及选择恢复保持视口。 | 导航31/0，Details2168→2168、LargeIcons1632→1632。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-navigation.json)） | 真实私有目录worker；非安装版人工验收。 |
+| F20 / #236、#87 | 网络侧栏固定项提供取消固定菜单。 | UI22/0，取消和取消固定均验证。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 虚构UNC且不持久化；不删除网络索引根。 |
+| F23 / #173 | 最后一列外边缘支持调整，移动增量只应用一次。 | UI22/0，三次移动共缩小30px。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 隐藏窗口合成输入，未覆盖物理拖动/多DPI。 |
+| F24 / #334 | 窄盘名采用单行字符省略号。 | UI22/0；184/320px截图目视。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-ui.json)） | 浅色100%DPI；过长末尾盘符仍可被省略。 |
+| F25 / #229 | 通知/显式刷新使本地图标缓存失效，拒绝迟到回复。 | 生产worker定向7/0。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 完整Shell/IPC首次加载1PASS/1FAIL；未到图标替换步骤，不算整链通过。 |
+| F26 / #263 | 相对路径在调用方目录内转绝对路径后再IPC转发。 | 命令行22/0，跨不同目录编码/解码。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-main.json)） | Listary未引号空格参数拆分尚未确认。 |
+| F27 / #58 | 目录总量参与大小排序，保持选择/视口，交互期间延期。 | 真实目录统计排序30/0；三策略×两方向及节流/取消。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-preview.json)） | 仅普通物理目录，未扩展搜索/压缩包/回收站。 |
 
 F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审计结论，未实施修复：涉及缺样本/设备、原现象未复现、产品约定未定或跨协议能力扩展。F10/F21等已确认能力限制仍存在，不能称全部已确认条目均已修复。
 
@@ -704,23 +704,23 @@ F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审�
 - 源码确认：后台仅在实验开关开启时启动 Explorer 窗口接管；设置页却没有对应字段、布局和命中入口，控制器也没有转发已有的 24 号动作。本轮恢复“接管 Explorer 窗口（实验性）”独立开关，沿用既有接管与关闭保护逻辑；当前用户配置仍为关闭。
 - 设置验证 71 PASS / 0 FAIL：生产控制器动作、服务请求、视图模型与真实渲染命中；中英文、100%/200%、760/1100 DIP、深浅主题共 16 张截图已检查，新行无裁切重叠。使用内存注册表和禁用真实 Explorer 服务的隔离夹具，注册表写入为 0。
 - 没有捕获微信本次具体使用的 API，也未执行微信菜单后完整接管。配置关闭足以解释既有窗口观察接管没有启动，但不能因此断言它是微信未接管的唯一原因，或声称微信问题已修复。新版构建尚未部署，安装版仍是此前程序。
-[命令行与微信检查证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-main.json)。
+[命令行与微信检查证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-main.json)。
 
 ### 首轮实际验证
 
 | 范围 | PASS / FAIL | 原始日志 |
 |---|---:|---|
-| 命令行 | 22 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-main/cli-test.log) |
-| Shell启动 | 29 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-main/shell-final.log) |
-| 导航 | 31 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-navigation/final.log) |
-| 窗口位置 | 10 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-navigation/placement.log) |
-| UI | 22 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-ui/after.log) |
-| 缩略图alpha | 4 / 0 | [日志](E:/Projects/pulse/bench_data/issue-confirm-preview-fixes/run-alpha.log) |
-| 图标缓存 | 7 / 0 | [日志](E:/Projects/pulse/bench_data/issue-confirm-preview-fixes/run-icons.log) |
-| 文件夹大小排序 | 30 / 0 | [日志](E:/Projects/pulse/bench_data/issue-confirm-preview-fixes/run-sizes.log) |
-| 接管设置 | 71 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-main/settings-run.log) |
+| 命令行 | 22 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-main/cli-test.log`） |
+| Shell启动 | 29 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-main/shell-final.log`） |
+| 导航 | 31 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-navigation/final.log`） |
+| 窗口位置 | 10 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-navigation/placement.log`） |
+| UI | 22 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-ui/after.log`） |
+| 缩略图alpha | 4 / 0 | 日志（历史本地附件：`bench_data/issue-confirm-preview-fixes/run-alpha.log`） |
+| 图标缓存 | 7 / 0 | 日志（历史本地附件：`bench_data/issue-confirm-preview-fixes/run-icons.log`） |
+| 文件夹大小排序 | 30 / 0 | 日志（历史本地附件：`bench_data/issue-confirm-preview-fixes/run-sizes.log`） |
+| 接管设置 | 71 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-main/settings-run.log`） |
 
-回收站功能区的“清空回收站”按钮已保留，并使用最终统一构建对象重新验证：441 checks / 0 failures，覆盖中英文、深浅主题、100%/150%、1100/640/380/300 DIP、空/非空/加载/未知占用、命中及实际指针消息入队。复用既有 EmptyRecycle 操作，工作线程保持停止，未执行真实清空。此441项为按钮功能复核，未计入上方修复回归226项。[按钮验证日志](E:/Projects/pulse/bench_data/issue-fixes-main/recycle-run.log)。
+回收站功能区的“清空回收站”按钮已保留，并使用最终统一构建对象重新验证：441 checks / 0 failures，覆盖中英文、深浅主题、100%/150%、1100/640/380/300 DIP、空/非空/加载/未知占用、命中及实际指针消息入队。复用既有 EmptyRecycle 操作，工作线程保持停止，未执行真实清空。此441项为按钮功能复核，未计入上方修复回归226项。按钮验证日志（历史本地附件：`bench_data/issue-fixes-main/recycle-run.log`）。
 
 另外：实际主程序隔离隐藏启动 `-Embedding`，修复前打开 `E:/Projects/pulse/-Embedding`，修复后打开默认 `C:/`，两次正常退出。Shell/IPC 图标完整尝试的 1 PASS / 1 FAIL 单独保留，发生在初次取图标时，未到达缓存替换步骤；原因未定，不记为通过，也未推断为本次回归。
 
@@ -732,27 +732,27 @@ F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审�
 
 | 项目 | 实际处理与证据 | 验证边界 |
 |---|---|---|
-| 重命名拖选闪烁 | 修复前 16 次鼠标移动各触发一次原生重绘关闭/开启及 WS_VISIBLE 丢失。改为整次捕获拖动共用一次重绘抑制，保留原生实时选区和 LumaText 呈现；补齐释放、失捕获和失去按键状态的收尾。最终 16 次原生选区更新保留，移动期间重绘切换和可见状态丢失均为 0。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json)） | 22 项使用实际生产处理器、原生 EDIT 和 LumaText，选区截图已检查；没有物理鼠标录像、真实 IME 或实际文件重命名验收。 |
-| 可移动及 USB 外接存储；#314 / #308 | 统一持久索引设备策略，排除 DRIVE_REMOVABLE 及包括 Windows 固定磁盘在内的 USB 外接存储。旧开关、手动根和后台写入不能重新启用；设置页禁用对应选项并显示简短状态。复用现有工作线程扫描器保留已识别设备当前目录内文件名及内容临时搜索，分页、取消和 UNC 路由定向检查通过。旧离线/未知内置根保留配置和缓存，只暂停不允许的扫描。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/followup-removable.json)） | 追加真实 G:/ exFAT USB 后端检查 29 PASS / 0 FAIL，设备排除、临时搜索、取消、陈旧结果及隔离配置写入通过；证据见专项第9节。未实际拔盘或手工验收安装版 UI；MTP 手机不属于本次盘符后端。 |
-| 以管理员身份运行 | 将已注册的直接 runas 操作提升至最外层“打开”之后、“打开方式”之前，保留偏好筛选、调用绑定、缓存与 COM 会话有效性约束。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/followup-menu.json)） | 15 项菜单组成/调用、27 项渲染、原打开方式 14 项及异步菜单 9 项通过；8 张中英文、100/150%、深浅主题截图已检查。没有真实提权或注册表修改。 |
-| Ctrl+F 后 Esc 提示音 | FilterEditProc 消费已处理 Enter/Esc 后队列中的 WM_CHAR，阻止字符继续到达原生 EDIT 默认错误提示音路径。普通输入及同步逻辑保留。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json)） | 包含于上述 22 项，未重复累计；未播放和听取实际系统音频。 |
-| #302 索引体积 | 第一阶段源码已完成：同时停写、停读可由 aggregate 重建的分卷查询副本，保留主格式、A/B 和真实 WAL。6 万文件双卷双代隔离快照逻辑大小减少 50.8%；三组各 97 个查询对照及更新/恢复通过。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/storage-optimization-implementation.json)） | 安装版未替换，真实 2.16G 目录未清理。逻辑大小和映射长度不是实际分配空间/RAM；现场迁移及更广泛性能验收仍待完成。 |
-| #374 大目录回收失败 | 生产 RunDelete 在隔离 IPC 注入 SIZE_TOO_BIG 后进入新的确切根永久删除确认。拒绝确认不发永久删除；接受才发新 token 请求；后端取消不产生虚假完成/撤销。普通访问拒绝不错误升级为永久删除。8 项通过，未发现该路径需要修复的本地同类故障。（[证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/followup-index-audit.json)） | 未改删除产品代码；未启动真实 Shell、填满真实回收站或删除用户文件。原目录/系统 HRESULT 未取得，不称原大目录场景已验收。 |
+| 重命名拖选闪烁 | 修复前 16 次鼠标移动各触发一次原生重绘关闭/开启及 WS_VISIBLE 丢失。改为整次捕获拖动共用一次重绘抑制，保留原生实时选区和 LumaText 呈现；补齐释放、失捕获和失去按键状态的收尾。最终 16 次原生选区更新保留，移动期间重绘切换和可见状态丢失均为 0。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json)） | 22 项使用实际生产处理器、原生 EDIT 和 LumaText，选区截图已检查；没有物理鼠标录像、真实 IME 或实际文件重命名验收。 |
+| 可移动及 USB 外接存储；#314 / #308 | 统一持久索引设备策略，排除 DRIVE_REMOVABLE 及包括 Windows 固定磁盘在内的 USB 外接存储。旧开关、手动根和后台写入不能重新启用；设置页禁用对应选项并显示简短状态。复用现有工作线程扫描器保留已识别设备当前目录内文件名及内容临时搜索，分页、取消和 UNC 路由定向检查通过。旧离线/未知内置根保留配置和缓存，只暂停不允许的扫描。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/followup-removable.json)） | 追加真实 G:/ exFAT USB 后端检查 29 PASS / 0 FAIL，设备排除、临时搜索、取消、陈旧结果及隔离配置写入通过；证据见专项第9节。未实际拔盘或手工验收安装版 UI；MTP 手机不属于本次盘符后端。 |
+| 以管理员身份运行 | 将已注册的直接 runas 操作提升至最外层“打开”之后、“打开方式”之前，保留偏好筛选、调用绑定、缓存与 COM 会话有效性约束。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/followup-menu.json)） | 15 项菜单组成/调用、27 项渲染、原打开方式 14 项及异步菜单 9 项通过；8 张中英文、100/150%、深浅主题截图已检查。没有真实提权或注册表修改。 |
+| Ctrl+F 后 Esc 提示音 | FilterEditProc 消费已处理 Enter/Esc 后队列中的 WM_CHAR，阻止字符继续到达原生 EDIT 默认错误提示音路径。普通输入及同步逻辑保留。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/fixes-user-followup-ui.json)） | 包含于上述 22 项，未重复累计；未播放和听取实际系统音频。 |
+| #302 索引体积 | 第一阶段源码已完成：同时停写、停读可由 aggregate 重建的分卷查询副本，保留主格式、A/B 和真实 WAL。6 万文件双卷双代隔离快照逻辑大小减少 50.8%；三组各 97 个查询对照及更新/恢复通过。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/storage-optimization-implementation.json)） | 安装版未替换，真实 2.16G 目录未清理。逻辑大小和映射长度不是实际分配空间/RAM；现场迁移及更广泛性能验收仍待完成。 |
+| #374 大目录回收失败 | 生产 RunDelete 在隔离 IPC 注入 SIZE_TOO_BIG 后进入新的确切根永久删除确认。拒绝确认不发永久删除；接受才发新 token 请求；后端取消不产生虚假完成/撤销。普通访问拒绝不错误升级为永久删除。8 项通过，未发现该路径需要修复的本地同类故障。（[证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/followup-index-audit.json)） | 未改删除产品代码；未启动真实 Shell、填满真实回收站或删除用户文件。原目录/系统 HRESULT 未取得，不称原大目录场景已验收。 |
 
 ### 追加定向验证
 
 | 范围 | PASS / FAIL | 原始日志 |
 |---|---:|---|
-| 管理员菜单组成与调用 | 15 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-main/admin-menu-test.log) |
-| 管理员菜单本地化渲染 | 27 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-main/admin-menu-ui.log) |
-| 原打开方式回归 | 14 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-main/open-with-regression.log) |
-| 异步实时菜单回归 | 9 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-main/menu-live-regression.log) |
-| 重命名拖选与筛选 Enter/Esc | 22 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-ui/after.log) |
-| 可移动设备策略与临时文件名扫描 | 36 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-removable/policy.log) |
-| 应用搜索入口与设置渲染 | 23 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-removable/routing.log) |
-| 离线内置盘配置与缓存保护 | 12 / 0 | [日志](E:/Projects/pulse/bench_data/issue-fixes-removable/cache.log) |
-| 网络重叠根边界与回收错误码映射 | 2 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-index/network-overlap-run.log) |
-| 回收拒绝后的重新确认、拒绝与后端取消 | 8 / 0 | [日志](E:/Projects/pulse/bench_data/issue-followup-index/delete-confirm-run.log) |
+| 管理员菜单组成与调用 | 15 / 0 | 日志（历史本地附件：`bench_data/issue-followup-main/admin-menu-test.log`） |
+| 管理员菜单本地化渲染 | 27 / 0 | 日志（历史本地附件：`bench_data/issue-followup-main/admin-menu-ui.log`） |
+| 原打开方式回归 | 14 / 0 | 日志（历史本地附件：`bench_data/issue-followup-main/open-with-regression.log`） |
+| 异步实时菜单回归 | 9 / 0 | 日志（历史本地附件：`bench_data/issue-followup-main/menu-live-regression.log`） |
+| 重命名拖选与筛选 Enter/Esc | 22 / 0 | 日志（历史本地附件：`bench_data/issue-followup-ui/after.log`） |
+| 可移动设备策略与临时文件名扫描 | 36 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-removable/policy.log`） |
+| 应用搜索入口与设置渲染 | 23 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-removable/routing.log`） |
+| 离线内置盘配置与缓存保护 | 12 / 0 | 日志（历史本地附件：`bench_data/issue-fixes-removable/cache.log`） |
+| 网络重叠根边界与回收错误码映射 | 2 / 0 | 日志（历史本地附件：`bench_data/issue-followup-index/network-overlap-run.log`） |
+| 回收拒绝后的重新确认、拒绝与后端取消 | 8 / 0 | 日志（历史本地附件：`bench_data/issue-followup-index/delete-confirm-run.log`） |
 
 追加定向检查合计 168 PASS / 0 FAIL，与首轮 226 项分别记录，不重复累计。
 
@@ -766,7 +766,7 @@ F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审�
 
 本节处理用户新增的“单选和多选时 7-Zip 菜单消失”。只修改已证实的偏好策略和菜单组成，不将此前大压缩包调用卡住的未决问题记为修复。安装版未替换。
 
-**现场根因已确认：实际配置中 7-Zip 的项目开关为开启，但 CLSID 慢调用记录是 `timeout=3, deferred=true, disabled=true`。** 实际配置通过存储位置注册表只读定位到 `D:/AppData/Pulse/context_menu.json`，并非默认 AppData 目录。旧 `RecordComTiming` 把成功但超过 1000 ms 的回复累计为“超时”，第三次直接禁用；宿主又把已完成且耗时超过 1000 ms 的处理器报作 slow CLSID。因此插件即使正常返回，后续仍被跳过。[配置窄化证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/preferences-narrow.json)。
+**现场根因已确认：实际配置中 7-Zip 的项目开关为开启，但 CLSID 慢调用记录是 `timeout=3, deferred=true, disabled=true`。** 实际配置通过存储位置注册表只读定位到 `D:/AppData/Pulse/context_menu.json`，并非默认 AppData 目录。旧 `RecordComTiming` 把成功但超过 1000 ms 的回复累计为“超时”，第三次直接禁用；宿主又把已完成且耗时超过 1000 ms 的处理器报作 slow CLSID。因此插件即使正常返回，后续仍被跳过。[配置窄化证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/preferences-narrow.json)。
 
 另一层已复现的问题是所有第三方 Shell 菜单都被收进“更多选项”。现在将非背景选择的 7-Zip 子菜单放到最外层，在固定内置项之后；保留原始子命令、偏好筛选和当前会话绑定，迟到回复仍能更新已打开的菜单。其他软件入口保留。
 
@@ -783,7 +783,7 @@ F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审�
 | TXT + ZIP | 1447 | 2647 | 16 |
 | 单目录 | 1087 | 2286 | 16 |
 
-最终回复时间包含其他扩展；不能全归因于 7-Zip，也不是压缩执行时间。7-Zip 到达后即可显示，无需等待所有扩展结束。[查询汇总](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/summary.json)。
+最终回复时间包含其他扩展；不能全归因于 7-Zip，也不是压缩执行时间。7-Zip 到达后即可显示，无需等待所有扩展结束。[查询汇总](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/summary.json)。
 
 另做一次独立分段测量，使用同一专用单文件夹具：
 
@@ -801,8 +801,8 @@ F06、F07、F10、F11、F12、F13、F15、F21、F22、F28、F29、F30 保留审�
 ### 定向验证与限制
 
 - 修复前同一回归夹具出现 15 条菜单断言失败、4 条慢调用策略断言失败；修复后策略 10 PASS、单选/多选/混合选择及真实 FluentMenu 刷新渲染 73 PASS、原异步菜单边界 9 PASS，均为 0 FAIL。缓存结果在当前会话验证前保持不可调用，验证后按新命令 ID 绑定。
-- 用实际配置经生产 FromJson 解析、重放四类真实 Shell 回调的 172 条检查通过；恢复后不再向宿主传入 7-Zip 跳过 CLSID，每个含 7-Zip 的阶段均恰好有一个最外层入口及 16 个对应的有效会话命令。该夹具重放先前已取得的真实回调，并未冒充修复后重新完成安装版交互。[配置与回调对照](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/composition-after-prefs-fix.log)。
-- 生成 24 张深浅主题、100%/150% 的根菜单及子菜单截图，标签裁切检查通过；人工查看其中 4 张代表截图，未见裁切或重叠。截图子命令使用受控注入数据，不是安装版真实菜单截图。[单选根菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/single-100-dark.png)、[多选根菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light.png)、[子菜单](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light-children.png)。
+- 用实际配置经生产 FromJson 解析、重放四类真实 Shell 回调的 172 条检查通过；恢复后不再向宿主传入 7-Zip 跳过 CLSID，每个含 7-Zip 的阶段均恰好有一个最外层入口及 16 个对应的有效会话命令。该夹具重放先前已取得的真实回调，并未冒充修复后重新完成安装版交互。配置与回调对照（历史本地附件：`docs/validation/issue-confirm-2026-10-23/sevenzip-menu/composition-after-prefs-fix.log`）。
+- 生成 24 张深浅主题、100%/150% 的根菜单及子菜单截图，标签裁切检查通过；人工查看其中 4 张代表截图，未见裁切或重叠。截图子命令使用受控注入数据，不是安装版真实菜单截图。[单选根菜单](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/single-100-dark.png)、[多选根菜单](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light.png)、[子菜单](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/sevenzip-menu/multi-150-light-children.png)。
 - 仅构建 `pulse` 和 `pulse_context_menu_loading_test`，无新增编译警告；最终 `Pulse.exe` SHA256 `646fbbd8dd64c46e49b2c40b00988f0355f511e8d58b7449850d828a556077dc`。同步更新已有 selftest 的旧策略断言，但没有运行完整 selftest/release。
 - 实际配置 SHA256 前后相同：`96fc981897ab3dc39cc371bcc89b5a432c3d29ca2b865e32a167034e2a382948`。没有修改用户配置、安装目录、服务、ACL 或真实索引；现场恢复须使用更新后的程序加载配置。没有验证实际 7-Zip 命令执行或解决此前压缩包调用卡住的问题。
 
@@ -927,7 +927,7 @@ Everything 官方 FAQ 区分数据库磁盘大小与 RAM，并说明 1.4 默认�
 
 ### 8. 本轮实际验证与测量
 
-专用 `pulse_index_storage_test`：**42 项顶层检查 PASS / 0 FAIL，退出码 0**，其中包含 baseline、overlay、WAL-restart 三组各 97 个查询比较。数据为两个合成 MFT 卷、6 万文件、48 个目录，未扫描真实内置磁盘。旧模式明确断言两个分卷映射生效，新模式断言无分卷映射。[原始日志](E:/Projects/pulse/bench_data/index-storage-optimization/paired-run.log)。
+专用 `pulse_index_storage_test`：**42 项顶层检查 PASS / 0 FAIL，退出码 0**，其中包含 baseline、overlay、WAL-restart 三组各 97 个查询比较。数据为两个合成 MFT 卷、6 万文件、48 个目录，未扫描真实内置磁盘。旧模式明确断言两个分卷映射生效，新模式断言无分卷映射。原始日志（历史本地附件：`bench_data/index-storage-optimization/paired-run.log`）。
 
 | 检查 | 实际结果 |
 |---|---|
@@ -948,7 +948,7 @@ Everything 官方 FAQ 区分数据库磁盘大小与 RAM，并说明 1.4 默认�
 
 空间为快照文件逻辑长度，未计真实 WAL、分配簇和临时峰值。映射长度不等于 Working Set 或 Private Bytes，没有据此宣称 RAM 减半。查询各模式/阶段先预热 3 次，再计时 30 次，轮换 alpha、*.txt、record 的名称排序首屏/分页查询，并清理 Engine 查询缓存；OS 文件缓存没有清空，旧模式先测。这一组 P95 分别约 +6.0% 和 −3.2%，没有观察到超过拟议 10% 的回退，但不是全面性能保证，也不能代替大规模安装现场基线。两次发布耗时不是整盘扫描耗时。
 
-`pulse_index`、`pulse` 和专用测试目标均构建成功，无新编译警告。主程序 SHA256 保持此前值；索引程序 SHA256 为 `b460630d23cff6c0d5b624dff9aa5ed570739e9c64199db734b713bfa311a0e2`。没有运行完整 release/selftest；没有将历史测试标成这次重新通过。[结构化结果与哈希](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/storage-optimization-implementation.json)。
+`pulse_index`、`pulse` 和专用测试目标均构建成功，无新编译警告。主程序 SHA256 保持此前值；索引程序 SHA256 为 `b460630d23cff6c0d5b624dff9aa5ed570739e9c64199db734b713bfa311a0e2`。没有运行完整 release/selftest；没有将历史测试标成这次重新通过。[结构化结果与哈希](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/storage-optimization-implementation.json)。
 
 ### 9. exFAT U 盘实际结果
 
@@ -962,7 +962,7 @@ Everything 官方 FAQ 区分数据库磁盘大小与 RAM，并说明 1.4 默认�
 | 取消与陈旧结果 | 回调边界取消、失效设备缓存、旧 generation 拦截与当前 generation 接受均通过 |
 | 清理 | 只创建 11 个小型数据文件及归属标记；核对唯一目录、父路径、标记与卷 GUID 后清理，并确认该目录不存在 |
 
-[设备与逐项证据](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/exfat-device-validation.json)；[实盘夹具](E:/Projects/pulse/src/bench/removable_exfat_device_test.cpp)。毫秒计时舍入为 0，不用作性能依据。没有整盘扫描、真实拔插或安装版 UI 手工验收；无法监控受保护的 D:/AppData/Index，因此这里只证明本轮后端/策略及隔离写入口行为，不声称全局真实索引目录零写入。
+[设备与逐项证据](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/exfat-device-validation.json)；[实盘夹具](E:/Projects/pulse/src/bench/removable_exfat_device_test.cpp)。毫秒计时舍入为 0，不用作性能依据。没有整盘扫描、真实拔插或安装版 UI 手工验收；无法监控受保护的 D:/AppData/Index，因此这里只证明本轮后端/策略及隔离写入口行为，不声称全局真实索引目录零写入。
 
 ### 10. 当前尚未完成的部分
 
@@ -1045,7 +1045,7 @@ Everything 官方 FAQ 区分数据库磁盘大小与 RAM，并说明 1.4 默认�
 
 修复前审计/验证记录的 HEAD 为 `45fdd54920eb23b1bcca3759bf33a161422327d4`，期间已有回收站按钮、分组工具栏等并发修改，均予保留。该历史阶段主程序 SHA256 为 `6e6a626d17072d483dbb84b2161957ce64ce6a01a32f49ff577a6a36078a87b5`，当时没有重建主程序。所记录的 498 个产品模块源码/头文件在该阶段开始与汇总时哈希一致；本轮修复后程序哈希见前文，两者不混用。
 
-来源与结构化证据：[候选来源快照](E:/Projects/pulse/docs/validation/issue-bug-audit-2026-10-23/sources.json)；[102 条原文刷新记录](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/source-refresh.json)；[验证工作区快照](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/workspace-snapshot.json)；[168 条统一结构化结果](E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/results.json)。
+来源与结构化证据：[候选来源快照](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-bug-audit-2026-10-23/sources.json)；[102 条原文刷新记录](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/source-refresh.json)；[验证工作区快照](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/workspace-snapshot.json)；[168 条统一结构化结果](https://github.com/EternalLightning/pulse/blob/aad8a3bc9a7f0fcfeff34a98bf3b154f9af8d18d/docs/validation/issue-confirm-2026-10-23/results.json)。
 
 刷新正文位于 `E:/Projects/pulse/docs/validation/issue-confirm-2026-10-23/sources/<编号>-readable.json`。各组 JSON 为证据包；完整结论和方法均已收入本文。
 
@@ -1053,7 +1053,7 @@ Everything 官方 FAQ 区分数据库磁盘大小与 RAM，并说明 1.4 默认�
 
 使用私有 console fixture链接现有生产对象，不写共享构建对象、不修改产品源码/CMake/偏好、不操作用户Pulse、不用桌面全局输入。窗口为隐藏WS_POPUP，生产状态转换和绘制/命中逻辑可以验证，DWM原生非客户区、任务栏、第三方注入与真实IME仍不在该fixture证明范围。
 
-证据入口：[runtime.log](E:/Projects/pulse/bench_data/issue-confirm-ui/runtime.log)、[fixture](E:/Projects/pulse/bench_data/issue-confirm-ui/confirm.cpp)、[对象与源码记录](E:/Projects/pulse/bench_data/issue-confirm-ui/provenance.json)、[有效图片清单](E:/Projects/pulse/bench_data/issue-confirm-ui/visual-manifest.json)。所有关键TU对象时间晚于对应源文件，关键头文件及所有链接对象SHA256已保存；这不是干净重建保证。
+证据入口：runtime.log（历史本地附件：`bench_data/issue-confirm-ui/runtime.log`）、fixture（历史本地附件：`bench_data/issue-confirm-ui/confirm.cpp`）、对象与源码记录（历史本地附件：`bench_data/issue-confirm-ui/provenance.json`）、有效图片清单（历史本地附件：`bench_data/issue-confirm-ui/visual-manifest.json`）。所有关键TU对象时间晚于对应源文件，关键头文件及所有链接对象SHA256已保存；这不是干净重建保证。
 
 截图校准：首轮在Present后读取buffer0得到旧帧/空图，已修正为EndDraw后、Present前。有效16帧全部被最终fixture覆盖；manifest列出的excluded_stale_initial_layouts不计验收。最终16帧为320/420/600/800 DIP×100%/200%×深浅主题，均非纯空色图。19标签下48次标题按钮命中均正确。列表图标未启用真实Shell宿主，空图标不构成产品图标结论。
 
