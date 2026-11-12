@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
+#include "../common/unique_resource.h"
 #include <windows.h>
 #include <algorithm>
 #include <functional>
@@ -47,6 +48,8 @@ public:
         HANDLE find = FindFirstFileExW(pattern.c_str(), FindExInfoStandard, &data, FindExSearchNameMatch, nullptr,
                                        FIND_FIRST_EX_LARGE_FETCH);
         if (find == INVALID_HANDLE_VALUE) return;
+        struct CloseFind { void operator()(HANDLE value) const noexcept { FindClose(value); } };
+        UniqueResource<HANDLE, nullptr, CloseFind> find_owner(find);
         // A huge folder receiving a few items: past this many names, asking
         // about each item is cheaper.
         size_t budget = (std::max)(size_t{4096}, items * 64);
@@ -63,7 +66,7 @@ public:
                 break;
             }
         }
-        FindClose(find);
+        find_owner.reset();
         valid_ = complete && !(cancelled && cancelled());
         if (!valid_) names_.clear();
     }

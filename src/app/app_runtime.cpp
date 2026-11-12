@@ -521,7 +521,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_change_days = s.appPrefs.change_tracking_days;
             vm.settings_row_height = s.appPrefs.row_height;
             vm.settings_text_render = s.appPrefs.text_render;
-            vm.settings_tray_icon = s.appPrefs.tray_icon_size;
             vm.settings_language = s.appPrefs.language == L"zh-CN" ? 1
                 : s.appPrefs.language == L"en-US" ? 2 : 0;
             wchar_t version_text[128]{};
@@ -670,6 +669,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 vm.status.status_text = l10n::Get(l10n::StringId::Settings);
 
             vm.dup_scope = static_cast<int>(s.duplicateScan.scope);
+            vm.dup_skip_small_files = s.duplicateScan.skip_small_files;
             vm.dup_folder = s.duplicateScan.folder_path;
             vm.dup_min_size = s.duplicateScan.minimum_file_bytes <= 1024 ? 0
                 : s.duplicateScan.minimum_file_bytes <= 1024ull * 1024ull ? 1 : 2;
@@ -1484,7 +1484,7 @@ static std::wstring ContextStatusHint(const app::Tab* tab) {
 }
 
 bool PumpClipboardAvailability(AppState& s, ULONGLONG now) {
-    const bool tray_present = !s.tray.batches().empty();
+    const bool tray_present = s.appPrefs.staging_tray_enabled && !s.tray.batches().empty();
     auto& availability = s.clipboard_availability;
     bool changed = availability.UpdateVersioned(GetClipboardSequenceNumber(),
         IsClipboardFormatAvailable(CF_HDROP) != 0, tray_present, s.tray.AvailabilityRevision(), [&] {
@@ -1710,6 +1710,10 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.settings_auto_folder_size = s.appPrefs.auto_folder_size;
     vm.settings_folder_sort = s.appPrefs.folder_sort_mode;
     vm.sidebar_scroll = s.sidebarScroll;
+    vm.staging_tray_enabled = s.appPrefs.staging_tray_enabled;
+    s.stagingTrayAnimation.Tick(vm.staging_tray_enabled, fold_now,
+        s.renderer.MotionEnabled() && !s.shot_high_contrast && !ui::IsHighContrast(), 180.0f);
+    vm.staging_tray_presence = s.stagingTrayAnimation.value;
     vm.sidebar_scrollbar_opacity = s.sidebarScrollbarFade.opacity;
     vm.sidebar_scrollbar_expand = s.sidebarScrollbarFade.expand;
     if (s.groupDragActive) {
@@ -1837,7 +1841,6 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         ui::TrayDeckView& deck = vm.tray_deck;
         deck.open = s.trayOpen;
         deck.spread = s.traySpread;
-        deck.thumb_dip = static_cast<float>(s.appPrefs.tray_icon_size);
         deck.offset = TrayStackTop(s);
         deck.total_count = TrayItemTotalCount(s.tray);
         deck.batch_count = static_cast<int>(s.tray.batches().size());
@@ -2173,7 +2176,6 @@ std::wstring TooltipForHover(AppState& s) {
             ? I::TooltipClearBackground : I::TooltipChooseBackground);
     case R::SettingsDensity: return text(I::SettingsRowHeight);
     case R::SettingsFolderSort: return text(I::SettingsFolderSort);
-    case R::SettingsTrayIcon: return text(I::SettingsTrayIcon);
     case R::SettingsWallpaperLook: return text(I::SettingsWallpaperLook);
     case R::SettingsWallpaperBlur: return text(I::SettingsWallpaperBlur);
     case R::SettingsAccent:
@@ -2345,6 +2347,7 @@ std::wstring TooltipForHover(AppState& s) {
     }
     case R::TrayPrev: return pulse::l10n::Get(pulse::l10n::StringId::TrayPrev);
     case R::TrayNext: return pulse::l10n::Get(pulse::l10n::StringId::TrayNext);
+    case R::TrayRelease: return pulse::l10n::Get(pulse::l10n::StringId::Release);
     default: return L"";
     }
 }

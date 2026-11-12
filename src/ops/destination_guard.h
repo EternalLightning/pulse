@@ -280,8 +280,12 @@ public:
         if (parts.empty()) return Fail(path, error);
         for (const auto& part : parts) {
             const auto found = snapshots_.find(part);
+            const auto lease = leases_->handles.find(part);
+            // Directory leases deny rename/delete; keep checking their live metadata
+            // through the held object. Unleased leaves still require a pathname open.
+            const HANDLE pinned = lease == leases_->handles.end() ? nullptr : lease->second.get();
             Snapshot current;
-            if (found == snapshots_.end() || !Read(part, current) || !Same(found->second, current))
+            if (found == snapshots_.end() || !Read(part, current, pinned) || !Same(found->second, current))
                 return Fail(part, error);
         }
         return true;
@@ -560,10 +564,18 @@ private:
     }
     static std::vector<std::wstring> Components(const std::wstring& path) {
         if (path.empty()) return {};
-        std::vector<wchar_t> full(32768);
-        const DWORD length = GetFullPathNameW(path.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
-        if (!length || length >= full.size()) return {};
-        std::wstring name = std::filesystem::path(std::wstring(full.data(), length)).lexically_normal().wstring();
+        wchar_t short_path[MAX_PATH]{};
+        DWORD length = GetFullPathNameW(path.c_str(), MAX_PATH, short_path, nullptr);
+        if (!length) return {};
+        std::wstring name;
+        if (length < MAX_PATH) name.assign(short_path, length);
+        else {
+            std::vector<wchar_t> full(32768);
+            length = GetFullPathNameW(path.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
+            if (!length || length >= full.size()) return {};
+            name.assign(full.data(), length);
+        }
+        name = std::filesystem::path(name).lexically_normal().wstring();
         std::replace(name.begin(), name.end(), L'/', L'\\');
         size_t root = 0;
         if (name.starts_with(L"\\\\?\\UNC\\") ||

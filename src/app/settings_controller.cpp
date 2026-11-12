@@ -381,12 +381,6 @@ void SettingsController::TextRendering(int index) {
         SaveAndApply(SettingsEffect::TextRendering);
 }
 
-void SettingsController::TrayIconSize(int index) {
-    static constexpr int values[] = {40, 48, 56};
-    if (prefs_ && SelectValue(index, values, prefs_->tray_icon_size))
-        SaveAndApply(SettingsEffect::TrayDeckIcon);
-}
-
 // Both only change how the next frame is painted; the caller invalidates.
 void SettingsController::WallpaperVisibility(int percent) {
     if (prefs_ && percent >= 0 && percent <= 100 &&
@@ -485,7 +479,16 @@ void SettingsController::ToggleUi(int index) {
         error_.clear();
         Apply(effects);
     };
-    if (index == 31) {
+    if (index == 36) {
+        prefs_->staging_tray_enabled = !prefs_->staging_tray_enabled;
+        if (!prefs_->Save()) {
+            prefs_->staging_tray_enabled = !prefs_->staging_tray_enabled;
+            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        } else {
+            error_.clear();
+            Apply(SettingsEffect::StagingTray);
+        }
+    } else if (index == 31) {
         const bool previous = prefs_->start_to_tray;
         if (prefs_->launch_on_startup && !prefs_->ApplyLaunchOnStartup(true)) {
             error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);

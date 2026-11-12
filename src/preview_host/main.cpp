@@ -34,6 +34,7 @@
 using namespace pulse;
 using Microsoft::WRL::ComPtr;
 using preview::DecodeImage;
+using preview::IsOneOf;
 
 namespace {
 
@@ -56,19 +57,6 @@ std::wstring ExtensionOf(const std::wstring& path) {
 // reject \\?\ extended paths; the fs layer hands them out for long-path support.
 std::wstring ShellPath(const std::wstring& path) {
     return pulse::path::StripExtendedPathPrefix(path);
-}
-
-bool IsOneOf(std::wstring_view extension,
-             std::initializer_list<std::wstring_view> values) {
-    return std::find(values.begin(), values.end(), extension) != values.end();
-}
-
-bool IsKnownText(std::wstring_view extension) {
-    return pulse::preview::IsTextExtension(extension);
-}
-
-bool IsDirectImage(std::wstring_view extension) {
-    return pulse::preview::IsImageExtension(extension);
 }
 
 bool IsKnownShellPreview(std::wstring_view extension) {
@@ -208,7 +196,7 @@ std::wstring MakeHex(const std::vector<uint8_t>& bytes) {
 bool MakeTextOrHex(const std::wstring& path, DWORD attrs, ipc::PreviewContentKind& kind,
                    std::wstring& text, uint32_t& bytes_read, bool& truncated) {
     if ((attrs & FILE_ATTRIBUTE_DIRECTORY) || IsOfflinePlaceholder(attrs)) return false;
-    const bool known_text = IsKnownText(ExtensionOf(path));
+    const bool known_text = preview::IsTextExtension(ExtensionOf(path));
     std::vector<uint8_t> bytes;
     uint64_t file_size = 0;
     const DWORD initial = known_text ? 32u * 1024u : 256u;
@@ -690,7 +678,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                                           pixels, w, h, stride);
                 if (made) response.kind = ipc::PreviewContentKind::Bitmap;
                 else errorText = L"provider-failed";
-            } else if (IsDirectImage(extension)) {
+            } else if (preview::IsImageExtension(extension)) {
                 uint32_t frame_count = 1, frame_delay = 0, loop_count = 0;
                 const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);

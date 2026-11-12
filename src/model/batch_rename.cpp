@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "batch_rename.h"
+#include "../common/file_name.h"
 #include "../common/file_identity.h"
 #include "../fs/fs_enum.h"
 #include <algorithm>
@@ -152,19 +153,7 @@ void SplitFileName(const std::wstring& name, std::wstring& stem, std::wstring& e
 }
 
 bool IsValidFileName(const std::wstring& name) {
-    if (name.empty()) return false;
-    if (name.back() == L' ' || name.back() == L'.') return false;
-    for (const wchar_t c : name) {
-        if (c < 32) return false;
-        switch (c) {
-        case L'<': case L'>': case L':': case L'"':
-        case L'/': case L'\\': case L'|': case L'?': case L'*':
-            return false;
-        default:
-            break;
-        }
-    }
-    return true;
+    return path::IsValidFileName(name);
 }
 
 std::wstring ApplyBatchRenameRule(const std::wstring& name, size_t index,

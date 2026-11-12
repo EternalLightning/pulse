@@ -381,9 +381,20 @@ int main(int argc, char** argv) {
     Check(std::filesystem::exists(root / L"stay.txt") && !std::filesystem::exists(root / L"child" / L"moved.txt") &&
         ops.Status().phase == OpPhase::Failed, "path component rejected without moving file");
     for (const auto name : {L"child/name.txt", L"..\\escape.txt", L"C:\\escape.txt", L"bad:name", L"bad?name",
-        L"CON.txt", L"LPT1", L"trailing.", L"trailing ", L".", L"..", L""}) {
+        L"CON.txt", L"con .txt", L"CONIN$", L"CONOUT$.log", L"LPT\u00b9.md", L"LPT1",
+        L"trailing.", L"trailing ", L".", L"..", L""}) {
         rename(L"stay.txt", name);
         Check(Exact(root / L"stay.txt") && ops.Status().phase == OpPhase::Failed, "invalid filename rejected");
+    }
+    DWORD component_limit = 0;
+    const bool volume_info = GetVolumeInformationW(root.root_path().c_str(), nullptr, 0, nullptr,
+        &component_limit, nullptr, nullptr, 0) && component_limit != 0;
+    Check(volume_info, "read the actual fixture filesystem component limit");
+    if (volume_info) {
+        const std::wstring too_long(static_cast<size_t>(component_limit) + 1, L'a');
+        rename(L"stay.txt", too_long.c_str());
+        Check(Exact(root / L"stay.txt") && ops.Status().phase == OpPhase::Failed,
+            "native rename enforces the filesystem length limit without changing the source");
     }
     make(L"first.txt"); make(L"second.txt"); make(L"third.txt");
     OpRequest batch; batch.type = OpType::BatchRename;

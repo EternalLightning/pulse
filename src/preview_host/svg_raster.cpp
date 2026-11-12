@@ -12,6 +12,7 @@
 // rasterizer, and documents that are too large to parse inside the UI's request
 // budget are refused instead of risking a timeout.
 #include "svg_raster.h"
+#include "../common/unique_resource.h"
 
 #include <d2d1_3.h>
 #include <d2d1svg.h>
@@ -161,6 +162,8 @@ bool ReadWholeFile(const std::wstring& path, std::vector<unsigned char>& bytes) 
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
+    const auto close_file = [](HANDLE value) noexcept { CloseHandle(value); };
+    const UniqueResource<HANDLE, nullptr, decltype(close_file)> owner(file);
     LARGE_INTEGER size{};
     bool ok = GetFileSizeEx(file, &size) != 0 && size.QuadPart > 0 &&
         static_cast<uint64_t>(size.QuadPart) <= kMaxSvgBytes;
@@ -170,7 +173,6 @@ bool ReadWholeFile(const std::wstring& path, std::vector<unsigned char>& bytes) 
         ok = ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) != 0;
         if (ok) bytes.resize(read);
     }
-    CloseHandle(file);
     if (!ok) bytes.clear();
     return ok;
 }

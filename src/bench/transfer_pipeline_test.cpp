@@ -8,8 +8,10 @@
 #include "ops/transfer_target_listing.h"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -112,7 +114,8 @@ bool RenameFixtureObject(const fs::path& source, const fs::path& destination) {
     SetLastError(error);
     return renamed;
 }
-enum class Mode { Normal, Cancel, Fail, ReplaceSource, IdentityMismatch, ReplaceDestination, OccupyVacatedName };
+enum class Mode { Normal, Cancel, Fail, ReplaceSource, IdentityMismatch, ReplaceDestination, OccupyVacatedName,
+    CreateDestination };
 struct CopyState {
     Mode mode = Mode::Normal;
     OpsManager* manager = nullptr;
@@ -120,6 +123,7 @@ struct CopyState {
     fs::path replacement_backup;
     std::atomic<int> active{0}, maximum{0}, large_active{0}, large_maximum{0};
     std::atomic<int> calls{0};
+    std::atomic<unsigned> staged{0};
     std::atomic<DWORD> injection_error{ERROR_SUCCESS};
     std::atomic<DWORD> retained_copy_read_error{ERROR_SUCCESS};
     FileIdentity identity_target;
@@ -181,6 +185,7 @@ HRESULT WINAPI ControlledCopy(PCWSTR source, PCWSTR destination, COPYFILE2_EXTEN
     if (large) Maximum(observed.large_maximum, ++observed.large_active);
     else if (observed.large_active.load()) observed.small_overlapped.store(true);
     ++observed.calls;
+    if (std::wcsstr(destination, L".pulse-copy-")) ++observed.staged;
     struct Retire {
         CopyState& observed;
         bool large;
@@ -190,6 +195,8 @@ HRESULT WINAPI ControlledCopy(PCWSTR source, PCWSTR destination, COPYFILE2_EXTEN
     Sleep(150);
     if (!large && observed.large_active.load()) observed.small_overlapped.store(true);
     if (observed.mode == Mode::IdentityMismatch) observed.injected.store(true);
+    if (observed.mode == Mode::CreateDestination && !observed.injected.exchange(true))
+        Write(destination, 29, 'D');
     if (observed.mode == Mode::ReplaceSource && !observed.injected.exchange(true)) {
         const fs::path old = fs::path(source).wstring() + L".original";
         if (!RenameFixtureObject(source, old)) {
@@ -318,6 +325,20 @@ void RunListingTests(const fs::path& fixture) {
     Check(bounded && unknown, "mid-listing cancellation stops within its checkpoint and discards partial absence hints");
     Check(counted_before && counted_after && handles_after <= handles_before,
         "repeated cancellation closes every target enumeration handle");
+    unsigned exceptions = 0;
+    const bool counted_exception_baseline = GetProcessHandleCount(GetCurrentProcess(), &handles_before) != FALSE;
+    for (unsigned i = 0; i < 32; ++i) {
+        checks = 0;
+        try {
+            TransferTargetListing interrupted(folder.wstring(), 16, [&] {
+                if (++checks == 3) throw std::runtime_error("listing interrupted");
+                return false;
+            });
+        } catch (const std::runtime_error&) { ++exceptions; }
+    }
+    const bool counted_exceptions = GetProcessHandleCount(GetCurrentProcess(), &handles_after) != FALSE;
+    Check(counted_exception_baseline && counted_exceptions && exceptions == 32 && handles_after <= handles_before,
+        "throwing listing callbacks close every target enumeration handle");
     TransferTargetListing resumed(folder.wstring(), 16, [] { return false; });
     bool present = !resumed.SurelyAbsent(L"present.TXT");
     for (unsigned i = 0; i < 32; ++i) present &= !resumed.SurelyAbsent(std::to_wstring(i) + L".txt");
@@ -325,9 +346,73 @@ void RunListingTests(const fs::path& fixture) {
         "new uncancelled listing remains complete after earlier cancellations");
 }
 
+void RunVerificationTests(const fs::path& fixture) {
+    for (const bool verify : {false, true}) {
+        Case test(fixture, verify ? L"verify" : L"conflict", {31003, 17011, 23003});
+        if (!verify) {
+            test.request.collision_policy = CollisionPolicy::Replace;
+            for (const auto& source : test.request.sources) Write(test.destination / fs::path(source).filename(), 11, 'X');
+        }
+        OpsManager manager;
+        CopyState observed;
+        Configure(manager, observed, test, false, verify);
+        TransferIntegrationProbe::Run(manager, test.request);
+        Check(manager.Status().phase == OpPhase::Completed && observed.maximum == 1 &&
+            (verify || observed.staged == test.sizes.size()) &&
+            test.Sources() && test.Destinations() && test.NoTemporary() && (!verify || observed.verifications == 3),
+            verify ? "hash verification retains serial copy fallback and verifies every file"
+                   : "replacement conflicts retain serial guarded copy fallback");
+    }
+}
+
+void RunDirectCopyTests(const fs::path& fixture) {
+    {
+        Case test(fixture, L"direct-small", {16384, 65536});
+        OpsManager manager;
+        CopyState observed;
+        Configure(manager, observed, test);
+        TransferIntegrationProbe::Run(manager, test.request);
+        Check(manager.Status().phase == OpPhase::Completed && observed.staged == 0 &&
+            test.Sources() && test.Destinations() && test.NoTemporary() &&
+            TransferIntegrationProbe::UndoMatches(manager, test.request),
+            "plain copies through 64KiB use final names and retain contents, cleanup and undo identity");
+    }
+    {
+        Case test(fixture, L"direct-mixed", {262144, 16384, 65536, 262144});
+        OpsManager manager;
+        CopyState observed;
+        Configure(manager, observed, test);
+        TransferIntegrationProbe::Run(manager, test.request);
+        Check(manager.Status().phase == OpPhase::Completed && observed.staged == 2 && observed.maximum >= 2 &&
+            test.Sources() && test.Destinations() && test.NoTemporary(),
+            "mixed batches stage only larger worker copies while small files keep the direct path");
+    }
+    for (const auto mode : {Mode::Cancel, Mode::Fail, Mode::IdentityMismatch, Mode::CreateDestination}) {
+        const auto name = L"direct-boundary-" + std::to_wstring(static_cast<int>(mode));
+        Case test(fixture, name.c_str(), {16384, 65536});
+        OpsManager manager;
+        CopyState observed;
+        observed.mode = mode;
+        Configure(manager, observed, test);
+        TransferIntegrationProbe::Run(manager, test.request);
+        const auto status = manager.Status();
+        bool preserved = fs::is_empty(test.destination);
+        if (mode == Mode::CreateDestination)
+            preserved = Content(test.destination / L"0.bin", 29, 'D') && !fs::exists(test.destination / L"1.bin");
+        Check(status.phase == (mode == Mode::Cancel ? OpPhase::Cancelled : OpPhase::Failed) &&
+            (mode != Mode::IdentityMismatch || status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID)) &&
+            observed.staged == 0 && observed.calls == 1 && test.Sources() && preserved && test.NoTemporary(),
+            mode == Mode::Cancel ? "direct copy cancellation removes its partial object and starts no next file" :
+            mode == Mode::Fail ? "direct copy failure removes only its own completed object" :
+            mode == Mode::IdentityMismatch ? "direct copy retains source binding and rejects a changed identity" :
+            "atomic fail-if-exists preserves a late external target during direct copy cleanup");
+    }
+}
+
 void RunTests(const fs::path& fixture) {
     constexpr size_t mib = 1024 * 1024;
     RunListingTests(fixture);
+    RunDirectCopyTests(fixture);
     {
         Case test(fixture, L"tiny-copy-cancel", {4096, 4096});
         OpsManager manager;
@@ -339,7 +424,8 @@ void RunTests(const fs::path& fixture) {
             fs::is_empty(test.destination), "cancelling a direct tiny batch removes its partial copy without starting the next file");
     }
     {
-        Case test(fixture, L"parallel", {12001, 25003, 33007, 8101, 9001, 18001});
+        // Keep these above the direct-copy limit to exercise worker publication.
+        Case test(fixture, L"parallel", {96001, 85003, 73007, 81001, 90001, 78001});
         OpsManager manager;
         CopyState observed;
         Configure(manager, observed, test);
@@ -417,7 +503,7 @@ void RunTests(const fs::path& fixture) {
             "source-only identity mismatch rejects parallel move and preserves sources without committed copies");
     }
     {
-        Case test(fixture, L"destination-change", {37003, 19001});
+        Case test(fixture, L"destination-change", {96001, 85003});
         OpsManager manager;
         CopyState observed;
         observed.mode = Mode::ReplaceDestination;
@@ -444,33 +530,63 @@ void RunTests(const fs::path& fixture) {
             !fs::exists(test.destination / (L"0.bin.pulse-copy-" + suffix)),
             "rollback preserves a new occupant of the vacated name and retains the original backup");
     }
-    for (const bool verify : {false, true}) {
-        Case test(fixture, verify ? L"verify" : L"conflict", {31003, 17011, 23003});
-        if (!verify) {
-            test.request.collision_policy = CollisionPolicy::Replace;
-            for (const auto& source : test.request.sources) Write(test.destination / fs::path(source).filename(), 11, 'X');
+    RunVerificationTests(fixture);
+}
+
+std::atomic<unsigned> benchmark_staged{0};
+HRESULT WINAPI BenchmarkCopy(PCWSTR source, PCWSTR destination, COPYFILE2_EXTENDED_PARAMETERS* parameters) {
+    if (std::wcsstr(destination, L".pulse-copy-")) ++benchmark_staged;
+    return CopyFile2(source, destination, parameters);
+}
+
+void RunCopyBenchmark(const fs::path& fixture) {
+    constexpr size_t count = 128;
+    for (const size_t bytes : {size_t{4096}, size_t{16384}, size_t{65536}, size_t{262144}}) {
+        for (unsigned trial = 0; trial < 2; ++trial) {
+            const auto name = L"size-" + std::to_wstring(bytes) + L"-" + std::to_wstring(trial);
+            Case test(fixture, name.c_str(), std::vector<size_t>(count, bytes));
+            OpsManager manager;
+            TransferIntegrationProbe::Initialize(manager, BenchmarkCopy);
+            benchmark_staged.store(0);
+            const auto start = std::chrono::steady_clock::now();
+            TransferIntegrationProbe::Run(manager, test.request);
+            const double elapsed = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count();
+            std::printf("[PERF] bytes=%zu files=%zu trial=%u ms=%.2f staged=%u\n",
+                bytes, count, trial + 1, elapsed, benchmark_staged.load());
+            Check(manager.Status().phase == OpPhase::Completed && test.Sources() && test.Destinations() &&
+                test.NoTemporary(), "benchmark preserves complete contents, sources and cleanup");
         }
-        OpsManager manager;
-        CopyState observed;
-        Configure(manager, observed, test, false, verify);
-        TransferIntegrationProbe::Run(manager, test.request);
-        Check(manager.Status().phase == OpPhase::Completed && observed.maximum == 1 &&
-            test.Sources() && test.Destinations() && test.NoTemporary() && (!verify || observed.verifications == 3),
-            verify ? "hash verification retains serial copy fallback and verifies every file"
-                   : "replacement conflicts retain serial guarded copy fallback");
     }
+    std::vector<size_t> mixed(count, 4096);
+    mixed.front() = 262144;
+    Case test(fixture, L"mixed-sizes", std::move(mixed));
+    OpsManager manager;
+    TransferIntegrationProbe::Initialize(manager, BenchmarkCopy);
+    benchmark_staged.store(0);
+    const auto start = std::chrono::steady_clock::now();
+    TransferIntegrationProbe::Run(manager, test.request);
+    const double elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    std::printf("[PERF] mixed=127x4KiB+256KiB ms=%.2f staged=%u\n", elapsed, benchmark_staged.load());
+    Check(manager.Status().phase == OpPhase::Completed && test.Sources() && test.Destinations() &&
+        test.NoTemporary(), "mixed benchmark preserves complete contents, sources and cleanup");
 }
 } // namespace
 
 int main(int argc, char** argv) {
     const bool listing_only = argc == 2 && std::strcmp(argv[1], "--listing-only") == 0;
+    const bool verification_only = argc == 2 && std::strcmp(argv[1], "--verification-only") == 0;
+    const bool benchmark = argc == 2 && std::strcmp(argv[1], "--copy-benchmark") == 0;
     const auto parent = (fs::current_path() / L"bench_data").lexically_normal();
     const auto fixture = parent / (L"transfer-pipeline-" + std::to_wstring(GetCurrentProcessId()) +
         L"-" + std::to_wstring(GetTickCount64()));
     try {
         fs::create_directories(parent);
         if (!fs::create_directory(fixture)) throw std::runtime_error("fixture already exists");
-        if (listing_only) RunListingTests(fixture);
+        if (benchmark) RunCopyBenchmark(fixture);
+        else if (listing_only) RunListingTests(fixture);
+        else if (verification_only) RunVerificationTests(fixture);
         else {
             const auto policy = TransferPolicy(fixture.wstring(), fixture.wstring());
             Check(policy.threads >= 2, "fixture storage admits at least two copy lanes");

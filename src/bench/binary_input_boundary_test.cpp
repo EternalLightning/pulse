@@ -5,6 +5,7 @@
 
 #include "../index/usn_record.h"
 #include "../preview_host/metafile_input.h"
+#include "../ipc/delete_plan_protocol.h"
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -290,12 +291,42 @@ void TestWmf() {
     Check(ValidMeta(Wmf(kMaxMetaFileRecords)), "WMF accepts the exact actual record budget");
     Check(!ValidMeta(Wmf(kMaxMetaFileRecords + 1)), "WMF rejects actual record counts over budget");
 }
+void TestDeleteWirePaths() {
+    using namespace pulse::ipc;
+    for (const auto* path : {L"C:\\Fixture\\normal.txt", L"\\\\?\\C:\\Fixture\\你好.txt",
+        L"\\\\?\\UNC\\server\\share\\normal.txt", L"C:\\Fixture\\COM0.txt", L"C:\\Fixture\\.gitignore"})
+        Check(IsLosslessDeleteShellPath(path), "normal drive/UNC/Unicode names remain accepted");
+    for (const auto* path : {L"C:\\Fixture\\name.", L"C:\\Fixture\\name ", L"C:\\Fixture\\NUL.txt",
+        L"C:\\Fixture\\CON .txt", L"C:\\Fixture\\conin$.txt", L"C:\\Fixture\\CONOUT$",
+        L"C:\\Fixture\\LPT\u00b9.txt", L"C:\\Fixture\\COM9", L"C:\\Fixture\\file:stream",
+        L"C:\\Fixture\\..\\file", L"C:\\Fixture\\.\\file", L"C:\\Fixture\\file\\", L"C:\\Fixture\\\\file",
+        L"C:\\Fixture\\a/b", L"C:\\Fixture\\a?b", L"C:relative", L"relative\\file", L"C:\\"})
+        Check(!IsLosslessDeleteShellPath(path), "ambiguous or non-absolute Shell path rejected");
+    PayloadWriter wire;
+    wire.PutU64(123); wire.PutU64(456); wire.PutStringArray({L"C:\\Fixture\\CON .txt"});
+    PayloadReader reader(wire.data().data(), wire.data().size());
+    DeleteWirePlan plan;
+    Check(!ReadDeleteWirePlan(reader, plan), "wire decoder rejects a lossy device alias");
+    PayloadWriter normal;
+    normal.PutU64(123); normal.PutU64(456); normal.PutStringArray({L"C:\\Fixture\\Foo", L"C:\\Fixture\\foo"});
+    PayloadReader normal_reader(normal.data().data(), normal.data().size());
+    Check(ReadDeleteWirePlan(normal_reader, plan) && plan.paths.size() == 2,
+        "wire decoder preserves case-distinct paths");
+    DeleteHostAdmission admission;
+    Check(!admission.Consume(plan, 124) && admission.Consume(plan, 123) && !admission.Consume(plan, 123),
+        "host admission still rejects stale epochs and replayed tokens");
+}
 } // namespace
 
-int main() {
-    TestUsn();
-    TestEmf();
-    TestWmf();
+int main(int argc, char** argv) {
+    TestDeleteWirePaths();
+    if (argc == 1) {
+        TestUsn();
+        TestEmf();
+        TestWmf();
+    } else if (argc != 2 || std::string_view(argv[1]) != "--delete-wire-only") {
+        return 2;
+    }
     std::cout << checks - failures << " PASS, " << failures << " FAIL\n";
     return failures ? 1 : 0;
 }

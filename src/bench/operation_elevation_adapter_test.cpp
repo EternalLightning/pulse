@@ -487,6 +487,11 @@ int wmain(int argc, wchar_t** argv) {
         return OperationElevationAdapter::RunWorker(argc, argv);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     try {
+        if (argc == 2 && std::wstring_view(argv[1]) == L"--codec-only") {
+            Check(OperationElevationAdapter::CodecChecksForTest(),
+                "request codec uses shared filename validation and recognizes ordinary and extended drive roots");
+            return failures ? 1 : 0;
+        }
         if (argc > 1 && std::wstring_view(argv[1]) == L"--partial-continuation") {
             RunPartialContinuation();
             return failures ? 1 : 0;

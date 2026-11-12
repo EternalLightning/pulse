@@ -526,6 +526,12 @@ void ElevationBatchFixtures() {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--transfer-plan") == 0) {
+        try { BatchAndOutcomeFixtures(); }
+        catch (const std::exception& error) { std::printf("[FAIL] fixture exception: %s\n", error.what()); ++failures; }
+        std::printf("%d failure(s)\n", failures);
+        return failures ? 1 : 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--elevation-batch") == 0) {
         ElevationBatchFixtures();
         std::printf("%d failure(s)\n", failures);

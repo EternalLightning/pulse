@@ -5,6 +5,8 @@
 
 #pragma once
 #include "animation_snapshot.h"
+#include "../ui/toolbar_layout.h"
+#include "../ui/animation_clock.h"
 #include "../app/archive_navigation.h"
 #include <optional>
 
@@ -30,6 +32,123 @@ struct NavigationMotionUiTest {
         std::memcpy(&color, mapped.bits, sizeof(color));
         sample->Unmap();
         return color;
+    }
+
+    static bool RunSettingsToolbar(AppState& s, const std::filesystem::path& root) {
+        int failures = 0;
+        const auto check = [&](bool ok, const char* label) {
+            std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+            failures += !ok;
+        };
+        auto& r = s.renderer;
+        r.SetDetailsPanelVisible(false);
+        const auto pixels = [&](D2D1_RECT_F bounds) -> std::optional<std::vector<BYTE>> {
+            using Microsoft::WRL::ComPtr;
+            auto* dc = s.compositor.Dc();
+            ComPtr<ID2D1Image> image;
+            ComPtr<ID2D1Bitmap1> target, sample;
+            dc->GetTarget(&image);
+            if (!image || FAILED(image.As(&target))) return {};
+            const D2D1_RECT_U region{static_cast<UINT>(bounds.left), static_cast<UINT>(bounds.top),
+                static_cast<UINT>(bounds.right), static_cast<UINT>(bounds.bottom)};
+            const UINT width = region.right-region.left, height = region.bottom-region.top;
+            const auto properties = D2D1::BitmapProperties1(
+                D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, target->GetPixelFormat());
+            if (FAILED(dc->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties, &sample)) ||
+                FAILED(sample->CopyFromBitmap(nullptr, target.Get(), &region))) return {};
+            D2D1_MAPPED_RECT mapped{};
+            if (FAILED(sample->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return {};
+            std::vector<BYTE> result(static_cast<size_t>(width)*height*4);
+            for (UINT y = 0; y < height; ++y)
+                std::memcpy(result.data()+static_cast<size_t>(y)*width*4, mapped.bits+y*mapped.pitch, width*4);
+            sample->Unmap();
+            return result;
+        };
+        const auto difference = [](const auto& first, const auto& second) {
+            if (!first || !second || first->size() != second->size() || first->empty()) return 1000.0;
+            double total = 0;
+            for (size_t i = 0; i < first->size(); ++i)
+                total += std::abs(static_cast<int>((*first)[i])-static_cast<int>((*second)[i]));
+            return total/first->size();
+        };
+        for (float scale : {1.0f, 1.5f}) for (bool dark : {false, true}) for (float width : {620.0f, 1100.0f}) {
+            r.SetScale(scale);
+            s.compositor.Resize(static_cast<UINT>(width*scale), static_cast<UINT>(720*scale));
+            s.compositor.RecreateTextFormats(scale);
+            r.page_surface_.Reset(); r.settings_content_surface_.Reset(); r.address_path_surface_.Reset();
+            for (auto& surface : r.pane_surfaces_) surface.Reset();
+            for (auto& surface : r.pane_title_surfaces_) surface.Reset();
+            r.hover_tracks_.clear(); r.motion_enabled_ = true;
+            WindowViewModel vm;
+            vm.dark = dark; vm.safe_mode = true;
+            vm.window_effect = WindowEffect::None;
+            vm.pane.path = LR"(C:\Tasks)";
+            vm.pane.header_text = L"Tasks";
+            vm.pane.navigation_owner = 1;
+            vm.pane.is_file_system = true;
+            vm.settings_page = 7;
+            const auto rect = D2D1::RectF(0, 0, width*scale, 720*scale);
+            const auto theme = MakeTheme(dark, HexColor(0x0078D4));
+            const auto prefix = std::wstring(dark ? L"dark-" : L"light-")+
+                std::to_wstring(static_cast<int>(scale*100))+L"-"+std::to_wstring(static_cast<int>(width))+L"-";
+            const auto draw = [&](const wchar_t* name) {
+                auto* dc = s.compositor.Dc();
+                dc->BeginDraw();
+                r.Render(vm, rect, theme);
+                check(SUCCEEDED(dc->EndDraw()), "settings toolbar transition renders without Direct2D errors");
+                if (name) check(WriteAnimationSnapshot(s.compositor, root/(prefix+name+L".png")),
+                    "capture settings toolbar transition frame");
+            };
+            const float left = r.EffectiveSidebarWidth(rect.right);
+            const auto command_bounds = D2D1::RectF(left+4*scale, r.TitleBarHeight()+50*scale,
+                rect.right-4*scale, r.TitleBarHeight()+82*scale);
+            const auto navigation_bounds = D2D1::RectF(left+4*scale, r.TitleBarHeight()+4*scale,
+                rect.right-4*scale, r.TitleBarHeight()+40*scale);
+            draw(L"files");
+            const auto files = pixels(command_bounds);
+            const auto navigation = pixels(navigation_bounds);
+            check(files && navigation, "read command and navigation pixels before settings opens");
+            vm.settings_open = true;
+            draw(L"enter-start");
+            check(r.page_surface_.pending && difference(files, pixels(command_bounds)) < 0.25,
+                "entering settings retains the outgoing file commands on its first frame");
+            r.page_surface_.started_ = AnimationTimeMs()-25;
+            draw(L"enter-middle");
+            const auto middle = pixels(command_bounds);
+            r.page_surface_.started_ = AnimationTimeMs()-260;
+            draw(L"settings");
+            const auto settings = pixels(command_bounds);
+            check(difference(files, middle) > 0.25 && difference(settings, middle) > 0.25,
+                "file commands pass through an intermediate frame instead of disappearing at once");
+            check(!r.page_surface_.pending && difference(navigation, pixels(navigation_bounds)) < 0.25,
+                "settings transition settles while address navigation remains stationary");
+            vm.settings_open = false;
+            draw(L"leave-start");
+            check(r.page_surface_.pending && difference(settings, pixels(command_bounds)) < 0.25,
+                "leaving settings retains its outgoing surface on the first frame");
+            r.page_surface_.started_ = AnimationTimeMs()-90;
+            draw(L"leave-middle");
+            check(difference(files, pixels(command_bounds)) > 0.25,
+                "file commands return gradually when leaving settings");
+            r.page_surface_.started_ = AnimationTimeMs()-260;
+            draw(L"files-restored");
+            check(!r.page_surface_.pending && difference(files, pixels(command_bounds)) < 0.25,
+                "leaving settings restores the complete file command bar");
+            vm.settings_open = true; draw(nullptr);
+            r.page_surface_.started_ = AnimationTimeMs()-25; draw(nullptr);
+            vm.settings_open = false; draw(nullptr);
+            check(r.page_surface_.pending, "rapid reversal keeps the shared page transition active");
+            r.page_surface_.started_ = AnimationTimeMs()-260; draw(nullptr);
+            check(difference(files, pixels(command_bounds)) < 0.25,
+                "rapid reversal restores file commands without a stale settings frame");
+            r.motion_enabled_ = false;
+            vm.settings_open = true; draw(nullptr);
+            check(!r.page_surface_.pending, "disabled motion opens settings immediately");
+            vm.settings_open = false; draw(nullptr);
+            check(!r.page_surface_.pending && difference(files, pixels(command_bounds)) < 0.25,
+                "disabled motion restores file commands immediately");
+        }
+        return failures == 0;
     }
 
     static bool RunEmptyViewport(AppState& s) {

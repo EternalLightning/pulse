@@ -9,8 +9,10 @@
 #include <windows.h>
 #include <winioctl.h>
 #include <algorithm>
+#include <map>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace pulse::ops {
@@ -23,8 +25,7 @@ inline std::wstring TransferVolumeRoot(const std::wstring& path) {
         ? std::wstring(root.data()) : std::wstring{};
 }
 
-inline TransferStorage ClassifyTransferStorage(const std::wstring& path) {
-    const auto root = TransferVolumeRoot(path);
+inline TransferStorage ClassifyTransferVolume(const std::wstring& root) {
     if (root.empty()) return TransferStorage::Unknown;
     if (fs::IsRemoteLikeDrive(root)) return TransferStorage::Remote;
     const UINT type = GetDriveTypeW(root.c_str());
@@ -63,6 +64,7 @@ struct TransferStoragePolicy {
     unsigned threads = 1;
     bool slow_target = false;
     bool block_clone = false;
+    bool remote = false;
 
     bool Unbuffered(uint64_t bytes) const {
         if (bytes < 64ull * 1024 * 1024 || block_clone) return false;
@@ -72,18 +74,44 @@ struct TransferStoragePolicy {
     }
 };
 
-inline TransferStoragePolicy TransferPolicy(const std::wstring& source, const std::wstring& destination) {
-    const auto from = ClassifyTransferStorage(source), to = ClassifyTransferStorage(destination);
+inline TransferStoragePolicy TransferPolicyForVolumes(const std::wstring& source_root, const std::wstring& target_root) {
+    const bool same_volume = !source_root.empty() && _wcsicmp(source_root.c_str(), target_root.c_str()) == 0;
+    const auto from = ClassifyTransferVolume(source_root);
+    const auto to = same_volume ? from : ClassifyTransferVolume(target_root);
     TransferStoragePolicy policy;
     policy.threads = (std::min)(TransferStorageThreads(from), TransferStorageThreads(to));
     policy.slow_target = to == TransferStorage::Remote || to == TransferStorage::Removable ||
         to == TransferStorage::Spinning;
-    const auto source_root = TransferVolumeRoot(source), target_root = TransferVolumeRoot(destination);
+    policy.remote = from == TransferStorage::Remote || to == TransferStorage::Remote;
     DWORD flags = 0;
-    if (!source_root.empty() && _wcsicmp(source_root.c_str(), target_root.c_str()) == 0 &&
+    if (same_volume &&
         GetVolumeInformationW(target_root.c_str(), nullptr, 0, nullptr, nullptr, &flags, nullptr, 0))
         policy.block_clone = (flags & 0x08000000) != 0; // FILE_SUPPORTS_BLOCK_REFCOUNTING
     return policy;
 }
+
+inline TransferStoragePolicy TransferPolicy(const std::wstring& source, const std::wstring& destination) {
+    return TransferPolicyForVolumes(TransferVolumeRoot(source), TransferVolumeRoot(destination));
+}
+
+// One transfer owns the cache; resolve each new directory pair so mounted
+// subdirectories can select a different volume without repeating device probes.
+class TransferPolicyCache {
+public:
+    const TransferStoragePolicy& Get(const std::wstring& source, const std::wstring& destination) {
+        const auto paths = std::make_pair(source, destination);
+        if (const auto found = paths_.find(paths); found != paths_.end()) return found->second;
+        const auto volumes = std::make_pair(TransferVolumeRoot(source), TransferVolumeRoot(destination));
+        auto found = volumes_.find(volumes);
+        if (found == volumes_.end())
+            found = volumes_.emplace(volumes, TransferPolicyForVolumes(volumes.first, volumes.second)).first;
+        return paths_.emplace(paths, found->second).first->second;
+    }
+
+private:
+    using Key = std::pair<std::wstring, std::wstring>;
+    std::map<Key, TransferStoragePolicy> paths_;
+    std::map<Key, TransferStoragePolicy> volumes_;
+};
 
 } // namespace pulse::ops

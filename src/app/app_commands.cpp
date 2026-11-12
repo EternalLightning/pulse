@@ -2263,8 +2263,11 @@ static void ApplyWindowSettingsEffects(AppState& s, app::SettingsEffect effects)
         }
         InvalidateRect(s.hwnd, nullptr, FALSE);
     }
-    if (app::HasEffect(effects, app::SettingsEffect::TrayDeckIcon))
-        s.renderer.SetTrayIconDip(static_cast<float>(s.appPrefs.tray_icon_size));
+    if (app::HasEffect(effects, app::SettingsEffect::StagingTray)) {
+        s.dropTray = false;
+        s.sidebarScroll = 0.0f;
+        PumpClipboardAvailability(s, GetTickCount64());
+    }
     if (app::HasEffect(effects, app::SettingsEffect::TrayVisibility) &&
         (!s.core.global_ui_owner || s.core.global_ui_owner == s.hwnd))
         s.tray_controller.SetVisible(s.appPrefs.keep_running_on_close || s.appPrefs.global_search_enabled);

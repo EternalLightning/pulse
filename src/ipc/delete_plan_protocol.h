@@ -7,6 +7,7 @@
 #include "protocol.h"
 #include "file_identity_protocol.h"
 #include "../common/path_utils.h"
+#include "../common/file_name.h"
 #include <set>
 #include <utility>
 
@@ -24,14 +25,7 @@ inline bool IsLosslessDeleteShellPath(std::wstring_view path) {
         const size_t slash = parsed.find(L'\\', begin);
         const size_t end = slash == std::wstring::npos ? parsed.size() : slash;
         const auto part = std::wstring_view(parsed).substr(begin, end - begin);
-        if (part.empty() || part == L"." || part == L".." || part.back() == L'.' || part.back() == L' ') return false;
-        for (const wchar_t ch : part) if (ch < L' ' || ch == L':' || ch == L'/' || ch == L'*' || ch == L'?' || ch == L'"' || ch == L'<' || ch == L'>' || ch == L'|') return false;
-        const auto stem = part.substr(0, part.find(L'.'));
-        for (const auto reserved : {L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$"})
-            if (pulse::path::EqualInsensitive(stem, reserved)) return false;
-        if (stem.size() == 4 && (pulse::path::EqualInsensitive(stem.substr(0, 3), L"COM") ||
-            pulse::path::EqualInsensitive(stem.substr(0, 3), L"LPT")) &&
-            ((stem[3] >= L'1' && stem[3] <= L'9') || stem[3] == L'\u00b9' || stem[3] == L'\u00b2' || stem[3] == L'\u00b3')) return false;
+        if (!pulse::path::IsValidFileName(part)) return false;
         ++components;
         if (slash == std::wstring::npos) break;
         begin = slash + 1;

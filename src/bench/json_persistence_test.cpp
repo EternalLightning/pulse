@@ -25,7 +25,12 @@ static int RunSessionPreferencesChecks() {
     };
     const auto root = std::filesystem::absolute(L"bench_data") /
         (L"session-preferences-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-    std::filesystem::create_directories(root);
+    std::error_code fixture_error;
+    std::filesystem::create_directories(root, fixture_error);
+    if (fixture_error) {
+        std::cerr << "[FAIL] create session preference fixture: error=" << fixture_error.value() << '\n';
+        return 2;
+    }
     storage::OverrideDefaultRootForTesting(root.wstring());
     app::SessionSnapshot full;
     full.active_path = L"C:\\retained";

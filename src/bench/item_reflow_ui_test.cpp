@@ -24,11 +24,14 @@ struct ItemReflowUiTest {
     static int RunBulk(const std::filesystem::path& output);
     static int RunSearchContinuity(const std::filesystem::path& output);
     static int RunViewModes(const std::filesystem::path& output);
+    static int RunDenseViewModes();
     static int RunHeaderIconClip(const std::filesystem::path& output);
     static int RunViewModeFeedback(const std::filesystem::path& output);
     static int RunWheelFeedback(const std::filesystem::path& output);
     static int RunFrameProfile(bool presented);
     static int RunVmProfile();
+    static int RunColdScroll();
+    static int RunScrollGhosting();
     static const ViewModeTransition& ViewTransition(const MainRenderer& renderer) {
         return renderer.view_mode_transitions_[0];
     }
@@ -73,10 +76,13 @@ struct ItemReflowUiTest {
 #include "item_reflow_bulk_cases.h"
 #include "search_continuity_cases.h"
 #include "view_mode_transition_cases.h"
+#include "view_mode_dense_cases.h"
 #include "header_icon_clip_cases.h"
 #include "view_mode_transition_feedback_cases.h"
 #include "view_mode_wheel_feedback_cases.h"
 #include "animation_frame_profile_cases.h"
+#include "cold_scroll_cases.h"
+#include "scroll_ghosting_cases.h"
 
 namespace {
 int failures = 0;
@@ -194,6 +200,21 @@ int main(int argc, char** argv) {
         std::printf("[TEST] starting search/filter fixture\n");
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc > 1 && std::string_view(argv[1]) == "--view-mode-dense-only") {
+        const int result = ui::ItemReflowUiTest::RunDenseViewModes();
+        OleUninitialize();
+        return result;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--scroll-ghosting-only") {
+        const int result = ui::ItemReflowUiTest::RunScrollGhosting();
+        OleUninitialize();
+        return result;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--cold-scroll-only") {
+        const int result = ui::ItemReflowUiTest::RunColdScroll();
+        OleUninitialize();
+        return result;
+    }
     if (argc > 1 && (std::string_view(argv[1]) == "--frame-profile-vm-only" ||
         (argc > 2 && std::string_view(argv[2]) == "--frame-profile-vm-only"))) {
         const int result = ui::ItemReflowUiTest::RunVmProfile();

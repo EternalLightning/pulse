@@ -1002,8 +1002,8 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 root.info.online = server_accessible && root.shard != nullptr;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
                 root.info.state = server_accessible && root.shard
-                    ? L"同步失败 · 继续使用旧索引"
-                    : root.shard ? L"服务器离线 · 已保留索引" : L"无法访问";
+                    ? L"同步失败，继续使用原有索引"
+                    : root.shard ? L"服务器离线，索引已保留" : L"无法访问";
                 root.info.error = Win32Message(failure);
             }
             break;

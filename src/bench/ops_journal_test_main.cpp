@@ -5,18 +5,30 @@
 
 #include "../ops/ops_manager.h"
 #include "../ops/operation_journal_paths.h"
+#include "../common/json_utils.h"
 #include "../common/utf8_file.h"
 #include <windows.h>
 #include <cstdio>
 #include <filesystem>
 #include <set>
+#include <string_view>
 
 using namespace pulse;
+
+int RunJsonUndoParserRegressions();
 
 namespace pulse::ops {
 struct OperationJournalProbe {
     static bool HasJournal(const OpsManager& manager) { return bool(manager.journal_); }
     static void Persist(OpsManager& manager) { manager.PersistJournal(); }
+    static std::wstring Serialize(const OpsManager& manager, const std::wstring& path) {
+        return manager.JournalJsonLocked(path);
+    }
+    static void ActivateNext(OpsManager& manager, bool elevated) {
+        manager.active_item_ = std::move(manager.queue_.front());
+        manager.queue_.pop_front();
+        manager.active_item_->elevated_retry = elevated;
+    }
     static void QueueCopy(OpsManager& manager, const std::wstring& source) {
         OpsManager::QueueItem item;
         item.seq = manager.next_seq_++;
@@ -48,6 +60,7 @@ std::wstring TestDirectory() {
         std::to_wstring(sequence.fetch_add(1)))).wstring();
     std::error_code ec;
     std::filesystem::create_directories(base, ec);
+    if (ec) std::fwprintf(stderr, L"[FAIL] create fixture %s: error=%d\n", base.c_str(), ec.value());
     return ec ? std::wstring{} : base;
 }
 
@@ -78,7 +91,9 @@ void Cleanup(const std::wstring& root) {
 
 } // namespace
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--json-parser-only")
+        return RunJsonUndoParserRegressions();
     const std::wstring root = TestDirectory();
     if (root.empty()) {
         std::fwprintf(stderr, L"[FAIL] unable to create operation-journal fixture directory\n");
@@ -92,6 +107,24 @@ int wmain() {
     Check(!ops::OperationJournalProbe::HasJournal(shell_worker) &&
           shell_worker.PendingRecovery().entries.empty(),
           L"unconfigured Shell workers persist and discard without allocating recovery journals");
+
+    {
+        const auto primary = root + L"\\canonical-primary.json", secondary = root + L"\\canonical-secondary.json";
+        ops::OpsManager canonical;
+        canonical.SetJournalPaths({L"", primary, primary, secondary});
+        ops::OperationJournalProbe::QueueCopy(canonical, L"C:\\fixture\\canonical-source.txt");
+        const auto serialized = ops::OperationJournalProbe::Serialize(canonical, primary);
+        Check(!serialized.empty() && ops::OperationJournalProbe::Serialize(canonical, secondary).empty(),
+              L"the first nonempty unique journal path owns new requests");
+        canonical.SetJournalPath(primary);
+        Check(ops::OperationJournalProbe::Serialize(canonical, primary) == serialized,
+              L"single-path and path-list configuration share the same primary journal rule");
+        canonical.SetJournalPath(L"");
+        ops::OperationJournalProbe::Persist(canonical);
+        Check(ops::OperationJournalProbe::Serialize(canonical, primary).empty() &&
+              !std::filesystem::exists(primary) && !std::filesystem::exists(secondary),
+              L"empty journal configuration cannot revive a previously configured path");
+    }
 
     const auto allocated_directory = root + L"\\allocated";
     std::filesystem::create_directory(allocated_directory);
@@ -158,7 +191,7 @@ int wmain() {
     ops::OperationJournalProbe::Persist(owner);
     std::wstring preserved_unknown;
     Check(ReadUtf8File(third_path, preserved_unknown) &&
-          preserved_unknown.find(L"future_data") != std::wstring::npos,
+          preserved_unknown.find(unknown) != std::wstring::npos,
           L"unrecognized recovery records remain in their source journal");
 
     const auto high_path = root + L"\\high-sequence.json";
@@ -170,6 +203,60 @@ int wmain() {
     Check(high_recovery.entries.size() == 1 && high_recovery.entries[0].sequence < UINT64_MAX / 2,
           L"near-overflow recovery sequence is remapped without losing the record");
 
+    const auto deletion_path = root + L"\\deletion.json";
+    const std::wstring deletion = LR"({"seq":"5","active":true,"type":3,"policy":0,"sources":["C:\\fixture\\\u6C49\uD83D\uDE00"],"delete_targets":[{"path":"C:\\fixture\\\u6C49\uD83D\uDE00","roots":["C:\\fixture\\physical"],"recycle_item":true}]})";
+    Check(WriteJournal(deletion_path, {deletion}), L"write isolated active deletion recovery record");
+    ops::OpsManager deletion_recovery;
+    deletion_recovery.SetJournalPath(deletion_path);
+    const auto deletions = deletion_recovery.PendingRecovery();
+    Check(deletions.entries.size() == 1 && deletions.entries[0].request.sources ==
+          std::vector<std::wstring>{L"C:\\fixture\\汉\U0001F600"} &&
+          deletions.entries[0].request.delete_targets.size() == 1 &&
+          deletions.entries[0].request.delete_targets[0].path == L"C:\\fixture\\汉\U0001F600" &&
+          deletions.entries[0].request.delete_targets[0].physical_paths ==
+          std::vector<std::wstring>{L"C:\\fixture\\physical"} &&
+          deletions.entries[0].request.delete_targets[0].recycle_item,
+          L"recovery reads nested deletion targets and Unicode directly from parsed values");
+    Check(!deletion_recovery.RetryRecovery(),
+          L"active deletion recovery still refuses automatic replay");
+
+    const auto corrupt_path = root + L"\\corrupt.json";
+    const std::wstring corrupt = LR"({"schema":1,"entries":[{"seq":"6","type":0,"sources":["\uD800"]}]})";
+    Check(WriteUtf8FileAtomic(corrupt_path, corrupt), L"write isolated damaged recovery journal");
+    ops::OpsManager corrupt_recovery;
+    corrupt_recovery.SetJournalPath(corrupt_path);
+    ops::OperationJournalProbe::Persist(corrupt_recovery);
+    std::wstring retained;
+    Check(corrupt_recovery.PendingRecovery().entries.empty() && ReadUtf8File(corrupt_path, retained) &&
+          retained == corrupt,
+          L"invalid recovery input is preserved byte-for-byte instead of overwritten or replayed");
+
+    const auto serialized_path = root + L"\\serialized.json";
+    ops::OpsManager serialized;
+    serialized.SetJournalPath(serialized_path);
+    Check(ops::OperationJournalProbe::Serialize(serialized, serialized_path).empty(),
+          L"an empty journal produces no serialized payload");
+    ops::OperationJournalProbe::QueueCopy(serialized, L"C:\\fixture\\quoted\"汉\U0001F600\n");
+    ops::OperationJournalProbe::ActivateNext(serialized, true);
+    const auto active_json = ops::OperationJournalProbe::Serialize(serialized, serialized_path);
+    const json::Document active_document(active_json);
+    const auto* active_entries = active_document.Find(L"entries");
+    Check(active_entries && active_entries->children.size() == 1 &&
+          json::Bool(active_entries->children[0].Find(L"active")) &&
+          json::Bool(active_entries->children[0].Find(L"outcome_unknown")) &&
+          json::Strings(active_entries->children[0].Find(L"sources")) ==
+          std::vector<std::wstring>{L"C:\\fixture\\quoted\"汉\U0001F600\n"},
+          L"direct serialization preserves escapes and marks an active elevated request as uncertain");
+
+    const auto opaque_path = root + L"\\opaque-only.json";
+    Check(WriteJournal(opaque_path, {unknown}), L"write an isolated journal containing only an unknown record");
+    ops::OpsManager opaque_only;
+    opaque_only.SetJournalPath(opaque_path);
+    ops::OperationJournalProbe::Persist(opaque_only);
+    Check(ReadUtf8File(opaque_path, retained) && retained.find(unknown) != std::wstring::npos,
+          L"an unknown-only journal remains nonempty and is never deleted as an empty journal");
+
+    failures += RunJsonUndoParserRegressions();
     Cleanup(root);
     std::wprintf(L"\n== operation journal test: %d failed ==\n", failures);
     return failures == 0 ? 0 : 1;

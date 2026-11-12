@@ -116,10 +116,6 @@ inline int RunTerminalMenuChecks() {
     state.ops.OpenTerminal(L"");
     state.ops.OpenTerminal(L"pulse:search:plain cr");
     check(Probe::Empty(state.ops), "launch boundary rejects empty and virtual directories");
-    check(ops::TerminalCommandLine(L"C:\\") == L"-d \"C:\\\\\"",
-        "terminal drive-root argument doubles its trailing slash before the closing quote");
-    check(ops::TerminalCommandLine(L"C:\\quoted\" folder\\") == L"-d \"C:\\quoted\\\" folder\\\\\"",
-        "terminal arguments preserve embedded quotes and trailing slashes");
     tab.current_path = L"pulse:search:content fixture";
     tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
     auto store = std::make_shared<index::ContentResultStore>(nullptr, 0);

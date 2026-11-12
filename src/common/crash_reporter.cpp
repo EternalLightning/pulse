@@ -55,6 +55,7 @@ DWORD g_os_build = 0;
 bool g_initialized = false;
 bool g_safe_mode = false;
 LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = nullptr;
+decltype(&MiniDumpWriteDump) g_write_dump = nullptr;
 
 uint64_t FileTimeValue(const FILETIME& value) noexcept {
     ULARGE_INTEGER result{};
@@ -219,6 +220,7 @@ void WriteFallback(const std::wstring& stem, DWORD code, void* address,
 }
 
 bool WriteDump(const std::wstring& stem, EXCEPTION_POINTERS* exception) noexcept {
+    if (!g_write_dump) return false;
     const std::wstring path = JoinPath(g_diagnostics_root, stem + L".dmp");
     HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                               CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -229,8 +231,8 @@ bool WriteDump(const std::wstring& stem, EXCEPTION_POINTERS* exception) noexcept
     info.ClientPointers = FALSE;
     const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpNormal |
         MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
-    const BOOL ok = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
-                                      type, exception ? &info : nullptr, nullptr, nullptr);
+    const BOOL ok = g_write_dump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                                type, exception ? &info : nullptr, nullptr, nullptr);
     CloseHandle(file);
     if (!ok) DeleteFileW(path.c_str());
     return ok != FALSE;
@@ -331,6 +333,13 @@ bool Initialize(const Config& config) noexcept {
     QueryOsVersion();
     RotateDiagnostics();
     g_safe_mode = DetectCrashLoop();
+    // Resolve before a crash, and retain the system module for every installed handler.
+    static const auto write_dump = [] {
+        const HMODULE module = LoadLibraryExW(L"dbghelp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return module ? reinterpret_cast<decltype(&MiniDumpWriteDump)>(
+            GetProcAddress(module, "MiniDumpWriteDump")) : nullptr;
+    }();
+    g_write_dump = write_dump;
     g_previous_filter = SetUnhandledExceptionFilter(TopLevelFilter);
     std::set_terminate([] { ReportTerminate(); });
     g_initialized = true;

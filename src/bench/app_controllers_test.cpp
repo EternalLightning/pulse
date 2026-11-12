@@ -1049,9 +1049,9 @@ int wmain(int argc, wchar_t** argv) {
     settings_ui.RowHeight(2);
     passed &= Report("settings density owns preference mutation",
         prefs.row_height == 40 && HasEffect(last_effect, SettingsEffect::RowHeight));
-    settings_ui.TrayIconSize(0);
-    passed &= Report("settings tray size owns preference mutation",
-        prefs.tray_icon_size == 40 && HasEffect(last_effect, SettingsEffect::TrayDeckIcon));
+    settings_ui.ToggleUi(36);
+    passed &= Report("settings staging tray toggle owns preference mutation",
+        !prefs.staging_tray_enabled && HasEffect(last_effect, SettingsEffect::StagingTray));
     settings_ui.Language(L"en-US");
     passed &= Report("settings language uses a stable identifier",
         prefs.language == L"en-US" && HasEffect(last_effect, SettingsEffect::Language));

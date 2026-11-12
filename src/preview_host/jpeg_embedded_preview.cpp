@@ -5,6 +5,7 @@
 
 #include "jpeg_embedded_preview.h"
 #include "../fs/cloud_state.h"
+#include "../common/unique_resource.h"
 #include <windows.h>
 #include <algorithm>
 #include <cstring>
@@ -182,9 +183,12 @@ bool ReadJpegEmbeddedPreview(const std::wstring& path, uint32_t attrs, uint32_t 
     const DWORD current_attrs = GetFileAttributesW(path.c_str());
     if (current_attrs == INVALID_FILE_ATTRIBUTES || (current_attrs & FILE_ATTRIBUTE_DIRECTORY) ||
         fs::IsCloudPlaceholder(current_attrs)) return false;
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                              nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_NO_RECALL, nullptr);
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_NO_RECALL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
+    const auto close_file = [](HANDLE value) noexcept { CloseHandle(value); };
+    const UniqueResource<HANDLE, nullptr, decltype(close_file)> owner(file);
     LARGE_INTEGER file_size{};
     std::vector<uint8_t> header;
     JpegHeaderInfo info;
@@ -221,7 +225,6 @@ bool ReadJpegEmbeddedPreview(const std::wstring& path, uint32_t attrs, uint32_t 
             if (ReadAt(file, entry.offset, bytes, entry.size)) found = take(std::move(bytes));
         }
     }
-    CloseHandle(file);
     if (!found) return false;
     out.source_width = info.width;
     out.source_height = info.height;

@@ -119,6 +119,9 @@ int RunFixture(bool actions_only) {
     };
     for (const wchar_t* language : {L"zh-CN", L"en-US"}) {
         l10n::SetLanguage(language);
+        check(l10n::Get(l10n::StringId::DupSkipSmallFiles) ==
+            (language[0] == L'z' ? L"跳过小文件" : L"Skip small files"),
+            "small-file switch title is available in both languages");
         vm.dup_hint = l10n::Get(l10n::StringId::DupHint);
         vm.dup_delete_all = l10n::Get(l10n::StringId::DupDeleteAllExtras) + L" · 1234567890";
         const auto scales = actions_only ? std::vector<float>{1.0f, 1.5f}
@@ -144,6 +147,7 @@ int RunFixture(bool actions_only) {
                             vm.dup_groups = state == 2 || state == 3
                                 ? decltype(vm.dup_groups){} : result_groups;
                             vm.dup_scanning = state == 1;
+                            vm.dup_skip_small_files = state != 3;
                             vm.dup_show_progress = state == 1;
                             vm.dup_progress_indeterminate = true;
                             vm.dup_status = L"Listing · 128 files";
@@ -159,6 +163,17 @@ int RunFixture(bool actions_only) {
                             check(valid(layout.dup_min_description, layout.dup_min_row), "minimum-size description fits");
                             check(nearly_equal(layout.dup_scope[2].right, right), "scope control is right aligned");
                             check(nearly_equal(layout.dup_min_size[2].right, right), "size control is right aligned");
+                            if (!layout.dup_scope_stacked) {
+                                check(nearly_equal(layout.dup_scope[0].left, layout.dup_min_size[0].left),
+                                    "scope and size option tracks share the same left edge");
+                                for (int i = 0; i < 3; ++i)
+                                    check(nearly_equal(layout.dup_scope[i].right, layout.dup_min_size[i].right),
+                                        "scope and size option segments align");
+                            }
+                            check(valid(layout.dup_skip_small_switch, layout.dup_skip_small_row) &&
+                                valid(layout.dup_skip_small_label, layout.dup_skip_small_row) &&
+                                layout.dup_skip_small_label.right <= layout.dup_skip_small_switch.left,
+                                "small-file switch and label fit without overlap");
                             check(nearly_equal(layout.dup_scan.right, right), "primary scan is right aligned");
                             check(layout.dup_cancel.bottom <= layout.dup_scan.top ||
                                 (nearly_equal(layout.dup_cancel.top, layout.dup_scan.top) &&
@@ -181,7 +196,17 @@ int RunFixture(bool actions_only) {
                             };
                             for (int i = 0; i < 3; ++i) {
                                 hit(layout.dup_scope[i], ui::HitTestResult::SettingsDupScope, i);
-                                hit(layout.dup_min_size[i], ui::HitTestResult::SettingsDupMinSize, i);
+                                if (vm.dup_skip_small_files)
+                                    hit(layout.dup_min_size[i], ui::HitTestResult::SettingsDupMinSize, i);
+                            }
+                            if (!vm.dup_scanning)
+                                hit(layout.dup_skip_small_switch, ui::HitTestResult::SettingsDupSkipSmallFiles);
+                            if (!vm.dup_skip_small_files && layout.dup_min_size[0].top >= layout.content.top &&
+                                layout.dup_min_size[0].bottom <= layout.content.bottom) {
+                                const auto r = layout.dup_min_size[0];
+                                check(renderer.HitTest(vm, bounds, (r.left + r.right) / 2,
+                                    (r.top + r.bottom) / 2).region != ui::HitTestResult::SettingsDupMinSize,
+                                    "disabled threshold choices cannot be hit");
                             }
                             hit(layout.dup_scan, ui::HitTestResult::SettingsDupScan);
                             hit(layout.dup_cancel, ui::HitTestResult::SettingsDupCancel);

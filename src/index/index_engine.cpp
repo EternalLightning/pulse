@@ -493,7 +493,7 @@ std::vector<VolumeInfo> Engine::Volumes() const {
         if (it != vols_.end() && volume.enabled) {
             volume.indexed_items = it->item_count;
             volume.progress = 100;
-            volume.state = volume.online ? L"已就绪" : L"离线 · 仍可搜索";
+            volume.state = volume.online ? L"已就绪" : L"离线，仍可搜索";
         } else if (volume.enabled && building_) {
             volume.state = L"正在建立索引";
         } else if (volume.enabled && ready_) {

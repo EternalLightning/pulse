@@ -4,6 +4,8 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "archive.h"
+#include "../common/command_line.h"
+#include "../common/file_name.h"
 #include "destination_guard.h"
 #include "archive_retry.h"
 #include <windows.h>
@@ -33,19 +35,6 @@ std::string Encode(const std::wstring& value) {
     std::string result(static_cast<size_t>(size), '\0');
     if (size) WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
     return result;
-}
-std::wstring Quote(const std::wstring& value) {
-    std::wstring result = L"\"";
-    size_t slashes = 0;
-    for (wchar_t c : value) {
-        if (c == L'\\') { ++slashes; continue; }
-        result.append(slashes * (c == L'"' ? 2 : 1), L'\\');
-        slashes = 0;
-        if (c == L'"') result += L'\\';
-        result += c;
-    }
-    result.append(slashes * 2, L'\\');
-    return result + L'"';
 }
 fs::path Runtime() {
     std::wstring executable(32768, L'\0');
@@ -106,8 +95,8 @@ ProcessResult Run(const std::vector<std::wstring>& args, const std::atomic_bool*
         inherited, sizeof(HANDLE) * (progress ? 3 : 2), nullptr, nullptr)) {
         result.output = L"无法配置压缩包进程句柄。"; return result;
     }
-    std::wstring command = Quote(exe.wstring());
-    for (const auto& arg : args) command += L" " + Quote(arg);
+    std::wstring command = QuoteWindowsArgument(exe.wstring());
+    for (const auto& arg : args) command += L" " + QuoteWindowsArgument(arg);
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW | STARTF_FORCEOFFFEEDBACK;
@@ -177,16 +166,10 @@ std::wstring Normalize(std::wstring path) {
     return path;
 }
 bool SafeName(const std::wstring& path) {
-    if (path.empty() || path.front() == L'/' || path.find_first_of(L":\r\n") != std::wstring::npos) return false;
+    if (path.empty() || path.front() == L'/') return false;
     std::wistringstream parts(path); std::wstring part;
     while (std::getline(parts, part, L'/')) {
-        if (part.empty() || part == L"." || part == L".." || part.back() == L'.' || part.back() == L' ') return false;
-        if (std::any_of(part.begin(), part.end(), [](wchar_t c) { return c < 32 || c == L'"' || c == L'<' || c == L'>' || c == L'|' || c == L'*' || c == L'?'; })) return false;
-        std::wstring stem = part.substr(0, part.find(L'.'));
-        std::transform(stem.begin(), stem.end(), stem.begin(), [](wchar_t c) { return static_cast<wchar_t>(towupper(c)); });
-        if (stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL" ||
-            (stem.size() == 4 && (stem.substr(0, 3) == L"COM" || stem.substr(0, 3) == L"LPT") &&
-                ((stem[3] >= L'1' && stem[3] <= L'9') || stem[3] == L'¹' || stem[3] == L'²' || stem[3] == L'³'))) return false;
+        if (!pulse::path::IsValidFileName(part)) return false;
     }
     return true;
 }
@@ -549,11 +532,11 @@ ArchiveOperationResult ExtractArchive(const std::wstring& path, const std::wstri
         SelectionFile selection_file(destination_guard.SharedDirectoryLeases());
         if (!selected_paths.empty()) {
             std::vector<std::wstring> members;
-            size_t command_size = Quote(Runtime().wstring()).size() + 1 + Quote(path).size() + Quote(L"--").size() + 2;
-            for (const auto& arg : args) command_size += Quote(arg).size() + 1;
+            size_t command_size = QuoteWindowsArgument(Runtime().wstring()).size() + 1 + QuoteWindowsArgument(path).size() + QuoteWindowsArgument(L"--").size() + 2;
+            for (const auto& arg : args) command_size += QuoteWindowsArgument(arg).size() + 1;
             for (const auto& entry : pending) if (!entry.is_dir) {
                 members.push_back(entry.path);
-                command_size += Quote(L"-i!" + entry.path).size() + 1;
+                command_size += QuoteWindowsArgument(L"-i!" + entry.path).size() + 1;
             }
             // CreateProcessW limits the complete command line, including its null,
             // to 32767 UTF-16 code units. Most selections need no list file.

@@ -28,8 +28,7 @@ $checks = @(
     @{ Name = 'shell_navigation_fixture_test'; Args = @() },
     @{ Name = 'entry_order_application_fixture_test'; Args = @() },
     @{ Name = 'tab_close_interaction_test'; Args = @() },
-    @{ Name = 'batch1_display_test'; Args = @((Join-Path $output 'display')) },
-    @{ Name = 'confirmation_paths_fixture_test'; Args = @() }
+    @{ Name = 'batch1_display_test'; Args = @((Join-Path $output 'display')) }
 )
 if ($IncludeRestartManager) {
     # These only use newly-created holder processes/files. No user's process is

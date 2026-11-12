@@ -45,6 +45,13 @@ SettingsToggleGeometry SettingsToggleBounds(const D2D1_RECT_F& row, std::wstring
         row.left + 40.0f * scale, center + 12.0f * scale);
     return result;
 }
+D2D1_RECT_F CenterSettingsControl(D2D1_RECT_F control, const D2D1_RECT_F& row) {
+    const float height = control.bottom - control.top;
+    control.top = (row.top + row.bottom - height) * 0.5f;
+    control.bottom = control.top + height;
+    return control;
+}
+
 float LayoutSettingsActions(float left, float right, float top, float scale,
                             const std::wstring_view* labels, int count, D2D1_RECT_F* output,
                             const fluent::Painter* painter, bool wrap_text = false) {
@@ -128,6 +135,8 @@ float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, flo
     }
     y = std::max(l.dup_hint.bottom, l.dup_scope[2].bottom) + 12 * scale;
     l.dup_scope_row = D2D1::RectF(card_left, options_top, card_right, y);
+    if (!scope_below) for (auto& control : l.dup_scope)
+        control = CenterSettingsControl(control, l.dup_scope_row);
 
     if (vm.dup_scope == 0 || vm.dup_scope == 1) {
         const float target_top = y;
@@ -155,11 +164,19 @@ float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, flo
             y = std::max(y + 64 * scale, bottom + 4 * scale);
         }
         l.dup_target_row = D2D1::RectF(card_left, target_top, card_right, y);
+        if (vm.dup_scope == 0 && card_right-card_left >= 560*scale)
+            l.dup_browse = CenterSettingsControl(l.dup_browse, l.dup_target_row);
     }
 
+    l.dup_skip_small_row = D2D1::RectF(card_left, y, card_right, y + 64 * scale);
+    const auto skip_bounds = SettingsToggleBounds(l.dup_skip_small_row, L"", scale, painter);
+    l.dup_skip_small_label = skip_bounds.title;
+    l.dup_skip_small_switch = skip_bounds.control;
+    y = l.dup_skip_small_row.bottom;
+
     const float min_top = y;
-    const bool min_below = card_right - card_left < 560 * scale;
-    const float min_width = std::min(300 * scale, available);
+    const bool min_below = scope_below;
+    const float min_width = std::min(scope_width, available);
     const float min_label_right = min_below ? right : right - min_width - 12 * scale;
     l.dup_min_label = D2D1::RectF(text_left, y + 10 * scale, min_label_right, y + 34 * scale);
     const float desc_height = caption_height(l10n::Get(I::DupMinSizeDesc), min_label_right - text_left);
@@ -171,6 +188,8 @@ float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, flo
             right - min_width + (i + 1) * min_width / 3, min_choice_top + 32 * scale);
     y = std::max(l.dup_min_description.bottom, l.dup_min_size[2].bottom) + 12 * scale;
     l.dup_min_row = D2D1::RectF(card_left, min_top, card_right, y);
+    if (!min_below) for (auto& control : l.dup_min_size)
+        control = CenterSettingsControl(control, l.dup_min_row);
 
     const float actions_top = y;
     const std::wstring_view actions[] = {l10n::Get(I::Cancel), l10n::Get(I::DupScan)};
@@ -237,9 +256,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
     const bool narrow = right - left < 560*scale;
     bool group_has_row = false;
     auto row = [&](float h) {
-        if(group_has_row) l.category_dividers.push_back(D2D1::RectF(left+16*scale,y,right-16*scale,y));
+        if(group_has_row) y += 4*scale;
         group_has_row=true;
-        auto r=D2D1::RectF(left,y,right,y+h*scale); y=r.bottom; return r;
+        auto r=D2D1::RectF(left,y,right,y+h*scale); y=r.bottom; l.category_rows.push_back(r); return r;
     };
     auto toggle_row = [&](l10n::StringId description) {
         return row(SettingsToggleHeight(right - left, l10n::Get(description), scale, painter) / scale);
@@ -260,8 +279,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         group_has_row=false;
     };
     auto choice = [&](D2D1_RECT_F r, float width) {
-        return D2D1::RectF(narrow ? r.left+16*scale : r.right-(width+16)*scale,
+        const auto control = D2D1::RectF(narrow ? r.left+16*scale : r.right-(width+16)*scale,
             r.bottom-44*scale, r.right-16*scale, r.bottom-12*scale);
+        return narrow ? control : CenterSettingsControl(control, r);
     };
     auto segments = [&](D2D1_RECT_F r, D2D1_RECT_F* output, int count, float width) {
         auto c=choice(r,width); const float w=(c.right-c.left)/count;
@@ -273,8 +293,11 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         l.theme_row=row(narrow ? 142.0f : 112.0f);
         const float tw=(std::min)(96*scale,(right-left-32*scale)/3);
         const float tile_left=narrow ? left+16*scale : right-16*scale-3*tw;
-        for(int i=0;i<3;++i) l.theme_tile[i]=D2D1::RectF(tile_left+i*tw+4*scale,
-            l.theme_row.bottom-90*scale,tile_left+(i+1)*tw-4*scale,l.theme_row.bottom-12*scale);
+        for(int i=0;i<3;++i) {
+            l.theme_tile[i]=D2D1::RectF(tile_left+i*tw+4*scale,
+                l.theme_row.bottom-90*scale,tile_left+(i+1)*tw-4*scale,l.theme_row.bottom-12*scale);
+            if (!narrow) l.theme_tile[i] = CenterSettingsControl(l.theme_tile[i], l.theme_row);
+        }
         l.accent_card=row(narrow ? 116.0f : 96.0f);
         const float accent_top=l.accent_card.bottom-(narrow ? 44.0f : 64.0f)*scale;
         l.accent_system=D2D1::RectF(right-116*scale,accent_top,right-16*scale,accent_top+32*scale);
@@ -294,12 +317,16 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
             l.effect_row[i]=D2D1::RectF(tile_x,tile_y,tile_x+effect_width,tile_y+74*scale);
     }
         section(I::SettingsSecBackground);
-        l.wallpaper_card=row(124);
+        l.wallpaper_card=row(narrow ? 124.0f : 80.0f);
         l.wallpaper_preview=D2D1::RectF(left+16*scale,l.wallpaper_card.top+12*scale,left+112*scale,l.wallpaper_card.top+68*scale);
         const float cw=painter ? painter->MeasureButtonWidth(l10n::Get(l10n::StringId::Clear)) : 80*scale;
         const float bw=painter ? painter->MeasureButtonWidth(l10n::Get(l10n::StringId::ChooseImage)) : 120*scale;
         l.wallpaper_clear=D2D1::RectF(right-16*scale-cw,y-44*scale,right-16*scale,y-12*scale);
         l.wallpaper_choose=D2D1::RectF(l.wallpaper_clear.left-8*scale-bw,y-44*scale,l.wallpaper_clear.left-8*scale,y-12*scale);
+        if (!narrow) {
+            l.wallpaper_clear = CenterSettingsControl(l.wallpaper_clear, l.wallpaper_card);
+            l.wallpaper_choose = CenterSettingsControl(l.wallpaper_choose, l.wallpaper_card);
+        }
         l.wallpaper_look_card=row(narrow ? 98.0f : 64.0f); l.wallpaper_look_value=choice(l.wallpaper_look_card,112);
         l.wallpaper_blur_card=row(narrow ? 98.0f : 64.0f); segments(l.wallpaper_blur_card,l.wallpaper_blur_row,3,282);
         section(I::SettingsSecTextLanguage);
@@ -352,9 +379,10 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
             l.configuration_path.top+108*scale, scale, config_labels, 2, l.configuration_action, painter);
         y = std::max(y, config_bottom+4*scale);
         l.configuration_path.bottom = y;
+        l.category_rows.back() = l.configuration_path;
     } else if (vm.settings_page==9) {
         section(I::SettingsSecStaging);
-        l.tray_icon_card=row(narrow ? 98.0f : 64.0f); segments(l.tray_icon_card,l.tray_icon_row,3,282);
+        l.staging_tray_row=toggle_row(I::SettingsStagingTrayDesc);
         l.text_compare_row=toggle_row(I::SettingsTextCompareDesc);
         section(I::SettingsSecChanges);
         l.change_tracking_row=toggle_row(I::SettingsChangeTrackingDesc);

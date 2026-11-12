@@ -26,14 +26,15 @@ namespace pulse::ui {
 void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     ID2D1DeviceContext* dc = compositor_->Dc();
     const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
-                                                  status_height_, &painter_);
-    D2D1_COLOR_F nav_bg = theme.tab_bg;
-    if (vm.backdrop_enabled) nav_bg.a = vm.dark ? 0.62f : 0.70f;
-    MakeBrush(dc, nav_bg, brFillHover_);
-    FillRect(dc, brFillHover_.get(), lay.nav.left, lay.nav.top,
-             lay.nav.right - lay.nav.left, lay.nav.bottom - lay.nav.top);
-    FillRect(dc, brStrokeDivider_.get(), lay.nav.right - 1.0f, lay.nav.top, 1.0f,
-             lay.nav.bottom - lay.nav.top);
+                                                  status_height_, &painter_, EffectiveSidebarWidth(rect.right));
+    const auto panel_fill = vm.dark && !IsHighContrast()
+        ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
+        : WithAlpha(theme.surface_sheet, std::max(sheet_alpha_, 0.25f));
+    MakeBrush(dc, panel_fill, brFillInput_);
+    const auto panel = D2D1::RoundedRect(lay.body, 8*scale_, 8*scale_);
+    dc->FillRoundedRectangle(panel, brFillInput_.get());
+    MakeBrush(dc, theme.stroke_card, brStrokeCard_);
+    dc->DrawRoundedRectangle(panel, brStrokeCard_.get(), 1.0f);
 
     const bool compact_nav = lay.nav.right - lay.nav.left < 100*scale_;
     MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
@@ -121,9 +122,22 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     if (title_format.get()) {
         title_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         title_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        // Keep heading outlines on DirectWrite's antialiased path over translucent content.
+        // Outline rendering avoids embedded bitmap strikes at display sizes.
+        ComPtr<IDWriteRenderingParams> previous;
+        ComPtr<IDWriteRenderingParams2> smooth;
+        dc->GetTextRenderingParams(&previous);
+        const auto aa = dc->GetTextAntialiasMode();
+        if (previous.get() && SUCCEEDED(compositor_->DwriteFactory()->CreateCustomRenderingParams(
+                previous->GetGamma(), previous->GetEnhancedContrast(), 0.0f, 0.0f,
+                DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_RENDERING_MODE_OUTLINE,
+                DWRITE_GRID_FIT_MODE_DISABLED, &smooth))) {
+            dc->SetTextRenderingParams(smooth.get());
+        }
+        dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         painter_.DrawTextNative(title, D2D1::RectF(lay.content.left+pad,origin+pad,
             lay.content.right-pad,origin+pad+40*scale_),title_format.get(),theme.text);
+        dc->SetTextAntialiasMode(aa);
+        dc->SetTextRenderingParams(previous.get());
     }
     if (vm.settings_page == 0 || vm.settings_page == 1)
         painter_.DrawText(l10n::Get(vm.settings_page == 0 ? l10n::StringId::SettingsAppearanceIntro : l10n::StringId::SettingsSearchIntro),
@@ -135,7 +149,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         DrawSettingsCore(vm, rect, theme);
     } else if (vm.settings_page == 1) {
         auto draw_card = [&](const D2D1_RECT_F& card) {
-            MakeBrush(dc, theme.fill_input, brFillInput_);
+            MakeBrush(dc, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))), brFillInput_);
             FillRoundedRect(dc, brFillInput_.get(), card.left, card.top,
                             card.right - card.left, card.bottom - card.top, 8.0f * scale_);
             MakeBrush(dc, theme.stroke_card, brStrokeCard_);
@@ -218,6 +232,9 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         for (size_t i = 0; i < vm.settings_index_volumes.size() && i < lay.index_volume_rows.size(); ++i) {
             const auto& volume = vm.settings_index_volumes[i];
             const auto& row = lay.index_volume_rows[i];
+            auto background = row;
+            background.top += 2*scale_; background.bottom -= 2*scale_;
+            draw_card(background);
             if (IsHovered(vm, HitTestResult::SettingsIndexVolume, static_cast<int>(i))) {
                 MakeBrush(dc, theme.fill_hover, brFillHover_);
                 FillRoundedRect(dc, brFillHover_.get(), row.left, row.top,
@@ -298,6 +315,9 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                            i < lay.index_exclude_rows.size() &&
                            i < lay.index_exclude_remove.size(); ++i) {
             const auto& row = lay.index_exclude_rows[i];
+            auto background = row;
+            background.top += 2*scale_; background.bottom -= 2*scale_;
+            draw_card(background);
             const auto& remove_rc = lay.index_exclude_remove[i];
             if (IsHovered(vm, HitTestResult::SettingsIndexExcludeRemove, static_cast<int>(i))) {
                 MakeBrush(dc, theme.fill_hover, brFillHover_);
@@ -383,7 +403,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         DrawSettingsSysCtx(vm,rect,theme);
     } else if (vm.settings_page == 3) {
         auto draw_card = [&](const D2D1_RECT_F& card) {
-            MakeBrush(dc, theme.fill_input, brFillInput_);
+            MakeBrush(dc, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))), brFillInput_);
             FillRoundedRect(dc, brFillInput_.get(), card.left, card.top,
                             card.right - card.left, card.bottom - card.top, 8.0f * scale_);
             MakeBrush(dc, theme.stroke_card, brStrokeCard_);
@@ -545,7 +565,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         using I = pulse::l10n::StringId;
         auto draw_card = [&](const D2D1_RECT_F& card) {
             if (card.right <= card.left || card.bottom <= card.top) return;
-            MakeBrush(dc, WithAlpha(theme.surface_card, card_alpha_), brFillInput_);
+            MakeBrush(dc, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))), brFillInput_);
             FillRoundedRect(dc, brFillInput_.get(), card.left, card.top,
                             card.right - card.left, card.bottom - card.top, 8.0f * scale_);
             MakeBrush(dc, theme.stroke_card, brStrokeCard_);
@@ -575,7 +595,11 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             spec.wrap_text = true;
             painter_.DrawButton(spec);
         };
-        draw_card(lay.duplicate_options);
+        for (auto row : {lay.dup_scope_row, lay.dup_target_row, lay.dup_skip_small_row, lay.dup_min_row, lay.dup_actions_row}) {
+            if (row.bottom <= row.top) continue;
+            row.top += 2*scale_; row.bottom -= 2*scale_;
+            draw_card(row);
+        }
         label(lay.dup_scope_row, lay.dup_scope_label, I::DupScopeLabel, kIconSearch);
         caption(vm.dup_hint, lay.dup_hint);
         divider(lay.dup_scope_row);
@@ -583,6 +607,13 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             label(lay.dup_target_row, lay.dup_target_label, I::DupTargetLabel, L"\xED25");
             divider(lay.dup_target_row);
         }
+        label(lay.dup_skip_small_row, lay.dup_skip_small_label, I::DupSkipSmallFiles, L"\xE8A4");
+        fluent::ControlState skip_small{};
+        skip_small.checked = vm.dup_skip_small_files;
+        skip_small.enabled = !vm.dup_scanning;
+        skip_small.hovered = skip_small.enabled && IsHovered(vm, HitTestResult::SettingsDupSkipSmallFiles);
+        DrawSettingsSwitch(L"duplicate:skip-small", lay.dup_skip_small_switch, skip_small);
+        divider(lay.dup_skip_small_row);
         label(lay.dup_min_row, lay.dup_min_label, I::DupMinSize, L"\xE8A4");
         caption(pulse::l10n::Get(I::DupMinSizeDesc), lay.dup_min_description);
         divider(lay.dup_min_row);
@@ -651,7 +682,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                              : i == 2 ? fluent::SegmentPosition::Last
                                       : fluent::SegmentPosition::Middle;
             segment.state.selected = vm.dup_min_size == i;
-            segment.state.enabled = !vm.dup_scanning;
+            segment.state.enabled = !vm.dup_scanning && vm.dup_skip_small_files;
             segment.state.hovered = segment.state.enabled &&
                 IsHovered(vm, HitTestResult::SettingsDupMinSize, i);
             painter_.DrawSegmentedItem(segment);
@@ -772,12 +803,12 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
 }
 
 D2D1_RECT_F MainRenderer::SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const {
-    const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(window_w));
     return index==0 ? l.effect_choice : index==2 ? l.external_open_choice : l.language_choice;
 }
 
 float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int setting_id, float window_w, float window_h) const {
-    const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(window_w));
     using I=l10n::StringId;
     D2D1_RECT_F target{};
     switch(static_cast<I>(setting_id)) {
@@ -806,7 +837,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SettingsMatchBackground: target=l.wallpaper_fit_card;break;
     case I::SettingsWallpaperLook: target=l.wallpaper_look_card;break;
     case I::SettingsWallpaperBlur: target=l.wallpaper_blur_card;break;
-    case I::SettingsTrayIcon: target=l.tray_icon_card;break;
+    case I::SettingsStagingTray: target=l.staging_tray_row;break;
     case I::SettingsShowHidden: target=l.hidden_files_row;break;
     case I::SettingsShowProtected: target=l.protected_files_row;break;
     case I::PinnedNames: target=l.pinned_names_row;break;
@@ -831,7 +862,7 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
 float MainRenderer::SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const {
     const D2D1_RECT_F rect = D2D1::RectF(0, 0, window_w, window_h);
     const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
-                                                  status_height_, &painter_);
+                                                  status_height_, &painter_, EffectiveSidebarWidth(rect.right));
     const float view = (std::max)(0.0f, lay.content.bottom - lay.content.top);
     return (std::max)(0.0f, lay.content_h - view);
 }
@@ -840,7 +871,7 @@ bool MainRenderer::SettingsScrollbarGeometry(const WindowViewModel& vm, float wi
                                             float window_h, D2D1_RECT_F& track,
                                             D2D1_RECT_F& thumb, float& maximum) const {
     const auto lay = MakeSettingsLayout(vm, D2D1::RectF(0, 0, window_w, window_h), scale_,
-                                       title_bar_height_, status_height_, &painter_);
+                                       title_bar_height_, status_height_, &painter_, EffectiveSidebarWidth(window_w));
     fluent::ScrollbarSpec bar;
     bar.viewport = D2D1::RectF(lay.content.right - 18.0f * scale_, lay.content.top,
                               lay.content.right - 10.0f * scale_, lay.content.bottom);

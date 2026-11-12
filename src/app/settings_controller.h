@@ -27,7 +27,7 @@ enum class SettingsEffect : uint32_t {
     Accent = 1u << 0,
     WindowMaterial = 1u << 1,
     RowHeight = 1u << 2,
-    TrayDeckIcon = 1u << 3,
+    StagingTray = 1u << 3,
     TrayVisibility = 1u << 4,
     Language = 1u << 5,
     StatusBarPerformance = 1u << 6,
@@ -152,7 +152,6 @@ public:
     void RowHeight(int index);
     void TextRendering(int index);
     void FolderSort(int index);
-    void TrayIconSize(int index);
     void WallpaperVisibility(int percent);
     void WallpaperBlur(int index);
     void Language(std::wstring_view language_id);

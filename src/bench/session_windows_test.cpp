@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../app/session.h"
+#include <chrono>
 #include <iostream>
 #include <string_view>
 
@@ -97,7 +98,29 @@ bool SameWindowRoundTrip(const WindowSessionSnapshot& actual, const WindowSessio
 }
 }
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--benchmark") {
+        SessionSnapshot sample;
+        for (int i = 0; i < 8; ++i) {
+            auto window = MakeWindow(i);
+            const auto tab = window.layout_tabs.front();
+            window.layout_tabs.assign(32, tab);
+            sample.windows.push_back(std::move(window));
+        }
+        const auto json = pulse::app::SessionToJson(sample);
+        constexpr int iterations = 40;
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iterations; ++i) {
+            SessionSnapshot restored;
+            if (!pulse::app::ParseSessionJson(json, restored) || restored.windows.size() != 8 ||
+                restored.windows.back().layout_tabs.size() != 32) return 1;
+        }
+        const auto elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+        std::cout << "[INFO] session chars=" << json.size() << " iterations=" << iterations
+                  << " mean_ms=" << elapsed / iterations << '\n';
+        return 0;
+    }
     int failures = 0;
     const auto check = [&](bool passed, const char* name) {
         failures += !Report(passed, name);
@@ -174,6 +197,30 @@ int wmain() {
     check(pulse::app::ParseLayoutTabs(LR"([{"splitRatios":"3500,invalid,6500"}])", decoded_tabs) &&
         decoded_tabs.size() == 1 && decoded_tabs.front().split_ratios == std::vector<float>{0.35f, 0.5f, 0.65f},
         "an invalid saved split ratio keeps its slot without shifting later branches");
+
+    for (const auto* json : {LR"([{"panes":[{"target":1}]}])", LR"([{"title":"target"}])",
+                            LR"([{"metadata":{"target":1}}])"}) {
+        check(pulse::app::ParseLayoutTabs(json, decoded_tabs) && decoded_tabs.size() == 1 &&
+            decoded_tabs.front().target == -1,
+            "a missing tab target keeps its default even when nested data or the title mentions target");
+    }
+    check(pulse::app::ParseLayoutTabs(LR"([{"tar\u0067et":1,"panes":[{}]}])", decoded_tabs) &&
+        decoded_tabs.front().target == 1,
+        "escaped tab member names use the same structured lookup as their values");
+    check(pulse::app::ParseSessionJson(
+        LR"({"layoutTabs":[{}, {"panes":[{},null]}],"tabGroups":[{},null]})", restored) &&
+        restored.layout_tabs.empty() && restored.tab_groups.empty(),
+        "malformed nested arrays retain the empty fallback without restoring partial state");
+    const auto previous = pulse::app::SessionToJson(restored);
+    check(!pulse::app::ParseSessionJson(LR"({"windows":[{"path":"\uD800"}]})", restored) &&
+        pulse::app::SessionToJson(restored) == previous,
+        "invalid nested Unicode rejects the document without replacing the current session");
+
+    std::vector<pulse::app::GroupSessionSnapshot> decoded_groups;
+    auto excess_groups = pulse::app::TabGroupsToJson(oversized.tab_groups);
+    excess_groups.insert(excess_groups.size() - 1, L",{}");
+    check(!pulse::app::ParseTabGroups(excess_groups, decoded_groups) && decoded_groups.empty(),
+        "the group count limit remains enforced when reading parsed values");
 
     check(pulse::app::ParseSessionJson(
         LR"({"version":8,"sidebarCollapsed":-1,"sidebarHidden":2147483647,"quickAccessHidden":2147483647})", restored) &&

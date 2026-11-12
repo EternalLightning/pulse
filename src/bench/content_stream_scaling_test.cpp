@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <future>
+#include <string_view>
 
 using namespace pulse::index;
 namespace {
@@ -94,8 +95,7 @@ void Scaling(size_t count) {
         "append after live deletions shares streaming identity and order semantics");
     Check(store.CachedRows()<=ContentResultStore::kCachePages*ContentResultStore::kPageSize,"display cache stays bounded");
 }
-}
-int main() {
+void ScopeChecks() {
     ContentSearchRequest scope; scope.root=L"C:\\A"; scope.roots={L"C:\\A",L"D:\\B"};
     Check(ContentRequestIncludesPath(scope,L"D:\\B\\new.txt") &&
         !ContentRequestIncludesPath(scope,L"D:\\BC\\outside.txt"),"multiple roots override the compatibility root with path boundaries");
@@ -104,6 +104,29 @@ int main() {
     scope.recursive=false;
     Check(ContentRequestIncludesPath(scope,L"D:\\B") && ContentRequestIncludesPath(scope,L"D:\\B\\new.txt") &&
         !ContentRequestIncludesPath(scope,L"D:\\B\\child\\new.txt"),"nonrecursive initial and live searches share their scope");
+    Check(ContentPathUnder(L"c:\\", L"c:\\") && ContentPathUnder(L"c:\\file.txt", L"c:\\") &&
+        !ContentPathUnder(L"d:\\file.txt", L"c:\\"), "shared path containment handles drive roots");
+    Check(ContentPathUnder(L"\\\\server\\share\\child", L"\\\\server\\share") &&
+        !ContentPathUnder(L"\\\\server\\share-extra\\child", L"\\\\server\\share"),
+        "shared path containment respects UNC share boundaries");
+    ContentIndexConfig config;
+    config.excluded_directories = {L".GIT", L"Node_Modules"};
+    config.excluded_paths = {L"C:/Work/Private/"};
+    Check(ContentPathExcluded(config, L"c:/work/.git/config") &&
+        ContentPathExcluded(config, L"C:\\Work\\NODE_MODULES\\package.json") &&
+        !ContentPathExcluded(config, L"C:\\Work\\node_modules_backup\\keep.txt"),
+        "directory exclusions preserve case folding, separator normalization and component boundaries");
+    Check(ContentPathExcluded(config, L"c:\\work\\private\\file.txt") &&
+        !ContentPathExcluded(config, L"c:\\work\\private-copy\\file.txt"),
+        "path exclusions match complete directory prefixes");
+    config.excluded_directories.clear();
+    config.excluded_paths.clear();
+    Check(!ContentPathExcluded(config, L"C:\\Work\\keep.txt"), "empty exclusions retain every ordinary path");
+}
+}
+int main(int argc, char** argv) {
+    ScopeChecks();
+    if (argc == 2 && std::string_view(argv[1]) == "--scope-only") return failures ? 1 : 0;
     for (size_t count:{1000u,10000u,100000u}) Scaling(count);
     return failures ? 1 : 0;
 }

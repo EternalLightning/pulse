@@ -69,7 +69,7 @@ void MainRenderer::DrawCtxLayerCards(const D2D1_RECT_F& pulse, const D2D1_RECT_F
 
 void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     using H = HitTestResult;
-    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_);
+    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_, EffectiveSidebarWidth(rect.right));
     const SysCtxLayout& o = l.sysctx;
     const SysCtxView* v = vm.settings_sysctx.get();
     const float s = scale_;
@@ -102,7 +102,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         }
     };
     auto card = [&](const D2D1_RECT_F& r, float radius = 10.0f) {
-        painter_.FillRoundedRect(r, radius * s, theme.fill_input);
+        painter_.FillRoundedRect(r, radius * s, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))));
         painter_.StrokeRoundedRect(r, radius * s, theme.stroke_card, 1);
     };
     auto icon_box = [&](const D2D1_RECT_F& box, const std::wstring& path, const wchar_t* glyph, float opacity,
@@ -762,7 +762,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
 float MainRenderer::SysCtxPreviewItemTop(const WindowViewModel& vm, const D2D1_RECT_F& rect, int item) {
     const SysCtxView* v = vm.settings_sysctx.get();
     if (!v || vm.settings_page != 5 || v->side_tab != 0) return NAN;
-    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_);
+    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_, EffectiveSidebarWidth(rect.right));
     if (l.sysctx.side_body.bottom <= l.sysctx.side_body.top) return NAN;
     const auto pl = LayoutSysCtxPreview(*v, l.sysctx.side_body, scale_, false);
     if (item < 0 || item >= static_cast<int>(pl.items.size())) return NAN;
@@ -775,7 +775,7 @@ float MainRenderer::SysCtxPreviewItemTop(const WindowViewModel& vm, const D2D1_R
 int MainRenderer::SysCtxDropZone(const WindowViewModel& vm, const D2D1_RECT_F& rect, float x, float y) {
     const SysCtxView* v = vm.settings_sysctx.get();
     if (!v || vm.settings_page != 5) return kSysCtxZoneNone;
-    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_);
+    const auto l = MakeSettingsLayout(vm, rect, scale_, title_bar_height_, status_height_, &painter_, EffectiveSidebarWidth(rect.right));
     const auto& card = l.sysctx.side_card;
     const float slack = 40 * scale_;
     if (card.bottom <= card.top || x < card.left - slack || x > card.right + slack || y < card.top - slack ||

@@ -764,6 +764,10 @@ void ProcessTests() {
     wchar_t module[32768]{};
     GetModuleFileNameW(nullptr, module, 32768);
     const std::wstring fixture = (fs::path(module).parent_path() / L"pulse_archive_process_fixture.exe").wstring();
+    const auto arguments = RunArchiveProcessForTest(fixture,
+        {L"arguments", L"", L"folder with spaces", L"中文", L"embedded\"quote", L"C:\\folder\\", L"-pback\\\"slash\\\\"}, 1024);
+    Check(arguments.outcome == ArchiveOutcome::Success && arguments.exit_code == 0u,
+        "archive child receives empty, Unicode, quoted and trailing-backslash arguments intact");
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
     HANDLE unrelated = CreateEventW(&security, TRUE, FALSE, nullptr);
     Check(unrelated != nullptr, "create unrelated inheritable event");
@@ -917,6 +921,16 @@ void RecoveryTests() {
 #endif
 int wmain(int argc, wchar_t** argv) {
     std::cout << std::unitbuf;
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--member-names-only") {
+        Check(IsSafeArchiveMember(L"子目录/你好.txt") && IsSafeArchiveMember(L"safe/.gitignore") &&
+            IsSafeArchiveMember(L"safe/COM0.txt"), "valid relative archive members retain their names");
+        for (const auto* name : {L"../outside", L"C:/outside", L"a/NUL.txt", L"a/b:stream", L"a/CON .txt",
+            L"a/CONIN$", L"a/CONOUT$.log", L"a/LPT\u00b9.md", L"a/trailing.", L"a/trailing "})
+            Check(!IsSafeArchiveMember(name), "archive members use the same reserved-name and component rules");
+        Check(IsSafeArchiveMember(L"a/" + std::wstring(256, L'a')),
+            "archive listing preserves long components for destination filesystem validation");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--progress-sampling-only") {
         ProgressSamplingTests();
         return failures ? 1 : 0;

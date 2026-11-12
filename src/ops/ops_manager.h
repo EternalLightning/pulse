@@ -519,6 +519,7 @@ private:
     bool FinishRecycleUndoLocked(const OpRequest& req); // caller holds mutex_
     void LoadRecoveryJournal();
     void PersistJournal();
+    // Empty when this journal has no serializable recovery records.
     std::wstring JournalJsonLocked(const std::wstring& path) const;
     bool ConsumeCtxInvokeDone(uint32_t id);   // true = RSP_DONE was a menu invoke
     void RegisterShellMenuQuery(uint32_t token, uint32_t request_id);

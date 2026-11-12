@@ -49,6 +49,20 @@ int wmain() {
     Check(app::ContentSearchNeedsScope(split), L"content-only query needs a scope");
     const std::wstring guarded = app::ApplyContentSearchGuards(split.filename_needle, split);
     Check(guarded.find(L"ext:") != std::wstring::npos, L"guard adds known text extensions");
+    const auto guarded_query = index::ParseQuery(guarded);
+    const bool one_filter = guarded_query.groups.size() == 1 && guarded_query.groups[0].size() == 1;
+    Check(one_filter, L"text guard compiles to one filename extension filter");
+    if (one_filter) {
+        const auto& term = guarded_query.groups[0][0];
+        for (const std::wstring name : {L"notes.tex", L"settings.jsonc", L"records.ndjson", L"circuit.vhdl", L"text.md"})
+            Check(index::MatchExt(name.data(), static_cast<uint32_t>(name.size()), term),
+                L"content guard admits supported text types previously omitted from its separate list");
+        Check(!index::MatchExt(L"program.exe", 11, term) && !index::MatchExt(L"document.pdf", 12, term),
+            L"default text guard still excludes binary and extracted-document types");
+    }
+    const auto explicit_split = app::SplitSearchQueryText(L"ext:pdf content:todo");
+    Check(app::ApplyContentSearchGuards(explicit_split.filename_needle, explicit_split) ==
+        explicit_split.filename_needle, L"an explicit extension filter is preserved without the default text guard");
 
     spec.kind = index::SearchKind::Document;
     const std::wstring scoped = app::CompileSearchQuery(spec);

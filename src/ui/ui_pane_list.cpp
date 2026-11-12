@@ -361,8 +361,8 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
         const std::wstring* values[] = { &entry.date_text, &entry.type_text, &entry.size_text };
         for (size_t i = 0; i < measured.size(); ++i)
             measured[i] = std::max(measured[i],
-                measure(*values[i], compositor_->TextFormat()) + 20.0f * scale_);
-        measured[1] = std::max(measured[1], measure(entry.type_text, compositor_->TextFormat()) +
+                CellTextWidth(*values[i]) + 20.0f * scale_);
+        measured[1] = std::max(measured[1], CellTextWidth(entry.type_text) +
             (20.0f + TypeChipWidthDip(TypeChipLabel(entry.name, entry.is_dir))) * scale_);
     }
     FitDetailsMetadata(columns.widths, columns.count, measured, scale_, columns.cloud_width);
@@ -1296,7 +1296,8 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
             surface_animating_ |= view_transition.Pending();
     }, pane.is_file_system || pane.is_query_search ? L"items" :
         std::to_wstring(static_cast<int>(pane.view_mode)), pane.view_mode_direct,
-        pane.navigation_motion, pane.navigation_owner, pane.navigation_revision);
+        pane.navigation_motion, pane.navigation_owner, pane.navigation_revision,
+        D2D1::Point2F(pane.scroll_x, pane.scroll_y));
     surface_animating_ |= surface.pending;
     dc->PopAxisAlignedClip();
     DrawScrollbar(pane, x, rows_top, w, bottom - rows_top, theme);
@@ -1546,6 +1547,13 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         !vm.is_changes && vm.rename_index < 0 && !vm.marquee_active &&
         motion_last - motion_first < 512;
     const auto motion_context = ItemReflowContext(vm);
+    const bool animate_row_hover = reflow.Matches(motion_context, viewport);
+    const auto row_hover_opacity = [&](const std::wstring& key, bool hovered, float enter_ms, float exit_ms) {
+        // Scrolling moves the rows under a stationary pointer; old highlights must not follow them.
+        if (!animate_row_hover)
+            hover_tracks_[key].animation.Tick(hovered, settings_switch_now_, false, enter_ms);
+        return HoverOpacity(key, hovered, enter_ms, exit_ms);
+    };
     const uint64_t revision = vm.content_results ? vm.content_results->Revision() : vm.view_generation;
     std::vector<int> paint_rows;
     const int paint_first = animate_items ? motion_first : startIdx;
@@ -1755,7 +1763,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             row_theme.text = row_theme.text_secondary = row_theme.text_disabled = theme.text_selected;
             row_theme.icon_folder = row_theme.icon_file = row_theme.accent = theme.text_selected;
         }
-        const float hover_opacity = HoverOpacity(row_key, hover, 180.0f, 180.0f);
+        const float hover_opacity = row_hover_opacity(row_key, hover, 180.0f, 180.0f);
         const float selection_opacity = SelectionOpacity(row_key, selected);
         bool cut = e.record_only || vm.cut_names.contains(e.name);
         const bool ghosted = (e.attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
@@ -1861,9 +1869,9 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         const bool actions_visible = actions_allowed && (hover || (selected && vm.selected_count == 1));
         const bool star_visible = actions_allowed && (actions_visible || e.starred);
         const bool new_tab_visible = actions_allowed && hover && e.is_dir;
-        const float star_opacity = HoverOpacity(row_key + L":star-reveal", star_visible, 180.0f, 160.0f);
-        const float new_tab_opacity = HoverOpacity(row_key + L":new-tab-reveal", new_tab_visible, 180.0f, 160.0f);
-        const float more_opacity = HoverOpacity(row_key + L":more-reveal", actions_visible, 180.0f, 160.0f);
+        const float star_opacity = row_hover_opacity(row_key + L":star-reveal", star_visible, 180.0f, 160.0f);
+        const float new_tab_opacity = row_hover_opacity(row_key + L":new-tab-reveal", new_tab_visible, 180.0f, 160.0f);
+        const float more_opacity = row_hover_opacity(row_key + L":more-reveal", actions_visible, 180.0f, 160.0f);
         const float nameColRight = vm.view_mode == ViewMode::Details
             ? detailsColumns.DividerX(0) - margin_
             : nameRc.right;

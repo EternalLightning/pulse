@@ -2411,9 +2411,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SettingsFolderSort) {
             s->settings.FolderSort(hit.index);
             InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsTrayIcon) {
-            s->settings.TrayIconSize(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::SettingsWallpaperLook) {
             std::wstring value = std::to_wstring(s->appPrefs.wallpaper_visibility);
             while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsWallpaperLook),
@@ -2498,9 +2495,14 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }
+        } else if (hit.region == ui::HitTestResult::SettingsDupSkipSmallFiles) {
+            if (!s->duplicateScan.scanning) {
+                s->duplicateScan.skip_small_files = !s->duplicateScan.skip_small_files;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
         } else if (hit.region == ui::HitTestResult::SettingsDupMinSize) {
             static constexpr uint64_t kBytes[] = {1024ull, 1024ull * 1024ull, 10ull * 1024ull * 1024ull};
-            if (!s->duplicateScan.scanning && hit.index >= 0 && hit.index < 3) {
+            if (!s->duplicateScan.scanning && s->duplicateScan.skip_small_files && hit.index >= 0 && hit.index < 3) {
                 s->duplicateScan.minimum_file_bytes = kBytes[hit.index];
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -3667,7 +3669,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         // sidebar branch below would swallow every wheel event over it.
         // Wheel down sends the top card to the back, wheel up brings the
         // last one back on top (cyclic).
-        if (msg == WM_MOUSEWHEEL && TrayItemTotalCount(s->tray) > 1) {
+        if (msg == WM_MOUSEWHEEL && s->appPrefs.staging_tray_enabled && TrayItemTotalCount(s->tray) > 1) {
             const D2D1_RECT_F tray_rc = s->renderer.StagingTrayRect(
                 wheelVm, wheelRect.right, wheelRect.bottom);
             if (pt.x >= tray_rc.left && pt.x < tray_rc.right &&

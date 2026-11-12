@@ -205,6 +205,7 @@ bool Render(AppState& s, bool schedule_frame) {
     dc->BeginDraw();
     dc->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
+    const ui::HighContrastFrameScope high_contrast_frame;
     bool hc = s.shot_high_contrast || ui::IsHighContrast();
     ui::Theme theme = hc ? ui::MakeHighContrastTheme() : ui::MakeTheme(s.darkMode, s.accentColor);
 
@@ -304,6 +305,7 @@ bool Render(AppState& s, bool schedule_frame) {
     }
     s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating ||
         s.sidebarProjectAnimation.Pending() ||
+        s.stagingTrayAnimation.Pending() ||
         address_animating || s.scrollAnimating || surface_scroll_animating || column_scroll_animating ||
         s.renderer.SurfaceScrollAnimating() || s.renderer.TabIndicatorAnimating() || s.renderer.TabCloseAnimating() ||
         s.renderer.DetailsPreviewAnimating() || s.renderer.SettingsSwitchAnimating() ||
@@ -523,7 +525,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->renderer.SetListStyle(s->appPrefs.list_smart_date, s->appPrefs.list_zebra_rows,
                                  s->appPrefs.list_size_bar);
         s->renderer.SetSidebarWidthDip(static_cast<float>(s->appPrefs.sidebar_width));
-        s->renderer.SetTrayIconDip(static_cast<float>(s->appPrefs.tray_icon_size));
         ApplyAccentFromPrefs(*s);
         ApplyAppWindowChrome(*s);
         s->index.Start(hwnd, WM_INDEX_NOTIFY, WM_INDEX_SEARCH);

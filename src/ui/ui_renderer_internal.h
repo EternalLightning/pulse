@@ -306,8 +306,7 @@ void ClearTextWidthCache() {
 
     int TrayTotalCount(const WindowViewModel& vm) { return vm.tray_deck.total_count; }
 
-    // Staging tray card metrics (DIPs): thumbnail follows the "staging tray
-    // icon" setting (32..64), the card adds 10 dip of padding above/below.
+    // Staging tray card metrics (DIPs): 10 DIP of padding above/below the thumbnail.
     inline float TrayThumbDip(float thumb_dip) {
         return std::clamp(thumb_dip + 2.0f, 40.0f, 66.0f);
     }
@@ -318,6 +317,11 @@ void ClearTextWidthCache() {
         // Card stack: header (38) + top card + peeking layers when fanned
         // out (25) + gap + footer row (31).
         return (TrayCardHeightDip(vm.tray_deck.thumb_dip) + 94.0f) * m.scale;
+    }
+
+    float StagingTrayPresence(const WindowViewModel& vm) {
+        return vm.staging_tray_presence < 0.0f ? (vm.staging_tray_enabled ? 1.0f : 0.0f) :
+            std::clamp(vm.staging_tray_presence, 0.0f, 1.0f);
     }
 
     float SidebarRowsHeight(const SidebarGroup& group, const SidebarMetrics& m) {
@@ -352,9 +356,10 @@ void ClearTextWidthCache() {
     fluent::ScrollbarSpec SidebarScrollbarSpec(const WindowViewModel& vm,
                                                const D2D1_RECT_F& sb, float scale) {
         const SidebarMetrics m = MakeSidebarMetrics(scale);
+        const float presence = StagingTrayPresence(vm);
         const float tray_height = std::min(ExpandedTrayHeight(vm, m),
             std::max(120.0f * scale, (sb.bottom - sb.top) * 0.52f));
-        const float bottom = std::max(sb.top, sb.bottom - tray_height - 2.0f * m.pad);
+        const float bottom = std::max(sb.top, sb.bottom - m.pad - (tray_height + m.pad) * presence);
         fluent::ScrollbarSpec bar;
         bar.viewport = D2D1::RectF(sb.right - 12.0f * scale, sb.top,
                                    sb.right - 2.0f * scale, bottom);
@@ -376,9 +381,11 @@ void ClearTextWidthCache() {
         const bool compact = SidebarRailLayout(width, scale);
         const SidebarMetrics m = MakeSidebarMetrics(scale);
 
+        const float tray_presence = StagingTrayPresence(vm);
+
         if (compact) {
             const float rowH = 38.0f * scale;
-            const float trayH = 44.0f * scale;
+            const float trayH = 44.0f * scale * tray_presence;
             float y = sb.top;
             int run = 0;
             for (int g = 0; g < static_cast<int>(vm.sidebar.size()); ++g) {
@@ -423,17 +430,18 @@ void ClearTextWidthCache() {
                 }
                 y = reveal_bottom;
             }
+            if (tray_presence <= 0.0f) return;
             SidebarSlot tray;
             tray.kind = SidebarSlot::TrayPanel;
             tray.rc = D2D1::RectF(4.0f * scale, sb.bottom - trayH,
-                                  width - 4.0f * scale, sb.bottom - 4.0f * scale);
+                                  width - 4.0f * scale, sb.bottom - trayH + 40.0f * scale);
             out.push_back(tray);
             return;
         }
 
         float trayH = ExpandedTrayHeight(vm, m);
         trayH = std::min(trayH, std::max(120.0f * scale, (sb.bottom - sb.top) * 0.52f));
-        const float trayTop = sb.bottom - m.pad - trayH;
+        const float trayTop = sb.bottom - (trayH + m.pad) * tray_presence;
         const float contentBottom = trayTop - m.pad;
         const float innerL = sb.left + m.pad;
         const float innerR = sb.right - m.pad;
@@ -537,22 +545,19 @@ void ClearTextWidthCache() {
             }
         }
 
+        if (tray_presence <= 0.0f) return;
         SidebarSlot tray;
         tray.kind = SidebarSlot::TrayPanel;
-        tray.rc = D2D1::RectF(innerL, trayTop, innerR, sb.bottom - m.pad);
+        tray.rc = D2D1::RectF(innerL, trayTop, innerR, trayTop + trayH);
         out.push_back(tray);
 
         const float inset = 10.0f * scale;
         if (vm.tray_deck.total_count > 0) {
-            const float headerTop = trayTop + 6.0f * scale;
-            const float headerBottom = headerTop + m.trayHeaderH;
+
             SidebarSlot release;
             release.kind = SidebarSlot::TrayRelease;
             release.batch = vm.tray_deck.batch_count - 1;
-            release.rc = D2D1::RectF(innerR - inset - m.actionW,
-                                     headerTop,
-                                     innerR - inset,
-                                     headerBottom);
+            release.rc = fluent::StagingTrayActionRect(tray.rc, scale);
             out.push_back(release);
 
             // Footer "clear all" action, bottom-right of the panel.
@@ -1521,7 +1526,7 @@ struct SettingsLayout {
     D2D1_RECT_F section[4]{}, group[4]{}, footer{};
     l10n::StringId section_title[4]{};
     int section_count = 0;
-    std::vector<D2D1_RECT_F> category_dividers;
+    std::vector<D2D1_RECT_F> category_rows;
     D2D1_RECT_F nav_group_label[5]{};
     D2D1_RECT_F theme_row{}, theme_tile[3]{}, effect_choice{}, language_choice{};
     D2D1_RECT_F performance_row{}, text_compare_row{}, disclosure[2]{}, filename_status{};
@@ -1543,8 +1548,7 @@ struct SettingsLayout {
     D2D1_RECT_F text_render_row[3]{};
     D2D1_RECT_F folder_sort_card{};
     D2D1_RECT_F folder_sort_row[3]{};
-    D2D1_RECT_F tray_icon_card{};
-    D2D1_RECT_F tray_icon_row[3]{};
+    D2D1_RECT_F staging_tray_row{};
     D2D1_RECT_F language_card{};
     D2D1_RECT_F language_segment[3]{};
     D2D1_RECT_F wallpaper_card{};
@@ -1597,6 +1601,7 @@ struct SettingsLayout {
     D2D1_RECT_F dup_scope_row{}, dup_scope_label{}, dup_hint{};
     D2D1_RECT_F dup_target_row{}, dup_target_label{}, dup_target_summary{};
     D2D1_RECT_F dup_min_row{}, dup_min_label{}, dup_min_description{};
+    D2D1_RECT_F dup_skip_small_row{}, dup_skip_small_label{}, dup_skip_small_switch{};
     D2D1_RECT_F dup_actions_row{}, dup_empty{};
     bool dup_scope_stacked = false;
     D2D1_RECT_F dup_scope[3]{};
@@ -1647,11 +1652,13 @@ size_t AboutRowLines(const WindowViewModel& vm, float card_w, float scale) {
 
 SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                                   float scale, float title_h, float status_h,
-                                  const fluent::Painter* painter) {
+                                  const fluent::Painter* painter, float sidebar_width = -1.0f) {
     SettingsLayout l;
-    l.body = D2D1::RectF(rect.left, title_h, rect.right, rect.bottom - status_h);
-    const float nav_width = (rect.right - rect.left < 760 * scale ? 64.0f :
-        rect.right - rect.left < 1000 * scale ? 200.0f : 220.0f) * scale;
+    if (sidebar_width < 0) sidebar_width = (rect.right / scale < kSidebarRailWindowDip
+        ? kSidebarRailWidthDip : 224.0f) * scale;
+    l.body = D2D1::RectF(rect.left + sidebar_width + 4*scale, title_h + 48*scale,
+        rect.right - 4*scale, rect.bottom - status_h - 4*scale);
+    const float nav_width = (l.body.right - l.body.left < 760 * scale ? 64.0f : 220.0f) * scale;
     l.nav = D2D1::RectF(l.body.left, l.body.top, l.body.left + nav_width, l.body.bottom);
     l.content = D2D1::RectF(l.nav.right, l.body.top, l.body.right, l.body.bottom);
     const float nav_height = (l.nav.bottom-l.nav.top)/scale;
@@ -1780,24 +1787,11 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float card_right = l.content.right - pad;
         {
             const float lines = static_cast<float>(AboutRowLines(vm, card_right - card_left, scale));
-            float actions_y = y + 66.0f * scale + lines * kAboutRowDip * scale + 10.0f * scale;
-            static constexpr pulse::l10n::StringId kAboutLabels[] = {
-                pulse::l10n::StringId::AboutCopyInfo,
-                pulse::l10n::StringId::AboutHomepage,
-            };
-            float ax = card_left + 16.0f * scale;
-            const float action_right = card_right - 16.0f * scale;
-            for (int i = 0; i < 2; ++i) {
-                const float w = std::min(action_right - card_left - 16.0f * scale,
-                    label_btn_w(pulse::l10n::Get(kAboutLabels[i])));
-                if (i > 0 && ax + w > action_right) {
-                    ax = card_left + 16.0f * scale;
-                    actions_y += 40.0f * scale;
-                }
-                l.about_action[i] = D2D1::RectF(ax, actions_y, ax + w, actions_y + 32.0f * scale);
-                ax += w + 8.0f * scale;
-            }
-            l.about_card = D2D1::RectF(card_left, y, card_right, actions_y + 48.0f * scale);
+            const float actions_y = y + 66.0f * scale + lines * kAboutRowDip * scale + 10.0f * scale;
+            const l10n::StringId labels[] = {l10n::StringId::AboutCopyInfo, l10n::StringId::AboutHomepage};
+            const float bottom = LayoutSettingsActions(card_left+16*scale, card_right-16*scale,
+                actions_y, scale, labels, 2, l.about_action, painter);
+            l.about_card = D2D1::RectF(card_left, y, card_right, bottom + 8*scale);
             y = l.about_card.bottom + 12.0f * scale;
         }
 
@@ -1811,8 +1805,8 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float upstream_top = l.about_distribution_notice.bottom + 16.0f * scale;
         const float upstream_width = std::min(notice_width,
             label_btn_w(l10n::Get(l10n::StringId::AboutUpstream)));
-        l.about_action[2] = D2D1::RectF(notice_left, upstream_top,
-            notice_left + upstream_width, upstream_top + 32.0f * scale);
+        l.about_action[2] = D2D1::RectF(card_right - 16*scale - upstream_width, upstream_top,
+            card_right - 16*scale, upstream_top + 32.0f * scale);
         l.about_distribution_card = D2D1::RectF(card_left, y, card_right,
             l.about_action[2].bottom + 16.0f * scale);
         y = l.about_distribution_card.bottom + 12.0f * scale;
@@ -1823,66 +1817,24 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             transfer_right - transfer_left, scale, painter);
         l.transfer_description = D2D1::RectF(transfer_left, y + 44.0f * scale,
             transfer_right, y + 44.0f * scale + transfer_caption);
-        float transfer_y = l.transfer_description.bottom + 16.0f * scale;
-        const bool transfer_stacked = card_right - card_left < 650.0f * scale;
         const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
             l10n::StringId::ImportSettingsTitle, vm.settings_transfer_pending ?
             l10n::StringId::RestartNow : l10n::StringId::RestoreSettingsTitle};
-        float transfer_x = transfer_left;
-        for (int i = 0; i < 3; ++i) {
-            const float width = transfer_stacked ? transfer_right - transfer_left :
-                label_btn_w(l10n::Get(transfer_labels[i]));
-            if (!transfer_stacked && i && transfer_x + width > transfer_right) {
-                transfer_x = transfer_left;
-                transfer_y += 40.0f * scale;
-            }
-            l.transfer_action[i] = D2D1::RectF(transfer_x, transfer_y,
-                (std::min)(transfer_right, transfer_x + width), transfer_y + 32.0f * scale);
-            if (transfer_stacked && i < 2) transfer_y += 40.0f * scale;
-            else transfer_x += width + 8.0f * scale;
-        }
-        l.transfer_card = D2D1::RectF(card_left, y, card_right, transfer_y + 48.0f * scale);
+        const float transfer_bottom = LayoutSettingsActions(transfer_left, transfer_right,
+            l.transfer_description.bottom + 16*scale, scale, transfer_labels, 3, l.transfer_action, painter);
+        l.transfer_card = D2D1::RectF(card_left, y, card_right, transfer_bottom + 8*scale);
         y = l.transfer_card.bottom + 12.0f * scale;
 
-        const bool compact_diagnostics = card_right - card_left < 650.0f * scale;
         const float performance_height=SettingsToggleHeight(card_right-card_left-16*scale,
             l10n::Get(l10n::StringId::SettingsShowPerformanceDesc),scale,painter);
-        const float performance_extra=performance_height-56*scale;
-        const float diagnostics_h = (compact_diagnostics ? 288.0f : 208.0f) * scale+performance_extra;
-        l.diagnostics_card = D2D1::RectF(card_left, y, card_right, y + diagnostics_h);
-        l.diagnostics_perf = D2D1::RectF(card_left + 8.0f * scale, y + 86.0f * scale,
-                                         card_right - 8.0f * scale, y + 86.0f * scale+performance_height);
-        const float gap = 8.0f * scale;
-        const float action_left = card_left + 16.0f * scale;
-        const float action_right = card_right - 16.0f * scale;
-        static constexpr pulse::l10n::StringId kDiagLabels[] = {
-            pulse::l10n::StringId::OpenDiagnostics,
-            pulse::l10n::StringId::ClearDiagnostics,
-            pulse::l10n::StringId::ExportDiagnostics,
-        };
-        float diag_w[3]{};
-        for (int i = 0; i < 3; ++i)
-            diag_w[i] = label_btn_w(pulse::l10n::Get(kDiagLabels[i]));
-        if (compact_diagnostics) {
-            for (int i = 0; i < 3; ++i) {
-                const float top = y + (152.0f + i * 40.0f) * scale+performance_extra;
-                l.diagnostics_action[i] = D2D1::RectF(action_left, top, action_right,
-                                                      top + 32.0f * scale);
-            }
-        } else {
-            const float available = action_right - action_left;
-            const float equal = (available - gap * 2.0f) / 3.0f;
-            const float measured_total = diag_w[0] + diag_w[1] + diag_w[2] + gap * 2.0f;
-            float left = action_left;
-            for (int i = 0; i < 3; ++i) {
-                const float width = measured_total > available ? equal : diag_w[i];
-                const float top = y + 160.0f * scale+performance_extra;
-                l.diagnostics_action[i] = D2D1::RectF(left, top, left + width,
-                                                      top + 32.0f * scale);
-                left += width + gap;
-            }
-        }
-        y += diagnostics_h + 12.0f * scale;
+        l.diagnostics_perf = D2D1::RectF(card_left + 8*scale, y + 86*scale,
+            card_right - 8*scale, y + 86*scale + performance_height);
+        const l10n::StringId labels[] = {l10n::StringId::OpenDiagnostics,
+            l10n::StringId::ClearDiagnostics, l10n::StringId::ExportDiagnostics};
+        const float bottom = LayoutSettingsActions(card_left+16*scale, card_right-16*scale,
+            l.diagnostics_perf.bottom + 18*scale, scale, labels, 3, l.diagnostics_action, painter);
+        l.diagnostics_card = D2D1::RectF(card_left, y, card_right, bottom + 8*scale);
+        y = l.diagnostics_card.bottom + 12*scale;
 
         if (!vm.settings_index_error.empty()) y += 44.0f * scale;
     } else if (vm.settings_page == 4) {

@@ -14,6 +14,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace pulse::bench {
 namespace {
@@ -109,7 +111,9 @@ struct OwnedFixture {
         }
         root = parent / name;
         if (!CreateDirectoryW(root.c_str(), nullptr)) {
-            result.Block(L"cannot create fresh fixture directory", GetLastError());
+            const DWORD code = GetLastError();
+            wprintf(L"[DIAG] fixture directory=%ls\n", root.c_str());
+            result.Block(L"cannot create fresh fixture directory", code);
             return false;
         }
         owned = true;
@@ -410,7 +414,7 @@ bool NoStaging(const fs::path& root) {
     return !error;
 }
 
-void MeasureTransfers(Session& session, const fs::path& source, const fs::path& destination) {
+void MeasureTransfers(Session& session, const fs::path& source, const fs::path& destination, bool few_files) {
     using Clock = std::chrono::steady_clock;
     if (!CreateDirectoryW(source.c_str(), nullptr) || !CreateDirectoryW(destination.c_str(), nullptr)) {
         session.result.Block(L"cannot prepare performance directories", GetLastError());
@@ -418,12 +422,20 @@ void MeasureTransfers(Session& session, const fs::path& source, const fs::path& 
     }
     const bool remote = GetDriveTypeW(source.root_path().c_str()) == DRIVE_REMOTE ||
         GetDriveTypeW(destination.root_path().c_str()) == DRIVE_REMOTE;
-    for (const unsigned count : {remote ? 64u : 256u, 1u}) {
-        const uint64_t bytes = count == 1 ? 64 * 1024 * 1024 + 137 : 4096;
+    std::vector<std::pair<unsigned, uint64_t>> cases;
+    if (few_files) {
+        cases.emplace_back(1, 64ull * 1024 * 1024 + 137);
+        if (!remote) cases.emplace_back(1, 256ull * 1024 * 1024 + 137);
+    } else {
+        cases.emplace_back(remote ? 64u : 256u, 4096);
+        cases.emplace_back(1, 64ull * 1024 * 1024 + 137);
+    }
+    for (const auto& [count, bytes] : cases) {
+        const auto case_name = std::to_wstring(count) + L"-" + std::to_wstring(bytes);
         OpRequest request;
         request.type = OpType::Copy;
         for (unsigned i = 0; i < count; ++i) {
-            const auto path = source / (std::to_wstring(count) + L"-" + std::to_wstring(i) + L".bin");
+            const auto path = source / (case_name + L"-" + std::to_wstring(i) + L".bin");
             if (!PatternFile(path, bytes, i, true)) {
                 session.result.Block(L"cannot prepare performance source", GetLastError());
                 return;
@@ -433,7 +445,7 @@ void MeasureTransfers(Session& session, const fs::path& source, const fs::path& 
         for (unsigned trial = 0; trial < 2; ++trial) {
             // Alternate order to avoid always running one implementation with a warm source cache.
             for (const bool pulse_copy : {trial == 0, trial != 0}) {
-                const auto folder = destination / (std::to_wstring(count) + L"-" +
+                const auto folder = destination / (case_name + L"-" +
                     std::to_wstring(trial) + (pulse_copy ? L"-pulse" : L"-win32"));
                 if (!CreateDirectoryW(folder.c_str(), nullptr)) {
                     session.result.Block(L"cannot prepare performance destination", GetLastError());
@@ -465,7 +477,7 @@ void MeasureTransfers(Session& session, const fs::path& source, const fs::path& 
 }
 }
 
-int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent, bool performance) {
+int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent, bool performance, bool few_files) {
     _setmode(_fileno(stdout), _O_U8TEXT);
     setvbuf(stdout, nullptr, _IONBF, 0);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -484,12 +496,15 @@ int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network
         }
         {
             Session session(owner, result, fixture, fixture);
-            const auto run = performance ? MeasureTransfers : Transfers;
-            run(session, fixture.root / L"transfer-source", fixture.root / L"transfer-destination");
+            if (performance)
+                MeasureTransfers(session, fixture.root / L"transfer-source", fixture.root / L"transfer-destination", few_files);
+            else Transfers(session, fixture.root / L"transfer-source", fixture.root / L"transfer-destination");
         }
         result.Check(NoStaging(fixture.root), L"no transfer staging or backup files remain");
     };
-    if (have_local) within(local_fixture, local, false);
+    // With a network parent, the few-file mode reserves local storage for the
+    // two transfer directions instead of repeating the local-only benchmark.
+    if (have_local && (!few_files || network_parent.empty())) within(local_fixture, local, false);
     if (have_network) within(network_fixture, network, true);
     const auto across = [&](OwnedFixture& from, OwnedFixture& to, Results& result, const wchar_t* name) {
         if (!have_local || !have_network || !owner) {
@@ -498,9 +513,10 @@ int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network
         }
         {
             Session session(owner, result, from, to);
-            const auto run = performance ? MeasureTransfers : Transfers;
-            run(session, from.root / (std::wstring(name) + L"-source"),
-                to.root / (std::wstring(name) + L"-destination"));
+            const auto source = from.root / (std::wstring(name) + L"-source");
+            const auto destination = to.root / (std::wstring(name) + L"-destination");
+            if (performance) MeasureTransfers(session, source, destination, few_files);
+            else Transfers(session, source, destination);
         }
         result.Check(NoStaging(from.root) && NoStaging(to.root), L"no cross-volume staging or backups remain");
     };

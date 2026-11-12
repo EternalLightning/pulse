@@ -11,6 +11,7 @@
 #include "../app/sidebar_pin_menu.h"
 #include <cstdio>
 #include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -166,6 +167,7 @@ struct FluentMenuTestPeer {
     static void Enter(FluentMenu& menu) { menu.HandleFilterKey(WM_KEYDOWN, VK_RETURN); }
     static float ScrollOffset(const FluentMenu& menu) { return menu.scroll_y_; }
     static int Count(const FluentMenu& menu) { return menu.model_.Count(); }
+    static int CommandAt(const FluentMenu& menu, int row) { return menu.model_.At(row)->command; }
     static int HoverRow(const FluentMenu& menu) { return menu.hover_row_; }
     static auto AnimationStart(const FluentMenu& menu) { return menu.anim_start_; }
     static void FinishAnimation(FluentMenu& menu) {
@@ -230,6 +232,28 @@ struct AnimationProbe {
     int stage = 0;
     uint64_t settled_presents = 0;
 };
+constexpr UINT kAnimationBurstMessage = WM_APP + 96;
+struct AnimationBurstProbe {
+    pulse::ui::FluentMenu* menu;
+    BYTE first_alpha = 0;
+    int handled = 0;
+};
+LRESULT CALLBACK AnimationBurstOwnerProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+                                         UINT_PTR, DWORD_PTR data) {
+    auto& probe = *reinterpret_cast<AnimationBurstProbe*>(data);
+    if (message == kAnimationBurstMessage) {
+        using Peer = pulse::ui::FluentMenuTestPeer;
+        if (!probe.handled) probe.first_alpha = Peer::Alpha(*probe.menu);
+        Sleep(4); // Simulate a burst of ordinary async owner completions.
+        if (++probe.handled == 32) {
+            Check(Peer::Alpha(*probe.menu) > probe.first_alpha,
+                "entry animation advances while queued owner completions are still draining");
+            probe.menu->RequestDismiss();
+        }
+        return 0;
+    }
+    return DefSubclassProc(window, message, wp, lp);
+}
 LRESULT CALLBACK AnimationOwnerProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
                                     UINT_PTR, DWORD_PTR data) {
     auto& probe = *reinterpret_cast<AnimationProbe*>(data);
@@ -439,6 +463,62 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--animation-burst") == 0) {
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create New dropdown under async message load");
+            AnimationBurstProbe probe{&menu};
+            Check(SetWindowSubclass(owner, AnimationBurstOwnerProc, kAnimationBurstMessage,
+                reinterpret_cast<DWORD_PTR>(&probe)) != FALSE, "observe the real modal message loop");
+            for (int i = 0; i < 32; ++i) PostMessageW(owner, kAnimationBurstMessage, 0, 0);
+            const int result = menu.TrackToolbarPopup({300, 200}, {Item(1, L"Folder"), Item(2, L"Text document")});
+            Check(probe.handled == 32 && result == 0 && !menu.IsOpen(),
+                "all owner messages complete and the dropdown exits normally");
+            RemoveWindowSubclass(owner, AnimationBurstOwnerProc, kAnimationBurstMessage);
+            DestroyWindow(owner); CoUninitialize();
+            return failures ? 1 : 0;
+        }
+        if (argc == 2 && wcscmp(argv[1], L"--command-refresh-animation") == 0) {
+            using Peer = FluentMenuTestPeer;
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create New menu command refresh fixture");
+            auto folder = Item(1, L"\u65b0\u5efa\u6587\u4ef6\u5939");
+            auto text = Item(2, L"\u6587\u672c\u6587\u6863");
+            folder.live_update = text.live_update = true;
+            std::vector<FluentMenuItem> items{folder, text};
+            Check(Peer::Begin(menu, items), "begin New menu entry animation");
+            Peer::Step(menu, 60);
+            const auto presents = Peer::PresentCount(menu), animation = Peer::AnimationStart(menu);
+            const auto alpha = Peer::Alpha(menu);
+            const int offset = Peer::Offset(menu);
+            double maximum_ms = 0;
+            for (int i = 0; i < 16; ++i) {
+                items[1].command = 8000 + i;
+                const auto started = std::chrono::steady_clock::now();
+                Check(menu.ReplaceItems(items), "accept late native command bindings during entry");
+                maximum_ms = std::max(maximum_ms, std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count());
+            }
+            Check(Peer::PresentCount(menu) == presents,
+                "command-only refresh reuses the painted menu without GPU readback or presentation");
+            Check(Peer::AnimationStart(menu) == animation && Peer::Alpha(menu) == alpha && Peer::Offset(menu) == offset,
+                "command refresh preserves the entry animation progress");
+            Check(Peer::CommandAt(menu, 1) == items[1].command, "latest native command binding is installed immediately");
+            items[1].enabled = false;
+            Check(menu.ReplaceItems(items) && Peer::PresentCount(menu) > presents,
+                "changed enabled state still repaints the visible row");
+            Peer::ChooseRow(menu, 1);
+            Check(menu.IsOpen() && Peer::Result(menu) == 0, "disabled refreshed template cannot execute");
+            items.push_back(Item(9000, L"Office document")); items.back().live_update = true;
+            Check(menu.ReplaceItems(items) && Peer::Count(menu) == 3,
+                "new native templates remain visible during the same popup invocation");
+            items[1].enabled = true;
+            Check(menu.ReplaceItems(items), "enable the current native template");
+            Peer::ChooseRow(menu, 1);
+            Check(Peer::Result(menu) == items[1].command, "selection invokes the latest native command");
+            std::printf("[COMMAND_REFRESH] updates=16 maximum_ms=%.3f\n", maximum_ms);
+            menu.Dismiss(); DestroyWindow(owner); CoUninitialize();
+            return failures ? 1 : 0;
+        }
         if (argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0) {
             using Peer = FluentMenuTestPeer;
             std::vector<FluentMenuItem> rows;

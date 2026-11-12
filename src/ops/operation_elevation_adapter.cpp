@@ -4,7 +4,10 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "operation_elevation_adapter.h"
+#include "delete_operation.h"
 #include "operation_presentation.h"
+#include "../common/file_name.h"
+#include "../common/path_utils.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
 #include <algorithm>
@@ -215,15 +218,11 @@ void Paths(const std::vector<std::wstring>& values) {
     for (const auto& path : values)
         Path(path);
 }
-bool IsDelete(OpType type) {
-    return type == OpType::RecycleDelete || type == OpType::RealDelete || type == OpType::EmptyRecycle;
-}
 bool IsTerminal(OpPhase phase) {
     return phase == OpPhase::Completed || phase == OpPhase::Failed || phase == OpPhase::Cancelled;
 }
 void Leaf(const std::wstring& value) {
-    if (value.empty() || value == L"." || value == L".." ||
-        value.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
+    if (!path::IsValidFileName(value))
         throw InvalidPayload{};
 }
 void ValidateRequest(const OpRequest& value) {
@@ -239,7 +238,7 @@ void ValidateRequest(const OpRequest& value) {
     if (value.type == OpType::Rename || value.type == OpType::BatchRename) {
         if (value.sources.empty() || (value.type == OpType::Rename && value.sources.size() != 1))
             throw InvalidPayload{};
-        if (value.type == OpType::Rename && value.sources[0].size() > 3)
+        if (value.type == OpType::Rename && !path::IsDriveRootPath(value.sources[0]))
             Leaf(value.new_name);
         if (value.type == OpType::BatchRename) {
             if (value.new_names.size() != value.sources.size())
@@ -869,7 +868,7 @@ std::vector<uint8_t> OperationElevationAdapter::ParentProgress(void* raw, std::s
             if (completed.task_id != state.item.seq && completed.task_id != 0)
                 throw InvalidPayload{};
             if (completed.type != state.item.req.type &&
-                !(IsDelete(state.item.req.type) && IsDelete(completed.type)))
+                !(IsDeleteOperation(state.item.req.type) && IsDeleteOperation(completed.type)))
                 throw InvalidPayload{};
             OpRequest req = state.item.req;
             req.type = completed.type;
@@ -1055,7 +1054,7 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
             wire.destination_guard = item.retry_destination_guard->ExportForElevation();
         const auto payload = EncodeRequest(wire);
         (void)DecodeRequest(payload);
-        if (IsDelete(item.req.type)) {
+        if (IsDeleteOperation(item.req.type)) {
             {
                 std::lock_guard lock(manager.mutex_);
                 manager.active_item_ = item;
@@ -1162,11 +1161,11 @@ void OperationElevationAdapter::RunParentImpl(OpsManager& manager, const OpsMana
             manager.active_item_.reset();
     }
     manager.PersistJournal();
-    if (uncertain && IsDelete(item.req.type)) {
+    if (uncertain && IsDeleteOperation(item.req.type)) {
         std::lock_guard lock(manager.mutex_);
         manager.delete_outcomes_.push_back({item.seq, state.imported_completions != 0, true});
     }
-    if (IsDelete(item.req.type)) {
+    if (IsDeleteOperation(item.req.type)) {
         std::lock_guard lock(manager.mutex_);
         if (item.req.undo_revision && item.req.undo_revision == manager.undo_revision_ &&
             !manager.undo_.empty() && (state.imported_completions || uncertain)) {
@@ -1303,7 +1302,7 @@ OperationElevationResult OperationElevationAdapter::ExecuteWorker(void* raw, std
         std::thread execution([&] {
             const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             try {
-                if (IsDelete(item.req.type))
+                if (IsDeleteOperation(item.req.type))
                     manager.RunDelete(item);
                 else if (item.req.type == OpType::Copy || item.req.type == OpType::Move)
                     manager.RunTransfer(item.req, item.seq, item.retry_completed_sources,
@@ -1765,6 +1764,19 @@ bool OperationElevationAdapter::CodecChecksForTest() {
                 return true;
             }
         };
+        auto rename = request;
+        rename.request.type = OpType::Rename;
+        for (const auto* name : {L"CON.txt", L"CON .txt", L"CONIN$", L"LPT\u00b9.md", L"trailing.", L"bad\nname"}) {
+            rename.request.new_name = name;
+            if (!rejects(EncodeRequest(rename))) return false;
+        }
+        rename.request.new_name = L".gitignore";
+        if (rejects(EncodeRequest(rename))) return false;
+        rename.request.new_name = L"CON"; // A volume label is not a filename component.
+        for (const auto* root : {L"C:\\", L"\\\\?\\C:\\"}) {
+            rename.request.sources = {root};
+            if (rejects(EncodeRequest(rename))) return false;
+        }
         for (size_t count = 0; count < valid.size(); ++count)
             if (!rejects(std::span<const uint8_t>(valid.data(), count)))
                 return false;

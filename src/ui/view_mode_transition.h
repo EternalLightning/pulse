@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pulse::ui {
 
@@ -33,6 +34,7 @@ public:
     template<class Visit> void RetainIcons(Visit visit) const {
         for (const auto& [_, picture] : current_.icons)
             visit(picture.source, std::max(picture.bounds.right - picture.bounds.left, picture.bounds.bottom - picture.bounds.top));
+        for (const auto& [source, extent] : current_.overflow_icons) visit(source, extent);
     }
     bool Matches(const std::wstring& identity, ViewMode mode, D2D1_RECT_F viewport,
                  D2D1_POINT_2F scroll, uint64_t revision) const {
@@ -77,7 +79,10 @@ public:
         if (!Capturing()) { draw(); return; }
         if (!Intersects(bounds, viewport_)) return;
         if (incoming_.icons.size() >= kMaxIcons) {
-            capture_icons_ = false;
+            // Keep excess icons in the fading decoration instead of cancelling
+            // the entire transition and re-recording a dense viewport each frame.
+            incoming_.overflow_icons.emplace_back(source,
+                std::max(bounds.right - bounds.left, bounds.bottom - bounds.top));
             draw();
             return;
         }
@@ -204,6 +209,7 @@ private:
         ComPtr<ID2D1Bitmap1> decoration_bitmap;
         D2D1_RECT_F decoration_bounds{};
         std::unordered_map<std::wstring, Picture> icons;
+        std::vector<std::pair<int, float>> overflow_icons;
         float decoration_opacity = 1.0f;
         bool valid = false;
     };

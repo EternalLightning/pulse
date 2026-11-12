@@ -133,6 +133,23 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
     auto text_width = [&](std::wstring_view text) {
         return painter ? painter->MeasureButtonWidth(text) : 100 * s;
     };
+    const float body_left = left + 16 * s, body_right = right - 16 * s;
+    const float available = std::max(1.0f, body_right - body_left);
+    static constexpr I kPresetName[] = {I::ContextPresetSlim, I::ContextPresetStandard,
+        I::ContextPresetFull, I::ContextPresetCustom};
+    static constexpr I kTabs[] = {I::ContextTabItem, I::ContextTabBackground, I::ContextTabRow};
+    float preset_w = 64 * s;
+    for (const auto name : kPresetName) preset_w = std::max(preset_w, text_width(l10n::Get(name)));
+    float tab_widths[3]{};
+    float tabs_width = 0;
+    for (int i = 0; i < 3; ++i) {
+        tab_widths[i] = std::min(available, std::max(72 * s, text_width(l10n::Get(kTabs[i]))));
+        tabs_width += tab_widths[i];
+    }
+    const float layer_width = painter
+        ? text_width(sysctx_text::LocalTitle()) + text_width(sysctx_text::SystemTitle()) : 340 * s;
+    const float choices_width = std::min(available, std::max({layer_width, 4 * preset_w, tabs_width}));
+    const float choices_left = body_right - choices_width;
     const auto& intro = l10n::Get(I::ContextMenuDesc);
     const float intro_h = SettingsCaptionHeight(intro, width, s, painter);
     l.ctx_intro = D2D1::RectF(left, y, right, y + intro_h);
@@ -142,10 +159,9 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
         l.ctx_error = D2D1::RectF(left, y, right, y + error_h);
         y += error_h + 12 * s;
     }
-    y = LayoutCtxLayerCards(l.ctx_layer[0], l.ctx_layer[1], left, right, y, painter, s);
+    y = LayoutCtxLayerCards(l.ctx_layer[0], l.ctx_layer[1], choices_left, body_right, y, painter, s, true);
 
-    const float top = y, body_left = left + 16 * s, body_right = right - 16 * s;
-    const float available = std::max(1.0f, body_right - body_left);
+    const float top = y;
     const float restore_w = std::min(available * 0.42f, text_width(l10n::Get(I::RestoreDefaults)) - 8 * s);
     l.pulse_restore = D2D1::RectF(body_right - restore_w, top + 12 * s, body_right, top + 40 * s);
     l.pulse_title = D2D1::RectF(left + 54 * s, top + 12 * s, l.pulse_restore.left - 8 * s, top + 36 * s);
@@ -154,14 +170,10 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
     l.pulse_description = D2D1::RectF(caption_left, top + 40 * s, right - 16 * s, top + 40 * s + caption_h);
     y = std::max(top + 72 * s, l.pulse_description.bottom + 14 * s);
 
-    static constexpr I kPresetName[] = {I::ContextPresetSlim, I::ContextPresetStandard,
-        I::ContextPresetFull, I::ContextPresetCustom};
     static constexpr I kPresetDesc[] = {I::ContextPresetSlimDesc, I::ContextPresetStandardDesc,
         I::ContextPresetFullDesc, I::ContextPresetCustomDesc};
-    float preset_w = 64 * s;
-    for (const auto name : kPresetName) preset_w = std::max(preset_w, text_width(l10n::Get(name)));
-    const int columns = available >= 4 * preset_w ? 4 : available >= 2 * preset_w ? 2 : 1;
-    preset_w = std::min(preset_w, available / columns);
+    const int columns = choices_width >= 4 * preset_w ? 4 : choices_width >= 2 * preset_w ? 2 : 1;
+    preset_w = choices_width / columns;
     for (int first = 0; first < 4; first += columns) {
         const int count = std::min(columns, 4 - first);
         for (int i = 0; i < count; ++i) {
@@ -175,27 +187,23 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
     const float preset_caption_h = SettingsCaptionHeight(l10n::Get(kPresetDesc[active]), body_right - caption_left_preset, s, painter);
     l.pulse_preset_description = D2D1::RectF(caption_left_preset, y + 8 * s, body_right, y + 8 * s + preset_caption_h);
     y = l.pulse_preset_description.bottom + 16 * s;
-    static constexpr I kTabs[] = {I::ContextTabItem, I::ContextTabBackground, I::ContextTabRow};
     const float tabs_top = y;
-    float tab_widths[3]{};
-    for (int i = 0; i < 3; ++i)
-        tab_widths[i] = std::min(available, std::max(72 * s, text_width(l10n::Get(kTabs[i]))));
-    float tabs_left = body_right;
     for (int first = 0; first < 3;) {
         int last = first;
         float row_width = tab_widths[first];
-        while (last < 2 && row_width + tab_widths[last + 1] <= available)
+        while (last < 2 && row_width + tab_widths[last + 1] <= choices_width)
             row_width += tab_widths[++last];
-        float tx = body_right - row_width;
-        tabs_left = std::min(tabs_left, tx);
+        const float factor = choices_width / row_width;
+        float tx = choices_left;
         for (int i = first; i <= last; ++i) {
-            l.pulse_tab[i] = D2D1::RectF(tx, y, tx + tab_widths[i], y + 36 * s);
-            tx += tab_widths[i];
+            const float tab_right = i == last ? body_right : tx + tab_widths[i] * factor;
+            l.pulse_tab[i] = D2D1::RectF(tx, y, tab_right, y + 36 * s);
+            tx = tab_right;
         }
         first = last + 1;
         if (first < 3) y += 42 * s;
     }
-    l.pulse_tabs = D2D1::RectF(tabs_left, tabs_top, body_right, y + 36 * s);
+    l.pulse_tabs = D2D1::RectF(choices_left, tabs_top, body_right, y + 36 * s);
     y += 52 * s;
 
     l.context_rows.resize(vm.settings_items.size());

@@ -238,18 +238,6 @@ std::wstring ExtensionOf(const std::wstring& path) {
     return extension;
 }
 
-bool IsOneOf(std::wstring_view extension, std::initializer_list<std::wstring_view> values) {
-    return std::find(values.begin(), values.end(), extension) != values.end();
-}
-
-bool IsNativePreviewExtension(std::wstring_view extension) {
-    return pulse::preview::IsNativeExtension(extension);
-}
-
-bool IsOfflinePlaceholder(DWORD attrs) {
-    return pulse::fs::IsCloudPlaceholder(attrs);
-}
-
 bool FindPreviewHandlerClsid(const std::wstring& extension, CLSID& clsid,
                              bool defer_uncached = false) {
     static auto& cache = *new std::unordered_map<std::wstring, CLSID>;
@@ -442,7 +430,7 @@ void RegisterClassOnce() {
 
 bool PreviewHandlerHost::CanHost(const std::wstring& path) {
     const std::wstring extension = ExtensionOf(path);
-    if (extension.empty() || IsNativePreviewExtension(extension)) return false;
+    if (extension.empty() || pulse::preview::IsNativeExtension(extension)) return false;
     if (ProviderCoolingDown(extension)) return false;
     const auto resources = Resources();
     if (resources.live >= resources.limit) return false;
@@ -459,7 +447,7 @@ bool PreviewHandlerHost::CanHost(const std::wstring& path) {
 bool PreviewHandlerHost::CanHostPath(const std::wstring& path) const {
     if (!worker_) return CanHost(path);
     const std::wstring extension = ExtensionOf(path);
-    if (extension.empty() || IsNativePreviewExtension(extension) || ProviderCoolingDown(extension))
+    if (extension.empty() || pulse::preview::IsNativeExtension(extension) || ProviderCoolingDown(extension))
         return false;
 #ifdef PULSE_PREVIEW_HANDLER_TESTING
     {
@@ -895,7 +883,7 @@ void PreviewHandlerHost::Sync(HWND owner, const D2D1_RECT_F& bounds, const std::
 
     const bool usable = enabled && !ProviderCoolingDown(ExtensionOf(path)) &&
         owner && IsWindow(owner) && !IsIconic(owner) &&
-        IsWindowVisible(owner) && !IsOfflinePlaceholder(attrs) &&
+        IsWindowVisible(owner) && !pulse::fs::IsCloudPlaceholder(attrs) &&
         target.right > target.left + 8 && target.bottom > target.top + 8;
     if (!usable) {
         if (last_enabled_) Hide();

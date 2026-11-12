@@ -16,6 +16,7 @@
 #include "../fs/fs_watch.h"
 #include "../../third_party/sqlite/sqlite3.h"
 #include "../common/current_user_security.h"
+#include "../common/path_utils.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -211,13 +212,10 @@ std::wstring Canonical(std::wstring p) {
     if (GetDriveTypeW(drive.c_str()) == DRIVE_REMOTE) return {};
     return p;
 }
-bool Same(std::wstring_view a, std::wstring_view b) {
-    return CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE) == CSTR_EQUAL;
-}
 bool Under(std::wstring_view path, std::wstring_view root, bool recursive = true) {
     if (root.empty()) return true;
     while (root.size() > 3 && (root.back() == L'\\' || root.back() == L'/')) root.remove_suffix(1);
-    if (path.size() < root.size() || !Same(path.substr(0, root.size()), root)) return false;
+    if (path.size() < root.size() || !path::EqualInsensitive(path.substr(0, root.size()), root)) return false;
     if (path.size() == root.size()) return true;
     const size_t next = root.back() == L'\\' ? root.size() : root.size() + 1;
     if (root.back() != L'\\' && path[root.size()] != L'\\') return false;
@@ -489,7 +487,7 @@ struct ContentIndex::Impl {
             const auto path_value = Column(rows.p, 1);
             const auto root = std::find_if(c.roots.begin(), c.roots.end(), [&](const auto& value) { return Under(path_value, value.path); });
             const auto old_root_path = Column(rows.p, 2);
-            const auto old_root = std::find_if(previous.roots.begin(), previous.roots.end(), [&](const auto& value) { return Same(value.path, old_root_path); });
+            const auto old_root = std::find_if(previous.roots.begin(), previous.roots.end(), [&](const auto& value) { return path::EqualInsensitive(value.path, old_root_path); });
             const auto id = static_cast<uint64_t>(sqlite3_column_int64(rows.p, 0));
             if (root == c.roots.end() || ExcludedContentPath(c, path_value) ||
                 (old_root != previous.roots.end() && old_root->encoding != root->encoding)) {
@@ -678,7 +676,7 @@ struct ContentIndex::Impl {
             if (end != relative.size() && relative[end] != L'\\') continue;
             const auto part = std::wstring_view(relative).substr(start, end - start);
             if (part == L".." || std::any_of(c.excluded_directories.begin(), c.excluded_directories.end(),
-                    [&](const auto& ex) { return Same(ex, part); })) return false;
+                    [&](const auto& ex) { return path::EqualInsensitive(ex, part); })) return false;
             start = end + 1;
         }
         return !relative.empty();
@@ -710,7 +708,7 @@ struct ContentIndex::Impl {
         for (const auto& [file, change] : batch) {
             if (!ContinueIndexing()) break;
             if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(change.root.path))) continue;
-            if (std::none_of(c.roots.begin(), c.roots.end(), [&](const auto& r) { return Same(r.path, change.root.path); })) continue;
+            if (std::none_of(c.roots.begin(), c.roots.end(), [&](const auto& r) { return path::EqualInsensitive(r.path, change.root.path); })) continue;
             if (!change.old_path.empty()) {
                 Statement move(db, "UPDATE OR REPLACE documents SET path=?2||substr(path,length(?1)+1),root=?3 WHERE path=?1 OR substr(path,1,length(?1)+1)=?1||'\\'");
                 move.Text(1, change.old_path); move.Text(2, file); move.Text(3, change.root.path);
@@ -1218,7 +1216,7 @@ bool ContentIndex::Configure(const ContentIndexConfig& input) {
     }
     for (size_t i = 0; i < config.roots.size(); ++i) {
         for (size_t j = i + 1; j < config.roots.size();) {
-            if (Same(config.roots[i].path, config.roots[j].path)) config.roots.erase(config.roots.begin() + static_cast<ptrdiff_t>(j));
+            if (path::EqualInsensitive(config.roots[i].path, config.roots[j].path)) config.roots.erase(config.roots.begin() + static_cast<ptrdiff_t>(j));
             else ++j;
         }
     }
@@ -1410,7 +1408,7 @@ bool ContentIndex::SearchCached(const ContentSearchRequest& r, const std::atomic
             // Existing databases can contain our history/configuration from
             // older versions. Never surface those rows while pruning catches up.
             if (InternalContentPath(path)) continue;
-            if (std::none_of(live_roots.begin(), live_roots.end(), [&](const auto& live) { return Same(root, live); })) continue;
+            if (std::none_of(live_roots.begin(), live_roots.end(), [&](const auto& live) { return path::EqualInsensitive(root, live); })) continue;
             if (r.roots.empty() && !r.root.empty() && !Under(path, r.root, r.recursive)) continue;
             if (!r.roots.empty() && std::none_of(r.roots.begin(), r.roots.end(), [&](const auto& scope) { return Under(path, scope, r.recursive); })) continue;
             const uint64_t size = static_cast<uint64_t>(sqlite3_column_int64(candidates.p, 1));

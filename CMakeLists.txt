@@ -161,7 +161,7 @@ add_library(pulse_crash_reporter STATIC
     src/common/crash_reporter.cpp
     src/common/diagnostics_exporter.cpp)
 target_include_directories(pulse_crash_reporter PUBLIC "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(pulse_crash_reporter PUBLIC dbghelp shell32 pulse_localization)
+target_link_libraries(pulse_crash_reporter PUBLIC shell32 pulse_localization)
 
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
@@ -239,8 +239,6 @@ add_executable(pulse_search_merge_test
 add_executable(pulse_index_migration_test
     src/bench/index_migration_test.cpp
     src/index/index_migration.cpp)
-target_link_libraries(pulse_index_migration_test PRIVATE shell32)
-
 add_executable(pulse_index_engine_test
     src/bench/index_engine_test.cpp
     src/index/index_engine.cpp
@@ -368,7 +366,7 @@ file(GLOB_RECURSE PULSE_APP_SOURCES CONFIGURE_DEPENDS
     src/app/*.cpp src/model/*.cpp src/ui/*.cpp src/fs/*.cpp src/ops/*.cpp src/ipc/*.cpp src/index/*.cpp)
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "index_host\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "network_agent_main\\.cpp$")
-list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "content_(agent|index|search|task_search|hit_aliases|instant_session)\\.cpp$")
+list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "content_(agent|index|search|task_search|instant_session)\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "filename_timing\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "image_open\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "device_fake\\.cpp$")
@@ -783,13 +781,6 @@ pulse_enable_lumatext(pulse_child_edit_test)
 add_executable(pulse_sidebar_scrollbar_fade_test src/bench/sidebar_scrollbar_fade_test.cpp)
 target_compile_options(pulse_sidebar_scrollbar_fade_test PRIVATE /W4 /permissive- /utf-8)
 
-add_executable(pulse_builtin_menu_items_test
-    src/bench/builtin_menu_items_test.cpp src/bench/localization_test.rc
-    src/app/builtin_menu_items.cpp src/model/builtin_menu_items.cpp src/app/context_menu_prefs.cpp)
-target_compile_options(pulse_builtin_menu_items_test PRIVATE /W4 /permissive- /utf-8)
-target_link_options(pulse_builtin_menu_items_test PRIVATE /MANIFEST:NO)
-target_link_libraries(pulse_builtin_menu_items_test PRIVATE pulse_localization)
-
 add_executable(pulse_builtin_menu_order_test
     src/bench/builtin_menu_order_test.cpp src/bench/localization_test.rc
     src/app/builtin_menu_items.cpp src/model/builtin_menu_items.cpp src/app/context_menu_prefs.cpp)
@@ -865,6 +856,9 @@ add_executable(pulse_smooth_scroll_test src/bench/smooth_scroll_test.cpp)
 
 add_executable(pulse_frame_profile_test EXCLUDE_FROM_ALL src/bench/frame_profile_test.cpp)
 target_compile_options(pulse_frame_profile_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_high_contrast_frame_test EXCLUDE_FROM_ALL src/bench/high_contrast_frame_test.cpp)
+target_link_libraries(pulse_high_contrast_frame_test PRIVATE user32)
 
 add_executable(pulse_text_diff_ui_test src/bench/text_diff_ui_test.cpp
     src/bench/localization_test.rc src/app/text_diff.cpp src/ui/text_diff_window.cpp
@@ -1207,9 +1201,6 @@ target_link_libraries(pulse_audit_ui_identity_ime_test PRIVATE
 add_executable(pulse_delete_confirmation_owner_test EXCLUDE_FROM_ALL src/bench/delete_confirmation_owner_test.cpp)
 target_link_libraries(pulse_delete_confirmation_owner_test PRIVATE user32)
 
-add_executable(pulse_bitmap_artifact_test EXCLUDE_FROM_ALL src/bench/bitmap_artifact_test.cpp)
-target_link_libraries(pulse_bitmap_artifact_test PRIVATE ole32)
-
 add_executable(pulse_audit_ui_remaining_test EXCLUDE_FROM_ALL
     src/bench/audit_ui_remaining_test.cpp src/bench/audit_ui_remaining_test.rc
     src/ui/advanced_search_dialog.cpp src/ui/batch_rename_dialog.cpp
@@ -1322,8 +1313,6 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/archive_navigation_test.cpp ${architecture_sources})
     add_executable(pulse_multiwindow_application_test
         src/bench/multiwindow_application_test.cpp ${architecture_sources})
-    add_executable(pulse_ops_journal_test
-        src/bench/ops_journal_test_main.cpp ${architecture_sources})
     add_executable(pulse_titlebar_layout_test
         src/bench/titlebar_layout_test.cpp ${architecture_sources})
     add_executable(pulse_permission_operation_prompt_ui_test
@@ -1388,7 +1377,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     target_link_libraries(pulse_playback_ui_test PRIVATE ${architecture_libraries})
     pulse_enable_lumatext(pulse_playback_ui_test)
     add_dependencies(pulse_playback_ui_test pulse_preview)
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_ops_journal_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test pulse_group_toolbar_ui_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test pulse_group_toolbar_ui_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})
@@ -1456,8 +1445,6 @@ foreach(shell_interaction_target IN LISTS shell_interaction_targets)
         target_link_libraries(${shell_interaction_target} PRIVATE pulse_shell_query_client)
     endif()
 endforeach()
-
-add_executable(pulse_recent_day_label_test src/bench/recent_day_label_test.cpp)
 
 add_executable(pulse_drop_shortcuts_test src/bench/drop_shortcuts_test.cpp
     src/app/app_drop_shortcuts_io.cpp)
@@ -1585,16 +1572,32 @@ add_executable(pulse_transfer_pipeline_test EXCLUDE_FROM_ALL
 target_include_directories(pulse_transfer_pipeline_test PRIVATE src)
 target_link_libraries(pulse_transfer_pipeline_test PRIVATE ${transfer_pipeline_libraries})
 
+add_executable(pulse_transfer_hash_test EXCLUDE_FROM_ALL
+    src/bench/transfer_hash_test.cpp src/bench/localization_test.rc)
+target_link_libraries(pulse_transfer_hash_test PRIVATE pulse_localization bcrypt)
+
+add_executable(pulse_transfer_validation_test EXCLUDE_FROM_ALL src/bench/transfer_validation_test.cpp)
+target_compile_definitions(pulse_transfer_validation_test PRIVATE PULSE_DESTINATION_GUARD_TESTING)
+
 add_executable(pulse_folder_actions_test EXCLUDE_FROM_ALL
     src/bench/folder_actions_test.cpp src/bench/localization_test.rc ${transfer_pipeline_sources})
 target_include_directories(pulse_folder_actions_test PRIVATE src)
 target_link_libraries(pulse_folder_actions_test PRIVATE ${transfer_pipeline_libraries})
 
+add_executable(pulse_ops_journal_test EXCLUDE_FROM_ALL
+    src/bench/ops_journal_test_main.cpp src/bench/json_undo_parser_test.cpp
+    src/ops/operation_journal_paths.cpp ${transfer_pipeline_sources})
+target_link_libraries(pulse_ops_journal_test PRIVATE ${transfer_pipeline_libraries})
+
 get_property(folder_operation_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(folder_operation_target IN LISTS folder_operation_targets)
     get_target_property(folder_operation_sources ${folder_operation_target} SOURCES)
-    if("${folder_operation_sources}" MATCHES "ops_manager\\.cpp" AND
-       NOT "${folder_operation_sources}" MATCHES "folder_operations\\.cpp")
-        target_sources(${folder_operation_target} PRIVATE src/ops/folder_operations.cpp)
+    if("${folder_operation_sources}" MATCHES "ops_manager\\.cpp")
+        if(NOT "${folder_operation_sources}" MATCHES "folder_operations\\.cpp")
+            target_sources(${folder_operation_target} PRIVATE src/ops/folder_operations.cpp)
+        endif()
+        if(NOT "${folder_operation_sources}" MATCHES "ops_persistence\\.cpp")
+            target_sources(${folder_operation_target} PRIVATE src/ops/ops_persistence.cpp)
+        endif()
     endif()
 endforeach()

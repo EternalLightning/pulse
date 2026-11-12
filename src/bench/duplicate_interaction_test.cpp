@@ -72,9 +72,28 @@ int main() {
     };
     s.duplicateScan.scanning = true;
     auto controls = layout();
+    click(controls.dup_skip_small_switch);
+    check(s.duplicateScan.skip_small_files, "small-file switch stays disabled during a scan");
     click(controls.dup_group_ignore[0]);
     check(s.duplicateScan.groups.size() == 2, "ignore stays disabled while the scan is running");
     s.duplicateScan.scanning = false;
+    controls = layout();
+    const auto threshold = s.duplicateScan.minimum_file_bytes;
+    click(controls.dup_skip_small_switch);
+    check(!s.duplicateScan.skip_small_files && !BuildVm(s, false).dup_skip_small_files &&
+        s.duplicateScan.MinimumFileBytes() == 0, "native small-file switch includes all file sizes");
+    controls = layout();
+    click(controls.dup_min_size[2]);
+    check(s.duplicateScan.minimum_file_bytes == threshold, "disabled size choices preserve the threshold");
+    click(controls.dup_scope[1]);
+    check(!s.duplicateScan.skip_small_files && s.duplicateScan.MinimumFileBytes() == 0,
+        "switching scan scope keeps all file sizes enabled");
+    controls = layout();
+    click(controls.dup_scope[0]);
+    controls = layout();
+    click(controls.dup_skip_small_switch);
+    check(s.duplicateScan.skip_small_files && s.duplicateScan.MinimumFileBytes() == threshold,
+        "reenabling the native switch restores the size threshold");
     controls = layout();
     click(controls.dup_group_ignore[0]);
     check(s.duplicateScan.groups.size() == 1 && s.duplicateScan.groups[0].id == 2 &&

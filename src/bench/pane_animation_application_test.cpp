@@ -76,6 +76,7 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool page_scroll = argc == 2 && std::string_view(argv[1]) == "--page-scroll-only";
     const bool column_scroll = argc == 2 && std::string_view(argv[1]) == "--column-scroll-only";
     const bool navigation_motion = argc == 2 && std::string_view(argv[1]) == "--navigation-motion-only";
+    const bool settings_toolbar = argc == 2 && std::string_view(argv[1]) == "--settings-toolbar-only";
     const bool empty_navigation = argc == 2 && std::string_view(argv[1]) == "--navigation-empty-viewport-only";
     const bool additional_motion = argc == 2 && std::string_view(argv[1]) == "--additional-motion-only";
     const bool home_hover_only = argc == 2 && std::string_view(argv[1]) == "--home-hover-only";
@@ -83,9 +84,10 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool list_hover_only = argc == 2 && std::string_view(argv[1]) == "--list-hover-only";
     const bool disclosure_only = argc == 2 && std::string_view(argv[1]) == "--sidebar-disclosure-only";
     const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
-    if (empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
+    if (settings_toolbar || empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
         (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
-        const bool passed = empty_navigation ? ui::NavigationMotionUiTest::RunEmptyViewport(s) :
+        const bool passed = settings_toolbar ? ui::NavigationMotionUiTest::RunSettingsToolbar(s, root) :
+            empty_navigation ? ui::NavigationMotionUiTest::RunEmptyViewport(s) :
             disclosure_only ? ui::InteractionFeedbackUiTest::RunDisclosure(s, root) :
             list_hover_only ? ui::InteractionFeedbackUiTest::RunListHover(s, root) :
             home_hover_only ? ui::InteractionFeedbackUiTest::RunHomeHover(s, root) :

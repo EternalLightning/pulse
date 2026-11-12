@@ -161,7 +161,7 @@ void PasteIntoCurrent(AppState& s) {
     const bool clipboard_paths = ops::ReadClipboard(cb);
     const bool shell_files = ops::ClipboardHasShellFiles();
     const auto source = app::ChooseClipboardPasteSource(clipboard_paths, cb, shell_files,
-        !s.tray.batches().empty(), observed_sequence, GetClipboardSequenceNumber());
+        s.appPrefs.staging_tray_enabled && !s.tray.batches().empty(), observed_sequence, GetClipboardSequenceNumber());
     if (source == app::ClipboardPasteSource::None) return;
     if (source == app::ClipboardPasteSource::Tray) {
         size_t idx = s.tray.batches().size() - 1;
@@ -261,7 +261,7 @@ void CollectToTray(AppState& s, bool move_intent) {
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);
     if (std::any_of(paths.begin(), paths.end(), path::IsDriveRootPath)) return;
     if (!paths.empty()) {
-        s.tray.Collect(paths, move_intent);
+        if (s.appPrefs.staging_tray_enabled) s.tray.Collect(paths, move_intent);
         // Mirror the cut state onto the list rows (ui.md §5.2 rule 6).
         s.cutPaths = move_intent ? paths : std::vector<std::wstring>{};
         // Interop with Explorer: mirror the collection onto the system clipboard.

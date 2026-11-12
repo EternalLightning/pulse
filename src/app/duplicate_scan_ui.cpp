@@ -74,7 +74,7 @@ void StartDuplicateScan(AppState& s) {
     request.root = roots.front();
     request.recursive = true;
     request.skip_system_locations = session.scope != app::DuplicateScanScope::Folder;
-    request.minimum_file_bytes = session.minimum_file_bytes;
+    request.minimum_file_bytes = session.MinimumFileBytes();
     s.duplicateSearch.SearchAsync(std::move(request));
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }

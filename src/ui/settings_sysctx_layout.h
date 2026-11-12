@@ -27,12 +27,12 @@ inline const wchar_t* Undo() { return l10n::Pick(L"撤销", L"Undo"); }
 inline const wchar_t* Log() { return l10n::Pick(L"操作日志", L"Activity log"); }
 inline const wchar_t* RestoreAll() { return l10n::Pick(L"全部还原…", L"Restore all…"); }
 inline const wchar_t* LocalTitle() { return l10n::Pick(L"Pulse 右键菜单", L"Pulse context menu"); }
-inline const wchar_t* LocalCaption() { return l10n::Pick(L"只影响 Pulse · 不需要权限 · 随时恢复",
-                                                         L"Only inside Pulse · no permission needed · always reversible"); }
+inline const wchar_t* LocalCaption() { return l10n::Pick(L"自定义 Pulse 的右键菜单，不影响系统菜单。",
+                                                         L"Customize Pulse's context menu without changing Windows menus."); }
 inline const wchar_t* SystemTitle() { return l10n::Pick(L"系统右键菜单", L"System context menu"); }
 inline const wchar_t* SystemCaption() { return l10n::Pick(
-    L"管理 Windows 菜单 · 应用后生效 · 所有用户范围需要管理员权限",
-    L"Manage Windows menus · apply to save · all-user changes require admin permission"); }
+    L"更改 Windows 右键菜单，修改所有用户的设置需要管理员权限。",
+    L"Change Windows context menus. Changes for all users require admin permission."); }
 inline const wchar_t* Group(int g) {
     return g == 0 ? l10n::Pick(L"基本对象", L"Basic objects")
          : g == 1 ? l10n::Pick(L"特定类型", L"Specific types")
@@ -62,11 +62,11 @@ inline std::wstring PendingCaption(const SysCtxView& v) {
     if (v.pending_pulse == v.pending)  // nothing for the registry: no backup, no admin
         return l10n::Pick(L"只改 Pulse 自己的右键菜单，Windows 不变", L"Pulse's own menu only; Windows is unchanged");
     if (v.pending_admin > 0)
-        return l10n::Pick(L"其中 ", L"") + std::to_wstring(v.pending_admin) +
-               l10n::Pick(L" 项涉及所有用户，需确认一次管理员权限 · 写入前先导出 .reg 备份",
-                          L" affect all users: one administrator confirmation · a .reg backup first");
-    return l10n::Pick(L"只改当前用户，无需管理员权限 · 写入前先导出 .reg 备份，可以撤销",
-                      L"Your user only, no admin needed · a .reg backup first; undo any time");
+        return l10n::Pick(L"其中 ", L"Changes requiring administrator approval: ") + std::to_wstring(v.pending_admin) +
+               l10n::Pick(L" 项更改影响所有用户，需要管理员授权。写入前会导出 .reg 备份。",
+                          L". These affect all users. A .reg backup is saved first.");
+    return l10n::Pick(L"仅修改当前用户的菜单，无需管理员权限。写入前会导出 .reg 备份，改动可以撤销。",
+                      L"Only your account is affected; no administrator permission is needed. A .reg backup is saved first, and changes can be undone.");
 }
 inline const wchar_t* Applying() { return l10n::Pick(L"正在应用… 如有管理员权限提示，请确认。",
                                                      L"Applying… confirm the administrator prompt if one appears."); }
@@ -86,7 +86,7 @@ inline const wchar_t* KeepLeftover() { return l10n::Pick(L"取消删除", L"Keep
 inline std::wstring Clean(int n) {
     return l10n::Pick(L"清理残留 ", L"Clean up ") + std::to_wstring(n);
 }
-inline const wchar_t* Missing() { return l10n::Pick(L"残留 · 程序已卸载", L"Leftover · uninstalled"); }
+inline const wchar_t* Missing() { return l10n::Pick(L"残留项：程序已卸载", L"Leftover entry: program uninstalled"); }
 inline const wchar_t* DefaultHidden() { return l10n::Pick(L"系统默认隐藏", L"Hidden by Windows"); }
 inline const wchar_t* Queued() { return l10n::Pick(L"待应用", L"Pending"); }
 inline const wchar_t* Shift() { return L"\x21E7 Shift"; }
@@ -102,8 +102,8 @@ inline const wchar_t* Key(int i) {
                   : l10n::Pick(L"权限", L"Permission");
 }
 inline std::wstring Permission(const SysCtxRowView& r) {
-    return r.machine ? l10n::Pick(L"所有用户 · 应用时确认一次管理员权限", L"All users · one admin confirmation when applied")
-                     : l10n::Pick(L"只影响当前用户 · 无需管理员权限", L"Your user only · no admin needed");
+    return r.machine ? l10n::Pick(L"修改所有用户的菜单，需要管理员授权", L"Changes for all users require administrator approval")
+                     : l10n::Pick(L"仅修改当前用户的菜单，无需管理员权限", L"Changes affect only your account and need no administrator permission");
 }
 inline const wchar_t* EnabledTitle() { return l10n::Pick(L"在系统里启用", L"Enabled in Windows"); }
 inline const wchar_t* EnabledCaption() { return l10n::Pick(L"资源管理器和所有应用", L"File Explorer and every app"); }
@@ -120,8 +120,8 @@ inline std::wstring PreviewHead(const SysCtxView& v) {
     const std::wstring target = picked ? v.subs[static_cast<size_t>(v.sub)] + l10n::Pick(L" 文件", L" files") : v.scene_title;
     return l10n::Pick(L"右键单击「", L"Right-click on ") + target + l10n::Pick(L"」时", L"");
 }
-inline const wchar_t* PreviewNote() { return l10n::Pick(L"示意图 · 拖动条目可置顶、置底或隐藏",
-                                                        L"Sketch of this scene's entries. Drag to pin or hide."); }
+inline const wchar_t* PreviewNote() { return l10n::Pick(L"拖动预览中的条目，可置顶、置底或隐藏。",
+                                                        L"Drag entries in the preview to move them to the top or bottom, or hide them."); }
 inline const wchar_t* Zone(int zone) {
     return zone == kSysCtxZoneTop ? l10n::Pick(L"置顶", L"Top")
          : zone == kSysCtxZoneBottom ? l10n::Pick(L"置底", L"Bottom") : l10n::Pick(L"默认位置", L"Default");
@@ -189,7 +189,7 @@ inline const wchar_t* RecentCaption() {
 inline const wchar_t* RecentEmpty() {
     return l10n::Pick(L"还没有改动。在左侧选择一个场景开始。", L"No changes yet. Pick a scene on the left to start.");
 }
-inline const wchar_t* UndonePrefix() { return l10n::Pick(L"已撤销 · ", L"Undone · "); }
+inline const wchar_t* UndonePrefix() { return l10n::Pick(L"已撤销：", L"Undone: "); }
 inline const wchar_t* OverviewSideHint() {
     return l10n::Pick(L"在左侧选择一个场景，这里会显示它的右键菜单，并实时反映你的改动。",
                       L"Pick a scene on the left to see its menu here, live with your changes.");
@@ -242,11 +242,12 @@ inline D2D1_RECT_F CtxLayerCaptionBounds(const D2D1_RECT_F& local, const D2D1_RE
 }
 
 inline float LayoutCtxLayerCards(D2D1_RECT_F& local, D2D1_RECT_F& system, float left, float right, float y,
-                                 const fluent::Painter* painter, float s) {
+                                 const fluent::Painter* painter, float s, bool fill_width = false) {
     const float width = (std::max)(1.0f, right - left);
     const float local_w = painter ? painter->MeasureButtonWidth(sysctx_text::LocalTitle()) : 170 * s;
     const float system_w = painter ? painter->MeasureButtonWidth(sysctx_text::SystemTitle()) : 170 * s;
-    const float factor = (std::min)(1.0f, width / (local_w + system_w));
+    const float factor = fill_width ? width / (local_w + system_w)
+                                    : (std::min)(1.0f, width / (local_w + system_w));
     const float start = right - (local_w + system_w) * factor;
     local = D2D1::RectF(start, y, start + local_w * factor, y + 36 * s);
     system = D2D1::RectF(local.right, y, local.right + system_w * factor, local.bottom);

@@ -63,7 +63,7 @@ struct AppPrefs {
     int sidebar_width = 224; // DIPs
     bool address_search_current = false;
     bool address_search_content = false;
-    int tray_icon_size = 48; // staging-tray deck icon edge in DIPs (32..64)
+    bool staging_tray_enabled = true;
     // Empty = theme default, or Windows when explicitly selected.
     std::wstring accent_rgb;
     bool accent_follow_system = false;

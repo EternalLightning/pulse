@@ -1516,7 +1516,7 @@ int FluentMenu::RunModalLoop() {
         // Input wakes the loop immediately; only animation, submenu dwell and
         // foreign topmost input tracking need the shorter polling interval.
         const DWORD interval = animating || sub_pending_row_ >= 0 || topmost_ ? 16 : 100;
-        DWORD wait = MsgWaitForMultipleObjects(0, nullptr, FALSE, interval, QS_ALLINPUT);
+        DWORD wait = MsgWaitForMultipleObjectsEx(0, nullptr, interval, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         (void)wait;
         if (topmost_ && open_ && !animating_out_ &&
             ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000)) {
@@ -1530,7 +1530,13 @@ int FluentMenu::RunModalLoop() {
                 RequestDismiss();
             }
         }
-        while (open_ && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        const uint64_t dispatch_started = AnimationTimeMs();
+        bool dispatched = false;
+        // Owner completions can keep the queue busy throughout a menu transition.
+        while (open_ && (!dispatched || !(animating || animating_out_) ||
+                AnimationTimeMs() - dispatch_started < 8) &&
+                PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            dispatched = true;
             if (msg.message == WM_QUIT) {
                 open_ = false;
                 PostQuitMessage((int)msg.wParam);
@@ -1852,7 +1858,12 @@ bool FluentMenu::ReplaceItems(std::vector<FluentMenuItem> items) {
     if (!open_ || animating_out_ || filter_fn_ || !compositor_ || items.empty()) return false;
     const auto* previous_hover = model_.At(hover_row_);
     const std::wstring hover_text = previous_hover ? previous_hover->text : std::wstring{};
+    bool enabled_changed = false;
+    for (int row = 0; row < model_.Count() && static_cast<size_t>(row) < items.size(); ++row)
+        enabled_changed |= model_.At(row)->enabled != items[static_cast<size_t>(row)].enabled;
     const bool patched = model_.PatchCommands(items);
+    // Rebinding commands leaves the existing pixels and animation state intact.
+    if (patched && !enabled_changed && open_flyouts_ == 0) return true;
     if (!patched) {
         if (!model_.ReplaceLiveItems(items)) return false;
         model_.Layout(compositor_->DwriteFactory(), scale_, static_cast<float>(model_.WidthPx()), compositor_);

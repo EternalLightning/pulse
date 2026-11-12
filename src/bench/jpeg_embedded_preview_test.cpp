@@ -11,12 +11,15 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <new>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
 using namespace pulse::preview;
 namespace {
+thread_local bool fail_header_allocation = false;
 int failures = 0;
 int checks = 0;
 void Check(bool value, const char* name) {
@@ -119,6 +122,20 @@ std::vector<uint8_t> OrientationBitmap() {
 }
 }
 
+void* operator new(size_t size) {
+    if (fail_header_allocation && size >= 128 * 1024) {
+        fail_header_allocation = false;
+        throw std::bad_alloc();
+    }
+    if (void* value = std::malloc(size ? size : 1)) return value;
+    throw std::bad_alloc();
+}
+void operator delete(void* value) noexcept { std::free(value); }
+void* operator new[](size_t size) { return ::operator new(size); }
+void operator delete[](void* value) noexcept { ::operator delete(value); }
+void operator delete(void* value, size_t) noexcept { ::operator delete(value); }
+void operator delete[](void* value, size_t) noexcept { ::operator delete(value); }
+
 int wmain() {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(com)) return 2;
@@ -217,6 +234,19 @@ int wmain() {
     }
     Check(Save(path, thumb) && DecodeImage(path, FILE_ATTRIBUTE_NORMAL, 256, output, w, h, stride, sw, sh) &&
         w == 256 && h == 171 && sw == 300 && sh == 200, "ordinary file decoding remains available after embedded miss");
+    Check(Save(path, std::vector<uint8_t>(128 * 1024, 0)), "allocation-failure fixture saved");
+    DWORD handles_before = 0, handles_after = 0;
+    const bool counted_before = GetProcessHandleCount(GetCurrentProcess(), &handles_before) != FALSE;
+    unsigned exceptions = 0;
+    for (unsigned i = 0; i < 32; ++i) {
+        fail_header_allocation = true;
+        try { ReadJpegEmbeddedPreview(path, FILE_ATTRIBUTE_NORMAL, 256, result); }
+        catch (const std::bad_alloc&) { ++exceptions; }
+        fail_header_allocation = false;
+    }
+    const bool counted_after = GetProcessHandleCount(GetCurrentProcess(), &handles_after) != FALSE;
+    Check(exceptions == 32 && counted_before && counted_after && handles_after == handles_before,
+        "header allocation failure releases every source file handle");
     std::filesystem::remove(path);
     std::filesystem::remove(dir);
     CoUninitialize();

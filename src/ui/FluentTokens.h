@@ -243,13 +243,33 @@ inline D2D1_COLOR_F GetAccentColor() noexcept {
 #define DWMSBT_TABBEDWINDOW 4
 #endif
 
+namespace detail {
+inline thread_local int frame_high_contrast = -1;
+}
+
 inline bool IsHighContrast() noexcept {
+    if (detail::frame_high_contrast >= 0) return detail::frame_high_contrast != 0;
     HIGHCONTRASTW hc{ sizeof(hc) };
     if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0)) {
         return (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
     }
     return false;
 }
+
+// A paint shares one system query; calls outside painting still read current settings.
+class HighContrastFrameScope {
+public:
+    HighContrastFrameScope() noexcept : HighContrastFrameScope(IsHighContrast()) {}
+    explicit HighContrastFrameScope(bool high_contrast) noexcept
+        : previous_(detail::frame_high_contrast) {
+        detail::frame_high_contrast = high_contrast ? 1 : 0;
+    }
+    ~HighContrastFrameScope() { detail::frame_high_contrast = previous_; }
+    HighContrastFrameScope(const HighContrastFrameScope&) = delete;
+    HighContrastFrameScope& operator=(const HighContrastFrameScope&) = delete;
+private:
+    int previous_;
+};
 
 inline void UpdateWindowTheme(HWND hwnd, bool dark) noexcept {
     BOOL darkValue = dark ? TRUE : FALSE;

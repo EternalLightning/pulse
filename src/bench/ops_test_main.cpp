@@ -1414,18 +1414,31 @@ int RunTransferUpdateRegressions() {
     return g_fail ? 1 : 0;
 }
 
+int RunTerminalArgumentTests() {
+    Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
+          L"terminal command quotes a directory");
+    Check(ops::TerminalCommandLine(L"C:\\") == L"-d \"C:\\\\\"",
+          L"terminal command preserves a drive root");
+    Check(ops::TerminalCommandLine(L"C:\\quoted\" folder\\") ==
+              L"-d \"C:\\quoted\\\" folder\\\\\"",
+          L"terminal command escapes quotes and trailing slashes");
+    return g_fail ? 1 : 0;
+}
+
 int RunOpsTests(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--replacement-fixture-child") return 0;
     if (argc == 3 && std::wstring_view(argv[1]) == L"--batch-replacement-parent")
         return RunBatchReplacementRegressions(argv[2]);
     if (argc >= 2 && (std::wstring_view(argv[1]) == L"--file-operation-matrix" ||
-                      std::wstring_view(argv[1]) == L"--file-operation-perf")) {
+                      std::wstring_view(argv[1]) == L"--file-operation-perf" ||
+                      std::wstring_view(argv[1]) == L"--file-operation-perf-few")) {
         if (argc != 3 && argc != 4) {
-            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix|--file-operation-perf LOCAL_PARENT [NETWORK_PARENT]\n");
+            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix|--file-operation-perf|--file-operation-perf-few LOCAL_PARENT [NETWORK_PARENT]\n");
             return 2;
         }
         return pulse::bench::RunFileOperationMatrix(argv[2], argc == 4 ? argv[3] : L"",
-            std::wstring_view(argv[1]) == L"--file-operation-perf");
+            std::wstring_view(argv[1]) != L"--file-operation-matrix",
+            std::wstring_view(argv[1]) == L"--file-operation-perf-few");
     }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--json-parser-only")
         return RunJsonUndoParserRegressions();
@@ -1536,6 +1549,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
     }
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
+        if (filter == L"terminal-arguments") return RunTerminalArgumentTests();
         if (filter == L"batch-replacement") return RunBatchReplacementRegressions();
         if (filter == L"open-workers") return RunMultiwindowOpenWorkers();
         if (filter == L"clipboard-isolated") return ops::RunClipboardIsolationRegressions();
@@ -1769,13 +1783,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     fprintf(stderr, "[test] start\n");
 
-    Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
-          L"terminal command quotes a directory");
-    Check(ops::TerminalCommandLine(L"C:\\") == L"-d \"C:\\\\\"",
-          L"terminal command preserves a drive root");
-    Check(ops::TerminalCommandLine(L"C:\\quoted\" folder\\") ==
-              L"-d \"C:\\quoted\\\" folder\\\\\"",
-          L"terminal command escapes quotes and trailing slashes");
+    RunTerminalArgumentTests();
 
     // --- Setup sandbox ------------------------------------------------------
     const std::wstring root = SandboxRoot();

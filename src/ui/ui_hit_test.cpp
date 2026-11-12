@@ -181,7 +181,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         return r;
     }
 
-    if (vm.settings_open) {
+    if (vm.settings_open && x >= EffectiveSidebarWidth(rect.right) &&
+        y >= title_bar_height_ + 44*scale_ && y < rect.bottom - status_height_) {
         D2D1_RECT_F track{}, thumb{};
         float maximum = 0.0f;
         if (SettingsScrollbarGeometry(vm, rect.right, rect.bottom, track, thumb, maximum) &&
@@ -190,7 +191,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             return r;
         }
         const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
-                                                      status_height_, &painter_);
+                                                      status_height_, &painter_, EffectiveSidebarWidth(rect.right));
         if (y >= rect.bottom - status_height_) {
             r.region = StatusBarHitRegion(vm, rect, x, y, scale_, status_height_,
                                           compositor_);
@@ -217,6 +218,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             if(ContainsPt(lay.external_open_choice,x,y)) {r.region=HitTestResult::SettingsDropdown;r.index=2;return r;}
             if(ContainsPt(lay.performance_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=4;return r;}
             if(ContainsPt(lay.auto_folder_size_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=35;return r;}
+            if(ContainsPt(lay.staging_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=36;return r;}
             if(ContainsPt(lay.text_compare_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=33;return r;}
             for(int list_row=0;list_row<3;++list_row)
                 if(ContainsPt(lay.list_style_row[list_row],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=17+list_row;return r;}
@@ -250,13 +252,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.folder_sort_row[i], x, y)) {
                         r.region = HitTestResult::SettingsFolderSort;
-                        r.index = i;
-                        return r;
-                    }
-                }
-                for (int i = 0; i < 3; ++i) {
-                    if (ContainsPt(lay.tray_icon_row[i], x, y)) {
-                        r.region = HitTestResult::SettingsTrayIcon;
                         r.index = i;
                         return r;
                     }
@@ -462,8 +457,12 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         return r;
                     }
                 }
+                if (!vm.dup_scanning && ContainsPt(lay.dup_skip_small_row, x, y)) {
+                    r.region = HitTestResult::SettingsDupSkipSmallFiles;
+                    return r;
+                }
                 for (int i = 0; i < 3; ++i) {
-                    if (ContainsPt(lay.dup_min_size[i], x, y)) {
+                    if (vm.dup_skip_small_files && ContainsPt(lay.dup_min_size[i], x, y)) {
                         r.region = HitTestResult::SettingsDupMinSize;
                         r.index = i;
                         return r;
@@ -555,6 +554,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             }
             return r;
         }
+        if (vm.settings_open) return r;
         if (vm.archive_view && RectContains(toolbar.extract,x,y)) {r.region=HitTestResult::Extract; return r;}
         if (vm.archive_view && RectContains(toolbar.extract_all,x,y)) {r.region=HitTestResult::ExtractAll; return r;}
         if (vm.pane.is_recycle && RectContains(toolbar.empty_recycle,x,y)) {
@@ -623,6 +623,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         const bool compact = SidebarRailLayout(sb.right - sb.left, scale_);
         for (int i = static_cast<int>(slots.size()) - 1; i >= 0; --i) {
             const auto& slot = slots[i];
+            if (!vm.staging_tray_enabled && (slot.kind == SidebarSlot::TrayPanel ||
+                slot.kind == SidebarSlot::TrayRelease || slot.kind == SidebarSlot::TrayClear)) continue;
             if (!RectContains(slot.rc, x, y)) continue;
             if (slot.kind == SidebarSlot::TrayRelease) {
                 r.region = HitTestResult::TrayRelease;

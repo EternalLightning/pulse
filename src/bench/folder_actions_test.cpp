@@ -88,6 +88,11 @@ void Tests(const fs::path& root) {
         Write(dir / L"a.txt", "a"); fs::create_directory(dir / L"folder"); Write(dir / L"folder" / L"b.txt", "b");
         OpsManager manager; TransferIntegrationProbe::Initialize(manager);
         TransferIntegrationProbe::Run(manager, Action(FolderAction::GroupSelection, dir,
+            {(dir / L"a.txt").wstring(), (dir / L"folder").wstring()}, L"CON .txt"));
+        Check(manager.Status().phase == OpPhase::Failed && Read(dir / L"a.txt") == "a" &&
+            Read(dir / L"folder" / L"b.txt") == "b" && TransferIntegrationProbe::History(manager) == 0,
+            "group uses shared reserved-name validation before moving any source");
+        TransferIntegrationProbe::Run(manager, Action(FolderAction::GroupSelection, dir,
             {(dir / L"a.txt").wstring(), (dir / L"folder").wstring()}));
         Check(manager.Status().phase == OpPhase::Completed && Read(dir / L"Grouped" / L"a.txt") == "a" &&
             Read(dir / L"Grouped" / L"folder" / L"b.txt") == "b" && !fs::exists(dir / L"a.txt"),

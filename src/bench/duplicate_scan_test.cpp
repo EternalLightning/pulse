@@ -63,6 +63,17 @@ int wmain(int argc, wchar_t** argv) {
         return failed == 0 ? 0 : 1;
     }
     app::DuplicateScanSession session;
+    Check(session.skip_small_files && session.MinimumFileBytes() == 1024,
+          L"small-file filtering is enabled by default");
+    session.skip_small_files = false;
+    Check(session.MinimumFileBytes() == 0,
+          L"disabling small-file filtering scans every file size including empty files");
+    session.minimum_file_bytes = app::DuplicateScanSession::DefaultMinimumBytes(app::DuplicateScanScope::Drive);
+    Check(session.MinimumFileBytes() == 0,
+          L"changing scope keeps small-file filtering disabled");
+    session.skip_small_files = true;
+    Check(session.MinimumFileBytes() == session.minimum_file_bytes,
+          L"reenabling small-file filtering restores the selected threshold");
     Check(app::DuplicateScanSession::DefaultMinimumBytes(app::DuplicateScanScope::Folder) == 1024,
           L"folder default minimum is 1 KB");
     Check(app::DuplicateScanSession::DefaultMinimumBytes(app::DuplicateScanScope::Drive) ==

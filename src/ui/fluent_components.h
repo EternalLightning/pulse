@@ -309,6 +309,17 @@ struct FileRowContentSpec {
     bool drop_target = false;
 };
 
+inline float StagingTrayHeaderInset(const D2D1_RECT_F& bounds, float scale) {
+    return (bounds.right - bounds.left < 192.0f * scale ? 4.0f : 10.0f) * scale;
+}
+
+inline D2D1_RECT_F StagingTrayActionRect(const D2D1_RECT_F& bounds, float scale) {
+    const float width = bounds.right - bounds.left;
+    const float right = bounds.right - StagingTrayHeaderInset(bounds, scale);
+    return D2D1::RectF(right - (width < 192.0f * scale ? 22.0f : 72.0f) * scale,
+        bounds.top + 6.0f * scale, right, bounds.top + 28.0f * scale);
+}
+
 struct StagingTrayPanelSpec {
     D2D1_RECT_F bounds{};
     std::wstring_view title;

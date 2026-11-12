@@ -43,9 +43,12 @@ inline bool ContentRequestIntersectsPath(const ContentSearchRequest& request, co
 }
 inline bool ContentPathExcluded(const ContentIndexConfig& config, const std::wstring& path) {
     const auto key = ContentScopeKey(path);
-    for (const auto& name : config.excluded_directories) {
-        const auto part = L"\\" + ContentScopeKey(name) + L"\\";
-        if ((key + L"\\").find(part) != std::wstring::npos) return true;
+    if (!config.excluded_directories.empty()) {
+        const auto directory_key = key + L'\\';
+        for (const auto& name : config.excluded_directories) {
+            const auto part = L"\\" + ContentScopeKey(name) + L"\\";
+            if (directory_key.find(part) != std::wstring::npos) return true;
+        }
     }
     return std::any_of(config.excluded_paths.begin(), config.excluded_paths.end(), [&](const auto& excluded) {
         return ContentPathUnder(key, ContentScopeKey(excluded));

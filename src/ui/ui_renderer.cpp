@@ -438,8 +438,12 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     paint_profile.Mark(app::PaintPhase::Backdrop);
     DrawTitleBar(vm, rect, theme);
     paint_profile.Mark(app::PaintPhase::Title);
-    const auto page_bounds = D2D1::RectF(rect.left, title_bar_height_, rect.right,
-                                       rect.bottom - status_height_);
+    DrawNavigationBar(vm, rect, theme);
+    paint_profile.Mark(app::PaintPhase::Toolbar);
+    DrawSidebar(vm, rect, theme);
+    paint_profile.Mark(app::PaintPhase::Sidebar);
+    const auto page_bounds = D2D1::RectF(EffectiveSidebarWidth(rect.right),
+        title_bar_height_ + 44*scale_, rect.right, rect.bottom - status_height_);
     page_surface_.Paint(dc, page_bounds, vm.settings_open ? L"settings" : L"files", true,
         settings_switch_now_, motion_enabled_ && !IsHighContrast(),
         (vm.settings_open ? 18 : -18) * scale_, 240, [&] {
@@ -450,10 +454,8 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         DrawSettings(vm, rect, theme);
         paint_profile.Mark(app::PaintPhase::Settings);
     } else {
-        DrawToolbar(vm, rect, theme);
+        DrawCommandBar(vm, rect, theme);
         paint_profile.Mark(app::PaintPhase::Toolbar);
-        DrawSidebar(vm, rect, theme);
-        paint_profile.Mark(app::PaintPhase::Sidebar);
         DrawPane(vm, rect, theme);
         paint_profile.Mark(app::PaintPhase::Pane);
         if (DetailsPanelWidth(rect.right) > 0) DrawAnimatedDetailsPanel(vm, rect, theme);

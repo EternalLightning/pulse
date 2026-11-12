@@ -383,6 +383,9 @@ void ContentSearchClient::ShutdownAgent() {
             !accounting.ActiveProcesses) break;
         Sleep(5);
     }
+    // Job accounting can reach zero while process termination is still unwinding.
+    const auto now = GetTickCount64();
+    WaitForSingleObject(persistent_process_, now < until ? static_cast<DWORD>(until - now) : 0);
     CloseHandle(persistent_process_); persistent_process_ = nullptr;
 }
 void ContentSearchClient::Run(ContentSearchRequest request, const std::shared_ptr<ActiveQuery>& active) {

@@ -2559,8 +2559,9 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
                                     : (dark_ ? RgbaF(0x3B82F6, 0.30f) : RgbaF(0x3B82F6, 0.35f));
     FillRoundedRect(spec.bounds, radius, fill);
     StrokeRoundedRect(spec.bounds, radius, border);
-    const auto header = D2D1::RectF(spec.bounds.left + Px(10.0f), spec.bounds.top + Px(6.0f),
-                                    spec.bounds.right - Px(10.0f),
+    const float header_inset = StagingTrayHeaderInset(spec.bounds, scale_);
+    const auto header = D2D1::RectF(spec.bounds.left + header_inset, spec.bounds.top + Px(6.0f),
+                                    spec.bounds.right - header_inset,
                                     spec.bounds.top + Px(28.0f));
     std::wstring count_text;
     if (!spec.count_label.empty()) {
@@ -2568,18 +2569,20 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
     } else if (spec.item_count > 0) {
         count_text = std::to_wstring(std::min(spec.item_count, 99));
     }
-    float right = header.right;
+    const auto action_bounds = StagingTrayActionRect(spec.bounds, scale_);
+    float right = action_bounds.right;
     if (!spec.action_text.empty()) {
         // Fill-only pill, same language as toolbar 新建 — no stroke.
-        const float action_width = Px(72.0f);
-        const D2D1_RECT_F action_rc =
-            D2D1::RectF(right - action_width, header.top + Px(1.5f), right,
-                        header.bottom - Px(1.5f));
+        const float action_width = Width(action_bounds);
+        const D2D1_RECT_F action_rc = D2D1::RectF(action_bounds.left,
+            action_bounds.top + Px(1.5f), action_bounds.right, action_bounds.bottom - Px(1.5f));
         FillRoundedRect(action_rc, Height(action_rc) * 0.5f,
                         spec.action_hovered ? theme_->accent_hover : theme_->accent);
-        DrawText(spec.action_text, action_rc, CaptionFormat(), theme_->accent_text,
+        const bool icon_only = action_width < Px(44.0f);
+        DrawText(icon_only ? std::wstring_view(L"\xE77F") : spec.action_text, action_rc,
+                 icon_only ? SmallIconFormat() : CaptionFormat(), theme_->accent_text,
                  HorizontalAlignment::Center);
-        right -= action_width + Px(6.0f);
+        right = action_bounds.left - (header_inset < Px(10.0f) ? Px(2.0f) : Px(6.0f));
     }
     if (!count_text.empty()) {
         // Size the badge to the text instead of fixed widths (CJK labels

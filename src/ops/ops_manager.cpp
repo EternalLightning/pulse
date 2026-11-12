@@ -4,12 +4,14 @@
 // Existing third-party notices and license terms remain applicable.
 
 // ops_manager.cpp — See ops_manager.h for the contract.
-#include "ops_manager.h"
+#include "ops_manager_internal.h"
 #include "transfer_rate.h"
 #include "copy_progress_report.h"
+#include "copy_source_validation.h"
 #include "transfer_storage.h"
 #include "transfer_work_queue.h"
 #include "transfer_target_listing.h"
+#include "transfer_hash.h"
 #include "operation_elevation_adapter.h"
 #include "operation_presentation.h"
 #include "delete_operation.h"
@@ -19,21 +21,20 @@
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_enum.h"
 #include "../ipc/shell_client.h"
-#include "../common/json_utils.h"
 #include "../common/path_utils.h"
-#include "../common/utf8_file.h"
+#include "../common/file_name.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
 #include <objbase.h>
-#include <bcrypt.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cwctype>
 #include <iterator>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <winioctl.h>
 
@@ -47,20 +48,6 @@ std::wstring FileName(const std::wstring& path) {
     auto pos = v.find_last_of(L"\\/");
     if (pos != std::wstring_view::npos) return std::wstring(v.substr(pos + 1));
     return std::wstring(v);
-}
-
-bool IsMutationOperation(OpType type) {
-    return type == OpType::Move || type == OpType::Rename || type == OpType::BatchRename;
-}
-
-bool RequiresProducedIdentity(OpType type) {
-    return IsMutationOperation(type) || type == OpType::Copy ||
-        type == OpType::CreateFolder || type == OpType::CreateTextFile;
-}
-
-bool HasProducedIdentities(size_t count, const std::vector<FileIdentity>& identities) {
-    return count != 0 && identities.size() == count &&
-        std::all_of(identities.begin(), identities.end(), [](const auto& id) { return id.Valid(); });
 }
 
 std::vector<FileIdentity> SelectUndoIdentities(const OpRequest& req, const std::vector<std::wstring>& sources) {
@@ -184,6 +171,12 @@ bool IsFinishedTask(const OpStatus& status) {
         status.phase == OpPhase::Failed || status.phase == OpPhase::Cancelled);
 }
 
+void SetTaskPaths(OpStatus& status, const OpRequest& request) {
+    status.source_label = !request.delete_targets.empty() ? request.delete_targets.front().path :
+        request.sources.empty() ? L"" : request.sources.front();
+    status.destination_label = request.type == OpType::Rename ? request.new_name : request.dest_dir;
+}
+
 OpStatus QueuedTaskStatus(const OpRequest& request, uint64_t task_id,
     const std::optional<OpStatus>& batch = {}) {
     OpStatus status = batch.value_or(OpStatus{});
@@ -196,38 +189,19 @@ OpStatus QueuedTaskStatus(const OpRequest& request, uint64_t task_id,
     status.locked_path.clear(); status.lock_owners.clear();
     if (batch) { status.summary = l10n::Get(l10n::StringId::PermissionOperationContinue); return status; }
     status.summary = Describe(request);
-    status.source_label = !request.delete_targets.empty() ? request.delete_targets.front().path :
-        request.sources.empty() ? L"" : request.sources.front();
-    status.destination_label = request.type == OpType::Rename ? request.new_name : request.dest_dir;
+    SetTaskPaths(status, request);
     status.total_items = !request.delete_targets.empty() ? request.delete_targets.size() : request.sources.size();
     return status;
 }
 
 OpStatus TaskStatusWithPaths(OpStatus status, const OpRequest& request) {
-    const auto paths = QueuedTaskStatus(request, status.task_id);
-    status.source_label = paths.source_label;
-    status.destination_label = paths.destination_label;
+    SetTaskPaths(status, request);
     return status;
 }
 
 // In-place rename avoids the Shell IPC round trip. Failed renames report their
 // error directly: the current Shell host suppresses confirmation and can
 // overwrite an existing target, so it is not a safe rename fallback.
-bool IsRenameComponent(const std::wstring& name) {
-    if (name.empty() || name == L"." || name == L".." ||
-        name.back() == L'.' || name.back() == L' ') return false;
-    for (const auto c : name)
-        if (c < 32 || std::wstring_view(L"\\/:*?\"<>|").find(c) != std::wstring_view::npos) return false;
-    std::wstring stem = name.substr(0, name.find(L'.'));
-    while (!stem.empty() && stem.back() == L' ') stem.pop_back();
-    for (auto& c : stem) c = static_cast<wchar_t>(towupper(c));
-    if (stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL" ||
-        stem == L"CONIN$" || stem == L"CONOUT$") return false;
-    if (stem.size() == 4 && (stem.starts_with(L"COM") || stem.starts_with(L"LPT")) &&
-        ((stem[3] >= L'1' && stem[3] <= L'9') || stem[3] == L'\u00b9' || stem[3] == L'\u00b2' || stem[3] == L'\u00b3')) return false;
-    return true;
-}
-
 enum class RenameResult { Completed, Rejected };
 RenameResult RenameInProcess(const std::wstring& source, const std::wstring& new_name,
                      std::wstring* error, DWORD* failure_code = nullptr, FileIdentity* source_identity = nullptr,
@@ -235,7 +209,7 @@ RenameResult RenameInProcess(const std::wstring& source, const std::wstring& new
     DestinationGuard* continuation_guard = nullptr, FileObjectReference* produced_reference = nullptr) {
     if (failure_code) *failure_code = ERROR_INVALID_NAME;
     if (have_identity) *have_identity = false;
-    if (source.empty() || !IsRenameComponent(new_name)) {
+    if (source.empty() || !path::IsValidFileName(new_name)) {
         if (error) *error = l10n::Get(l10n::StringId::InvalidName);
         return RenameResult::Rejected;
     }
@@ -325,8 +299,7 @@ struct CopyProgressContext {
     COPYFILE2_COPY_PHASE error_phase = COPYFILE2_PHASE_NONE;
     const FileObjectReference* source_identity = nullptr;
     decltype(&GetFileInformationByHandleEx) identity_query = GetFileInformationByHandleEx;
-    bool source_checked = false;
-    bool source_changed = false;
+    CopySourceValidation source_validation;
     std::atomic<bool>* worker_cancel = nullptr;
     std::function<bool()> wait_before_continue;
 };
@@ -337,23 +310,27 @@ COPYFILE2_MESSAGE_ACTION CALLBACK CopyProgress(const COPYFILE2_MESSAGE* message,
     if (!ctx || !message) return COPYFILE2_PROGRESS_CANCEL;
     HANDLE destination = nullptr;
     HANDLE source = nullptr;
+    DWORD stream = 0;
+    bool boundary = false;
     switch (message->Type) {
     case COPYFILE2_CALLBACK_CHUNK_STARTED:
-        destination = message->Info.ChunkStarted.hDestinationFile; source = message->Info.ChunkStarted.hSourceFile; break;
+        destination = message->Info.ChunkStarted.hDestinationFile; source = message->Info.ChunkStarted.hSourceFile;
+        stream = message->Info.ChunkStarted.dwStreamNumber; break;
     case COPYFILE2_CALLBACK_CHUNK_FINISHED:
-        destination = message->Info.ChunkFinished.hDestinationFile; source = message->Info.ChunkFinished.hSourceFile; break;
+        destination = message->Info.ChunkFinished.hDestinationFile; source = message->Info.ChunkFinished.hSourceFile;
+        stream = message->Info.ChunkFinished.dwStreamNumber; break;
     case COPYFILE2_CALLBACK_STREAM_STARTED:
-        destination = message->Info.StreamStarted.hDestinationFile; source = message->Info.StreamStarted.hSourceFile; break;
+        destination = message->Info.StreamStarted.hDestinationFile; source = message->Info.StreamStarted.hSourceFile;
+        stream = message->Info.StreamStarted.dwStreamNumber; boundary = true; break;
     case COPYFILE2_CALLBACK_STREAM_FINISHED:
-        destination = message->Info.StreamFinished.hDestinationFile; source = message->Info.StreamFinished.hSourceFile; break;
+        destination = message->Info.StreamFinished.hDestinationFile; source = message->Info.StreamFinished.hSourceFile;
+        stream = message->Info.StreamFinished.dwStreamNumber; boundary = true; break;
     default: break;
     }
     if (source && ctx->source_identity) {
-        if (!ctx->source_identity->Matches(source, ctx->identity_query)) {
-            ctx->source_changed = true;
+        if (!ctx->source_validation.Observe(*ctx->source_identity, source, stream, boundary, ctx->identity_query)) {
             return COPYFILE2_PROGRESS_CANCEL;
         }
-        ctx->source_checked = true;
     }
     if (destination && !ctx->destination_handle) {
         HANDLE owned = nullptr;
@@ -538,380 +515,7 @@ bool StartsWithPath(const std::wstring& path, const std::wstring& prefix) {
     return path.size() == prefix.size() || path[prefix.size()] == L'\\' || path[prefix.size()] == L'/';
 }
 
-bool Sha256File(const std::wstring& path, const std::atomic<bool>& cancel,
-                const std::atomic<bool>& pause, std::array<uint8_t, 32>& digest,
-                std::wstring& error) {
-    BCRYPT_ALG_HANDLE algorithm = nullptr;
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    DWORD object_bytes = 0;
-    DWORD hash_bytes = 0;
-    DWORD returned = 0;
-    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
-        BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
-                          reinterpret_cast<PUCHAR>(&object_bytes), sizeof(object_bytes),
-                          &returned, 0) < 0 ||
-        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH,
-                          reinterpret_cast<PUCHAR>(&hash_bytes), sizeof(hash_bytes),
-                          &returned, 0) < 0 || hash_bytes != digest.size()) {
-        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-        error = l10n::Get(l10n::StringId::OperationHashInitializeFailed);
-        return false;
-    }
-    std::vector<uint8_t> object(object_bytes);
-    if (BCryptCreateHash(algorithm, &hash, object.data(), object_bytes,
-                         nullptr, 0, 0) < 0) {
-        BCryptCloseAlgorithmProvider(algorithm, 0);
-        error = l10n::Get(l10n::StringId::OperationHashInitializeFailed);
-        return false;
-    }
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    bool ok = file != INVALID_HANDLE_VALUE;
-    std::vector<uint8_t> buffer(1024 * 1024);
-    while (ok && !cancel.load()) {
-        while (pause.load() && !cancel.load()) Sleep(20);
-        if (cancel.load()) break;
-        DWORD read = 0;
-        if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) {
-            ok = false;
-            break;
-        }
-        if (read == 0) break;
-        if (BCryptHashData(hash, buffer.data(), read, 0) < 0) {
-            ok = false;
-            break;
-        }
-    }
-    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
-    if (ok && !cancel.load() && BCryptFinishHash(hash, digest.data(),
-                                                 static_cast<ULONG>(digest.size()), 0) < 0)
-        ok = false;
-    BCryptDestroyHash(hash);
-    BCryptCloseAlgorithmProvider(algorithm, 0);
-    if (!ok && error.empty()) error = Win32Message(GetLastError()) + L" | " + path;
-    return ok && !cancel.load();
-}
-
-std::wstring JsonString(const std::wstring& value) {
-    std::wstring escaped;
-    json::Escape(value, escaped);
-    return L"\"" + escaped + L"\"";
-}
-
-std::wstring StringArrayJson(const std::vector<std::wstring>& values) {
-    std::wstring out = L"[";
-    for (size_t i = 0; i < values.size(); ++i) {
-        if (i) out += L",";
-        out += JsonString(values[i]);
-    }
-    out += L"]";
-    return out;
-}
-
-bool ParseRecoveryEntry(const std::wstring& object, RecoveryEntry& entry) {
-    const json::Document doc(object);
-    if (!doc.Is(json::Kind::Object)) return false;
-    const int type = json::ExtractInt(doc, L"type", -1);
-    const int policy = json::ExtractInt(doc, L"policy", -1);
-    if (type < static_cast<int>(OpType::Copy) || type > static_cast<int>(OpType::BatchRename) ||
-        policy < static_cast<int>(CollisionPolicy::System) ||
-        policy > static_cast<int>(CollisionPolicy::KeepBoth)) return false;
-    if (!json::ParseUnsigned(json::ExtractString(doc, L"seq"), entry.sequence) ||
-        entry.sequence == UINT64_MAX) return false;
-    entry.was_active = json::ExtractBool(doc, L"active", false);
-    entry.outcome_unknown = json::ExtractBool(doc, L"outcome_unknown", false);
-    entry.request.type = static_cast<OpType>(type);
-    entry.request.collision_policy = static_cast<CollisionPolicy>(policy);
-    entry.request.sources = json::ExtractStringArray(doc, L"sources");
-    entry.request.recycle_paths = json::ExtractStringArray(doc, L"recycle_paths");
-    entry.request.dest_dir = json::ExtractString(doc, L"dest");
-    entry.request.new_name = json::ExtractString(doc, L"name");
-    entry.request.new_names = json::ExtractStringArray(doc, L"names");
-    const int action = json::ExtractInt(doc, L"folder_action", 0);
-    if (action < 0 || action > static_cast<int>(FolderAction::DissolveFolders)) return false;
-    entry.request.folder_action = static_cast<FolderAction>(action);
-    if (action && entry.request.type != OpType::Move) return false;
-    entry.request.undo_label = json::ExtractString(doc, L"undo_label");
-    entry.request.is_undo = json::ExtractBool(doc, L"undo", false);
-    for (const auto& target_json : json::ExtractObjectArray(doc, L"delete_targets")) {
-        DeleteRequestTarget target;
-        target.path = json::ExtractString(target_json, L"path", L"");
-        target.physical_paths = json::ExtractStringArray(target_json, L"roots");
-        target.recycle_item = json::ExtractBool(target_json, L"recycle_item", false);
-        entry.request.delete_targets.push_back(std::move(target));
-    }
-    if (entry.request.type == OpType::EmptyRecycle) return entry.sequence != 0;
-    return entry.sequence != 0 && !entry.request.sources.empty();
-}
-
 } // namespace
-
-struct OpsManager::JournalState {
-    std::wstring path;
-    std::vector<std::wstring> paths;
-    std::map<uint64_t, std::wstring> recovery_sources;
-    std::map<std::wstring, std::vector<std::wstring>> opaque_entries;
-    std::set<std::wstring> opaque_files;
-};
-
-OpsManager::OpsManager() = default;
-
-OpsManager::~OpsManager() {
-    Stop();
-}
-
-void OpsManager::SetJournalPath(std::wstring path) {
-    if (running_) return;
-    if (!journal_) journal_ = std::make_unique<JournalState>();
-    journal_->path = std::move(path);
-    journal_->paths.clear();
-    if (!journal_->path.empty()) journal_->paths.push_back(journal_->path);
-    LoadRecoveryJournal();
-}
-
-void OpsManager::SetJournalPaths(std::vector<std::wstring> paths) {
-    if (running_) return;
-    if (!journal_) journal_ = std::make_unique<JournalState>();
-    journal_->paths.clear();
-    for (auto& path : paths) {
-        if (path.empty() || std::find(journal_->paths.begin(), journal_->paths.end(), path) != journal_->paths.end())
-            continue;
-        journal_->paths.push_back(std::move(path));
-    }
-    journal_->path = journal_->paths.empty() ? std::wstring{} : journal_->paths.front();
-    LoadRecoveryJournal();
-}
-
-void OpsManager::LoadRecoveryJournal() {
-    pending_recovery_.clear();
-    journal_->recovery_sources.clear();
-    journal_->opaque_entries.clear();
-    journal_->opaque_files.clear();
-    next_seq_ = 1;
-    if (journal_->paths.empty() && !journal_->path.empty()) journal_->paths.push_back(journal_->path);
-    std::set<uint64_t> used_sequences;
-    uint64_t remapped_sequence = 1;
-    for (const auto& path : journal_->paths) {
-        std::wstring text;
-        if (!ReadUtf8File(path, text)) {
-            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
-                journal_->opaque_files.insert(path);
-            continue;
-        }
-        if (text.empty()) continue;
-        const json::Document doc(text);
-        const auto* entries_value = doc.Find(L"entries");
-        if (!doc.Is(json::Kind::Object) || json::ExtractInt(doc, L"schema", 0) != 1 ||
-            !entries_value || entries_value->kind != json::Kind::Array ||
-            std::any_of(entries_value->children.begin(), entries_value->children.end(),
-                [](const json::Value& value) { return value.kind != json::Kind::Object; })) {
-            journal_->opaque_files.insert(path);
-            continue;
-        }
-        for (const auto& object : json::ExtractObjectArray(doc, L"entries")) {
-            RecoveryEntry entry;
-            if (!ParseRecoveryEntry(object, entry)) {
-                journal_->opaque_entries[path].push_back(object);
-                continue;
-            }
-            constexpr uint64_t kHighSequenceThreshold = UINT64_MAX / 2;
-            if (used_sequences.contains(entry.sequence) || entry.sequence >= kHighSequenceThreshold) {
-                while (remapped_sequence < kHighSequenceThreshold &&
-                       used_sequences.contains(remapped_sequence)) ++remapped_sequence;
-                if (remapped_sequence >= kHighSequenceThreshold) {
-                    journal_->opaque_entries[path].push_back(object);
-                    continue;
-                }
-                entry.sequence = remapped_sequence++;
-            }
-            used_sequences.insert(entry.sequence);
-            next_seq_ = (std::max)(next_seq_, entry.sequence + 1);
-            journal_->recovery_sources.insert_or_assign(entry.sequence, path);
-            pending_recovery_.push_back(std::move(entry));
-        }
-    }
-}
-
-RecoverySnapshot OpsManager::PendingRecovery() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    RecoverySnapshot result;
-    result.entries = pending_recovery_;
-    result.has_uncertain_destructive = std::any_of(
-        result.entries.begin(), result.entries.end(), [](const RecoveryEntry& entry) {
-            return entry.was_active && IsDeleteOperation(entry.request.type);
-        });
-    return result;
-}
-
-bool OpsManager::RetryRecovery() {
-    bool all_retryable = true;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!accepting_) return false;
-        for (const auto& recovery : pending_recovery_) {
-            if (scheduled_recovery_.contains(recovery.sequence)) continue;
-            if (recovery.outcome_unknown) {
-                all_retryable = false;
-                status_.last_error = l10n::Get(l10n::StringId::PermissionOperationOutcomeUnknown);
-                status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
-                continue;
-            }
-            if (recovery.was_active && IsDeleteOperation(recovery.request.type)) {
-                all_retryable = false;
-                status_.last_error = L"A deletion may have partially executed. Inspect the affected paths before discarding this recovery record; it will not be replayed.";
-                status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
-                continue;
-            }
-            if (recovery.request.is_undo && IsMutationOperation(recovery.request.type)) {
-                all_retryable = false;
-                status_.last_error = l10n::Get(l10n::StringId::OperationUndoReservationMissing);
-                status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
-                continue;
-            }
-            // A matching .pulse-copy/.pulse-backup name is not ownership proof.
-            // Recovery that first requires destructive reconciliation stops.
-            if (!recovery.request.dest_dir.empty()) {
-                all_retryable = false;
-                status_.last_error = L"Recovery stopped: temporary-file ownership cannot be proven; nothing was deleted.";
-                status_.summary = status_.last_error;
-                status_.phase = OpPhase::Failed;
-                continue;
-            }
-            QueueItem item;
-            item.seq = next_seq_++;
-            item.req = recovery.request;
-            item.req.delete_origin = DeleteOrigin::Recovery;
-            item.recovery_sequence = recovery.sequence;
-            scheduled_recovery_.insert(recovery.sequence);
-            queue_.push_back(std::move(item));
-        }
-    }
-    cv_.notify_one();
-    if (notify_) notify_();
-    return all_retryable;
-}
-
-void OpsManager::DiscardRecovery() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Discard forgets the journal only. Never delete files by a temporary
-        // name pattern, which may also match user-owned files.
-        pending_recovery_.clear();
-        scheduled_recovery_.clear();
-        std::erase_if(queue_, [](const QueueItem& item) { return item.recovery_sequence != 0; });
-        if (journal_) {
-            journal_->recovery_sources.clear();
-            journal_->opaque_entries.clear();
-            journal_->opaque_files.clear();
-        }
-    }
-    if (journal_) {
-        for (const auto& path : journal_->paths) DeleteFileW(path.c_str());
-    }
-    cv_.notify_one();
-}
-
-std::wstring OpsManager::JournalJsonLocked(const std::wstring& path) const {
-    std::wstring out = L"{\n  \"schema\":1,\n  \"entries\":[";
-    bool first = true;
-    auto append = [&](const QueueItem& item, bool active, bool outcome_unknown = false) {
-        if (item.req.sources.empty() && item.req.type != OpType::EmptyRecycle) return;
-        if (!first) out += L",";
-        first = false;
-        out += L"\n    {\"seq\":" + JsonString(std::to_wstring(item.seq)) +
-            L",\"active\":" + (active ? std::wstring(L"true") : std::wstring(L"false")) +
-            L",\"outcome_unknown\":" + ((outcome_unknown || (active && item.elevated_retry)) ? std::wstring(L"true") : std::wstring(L"false")) +
-            L",\"type\":" + std::to_wstring(static_cast<int>(item.req.type)) +
-            L",\"policy\":" + std::to_wstring(static_cast<int>(item.req.collision_policy)) +
-            L",\"undo\":" + (item.req.is_undo ? std::wstring(L"true") : std::wstring(L"false")) +
-            L",\"sources\":" + StringArrayJson(item.req.sources) +
-            L",\"dest\":" + JsonString(item.req.dest_dir) +
-            L",\"name\":" + JsonString(item.req.new_name) +
-            L",\"names\":" + StringArrayJson(item.req.new_names) +
-            L",\"folder_action\":" + std::to_wstring(static_cast<int>(item.req.folder_action)) +
-            L",\"undo_label\":" + JsonString(item.req.undo_label) +
-            L",\"recycle_paths\":" + StringArrayJson(item.req.recycle_paths);
-        if (!item.req.delete_targets.empty()) {
-            out += L",\"delete_targets\":[";
-            for (size_t i = 0; i < item.req.delete_targets.size(); ++i) {
-                const auto& target = item.req.delete_targets[i];
-                if (i != 0) out += L",";
-                out += L"{\"path\":" + JsonString(target.path) + L",\"roots\":" +
-                    StringArrayJson(target.physical_paths) + L",\"recycle_item\":" +
-                    (target.recycle_item ? L"true" : L"false") + L"}";
-            }
-            out += L"]";
-        }
-        out += L"}";
-    };
-    if (path == journal_->path) {
-        if (active_item_ && active_item_->recovery_sequence == 0) append(*active_item_, true);
-        for (const auto& item : queue_)
-            if (!IsDeleteOperation(item.req.type) && item.recovery_sequence == 0) append(item, false);
-    }
-    if (active_item_ && active_item_->recovery_sequence != 0) {
-        const auto source = journal_->recovery_sources.find(active_item_->recovery_sequence);
-        const std::wstring& source_path = source == journal_->recovery_sources.end()
-            ? journal_->path : source->second;
-        if (source_path == path) append(*active_item_, true);
-    }
-    for (const auto& recovery : pending_recovery_) {
-        if (active_item_ && active_item_->recovery_sequence == recovery.sequence) continue;
-        const auto source = journal_->recovery_sources.find(recovery.sequence);
-        const std::wstring& source_path = source == journal_->recovery_sources.end()
-            ? journal_->path : source->second;
-        if (source_path != path) continue;
-        QueueItem item;
-        item.seq = recovery.sequence; item.req = recovery.request;
-        append(item, recovery.was_active, recovery.outcome_unknown);
-    }
-    if (const auto opaque = journal_->opaque_entries.find(path);
-        opaque != journal_->opaque_entries.end()) {
-        for (const auto& object : opaque->second) {
-            if (!first) out += L",";
-            first = false;
-            out += L"\n    " + object;
-        }
-    }
-    out += first ? L"]\n}\n" : L"\n  ]\n}\n";
-    return out;
-}
-
-void OpsManager::PersistJournal() {
-    if (!journal_) return;
-    if (journal_->paths.empty() && !journal_->path.empty()) journal_->paths.push_back(journal_->path);
-    for (const auto& path : journal_->paths) {
-        std::wstring text;
-        bool has_entries = false;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (journal_->opaque_files.contains(path)) continue;
-            const auto opaque = journal_->opaque_entries.find(path);
-            has_entries = opaque != journal_->opaque_entries.end() && !opaque->second.empty();
-            if (path == journal_->path) {
-                has_entries = has_entries || (active_item_ && active_item_->recovery_sequence == 0) ||
-                    std::any_of(queue_.begin(), queue_.end(), [](const QueueItem& item) {
-                        return !IsDeleteOperation(item.req.type) && item.recovery_sequence == 0;
-                    });
-            }
-            if (active_item_ && active_item_->recovery_sequence != 0) {
-                const auto source = journal_->recovery_sources.find(active_item_->recovery_sequence);
-                has_entries = has_entries || (source == journal_->recovery_sources.end()
-                    ? journal_->path == path : source->second == path);
-            }
-            has_entries = has_entries || std::any_of(pending_recovery_.begin(), pending_recovery_.end(),
-                [&](const RecoveryEntry& entry) {
-                    const auto source = journal_->recovery_sources.find(entry.sequence);
-                    return source == journal_->recovery_sources.end()
-                        ? journal_->path == path : source->second == path;
-                });
-            if (has_entries) text = JournalJsonLocked(path);
-        }
-        if (has_entries) WriteUtf8FileAtomic(path, text);
-        else DeleteFileW(path.c_str());
-    }
-}
 
 void OpsManager::Start(std::function<void()> notify) {
     if (running_) return;
@@ -1137,26 +741,7 @@ void OpsManager::ExecuteCommand(const std::wstring& command, const std::wstring&
 }
 
 std::wstring TerminalCommandLine(const std::wstring& dir) {
-    std::wstring quoted = L"\"";
-    size_t slashes = 0;
-    for (const wchar_t c : dir) {
-        if (c == L'\\') {
-            ++slashes;
-            continue;
-        }
-        if (c == L'\"') {
-            quoted.append(slashes * 2 + 1, L'\\');
-            quoted.push_back(c);
-        } else {
-            quoted.append(slashes, L'\\');
-            quoted.push_back(c);
-        }
-        slashes = 0;
-    }
-    // Backslashes immediately before a closing quote must be doubled.
-    quoted.append(slashes * 2, L'\\');
-    quoted.push_back(L'\"');
-    return L"-d " + quoted;
+    return L"-d " + QuoteWindowsArgument(dir);
 }
 
 void OpsManager::OpenTerminal(const std::wstring& dir) {
@@ -2844,13 +2429,9 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     // Destroy the queue before its jobs and their checked source references.
     std::unique_ptr<TransferWorkQueue> copy_workers;
     unsigned worker_count = 0;
-    std::map<std::pair<std::wstring, std::wstring>, TransferStoragePolicy> storage_policies;
+    TransferPolicyCache storage_policies;
     const auto storage_policy = [&](const TransferEntry& entry) -> const TransferStoragePolicy& {
-        const auto key = std::make_pair(ParentOf(entry.source), ParentOf(entry.destination));
-        auto found = storage_policies.find(key);
-        if (found == storage_policies.end())
-            found = storage_policies.emplace(key, TransferPolicy(key.first, key.second)).first;
-        return found->second;
+        return storage_policies.Get(ParentOf(entry.source), ParentOf(entry.destination));
     };
     uint64_t committed_bytes = 0;
     uint64_t published_bytes = 0;
@@ -2989,8 +2570,14 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         std::all_of(entries.begin(), entries.end(), [](const auto& entry) {
             return !entry.reparse && entry.bytes <= 4 * 1024;
         });
+    const auto direct_small_copy = [&](const TransferEntry& entry) {
+        return req.type == OpType::Copy && !req.is_undo && prior_plan.empty() && !verify_copies_.load() &&
+            !entry.directory && !entry.reparse && !entry.destination_preexisting && entry.bytes <= 64 * 1024 &&
+            source_directories->Impacts().empty() && destination_guard.Impacts().empty() &&
+            !storage_policy(entry).remote;
+    };
     const auto prepare_copies = [&](size_t first) {
-        if (first + 1 == entries.size() || tiny_copy_batch) return;
+        if (first + 1 == entries.size() || tiny_copy_batch || direct_small_copy(entries[first])) return;
         // Preparing copies is optional. Allocation/queue admission failure must
         // leave every retained job submitted, so the serial waiter can finish.
         try {
@@ -3027,6 +2614,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                     planned.destination_preexisting ||
                     ParentOf(planned.source) != source_parent || ParentOf(planned.destination) != destination_parent ||
                     cleanup_only(planned.source) || already_renamed(planned.source) || in_skipped_subtree(planned.source)) break;
+                if (direct_small_copy(planned)) continue;
                 if (planned.bytes >= 1024 * 1024 && have_large) continue;
                 if (!destinations.insert(planned.destination).second) break;
                 std::wstring ignored;
@@ -3087,9 +2675,11 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                                     (unbuffered ? COPY_FILE_NO_BUFFERING : 0);
                                 parameters.pProgressRoutine = CopyProgress;
                                 parameters.pvCallbackContext = &copy->context;
+                                copy->context.source_validation.BeginAttempt();
                                 copy->result = transfer_copy_file_(entries[candidate].source.c_str(), copy->temporary.c_str(), &parameters);
                                 if (copy->result == HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER)) {
                                     parameters.dwCopyFlags = COPY_FILE_FAIL_IF_EXISTS;
+                                    copy->context.source_validation.BeginAttempt();
                                     copy->result = transfer_copy_file_(entries[candidate].source.c_str(), copy->temporary.c_str(), &parameters);
                                 }
                             }
@@ -3411,6 +3001,11 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             prepared_copies.erase(old);
         }
         if (!destination_exists && !conflict) prepare_copies(index);
+        // Newly direct copies keep the source proof previously acquired by prefetch.
+        if (!tiny_copy_batch && direct_small_copy(entry) && !entry.source_identity.Get()) {
+            entry.source_identity = FileObjectReference::Open(entry.source, transfer_identity_query_);
+            if (!entry.source_identity.Get()) { fail_win32(GetLastError(), entry.source); break; }
+        }
         const bool prefetched = prepared_copies.contains(index);
         const bool replacing = destination_exists && choice == ConflictChoice::Replace;
         const bool temporary_copy = prefetched || (conflict && choice == ConflictChoice::Replace) ||
@@ -3479,6 +3074,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             prepared_copies.erase(index);
         } else for (;;) {
             context.pause_sent = false;
+            context.source_validation.BeginAttempt();
             COPYFILE2_EXTENDED_PARAMETERS parameters{};
             parameters.dwSize = sizeof(parameters);
             parameters.dwCopyFlags = extra_flags;
@@ -3529,8 +3125,8 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             cleanup_temporary();
             break;
         }
-        if (context.source_changed ||
-            (SUCCEEDED(copy_result) && req.type == OpType::Move && !context.source_checked)) {
+        if (context.source_validation.Changed() ||
+            (SUCCEEDED(copy_result) && req.type == OpType::Move && !context.source_validation.Checked())) {
             cleanup_temporary();
             fail_win32(ERROR_FILE_INVALID, entry.source);
             break;
@@ -4008,19 +3604,33 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     outcome.plan_complete = plan_complete;
     outcome.can_restage = plan_complete && !req.is_undo && retained_backups.empty() &&
         failure_hr != HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-    auto outcome_plan = entries;
+    auto outcome_plan = std::move(entries);
     for (const auto& prior : prior_plan) {
         if (std::none_of(outcome_plan.begin(), outcome_plan.end(), [&](const auto& entry) {
                 return entry.source == prior.source;
             })) outcome_plan.push_back(prior);
     }
+    enum : unsigned { PathSkipped = 1, PathCompleted = 2, PathProduced = 4, PathPrepared = 8 };
+    // These source lists are final; views avoid copying their path strings.
+    std::unordered_map<std::wstring_view, unsigned> result_paths;
+    result_paths.reserve(outcome_plan.size());
+    const auto mark_paths = [&](const std::vector<std::wstring>& paths, unsigned state) {
+        for (const auto& path : paths) result_paths[path] |= state;
+    };
+    mark_paths(skipped_sources, PathSkipped);
+    mark_paths(completed_sources, PathCompleted);
+    mark_paths(removed_directories, PathCompleted);
+    mark_paths(produced_sources, PathProduced);
+    mark_paths(prepared_directories, PathPrepared);
+    outcome.items.reserve(outcome_plan.size());
     for (const auto& entry : outcome_plan) {
         TransferItemResult item{entry.source, entry.destination, entry.directory, entry.reparse};
-        const bool was_skipped = std::find(skipped_sources.begin(), skipped_sources.end(), entry.source) != skipped_sources.end() ||
+        const auto found = result_paths.find(entry.source);
+        const unsigned state = found == result_paths.end() ? 0u : found->second;
+        const bool was_skipped = (state & PathSkipped) != 0 ||
             in_skipped_subtree(entry.source);
         const bool was_completed = already_renamed(entry.source) ||
-            std::find(completed_sources.begin(), completed_sources.end(), entry.source) != completed_sources.end() ||
-            std::find(removed_directories.begin(), removed_directories.end(), entry.source) != removed_directories.end() ||
+            (state & PathCompleted) != 0 ||
             std::any_of(prior_completed.begin(), prior_completed.end(), [&](const auto& done) {
                 return StartsWithPath(entry.source, done);
             });
@@ -4034,7 +3644,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             return StartsWithPath(entry.destination, restored);
         });
         item.destination_committed = !rolled_back && (was_completed ||
-            std::find(produced_sources.begin(), produced_sources.end(), entry.source) != produced_sources.end() ||
+            (state & PathProduced) != 0 ||
             item.state == TransferItemState::Completed);
         item.source_removed = req.type == OpType::Move && was_completed;
         if (item.state != TransferItemState::Completed) {
@@ -4045,7 +3655,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 })) {
                 // A directory whose creation succeeded but metadata did not finish
                 // cannot be reconstructed by resubmitting it and scanning new children.
-                if (std::find(prepared_directories.begin(), prepared_directories.end(), entry.source) != prepared_directories.end())
+                if ((state & PathPrepared) != 0)
                     outcome.can_restage = false;
                 outcome.remaining_sources.push_back(entry.source);
             }
@@ -4079,7 +3689,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             completed_sources.begin(), completed_sources.end());
         continuation.retry_completed_sources.insert(continuation.retry_completed_sources.end(),
             removed_directories.begin(), removed_directories.end());
-        continuation.retry_transfer_plan = outcome_plan;
+        continuation.retry_transfer_plan = std::move(outcome_plan);
         continuation.retry_source_directories = source_directories;
         continuation.retry_destination_guard = destination_snapshot;
         for (auto& planned : continuation.retry_transfer_plan) {
@@ -4367,7 +3977,7 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FileId
         bool valid = !req.sources.empty() && (req.type != OpType::Rename || req.sources.size() == 1);
         for (size_t i = 0; i < req.sources.size(); ++i) {
             const auto& name = req.type == OpType::BatchRename && i < req.new_names.size() ? req.new_names[i] : req.new_name;
-            valid = valid && !req.sources[i].empty() && IsRenameComponent(name);
+            valid = valid && !req.sources[i].empty() && path::IsValidFileName(name);
         }
         if (!valid || shell_cancel_requested_.load() || stopping_.load() || (lock_retry && lock_retry_cancel_.load())) {
             const bool cancelled = shell_cancel_requested_.load() || stopping_.load() || (lock_retry && lock_retry_cancel_.load());
@@ -4704,140 +4314,6 @@ bool OpsManager::WaitShellDone(uint32_t id, ShellCompletion& result) {
     }
     current_req_id_.store(0);
     shell_cancel_requested_ = false;
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Undo stack JSON persistence (minimal parser, same style as StagingTray).
-// ---------------------------------------------------------------------------
-std::wstring OpsManager::UndoToJson() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::wstring out = L"[\n";
-    for (size_t i = 0; i < undo_.size(); ++i) {
-        const auto& e = undo_[i];
-        wchar_t head[64];
-        swprintf_s(head, L"  {\"type\":%d,\"sup\":%s,", (int)e.type, e.supported && !e.session_only ? L"true" : L"false");
-        out += head;
-        out += L"\"dest\":\"";
-        pulse::json::Escape(e.dest_dir, out);
-        out += L"\",\"name\":\"";
-        pulse::json::Escape(e.new_name, out);
-        out += L"\",\"src\":[";
-        for (size_t j = 0; j < e.sources.size(); ++j) {
-            out += L"\"";
-            pulse::json::Escape(e.sources[j], out);
-            out += L"\"";
-            if (j + 1 < e.sources.size()) out += L",";
-        }
-        out += L"],\"dst\":[";
-        for (size_t j = 0; j < e.destinations.size(); ++j) {
-            out += L"\"";
-            pulse::json::Escape(e.destinations[j], out);
-            out += L"\"";
-            if (j + 1 < e.destinations.size()) out += L",";
-        }
-        out += L"],\"produced\":[";
-        for (size_t j = 0; j < e.produced_identities.size(); ++j) {
-            out += L"\"" + ProducedIdentityText(e.produced_identities[j]) + L"\"";
-            if (j + 1 < e.produced_identities.size()) out += L",";
-        }
-        out += L"],\"cleanup\":" + StringArrayJson(e.cleanup_directories) +
-            L",\"undo_group\":" + JsonString(std::to_wstring(e.undo_group)) +
-            L",\"undo_label\":" + JsonString(e.undo_label);
-        if (e.folder_metadata) {
-            const auto& basic = *e.folder_metadata;
-            out += L",\"folder_basic\":" + StringArrayJson({
-                std::to_wstring(basic.CreationTime.QuadPart), std::to_wstring(basic.LastAccessTime.QuadPart),
-                std::to_wstring(basic.LastWriteTime.QuadPart), std::to_wstring(basic.ChangeTime.QuadPart),
-                std::to_wstring(basic.FileAttributes)});
-        }
-        out += L"}";
-        if (i + 1 < undo_.size()) out += L",";
-        out += L"\n";
-    }
-    out += L"]";
-    return out;
-}
-
-bool OpsManager::UndoFromJson(const std::wstring& in) {
-    const json::Document doc(in);
-    if (!doc.Is(json::Kind::Array)) return false;
-    std::deque<UndoEntry> parsed;
-    for (const auto& object : doc.Root().children) {
-        if (object.kind != json::Kind::Object) return false;
-        UndoEntry e;
-        const int type = json::Int(object.Find(L"type"), -1);
-        if (type < static_cast<int>(OpType::Copy) || type > static_cast<int>(OpType::RemoveEmptyFolder)) return false;
-        e.type = static_cast<OpType>(type);
-        const auto group = json::String(object.Find(L"undo_group"));
-        if (!group.empty() && !json::ParseUnsigned(group, e.undo_group)) return false;
-        e.undo_label = json::String(object.Find(L"undo_label"));
-        const auto* supported = object.Find(L"sup");
-        const auto* destination = object.Find(L"dest");
-        const auto* name = object.Find(L"name");
-        const auto* sources = object.Find(L"src");
-        if (!supported || supported->kind != json::Kind::Boolean ||
-            !destination || destination->kind != json::Kind::String ||
-            !name || name->kind != json::Kind::String ||
-            !sources || sources->kind != json::Kind::Array) return false;
-        e.supported = json::Bool(supported);
-        e.dest_dir = json::String(destination);
-        e.new_name = json::String(name);
-        if (const auto* metadata = object.Find(L"folder_basic")) {
-            if (metadata->kind != json::Kind::Array || metadata->children.size() != 5 ||
-                e.type != OpType::RemoveEmptyFolder) return false;
-            uint64_t values[5]{};
-            for (size_t i = 0; i < 5; ++i) {
-                if (metadata->children[i].kind != json::Kind::String ||
-                    !json::ParseUnsigned(metadata->children[i].text, values[i]) ||
-                    (i < 4 && values[i] > INT64_MAX) || (i == 4 && values[i] > MAXDWORD)) return false;
-            }
-            FILE_BASIC_INFO basic{};
-            basic.CreationTime.QuadPart = static_cast<LONGLONG>(values[0]);
-            basic.LastAccessTime.QuadPart = static_cast<LONGLONG>(values[1]);
-            basic.LastWriteTime.QuadPart = static_cast<LONGLONG>(values[2]);
-            basic.ChangeTime.QuadPart = static_cast<LONGLONG>(values[3]);
-            basic.FileAttributes = static_cast<DWORD>(values[4]);
-            e.folder_metadata = basic;
-        }
-        for (const auto& source : sources->children) {
-            if (source.kind != json::Kind::String) return false;
-            e.sources.push_back(source.text);
-        }
-        if (const auto* destinations = object.Find(L"dst")) {
-            if (destinations->kind != json::Kind::Array) return false;
-            for (const auto& value : destinations->children) {
-                if (value.kind != json::Kind::String) return false;
-                e.destinations.push_back(value.text);
-            }
-        }
-        if (const auto* produced = object.Find(L"produced")) {
-            if (produced->kind != json::Kind::Array) return false;
-            for (const auto& value : produced->children) {
-                FileIdentity identity;
-                if (value.kind != json::Kind::String || !ParseProducedIdentity(value.text, identity)) return false;
-                e.produced_identities.push_back(identity);
-            }
-        }
-        if (const auto* cleanup = object.Find(L"cleanup")) {
-            if (cleanup->kind != json::Kind::Array) return false;
-            for (const auto& value : cleanup->children) {
-                if (value.kind != json::Kind::String || e.type != OpType::Move ||
-                    std::find(e.destinations.begin(), e.destinations.end(), value.text) == e.destinations.end()) return false;
-                e.cleanup_directories.push_back(value.text);
-            }
-        }
-        if (RequiresProducedIdentity(e.type)) {
-            const size_t count = e.type == OpType::Copy ? e.destinations.size() : e.sources.size();
-            e.supported = e.supported && HasProducedIdentities(count, e.produced_identities) &&
-                (!IsMutationOperation(e.type) || e.destinations.size() == count);
-        }
-        parsed.push_back(std::move(e));
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    undo_ = std::move(parsed);
-    undo_validation_requested_.store(true);
-    ++undo_revision_;
     return true;
 }
 

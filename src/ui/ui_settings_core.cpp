@@ -13,27 +13,26 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
     using I = l10n::StringId;
     using H = HitTestResult;
     auto* dc=compositor_->Dc();
-    const auto lay=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
+    const auto lay=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(rect.right));
     auto text=[&](const std::wstring& value,D2D1_RECT_F r,bool is_small=false) {
         painter_.DrawText(value,r,is_small ? compositor_->SmallFormat() : compositor_->TextFormat(),is_small ? theme.text_secondary : theme.text);
     };
     auto draw_card=[&](D2D1_RECT_F r) {
         if(r.bottom<=r.top) return;
-        MakeBrush(dc,WithAlpha(theme.surface_card,card_alpha_),brFillInput_); MakeBrush(dc,theme.stroke_card,brStrokeCard_);
+        MakeBrush(dc,(vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card,std::max(card_alpha_,0.65f))),brFillInput_); MakeBrush(dc,theme.stroke_card,brStrokeCard_);
         dc->FillRoundedRectangle(D2D1::RoundedRect(r,8*scale_,8*scale_),brFillInput_.get());
         dc->DrawRoundedRectangle(D2D1::RoundedRect(r,8*scale_,8*scale_),brStrokeCard_.get(),1);
     };
-    auto divider=[&](D2D1_RECT_F r) {
-        if(r.bottom<=r.top) return;
-        MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
-        FillRect(dc,brStrokeDivider_.get(),r.left+16*scale_,r.bottom,r.right-r.left-32*scale_,1);
-    };
     auto label=[&](D2D1_RECT_F r,const std::wstring& title,const std::wstring& desc,const wchar_t* icon,float text_right=0.0f,float description_height=21.0f) {
         const float right=text_right>0 ? text_right : r.right-72*scale_;
-        DrawIconText(r.left+16*scale_,r.top+17*scale_,24*scale_,24*scale_,icon,L"",theme.text_secondary,0.85f);
-        text(title,D2D1::RectF(r.left+54*scale_,r.top+10*scale_,right,r.top+34*scale_));
+        const bool inline_control = right < r.right-60*scale_;
+        const float text_height = (24.0f + (desc.empty() ? 0.0f : 1.0f+description_height))*scale_;
+        const float top = inline_control ? (r.top+r.bottom-text_height)*0.5f : r.top+10*scale_;
+        const float icon_top = inline_control ? (r.top+r.bottom-24*scale_)*0.5f : r.top+17*scale_;
+        DrawIconText(r.left+16*scale_,icon_top,24*scale_,24*scale_,icon,L"",theme.text_secondary,0.85f);
+        text(title,D2D1::RectF(r.left+54*scale_,top,right,top+24*scale_));
         if(!desc.empty()) {
-            const auto bounds=D2D1::RectF(r.left+54*scale_,r.top+35*scale_,right,r.top+(35+description_height)*scale_);
+            const auto bounds=D2D1::RectF(r.left+54*scale_,top+25*scale_,right,top+(25+description_height)*scale_);
             if(description_height<=21.0f) text(desc,bounds,true);
             else {
                 ComPtr<IDWriteTextLayout> description;
@@ -103,10 +102,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
     };
     if (IsSettingsCategory(vm.settings_page)) {
         for (int i = 0; i < lay.section_count; ++i) section(i, lay.section_title[i]);
-        for (const auto &group : lay.group) draw_card(group);
-        MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
-        for (const auto &line : lay.category_dividers)
-            FillRect(dc, brStrokeDivider_.get(), line.left, line.top, line.right - line.left, 1);
+        for (const auto &row : lay.category_rows) draw_card(row);
         const I languages[] = {I::LanguageSystem, I::LanguageZhCN, I::LanguageEnUS};
         const auto dropdown = [&](D2D1_RECT_F r, D2D1_RECT_F c, I title, I desc, const std::wstring &value, int id) {
             label(r, l10n::Get(title), l10n::Get(desc), id == 0 ? L"\xE790" : L"\xE8C1",
@@ -380,10 +376,8 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                                         lay.footer.right - lay.footer.left, theme.text_secondary);
             dc->PopAxisAlignedClip();
         } else if (vm.settings_page == 9) {
-            const I sizes[] = {I::SettingsTraySmall, I::SettingsTrayStandard, I::SettingsTrayLarge};
-            const int icons[] = {40, 48, 56};
-            segmented(lay.tray_icon_card, lay.tray_icon_row, sizes, icons, vm.settings_tray_icon, H::SettingsTrayIcon,
-                      I::SettingsTrayIcon, I::SettingsTrayIconDesc);
+            toggle(lay.staging_tray_row, I::SettingsStagingTray, I::SettingsStagingTrayDesc, L"\xE7B8",
+                   vm.staging_tray_enabled, 36);
             toggle(lay.text_compare_row, I::SettingsTextCompare, I::SettingsTextCompareDesc, L"\xE8A5",
                    vm.settings_text_compare, 33);
             toggle(lay.change_tracking_row, I::SettingsChangeTracking, I::SettingsChangeTrackingDesc, L"\xE823",
@@ -395,23 +389,29 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         }
     } else {
         section(0,I::SearchModeName);section(1,I::SearchModeContent);
-        draw_card(lay.group[0]);draw_card(lay.group[1]);
-        toggle(lay.global_search_row,I::GlobalSearch,I::GlobalSearchDesc,L"\xE721",vm.settings_global_search_enabled,15);divider(lay.global_search_row);
+        for (auto row : {lay.global_search_row, lay.global_search_hotkey_row, lay.search_pinyin_row,
+                lay.filename_status, lay.disclosure[1], lay.content_header, lay.content_types,
+                lay.content_empty, lay.content_options, lay.content_rebuild}) {
+            if (row.bottom <= row.top) continue;
+            row.top += 2*scale_; row.bottom -= 2*scale_;
+            draw_card(row);
+        }
+        toggle(lay.global_search_row,I::GlobalSearch,I::GlobalSearchDesc,L"\xE721",vm.settings_global_search_enabled,15);
         label(lay.global_search_hotkey_row,l10n::Get(I::GlobalSearchHotkey),
             vm.settings_global_search_error.empty() ? l10n::Get(I::GlobalSearchHotkeyDesc) : vm.settings_global_search_error,
             L"\xE765",lay.global_search_hotkey_button.top >= lay.global_search_hotkey_row.top+56*scale_
                 ? lay.global_search_hotkey_row.right-16*scale_ : lay.global_search_hotkey_button.left-12*scale_);
         button(lay.global_search_hotkey_button,vm.settings_global_search_capturing ? l10n::Get(I::GlobalSearchRecording) : vm.settings_global_search_hotkey,H::SettingsGlobalSearchHotkey,0);
-        divider(lay.global_search_hotkey_row);
-        toggle(lay.search_pinyin_row,I::SearchPinyin,I::SearchPinyinDesc,L"\xE721",vm.settings_search_pinyin,9);divider(lay.search_pinyin_row);
-        label(lay.filename_status,l10n::Get(I::SettingsFilenameIndex),vm.settings_index_status,L"\xE8A5",lay.filename_status.right-16*scale_);divider(lay.filename_status);
+
+        toggle(lay.search_pinyin_row,I::SearchPinyin,I::SearchPinyinDesc,L"\xE721",vm.settings_search_pinyin,9);
+        label(lay.filename_status,l10n::Get(I::SettingsFilenameIndex),vm.settings_index_status,L"\xE8A5",lay.filename_status.right-16*scale_);
         disclosure(lay.disclosure[1],I::SettingsMaintenance,I::SettingsMaintenanceDesc,L"\xE713",1,false);
         label(lay.content_header,l10n::Get(I::SettingsContentFolders),vm.settings_content_summary,L"\xE8B7",
             lay.content_header.right-16*scale_);
-        divider(lay.content_header);
+
         label(lay.content_types,l10n::Get(I::SettingsContentTypes),l10n::Get(I::SettingsContentTypesDesc),L"\xE8A5",
             lay.content_types.right-16*scale_,(lay.content_types.bottom-lay.content_types.top)/scale_-45);
-        divider(lay.content_types);
+
         if(vm.settings_content_folders.empty()) {
             label(lay.content_empty,l10n::Get(I::ContentIndexEmpty),l10n::Get(I::SettingsContentEmptyHelp),L"\xE8B7",lay.content_empty.right-16*scale_);
         }
@@ -420,7 +420,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         DrawIconText(lay.content_options.right-38*scale_,lay.content_options.top+22*scale_,18*scale_,18*scale_,L"\xE76C",L"",theme.text_secondary,0.75f);
         text(l10n::Get(vm.settings_content_instant ? I::ContentInstantReady : I::SettingsContentHelp),lay.footer,true);
         if(!vm.settings_content_instant && !vm.settings_content_folders.empty()) {
-        divider(lay.content_options);label(lay.content_rebuild,l10n::Get(I::ContentIndexRebuild),l10n::Get(I::SettingsContentRebuildHelp),L"\xE72C");
+        label(lay.content_rebuild,l10n::Get(I::ContentIndexRebuild),l10n::Get(I::SettingsContentRebuildHelp),L"\xE72C");
         DrawIconText(lay.content_rebuild.right-38*scale_,lay.content_rebuild.top+22*scale_,18*scale_,18*scale_,L"\xE76C",L"",theme.text_secondary,0.75f);
         }
     }

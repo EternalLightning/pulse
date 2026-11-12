@@ -46,6 +46,7 @@ struct DuplicateScanSession {
     std::wstring folder_path;
     std::wstring drive_root;
     uint64_t minimum_file_bytes = 1024;
+    bool skip_small_files = true;
     uint64_t generation = 0;
     bool scanning = false;
     bool completed = false;
@@ -62,6 +63,7 @@ struct DuplicateScanSession {
     uint64_t result_epoch = 0;
 
     static uint64_t DefaultMinimumBytes(DuplicateScanScope scope) noexcept;
+    uint64_t MinimumFileBytes() const noexcept { return skip_small_files ? minimum_file_bytes : 0; }
     static std::wstring NormalizeDriveRoot(std::wstring root);
     static std::vector<std::wstring> ResolveRoots(
         DuplicateScanScope scope, const std::wstring& folder, const std::wstring& drive,

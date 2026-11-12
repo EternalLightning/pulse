@@ -58,7 +58,7 @@ constexpr SettingDestination destinations[]={
     {I::CloseLastTabWindow,7,0},{I::SettingsMatchBackground,7,0},{I::SettingsLockWindowSize,7,0},
     {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},{I::SettingsLaunch,8,0},
     {I::StartToTray,8,0},{I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
-    {I::SettingsTrayIcon,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
+    {I::SettingsStagingTray,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
     {I::SettingsChangeDays,9,0},
     {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},
     {I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},

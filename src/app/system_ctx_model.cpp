@@ -1152,7 +1152,7 @@ std::shared_ptr<const ui::SysCtxView> SystemCtxModel::View() {
             const std::wstring target = !item.file.empty() ? item.file : !item.command.empty() ? item.command : item.clsid;
             const bool handler = item.kind == Kind::ShellEx || item.kind == Kind::DragDrop;
             if (item.missing) {
-                row.subtitle = l10n::Pick(L"程序已不存在（多半已卸载） · ", L"Program gone (probably uninstalled) · ") +
+                row.subtitle = l10n::Pick(L"找不到程序，可能已卸载：", L"Program not found (possibly uninstalled): ") +
                                (!item.command.empty() ? item.command : target);
             } else if (handler) {
                 // Named by its menu rows: "Bandizip 的右键扩展 · Bandisoft"; named
@@ -1181,9 +1181,9 @@ std::shared_ptr<const ui::SysCtxView> SystemCtxModel::View() {
                 row.subtitle = KindLabel(item.kind);
             }
             if (item.target_state == sysctx::TargetState::Unavailable)
-                row.subtitle += l10n::Pick(L" · 无法读取程序位置", L" · Program location unavailable");
+                row.subtitle += l10n::Pick(L"（无法读取程序位置）", L" (program location unavailable)");
             else if (!item.missing && item.icon_state == sysctx::TargetState::Missing)
-                row.subtitle += l10n::Pick(L" · 图标已不存在", L" · Icon missing");
+                row.subtitle += l10n::Pick(L"（图标文件已不存在）", L" (icon file missing)");
             row.icon_path = e.icon;
             row.glyph = KindGlyph(item.kind);
             row.on = on;

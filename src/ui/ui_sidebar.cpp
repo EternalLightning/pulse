@@ -80,10 +80,13 @@ void MainRenderer::SidebarGroupBands(const WindowViewModel& vm, float w, float h
 }
 
 D2D1_RECT_F MainRenderer::StagingTrayRect(const WindowViewModel& vm, float w, float h) const {
+    if (!vm.staging_tray_enabled) return D2D1::RectF();
     std::vector<SidebarSlot> slots;
-    LayoutSidebar(vm, SidebarRect(w, h), scale_, slots);
+    const auto sidebar = SidebarRect(w, h);
+    LayoutSidebar(vm, sidebar, scale_, slots);
     for (const auto& slot : slots) {
-        if (slot.kind == SidebarSlot::TrayPanel) return slot.rc;
+        if (slot.kind == SidebarSlot::TrayPanel) return D2D1::RectF(slot.rc.left,
+            std::max(slot.rc.top, sidebar.top), slot.rc.right, std::min(slot.rc.bottom, sidebar.bottom));
     }
     return D2D1::RectF();
 }
@@ -98,8 +101,9 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     ID2D1DeviceContext* dc = compositor_->Dc();
     painter_.BeginFrame(theme, IsHighContrast());
     const auto settings = SidebarSettingsRect(rect.right, rect.bottom);
-    auto settings_fill = theme.fill_hover;
-    settings_fill.a *= ControlHoverOpacity(settings, IsHovered(vm, HitTestResult::SettingsButton));
+    auto settings_fill = vm.settings_open ? theme.fill_selected : theme.fill_hover;
+    const float settings_hot = ControlHoverOpacity(settings, IsHovered(vm, HitTestResult::SettingsButton));
+    if (!vm.settings_open) settings_fill.a *= settings_hot;
     const auto home = HomeButtonRect(EffectiveSidebarWidth(rect.right), title_bar_height_ + margin_, scale_);
     const bool home_hover = vm.hover_region == HitTestResult::HomeButton;
     const bool home_selected = vm.pane.is_home;
@@ -136,6 +140,10 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
     if (compact) {
         for (const auto& slot : slots) {
             if (slot.kind == SidebarSlot::TrayPanel) {
+                const bool fading = StagingTrayPresence(vm) < 1.0f;
+                if (fading) dc->PushLayer(D2D1::LayerParameters1(slot.rc, nullptr,
+                    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(),
+                    StagingTrayPresence(vm)), nullptr);
                 MakeBrush(dc, vm.tray_drop ? theme.fill_selected : theme.surface_flyout, brFillHover_);
                 FillRoundedRect(dc, brFillHover_.get(), slot.rc.left, slot.rc.top,
                     slot.rc.right - slot.rc.left, slot.rc.bottom - slot.rc.top,
@@ -148,6 +156,7 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
                     dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(slot.rc.right - 6.0f * scale_,
                         slot.rc.top + 7.0f * scale_), badge * 0.5f, badge * 0.5f), brAccent_.get());
                 }
+                if (fading) dc->PopLayer();
                 continue;
             }
             if (slot.kind == SidebarSlot::Rail) {
@@ -225,11 +234,6 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
         return;
     }
 
-    wchar_t countLabel[24]{};
-    const int trayCount = TrayTotalCount(vm);
-    if (trayCount > 0) swprintf_s(countLabel,
-        pulse::l10n::Get(pulse::l10n::StringId::ItemsCountFormat).c_str(), trayCount);
-
     for (const auto& slot : slots) {
         if (slot.kind == SidebarSlot::Header) {
             fluent::SidebarSectionHeaderSpec header;
@@ -260,23 +264,25 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             continue;
         }
         if (slot.kind == SidebarSlot::TrayPanel) {
+            const bool fading = StagingTrayPresence(vm) < 1.0f;
+            if (fading) dc->PushLayer(D2D1::LayerParameters1(slot.rc, nullptr,
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(),
+                StagingTrayPresence(vm)), nullptr);
             fluent::StagingTrayPanelSpec tray;
             tray.bounds = slot.rc;
             tray.title = pulse::l10n::Get(pulse::l10n::StringId::StagingTray);
             // The empty state (dashed outline + hint) is drawn by DrawTrayDeck.
             // Do not assign a conditional std::wstring temporary to a
             // std::wstring_view: the view would dangle before DrawText runs.
-            tray.count_label = countLabel;
             if (vm.tray_deck.total_count != 0) {
                 tray.action_text = pulse::l10n::Get(pulse::l10n::StringId::Release);
             }
             tray.action_hovered =
                 vm.hover_region == static_cast<int>(HitTestResult::TrayRelease);
-            tray.item_count = trayCount;
             tray.state.hovered = vm.tray_drop;
-            tray.expanded = true;
             painter_.DrawStagingTrayPanel(tray);
             DrawTrayDeck(vm, slot.rc, theme);
+            if (fading) dc->PopLayer();
             continue;
         }
         if (slot.kind == SidebarSlot::TrayRelease) continue;

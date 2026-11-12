@@ -262,7 +262,13 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     SetEnvironmentVariableW(L"PULSE_DOCUMENT_ADMISSION_DIR", profile.c_str());
     const auto logs = base / L"logs";
     SetEnvironmentVariableW(L"PULSE_CONTENT_TIMING_DIR", logs.c_str());
-    const auto cache = profile / L"Pulse" / L"ContentIndex" / L"content-v1.sqlite";
+    const auto cache = base / L"instant.sqlite";
+    const auto isolate = [&](ContentSearchClient& client) {
+        const bool isolated = client.SetDatabasePathForTesting(cache.wstring()) &&
+            config_storage::ConfigurationPath(cache.wstring()) == cache.wstring() + L".config";
+        Check(isolated, "instant client configuration stays inside the owned fixture");
+        return isolated;
+    };
     Write(files / L"a.txt", "instant_marker first"); Write(files / L"b.txt", "absent");
     const auto nested = files / L"parent" / L"sub";
     std::filesystem::create_directories(nested);
@@ -288,13 +294,15 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
         Check(Await([&] { FileFeedPage page; return feed.Request(true, L"", 0, 0, page) && page.ready; }, 10000), "isolated filename feed is ready");
     }
     ContentSearchClient client;
+    if (!isolate(client)) return 1;
     client.Start(nullptr, 0, ContentAgentMode::Instant);
     Check(Await([&] { return client.ConfigurationReady(); }), "instant config loads without starting a writer");
     ContentIndexConfig config; config.roots = {{files.wstring()}};
     if (multi_root) config.roots.push_back({first_root.wstring()});
     config.shared_scope = shared;
     client.Configure(config);
-    Check(Await([&] { return client.GetConfig().roots.size() == config.roots.size(); }), "instant scope can be saved without a body database");
+    Check(Await([&] { return config_storage::SameConfig(client.GetConfig(), config); }),
+        "instant scope can be saved without a body database");
     Check(Children().empty() && !std::filesystem::exists(cache), "startup/configuration have no content process or body database");
     wchar_t seconds[16]{}; GetEnvironmentVariableW(L"PULSE_TEST_INSTANT_IDLE_SECONDS", seconds, ARRAYSIZE(seconds));
     const DWORD idle_ms = wcstoul(seconds, nullptr, 10) * 1000;
@@ -371,6 +379,7 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     Write(files / L"a.txt", "instant_marker again");
     Await([&] { pump(); return visible.size() == 1; });
     ContentSearchClient second;
+    if (!isolate(second)) return 1;
     second.Start(nullptr, 0, ContentAgentMode::Instant);
     Await([&] { return second.ConfigurationReady(); });
     auto other = request; other.generation = 990010;
@@ -393,11 +402,21 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     completed = 0; visible.clear(); last_error = 0;
     Check(Await([&] { pump(); return completed == 1 && visible.size() == 2; }), "rapid explicit queries after suspend accept only the latest generation");
     const auto exit = GetTickCount64(); client.Stop();
-    printf("STOP elapsed_ms=%llu\n", GetTickCount64() - exit);
-    Check(GetTickCount64() - exit < 2000 && Children().empty(), "stop joins the active subscription within two seconds");
+    const auto exit_ms = GetTickCount64() - exit;
+    const auto remaining = Children();
+    printf("STOP elapsed_ms=%llu remaining=%zu\n", exit_ms, remaining.size());
+    for (const auto pid : remaining) {
+        HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        DWORD code = STILL_ACTIVE;
+        const DWORD wait = process ? WaitForSingleObject(process, 0) : WAIT_FAILED;
+        if (process) { GetExitCodeProcess(process, &code); CloseHandle(process); }
+        printf("STOP child=%lu wait=%lu exit=%lu\n", pid, wait, code);
+    }
+    Check(exit_ms < 2000 && remaining.empty(), "stop joins the active subscription within two seconds");
     Check(!std::filesystem::exists(cache), "entire lifecycle leaves body cache absent");
 
     ContentSearchClient interrupted;
+    if (!isolate(interrupted)) return 1;
     interrupted.Start(nullptr, 0, ContentAgentMode::Instant); Await([&] { return interrupted.ConfigurationReady(); });
     auto interrupted_request = request; interrupted_request.generation += 300;
     interrupted.SearchAsync(interrupted_request);
@@ -420,6 +439,7 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     interrupted.Stop();
 
     ContentSearchClient scoped;
+    if (!isolate(scoped)) return 1;
     scoped.Start(nullptr, 0, ContentAgentMode::Instant); Await([&] { return scoped.ConfigurationReady(); });
     Write(nested / L"scoped.txt", "instant_marker");
     auto scoped_request = request; scoped_request.roots.clear(); scoped_request.root = nested.wstring(); scoped_request.generation += 500;
@@ -440,6 +460,7 @@ int RunInstantLifecycleTests(const std::filesystem::path& base) {
     scoped.Stop();
 
     ContentSearchClient locked;
+    if (!isolate(locked)) return 1;
     locked.Start(nullptr, 0, ContentAgentMode::Instant); Await([&] { return locked.ConfigurationReady(); });
     HANDLE config_mutex = config_storage::NamedMutex(cache.wstring(), L"config");
     WaitForSingleObject(config_mutex, INFINITE);

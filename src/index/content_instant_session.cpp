@@ -21,7 +21,7 @@ namespace pulse::index {
 namespace {
 bool Under(const std::wstring& path, const std::wstring& root) {
     const auto p = ContentScopeKey(path), r = ContentScopeKey(root);
-    return p == r || (p.starts_with(r) && (r.ends_with(L'\\') || (p.size() > r.size() && p[r.size()] == L'\\')));
+    return ContentPathUnder(p, r);
 }
 struct Changes {
     struct Change { std::wstring path; bool imported = false; };

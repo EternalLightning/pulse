@@ -413,7 +413,7 @@ struct TrayDeckView {
     int batch_count = 0;
     float open = 0.0f;               // 0..1 drag-over highlight
     float spread = 0.0f;             // 0..1 peeking layers fan out (stack hovered)
-    float thumb_dip = 48.0f;         // thumbnail edge (settings: staging tray icon size)
+    float thumb_dip = 48.0f;         // fixed thumbnail edge in DIPs
     int hovered = -1;                // live display index under the cursor (0 = top)
 };
 
@@ -561,6 +561,8 @@ struct WindowViewModel {
     float sidebar_scrollbar_opacity = 0.0f;
     float sidebar_scrollbar_expand = 0.0f;
     TrayDeckView tray_deck;
+    bool staging_tray_enabled = true;
+    float staging_tray_presence = -1.0f; // Negative uses the unsampled enabled state.
     bool details_visible = false;   // right details panel toggle (view menu)
     bool details_motion_sampled = false;
     DetailsPanelView details;
@@ -675,7 +677,6 @@ struct WindowViewModel {
     int settings_change_days = 3;
     int settings_row_height = 34; // current row-height pref (DIPs) for density radios
     int settings_text_render = 0; // 0 auto, 1 sharp, 2 smooth
-    int settings_tray_icon = 48;  // current tray-deck icon pref (DIPs) for size radios
     int settings_language = 0;    // 0 system, 1 zh-CN, 2 en-US
     bool settings_group_on[6] = { true, true, false, false, true, true };
     std::vector<SettingsRowView> settings_items;
@@ -712,6 +713,7 @@ struct WindowViewModel {
     std::wstring dup_folder;
     std::vector<DuplicateDriveView> dup_drives;
     int dup_min_size = 0;
+    bool dup_skip_small_files = true;
     bool dup_scanning = false;
     bool dup_can_scan = false;
     bool dup_show_progress = false;
@@ -846,7 +848,6 @@ struct HitTestResult {
         SettingsDensity,
         SettingsTextRender,
         SettingsFolderSort,
-        SettingsTrayIcon,
         SettingsLanguage,
         SettingsIndexVolume,
         SettingsIndexAction,
@@ -863,6 +864,7 @@ struct HitTestResult {
         SettingsDupScan,
         SettingsDupCancel,
         SettingsDupMinSize,
+        SettingsDupSkipSmallFiles,
         SettingsDupKeep,
         SettingsDupOpen,
         SettingsDupGroupDelete,
@@ -909,6 +911,7 @@ class MainRenderer {
     friend struct SurfaceScrollUiTest;
     friend struct TooltipMotionUiTest;
     friend struct TrayCardMotionTest;
+    friend struct StagingTrayMotionTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);
@@ -946,8 +949,6 @@ public:
         row_height_dip_ = std::clamp(dip, 24.0f, 48.0f);
         row_height_ = row_height_dip_ * scale_;
     }
-    // Staging-tray deck icon edge preference (DIPs); single-item decks add 8.
-    void SetTrayIconDip(float dip) { tray_icon_dip_ = std::clamp(dip, 32.0f, 64.0f); }
     float Margin() const { return margin_; }
 
     // Right details panel: toggled from the view menu; ContentRect shrinks.
@@ -1242,6 +1243,8 @@ private:
     TabStripMetrics ComputeTabStrip(const WindowViewModel& vm, float window_w) const;
     void DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
@@ -1349,7 +1352,6 @@ private:
     std::array<uint32_t, 8> painted_columns_{};
     std::array<std::unordered_map<std::wstring, bool>, 8> painted_name_truncation_;
     size_t painted_name_pane_ = 0;
-    float tray_icon_dip_ = 48.0f;
     // Staging tray card text: 13 px semibold name, 11 px folder line.
     mutable ComPtr<IDWriteTextFormat> tray_name_format_;
     mutable ComPtr<IDWriteTextFormat> tray_folder_format_;

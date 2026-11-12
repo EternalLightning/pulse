@@ -318,6 +318,7 @@ struct AppState : AppCoreOwner {
     };
     std::unordered_map<int, SidebarFoldTrack> sidebarFoldTracks;
     app::SidebarProjectAnimation sidebarProjectAnimation;
+    ui::BinaryTransition stagingTrayAnimation;
     uint32_t sidebarHiddenMask = 0;  // Section menu: hidden groups are not drawn.
     // Section display order (logical SidebarSectionId values). Header drags
     // rewrite it; the masks above are indexed by id, so they survive a reorder.

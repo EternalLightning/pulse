@@ -66,6 +66,7 @@ int RunSettingsCategories() {
         {8,&ui::SettingsLayout::explorer_takeover_row,H::SettingsToggle,24,I::SettingsExplorerTakeover},
         {8,&ui::SettingsLayout::text_compare_row,H::None,0,I::SettingsTextCompare},
         {8,&ui::SettingsLayout::startup_tray_row,H::SettingsToggle,31,I::StartToTray},
+        {9,&ui::SettingsLayout::staging_tray_row,H::SettingsToggle,36,I::SettingsStagingTray},
         {9,&ui::SettingsLayout::text_compare_row,H::SettingsToggle,33,I::SettingsTextCompare},
         {9,&ui::SettingsLayout::change_tracking_row,H::SettingsToggle,8,I::SettingsChangeTracking},
     };
@@ -140,8 +141,7 @@ int RunSettingsCategories() {
                     {layout.configuration_action[0],H::SettingsConfigurationAction,0,I::ConfigurationLocation},
                     {layout.configuration_action[1],H::SettingsConfigurationAction,1,I::ConfigurationLocation}};
             } else if(page==9) {
-                segments={{layout.tray_icon_row[1],H::SettingsTrayIcon,1,I::SettingsTrayIcon},
-                    {layout.change_days[2],H::SettingsChangeDays,2,I::SettingsChangeDays}};
+                segments={{layout.change_days[2],H::SettingsChangeDays,2,I::SettingsChangeDays}};
             }
             for(const auto& segment:segments) {
                 vm.settings_scroll=std::max(0.0f,segment.bounds.top-layout.content.top-24*scale);
@@ -171,7 +171,7 @@ int RunSettingsCategories() {
     state.compositor.RecreateTextFormats(1);state.compositor.Resize(1100,900);
     const auto rect=D2D1::RectF(0,0,1100,900);
     for(const auto& control:controls) if(control.region==H::SettingsToggle &&
-        (control.index==5 || control.index==6 || control.index==33 || control.index==8)) {
+        (control.index==5 || control.index==6 || control.index==33 || control.index==36 || control.index==8)) {
         OpenSettingsTab(state,control.page);
         auto vm=BuildVm(state,false);
         auto layout=ui::MakeSettingsLayout(vm,rect,1,state.renderer.TitleBarHeight(),28,&measuring);

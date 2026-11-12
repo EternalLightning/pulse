@@ -15,10 +15,13 @@
 #include <iostream>
 
 #include "settings_categories_cases.h"
+#include "settings_page_cases.h"
 #include "cloud_columns_cases.h"
 #include "cloud_sidebar_cases.h"
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "--settings-page-only")
+        return RunSettingsPageCases();
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-sidebar-only")
         return RunCloudSidebarCases();
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-columns-only")

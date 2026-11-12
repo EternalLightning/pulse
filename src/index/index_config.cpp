@@ -88,11 +88,9 @@ bool EnsureMachineDirectory(const std::wstring& path) {
               owner, group, dacl, nullptr)
         : ERROR_INVALID_SECURITY_DESCR;
 
-    const DWORD access_error = GetLastError();
     CloseHandle(directory);
     LocalFree(descriptor);
     // Ordinary callers cannot turn a failed repair into a security success.
-    (void)access_error;
     return valid_directory && security_error == ERROR_SUCCESS;
 }
 

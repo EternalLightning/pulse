@@ -6,6 +6,7 @@
 #include "content_search.h"
 #include "document_reader.h"
 #include "../common/text_decode.h"
+#include "../common/path_utils.h"
 #include "../common/unique_resource.h"
 
 #include <windows.h>
@@ -159,21 +160,17 @@ ContentHit MakeContentHit(const Candidate& file, std::wstring_view content, size
     return hit;
 }
 
-bool NameEquals(std::wstring_view left, std::wstring_view right) {
-    return CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
-                                right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
-}
 
 bool IsSkippedSystemDirectory(std::wstring_view name) {
-    return NameEquals(name, L"$Recycle.Bin") ||
-           NameEquals(name, L"System Volume Information") ||
-           NameEquals(name, L"Windows");
+    return path::EqualInsensitive(name, L"$Recycle.Bin") ||
+           path::EqualInsensitive(name, L"System Volume Information") ||
+           path::EqualInsensitive(name, L"Windows");
 }
 
 bool IsSkippedSystemFile(std::wstring_view name) {
-    return NameEquals(name, L"pagefile.sys") ||
-           NameEquals(name, L"hiberfil.sys") ||
-           NameEquals(name, L"swapfile.sys");
+    return path::EqualInsensitive(name, L"pagefile.sys") ||
+           path::EqualInsensitive(name, L"hiberfil.sys") ||
+           path::EqualInsensitive(name, L"swapfile.sys");
 }
 
 std::vector<std::wstring> EffectiveRoots(const ContentSearchRequest& request) {

@@ -28,17 +28,23 @@ public:
         current_.reset(); previous_.reset(); key_.clear(); variant_.clear(); pending = false;
         owner_ = revision_ = 0;
         waiting_ = false;
+        scroll_ = {};
     }
 
     template<class Draw>
     void Paint(ID2D1DeviceContext* dc, D2D1_RECT_F bounds, const std::wstring& key,
                bool ready, uint64_t now, bool animate, float distance, float duration, Draw draw,
                std::wstring_view variant = {}, bool direct_variant = false,
-               SurfaceMotion motion = SurfaceMotion::Forward, uint64_t owner = 0, uint64_t revision = 0) {
+               SurfaceMotion motion = SurfaceMotion::Forward, uint64_t owner = 0, uint64_t revision = 0,
+               D2D1_POINT_2F scroll = {}) {
         if (!animate) { Reset(); draw(); return; }
+        // Scrolling takes control of the current list; discard the outgoing page.
+        if (pending && key == key_ && owner == owner_ && revision == revision_ &&
+            (scroll.x != scroll_.x || scroll.y != scroll_.y)) Reset();
         if (bounds.left != bounds_.left || bounds.top != bounds_.top ||
             bounds.right != bounds_.right || bounds.bottom != bounds_.bottom) Reset();
         bounds_ = bounds;
+        scroll_ = scroll;
         if (direct_variant && key == key_ && variant != variant_) {
             // Wheel resizing is direct manipulation: never queue repeated
             // full-pane exits or leave an old fade underneath the next step.
@@ -105,6 +111,7 @@ private:
     std::wstring key_;
     std::wstring variant_;
     D2D1_RECT_F bounds_{};
+    D2D1_POINT_2F scroll_{};
     uint64_t started_ = 0;
     uint64_t owner_ = 0, revision_ = 0;
     float direction_ = 1.0f;

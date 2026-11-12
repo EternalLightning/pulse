@@ -510,10 +510,6 @@ bool IndexClient::RequestInstallService() {
 
 namespace {
 
-std::wstring QuoteCommandArg(const std::wstring& value) {
-    return pulse::QuoteWindowsArgument(value);
-}
-
 bool RunElevatedIndexCommand(const std::wstring& exe, const std::wstring& parameters,
                             DWORD* result = nullptr) {
     ipc::ShellLaunchRequest request;
@@ -536,7 +532,7 @@ bool RunElevatedIndexCommand(const std::wstring& exe, const std::wstring& parame
 } // namespace
 
 bool IndexClient::ConfigureVolumeElevated(const std::wstring& volume_id, bool enabled) {
-    const std::wstring parameters = L"--configure-volume " + QuoteCommandArg(volume_id) +
+    const std::wstring parameters = L"--configure-volume " + pulse::QuoteWindowsArgument(volume_id) +
                                     (enabled ? L" --enable" : L" --disable");
     return RunElevatedIndexCommand(ExePath(), parameters);
 }
@@ -555,7 +551,7 @@ bool IndexClient::InstallServiceElevated(DWORD* error) {
 
 bool IndexClient::ConfigureIndexPathElevated(const std::wstring& path, std::wstring* error) {
     DWORD code = 0;
-    if (RunElevatedIndexCommand(ExePath(), L"--set-index-path " + QuoteCommandArg(path), &code)) return true;
+    if (RunElevatedIndexCommand(ExePath(), L"--set-index-path " + pulse::QuoteWindowsArgument(path), &code)) return true;
     if (error) {
         switch (code) {
         case ERROR_CANCELLED: *error = L"已取消索引迁移，原位置保持不变。"; break;
@@ -578,14 +574,14 @@ bool IndexClient::ConfigureIndexPathElevated(const std::wstring& path, std::wstr
 }
 
 bool IndexClient::ConfigureExcludePathElevated(const std::wstring& path, bool enabled) {
-    const std::wstring parameters = L"--configure-exclude " + QuoteCommandArg(path) +
+    const std::wstring parameters = L"--configure-exclude " + pulse::QuoteWindowsArgument(path) +
                                     (enabled ? L" --enable" : L" --disable");
     return RunElevatedIndexCommand(ExePath(), parameters);
 }
 
 bool IndexClient::ExportDiagnosticsElevated(const std::wstring& empty_directory) {
     return RunElevatedIndexCommand(ExePath(),
-        L"--export-diagnostics " + QuoteCommandArg(empty_directory));
+        L"--export-diagnostics " + pulse::QuoteWindowsArgument(empty_directory));
 }
 
 } // namespace pulse::index

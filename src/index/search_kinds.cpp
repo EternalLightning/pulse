@@ -5,6 +5,7 @@
 
 #include "search_kinds.h"
 #include "index_query.h"
+#include "../common/text_extensions.h"
 
 namespace pulse::index {
 namespace {
@@ -91,9 +92,14 @@ bool ExpandKindToken(std::wstring_view raw, std::vector<std::wstring>& exts, boo
 }
 
 std::wstring TextExtensionQueryToken() {
-    return L"ext:txt;md;log;json;xml;yaml;yml;ini;cfg;conf;csv;tsv;cpp;c;h;hpp;cc;cxx;cs;"
-           L"java;js;jsx;ts;tsx;py;rs;go;php;html;htm;css;scss;sql;ps1;bat;cmd;sh;qml;"
-           L"cmake;toml;properties";
+    std::wstring token = L"ext:";
+    bool first = true;
+    for (const auto extension : text::kKnownTextExtensions) {
+        if (!first) token += L';';
+        first = false;
+        token.append(extension.substr(1));
+    }
+    return token;
 }
 
 } // namespace pulse::index

@@ -113,7 +113,7 @@ void AppPrefs::ResetToDefaults() {
     sidebar_width = 224;
     address_search_current = false;
     address_search_content = false;
-    tray_icon_size = 48;
+    staging_tray_enabled = true;
     accent_rgb.clear();
     accent_follow_system = false;
     custom_tag_colors.clear();
@@ -200,8 +200,8 @@ std::wstring AppPrefs::ToJson() const {
     out += L",\n  \"sidebar_width\":" + std::to_wstring(sidebar_width);
     out += L",\n  \"address_search_current\":" + std::to_wstring(address_search_current);
     out += L",\n  \"address_search_content\":" + std::to_wstring(address_search_content);
-    out += L",\n  \"tray_icon_size\":";
-    out += std::to_wstring(tray_icon_size);
+    out += L",\n  \"staging_tray_enabled\":";
+    out += staging_tray_enabled ? L"true" : L"false";
     out += L",\n  \"wallpaper_visibility\":";
     out += std::to_wstring(wallpaper_visibility);
     out += L",\n  \"wallpaper_blur\":";
@@ -301,8 +301,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     address_search_current = pulse::json::ExtractInt(doc, L"address_search_current", 0) != 0;
     address_search_content = pulse::json::ExtractInt(doc, L"address_search_content", 0) != 0;
     if (row_height < 24 || row_height > 48) row_height = 34;
-    tray_icon_size = pulse::json::ExtractInt(doc, L"tray_icon_size", 48);
-    if (tray_icon_size < 32 || tray_icon_size > 64) tray_icon_size = 48;
+    staging_tray_enabled = pulse::json::ExtractBool(doc, L"staging_tray_enabled", true);
     const int legacy_look = pulse::json::ExtractInt(doc, L"wallpaper_look", 1);
     const int migrated = legacy_look == 0 ? 35 : legacy_look == 2 ? 65 : 50;
     wallpaper_visibility = pulse::json::ExtractInt(doc, L"wallpaper_visibility", migrated);

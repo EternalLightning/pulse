@@ -26,6 +26,19 @@ auto WaitResult(pulse::model::BatchRenamePreview& preview) {
 
 int main() {
     using namespace pulse::model;
+    for (const std::wstring name : {L"CON.txt", L"con .txt", L"CONIN$", L"conout$.log", L"LPT\u00b9.md"}) {
+        BatchRenameRule invalid;
+        invalid.pattern = name;
+        int invalid_probes = 0;
+        const auto plan = PreviewBatchRename({L"C:\\fixture\\original.txt"}, invalid, {},
+            [&](const std::wstring&) { ++invalid_probes; return false; });
+        Check(!IsValidFileName(name) && plan.size() == 1 && plan[0].status == BatchRenameStatus::Invalid &&
+            invalid_probes == 0, "reserved names are rejected by preview before probing the filesystem");
+    }
+    Check(IsValidFileName(L".gitignore") && IsValidFileName(L"COM0.txt") && IsValidFileName(L"LPT10") &&
+        IsValidFileName(L"控制台.txt") && IsValidFileName(std::wstring(256, L'a')) &&
+        !IsValidFileName(L".") && !IsValidFileName(L".."),
+        "shared syntax validation keeps valid names and leaves length limits to the filesystem");
     BatchRenameRule rule;
     rule.prefix = L"new-";
     std::promise<void> entered, release, finished;

@@ -4,6 +4,8 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../app/app_internal.h"
+#include "../app/pane_animations.h"
+#include "animation_snapshot.h"
 #include "../common/localization.h"
 #include "../ui/ui_renderer_internal.h"
 #include <cmath>
@@ -14,6 +16,12 @@
 #include <tuple>
 
 namespace pulse { void UpdateSidebarPinDrag(AppState& s, int my); }
+
+namespace pulse::ui {
+struct StagingTrayMotionTest {
+    static void SetMotion(MainRenderer& renderer, bool enabled) { renderer.motion_enabled_ = enabled; }
+};
+}
 
 int QuickAccessDragTest() {
     using namespace pulse;
@@ -163,14 +171,19 @@ int wmain(int argc, wchar_t** argv) {
     double now = TrayAnimationNow();
     auto settle = [&]() {
         for (int i = 0; i < 90; ++i) TickTrayDeck(s, now += 16.0);
+        (void)BuildVm(s, false);
+        s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 180;
+        (void)BuildVm(s, false);
     };
     settle();
     auto find_hit = [&](ui::HitTestResult::Region region) {
         const auto vm = BuildVm(s, false);
-        const auto panel = s.renderer.StagingTrayRect(vm, 1000, 700);
+        const auto bounds = D2D1::RectF(0, 0, static_cast<float>(s.compositor.Width()),
+            static_cast<float>(s.compositor.Height()));
+        const auto panel = s.renderer.StagingTrayRect(vm, bounds.right, bounds.bottom);
         for (float y = panel.top; y < panel.bottom; y += 1.0f)
             for (float x = panel.left; x < panel.right; x += 1.0f)
-                if (s.renderer.HitTest(vm, D2D1::RectF(0, 0, 1000, 700), x, y).region == region)
+                if (s.renderer.HitTest(vm, bounds, x, y).region == region)
                     return POINT{static_cast<LONG>(x), static_cast<LONG>(y)};
         return POINT{-1, -1};
     };
@@ -180,6 +193,263 @@ int wmain(int argc, wchar_t** argv) {
         else HandleLButtonDown(&s, s.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, pos);
         HandleLButtonUp(&s, s.hwnd, WM_LBUTTONUP, 0, pos);
     };
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--tray-animation") {
+        s.ctxMenuPrefs.persist = false;
+        app::SettingsController::UiCallbacks callbacks;
+        callbacks.apply_effects = [&](app::SettingsEffect effect) { ApplySettingsEffects(s, effect); };
+        s.settings.BindUi(s.appPrefs, s.ctxMenuPrefs, s.index, s.networkIndex, std::move(callbacks));
+        ui::StagingTrayMotionTest::SetMotion(s.renderer, true);
+        const auto output = std::filesystem::absolute(L"bench_data/review-changes/tray-animation");
+        std::error_code error;
+        std::filesystem::create_directories(output, error);
+        for (const float scale : {1.0f, 1.5f}) for (const float width : {56.0f, 160.0f, 224.0f}) {
+            s.scale = scale;
+            s.renderer.SetScale(scale);
+            s.renderer.SetSidebarWidthDip(width);
+            s.compositor.RecreateTextFormats(scale);
+            const float window_width = width == 56.0f ? 800.0f : 1000.0f;
+            s.compositor.Resize(static_cast<UINT>(window_width * scale), static_cast<UINT>(700 * scale));
+            const auto bounds = D2D1::RectF(0, 0, window_width * scale, 700 * scale);
+            const auto sidebar = s.renderer.SidebarRect(bounds.right, bounds.bottom);
+            check(ui::SidebarRailLayout(sidebar.right - sidebar.left, scale) == (width == 56.0f),
+                "animation fixture exercises the requested rail or expanded sidebar");
+            s.appPrefs.staging_tray_enabled = true;
+            settle();
+            const auto open_vm = BuildVm(s, false);
+            const auto open_panel = s.renderer.StagingTrayRect(open_vm, bounds.right, bounds.bottom);
+            const auto open_bar = ui::SidebarScrollbarSpec(open_vm, sidebar, scale);
+            s.settings.ToggleUi(36);
+            auto vm = BuildVm(s, false);
+            check(!vm.staging_tray_enabled && vm.staging_tray_presence > 0.99f &&
+                s.stagingTrayAnimation.Pending(), "disabling starts an exit from the visible tray");
+            s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 60;
+            vm = BuildVm(s, false);
+            std::vector<ui::SidebarSlot> slots;
+            ui::LayoutSidebar(vm, sidebar, scale, slots);
+            const auto panel = std::find_if(slots.begin(), slots.end(), [](const auto& slot) {
+                return slot.kind == ui::SidebarSlot::TrayPanel;
+            });
+            const auto bar = ui::SidebarScrollbarSpec(vm, sidebar, scale);
+            check(panel != slots.end() && panel->rc.top > open_panel.top && panel->rc.top < sidebar.bottom &&
+                std::abs((panel->rc.bottom - panel->rc.top) - (open_panel.bottom - open_panel.top)) < 0.01f &&
+                (width == 56.0f || bar.viewport.bottom > open_bar.viewport.bottom),
+                "exit slides the full tray and smoothly returns its scroll space");
+            check(s.renderer.StagingTrayRect(vm, bounds.right, bounds.bottom).right == 0 &&
+                find_hit(ui::HitTestResult::TrayItemRemove).x < 0,
+                "exiting tray cannot accept drops or hidden card hits");
+            if (panel != slots.end()) {
+                bool inert = true;
+                for (float y = std::max(sidebar.top, panel->rc.top); y < sidebar.bottom; y += 4 * scale)
+                    for (float x = panel->rc.left; x < panel->rc.right; x += 4 * scale) {
+                        const auto hit = s.renderer.HitTest(vm, bounds, x, y).region;
+                        inert &= hit != ui::HitTestResult::TrayRelease && hit != ui::HitTestResult::TrayClear &&
+                            hit != ui::HitTestResult::TrayCard && hit != ui::HitTestResult::TrayItemRemove &&
+                            hit != ui::HitTestResult::TrayPrev && hit != ui::HitTestResult::TrayNext;
+                    }
+                check(inert, "all outgoing tray actions become inert immediately");
+            }
+            for (const bool dark : {false, true}) {
+                vm.dark = dark;
+                const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
+                auto* dc = s.compositor.Dc();
+                dc->BeginDraw(); dc->Clear(theme.bg); s.renderer.Render(vm, bounds, theme);
+                const auto result = dc->EndDraw();
+                const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                    std::to_wstring(static_cast<int>(width)) + L"-" +
+                    std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                check(!error && SUCCEEDED(result) && WriteAnimationSnapshot(s.compositor, output / name),
+                    "render an intermediate tray frame across themes, widths and DPI");
+            }
+            s.settings.ToggleUi(36);
+            settle();
+            s.settings.ToggleUi(36);
+            (void)BuildVm(s, false);
+            s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 60;
+            const float before_reverse = BuildVm(s, false).staging_tray_presence;
+            s.settings.ToggleUi(36);
+            vm = BuildVm(s, false);
+            check(vm.staging_tray_enabled && vm.staging_tray_presence <= before_reverse + 0.001f &&
+                vm.staging_tray_presence > 0.0f && s.stagingTrayAnimation.target == 1.0f,
+                "rapid reversal resumes from the currently sampled tray pose");
+            s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 180;
+            vm = BuildVm(s, false);
+            check(vm.staging_tray_presence == 1.0f && !s.stagingTrayAnimation.Pending(),
+                "opening settles and stops requesting animation frames");
+            s.settings.ToggleUi(36);
+            (void)BuildVm(s, false);
+            s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 180;
+            vm = BuildVm(s, false);
+            ui::LayoutSidebar(vm, sidebar, scale, slots);
+            check(vm.staging_tray_presence == 0.0f && !s.stagingTrayAnimation.Pending() &&
+                std::none_of(slots.begin(), slots.end(), [](const auto& slot) {
+                    return slot.kind == ui::SidebarSlot::TrayPanel || slot.kind == ui::SidebarSlot::TrayRelease ||
+                        slot.kind == ui::SidebarSlot::TrayClear;
+                }), "completed exit removes tray geometry and stops animation");
+            s.settings.ToggleUi(36);
+            vm = BuildVm(s, false);
+            check(vm.staging_tray_presence == 0.0f && s.stagingTrayAnimation.Pending(),
+                "opening from hidden begins at the invisible pose");
+            s.stagingTrayAnimation.started = app::PaneAnimationTimeMs() - 60;
+            vm = BuildVm(s, false);
+            check(vm.staging_tray_presence > 0.0f && vm.staging_tray_presence < 1.0f,
+                "opening exposes intermediate poses");
+            const auto visible_panel = s.renderer.StagingTrayRect(vm, bounds.right, bounds.bottom);
+            check(visible_panel.top >= sidebar.top && visible_panel.bottom <= sidebar.bottom,
+                "opening tray drop and wheel bounds stay inside its visible sidebar area");
+        }
+        for (const bool high_contrast : {false, true}) {
+            ui::StagingTrayMotionTest::SetMotion(s.renderer, high_contrast);
+            s.shot_high_contrast = high_contrast;
+            for (const bool enabled : {false, true}) {
+                s.appPrefs.staging_tray_enabled = enabled;
+                const auto vm = BuildVm(s, false);
+                check(vm.staging_tray_presence == (enabled ? 1.0f : 0.0f) && !s.stagingTrayAnimation.Pending(),
+                    "disabled motion and high contrast snap directly without a frame loop");
+            }
+        }
+        const HWND hwnd = s.hwnd;
+        s.hwnd = nullptr; owned.reset(); DestroyWindow(hwnd); OleUninitialize();
+        return failures ? 1 : 0;
+    }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--tray-settings") {
+        s.ctxMenuPrefs.persist = false;
+        app::SettingsController::UiCallbacks callbacks;
+        callbacks.apply_effects = [&](app::SettingsEffect effect) { ApplySettingsEffects(s, effect); };
+        s.settings.BindUi(s.appPrefs, s.ctxMenuPrefs, s.index, s.networkIndex, std::move(callbacks));
+        app::AppPrefs restored;
+        check(restored.FromJson(L"{\"tray_icon_size\":56}") && restored.staging_tray_enabled,
+            "legacy icon-size preferences keep the tray enabled at its fixed size");
+        const auto output = std::filesystem::absolute(L"bench_data/review-changes/tray-settings");
+        std::error_code error;
+        std::filesystem::create_directories(output, error);
+        for (const float scale : {1.0f, 1.5f, 2.0f}) {
+            s.scale = scale;
+            s.renderer.SetScale(scale);
+            s.compositor.RecreateTextFormats(scale);
+            s.compositor.Resize(static_cast<UINT>(1000 * scale), static_cast<UINT>(700 * scale));
+            for (const float width : {56.0f, 160.0f, 224.0f}) {
+                const float window_width = width == 56.0f ? 800.0f : 1000.0f;
+                s.compositor.Resize(static_cast<UINT>(window_width * scale), static_cast<UINT>(700 * scale));
+                const auto bounds = D2D1::RectF(0, 0, window_width * scale, 700 * scale);
+                s.renderer.SetSidebarWidthDip(width);
+                for (const bool empty : {false, true}) {
+                    s.tray.Clear();
+                    if (!empty) s.tray.Collect({L"C:\\PulseSidebarTrayFixture\\retained",
+                        L"C:\\PulseSidebarTrayFixture\\second"}, false);
+                    s.appPrefs.staging_tray_enabled = true;
+                    settle();
+                    std::wstring items_before;
+                    s.tray.ToJson(items_before);
+                    auto open_vm = BuildVm(s, false);
+                    const auto open_panel = s.renderer.StagingTrayRect(open_vm, bounds.right, bounds.bottom);
+                    const auto sidebar = s.renderer.SidebarRect(bounds.right, bounds.bottom);
+                    const auto open_scrollbar = ui::SidebarScrollbarSpec(open_vm, sidebar, scale);
+                    check(open_panel.right > open_panel.left && open_vm.tray_deck.thumb_dip == 48.0f,
+                        "enabled tray keeps its original fixed thumbnail size");
+                    const bool rail = ui::SidebarRailLayout(sidebar.right - sidebar.left, scale);
+                    if (!rail) {
+                        check(std::abs(open_panel.bottom - open_panel.top - 164.0f * scale) < 0.01f,
+                            "tray restores the standard fixed panel height");
+                        if (!empty) {
+                            const auto release = ui::fluent::StagingTrayActionRect(open_panel, scale);
+                            check(find_hit(ui::HitTestResult::TrayRelease).x >= 0 &&
+                                std::abs(release.right - release.left - (width == 224.0f ? 72.0f : 22.0f) * scale) < 0.01f,
+                                "release keeps its text at standard width and fits narrow sidebars");
+                        }
+                        const auto former_close = s.renderer.HitTest(open_vm, bounds,
+                            open_panel.right - 12 * scale, open_panel.top + 17 * scale);
+                        check(former_close.region == (empty ? ui::HitTestResult::None : ui::HitTestResult::TrayRelease),
+                            "former close position contains only the release action or empty header");
+                    }
+                    for (const bool enabled : {true, false}) {
+                        if (!enabled) s.settings.ToggleUi(36);
+                        settle();
+                        auto vm = BuildVm(s, false);
+                        const auto panel = s.renderer.StagingTrayRect(vm, bounds.right, bounds.bottom);
+                        check(vm.staging_tray_enabled == enabled && restored.FromJson(s.appPrefs.ToJson()) &&
+                            restored.staging_tray_enabled == enabled &&
+                            s.appPrefs.ToJson().find(L"tray_icon_size") == std::wstring::npos,
+                            "tray switch round-trips without retaining obsolete icon size");
+                        if (!enabled) {
+                            std::vector<ui::SidebarSlot> slots;
+                            ui::LayoutSidebar(vm, sidebar, scale, slots);
+                            bool hidden = panel.left == panel.right && panel.top == panel.bottom;
+                            for (const auto& slot : slots)
+                                hidden &= slot.kind != ui::SidebarSlot::TrayPanel &&
+                                    slot.kind != ui::SidebarSlot::TrayRelease && slot.kind != ui::SidebarSlot::TrayClear;
+                            check(hidden && find_hit(ui::HitTestResult::TrayItemRemove).x < 0,
+                                "disabled tray has no panel, rail entry, actions or hidden hit targets");
+                            const auto bar = ui::SidebarScrollbarSpec(vm, sidebar, scale);
+                            check(rail || bar.viewport.bottom > open_scrollbar.viewport.bottom + 150 * scale,
+                                "disabled tray returns its space to sidebar scrolling");
+                            const int offset = s.trayDeckOffset;
+                            POINT point{static_cast<LONG>((open_panel.left + open_panel.right) / 2),
+                                static_cast<LONG>((open_panel.top + open_panel.bottom) / 2)};
+                            ClientToScreen(s.hwnd, &point);
+                            HandleMouseWheel(&s, s.hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, -WHEEL_DELTA),
+                                MAKELPARAM(point.x, point.y));
+                            check(s.trayDeckOffset == offset, "wheel cannot rotate disabled tray cards");
+                        }
+                        for (const bool dark : {false, true}) {
+                            vm.dark = dark;
+                            const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
+                            auto* dc = s.compositor.Dc();
+                            dc->BeginDraw();
+                            dc->Clear(theme.bg);
+                            s.renderer.Render(vm, bounds, theme);
+                            const auto result = dc->EndDraw();
+                            const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                                (enabled ? L"enabled-" : L"disabled-") + (empty ? L"empty-" : L"full-") +
+                                std::to_wstring(static_cast<int>(width)) + L"-" +
+                                std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                            check(!error && SUCCEEDED(result) && WriteAnimationSnapshot(s.compositor, output / name),
+                                "render tray visibility across themes, narrow widths and DPI");
+                        }
+                    }
+                    s.settings.ToggleUi(36);
+                    std::wstring items_after;
+                    s.tray.ToJson(items_after);
+                    check(s.appPrefs.staging_tray_enabled && items_after == items_before,
+                        "re-enabling the tray preserves all staged items");
+                }
+            }
+        }
+        s.scale = 1;
+        s.renderer.SetScale(1);
+        s.renderer.SetSidebarWidthDip(224);
+        s.compositor.RecreateTextFormats(1);
+        s.compositor.Resize(1100, 900);
+        OpenSettingsTab(s, 9);
+        const auto bounds = D2D1::RectF(0, 0, 1100, 900);
+        auto vm = BuildVm(s, false);
+        auto layout = ui::MakeSettingsLayout(vm, bounds, 1, s.renderer.TitleBarHeight(), 28, nullptr);
+        const auto row = layout.staging_tray_row;
+        const POINT toggle{static_cast<LONG>(row.right - 35), static_cast<LONG>((row.top + row.bottom) / 2)};
+        const auto hit = s.renderer.HitTest(vm, bounds, static_cast<float>(toggle.x), static_cast<float>(toggle.y));
+        check(hit.region == ui::HitTestResult::SettingsToggle && hit.index == 36,
+            "settings contains the enable switch in place of size choices");
+        press(toggle, false);
+        check(!s.appPrefs.staging_tray_enabled && !BuildVm(s, false).staging_tray_enabled,
+            "native settings click immediately hides the staging tray");
+        press(toggle, false);
+        check(s.appPrefs.staging_tray_enabled, "second native settings click restores the tray");
+        for (const bool dark : {false, true}) {
+            vm = BuildVm(s, false);
+            vm.dark = dark;
+            const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
+            auto* dc = s.compositor.Dc();
+            dc->BeginDraw(); dc->Clear(theme.bg); s.renderer.Render(vm, bounds, theme);
+            check(SUCCEEDED(dc->EndDraw()) && WriteAnimationSnapshot(s.compositor,
+                output / (dark ? L"settings-dark.png" : L"settings-light.png")),
+                "render settings enable switch in both themes");
+        }
+        const HWND hwnd = s.hwnd;
+        s.hwnd = nullptr;
+        owned.reset();
+        DestroyWindow(hwnd);
+        OleUninitialize();
+        return failures ? 1 : 0;
+    }
     const auto next = find_hit(ui::HitTestResult::TrayNext);
     const auto prev = find_hit(ui::HitTestResult::TrayPrev);
     check(next.x >= 0 && prev.x >= 0, "real layout exposes both pager buttons");

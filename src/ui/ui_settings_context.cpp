@@ -11,7 +11,7 @@
 namespace pulse::ui {
 void MainRenderer::DrawSettingsContext(const WindowViewModel& vm,const D2D1_RECT_F& rect,const Theme& theme) {
     using I=l10n::StringId;
-    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(rect.right));
     painter_.DrawWrappedCaption(l10n::Get(I::ContextMenuDesc),D2D1::Point2F(l.ctx_intro.left,l.ctx_intro.top+6*scale_),
                                 l.ctx_intro.right-l.ctx_intro.left,theme.text_secondary);
     if (l.ctx_error.bottom > l.ctx_error.top) {
@@ -28,7 +28,7 @@ void MainRenderer::DrawSettingsContext(const WindowViewModel& vm,const D2D1_RECT
 
 void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RECT_F& rect,const Theme& theme) {
     using I=l10n::StringId;
-    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(rect.right));
     if(l.pulse_card.bottom<=l.pulse_card.top) return;
     auto* dc=compositor_->Dc();
     auto fill=[&](const D2D1_RECT_F& r,float radius,const D2D1_COLOR_F& c) {
@@ -45,7 +45,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
     };
     const float s=scale_;
     const auto card=l.pulse_card;
-    fill(card,8*s,theme.fill_input);
+    fill(card,8*s,(vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card,std::max(card_alpha_,0.65f))));
     stroke(card,8*s,theme.stroke_card,1);
     DrawIconText(card.left+16*s,card.top+20*s,24*s,24*s,L"\xE8FD",L"",theme.text_secondary,0.85f);
     painter_.DrawText(FitEndEllipsis(l10n::Get(I::ContextPulseMenu),l.pulse_title.right-l.pulse_title.left,[&](const std::wstring& value) {
@@ -59,8 +59,8 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         for(int i=0;i<static_cast<int>(model::BuiltinMenuSurface::Count);++i) any|=PulseMenuOrderCustom(vm,static_cast<model::BuiltinMenuSurface>(i));
         const bool hot=any && IsHovered(vm,HitTestResult::SettingsToggle,67);
         if(hot) fill(l.pulse_restore,4*s,theme.fill_hover);
-        painter_.DrawText(l10n::Get(I::RestoreDefaults),D2D1::RectF(l.pulse_restore.left+4*s,l.pulse_restore.top,l.pulse_restore.right,l.pulse_restore.bottom),
-                          compositor_->SmallFormat(),any ? theme.accent : theme.text_disabled);
+        painter_.DrawText(l10n::Get(I::RestoreDefaults),l.pulse_restore,
+                          compositor_->SmallFormat(),any ? theme.accent : theme.text_disabled,fluent::HorizontalAlignment::Center);
     }
     // Presets.
     const auto active=model::BuiltinMenuPresetFor(vm.settings_builtin_hidden);
@@ -254,7 +254,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
 }
 
 float MainRenderer::SettingsMenuRowStart(const WindowViewModel& vm,const D2D1_RECT_F& rect,int item) {
-    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(rect.right));
     if(l.pulse_preview.bottom<=l.pulse_preview.top) return NAN;
     WindowViewModel still=vm;still.settings_menu_drag=-1;
     for(const auto& r:LayoutPulsePreview(still,PulsePreviewBox(l.pulse_preview,scale_),scale_).rows)
@@ -264,7 +264,7 @@ float MainRenderer::SettingsMenuRowStart(const WindowViewModel& vm,const D2D1_RE
 }
 
 model::BuiltinMenuOrder MainRenderer::SettingsMenuDropOrder(const WindowViewModel& vm,const D2D1_RECT_F& rect,float x,float y) {
-    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_);
+    const auto l=MakeSettingsLayout(vm,rect,scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(rect.right));
     const auto pv=l.pulse_preview;
     const float slack=40*scale_;
     if(pv.bottom<=pv.top || x<pv.left-slack || x>pv.right+slack || y<pv.top-slack || y>pv.bottom+slack) return {};

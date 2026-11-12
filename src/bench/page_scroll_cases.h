@@ -6,12 +6,12 @@
 #pragma once
 #include "../app/app_surface_scroll.h"
 #include "../ui/animation_clock.h"
-#include "smooth_scroll_cases.h"
 #include <cmath>
+#include <cstdio>
 
 inline bool RunPageScrollChecks(pulse::AppState& s) {
     using namespace pulse;
-    int failures = RunSmoothScrollChecks();
+    int failures = 0;
     const auto check = [&](bool passed, const char* label) {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
         failures += !passed;

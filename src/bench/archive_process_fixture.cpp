@@ -6,10 +6,19 @@
 #include <windows.h>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 int wmain(int argc, wchar_t** argv) {
     if (argc < 2) return 2;
     const std::wstring mode = argv[1];
+    if (mode == L"arguments") {
+        const wchar_t* expected[] = {L"", L"folder with spaces", L"中文", L"embedded\"quote",
+            L"C:\\folder\\", L"-pback\\\"slash\\\\"};
+        if (argc != 8) return 1;
+        for (int i = 0; i < 6; ++i)
+            if (std::wstring_view(argv[i + 2]) != expected[i]) return 1;
+        return 0;
+    }
     if (mode == L"progress" || mode == L"progress-error" || mode == L"progress-cancel") {
         const char update[] = "\r 25%";
         DWORD written = 0;

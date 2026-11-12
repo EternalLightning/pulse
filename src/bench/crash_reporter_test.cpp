@@ -138,7 +138,53 @@ int EnumerationErrorsTest() {
     return g_fail ? 1 : 0;
 }
 
+int DumpLoadingTest() {
+    namespace fs = std::filesystem;
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(ARRAYSIZE(temp), temp);
+    const auto root = fs::absolute(fs::path(temp) /
+        (L"crash-dump-loading-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64())));
+    const auto crashes = root / L"Diagnostics" / L"Crashes";
+    fs::create_directories(root);
+    Check(GetModuleHandleW(L"dbghelp.dll") == nullptr,
+          L"dbghelp is not an executable startup dependency");
+    Check(crash::Initialize({crash::ProcessRole::Test, false, root.wstring()}),
+          L"crash reporter initializes with an isolated data root");
+    const HMODULE module = GetModuleHandleW(L"dbghelp.dll");
+    wchar_t loaded[MAX_PATH]{}, system[MAX_PATH]{};
+    const DWORD loaded_chars = module ? GetModuleFileNameW(module, loaded, ARRAYSIZE(loaded)) : 0;
+    const UINT system_chars = GetSystemDirectoryW(system, ARRAYSIZE(system));
+    const auto expected = fs::path(system) / L"dbghelp.dll";
+    Check(loaded_chars > 0 && loaded_chars < ARRAYSIZE(loaded) &&
+          system_chars > 0 && system_chars < ARRAYSIZE(system) &&
+          _wcsicmp(loaded, expected.c_str()) == 0,
+          L"crash reporter loads dbghelp from the Windows system directory");
+    Check(RunChild(root.wstring(), L"seh"), L"unhandled SEH terminates child");
+    Check(RunChild(root.wstring(), L"terminate"), L"terminate handler terminates child");
+    Check(CountExtension(crashes, L".dmp") == 2,
+          L"system dbghelp writes both crash minidumps");
+    const std::string json = FirstJson(crashes);
+    Check(CountExtension(crashes, L".json") == 2 &&
+          json.find("\"dump_written\":true") != std::string::npos,
+          L"crash metadata records successful dump creation");
+    crash::Shutdown();
+    std::error_code error;
+    fs::remove_all(root, error);
+    wprintf(L"%d passed, %d failed\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    if (argc == 2 && wcscmp(argv[1], L"--dump-loading") == 0) {
+        try {
+            return DumpLoadingTest();
+        } catch (const std::filesystem::filesystem_error& error) {
+            std::fprintf(stderr, "[FAIL] dump-loading fixture: %s\n", error.what());
+            return 1;
+        }
+    }
     if (argc == 2 && wcscmp(argv[1], L"--enumeration-errors") == 0) return EnumerationErrorsTest();
     if (argc >= 4 && wcscmp(argv[1], L"--child") == 0) {
         crash::Initialize({crash::ProcessRole::Test, false, argv[2]});

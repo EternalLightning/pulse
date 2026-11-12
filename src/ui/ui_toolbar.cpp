@@ -12,6 +12,11 @@
 
 namespace pulse::ui {
 void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
+    DrawNavigationBar(vm, rect, theme);
+    DrawCommandBar(vm, rect, theme);
+}
+
+void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     auto* dc = compositor_->Dc();
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
@@ -145,6 +150,14 @@ void MainRenderer::DrawToolbar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(layout.operations.right-5*scale_,
                 layout.operations.top+6*scale_),3*scale_,3*scale_),badge.get());
     }
+}
+
+void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
+    if (vm.settings_open) return;
+    auto* dc = compositor_->Dc();
+    const float left = EffectiveSidebarWidth(rect.right);
+    const bool compact = rect.right-left < 600*scale_;
+    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle);
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),left+margin_,title_bar_height_+44*scale_,rect.right-left-2*margin_,scale_);
     const std::wstring label=l10n::Get(l10n::StringId::New);
