@@ -151,18 +151,12 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     };
     auto ghostButton = [&](const D2D1_RECT_F& rc, const wchar_t* glyph,
                            const std::wstring& label, bool hovered) {
-        if (hovered) {
-            MakeBrush(dc, theme.fill_hover, brFillHover_);
-            FillRoundedRect(dc, brFillHover_.get(), rc.left, rc.top,
-                            rc.right - rc.left, rc.bottom - rc.top, 6.0f * s);
-        }
-        MakeBrush(dc, theme.stroke_card, brStrokeCard_);
-        dc->DrawRoundedRectangle(D2D1::RoundedRect(rc, 6.0f * s, 6.0f * s),
-                                 brStrokeCard_.get(), 1.0f);
-        if (glyph) DrawIconText(rc.left + 6.0f * s, rc.top, 20.0f * s,
-                                rc.bottom - rc.top, glyph, L"?", theme.text_secondary, 0.72f);
-        text(label, D2D1::RectF(rc.left + 28.0f * s, rc.top, rc.right - 4.0f * s, rc.bottom),
-             compositor_->SmallFormat(), theme.text);
+        fluent::ButtonSpec button;
+        button.bounds = rc;
+        button.glyph = glyph ? glyph : L"";
+        button.text = label;
+        button.state.hovered = hovered;
+        painter_.DrawButton(button);
     };
 
     if (!d.has_selection) {
@@ -279,7 +273,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), content_opacity), nullptr);
             if (!preview_mono_format_.get() && compositor_->DwriteFactory()) {
                 typography::CreateTextFormat(compositor_->DwriteFactory(),
-                    {typography::FontRole::Monospace, 11.0f * s},
+                    typography::Scaled(typography::kEmbeddedPreview, s),
                     &preview_mono_format_);
                 if (preview_mono_format_.get()) {
                     preview_mono_format_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -672,7 +666,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                          chip.assigned ? theme.text : theme.text_secondary);
                     text_background_ = saved_bg;
                 }
-                y = hit.preset_chips.empty() ? (y + 26.0f * s + 6.0f * s + 8.0f * s)
+                y = hit.preset_chips.empty() ? (hit.tag_add.bottom + 6.0f * s + 8.0f * s)
                     : (hit.preset_chips.back().bottom + 8.0f * s);
                 break;
             }

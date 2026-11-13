@@ -954,14 +954,17 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 out.region = HitTestResult::Pane;
                 return out;
             }
-            if (!paneVm.loading && paneVm.EntryCount() == 0 &&
-                paneVm.filter_text.empty() && paneVm.is_file_system && paneVm.can_create) {
+            if (!paneVm.loading && paneVm.EntryCount() == 0 && !paneVm.is_changes &&
+                (paneVm.listing_failed || !paneVm.filter_text.empty() ||
+                 (paneVm.is_file_system && paneVm.can_create))) {
                 const PaneEmptyLayout emptyLayout = MakePaneEmptyLayout(
                     D2D1::RectF(paneRc.left, listTop, paneRc.right, paneRc.bottom),
                     scale_, true);
-                if (!paneVm.is_changes && emptyLayout.show_action && RectContains(emptyLayout.action, x, y)) {
-                    out.region = HitTestResult::PaneEmptyNewFolder;
+                if (emptyLayout.show_action && RectContains(emptyLayout.action, x, y)) {
+                    out.region = paneVm.listing_failed ? HitTestResult::PaneEmptyRetry :
+                        !paneVm.filter_text.empty() ? HitTestResult::FilterClear : HitTestResult::PaneEmptyNewFolder;
                     out.index = paneIndex;
+                    out.control_bounds = emptyLayout.action;
                     return out;
                 }
             }

@@ -1194,6 +1194,7 @@ enum class StringId : UINT {
     BatchConflictUnknown = IDS_BATCH_CONFLICT_UNKNOWN,
     ItemFilterSyntax = IDS_ITEM_FILTER_SYNTAX,
     ItemFilterInvalid = IDS_ITEM_FILTER_INVALID,
+    ClearFilter = IDS_CLEAR_FILTER,
     ResumeIncompleteTransfer = IDS_RESUME_INCOMPLETE_TRANSFER,
     GroupBy = IDS_GROUP_BY,
     GroupAuto = IDS_GROUP_AUTO,

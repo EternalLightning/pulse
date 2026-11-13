@@ -10,6 +10,7 @@
 #include "../ui/quick_preview_window.h"
 #include "../ui/text_diff_window.h"
 #include "../ui/color_picker.h"
+#include "../ui/fluent_menu.h"
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include <commctrl.h>
@@ -19,6 +20,9 @@
 #include <thread>
 #include <wrl/client.h>
 #include <wincodec.h>
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace {
 int failures = 0;
@@ -403,6 +407,135 @@ struct FluentMenuTestPeer {
 }
 
 namespace {
+void CheckPickerTextAlignment(const std::filesystem::path& path, bool dark, float scale) {
+    Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+    Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+    Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+    Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+    bool loaded = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder)) &&
+        SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
+        SUCCEEDED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+            nullptr, 0, WICBitmapPaletteTypeCustom));
+    UINT width = 0, height = 0;
+    loaded = loaded && SUCCEEDED(converter->GetSize(&width, &height));
+    std::vector<BYTE> pixels(static_cast<size_t>(width) * height * 4);
+    loaded = loaded && SUCCEEDED(converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(pixels.size()), pixels.data()));
+    Check(loaded, "read actual picker pixels for text alignment");
+    if (!loaded) return;
+    const float shadow = static_cast<float>(pulse::ui::FluentMenu::kShadowMargin);
+    const auto ink_center = [&](float left, float top, float right, float bottom, const char* label) {
+        const int x0 = std::max(0, static_cast<int>(std::ceil(shadow + left * scale)));
+        const int y0 = std::max(0, static_cast<int>(std::ceil(shadow + top * scale)));
+        const int x1 = std::min(static_cast<int>(width), static_cast<int>(std::floor(shadow + right * scale)));
+        const int y1 = std::min(static_cast<int>(height), static_cast<int>(std::floor(shadow + bottom * scale)));
+        int first = y1, last = y0 - 1;
+        for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) {
+            const auto* pixel = pixels.data() + (static_cast<size_t>(y) * width + x) * 4;
+            const bool ink = dark ? std::min({pixel[0], pixel[1], pixel[2]}) > 180
+                                  : std::max({pixel[0], pixel[1], pixel[2]}) < 120;
+            if (pixel[3] > 180 && ink) { first = std::min(first, y); last = std::max(last, y); }
+        }
+        const float center = (first + last + 1) * 0.5f;
+        const float expected = shadow + (top + bottom) * 0.5f * scale;
+        const bool centered = last >= first && std::abs(center - expected) <= 2.5f * scale;
+        if (!centered) std::printf("[ALIGN] %s scale=%.1f dark=%d ink=%d..%d expected=%.2f\n",
+            label, scale, dark, first, last, expected);
+        Check(centered, label);
+        return center;
+    };
+    ink_center(30, 315, 76, 349, "RGB/HSV text is vertically centered inside its control");
+    ink_center(124, 315, 262, 349, "hex value is vertically centered inside its control");
+    for (int row = 0; row < 4; ++row) {
+        const float top = 361.0f + row * 46.0f, bottom = top + 34.0f;
+        const auto label = ink_center(18, top, 30, bottom, "channel label is vertically centered in its row");
+        const auto value = ink_center(52, top, 106, bottom, "channel number is vertically centered in its input");
+        Check(std::abs(label - value) <= 1.5f * scale, "channel label and input value share the same baseline");
+    }
+    const auto icon_size = [&](float center_x) {
+        int left = static_cast<int>(width), top = static_cast<int>(height), right = -1, bottom = -1;
+        const int cx = static_cast<int>(shadow + center_x * scale);
+        const int cy = static_cast<int>(shadow + 573.0f * scale);
+        const int radius = static_cast<int>(14 * scale);
+        for (int y = cy - radius; y <= cy + radius; ++y) for (int x = cx - radius; x <= cx + radius; ++x) {
+            const auto* pixel = pixels.data() + (static_cast<size_t>(y) * width + x) * 4;
+            const bool ink = dark ? std::min({pixel[0], pixel[1], pixel[2]}) > 180
+                                  : std::max({pixel[0], pixel[1], pixel[2]}) < 120;
+            if (pixel[3] > 180 && ink) {
+                left = std::min(left, x); right = std::max(right, x);
+                top = std::min(top, y); bottom = std::max(bottom, y);
+            }
+        }
+        return D2D1::SizeF(static_cast<float>(right - left + 1), static_cast<float>(bottom - top + 1));
+    };
+    const auto check = icon_size(82), close = icon_size(210);
+    const bool balanced = check.width >= 8 * scale && close.width >= 8 * scale &&
+        std::abs(check.width - close.width) <= 3.5f * scale &&
+        std::abs(check.height - close.height) <= 3.5f * scale;
+    if (!balanced) std::printf("[ICONS] scale=%.1f check=%.1fx%.1f close=%.1fx%.1f\n",
+        scale, check.width, check.height, close.width, close.height);
+    Check(balanced, "Accept and Cancel have balanced visible icon dimensions");
+}
+
+struct PickerExitSamples {
+    std::atomic_bool stop = false;
+    std::vector<BYTE> alpha;
+    std::vector<COLORREF> corners;
+    std::thread worker;
+    COLORREF initial_corner = CLR_INVALID;
+    bool ordinary_layered_alpha = false;
+    bool started = false;
+} picker_exit;
+
+void StartPickerExitSamples(HWND picker) {
+    RECT rect{}; GetWindowRect(picker, &rect);
+    HDC screen = GetDC(nullptr);
+    picker_exit.initial_corner = GetPixel(screen, rect.left + 3, rect.top + 3);
+    ReleaseDC(nullptr, screen);
+    picker_exit.started = true;
+    picker_exit.worker = std::thread([picker, rect] {
+        HDC desktop = GetDC(nullptr);
+        while (!picker_exit.stop.load() && IsWindow(picker)) {
+            DWORD_PTR result = 0;
+            if (SendMessageTimeoutW(picker, WM_APP + 0x2BD, 0, 0, SMTO_ABORTIFHUNG, 40, &result) &&
+                result > 0 && result <= 256 && IsWindowVisible(picker)) {
+                picker_exit.alpha.push_back(static_cast<BYTE>(result - 1));
+                BYTE alpha = 0; DWORD flags = 0;
+                picker_exit.ordinary_layered_alpha |= GetLayeredWindowAttributes(picker, nullptr, &alpha, &flags) != FALSE;
+                picker_exit.corners.push_back(GetPixel(desktop, rect.left + 3, rect.top + 3));
+            }
+            Sleep(1);
+        }
+        ReleaseDC(nullptr, desktop);
+    });
+}
+
+void CheckPickerExitSamples() {
+    picker_exit.stop.store(true);
+    if (picker_exit.worker.joinable()) picker_exit.worker.join();
+    BOOL motion = TRUE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &motion, 0);
+    const bool animates = motion && !pulse::ui::IsHighContrast();
+    Check(picker_exit.started && (!animates || !picker_exit.alpha.empty()), "sample the real picker while closing");
+    Check(!picker_exit.ordinary_layered_alpha, "exit retains per-pixel alpha instead of switching layered-window modes");
+    Check(picker_exit.initial_corner == RGB(215, 231, 247), "desktop sample sees the visible fixture backdrop through the transparent corner");
+    bool background_retained = picker_exit.initial_corner != CLR_INVALID;
+    for (COLORREF color : picker_exit.corners) {
+        background_retained &= color != CLR_INVALID &&
+            std::abs(GetRValue(color) - GetRValue(picker_exit.initial_corner)) <= 8 &&
+            std::abs(GetGValue(color) - GetGValue(picker_exit.initial_corner)) <= 8 &&
+            std::abs(GetBValue(color) - GetBValue(picker_exit.initial_corner)) <= 8;
+        std::printf("[EXIT] transparent corner=%06lx reference=%06lx\n", color, picker_exit.initial_corner);
+    }
+    Check(background_retained, "transparent picker corners never darken during the desktop exit frames");
+    if (animates) {
+        const bool intermediate = std::any_of(picker_exit.alpha.begin(), picker_exit.alpha.end(),
+            [](BYTE value) { return value > 0 && value < 255; });
+        Check(intermediate && std::is_sorted(picker_exit.alpha.rbegin(), picker_exit.alpha.rend()),
+            "picker exit presents decreasing per-pixel opacity without a full-opacity jump");
+    } else std::printf("[SKIP] intermediate exit frames: system motion disabled or high contrast enabled\n");
+}
+
 void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
     OwnedWindowSearch search{fixture_owner, L"PulseFluentColorPicker", GetCurrentProcessId(), GetCurrentThreadId()};
     EnumThreadWindows(search.thread_id, FindOwnedWindow, reinterpret_cast<LPARAM>(&search));
@@ -417,11 +550,17 @@ void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
     Check(IsWindow(picker) && SendMessageW(picker, WM_APP + 0x2BC, 0, 0) == 1,
         "Enter on the mode control switches to HSV without accepting the popup");
     Check(Snapshot(picker, L"color-hsv-focus"), "HSV mode screenshot saved");
+    CheckPickerTextAlignment(output / L"color-hsv-focus-96.png", false, 1.0f);
     SendMessageW(picker, WM_KEYDOWN, VK_SPACE, 0);
     Check(SendMessageW(picker, WM_APP + 0x2BC, 0, 0) == 0,
         "Space on the mode control switches back to RGB");
     Tab();
     Check(GetFocus() != picker && IsChild(picker, GetFocus()), "Tab reaches the native hex edit");
+    RECT edit_bounds{}; GetWindowRect(GetFocus(), &edit_bounds);
+    MapWindowPoints(nullptr, picker, reinterpret_cast<POINT*>(&edit_bounds), 2);
+    Check(std::abs((edit_bounds.top + edit_bounds.bottom) * 0.5f -
+        (pulse::ui::FluentMenu::kShadowMargin + 332.0f)) <= 1.0f,
+        "live native hex edit shares the centered row used by the painted value");
     ShiftTab();
     Check(GetFocus() == picker, "Shift+Tab returns from the hex edit to the mode control");
     Tab();
@@ -430,6 +569,7 @@ void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
     Check(Snapshot(picker, L"color-accept-focus"), "color Accept focus screenshot saved");
     Tab();
     Check(Snapshot(picker, L"color-cancel-focus"), "color Cancel focus screenshot saved");
+    StartPickerExitSamples(picker);
     SendMessageW(picker, WM_KEYDOWN, VK_SPACE, 0);
 }
 
@@ -516,6 +656,7 @@ void PickerStyle(HWND owner) {
                 std::to_wstring(static_cast<int>(scale * 96)) + L".png");
             Check(ui::ColorPickerPopup::SaveDebugSnapshot(&compositor, file.c_str(), dark,
                 ui::HexColor(0x0078D4), scale), "picker theme/DPI screenshot saved");
+            CheckPickerTextAlignment(file, dark, scale);
         }
     }
     const auto contrast_file = output / L"color-picker-high-contrast.png";
@@ -525,6 +666,7 @@ void PickerStyle(HWND owner) {
     uint32_t color = 0x3574BA;
     const bool accepted = ui::ColorPickerPopup::Pick(owner, &compositor, nullptr, 1, {100, 80},
         color, false, color);
+    CheckPickerExitSamples();
     KillTimer(nullptr, drive_timer);
     Check(!accepted && color == 0x3574BA, "keyboard Cancel preserves the original color");
     compositor.Shutdown();
@@ -544,13 +686,26 @@ int wmain(int argc, wchar_t** argv) {
     std::filesystem::create_directories(output);
     const auto left = output / L"left.txt", right = output / L"right.txt";
     Write(left, "alpha\nline two\n"); Write(right, "Alpha\nline three\n");
-    HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse isolated UI fixture", WS_OVERLAPPEDWINDOW,
+    WNDCLASSW backdrop{};
+    HBRUSH backdrop_brush = nullptr;
+    if (color_picker_only) {
+        backdrop.lpfnWndProc = DefWindowProcW;
+        backdrop.hInstance = GetModuleHandleW(nullptr);
+        backdrop.lpszClassName = L"PulsePickerExitBackdropFixture";
+        backdrop_brush = CreateSolidBrush(RGB(215, 231, 247));
+        backdrop.hbrBackground = backdrop_brush;
+        RegisterClassW(&backdrop);
+    }
+    HWND owner = CreateWindowExW(0, color_picker_only ? backdrop.lpszClassName : L"STATIC", L"Pulse isolated UI fixture", WS_OVERLAPPEDWINDOW,
         20, 20, 1000, 720, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     fixture_owner = owner;
     ShowWindow(owner, SW_SHOW);
     if (color_picker_only) {
         PickerStyle(owner);
-        DestroyWindow(owner); OleUninitialize();
+        DestroyWindow(owner);
+        UnregisterClassW(backdrop.lpszClassName, backdrop.hInstance);
+        DeleteObject(backdrop_brush);
+        OleUninitialize();
         std::printf("failures=%d\n", failures);
         return failures ? 1 : 0;
     }

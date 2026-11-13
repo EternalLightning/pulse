@@ -7,6 +7,8 @@
 #include "../common/user_storage.h"
 #include "../common/windows_compat.h"
 #include "../ui/ui_renderer_internal.h"
+#include "../ui/color_picker.h"
+#include "../app/settings_input.h"
 #include "snapshot_output.h"
 
 #include <algorithm>
@@ -153,6 +155,115 @@ struct Fixture {
         }
     }
 };
+
+struct AccentPickerDrive {
+    HWND owner = nullptr, popup = nullptr;
+    std::wstring initial_hex;
+    bool accept = false, driven = false;
+    int ticks = 0;
+};
+AccentPickerDrive* accent_drive = nullptr;
+
+BOOL CALLBACK FindAccentPicker(HWND window, LPARAM parameter) {
+    auto& drive = *reinterpret_cast<AccentPickerDrive*>(parameter);
+    if (GetWindow(window, GW_OWNER) != drive.owner) return TRUE;
+    wchar_t name[80]{}; GetClassNameW(window, name, ARRAYSIZE(name));
+    if (wcscmp(name, L"PulseSettingsValueDialog") == 0) {
+        Check(false, "accent selection must not open the old text prompt");
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
+    if (wcscmp(name, L"PulseFluentColorPicker") != 0 || !IsWindowVisible(window)) return TRUE;
+    drive.popup = window;
+    return FALSE;
+}
+
+void CALLBACK DriveAccentPicker(HWND, UINT, UINT_PTR timer, DWORD) {
+    if (!accent_drive) return;
+    auto& drive = *accent_drive;
+    EnumThreadWindows(GetCurrentThreadId(), FindAccentPicker, reinterpret_cast<LPARAM>(&drive));
+    if (!drive.popup) {
+        if (++drive.ticks > 20) {
+            KillTimer(nullptr, timer);
+            Check(false, "settings accent opens a real picker within the fixture deadline");
+            PostQuitMessage(2);
+        }
+        return;
+    }
+    KillTimer(nullptr, timer);
+    drive.driven = true;
+    HWND hex_edit = nullptr;
+    for (HWND edit = FindWindowExW(drive.popup, nullptr, L"EDIT", nullptr); edit;
+         edit = FindWindowExW(drive.popup, edit, L"EDIT", nullptr)) {
+        wchar_t value[64]{}; GetWindowTextW(edit, value, ARRAYSIZE(value));
+        if (value[0] == L'#') { hex_edit = edit; break; }
+    }
+    wchar_t initial[64]{}; GetWindowTextW(hex_edit, initial, ARRAYSIZE(initial));
+    Check(hex_edit && drive.initial_hex == initial, "picker starts from the displayed effective accent");
+    RECT bounds{}; GetWindowRect(drive.popup, &bounds);
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(drive.popup, MONITOR_DEFAULTTONEAREST), &monitor);
+    Check(bounds.left >= monitor.rcWork.left && bounds.top >= monitor.rcWork.top &&
+        bounds.right <= monitor.rcWork.right && bounds.bottom <= monitor.rcWork.bottom,
+        "settings picker is constrained to the monitor work area");
+    SetWindowTextW(hex_edit, L"#ff3574ba");
+    SetFocus(hex_edit);
+    SendMessageW(hex_edit ? hex_edit : drive.popup, WM_KEYDOWN, drive.accept ? VK_RETURN : VK_ESCAPE, 0);
+}
+
+void AccentPickerChecks(Fixture& f) {
+    auto& s = f.State();
+    ActiveTab(s)->current_path = app::MakeSettingsPath(L"general");
+    s.settings.SelectPage(0);
+    app::SettingsController::UiCallbacks callbacks;
+    callbacks.apply_effects = [&](app::SettingsEffect effect) { ++f.effects; ApplySettingsEffects(s, effect); };
+    s.settings.BindUi(s.appPrefs, s.ctxMenuPrefs, s.index, s.networkIndex, std::move(callbacks));
+    for (const bool dark : {false, true}) for (const float scale : {1.0f, 1.5f}) {
+        f.Resize(1100, scale, dark);
+        for (const bool system : {false, true}) for (const bool accept : {false, true}) {
+            s.settings.AccentChoice(system, 0x0078D4);
+            const auto before_rgb = s.appPrefs.accent_rgb;
+            const int before_effects = f.effects;
+            auto vm = f.Vm();
+            auto layout = f.Layout(vm);
+            auto target = f.Hit(vm, layout.accent_picker);
+            Check(target.region == H::SettingsAccent && target.index == 0,
+                "theme color control remains reachable through production hit testing");
+            uint32_t initial = 0; app::ParseAccentInput(L"#" + vm.settings_accent_hex, initial);
+            AccentPickerDrive drive{s.hwnd, nullptr, ui::FormatHexColor(0xFF000000u | initial, true), accept};
+            accent_drive = &drive;
+            const UINT_PTR timer = SetTimer(nullptr, 0, 250, DriveAccentPicker);
+            if (accept) {
+                s.settings_input.focus = target;
+                s.settings_input.keyboard = true;
+                Check(HandleSettingsKey(s, VK_RETURN, 0), "keyboard activates the settings color picker");
+            } else {
+                const auto center = Center(layout.accent_picker);
+                Check(BeginSettingsPointer(s, target) && EndSettingsPointer(s,
+                    static_cast<int>(center.x), static_cast<int>(center.y)), "mouse release activates the settings color picker");
+            }
+            KillTimer(nullptr, timer); accent_drive = nullptr;
+            Check(drive.driven, "settings opens the existing color picker instead of a text dialog");
+            Check(accept ? s.appPrefs.accent_rgb == L"3574BA" && !s.appPrefs.accent_follow_system :
+                s.appPrefs.accent_rgb == before_rgb && s.appPrefs.accent_follow_system == system,
+                "accept saves the selected custom color while Escape preserves custom or system mode");
+            Check(f.effects == before_effects + (accept ? 1 : 0), "only accepted colors trigger theme application");
+            if (accept) {
+                Check(std::abs(s.accentColor.r - 53.0f / 255) < 0.001f &&
+                    std::abs(s.accentColor.b - 186.0f / 255) < 0.001f, "accepted color immediately updates the live app accent");
+                app::AppPrefs restored; restored.persist = false;
+                Check(restored.FromJson(s.appPrefs.ToJson()) && restored.accent_rgb == L"3574BA" &&
+                    !restored.accent_follow_system, "accepted picker color survives settings serialization");
+            }
+        }
+        f.Render(f.Vm(), std::wstring(dark ? L"dark-" : L"light-") + std::to_wstring(static_cast<int>(scale * 100)) + L"-accent.png");
+        Check(ui::ColorPickerPopup::SaveDebugSnapshot(&s.compositor,
+            (f.output / (std::wstring(dark ? L"dark-" : L"light-") + std::to_wstring(static_cast<int>(scale * 100)) + L"-picker.png")).c_str(),
+            dark, s.accentColor, scale), "save the shared picker appearance at the tested theme and scale");
+        H system_target; system_target.region = H::SettingsAccent; system_target.index = 1;
+        Check(ActivateSettingsControl(s, system_target) && s.appPrefs.accent_follow_system && s.appPrefs.accent_rgb.empty(),
+            "follow-system button still restores the Windows accent without a picker");
+    }
+}
 
 void BehaviorChecks(Fixture& f) {
     auto& s = f.State();
@@ -496,14 +607,17 @@ void RowActionChecks(Fixture& f) {
 
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    bool accent_only = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string_view(argv[i]) == "--screenshots-only") screenshots_only = true;
+        else if (std::string_view(argv[i]) == "--accent-picker-only") accent_only = true;
         else { std::printf("Unknown argument: %s\n", argv[i]); return 2; }
     }
     if (FAILED(OleInitialize(nullptr))) return 2;
     compat::EnableDpiAwareness();
     SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", L"1");
-    const auto output = std::filesystem::absolute(L"docs/validation/context-menu-port-20261025/screenshots");
+    const auto output = std::filesystem::absolute(accent_only ? L"bench_data/settings-accent-ui" :
+        L"docs/validation/context-menu-port-20261025/screenshots");
     std::filesystem::create_directories(output);
     storage::OverrideDefaultRootForTesting((output.parent_path() / L"isolated-profile").wstring());
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
@@ -512,7 +626,10 @@ int main(int argc, char** argv) {
         Fixture fixture;
         const bool initialized = fixture.Init(output);
         Check(initialized, "initialize isolated hidden production renderer and controller");
-        if (initialized) {
+        if (initialized && accent_only) {
+            AccentPickerChecks(fixture);
+            result = failures ? 1 : 0;
+        } else if (initialized) {
             if (!screenshots_only) BehaviorChecks(fixture);
             for (const auto* language : {L"zh-CN", L"en-US"}) {
                 l10n::SetLanguage(language);

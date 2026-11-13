@@ -79,14 +79,16 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool settings_toolbar = argc == 2 && std::string_view(argv[1]) == "--settings-toolbar-only";
     const bool empty_navigation = argc == 2 && std::string_view(argv[1]) == "--navigation-empty-viewport-only";
     const bool additional_motion = argc == 2 && std::string_view(argv[1]) == "--additional-motion-only";
+    const bool tooltip_only = argc == 2 && std::string_view(argv[1]) == "--tooltip-only";
     const bool home_hover_only = argc == 2 && std::string_view(argv[1]) == "--home-hover-only";
     const bool hover_only = argc == 2 && std::string_view(argv[1]) == "--control-hover-only";
     const bool list_hover_only = argc == 2 && std::string_view(argv[1]) == "--list-hover-only";
     const bool disclosure_only = argc == 2 && std::string_view(argv[1]) == "--sidebar-disclosure-only";
     const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
-    if (settings_toolbar || empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
+    if (tooltip_only || settings_toolbar || empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
         (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
-        const bool passed = settings_toolbar ? ui::NavigationMotionUiTest::RunSettingsToolbar(s, root) :
+        const bool passed = tooltip_only ? ui::TooltipMotionUiTest::RunLayout(s.compositor, root) :
+            settings_toolbar ? ui::NavigationMotionUiTest::RunSettingsToolbar(s, root) :
             empty_navigation ? ui::NavigationMotionUiTest::RunEmptyViewport(s) :
             disclosure_only ? ui::InteractionFeedbackUiTest::RunDisclosure(s, root) :
             list_hover_only ? ui::InteractionFeedbackUiTest::RunListHover(s, root) :

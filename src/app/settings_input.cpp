@@ -5,6 +5,7 @@
 #include "system_ctx_model.h"
 #include "app_hover.h"
 #include "../common/localization.h"
+#include "../ui/color_picker.h"
 #include <windowsx.h>
 
 namespace pulse {
@@ -153,20 +154,12 @@ bool ActivateSettingsControl(AppState& state, const ui::HitTestResult& hit, bool
     } else if (hit.region == ui::HitTestResult::SettingsAccent) {
         if (hit.index == 1) {
             s->settings.AccentChoice(true, 0);
-        } else {
-            std::wstring value = L"#" + (s->appPrefs.accent_rgb.empty()
-                ? vm.settings_accent_hex : s->appPrefs.accent_rgb);
-            while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsThemeColor),
-                    l10n::Get(l10n::StringId::AccentInputHint), value, value, 32, {},
-                    s->darkMode, s->accentColor)) {
-                uint32_t rgb = 0;
-                if (app::ParseAccentInput(value, rgb)) {
-                    s->settings.AccentChoice(false, rgb);
-                    break;
-                }
-                MessageBoxW(hwnd, l10n::Get(l10n::StringId::AccentInputInvalid).c_str(),
-                    l10n::Get(l10n::StringId::SettingsThemeColor).c_str(), MB_OK | MB_ICONWARNING);
-            }
+        } else if (EnsureMenu(*s)) {
+            uint32_t rgb = 0;
+            app::ParseAccentInput(L"#" + vm.settings_accent_hex, rgb);
+            if (ui::ColorPickerPopup::Pick(hwnd, &s->compositor, s->menu.get(), s->scale,
+                    SettingsPopupPoint(*s), rgb, s->darkMode, rgb))
+                s->settings.AccentChoice(false, rgb);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (hit.region == ui::HitTestResult::SettingsEffect) {

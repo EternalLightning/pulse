@@ -111,6 +111,7 @@ bool Tab::NavigateTo(const std::wstring& path, ui::SurfaceMotion motion) {
     filter_text.clear();
     virtual_title.clear();
     ClearBanner();
+    listing_failed = false;
     net_readonly = false;
     git_root.clear();
     cache_unix = 0;
@@ -525,6 +526,7 @@ std::wstring Tab::GoBack() {
     back_stack.pop();
     ClearSelection();
     RestoreHistoryEntry(*this, std::move(entry));
+    listing_failed = false;
     filter_text.clear();
     virtual_title.clear();
     loading = true;
@@ -542,6 +544,7 @@ std::wstring Tab::GoForward() {
     forward_stack.pop();
     ClearSelection();
     RestoreHistoryEntry(*this, std::move(entry));
+    listing_failed = false;
     filter_text.clear();
     virtual_title.clear();
     loading = true;
@@ -1577,7 +1580,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.banner_title = tab->banner_title;
     out.banner_message = tab->banner_message;
     out.network_search_root = tab->network_search_root;
-    out.banner_kind = tab->net_readonly ? 2 : 0;
+    out.banner_kind = tab->listing_failed ? 3 : tab->net_readonly ? 2 : 0;
     out.banner_expansion = -1.0f;
     if (const auto& banner = tab->banner_animation; banner.MatchesPath(tab->current_path)) {
         out.banner_title = banner.title;
@@ -1591,6 +1594,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.date_groups.reset();
     out.tag_dots.reset();
     out.loading = tab->loading;
+    out.listing_failed = tab->listing_failed;
     out.search_retaining_results = tab->search_retaining_results;
     out.can_go_back = tab->CanGoBack();
     out.can_go_forward = tab->CanGoForward();
@@ -1608,7 +1612,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     if (out.is_home) out.can_go_up = false;
     out.is_file_system = !tab->current_path.empty() && !fs::IsVirtualPath(tab->current_path);
     out.cloud_status_column = out.is_file_system && IsUnderCloudFilesRoot(tab->current_path);
-    out.can_create = out.is_file_system && !tab->net_readonly;
+    out.can_create = out.is_file_system && !tab->net_readonly && !tab->listing_failed;
     out.curated_order = virtual_kind == L"starred" || virtual_kind == L"recent" || virtual_kind == L"changes";
     out.is_starred = virtual_kind == L"starred";
     out.is_recent = virtual_kind == L"recent";

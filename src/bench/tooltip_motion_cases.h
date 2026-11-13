@@ -5,10 +5,87 @@
 
 #pragma once
 #include "../ui/ui_renderer.h"
+#include "../ui/tooltip_layout.h"
+#include "../ui/ui_renderer_internal.h"
+#include "animation_snapshot.h"
 #include <cstdio>
 
 namespace pulse::ui {
 struct TooltipMotionUiTest {
+    static bool RunLayout(Compositor& compositor, const std::filesystem::path& root) {
+        int failures = Run();
+        const auto check = [&](bool ok, const char* label) {
+            std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+            failures += !ok;
+        };
+        MainRenderer renderer;
+        renderer.SetCompositor(&compositor);
+        renderer.motion_enabled_ = false;
+        for (float scale : {1.0f, 1.5f, 2.0f}) for (bool dark : {false, true}) {
+            renderer.SetScale(scale);
+            compositor.RecreateTextFormats(scale);
+            for (int width : {380, 1100}) {
+                const auto rect = D2D1::RectF(0, 0, width * scale, 560 * scale);
+                compositor.Resize(static_cast<UINT>(rect.right), static_cast<UINT>(rect.bottom));
+                WindowViewModel vm;
+                vm.tooltip_text = L"C:\\Documents\\项目资料\\A very long folder name\\Another long folder name\\报告与附件.txt\n"
+                    L"文件大小：123 MB\n修改时间：2026-11-13 10:30\n拖动卡片可移动暂存文件。";
+                vm.tooltip_x = rect.right - 12 * scale;
+                vm.tooltip_y = rect.bottom - 12 * scale;
+                vm.hover_region = HitTestResult::TrayCard;
+                for (bool status : {false, true}) {
+                    ComPtr<IDWriteTextLayout> layout;
+                    const auto bounds = MakeTooltipLayout(compositor.DwriteFactory(), compositor.SmallFormat(),
+                        vm.tooltip_text, scale, rect, vm.tooltip_x, vm.tooltip_y, 32 * scale, status, &layout);
+                    DWRITE_TEXT_METRICS metrics{};
+                    check(layout.get() && SUCCEEDED(layout->GetMetrics(&metrics)), "measure multiline tooltip layout");
+                    check(bounds.left >= 8 * scale && bounds.right <= rect.right - 8 * scale &&
+                        bounds.top >= 8 * scale && bounds.bottom <= rect.bottom - 8 * scale,
+                        "tooltip stays within narrow and high-DPI window bounds");
+                    check(metrics.lineCount >= 4 && metrics.height <= bounds.bottom - bounds.top - 12 * scale + 1,
+                        "all wrapped tooltip lines fit the measured surface");
+                    check(!status || bounds.bottom <= rect.bottom - 40 * scale,
+                        "status tooltip remains above the status bar");
+                }
+                {
+                    ComPtr<IDWriteTextLayout> layout;
+                    const auto bounds = MakeTooltipLayout(compositor.DwriteFactory(), compositor.SmallFormat(),
+                        std::wstring(3000, L'长'), scale, rect, vm.tooltip_x, vm.tooltip_y, 0, false, &layout);
+                    DWRITE_TRIMMING trimming{}; ComPtr<IDWriteInlineObject> sign;
+                    check(layout.get() && SUCCEEDED(layout->GetTrimming(&trimming, &sign)) && sign.get() &&
+                        trimming.granularity == DWRITE_TRIMMING_GRANULARITY_CHARACTER &&
+                        bounds.bottom <= rect.bottom - 8 * scale &&
+                        layout->GetMaxHeight() <= rect.bottom - 28 * scale,
+                        "oversized unbroken tooltip is window-bounded with an explicit ellipsis");
+                }
+                auto* dc = compositor.Dc();
+                const auto theme = MakeTheme(dark, HexColor(0x0078D4));
+                dc->BeginDraw(); dc->Clear(theme.bg);
+                renderer.DrawTooltip(vm, rect, theme);
+                check(SUCCEEDED(dc->EndDraw()), "draw wrapped tooltip with production renderer");
+                const auto name = std::wstring(dark ? L"dark-" : L"light-") + std::to_wstring(width) +
+                    L"-" + std::to_wstring(static_cast<int>(scale * 100));
+                check(WriteAnimationSnapshot(compositor, root / (name + L"-tooltip.png")), "capture wrapped tooltip");
+            }
+            // A remove badge dismisses a staged reference and uses a neutral hover.
+            const auto rect = D2D1::RectF(0, 0, 380 * scale, 560 * scale);
+            compositor.Resize(static_cast<UINT>(rect.right), static_cast<UINT>(rect.bottom));
+            WindowViewModel vm; vm.dark = dark;
+            TrayCardView card; card.name = L"项目报告.txt"; card.folder = L"C:\\Documents\\项目资料";
+            card.hover = 1; vm.tray_deck.cards.push_back(card);
+            vm.tray_deck.live_count = vm.tray_deck.total_count = vm.tray_deck.batch_count = 1;
+            vm.hover_region = HitTestResult::TrayItemRemove;
+            auto* dc = compositor.Dc(); const auto theme = MakeTheme(dark, HexColor(0x0078D4));
+            dc->BeginDraw(); dc->Clear(theme.bg); renderer.DrawTrayDeck(vm, rect, theme);
+            check(SUCCEEDED(dc->EndDraw()), "draw neutral staging remove badge");
+            const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                std::to_wstring(static_cast<int>(scale * 100)) + L"-staging.png";
+            check(WriteAnimationSnapshot(compositor, root / name), "capture compact staging typography and remove badge");
+        }
+        renderer.SetCompositor(nullptr);
+        return failures == 0;
+    }
+
     static int Run() {
         int failures = 0;
         const auto check = [&](bool ok, const char* label) {

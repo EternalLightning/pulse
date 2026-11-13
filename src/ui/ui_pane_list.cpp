@@ -830,13 +830,57 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
         }
         return;
     }
-    if (!pane.filter_text.empty()) {
-        fluent::EmptyStateSpec empty;
-        empty.bounds = bounds;
-        empty.glyph = kIconSearch;
-        empty.title = pulse::l10n::Get(pulse::l10n::StringId::NoMatches);
-        empty.message = pane.filter_error;
-        painter_.DrawEmptyState(empty);
+    if (pane.listing_failed || !pane.filter_text.empty()) {
+        const bool failed = pane.listing_failed;
+        const PaneEmptyLayout layout = MakePaneEmptyLayout(bounds, scale_, true);
+        if (failed) {
+            if (!DrawNoSelectionSvg(layout.art, theme.bg.r > 0.5f ? 0.68f : 1.0f))
+                DrawIconText(layout.art.left, layout.art.top, layout.art.right - layout.art.left,
+                    layout.art.bottom - layout.art.top, L"\xE783", L"!", theme.text_secondary, 2.6f);
+        } else {
+            const int resource_id = pane.filter_error.empty() ? IDR_NO_FILTER_RESULTS_SVG : IDR_INVALID_FILTER_SVG;
+            if (!IsHighContrast() && EnsureFluentSvg(resource_id, true)) {
+                auto* svg = fluent_svgs_.at(resource_id).get();
+                ComPtr<ID2D1SvgElement> root;
+                svg->GetRoot(&root);
+                if (root.get()) root->SetAttributeValue(L"opacity", theme.bg.r > 0.5f ? 0.68f : 1.0f);
+                const float width = std::min(layout.art.right - layout.art.left,
+                    (layout.art.bottom - layout.art.top) * 320.0f / 240.0f);
+                const float height = width * 240.0f / 320.0f;
+                const float left = (layout.art.left + layout.art.right - width) * 0.5f;
+                const float top = (layout.art.top + layout.art.bottom - height) * 0.5f;
+                svg->SetViewportSize(D2D1::SizeF(320.0f, 240.0f));
+                D2D1_MATRIX_3X2_F previous{};
+                empty_state_svg_dc_->GetTransform(&previous);
+                empty_state_svg_dc_->SetTransform(D2D1::Matrix3x2F::Scale(width / 320.0f, height / 240.0f) *
+                    D2D1::Matrix3x2F::Translation(left, top) * previous);
+                empty_state_svg_dc_->DrawSvgDocument(svg);
+                empty_state_svg_dc_->SetTransform(previous);
+            } else {
+                const float icon = 52.0f * scale_;
+                DrawIconText((layout.art.left + layout.art.right - icon) * 0.5f,
+                    (layout.art.top + layout.art.bottom - icon) * 0.5f, icon, icon,
+                    pane.filter_error.empty() ? kIconSearch : L"\xE783", L"!",
+                    IsHighContrast() ? theme.text : theme.text_secondary, 1.8f);
+            }
+        }
+        painter_.DrawText(pulse::l10n::Get(failed ? pulse::l10n::StringId::CannotOpen :
+            pane.filter_error.empty() ? pulse::l10n::StringId::NoMatches :
+                                       pulse::l10n::StringId::ItemFilterInvalid),
+            layout.title, compositor_->HeaderFormat(), theme.text, fluent::HorizontalAlignment::Center);
+        if (!failed && layout.show_message && !pane.filter_error.empty())
+            painter_.DrawText(pane.filter_error, layout.message, compositor_->SmallFormat(),
+                              theme.text_secondary, fluent::HorizontalAlignment::Center);
+        if (layout.show_action) {
+            fluent::ButtonSpec action;
+            action.bounds = layout.action;
+            action.text = pulse::l10n::Get(failed ? pulse::l10n::StringId::LockedItemRetry :
+                                                  pulse::l10n::StringId::ClearFilter);
+            action.state.hovered = vm.hover_region == static_cast<int>(failed ?
+                HitTestResult::PaneEmptyRetry : HitTestResult::FilterClear) &&
+                vm.hover_control_index == pane_index;
+            painter_.DrawButton(action);
+        }
         return;
     }
     if (!pane.is_file_system) {
@@ -913,24 +957,12 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
                           fluent::HorizontalAlignment::Center);
     }
     if (layout.show_action) {
-        const bool hovered = vm.hover_region == static_cast<int>(HitTestResult::PaneEmptyNewFolder) &&
-                             vm.hover_control_index == pane_index;
-        painter_.FillRoundedRect(layout.action, 6.0f * scale_,
-                                 hovered ? theme.fill_input_hover : theme.fill_input);
-        painter_.StrokeRoundedRect(layout.action, 6.0f * scale_, theme.stroke_card);
-        const float iconW = 32.0f * scale_;
-        painter_.DrawText(pulse::l10n::Get(pulse::l10n::StringId::NewFolder),
-            D2D1::RectF(layout.action.left + 8.0f * scale_, layout.action.top,
-                        layout.action.right - iconW, layout.action.bottom),
-            compositor_->SmallFormat(), theme.text, fluent::HorizontalAlignment::Center);
-        MakeBrush(compositor_->Dc(), theme.stroke_divider, brStrokeDivider_);
-        compositor_->Dc()->DrawLine(
-            D2D1::Point2F(layout.action.right - iconW, layout.action.top + 6.0f * scale_),
-            D2D1::Point2F(layout.action.right - iconW, layout.action.bottom - 6.0f * scale_),
-            brStrokeDivider_.get(), 1.0f);
-        DrawIconText(layout.action.right - iconW, layout.action.top, iconW,
-                     layout.action.bottom - layout.action.top,
-                     kIconAdd, L"+", theme.text, 0.72f);
+        fluent::ButtonSpec action;
+        action.bounds = layout.action;
+        action.text = pulse::l10n::Get(pulse::l10n::StringId::NewFolder);
+        action.state.hovered = vm.hover_region == static_cast<int>(HitTestResult::PaneEmptyNewFolder) &&
+                               vm.hover_control_index == pane_index;
+        painter_.DrawButton(action);
     }
 }
 
@@ -2367,7 +2399,7 @@ uint64_t MainRenderer::ViewModeFrameSignature(const PaneViewModel& vm, const The
     mix(vm.selection_revision); mix(vm.view_generation); mix(static_cast<uint64_t>(vm.view_mode));
     mix(static_cast<uint64_t>(vm.selected_index)); mix(static_cast<uint64_t>(vm.selected_count));
     mix(vm.all_selected); mix(static_cast<uint64_t>(vm.hover_index)); mix(static_cast<uint64_t>(vm.drop_target_index));
-    mix(vm.row_action_mask); mix(vm.cut_names.size());
+    mix(vm.row_action_mask); mix(vm.cut_names.size()); mix(vm.listing_failed);
     mix(icon_cache_.ContentRevision()); mix(thumbnail_cache_.ContentRevision());
     mix(vm.tag_catalog ? vm.tag_catalog->TagRevision() : 0); mix(focused);
     mix(static_cast<uint64_t>(hover_region)); mix(static_cast<uint64_t>(hover_control_index));

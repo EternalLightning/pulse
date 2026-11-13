@@ -32,6 +32,16 @@ struct TextFormatSpec {
     DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
 };
 
+inline constexpr TextFormatSpec kCompactCardTitle{FontRole::Text, 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD};
+inline constexpr TextFormatSpec kCompactCardCaption{FontRole::Text, 11.0f};
+inline constexpr TextFormatSpec kEmbeddedPreview{FontRole::Monospace, 11.0f};
+inline constexpr TextFormatSpec kDocumentPreview{FontRole::Monospace, 13.0f};
+
+inline TextFormatSpec Scaled(TextFormatSpec spec, float scale) noexcept {
+    spec.size *= scale;
+    return spec;
+}
+
 const wchar_t* LocaleName() noexcept;
 bool HasIconFont(IDWriteFactory2* factory);
 const wchar_t* PreferredTextFamily() noexcept;

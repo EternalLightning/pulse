@@ -40,7 +40,7 @@ inline bool TickPaneAnimations(Pane& pane, bool focused, bool editing, uint64_t 
     bool home_pending = false;
     if (auto* tab = pane.ActiveTab()) {
         tab->banner_animation.Tick(tab->current_path, tab->banner_title, tab->banner_message,
-            tab->network_search_root, tab->net_readonly ? 2 : 0, now, animate);
+            tab->network_search_root, tab->listing_failed ? 3 : tab->net_readonly ? 2 : 0, now, animate);
         home_pending |= tab->banner_animation.expansion.Pending();
         if (tab->current_path == L"pulse:home") home_pending |= TickHomeGroupAnimations(*tab, now, animate);
         else tab->home_group_transitions = {};

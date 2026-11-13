@@ -119,6 +119,7 @@ struct Tab {
 
     // Transient UI state.
     bool loading = false;
+    bool listing_failed = false;
     uint64_t pending_generation = 0;
     uint64_t applied_generation = 0;
     // A replaced Tab resets this watermark even when its address is reused.

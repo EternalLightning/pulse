@@ -2192,7 +2192,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsWallpaperLook: return text(I::SettingsWallpaperLook);
     case R::SettingsWallpaperBlur: return text(I::SettingsWallpaperBlur);
     case R::SettingsAccent:
-        return text(s.hoverControlIndex == 0 ? I::TooltipFollowAccent : I::SettingsThemeColor);
+        return text(s.hoverControlIndex == 0 ? I::CustomColor : I::TooltipFollowAccent);
     case R::SettingsToggle:
         if (s.hoverControlIndex == 4) return text(I::SettingsShowPerformance);
         return L"";

@@ -2466,6 +2466,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
         } else if (hit.region == ui::HitTestResult::PaneEmptyNewFolder) {
             CreateNewItem(*s, true);
+        } else if (hit.region == ui::HitTestResult::PaneEmptyRetry) {
+            RefreshActiveTab(*s, RefreshReason::Explicit);
         } else if (hit.region == ui::HitTestResult::DetailsOpen) {
             OpenSelected(*s);
         } else if (hit.region == ui::HitTestResult::DetailsStar) {

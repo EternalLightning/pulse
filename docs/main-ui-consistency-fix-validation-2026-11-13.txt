@@ -1,0 +1,117 @@
+Pulse 主界面一致性修复与定向验证 — 2026-11-13
+
+范围
+落实主界面续查的 4 项实现问题和 4 项风格/交互建议。起点 5e4d941d、版本 1.5.1.0，起始工作区干净。
+修复验证阶段没有提交、升版、打包或替换已安装应用。源码改动限于所列 UI、状态投影及直接验证依赖。
+2026-11-14 用户随后授权统一提交并推送全部源码、测试、SVG 及本验证记录，版本保持 1.5.1.0。
+下方各阶段的“未提交/未推送”描述均记录当时的验证状态。
+
+逐项结果
+01 目录读取失败使用显式 listing_failed 状态，显示无法打开与重试，禁止普通空目录的新建动作。
+   读取成功和导航清理错误；默认及动效中的错误条均使用 error 类型。保留后台重试和目录恢复。
+02 修复导航、工具栏独立 SVG、地址搜索 pressed/checked、Home 分组/卡片/网络提示和详情按钮的 HC 前景背景配对。
+   以实际高亮状态解析前景，不用颜色相等推断 disabled；夹具明确覆盖 secondary 与 disabled 同为 GrayText。
+03 Tooltip 按有限宽度换行、测量实际高度，保留显式换行，并约束在窗口内；状态栏提示保持上方锚定。
+   极长无分隔文本使用窗口高度上限和省略号；HC 保留 DirectWrite 原生文字路径。
+04 操作中心同时显示运行数量与失败红点，分开放置。截图还发现 100% DPI 的 9+ 原来被固定宽度压成省略号，
+   已按实际文字测宽，并以徽标填充色作为文字抗锯齿背景。
+05 空目录新建、错误重试、清除筛选和详情辅助动作复用公共 Button，普通按钮高 32 DIP、文字 14 DIP、主题圆角 8 DIP。
+   移除新建按钮的假分隔加号；详情按钮与命中共用几何，标签区域后续布局同步调整。
+06 暂存卡片移出按钮改为中性悬停色，HC 使用高亮前景，保留原卡片动效与移出行为。
+07 显式命名 compact card title/caption、embedded preview、document preview 字体规格，保留各自用途的字号。
+08 筛选无结果提供清除筛选；非法条件使用独立标题和图标。点击复用原清除逻辑，先聚焦目标 pane，再恢复条目。
+   新增 ClearFilter 中英文资源，并更新本地化缓存上限，防止按钮空白。
+
+实际验证
+构建：scripts/build.ps1 -BuildDir build-release -Targets pulse,pulse_empty_state_render_test,pulse_group_toolbar_ui_test,pulse_pane_animation_application_test,pulse_localization_test -Parallel 4
+生产 pulse 与直接依赖构建成功；PULSE_WITH_SELFTEST=OFF。最终增量构建无 C++ warning/error。
+第一次构建的测试变量遮蔽 C4456 已修复，原日志保留。
+
+检查均从 bench_data/main-ui-consistency-fix-2026-11-13/run 的隔离工作目录执行。
+1. pulse_empty_state_render_test（文案缓存修正前的完整组）：230 PASS / 0 FAIL。
+   7 类场景、浅深主题、100%/150% DPI、显式动效开/关；每场景连续 32 帧逐字节一致及插图非空断言。
+   真实目录 worker 验证缺目录错误、鼠标重试、后台重试、目录恢复；分屏点击验证只清除目标 pane 的筛选。
+2. pulse_group_toolbar_ui_test --main-ui-colors-only：148 PASS / 0 FAIL。
+   受控 HC 配色、100%/150% DPI、1100/500 DIP、导航与独立图标、搜索 pressed/checked、Home、详情绘制/命中、组合徽标。
+3. pulse_pane_animation_application_test --tooltip-only：159 PASS / 0 FAIL。
+   Tooltip 进入/退出状态、浅深主题、100%/150%/200% DPI、380/1100 DIP、换行与边界、状态栏锚定、超长内容省略；暂存截图。
+4. pulse_localization_test --clear-filter：2 PASS / 0 FAIL，中英文直接验证。
+5. 文案修正后 pulse_empty_state_render_test --filter-only：97 PASS / 0 FAIL。
+   仅重跑有效/非法筛选矩阵、严格像素断言，并验证按钮文案非空及文字含内边距完整容纳。
+合计 636 PASS / 0 FAIL。没有运行完整自测或无关历史测试。
+git diff --check 通过。
+
+诊断与修正记录
+旧空状态审查的 14 个静态帧失败：旧夹具让不同场景共用 renderer，首帧可能保留上一场景的转场缓存。
+现每个静态场景独立 renderer，显式覆盖动效开关，未删除或放宽逐字节一致和非空断言；全部 56 组稳定性检查通过。
+不将这项夹具隔离修正描述为已经确认并修复的 SVG 产品缺陷。
+配色初测 148 项中 5 项失败，原 colors-initial.log 保留。4 项揭示 100% DPI 徽标文字实际省略，已修产品；
+另 1 项是细线抗锯齿没有完全实黑像素，现将断言限制在白底内部并容许黑到白的混合，仍拒绝普通灰/青/白前景。
+截图审阅发现 ClearFilter 缓存上限遗漏，已修资源加载，并定向复测，不把最初空白按钮截图当作验收。
+
+截图与限制
+图库：bench_data/main-ui-consistency-fix-2026-11-13/index.html；包含 181 张原始截图和 3 张总览。
+空/错误/筛选、主控件、Tooltip/暂存总览已实际打开检查；组合徽标另有定向像素检查。
+HC 截图来自当前生产渲染器的受控测试配色，不代表已在真实系统切换 HC 主题验收。
+未执行真实系统 HC 切换、多显示器 DPI 切换或已安装版本验证；暂存截图不证明真实 Shell 缩略图加载。
+日志：build.log、build-empty-final.log、build-final.log、empty-state.log、filter.log、colors-initial.log、colors.log、tooltip.log、localization.log。
+
+后续：筛选插画风格统一
+根据用户截图反馈，将筛选无结果/非法筛选的线性控件图标替换为同系列 SVG 插画。
+assets/no-filter-results-state.svg、assets/invalid-filter-state.svg 复用现有 no-selection-state.svg 的纸张造型、灰蓝渐变和柔和阴影，
+分别加入立体放大镜、筛选漏斗与低饱和琥珀色提示。透明背景，按原插画区域等比绘制；保留 HC 系统色图标回退。
+复用现有 SVG 加载缓存；嵌入资源并声明资源构建依赖，不依赖外置素材。
+仅构建 pulse、pulse_empty_state_render_test；构建通过，无新增 C++ warning/error。
+仅运行 pulse_empty_state_render_test --filter-only：113 PASS / 0 FAIL，覆盖动效开/关、浅深色、100%/150% DPI、32 帧稳定性，
+并明确断言嵌入插画加载成功、不是回退字形。保留已有未提交修改，没有提交或推送。
+新增图库：bench_data/filter-art-consistency-2026-11-13/index.html；32 张完整生产截图、同系列对比图和浅深色图已打开核对。
+未进行真实系统 HC 切换实测。
+
+后续：原生输入弹窗标题字体统一
+新建、解压/密码、设置值输入的自绘标题改用 Microsoft YaHei UI / FW_BOLD，保持 14 DIP。
+永久删除等现有 DirectWrite 标题的逻辑字重为 600；当前系统实际选中 700 的粗体字面。
+GDI 请求 600 时读取到的字体 head 表与常规字面相同，请求 700 后才与 DirectWrite 标题实际字体的 head 表完全一致。
+因此原生标题明确选真实粗体字面；正文、输入框和按钮字号、字重不变。其余自绘弹窗原本使用共享 HeaderFormat。
+仅构建 pulse、pulse_dialog_fade_test、pulse_archive_dialog_test、pulse_settings_value_ui_test，最终构建无新增 C++ warning/error。
+三个测试均仅运行 --popup-style-only：新建 49 PASS、解压/密码 85 PASS、设置值输入 75 PASS，共 209 PASS / 0 FAIL。
+验证了浅深色和 DPI 后的布局、输入保留、接受/取消等原检查；新建截图增加中文标题，最终截图已实际打开核对。
+独立字体映射诊断及日志：bench_data/dialog-title-font-2026-11-13/font_probe.cpp、font-probe.log。
+截图：同目录 title-details.png、screenshots/ 及 run/settings-value/；截图取自原生客户端，不证明桌面合成效果。
+保留本轮前已有未提交修改；没有提交、推送或替换已安装应用。
+
+后续：设置主题色使用选色浮层
+外观页主题色按钮改为调用现有 ColorPickerPopup，初始颜色取当前设置页显示的有效色值。
+接受后仍通过 SettingsController::AccentChoice 应用并保存；取消/ESC 不改变颜色或跟随系统状态；跟随系统按钮保持原流程。
+色值按钮悬停提示改为自定义颜色，系统色按钮提示跟随系统；中英文说明同步改为选择颜色，不再提示输入 RGB。
+新增定向入口 pulse_context_menu_settings_ui_test --accent-picker-only：149 PASS / 0 FAIL。
+实际打开真实选色浮层，验证鼠标释放/键盘 Enter、浅深主题、100%/150% DPI、自定义/系统色初始状态、确认/ESC、工作区边界、
+实时应用及设置序列化往返；偏好持久化关闭并使用隔离配置根目录，不修改用户设置。
+仅构建 pulse 与上述定向测试；构建通过，无新增 C++ warning/error，git diff --check 通过。
+本轮前 architecture fixtures 为 OFF，验证时临时启用；完成后恢复 OFF，PULSE_WITH_SELFTEST 仍为 OFF。
+图库和日志：bench_data/settings-accent-picker-2026-11-13/；生成 8 张主题/DPI 图片，并抽查设置页与浮层样式。
+其中选色器图片为现有 SaveDebugSnapshot 样式预览的样例色，实际入口由真实浮层交互检查验证。
+没有提交、推送或替换已安装应用。
+
+后续：选色器文字垂直对齐
+用户指出浮层文字偏上；原正文/图标格式没有指定段落居中，Luma 绘制的数值与标签、居中的原生编辑框不一致。
+实际 Pick 与 SaveDebugSnapshot 现在复用相同的格式创建过程，明确设置段落垂直居中和单行不换行。
+新增实际 PNG 像素检查：RGB/HSV、十六进制值、RGBA/HSVA 标签和数字的控件内垂直中心、同行对齐；检查真实 hex 编辑框位置。
+修复前同一检查复现 50 个失败，修复后 pulse_audit_ui_remaining_test --color-picker-only 为 98 PASS / 0 FAIL。
+覆盖浅深色、100%/150% 缩放、RGB/HSV、原有焦点遍历和取消行为。没有删除或放宽修复前失败的断言。
+仅构建 pulse、pulse_audit_ui_remaining_test，构建成功，无新增 C++ warning/error；git diff --check 通过。
+日志、修复前截图与对比图：bench_data/color-picker-text-align-2026-11-13/；浅深色截图和对比图已打开核对。
+此前设置主题色图库中的四张浮层预览已同步更新，原图另存该目录 baseline/。保留已有修改，没有提交或更新安装版。
+
+后续（2026-11-14）：选色器勾叉尺寸与退出黑边
+勾、叉从字体字形改用统一 command_icons 矢量绘制，共用 20 DIP 图标框与圆头线宽；按浮层自身 scale 绘制，避免预览依赖主窗口字体缩放。
+退出时沿用 UpdateLayeredWindow / ULW_ALPHA 的预乘透明位图，仅递减 SourceConstantAlpha；先隐藏编辑叠层，以最后呈现的透明度开始淡出。
+到透明后先隐藏浮层，再调用既有 owned-window 清理流程；退出过程中停止重新绘制，避免中途恢复 255 或切换普通 layered-window 模式。
+黑边已在修复前的真实桌面采样复现：测试背景 RGB #D7E7F7，透明角落先出现 #000000，再逐步恢复背景色。
+修复后同一退出采样的角落一直保持背景色，逐像素透明模式未切换，呈现透明度单调下降；键盘取消与颜色返回保持原行为。
+新增图标可见像素大小检查，以及真实关闭过程的透明模式、透明度、桌面角落颜色检查；旧版复现 8 项失败。
+首次修正后的 150% 预览还有 2 项图标尺寸失败，改为显式按浮层尺度绘制后通过；保留 after-first-pass.log，没有放宽尺寸断言。
+最终仅构建 pulse、pulse_audit_ui_remaining_test，构建成功，无新增 C++ warning/error。
+pulse_audit_ui_remaining_test --color-picker-only：108 PASS / 0 FAIL；含原文字对齐、RGB/HSV、浅深色、100%/150%、焦点与取消检查。
+动态图采样使用当前系统动画配置；未修改系统动画或主题设置。缩减动效/高对比环境会明确跳过中间动画帧要求。
+图库、像素采样对比及原始日志：bench_data/picker-exit-icons-2026-11-14/；浅深色图标和对比图已实际打开检查。
+设置主题色图库的四张浮层预览再次同步更新，旧图保留在该目录 baseline/。保留已有未提交修改，未提交或替换安装版。

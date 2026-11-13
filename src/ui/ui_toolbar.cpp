@@ -33,7 +33,7 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
             if (r.right<=r.left) continue;
             const bool enabled=i==0 ? vm.can_go_back : i==1 ? vm.can_go_forward : true;
             DrawButton(r,theme,enabled && IsHovered(vm,nav_hits[i]) ? theme.fill_hover : kTransparent,
-                nav_glyphs[i],L"",enabled ? (vm.dark ? HexColor(0xFFFFFF) : theme.text_secondary) : theme.text_disabled,true,true);
+                nav_glyphs[i],L"",enabled ? (vm.dark && !IsHighContrast() ? HexColor(0xFFFFFF) : theme.text_secondary) : theme.text_disabled,true,true);
         }
         // Breadcrumb address bar: segments clickable, empty area -> edit mode.
         D2D1_RECT_F addrRc = AddressBarRect(rect.right);
@@ -124,7 +124,9 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
         if (address_opacity < 1.0f) dc->PopLayer();
     } else address_path_surface_.Reset();
     DrawAddressSearchChrome(vm, rect.right, theme);
-    const auto operation_color = vm.operation_count > 0 || vm.operation_center_open
+    const auto operation_color = IsHighContrast() &&
+        (IsHovered(vm, HitTestResult::OperationCenter) || vm.operation_center_open)
+        ? theme.text_selected : vm.operation_count > 0 || vm.operation_center_open
         ? theme.accent_ink : theme.text_secondary;
     DrawButton(layout.operations,theme,
         IsHovered(vm,HitTestResult::OperationCenter) ? theme.fill_hover :
@@ -136,19 +138,23 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
         D2D1::RectF(operation_x-8*scale_,operation_y-8*scale_,
                     operation_x+8*scale_,operation_y+8*scale_),1.0f,&operation_color);
     if (vm.operation_count > 0) {
-        const auto badge = D2D1::RectF(layout.operations.right-17*scale_,
+        const auto count = vm.operation_count > 9 ? L"9+" : std::to_wstring(vm.operation_count);
+        const float badge_width = std::max(19*scale_,
+            typography::MeasureLine(compositor_, compositor_->SmallFormat(), count) + 4*scale_);
+        const auto badge = D2D1::RectF(layout.operations.right+2*scale_-badge_width,
             layout.operations.top,layout.operations.right+2*scale_,layout.operations.top+14*scale_);
         MakeBrush(dc,theme.accent,brAccent_);
         FillRoundedRect(dc,brAccent_.get(),badge.left,badge.top,badge.right-badge.left,
             badge.bottom-badge.top,7*scale_);
-        const auto count = vm.operation_count > 9 ? L"9+" : std::to_wstring(vm.operation_count);
         painter_.DrawText(count,badge,compositor_->SmallFormat(),theme.accent_text,
-            fluent::HorizontalAlignment::Center);
-    } else if (vm.operation_failed) {
+            fluent::HorizontalAlignment::Center,theme.accent);
+    }
+    if (vm.operation_failed) {
         ComPtr<ID2D1SolidColorBrush> badge;
         if (SUCCEEDED(dc->CreateSolidColorBrush(theme.danger,&badge)))
             dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(layout.operations.right-5*scale_,
-                layout.operations.top+6*scale_),3*scale_,3*scale_),badge.get());
+                vm.operation_count > 0 ? layout.operations.bottom-6*scale_
+                                       : layout.operations.top+6*scale_),3*scale_,3*scale_),badge.get());
     }
 }
 
@@ -178,7 +184,8 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
     const auto enabled_color=theme.accent_ink;
-    const auto& create_color=create.state.enabled ? enabled_color : theme.text_disabled;
+    const auto create_color=!create.state.enabled ? theme.text_disabled
+        : IsHighContrast() && create.state.hovered ? theme.text_selected : enabled_color;
     const int create_icon=vm.dark ? IDR_FILES_NEW_COLOR_DARK_SVG : IDR_FILES_NEW_COLOR_SVG;
     auto create_bounds=icon_bounds(icon_x,icon_y);
     // Move the complete 1px icon onto pixel centers, keeping its layers concentric.
@@ -186,8 +193,8 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
     const float shift_y=std::floor(create_bounds.top)+0.5f-create_bounds.top;
     create_bounds.left+=shift_x; create_bounds.right+=shift_x;
     create_bounds.top+=shift_y; create_bounds.bottom+=shift_y;
-    if (!DrawFluentSvg(create.state.enabled ? create_icon : IDR_FILES_NEW_SVG,
-        create_bounds,1.0f,create.state.enabled ? nullptr : &create_color)) {
+    if (!DrawFluentSvg(create.state.enabled && !IsHighContrast() ? create_icon : IDR_FILES_NEW_SVG,
+        create_bounds,1.0f,create.state.enabled && !IsHighContrast() ? nullptr : &create_color)) {
         const auto icon=create_bounds;
         DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
             kIconAdd,L"",create_color,0.82f);
@@ -220,20 +227,23 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :
             selected ? theme.fill_selected : kTransparent,
             i<=6 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent_ink : theme.text_secondary,true,true,0.82f);
+        const auto foreground = !enabled ? theme.text_disabled
+            : IsHighContrast() && (selected || IsHovered(vm, hits[i])) ? theme.text_selected
+            : selected ? theme.accent_ink : theme.text_secondary;
         if (i<6) {
             const auto& r=layout.commands[i];
             const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
-            const D2D1_COLOR_F color=enabled ? enabled_color : theme.text_disabled;
+            const D2D1_COLOR_F color=IsHighContrast() ? foreground : enabled ? enabled_color : theme.text_disabled;
             const int color_icon=vm.dark ? dark_color_icons[i] : color_icons[i];
-            if (!DrawFluentSvg(enabled ? color_icon : files_icons[i],icon_bounds(cx,cy),
-                1.0f,enabled ? nullptr : &color)) {
+            if (!DrawFluentSvg(enabled && !IsHighContrast() ? color_icon : files_icons[i],icon_bounds(cx,cy),
+                1.0f,enabled && !IsHighContrast() ? nullptr : &color)) {
                 const auto icon=icon_bounds(cx,cy);
                 DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
                     glyphs[i],L"",color,0.82f);
             }
         }
-        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent_ink : theme.text_secondary);
-        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent_ink : theme.text_secondary);
+        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,foreground);
+        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,foreground);
     }
     const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
                                        const wchar_t* text, bool enabled) {
@@ -273,11 +283,12 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         painter_.DrawButton(button);
         const float cx=button.icon_only ? (bounds.left+bounds.right)*0.5f : bounds.left+18*scale_;
         const float cy=(bounds.top+bounds.bottom)*0.5f;
-        const auto foreground=enabled ? theme.text : theme.text_disabled;
+        const auto foreground=!enabled ? theme.text_disabled
+            : IsHighContrast() && button.state.hovered ? theme.text_selected : theme.text;
         if (!DrawFluentSvg(files_icon,icon_bounds(cx,cy),1.0f,&foreground)) {
             const auto icon=icon_bounds(cx,cy);
             DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-                glyph,L"",enabled ? theme.text_secondary : theme.text_disabled,0.82f);
+                glyph,L"",IsHighContrast() ? foreground : enabled ? theme.text_secondary : theme.text_disabled,0.82f);
         }
     };
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);

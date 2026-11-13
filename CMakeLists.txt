@@ -399,6 +399,8 @@ if(PULSE_APP_SOURCES)
     endif()
     target_sources(pulse PRIVATE src/app/pulse.rc)
     set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/no-filter-results-state.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/invalid-filter-state.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/global-search-logo.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/app/pulse.ico"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc"

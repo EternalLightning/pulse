@@ -6,6 +6,7 @@
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "animation_clock.h"
+#include "tooltip_layout.h"
 
 namespace pulse::ui {
 
@@ -48,17 +49,13 @@ void MainRenderer::DrawTooltip(const WindowViewModel& vm, const D2D1_RECT_F& rec
     if (tooltip_text_.empty() || opacity <= 0.0f) return;
     auto* dc = compositor_->Dc();
     auto* fmt = compositor_->SmallFormat();
-    const float tw = MeasureLayoutText(compositor_, compositor_->DwriteFactory(), fmt, tooltip_text_);
-    const float bw = std::min(tw + 20.0f * scale_, rect.right - 16.0f * scale_);
-    const float bh = 28.0f * scale_;
-    if (bw <= 0.0f) return;
-    const float bx = std::clamp(tooltip_x_ + 12.0f * scale_, 8.0f * scale_,
-        std::max(8.0f * scale_, rect.right - bw - 8.0f * scale_));
-    const float tip_y = tooltip_hover_region_ == HitTestResult::StatusBarCancelSearch
-        ? rect.bottom - status_height_ - bh - 8.0f * scale_ : tooltip_y_ + 18.0f * scale_;
-    const float by = std::clamp(tip_y, 8.0f * scale_,
-        std::max(8.0f * scale_, rect.bottom - bh - 8.0f * scale_));
-    const auto bounds = D2D1::RectF(bx, by, bx + bw, by + bh);
+    ComPtr<IDWriteTextLayout> layout;
+    const auto bounds = MakeTooltipLayout(compositor_->DwriteFactory(), fmt, tooltip_text_, scale_,
+        rect, tooltip_x_, tooltip_y_, status_height_,
+        tooltip_hover_region_ == HitTestResult::StatusBarCancelSearch, &layout);
+    if (!layout.get()) return;
+    const float bx = bounds.left, by = bounds.top;
+    const float bw = bounds.right - bx, bh = bounds.bottom - by;
     const bool layered = opacity < 1.0f;
     if (layered) {
         const auto layer = D2D1::LayerParameters1(rect, nullptr,
@@ -71,11 +68,9 @@ void MainRenderer::DrawTooltip(const WindowViewModel& vm, const D2D1_RECT_F& rec
     dc->DrawRoundedRectangle(D2D1::RoundedRect(bounds, 4.0f * scale_, 4.0f * scale_),
         brStrokeCard_.get(), 1.0f);
     MakeBrush(dc, theme.text, brText_);
-    const auto saved_tip_bg = text_background_;
-    text_background_ = BlendOver(theme.surface_flyout, theme.bg);
-    DrawTextRect(dc, fmt, brText_.get(), tooltip_text_, bx + 10.0f * scale_, by,
-        std::max(0.0f, bw - 20.0f * scale_), bh);
-    text_background_ = saved_tip_bg;
+    const auto origin = D2D1::Point2F(bx + 10.0f * scale_, by + 6.0f * scale_);
+    if (IsHighContrast()) dc->DrawTextLayout(origin, layout.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    else compositor_->DrawTextLayout(origin, layout.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     if (layered) dc->PopLayer();
 }
 

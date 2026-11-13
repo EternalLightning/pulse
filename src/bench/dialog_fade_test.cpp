@@ -522,7 +522,8 @@ void RunPrompt(HWND owner, bool accept) {
         PostThreadMessageW(ui_thread, WM_QUIT, 1, 0);
     });
     std::wstring result = L"retained-value";
-    const bool accepted = pulse::app::PromptNewItemName(owner, L"Fade test new item",
+    const bool accepted = pulse::app::PromptNewItemName(owner,
+        theme_refresh_required ? L"新建文本文档" : L"Fade test new item",
         accept, prompt_accent, result);
     helper.join();
     Check(accepted == accept, accept ? "new-item accepts after fade" : "new-item cancels after fade");

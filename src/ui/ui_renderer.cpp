@@ -351,7 +351,9 @@ void MainRenderer::DrawButton(const D2D1_RECT_F& rc, const Theme& theme, const D
         float r = theme.radius_control * scale_;
         FillRoundedRect(dc, brFillHover_.get(), rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, r);
     }
-    DrawIconText(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, glyph, fallback, fg,
+    const auto foreground = IsHighContrast() && fill.a > 0.0f
+        ? theme.text_selected : fg;
+    DrawIconText(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, glyph, fallback, foreground,
         size_factor);
 }
 

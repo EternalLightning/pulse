@@ -105,6 +105,7 @@ bool IsUncPath(const std::wstring& p) {
 }
 
 static void SetPathFailure(app::Tab& tab, DWORD error) {
+    tab.listing_failed = true;
     if (error == ERROR_SUCCESS) error = ERROR_GEN_FAILURE;
     tab.net_readonly = fs::IsUncPath(tab.current_path);
     const bool offline = tab.net_readonly && fs::ClassifyPathError(error) == fs::PathError::Offline;
@@ -1014,6 +1015,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         tab.downloads_auto_sort = false;
     }
     tab.current_path = normalized;
+    tab.listing_failed = false;
     if (const auto git = s.gitRoots.find(normalized); git != s.gitRoots.end())
         tab.git_root = git->second;
     else
@@ -1360,6 +1362,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             tab->pending_generation = 0;
             tab->applied_generation = res.generation;
             if (!res.projection_only) {
+                tab->listing_failed = false;
                 tab->net_readonly = app::IsDeviceTab(tab) &&
                     !app::DeviceRegistry::Instance().FolderWritable(res.path);
                 tab->ClearBanner();

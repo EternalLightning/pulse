@@ -30,6 +30,7 @@
 #include "ui_compositor.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
+#include "command_icons.h"
 
 #include <windowsx.h>
 #include <commctrl.h>
@@ -179,6 +180,7 @@ struct State {
     int base_x = 0;
     int base_y = 0;
     int present_dx = 0;
+    BYTE present_alpha = 255;
     int win_w = 0;
     int win_h = 0;
 
@@ -267,6 +269,19 @@ const wchar_t* ChannelLabel(const State& s, int ch) {
 }
 
 float Px(const State& s, float dip) { return dip * s.scale; }
+
+bool CreateTextFormats(State& s) {
+    typography::CreateTextFormat(s.compositor->DwriteFactory(),
+        {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
+    typography::CreateTextFormat(s.compositor->DwriteFactory(),
+        {typography::FontRole::Icon, 16.0f * s.scale}, &s.icon_format);
+    if (!s.body_format.get() || !s.icon_format.get()) return false;
+    for (auto* format : {s.body_format.get(), s.icon_format.get()}) {
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
+    return true;
+}
 
 bool Contains(const D2D1_RECT_F& r, float x, float y) {
     return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
@@ -713,6 +728,10 @@ bool Render(State& s) {
 
     // Accept / cancel glyph buttons. The hover pill is inset and rounded so
     // it never pokes past the card's rounded bottom corners.
+    ComPtr<ID2D1SolidColorBrush> action_brush;
+    dc->CreateSolidColorBrush(s.theme.text, &action_brush);
+    ComPtr<ID2D1StrokeStyle> action_stroke;
+    command_icons::CreateStrokeStyle(dc, &action_stroke);
     auto draw_tool = [&](const D2D1_RECT_F& rc, const wchar_t* glyph, bool hovered,
                          bool pressed, int part) {
         if (hovered || pressed) {
@@ -722,20 +741,21 @@ bool Render(State& s) {
             s.painter.FillRoundedRect(pill, Px(s, 4.5f),
                                       pressed ? s.theme.fill_pressed : s.theme.fill_hover);
         }
-        const float g = Px(s, 8.0f);
+        const float g = Px(s, 10.0f);
         const float cx = (rc.left + rc.right) * 0.5f;
         const float cy = (rc.top + rc.bottom) * 0.5f;
-        s.painter.DrawText(glyph, D2D1::RectF(cx - g, cy - g, cx + g, cy + g),
-                            s.icon_format.get(), IsHighContrast() && (hovered || pressed)
-                                ? s.theme.text_selected : s.theme.text, fluent::HorizontalAlignment::Center);
+        if (action_brush.get()) {
+            action_brush->SetColor(IsHighContrast() && (hovered || pressed) ? s.theme.text_selected : s.theme.text);
+            command_icons::Draw(dc, action_brush.get(), action_stroke.get(), command_icons::FromGlyph(glyph),
+                D2D1::RectF(cx - g, cy - g, cx + g, cy + g));
+        }
         if (GetFocus() == s.hwnd && s.focus_part == part) {
             const float inset = Px(s, 3.0f);
             s.painter.DrawFocusRing(D2D1::RectF(rc.left + inset, rc.top + inset,
                 rc.right - inset, rc.bottom - inset), Px(s, s.theme.radius_control));
         }
     };
-    // CheckMark E73E + Close E8BB are the matched bold pair in Segoe Fluent
-    // Icons (Accept E8FB is visibly thinner than Close, so it is not used).
+    // Shared vector commands use the same optical grid and stroke for both actions.
     draw_tool(s.r_ok, L"\xE73E", s.hot == kPartOk, s.press_ok, kPartOk);
     draw_tool(s.r_cancel, L"\xE8BB", s.hot == kPartCancel, s.press_cancel, kPartCancel);
 
@@ -795,14 +815,47 @@ void Present(State& s, BYTE alpha, int dx) {
     POINT src{ 0, 0 };
     SIZE sz{ s.win_w, s.win_h };
     BLENDFUNCTION blend{ AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
-    UpdateLayeredWindow(s.hwnd, nullptr, &dst, &sz, s.mem_dc, &src, 0, &blend, ULW_ALPHA);
+    const BOOL presented = UpdateLayeredWindow(s.hwnd, nullptr, &dst, &sz, s.mem_dc, &src, 0, &blend, ULW_ALPHA);
     SelectObject(s.mem_dc, old);
+    if (!presented) return;
+    s.present_alpha = alpha;
     s.present_dx = dx;
     if (s.edits_shown) PlaceEdits(s);
 }
 
 void Repaint(State& s) {
+    if (s.done) return;
     if (Render(s)) Present(s, 255, s.present_dx);
+}
+
+void HidePicker(State& s) {
+    KillTimer(s.hwnd, 1);
+    s.done = true;
+    const BYTE from = s.present_alpha;
+    s.edits_shown = false;
+    for (HWND edit : s.edits) if (edit) ShowWindow(edit, SW_HIDE);
+    BOOL animate = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0);
+    if (animate && !IsHighContrast() && from > 0 && s.dib && IsWindowVisible(s.hwnd)) {
+        const uint64_t start = AnimationTimeMs();
+        const float duration = 110.0f * from / 255.0f;
+        while (IsWindowVisible(s.hwnd)) {
+            const float elapsed = static_cast<float>(AnimationTimeMs() - start);
+            const float t = std::min(1.0f, elapsed / duration);
+            const float opacity = 1.0f - t * t * (3.0f - 2.0f * t);
+            // Keep ULW_ALPHA throughout: ordinary layered opacity makes transparent edges black.
+            Present(s, static_cast<BYTE>(std::lround(from * opacity)), s.present_dx);
+            if (t >= 1.0f) break;
+            MSG message{};
+            if (PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_NOREMOVE)) break;
+            const DWORD remaining = static_cast<DWORD>(std::max(0.0f, duration - elapsed));
+            if (remaining) MsgWaitForMultipleObjectsEx(0, nullptr, std::min<DWORD>(16, remaining),
+                QS_SENDMESSAGE, MWMO_INPUTAVAILABLE);
+        }
+    }
+    Present(s, 0, s.present_dx);
+    ShowWindow(s.hwnd, SW_HIDE);
+    HideComposedDialog(s.hwnd);
 }
 
 void SetEditText(State& s, HWND edit, const std::wstring& text) {
@@ -1017,6 +1070,8 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (!s) return DefWindowProcW(hwnd, msg, wp, lp);
     switch (msg) {
 #ifdef PULSE_UI_TEST_HOOKS
+    case WM_APP + 0x2BD:
+        return static_cast<LRESULT>(s->present_alpha) + 1;
     case WM_APP + 0x2B5:
         return lp && Render(*s) && SavePng(reinterpret_cast<const wchar_t*>(lp),
             s->win_w, s->win_h, s->bits);
@@ -1309,11 +1364,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     if (!GetMonitorInfoW(MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST), &mi)) return false;
     s.scale = FitPopupScale(s.scale, kCardW, kCardH, kShadow, mi.rcWork);
     if (s.scale < 0.25f) return false;
-    typography::CreateTextFormat(compositor->DwriteFactory(),
-        {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
-    typography::CreateTextFormat(compositor->DwriteFactory(),
-        {typography::FontRole::Icon, 16.0f * s.scale}, &s.icon_format);
-    if (!s.body_format.get() || !s.icon_format.get()) return false;
+    if (!CreateTextFormats(s)) return false;
     s.painter.SetCompositor(compositor);
     s.painter.SetScale(s.scale);
     Layout(s);
@@ -1362,8 +1413,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
         DispatchMessageW(&msg);
     }
 
-    KillTimer(s.hwnd, 1);
-    HideComposedDialog(s.hwnd);
+    HidePicker(s);
     for (HWND e : s.edits) {
         if (e) DestroyWindow(e); // subclass is removed with the window
     }
@@ -1386,10 +1436,7 @@ bool ColorPickerPopup::SaveDebugSnapshot(Compositor* compositor, const wchar_t* 
     s.dark = dark;
     s.accent = accent;
     s.theme = IsHighContrast() ? MakeHighContrastTheme() : MakeTheme(dark, accent);
-    typography::CreateTextFormat(compositor->DwriteFactory(),
-        {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
-    typography::CreateTextFormat(compositor->DwriteFactory(),
-        {typography::FontRole::Icon, 16.0f * s.scale}, &s.icon_format);
+    if (!CreateTextFormats(s)) return false;
     // Sample color from the QFluent reference screenshot.
     s.argb = 0xFF2FDFF1u;
     s.hsv = HsvFromRgb(0x2FDFF1u);

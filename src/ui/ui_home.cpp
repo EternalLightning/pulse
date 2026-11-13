@@ -11,6 +11,7 @@ namespace pulse::ui {
 void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
                             const D2D1_RECT_F& bounds, int pane_index, const Theme& theme) {
     auto* dc = compositor_->Dc();
+    const bool high_contrast = IsHighContrast();
     painter_.BeginFrame(theme, IsHighContrast());
     dc->PushAxisAlignedClip(bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     const D2D1_RECT_F body = bounds;
@@ -31,20 +32,21 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         header_fill.a *= HoverOpacity(prefix + L"group:" + std::to_wstring(group), header_hover);
         if (header_fill.a > 0.0f)
             painter_.FillRoundedRect(header, theme.radius_control * scale_, header_fill);
+        const bool header_highlight = high_contrast && header_hover;
         D2D1_MATRIX_3X2_F transform;
         dc->GetTransform(&transform);
         dc->SetTransform(D2D1::Matrix3x2F::Rotation(90.0f * expansion,
             D2D1::Point2F(header.left + 8 * scale_, header.top + 14 * scale_)) * transform);
         DrawIconText(header.left, header.top + 6 * scale_, 16 * scale_, 16 * scale_,
-            kIconChevronRight, L"", theme.text_secondary, 1.0f);
+            kIconChevronRight, L"", header_highlight ? theme.text_selected : theme.text_secondary, 1.0f);
         dc->SetTransform(transform);
         auto text = header;
         text.left += 24 * scale_; text.top += 2 * scale_;
         const auto title = l10n::Get(headings[group]);
-        painter_.DrawText(title, text, compositor_->TextFormat(), theme.text);
+        painter_.DrawText(title, text, compositor_->TextFormat(), header_highlight ? theme.text_selected : theme.text);
         const float line_left = text.left + MeasureTextWidth(compositor_->DwriteFactory(), compositor_->TextFormat(), title) + 12 * scale_;
         if (line_left < header.right)
-            painter_.FillRoundedRect(D2D1::RectF(line_left, header.top + 15 * scale_, header.right, header.top + 16 * scale_), 0, theme.stroke_divider);
+            painter_.FillRoundedRect(D2D1::RectF(line_left, header.top + 15 * scale_, header.right, header.top + 16 * scale_), 0, header_highlight ? theme.text_selected : theme.stroke_divider);
         if (expansion <= 0.0f) continue;
         dc->PushAxisAlignedClip(layout.content_clips[group], D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         if (expansion < 1.0f) dc->PushLayer(D2D1::LayerParameters(layout.content_clips[group], nullptr,
@@ -53,13 +55,14 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
             const auto& notice = layout.network_notice;
             const bool hover = vm.hover_region == HitTestResult::HomeNetworkSettings && vm.hover_pane_index == pane_index;
             const float hot = HoverOpacity(prefix + L"network-notice", hover);
+            const bool highlighted = high_contrast && hover;
             painter_.FillRoundedRect(notice, theme.radius_control * scale_, blend(theme.fill_input, theme.fill_hover, hot));
             painter_.DrawText(l10n::Get(l10n::StringId::NetworkDiscoveryDisabled),
                 D2D1::RectF(notice.left + 12 * scale_, notice.top + 4 * scale_, notice.right - 12 * scale_, notice.top + 28 * scale_),
-                compositor_->TextFormat(), theme.text_secondary);
+                compositor_->TextFormat(), highlighted ? theme.text_selected : theme.text_secondary);
             painter_.DrawText(l10n::Get(l10n::StringId::OpenNetworkSettings),
                 D2D1::RectF(notice.left + 12 * scale_, notice.top + 27 * scale_, notice.right - 12 * scale_, notice.bottom - 3 * scale_),
-                compositor_->SmallFormat(), theme.accent_ink);
+                compositor_->SmallFormat(), highlighted ? theme.text_selected : theme.accent_ink);
         } else if (layout.empty[group]) {
             auto empty_text = layout.headings[group];
             empty_text.top += 36 * scale_; empty_text.bottom += 38 * scale_;
@@ -74,20 +77,21 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
             if (r.bottom < body.top || r.top > body.bottom) continue;
             const bool hover = vm.hover_region == HitTestResult::HomeCard && vm.hover_control_index == placed.index && vm.hover_pane_index == pane_index;
             const float hot = HoverOpacity(prefix + L"card:" + std::to_wstring(group) + L":" + card.path, hover);
+            const bool highlighted = high_contrast && hover;
             painter_.FillRoundedRect(r, theme.radius_control * scale_, blend(theme.fill_input, theme.fill_hover, hot));
             painter_.StrokeRoundedRect(r, theme.radius_control * scale_, blend(theme.stroke_card, theme.accent, hot));
             const float icon_top = card.group == 0 ? (r.top + r.bottom - 28 * scale_) * 0.5f : r.top + 8 * scale_;
             const auto icon = D2D1::RectF(r.left + 14 * scale_, icon_top, r.left + 42 * scale_, icon_top + 28 * scale_);
             const int svg = FluentSvgIdForGlyph(card.glyph);
-            const bool native = card.group == 0 && !card.shell_icon_path.empty() &&
+            const bool native = !high_contrast && card.group == 0 && !card.shell_icon_path.empty() &&
                 icon_cache_.Draw(dc, icon, card.shell_icon_path, card.label, true, FILE_ATTRIBUTE_DIRECTORY);
             if (!native && (IsHighContrast() || !svg || !DrawFluentSvg(svg, icon, 1.0f, nullptr, true)))
-                DrawIconText(icon.left, icon.top, 28 * scale_, 28 * scale_, card.glyph.c_str(), L"", theme.accent_ink, 1.0f);
+                DrawIconText(icon.left, icon.top, 28 * scale_, 28 * scale_, card.glyph.c_str(), L"", highlighted ? theme.text_selected : theme.accent_ink, 1.0f);
             painter_.DrawText(card.label, D2D1::RectF(r.left + 52 * scale_, icon_top - 4 * scale_, r.right - 12 * scale_, icon_top + 32 * scale_),
-                compositor_->TextFormat(), theme.text);
+                compositor_->TextFormat(), highlighted ? theme.text_selected : theme.text);
             const std::wstring detail = card.detail.empty() && card.group == 2 ? card.path : card.detail;
             painter_.DrawText(detail, D2D1::RectF(r.left + 14 * scale_, r.top + 44 * scale_, r.right - 12 * scale_, r.top + 68 * scale_),
-                compositor_->SmallFormat(), theme.text_secondary);
+                compositor_->SmallFormat(), highlighted ? theme.text_selected : theme.text_secondary);
             if (card.used_ratio >= 0) {
                 const auto bar = D2D1::RectF(r.left + 14 * scale_, r.bottom - 16 * scale_, r.right - 14 * scale_, r.bottom - 11 * scale_);
                 painter_.FillRoundedRect(bar, 2 * scale_, theme.stroke_divider);

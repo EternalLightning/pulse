@@ -489,10 +489,10 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         tray_name_format_.reset();
         tray_folder_format_.reset();
         typography::CreateTextFormat(factory,
-            {typography::FontRole::Text, 13.0f * scale_, DWRITE_FONT_WEIGHT_SEMI_BOLD},
+            typography::Scaled(typography::kCompactCardTitle, scale_),
             &tray_name_format_);
         typography::CreateTextFormat(factory,
-            {typography::FontRole::Text, 11.0f * scale_, DWRITE_FONT_WEIGHT_NORMAL},
+            typography::Scaled(typography::kCompactCardCaption, scale_),
             &tray_folder_format_);
         for (IDWriteTextFormat* f : {tray_name_format_.get(), tray_folder_format_.get()})
             if (f) f->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -693,10 +693,10 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
             const D2D1_POINT_2F c = TrayCloseCentre(g);
             const float r = 10.0f * scale_;
             const bool hot = vm.hover_region == static_cast<int>(HitTestResult::TrayItemRemove);
-            const D2D1_COLOR_F fill = hot ? theme.danger
+            const D2D1_COLOR_F fill = hot ? theme.fill_hover
                 : (vm.dark ? rgba(0xFFFFFF, 0.09f) : rgba(0x000000, 0.06f));
             dc->FillEllipse(D2D1::Ellipse(c, r, r), color(fill, h));
-            D2D1_COLOR_F glyph = hot ? HexColor(0xFFFFFF) : theme.text_secondary;
+            D2D1_COLOR_F glyph = hot ? (hc ? theme.text_selected : theme.text) : theme.text_secondary;
             glyph.a *= h;
             DrawIconText(c.x - r, c.y - r, r * 2.0f, r * 2.0f, kIconCloseSmall, L"x", glyph, 0.55f);
         }

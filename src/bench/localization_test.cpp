@@ -22,6 +22,14 @@ bool Report(const char* name, bool passed) {
 int main(int argc, char** argv) {
     using namespace pulse::l10n;
     bool passed = true;
+    if (argc == 2 && std::string_view(argv[1]) == "--clear-filter") {
+        for (const auto language : {L"zh-CN", L"en-US"}) {
+            Initialize(GetModuleHandleW(nullptr), language);
+            passed &= Report("empty filter recovery label follows display language",
+                Get(StringId::ClearFilter) == (std::wstring_view(language) == L"zh-CN" ? L"清除筛选" : L"Clear filter"));
+        }
+        return passed ? 0 : 1;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--synced-features") {
         for (const auto language : {L"zh-CN", L"en-US"}) {
             Initialize(GetModuleHandleW(nullptr), language);

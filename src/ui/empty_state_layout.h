@@ -26,7 +26,7 @@ inline PaneEmptyLayout MakePaneEmptyLayout(const D2D1_RECT_F& bounds, float scal
 
     const float titleH = 24.0f * scale;
     const float messageH = out.show_message ? 20.0f * scale : 0.0f;
-    const float actionH = out.show_action ? 34.0f * scale : 0.0f;
+    const float actionH = out.show_action ? 32.0f * scale : 0.0f;
     const float textGap = out.show_message ? 2.0f * scale : 0.0f;
     const float actionGap = out.show_action ? 14.0f * scale : 0.0f;
     const float fixedH = titleH + textGap + messageH + actionGap + actionH;

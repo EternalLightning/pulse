@@ -1150,7 +1150,7 @@ void ClearTextWidthCache() {
             const auto label = pulse::l10n::Get(d.cloud_download_percent >= 0
                 ? pulse::l10n::StringId::CloudDownloadCancel : pulse::l10n::StringId::CloudDownloadPreview);
             const float width = std::min(w - 16.0f * s,
-                std::max(140.0f * s, MeasureLayoutText(compositor, dwrite, small_fmt, label) + 40.0f * s));
+                std::max(140.0f * s, MeasureLayoutText(compositor, dwrite, compositor ? compositor->TextFormat() : small_fmt, label) + 48.0f * s));
             const float left = x + (w - width) * 0.5f;
             out.cloud_download = D2D1::RectF(left, previewBottom - 46.0f * s,
                 left + width, previewBottom - 14.0f * s);
@@ -1235,8 +1235,8 @@ void ClearTextWidthCache() {
                     break;
                 }
                 case 2: { // 标签: 添加标签 row + preset chip grid (wraps)
-                    out.tag_add = D2D1::RectF(x, y, x + w, y + 26.0f * s);
-                    y += 26.0f * s + 6.0f * s;
+                    out.tag_add = D2D1::RectF(x, y, x + w, y + 32.0f * s);
+                    y += 32.0f * s + 6.0f * s;
                     float cx = x;
                     const float chipH = 22.0f * s;
                     bool any = false;

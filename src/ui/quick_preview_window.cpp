@@ -205,7 +205,7 @@ void QuickPreviewWindow::RecreateFormats() {
         close_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
     typography::CreateTextFormat(compositor_.DwriteFactory(),
-        {typography::FontRole::Monospace, 13.0f * scale_}, &preview_text_format_);
+        typography::Scaled(typography::kDocumentPreview, scale_), &preview_text_format_);
     if (preview_text_format_.get()) {
         preview_text_format_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         preview_text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);

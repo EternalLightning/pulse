@@ -15,7 +15,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_DUP_SKIP_SMALL_FILES;
+constexpr UINT kLastString = IDS_CLEAR_FILTER;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -34,7 +34,8 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::IndexDeviceUnavailable) <= kLastString &&
               static_cast<UINT>(StringId::TextRenderSmooth) <= kLastString &&
               static_cast<UINT>(StringId::OpenNetworkSettings) <= kLastString &&
-              static_cast<UINT>(StringId::DupSkipSmallFiles) <= kLastString);
+              static_cast<UINT>(StringId::DupSkipSmallFiles) <= kLastString &&
+              static_cast<UINT>(StringId::ClearFilter) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

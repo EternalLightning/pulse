@@ -71,7 +71,8 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
                                             : bounds.left + 18.0f * scale_;
             const float cy = (bounds.top + bounds.bottom) * 0.5f;
             DrawIconText(cx - edge * 0.5f, cy - edge * 0.5f, edge, edge,
-                         glyph, L"", theme.text, 0.8f);
+                         glyph, L"", IsHighContrast() && (spec.state.hovered || spec.state.pressed)
+                             ? theme.text_selected : theme.text, 0.8f);
         }
     };
     if (expanded_opacity > 0.0f) {
@@ -117,7 +118,8 @@ void MainRenderer::DrawAddressSearchChrome(const WindowViewModel& vm, float w, c
             painter_.DrawButton(spec);
             if (!layout.mode_label) DrawIconText(bounds.left, bounds.top,
                 bounds.right-bounds.left, bounds.bottom-bounds.top, content ? L"\xE8A5" : L"\xE8B7", L"",
-                theme.text, 0.8f);
+                IsHighContrast() ? spec.state.checked ? theme.accent_text
+                    : spec.state.hovered ? theme.text_selected : theme.text : theme.text, 0.8f);
         };
         segment(layout.name, false);
         segment(layout.content, true);

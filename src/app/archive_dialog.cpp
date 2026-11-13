@@ -84,7 +84,8 @@ void Layout(HWND hwnd, DialogState& s) {
     wcscpy_s(font.lfFaceName, L"Segoe UI");
     font.lfHeight = -Px(s, 14);
     const HFONT text = CreateFontIndirectW(&font);
-    font.lfWeight = FW_SEMIBOLD;
+    wcscpy_s(font.lfFaceName, L"Microsoft YaHei UI");
+    font.lfWeight = FW_BOLD;
     const HFONT title = CreateFontIndirectW(&font);
     font.lfWeight = FW_NORMAL;
     font.lfHeight = -Px(s, static_cast<int>(ds::kIconSize));

@@ -214,6 +214,7 @@ struct PaneViewModel {
     std::unordered_set<std::wstring> cut_names;
     std::shared_ptr<const TagDots> tag_dots;
     bool loading = false;
+    bool listing_failed = false;
     bool search_retaining_results = false;
     bool can_go_back = false;
     bool can_go_forward = false;
@@ -819,6 +820,7 @@ struct HitTestResult {
         RecentFilter,
         RecentClear,
         PaneEmptyNewFolder,
+        PaneEmptyRetry,
         DetailsOpen,
         DetailsStar,
         DetailsMore,
@@ -915,6 +917,7 @@ class MainRenderer {
     friend struct TooltipMotionUiTest;
     friend struct TrayCardMotionTest;
     friend struct StagingTrayMotionTest;
+    friend struct EmptyStateRenderTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);
