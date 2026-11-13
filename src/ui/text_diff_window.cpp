@@ -139,6 +139,11 @@ Theme TextDiffWindow::CurrentTheme() const {
     return DiffHighContrast() ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
 }
 
+D2D1_COLOR_F TextDiffWindow::NewerBadgeText(D2D1_COLOR_F panel) const {
+    return DiffHighContrast() ? CurrentTheme().text_selected :
+        AutoAccentText(BlendOver(WithAlpha(accent_, 0.18f), panel));
+}
+
 bool TextDiffWindow::EnsureWindow(HWND owner) {
     if (hwnd_) return true;
     static bool registered = false;
@@ -180,9 +185,7 @@ void TextDiffWindow::Show(HWND owner, const std::wstring& left, const std::wstri
     dark_ = dark;
     accent_ = accent;
     if (!EnsureWindow(owner)) return;
-    const BOOL immersive_dark = dark ? TRUE : FALSE;
-    DwmSetWindowAttribute(hwnd_, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &immersive_dark,
-                          sizeof(immersive_dark));
+    SetAppearance(dark, effect_, accent);
     path_[0] = left;
     path_[1] = right;
     for (int i = 0; i < 2; ++i) {
@@ -212,6 +215,16 @@ void TextDiffWindow::Show(HWND owner, const std::wstring& left, const std::wstri
     if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void TextDiffWindow::SetAppearance(bool dark, WindowEffect effect, D2D1_COLOR_F accent) {
+    dark_ = dark;
+    effect_ = effect;
+    accent_ = accent;
+    hatch_.reset();
+    if (!hwnd_) return;
+    ApplyWindowEffect(hwnd_, effect_, dark_);
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -964,10 +977,11 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
             const D2D1_RECT_F pill = D2D1::RectF(nx + name_w + 8.0f * s, header_.top + 6.0f * s,
                                                  nx + name_w + 8.0f * s + tw,
                                                  header_.top + 22.0f * s);
-            brush_->SetColor(D2D1::ColorF(accent_.r, accent_.g, accent_.b, 0.18f));
+            const auto badge = hc ? theme.fill_selected : WithAlpha(accent_, 0.18f);
+            brush_->SetColor(badge);
             dc->FillRoundedRectangle(D2D1::RoundedRect(pill, 8.0f * s, 8.0f * s), brush_.get());
             text_at(tag, D2D1::RectF(pill.left + 6.0f * s, pill.top, pill.right, pill.bottom),
-                    small_.get(), theme.accent_text);
+                    small_.get(), NewerBadgeText(pal.panel));
         }
         std::wstring sub = fi.folder;
         if (!fi.time.empty()) sub += (sub.empty() ? L"" : L"  \x00B7  ") + fi.time;
@@ -1253,6 +1267,11 @@ LRESULT TextDiffWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam
         ImmAssociateContext(hwnd_, nullptr);
         compositor_.RecreateTextFormats(scale_);
         RecreateFormats();
+        return 0;
+    case WM_THEMECHANGED:
+    case WM_SETTINGCHANGE:
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+        SetAppearance(dark_, effect_, accent_);
         return 0;
     case WM_SIZE:
         ResetScrollAnimation();

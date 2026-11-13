@@ -48,8 +48,11 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
     };
     auto toggle=[&](D2D1_RECT_F r,I title,I desc,const wchar_t* icon,bool on,int hit) {
         if(IsHovered(vm,H::SettingsToggle,hit)) {
-            MakeBrush(dc,theme.fill_hover,brFillHover_);
-            FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
+            if (IsHighContrast()) painter_.StrokeRoundedRect(r, 8*scale_, theme.stroke_card);
+            else {
+                MakeBrush(dc,SettingsPressed(vm,r) ? theme.fill_pressed : theme.fill_hover,brFillHover_);
+                FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
+            }
         }
         const auto bounds=SettingsToggleBounds(r,l10n::Get(desc),scale_,&painter_);
         DrawIconText(bounds.icon.left,bounds.icon.top,bounds.icon.right-bounds.icon.left,
@@ -64,16 +67,17 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         // Busy is enforced in HitTest/controller, not by recoloring every sibling
         // switch. Its geometry and checked appearance stay stable until result.
         fluent::ControlState state{}; state.checked=on; state.hovered=IsHovered(vm,H::SettingsToggle,hit);
-        DrawSettingsSwitch(L"setting:"+std::to_wstring(hit),bounds.control,state);
+        DrawSettingsSwitch(vm, L"setting:"+std::to_wstring(hit),bounds.control,state);
     };
     auto button=[&](D2D1_RECT_F r,const std::wstring& value,H::Region region,int index,bool primary=false,bool enabled=true,const wchar_t* glyph=L"") {
         fluent::ControlState st{}; st.enabled=enabled; st.hovered=enabled && IsHovered(vm,region,index);
-        painter_.DrawButton({r,value,glyph,primary ? fluent::ButtonKind::Primary : fluent::ButtonKind::Standard,st});
+        DrawSettingsButton(vm, {r,value,glyph,primary ? fluent::ButtonKind::Primary : fluent::ButtonKind::Standard,st});
     };
     auto disclosure=[&](D2D1_RECT_F r,I title,I desc,const wchar_t* icon,int id,bool own_card) {
         if(own_card) draw_card(r);
         const float hover = ControlHoverOpacity(r, IsHovered(vm,H::SettingsDisclosure,id));
-        if(hover > 0.0f) {
+        if(hover > 0.0f && IsHighContrast()) painter_.StrokeRoundedRect(r, 8*scale_, theme.stroke_card);
+        if(hover > 0.0f && !IsHighContrast()) {
             auto fill = theme.fill_hover; fill.a *= hover;
             MakeBrush(dc,fill,brFillHover_);
             FillRoundedRect(dc,brFillHover_.get(),r.left+2*scale_,r.top+2*scale_,r.right-r.left-4*scale_,r.bottom-r.top-4*scale_,6*scale_);
@@ -97,7 +101,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             fluent::SegmentedItemSpec item{};item.bounds=choices[i];item.text=l10n::Get(labels[i]);
             item.state.checked=current==values[i];item.state.hovered=IsHovered(vm,hit,i);
             item.shared_track=true; item.position=i==0 ? fluent::SegmentPosition::First : i==2 ? fluent::SegmentPosition::Last : fluent::SegmentPosition::Middle;
-            painter_.DrawSegmentedItem(item);
+            DrawSettingsSegment(vm, item);
         }
     };
     if (IsSettingsCategory(vm.settings_page)) {
@@ -112,7 +116,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             control.text = value;
             control.drop_down = true;
             control.state.hovered = IsHovered(vm, H::SettingsDropdown, id);
-            painter_.DrawButton(control);
+            DrawSettingsButton(vm, control);
         };
         if (vm.settings_page == 0) {
             const bool small_theme = lay.theme_tile[0].left < lay.theme_row.left + 100 * scale_;
@@ -147,7 +151,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                                          selected ? 2 * scale_ : 1);
                 if (selected)
                     DrawIconText(preview.right - 23 * scale_, preview.top + 3 * scale_, 20 * scale_, 20 * scale_,
-                                 L"\xE73E", L"", !vm.dark && i != 0 ? HexColor(0xFFFFFF) : theme.accent, 0.7f);
+                                 L"\xE73E", L"", !vm.dark && i != 0 ? HexColor(0xFFFFFF) : theme.accent_ink, 0.7f);
                 painter_.DrawText(l10n::Get(theme_names[i]),
                                   D2D1::RectF(r.left, preview.bottom + 2 * scale_, r.right, r.bottom),
                                   compositor_->SmallFormat(), theme.text, fluent::HorizontalAlignment::Center);
@@ -210,7 +214,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                 }
                 painter_.DrawText(l10n::Get(effects[i]),
                                   D2D1::RectF(r.left, preview.bottom + 3 * scale_, r.right, r.bottom),
-                                  compositor_->SmallFormat(), selected ? theme.accent : theme.text_secondary,
+                                  compositor_->SmallFormat(), selected ? theme.accent_ink : theme.text_secondary,
                                   fluent::HorizontalAlignment::Center);
             }
 
@@ -240,7 +244,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                          18.0f * scale_);
             fluent::ControlState choose{};
             choose.hovered = IsHovered(vm, HitTestResult::SettingsWallpaper, 0);
-            painter_.DrawButton({lay.wallpaper_choose,
+            DrawSettingsButton(vm, {lay.wallpaper_choose,
                                  pulse::l10n::Get(pulse::l10n::StringId::ChooseImage),
                                  {},
                                  fluent::ButtonKind::Standard,
@@ -248,7 +252,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             fluent::ControlState clear{};
             clear.enabled = !vm.background_image.empty();
             clear.hovered = clear.enabled && IsHovered(vm, HitTestResult::SettingsWallpaper, 1);
-            painter_.DrawButton({lay.wallpaper_clear,
+            DrawSettingsButton(vm, {lay.wallpaper_clear,
                                  pulse::l10n::Get(pulse::l10n::StringId::Clear),
                                  {},
                                  fluent::ButtonKind::Standard,
@@ -370,6 +374,19 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             button(lay.configuration_action[0], l10n::Get(I::OpenLocation), H::SettingsConfigurationAction, 0);
             button(lay.configuration_action[1], l10n::Get(I::ChangeLocation), H::SettingsConfigurationAction, 1, true,
                    !vm.settings_storage_pending);
+            painter_.DrawWrappedCaption(vm.settings_transfer_status,
+                D2D1::Point2F(lay.transfer_description.left, lay.transfer_description.top),
+                lay.transfer_description.right - lay.transfer_description.left, theme.text_secondary);
+            const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
+                l10n::StringId::ImportSettingsTitle, l10n::StringId::RestartNow};
+            for (int i = 0; i < 2 + static_cast<int>(vm.settings_transfer_pending); ++i) {
+                fluent::ControlState state{};
+                state.enabled = !vm.settings_transfer_busy;
+                state.hovered = state.enabled && IsHovered(vm, HitTestResult::SettingsDiagnosticsAction, i + 3);
+                DrawSettingsButton(vm, {lay.transfer_action[i], l10n::Get(transfer_labels[i]), {},
+                    fluent::ButtonKind::Standard, state});
+            }
+
             dc->PushAxisAlignedClip(lay.footer, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             painter_.DrawWrappedCaption(l10n::Get(I::SettingsStorageFooter),
                                         D2D1::Point2F(lay.footer.left, lay.footer.top),

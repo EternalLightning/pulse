@@ -16,10 +16,15 @@
 
 #include "settings_categories_cases.h"
 #include "settings_page_cases.h"
+#include "settings_input_cases.h"
 #include "cloud_columns_cases.h"
 #include "cloud_sidebar_cases.h"
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "--settings-input-only")
+        return RunSettingsInputCases();
+    if (argc > 1 && std::string_view(argv[1]) == "--settings-transfer-only")
+        return RunSettingsPageCases(true);
     if (argc > 1 && std::string_view(argv[1]) == "--settings-page-only")
         return RunSettingsPageCases();
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-sidebar-only")
@@ -124,10 +129,10 @@ int main(int argc, char** argv) {
             "Ctrl hover preserves explicit copying");
         ClearDropFeedback(state);
         frame.settings_open = true;
-        frame.settings_page = 3;
+        frame.settings_page = 8;
         frame.settings_scroll = 0;
         frame.settings_transfer_status = l10n::Get(l10n::StringId::SettingsTransferDesc);
-        frame.settings_transfer_has_backup = true;
+        frame.settings_transfer_pending = true;
         ui::fluent::Painter measuring(&state.compositor);
         measuring.SetScale(scale);
         measuring.BeginFrame(theme);

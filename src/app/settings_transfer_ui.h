@@ -11,8 +11,7 @@ namespace pulse::app { struct SettingsTask; struct SettingsTaskResult; }
 
 namespace pulse {
 struct SettingsTransferView {
-    bool busy = false, pending = false, has_backup = false;
-    std::wstring backup_time;
+    bool busy = false, pending = false;
 };
 SettingsTransferView GetSettingsTransferView();
 void SettingsTransferAction(AppState& s, int action);

@@ -12,6 +12,7 @@
 #include "typography.h"
 #include "window_helpers.h"
 #include "dialog_text_fit.h"
+#include "dialog_style.h"
 #include "conflict_details.h"
 #include "animation_clock.h"
 #ifdef PULSE_UI_TEST_HOOKS
@@ -27,6 +28,51 @@
 #include <tuple>
 
 namespace pulse::ui {
+#ifdef PULSE_UI_TEST_HOOKS
+bool InspectDialogPixels(Compositor& compositor, DialogPixelInspection& inspection) {
+    auto* dc = compositor.Dc();
+    if (!dc) return false;
+    ComPtr<ID2D1Image> image;
+    ComPtr<ID2D1Bitmap1> source, readable;
+    dc->GetTarget(&image);
+    if (!image.get() || FAILED(image->QueryInterface(&source))) return false;
+    const auto size = source->GetPixelSize();
+    const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ |
+        D2D1_BITMAP_OPTIONS_CANNOT_DRAW, source->GetPixelFormat(), 96, 96);
+    if (FAILED(dc->CreateBitmap(size, nullptr, 0, properties, &readable)) ||
+        FAILED(readable->CopyFromBitmap(nullptr, source.get(), nullptr))) return false;
+    D2D1_MAPPED_RECT pixels{};
+    if (FAILED(readable->Map(D2D1_MAP_OPTIONS_READ, &pixels))) return false;
+    const auto bounds = inspection.bounds;
+    const bool full = bounds.right <= bounds.left || bounds.bottom <= bounds.top;
+    const UINT left = full ? 0 : static_cast<UINT>(std::clamp(bounds.left, 0.0f, static_cast<float>(size.width)));
+    const UINT top = full ? 0 : static_cast<UINT>(std::clamp(bounds.top, 0.0f, static_cast<float>(size.height)));
+    const UINT right = full ? size.width : static_cast<UINT>(std::clamp(bounds.right, 0.0f, static_cast<float>(size.width)));
+    const UINT bottom = full ? size.height : static_cast<UINT>(std::clamp(bounds.bottom, 0.0f, static_cast<float>(size.height)));
+    inspection.matching = inspection.samples = 0;
+    inspection.varied = inspection.nonblack = false;
+    const auto expected = inspection.expected;
+    const int channels[] = {static_cast<int>(std::lround(expected.b * 255)),
+        static_cast<int>(std::lround(expected.g * 255)), static_cast<int>(std::lround(expected.r * 255)),
+        static_cast<int>(std::lround(expected.a * 255))};
+    const auto* first = pixels.bits + top * pixels.pitch + left * 4;
+    for (UINT y = top; y < bottom; ++y) {
+        for (UINT x = left; x < right; ++x) {
+            const auto* pixel = pixels.bits + y * pixels.pitch + x * 4;
+            bool matches = true;
+            for (int channel = 0; channel < 4; ++channel) {
+                matches = matches && std::abs(static_cast<int>(pixel[channel]) - channels[channel]) <= 2;
+                inspection.varied = inspection.varied || pixel[channel] != first[channel];
+            }
+            inspection.nonblack = inspection.nonblack || pixel[0] > 4 || pixel[1] > 4 || pixel[2] > 4;
+            inspection.matching += matches;
+            ++inspection.samples;
+        }
+    }
+    readable->Unmap();
+    return inspection.samples > 0;
+}
+#endif
 namespace {
 
 constexpr wchar_t kTransferClass[] = L"PulseFileOperationWindow";
@@ -298,7 +344,7 @@ public:
         const int width = static_cast<int>(480 * scale_);
         const int height = static_cast<int>(428 * scale_);
         hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, kConflictClass, l10n::Get(l10n::StringId::OpConflictTitle).c_str(),
-            WS_POPUP | WS_THICKFRAME | WS_SYSMENU,
+            WS_POPUP | WS_SYSMENU,
             CW_USEDEFAULT, CW_USEDEFAULT, width, height, owner, nullptr,
             wc.hInstance, this);
         if (!hwnd_) return result_;
@@ -333,11 +379,18 @@ private:
                     : DefWindowProcW(hwnd, message, wparam, lparam);
     }
 
-    D2D1_RECT_F CloseRect() const { return Rect(scale_, 434, 0, 46, 44); }
+    D2D1_RECT_F CloseRect() const { return Rect(scale_, 480 - dialog_style::kCloseWidth, 0,
+        dialog_style::kCloseWidth, dialog_style::kTitleHeight); }
     D2D1_RECT_F CardRect(int index) const { return Rect(scale_, 20, 121 + index * 66.0f, 440, 58); }
     D2D1_RECT_F CheckRect() const { return Rect(scale_, 20, details_ ? 438.0f : 326.0f, 350, 30); }
-    D2D1_RECT_F DetailRect() const { return Rect(scale_, 20, details_ ? 486.0f : 374.0f, 124, 32); }
-    D2D1_RECT_F CancelRect() const { return Rect(scale_, 362, details_ ? 482.0f : 370.0f, 98, 34); }
+    D2D1_RECT_F DetailRect() const { return painter_.FitButtonBounds(
+        Rect(scale_, 20, details_ ? 490.0f : 380.0f, 0, dialog_style::kControlHeight),
+        l10n::Get(details_ ? l10n::StringId::OpBrief : l10n::StringId::OpMore), L"\xE70D"); }
+    D2D1_RECT_F CancelRect() const {
+        const float width = painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel));
+        return D2D1::RectF(460 * scale_ - width, (details_ ? 490 : 380) * scale_,
+            460 * scale_, (details_ ? 522 : 412) * scale_);
+    }
 
     int Hit(float x, float y) const {
         if (pulse::ui::ContainsRect(CloseRect(), x, y)) return 7;
@@ -395,7 +448,7 @@ private:
         painter_.DrawBadge(badge);
     }
 
-    void Render() {
+    void Render(bool present = true) {
         if (compositor_.NeedsRecovery()) {
             if (!compositor_.Recover()) return;
             compositor_.RecreateTextFormats(scale_);
@@ -408,9 +461,10 @@ private:
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_,
                      scale_);
 
-        painter_.DrawGlyph(L"\xE8C8", Rect(scale_, 14, 11, 22, 22), theme.accent);
-        painter_.DrawText(l10n::Get(l10n::StringId::OpConflictTitle).c_str(), Rect(scale_, 42, 0, 260, 44),
-                          compositor_.SmallFormat(), theme.text);
+        painter_.DrawGlyph(L"\xE8C8", Rect(scale_, 20, 12, dialog_style::kIconSize, dialog_style::kIconSize),
+            high_contrast ? theme.text : theme.accent_ink);
+        painter_.DrawText(l10n::Get(l10n::StringId::OpConflictTitle).c_str(), Rect(scale_, 48, 0, 378, dialog_style::kTitleHeight),
+                          compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 7;
         close_state.pressed = pressed_ == 7;
@@ -437,23 +491,23 @@ private:
             fluent::ControlState check{};
             check.checked = apply_all_;
             check.hovered = hover_ == 4;
-            check.focused = focus_ == 3;
+            check.keyboard_focus = focus_ == 3;
             const std::wstring label = l10n::Get(l10n::StringId::OpApplyLead).c_str() + std::to_wstring(conflict_.remaining)
                                      + l10n::Get(l10n::StringId::OpApplyEnd).c_str();
             painter_.DrawCheckBox(CheckRect(), label, check);
         }
-        painter_.FillRoundedRect(Rect(scale_, 0, details_ ? 474.0f : 360.0f, 480, 1), 0,
+        painter_.FillRoundedRect(Rect(scale_, 0, details_ ? 474.0f : 364.0f, 480, 1), 0,
                                  theme.stroke_divider);
         fluent::ControlState detail_state{};
         detail_state.hovered = hover_ == 5;
-        detail_state.focused = focus_ == (conflict_.remaining > 1 ? 4 : 3);
+        detail_state.keyboard_focus = focus_ == (conflict_.remaining > 1 ? 4 : 3);
         painter_.DrawButton({ DetailRect(), details_ ? l10n::Get(l10n::StringId::OpBrief).c_str() : l10n::Get(l10n::StringId::OpMore).c_str(),
                               details_ ? L"\xE70E" : L"\xE70D",
                               fluent::ButtonKind::Transparent, detail_state });
         fluent::ControlState cancel_state{};
         cancel_state.hovered = hover_ == 6;
         cancel_state.pressed = pressed_ == 6;
-        cancel_state.focused = focus_ == (conflict_.remaining > 1 ? 5 : 4);
+        cancel_state.keyboard_focus = focus_ == (conflict_.remaining > 1 ? 5 : 4);
         painter_.DrawButton({ CancelRect(), l10n::Get(l10n::StringId::Cancel).c_str(), {}, fluent::ButtonKind::Standard,
                               cancel_state });
 
@@ -468,7 +522,11 @@ private:
             DrawConflictDetails(painter_, compositor_, Rect(scale_, 20, top, 440, 104), scale_, theme, dark_, true,
                 {source_label, source_meta, conflict_.source}, {existing_label, target_meta, conflict_.destination});
         }
-        pulse::ui::EndSurface(compositor_);
+        if (present) pulse::ui::EndSurface(compositor_);
+        else {
+            const HRESULT result = compositor_.Dc()->EndDraw();
+            if (FAILED(result)) compositor_.NotifyDeviceLost(result);
+        }
     }
 
     LRESULT Handle(UINT message, WPARAM wparam, LPARAM lparam) {
@@ -483,6 +541,24 @@ private:
             return 0;
         case WM_NCCALCSIZE:
             return 0;
+#ifdef PULSE_UI_TEST_HOOKS
+        case kConfirmSnapshotMessage: {
+            Render(false);
+            DialogPixelInspection pixels;
+            return lparam && InspectDialogPixels(compositor_, pixels) && pixels.varied && pixels.nonblack &&
+                bench::SaveSnapshot(compositor_, reinterpret_cast<const wchar_t*>(lparam));
+        }
+        case kDialogInspectPixelsMessage:
+            Render(false);
+            return lparam && InspectDialogPixels(compositor_, *reinterpret_cast<DialogPixelInspection*>(lparam));
+        case kConflictInspectMessage:
+            if (lparam) {
+                *reinterpret_cast<ConflictDialogInspection*>(lparam) =
+                    {CloseRect(), CheckRect(), DetailRect(), CancelRect(), focus_, details_};
+                return TRUE;
+            }
+            return FALSE;
+#endif
         case WM_GETMINMAXINFO: {
             auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
             info->ptMinTrackSize = {static_cast<LONG>(std::ceil(480.0f * scale_)),
@@ -490,7 +566,8 @@ private:
             return 0;
         }
         case WM_NCHITTEST:
-            return pulse::ui::BorderlessHitTest(hwnd_, lparam, 44 * scale_, CloseRect());
+            return pulse::ui::BorderlessHitTest(hwnd_, lparam,
+                dialog_style::kTitleHeight * scale_, CloseRect());
         case WM_SIZE:
             if (compositor_.Dc()) compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -622,7 +699,7 @@ public:
         if (spec.still_valid && !spec.still_valid()) return false;
         owner_ = owner;
         spec_ = spec;
-        spec_.message = path::FriendlyPathText(spec_.message);
+        if (!spec_.preserve_message) spec_.message = path::FriendlyPathText(spec_.message);
         spec_.note = path::FriendlyPathText(spec_.note);
         for (auto& row : spec_.rows) if (row.is_path) row.text = path::FriendlyPathText(row.text);
         if (spec_.confirm_text.empty()) spec_.confirm_text = pulse::l10n::Get(pulse::l10n::StringId::ConfirmDefault);
@@ -632,7 +709,7 @@ public:
         accepted_ = false;
         checked_ = false;
         done_ = false;
-        focus_ = spec_.cancel_is_default ? 1 : 0;
+        focus_ = spec_.cancel_is_default && !spec_.hide_cancel ? 1 : 0;
         scale_ = static_cast<float>(pulse::compat::WindowDpi(owner ? owner : GetDesktopWindow())) / 96.0f;
 
         WNDCLASSEXW wc{ sizeof(wc) };
@@ -719,39 +796,42 @@ private:
     }
 
     void LayoutFromSize(float width, float height) {
-        const float pad = ScaleDip(scale_, 20.0f);
-        const float title_h = ScaleDip(scale_, 36.0f);
-        const float close_w = ScaleDip(scale_, 46.0f);
-        const float gap = ScaleDip(scale_, 8.0f);
-        const float btn_h = painter_.MeasureButtonHeight();
+        const float pad = ScaleDip(scale_, dialog_style::kMargin);
+        const float title_h = ScaleDip(scale_, dialog_style::kTitleHeight);
+        const float close_w = ScaleDip(scale_, dialog_style::kCloseWidth);
+        const float gap = ScaleDip(scale_, dialog_style::kGap);
+        const float btn_h = ScaleDip(scale_, dialog_style::kControlHeight);
         close_rc_ = D2D1::RectF(width - close_w, 0, width, title_h);
-        const float cancel_w = painter_.MeasureButtonWidth(spec_.cancel_text);
+        const float cancel_w = spec_.hide_cancel ? 0.0f : painter_.MeasureButtonWidth(spec_.cancel_text);
         const float confirm_w = painter_.MeasureButtonWidth(spec_.confirm_text);
         const float alternate_w = spec_.alternate_text.empty() ? 0.0f : painter_.MeasureButtonWidth(spec_.alternate_text);
-        const float buttons_width = cancel_w + gap + confirm_w + (alternate_w > 0 ? gap + alternate_w : 0.0f);
+        const float buttons_width = confirm_w + (cancel_w > 0 ? gap + cancel_w : 0.0f) +
+            (alternate_w > 0 ? gap + alternate_w : 0.0f);
         const bool stacked = buttons_width > width - 2.0f * pad;
-        const float y1 = height - ScaleDip(scale_, 10.0f);
+        const float y1 = height - ScaleDip(scale_, 16.0f);
         const float y0 = y1 - btn_h;
         confirm_rc_ = D2D1::RectF(width - pad - confirm_w, y0, width - pad, y1);
-        cancel_rc_ = D2D1::RectF(confirm_rc_.left - gap - cancel_w, y0,
-                                 confirm_rc_.left - gap, y1);
-        if (!spec_.alternate_text.empty()) {
-            alternate_rc_ = D2D1::RectF(cancel_rc_.left - gap - alternate_w, y0,
-                cancel_rc_.left - gap, y1);
-        }
-        float footer_top = y0;
+        const float secondary_right = confirm_rc_.left - gap;
+        cancel_rc_ = cancel_w > 0 ? D2D1::RectF(secondary_right - cancel_w, y0, secondary_right, y1) : D2D1_RECT_F{};
+        const float alternate_right = cancel_w > 0 ? cancel_rc_.left - gap : secondary_right;
+        alternate_rc_ = alternate_w > 0 ? D2D1::RectF(alternate_right - alternate_w, y0, alternate_right, y1) : D2D1_RECT_F{};
+        float footer_top = height - ScaleDip(scale_, dialog_style::kFooterHeight);
         if (stacked) {
             confirm_rc_ = D2D1::RectF(pad, y0, width - pad, y1);
-            cancel_rc_ = D2D1::RectF(pad, y0 - gap - btn_h, width - pad, y0 - gap);
-            footer_top = cancel_rc_.top;
-            if (alternate_w > 0) {
-                alternate_rc_ = D2D1::RectF(pad, footer_top - gap - btn_h, width - pad, footer_top - gap);
-                footer_top = alternate_rc_.top;
+            float next_bottom = y0 - gap;
+            if (cancel_w > 0) {
+                cancel_rc_ = D2D1::RectF(pad, next_bottom - btn_h, width - pad, next_bottom);
+                next_bottom = cancel_rc_.top - gap;
             }
+            if (alternate_w > 0) {
+                alternate_rc_ = D2D1::RectF(pad, next_bottom - btn_h, width - pad, next_bottom);
+                next_bottom = alternate_rc_.top - gap;
+            }
+            footer_top = next_bottom + gap - ScaleDip(scale_, 16.0f);
         }
-        const float msg_top = title_h + ScaleDip(scale_, 16.0f);
+        const float msg_top = title_h + pad;
         const float check_h = spec_.checkbox_text.empty() ? 0.0f : ScaleDip(scale_, 38.0f);
-        message_rc_ = D2D1::RectF(pad, msg_top, width - pad, footer_top - ScaleDip(scale_, 12.0f) - check_h);
+        message_rc_ = D2D1::RectF(pad, msg_top, width - pad, footer_top - pad - check_h);
         message_height_ = MeasureContent(width - 2.0f * pad);
         dc_scroll_max_ = std::max(0.0f, message_height_ - (message_rc_.bottom - message_rc_.top));
         message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), false);
@@ -759,20 +839,20 @@ private:
         check_rc_ = D2D1::RectF(pad, message_rc_.bottom + ScaleDip(scale_, 4.0f),
                                width - pad, message_rc_.bottom + check_h);
         divider_top_ = title_h;
-        divider_footer_ = footer_top - ScaleDip(scale_, 12.0f);
+        divider_footer_ = footer_top;
         dip_w_ = width / std::max(scale_, 0.001f);
     }
 
     void SizeToContent() {
         if (!hwnd_ || !compositor_.DwriteFactory()) return;
         const float pad = ScaleDip(scale_, 20.0f);
-        const float title_h = ScaleDip(scale_, 36.0f);
+        const float title_h = ScaleDip(scale_, dialog_style::kTitleHeight);
         const float gap = ScaleDip(scale_, 8.0f);
-        const float btn_h = painter_.MeasureButtonHeight();
-        const float cancel_w = painter_.MeasureButtonWidth(spec_.cancel_text);
+        const float btn_h = ScaleDip(scale_, dialog_style::kControlHeight);
+        const float cancel_w = (spec_.hide_cancel ? 0.0f : painter_.MeasureButtonWidth(spec_.cancel_text));
         const float confirm_w = painter_.MeasureButtonWidth(spec_.confirm_text);
         float width = std::max(ScaleDip(scale_, kConfirmMinW),
-                               pad + cancel_w + gap + confirm_w + pad +
+                               pad + cancel_w + (cancel_w > 0 ? gap : 0.0f) + confirm_w + pad +
                                (spec_.alternate_text.empty() ? 0.0f : gap + painter_.MeasureButtonWidth(spec_.alternate_text)));
         RECT work{};
         MONITORINFO monitor{sizeof(monitor)};
@@ -780,16 +860,17 @@ private:
             work = monitor.rcWork;
             width = std::min(width, static_cast<float>(work.right - work.left - 24));
         }
-        const float buttons_width = cancel_w + gap + confirm_w +
+        const float buttons_width = cancel_w + (cancel_w > 0 ? gap : 0.0f) + confirm_w +
             (spec_.alternate_text.empty() ? 0.0f : gap + painter_.MeasureButtonWidth(spec_.alternate_text));
-        const int rows = buttons_width > width - 2.0f * pad ? (spec_.alternate_text.empty() ? 2 : 3) : 1;
-        const float footer_h = rows * btn_h + (rows - 1) * gap + ScaleDip(scale_, 20.0f);
+        const int rows = buttons_width > width - 2.0f * pad ? (1 + (spec_.hide_cancel ? 0 : 1) + (spec_.alternate_text.empty() ? 0 : 1)) : 1;
+        const float footer_h = rows * btn_h + (rows - 1) * gap + ScaleDip(scale_, 32.0f);
         const float wrap = width - pad * 2.0f;
         const float msg_h = MeasureContent(wrap);
         message_height_ = msg_h;
-        float height = title_h + ScaleDip(scale_, 16.0f) + msg_h
-                     + ScaleDip(scale_, 16.0f) + footer_h
+        float height = title_h + pad + msg_h
+                     + pad + footer_h
                      + (spec_.checkbox_text.empty() ? 0.0f : ScaleDip(scale_, 38.0f));
+        if (spec_.max_height_dip > 0.0f) height = std::min(height, ScaleDip(scale_, spec_.max_height_dip));
         if (work.bottom > work.top) height = std::min(height, static_cast<float>(work.bottom - work.top - 24));
         SetWindowPos(hwnd_, nullptr, 0, 0,
                      static_cast<int>(std::ceil(width)),
@@ -817,7 +898,7 @@ private:
         if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
     }
 
-    void Render() {
+    void Render(bool present = true) {
         if (compositor_.NeedsRecovery()) {
             if (!compositor_.Recover()) return;
             compositor_.RecreateTextFormats(scale_);
@@ -830,12 +911,12 @@ private:
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_,
                      scale_);
 
-        const D2D1_COLOR_F warning = dark_ ? HexColor(0xF7D154) : HexColor(0x8A5500);
-        painter_.DrawGlyph(L"\xE7BA", Rect(scale_, 14, 8, 22, 22), warning);
-        painter_.DrawText(spec_.title, D2D1::RectF(ScaleDip(scale_, 42.0f), 0,
+        const D2D1_COLOR_F warning = high_contrast ? theme.text : theme.accent_ink;
+        painter_.DrawGlyph(L"\xE7BA", Rect(scale_, 20, 12, dialog_style::kIconSize, dialog_style::kIconSize), warning);
+        painter_.DrawText(spec_.title, D2D1::RectF(ScaleDip(scale_, 48.0f), 0,
                                                   close_rc_.left - ScaleDip(scale_, 8.0f),
-                                                  ScaleDip(scale_, 36.0f)),
-                          compositor_.SmallFormat(), theme.text);
+                                                  ScaleDip(scale_, dialog_style::kTitleHeight)),
+                          compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 3;
         close_state.pressed = pressed_ == 3;
@@ -896,7 +977,7 @@ private:
             fluent::ControlState check{};
             check.checked = checked_;
             check.hovered = hover_ == 4;
-            check.focused = focus_ == 2;
+            check.keyboard_focus = focus_ == 2;
             painter_.DrawCheckBox(check_rc_, spec_.checkbox_text, check);
         }
 
@@ -908,8 +989,8 @@ private:
         cancel_state.hovered = hover_ == 2;
         cancel_state.pressed = pressed_ == 2;
         cancel_state.keyboard_focus = focus_ == 1;
-        painter_.DrawButton({ CancelRect(), spec_.cancel_text, {},
-                              fluent::ButtonKind::Transparent, cancel_state });
+        if (!spec_.hide_cancel) painter_.DrawButton({ CancelRect(), spec_.cancel_text, {},
+                              fluent::ButtonKind::Standard, cancel_state });
 
         if (!spec_.alternate_text.empty()) {
             fluent::ControlState alternate_state{};
@@ -929,7 +1010,11 @@ private:
                                            : fluent::ButtonKind::Primary,
                               confirm_state });
 
-        pulse::ui::EndSurface(compositor_);
+        if (present) pulse::ui::EndSurface(compositor_);
+        else {
+            const HRESULT result = compositor_.Dc()->EndDraw();
+            if (FAILED(result)) compositor_.NotifyDeviceLost(result);
+        }
     }
 
     bool ScrollAnimationsEnabled() const {
@@ -964,15 +1049,21 @@ private:
             SizeToContent();
             return 0;
 #ifdef PULSE_UI_TEST_HOOKS
-        case kConfirmSnapshotMessage:
-            Render();
-            return lparam && bench::SaveSnapshot(compositor_, reinterpret_cast<const wchar_t*>(lparam));
+        case kConfirmSnapshotMessage: {
+            Render(false);
+            DialogPixelInspection pixels;
+            return lparam && InspectDialogPixels(compositor_, pixels) && pixels.varied && pixels.nonblack &&
+                bench::SaveSnapshot(compositor_, reinterpret_cast<const wchar_t*>(lparam));
+        }
+        case kDialogInspectPixelsMessage:
+            Render(false);
+            return lparam && InspectDialogPixels(compositor_, *reinterpret_cast<DialogPixelInspection*>(lparam));
         case kConfirmInspectMessage:
             if (lparam) {
                 Render();
                 auto& info = *reinterpret_cast<ConfirmDialogInspection*>(lparam);
                 info = {spec_.rows.size(), message_scroll_, dc_scroll_max_, message_rc_,
-                    confirm_rc_, cancel_rc_, alternate_rc_};
+                    confirm_rc_, cancel_rc_, alternate_rc_, close_rc_, check_rc_, spec_.message, focus_};
                 return TRUE;
             }
             return FALSE;
@@ -980,7 +1071,7 @@ private:
         case WM_NCCALCSIZE:
             return 0;
         case WM_NCHITTEST:
-            return pulse::ui::BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
+            return pulse::ui::BorderlessHitTest(hwnd_, lparam, dialog_style::kTitleHeight * scale_, CloseRect());
         case WM_SIZE:
             if (compositor_.Dc()) compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
             LayoutFromSize(static_cast<float>(LOWORD(lparam)),
@@ -1075,6 +1166,7 @@ private:
             if (wparam == VK_TAB) {
                 const int count = (spec_.checkbox_text.empty() ? 2 : 3) + (spec_.alternate_text.empty() ? 0 : 1);
                 focus_ = (focus_ + (GetKeyState(VK_SHIFT) < 0 ? count - 1 : 1)) % count;
+                if (spec_.hide_cancel && focus_ == 1) focus_ = GetKeyState(VK_SHIFT) < 0 ? 0 : (count > 2 ? 2 : 0);
                 InvalidateRect(hwnd_, nullptr, FALSE);
                 return 0;
             }
@@ -1354,7 +1446,7 @@ void FileOperationWindow::Render(bool present) {
                        || status_.type == ops::OpType::RealDelete;
     const bool restoring = status_.type == ops::OpType::RestoreRecycle;
     const bool emptying = status_.type == ops::OpType::EmptyRecycle;
-    const D2D1_COLOR_F sky = dark_ ? HexColor(0x38BDF8) : HexColor(0x0284C7);
+    const D2D1_COLOR_F sky = high_contrast ? theme.text : dark_ ? HexColor(0x38BDF8) : HexColor(0x0284C7);
 
     const wchar_t* operation_glyph = (deleting || emptying) ? L"\xE74D"
         : restoring ? L"\xE777" : (moving ? L"\xE7C2" : L"\xE8C8");
@@ -1618,7 +1710,7 @@ void FileOperationWindow::Render(bool present) {
     const auto footer_bg = D2D1::RectF(0, height - ScaleDip(scale_, kFooterH) + 1.0f,
                                        width, height);
     painter_.FillRoundedRect(footer_bg, 0,
-        dark_ ? HexColor(0x202022, 0.92f) : HexColor(0x000000, 0.04f));
+        high_contrast ? theme.bg : dark_ ? HexColor(0x202022, 0.92f) : HexColor(0x000000, 0.04f));
 
     fluent::ControlState detail_state{};
     detail_state.hovered = hover_ == 5;
@@ -1734,6 +1826,17 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         return 0;
     case WM_NCCALCSIZE:
         return 0;
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+        const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
+        const float controls = painter_.MeasureButtonWidth(labels.details, L"\xE70D") +
+            painter_.MeasureButtonWidth(labels.cancel) + (labels.show_pause ?
+                painter_.MeasureButtonWidth(labels.pause) + ScaleDip(scale_, 8.0f) : 0.0f);
+        info->ptMinTrackSize = {static_cast<LONG>(std::ceil(std::max(ScaleDip(scale_, kDlgW),
+            controls + ScaleDip(scale_, 2 * kPadX + 8)))),
+            static_cast<LONG>(std::ceil(ScaleDip(scale_, kCollapsedH + (detailed_ ? kGraphBlockH : 0.0f))))};
+        return 0;
+    }
     case WM_NCHITTEST: {
         const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
         const auto chrome = MakeTransferChrome(scale_,

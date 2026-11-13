@@ -26,7 +26,6 @@ using I = l10n::StringId;
 std::atomic_bool transfer_busy{false};
 std::mutex disk_mutex;
 SettingsTransferView disk_view;
-std::wstring latest_backup;
 st::ApplyResult startup_result;
 
 std::wstring Stamp(bool iso = false) {
@@ -48,11 +47,7 @@ void RefreshDisk() {
     const auto dir = app::GetPulseDataDir();
     SettingsTransferView next;
     next.pending = st::HasPendingImport(dir);
-    const auto backups = st::ListBackups(dir);
     std::lock_guard lock(disk_mutex);
-    latest_backup = backups.empty() ? L"" : backups.front().dir;
-    next.has_backup = !backups.empty();
-    if (next.has_backup) next.backup_time = st::DisplayTime(backups.front().stamp);
     disk_view = std::move(next);
 }
 
@@ -122,8 +117,8 @@ void SettingsTransferAction(AppState& state, int action) {
         ~Release() { if (!started) transfer_busy.store(false, std::memory_order_release); }
     } release;
     const auto view = GetSettingsTransferView();
-    if (action == 2 && view.pending) {
-        if (!Restart(state)) Toast(state, l10n::Get(I::SettingsRestartFailed));
+    if (action == 2) {
+        if (view.pending && !Restart(state)) Toast(state, l10n::Get(I::SettingsRestartFailed));
         return;
     }
     app::SettingsTask task;
@@ -138,16 +133,6 @@ void SettingsTransferAction(AppState& state, int action) {
         if (!ipc::PickShellPath(state.hwnd, false, l10n::Get(I::ImportSettingsTitle), task.path,
             {L"JSON", L"*.json"})) return;
         if (!Confirm(state, I::ImportSettingsTitle, l10n::Get(I::SettingsTransferDesc), I::ImportSettingsConfirm)) return;
-    } else {
-        if (!view.has_backup) return;
-        task.kind = app::SettingsTaskKind::SettingsImport;
-        task.pin = true;
-        {
-            std::lock_guard lock(disk_mutex);
-            task.path = latest_backup;
-        }
-        if (!Confirm(state, I::RestoreSettingsTitle, Substitute(l10n::Get(I::RestoreSettingsPrompt),
-            L"{time}", view.backup_time), I::RestoreSettingsConfirm)) return;
     }
     if (!(release.started = state.settings.StartSettingsTransfer(std::move(task))))
         Toast(state, l10n::Get(action == 0 ? I::SettingsExportFailed : I::SettingsImportFailed));
@@ -165,8 +150,6 @@ bool RunSettingsTransferTask(const app::SettingsTask& task, std::wstring& error)
         ok = st::BuildBundle(dir, st::kAllCategories, {PULSE_VERSION_STRING, Stamp(true)}, text,
             nullptr, &task.snapshots) && WriteUtf8FileAtomic(task.path, text);
         if (!ok) error = l10n::Get(I::SettingsExportFailed);
-    } else if (task.pin) {
-        ok = st::StageRestore(dir, task.path);
     } else {
         std::wstring text;
         st::Bundle bundle;
@@ -197,7 +180,7 @@ bool WaitForSettingsRestart(unsigned long process_id) {
 }
 
 void ApplyStagedSettingsAtStartup() {
-    startup_result = st::ApplyPendingImport(app::GetPulseDataDir(), Stamp());
+    startup_result = st::ApplyPendingImport(app::GetPulseDataDir());
     RefreshDisk();
 }
 
@@ -205,6 +188,6 @@ void ShowSettingsTransferStartupToast(AppState& state) {
     const auto outcome = std::exchange(startup_result.outcome, st::ApplyOutcome::Nothing);
     if (outcome == st::ApplyOutcome::Nothing) return;
     Toast(state, l10n::Get(outcome == st::ApplyOutcome::Imported ? I::SettingsImportedToast :
-        outcome == st::ApplyOutcome::Restored ? I::SettingsRestoredToast : I::SettingsApplyFailedToast));
+        I::SettingsApplyFailedToast));
 }
 }

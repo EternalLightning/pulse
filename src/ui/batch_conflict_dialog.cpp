@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "batch_conflict_dialog.h"
+#include "dialog_style.h"
 #include "conflict_details.h"
 #include "animation_clock.h"
 #include "../common/text_format.h"
@@ -129,7 +130,7 @@ void BatchConflictDialog::Layout() {
     const bool inline_apply = label_width + 24 * s + total_choices <= width - 2 * pad;
     const float actions_bottom = add_choices(end, (inline_apply ? 100 : 120) * s, width - 2 * pad, Action::Apply, 0);
     header_height_ = actions_bottom + 20 * s;
-    footer_height_ = 64 * s;
+    footer_height_ = dialog_style::kFooterHeight * s;
     viewport_ = D2D1::RectF(pad, header_height_, width - 10 * s, (std::max)(header_height_ + 1, height - footer_height_));
     const bool columns = width >= 620 * s;
     const size_t first_row_control = controls_.size();
@@ -147,9 +148,8 @@ void BatchConflictDialog::Layout() {
     const float max_footer_width = (std::max)(1.0f, (width - 2 * pad - gap) / 2);
     const float cancel_width = (std::min)(max_footer_width, painter_.MeasureButtonWidth(labels_.cancel) + 12 * s);
     const float confirm_width = (std::min)(max_footer_width, painter_.MeasureButtonWidth(labels_.confirm) + 12 * s);
-    controls_.push_back({D2D1::RectF(end - cancel_width, button_y, end, button_y + 32 * s), Action::Cancel, 0, {}, labels_.cancel});
-    controls_.push_back({D2D1::RectF(end - cancel_width - gap - confirm_width, button_y,
-        end - cancel_width - gap, button_y + 32 * s), Action::Confirm, 0, {}, labels_.confirm});
+    controls_.push_back({D2D1::RectF(end - confirm_width - gap - cancel_width, button_y, end - confirm_width - gap, button_y + 32 * s), Action::Cancel, 0, {}, labels_.cancel});
+    controls_.push_back({D2D1::RectF(end - confirm_width, button_y, end, button_y + 32 * s), Action::Confirm, 0, {}, labels_.confirm});
     if (focus_ < 0 || focus_ >= static_cast<int>(controls_.size()) + 1) focus_ = static_cast<int>(controls_.size()) - 2;
     controls_.push_back({D2D1::RectF(width - 46 * s, 0, width, 44 * s), Action::Close, 0, {}, labels_.cancel});
 }
@@ -179,8 +179,8 @@ bool BatchConflictDialog::Render(bool present) {
     const auto theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
     const float s = scale_, width = static_cast<float>(compositor_.Width());
     BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_, s);
-    painter_.DrawGlyph(L"\xE8C8", D2D1::RectF(14 * s, 11 * s, 36 * s, 33 * s), theme.accent);
-    painter_.DrawText(labels_.title, D2D1::RectF(42 * s, 0, width - 50 * s, 44 * s), compositor_.SmallFormat(), theme.text);
+    painter_.DrawGlyph(L"\xE8C8", D2D1::RectF(dialog_style::kMargin * s, 12 * s, (dialog_style::kMargin + dialog_style::kIconSize) * s, 32 * s), theme.accent_ink);
+    painter_.DrawText(labels_.title, D2D1::RectF(48 * s, 0, width - dialog_style::kCloseWidth * s, dialog_style::kTitleHeight * s), compositor_.HeaderFormat(), theme.text);
     painter_.FillRoundedRect(D2D1::RectF(0, 43 * s, width, 44 * s), 0, theme.stroke_divider);
     Text(labels_.instruction, D2D1::RectF(20 * s, 60 * s, width - 20 * s, 92 * s), theme.text_secondary);
     const bool inline_apply = controls_[0].bounds.top == 100 * s;

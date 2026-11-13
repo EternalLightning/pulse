@@ -334,6 +334,13 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         return r;
                     }
                 }
+                for (int i = 0; i < 2 + static_cast<int>(vm.settings_transfer_pending); ++i) {
+                    if (!vm.settings_transfer_busy && ContainsPt(lay.transfer_action[i], x, y)) {
+                        r.region = HitTestResult::SettingsDiagnosticsAction;
+                        r.index = i + 3;
+                        return r;
+                    }
+                }
                 for (int i = 0; i < 2; ++i) if (ContainsPt(lay.configuration_action[i], x, y)) {
                     r.region = HitTestResult::SettingsConfigurationAction; r.index = i; return r;
                 }
@@ -410,14 +417,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 const int action=HitTestSettingsSysCtx(lay,vm,x,y);
                 if(action>=0) {r.region=HitTestResult::SettingsSysCtx;r.index=action;return r;}
             } else if (vm.settings_page == 3) {
-                for (int i = 0; i < 3; ++i) {
-                    if (!vm.settings_transfer_busy && (i < 2 || vm.settings_transfer_pending ||
-                        vm.settings_transfer_has_backup) && ContainsPt(lay.transfer_action[i], x, y)) {
-                        r.region = HitTestResult::SettingsDiagnosticsAction;
-                        r.index = i + 3;
-                        return r;
-                    }
-                }
                 for (int i = 0; i < 3; ++i) {
                     if (ContainsPt(lay.about_action[i], x, y)) {
                         r.region = HitTestResult::SettingsAboutAction;

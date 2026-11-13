@@ -4,7 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 // settings_transfer_test.cpp - Settings import / export (settings_transfer.h):
-// bundle contents, staged import with backup, restore, and the guards.
+// bundle contents, staged import without backups, rollback, and the guards.
 // Works only in bench_data\ fixtures built here; never the real data dir.
 #include "../app/settings_transfer.h"
 #include "../common/json_utils.h"
@@ -124,7 +124,7 @@ int wmain() {
     Bundle bundle;
     Check(ParseBundle(bundle_text, bundle) == ParseResult::Ok, L"bundle parses");
     Check(bundle.categories == kAllCategories && bundle.app_version == L"1.0.57" &&
-          DisplayTime(bundle.exported_at) == L"2026-10-21 23:40",
+          bundle.exported_at == L"2026-10-21T23:40:05",
           L"bundle header round trips");
     Check(bundle.File(L"places.json") && Contains(*bundle.File(L"places.json"), L"0xFF0000"),
           L"legacy colours survive as text");
@@ -143,11 +143,10 @@ int wmain() {
 
     // ---- import: settings, tags and aliases (not places, not searches) ----
     SeedTarget(target);
-    const std::wstring before_app = Read(target, L"app.json");
     Check(StageImport(target.wstring(), bundle, kPrefs | kTags | kAliases), L"import stages");
     Check(HasPendingImport(target.wstring()), L"staged import is pending");
     Check(Member(Read(target, L"app.json"), L"theme_mode") == L"1", L"staging leaves live files alone");
-    const ApplyResult applied = ApplyPendingImport(target.wstring(), L"20261021-120000");
+    const ApplyResult applied = ApplyPendingImport(target.wstring());
     Check(applied.outcome == ApplyOutcome::Imported && !HasPendingImport(target.wstring()),
           L"start applies the staged import once");
     const std::wstring app = Read(target, L"app.json");
@@ -172,45 +171,18 @@ int wmain() {
     Check(Contains(Read(target, L"aliases.json"), L"项目"), L"aliases arrive");
     Check(Contains(Read(target, L"saved_searches.json"), L"mine"), L"saved searches stay when not chosen");
 
-    // ---- backup and restore ----
-    const auto backups = ListBackups(target.wstring());
-    Check(backups.size() == 1 && backups[0].stamp == L"20261021-120000" &&
-          DisplayTime(backups[0].stamp) == L"2026-10-21 12:00",
-          L"import left one backup");
-    Check(!backups.empty() && Read(backups[0].dir, L"app.json") == before_app &&
-          Has(backups[0].dir, L"tag_rules.json"),
-          L"backup holds the files from before the import");
-    Check(!backups.empty() && StageRestore(target.wstring(), backups[0].dir), L"restore stages");
-    const ApplyResult restored = ApplyPendingImport(target.wstring(), L"20261021-130000");
-    Check(restored.outcome == ApplyOutcome::Restored, L"restore applies");
-    Check(Member(Read(target, L"app.json"), L"theme_mode") == L"1" &&
-          !Contains(Read(target, L"app.json"), L"copy_path"),
-          L"restored preferences are the old ones");
-    Check(!Has(target, L"context_menu.json"), L"files absent before the import are removed again");
-    Check(Has(target, L"tag_rules.json") && Contains(Read(target, L"places.json"), L"\"旧\""),
-          L"tag rules and old tags come back");
-    Check(ListBackups(target.wstring()).size() == 2, L"a restore also backs up the settings it replaces");
-
-    // ---- retention ----
-    for (int i = 0; i < 7; ++i) {
-        StageImport(target.wstring(), bundle, kAliases);
-        wchar_t stamp[32]{};
-        swprintf_s(stamp, L"20261022-1000%02d", i);
-        ApplyPendingImport(target.wstring(), stamp);
-    }
-    const auto kept = ListBackups(target.wstring());
-    Check(kept.size() == kBackupsKept && kept[0].stamp == L"20261022-100006",
-          L"only the newest backups are kept");
+    Check(!Has(target, L"backups") && !Has(target, L"settings_import"),
+          L"successful import leaves no backup or staging directory");
 
     // ---- guards ----
     fs::create_directories(target / L"settings_import");
     Write(target / L"settings_import", L"evil.json", L"{}");
     Write(target / L"settings_import", L"apply.list", L"mode import\nput ..\\evil.json\nput session.json\n");
-    const ApplyResult guarded = ApplyPendingImport(target.wstring(), L"20261023-000000");
+    const ApplyResult guarded = ApplyPendingImport(target.wstring());
     Check(guarded.outcome == ApplyOutcome::Failed && !Has(target, L"evil.json") &&
           !Has(target, L"session.json") && !HasPendingImport(target.wstring()),
           L"a list naming other files applies nothing and is dropped");
-    Check(ApplyPendingImport(target.wstring(), L"x").outcome == ApplyOutcome::Nothing,
+    Check(ApplyPendingImport(target.wstring()).outcome == ApplyOutcome::Nothing,
           L"no stage, nothing to do");
     StageImport(target.wstring(), bundle, kAliases);
     CancelPendingImport(target.wstring());
@@ -224,11 +196,6 @@ int wmain() {
           L"MergePrefs overlays choices and keeps this PC's members");
     Check(MergePrefs(L"garbage", L"{\"a\":1}") == L"{\n  \"a\":1\n}\n", L"MergePrefs survives an unreadable local file");
     Check(MergePrefs(L"{}", L"garbage").empty(), L"MergePrefs refuses an unreadable import");
-    Check(RestorePrefs(L"{\"a\":9,\"shell_tag_menu\":true}", L"{\"a\":1,\"shell_tag_menu\":false}") ==
-          L"{\n  \"a\":1,\n  \"shell_tag_menu\":true\n}\n",
-          L"RestorePrefs brings choices back and keeps this PC's members");
-    Check(DisplayTime(L"20261021-234005-2") == L"2026-10-21 23:40", L"display time of a suffixed backup");
-
     // Local settings are more extensive than the upstream whitelist. Their
     // portable members travel while old bundles leave destination additions.
     SeedTarget(target);
@@ -256,7 +223,7 @@ int wmain() {
     Check(!Member(*bundle.File(L"preferences.json"), L"left").size() &&
         Member(*bundle.File(L"preferences.json"), L"tray").empty(), L"window geometry and tray never travel");
     Check(StageImport(target.wstring(), bundle, kAllCategories) &&
-        ApplyPendingImport(target.wstring(), L"20261024-000000").outcome == ApplyOutcome::Imported,
+        ApplyPendingImport(target.wstring()).outcome == ApplyOutcome::Imported,
         L"local settings apply after staging");
     Check(Member(Read(target, L"preferences.json"), L"left") == L"40" &&
         Member(Read(target, L"preferences.json"), L"sidebarHidden") == L"5" &&
@@ -275,7 +242,7 @@ int wmain() {
     Bundle old_bundle;
     Check(ParseBundle(prefs_only, old_bundle) == ParseResult::Ok &&
         StageImport(target.wstring(), old_bundle, kPrefs) &&
-        ApplyPendingImport(target.wstring(), L"20261024-010000").outcome == ApplyOutcome::Imported &&
+        ApplyPendingImport(target.wstring()).outcome == ApplyOutcome::Imported &&
         Read(target, L"preferences.json") == local_preferences && Has(target, L"content-index.config"),
         L"older bundles preserve local extensions they do not carry");
 
@@ -285,26 +252,41 @@ int wmain() {
     Check(StageImport(target.wstring(), bundle, kPrefs), L"failure fixture stages");
     HANDLE locked = CreateFileW((target / L"tags.json").c_str(), GENERIC_READ,
         FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    // Hold a later selected file without FILE_SHARE_DELETE: backups can read it,
+    // Hold a later selected file without FILE_SHARE_DELETE: rollback state can read it,
     // but atomic replacement fails after app.json has already changed.
     if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
     Write(target, L"context_menu.json", L"{\"builtin_hidden\":0}");
     locked = CreateFileW((target / L"context_menu.json").c_str(), GENERIC_READ,
         FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    const auto rolled_back = ApplyPendingImport(target.wstring(), L"20261024-020000");
+    const auto rolled_back = ApplyPendingImport(target.wstring());
     if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
     Check(locked != INVALID_HANDLE_VALUE && rolled_back.outcome == ApplyOutcome::Failed &&
-        rolled_back.rollback_ok && rolled_back.changed == 0 && Read(target, L"app.json") == rollback_before,
+        rolled_back.rollback_ok && rolled_back.changed == 0 && Read(target, L"app.json") == rollback_before &&
+        !Has(target, L"backups") && !Has(target, L"settings_import"),
         L"late file replacement failure rolls earlier settings back");
+
+    SeedTarget(target);
+    const auto old_rules = Read(target, L"tag_rules.json");
+    DeleteFileW((target / L"aliases.json").c_str());
+    Check(StageImport(target.wstring(), bundle, kAllCategories), L"delete and create rollback fixture stages");
+    Write(target / L"settings_import", L"apply.list",
+        L"mode import\ndelete tag_rules.json\nput aliases.json\nput context_menu.json\n");
+    Write(target, L"context_menu.json", L"{}");
+    locked = CreateFileW((target / L"context_menu.json").c_str(), GENERIC_READ,
+        FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    const auto reverted = ApplyPendingImport(target.wstring());
+    if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+    Check(locked != INVALID_HANDLE_VALUE && reverted.outcome == ApplyOutcome::Failed && reverted.rollback_ok &&
+        Read(target, L"tag_rules.json") == old_rules && !Has(target, L"aliases.json") && !Has(target, L"backups"),
+        L"rollback restores deleted files and removes files created by the failed import without backups");
 
     SeedTarget(target);
     StageImport(target.wstring(), bundle, kPrefs);
     Write(target / L"settings_import", L"context_menu.json", L"{broken");
-    const auto malformed_stage = ApplyPendingImport(target.wstring(), L"20261024-030000");
+    const auto malformed_stage = ApplyPendingImport(target.wstring());
     Check(malformed_stage.outcome == ApplyOutcome::Failed &&
-        Read(target, L"app.json") == rollback_before && ListBackups(target.wstring()).empty(),
+        Read(target, L"app.json") == rollback_before && !Has(target, L"backups"),
         L"preflight rejects corrupt later payload before changing any settings");
-    Check(!StageRestore(target.wstring(), source.wstring()), L"restore rejects directories outside committed automatic backups");
     Check(ParseBundle(L"{\"format\":\"pulse-settings\",\"format_version\":1,\"files\":{\"app.json\":{},\"app.json\":{}}}",
         rejected) == ParseResult::Invalid, L"duplicate bundled file names are rejected");
     Check(IsMachineLocalPref(L"experimental_explorer_takeover"), L"local Explorer takeover integration stays on this PC");

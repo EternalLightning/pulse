@@ -41,9 +41,6 @@ constexpr std::wstring_view kPlacesFile = L"places.json";
 constexpr std::wstring_view kTagsFile = L"tags.json";
 constexpr wchar_t kStageDir[] = L"\\settings_import";
 constexpr wchar_t kListName[] = L"\\apply.list";
-constexpr wchar_t kBackupRoot[] = L"\\backups";
-constexpr std::wstring_view kBackupPrefix = L"pre-import-";
-constexpr wchar_t kAbsentName[] = L"\\absent.list";
 constexpr wchar_t kTagRecovery[] = L"\\tags.pending.json";
 
 const FileSpec* FindSpec(std::wstring_view name) {
@@ -272,35 +269,6 @@ bool SetTagsGeneration(const std::wstring& path, uint64_t generation) {
     return ValidContent(out, true) && WriteUtf8FileAtomic(path, out);
 }
 
-bool MakeBackup(const std::wstring& data_dir, std::wstring_view stamp, std::wstring& dir) {
-    const std::wstring root = data_dir + kBackupRoot;
-    if (!CreateDirectoryW(root.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
-        return false;
-    const std::wstring base = root + L"\\" + std::wstring(kBackupPrefix) + std::wstring(stamp);
-    dir = base;
-    for (int n = 2; Exists(dir) && n < 100; ++n) dir = base + L"-" + std::to_wstring(n);
-    if (!CreateDirectoryW(dir.c_str(), nullptr)) return false;
-    std::wstring absent;
-    for (const auto& spec : kFiles) {
-        const std::wstring live = data_dir + L"\\" + spec.name;
-        if (!Exists(live)) {
-            absent += spec.name;
-            absent += L'\n';
-            continue;
-        }
-        if (!CopyFileW(live.c_str(), (dir + L"\\" + spec.name).c_str(), FALSE)) return false;
-    }
-    return WriteUtf8FileAtomic(dir + kAbsentName, absent);
-}
-
-void PruneBackups(const std::wstring& data_dir) {
-    const auto backups = ListBackups(data_dir);
-    for (size_t i = kBackupsKept; i < backups.size(); ++i) {
-        ClearFiles(backups[i].dir);
-        RemoveDirectoryW(backups[i].dir.c_str());
-    }
-}
-
 } // namespace
 
 Category CategoryAt(int index) noexcept {
@@ -513,38 +481,6 @@ bool StageImport(const std::wstring& data_dir, const Bundle& bundle, uint32_t ca
     return CommitStage(data_dir, stage, lines);
 }
 
-bool StageRestore(const std::wstring& data_dir, const std::wstring& backup_dir) {
-    const auto known = ListBackups(data_dir);
-    if (std::none_of(known.begin(), known.end(), [&](const auto& backup) {
-        return backup.dir == backup_dir;
-    })) return false;
-    std::wstring absent_text;
-    if (!ReadUtf8File(backup_dir + kAbsentName, absent_text)) return false;
-    const std::vector<std::wstring> absent = Lines(absent_text);
-    std::wstring stage;
-    if (!BeginStage(data_dir, stage)) return false;
-    std::vector<std::wstring> lines{L"mode restore"};
-    for (const auto& spec : kFiles) {
-        const std::wstring name = spec.name;
-        const std::wstring saved = backup_dir + L"\\" + name;
-        if (Exists(saved)) {
-            std::wstring text;
-            if (!ReadPayload(saved, name, text) || !StageFile(stage, name, text)) {
-                RemoveStage(data_dir);
-                return false;
-            }
-            lines.push_back((name == kAppFile ? L"replace-prefs " : L"put ") + name);
-        } else if (std::find(absent.begin(), absent.end(), name) != absent.end()) {
-            lines.push_back(L"delete " + name);
-        }
-    }
-    if (lines.size() == 1) {
-        RemoveStage(data_dir);
-        return false;
-    }
-    return CommitStage(data_dir, stage, lines);
-}
-
 bool HasPendingImport(const std::wstring& data_dir) {
     return !data_dir.empty() && Exists(StagePath(data_dir) + kListName);
 }
@@ -553,29 +489,7 @@ void CancelPendingImport(const std::wstring& data_dir) {
     if (!data_dir.empty()) RemoveStage(data_dir);
 }
 
-std::vector<BackupInfo> ListBackups(const std::wstring& data_dir) {
-    std::vector<BackupInfo> backups;
-    if (data_dir.empty()) return backups;
-    const std::wstring root = data_dir + kBackupRoot;
-    WIN32_FIND_DATAW found{};
-    HANDLE find = FindFirstFileW((root + L"\\" + std::wstring(kBackupPrefix) + L"*").c_str(), &found);
-    if (find == INVALID_HANDLE_VALUE) return backups;
-    do {
-        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
-            (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-        const std::wstring name = found.cFileName;
-        if (name.size() <= kBackupPrefix.size()) continue;
-        const auto dir = root + L"\\" + name;
-        if (Exists(dir + kAbsentName))
-            backups.push_back({dir, name.substr(kBackupPrefix.size())});
-    } while (FindNextFileW(find, &found));
-    FindClose(find);
-    std::sort(backups.begin(), backups.end(),
-              [](const BackupInfo& a, const BackupInfo& b) { return a.stamp > b.stamp; });
-    return backups;
-}
-
-ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view stamp) {
+ApplyResult ApplyPendingImport(const std::wstring& data_dir) {
     ApplyResult result;
     if (!HasPendingImport(data_dir)) return result;
     const std::wstring stage = StagePath(data_dir);
@@ -585,31 +499,26 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view s
         result.outcome = ApplyOutcome::Failed;
         return result;
     }
-    if (stamp.empty() || stamp.find_first_not_of(L"0123456789-") != std::wstring_view::npos) {
-        result.outcome = ApplyOutcome::Failed;
-        return result;
-    }
-    bool import = false, restore = false, generation = false, invalid = false;
+    bool import = false, generation = false, invalid = false;
     std::vector<std::pair<std::wstring, std::wstring>> ops;
     for (const auto& line : Lines(list)) {
         const size_t space = line.find(L' ');
         const std::wstring verb = line.substr(0, space);
         const std::wstring argument = space == std::wstring::npos ? L"" : line.substr(space + 1);
         if (verb == L"mode") {
-            if (import || restore) invalid = true;
+            if (import || argument != L"import") invalid = true;
             import = argument == L"import";
-            restore = argument == L"restore";
         } else if (verb == L"tags-generation") {
             if (!argument.empty()) invalid = true;
             generation = true;
         } else if (FindSpec(argument) &&
-                   (verb == L"merge-prefs" || verb == L"replace-prefs" ||
+                   (verb == L"merge-prefs" ||
                     verb == L"merge-object" || verb == L"put" || verb == L"delete")) {
             if (std::any_of(ops.begin(), ops.end(), [&](const auto& op) { return op.second == argument; })) invalid = true;
             ops.emplace_back(verb, argument);
         } else invalid = true;
     }
-    if (invalid || (!import && !restore) || ops.empty()) {
+    if (invalid || !import || ops.empty()) {
         RemoveStage(data_dir);
         result.outcome = ApplyOutcome::Failed;
         return result;
@@ -633,7 +542,6 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view s
                 } else local = L"{}";
             }
             if (verb == L"merge-prefs") change.text = MergePrefs(local, incoming);
-            else if (verb == L"replace-prefs") change.text = RestorePrefs(local, incoming);
             else if (verb == L"merge-object") change.text = MergeObjects(local, incoming);
             else change.text = incoming;
             if (change.text.empty() || !ValidContent(change.text, FindSpec(name)->legacy_hex)) { invalid = true; break; }
@@ -644,8 +552,22 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view s
         }
         planned.push_back(std::move(change));
     }
-    if (invalid || !MakeBackup(data_dir, stamp, result.backup_dir)) {
-        // Without a way back nothing is replaced.
+    // Keep rollback state only in memory for this import; no backup files are created.
+    std::vector<Planned> previous;
+    const auto remember = [&](const std::wstring& name) {
+        if (std::any_of(previous.begin(), previous.end(), [&](const auto& item) { return item.name == name; }))
+            return true;
+        Planned old{name, {}, !Exists(live_path(name))};
+        if (!old.remove && !ReadPayload(live_path(name), name, old.text)) return false;
+        previous.push_back(std::move(old));
+        return true;
+    };
+    if (!invalid) {
+        for (const auto& change : planned)
+            if (!remember(change.name)) { invalid = true; break; }
+        if (generation && (!remember(std::wstring(kPlacesFile)) || !remember(std::wstring(kTagsFile)))) invalid = true;
+    }
+    if (invalid) {
         RemoveStage(data_dir);
         result.outcome = ApplyOutcome::Failed;
         return result;
@@ -680,9 +602,10 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view s
         // cannot leave earlier preferences half imported.
         result.rollback_ok = true;
         for (auto it = changed.rbegin(); it != changed.rend(); ++it) {
-            const auto saved = result.backup_dir + L"\\" + *it;
-            const bool ok = Exists(saved) ? CopyFileW(saved.c_str(), live_path(*it).c_str(), FALSE) != FALSE
-                                          : remove(live_path(*it));
+            const auto old = std::find_if(previous.begin(), previous.end(),
+                [&](const auto& item) { return item.name == *it; });
+            const bool ok = old != previous.end() && (old->remove ? remove(live_path(*it))
+                : WritePayload(live_path(*it), *it, old->text));
             result.rollback_ok = result.rollback_ok && ok;
         }
         result.outcome = ApplyOutcome::Failed;
@@ -691,9 +614,8 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view s
     }
     if (tag_files || generation) DeleteFileW((data_dir + kTagRecovery).c_str());
     RemoveStage(data_dir);
-    PruneBackups(data_dir);
     result.changed = static_cast<int>(changed.size());
-    result.outcome = import ? ApplyOutcome::Imported : ApplyOutcome::Restored;
+    result.outcome = ApplyOutcome::Imported;
     return result;
 }
 
@@ -708,18 +630,6 @@ std::wstring MergePrefs(const std::wstring& local, const std::wstring& imported)
     return json::Document(out).Is(json::Kind::Object) ? out : std::wstring{};
 }
 
-std::wstring RestorePrefs(const std::wstring& current, const std::wstring& backup) {
-    Members base;
-    if (!ReadMembers(backup, base)) return {};
-    Members now;
-    if (ReadMembers(current, now)) {
-        for (const auto& [key, raw] : now)
-            if (IsMachineLocalPref(key)) SetMember(base, key, raw);
-    }
-    const std::wstring out = WriteMembers(base);
-    return json::Document(out).Is(json::Kind::Object) ? out : std::wstring{};
-}
-
 std::wstring MergeObjects(const std::wstring& base_text, const std::wstring& overlay) {
     Members base;
     if (!ReadMembers(base_text, base)) base.clear();
@@ -727,22 +637,6 @@ std::wstring MergeObjects(const std::wstring& base_text, const std::wstring& ove
     if (!ReadMembers(overlay, incoming)) return {};
     for (const auto& [key, raw] : incoming) SetMember(base, key, raw);
     return WriteMembers(base);
-}
-
-std::wstring DisplayTime(std::wstring_view stamp) {
-    if (stamp.size() >= 13 && stamp[8] == L'-') {
-        std::wstring out;
-        out.append(stamp.substr(0, 4)).append(L"-").append(stamp.substr(4, 2)).append(L"-")
-           .append(stamp.substr(6, 2)).append(L" ").append(stamp.substr(9, 2)).append(L":")
-           .append(stamp.substr(11, 2));
-        return out;
-    }
-    if (stamp.size() >= 16 && stamp[10] == L'T') {
-        std::wstring out(stamp.substr(0, 16));
-        out[10] = L' ';
-        return out;
-    }
-    return std::wstring(stamp);
 }
 
 } // namespace pulse::app::settings_transfer

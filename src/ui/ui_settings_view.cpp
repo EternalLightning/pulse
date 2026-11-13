@@ -23,6 +23,16 @@
 
 namespace pulse::ui {
 
+void MainRenderer::DrawSettingsButton(const WindowViewModel& vm, fluent::ButtonSpec spec) {
+    spec.state.pressed = spec.state.enabled && SettingsPressed(vm, spec.bounds);
+    painter_.DrawButton(spec);
+}
+
+void MainRenderer::DrawSettingsSegment(const WindowViewModel& vm, fluent::SegmentedItemSpec spec) {
+    spec.state.pressed = spec.state.enabled && SettingsPressed(vm, spec.bounds);
+    painter_.DrawSegmentedItem(spec);
+}
+
 void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     ID2D1DeviceContext* dc = compositor_->Dc();
     const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
@@ -98,10 +108,11 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             FillRoundedRect(dc, brFillSelected_.get(), rc.left, rc.top,
                             rc.right - rc.left, rc.bottom - rc.top, 6.0f * scale_);
         }
+        const bool highlighted = IsHighContrast() && (active || hovered);
         DrawIconText(rc.left + (compact_nav ? 13.0f : 12.0f) * scale_, rc.top, 22.0f * scale_, rc.bottom - rc.top,
-                     kNavIcon[i], L"*", BlendOver(WithAlpha(theme.accent, selection.value),
-                         theme.text_secondary), 0.85f);
-        MakeBrush(dc, theme.text, brText_);
+                     kNavIcon[i], L"*", highlighted ? theme.text_selected :
+                         BlendOver(WithAlpha(theme.accent_ink, selection.value), theme.text_secondary), 0.85f);
+        MakeBrush(dc, highlighted ? theme.text_selected : theme.text, brText_);
         if (!compact_nav) DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), pulse::l10n::Get(kSettingsNavTitles[i]),
                      rc.left + 42.0f * scale_, rc.top, rc.right - rc.left - 48.0f * scale_,
                      rc.bottom - rc.top);
@@ -217,7 +228,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             fluent::ControlState st{};
             st.enabled = (i != 0 || vm.settings_index_service) && (!vm.settings_index_migrating || i == 1);
             st.hovered = st.enabled && IsHovered(vm, HitTestResult::SettingsIndexAction, i);
-            painter_.DrawButton({ lay.index_action[i], actions[i], {},
+            DrawSettingsButton(vm, { lay.index_action[i], actions[i], {},
                                   i == 2 ? fluent::ButtonKind::Primary : fluent::ButtonKind::Standard,
                                   st });
         }
@@ -280,7 +291,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         add_exclude.enabled = vm.settings_index_service;
         add_exclude.hovered = add_exclude.enabled &&
             IsHovered(vm, HitTestResult::SettingsIndexExcludeAction, 0);
-        painter_.DrawButton({ lay.index_exclude_action,
+        DrawSettingsButton(vm, { lay.index_exclude_action,
                               pulse::l10n::Get(pulse::l10n::StringId::AddFolder), {},
                               fluent::ButtonKind::Primary, add_exclude });
         if (vm.settings_index_excluded_paths.empty() &&
@@ -334,7 +345,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             remove.enabled = vm.settings_index_service;
             remove.hovered = remove.enabled &&
                 IsHovered(vm, HitTestResult::SettingsIndexExcludeRemove, static_cast<int>(i));
-            painter_.DrawButton({ remove_rc,
+            DrawSettingsButton(vm, { remove_rc,
                                   pulse::l10n::Get(pulse::l10n::StringId::Remove), {},
                                   fluent::ButtonKind::Standard, remove });
         }
@@ -352,7 +363,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             fluent::ControlState state{};
             state.enabled = i == 0 || !vm.settings_network_roots.empty();
             state.hovered = state.enabled && IsHovered(vm, HitTestResult::SettingsNetworkAction, i);
-            painter_.DrawButton({ lay.network_action[i], network_actions[i], {},
+            DrawSettingsButton(vm, { lay.network_action[i], network_actions[i], {},
                                   i == 0 ? fluent::ButtonKind::Primary : fluent::ButtonKind::Standard,
                                   state });
         }
@@ -392,7 +403,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             remove.enabled = true;
             remove.hovered = remove.enabled &&
                 IsHovered(vm, HitTestResult::SettingsNetworkRemove, static_cast<int>(i));
-            painter_.DrawButton({ lay.network_remove[i],
+            DrawSettingsButton(vm, { lay.network_remove[i],
                                   pulse::l10n::Get(pulse::l10n::StringId::Remove), {},
                                   fluent::ButtonKind::Standard, remove });
         }
@@ -453,7 +464,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                 fluent::ControlState state{};
                 state.enabled = true;
                 state.hovered = IsHovered(vm, HitTestResult::SettingsAboutAction, i);
-                painter_.DrawButton({lay.about_action[i], pulse::l10n::Get(kAboutActions[i]), {},
+                DrawSettingsButton(vm, {lay.about_action[i], pulse::l10n::Get(kAboutActions[i]), {},
                                      fluent::ButtonKind::Standard, state});
             }
         }
@@ -471,28 +482,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             lay.about_distribution_notice.right - lay.about_distribution_notice.left, theme.text_secondary);
         fluent::ControlState upstream_state{};
         upstream_state.hovered = IsHovered(vm, HitTestResult::SettingsAboutAction, 2);
-        painter_.DrawButton({lay.about_action[2], l10n::Get(l10n::StringId::AboutUpstream), {},
+        DrawSettingsButton(vm, {lay.about_action[2], l10n::Get(l10n::StringId::AboutUpstream), {},
                              fluent::ButtonKind::Standard, upstream_state});
-
-        draw_card(lay.transfer_card);
-        MakeBrush(dc, theme.text, brText_);
-        DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), l10n::Get(l10n::StringId::SettingsTransfer),
-            lay.transfer_card.left + 16.0f * scale_, lay.transfer_card.top + 12.0f * scale_,
-            lay.transfer_card.right - lay.transfer_card.left - 32.0f * scale_, 22.0f * scale_);
-        painter_.DrawWrappedCaption(vm.settings_transfer_status,
-            D2D1::Point2F(lay.transfer_description.left, lay.transfer_description.top),
-            lay.transfer_description.right - lay.transfer_description.left, theme.text_secondary);
-        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
-            l10n::StringId::ImportSettingsTitle, vm.settings_transfer_pending ?
-            l10n::StringId::RestartNow : l10n::StringId::RestoreSettingsTitle};
-        for (int i = 0; i < 3; ++i) {
-            fluent::ControlState state{};
-            state.enabled = !vm.settings_transfer_busy && (i < 2 ||
-                vm.settings_transfer_pending || vm.settings_transfer_has_backup);
-            state.hovered = state.enabled && IsHovered(vm, HitTestResult::SettingsDiagnosticsAction, i + 3);
-            painter_.DrawButton({lay.transfer_action[i], l10n::Get(transfer_labels[i]), {},
-                fluent::ButtonKind::Standard, state});
-        }
 
         draw_card(lay.diagnostics_card);
         MakeBrush(dc, theme.text, brText_);
@@ -532,7 +523,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             fluent::ControlState st{};
             st.checked = vm.settings_show_performance;
             st.hovered = IsHovered(vm, HitTestResult::SettingsToggle, 4);
-            DrawSettingsSwitch(L"setting:4",D2D1::RectF(row.right - 60.0f * scale_,
+            DrawSettingsSwitch(vm, L"setting:4",D2D1::RectF(row.right - 60.0f * scale_,
                                             (row.top + row.bottom - 32.0f * scale_) * 0.5f,
                                             row.right - 16.0f * scale_,
                                             (row.top + row.bottom + 32.0f * scale_) * 0.5f),
@@ -548,7 +539,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             state.enabled = !vm.settings_diagnostics_exporting;
             state.hovered = state.enabled &&
                 IsHovered(vm, HitTestResult::SettingsDiagnosticsAction, i);
-            painter_.DrawButton({lay.diagnostics_action[i],
+            DrawSettingsButton(vm, {lay.diagnostics_action[i],
                 pulse::l10n::Get(kDiagnosticsActions[i]), {},
                 fluent::ButtonKind::Standard, state});
         }
@@ -593,7 +584,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                           fluent::ButtonKind kind, const fluent::ControlState& state) {
             fluent::ButtonSpec spec{bounds, value, {}, kind, state};
             spec.wrap_text = true;
-            painter_.DrawButton(spec);
+            DrawSettingsButton(vm, spec);
         };
         for (auto row : {lay.dup_scope_row, lay.dup_target_row, lay.dup_skip_small_row, lay.dup_min_row, lay.dup_actions_row}) {
             if (row.bottom <= row.top) continue;
@@ -612,7 +603,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
         skip_small.checked = vm.dup_skip_small_files;
         skip_small.enabled = !vm.dup_scanning;
         skip_small.hovered = skip_small.enabled && IsHovered(vm, HitTestResult::SettingsDupSkipSmallFiles);
-        DrawSettingsSwitch(L"duplicate:skip-small", lay.dup_skip_small_switch, skip_small);
+        DrawSettingsSwitch(vm, L"duplicate:skip-small", lay.dup_skip_small_switch, skip_small);
         divider(lay.dup_skip_small_row);
         label(lay.dup_min_row, lay.dup_min_label, I::DupMinSize, L"\xE8A4");
         caption(pulse::l10n::Get(I::DupMinSizeDesc), lay.dup_min_description);
@@ -638,7 +629,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             segment.state.enabled = !vm.dup_scanning;
             segment.state.hovered = segment.state.enabled &&
                 IsHovered(vm, HitTestResult::SettingsDupScope, i);
-            painter_.DrawSegmentedItem(segment);
+            DrawSettingsSegment(vm, segment);
         }
         if (vm.dup_scope == 0) {
             MakeBrush(dc, theme.text, brText_);
@@ -685,7 +676,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             segment.state.enabled = !vm.dup_scanning && vm.dup_skip_small_files;
             segment.state.hovered = segment.state.enabled &&
                 IsHovered(vm, HitTestResult::SettingsDupMinSize, i);
-            painter_.DrawSegmentedItem(segment);
+            DrawSettingsSegment(vm, segment);
         }
         fluent::ControlState scan{};
         scan.enabled = vm.dup_can_scan && !vm.dup_scanning;
@@ -752,7 +743,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                     open_rc.right - open_rc.left, 18 * scale_);
                 const bool open_hovered = IsHovered(vm, HitTestResult::SettingsDupOpen,
                     static_cast<int>(g), f);
-                MakeBrush(dc, open_hovered ? theme.accent : theme.text_secondary, brTextSecondary_);
+                MakeBrush(dc, open_hovered ? theme.accent_ink : theme.text_secondary, brTextSecondary_);
                 DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                     brTextSecondary_.get(), file.detail, open_rc.left, open_rc.top + 18 * scale_,
                     open_rc.right - open_rc.left, 18 * scale_);
@@ -800,6 +791,21 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     }
     });
     surface_animating_ |= settings_content_surface_.pending;
+    if (vm.settings_focus_region != HitTestResult::None) {
+        for (const auto& target : SettingsControls(vm, rect)) {
+            if (target.region != vm.settings_focus_region || target.index != vm.settings_focus_index ||
+                target.sub_index != vm.settings_focus_sub_index || target.path != vm.settings_focus_key) continue;
+            const bool navigation = target.region == HitTestResult::SettingsNav;
+            dc->PushAxisAlignedClip(navigation ? lay.nav : lay.content, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            auto bounds = target.control_bounds;
+            const float inset = 3 * scale_;
+            bounds.left += inset; bounds.top += inset;
+            bounds.right -= inset; bounds.bottom -= inset;
+            painter_.DrawFocusRing(bounds, (std::max)(0.0f, theme.radius_control * scale_ - inset));
+            dc->PopAxisAlignedClip();
+            break;
+        }
+    }
 }
 
 D2D1_RECT_F MainRenderer::SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const {
@@ -850,6 +856,10 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SearchPinyin: target=l.search_pinyin_row;break;
     case I::ContentIndexManage: target=l.content_header;break;
     case I::ConfigurationLocation: target=l.configuration_path;break;
+    case I::SettingsTransfer:
+    case I::ExportSettingsTitle:
+    case I::ImportSettingsTitle:
+        target=l.transfer_card;break;
     case I::IndexLocation: target=l.index_path;break;
     case I::LocalDrives: if(!l.index_volume_rows.empty()) target=l.index_volume_rows.front();break;
     case I::Exclusions: target=l.index_exclude_action;break;

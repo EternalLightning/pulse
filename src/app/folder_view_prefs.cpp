@@ -25,10 +25,15 @@ std::wstring FolderKey(const std::wstring& path) {
     return key;
 }
 
+std::wstring ViewKey(const std::wstring& path) {
+    if (path == L"pulse:recycle") return path;
+    return FolderKey(path);
+}
+
 std::wstring SortKey(const std::wstring& path) {
     // This PC uses an empty navigation path; only its sort order is persisted.
     if (path.empty() || path == L"pulse:thispc") return L"pulse:thispc";
-    return FolderKey(path);
+    return ViewKey(path);
 }
 
 std::wstring JsonKey(ui::ViewMode mode) {
@@ -68,12 +73,12 @@ bool FolderViewPrefs::PathLess::operator()(const std::wstring& a, const std::wst
 }
 
 std::optional<ui::ViewMode> FolderViewPrefs::Find(const std::wstring& path) const {
-    const auto it = views_.find(FolderKey(path));
+    const auto it = views_.find(ViewKey(path));
     return it == views_.end() ? std::nullopt : std::optional(it->second);
 }
 
 bool FolderViewPrefs::Set(const std::wstring& path, ui::ViewMode mode) {
-    const auto key = FolderKey(path);
+    const auto key = ViewKey(path);
     if (key.empty() || static_cast<unsigned>(mode) >= 8) return false;
     const auto [it, inserted] = views_.try_emplace(key, mode);
     if (!inserted && it->second == mode) return false;

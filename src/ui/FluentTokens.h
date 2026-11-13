@@ -97,10 +97,18 @@ inline AccentShades DeriveAccentShades(D2D1_COLOR_F accent) noexcept {
     return a;
 }
 
+inline float RelativeLuminance(D2D1_COLOR_F color) noexcept {
+    const auto linear = [](float value) {
+        return value <= 0.04045f ? value / 12.92f
+            : std::pow((value + 0.055f) / 1.055f, 2.4f);
+    };
+    return 0.2126f * linear(color.r) + 0.7152f * linear(color.g) + 0.0722f * linear(color.b);
+}
+
 inline D2D1_COLOR_F AutoAccentText(D2D1_COLOR_F accent) noexcept {
-    // Perceived luminance; return white or black.
-    float y = 0.2126f * accent.r + 0.7152f * accent.g + 0.0722f * accent.b;
-    return y < 0.5f ? HexColor(0xFFFFFF) : HexColor(0x000000);
+    const float luminance = RelativeLuminance(accent);
+    return (luminance + 0.05f) / 0.05f >= 1.05f / (luminance + 0.05f)
+        ? HexColor(0x000000) : HexColor(0xFFFFFF);
 }
 
 // Layout metrics in DIPs at 100% scale. Scaled at use (SetScale, etc.).
@@ -139,7 +147,8 @@ struct Theme {
     D2D1_COLOR_F surface_sheet;
     D2D1_COLOR_F surface_card;
 
-    D2D1_COLOR_F accent;
+    D2D1_COLOR_F accent; // Chosen fill, paired with accent_text.
+    D2D1_COLOR_F accent_ink; // Readable text/icons on neutral surfaces.
     D2D1_COLOR_F accent_hover;
     D2D1_COLOR_F accent_pressed;
     D2D1_COLOR_F accent_text;
@@ -280,26 +289,19 @@ inline void UpdateWindowTheme(HWND hwnd, bool dark) noexcept {
 
 inline Theme MakeTheme(bool dark, D2D1_COLOR_F accent) noexcept {
     Theme t{};
-    // Keep the stored hue; light chrome needs darker accent ink over wallpaper.
+    // Preserve the chosen fill; ink is resolved separately for neutral surfaces.
     t.accent = accent;
+    t.accent_ink = accent;
     if (!dark) {
-        const auto luminance = [](D2D1_COLOR_F color) {
-            const auto linear = [](float value) {
-                return value <= 0.04045f ? value / 12.92f
-                    : std::pow((value + 0.055f) / 1.055f, 2.4f);
-            };
-            return 0.2126f * linear(color.r) + 0.7152f * linear(color.g)
-                + 0.0722f * linear(color.b);
-        };
-        if (luminance(accent) > 0.04f) {
+        if (RelativeLuminance(accent) > 0.04f) {
             float low = 0.0f, high = 1.0f;
             for (int i = 0; i < 12; ++i) {
                 const float factor = (low + high) * 0.5f;
                 const D2D1_COLOR_F ink{accent.r * factor, accent.g * factor, accent.b * factor, accent.a};
-                if (luminance(ink) > 0.04f) high = factor;
+                if (RelativeLuminance(ink) > 0.04f) high = factor;
                 else low = factor;
             }
-            t.accent = {accent.r * low, accent.g * low, accent.b * low, accent.a};
+            t.accent_ink = {accent.r * low, accent.g * low, accent.b * low, accent.a};
         }
     }
     AccentShades shades = DeriveAccentShades(t.accent);
@@ -386,15 +388,28 @@ inline Theme MakeTheme(bool dark, D2D1_COLOR_F accent) noexcept {
         t.fps_bg = WithAlpha(HexColor(0x303B50), 0.85f);
         t.fps_text = HexColor(0xFFFFFF);
     }
+    if (dark) {
+        // Include the lightest neutral segmented plate, not only the card below it.
+        const float target = 4.5f * (RelativeLuminance(BlendOver(
+            WithAlpha(HexColor(0xFFFFFF), 40.0f / 255.0f), HexColor(0x2B2B2B))) + 0.05f) - 0.05f;
+        if (RelativeLuminance(accent) < target) {
+            float low = 0.0f, high = 1.0f;
+            for (int i = 0; i < 16; ++i) {
+                const float mix = (low + high) * 0.5f;
+                const D2D1_COLOR_F ink{accent.r + (1.0f - accent.r) * mix,
+                    accent.g + (1.0f - accent.g) * mix, accent.b + (1.0f - accent.b) * mix, accent.a};
+                if (RelativeLuminance(ink) < target) low = mix;
+                else high = mix;
+            }
+            t.accent_ink = {accent.r + (1.0f - accent.r) * high,
+                accent.g + (1.0f - accent.g) * high, accent.b + (1.0f - accent.b) * high, accent.a};
+        }
+    }
     return t;
 }
 
 inline Theme MakeHighContrastTheme() noexcept {
     Theme t{};
-    t.accent = HexColor(0x0078D4);
-    t.accent_hover = HexColor(0x005A9E);
-    t.accent_pressed = HexColor(0x004578);
-    t.accent_text = HexColor(0xFFFFFF);
     t.danger = HexColor(0xC42B1C);
     t.danger_hover = HexColor(0xA51910);
 
@@ -410,6 +425,9 @@ inline Theme MakeHighContrastTheme() noexcept {
     t.text_secondary = sys(COLOR_GRAYTEXT);
     t.text_disabled = sys(COLOR_GRAYTEXT);
     t.text_selected = sys(COLOR_HIGHLIGHTTEXT);
+    t.accent = t.accent_hover = t.accent_pressed = sys(COLOR_HIGHLIGHT);
+    t.accent_text = t.text_selected;
+    t.accent_ink = sys(COLOR_HOTLIGHT);
 
     t.fill_hover = sys(COLOR_HIGHLIGHT);
     t.fill_pressed = sys(COLOR_HIGHLIGHT);

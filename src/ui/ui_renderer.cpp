@@ -5,6 +5,7 @@
 
 // ui_renderer.cpp — Chrome orchestration (title, toolbar, status, render).
 #include "legacy_icons.h"
+#include "fluent_svg_cache.h"
 #include "ui_renderer.h"
 #include "../app/frame_profile.h"
 #include "command_icons.h"
@@ -41,6 +42,7 @@ SIZE MainRenderer::BackgroundImageSize(const std::wstring& path) {
 }
 
 MainRenderer::~MainRenderer() {
+    ClearFluentSvgRasterCache(this);
     icon_cache_.RemoveNotifyWindow(notify_hwnd_);
     thumbnail_cache_.SetNotifyWindow(nullptr);
     thumbnail_cache_.Evict();
@@ -48,6 +50,7 @@ MainRenderer::~MainRenderer() {
 }
 
 void MainRenderer::SetCompositor(Compositor* comp) {
+    ClearFluentSvgRasterCache(this);
     details_open_motion_ = {};
     details_motion_window_width_ = 0;
     details_exit_commands_.reset();
@@ -506,7 +509,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
             begin = end + 1;
         }
         content.top = rc.bottom - 38 * scale_; content.bottom = rc.bottom - 8 * scale_;
-        painter_.DrawText(pulse::l10n::Get(pulse::l10n::StringId::ChangeView), content, compositor_->TextFormat(), theme.accent);
+        painter_.DrawText(pulse::l10n::Get(pulse::l10n::StringId::ChangeView), content, compositor_->TextFormat(), theme.accent_ink);
     }
     DrawTooltip(vm, rect, theme);
     paint_profile.Mark(app::PaintPhase::Overlays);

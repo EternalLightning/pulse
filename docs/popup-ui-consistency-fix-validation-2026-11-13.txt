@@ -1,0 +1,91 @@
+Pulse 弹窗一致性修复与定向验证 — 2026-11-13
+
+结果
+原审查的 12 项实现问题和 2 项风格差异均已处理。保留已有未提交修改，没有暂存、提交、打包、发布或替换已安装应用。
+本轮定向检查共 1,208 PASS / 0 FAIL；控件图库另以退出码 0 完成。
+生产 pulse 目标构建成功，PULSE_WITH_SELFTEST=OFF；构建与功能、像素、截图检查分别记录。
+
+统一规则
+模态窗口：44 DIP 标题栏，14 DIP 半粗体标题，20 DIP 语义图标槽，46×44 DIP 关闭热区，12 DIP 关闭字形。
+正文与普通控件文字为 14 DIP；内容左右边距 20 DIP；按钮、单行输入框高 32 DIP，圆角沿用主题的 8 DIP。
+底部操作右对齐，取消在左、主操作在右，间距 8 DIP；宽度按文字测量。可选操作位于取消左侧。
+主操作 Primary、取消 Standard、辅助动作 Transparent；危险操作保留 Danger。按钮顺序与键盘遍历顺序同步。
+标题语义图标普通模式用 accent_ink，高对比度用系统前景。实色强调填充、半透明强调底和中性表面的文字按实际背景配对。
+原生编辑框保留；设置值输入框保留创建时的高对比度原生标题栏回退。
+预览、文本对比、操作中心、通知和选色浮层保留各自用途的布局，不强制变成模态表单。
+
+逐项修复
+01 较新标签：按 18% 强调色与实际面板合成后的背景选择文字；三种背景/强调色的文字对比度断言均达到 4.5:1。
+   src/ui/text_diff_window.cpp/.h；src/bench/text_diff_ui_test.cpp。
+02 新建、解压/密码：主按钮按实际普通/悬停/按下填充解析前景，勾选标记复用公共算法，消除固定黑勾和旧 RGB 阈值。
+   src/app/new_item_dialog.cpp；src/app/archive_dialog.cpp。
+03 高对比度：修复原生输入弹窗、搜索选中行与次级文字、进度窗口底栏/图标、确认图标、选色器及 Toast 关闭区域的前景背景配对。
+   原生窗口接收主题/系统设置消息刷新画刷，保留输入内容；GDI 颜色先按实际表面合成 alpha，避免半透明白色边框变成实白。
+04 焦点：修正 Conflict/Confirm 控件的 keyboard_focus；共享标题按钮支持可见焦点，批量冲突等调用方同步使用。
+   src/ui/file_operation_dialog.cpp；src/ui/fluent_components.cpp；相关弹窗调用方。
+05 放大布局：批量重命名按实际客户区更新输入列、预览、摘要、Close 和页脚；连接及单文件冲突禁用交互缩放。
+   BorderlessHitTest 只在 WS_THICKFRAME 存在时返回缩放边缘，保留固定窗口的拖动和关闭点击。
+06 进度窗口：增加与现有统计列、动作文字相容的最小宽高，避免缩窄后列越界或底栏互相覆盖。
+07 DPI：新建、解压/密码窗口在 DPI 消息中更新字体、编辑框、操作区、区域和建议位置，保留输入；原生控件补充几何/像素检查。
+08 外观更新：主窗口主题/强调色更新通知已打开的预览和文本对比；保留内容、滚动、选区、查找状态和任务代次。
+   src/app/app_commands.cpp；src/ui/quick_preview_window.cpp/.h；src/ui/text_diff_window.cpp/.h。
+09 屏外居中：设置值输入框按 owner 定位后限制到显示器工作区，避免模态输入落到屏外。
+10 键盘操作：搜索使用标准 Tab/Shift+Tab 焦点遍历，方向键/Space 操作名称/内容与范围；选色器可遍历模式、编辑框和接受/取消。
+   保留搜索 Enter 打开/Esc 隐藏、选色 Enter 确认/Esc 取消；IME 输入状态交由原生编辑框处理。
+11 长错误：Toast 提供有省略号的紧凑预览和“详细信息 (F6)”入口，可用鼠标或 F6、Enter/Space 打开。
+   复用可滚动确认窗口展示原始全文，单一关闭按钮；详情高度不超过 640 DIP 和工作区上限，End 可到达全文末尾。
+12 高级搜索：公开控件接收按下与键盘焦点状态，移除旧的重复 4 DIP 焦点绘制。
+13 标题：搜索、重命名、连接、冲突、确认、新建、解压/密码、设置值采用上述模态标题规格和语义图标。
+14 控件：统一主次按钮顺序、样式、尺寸、圆角和间距；原生输入框使用与公开控件相同的中性边框和按焦点变化的底线。
+
+视觉验收中补修的直接相关问题
+快速预览长文本原先能画进底部状态栏。统一 TextViewport 后，绘制、选择、命中、查找显露、滚动范围和滚轮视口共同避开状态栏；末行仍可滚动到达。
+截图采集原先会在 Present 后读到上一缓冲帧；现在在呈现前保存/采样，并验证非空画面与实际主题像素。
+Compositor PNG 导出原先把预乘颜色当作直通颜色，导致半透明浅色截图偏灰；现在用 WIC 正确转换，并通过半透明颜色 PNG 往返断言。
+这些采集修正不改变窗口表面实际呈现的配色；用于保证本轮视觉证据可靠。
+
+实际验证（均退出 0）
+以下只统计各项最终有效运行，不累加中间重复执行。
+1. pulse_dialog_fade_test --popup-style-only：49 PASS / 0 FAIL。
+2. pulse_archive_dialog_test --popup-style-only：85 PASS / 0 FAIL。
+3. pulse_settings_value_ui_test --popup-style-only：75 PASS / 0 FAIL。
+4. pulse_audit_ui_remaining_test --color-picker-only：22 PASS / 0 FAIL。
+5. pulse_audit_ui_remaining_test --dialog-buttons-only：164 PASS / 0 FAIL。
+6. pulse_dialog_edit_integration_test --dialog-style-only：125 PASS / 0 FAIL。
+7. pulse_batch_conflict_dialog_test --style-only：96 PASS / 0 FAIL。
+8. pulse_text_diff_ui_test --appearance：9 PASS / 0 FAIL。
+9. pulse_text_diff_ui_test：8 PASS / 0 FAIL（该独立窗口用例仅涵盖比较、布局、错误、关闭和重开）。
+10. pulse_popup_operation_style_test：433 PASS / 0 FAIL（新增独立弹窗夹具，无真实文件操作）。
+11. pulse_global_search_window_test --appearance-keyboard：21 PASS / 0 FAIL。
+12. pulse_context_menu_loading_test --toast-animation bench_data/toast-animation：121 PASS / 0 FAIL。
+13. pulse_fluent_gallery：退出 0，生成 11 张控件图库和颜色回归截图。
+
+覆盖包括：中英文、浅深色、代表性强调色、100%/150% 与原生窗口额外 200% DPI 消息、窄窗口、放大锚定、输入保留、按压/禁用/焦点、键盘操作、长错误全文、隐藏/取消及外观更新。
+高对比度使用线程内夹具和系统色配对验证；搜索选中行、通知关闭字形、确认图标、进度底栏等具有实际像素断言。
+原生字体/热区/输入底线/边框有几何与像素断言；预览的深浅主题及状态栏隔离从保存的 PNG 读取像素检查。
+全局搜索集成夹具临时启用了 PULSE_BUILD_ARCHITECTURE_FIXTURES，仅构建和运行上述单一筛选，没有运行其他架构测试或完整 selftest。
+只构建受影响生产/测试目标；没有运行 build_release.bat 或完整历史测试。
+
+日志与图像
+本轮全部输出位于 bench_data/popup-ui-fix-2026-11-13/。
+最终原生输入验证：logs/acceptance-pulse_{dialog_fade,archive_dialog,settings_value_ui}_test-popup-style-only.log。
+其他最终检查：logs/snapshot-final-*.log；最终生产及相关测试构建：logs/build-snapshot-validation.log。
+最终构建无 MSVC 编译/链接警告；git diff --check 通过。Git 对部分原有文件的 LF/CRLF 提示不等同于编译警告。
+screenshots/index.html：17 张代表图的原尺寸图库。
+screenshots/overview-forms.png：新建、解压、密码、设置值、高级搜索、连接、重命名。
+screenshots/overview-operations.png：单文件冲突、确认、批量冲突、进度、错误通知、错误详情。
+screenshots/overview-tools.png：全局搜索、选色器、快速预览、文本对比。
+screenshots/manifest.json 记录每张代表图的原始夹具路径和尺寸；总览只缩放排列，透明像素在对应主题底色上显示。
+已查看三组总览及关键原尺寸图，检查标题、图标、主次按钮、边框、焦点和内容/底栏分隔。17 张代表图均通过非空检查。
+
+保留已有修改
+开始前保存了 baseline-status.txt、baseline-tracked.diff 和 122 个相关/已有修改文件的快照。
+baseline-comparison.json 记录后续变化：93 个快照文件字节未变，29 个快照文件属于本轮修改，无快照文件丢失。
+原本干净的 settings_value_ui_test.cpp、ui_compositor.cpp，以及新夹具/样式常量和本记录，也属于本轮明确范围。
+没有重置、清理、暂存或覆盖不相关的已有修改。
+
+验证边界
+以上证明本轮夹具、断言与渲染截图覆盖的行为；不等同于完整仓库回归或已安装版本验收。
+未修改用户文件、用户偏好、系统高对比度设置或屏幕缩放；真实跨屏 DPI、系统级高对比度启停及第三方预览提供程序外观仍未实机验证。
+半透明截图不包含真实桌面背后的毛玻璃采样，不以 PNG 或 DWM 调用成功证明实际模糊效果。
+本次范围内没有尚未解决的测试失败；先前报告中其他模块的既有失败未删除、弱化或顺手修复。

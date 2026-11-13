@@ -650,6 +650,10 @@ struct WindowViewModel {
     bool settings_open = false;
     int settings_page = 0; // 0 appearance, 1 search/index, 2 context, 3 about, 4 duplicates, 5 system menu, 6 files, 7 tabs, 8 startup, 9 operations
     float settings_scroll = 0.0f;
+    int settings_focus_region = 0, settings_focus_index = -1, settings_focus_sub_index = -1;
+    std::wstring settings_focus_key;
+    int settings_pressed_region = 0, settings_pressed_index = -1, settings_pressed_sub_index = -1;
+    D2D1_RECT_F settings_pressed_bounds{};
     bool settings_launch_on_startup = false;
     bool settings_start_to_tray = false;
     bool settings_text_compare = false;
@@ -706,7 +710,6 @@ struct WindowViewModel {
     bool settings_diagnostics_exporting = false;
     bool settings_transfer_busy = false;
     bool settings_transfer_pending = false;
-    bool settings_transfer_has_backup = false;
     std::wstring settings_transfer_status;
     bool settings_show_performance = false;
     int dup_scope = 0;
@@ -1199,6 +1202,8 @@ public:
     bool SettingsSwitchAnimating() const { return settings_switch_animating_; }
     bool SurfaceAnimating() const { return surface_animating_; }
     float SettingsMaxScroll(const WindowViewModel& vm, float window_w, float window_h) const;
+    std::vector<HitTestResult> SettingsControls(const WindowViewModel& vm, const D2D1_RECT_F& rect) const;
+    D2D1_RECT_F SettingsContentBounds(const WindowViewModel& vm, const D2D1_RECT_F& rect) const;
     bool SettingsScrollbarGeometry(const WindowViewModel& vm, float window_w, float window_h,
                                    D2D1_RECT_F& track, D2D1_RECT_F& thumb, float& maximum) const;
     D2D1_RECT_F SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const;
@@ -1249,7 +1254,7 @@ private:
     void DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
                   const D2D1_RECT_F& bounds, int pane_index, const Theme& theme);
-    void DrawSettingsSwitch(const std::wstring& key, const D2D1_RECT_F& bounds,
+    void DrawSettingsSwitch(const WindowViewModel& vm, const std::wstring& key, const D2D1_RECT_F& bounds,
                             fluent::ControlState state);
     void DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
@@ -1267,6 +1272,8 @@ private:
                             float x, float y, HitTestResult& out) const;
     void DrawStatusBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawSettingsButton(const WindowViewModel& vm, fluent::ButtonSpec spec);
+    void DrawSettingsSegment(const WindowViewModel& vm, fluent::SegmentedItemSpec spec);
     void DrawSettingsContext(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSettingsPulseMenu(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);

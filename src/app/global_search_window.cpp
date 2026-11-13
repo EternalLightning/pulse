@@ -66,6 +66,8 @@ struct GlobalSearchWindow::Impl {
     std::wstring current_folder, current_folder_tip, query, error;
     struct Row { std::wstring name, path, snippet; bool directory = false; };
     std::vector<Row> rows;
+    enum class Focus { Edit, Name, Content, Everywhere, Current, Results };
+    Focus focus = Focus::Edit;
     int selected = 0;
     float scroll_y = 0;
     ui::SmoothScroll scroll_motion;
@@ -109,6 +111,7 @@ struct GlobalSearchWindow::Impl {
     }
     void ApplyAppearance() {
         if (!hwnd) return;
+        material.Invalidate();
         backdrop = ui::ApplyWindowEffect(hwnd, background_image.empty() ? effect : ui::WindowEffect::None, dark);
         if (background) DeleteObject(background);
         background = CreateSolidBrush(Background());
@@ -251,15 +254,48 @@ struct GlobalSearchWindow::Impl {
         scope_hover = hovered;
         if (scope_hover) SetTimer(hwnd, kScopeTooltipTimer, 400, nullptr);
     }
+    void FocusControl(Focus next) {
+        focus = next;
+        SetFocus(next == Focus::Edit ? edit : hwnd);
+        Invalidate();
+    }
+    void TraverseFocus(bool reverse) {
+        int next = static_cast<int>(focus);
+        do {
+            next = (next + (reverse ? 5 : 1)) % 6;
+        } while (next == static_cast<int>(Focus::Current) && current_folder.empty());
+        FocusControl(static_cast<Focus>(next));
+    }
+    void ActivateFocusedControl() {
+        if (focus == Focus::Name || focus == Focus::Content) {
+            const bool next = focus == Focus::Content;
+            if (content_mode != next) { content_mode = next; Changed(); }
+        } else if (focus == Focus::Everywhere || focus == Focus::Current) {
+            const bool next = focus == Focus::Current && !current_folder.empty();
+            if (current_only != next) { current_only = next; Changed(); }
+        }
+    }
     bool Key(WPARAM key) {
         if (composing) return false;
         if (key == VK_ESCAPE) { Hide(); return true; }
         if (key == VK_RETURN) { Open((GetKeyState(VK_CONTROL) & 0x8000) != 0); return true; }
+        if (key == VK_TAB) { TraverseFocus((GetKeyState(VK_SHIFT) & 0x8000) != 0); return true; }
+        if (focus != Focus::Edit && focus != Focus::Results) {
+            if (key == VK_SPACE) { ActivateFocusedControl(); return true; }
+            if (key == VK_LEFT || key == VK_RIGHT || key == VK_UP || key == VK_DOWN) {
+                if (focus == Focus::Name || focus == Focus::Content)
+                    FocusControl(focus == Focus::Name ? Focus::Content : Focus::Name);
+                else if (!current_folder.empty())
+                    FocusControl(focus == Focus::Everywhere ? Focus::Current : Focus::Everywhere);
+                ActivateFocusedControl();
+                return true;
+            }
+            return false;
+        }
         if (key == VK_UP || key == VK_DOWN || key == VK_PRIOR || key == VK_NEXT) {
             selected += key == VK_UP ? -1 : key == VK_DOWN ? 1 : key == VK_PRIOR ? -PageSize() : PageSize();
             ClampSelection(); Invalidate(); return true;
         }
-        if (key == VK_TAB) { content_mode = !content_mode; Changed(); return true; }
         return false;
     }
     static LRESULT CALLBACK EditProc(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
@@ -270,6 +306,8 @@ struct GlobalSearchWindow::Impl {
             const auto result = self->DefaultEdit(window, message, wp, lp);
             self->Changed(); return result;
         }
+        if (message == WM_SETFOCUS) { self->focus = Focus::Edit; self->Invalidate(); }
+        if (message == WM_KILLFOCUS) self->Invalidate();
         if (message == WM_KEYDOWN && self->Key(wp)) return 0;
         if (message == WM_CHAR && !self->composing && (wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_TAB)) return 0;
         LRESULT result = 0;
@@ -441,12 +479,13 @@ struct GlobalSearchWindow::Impl {
         }
         target->SetDpi(96 * scale, 96 * scale);
     }
-    void Paint() {
+    void Paint(bool present = true) {
         PAINTSTRUCT paint{}; BeginPaint(hwnd, &paint);
         if (EnsureTarget()) {
             const auto theme = Theme();
-            const UINT32 fg = Rgb(theme.text), muted = dark ? 0xa8abb2 : 0x676a70;
-            const UINT32 line = dark ? 0x3b3d41 : 0xe2e3e7, accent = Rgb(theme.accent);
+            const bool hc = ui::IsHighContrast();
+            const UINT32 fg = Rgb(theme.text), muted = Rgb(theme.text_secondary);
+            const UINT32 line = Rgb(theme.stroke_divider), accent = Rgb(theme.accent);
             target->BeginDraw(); target->Clear(D2D1::ColorF(0, 0.0f));
             const bool live = target.Get() == compositor.Dc();
             const bool image_mode = !ui::IsHighContrast() && !background_image.empty() && effect == ui::WindowEffect::None;
@@ -472,7 +511,7 @@ struct GlobalSearchWindow::Impl {
             const float tab_center = (content_mode ? 124.0f : 28.0f) +
                 TextWidth(Text(content_mode ? StringId::SearchModeContent : StringId::SearchModeName), 16, true) * 0.5f;
             Fill({tab_center - 12, 124, tab_center + 12, 127}, accent, 1.5f);
-            const UINT32 disabled = dark ? 0x6f7279 : 0x9a9da3;
+            const UINT32 disabled = Rgb(theme.text_disabled);
             Label(Text(StringId::GlobalSearchEverywhere), {width - 230, 83, width - 130, 120}, 15,
                 current_only ? muted : fg, !current_only, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
             Label(Text(StringId::GlobalSearchCurrentFolder), {width - 122, 83, width - 22, 120}, 15,
@@ -481,6 +520,19 @@ struct GlobalSearchWindow::Impl {
             const float scope_center = current_only ? width - 72 : width - 180;
             Fill({scope_center - 12, 124, scope_center + 12, 127}, accent, 1.5f);
             Fill({0, 128, width, 129}, line);
+            if (GetFocus() == hwnd && focus != Focus::Edit) {
+                D2D1_RECT_F ring{};
+                switch (focus) {
+                case Focus::Name: ring = {24, 80, 114, 122}; break;
+                case Focus::Content: ring = {120, 80, 212, 122}; break;
+                case Focus::Everywhere: ring = {width - 234, 80, width - 126, 122}; break;
+                case Focus::Current: ring = {width - 126, 80, width - 18, 122}; break;
+                case Focus::Results: ring = {3, 133, width - 3, height - kFooter - 2}; break;
+                default: break;
+                }
+                brush->SetColor(theme.text);
+                target->DrawRoundedRectangle(D2D1::RoundedRect(ring, 4, 4), brush.Get(), 2);
+            }
             const float bottom = height - kFooter;
             target->PushAxisAlignedClip({0, 136, width, bottom}, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             if (rows.empty()) {
@@ -504,20 +556,28 @@ struct GlobalSearchWindow::Impl {
                 const float y = 136 + static_cast<float>(i) * kRow - scroll_y;
                 if (y >= bottom) break;
                 const auto& row = rows[static_cast<size_t>(i)];
-                if (i == selected) { Fill({5, y, width - 5, y + kRow - 3}, dark ? 0x293947 : 0xe1effa, 6); Fill({5, y + 9, 8, y + kRow - 12}, accent, 2); }
+                const bool selected_hc = hc && i == selected;
+                const UINT32 row_fg = selected_hc ? Rgb(theme.text_selected) : fg;
+                const UINT32 row_muted = selected_hc ? row_fg : muted;
+                if (i == selected) {
+                    brush->SetColor(theme.fill_selected);
+                    target->FillRoundedRectangle(D2D1::RoundedRect({5, y, width - 5, y + kRow - 3}, 6, 6), brush.Get());
+                    Fill({5, y + 9, 8, y + kRow - 12}, accent, 2);
+                }
                 const auto dot = row.name.find_last_of(L'.');
                 std::wstring extension = dot == std::wstring::npos ? L"" : row.name.substr(dot);
                 for (auto& letter : extension) letter = static_cast<wchar_t>(towlower(letter));
                 const bool excel = extension == L".xlsx" || extension == L".xls" || extension == L".csv";
                 const bool word = extension == L".docx" || extension == L".doc";
                 const bool pdf = extension == L".pdf", powerpoint = extension == L".pptx" || extension == L".ppt";
-                const UINT32 icon_color = row.directory ? 0xd59b27 : excel ? 0x178753 : pdf ? 0xc4413b : powerpoint ? 0xc55a39 : 0x367cb5;
-                Fill({29, y + 23, 58, y + 57}, icon_color, 4);
-                if (excel || word || pdf || powerpoint) Label(excel ? L"X" : word ? L"W" : pdf ? L"PDF" : L"P", {33, y + 27, 58, y + 54}, pdf ? 11.0f : 19.0f, 0xffffff, true);
-                else Label(row.directory ? L"\xE8B7" : L"\xE8A5", {34, y + 27, 58, y + 54}, 19, 0xffffff, false, L"Segoe Fluent Icons");
-                Label(row.name, {78, y + 8, width - 30, y + 35}, 17, fg, true, L"Segoe UI", true);
-                Label(ParentPath(row.path), {78, y + 34, width - 30, y + 57}, 14, muted);
-                if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, muted, false, L"Segoe UI", true);
+                const UINT32 icon_color = hc ? row_fg : row.directory ? 0xd59b27 : excel ? 0x178753 : pdf ? 0xc4413b : powerpoint ? 0xc55a39 : 0x367cb5;
+                if (!hc) Fill({29, y + 23, 58, y + 57}, icon_color, 4);
+                const UINT32 icon_fg = hc ? row_fg : 0xffffff;
+                if (excel || word || pdf || powerpoint) Label(excel ? L"X" : word ? L"W" : pdf ? L"PDF" : L"P", {33, y + 27, 58, y + 54}, pdf ? 11.0f : 19.0f, icon_fg, true);
+                else Label(row.directory ? L"\xE8B7" : L"\xE8A5", {34, y + 27, 58, y + 54}, 19, icon_fg, false, L"Segoe Fluent Icons");
+                Label(row.name, {78, y + 8, width - 30, y + 35}, 17, row_fg, true, L"Segoe UI", !hc);
+                Label(ParentPath(row.path), {78, y + 34, width - 30, y + 57}, 14, row_muted);
+                if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, row_muted, false, L"Segoe UI", !hc);
             }
             target->PopAxisAlignedClip();
             if (MaxScroll() > 0) {
@@ -532,7 +592,7 @@ struct GlobalSearchWindow::Impl {
             DrawScopeTooltip(theme);
             const HRESULT rendered = target->EndDraw();
             if (FAILED(rendered)) { compositor.NotifyDeviceLost(rendered); empty_art.Reset(); empty_art_target = nullptr; logo.Reset(); logo_target = nullptr; brush.Reset(); target.Reset(); }
-            else if (live) compositor.Present();
+            else if (live && present) compositor.Present();
         }
         EndPaint(hwnd, &paint);
     }
@@ -559,12 +619,14 @@ struct GlobalSearchWindow::Impl {
         }
         case WM_CLOSE: Hide(); return 0;
         case WM_ACTIVATEAPP: if (!wp) Hide(); return 0;
-        case WM_SETFOCUS: SetFocus(edit); return 0;
+        case WM_SETFOCUS: if (focus == Focus::Edit) SetFocus(edit); Invalidate(); return 0;
+        case WM_KILLFOCUS: Invalidate(); return 0;
         case WM_KEYDOWN: if (Key(wp)) return 0; break;
         case WM_COMMAND: if (reinterpret_cast<HWND>(lp) == edit && HIWORD(wp) == EN_CHANGE) Changed(); return 0;
         case WM_CTLCOLOREDIT: {
             const auto dc = reinterpret_cast<HDC>(wp); SetBkColor(dc, Background());
-            SetTextColor(dc, dark ? RGB(245, 245, 247) : RGB(32, 33, 36)); return reinterpret_cast<LRESULT>(background);
+            const auto ink = Theme().text;
+            SetTextColor(dc, RGB(static_cast<BYTE>(ink.r * 255), static_cast<BYTE>(ink.g * 255), static_cast<BYTE>(ink.b * 255))); return reinterpret_cast<LRESULT>(background);
         }
         case WM_TIMER:
             if (wp == kScrollTimer) {
@@ -599,16 +661,17 @@ struct GlobalSearchWindow::Impl {
             HideScopeTooltip();
             if (y < 76 && x > width - 70) Hide();
             else if (y >= 76 && y < 129) {
-                if (x < 220) { content_mode = x >= 114; Changed(); }
+                if (x < 220) { FocusControl(x >= 114 ? Focus::Content : Focus::Name); ActivateFocusedControl(); }
                 else if (x >= width - 230 && x < width - 126) {
-                    if (current_only) { current_only = false; Changed(); }
+                    FocusControl(Focus::Everywhere); ActivateFocusedControl();
                 } else if (x >= width - 126 && x < width - 12 && !current_folder.empty()) {
-                    if (!current_only) { current_only = true; Changed(); }
+                    FocusControl(Focus::Current); ActivateFocusedControl();
                 }
             } else if (y >= 136 && y < height - kFooter) {
+                FocusControl(Focus::Results);
                 selected = static_cast<int>((y - 136 + scroll_y) / kRow); ClampSelection(false); Invalidate();
             }
-            if (IsWindowVisible(hwnd)) SetFocus(edit); return 0;
+            if (IsWindowVisible(hwnd) && y < 76) FocusControl(Focus::Edit); return 0;
         }
         case WM_LBUTTONDBLCLK: if (GET_Y_LPARAM(lp) >= Px(136) && GET_Y_LPARAM(lp) < Px(height - kFooter)) Open(false); return 0;
         case WM_MOUSEWHEEL:

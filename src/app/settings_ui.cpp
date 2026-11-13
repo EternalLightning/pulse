@@ -24,7 +24,7 @@ ui::FluentMenuItem Item(int command,I title,bool checked=false) {
 int Popup(AppState& s,std::vector<ui::FluentMenuItem> items) {
     if(!EnsureMenu(s)) return 0;
     s.menu->SetTheme(s.darkMode,s.accentColor);
-    POINT pt{};GetCursorPos(&pt);return s.menu->TrackPopup(pt,std::move(items));
+    return s.menu->TrackPopup(SettingsPopupPoint(s),std::move(items));
 }
 int Dropdown(AppState& s, int index, std::vector<ui::FluentMenuItem> items) {
     if(!EnsureMenu(s)) return 0;
@@ -58,6 +58,7 @@ constexpr SettingDestination destinations[]={
     {I::CloseLastTabWindow,7,0},{I::SettingsMatchBackground,7,0},{I::SettingsLockWindowSize,7,0},
     {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},{I::SettingsLaunch,8,0},
     {I::StartToTray,8,0},{I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
+    {I::SettingsTransfer,8,0},{I::ExportSettingsTitle,8,0},{I::ImportSettingsTitle,8,0},
     {I::SettingsStagingTray,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
     {I::SettingsChangeDays,9,0},
     {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},

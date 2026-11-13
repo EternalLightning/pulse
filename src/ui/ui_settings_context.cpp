@@ -44,8 +44,9 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         if(b.get()) dc->DrawLine(D2D1::Point2F(x0,y),D2D1::Point2F(x1,y),b.get(),1);
     };
     const float s=scale_;
+    const bool high_contrast=IsHighContrast();
     const auto card=l.pulse_card;
-    fill(card,8*s,(vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card,std::max(card_alpha_,0.65f))));
+    fill(card,8*s,high_contrast ? theme.surface_card : vm.dark ? theme.fill_input : WithAlpha(theme.surface_card,std::max(card_alpha_,0.65f)));
     stroke(card,8*s,theme.stroke_card,1);
     DrawIconText(card.left+16*s,card.top+20*s,24*s,24*s,L"\xE8FD",L"",theme.text_secondary,0.85f);
     painter_.DrawText(FitEndEllipsis(l10n::Get(I::ContextPulseMenu),l.pulse_title.right-l.pulse_title.left,[&](const std::wstring& value) {
@@ -60,7 +61,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         const bool hot=any && IsHovered(vm,HitTestResult::SettingsToggle,67);
         if(hot) fill(l.pulse_restore,4*s,theme.fill_hover);
         painter_.DrawText(l10n::Get(I::RestoreDefaults),l.pulse_restore,
-                          compositor_->SmallFormat(),any ? theme.accent : theme.text_disabled,fluent::HorizontalAlignment::Center);
+                          compositor_->SmallFormat(),high_contrast && hot ? theme.text_selected : any ? theme.accent_ink : theme.text_disabled,fluent::HorizontalAlignment::Center);
     }
     // Presets.
     const auto active=model::BuiltinMenuPresetFor(vm.settings_builtin_hidden);
@@ -78,7 +79,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         item.bounds=r;item.text=l10n::Get(kPresetName[i]);item.shared_track=true;
         item.state.checked=on;item.state.enabled=i<3 || on;
         item.state.hovered=i<3 && IsHovered(vm,HitTestResult::SettingsToggle,60+i);
-        painter_.DrawSegmentedItem(item);
+        DrawSettingsSegment(vm, item);
     }
     painter_.DrawWrappedCaption(l10n::Get(kPresetDesc[static_cast<int>(active)]),
         D2D1::Point2F(l.pulse_preset_description.left,l.pulse_preset_description.top),
@@ -96,7 +97,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         fluent::SegmentedItemSpec item{};
         item.bounds=r;item.text=l10n::Get(kTabs[i]);item.shared_track=true;
         item.state.checked=on;item.state.hovered=IsHovered(vm,HitTestResult::SettingsToggle,64+i);
-        painter_.DrawSegmentedItem(item);
+        DrawSettingsSegment(vm, item);
     }
     // Rows (list order = menu order of the selected surface).
     const auto rows=model::BuiltinMenuOrderedRows(PulseMenuSurface(vm),PulseMenuOrder(vm));
@@ -114,7 +115,11 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         }
         if(r.bottom<=r.top) continue;
         if(k>0) hline(r.left,r.right,r.top,theme.stroke_divider);
-        if(hot) fill(D2D1::RectF(r.left-8*s,r.top+2*s,r.right+8*s,r.bottom-2*s),4*s,theme.fill_hover);
+        if(hot) {
+            const auto hover_row=D2D1::RectF(r.left-8*s,r.top+2*s,r.right+8*s,r.bottom-2*s);
+            if(high_contrast) stroke(hover_row,4*s,theme.stroke_input_bottom,1);
+            else fill(hover_row,4*s,theme.fill_hover);
+        }
         const auto label=model::BuiltinMenuRowLabel(row);
         const bool shared=hit>=0 && vm.settings_context_tab!=2 && model::BuiltinMenuShared(row.item);
         const float label_right=r.right-(hit<0 ? 120 : 60)*s;
@@ -131,7 +136,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
             }
             fluent::ControlState state{};state.checked=on;state.hovered=hot;
             const float cy=(r.top+r.bottom)*0.5f;
-            DrawSettingsSwitch(L"context:"+std::to_wstring(hit),D2D1::RectF(r.right-44*s,cy-16*s,r.right,cy+16*s),state);
+            DrawSettingsSwitch(vm, L"context:"+std::to_wstring(hit),D2D1::RectF(r.right-44*s,cy-16*s,r.right,cy+16*s),state);
         }
     }
     // Live preview built from the same rows the real menu keeps. Movable
@@ -144,10 +149,11 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
     if(l.pulse_order_reset.right>l.pulse_order_reset.left) {
         const auto label=l10n::Get(I::ContextOrderReset);
         const float w=CellTextWidth(label,true);
-        if(IsHovered(vm,HitTestResult::SettingsToggle,kSettingsMenuOrderReset))
+        const bool hot=IsHovered(vm,HitTestResult::SettingsToggle,kSettingsMenuOrderReset);
+        if(hot)
             fill(D2D1::RectF(l.pulse_order_reset.right-w-8*s,l.pulse_order_reset.top,l.pulse_order_reset.right+4*s,l.pulse_order_reset.bottom),4*s,theme.fill_hover);
         painter_.DrawText(label,D2D1::RectF(l.pulse_order_reset.right-w-2*s,l.pulse_order_reset.top,l.pulse_order_reset.right+2*s,l.pulse_order_reset.bottom),
-                          compositor_->SmallFormat(),theme.accent);
+                          compositor_->SmallFormat(),high_contrast && hot ? theme.text_selected : theme.accent_ink);
     }
     const auto box=PulsePreviewBox(pv,s);
     fill(D2D1::RectF(box.left+1*s,box.top+2*s,box.right+1*s,box.bottom+3*s),8*s,D2D1::ColorF(0,0,0,0.06f));
@@ -183,11 +189,11 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         // One list row with the hover buttons that stay on.
         const auto row=D2D1::RectF(box.left+8*s,box.top+12*s,box.right-8*s,box.bottom-12*s);
         fill(row,4*s,theme.fill_hover);
-        DrawIconText(row.left+8*s,row.top+6*s,20*s,20*s,L"\xE8A5",L"",theme.text_secondary,0.8f);
-        painter_.DrawText(L"notes.txt",D2D1::RectF(row.left+36*s,row.top,row.right-90*s,row.bottom),compositor_->TextFormat(),theme.text);
+        DrawIconText(row.left+8*s,row.top+6*s,20*s,20*s,L"\xE8A5",L"",high_contrast ? theme.text_selected : theme.text_secondary,0.8f);
+        painter_.DrawText(L"notes.txt",D2D1::RectF(row.left+36*s,row.top,row.right-90*s,row.bottom),compositor_->TextFormat(),high_contrast ? theme.text_selected : theme.text);
         for(const auto& v:pl.rows) {
             if(hovered(v.row)) fill(v.rect,4*s,theme.fill_pressed);
-            DrawIconText(v.rect.left+4*s,v.rect.top+4*s,16*s,16*s,v.row.glyph,L"",theme.text_secondary,0.75f);
+            DrawIconText(v.rect.left+4*s,v.rect.top+4*s,16*s,16*s,v.row.glyph,L"",high_contrast ? theme.text_selected : theme.text_secondary,0.75f);
         }
         if(pl.dragging) {
             const float x=(pl.gap.left+pl.gap.right)*0.5f;
@@ -197,7 +203,9 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         }
         return;
     }
-    auto draw_row=[&](const model::BuiltinMenuRow& row,const D2D1_RECT_F& rect) {
+    auto draw_row=[&](const model::BuiltinMenuRow& row,const D2D1_RECT_F& rect,bool highlighted) {
+        const auto foreground=highlighted ? theme.text_selected : theme.text;
+        const auto secondary=highlighted ? theme.text_selected : theme.text_secondary;
         float y=rect.top;
         if(row.item==model::BuiltinMenuItem::Tags) {
             static constexpr D2D1_COLOR_F kSwatch[]={{0.93f,0.27f,0.27f,1},{0.96f,0.56f,0.13f,1},{0.13f,0.73f,0.38f,1},{0.92f,0.70f,0.03f,1},{0.66f,0.33f,0.97f,1},{0.23f,0.51f,0.96f,1},{0.58f,0.64f,0.72f,1}};
@@ -213,19 +221,19 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         if(row.fixed==model::BuiltinFixedRow::Strip) {
             static constexpr const wchar_t* kStrip[]={L"\xE8C6",L"\xE8C8",L"\xE74D",L"\xE8AC"};
             float sx=r.left+28*s;
-            for(const auto* g:kStrip) {DrawIconText(sx,r.top+9*s,16*s,16*s,g,L"",theme.text,0.8f);sx+=44*s;}
+            for(const auto* g:kStrip) {DrawIconText(sx,r.top+9*s,16*s,16*s,g,L"",foreground,0.8f);sx+=44*s;}
             return;
         }
-        if(row.glyph) DrawIconText(r.left+10*s,r.top+9*s,16*s,16*s,row.glyph,L"",theme.text,0.8f);
+        if(row.glyph) DrawIconText(r.left+10*s,r.top+9*s,16*s,16*s,row.glyph,L"",foreground,0.8f);
         const auto label=row.item==model::BuiltinMenuItem::Tags ? l10n::Get(I::TagsEllipsis) : model::BuiltinMenuRowLabel(row);
         const float label_right=row.submenu ? r.right-28*s : row.shortcut ? r.right-20*s-CellTextWidth(row.shortcut,true) : r.right-8*s;
         const auto shown=FitEndEllipsis(label,label_right-r.left-36*s,[&](const std::wstring& value) {return CellTextWidth(value,true);});
-        painter_.DrawText(shown,D2D1::RectF(r.left+36*s,r.top,label_right,r.bottom),compositor_->SmallFormat(),theme.text);
+        painter_.DrawText(shown,D2D1::RectF(r.left+36*s,r.top,label_right,r.bottom),compositor_->SmallFormat(),foreground);
         if(row.submenu) {
-            DrawIconText(r.right-22*s,r.top+11*s,12*s,12*s,L"\xE76C",L"",theme.text_secondary,0.7f);
+            DrawIconText(r.right-22*s,r.top+11*s,12*s,12*s,L"\xE76C",L"",secondary,0.7f);
         } else if(row.shortcut) {
             const float w=CellTextWidth(row.shortcut,true);
-            painter_.DrawText(row.shortcut,D2D1::RectF(r.right-10*s-w,r.top,r.right-6*s,r.bottom),compositor_->SmallFormat(),theme.text_secondary);
+            painter_.DrawText(row.shortcut,D2D1::RectF(r.right-10*s-w,r.top,r.right-6*s,r.bottom),compositor_->SmallFormat(),secondary);
         }
     };
     const float x0=box.left+6*s,x1=box.right-6*s;
@@ -234,13 +242,13 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         if(hovered(v.row)) {
             if(!fixed) {
                 fill(v.rect,4*s,theme.fill_hover);
-                grip(box.left+7*s,(v.rect.top+v.rect.bottom)*0.5f,theme.text_secondary);
+                grip(box.left+7*s,(v.rect.top+v.rect.bottom)*0.5f,high_contrast ? theme.text_selected : theme.text_secondary);
             } else {
                 // Open and the action strip stay on top: a lock where the grip would be.
                 DrawIconText(box.left+3*s,(v.rect.top+v.rect.bottom)*0.5f-6*s,12*s,12*s,L"\xE72E",L"",theme.text_secondary,0.7f);
             }
         }
-        draw_row(v.row,v.rect);
+        draw_row(v.row,v.rect,high_contrast && !fixed && hovered(v.row));
         if(v.separator_after)
             hline(x0+4*s,x1-4*s,v.rect.bottom+kPulsePreviewSeparator*s*0.5f,theme.stroke_divider);
     }
@@ -248,7 +256,7 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         const float y=(pl.gap.top+pl.gap.bottom)*0.5f;
         insertion(x0+2*s,y,x1-2*s,y);
         ghost_card(pl.ghost);
-        draw_row(pl.drag_row,pl.ghost);
+        draw_row(pl.drag_row,pl.ghost,false);
         grip(box.left+7*s,(pl.ghost.top+pl.ghost.bottom)*0.5f,theme.text_secondary);
     }
 }

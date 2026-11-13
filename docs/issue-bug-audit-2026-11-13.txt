@@ -1,0 +1,354 @@
+Pulse 上游 issue 核查与本轮修复记录（2026-11-13）
+
+范围：jimmgreen/pulse 在 2026-11-06 至 2026-11-13 核查时可见的新建 issue，共78条（不含PR）；另完整读取指定的602、600、582、581、578及评论。用API保留原文于bench_data/issue-review-2026-11-13。此前已有修改全部保留，本轮不提交、不打包、不替换安装版。
+
+判定方法：按本分支当前实现核实。建议不实现；缺环境/样本的不冒充复现或修复。已有代码处理仅说明当前实现，不等同报告者现场验收。所有测试使用隔离夹具，不对真实INF、回收站、用户偏好或系统接管作测试写入。
+
+本轮修改：
+1. #581：Shell根目录项目工作目录计算，覆盖INF路径，规范扩展路径/UNC；安装命令解析本地原已具备。
+2. #582：补设备节点变化消息、重复广播去重；设备变化刷新此电脑快照，防止弹出后显示旧驱动器。
+3. #599：只为回收站开放视图/排序偏好，重开恢复；其他虚拟位置拒绝规则保留。
+4. #575评论：普通悬停提示失焦清理，9项隔离消息检查通过，不推断为该issue卡顿根因。
+5. strings.rcinc / runtime_messages.inc：精简29个ID、55处中英文文本；两文件ID与文本列左对齐，宏参数按显示宽度对齐。全部RC条目和134个runtime条目的顺序/ID/格式占位符/有效空格/转义换行保留。
+6. localization_test：两条压缩包提示的精确期望本轮开始时即与资源不符；保持原文案不变，更新测试期望，未删除或改为模糊匹配。
+
+建议意见（只回应指定issue）：
+#602：最大化时标签顶边应更容易命中；窗口化保留调整边框，标签间/空白保留拖动窗口。不必为了触达把标签视觉尺寸做大。
+#600：先测量再改进。当前已有耗时任务隔离；仅为关闭UI后省内存就重构整个前后端代价偏高，可先减少隐藏窗口的图形资源/缓存常驻，再判断是否值得独立UI进程。
+#582评论：侧栏磁盘提供弹出/属性等常用操作有实用价值，建议复用Shell菜单和后台调用；属于功能建议，本轮未实现。
+#578附带补丁：不直接套用按AppState裸指针索引的全局map；本地已有按标签页/世代取消的选择链路，直接验证复用即可。
+
+实际验证（持续更新）：
+- pulse_localization_test --runtime-messages：9项通过。
+- pulse_localization_test --centralized：初次2项失败，原因是本轮前已有的压缩包文案精确期望陈旧；更新期望后6项通过。
+- pulse_app_core_remaining_test --drives-only：13项通过。
+- pulse_shell_launch_regression_test --commands-only：22项通过（含6条INF检查，拦截进程调用，无真实安装）。
+- pulse_preview_handler_pan_test：51项通过；不代表原Word/Excel自绘滚动条样本通过。
+- open_location_fixture_test：首次因缺shell_path.h未编译；补直接包含后17项通过，覆盖真实CmdOpenPath与可见性。
+- recycle_preferences_fixture_test：11项通过（隔离app.json，无真实回收站写入）。
+- hover_deactivation_fixture_test：9项通过（失焦、定时器不复活、捕获拖动、重新悬停、前台保持）。
+- 生产pulse：最终源码和资源构建通过（Release，自测关闭）。
+- 总计8组定向功能/资源检查138项通过；结构检查另计。
+- git diff --check：通过。
+
+逐条核查：
+#535 右键二级选项条目被压缩
+https://github.com/jimmgreen/pulse/issues/535
+待复现：二级菜单压缩仅有上游对比图，缺当前菜单、扩展及DPI条件。
+
+#536 【功能建议】增加复制与移动行为的确认弹窗，优化现存的布局提示避免遮挡提示内容，增加全局文件查看和排序
+https://github.com/jimmgreen/pulse/issues/536
+建议，忽略；评论称原图2已优化。
+
+#537 [建议]动画不跟手
+https://github.com/jimmgreen/pulse/issues/537
+建议/缺证据：悬停慢未给具体对象和时序，未据此改动画。
+
+#538 【问题反馈】详细信息面板预览小窗内文件滚动条无法拖动（滚轮翻页正常，Excel/Word 均出现）
+https://github.com/jimmgreen/pulse/issues/538
+待现场：Office自绘滚动条需原预览提供程序/样本；现有原生滚动条及拖动测试51项通过，不能代替原Word/Excel现场。
+
+#539 #功能请求，文件或者文件夹前增加序号
+https://github.com/jimmgreen/pulse/issues/539
+建议，忽略。
+
+#541 打开文件窗口底栏搜索怎么关闭？
+https://github.com/jimmgreen/pulse/issues/541
+不适用：本分支没有文件对话框底部跳转条。
+
+#542 [feat] 合并地址栏和搜索栏
+https://github.com/jimmgreen/pulse/issues/542
+建议，忽略。
+
+#543 [BUG]全局搜索双ctrl唤起后一部分应用程序无法打开。
+https://github.com/jimmgreen/pulse/issues/543
+本地已具备对应路径：全局搜索直接open_callback→OpenWith，不按EXE/app类型阻止；未用报告者应用样本验收。
+
+#544 可以支持ftp吗？
+https://github.com/jimmgreen/pulse/issues/544
+建议，忽略。
+
+#545 [feat]在设置中加入关闭文件夹在当前标签页展开的按钮的选项
+https://github.com/jimmgreen/pulse/issues/545
+建议，忽略。
+
+#546 我发现正在写入的flv文件他的缩略图会不断生成，同时缩略图缓存也会不断增加
+https://github.com/jimmgreen/pulse/issues/546
+本地已有对应处理：thumbnail_cache.cpp检测写入后延迟，disk_cache同路径+尺寸使用相同键；未复现原FLV写入环境。
+
+#548 打开终端报错
+https://github.com/jimmgreen/pulse/issues/548
+待现场：OpenTerminal启动wt.exe，缺实际错误码和终端安装状态，不擅加新终端回退。
+
+#549 界面字号调到最大，大小就显示不全
+https://github.com/jimmgreen/pulse/issues/549
+待复现：最大字号下大小截断缺列宽、视图和截图条件。
+
+#550 对话框跳转条 不能关闭 点击没反应
+https://github.com/jimmgreen/pulse/issues/550
+不适用：本地无上游对话框跳转条。
+
+#551 建议作者增加“活动标签背景色/非活动标签透明度”自定义选项
+https://github.com/jimmgreen/pulse/issues/551
+建议，忽略。
+
+#552 [无法使用 open code go] 助手默认 base_url 指向需要订阅凭证的第三方网关，首次使用即报 400 MissingSessionID
+https://github.com/jimmgreen/pulse/issues/552
+不适用：本地无上游AI助手/base_url网关实现；已读评论中的凭证说明。
+
+#553 [Feature Request] 希望 Win+E 支持复用现有窗口，以新标签页打开文件夹
+https://github.com/jimmgreen/pulse/issues/553
+建议，忽略。
+
+#554 能正常打开快捷方式了，但是另外开了一个新窗口，能否在现有窗口里开一个新标签页？
+https://github.com/jimmgreen/pulse/issues/554
+建议，忽略。
+
+#555 文件的排序问题（看图很受影响）
+https://github.com/jimmgreen/pulse/issues/555
+本地已有对应路径：传递当前快照、过滤顺序及排序；第三方看图软件是否采纳仍需具体样本。
+
+#556 在其它程序的打开、保存对话框出现的瞬间，下方跳转条里最近使用的文件夹选框呈自动展开状态
+https://github.com/jimmgreen/pulse/issues/556
+不适用：本地无上游对话框跳转条。
+
+#557 链接地址不对启动不报错
+https://github.com/jimmgreen/pulse/issues/557
+缺证据：正文为空，没有错误链接样本。
+
+#558 增加AI开关
+https://github.com/jimmgreen/pulse/issues/558
+建议，忽略。
+
+#559 文件夹中的图片右键打印无反应的
+https://github.com/jimmgreen/pulse/issues/559
+待现场：图片打印依赖关联程序及print verb；评论仅补版本，没有执行错误证据。
+
+#560 启动程序exe右键固定到开始按键无效
+https://github.com/jimmgreen/pulse/issues/560
+本地不提供该入口：ctx_menu_util.h明确过滤pintostart/pintostartscreen，不能按上游按钮无效认定同一故障。
+
+#561 复制或者移动文件时的文件传输界面窗口最小化显示错误
+https://github.com/jimmgreen/pulse/issues/561
+缺证据：传输窗最小化显示错误未给具体表现，仅有系统/分辨率。
+
+#562 建议：增加「默认视图模式」与「图标尺寸」设置项
+https://github.com/jimmgreen/pulse/issues/562
+建议，忽略。
+
+#563 系统右键菜单有些不能正常显示
+https://github.com/jimmgreen/pulse/issues/563
+缺证据：没有具体缺失菜单或扩展。
+
+#564 [功能建议] MCP 按目录设置“始终允许”：新建、复制、移动、重命名与移入回收站
+https://github.com/jimmgreen/pulse/issues/564
+建议，忽略。
+
+#565 v1.0.59图标特征不明显
+https://github.com/jimmgreen/pulse/issues/565
+建议，忽略。
+
+#566 【需求】无法在地址栏里输入shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}打开设备和打印机界面
+https://github.com/jimmgreen/pulse/issues/566
+新增Shell虚拟位置支持需求，本轮不实现。
+
+#567 "用Pulse打开文件夹“启用时，启动第一个Pulse窗口总会唤起UAC
+https://github.com/jimmgreen/pulse/issues/567
+待现场：本地默认管理器使用HKCU，启动只读取和修复旧配置；未得到产生UAC的旧配置样本。
+
+#568 启用其他软件打开的文件夹后从其他短句打开文件夹仍然闪过原生资源管理器窗口
+https://github.com/jimmgreen/pulse/issues/568
+机制限制/需现场：实验接管依赖发现Explorer窗口，不能保证从未显示；未认定新的可确认回归。
+
+#569 【BUG】本地硬盘文件夹封面缩略图正常，SMB 映射 NAS 网络盘文件夹无法生成封面缩略图，无法加入索引
+https://github.com/jimmgreen/pulse/issues/569
+待现场：NAS封面/索引需相应共享、认证与目录样本；评论仅附和。
+
+#570 增加关闭窗口管理
+https://github.com/jimmgreen/pulse/issues/570
+建议，忽略。
+
+#571 希望增加的功能和一个BUG
+https://github.com/jimmgreen/pulse/issues/571
+待现场：Win+E本地采用注册表委派而非模拟按键，未复现报告者26H2环境；建议部分忽略。
+
+#572 Winrar右键扩展菜单功能与文字描述不相符
+https://github.com/jimmgreen/pulse/issues/572
+待现场：本地保留HMENU wID并校验id/verb/text，通用索引错位路径已规避；仍需WinRAR7.23菜单样本。
+
+#573 【BUG】
+https://github.com/jimmgreen/pulse/issues/573
+待现场：只接管Directory/Drive/Win+E/ThisPC，未复现mydockfinder的回收站/控制面板入口。
+
+#574 功能建議：自訂右鍵選單項目的顯示名稱與圖示
+https://github.com/jimmgreen/pulse/issues/574
+建议，忽略。
+
+#575 【1.0.59 BUG 】更新后明显卡顿。不限于打开新窗口，加载预览，包括新建文件夹
+https://github.com/jimmgreen/pulse/issues/575
+卡顿部分缺现场；评论中的普通文件悬停提示失焦残留已确认，定向修复并通过9项失焦/定时器/捕获拖动检查。置顶预览已有失焦隐藏，不能据此声称整个问题已解决。
+
+#576 可否添加操作记录的开关
+https://github.com/jimmgreen/pulse/issues/576
+建议，忽略。
+
+#577 窗口效果切换没有一点效果，应该是bug
+https://github.com/jimmgreen/pulse/issues/577
+平台限制：window_material.cpp在Win10使用None，未伪称修复材质支持。
+
+#578 打开所在位置：只跳到目录，不选中目标文件（reveal 路径仍在用 pending_selected_*）
+https://github.com/jimmgreen/pulse/issues/578
+本地已有修复：主搜索CmdOpenPath已NavigateTo后复用SelectLaunchedFile；真实命令链17项检查通过（普通/扩展路径、延迟、过期、取消、选择与可见性）。全局搜索的location仍交给Explorer；托盘未发现同名定位动作，不扩大结论。
+
+#579 竖着展开目录的时候往下滑会自动往上滑
+https://github.com/jimmgreen/pulse/issues/579
+待现场：无普通可展开目录树；Miller分栏滚轮已停auto_scroll，缺具体视图/录像。
+
+#580 ## WPS「打开文件位置」报错
+https://github.com/jimmgreen/pulse/issues/580
+待现场：空DelegateExecute机制仍可见，但没有WPS现场验证，未凭原文假设修改系统接管。
+
+#581 inf文件右键安装会提示: 无法启动此菜单命令,指定的路径无效（161）
+https://github.com/jimmgreen/pulse/issues/581
+已修源码可确认分支：C:\driver.inf的Shell工作目录应为C:\而非文件本身；6条新INF检查在命令组22项中通过，不执行真实安装。
+
+#582 插入移动光驱之后，整个程序变得非常卡
+https://github.com/jimmgreen/pulse/issues/582
+已修源码可确认分支：设备节点变更漏处理、只刷新侧栏未刷新此电脑；13项设备/异步查询检查通过。当前无光驱，未声称卡顿或实机弹出验收。
+
+#583 【功能建议】文件批量重命名当前功能太简单，不满足日常使用要求
+https://github.com/jimmgreen/pulse/issues/583
+建议，忽略。
+
+#584 功能建议
+https://github.com/jimmgreen/pulse/issues/584
+建议，忽略。
+
+#585 1.0.60还是卡
+https://github.com/jimmgreen/pulse/issues/585
+待现场：操作卡顿缺路径、规模、阶段及日志，未归因。
+
+#586 回收站重复标示
+https://github.com/jimmgreen/pulse/issues/586
+待复现：仅上游截图，无当前重复标示触发条件。
+
+#587 索引排除文件夹配置增加规则配置
+https://github.com/jimmgreen/pulse/issues/587
+建议，忽略。
+
+#588 功能建议：分栏模式下支持点击空白区域切换当前活动栏
+https://github.com/jimmgreen/pulse/issues/588
+明确功能建议，忽略。
+
+#589 软件更新失败
+https://github.com/jimmgreen/pulse/issues/589
+不适用：本地无该应用内更新链。
+
+#590 7-zip 压缩与解压扩展更新失败。
+https://github.com/jimmgreen/pulse/issues/590
+不适用：本地使用随包7zip/7z.exe，没有上游扩展商店更新链。
+
+#591 别的程序打开界面,这个索引栏可不可以不要先弹框框,挡视线
+https://github.com/jimmgreen/pulse/issues/591
+不适用：没有上游DialogBridge/文件对话框替换。
+
+#592 打不开
+https://github.com/jimmgreen/pulse/issues/592
+缺证据：没有本分支日志、错误码或具体启动条件。
+
+#593 [Bug] 连接 MCP 后“更新并重启”失败：stdio 转发进程持续运行导致退出码 7 并回滚
+https://github.com/jimmgreen/pulse/issues/593
+不适用：没有上游MCP stdio/AI更新进程链。
+
+#594 启动时只能恢复最后一个选中的标签页
+https://github.com/jimmgreen/pulse/issues/594
+主要不适用：本地明确启动不恢复导航；工作区保存当前布局，非所有顶层标签。其余新行为建议忽略。
+
+#595 选中文件，窗口底栏怎么不显示文件大小了？
+https://github.com/jimmgreen/pulse/issues/595
+已有对应实现：SelectionText单文件/多文件显示大小，状态栏绘制selection_text；没有现场复现本地缺失。
+
+#596 设置成自动跳转了，但是每次还需要手动。
+https://github.com/jimmgreen/pulse/issues/596
+不适用：没有上游文件对话框自动跳转。
+
+#597 升级到最新版（Pulse 1.0.60）后程序打不开
+https://github.com/jimmgreen/pulse/issues/597
+安装桥验证错误不适用：本地使用Inno Setup；普通启动故障仍缺本分支日志。
+
+#598 【功能建议】可以在内容检索结果里面加入关键字数量么
+https://github.com/jimmgreen/pulse/issues/598
+建议，忽略。
+
+#599 希望可以让删除文件的详细窗口在删除完成后就马上消失
+https://github.com/jimmgreen/pulse/issues/599
+已修回收站视图/排序保存和重开恢复，11项真实命令与隔离配置往返检查通过。删除详情自动窗已有600ms关闭，固定窗保留；音量记忆是建议，不实现。
+
+#600 【功能建议】前后端进程分离
+https://github.com/jimmgreen/pulse/issues/600
+指定建议：不建议为内存目标立即全面拆前后端；已有Index/Shell/Preview/Document独立进程，应先测量隐藏窗口保留量再按热点释放图形和缓存。
+
+#601 Ctrl+F搜索当前文件夹,会被一坨色块给遮挡输入框
+https://github.com/jimmgreen/pulse/issues/601
+待现场：评论指框内透明穿透；当前编辑器已不透明清背景并在呈现失败时转原生，需报告者后端/材质/DPI条件。
+
+#602 标签页操作便捷性的改进
+https://github.com/jimmgreen/pulse/issues/602
+后续按用户选择放大标签关闭按钮：20→28 DIP、右内边距10→6 DIP，叉号绘制系数保持0.85，与窗口关闭图标一致；点击范围同步扩大。未额外扩展标签顶边命中。
+
+#603 Pulse 1.0.60 升级后程序点击没反应，重新安装提示：Existing Dialog versin failed verification error 13: 数据无效
+https://github.com/jimmgreen/pulse/issues/603
+同597：上游DialogBridge验证/卸载链不适用；缺本地启动日志。
+
+#604 cryptomator 加密挂载出来的磁盘，无法删除文件，提示：“此卷不包含可识别的文件系统”
+https://github.com/jimmgreen/pulse/issues/604
+待现场：缺Cryptomator挂载类型和失败阶段；不把所有回收失败泛化成永久删除，保留明确确认边界。
+
+#605 很多的问题，能否减缓增加新功能，集中精力完善当前的问题。
+https://github.com/jimmgreen/pulse/issues/605
+开发节奏建议，忽略。
+
+#606 [Bug] 设置页面左上角有白点
+https://github.com/jimmgreen/pulse/issues/606
+待复现：仅上游设置页截图，本地设置界面独立改动较多。
+
+#607 图片右键菜单：向左旋转、向右旋转，怎么关闭？
+https://github.com/jimmgreen/pulse/issues/607
+设置咨询，忽略。
+
+#608 分区容量进度条颜色不一样
+https://github.com/jimmgreen/pulse/issues/608
+容量条配色建议，忽略。
+
+#609 分区容量进度条颜色不一样
+https://github.com/jimmgreen/pulse/issues/609
+同608，建议忽略。
+
+#610 BUG或设置问题
+https://github.com/jimmgreen/pulse/issues/610
+不匹配本地普通启动链：本地默认主页，只有显式目标改变入口，没有恢复上次标签设置。
+
+#611 [New Fuction]可否增加空白处粘贴能自动生成「剪切板文本.txt」
+https://github.com/jimmgreen/pulse/issues/611
+建议，忽略。
+
+#612 对于无选择建立索引的盘，不能搜索文件名
+https://github.com/jimmgreen/pulse/issues/612
+正文是新增能力请求：未索引普通固定盘无文件名扫描回退属当前能力边界，本轮不新增扫描功能。
+
+#613 预览文本内容，能否设置是否截断或不截断的菜单选项
+https://github.com/jimmgreen/pulse/issues/613
+建议，忽略。
+
+#614 建议增加一项手势功能
+https://github.com/jimmgreen/pulse/issues/614
+建议，忽略。
+
+
+相关限制：
+未执行完整回归、真实INF安装、移动光驱/ISO硬件验收或原Word/Excel自绘滚动条现场；未进行全屏截图验收所有提示文本。缺特定软件/挂载/现场条件的issue仍按逐条列表保留。编译不等同这些现场已通过。不打包、不更新安装版、不发布，也不向GitHub发送评论。
+
+后续用户确认（2026-11-13）：
+- #602：放大标签关闭按钮和点击区域，叉号按用户要求保持与窗口关闭图标相同的大小；窄标签的LumaText标题先按实际宽度省略，避免出现半个汉字。保留标题切换、固定标签保护、连续关闭行为。最终生产构建通过；tab_close_interaction_test 的95项相关检查通过，涵盖100/125/150/200%缩放、深浅主题、480/1400 DIP宽度、连续关闭、固定标签保护和邻接标题点击。已查看宽深色与窄浅色截图。
+- #600只做架构评估，本次不拆进程。当前Index/Shell/Preview/Document已独立；主程序同时拥有AppCore、AppState、窗口渲染、热键/托盘及操作协调。后台运行路径主要HideAppWindow，未销毁主合成器。完整拆分需要重新安排任务所有权和IPC；建议先做隐藏时释放界面缓存/图形资源的挂起恢复。
+- 收益仅作量级估算：缩略图缓存常规预算16 MiB/窗口；两个BGRA缓冲在1920×1080为15.82 MiB，在3840×2160为63.28 MiB，另有按需保留的图形表面。预算不等于实际占用，图形内存不能直接等同进程私有工作集。未做开关窗口前后内存实测。

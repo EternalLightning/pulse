@@ -93,7 +93,7 @@ float LayoutSettingsActions(float left, float right, float top, float scale,
 }
 
 float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, float scale,
-                               float y, const fluent::Painter* painter) {
+                               float y, const fluent::Painter* painter, bool include_offscreen = false) {
     using I = l10n::StringId;
     const float card_left = l.content.left + 20 * scale;
     const float card_right = l.content.right - 20 * scale;
@@ -226,7 +226,7 @@ float LayoutSettingsDuplicates(SettingsLayout& l, const WindowViewModel& vm, flo
         l.dup_group_cards.push_back(card);
         l.dup_group_ignore.push_back(group_buttons[0]);
         l.dup_group_delete.push_back(group_buttons[1]);
-        if (VisibleInContent(card, l.content, 64 * scale)) {
+        if (include_offscreen || VisibleInContent(card, l.content, 64 * scale)) {
             for (size_t f = 0; f < vm.dup_groups[g].files.size(); ++f) {
                 const float top = files_top + static_cast<float>(f) * file_height;
                 l.dup_keep.push_back(D2D1::RectF(right - keep_width,
@@ -380,6 +380,23 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         y = std::max(y, config_bottom+4*scale);
         l.configuration_path.bottom = y;
         l.category_rows.back() = l.configuration_path;
+        y += 12*scale;
+        l.footer = D2D1::RectF(left, y, right, y+44*scale);
+        y = l.footer.bottom;
+        section(I::SettingsTransfer);
+        const float transfer_left = left + 16.0f * scale;
+        const float transfer_right = right - 16.0f * scale;
+        const float transfer_caption = SettingsCaptionHeight(vm.settings_transfer_status,
+            transfer_right - transfer_left, scale, painter);
+        l.transfer_description = D2D1::RectF(transfer_left, y + 12.0f * scale,
+            transfer_right, y + 12.0f * scale + transfer_caption);
+        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
+            l10n::StringId::ImportSettingsTitle, l10n::StringId::RestartNow};
+        const float transfer_bottom = LayoutSettingsActions(transfer_left, transfer_right,
+            l.transfer_description.bottom + 16*scale, scale, transfer_labels, 2 + static_cast<int>(vm.settings_transfer_pending), l.transfer_action, painter);
+        l.transfer_card = D2D1::RectF(left, y, right, transfer_bottom + 8*scale);
+        y = l.transfer_card.bottom;
+        l.category_rows.push_back(l.transfer_card);
     } else if (vm.settings_page==9) {
         section(I::SettingsSecStaging);
         l.staging_tray_row=toggle_row(I::SettingsStagingTrayDesc);
@@ -389,7 +406,6 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         l.change_days_row=row(narrow ? 98.0f : 64.0f); segments(l.change_days_row,l.change_days,3,282);
     }
     end_group();
-    if(vm.settings_page==8) { y+=12*scale; l.footer=D2D1::RectF(left,y,right,y+44*scale); y=l.footer.bottom; }
     y+=16*scale;
     return y;
 }

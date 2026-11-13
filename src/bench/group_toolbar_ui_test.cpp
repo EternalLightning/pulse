@@ -70,7 +70,7 @@ int RunGroupToolbarUiTest(bool order_only = false) {
         "user-provided grouping SVG is embedded in the production resource set");
     for (const wchar_t* language : {L"zh-CN", L"en-US"}) {
         l10n::Initialize(GetModuleHandleW(nullptr), language);
-        for (float scale : {1.0f, 1.5f}) for (bool dark : {false, true}) {
+        for (float scale : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f}) for (bool dark : {false, true}) {
             s.scale = scale;
             s.darkMode = dark;
             s.renderer.SetScale(scale);
@@ -85,13 +85,19 @@ int RunGroupToolbarUiTest(bool order_only = false) {
                 const auto layout = ui::MakeToolbarLayout(rect.right, scale, s.renderer.TitleBarHeight(),
                     s.renderer.Margin(), s.renderer.NewButtonWidthPx(rect.right - left < 600 * scale),
                     left, expand);
-                if (layout.group.right - layout.group.left >= 60 * scale) {
+                if (layout.sort.right - layout.sort.left >= 60 * scale) {
                     ui::fluent::Painter painter(&s.compositor);
                     painter.SetScale(scale);
                     painter.BeginFrame(ui::MakeTheme(dark, s.accentColor));
+                    check(painter.MeasureButtonWidth(l10n::Get(l10n::StringId::ToolbarSort), L"\xE8CB", true) <=
+                        layout.sort.right - layout.sort.left,
+                        "localized sort label, icon and chevron fit without clipping");
                     check(painter.MeasureButtonWidth(l10n::Get(l10n::StringId::ToolbarGroup), L"\xE8FD", true) <=
                         layout.group.right - layout.group.left,
                         "localized group label, supplied icon and chevron fit without clipping");
+                    check(painter.MeasureButtonWidth(l10n::Get(l10n::StringId::ToolbarFilter), L"\xE71C") <=
+                        layout.filter.right - layout.filter.left,
+                        "localized filter label and icon fit without clipping");
                 }
                 check(layout.sort.right + 5 * scale <= layout.group.left &&
                     layout.group.right + 5 * scale <= layout.filter.left &&

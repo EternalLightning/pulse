@@ -21,6 +21,21 @@ namespace pulse::ui {
 #ifdef PULSE_UI_TEST_HOOKS
 inline constexpr UINT kConfirmSnapshotMessage = WM_APP + 0x2B1;
 inline constexpr UINT kConfirmInspectMessage = WM_APP + 0x2B2;
+inline constexpr UINT kConflictInspectMessage = WM_APP + 0x2B3;
+inline constexpr UINT kDialogInspectPixelsMessage = WM_APP + 0x2B4;
+struct DialogPixelInspection {
+    D2D1_RECT_F bounds{};
+    D2D1_COLOR_F expected{};
+    size_t matching = 0, samples = 0;
+    bool varied = false;
+    bool nonblack = false;
+};
+bool InspectDialogPixels(Compositor& compositor, DialogPixelInspection& inspection);
+struct ConflictDialogInspection {
+    D2D1_RECT_F close{}, checkbox{}, details{}, cancel{};
+    int focus = 0;
+    bool expanded = false;
+};
 struct ConfirmDialogInspection {
     size_t row_count = 0;
     float scroll = 0.0f;
@@ -29,6 +44,10 @@ struct ConfirmDialogInspection {
     D2D1_RECT_F primary{};
     D2D1_RECT_F cancel{};
     D2D1_RECT_F alternate{};
+    D2D1_RECT_F close{};
+    D2D1_RECT_F checkbox{};
+    std::wstring message;
+    int focus = 0;
 };
 #endif
 
@@ -150,6 +169,9 @@ struct ConfirmDialogSpec {
     bool* alternate_selected = nullptr;
     std::vector<ConfirmDialogRow> rows;
     std::wstring note;
+    bool hide_cancel = false;
+    bool preserve_message = false;
+    float max_height_dip = 0.0f;
 };
 
 ConfirmDialogSpec BuildLinkConfirmationSpec(const ops::ConflictItemInfo& conflict);

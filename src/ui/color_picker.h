@@ -53,7 +53,7 @@ public:
 
     // GUI verification: render the popup frame to a PNG without showing it.
     static bool SaveDebugSnapshot(Compositor* compositor, const wchar_t* png_path,
-                                  bool dark, D2D1_COLOR_F accent, float scale);
+                                  bool dark, D2D1_COLOR_F accent, float scale, bool high_contrast = false);
 };
 
 } // namespace pulse::ui

@@ -21,6 +21,7 @@
 #include "../ipc/delete_plan_protocol.h"
 #include "../ipc/ctx_menu_util.h"
 #include "ctx_handlers.h"
+#include "context_invoke_directory.h"
 #include "ctx_session_process.h"
 #include "shell_launch_process.h"
 #include "shell_query_worker.h"
@@ -660,18 +661,14 @@ void CtxInvoke(const CtxSessionData& d, IContextMenu* menu, UINT id_first,
         SendDone(invoke_req_id, E_INVALIDARG, false, L"context menu invoke failed");
         return;
     }
-    std::wstring dir = ToParsingPath(d.paths.front());
-    if (!d.background) {
-        const auto slash = dir.find_last_of(L'\\');
-        if (slash != std::wstring::npos && slash > 2) dir.resize(slash);
-    }
+    const auto dir = pulse::shell::ContextInvokeDirectory(d.paths.front(), d.background);
     CMINVOKECOMMANDINFOEX info{};
     info.cbSize = sizeof(info);
     info.fMask = CMIC_MASK_UNICODE;
     info.hwnd = d.owner;
     info.lpVerb = MAKEINTRESOURCEA(item_id - id_first);
     info.lpVerbW = MAKEINTRESOURCEW(item_id - id_first);
-    info.lpDirectoryW = dir.starts_with(L"::") ? nullptr : dir.c_str();
+    info.lpDirectoryW = dir.empty() ? nullptr : dir.c_str();
     info.nShow = SW_SHOWNORMAL;
     const HRESULT hr = menu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
     SendDone(invoke_req_id, hr, false,

@@ -4,11 +4,17 @@
 #include "frame_profile_output.h"
 #include "gpu_timestamp_profile.h"
 #include "presentation_statistics_profile.h"
+#include "../ui/fluent_svg_cache.h"
 
 inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
     using namespace pulse;
     using Clock = std::chrono::steady_clock;
     int failures = 0;
+    wchar_t fixed_option[2]{}, cache_option[2]{};
+    const bool fixed_60 = GetEnvironmentVariableW(L"PULSE_PROFILE_FIXED_60", fixed_option, 2) == 1 && fixed_option[0] == L'1';
+    const bool svg_cache = GetEnvironmentVariableW(L"PULSE_PROFILE_SVG_RASTER", cache_option, 2) != 1 || cache_option[0] != L'0';
+    SetFluentSvgRasterCacheEnabledForTest(svg_cache);
+    std::printf("[FRAME_CONTROL] fixed_60=%d svg_raster_cache=%d\n", fixed_60, svg_cache);
     auto owned = std::make_unique<AppState>();
     auto& s = *owned;
     s.isolatedTest = s.shot.active = true;
@@ -83,6 +89,8 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
     }
     SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", presented ? nullptr : L"1");
     if (presented) ShowWindow(s.hwnd, SW_SHOWNOACTIVATE);
+    if (presented && fixed_60)
+        SetWindowPos(s.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     struct Row {
         int scenario, repeat, frame;
         bool active;
@@ -94,7 +102,8 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
     std::vector<Row> rows;
     rows.reserve(16000);
     constexpr const char* scenarios[] = {"view", "filter", "scroll", "tabs", "tray"};
-    std::printf("[FRAME_WORKLOAD] warmup_ms=400 measurement_ms=2000 input_period_ms=240 repeats=2 pacing=natural-render\n");
+    std::printf("[FRAME_WORKLOAD] warmup_ms=400 measurement_ms=2000 input_period_ms=240 repeats=2 pacing=%s\n",
+        fixed_60 ? "fixed-60" : "natural-render");
     std::printf("[FRAME_LIMIT] Present duration is CPU call time; intervals are render-loop intervals, not display timestamps or GPU duration\n");
     std::printf("[FRAME_MODE] %s\n", presented ? "presented-render-workload" : "hidden-render-workload-not-desktop-performance");
     const bool waitable = presented && s.compositor.WaitableFramePacingEnabled();
@@ -144,8 +153,13 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
         const auto until = started + std::chrono::milliseconds(2400);
         int changes = 0;
         int frame = 0;
+        auto next_frame = started;
         while (Clock::now() < until) {
             const auto waiting_begin = Clock::now();
+            if (fixed_60) {
+                std::this_thread::sleep_until(next_frame);
+                next_frame = std::max(next_frame + std::chrono::microseconds(16667), Clock::now());
+            }
             if (waitable && !frame_permit) {
                 HANDLE handle = s.compositor.FrameLatencyWaitableObject();
                 for (;;) {

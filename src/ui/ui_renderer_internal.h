@@ -84,8 +84,8 @@ void ClearTextWidthCache() {
     constexpr float kTabPinnedW = 36.0f; // Chrome pinned tab: icon-only square
     constexpr float kTabPinnedNamedW = 112.0f;
     constexpr float kTabCloseAlwaysW = 96.0f;
-    constexpr float kTabClosePadDip = 10.0f;
-    constexpr float kTabCloseSizeDip = 20.0f;
+    constexpr float kTabClosePadDip = 6.0f;
+    constexpr float kTabCloseSizeDip = 28.0f;
     constexpr float kCommandIconButtonDip = 32.0f;
     constexpr float kCommandIconStepDip = 34.0f;
     constexpr float kRecentControlsDip = 40.0f;
@@ -1427,9 +1427,13 @@ void DrawTabTitle(Compositor* compositor, const D2D1_COLOR_F& background,
 
     auto draw_ellipsis = [&](const std::wstring& s, float left, float width) {
         if (!factory || width <= 1.0f) return;
+        const auto shown = FitEndEllipsis(s, width, [&](const std::wstring& value) {
+            return MeasureLayoutText(compositor, factory, fmt, value);
+        });
+        if (shown.empty()) return;
         const D2D1_RECT_F clip = D2D1::RectF(left, y, left + width, y + h);
         if (compositor && br && compositor->DrawLumaText(
-                s, fmt, clip, br->GetColor(), background, fmt->GetTextAlignment())) return;
+                shown, fmt, clip, br->GetColor(), background, fmt->GetTextAlignment())) return;
         ComPtr<IDWriteTextLayout> layout;
         if (FAILED(typography::CreateTextLayout(factory, s.c_str(), (UINT32)s.size(), fmt,
                                              width, h, &layout)) || !layout.get()) {
@@ -1652,7 +1656,8 @@ size_t AboutRowLines(const WindowViewModel& vm, float card_w, float scale) {
 
 SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                                   float scale, float title_h, float status_h,
-                                  const fluent::Painter* painter, float sidebar_width = -1.0f) {
+                                  const fluent::Painter* painter, float sidebar_width = -1.0f,
+                                  bool include_offscreen = false) {
     SettingsLayout l;
     if (sidebar_width < 0) sidebar_width = (rect.right / scale < kSidebarRailWindowDip
         ? kSidebarRailWidthDip : 224.0f) * scale;
@@ -1811,20 +1816,6 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             l.about_action[2].bottom + 16.0f * scale);
         y = l.about_distribution_card.bottom + 12.0f * scale;
 
-        const float transfer_left = card_left + 16.0f * scale;
-        const float transfer_right = card_right - 16.0f * scale;
-        const float transfer_caption = SettingsCaptionHeight(vm.settings_transfer_status,
-            transfer_right - transfer_left, scale, painter);
-        l.transfer_description = D2D1::RectF(transfer_left, y + 44.0f * scale,
-            transfer_right, y + 44.0f * scale + transfer_caption);
-        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
-            l10n::StringId::ImportSettingsTitle, vm.settings_transfer_pending ?
-            l10n::StringId::RestartNow : l10n::StringId::RestoreSettingsTitle};
-        const float transfer_bottom = LayoutSettingsActions(transfer_left, transfer_right,
-            l.transfer_description.bottom + 16*scale, scale, transfer_labels, 3, l.transfer_action, painter);
-        l.transfer_card = D2D1::RectF(card_left, y, card_right, transfer_bottom + 8*scale);
-        y = l.transfer_card.bottom + 12.0f * scale;
-
         const float performance_height=SettingsToggleHeight(card_right-card_left-16*scale,
             l10n::Get(l10n::StringId::SettingsShowPerformanceDesc),scale,painter);
         l.diagnostics_perf = D2D1::RectF(card_left + 8*scale, y + 86*scale,
@@ -1838,7 +1829,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
 
         if (!vm.settings_index_error.empty()) y += 44.0f * scale;
     } else if (vm.settings_page == 4) {
-        y = LayoutSettingsDuplicates(l, vm, scale, y, painter);
+        y = LayoutSettingsDuplicates(l, vm, scale, y, painter, include_offscreen);
     }
     l.content_h = y - l.content_origin + pad;
     return l;
@@ -1865,6 +1856,15 @@ bool IsHovered(const WindowViewModel& vm, HitTestResult::Region region, int inde
     return vm.hover_region == static_cast<int>(region) &&
         (index < 0 || vm.hover_control_index == index) &&
         (sub_index < 0 || vm.hover_sub_index == sub_index);
+}
+
+bool SettingsPressed(const WindowViewModel& vm, const D2D1_RECT_F& bounds) {
+    return vm.settings_pressed_region != HitTestResult::None &&
+        vm.hover_region == vm.settings_pressed_region &&
+        vm.hover_control_index == vm.settings_pressed_index &&
+        vm.hover_sub_index == vm.settings_pressed_sub_index &&
+        ContainsPt(vm.settings_pressed_bounds, (bounds.left + bounds.right) * 0.5f,
+            (bounds.top + bounds.bottom) * 0.5f);
 }
 
 bool TabCloseVisible(const WindowViewModel& vm, int index, float tab_w, float scale) {

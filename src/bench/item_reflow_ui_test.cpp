@@ -32,6 +32,7 @@ struct ItemReflowUiTest {
     static int RunVmProfile();
     static int RunColdScroll();
     static int RunScrollGhosting();
+    static int RunSvgState();
     static const ViewModeTransition& ViewTransition(const MainRenderer& renderer) {
         return renderer.view_mode_transitions_[0];
     }
@@ -76,6 +77,7 @@ struct ItemReflowUiTest {
 #include "item_reflow_bulk_cases.h"
 #include "search_continuity_cases.h"
 #include "view_mode_transition_cases.h"
+#include "svg_state_cases.h"
 #include "view_mode_dense_cases.h"
 #include "header_icon_clip_cases.h"
 #include "view_mode_transition_feedback_cases.h"
@@ -200,6 +202,11 @@ int main(int argc, char** argv) {
         std::printf("[TEST] starting search/filter fixture\n");
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc > 1 && std::string_view(argv[1]) == "--svg-state-only") {
+        const int result = ui::ItemReflowUiTest::RunSvgState();
+        OleUninitialize();
+        return result;
+    }
     if (argc > 1 && std::string_view(argv[1]) == "--view-mode-dense-only") {
         const int result = ui::ItemReflowUiTest::RunDenseViewModes();
         OleUninitialize();

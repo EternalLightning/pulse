@@ -863,7 +863,7 @@ target_link_libraries(pulse_high_contrast_frame_test PRIVATE user32)
 add_executable(pulse_text_diff_ui_test src/bench/text_diff_ui_test.cpp
     src/bench/localization_test.rc src/app/text_diff.cpp src/ui/text_diff_window.cpp
     src/ui/ui_compositor.cpp src/ui/fluent_components.cpp src/ui/typography.cpp
-    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp)
+    src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp)
 target_link_libraries(pulse_text_diff_ui_test PRIVATE pulse_text pulse_localization
     d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 windowscodecs user32 gdi32 comctl32)
 pulse_enable_lumatext(pulse_text_diff_ui_test)
@@ -1000,7 +1000,8 @@ pulse_enable_lumatext(pulse_menu_text_test)
 
 add_executable(pulse_context_menu_loading_test
     src/bench/context_menu_loading_test.cpp src/bench/localization_test.rc
-    src/ui/notification_toast.cpp
+    src/ui/notification_toast.cpp src/ui/file_operation_dialog.cpp src/ui/window_helpers.cpp
+    src/ops/file_lock_owner.cpp
     src/app/command_catalog.cpp
     src/app/context_menu_controller.cpp src/app/context_menu_prefs.cpp
     src/app/builtin_menu_items.cpp
@@ -1011,7 +1012,7 @@ add_executable(pulse_context_menu_loading_test
 target_link_options(pulse_context_menu_loading_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_context_menu_loading_test PRIVATE
     pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
-    comctl32 user32 gdi32 windowscodecs advapi32 shlwapi)
+    comctl32 user32 gdi32 windowscodecs advapi32 shlwapi rstrtmgr)
 pulse_enable_lumatext(pulse_context_menu_loading_test)
 add_dependencies(pulse_context_menu_loading_test pulse_shell)
 
@@ -1043,6 +1044,19 @@ target_link_libraries(pulse_file_operation_failure_test PRIVATE
     pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
     comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
 pulse_enable_lumatext(pulse_file_operation_failure_test)
+
+add_executable(pulse_popup_operation_style_test EXCLUDE_FROM_ALL
+    src/bench/popup_operation_style_test.cpp src/bench/localization_test.rc
+    src/ui/notification_toast.cpp src/ui/file_operation_dialog.cpp
+    src/ui/fluent_components.cpp src/ui/window_helpers.cpp src/ui/tab_shape.cpp
+    src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp src/ui/typography.cpp
+    src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp)
+target_compile_definitions(pulse_popup_operation_style_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_popup_operation_style_test PRIVATE /MANIFEST:NO)
+target_link_libraries(pulse_popup_operation_style_test PRIVATE
+    pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
+    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
+pulse_enable_lumatext(pulse_popup_operation_style_test)
 
 add_executable(pulse_operation_center_ui_test
     src/bench/operation_center_ui_test.cpp src/bench/localization_test.rc
@@ -1083,7 +1097,7 @@ add_executable(pulse_dialog_edit_integration_test
     src/fs/fs_enum.cpp src/ui/edit_host.cpp src/ui/fluent_menu.cpp
     src/ui/fluent_components.cpp src/ui/window_helpers.cpp src/ui/tab_shape.cpp
     src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp src/ui/typography.cpp src/ui/ui_compositor.cpp)
-target_compile_definitions(pulse_dialog_edit_integration_test PRIVATE PULSE_TEST_LUMATEXT_INIT_FAILURE=1)
+target_compile_definitions(pulse_dialog_edit_integration_test PRIVATE PULSE_TEST_LUMATEXT_INIT_FAILURE=1 PULSE_UI_TEST_HOOKS=1)
 target_link_options(pulse_dialog_edit_integration_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_dialog_edit_integration_test PRIVATE
     pulse_localization d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
@@ -1493,6 +1507,9 @@ target_compile_options(pulse_item_reflow_rows_test PRIVATE /W4 /permissive- /utf
 add_executable(pulse_item_reflow_bitmap_test EXCLUDE_FROM_ALL
     src/bench/item_reflow_bitmap_test.cpp src/ui/animation_image_cache.cpp)
 target_compile_options(pulse_item_reflow_bitmap_test PRIVATE /W4 /permissive- /utf-8)
+
+add_executable(pulse_surface_transition_test EXCLUDE_FROM_ALL src/bench/surface_transition_test.cpp)
+target_compile_options(pulse_surface_transition_test PRIVATE /W4 /permissive- /utf-8)
 
 add_executable(pulse_view_mode_scroll_anchor_test EXCLUDE_FROM_ALL
     src/bench/view_mode_scroll_anchor_test.cpp src/ui/view_layout.cpp)

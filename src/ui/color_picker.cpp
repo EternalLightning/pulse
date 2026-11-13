@@ -200,6 +200,7 @@ struct State {
     HBRUSH edit_brush = nullptr;
     int line_h = 16;
     int focus_edit = -1;
+    int focus_part = kPartNone;
     bool edits_shown = false;
 
     int hot = kPartNone;      // hovered part
@@ -647,7 +648,8 @@ bool Render(State& s) {
 
     // Mode combo (ComboBox look: field frame + text + chevron).
     {
-        DrawPopupField(s, dc, s.r_combo, false, s.hot == kPartCombo);
+        DrawPopupField(s, dc, s.r_combo, GetFocus() == s.hwnd && s.focus_part == kPartCombo,
+                       s.hot == kPartCombo);
         const float pad = Px(s, 12.0f);
         const D2D1_RECT_F text_rc = D2D1::RectF(
             s.r_combo.left + pad, s.r_combo.top, s.r_combo.right - Px(s, 26.0f),
@@ -712,7 +714,7 @@ bool Render(State& s) {
     // Accept / cancel glyph buttons. The hover pill is inset and rounded so
     // it never pokes past the card's rounded bottom corners.
     auto draw_tool = [&](const D2D1_RECT_F& rc, const wchar_t* glyph, bool hovered,
-                         bool pressed) {
+                         bool pressed, int part) {
         if (hovered || pressed) {
             const float inset = Px(s, 3.0f);
             const D2D1_RECT_F pill = D2D1::RectF(rc.left + inset, rc.top + inset,
@@ -724,12 +726,18 @@ bool Render(State& s) {
         const float cx = (rc.left + rc.right) * 0.5f;
         const float cy = (rc.top + rc.bottom) * 0.5f;
         s.painter.DrawText(glyph, D2D1::RectF(cx - g, cy - g, cx + g, cy + g),
-                            s.icon_format.get(), s.theme.text, fluent::HorizontalAlignment::Center);
+                            s.icon_format.get(), IsHighContrast() && (hovered || pressed)
+                                ? s.theme.text_selected : s.theme.text, fluent::HorizontalAlignment::Center);
+        if (GetFocus() == s.hwnd && s.focus_part == part) {
+            const float inset = Px(s, 3.0f);
+            s.painter.DrawFocusRing(D2D1::RectF(rc.left + inset, rc.top + inset,
+                rc.right - inset, rc.bottom - inset), Px(s, s.theme.radius_control));
+        }
     };
     // CheckMark E73E + Close E8BB are the matched bold pair in Segoe Fluent
     // Icons (Accept E8FB is visibly thinner than Close, so it is not used).
-    draw_tool(s.r_ok, L"\xE73E", s.hot == kPartOk, s.press_ok);
-    draw_tool(s.r_cancel, L"\xE8BB", s.hot == kPartCancel, s.press_cancel);
+    draw_tool(s.r_ok, L"\xE73E", s.hot == kPartOk, s.press_ok, kPartOk);
+    draw_tool(s.r_cancel, L"\xE8BB", s.hot == kPartCancel, s.press_cancel, kPartCancel);
 
     HRESULT hr = dc->EndDraw();
     dc->SetTextAntialiasMode(old_text_aa);
@@ -872,6 +880,23 @@ void FocusEdit(State& s, int index) {
     if (index >= 0 && index < 5 && s.edits[index]) SetFocus(s.edits[index]);
 }
 
+void MoveKeyboardFocus(State& s, bool backwards) {
+    constexpr std::array<int, 8> order{kPartCombo, -5, -1, -2, -3, -4, kPartOk, kPartCancel};
+    const int edit = EditIndexFromHwnd(s, GetFocus());
+    const int current = edit >= 0 ? -edit - 1 : s.focus_part;
+    const auto found = std::find(order.begin(), order.end(), current);
+    const int count = static_cast<int>(order.size());
+    const int index = found == order.end() ? (backwards ? 0 : count - 1)
+        : static_cast<int>(found - order.begin());
+    const int next = order[static_cast<size_t>((index + (backwards ? count - 1 : 1)) % count)];
+    if (next < 0) FocusEdit(s, -next - 1);
+    else {
+        s.focus_part = next;
+        SetFocus(s.hwnd);
+    }
+    Repaint(s);
+}
+
 void OpenModeCombo(State& s) {
     if (!s.menu) {
         s.hsv_mode = !s.hsv_mode;
@@ -936,8 +961,7 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
             return 0;
         }
         if (wp == VK_TAB) {
-            const int dir = (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1;
-            FocusEdit(*s, (hook->index + dir + 5) % 5);
+            MoveKeyboardFocus(*s, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
             return 0;
         }
         break;
@@ -981,6 +1005,8 @@ void OnEditChange(State& s, int index) {
     Repaint(s);
 }
 
+bool SavePng(const wchar_t* path, int w, int h, void* bits);
+
 LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     State* s = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (msg == WM_NCCREATE) {
@@ -990,6 +1016,13 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (!s) return DefWindowProcW(hwnd, msg, wp, lp);
     switch (msg) {
+#ifdef PULSE_UI_TEST_HOOKS
+    case WM_APP + 0x2B5:
+        return lp && Render(*s) && SavePng(reinterpret_cast<const wchar_t*>(lp),
+            s->win_w, s->win_h, s->bits);
+    case WM_APP + 0x2BC:
+        return s->hsv_mode ? 1 : 0;
+#endif
     case WM_TIMER:
         if (wp == 1 && s->animation_start) {
             BOOL enabled = TRUE;
@@ -1029,6 +1062,7 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (HIWORD(wp) == EN_CHANGE) OnEditChange(*s, index);
         else if (HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS) {
             s->focus_edit = HIWORD(wp) == EN_SETFOCUS ? index : -1;
+            if (HIWORD(wp) == EN_SETFOCUS) s->focus_part = kPartNone;
             for (HWND e : s->edits) {
                 if (e) InvalidateRect(e, nullptr, FALSE);
             }
@@ -1040,6 +1074,8 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         const float x = static_cast<float>(GET_X_LPARAM(lp));
         const float y = static_cast<float>(GET_Y_LPARAM(lp));
         const int part = HitTest(*s, x, y);
+        s->focus_part = part == kPartCombo || part == kPartOk || part == kPartCancel
+            ? part : kPartNone;
         SetFocus(hwnd);
         if (part == kPartHue || part == kPartBright ||
             (part >= kPartCh0 && part < kPartCh0 + 4)) {
@@ -1116,15 +1152,28 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_KEYDOWN:
+        if (wp == VK_TAB) {
+            MoveKeyboardFocus(*s, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+            return 0;
+        }
         if (wp == VK_ESCAPE) {
             s->done = true;
             return 0;
         }
-        if (wp == VK_RETURN) {
-            s->accepted = true;
+        if ((wp == VK_RETURN || wp == VK_SPACE || wp == VK_DOWN || wp == VK_F4) &&
+            s->focus_part == kPartCombo) {
+            OpenModeCombo(*s);
+            return 0;
+        }
+        if (wp == VK_RETURN || (wp == VK_SPACE &&
+            (s->focus_part == kPartOk || s->focus_part == kPartCancel))) {
+            s->accepted = s->focus_part != kPartCancel;
             s->done = true;
             return 0;
         }
+        break;
+    case WM_CHAR:
+        if (wp == VK_TAB || wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_SPACE) return 0;
         break;
     case WM_CAPTURECHANGED:
         if (s->drag != kPartNone) s->drag = kPartNone;
@@ -1328,14 +1377,15 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
 }
 
 bool ColorPickerPopup::SaveDebugSnapshot(Compositor* compositor, const wchar_t* png_path,
-                                         bool dark, D2D1_COLOR_F accent, float scale) {
+                                         bool dark, D2D1_COLOR_F accent, float scale, bool high_contrast) {
     if (!compositor || !compositor->Dc() || !png_path) return false;
+    const HighContrastFrameScope contrast(high_contrast || IsHighContrast());
     State s;
     s.compositor = compositor;
     s.scale = (std::max)(0.5f, scale);
     s.dark = dark;
     s.accent = accent;
-    s.theme = MakeTheme(dark, accent);
+    s.theme = IsHighContrast() ? MakeHighContrastTheme() : MakeTheme(dark, accent);
     typography::CreateTextFormat(compositor->DwriteFactory(),
         {typography::FontRole::Text, 14.0f * s.scale}, &s.body_format);
     typography::CreateTextFormat(compositor->DwriteFactory(),

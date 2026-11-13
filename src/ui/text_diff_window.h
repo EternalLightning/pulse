@@ -12,6 +12,7 @@
 #include "ui_compositor.h"
 #include "fluent_components.h"
 #include "smooth_scroll.h"
+#include "window_material.h"
 #include "../app/text_diff.h"
 #include "../app/window_result_mailbox.h"
 
@@ -37,6 +38,7 @@ public:
     // Opens (or reuses) the window for a new pair and starts the comparison.
     void Show(HWND owner, const std::wstring& left, const std::wstring& right, bool dark,
               D2D1_COLOR_F accent);
+    void SetAppearance(bool dark, WindowEffect effect, D2D1_COLOR_F accent);
     void Close();
     bool visible() const noexcept;
     HWND hwnd() const noexcept { return hwnd_; }
@@ -102,12 +104,14 @@ private:
                right_->status == diff::LoadStatus::Ok;
     }
     Theme CurrentTheme() const;
+    D2D1_COLOR_F NewerBadgeText(D2D1_COLOR_F panel) const;
 
     HWND hwnd_ = nullptr;
     Compositor compositor_;
     fluent::Painter painter_;
     float scale_ = 1.0f;
     bool dark_ = false;
+    WindowEffect effect_ = WindowEffect::None;
     D2D1_COLOR_F accent_{0.0f, 0.47f, 0.83f, 1.0f};
 
     ComPtr<IDWriteTextFormat> mono_;

@@ -81,6 +81,9 @@ int RunSettingsCategories() {
             OpenSettingsTab(state,page);
             auto vm=BuildVm(state,false);vm.settings_scroll=0;vm.settings_expanded=0;
             auto layout=ui::MakeSettingsLayout(vm,rect,scale,state.renderer.TitleBarHeight(),28*scale,&measuring);
+            if (layout.section_count < 2 || layout.section_count > 3)
+                std::cout << "[INFO] category sections: page=" << page << " count=" << layout.section_count
+                    << " width=" << width << " height=" << height << " scale=" << scale << '\n';
             check(layout.section_count>=2 && layout.section_count<=3,"only populated category sections appear");
             float previous=layout.nav.top;
             for(int nav:ui::kSettingsNavOrder) {
@@ -182,8 +185,11 @@ int RunSettingsCategories() {
         const auto before=state.appPrefs.ToJson();
         const int x=static_cast<int>(row.right-35),y=static_cast<int>((row.top+row.bottom)/2);
         HandleLButtonDown(&state,state.hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));
+        check(state.appPrefs.ToJson()==before,"native press waits for release before changing a preference");
+        HandleLButtonUp(&state,state.hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));
         check(state.appPrefs.ToJson()!=before,"native click applies a moved preference through the production controller");
         HandleLButtonDown(&state,state.hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));
+        HandleLButtonUp(&state,state.hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));
         check(state.appPrefs.ToJson()==before,"second native click restores the isolated preference");
     }
     state.settings.ResetUi();

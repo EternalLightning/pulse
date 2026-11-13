@@ -6,6 +6,7 @@
 #include "../app/new_item_dialog.h"
 #include "../app/archive_dialog.h"
 #include "../common/localization.h"
+#include "../ui/FluentTokens.h"
 #include "../common/windows_compat.h"
 #include "../ui/dialog_lifecycle.h"
 #include "../ui/ui_compositor.h"
@@ -24,6 +25,7 @@
 
 namespace {
 std::atomic_int failures = 0;
+COLORREF prompt_accent = RGB(80, 180, 220);
 std::atomic_int paints = 0;
 int messages_during_fade = 0;
 constexpr UINT kResponsivenessProbe = WM_APP + 8;
@@ -402,6 +404,87 @@ BOOL CALLBACK FindPrompt(HWND window, LPARAM parameter) {
     return TRUE;
 }
 
+RECT ChildBounds(HWND dialog, int id) {
+    RECT rect{};
+    GetWindowRect(GetDlgItem(dialog, id), &rect);
+    MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&rect), 2);
+    return rect;
+}
+
+void CheckPromptStyle(HWND dialog, UINT dpi, bool dark) {
+    const auto px = [dpi](int dip) { return MulDiv(dip, static_cast<int>(dpi), 96); };
+    RECT client{}; GetClientRect(dialog, &client);
+    const RECT primary = ChildBounds(dialog, IDOK), cancel = ChildBounds(dialog, IDCANCEL);
+    const RECT close = ChildBounds(dialog, 101);
+    Check(close.right - close.left == px(46) && close.bottom == px(44),
+        "new-item close target follows 46 by 44 DIP header contract");
+    Check(primary.bottom - primary.top == px(32) && cancel.bottom == primary.bottom &&
+        primary.left - cancel.right == px(8) && client.right - primary.right == px(20) &&
+        client.bottom - primary.bottom == px(16), "new-item actions use right-aligned Cancel then Primary with 64 DIP footer");
+    POINT point{px(50), px(10)}; ClientToScreen(dialog, &point);
+    Check(SendMessageW(dialog, WM_NCHITTEST, 0, MAKELPARAM(point.x, point.y)) == HTCAPTION,
+        "new-item semantic header remains draggable");
+    LOGFONTW font{};
+    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 100), WM_GETFONT, 0, 0)), sizeof(font), &font);
+    Check(font.lfHeight == -px(14), "new-item native input uses 14 DIP text after layout");
+    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 101), WM_GETFONT, 0, 0)), sizeof(font), &font);
+    Check(font.lfHeight == -px(12), "close glyph uses 12 DIP format independently of the semantic header icon");
+    const auto theme = pulse::ui::IsHighContrast() ? pulse::ui::MakeHighContrastTheme() :
+        pulse::ui::MakeTheme(dark, D2D1::ColorF(GetRValue(prompt_accent) / 255.0f,
+            GetGValue(prompt_accent) / 255.0f, GetBValue(prompt_accent) / 255.0f));
+    const auto sheet = pulse::ui::BlendOver(theme.surface_sheet, theme.bg);
+    const auto input = pulse::ui::BlendOver(theme.fill_input_focus, sheet);
+    const auto outline = pulse::ui::IsHighContrast() ? theme.stroke_card : dark
+        ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
+    const auto border = pulse::ui::BlendOver(outline, input);
+    const COLORREF expected = RGB(static_cast<BYTE>(border.r * 255), static_cast<BYTE>(border.g * 255), static_cast<BYTE>(border.b * 255));
+    RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    HDC dc = GetDC(dialog);
+    Check(GetPixel(dc, px(20), px(116)) == expected,
+        "new-item input border composites translucent stroke over the input fill");
+    GUITHREADINFO thread{sizeof(thread)};
+    GetGUIThreadInfo(GetWindowThreadProcessId(dialog, nullptr), &thread);
+    const auto bottom = pulse::ui::BlendOver(thread.hwndFocus == GetDlgItem(dialog, 100)
+        ? theme.accent : theme.stroke_input_bottom, input);
+    Check(GetPixel(dc, px(50), px(131)) == RGB(static_cast<BYTE>(bottom.r * 255), static_cast<BYTE>(bottom.g * 255), static_cast<BYTE>(bottom.b * 255)),
+        "new-item bottom stroke uses accent only while its native editor owns focus");
+    ReleaseDC(dialog, dc);
+}
+
+std::atomic_bool theme_refresh_ran = false;
+bool theme_refresh_required = false;
+constexpr UINT_PTR kThemeRefreshTimer = 947;
+void CALLBACK RefreshThemeFixture(HWND owner, UINT, UINT_PTR, DWORD) {
+    Search search{owner};
+    EnumThreadWindows(GetCurrentThreadId(), FindPrompt, reinterpret_cast<LPARAM>(&search));
+    if (!search.dialog) return;
+    KillTimer(owner, kThemeRefreshTimer);
+    const HWND dialog = search.dialog;
+    const HWND edit = GetDlgItem(dialog, 100);
+    if (GetWindowTextLengthW(edit) == 0) SetWindowTextW(edit, L"theme-fixture");
+    const bool system_contrast = pulse::ui::IsHighContrast();
+    wchar_t text[128]{};
+    GetWindowTextW(edit, text, ARRAYSIZE(text));
+    {
+        pulse::ui::HighContrastFrameScope contrast(true);
+        SendMessageW(dialog, WM_SETTINGCHANGE, SPI_SETHIGHCONTRAST, 0);
+        HDC dc = GetDC(edit);
+        const auto brush = reinterpret_cast<HBRUSH>(SendMessageW(dialog, WM_CTLCOLOREDIT,
+            reinterpret_cast<WPARAM>(dc), reinterpret_cast<LPARAM>(edit)));
+        LOGBRUSH info{}; GetObjectW(brush, sizeof(info), &info);
+        Check(info.lbColor == GetSysColor(COLOR_WINDOW) && GetTextColor(dc) == GetSysColor(COLOR_WINDOWTEXT),
+            "open prompt refreshes input brush and text to the system high-contrast pair");
+        ReleaseDC(edit, dc);
+    }
+    {
+        pulse::ui::HighContrastFrameScope contrast(system_contrast);
+        SendMessageW(dialog, WM_THEMECHANGED, 0, 0);
+    }
+    wchar_t retained[128]{}; GetWindowTextW(edit, retained, ARRAYSIZE(retained));
+    Check(wcscmp(text, retained) == 0, "theme and contrast refresh preserve entered native edit text");
+    theme_refresh_ran = true;
+}
+
 void RunPrompt(HWND owner, bool accept) {
     const DWORD ui_thread = GetCurrentThreadId();
     auto helper = std::thread([owner, ui_thread, accept] {
@@ -410,10 +493,26 @@ void RunPrompt(HWND owner, bool accept) {
         while (std::chrono::steady_clock::now() < deadline) {
             EnumThreadWindows(ui_thread, FindPrompt, reinterpret_cast<LPARAM>(&search));
             if (search.dialog) {
+                if (theme_refresh_required) {
+                    const auto theme_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                    while (!theme_refresh_ran.load() && std::chrono::steady_clock::now() < theme_deadline)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
                 Check(GetDlgItem(search.dialog, 100) != nullptr, "new-item prompt contains name edit");
+                CheckPromptStyle(search.dialog, pulse::compat::WindowDpi(search.dialog), accept);
                 SetWindowTextW(GetDlgItem(search.dialog, 100), L"fade-fixture.txt");
                 Check(CaptureFixture(search.dialog, accept ? L"newitem-dark.bmp" : L"newitem-light.bmp"),
                     "save actual new-item dialog client screenshot");
+                const UINT dpi = accept ? 144u : 192u;
+                RECT rect{}; GetWindowRect(search.dialog, &rect);
+                rect.right = rect.left + MulDiv(350, static_cast<int>(dpi), 96);
+                rect.bottom = rect.top + MulDiv(224, static_cast<int>(dpi), 96);
+                SendMessageW(search.dialog, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&rect));
+                wchar_t entered[64]{}; GetWindowTextW(GetDlgItem(search.dialog, 100), entered, ARRAYSIZE(entered));
+                Check(wcscmp(entered, L"fade-fixture.txt") == 0, "new-item DPI transition preserves entered name");
+                CheckPromptStyle(search.dialog, dpi, accept);
+                Check(CaptureFixture(search.dialog, accept ? L"newitem-style-144dpi.bmp" : L"newitem-style-192dpi.bmp"),
+                    "capture new-item style after DPI transition");
                 PostMessageW(search.dialog, WM_COMMAND, accept ? IDOK : IDCANCEL, 0);
                 return;
             }
@@ -424,7 +523,7 @@ void RunPrompt(HWND owner, bool accept) {
     });
     std::wstring result = L"retained-value";
     const bool accepted = pulse::app::PromptNewItemName(owner, L"Fade test new item",
-        accept, RGB(80, 180, 220), result);
+        accept, prompt_accent, result);
     helper.join();
     Check(accepted == accept, accept ? "new-item accepts after fade" : "new-item cancels after fade");
     Check(result == (accept ? L"fade-fixture.txt" : L"retained-value"),
@@ -668,6 +767,7 @@ void RunEscapeCases(HWND owner) {
 } // namespace
 
 int main(int argc, char** argv) {
+    const bool style_only = argc == 2 && std::strcmp(argv[1], "--popup-style-only") == 0;
     const bool input_only = argc == 2 && std::strcmp(argv[1], "--new-item-input") == 0;
     const bool lifecycle_only = argc == 2 && std::strcmp(argv[1], "--lifecycle") == 0;
     pulse::compat::EnableDpiAwareness();
@@ -684,7 +784,15 @@ int main(int argc, char** argv) {
     Check(owner != nullptr, "create isolated modal owner");
     if (!owner) return 1;
     const bool animations = AnimationsEnabled();
-    if (input_only) {
+    if (style_only) {
+        prompt_accent = RGB(0, 120, 212);
+        theme_refresh_required = true;
+        SetTimer(owner, kThemeRefreshTimer, 1, RefreshThemeFixture);
+        RunPrompt(owner, true);
+        KillTimer(owner, kThemeRefreshTimer);
+        Check(theme_refresh_ran, "UI-thread high-contrast refresh fixture reached the open new-item prompt");
+        RunPrompt(owner, false);
+    } else if (input_only) {
         RunInput(owner, false);
         RunInput(owner, true);
     } else {

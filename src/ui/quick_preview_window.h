@@ -55,6 +55,7 @@ public:
                     std::shared_ptr<ThumbnailCache> thumbnails = {});
     void Show(const QuickPreviewItem& item, bool dark, WindowEffect effect, bool safe_mode);
     void Update(const QuickPreviewItem& item);
+    void SetAppearance(bool dark, WindowEffect effect, D2D1_COLOR_F accent);
     void SetStarred(bool starred);
     void Close();
     bool visible() const noexcept;
@@ -63,12 +64,13 @@ public:
 
 private:
     friend struct QuickPreviewPlaybackProbe;
+    friend struct QuickPreviewAppearanceProbe;
     enum class NativeKind { None, Bitmap, Text, Hex };
     enum class ChromeButton { None, Prev, Next, More };
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
-    void Render();
+    bool Render(const wchar_t* snapshot_path = nullptr);
     void Resize();
     void ResetView();
     void RecreateFormats();
@@ -98,6 +100,7 @@ private:
     void UpdateTextScrollTimer();
 
     D2D1_RECT_F ContentRect() const;
+    D2D1_RECT_F TextViewport() const;
     D2D1_RECT_F FindBarRect() const;
     D2D1_RECT_F FindFieldRect() const;
     D2D1_RECT_F FindEditCell() const;
@@ -124,8 +127,7 @@ private:
     void UpdateFindMatches();
     void FindNext(int direction);
     void ScrollMatchIntoView(uint32_t start);
-    void DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT_F& content,
-                          ID2D1SolidColorBrush* text_brush);
+    void DrawTextPreview(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* text_brush);
     bool ClientPoint(LPARAM lparam, POINT& out) const;
     HCURSOR ContentCursor(POINT client) const;
     bool EnsureFindEdit();
@@ -164,6 +166,7 @@ private:
     QuickPreviewItem item_;
     uint64_t generation_ = 1;
     bool dark_ = false;
+    D2D1_COLOR_F accent_ = GetAccentColor();
     WindowEffect effect_ = WindowEffect::MicaAlt;
     bool safe_mode_ = false;
     bool handler_immediate_ = false;

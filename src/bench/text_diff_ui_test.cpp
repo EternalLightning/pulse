@@ -31,6 +31,69 @@ struct TextDiffWindowTestPeer {
     static bool Snapshot(TextDiffWindow& window, const std::filesystem::path& path) {
         return window.Render(path.c_str());
     }
+    static int AppearanceTest() {
+        int failures = 0;
+        const auto check = [&](bool ok, const char* message) {
+            std::cout << (ok ? "[PASS] " : "[FAIL] ") << message << std::endl;
+            if (!ok) ++failures;
+        };
+        const auto folder = std::filesystem::absolute(L"bench_data/text-diff-appearance");
+        std::filesystem::create_directories(folder);
+        const auto left = folder / L"before.txt", right = folder / L"after.txt";
+        for (const auto& path : {left, right}) {
+            std::ofstream file(path);
+            for (int i = 0; i < 200; ++i) file << i << (path == left ? " before" : " after") << '\n';
+        }
+        std::filesystem::last_write_time(right, std::filesystem::last_write_time(left) + std::chrono::seconds(5));
+        TextDiffWindow window;
+        window.Show(nullptr, left.wstring(), right.wstring(), false, HexColor(0x0078d4));
+        const auto deadline = GetTickCount64() + 10000;
+        while (window.computing_ && GetTickCount64() < deadline) {
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message); DispatchMessageW(&message);
+            }
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, 15, QS_ALLINPUT);
+        }
+        check(window.Ready(), "load real diff for appearance preservation");
+        if (window.Ready()) {
+            window.Render();
+            window.ScrollTo(400);
+            window.sel_anchor_ = 20; window.sel_end_ = 22;
+            const auto generation = window.generation_;
+            const auto* retained = window.left_.get();
+            const auto rows = window.view_.size();
+            const float scroll = window.scroll_y_;
+            for (const bool dark : {false, true}) {
+                window.SetAppearance(dark, WindowEffect::MicaAlt, HexColor(0x0078d4));
+                SendMessageW(window.hwnd_, WM_THEMECHANGED, 0, 0);
+                check(window.dark_ == dark && window.effect_ == WindowEffect::MicaAlt &&
+                    window.generation_ == generation && window.left_.get() == retained &&
+                    window.view_.size() == rows && window.scroll_y_ == scroll &&
+                    window.sel_anchor_ == 20 && window.sel_end_ == 22 && !window.computing_,
+                    "appearance refresh preserves diff content, selection, scroll and job generation");
+                const auto background = BlendOver(WithAlpha(window.accent_, 0.18f),
+                    dark ? HexColor(0x202020) : HexColor(0xf3f3f3));
+                const auto ink = window.NewerBadgeText(dark ? HexColor(0x202020) : HexColor(0xf3f3f3));
+                const float bg_luminance = RelativeLuminance(background), ink_luminance = RelativeLuminance(ink);
+                check(((std::max)(bg_luminance, ink_luminance) + 0.05f) /
+                    ((std::min)(bg_luminance, ink_luminance) + 0.05f) >= 4.5f,
+                    "production newer badge ink exceeds 4.5:1 contrast on composited panel");
+                check(window.Render((folder / (dark ? L"badge-dark.png" : L"badge-light.png")).c_str()),
+                    "capture newer badge on actual panel background");
+            }
+            window.SetAppearance(false, WindowEffect::None, HexColor(0xffed00));
+            const auto background = BlendOver(WithAlpha(window.accent_, 0.18f), HexColor(0xf3f3f3));
+            const auto ink = window.NewerBadgeText(HexColor(0xf3f3f3));
+            const float bg_luminance = RelativeLuminance(background), ink_luminance = RelativeLuminance(ink);
+            check(((std::max)(bg_luminance, ink_luminance) + 0.05f) /
+                ((std::min)(bg_luminance, ink_luminance) + 0.05f) >= 4.5f,
+                "bright accent newer badge exceeds 4.5:1 contrast on composited panel");
+            check(window.Render((folder / L"badge-bright-light.png").c_str()), "capture bright accent badge");
+        }
+        window.Close();
+        return failures ? 1 : 0;
+    }
     static int SmoothScrollTest() {
         int failures = 0;
         auto check = [&](bool ok, const char* name) {
@@ -122,6 +185,11 @@ int wmain(int argc, wchar_t** argv) {
     using Peer = ui::TextDiffWindowTestPeer;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (argc == 2 && wcscmp(argv[1], L"--appearance") == 0) {
+        const int result = Peer::AppearanceTest();
+        if (SUCCEEDED(com)) CoUninitialize();
+        return result;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0) {
         const int result = Peer::SmoothScrollTest();
         if (SUCCEEDED(com)) CoUninitialize();

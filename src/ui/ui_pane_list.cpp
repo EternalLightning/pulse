@@ -749,7 +749,7 @@ void MainRenderer::DrawEntryIcon(const ListEntryView& entry, float x, float y, f
                                  const Theme& theme) {
     const auto dest = D2D1::RectF(x, y, x + size, y + size);
     if (entry.pc_device) {
-        DrawIconText(x, y, size, size, L"\xE8EA", L"MTP", theme.accent, 0.9f);
+        DrawIconText(x, y, size, size, L"\xE8EA", L"MTP", theme.accent_ink, 0.9f);
         return;
     }
     if (entry.path.starts_with(L"pulse:device:")) {
@@ -1020,7 +1020,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                                 theme.radius_control * scale_);
             }
             DrawPaneHeaderIcon(rc, icon, !enabled ? theme.text_disabled
-                : (active ? theme.accent : theme.text));
+                : (active ? theme.accent_ink : theme.text));
         };
         headerButton(detailsRc, HitTestResult::PaneDetails, PaneHeaderIcon::View,
                      pane.view_mode == ViewMode::Details);
@@ -1177,7 +1177,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
         float cx = columns.left;
         auto drawCol = [&](const std::wstring& label, SortColumn col, float cw, bool right = false) {
             const bool active = !pane.curated_order && pane.sort_column == col;
-            MakeBrush(dc, active ? theme.accent : theme.text, brText_);
+            MakeBrush(dc, active ? theme.accent_ink : theme.text, brText_);
             IDWriteTextFormat* fmt = compositor_->HeaderFormat();
             const float textInset = 8.0f * scale_;
             const float contentLeft = cx + textInset;
@@ -1213,7 +1213,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                              pane.sort_direction == SortDirection::Asc
                                  ? kIconChevronUp : kIconChevronDown,
                              pane.sort_direction == SortDirection::Asc ? L"^" : L"v",
-                             theme.accent, 0.75f);
+                             theme.accent_ink, 0.75f);
             }
             fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             cx += cw;
@@ -1733,7 +1733,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             const bool busy = sync == fs::CloudSync::Syncing;
             const bool online = fs::IsCloudPlaceholder(e.attrs);
             const bool pinned = !online && fs::CloudStateFromAttrs(e.attrs) == fs::CloudState::Pinned;
-            const auto color = problem ? HexColor(0xD13438) : busy || online ? theme.accent : HexColor(0x168344);
+            const auto color = problem ? HexColor(0xD13438) : busy || online ? theme.accent_ink : HexColor(0x168344);
             const float left = detailsColumns.cloud_left + (detailsColumns.cloud_width - 22.0f * scale_) * 0.5f;
             if (pinned && !problem && !busy) {
                 const auto center = D2D1::Point2F(left + 11.0f * scale_, (cell.top + cell.bottom) * 0.5f);
@@ -1761,7 +1761,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         const bool highlighted = IsHighContrast() && (selected || hover);
         if (highlighted) {
             row_theme.text = row_theme.text_secondary = row_theme.text_disabled = theme.text_selected;
-            row_theme.icon_folder = row_theme.icon_file = row_theme.accent = theme.text_selected;
+            row_theme.icon_folder = row_theme.icon_file = row_theme.accent = row_theme.accent_ink = theme.text_selected;
         }
         const float hover_opacity = row_hover_opacity(row_key, hover, 180.0f, 180.0f);
         const float selection_opacity = SelectionOpacity(row_key, selected);
@@ -2130,7 +2130,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                     manual_size = size->second.manual;
                 }
             }
-            if (manual_size) MakeBrush(dc, row_theme.accent, brAccent_);
+            if (manual_size) MakeBrush(dc, row_theme.accent_ink, brAccent_);
             DrawTextEndEllipsis(compositor_, row_theme.bg, dc, compositor_->DwriteFactory(), compositor_->SmallFormat(),
                 manual_size ? brAccent_.get() : brTextSecondary_.get(), meta,
                 nameRc.left, nameRc.top + 25.0f * scale_,
@@ -2145,7 +2145,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 const auto alignment = format->GetTextAlignment();
                 format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 const bool manual = size->second.manual;
-                if (manual) MakeBrush(dc, row_theme.accent, brAccent_);
+                if (manual) MakeBrush(dc, row_theme.accent_ink, brAccent_);
                 DrawTextEndEllipsis(compositor_, row_theme.bg, dc, compositor_->DwriteFactory(), format,
                     manual ? brAccent_.get() : brTextSecondary_.get(), size->second.text,
                     bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
@@ -2180,7 +2180,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             if (trail.show_star) {
                 draw_action(trail.star, L":star-hot", starHot, star_opacity, e.starred,
                             e.starred ? L"\xE735" : L"\xE734", L"*",
-                            e.starred ? row_theme.accent : row_theme.text_secondary,
+                            e.starred ? row_theme.accent_ink : row_theme.text_secondary,
                             1.0f);
             }
             if (trail.show_new_tab)

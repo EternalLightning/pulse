@@ -125,7 +125,7 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
     } else address_path_surface_.Reset();
     DrawAddressSearchChrome(vm, rect.right, theme);
     const auto operation_color = vm.operation_count > 0 || vm.operation_center_open
-        ? theme.accent : theme.text_secondary;
+        ? theme.accent_ink : theme.text_secondary;
     DrawButton(layout.operations,theme,
         IsHovered(vm,HitTestResult::OperationCenter) ? theme.fill_hover :
         vm.operation_center_open ? theme.fill_selected : kTransparent,
@@ -177,7 +177,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float radius=8*scale_;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
-    const auto enabled_color=vm.dark ? HexColor(0x8CCBFF) : theme.accent;
+    const auto enabled_color=theme.accent_ink;
     const auto& create_color=create.state.enabled ? enabled_color : theme.text_disabled;
     const int create_icon=vm.dark ? IDR_FILES_NEW_COLOR_DARK_SVG : IDR_FILES_NEW_COLOR_SVG;
     auto create_bounds=icon_bounds(icon_x,icon_y);
@@ -219,7 +219,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
             (i==8 && vm.pane.column_strip.enabled);
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :
             selected ? theme.fill_selected : kTransparent,
-            i<=6 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent : theme.text_secondary,true,true,0.82f);
+            i<=6 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent_ink : theme.text_secondary,true,true,0.82f);
         if (i<6) {
             const auto& r=layout.commands[i];
             const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
@@ -232,8 +232,8 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
                     glyphs[i],L"",color,0.82f);
             }
         }
-        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent : theme.text_secondary);
-        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent : theme.text_secondary);
+        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,selected ? theme.accent_ink : theme.text_secondary);
+        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,selected ? theme.accent_ink : theme.text_secondary);
     }
     const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
                                        const wchar_t* text, bool enabled) {

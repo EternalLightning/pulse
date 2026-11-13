@@ -21,16 +21,21 @@ public:
     D2D1_RECT_F Bounds() const noexcept { return card_; }
 private:
     void Dismiss(HWND owner);
+    void ShowDetails(HWND owner);
     static constexpr UINT_PTR timer = 0x50554C54;
     fluent::Painter painter_;
     BinaryTransition reveal_;
     bool motion_enabled_ = true;
     std::wstring title_, message_;
+    std::wstring preview_;
     UINT action_message_ = 0;
-    D2D1_RECT_F card_{}, close_{};
+    D2D1_RECT_F card_{}, close_{}, details_{};
     ULONGLONG born_ = 0, last_tick_ = 0, remaining_ = 0;
     bool visible_ = false, hovered_ = false, pressed_close_ = false, pressed_card_ = false, persistent_ = true;
     bool top_center_ = false;
+    bool overflow_ = false, details_focus_ = false, pressed_details_ = false;
+    bool dark_ = false;
+    D2D1_COLOR_F accent_{};
     fluent::InfoBarKind kind_ = fluent::InfoBarKind::Warning;
 };
 }

@@ -137,7 +137,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         dc->SetTransform(transform);
         text(label, D2D1::RectF(panel.left + 28.0f * s, y + 4.0f * s,
                                 panel.right - 12.0f * s, y + 24.0f * s),
-             compositor_->SmallFormat(), theme.accent);
+             compositor_->SmallFormat(), theme.accent_ink);
     };
     auto centeredText = [&](const std::wstring& str, const D2D1_RECT_F& rc,
                             IDWriteTextFormat* fmt, const D2D1_COLOR_F& color) {
@@ -464,11 +464,11 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 }
                 DrawIconText(hit.preview_enable.left, hit.preview_enable.top, 22.0f * s,
                              22.0f * s, L"\xE890", L"eye",
-                             d.preview_enabled ? theme.accent : theme.text_secondary, 0.72f);
+                             d.preview_enabled ? theme.accent_ink : theme.text_secondary, 0.72f);
             }
             DrawIconText(hit.star.left, hit.star.top, 22.0f * s, 22.0f * s,
                          d.starred ? L"\xE735" : L"\xE734", L"*",
-                         d.starred ? theme.accent : theme.text_secondary, 1.0f);
+                         d.starred ? theme.accent_ink : theme.text_secondary, 1.0f);
             DrawIconText(hit.rename.left, hit.rename.top, 22.0f * s, 22.0f * s,
                          L"\xE8AC", L"ren", theme.text_secondary, 0.72f);
         }
@@ -514,9 +514,11 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 dc->DrawRoundedRectangle(D2D1::RoundedRect(rc, 6.0f * s, 6.0f * s),
                                          brStrokeCard_.get(), 1.0f);
             }
-            const D2D1_COLOR_F fg = primary ? theme.accent_text : theme.text;
+            const D2D1_COLOR_F fg = primary
+                ? (IsHighContrast() ? theme.accent_text : AutoAccentText(hovered ? theme.accent_hover : theme.accent))
+                : theme.text;
             DrawIconText(rc.left, rc.top + 5.0f * s, rc.right - rc.left, 18.0f * s,
-                         glyph, fallback, primary ? theme.accent_text
+                         glyph, fallback, primary ? fg
                                                   : theme.text_secondary, 1.0f);
             IDWriteTextFormat* fmt = compositor_->SmallFormat();
             if (!fmt) return;
@@ -567,7 +569,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
         text(pulse::l10n::Get(pulse::l10n::StringId::Information),
              D2D1::RectF(panel.left + 12.0f * s, y, panel.right - 12.0f * s,
                                           y + 20.0f * s),
-             compositor_->SmallFormat(), theme.accent);
+             compositor_->SmallFormat(), theme.accent_ink);
         float iy = y + 20.0f * s;
         infoRow(pulse::l10n::Get(pulse::l10n::StringId::Location).c_str(), d.location_text, iy);
         infoRow(pulse::l10n::Get(pulse::l10n::StringId::KnownSize).c_str(), d.size_text, iy);
@@ -685,7 +687,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                          D2D1::RectF(hit.security_change.left, y,
                                      hit.security_change.right, y + 18.0f * s),
                          compositor_->SmallFormat(),
-                         hot ? theme.accent_hover : theme.accent, true);
+                         hot ? BlendOver(WithAlpha(theme.text, 0.16f), theme.accent_ink) : theme.accent_ink, true);
                 }
                 infoRow(pulse::l10n::Get(pulse::l10n::StringId::Permissions).c_str(),
                         d.permissions_text.empty() ? pulse::l10n::Get(pulse::l10n::StringId::LoadingEllipsis)

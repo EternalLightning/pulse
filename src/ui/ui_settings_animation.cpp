@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "ui_renderer.h"
+#include "ui_renderer_internal.h"
 
 namespace pulse::ui {
 
@@ -33,8 +34,9 @@ float MainRenderer::ControlHoverOpacity(const D2D1_RECT_F& bounds, bool hovered)
     return HoverOpacity(key, hovered);
 }
 
-void MainRenderer::DrawSettingsSwitch(const std::wstring& key, const D2D1_RECT_F& bounds,
+void MainRenderer::DrawSettingsSwitch(const WindowViewModel& vm, const std::wstring& key, const D2D1_RECT_F& bounds,
                                       fluent::ControlState state) {
+    state.pressed = state.enabled && SettingsPressed(vm, bounds);
     auto& track = settings_switch_tracks_[key];
     track.frame = settings_switch_frame_;
     track.transition.Tick(state.checked, settings_switch_now_, motion_enabled_ && !IsHighContrast(), 160.0f);

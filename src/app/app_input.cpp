@@ -2102,6 +2102,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             hit.region != ui::HitTestResult::FilterClear) {
             HideFilterEditor(*s, true);
         }
+        if (BeginSettingsPointer(*s, hit)) return 0;
         if (hit.pane_index >= 0) {
             if (app::Pane* p = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, p);
         }
@@ -2368,164 +2369,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ToggleTheme(*s);
         } else if (hit.region == ui::HitTestResult::SettingsButton) {
             OpenSettingsTab(*s, 0);
-        } else if (hit.region == ui::HitTestResult::SettingsNav) {
-            OpenSettingsTab(*s, hit.index);
-        } else if (HandleSettingsControl(*s, hit)) {
-        } else if (hit.region == ui::HitTestResult::SettingsToggle) {
-            if (hit.index == 21) s->settings.ClearError();
-            s->settings.ToggleUi(hit.index);
-            if (hit.index == 21 && !s->settings.error().empty())
-                MessageBoxW(hwnd, s->settings.error().c_str(),
-                    l10n::Get(l10n::StringId::SettingsDefaultManager).c_str(), MB_OK | MB_ICONWARNING);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsAccent) {
-            if (hit.index == 1) {
-                s->settings.AccentChoice(true, 0);
-            } else {
-                std::wstring value = L"#" + (s->appPrefs.accent_rgb.empty()
-                    ? vm.settings_accent_hex : s->appPrefs.accent_rgb);
-                while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsThemeColor),
-                        l10n::Get(l10n::StringId::AccentInputHint), value, value, 32, {},
-                        s->darkMode, s->accentColor)) {
-                    uint32_t rgb = 0;
-                    if (app::ParseAccentInput(value, rgb)) {
-                        s->settings.AccentChoice(false, rgb);
-                        break;
-                    }
-                    MessageBoxW(hwnd, l10n::Get(l10n::StringId::AccentInputInvalid).c_str(),
-                        l10n::Get(l10n::StringId::SettingsThemeColor).c_str(), MB_OK | MB_ICONWARNING);
-                }
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsEffect) {
-            if (hit.index >= 0 && hit.index < ui::kWindowEffectCount)
-                s->settings.WindowEffect(
-                    ui::WindowEffectId(static_cast<ui::WindowEffect>(hit.index)));
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsDensity) {
-            s->settings.RowHeight(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsTextRender) {
-            s->settings.TextRendering(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsFolderSort) {
-            s->settings.FolderSort(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsWallpaperLook) {
-            std::wstring value = std::to_wstring(s->appPrefs.wallpaper_visibility);
-            while (app::PromptSettingsValue(hwnd, l10n::Get(l10n::StringId::SettingsWallpaperLook),
-                    l10n::Get(l10n::StringId::WallpaperPercentHint), value, value, 32, {},
-                    s->darkMode, s->accentColor)) {
-                int percent = 0;
-                if (app::ParseWallpaperVisibility(value, percent)) {
-                    s->settings.WallpaperVisibility(percent);
-                    break;
-                }
-                MessageBoxW(hwnd, l10n::Get(l10n::StringId::WallpaperPercentInvalid).c_str(),
-                    l10n::Get(l10n::StringId::SettingsWallpaperLook).c_str(), MB_OK | MB_ICONWARNING);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsWallpaperBlur) {
-            s->settings.WallpaperBlur(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsLanguage) {
-            static constexpr const wchar_t* languages[] = {L"system", L"zh-CN", L"en-US"};
-            if (hit.index >= 0 && hit.index < static_cast<int>(std::size(languages)))
-                s->settings.Language(languages[hit.index]);
-        } else if (hit.region == ui::HitTestResult::SettingsWallpaper) {
-            s->settings.Wallpaper(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsIndexVolume) {
-            s->settings.ToggleVolume(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsConfigurationAction) {
-            s->settings.ConfigurationAction(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsIndexAction) {
-            s->settings.IndexAction(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsIndexExcludeAction) {
-            s->settings.AddExclude();
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsIndexExcludeRemove) {
-            s->settings.RemoveExclude(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsNetworkAction) {
-            s->settings.NetworkAction(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsNetworkRemove) {
-            s->settings.RemoveNetwork(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsRestore) {
-            s->ctxMenuPrefs.ResetToDefaults();
-            s->ctxMenuPrefs.Save();
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsDiagnosticsAction) {
-            s->settings.DiagnosticsAction(hit.index);
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsDupScope) {
-            if (!s->duplicateScan.scanning && hit.index >= 0 && hit.index <= 2) {
-                s->duplicateScan.scope = static_cast<app::DuplicateScanScope>(hit.index);
-                s->duplicateScan.minimum_file_bytes =
-                    app::DuplicateScanSession::DefaultMinimumBytes(s->duplicateScan.scope);
-                PersistDuplicateScanPrefs(*s);
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-        } else if (hit.region == ui::HitTestResult::SettingsDupDrive) {
-            if (!s->duplicateScan.scanning && hit.index >= 0) {
-                int n = 0;
-                for (const auto& volume : s->dup_volume_cache) {
-                    if (volume.mount_point.empty()) continue;
-                    if (n == hit.index) {
-                        s->duplicateScan.drive_root =
-                            app::DuplicateScanSession::NormalizeDriveRoot(volume.mount_point);
-                        PersistDuplicateScanPrefs(*s);
-                        InvalidateRect(hwnd, nullptr, FALSE);
-                        break;
-                    }
-                    ++n;
-                }
-            }
-        } else if (hit.region == ui::HitTestResult::SettingsDupBrowse) {
-            if (!s->duplicateScan.scanning) {
-                std::wstring path;
-                if (PickFolder(hwnd, path, l10n::Get(l10n::StringId::DupFolderPlaceholder).c_str())) {
-                    s->duplicateScan.folder_path = std::move(path);
-                    PersistDuplicateScanPrefs(*s);
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                }
-            }
-        } else if (hit.region == ui::HitTestResult::SettingsDupSkipSmallFiles) {
-            if (!s->duplicateScan.scanning) {
-                s->duplicateScan.skip_small_files = !s->duplicateScan.skip_small_files;
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-        } else if (hit.region == ui::HitTestResult::SettingsDupMinSize) {
-            static constexpr uint64_t kBytes[] = {1024ull, 1024ull * 1024ull, 10ull * 1024ull * 1024ull};
-            if (!s->duplicateScan.scanning && s->duplicateScan.skip_small_files && hit.index >= 0 && hit.index < 3) {
-                s->duplicateScan.minimum_file_bytes = kBytes[hit.index];
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-        } else if (hit.region == ui::HitTestResult::SettingsDupScan) {
-            StartDuplicateScan(*s);
-        } else if (hit.region == ui::HitTestResult::SettingsDupCancel) {
-            CancelDuplicateScan(*s);
-        } else if (hit.region == ui::HitTestResult::SettingsDupKeep) {
-            if (!s->duplicateScan.scanning)
-                s->duplicateScan.SetKeep(static_cast<size_t>(hit.index),
-                                         static_cast<size_t>(hit.sub_index));
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsDupOpen) {
-            OpenDuplicateLocation(*s, static_cast<size_t>(hit.index),
-                                  static_cast<size_t>(hit.sub_index));
-        } else if (hit.region == ui::HitTestResult::SettingsDupGroupDelete) {
-            RecycleDuplicateGroup(*s, static_cast<size_t>(hit.index));
-        } else if (hit.region == ui::HitTestResult::SettingsDupGroupIgnore) {
-            if (!s->duplicateScan.scanning)
-                s->duplicateScan.IgnoreGroup(static_cast<size_t>(hit.index));
-            InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (hit.region == ui::HitTestResult::SettingsDupDeleteAll) {
-            RecycleAllDuplicateExtras(*s);
+        } else if (ActivateSettingsControl(*s, hit)) {
         } else if (hit.region == ui::HitTestResult::NavBack) {
             GoBack(*s);
         } else if (hit.region == ui::HitTestResult::NavForward) {
@@ -2763,8 +2607,6 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ShowSearchOptions(*s, true);
         } else if (hit.region == ui::HitTestResult::NetworkSearchAdd) {
             s->settings.AddNetworkPath(hit.path);
-        } else if (hit.region == ui::HitTestResult::SettingsContentIndex) {
-            ShowSearchOptions(*s);
         } else if (hit.region == ui::HitTestResult::AddressSearchClear) {
             if (!s->addressSearching) ShowAddressSearch(*s);
             SetWindowTextW(s->hwndAddressEdit, L"");
@@ -3032,6 +2874,7 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         (void)msg;
         (void)wParam;
         if (s) {
+            if (EndSettingsPointer(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
             if (SysCtxPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) ||
                 PulseMenuPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
             if (s->trayDrag.pending || s->trayDrag.active) {
@@ -3407,6 +3250,7 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
         (void)wParam;
         (void)lParam;
         if (s) {
+            CancelSettingsPointer(*s);
             SysCtxPreviewDragCancel(*s);
             PulseMenuPreviewDragCancel(*s);
             s->paneDragPending = false;
@@ -3645,6 +3489,7 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
 LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        CancelSettingsPointer(*s);
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -3778,6 +3623,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (HandleSettingsKey(*s, wParam, lParam)) return 0;
         if (wParam == VK_ESCAPE && (SysCtxPreviewDragCancel(*s) || PulseMenuPreviewDragCancel(*s))) return 0;
         if (wParam == VK_ESCAPE && CancelWindowTransferDrag(*s)) return 0;
         if (wParam == VK_ESCAPE && CancelSidebarReorder(*s)) return 0;

@@ -7,6 +7,8 @@
 #include "../ui/fluent_components.h"
 
 #include <windows.h>
+#include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -35,6 +37,123 @@ ControlState State(bool hovered = false, bool pressed = false, bool enabled = tr
     state.pressed = pressed;
     state.enabled = enabled;
     return state;
+}
+
+int SnapshotColorCount(const wchar_t* path, const WICRect& bounds, D2D1_COLOR_F color) {
+    using pulse::ui::ComPtr;
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICFormatConverter> converter;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+    if (SUCCEEDED(hr)) hr = wic->CreateDecoderFromFilename(path, nullptr, GENERIC_READ,
+        WICDecodeMetadataCacheOnLoad, &decoder);
+    if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+    if (SUCCEEDED(hr)) hr = wic->CreateFormatConverter(&converter);
+    if (SUCCEEDED(hr)) hr = converter->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
+        WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+    const UINT stride = static_cast<UINT>(bounds.Width * 4);
+    std::vector<BYTE> pixels(static_cast<size_t>(stride) * bounds.Height);
+    if (SUCCEEDED(hr)) hr = converter->CopyPixels(&bounds, stride, static_cast<UINT>(pixels.size()), pixels.data());
+    if (FAILED(hr)) return -1;
+    const int expected[] = {static_cast<int>(std::lround(color.b * 255)),
+        static_cast<int>(std::lround(color.g * 255)), static_cast<int>(std::lround(color.r * 255))};
+    int matches = 0;
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        if (std::abs(static_cast<int>(pixels[i])-expected[0]) <= 18 &&
+            std::abs(static_cast<int>(pixels[i+1])-expected[1]) <= 18 &&
+            std::abs(static_cast<int>(pixels[i+2])-expected[2]) <= 18) ++matches;
+    }
+    return matches;
+}
+
+bool DrawColorRegression(Compositor& compositor) {
+    constexpr auto output = L"build-fluent-verify\\fluent_color_regression.png";
+    Painter painter(&compositor);
+    painter.SetScale(1.0f);
+    auto* dc = compositor.Dc();
+    dc->BeginDraw();
+    dc->Clear(HexColor(0xB8CFB0));
+    for (int dark = 0; dark < 2; ++dark) {
+        for (int color = 0; color < 3; ++color) {
+            const auto theme = MakeTheme(dark != 0, HexColor(color == 0 ? 0x112244 : color == 1 ? 0xE74856 : 0xFFD400));
+            painter.BeginFrame(theme, false);
+            for (int state_index = 0; state_index < 3; ++state_index) {
+                auto state = State(state_index == 1, state_index == 2);
+                state.checked = true;
+                const float x = 24.0f + static_cast<float>(color * 3 + state_index) * 104.0f;
+                const float y = 24.0f + static_cast<float>(dark) * 100.0f;
+                painter.DrawCheckBox(Rect(x, y, 18, 18), L"", state);
+                painter.DrawSwitch(Rect(x, y+30, 42, 22), L"", state);
+                painter.DrawButton({Rect(x, y+60, 88, 30), L"H", {}, ButtonKind::Primary, state});
+            }
+        }
+    }
+    auto high = MakeHighContrastTheme();
+    // Deliberately make normal ink equal the highlight to catch unpaired paths.
+    high.bg = high.surface_card = high.fill_input = HexColor(0xB8CFB0);
+    high.text = high.text_secondary = high.accent_ink = high.fill_hover = high.fill_pressed = high.fill_selected = high.accent = HexColor(0x112244);
+    high.accent_text = high.text_selected = HexColor(0xFFFFFF);
+    painter.BeginFrame(high, true);
+    for (int state_index = 0; state_index < 3; ++state_index) {
+        const float x = 24.0f + static_cast<float>(state_index) * 312.0f;
+        auto state = State(state_index == 1, state_index == 2);
+        painter.DrawButton({Rect(x, 240, 280, 32), L"H", L"\xE713", ButtonKind::Standard, state});
+        painter.DrawButton({Rect(x, 280, 280, 32), L"H", L"\xE713", ButtonKind::Transparent, state});
+        state.selected = true;
+        painter.DrawSegmentedItem({Rect(x, 320, 280, 32), L"H", L"\xE713", state});
+        painter.DrawTab({Rect(x, 360, 280, 32), L"H", L"\xE713", state, true});
+        SidebarItemSpec sidebar{};
+        sidebar.bounds = Rect(x, 400, 280, 32);
+        sidebar.text = sidebar.detail = L"H";
+        sidebar.glyph = L"\xE713";
+        sidebar.icon_color = high.text;
+        sidebar.state = state;
+        painter.DrawSidebarItem(sidebar);
+        DriveSidebarItemSpec drive{};
+        drive.bounds = Rect(x, 440, 280, 52);
+        drive.name = drive.detail = L"H";
+        drive.glyph = L"\xE713";
+        drive.icon_color = high.text;
+        drive.state = state;
+        painter.DrawDriveSidebarItem(drive);
+    }
+    if (FAILED(dc->EndDraw()) || !compositor.SaveSnapshot(output)) return false;
+    bool ok = true;
+    const auto check = [&](bool passed, const char* name) {
+        if (!passed) { std::fprintf(stderr, "[FAIL] %s\n", name); ok = false; }
+    };
+    for (int dark = 0; dark < 2; ++dark) for (int color = 0; color < 3; ++color) for (int state = 0; state < 3; ++state) {
+        const auto accent = HexColor(color == 0 ? 0x112244 : color == 1 ? 0xE74856 : 0xFFD400);
+        const auto shades = pulse::ui::DeriveAccentShades(accent);
+        const auto checkbox_fill = state == 2 ? (dark ? shades.dark2 : shades.light2)
+            : state == 1 ? (dark ? shades.dark1 : shades.light1) : accent;
+        const auto switch_fill = state == 2 ? shades.light2 : state == 1 ? shades.light1 : accent;
+        const int x = 24 + (color * 3 + state) * 104, y = 24 + dark * 100;
+        check(SnapshotColorCount(output, {x+3,y+3,12,12}, pulse::ui::AutoAccentText(checkbox_fill)) > 4,
+              "custom-accent checkbox mark pairs with actual fill");
+        check(SnapshotColorCount(output, {x+29,y+39,4,4}, pulse::ui::AutoAccentText(switch_fill)) == 16,
+              "custom-accent switch knob pairs with actual fill");
+        const auto button_fill = state == 2 ? (dark ? shades.dark2 : shades.light3)
+            : state == 1 ? (dark ? shades.dark1 : shades.light1) : accent;
+        check(SnapshotColorCount(output, {x+8,y+63,72,24}, pulse::ui::AutoAccentText(button_fill)) > 4,
+              "custom-accent primary button text pairs with actual fill");
+    }
+    for (int state = 0; state < 3; ++state) {
+        const int x = 24 + state * 312;
+        if (state) for (const int y : {240,280})
+            check(SnapshotColorCount(output, {x+8,y+6,264,20}, high.text_selected) > 8,
+                  "high-contrast button highlight uses selected foreground");
+        for (const int y : {320,360,400,440}) {
+            check(SnapshotColorCount(output, {x+8,y+5,264,22}, high.text_selected) > 8,
+                  "high-contrast selected segmented tab and sidebar foreground");
+        }
+        check(SnapshotColorCount(output, {x+10,405,18,22}, high.text_selected) > 4,
+              "high-contrast sidebar icon overrides custom normal ink");
+        check(SnapshotColorCount(output, {x+250,405,20,22}, high.text_selected) > 3,
+              "high-contrast sidebar detail pairs with highlight");
+    }
+    return ok;
 }
 
 bool DrawGallery(Compositor& compositor, bool dark, bool high_contrast,
@@ -411,6 +530,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 2;
     }
     compositor.RecreateTextFormats(1.0f);
+    const bool colors_ok = DrawColorRegression(compositor);
     const bool dark_ok = DrawGallery(compositor, true, false,
                                      L"build-fluent-verify\\fluent_gallery_dark.png");
     const bool light_ok = DrawGallery(compositor, false, false,
@@ -443,7 +563,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     compositor.Shutdown();
     DestroyWindow(hwnd);
     CoUninitialize();
-    return dark_ok && light_ok && high_contrast_ok && composite_dark_ok &&
+    return colors_ok && dark_ok && light_ok && high_contrast_ok && composite_dark_ok &&
                    composite_light_ok && composite_high_contrast_ok &&
                    dark_150_ok && light_150_ok && composite_dark_150_ok &&
                    composite_light_150_ok ? 0 : 4;

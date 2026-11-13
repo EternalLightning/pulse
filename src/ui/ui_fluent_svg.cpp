@@ -5,6 +5,7 @@
 
 // Unified command geometry, with the existing SVG loader retained for artwork.
 #include "ui_renderer.h"
+#include "fluent_svg_cache.h"
 #include "command_icons.h"
 #include "../common/resource_ids.h"
 #include <d2d1svg.h>
@@ -13,6 +14,8 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <map>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -172,7 +175,95 @@ bool CreateSvgFromBytes(ID2D1DeviceContext5* dc, const void* bytes, DWORD byte_c
     return true;
 }
 
+struct SvgRasterCache {
+    using Key = std::tuple<ID2D1SvgDocument*, UINT32, float, float, float, float>;
+    ComPtr<ID2D1Device> device;
+    ComPtr<ID2D1DeviceContext5> dc;
+    std::map<Key, ComPtr<ID2D1Bitmap1>> images;
+};
+thread_local std::map<const MainRenderer*, SvgRasterCache> svg_raster_caches;
+thread_local bool svg_raster_cache_enabled = true;
+
+bool DrawRasterSvg(const MainRenderer* renderer, ID2D1DeviceContext5* source, ID2D1SvgDocument* svg,
+                   float left, float top, float art, float opacity) {
+    if (!svg_raster_cache_enabled) return false;
+    // Keep fractional positions and transformed artwork on the vector path.
+    D2D1_MATRIX_3X2_F transform;
+    source->GetTransform(&transform);
+    float dpi_x = 0, dpi_y = 0;
+    source->GetDpi(&dpi_x, &dpi_y);
+    if (opacity != 1 || art > 64 || art != std::floor(art) || left != std::floor(left) || top != std::floor(top) ||
+        transform._11 != 1 || transform._12 != 0 || transform._21 != 0 || transform._22 != 1 ||
+        transform._31 != 0 || transform._32 != 0 || dpi_x != 96 || dpi_y != 96 ||
+        source->GetAntialiasMode() != D2D1_ANTIALIAS_MODE_PER_PRIMITIVE ||
+        source->GetPrimitiveBlend() != D2D1_PRIMITIVE_BLEND_SOURCE_OVER) return false;
+    // Retained surfaces can later move by fractional pixels; keep their vectors.
+    ComPtr<ID2D1Image> target;
+    ComPtr<ID2D1Bitmap1> target_bitmap;
+    source->GetTarget(&target);
+    if (!target.get() || FAILED(target->QueryInterface(IID_PPV_ARGS(&target_bitmap)))) return false;
+    auto& cache = svg_raster_caches[renderer];
+    ComPtr<ID2D1Device> device;
+    source->GetDevice(&device);
+    if (device.get() != cache.device.get()) {
+        cache.images.clear(); cache.dc.reset(); cache.device = std::move(device);
+    }
+    ComPtr<ID2D1SvgElement> root;
+    ComPtr<ID2D1SvgPaint> fill;
+    D2D1_COLOR_F color{};
+    svg->GetRoot(&root);
+    if (root.get() && SUCCEEDED(root->GetAttributeValue(L"fill", IID_PPV_ARGS(&fill))) && fill.get())
+        fill->GetColor(&color);
+    const UINT32 size = static_cast<UINT32>(art) + 2;
+    const SvgRasterCache::Key key{svg, size, color.r, color.g, color.b, color.a};
+    auto found = cache.images.find(key);
+    if (found == cache.images.end()) {
+        if (!cache.dc.get()) {
+            ComPtr<ID2D1DeviceContext> dc;
+            if (!cache.device.get() || FAILED(cache.device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)) ||
+                FAILED(dc->QueryInterface(IID_PPV_ARGS(&cache.dc)))) return false;
+        }
+        ComPtr<ID2D1Bitmap1> bitmap;
+        const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        if (FAILED(cache.dc->CreateBitmap({size, size}, nullptr, 0, properties, &bitmap))) return false;
+        cache.dc->SetTarget(bitmap.get());
+        cache.dc->BeginDraw(); cache.dc->Clear(D2D1::ColorF(0, 0));
+        cache.dc->SetTransform(D2D1::Matrix3x2F::Scale(art / 24, art / 24) * D2D1::Matrix3x2F::Translation(1, 1));
+        cache.dc->DrawSvgDocument(svg);
+        const HRESULT result = cache.dc->EndDraw();
+        cache.dc->SetTarget(nullptr);
+        if (FAILED(result)) return false;
+        // At most 32 padded 64px icons: under 545 KiB of pixel payload.
+        if (cache.images.size() >= 32) cache.images.clear();
+        found = cache.images.emplace(key, std::move(bitmap)).first;
+    }
+    const auto bounds = D2D1::RectF(left - 1, top - 1, left + art + 1, top + art + 1);
+    source->DrawBitmap(found->second.get(), &bounds, 1, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    return true;
+}
+
 } // namespace
+
+void ClearFluentSvgRasterCache(const MainRenderer* renderer) {
+    svg_raster_caches.erase(renderer);
+}
+
+size_t FluentSvgRasterCacheBytes() {
+    size_t bytes = 0;
+    for (const auto& [_, cache] : svg_raster_caches) {
+        for (const auto& [key, image] : cache.images) {
+            const auto size = image->GetPixelSize();
+            bytes += static_cast<size_t>(size.width) * size.height * 4;
+        }
+    }
+    return bytes;
+}
+
+void SetFluentSvgRasterCacheEnabledForTest(bool enabled) {
+    svg_raster_caches.clear();
+    svg_raster_cache_enabled = enabled;
+}
 
 bool MainRenderer::EnsureFluentSvg(int resource_id, bool colorful) {
     if (!colorful && CommandIconForResource(resource_id) != command_icons::Icon::None)
@@ -236,8 +327,8 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
     ID2D1SvgDocument* svg = fluent_svgs_.at(resource_id).get();
     ComPtr<ID2D1SvgElement> root;
     svg->GetRoot(&root);
-    if (root.get())
-        root->SetAttributeValue(L"opacity", std::clamp(opacity, 0.0f, 1.0f));
+    opacity = std::clamp(opacity, 0.0f, 1.0f);
+    if (root.get()) root->SetAttributeValue(L"opacity", opacity);
     if (root.get() && foreground && ((resource_id >= IDR_FILES_NEW_SVG &&
         resource_id <= IDR_FILES_FILTER_SVG) || resource_id == IDR_FILES_STATUS_CENTER_SVG ||
         resource_id == IDR_FILES_GROUP_SVG)) {
@@ -251,6 +342,7 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
     const float left = (bounds.left + bounds.right - art) * 0.5f;
     const float top = (bounds.top + bounds.bottom - art) * 0.5f;
 
+    if (DrawRasterSvg(this, empty_state_svg_dc_.get(), svg, left, top, art, opacity)) return true;
     svg->SetViewportSize(D2D1::SizeF(24.0f, 24.0f));
     D2D1_MATRIX_3X2_F previous{};
     empty_state_svg_dc_->GetTransform(&previous);

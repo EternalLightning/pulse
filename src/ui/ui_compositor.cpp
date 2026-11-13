@@ -637,8 +637,15 @@ bool Compositor::SaveSnapshot(const wchar_t* path) {
     hr = frame->SetPixelFormat(&format);
     if (FAILED(hr)) { ctx->Unmap(staging.get(), 0); return false; }
 
-    hr = frame->WritePixels(desc.Height, mapped.RowPitch, mapped.RowPitch * desc.Height,
-        static_cast<BYTE*>(mapped.pData));
+    // Composition surfaces are premultiplied; PNG stores straight-alpha colors.
+    ComPtr<IWICBitmap> pixels;
+    hr = wic->CreateBitmapFromMemory(desc.Width, desc.Height, GUID_WICPixelFormat32bppPBGRA,
+        mapped.RowPitch, mapped.RowPitch * desc.Height, static_cast<BYTE*>(mapped.pData), &pixels);
+    ComPtr<IWICFormatConverter> straight;
+    if (SUCCEEDED(hr)) hr = wic->CreateFormatConverter(&straight);
+    if (SUCCEEDED(hr)) hr = straight->Initialize(pixels.get(), GUID_WICPixelFormat32bppBGRA,
+        WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+    if (SUCCEEDED(hr)) hr = frame->WriteSource(straight.get(), nullptr);
     ctx->Unmap(staging.get(), 0);
     if (FAILED(hr)) return false;
 

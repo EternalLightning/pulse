@@ -157,8 +157,8 @@ void QuickPreviewWindow::ResetTextScroll() {
 float QuickPreviewWindow::TextScrollMaximum() const {
     DWRITE_TEXT_METRICS metrics{};
     if (!text_layout_.get() || FAILED(text_layout_->GetMetrics(&metrics))) return 0.0f;
-    const auto content = ContentRect();
-    const float view = (std::max)(1.0f, content.bottom - content.top - 20.0f * scale_);
+    const auto viewport = TextViewport();
+    const float view = (std::max)(1.0f, viewport.bottom - viewport.top);
     return (std::max)(0.0f, metrics.height - view);
 }
 
@@ -229,6 +229,21 @@ void QuickPreviewWindow::RecreateFormats() {
     }
 }
 
+void QuickPreviewWindow::SetAppearance(bool dark, WindowEffect effect, D2D1_COLOR_F accent) {
+    dark_ = dark;
+    effect_ = effect;
+    accent_ = accent;
+    text_menu_.SetTheme(dark_, accent_);
+    if (find_edit_brush_) {
+        DeleteObject(find_edit_brush_);
+        find_edit_brush_ = nullptr;
+    }
+    if (!hwnd_) return;
+    ApplyWindowEffect(hwnd_, effect_, dark_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    if (find_edit_) InvalidateRect(find_edit_, nullptr, TRUE);
+}
+
 void QuickPreviewWindow::Show(const QuickPreviewItem& item, bool dark, WindowEffect effect,
                               bool safe_mode) {
     if (!hwnd_ || item.path.empty()) return;
@@ -239,11 +254,7 @@ void QuickPreviewWindow::Show(const QuickPreviewItem& item, bool dark, WindowEff
     effect_ = effect;
     safe_mode_ = safe_mode;
     handler_immediate_ = true;
-    ApplyWindowEffect(hwnd_, effect_, dark_);
-    if (find_edit_brush_) {
-        DeleteObject(find_edit_brush_);
-        find_edit_brush_ = nullptr;
-    }
+    SetAppearance(dark, effect, accent_);
     ++generation_;
     ResetView();
     ResetAnimation();
@@ -350,6 +361,14 @@ D2D1_RECT_F QuickPreviewWindow::ContentRect() const {
     const float height = static_cast<float>(compositor_.Height());
     const float header = kTitleBarHeight * scale_;
     return D2D1::RectF(0, header + FindBarHeight(), width, height - PlaybackHeight());
+}
+
+D2D1_RECT_F QuickPreviewWindow::TextViewport() const {
+    const auto content = ContentRect();
+    const float pad = 20.0f * scale_;
+    const float top = content.top + pad;
+    return D2D1::RectF(content.left + pad, top, (std::max)(content.left + pad, content.right - pad),
+        (std::max)(top, content.bottom - pad));
 }
 
 D2D1_RECT_F QuickPreviewWindow::ChromeButtonRect(ChromeButton button) const {
@@ -579,10 +598,10 @@ void QuickPreviewWindow::EnsureTextLayout(const std::wstring& text, bool hex, fl
 
 bool QuickPreviewWindow::HitTestText(float x, float y, uint32_t& index) {
     if (!text_layout_.get()) return false;
-    const D2D1_RECT_F content = ContentRect();
-    const float pad = 20.0f * scale_;
-    const float origin_x = pad;
-    const float origin_y = content.top + pad - text_scroll_;
+    const auto viewport = TextViewport();
+    if (x < viewport.left || x >= viewport.right || y < viewport.top || y >= viewport.bottom) return false;
+    const float origin_x = viewport.left;
+    const float origin_y = viewport.top - text_scroll_;
     BOOL trailing = FALSE;
     BOOL inside = FALSE;
     DWRITE_HIT_TEST_METRICS metrics{};
@@ -796,7 +815,7 @@ LRESULT CALLBACK QuickPreviewWindow::FindEditProc(HWND hwnd, UINT message, WPARA
 
 void QuickPreviewWindow::ShowContextMenu(POINT screen) {
     if (!text_menu_.Create(hwnd_, &compositor_, scale_)) return;
-    text_menu_.SetTheme(dark_, HexColor(0x0078D4));
+    text_menu_.SetTheme(dark_, accent_);
     // System preview handlers (video, PDF, Office) sit in a topmost overlay
     // over the content area; a plain popup would open underneath it.
     text_menu_.SetTopmost(native_kind_ == NativeKind::None);
@@ -876,9 +895,8 @@ void QuickPreviewWindow::ScrollMatchIntoView(uint32_t start) {
     FLOAT x = 0, y = 0;
     DWRITE_HIT_TEST_METRICS metrics{};
     if (FAILED(text_layout_->HitTestTextPosition(start, FALSE, &x, &y, &metrics))) return;
-    const D2D1_RECT_F content = ContentRect();
-    const float pad = 20.0f * scale_;
-    const float view = (std::max)(1.0f, content.bottom - content.top - pad * 2.0f);
+    const auto viewport = TextViewport();
+    const float view = (std::max)(1.0f, viewport.bottom - viewport.top);
     if (y < text_scroll_) text_scroll_ = (std::max)(0.0f, y);
     else if (y + metrics.height > text_scroll_ + view)
         text_scroll_ = y + metrics.height - view;
@@ -903,7 +921,7 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
         return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(value), &value, 0) &&
             (value.dwFlags & HCF_HIGHCONTRASTON);
     }();
-    const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, HexColor(0x0078D4));
+    const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
     find_painter_.SetCompositor(&compositor_);
     find_painter_.SetScale(scale_);
     if (!find_painter_.BeginFrame(theme, high_contrast)) return;
@@ -931,15 +949,15 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
     find_painter_.DrawTextField(field);
 }
 
-void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT_F& content,
-                                          ID2D1SolidColorBrush* text_brush) {
+void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* text_brush) {
     if (!text_layout_.get() || !dc) return;
     const bool high_contrast = IsHighContrast();
     text_smooth_scroll_.Tick(text_scroll_, TextScrollMaximum(), AnimationTimeMs(), AnimateTextScroll());
     UpdateTextScrollTimer();
-    const float pad = 20.0f * scale_;
-    const float origin_x = pad;
-    const float origin_y = content.top + pad - text_scroll_;
+    const auto viewport = TextViewport();
+    const float origin_x = viewport.left;
+    const float origin_y = viewport.top - text_scroll_;
+    dc->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     if (find_open_ && !find_query_.empty() && !find_matches_.empty()) {
         ComPtr<ID2D1SolidColorBrush> match_brush;
         ComPtr<ID2D1SolidColorBrush> current_brush;
@@ -965,6 +983,7 @@ void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, const D2D1_RECT
     }
     dc->DrawTextLayout(D2D1::Point2F(origin_x, origin_y), text_layout_.get(), text_brush,
                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    dc->PopAxisAlignedClip();
 }
 
 bool QuickPreviewWindow::ClientPoint(LPARAM lparam, POINT& out) const {
@@ -985,8 +1004,12 @@ HCURSOR QuickPreviewWindow::ContentCursor(POINT client) const {
     if (client.x < content.left || client.x >= content.right ||
         client.y < content.top || client.y >= content.bottom)
         return LoadCursorW(nullptr, IDC_ARROW);
-    if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex)
-        return LoadCursorW(nullptr, IDC_IBEAM);
+    if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex) {
+        const auto viewport = TextViewport();
+        if (client.x >= viewport.left && client.x < viewport.right &&
+            client.y >= viewport.top && client.y < viewport.bottom)
+            return LoadCursorW(nullptr, IDC_IBEAM);
+    }
     if (panning_ || CanPanImage()) return LoadCursorW(nullptr, IDC_SIZEALL);
     return LoadCursorW(nullptr, IDC_ARROW);
 }
@@ -1028,10 +1051,10 @@ void QuickPreviewWindow::DrawChromeButtons(ID2D1DeviceContext* dc,
     }
 }
 
-void QuickPreviewWindow::Render() {
-    if (!compositor_.Dc()) return;
+bool QuickPreviewWindow::Render(const wchar_t* snapshot_path) {
+    if (!compositor_.Dc()) return false;
     if (compositor_.NeedsRecovery()) {
-        if (!compositor_.Recover()) return;
+        if (!compositor_.Recover()) return false;
         compositor_.RecreateTextFormats(scale_);
         RecreateFormats();
         thumbnails_->SetDeviceContext(compositor_.Dc(), ThumbnailCache::Consumer::QuickPreview);
@@ -1190,7 +1213,7 @@ void QuickPreviewWindow::Render() {
             native_kind_ = result == PreviewDrawResult::Hex ? NativeKind::Hex : NativeKind::Text;
             EnsureTextLayout(text, result == PreviewDrawResult::Hex,
                              (std::max)(1.0f, width - pad * 2.0f));
-            DrawTextPreview(dc, content, text_brush.get());
+            DrawTextPreview(dc, text_brush.get());
             std::wstring footer = pulse::l10n::Get(result == PreviewDrawResult::Hex
                 ? pulse::l10n::StringId::HexPrefix : pulse::l10n::StringId::TextPrefix);
             footer += pulse::format::ByteSize(bytes_read, true);
@@ -1231,13 +1254,18 @@ void QuickPreviewWindow::Render() {
         compositor_.TextFormat()->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
     const HRESULT result = dc->EndDraw();
+    bool saved = false;
     if (result == D2DERR_RECREATE_TARGET || result == DXGI_ERROR_DEVICE_REMOVED ||
         result == DXGI_ERROR_DEVICE_RESET) compositor_.NotifyDeviceLost(result);
-    else compositor_.Present();
+    else if (SUCCEEDED(result)) {
+        saved = !snapshot_path || compositor_.SaveSnapshot(snapshot_path);
+        compositor_.Present();
+    }
     if (find_open_ && (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex))
         LayoutFindEdit();
     else if (find_edit_)
         ShowWindow(find_edit_, SW_HIDE);
+    return saved;
 }
 
 LRESULT CALLBACK QuickPreviewWindow::WndProc(HWND hwnd, UINT message,
@@ -1349,9 +1377,9 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
             ZoomAt(static_cast<float>(cursor.x), static_cast<float>(cursor.y),
                    std::pow(1.15f, steps));
         } else if (native_kind_ == NativeKind::Text || native_kind_ == NativeKind::Hex) {
-            const auto content = ContentRect();
+            const auto viewport = TextViewport();
             text_smooth_scroll_.ScrollBy(text_scroll_, -steps * 56.0f * scale_,
-                TextScrollMaximum(), content.bottom - content.top, AnimationTimeMs(),
+                TextScrollMaximum(), viewport.bottom - viewport.top, AnimationTimeMs(),
                 AnimateTextScroll());
             UpdateTextScrollTimer();
         } else {
@@ -1719,12 +1747,8 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
     }
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
-        ApplyWindowEffect(hwnd_, effect_, dark_);
-        if (find_edit_brush_) {
-            DeleteObject(find_edit_brush_);
-            find_edit_brush_ = nullptr;
-        }
-        InvalidateRect(hwnd_, nullptr, FALSE);
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+        SetAppearance(dark_, effect_, accent_);
         return 0;
     case WM_CLOSE:
         Close();

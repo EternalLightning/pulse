@@ -21,7 +21,7 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
                                       bool recycle = false) {
     ToolbarLayout out;
     const float available = width - left;
-    const float nav_step = available < 500*scale ? 26*scale : 34*scale;
+    const float nav_step = available < 500*scale ? 28*scale : 34*scale;
     float x = left + margin;
     for (int i=0;i<4;++i) {
         out.navigation[i] = {x,top+6*scale,x+nav_step-4*scale,top+38*scale};
@@ -37,9 +37,10 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
     }
     out.address.right = out.search.left-8*scale;
     out.create = {left+margin,top+50*scale,left+margin+create_width,top+82*scale};
-    const float sort_width = available >= 700*scale ? 88*scale : 32*scale;
-    const float group_width = available >= 700*scale ? 104*scale : 32*scale;
-    const float filter_base = available >= 700*scale ? 76*scale : 32*scale;
+    // Leave room for localized text ink after the icons, chevrons and insets.
+    const float sort_width = available >= 700*scale ? 104*scale : 32*scale;
+    const float group_width = available >= 700*scale ? 120*scale : 32*scale;
+    const float filter_base = available >= 700*scale ? 96*scale : 32*scale;
     out.overflow = {width-margin-32*scale,top+50*scale,width-margin,top+82*scale};
     const float filter_right = out.overflow.left-8*scale;
     const float left_limit = filter_right-filter_base-6*scale-group_width-6*scale-sort_width-8*scale;

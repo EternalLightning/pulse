@@ -55,6 +55,7 @@
 #include "saved_search.h"
 #include "search_history.h"
 #include "settings_controller.h"
+#include "settings_input.h"
 #include "single_instance_coordinator.h"
 #include "tray_controller.h"
 #include "global_search_hotkey.h"
@@ -339,6 +340,7 @@ struct AppState : AppCoreOwner {
     app::SearchHistory& searchHistory;
     app::SearchHistoryWriter& searchHistoryWriter;
     app::SettingsController settings;
+    app::SettingsInputState settings_input;
     app::TabController tabs;
     app::TrayController tray_controller;
     GlobalSearchHotkey globalSearchHotkey;

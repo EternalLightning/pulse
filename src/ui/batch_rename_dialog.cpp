@@ -12,6 +12,7 @@
 #include "ui_compositor.h"
 #include "window_helpers.h"
 #include "dialog_keyboard.h"
+#include "dialog_style.h"
 #include "smooth_scroll.h"
 #include "animation_clock.h"
 #include "../common/localization.h"
@@ -113,29 +114,46 @@ private:
                     : DefWindowProcW(hwnd, message, wparam, lparam);
     }
 
-    D2D1_RECT_F CloseRect() const { return Rect(scale_, kDlgW - 46, 0, 46, 36); }
-    D2D1_RECT_F FindField() const { return Rect(scale_, 20, 68, 280, 32); }
-    D2D1_RECT_F ReplaceField() const { return Rect(scale_, 320, 68, 280, 32); }
-    D2D1_RECT_F IncludeExtRect() const { return Rect(scale_, 430, 40, 170, 24); }
+    float ClientWidth() const {
+        RECT bounds{};
+        return GetClientRect(hwnd_, &bounds) && bounds.right > 0 ? bounds.right / scale_ : kDlgW;
+    }
+    float ClientHeight() const {
+        RECT bounds{};
+        return GetClientRect(hwnd_, &bounds) && bounds.bottom > 0 ? bounds.bottom / scale_ : kDlgH;
+    }
+    float ColumnWidth() const { return (ClientWidth() - 2 * dialog_style::kMargin - dialog_style::kGap) / 2; }
+    float SecondColumn() const { return dialog_style::kMargin + ColumnWidth() + dialog_style::kGap; }
+    D2D1_RECT_F CloseRect() const { return Rect(scale_, ClientWidth() - dialog_style::kCloseWidth, 0, dialog_style::kCloseWidth, dialog_style::kTitleHeight); }
+    D2D1_RECT_F FindField() const { return Rect(scale_, 20, 84, ColumnWidth(), 32); }
+    D2D1_RECT_F ReplaceField() const { return Rect(scale_, SecondColumn(), 84, ColumnWidth(), 32); }
+    D2D1_RECT_F IncludeExtRect() const { return Rect(scale_, ClientWidth() - 190, 52, 170, 32); }
     bool UsesIndex() const { return model::BatchRenamePatternUsesIndex(rule_.pattern); }
     D2D1_RECT_F PatternField() const {
-        return UsesIndex() ? Rect(scale_, 20, 128, 424, 32)
-                           : Rect(scale_, 20, 128, 580, 32);
+        return Rect(scale_, 20, 144, ClientWidth() - (UsesIndex() ? 192 : 40), 32);
     }
-    D2D1_RECT_F StartField() const { return Rect(scale_, 456, 128, 144, 32); }
+    D2D1_RECT_F StartField() const { return Rect(scale_, ClientWidth() - 164, 144, 144, 32); }
     D2D1_RECT_F ChipRect(int index) const {
         constexpr float widths[] = {92.0f, 100.0f, 100.0f};
         float x = 20.0f;
-        for (int i = 0; i < index; ++i) x += widths[i] + 8.0f;
-        return Rect(scale_, x, 168, widths[index], 28);
+        for (int i = 0; i < index; ++i) x += widths[i] + dialog_style::kGap;
+        return Rect(scale_, x, 184, widths[index], dialog_style::kControlHeight);
     }
-    D2D1_RECT_F CancelRect() const { return Rect(scale_, kDlgW - 196, kDlgH - 48, 80, 32); }
-    D2D1_RECT_F ApplyRect() const { return Rect(scale_, kDlgW - 108, kDlgH - 48, 88, 32); }
+    D2D1_RECT_F CancelRect() const {
+        const float width = std::max(80.0f, painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel)) / scale_ + 12.0f);
+        return Rect(scale_, ApplyRect().left / scale_ - dialog_style::kGap - width,
+            ClientHeight() - 48, width, dialog_style::kControlHeight);
+    }
+    D2D1_RECT_F ApplyRect() const {
+        const float width = std::max(88.0f, painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Apply)) / scale_ + 12.0f);
+        return Rect(scale_, ClientWidth() - dialog_style::kMargin - width, ClientHeight() - 48, width, dialog_style::kControlHeight);
+    }
     D2D1_RECT_F PreviewBounds() const {
-        return Rect(scale_, 20, 260, kDlgW - 40, kDlgH - 260 - 56);
+        return Rect(scale_, 20, 276, ClientWidth() - 40, ClientHeight() - 276 - dialog_style::kFooterHeight);
     }
     D2D1_RECT_F SummaryRect() const {
-        return Rect(scale_, 20, kDlgH - 48, kDlgW - 228, 32);
+        return Rect(scale_, dialog_style::kMargin, ClientHeight() - 48,
+            std::max(0.0f, CancelRect().left / scale_ - dialog_style::kMargin - dialog_style::kGap), dialog_style::kControlHeight);
     }
 
     HWND EditAt(int id) const {
@@ -175,15 +193,6 @@ private:
         else if (hit == 6) ApplyChip(kChipPadded);
         else if (hit == 7) ApplyChip(kChipExt);
         if (hwnd_ && !done_) InvalidateRect(hwnd_, nullptr, FALSE);
-    }
-
-    D2D1_RECT_F FocusRect() const {
-        if (focus_ == 1) return ApplyRect();
-        if (focus_ == 2) return CancelRect();
-        if (focus_ == 3) return CloseRect();
-        if (focus_ == 4) return IncludeExtRect();
-        if (focus_ >= 5 && focus_ <= 7) return ChipRect(focus_ - 5);
-        return {};
     }
 
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
@@ -413,25 +422,28 @@ private:
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_,
                      scale_);
 
+        painter_.DrawGlyph(L"\xE8AC", Rect(scale_, dialog_style::kMargin, 12, dialog_style::kIconSize, dialog_style::kIconSize), theme.accent_ink);
         painter_.DrawText(l10n::Get(l10n::StringId::BatchRename),
-                          Rect(scale_, 16, 0, 360, 36), compositor_.SmallFormat(), theme.text);
+                          Rect(scale_, 48, 0, ClientWidth() - 48 - dialog_style::kCloseWidth, dialog_style::kTitleHeight), compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 3;
         close_state.pressed = pressed_ == 3;
+        close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 3;
         painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
                                     {}, close_state);
-        painter_.FillRoundedRect(Rect(scale_, 0, 36, kDlgW, 1), 0, theme.stroke_divider);
+        painter_.FillRoundedRect(Rect(scale_, 0, dialog_style::kTitleHeight - 1, ClientWidth(), 1), 0, theme.stroke_divider);
 
         painter_.DrawText(l10n::Get(l10n::StringId::Find),
-                          Rect(scale_, 20, 48, 280, 20), compositor_.SmallFormat(),
+                          Rect(scale_, 20, 64, ColumnWidth(), 20), compositor_.SmallFormat(),
                           theme.text_secondary);
         painter_.DrawText(l10n::Get(l10n::StringId::Replace),
-                          Rect(scale_, 320, 48, 100, 20), compositor_.SmallFormat(),
+                          Rect(scale_, SecondColumn(), 64, std::max(0.0f, ClientWidth() - 198 - SecondColumn()), 20), compositor_.SmallFormat(),
                           theme.text_secondary);
         fluent::ControlState include_state{};
         include_state.hovered = hover_ == 4;
         include_state.pressed = pressed_ == 4;
         include_state.checked = rule_.replace_in_extension;
+        include_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 4;
         painter_.DrawCheckBox(IncludeExtRect(),
                               l10n::Get(l10n::StringId::BatchRenameIncludeExt),
                               include_state);
@@ -439,11 +451,11 @@ private:
         DrawFieldFrame(ReplaceField(), edit_replace_, 11, true);
 
         painter_.DrawText(l10n::Get(l10n::StringId::BatchRenamePattern),
-                          Rect(scale_, 20, 108, 280, 20), compositor_.SmallFormat(),
+                          Rect(scale_, 20, 124, 280, 20), compositor_.SmallFormat(),
                           theme.text_secondary);
         if (UsesIndex()) {
             painter_.DrawText(l10n::Get(l10n::StringId::BatchRenameStartFrom),
-                              Rect(scale_, 456, 108, 144, 20), compositor_.SmallFormat(),
+                              Rect(scale_, ClientWidth() - 164, 124, 144, 20), compositor_.SmallFormat(),
                               theme.text_secondary);
         }
         DrawFieldFrame(PatternField(), edit_pattern_, 12, true);
@@ -460,13 +472,14 @@ private:
             chip_state.hovered = hover_ == 5 + i;
             chip_state.pressed = pressed_ == 5 + i;
             chip_state.checked = rule_.pattern == chip_patterns[i];
+            chip_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 5 + i;
             painter_.DrawButton({ ChipRect(i), l10n::Get(chip_labels[i]), {},
                                   chip_state.checked ? fluent::ButtonKind::Primary
                                                      : fluent::ButtonKind::Standard,
                                   chip_state });
         }
         painter_.DrawText(l10n::Get(l10n::StringId::BatchRenamePatternHint),
-                          Rect(scale_, 20, 204, kDlgW - 40, 48), compositor_.SmallFormat(),
+                          Rect(scale_, 20, 224, ClientWidth() - 40, 44), compositor_.SmallFormat(),
                           theme.text_secondary);
 
         const auto preview = PreviewBounds();
@@ -525,19 +538,18 @@ private:
         fluent::ControlState cancel_state{};
         cancel_state.hovered = hover_ == 2;
         cancel_state.pressed = pressed_ == 2;
+        cancel_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 2;
         painter_.DrawButton({ CancelRect(), l10n::Get(l10n::StringId::Cancel), {},
-                              fluent::ButtonKind::Transparent, cancel_state });
+                              fluent::ButtonKind::Standard, cancel_state });
 
-        const auto apply = ApplyRect();
-        const D2D1_COLOR_F apply_fill = !can_apply_
-            ? theme.fill_input
-            : (hover_ == 1 || pressed_ == 1 ? theme.accent_hover : theme.accent);
-        painter_.FillRoundedRect(apply, theme.radius_control * scale_, apply_fill);
-        painter_.DrawText(l10n::Get(l10n::StringId::Apply), apply, compositor_.SmallFormat(),
-                          can_apply_ ? theme.accent_text : theme.text_secondary,
-                          fluent::HorizontalAlignment::Center);
+        fluent::ControlState apply_state{};
+        apply_state.enabled = can_apply_;
+        apply_state.hovered = hover_ == 1;
+        apply_state.pressed = pressed_ == 1;
+        apply_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 1;
+        painter_.DrawButton({ ApplyRect(), l10n::Get(l10n::StringId::Apply), {},
+                              fluent::ButtonKind::Primary, apply_state });
 
-        if (GetFocus() == hwnd_ && focus_) painter_.DrawFocusRing(FocusRect(), 4.0f * scale_);
         if (present) pulse::ui::EndSurface(compositor_);
         else compositor_.Dc()->EndDraw();
     }
@@ -588,7 +600,7 @@ private:
             return 0;
         }
         case WM_NCHITTEST:
-            return pulse::ui::BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
+            return pulse::ui::BorderlessHitTest(hwnd_, lparam, dialog_style::kTitleHeight * scale_, CloseRect());
         case WM_SIZE:
             if (wparam == SIZE_MINIMIZED) {
                 scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), false);
@@ -645,6 +657,7 @@ private:
         }
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
+            backdrop_enabled_ = ApplyBackdrop(hwnd_, dark_);
             scroll_animation_.Tick(scroll_, ScrollMaximum(), AnimationTimeMs(), ScrollAnimationsEnabled());
             UpdateScrollTimer();
             InvalidateRect(hwnd_, nullptr, FALSE);

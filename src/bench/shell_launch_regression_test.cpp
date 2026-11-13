@@ -11,6 +11,7 @@
 #include <fstream>
 #include <cstdio>
 #include "../ops/shell_command.h"
+#include "../shell_host/context_invoke_directory.h"
 
 namespace fixture {
 bool mock_process = false, mock_shell = false;
@@ -212,6 +213,36 @@ void CommandExpansion() {
     Check(pulse::ops::ExpandShellCommand(L"%SystemRoot%\\viewer.exe --literal=100%%", file) ==
         L"%SystemRoot%\\viewer.exe --literal=100%%", "P13 unrelated percent text is unchanged");
 }
+void InfInstallCommand() {
+    using pulse::shell::ContextInvokeDirectory;
+    Check(ContextInvokeDirectory(L"C:\\driver.inf", false) == L"C:\\",
+        "581 context install uses the drive root rather than the INF file as working directory");
+    Check(ContextInvokeDirectory(L"\\\\?\\C:\\drivers\\driver.inf", false) == L"C:\\drivers" &&
+        ContextInvokeDirectory(L"\\\\?\\UNC\\server\\share\\driver.inf", false) == L"\\\\server\\share",
+        "581 context working directories normalize extended drive and UNC paths");
+    Check(ContextInvokeDirectory(L"C:\\", false) == L"C:\\" &&
+        ContextInvokeDirectory(L"C:\\drivers", true) == L"C:\\drivers",
+        "581 drive and background menus retain their own directory");
+    Check(ContextInvokeDirectory(L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", false).empty() &&
+        ContextInvokeDirectory(L"shell:Downloads", true).empty(),
+        "581 namespace menus do not receive a filesystem working directory");
+    pulse::ipc::ShellLaunchRequest request;
+    request.kind = pulse::ipc::ShellLaunchKind::Command;
+    request.executable = pulse::ops::ExpandShellCommand(
+        L"rundll32.exe setupapi.dll,InstallHinfSection DefaultInstall 132 %1", L"C:\\driver files\\driver.inf");
+    request.directory = L"C:\\driver files";
+    fixture::mock_process = true;
+    fixture::process_error = ERROR_FILE_NOT_FOUND;
+    fixture::process_calls = 0;
+    Check(Execute(request) == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) && fixture::process_calls == 1 &&
+        std::filesystem::path(fixture::process_file).filename() == L"rundll32.exe",
+        "581 INF command parses rundll32 separately without executing an installation");
+    std::wstring executable, arguments;
+    Check(pulse::shell::SplitLaunchCommand(request.executable, executable, arguments) &&
+        arguments == L"setupapi.dll,InstallHinfSection DefaultInstall 132 \"C:\\driver files\\driver.inf\"",
+        "581 INF command preserves the entry point, install flags and quoted selected path");
+    fixture::mock_process = false;
+}
 void OpenDirectories(const std::filesystem::path& root) {
     wchar_t previous[32768]{};
     GetCurrentDirectoryW(ARRAYSIZE(previous), previous);
@@ -335,7 +366,7 @@ int wmain(int argc, wchar_t** argv) {
     if (!std::filesystem::create_directory(root)) return 2;
     const bool commands_only = argc == 2 && wcscmp(argv[1], L"--commands-only") == 0;
     if (!commands_only) { Cache(); OpenDirectories(root); }
-    CommandExpansion(); Elevation(root);
+    CommandExpansion(); InfInstallCommand(); Elevation(root);
     std::error_code error;
     std::filesystem::remove_all(root, error);
     Check(!error && !std::filesystem::exists(root), "isolated launch regression fixtures are removed");

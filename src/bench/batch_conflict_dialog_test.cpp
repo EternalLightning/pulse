@@ -64,6 +64,69 @@ struct BatchConflictDialogTestPeer {
         dialog.scroll_started_ = now - elapsed;
         dialog.TickScroll(now);
     }
+    static int RunStyle(HWND owner, const std::filesystem::path& output) {
+        int failures = 0;
+        auto check = [&](bool ok, const char* label) {
+            std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+            if (!ok) ++failures;
+        };
+        ops::ConflictItemInfo conflict;
+        conflict.token = 71;
+        for (uint64_t id : {1ULL, 2ULL}) {
+            ops::ConflictRowInfo row;
+            row.row_id = id;
+            row.source = L"C:\\fixture\\source\\report-" + std::to_wstring(id) + L".txt";
+            row.destination = L"D:\\fixture\\target\\report-" + std::to_wstring(id) + L".txt";
+            conflict.rows.push_back(std::move(row));
+        }
+        for (const float scale : {1.0f, 1.5f}) for (const int width : {760, 340}) for (const bool dark : {false, true}) {
+            BatchConflictDialog dialog;
+            check(dialog.Initialize(owner, conflict, Labels(), dark, HexColor(0x0078D4), false), "initialize isolated batch-conflict style fixture");
+            if (!dialog.hwnd_) return 2;
+            dialog.scale_ = scale;
+            dialog.painter_.SetScale(scale);
+            dialog.compositor_.RecreateTextFormats(scale);
+            dialog.compositor_.Resize(static_cast<int>(width * scale), static_cast<int>(720 * scale));
+            dialog.Layout();
+            const int cancel = Find(dialog, BatchConflictDialog::Action::Cancel);
+            const int confirm = Find(dialog, BatchConflictDialog::Action::Confirm);
+            const int close = Find(dialog, BatchConflictDialog::Action::Close);
+            const auto& left = dialog.controls_[cancel].bounds;
+            const auto& right = dialog.controls_[confirm].bounds;
+            const auto& title_close = dialog.controls_[close].bounds;
+            check(cancel + 1 == confirm && std::abs(left.right + 8 * scale - right.left) < 0.1f &&
+                std::abs(right.right - (width - 20) * scale) < 0.1f &&
+                std::abs(left.bottom - left.top - 32 * scale) < 0.1f && left.top == right.top,
+                "Cancel precedes the primary confirmation in visual and Tab order with an eight-DIP gap and twenty-DIP right margin");
+            check(std::abs(title_close.right - width * scale) < 0.1f &&
+                std::abs(title_close.right - title_close.left - 46 * scale) < 0.1f &&
+                std::abs(title_close.bottom - 44 * scale) < 0.1f,
+                "batch-conflict close uses the shared 46 by 44 title-bar geometry");
+            dialog.focus_ = cancel;
+            SendMessageW(dialog.hwnd_, WM_KEYDOWN, VK_TAB, 0);
+            check(dialog.focus_ == confirm, "Tab follows the footer from Cancel to primary confirmation");
+            SendMessageW(dialog.hwnd_, WM_KEYDOWN, VK_TAB, 0);
+            check(dialog.focus_ == close, "Tab reaches title-bar Close after primary confirmation");
+            auto snapshot = [&](const wchar_t* state) {
+                const auto name = L"batch-style-" + std::to_wstring(width) + L"-" + std::to_wstring(static_cast<int>(scale * 96)) +
+                    (dark ? L"-dark-" : L"-light-") + state + L".png";
+                check(dialog.Render(false) && dialog.compositor_.SaveSnapshot((output / name).c_str()),
+                    "production renderer captures the requested footer and close state");
+            };
+            snapshot(L"close-focus");
+            dialog.focus_ = cancel; snapshot(L"cancel-focus");
+            dialog.focus_ = confirm; snapshot(L"primary-focus");
+            dialog.focus_ = -1; dialog.hover_ = confirm; snapshot(L"primary-hover");
+            const auto bounds = dialog.controls_[confirm].bounds;
+            SendMessageW(dialog.hwnd_, WM_LBUTTONDOWN, MK_LBUTTON,
+                MAKELPARAM(static_cast<int>((bounds.left + bounds.right) / 2), static_cast<int>((bounds.top + bounds.bottom) / 2)));
+            check(dialog.pressed_ == confirm, "primary pointer press reaches the confirmation control");
+            snapshot(L"primary-pressed");
+            SendMessageW(dialog.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(0, 0));
+            check(!dialog.done_, "release outside primary leaves the conflict decisions pending");
+        }
+        return failures ? 1 : 0;
+    }
     static int RunScroll(HWND owner, const std::filesystem::path& output) {
         int failures = 0;
         auto check = [&](bool passed, const char* label) {
@@ -314,6 +377,10 @@ struct BatchConflictDialogTestPeer {
                         a.bounds.top < b.bounds.bottom && a.bounds.bottom > b.bounds.top);
                 }
                 check(safe, "file metadata row choices and fixed footer stay in separate non-overlapping areas");
+                const auto cancel_bounds = dialog.controls_[Find(dialog, BatchConflictDialog::Action::Cancel)].bounds;
+                const auto confirm_bounds = dialog.controls_[Find(dialog, BatchConflictDialog::Action::Confirm)].bounds;
+                check(cancel_bounds.right < confirm_bounds.left && std::abs(confirm_bounds.right - (width - 20) * scale) < 0.1f,
+                    "footer keeps Cancel left of the right-aligned primary action at every width and DPI");
                 bool right_aligned = true;
                 for (const auto& control : dialog.controls_) {
                     if (control.action != BatchConflictDialog::Action::Select && control.action != BatchConflictDialog::Action::Apply) continue;
@@ -411,7 +478,8 @@ int main(int argc, char** argv) {
     HWND owner = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Batch conflict isolated fixture", WS_OVERLAPPEDWINDOW,
         -20000, -20000, 960, 720, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     const bool scroll_only = argc > 1 && std::strcmp(argv[1], "--scroll") == 0;
-    const int result = !owner ? 2 : scroll_only ? pulse::ui::BatchConflictDialogTestPeer::RunScroll(owner, output) :
+    const bool style_only = argc > 1 && std::strcmp(argv[1], "--style-only") == 0;
+    const int result = !owner ? 2 : style_only ? pulse::ui::BatchConflictDialogTestPeer::RunStyle(owner, output) : scroll_only ? pulse::ui::BatchConflictDialogTestPeer::RunScroll(owner, output) :
         pulse::ui::BatchConflictDialogTestPeer::Run(owner, output);
     if (owner) DestroyWindow(owner);
     if (SUCCEEDED(initialized)) CoUninitialize();

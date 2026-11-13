@@ -7,8 +7,9 @@
 #include "../common/localization.h"
 #include "../app/tab_controller.h"
 #include <cstdio>
+#include <filesystem>
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
     using namespace pulse::app;
     OleInitialize(nullptr);
@@ -16,7 +17,7 @@ int main() {
     auto owned = std::make_unique<AppState>();
     auto& state = *owned;
     state.isolatedTest = true;
-    state.appPrefs.persist = state.places.persist = state.ctxMenuPrefs.persist = false;
+    state.appPrefs.persist = state.places.persist = state.ctxMenuPrefs.persist = state.searchHistory.persist = false;
     state.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"tab fixture", WS_OVERLAPPEDWINDOW,
         -30000, -30000, 1400, 800, nullptr, nullptr, nullptr, nullptr);
     if (!state.hwnd || !state.compositor.Init(state.hwnd)) return 2;
@@ -26,6 +27,8 @@ int main() {
         std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", text);
         if (!ok) ++failures;
     };
+    const auto output = std::filesystem::absolute(argc > 1 ? argv[1] : "../bench_data/tab-close-interaction");
+    std::filesystem::create_directories(output);
     AppPrefs prefs;
     prefs.persist = false;
     prefs.start_to_tray = prefs.close_last_tab_window = true;
@@ -83,7 +86,7 @@ int main() {
         }
         return false;
     };
-    for (const float scale : {1.0f, 1.25f, 1.5f}) {
+    for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
         state.scale = scale;
         state.renderer.SetScale(scale);
         state.compositor.RecreateTextFormats(scale);
@@ -93,6 +96,40 @@ int main() {
         state.window_tabs.items[0]->pinned = true;
         for (int i = 0; i < 4; ++i) state.window_tabs.NewTab(app::MakeHomePath());
         state.pane = state.window_tabs.Active()->FocusedPane();
+        {
+            const auto model = BuildVm(state, false);
+            const auto bounds = D2D1::RectF(0, 0, static_cast<float>(state.compositor.Width()),
+                static_cast<float>(state.compositor.Height()));
+            D2D1_RECT_F tab{};
+            const bool found = state.renderer.TabItemRect(model, bounds.right, 4, &tab);
+            const float button_left = tab.right - 34.0f * scale;
+            const float button_top = (tab.top + tab.bottom - 28.0f * scale) * 0.5f;
+            bool clickable = found;
+            for (const float x : {button_left + scale, tab.right - 7.0f * scale})
+                for (const float y : {button_top + scale, button_top + 27.0f * scale}) {
+                    const auto hit = state.renderer.HitTest(model, bounds, x, y);
+                    clickable &= hit.region == ui::HitTestResult::TabClose && hit.index == 4;
+                }
+            check(clickable, "the enlarged 28 DIP close button is clickable across its whole visual area");
+            check(state.renderer.HitTest(model, bounds, button_left - scale,
+                (tab.top + tab.bottom) * 0.5f).region == ui::HitTestResult::Tab,
+                "the title beside the enlarged button still switches the tab");
+        }
+        for (const bool dark : {false, true}) for (const int width : {480, 1400}) {
+            state.compositor.Resize(static_cast<UINT>(width * scale), static_cast<UINT>(800 * scale));
+            state.darkMode = dark;
+            auto model = BuildVm(state, false);
+            model.hover_region = ui::HitTestResult::TabClose;
+            model.hover_control_index = 4;
+            const auto bounds = D2D1::RectF(0, 0, static_cast<float>(state.compositor.Width()),
+                static_cast<float>(state.compositor.Height()));
+            state.compositor.Dc()->BeginDraw();
+            state.renderer.Render(model, bounds, ui::MakeTheme(dark, ui::HexColor(0x0078D4)));
+            check(SUCCEEDED(state.compositor.Dc()->EndDraw()), "tab close button renders in both themes");
+            const auto name = std::to_wstring(width) + L"-" + std::to_wstring(static_cast<int>(scale * 100)) +
+                (dark ? L"-dark.png" : L"-light.png");
+            check(state.compositor.SaveSnapshot((output / name).c_str()), "save tab close button visual evidence");
+        }
         for (int click = 0; click < 4; ++click) {
             POINT point{};
             const int target = static_cast<int>(state.window_tabs.items.size()) - 1;

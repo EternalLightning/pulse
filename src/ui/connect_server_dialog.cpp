@@ -14,6 +14,7 @@
 #include "ui_compositor.h"
 #include "window_helpers.h"
 #include "dialog_keyboard.h"
+#include "dialog_style.h"
 #include "../common/localization.h"
 
 #include <commctrl.h>
@@ -27,8 +28,8 @@ namespace {
 
 constexpr wchar_t kClass[] = L"PulseConnectServerWindow";
 constexpr float kDlgW = 520.0f;
-constexpr float kConnectH = 348.0f;
-constexpr float kRenameH = 212.0f;
+constexpr float kConnectH = 380.0f;
+constexpr float kRenameH = 244.0f;
 constexpr int kMaxSuggestions = 4;
 
 // Hit ids.
@@ -62,7 +63,7 @@ public:
         const int width = static_cast<int>(kDlgW * scale_);
         const int height = static_cast<int>(height_ * scale_);
         hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, kClass, spec_.title.c_str(),
-            WS_POPUP | WS_THICKFRAME | WS_SYSMENU,
+            WS_POPUP | WS_SYSMENU,
             CW_USEDEFAULT, CW_USEDEFAULT, width, height, owner, nullptr, wc.hInstance, this);
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
@@ -105,15 +106,22 @@ private:
         return self ? self->Handle(message, wparam, lparam) : DefWindowProcW(hwnd, message, wparam, lparam);
     }
 
-    D2D1_RECT_F CloseRect() const { return Rect(scale_, kDlgW - 46, 0, 46, 36); }
-    D2D1_RECT_F LabelRect() const { return Rect(scale_, 20, 50, 480, 20); }
-    D2D1_RECT_F Field() const { return Rect(scale_, 20, 72, 480, 34); }
-    D2D1_RECT_F PreviewRect() const { return Rect(scale_, 20, 110, 480, 22); }
-    D2D1_RECT_F NoteRect() const { return Rect(scale_, 20, 112, 480, 44); }
-    D2D1_RECT_F SuggestRow(int i) const { return Rect(scale_, 20, 138 + 28.0f * static_cast<float>(i), 480, 28); }
-    D2D1_RECT_F PinRect() const { return Rect(scale_, 20, 264, 320, 24); }
-    D2D1_RECT_F CancelRect() const { return Rect(scale_, kDlgW - 196, height_ - 48, 80, 32); }
-    D2D1_RECT_F ConfirmRect() const { return Rect(scale_, kDlgW - 108, height_ - 48, 88, 32); }
+    D2D1_RECT_F CloseRect() const { return Rect(scale_, kDlgW - dialog_style::kCloseWidth, 0, dialog_style::kCloseWidth, dialog_style::kTitleHeight); }
+    D2D1_RECT_F LabelRect() const { return Rect(scale_, 20, 64, 480, 20); }
+    D2D1_RECT_F Field() const { return Rect(scale_, 20, 86, 480, dialog_style::kControlHeight); }
+    D2D1_RECT_F PreviewRect() const { return Rect(scale_, 20, 122, 480, 22); }
+    D2D1_RECT_F NoteRect() const { return Rect(scale_, 20, 126, 480, 44); }
+    D2D1_RECT_F SuggestRow(int i) const { return Rect(scale_, 20, 150 + 28.0f * static_cast<float>(i), 480, 28); }
+    D2D1_RECT_F PinRect() const { return Rect(scale_, 20, 276, 320, dialog_style::kControlHeight); }
+    D2D1_RECT_F CancelRect() const {
+        const float width = std::max(80.0f, painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel)) / scale_ + 12.0f);
+        return Rect(scale_, ConfirmRect().left / scale_ - dialog_style::kGap - width,
+            height_ - 48, width, dialog_style::kControlHeight);
+    }
+    D2D1_RECT_F ConfirmRect() const {
+        const float width = std::max(88.0f, painter_.MeasureButtonWidth(spec_.confirm_text) / scale_ + 12.0f);
+        return Rect(scale_, kDlgW - dialog_style::kMargin - width, height_ - 48, width, dialog_style::kControlHeight);
+    }
 
     bool CanConfirm() const { return spec_.rename || preview_.ok; }
     void MoveFocus(bool backwards) {
@@ -125,13 +133,6 @@ private:
         MoveDialogFocus(hwnd_, focus_, targets, backwards);
     }
 
-    D2D1_RECT_F FocusRect() const {
-        if (focus_ == kHitPin) return PinRect();
-        if (focus_ == kHitConfirm) return ConfirmRect();
-        if (focus_ == kHitCancel) return CancelRect();
-        if (focus_ == kHitClose) return CloseRect();
-        return {};
-    }
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
     D2D1_COLOR_F EditBackground() const { return ChildEditColor(ChildEditBackColor(dark_)); }
 
@@ -272,12 +273,14 @@ private:
         const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_, scale_);
 
-        painter_.DrawText(spec_.title, Rect(scale_, 16, 0, 400, 36), compositor_.SmallFormat(), theme.text);
+        painter_.DrawGlyph(spec_.rename ? L"\xE8AC" : L"\xE968", Rect(scale_, dialog_style::kMargin, 12, dialog_style::kIconSize, dialog_style::kIconSize), theme.accent_ink);
+        painter_.DrawText(spec_.title, Rect(scale_, 48, 0, kDlgW - 48 - dialog_style::kCloseWidth, dialog_style::kTitleHeight), compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == kHitClose;
         close_state.pressed = pressed_ == kHitClose;
+        close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == kHitClose;
         painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close, {}, close_state);
-        painter_.FillRoundedRect(Rect(scale_, 0, 36, kDlgW, 1), 0, theme.stroke_divider);
+        painter_.FillRoundedRect(Rect(scale_, 0, dialog_style::kTitleHeight - 1, kDlgW, 1), 0, theme.stroke_divider);
 
         painter_.DrawText(spec_.label, LabelRect(), compositor_.SmallFormat(), theme.text_secondary);
         fluent::ControlState field{};
@@ -292,7 +295,7 @@ private:
                 painter_.DrawText(preview_.text, PreviewRect(), compositor_.SmallFormat(),
                                   preview_.ok ? theme.text_secondary : theme.danger);
             if (suggestions_.empty()) {
-                painter_.DrawText(l10n::Get(l10n::StringId::ConnectServerHint), Rect(scale_, 28, 142, 464, 44),
+                painter_.DrawText(l10n::Get(l10n::StringId::ConnectServerHint), Rect(scale_, 28, 154, 464, 44),
                                   compositor_.SmallFormat(), theme.text_secondary);
             }
             for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
@@ -310,6 +313,7 @@ private:
             pin.checked = pin_;
             pin.hovered = hover_ == kHitPin;
             pin.pressed = pressed_ == kHitPin;
+            pin.keyboard_focus = GetFocus() == hwnd_ && focus_ == kHitPin;
             painter_.DrawCheckBox(PinRect(), l10n::Get(l10n::StringId::ConnectServerPinAfter), pin);
 
 
@@ -318,16 +322,15 @@ private:
         fluent::ControlState cancel{};
         cancel.hovered = hover_ == kHitCancel;
         cancel.pressed = pressed_ == kHitCancel;
-        painter_.DrawButton({ CancelRect(), l10n::Get(l10n::StringId::Cancel), {}, fluent::ButtonKind::Transparent, cancel });
-        const bool can = CanConfirm();
-        const auto confirm = ConfirmRect();
-        const D2D1_COLOR_F fill = !can ? theme.fill_input
-            : (hover_ == kHitConfirm || pressed_ == kHitConfirm ? theme.accent_hover : theme.accent);
-        painter_.FillRoundedRect(confirm, theme.radius_control * scale_, fill);
-        painter_.DrawText(spec_.confirm_text, confirm, compositor_.SmallFormat(),
-                          can ? theme.accent_text : theme.text_secondary, fluent::HorizontalAlignment::Center);
+        cancel.keyboard_focus = GetFocus() == hwnd_ && focus_ == kHitCancel;
+        painter_.DrawButton({ CancelRect(), l10n::Get(l10n::StringId::Cancel), {}, fluent::ButtonKind::Standard, cancel });
+        fluent::ControlState confirm{};
+        confirm.enabled = CanConfirm();
+        confirm.hovered = hover_ == kHitConfirm;
+        confirm.pressed = pressed_ == kHitConfirm;
+        confirm.keyboard_focus = GetFocus() == hwnd_ && focus_ == kHitConfirm;
+        painter_.DrawButton({ ConfirmRect(), spec_.confirm_text, {}, fluent::ButtonKind::Primary, confirm });
 
-        if (GetFocus() == hwnd_ && focus_) painter_.DrawFocusRing(FocusRect(), 4.0f * scale_);
         if (present) pulse::ui::EndSurface(compositor_);
         else compositor_.Dc()->EndDraw();
     }
@@ -367,7 +370,7 @@ private:
             return 0;
         }
         case WM_NCHITTEST:
-            return pulse::ui::BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
+            return pulse::ui::BorderlessHitTest(hwnd_, lparam, dialog_style::kTitleHeight * scale_, CloseRect());
         case WM_SIZE:
             if (compositor_.Dc()) compositor_.Resize(LOWORD(lparam), HIWORD(lparam));
             LayoutEdit();
@@ -392,6 +395,11 @@ private:
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            backdrop_enabled_ = ApplyBackdrop(hwnd_, dark_);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
         case WM_MOVE:
             compositor_.UpdateTextRenderingParams(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
             LayoutEdit();

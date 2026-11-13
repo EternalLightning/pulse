@@ -6,6 +6,7 @@
 #include "../app/archive_dialog.h"
 #include "../app/archive_operation_ui.h"
 #include "../common/localization.h"
+#include "../ui/FluentTokens.h"
 #include "../common/windows_compat.h"
 #include <windows.h>
 #include <objbase.h>
@@ -23,6 +24,7 @@
 namespace {
 constexpr int kDestination = 100, kPassword = 101, kCreateFolder = 103;
 constexpr COLORREF kAccent = RGB(80, 180, 220);
+COLORREF dialog_accent = kAccent;
 std::atomic_int failures = 0;
 
 void Check(bool condition, const char* description) {
@@ -97,6 +99,33 @@ bool SaveScreenshot(HWND dialog, const wchar_t* name) {
         RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         // These custom windows paint WM_PAINT, so capture their displayed client pixels.
         if (BitBlt(memory, 0, 0, width, height, screen, 0, 0, SRCCOPY)) {
+            wchar_t class_name[64]{}; GetClassNameW(dialog, class_name, ARRAYSIZE(class_name));
+            if (wcscmp(class_name, L"PulseArchiveDialog") == 0) {
+                const bool dark = std::wstring(name).find(L"dark") != std::wstring::npos;
+                const auto theme = pulse::ui::IsHighContrast() ? pulse::ui::MakeHighContrastTheme() :
+                    pulse::ui::MakeTheme(dark, D2D1::ColorF(GetRValue(dialog_accent) / 255.0f,
+                        GetGValue(dialog_accent) / 255.0f, GetBValue(dialog_accent) / 255.0f));
+                const auto sheet = pulse::ui::BlendOver(theme.surface_sheet, theme.bg);
+                const auto input = pulse::ui::BlendOver(theme.fill_input_focus, sheet);
+                const auto outline = pulse::ui::IsHighContrast() ? theme.stroke_card : dark
+                    ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
+                const auto border = pulse::ui::BlendOver(outline, input);
+                const COLORREF expected = RGB(static_cast<BYTE>(border.r * 255), static_cast<BYTE>(border.g * 255), static_cast<BYTE>(border.b * 255));
+                const int dip_width = GetDlgItem(dialog, kDestination) ? 520 : 420;
+                Check(GetPixel(memory, MulDiv(20, width, dip_width), MulDiv(116, width, dip_width)) == expected,
+                    "archive input border composites translucent stroke over the input fill");
+                GUITHREADINFO thread{sizeof(thread)};
+                GetGUIThreadInfo(GetWindowThreadProcessId(dialog, nullptr), &thread);
+                for (int id : {kDestination, kPassword}) {
+                    const HWND edit = GetDlgItem(dialog, id);
+                    if (!edit) continue;
+                    const auto bottom = pulse::ui::BlendOver(thread.hwndFocus == edit ? theme.accent : theme.stroke_input_bottom, input);
+                    const int bottom_y = id == kDestination || !GetDlgItem(dialog, kDestination) ? 131 : 223;
+                    Check(GetPixel(memory, MulDiv(50, width, dip_width), MulDiv(bottom_y, width, dip_width)) ==
+                        RGB(static_cast<BYTE>(bottom.r * 255), static_cast<BYTE>(bottom.g * 255), static_cast<BYTE>(bottom.b * 255)),
+                        "archive accent underline belongs only to the focused editor");
+                }
+            }
             std::error_code error;
             const std::filesystem::path folder = L"bench_data/archive_ui";
             std::filesystem::create_directories(folder, error);
@@ -127,10 +156,91 @@ bool SaveScreenshot(HWND dialog, const wchar_t* name) {
     return saved;
 }
 
+RECT ChildBounds(HWND dialog, int id) {
+    RECT rect{};
+    GetWindowRect(GetDlgItem(dialog, id), &rect);
+    MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&rect), 2);
+    return rect;
+}
+
+void CheckArchiveStyle(HWND dialog, UINT dpi) {
+    const auto px = [dpi](int dip) { return MulDiv(dip, static_cast<int>(dpi), 96); };
+    RECT client{}; GetClientRect(dialog, &client);
+    const RECT primary = ChildBounds(dialog, IDOK), cancel = ChildBounds(dialog, IDCANCEL);
+    const RECT close = ChildBounds(dialog, 104);
+    Check(close.right - close.left == px(46) && close.bottom == px(44),
+        "archive close target follows 46 by 44 DIP header contract");
+    Check(primary.bottom - primary.top == px(32) && cancel.bottom == primary.bottom &&
+        primary.left - cancel.right == px(8) && client.right - primary.right == px(20) &&
+        client.bottom - primary.bottom == px(16), "archive actions use right-aligned Cancel then Primary with 64 DIP footer");
+    POINT point{px(50), px(10)}; ClientToScreen(dialog, &point);
+    Check(SendMessageW(dialog, WM_NCHITTEST, 0, MAKELPARAM(point.x, point.y)) == HTCAPTION,
+        "archive semantic header remains draggable");
+    LOGFONTW font{};
+    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 101), WM_GETFONT, 0, 0)), sizeof(font), &font);
+    Check(font.lfHeight == -px(14), "archive native input uses 14 DIP text after layout");
+    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 104), WM_GETFONT, 0, 0)), sizeof(font), &font);
+    Check(font.lfHeight == -px(12), "close glyph uses 12 DIP format independently of the semantic header icon");
+}
+
+void CheckArchiveDpi(HWND dialog, UINT dpi, bool password_only, const wchar_t* screenshot) {
+    const std::wstring password = Text(GetDlgItem(dialog, kPassword));
+    const HWND destination = GetDlgItem(dialog, kDestination);
+    const std::wstring path = destination ? Text(destination) : L"";
+    const int height = password_only ? 224 : GetDlgItem(dialog, kCreateFolder) ? 348 : 306;
+    RECT rect{}; GetWindowRect(dialog, &rect);
+    rect.right = rect.left + MulDiv(password_only ? 420 : 520, static_cast<int>(dpi), 96);
+    rect.bottom = rect.top + MulDiv(height, static_cast<int>(dpi), 96);
+    SendMessageW(dialog, WM_DPICHANGED, MAKELONG(dpi, dpi), reinterpret_cast<LPARAM>(&rect));
+    Check(Text(GetDlgItem(dialog, kPassword)) == password && (!destination || Text(destination) == path),
+        "archive DPI transition preserves password and destination controls");
+    CheckArchiveStyle(dialog, dpi);
+    Check(SaveScreenshot(dialog, screenshot), "save archive DPI-transition style screenshot");
+}
+
+std::atomic_bool theme_refresh_ran = false;
+bool theme_refresh_required = false;
+constexpr UINT_PTR kThemeRefreshTimer = 947;
+void CALLBACK RefreshThemeFixture(HWND owner, UINT, UINT_PTR, DWORD) {
+    Search search{owner};
+    EnumThreadWindows(GetCurrentThreadId(), FindDialog, reinterpret_cast<LPARAM>(&search));
+    if (!search.dialog) return;
+    KillTimer(owner, kThemeRefreshTimer);
+    const HWND dialog = search.dialog;
+    const HWND edit = GetDlgItem(dialog, kPassword);
+    if (GetWindowTextLengthW(edit) == 0) SetWindowTextW(edit, L"theme-fixture");
+    const bool system_contrast = pulse::ui::IsHighContrast();
+    wchar_t text[128]{};
+    GetWindowTextW(edit, text, ARRAYSIZE(text));
+    {
+        pulse::ui::HighContrastFrameScope contrast(true);
+        SendMessageW(dialog, WM_SETTINGCHANGE, SPI_SETHIGHCONTRAST, 0);
+        HDC dc = GetDC(edit);
+        const auto brush = reinterpret_cast<HBRUSH>(SendMessageW(dialog, WM_CTLCOLOREDIT,
+            reinterpret_cast<WPARAM>(dc), reinterpret_cast<LPARAM>(edit)));
+        LOGBRUSH info{}; GetObjectW(brush, sizeof(info), &info);
+        Check(info.lbColor == GetSysColor(COLOR_WINDOW) && GetTextColor(dc) == GetSysColor(COLOR_WINDOWTEXT),
+            "open prompt refreshes input brush and text to the system high-contrast pair");
+        ReleaseDC(edit, dc);
+    }
+    {
+        pulse::ui::HighContrastFrameScope contrast(system_contrast);
+        SendMessageW(dialog, WM_THEMECHANGED, 0, 0);
+    }
+    wchar_t retained[128]{}; GetWindowTextW(edit, retained, ARRAYSIZE(retained));
+    Check(wcscmp(text, retained) == 0, "theme and contrast refresh preserve entered native edit text");
+    theme_refresh_ran = true;
+}
+
 void RunExtractCases(HWND owner, DWORD thread) {
     for (bool dark : {false, true}) {
         pulse::app::ArchiveExtractOptions options;
         auto helper = Automate(thread, owner, [dark](HWND dialog) {
+            if (theme_refresh_required) {
+                const auto theme_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                while (!theme_refresh_ran.load() && std::chrono::steady_clock::now() < theme_deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             Check(Text(GetDlgItem(dialog, kDestination)) == L"C:\\archive-dialog-fixture",
                 "all: destination defaults to archive parent");
             Check(GetDlgItem(dialog, kCreateFolder) != nullptr, "all: create-folder control exists");
@@ -138,11 +248,13 @@ void RunExtractCases(HWND owner, DWORD thread) {
                 "all: password edit masks text");
             Check(Text(GetDlgItem(dialog, kCreateFolder)).find(L"example") != std::wstring::npos,
                 "all: folder label uses archive stem");
+            CheckArchiveStyle(dialog, pulse::compat::WindowDpi(dialog));
             Check(SaveScreenshot(dialog, dark ? L"extract-dark" : L"extract-light"),
                 "extraction screenshot saved at actual monitor DPI");
+            CheckArchiveDpi(dialog, dark ? 192u : 144u, false, dark ? L"extract-dark-style192" : L"extract-light-style144");
             Confirm(dialog);
         });
-        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, dark, kAccent,
+        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, dark, dialog_accent,
             L"C:\\archive-dialog-fixture\\example.zip", true, options);
         helper.join();
         Check(accepted && options.create_folder && options.destination == L"C:\\archive-dialog-fixture",
@@ -156,7 +268,7 @@ void RunExtractCases(HWND owner, DWORD thread) {
             SetWindowTextW(GetDlgItem(dialog, kPassword), L"fixture-password");
             Confirm(dialog);
         });
-        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, true, kAccent,
+        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, true, dialog_accent,
             L"C:\\archive-dialog-fixture\\example.zip", true, options);
         helper.join();
         Check(accepted && !options.create_folder && options.password == L"fixture-password",
@@ -168,7 +280,7 @@ void RunExtractCases(HWND owner, DWORD thread) {
             Check(GetDlgItem(dialog, kCreateFolder) == nullptr, "selected: checkbox is absent");
             Confirm(dialog);
         });
-        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, kAccent,
+        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, dialog_accent,
             L"C:\\archive-dialog-fixture\\example.zip", false, options);
         helper.join();
         Check(accepted && !options.create_folder, "selected: extracts directly to destination");
@@ -182,7 +294,7 @@ void RunExtractCases(HWND owner, DWORD thread) {
                 reinterpret_cast<LPARAM>(GetDlgItem(dialog, kCreateFolder)));
             Cancel(dialog);
         });
-        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, kAccent,
+        const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, dialog_accent,
             L"C:\\archive-dialog-fixture\\example.zip", true, options);
         helper.join();
         Check(!accepted && options.destination == L"C:\\original" &&
@@ -198,16 +310,20 @@ void RunPasswordCases(HWND owner, DWORD thread) {
             "password dialog: input masks text");
         Check(Text(GetDlgItem(dialog, kPassword)) == L"initial", "password dialog: initial value retained");
         SetWindowTextW(GetDlgItem(dialog, kPassword), L"entered");
+        CheckArchiveStyle(dialog, pulse::compat::WindowDpi(dialog));
+        Check(SaveScreenshot(dialog, L"password-dark"), "capture password prompt with semantic lock header");
+        CheckArchiveDpi(dialog, 144u, true, L"password-dark-style144");
         Confirm(dialog);
     });
-    const bool accepted = pulse::app::ShowArchivePasswordDialog(owner, true, kAccent, password);
+    const bool accepted = pulse::app::ShowArchivePasswordDialog(owner, true, dialog_accent, password);
     helper.join();
     Check(accepted && password == L"entered", "password dialog: confirms entered value");
     helper = Automate(thread, owner, [](HWND dialog) {
         SetWindowTextW(GetDlgItem(dialog, kPassword), L"discarded");
+        CheckArchiveDpi(dialog, 192u, true, L"password-light-style192");
         Cancel(dialog);
     });
-    const bool cancelled = pulse::app::ShowArchivePasswordDialog(owner, false, kAccent, password);
+    const bool cancelled = pulse::app::ShowArchivePasswordDialog(owner, false, dialog_accent, password);
     helper.join();
     Check(!cancelled && password == L"entered", "password dialog: cancellation retains output");
 }
@@ -499,10 +615,21 @@ int main(int argc, char** argv) {
         std::printf("Archive failure dialog tests: %d failure(s).\n", failures.load());
         return failures.load() == 0 ? 0 : 1;
     }
+    const bool style_only = argc == 2 && std::string_view(argv[1]) == "--popup-style-only";
+    if (style_only) dialog_accent = RGB(0, 120, 212);
+    theme_refresh_required = style_only;
+    if (style_only) SetTimer(owner, kThemeRefreshTimer, 1, RefreshThemeFixture);
     const bool progress_only = argc == 2 && std::string_view(argv[1]) == "--progress-only";
     if (!progress_only) {
         RunExtractCases(owner, thread);
         RunPasswordCases(owner, thread);
+    }
+    if (style_only) {
+        KillTimer(owner, kThemeRefreshTimer);
+        Check(theme_refresh_ran, "UI-thread high-contrast refresh fixture reached the open extraction prompt");
+        DestroyWindow(owner);
+        if (SUCCEEDED(com)) CoUninitialize();
+        return failures.load() == 0 ? 0 : 1;
     }
     RunProgressCases(owner, thread);
     pulse::l10n::SetLanguage(L"en-US");

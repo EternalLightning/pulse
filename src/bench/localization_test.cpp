@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
             const auto message = Format(StringId::OperationUndoResultChangedFormat, path.c_str());
             passed &= Report("localized errors preserve a complete path containing percent signs",
                 message.ends_with(path) && message.starts_with(chinese
-                    ? L"原操作产物已改变" : L"The original result changed"));
+                    ? L"原项目已更改" : L"The original item changed"));
             passed &= Report("localized numeric errors preserve the system code",
                 Format(StringId::StorageSaveFailedFormat, static_cast<unsigned long>(12345)).find(L"12345")
                     != std::wstring::npos);
@@ -120,11 +120,11 @@ int main(int argc, char** argv) {
             passed &= Report("archive exit playback and link text follow display language",
                 Get(StringId::ArchiveExtractAll) == (chinese ? L"解压全部项目" : L"Extract all") &&
                 Get(StringId::ArchivePasswordOrDataError) == (chinese
-                    ? L"密码不正确，或压缩包数据已损坏。"
-                    : L"The password is incorrect or the archive data is damaged.") &&
+                    ? L"密码不正确，或压缩包数据已损坏"
+                    : L"The password is incorrect or the archive data is damaged") &&
                 Get(StringId::ArchivePasswordRetryHint) == (chinese
-                    ? L"请关闭此窗口，重新打开文件并输入密码。如果密码无误，压缩包可能已损坏。"
-                    : L"Close this window, reopen the file, and enter the password again. If the password is correct, the archive may be damaged.") &&
+                    ? L"密码错误，或者压缩包数据已损坏，请尝试重新输入密码。"
+                    : L"The password is incorrect, or the archive data is damaged. Please try entering the password again.") &&
                 Get(StringId::ExitStopTasks) == (chinese ? L"停止任务并退出" : L"Stop tasks and exit") &&
                 Get(StringId::PlaybackNextFrame) == (chinese ? L"下一帧" : L"Next frame") &&
                 Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue"));

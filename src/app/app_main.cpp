@@ -9,6 +9,7 @@
 #include "app_exit.h"
 #include "../ops/operation_journal_paths.h"
 #include "drive_label_rename.h"
+#include "drive_change.h"
 #include "../ops/archive.h"
 #include "../ops/drop_staging.h"
 #include "locked_operation_prompt.h"
@@ -1081,20 +1082,25 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 app::ApplyDeviceOperationResult(*s, result);
         return 0;
 
-    case WM_DEVICECHANGE:
+    case WM_DEVICECHANGE: {
         // A USB stick, a mounted image, or any new volume changes the drive
         // list. The sidebar model is built once, so rebuild it here instead of
         // waiting for a language switch or a restart.
-        if (s && (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE)) {
-            const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(lParam);
+        if (s) {
+            const auto* header = (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE)
+                ? reinterpret_cast<const DEV_BROADCAST_HDR*>(lParam) : nullptr;
             if (header && header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
                 app::DeviceRegistry::Instance().OnDevicesBroadcast();
-            if (!header || header->dbch_devicetype == DBT_DEVTYP_VOLUME) {
+            const DWORD logical_drives = wParam == DBT_DEVNODES_CHANGED ? GetLogicalDrives() : 0;
+            if (app::ShouldRefreshDriveList(wParam, header, logical_drives, app::SidebarDriveMask(s->sidebar))) {
                 RefreshSidebarModel(*s);
+                s->store.MarkDirty(L"");
+                RefreshPath(*s, L"", RefreshReason::FileChange);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
         }
         return 0;
+    }
 
     case WM_SHOWWINDOW:
         // Sent before the window becomes visible; restore full rate right away.
@@ -1102,7 +1108,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
 
     case WM_ACTIVATE:
+        if (s && LOWORD(wParam) == WA_INACTIVE) CancelSettingsPointer(*s);
         if (s && LOWORD(wParam) != WA_INACTIVE) s->core.windows.Touch(hwnd);
+        if (s && LOWORD(wParam) == WA_INACTIVE)
+            HandleMouseLeave(s, hwnd, WM_MOUSELEAVE, 0, 0);
         if (s && s->menu && LOWORD(wParam) == WA_INACTIVE)
             s->menu->DismissForDeactivation(reinterpret_cast<HWND>(lParam));
         if (s && s->operationCenter && LOWORD(wParam) == WA_INACTIVE)
@@ -1112,6 +1121,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_ACTIVATEAPP:
         if (s && !wParam) {
+            HandleMouseLeave(s, hwnd, WM_MOUSELEAVE, 0, 0);
             if (s->operationCenter) s->operationCenter->Hide(false);
             if (s->menu) s->menu->DismissForDeactivation(nullptr);
             s->detailsPreviewPanning = false;
@@ -1132,6 +1142,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_SIZE: {
         if (s) {
+            CancelSettingsPointer(*s);
             if (s->operationCenter) s->operationCenter->Hide(false);
             s->compositor.Resize(LOWORD(lParam), HIWORD(lParam));
             s->maximized = (wParam == SIZE_MAXIMIZED);

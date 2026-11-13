@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include "../app/global_search_window.h"
+#include "../ui/quick_preview_window.h"
 #include "../app/global_search_window.cpp"
 #include "content_search_fixture.h"
 #include <wincodec.h>
@@ -22,6 +23,121 @@ struct GlobalSearchWindowTestPeer {
     static bool BindDatabase(GlobalSearchWindow& window, const std::wstring& database_path) {
         if (!window.impl_) window.impl_ = std::make_unique<State>();
         return window.impl_->contents.SetDatabasePathForTesting(database_path);
+    }
+};
+}
+
+namespace pulse::ui {
+struct ThumbnailCacheTestAccess {
+    static void SeedText(ThumbnailCache& cache, const std::wstring& path, uint32_t pixels, const std::wstring& text) {
+        std::lock_guard lock(cache.mutex_);
+        const auto key = cache.Key(path, pixels, 0, 0);
+        if (cache.items_.contains(key)) return;
+        ThumbnailCache::Item item;
+        item.kind = ipc::PreviewContentKind::Text;
+        item.text = text;
+        item.bytes_read = static_cast<uint32_t>(text.size() * sizeof(wchar_t));
+        cache.lru_.push_front(key);
+        item.lru_position = cache.lru_.begin();
+        cache.items_.insert_or_assign(key, std::move(item));
+    }
+};
+struct QuickPreviewAppearanceProbe {
+    static bool HeaderPixelMatches(const std::filesystem::path& path, bool dark) {
+        ComPtr<IWICImagingFactory> factory;
+        ComPtr<IWICBitmapDecoder> decoder;
+        ComPtr<IWICBitmapFrameDecode> frame;
+        ComPtr<IWICFormatConverter> pixels;
+        HRESULT result = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&factory));
+        if (SUCCEEDED(result)) result = factory->CreateDecoderFromFilename(path.c_str(), nullptr,
+            GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder);
+        if (SUCCEEDED(result)) result = decoder->GetFrame(0, &frame);
+        if (SUCCEEDED(result)) result = factory->CreateFormatConverter(&pixels);
+        if (SUCCEEDED(result)) result = pixels->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+        BYTE pixel[4]{};
+        const WICRect point{5, 5, 1, 1};
+        if (SUCCEEDED(result)) result = pixels->CopyPixels(&point, 4, 4, pixel);
+        const BYTE expected = dark ? 0x15 : 0xf7;
+        const bool matches = SUCCEEDED(result) && pixel[0] == expected && pixel[1] == expected &&
+            pixel[2] == expected && pixel[3] == 255;
+        if (!matches) std::cout << "[INFO] preview header " << (dark ? "dark" : "light") <<
+            " actual BGRA=" << static_cast<int>(pixel[0]) << ',' << static_cast<int>(pixel[1]) << ',' <<
+            static_cast<int>(pixel[2]) << ',' << static_cast<int>(pixel[3]) << " expected gray=" <<
+            static_cast<int>(expected) << " HRESULT=" << std::hex << result << std::dec << '\n';
+        if (!matches) return false;
+        UINT width = 0, height = 0;
+        if (FAILED(frame->GetSize(&width, &height)) || width < 6 || height < 20) return false;
+        const WICRect footer_band{static_cast<INT>(width / 3), static_cast<INT>(height - 18),
+            static_cast<INT>(width / 3), 16};
+        const UINT stride = static_cast<UINT>(footer_band.Width) * 4;
+        std::vector<BYTE> band(static_cast<size_t>(stride) * footer_band.Height);
+        if (FAILED(pixels->CopyPixels(&footer_band, stride, static_cast<UINT>(band.size()), band.data()))) return false;
+        for (size_t i = 0; i < band.size(); i += 4) {
+            if (band[i] != expected || band[i + 1] != expected || band[i + 2] != expected || band[i + 3] != 255) {
+                std::cout << "[INFO] preview text reaches reserved footer band in " << (dark ? "dark" : "light") << " snapshot\n";
+                return false;
+            }
+        }
+        return true;
+    }
+    static bool Snapshot(QuickPreviewWindow& window, const std::filesystem::path& folder, bool dark) {
+        window.safe_mode_ = true;
+        window.item_.path = (folder / L"appearance-preview.txt").wstring();
+        window.item_.name = L"appearance-preview.txt";
+        SetWindowPos(window.hwnd_, nullptr, 0, 0, 720, 480, SWP_NOMOVE | SWP_NOZORDER);
+        window.Resize();
+        RECT client{};
+        GetClientRect(window.hwnd_, &client);
+        if (window.compositor_.Width() != client.right || window.compositor_.Height() != client.bottom) {
+            std::cout << "[INFO] preview viewport HWND=" << client.right << 'x' << client.bottom <<
+                " compositor=" << window.compositor_.Width() << 'x' << window.compositor_.Height() << '\n';
+            return false;
+        }
+        std::wstring text = L"Pulse quick preview\r\n\r\n";
+        text += L"Theme changes preserve the open file, scroll position and selection.\r\n";
+        text += L"浅色与深色预览使用同一份文本内容。\r\n\r\n";
+        for (int i = 1; i <= 50; ++i)
+            text += L"Line " + std::to_wstring(i) + L": retained preview content and readable controls.\r\n";
+        ThumbnailCacheTestAccess::SeedText(*window.thumbnails_, window.item_.path,
+            window.RequestedPixelSize(window.ContentRect()), text);
+        window.SetAppearance(dark, WindowEffect::None, HexColor(0x8040b0));
+        window.text_scroll_ = 0;
+        window.sel_anchor_ = window.sel_focus_ = 0;
+        ShowWindow(window.hwnd_, SW_SHOW);
+        const auto path = folder / (dark ? L"quick-preview-dark.png" : L"quick-preview-light.png");
+        return window.Render(path.c_str()) && window.native_kind_ == QuickPreviewWindow::NativeKind::Text &&
+            window.preview_text_ == text && HeaderPixelMatches(path, dark);
+    }
+    static bool TextEndVisible(QuickPreviewWindow& window) {
+        if (!window.text_layout_.get()) return false;
+        window.ResetTextScroll();
+        window.text_scroll_ = window.TextScrollMaximum();
+        const auto viewport = window.TextViewport();
+        FLOAT x = 0, y = 0;
+        DWRITE_HIT_TEST_METRICS metrics{};
+        const auto end = static_cast<uint32_t>(window.preview_text_.size() - 3);
+        const HRESULT result = window.text_layout_->HitTestTextPosition(end, FALSE, &x, &y, &metrics);
+        uint32_t index = 0;
+        return SUCCEEDED(result) && y >= window.text_scroll_ - 0.5f &&
+            y + metrics.height - window.text_scroll_ <= viewport.bottom - viewport.top + 0.5f &&
+            !window.HitTestText(viewport.left + 10, viewport.bottom + 4, index);
+    }
+    static bool Check(QuickPreviewWindow& window) {
+        window.preview_text_ = L"Retained preview content";
+        window.text_scroll_ = 123.0f;
+        window.sel_anchor_ = 2;
+        window.sel_focus_ = 9;
+        window.find_query_ = L"preview";
+        const auto generation = window.generation_;
+        const auto accent = HexColor(0x8040b0);
+        window.SetAppearance(true, WindowEffect::Acrylic, accent);
+        SendMessageW(window.hwnd_, WM_THEMECHANGED, 0, 0);
+        return window.dark_ && window.effect_ == WindowEffect::Acrylic && window.accent_.r == accent.r &&
+            window.generation_ == generation && window.text_scroll_ == 123.0f &&
+            window.preview_text_ == L"Retained preview content" && window.sel_anchor_ == 2 &&
+            window.sel_focus_ == 9 && window.find_query_ == L"preview";
     }
 };
 }
@@ -44,9 +160,10 @@ void Pump(DWORD milliseconds) {
         Sleep(10);
     } while (GetTickCount64() < end);
 }
-bool SelectionMarkerMatches(pulse::GlobalSearchWindowTestPeer::State& state, int row) {
+bool RowPixelMatches(pulse::GlobalSearchWindowTestPeer::State& state, int row, UINT x, float offset, D2D1_COLOR_F color) {
     state.selected = row;
-    state.Paint();
+    // FLIP_DISCARD makes the target undefined after Present; sample the completed frame first.
+    state.Paint(false);
     auto* dc = state.compositor.Dc();
     if (!dc) return false;
     Microsoft::WRL::ComPtr<ID2D1Image> source;
@@ -56,18 +173,29 @@ bool SelectionMarkerMatches(pulse::GlobalSearchWindowTestPeer::State& state, int
     const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
     if (SUCCEEDED(result)) result = dc->CreateBitmap(D2D1::SizeU(1, 1), nullptr, 0, properties, &sample);
-    const UINT y = static_cast<UINT>(std::floor(136 + static_cast<float>(row) * 88 - state.scroll_y + 14));
-    const D2D1_RECT_U area{6, y, 7, y + 1};
+    const UINT sample_x = static_cast<UINT>(state.Px(static_cast<float>(x)));
+    const UINT y = static_cast<UINT>(state.Px(136 + static_cast<float>(row) * 88 - state.scroll_y + offset));
+    const D2D1_RECT_U area{sample_x, y, sample_x + 1, y + 1};
     if (SUCCEEDED(result)) result = sample->CopyFromBitmap(nullptr, bitmap.Get(), &area);
     D2D1_MAPPED_RECT pixel{};
     if (SUCCEEDED(result)) result = sample->Map(D2D1_MAP_OPTIONS_READ, &pixel);
-    if (FAILED(result)) return false;
-    const auto accent = state.Theme().accent;
+    if (FAILED(result)) {
+        std::cout << "[INFO] row pixel sampling HRESULT=" << std::hex << result << std::dec << '\n';
+        return false;
+    }
+    const auto accent = color;
     const bool matches = std::abs(static_cast<int>(pixel.bits[0]) - static_cast<int>(std::lround(accent.b * 255))) <= 5 &&
         std::abs(static_cast<int>(pixel.bits[1]) - static_cast<int>(std::lround(accent.g * 255))) <= 5 &&
         std::abs(static_cast<int>(pixel.bits[2]) - static_cast<int>(std::lround(accent.r * 255))) <= 5;
+    if (!matches) std::cout << "[INFO] selected row pixel (" << sample_x << ',' << y << ") actual BGRA=" <<
+        static_cast<int>(pixel.bits[0]) << ',' << static_cast<int>(pixel.bits[1]) << ',' <<
+        static_cast<int>(pixel.bits[2]) << ',' << static_cast<int>(pixel.bits[3]) << " expected RGB=" <<
+        std::lround(accent.r * 255) << ',' << std::lround(accent.g * 255) << ',' << std::lround(accent.b * 255) << '\n';
     sample->Unmap();
     return matches;
+}
+bool SelectionMarkerMatches(pulse::GlobalSearchWindowTestPeer::State& state, int row) {
+    return RowPixelMatches(state, row, 6, 14, state.Theme().accent);
 }
 bool Capture(pulse::GlobalSearchWindowTestPeer::State& state, const std::wstring& path) {
     Pump(30);
@@ -142,12 +270,121 @@ int wmain(int argc, wchar_t** argv) {
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const bool routing_only = (argc > 1 && std::wstring_view(argv[1]) == L"--routing-only") ||
         (argc > 2 && std::wstring_view(argv[2]) == L"--routing-only");
+    const bool appearance_only = argc > 1 && std::wstring_view(argv[1]) == L"--appearance-keyboard";
     const bool smooth_only = argc > 1 && std::wstring_view(argv[1]) == L"--smooth-scroll";
     const bool storage_isolation_only = argc > 1 && std::wstring_view(argv[1]) == L"--storage-isolation-only";
-    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only && !appearance_only
         ? argv[1] : L"bench_data/global-search-window";
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
+    if (appearance_only) {
+        std::filesystem::create_directories(output);
+        pulse::GlobalSearchWindow window;
+        window.SetAppearance(false, pulse::ui::WindowEffect::None, L"", D2D1::ColorF(0x8040b0));
+        auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
+        using Focus = pulse::GlobalSearchWindowTestPeer::State::Focus;
+        WNDCLASSW cls{};
+        cls.lpfnWndProc = pulse::GlobalSearchWindowTestPeer::State::WindowProc;
+        cls.hInstance = GetModuleHandleW(nullptr);
+        cls.lpszClassName = L"Pulse.GlobalSearch.AppearanceFixture";
+        RegisterClassW(&cls);
+        state.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP, cls.lpszClassName,
+            L"", WS_POPUP | WS_CLIPCHILDREN, 100, 100, 780, 488, nullptr, nullptr, cls.hInstance, &state);
+        state.edit = pulse::ui::CreateChildEdit(state.hwnd);
+        check(state.hwnd && state.edit, "create search appearance fixture without starting workers");
+        if (state.hwnd && state.edit) {
+            SetWindowSubclass(state.edit, pulse::GlobalSearchWindowTestPeer::State::EditProc, 1,
+                reinterpret_cast<DWORD_PTR>(&state));
+            ShowWindow(state.hwnd, SW_SHOW);
+            state.Layout();
+            state.current_folder = L"C:\\fixture";
+            state.FocusControl(Focus::Edit);
+            SendMessageW(state.edit, WM_KEYDOWN, VK_TAB, 0);
+            check(state.focus == Focus::Name && !state.content_mode && GetFocus() == state.hwnd,
+                "Tab leaves IME edit for visible name mode without changing query mode");
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_RIGHT, 0);
+            check(state.focus == Focus::Content && state.content_mode,
+                "arrow key selects visible content mode");
+            state.Cancel();
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_TAB, 0);
+            check(state.focus == Focus::Everywhere, "Tab reaches scope controls");
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_RIGHT, 0);
+            check(state.focus == Focus::Current && state.current_only,
+                "arrow key switches to current folder scope");
+            state.Cancel();
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_LEFT, 0);
+            check(!state.current_only && state.focus == Focus::Everywhere,
+                "arrow key switches back to everywhere scope");
+            state.Cancel();
+            BYTE keyboard[256]{};
+            GetKeyboardState(keyboard);
+            BYTE shifted[256]{};
+            std::copy_n(keyboard, 256, shifted);
+            shifted[VK_SHIFT] |= 0x80;
+            SetKeyboardState(shifted);
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_TAB, 0);
+            SetKeyboardState(keyboard);
+            check(state.focus == Focus::Content, "reverse Tab traversal returns to previous mode control");
+            state.content_mode = false;
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_SPACE, 0);
+            check(state.content_mode, "Space activates focused mode");
+            state.Cancel();
+            state.composing = true;
+            const auto focus = state.focus;
+            check(!state.Key(VK_TAB) && !state.Key(VK_RETURN) && state.focus == focus,
+                "IME composition keeps Tab and Enter with native editor");
+            state.composing = false;
+            for (int i = 0; i < 20; ++i)
+                state.rows.push_back({L"Retained result.xlsx", L"C:\\fixture\\result.xlsx", L"retained snippet", false});
+            state.total = state.rows.size();
+            state.scroll_y = 176; state.selected = 3;
+            const auto generation = state.generation;
+            window.SetAppearance(true, pulse::ui::WindowEffect::MicaAlt, L"", D2D1::ColorF(0x0078d4));
+            SendMessageW(state.hwnd, WM_THEMECHANGED, 0, 0);
+            check(state.dark && state.effect == pulse::ui::WindowEffect::MicaAlt && state.rows.size() == 20 &&
+                state.rows[0].snippet == L"retained snippet" && state.scroll_y == 176 &&
+                state.selected == 3 && state.generation == generation,
+                "theme and effect refresh preserve results, selection, scroll and query generation");
+            state.FocusControl(Focus::Current);
+            check(Capture(state, (output / L"keyboard-scope-focus.png").wstring()), "capture focused scope control");
+            {
+                pulse::ui::HighContrastFrameScope hc(true);
+                state.ApplyAppearance();
+                check(RowPixelMatches(state, state.selected, 70, 14, state.Theme().fill_selected),
+                    "selected high contrast row paints the system highlight background");
+                check(Capture(state, (output / L"selected-high-contrast.png").wstring()), "capture high contrast selected result and focus");
+            }
+            state.ApplyAppearance();
+            state.FocusControl(Focus::Results);
+            bool opened = false;
+            window.SetOpenCallback([&](const std::wstring& path, bool location) {
+                opened = path == L"C:\\fixture\\result.xlsx" && !location;
+            });
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_RETURN, 0);
+            check(opened && !window.Visible(), "Enter opens focused result and hides search");
+            ShowWindow(state.hwnd, SW_SHOW);
+            state.current_folder.clear();
+            state.FocusControl(Focus::Everywhere);
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_TAB, 0);
+            check(state.focus == Focus::Results, "Tab skips unavailable current folder scope");
+            SendMessageW(state.hwnd, WM_KEYDOWN, VK_ESCAPE, 0);
+            check(!window.Visible(), "Escape hides search from result focus");
+        }
+        window.Shutdown();
+        {
+            pulse::ui::QuickPreviewWindow preview;
+            check(preview.Initialize(nullptr, WM_APP + 1, WM_APP + 2), "create preview appearance fixture");
+            check(pulse::ui::QuickPreviewAppearanceProbe::Check(preview),
+                "preview appearance preserves content, scroll, selection, find query and generation");
+            check(pulse::ui::QuickPreviewAppearanceProbe::Snapshot(preview, std::filesystem::absolute(output), false),
+                "capture production light quick preview with owned text fixture");
+            check(pulse::ui::QuickPreviewAppearanceProbe::Snapshot(preview, std::filesystem::absolute(output), true),
+                "capture production dark quick preview with the same text fixture");
+            check(pulse::ui::QuickPreviewAppearanceProbe::TextEndVisible(preview),
+                "text end remains reachable above footer and footer does not select text");
+        }
+        CoUninitialize(); return failed ? 1 : 0;
+    }
     pulse::bench::ContentSearchFixture isolation;
     if (!isolation.Initialize(output, L"isolation")) {
         check(false, "initialize private content database and storage sentinels");

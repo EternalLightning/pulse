@@ -38,14 +38,16 @@ LRESULT BorderlessHitTest(HWND hwnd, LPARAM lparam, float title_height,
     const bool right = point.x >= window.right - frame_x;
     const bool top = point.y < window.top + frame_y;
     const bool bottom = point.y >= window.bottom - frame_y;
-    if (top && left) return HTTOPLEFT;
-    if (top && right) return HTTOPRIGHT;
-    if (bottom && left) return HTBOTTOMLEFT;
-    if (bottom && right) return HTBOTTOMRIGHT;
-    if (left) return HTLEFT;
-    if (right) return HTRIGHT;
-    if (top) return HTTOP;
-    if (bottom) return HTBOTTOM;
+    if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_THICKFRAME) {
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+    }
     ScreenToClient(hwnd, &point);
     if (point.y >= 0 && point.y < title_height &&
         !ContainsRect(client_buttons, static_cast<float>(point.x), static_cast<float>(point.y)))

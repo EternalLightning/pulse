@@ -3,16 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-// settings_transfer.h - Settings > 关于与诊断 > 备份与迁移: one JSON file that
-// carries the preferences and the user's own lists to another PC, or back.
-//
-// Export reads the data dir. Import never replaces live files while Pulse runs:
-// the running instance writes app.json, places.json and context_menu.json on
-// exit, which would undo it. Import stages its files under
-// <data>\settings_import instead, and the next start applies them
-// (ApplyPendingImport) before anything is loaded, right after backing the
-// current files up under <data>\backups\pre-import-<stamp>.
-//
+// Import stages changes for the next launch. Failed writes roll back in memory.
 // Machine-specific state never travels: window placement and sessions live in
 // other files, and app.json's system integration, picker history and similar
 // members (IsMachineLocalPref) are dropped on export and kept on import.
@@ -42,7 +33,6 @@ const wchar_t* CategoryKey(Category category) noexcept;
 
 inline constexpr int kFormatVersion = 1;
 inline constexpr wchar_t kFormatName[] = L"pulse-settings";
-inline constexpr size_t kBackupsKept = 5;
 
 // app.json members that describe this PC rather than the user's choices.
 bool IsMachineLocalPref(std::wstring_view key) noexcept;
@@ -74,33 +64,19 @@ ParseResult ParseBundle(const std::wstring& text, Bundle& out);
 
 // Writes <data>\settings_import for the next start (replacing an earlier one).
 bool StageImport(const std::wstring& data_dir, const Bundle& bundle, uint32_t categories);
-// Stages a backup made by an earlier import, exactly as it was.
-bool StageRestore(const std::wstring& data_dir, const std::wstring& backup_dir);
 bool HasPendingImport(const std::wstring& data_dir);
 void CancelPendingImport(const std::wstring& data_dir);
 
-struct BackupInfo {
-    std::wstring dir;
-    std::wstring stamp;  // "20261021-234005"
-};
-// Pre-import backups, newest first.
-std::vector<BackupInfo> ListBackups(const std::wstring& data_dir);
-
-enum class ApplyOutcome { Nothing, Imported, Restored, Failed };
+enum class ApplyOutcome { Nothing, Imported, Failed };
 struct ApplyResult {
     ApplyOutcome outcome = ApplyOutcome::Nothing;
     int changed = 0;          // files written or removed
     bool rollback_ok = true;  // Failed: earlier replacements were undone
-    std::wstring backup_dir;  // Previous files, including before restore
 };
-// Applies a staged import or restore; `stamp` names the backup it makes.
-ApplyResult ApplyPendingImport(const std::wstring& data_dir, std::wstring_view stamp);
+// Applies a staged import without creating a persistent backup.
+ApplyResult ApplyPendingImport(const std::wstring& data_dir);
 
 // Building blocks, exposed for the tests.
 std::wstring MergePrefs(const std::wstring& local, const std::wstring& imported);
-std::wstring RestorePrefs(const std::wstring& current, const std::wstring& backup);
 std::wstring MergeObjects(const std::wstring& base, const std::wstring& overlay);
-// "20261021-234005" or "2026-10-21T23:40:05" -> "2026-10-21 23:40".
-std::wstring DisplayTime(std::wstring_view stamp);
-
 } // namespace pulse::app::settings_transfer

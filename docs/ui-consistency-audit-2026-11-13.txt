@@ -1,0 +1,112 @@
+Pulse UI 一致性检查 — 2026-11-13
+
+对象与结论
+Pulse 是 Windows 自绘文件管理器。本次按单人桌面使用场景，检查当前工作树的主题令牌、公共 Fluent 控件、主工具栏、设置页及若干常用对话框。
+已有统一基础：FluentTokens.h 提供颜色和几何令牌，Painter 提供按钮、输入框、开关、菜单等公共绘制，typography 统一字体选择和回退。
+结论：普通明暗主题的公共控件基本一致，但不能判定全应用已经遵守同一套规则。下面有 8 项具体问题；先处理 1–5，再整理 6–8。
+本次不修改产品代码，保留已有未提交工作。报告与验证产物是本次新增内容。
+
+对照依据
+- docs/design-references/interaction-design.md:41：点击区域不低于 24–28 DIP。
+- 同文件:128–129、:156–161：区分悬停、选中、焦点、禁用状态；强调色有明确用途；键盘焦点可见。
+- 同文件:151：4 DIP 间距基准、8 DIP 控件圆角。
+- src/ui/FluentTokens.h:117、:145：已存在 text_selected 和 accent_text，调用方应使用与背景匹配的前景色。
+- src/bench/command_icon_test.cpp:169–174：现有颜色检查包含 4.5:1 的文字/强调色对比度要求。
+没有把不同语义控件必须完全同色、所有图标必须单色等审美偏好当成缺陷。
+
+需要优先修复
+
+1. [P2] 深色主题的选中复选框和开关忽略 accent_text
+位置：src/ui/fluent_components.cpp:1147–1149、:1250–1251；src/ui/FluentTokens.h:308。
+具体场景：深色主题选自定义强调色 #112244，再开启设置开关或勾选复选框。
+问题：普通主按钮使用 theme.accent_text，复选框勾和开关圆点却按 dark_ 固定使用黑色。实际主题函数给该颜色选择白色前景；黑色对强调色的对比度只有 1.336:1，白色为 15.717:1。
+最小修复：开启/选中的可用状态统一使用与实际填充配对的 accent_text；保留禁用状态自己的规则。
+不处理的影响：同一种强调色在按钮里清晰，在勾选标记和开关上却难以辨认。
+证据：源码确认；token_probe.cpp 直接调用当前 MakeTheme 实测颜色数值。未生成该自定义颜色的实际对话框截图。
+
+2. [P2] 强调色作为文字/图标以及作为底色时，没有分别保证可读性
+位置：src/ui/FluentTokens.h:100–104、:281–308；src/ui/fluent_components.cpp:884–889、:2098。
+具体场景：深色主题使用 #E74856；或使用 #5867C8，在卡片上的选中分段文字使用 theme.accent。
+问题：AutoAccentText 用未线性化的 RGB 加权值与 0.5 比较，#E74856 会选白字，实测对比度 3.847:1；黑字可达 5.459:1。深色主题同时直接保留原始 accent，#5867C8 对 surface_card 的对比度为 2.980:1，现有检查要求至少 4.5:1。
+最小修复：用实际相对亮度比较黑/白文字对比度；为强调色文字/图标解析可读的颜色。若填充与文字要求冲突，明确区分这两种用途，沿用既有主题体系。
+不处理的影响：主题色不同会改变按钮和选中状态的可读性，预设颜色通过不能代表任意自定义颜色通过。
+证据：现有 pulse_command_icon_test 的 dark accent 检查失败；独立数值探针确认上述比值。
+
+3. [P2] 高对比度的背景和文字没有全面配对
+位置：src/ui/fluent_components.cpp:798–811、:2078–2099；src/ui/ui_settings_view.cpp:78–107；src/ui/FluentTokens.h:412。
+具体场景：高对比度下悬停普通/透明按钮、选中分段项，或显示设置页当前导航项。
+问题：背景使用 fill_hover/fill_selected，即系统 COLOR_HIGHLIGHT，文字却继续使用 text、text_secondary 或 accent。text_selected 已读取 COLOR_HIGHLIGHTTEXT，但这些路径没有采用；菜单 DrawMenuItem:1428–1431 已采用成对规则，因此同屏控件行为不同。
+最小修复：在高对比度高亮背景上统一使用 text_selected，并同步图标、附加文字等前景；普通、禁用状态继续按各自背景配色。
+不处理的影响：某些合法的自定义系统配色会使悬停/选中文字与背景相同，无法识别。
+证据：强制高对比度 gallery 截图中，菜单为蓝底白字，普通/透明按钮为蓝底黑字；生产设置页和分段控件的调用链已静态核对。截图使用当前系统颜色，并非实际切换系统高对比度后的桌面验收。gallery 自己绘制的样例列表标题不作为生产列表缺陷证据。
+
+4. [P2] 设置页的按钮和开关缺少键盘焦点路径
+位置：src/app/app_input.cpp:3779 起的 HandleKeyDown；src/app/app_main.cpp:1473–1481；src/ui/ui_settings_core.cpp:66–71；src/ui/ui_settings_view.cpp:217–222；src/app/app_navigation.cpp:1885–1893。
+具体场景：打开设置，仅用 Tab/Shift+Tab、方向键、Space/Enter 切换主题、开启开关或激活导入/导出。
+问题：主窗口键盘处理没有设置控件焦点遍历/激活分支，绘制状态也不传 keyboard_focus。F6 的 CycleFocus 只切换文件窗格，不能替代设置焦点。批量重命名等对话框已经使用 MoveDialogFocus，因此交互能力不一致。
+最小修复：为设置页建立可用控件的焦点顺序、可见焦点环与 Space/Enter 激活，并在焦点滚出视口时滚动到该项；复用现有焦点辅助方式。
+不处理的影响：可以看到设置选项，却无法仅用键盘完成这些设置。
+证据：静态输入/绘制链确认；没有进行纯键盘桌面实操，也没有据此扩大为全应用 UI Automation 结论。
+
+5. [P2] 设置操作在鼠标按下时立即执行，没有完整按压与移出取消行为
+位置：src/app/app_input.cpp:2072、:2373、:2441–2446、:2509–2523；src/ui/ui_settings_core.cpp:70；src/ui/ui_settings_view.cpp:217–222。
+具体场景：在设置的“更改位置”“开始扫描”等动作上按住左键，再移出按钮后松开。
+问题：这些动作在 HandleLButtonDown 中已经执行；按钮只传 hovered/enabled，没有 pressed。对照 src/ui/batch_rename_dialog.cpp:670–695 和 src/ui/connect_server_dialog.cpp:422–441，对话框记录按压并在同一按钮上松开才执行。
+最小修复：保留即时导航/拖动的既有行为，为实际动作按钮记录按压，显示 pressed，并在同一可用目标上松开时提交；失去捕获时清除。
+不处理的影响：设置按钮与对话框按钮反馈不同，鼠标移出无法取消尚未松开的点击。
+证据：静态调用链确认；未触发实际迁移、扫描或删除来测试，避免操作用户数据。
+
+应统一的视觉细节
+
+6. [P3] 两个对话框的主按钮绕过公共控件
+位置：src/ui/batch_rename_dialog.cpp:531–540；src/ui/connect_server_dialog.cpp:322–330；对照 src/ui/fluent_components.cpp:334–368、:778–984。
+具体场景：对比批量重命名的“应用”、连接服务器的确认按钮与通用确认对话框的主按钮。
+问题：前两者自己画填充与文本，使用 12 DIP SmallFormat；公共按钮使用 14 DIP BodyFormat。手绘路径把 hover/pressed 合并为同色，禁用背景/前景与公共 Primary 不同，焦点环圆角另写成 4 DIP。
+最小修复：改为公共 Primary ButtonSpec，传入可用、悬停、按压、键盘焦点状态，沿用原有按钮边界和点击逻辑。
+不处理的影响：同级主操作的字号、按压反馈、禁用样式和焦点外形随窗口改变。
+证据：静态绘制/字体定义确认；没有把它描述为已完成这两个窗口的视觉验收。
+
+7. [P3] 同一工具栏中的透明按钮使用两套悬停配色
+位置：src/ui/ui_renderer.cpp:339–348；src/ui/fluent_components.cpp:854–858；调用方 src/ui/ui_toolbar.cpp:35、:166–172、:220、:267–273。
+具体场景：在主工具栏分别悬停后退/复制等图标，以及“新建”或排序/分组按钮。
+问题：MainRenderer::DrawButton 使用 theme.fill_hover，深色是 8% 白色；Painter::DrawButton 的 Transparent 分支使用 9/255，约 3.53% 白色。浅色也分别使用带色调的 fill_hover 与 3.53% 黑色。
+最小修复：在公共控件中统一同类透明命令按钮的填充/按压令牌，再让旧辅助函数沿用同一规则。
+不处理的影响：相同层级的悬停反馈深浅、色调不同，今后改主题仍要维护两套值。
+证据：当前主题与两种实际调用路径静态核对；gallery 只覆盖 Painter，不能验证另一套辅助函数的最终外观。
+
+8. [P3] 工具栏压缩后，导航点击区域只有 22 DIP 宽
+位置：src/ui/toolbar_layout.h:24–28；src/ui/panel_metrics.h:47；src/ui/ui_renderer.cpp:152–159。
+具体场景：1100 DIP 宽窗口把侧栏扩到 740 DIP，给主区保留 360 DIP（在现有限制内）。
+问题：available < 500 时 nav_step=26，再减去 4，导航区域实测为 22×32 DIP，低于项目参考中的 24–28 DIP 点击宽度下限。
+最小修复：维持至少 24 DIP 的点击宽度，由按钮间距或相邻布局腾出空间；不要只放大图标。
+不处理的影响：布局越紧，后退/前进等高频导航越难点准。
+证据：token_probe.cpp 直接调用 MakeToolbarLayout 得到 22×32 DIP；尚未做指针实操和跨屏测试。
+
+需要澄清的现有契约，不计为第 9 项产品缺陷
+浅色主题 MakeTheme 会把亮度大于 0.04 的输入强调色整体压暗：#0078D4 解析为约 #003A67，#5867C8 解析为约 #2D3466。这是源码明确写出的“浅色壁纸上需要更深文字色”策略。
+因此 pulse_command_icon_test 的“light custom accent is preserved”断言目前失败。保留原色还是解析可读色应先明确；不能为通过测试直接删除压暗，也不能未经确认简单把断言改成通过。该冲突与第 2 项的文字/底色语义混用有关，但不是单独证明策略错误。
+
+实际验证
+1. 成功构建 pulse_fluent_gallery、pulse_command_icon_test；没有构建主程序或交付包。
+2. pulse_fluent_gallery 实际退出码 0，生成 10 张 PNG：普通 gallery 和组合 gallery 的明暗/强制高对比度，以及明暗 150% 画布版本。人工查看了普通 gallery 的明暗/高对比度、浅色 150% 版本和浅色组合版。150% 是现有 gallery 的画布缩放，不等于真实跨 DPI 桌面验证。
+3. pulse_command_icon_test 实际退出码 1：560 次图标渲染检查通过；“resolved dark accent remains legible”和“light custom accent is preserved”失败。没有修改、删除或弱化断言。
+4. token_probe.cpp 直接包含现有头文件，使用与仓库一致的 NOMINMAX / WIN32_LEAN_AND_MEAN 定义编译，最终无警告、退出码 0。数值见下方。初次独立编译遗漏 NOMINMAX 失败，已修正探针构建参数；该失误不属于产品缺陷。
+5. 尝试同时构建设置页与工具栏 fixture，当前 build-release 未启用工具栏所需的 PULSE_BUILD_ARCHITECTURE_FIXTURES，Ninja 报 unknown target 'pulse_group_toolbar_ui_test'。没有更改构建配置来扩大范围。
+6. 单独尝试重建 pulse_feature_sync_application_test，需要重编译 215 步；在 93/215 后主动停止，没有运行设置页测试，也没有使用目录中的旧 EXE 宣称当前源码通过。设置页完整布局/截图检查仍未完成。
+7. 未操作用户文件、配置或系统主题；未更新已安装应用。没有完整历史回归、全界面截图验收、读屏测试、实际跨屏 DPI、所有语言/窄窗口状态的运行结论。
+
+探针结果（基于当前头文件；RGB 为解析后四舍五入值）
+输入强调色 | 浅色解析 | 深色 accent/card | 深色 accent_text/accent | 深色黑色勾/圆点/accent
+#0078D4   | #003A67 | 3.299:1 | 4.529:1  | 4.637:1
+#5867C8   | #2D3466 | 2.980:1 | 5.013:1  | 4.189:1
+#112244   | #112244 | 1.052:1 | 15.717:1 | 1.336:1
+#E74856   | #662026 | 3.883:1 | 3.847:1  | 5.459:1
+工具栏 available=360，navigation_hit=22×32 DIP。
+
+产物
+截图目录：bench_data/ui-consistency-audit-2026-11-13/build-fluent-verify/
+数值探针：bench_data/ui-consistency-audit-2026-11-13/token_probe.cpp
+探针构建/运行：bench_data/ui-consistency-audit-2026-11-13/run_token_probe.cmd
+
+修复顺序
+先统一强调色前景与高对比度配对，补设置焦点/按压行为；再把手绘动作按钮并回现有 Painter，统一透明按钮悬停令牌，修正压缩导航热区。无需另建一套 UI 框架。

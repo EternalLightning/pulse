@@ -13,6 +13,7 @@
 #include "ui_compositor.h"
 #include "window_helpers.h"
 #include "dialog_keyboard.h"
+#include "dialog_style.h"
 #include "../common/localization.h"
 #include "../ipc/shell_interaction_client.h"
 
@@ -31,7 +32,7 @@ namespace {
 
 constexpr wchar_t kClass[] = L"PulseAdvancedSearchWindow";
 constexpr float kDlgW = 560.0f;
-constexpr float kDlgH = 500.0f;
+constexpr float kDlgH = 516.0f;
 
 D2D1_RECT_F Rect(float scale, float x, float y, float width, float height) {
     return pulse::ui::DipRect(scale, x, y, width, height);
@@ -167,24 +168,31 @@ private:
         return self ? self->Handle(message, wparam, lparam) : DefWindowProcW(hwnd, message, wparam, lparam);
     }
 
-    D2D1_RECT_F CloseRect() const { return Rect(scale_, kDlgW - 46, 0, 46, 36); }
-    D2D1_RECT_F NameField() const { return Rect(scale_, 20, 68, 328, 32); }
-    D2D1_RECT_F NameHowRect() const { return Rect(scale_, 360, 68, 180, 32); }
-    D2D1_RECT_F KindRect() const { return Rect(scale_, 20, 128, 140, 32); }
-    D2D1_RECT_F ExtField() const { return Rect(scale_, 168, 128, 104, 32); }
-    D2D1_RECT_F LocationRect() const { return Rect(scale_, 284, 128, 168, 32); }
-    D2D1_RECT_F BrowseRect() const { return Rect(scale_, 460, 128, 80, 32); }
-    D2D1_RECT_F DateRect() const { return Rect(scale_, 20, 188, 252, 32); }
-    D2D1_RECT_F SizeRect() const { return Rect(scale_, 284, 188, 256, 32); }
-    D2D1_RECT_F ContentField() const { return Rect(scale_, 20, 248, 328, 32); }
-    D2D1_RECT_F ModeRect() const { return Rect(scale_, 360, 248, 180, 32); }
-    D2D1_RECT_F ExcludeField() const { return Rect(scale_, 20, 308, 520, 32); }
-    D2D1_RECT_F WholeWordRect() const { return Rect(scale_, 20, 352, 252, 32); }
-    D2D1_RECT_F MatchCaseRect() const { return Rect(scale_, 284, 352, 256, 32); }
-    D2D1_RECT_F PreviewRect() const { return Rect(scale_, 20, 392, kDlgW - 40, 24); }
-    D2D1_RECT_F ErrorRect() const { return Rect(scale_, 20, 418, kDlgW - 40, 28); }
-    D2D1_RECT_F CancelRect() const { return Rect(scale_, kDlgW - 196, kDlgH - 48, 80, 32); }
-    D2D1_RECT_F SearchRect() const { return Rect(scale_, kDlgW - 108, kDlgH - 48, 88, 32); }
+    D2D1_RECT_F CloseRect() const { return Rect(scale_, kDlgW - dialog_style::kCloseWidth, 0, dialog_style::kCloseWidth, dialog_style::kTitleHeight); }
+    D2D1_RECT_F NameField() const { return Rect(scale_, 20, 82, 328, 32); }
+    D2D1_RECT_F NameHowRect() const { return Rect(scale_, 360, 82, 180, 32); }
+    D2D1_RECT_F KindRect() const { return Rect(scale_, 20, 142, 140, 32); }
+    D2D1_RECT_F ExtField() const { return Rect(scale_, 168, 142, 104, 32); }
+    D2D1_RECT_F LocationRect() const { return Rect(scale_, 284, 142, 168, 32); }
+    D2D1_RECT_F BrowseRect() const { return Rect(scale_, 460, 142, 80, 32); }
+    D2D1_RECT_F DateRect() const { return Rect(scale_, 20, 202, 252, 32); }
+    D2D1_RECT_F SizeRect() const { return Rect(scale_, 284, 202, 256, 32); }
+    D2D1_RECT_F ContentField() const { return Rect(scale_, 20, 262, 328, 32); }
+    D2D1_RECT_F ModeRect() const { return Rect(scale_, 360, 262, 180, 32); }
+    D2D1_RECT_F ExcludeField() const { return Rect(scale_, 20, 322, 520, 32); }
+    D2D1_RECT_F WholeWordRect() const { return Rect(scale_, 20, 366, 252, 32); }
+    D2D1_RECT_F MatchCaseRect() const { return Rect(scale_, 284, 366, 256, 32); }
+    D2D1_RECT_F PreviewRect() const { return Rect(scale_, 20, 406, kDlgW - 40, 24); }
+    D2D1_RECT_F ErrorRect() const { return Rect(scale_, 20, 432, kDlgW - 40, 20); }
+    D2D1_RECT_F CancelRect() const {
+        const float width = std::max(80.0f, painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel)) / scale_ + 12.0f);
+        return Rect(scale_, SearchRect().left / scale_ - dialog_style::kGap - width,
+            kDlgH - 48, width, dialog_style::kControlHeight);
+    }
+    D2D1_RECT_F SearchRect() const {
+        const float width = std::max(88.0f, painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::AdvSearchRun)) / scale_ + 12.0f);
+        return Rect(scale_, kDlgW - dialog_style::kMargin - width, kDlgH - 48, width, dialog_style::kControlHeight);
+    }
 
     D2D1_RECT_F ResetRect() const { return Rect(scale_, 20, kDlgH - 48, 120, 32); }
 
@@ -221,16 +229,6 @@ private:
             }
         } else if (id >= 4 && id <= 13) Choose(id);
         if (hwnd_ && !done_) InvalidateRect(hwnd_, nullptr, FALSE);
-    }
-
-    D2D1_RECT_F FocusRect() const {
-        switch (focus_) {
-        case 1: return SearchRect(); case 2: return CancelRect(); case 3: return CloseRect();
-        case 4: return NameHowRect(); case 5: return KindRect(); case 6: return LocationRect();
-        case 7: return BrowseRect(); case 8: return DateRect(); case 9: return SizeRect();
-        case 10: return ModeRect(); case 11: return WholeWordRect(); case 12: return MatchCaseRect();
-        case 13: return ResetRect(); default: return {};
-        }
     }
 
     D2D1_COLOR_F EditForeground() const { return ChildEditColor(ChildEditTextColor(dark_)); }
@@ -471,14 +469,16 @@ private:
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
-    void DrawButton(const D2D1_RECT_F& bounds, const std::wstring& text, bool hover,
+    void DrawButton(const D2D1_RECT_F& bounds, const std::wstring& text, int id,
                     bool selected = false) {
         fluent::ButtonSpec spec;
         spec.bounds = bounds;
         spec.text = text;
         spec.kind = fluent::ButtonKind::Toggle;
         spec.drop_down = bounds.left != BrowseRect().left;
-        spec.state.hovered = hover;
+        spec.state.hovered = hover_ == id;
+        spec.state.pressed = pressed_ == id;
+        spec.state.keyboard_focus = GetFocus() == hwnd_ && focus_ == id;
         spec.state.selected = selected;
         spec.state.checked = selected;
         painter_.DrawButton(spec);
@@ -492,21 +492,23 @@ private:
         painter_.SetScale(scale_);
         BeginSurface(compositor_, painter_, theme, dark_, IsHighContrast(), backdrop_, scale_);
 
+        painter_.DrawGlyph(L"\xE721", Rect(scale_, dialog_style::kMargin, 12, dialog_style::kIconSize, dialog_style::kIconSize), theme.accent_ink);
         painter_.DrawText(l10n::Get(l10n::StringId::AdvancedSearch),
-                          Rect(scale_, 20, 8, 300, 24), compositor_.HeaderFormat(), theme.text);
+                          Rect(scale_, 48, 0, kDlgW - 48 - dialog_style::kCloseWidth, dialog_style::kTitleHeight), compositor_.HeaderFormat(), theme.text);
+        painter_.FillRoundedRect(Rect(scale_, 0, dialog_style::kTitleHeight - 1, kDlgW, 1), 0, theme.stroke_divider);
 
         auto label = [&](l10n::StringId id, float x, float y) {
             painter_.DrawText(l10n::Get(id), Rect(scale_, x, y, 200, 18),
                               compositor_.SmallFormat(), theme.text_secondary);
         };
-        label(l10n::StringId::AdvSearchName, 20, 50);
-        label(l10n::StringId::AdvSearchKind, 20, 110);
-        label(l10n::StringId::AdvSearchExtensions, 168, 110);
-        label(l10n::StringId::AdvSearchLocation, 284, 110);
-        label(l10n::StringId::AdvSearchDate, 20, 170);
-        label(l10n::StringId::AdvSearchSize, 284, 170);
-        label(l10n::StringId::AdvSearchContent, 20, 230);
-        label(l10n::StringId::AdvSearchExclude, 20, 290);
+        label(l10n::StringId::AdvSearchName, 20, 64);
+        label(l10n::StringId::AdvSearchKind, 20, 124);
+        label(l10n::StringId::AdvSearchExtensions, 168, 124);
+        label(l10n::StringId::AdvSearchLocation, 284, 124);
+        label(l10n::StringId::AdvSearchDate, 20, 184);
+        label(l10n::StringId::AdvSearchSize, 284, 184);
+        label(l10n::StringId::AdvSearchContent, 20, 244);
+        label(l10n::StringId::AdvSearchExclude, 20, 304);
 
         auto field = [&](const D2D1_RECT_F& bounds, HWND edit, l10n::StringId placeholder) {
             fluent::TextFieldSpec spec;
@@ -522,24 +524,28 @@ private:
         field(ExcludeField(), edit_exclude_, l10n::StringId::AdvSearchExclude);
         field(ExtField(), edit_exts_, l10n::StringId::AdvSearchExtHint);
 
-        DrawButton(NameHowRect(), NameHowLabel(spec_.name_how), hover_ == 4);
-        DrawButton(KindRect(), KindLabel(spec_), hover_ == 5,
+        DrawButton(NameHowRect(), NameHowLabel(spec_.name_how), 4);
+        DrawButton(KindRect(), KindLabel(spec_), 5,
                    spec_.kind != index::SearchKind::Any);
-        DrawButton(LocationRect(), LocationLabel(spec_.location), hover_ == 6,
+        DrawButton(LocationRect(), LocationLabel(spec_.location), 6,
                    spec_.location != model::LocationScope::Indexed);
-        DrawButton(BrowseRect(), l10n::Get(l10n::StringId::AdvSearchBrowse), hover_ == 7);
-        DrawButton(DateRect(), DateLabel(spec_.date), hover_ == 8,
+        DrawButton(BrowseRect(), l10n::Get(l10n::StringId::AdvSearchBrowse), 7);
+        DrawButton(DateRect(), DateLabel(spec_.date), 8,
                    spec_.date != model::DatePreset::Any);
-        DrawButton(SizeRect(), SizeLabel(spec_.size), hover_ == 9,
+        DrawButton(SizeRect(), SizeLabel(spec_.size), 9,
                    spec_.size != model::SizePreset::Any);
-        DrawButton(ModeRect(), ModeLabel(spec_.content_mode), hover_ == 10);
+        DrawButton(ModeRect(), ModeLabel(spec_.content_mode), 10);
         fluent::ControlState whole_word;
         whole_word.checked = spec_.whole_word;
         whole_word.hovered = hover_ == 11;
+        whole_word.pressed = pressed_ == 11;
+        whole_word.keyboard_focus = GetFocus() == hwnd_ && focus_ == 11;
         painter_.DrawCheckBox(WholeWordRect(), l10n::Get(l10n::StringId::AdvSearchWholeWord), whole_word);
         fluent::ControlState match_case;
         match_case.checked = spec_.case_sensitive;
         match_case.hovered = hover_ == 12;
+        match_case.pressed = pressed_ == 12;
+        match_case.keyboard_focus = GetFocus() == hwnd_ && focus_ == 12;
         painter_.DrawCheckBox(MatchCaseRect(), l10n::Get(l10n::StringId::AdvSearchMatchCase), match_case);
         const auto location = spec_.location == model::LocationScope::CustomFolder ? spec_.custom_folder
             : spec_.location == model::LocationScope::CurrentFolder ? spec_.current_folder : L"";
@@ -548,6 +554,8 @@ private:
         reset.bounds = ResetRect();
         reset.text = l10n::Get(l10n::StringId::ClearAll);
         reset.state.hovered = hover_ == 13;
+        reset.state.pressed = pressed_ == 13;
+        reset.state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 13;
         painter_.DrawButton(reset);
         if (scope_error_) {
             painter_.DrawText(l10n::Get(l10n::StringId::AdvancedSearchNeedScopeMessage),
@@ -558,20 +566,24 @@ private:
         cancel.bounds = CancelRect();
         cancel.text = l10n::Get(l10n::StringId::Cancel);
         cancel.state.hovered = hover_ == 2;
+        cancel.state.pressed = pressed_ == 2;
+        cancel.state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 2;
         painter_.DrawButton(cancel);
         fluent::ButtonSpec search;
         search.bounds = SearchRect();
         search.text = l10n::Get(l10n::StringId::AdvSearchRun);
         search.kind = fluent::ButtonKind::Primary;
         search.state.hovered = hover_ == 1;
+        search.state.pressed = pressed_ == 1;
+        search.state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 1;
         painter_.DrawButton(search);
 
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 3;
         close_state.pressed = pressed_ == 3;
+        close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 3;
         painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
                                     {}, close_state);
-        if (GetFocus() == hwnd_ && focus_) painter_.DrawFocusRing(FocusRect(), 4.0f * scale_);
         if (present) EndSurface(compositor_);
         else compositor_.Dc()->EndDraw();
     }
@@ -623,6 +635,11 @@ private:
             LayoutEdits();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+            backdrop_ = ApplyBackdrop(hwnd_, dark_);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
         case WM_MOVE:
             compositor_.UpdateTextRenderingParams(
                 MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
@@ -658,7 +675,7 @@ private:
         case WM_ERASEBKGND:
             return 1;
         case WM_NCHITTEST:
-            return BorderlessHitTest(hwnd_, lparam, 36 * scale_, CloseRect());
+            return BorderlessHitTest(hwnd_, lparam, dialog_style::kTitleHeight * scale_, CloseRect());
         case WM_CLOSE:
             Complete(false);
             return 0;

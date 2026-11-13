@@ -5,6 +5,7 @@
 
 #include "../ui/command_icons.h"
 #include "../ui/FluentTokens.h"
+#include "../ui/toolbar_layout.h"
 #include <wincodec.h>
 #include <dwrite.h>
 #include <cstdio>
@@ -34,6 +35,60 @@ float Luminance(D2D1_COLOR_F color) {
 float Contrast(D2D1_COLOR_F a,D2D1_COLOR_F b) {
     const float x=Luminance(a),y=Luminance(b);
     return ((std::max)(x,y)+0.05f)/((std::min)(x,y)+0.05f);
+}
+void CheckThemeTokens() {
+    using namespace pulse::ui;
+    const auto same = [](D2D1_COLOR_F a, D2D1_COLOR_F b) {
+        return std::abs(a.r-b.r)<0.0001f && std::abs(a.g-b.g)<0.0001f &&
+            std::abs(a.b-b.b)<0.0001f && std::abs(a.a-b.a)<0.0001f;
+    };
+    const auto light=MakeTheme(false,HexColor(0x5867C8));
+    const auto dark=MakeTheme(true,HexColor(0x5867C8));
+    Check(Contrast(light.text,light.surface_card)>=7.0f,"light primary text contrast");
+    Check(Contrast(dark.text,dark.surface_card)>=7.0f,"dark primary text contrast");
+    Check(Contrast(light.text_secondary,light.surface_card)>=4.5f,"light secondary text contrast");
+    Check(Contrast(dark.text_secondary,dark.surface_card)>=4.5f,"dark secondary text contrast");
+    Check(Contrast(dark.accent_ink,dark.surface_card)>=4.5f,"resolved dark accent ink remains legible");
+    Check(same(light.accent,HexColor(0x5867C8)),"light custom accent fill is preserved");
+    Check(light.fill_selected.a!=light.fill_selected_inactive.a,"focused and inactive selections remain distinct");
+    for (const uint32_t rgb : {0x0078D4u,0x5867C8u,0x112244u,0xE74856u,0xFFD400u,0x000000u,0xFFFFFFu}) {
+        for (const bool is_dark : {false,true}) {
+            const auto accent=HexColor(rgb);
+            const auto theme=MakeTheme(is_dark,accent);
+            Check(same(theme.accent,accent),"custom accent fill preserves every channel in both themes");
+            Check(Contrast(theme.accent_text,theme.accent)>=4.5f,"custom accent fill has readable foreground");
+            Check(Contrast(theme.accent_ink,theme.surface_card)>=4.5f,"custom accent ink is readable on cards");
+            const auto plate=BlendOver(WithAlpha(HexColor(0xFFFFFF),is_dark ? 40.0f/255.0f : 214.0f/255.0f),
+                is_dark ? HexColor(0x2B2B2B) : HexColor(0xEDF1EA));
+            Check(Contrast(theme.accent_ink,plate)>=4.5f,"custom accent ink is readable on selected segmented plates");
+            const auto shades=DeriveAccentShades(accent);
+            for (const auto fill : {accent,shades.dark1,shades.dark2,shades.light1,shades.light2,shades.light3})
+                Check(Contrast(AutoAccentText(fill),fill)>=4.5f,"actual accent hover/pressed fill has readable foreground");
+            if (!is_dark) Check(Luminance(theme.accent_ink)<=0.0401f,"light ink preserves existing darkening contract");
+        }
+    }
+    Check(same(AutoAccentText(HexColor(0xE74856)),HexColor(0x000000)),"red accent selects higher-contrast black foreground");
+    Check(same(AutoAccentText(HexColor(0x112244)),HexColor(0xFFFFFF)),"dark custom accent selects white foreground");
+    const auto high=MakeHighContrastTheme();
+    Check(high.surface_card.a==1.0f && high.text.a==1.0f && high.fill_selected.a==1.0f,
+          "high-contrast surfaces and selection stay opaque");
+    Check(same(high.accent,high.fill_selected) && same(high.accent_text,high.text_selected),
+          "high-contrast accent fill and foreground use the system highlight pair");
+    for (const float scale : {1.0f,1.25f,1.5f,2.0f}) for (const float available : {360.0f,480.0f,500.0f,700.0f}) {
+        const float left=740.0f*scale;
+        const auto layout=MakeToolbarLayout(left+available*scale,scale,48.0f*scale,12.0f*scale,100.0f*scale,left);
+        for (size_t i=0;i<layout.navigation.size();++i) {
+            const auto& nav=layout.navigation[i];
+            Check(nav.right-nav.left>=24.0f*scale && nav.bottom-nav.top>=24.0f*scale,"compressed navigation keeps 24 DIP hit area");
+            if (i) Check(layout.navigation[i-1].right<=nav.left,"navigation hit areas do not overlap");
+        }
+        Check(layout.navigation.back().right<=layout.address.left && layout.address.left<layout.address.right &&
+              layout.address.right<=layout.search.left && layout.search.right<=layout.operations.left,
+              "compressed toolbar navigation address search and operations do not overlap");
+        Check(layout.create.right<=layout.sort.left && layout.sort.right<=layout.group.left &&
+              layout.group.right<=layout.filter.left && layout.filter.right<=layout.overflow.left,
+              "compressed toolbar command groups do not overlap");
+    }
 }
 struct Pixels { int ink=0,outside=0; };
 Pixels Inspect(IWICBitmap* bitmap,D2D1_COLOR_F background,D2D1_RECT_F bounds) {
@@ -127,6 +182,11 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ui;
     using namespace command_icons;
+    if (argc == 2 && wcscmp(argv[1], L"--theme-only") == 0) {
+        CheckThemeTokens();
+        std::printf("[%s] theme contrast, highlight pairs and toolbar hit areas\n",failures ? "FAIL" : "PASS");
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--high-contrast-only") == 0) {
         const auto theme = MakeHighContrastTheme();
         const auto matches = [](D2D1_COLOR_F actual, int system_color) {
@@ -138,6 +198,9 @@ int wmain(int argc, wchar_t** argv) {
         Check(matches(theme.bg, COLOR_WINDOW), "high-contrast background uses system RGB channels");
         Check(matches(theme.text, COLOR_WINDOWTEXT), "high-contrast text uses system RGB channels");
         Check(matches(theme.fill_selected, COLOR_HIGHLIGHT), "high-contrast selection uses system RGB channels");
+        Check(matches(theme.accent, COLOR_HIGHLIGHT), "high-contrast accent uses system highlight");
+        Check(matches(theme.accent_text, COLOR_HIGHLIGHTTEXT), "high-contrast accent foreground uses system highlight text");
+        Check(matches(theme.text_selected, COLOR_HIGHLIGHTTEXT), "high-contrast selection foreground uses system highlight text");
         Check(matches(theme.stroke_card, COLOR_WINDOWFRAME), "high-contrast border uses system RGB channels");
         return failures ? 1 : 0;
     }
@@ -166,16 +229,7 @@ int wmain(int argc, wchar_t** argv) {
 
     const auto light=MakeTheme(false,HexColor(0x5867C8));
     const auto dark=MakeTheme(true,HexColor(0x5867C8));
-    Check(Contrast(light.text,light.surface_card)>=7.0f,"light primary text contrast");
-    Check(Contrast(dark.text,dark.surface_card)>=7.0f,"dark primary text contrast");
-    Check(Contrast(light.text_secondary,light.surface_card)>=4.5f,"light secondary text contrast");
-    Check(Contrast(dark.text_secondary,dark.surface_card)>=4.5f,"dark secondary text contrast");
-    Check(Contrast(dark.accent,dark.surface_card)>=4.5f,"resolved dark accent remains legible");
-    Check(std::abs(light.accent.r-HexColor(0x5867C8).r)<0.0001f,"light custom accent is preserved");
-    Check(light.fill_selected.a!=light.fill_selected_inactive.a,"focused and inactive selections remain distinct");
-    const auto high=MakeHighContrastTheme();
-    Check(high.surface_card.a==1.0f && high.text.a==1.0f && high.fill_selected.a==1.0f,
-          "high-contrast surfaces and selection stay opaque");
+    CheckThemeTokens();
     const int theme_failures=failures;
     Check(FromGlyph(L"\xE8A7")==Icon::OpenExternal,"open-in-new-window is not a document icon");
     Check(FromGlyph(L"\xE734")==Icon::Star && FromGlyph(L"\xE735")==Icon::StarFilled,

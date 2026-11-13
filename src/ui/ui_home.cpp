@@ -59,7 +59,7 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
                 compositor_->TextFormat(), theme.text_secondary);
             painter_.DrawText(l10n::Get(l10n::StringId::OpenNetworkSettings),
                 D2D1::RectF(notice.left + 12 * scale_, notice.top + 27 * scale_, notice.right - 12 * scale_, notice.bottom - 3 * scale_),
-                compositor_->SmallFormat(), theme.accent);
+                compositor_->SmallFormat(), theme.accent_ink);
         } else if (layout.empty[group]) {
             auto empty_text = layout.headings[group];
             empty_text.top += 36 * scale_; empty_text.bottom += 38 * scale_;
@@ -82,7 +82,7 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
             const bool native = card.group == 0 && !card.shell_icon_path.empty() &&
                 icon_cache_.Draw(dc, icon, card.shell_icon_path, card.label, true, FILE_ATTRIBUTE_DIRECTORY);
             if (!native && (IsHighContrast() || !svg || !DrawFluentSvg(svg, icon, 1.0f, nullptr, true)))
-                DrawIconText(icon.left, icon.top, 28 * scale_, 28 * scale_, card.glyph.c_str(), L"", theme.accent, 1.0f);
+                DrawIconText(icon.left, icon.top, 28 * scale_, 28 * scale_, card.glyph.c_str(), L"", theme.accent_ink, 1.0f);
             painter_.DrawText(card.label, D2D1::RectF(r.left + 52 * scale_, icon_top - 4 * scale_, r.right - 12 * scale_, icon_top + 32 * scale_),
                 compositor_->TextFormat(), theme.text);
             const std::wstring detail = card.detail.empty() && card.group == 2 ? card.path : card.detail;

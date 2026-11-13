@@ -5,6 +5,7 @@
 
 #include "../app/home_catalog.h"
 #include "../app/app_model.h"
+#include "../app/drive_change.h"
 #include "../app/places.h"
 #include "../app/details_attribute_toggle.h"
 #include "../common/localization.h"
@@ -81,6 +82,37 @@ bool QueryShell(const ShellQueryRequest&, ShellQueryResult&, const std::function
 }
 
 namespace {
+void DriveChangeChecks() {
+    using namespace pulse::app;
+    SidebarModel sidebar;
+    SidebarEntry drive;
+    drive.is_drive = true;
+    drive.path = L"\\\\?\\D:\\";
+    sidebar.drives.push_back(drive);
+    drive.is_drive = false;
+    drive.path = L"C:\\phone";
+    sidebar.drives.push_back(drive);
+    Check(SidebarDriveMask(sidebar) == (1u << 3), "drive mask excludes portable-device rows");
+    Check(ShouldRefreshDriveList(DBT_DEVNODES_CHANGED, nullptr, 0, SidebarDriveMask(sidebar)),
+        "virtual-drive removal refreshes when only a device-node broadcast arrives");
+    sidebar.drives.clear();
+    Check(!ShouldRefreshDriveList(DBT_DEVNODES_CHANGED, nullptr, 0, SidebarDriveMask(sidebar)),
+        "repeated device-node broadcasts do not restart drive enumeration");
+    DEV_BROADCAST_VOLUME volume{};
+    volume.dbcv_size = sizeof(volume);
+    volume.dbcv_devicetype = DBT_DEVTYP_VOLUME;
+    volume.dbcv_flags = DBTF_MEDIA;
+    const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(&volume);
+    Check(ShouldRefreshDriveList(DBT_DEVICEARRIVAL, header, 0, 0) &&
+        ShouldRefreshDriveList(DBT_DEVICEREMOVECOMPLETE, header, 0, 0),
+        "media insertion and ejection refresh even when drive letters stay the same");
+    DEV_BROADCAST_HDR interface_header{};
+    interface_header.dbch_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    Check(!ShouldRefreshDriveList(DBT_DEVICEARRIVAL, &interface_header, 0, 0) &&
+        !ShouldRefreshDriveList(DBT_DEVICEQUERYREMOVE, header, 0, 0),
+        "portable-device and query-removal messages do not refresh logical drives");
+}
+
 void CatalogChecks() {
     using namespace pulse;
     for (int i = 0; i < 2; ++i) {
@@ -204,8 +236,9 @@ void AttributeChecks(const std::wstring& root) {
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) return 2;
     main_thread = GetCurrentThreadId();
+    DriveChangeChecks();
     CatalogChecks();
-    AttributeChecks(argv[1]);
+    if (wcscmp(argv[1], L"--drives-only") != 0) AttributeChecks(argv[1]);
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;
 }

@@ -74,11 +74,12 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
     const SysCtxView* v = vm.settings_sysctx.get();
     const float s = scale_;
     auto* dc = compositor_->Dc();
+    const bool high_contrast = IsHighContrast();
     const bool dark = IsDark(theme);
-    const D2D1_COLOR_F amber = dark ? D2D1::ColorF(0xE8B04A) : D2D1::ColorF(0xB7791F);
-    const D2D1_COLOR_F red = dark ? D2D1::ColorF(0xE6716B) : D2D1::ColorF(0xC2413A);
-    const D2D1_COLOR_F green = dark ? D2D1::ColorF(0x5CC489) : D2D1::ColorF(0x2E8B57);
-    const D2D1_COLOR_F subtle = WithAlpha(theme.text, dark ? 0.06f : 0.05f);
+    const D2D1_COLOR_F amber = high_contrast ? theme.text : dark ? D2D1::ColorF(0xE8B04A) : D2D1::ColorF(0xB7791F);
+    const D2D1_COLOR_F red = high_contrast ? theme.text : dark ? D2D1::ColorF(0xE6716B) : D2D1::ColorF(0xC2413A);
+    const D2D1_COLOR_F green = high_contrast ? theme.text : dark ? D2D1::ColorF(0x5CC489) : D2D1::ColorF(0x2E8B57);
+    const D2D1_COLOR_F subtle = high_contrast ? theme.fill_input : WithAlpha(theme.text, dark ? 0.06f : 0.05f);
     const bool ready = v && v->state == SysCtxView::State::Ready;
     IDWriteTextFormat* title_format = SysCtxTitleFormat();
     IDWriteTextFormat* stat_format = sysctx_stat_format_.get() ? sysctx_stat_format_.get() : title_format;
@@ -94,24 +95,25 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         const bool small_glyph = !glyph.empty() && !text.empty() && kind == fluent::ButtonKind::Standard;
         fluent::ButtonSpec spec{r, text, glyph, kind, state};
         spec.skip_glyph = small_glyph;
-        painter_.DrawButton(spec);
+        DrawSettingsButton(vm, spec);
         if (small_glyph) {
             const float mid = (r.top + r.bottom) * 0.5f;
             DrawIconText(r.left + 8 * s, mid - 10 * s, 20 * s, 20 * s, std::wstring(glyph), L"",
-                         enabled ? theme.text : theme.text_disabled, 0.72f);
+                         !enabled ? theme.text_disabled : high_contrast && (state.hovered || SettingsPressed(vm, r))
+                             ? theme.text_selected : theme.text, 0.72f);
         }
     };
     auto card = [&](const D2D1_RECT_F& r, float radius = 10.0f) {
-        painter_.FillRoundedRect(r, radius * s, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))));
+        painter_.FillRoundedRect(r, radius * s, high_contrast ? theme.surface_card : vm.dark ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f)));
         painter_.StrokeRoundedRect(r, radius * s, theme.stroke_card, 1);
     };
     auto icon_box = [&](const D2D1_RECT_F& box, const std::wstring& path, const wchar_t* glyph, float opacity,
-                        bool plate = true) {
-        if (plate) painter_.FillRoundedRect(box, 7 * s, subtle);
+                        bool plate = true, bool highlighted = false) {
+        if (plate && !highlighted) painter_.FillRoundedRect(box, 7 * s, subtle);
         const float pad = (box.right - box.left) * 0.15f;
         const auto inner = D2D1::RectF(box.left + pad, box.top + pad, box.right - pad, box.bottom - pad);
         bool drew = false;
-        if (!path.empty()) {
+        if (!path.empty() && !highlighted) {
             const size_t slash = path.find_last_of(L"\\/");
             if (auto* bitmap = icon_cache_.BitmapFor(path, slash == std::wstring::npos ? path : path.substr(slash + 1),
                 false, FILE_ATTRIBUTE_NORMAL, (inner.bottom - inner.top) / s)) {
@@ -121,7 +123,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         }
         if (!drew)
             DrawIconText(inner.left, inner.top, inner.right - inner.left, inner.bottom - inner.top, glyph, L"",
-                         WithAlpha(theme.text_secondary, opacity), 0.8f);
+                         highlighted ? theme.text_selected : WithAlpha(theme.text_secondary, high_contrast ? 1.0f : opacity), 0.8f);
     };
     auto divider = [&](float x0, float x1, float y0) {
         painter_.FillRoundedRect(D2D1::RectF(x0, y0, x1, y0 + 1), 0, theme.stroke_divider);
@@ -134,7 +136,8 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
     auto head_button = [&](const D2D1_RECT_F& r, std::wstring_view text, const wchar_t* glyph, int hit, bool enabled) {
         if (r.right <= r.left) return;
         if (enabled && hovered(hit)) painter_.FillRoundedRect(r, 6 * s, theme.fill_hover);
-        const D2D1_COLOR_F color = enabled ? theme.text_secondary : theme.text_disabled;
+        const D2D1_COLOR_F color = !enabled ? theme.text_disabled
+            : IsHighContrast() && hovered(hit) ? theme.text_selected : theme.text_secondary;
         const float mid = (r.top + r.bottom) * 0.5f;
         DrawIconText(r.left + 6 * s, mid - 8 * s, 16 * s, 16 * s, glyph, L"", color, 0.62f);
         DrawSysCtxLine(painter_, compositor_, text, D2D1::RectF(r.left + 24 * s, r.top, r.right - 4 * s, r.bottom), compositor_->SmallFormat(),
@@ -194,7 +197,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             state.checked = row.on;
             state.enabled = ready;
             state.hovered = ready && hovered(kSysCtxDetailSwitch);
-            DrawSettingsSwitch(L"detail:" + row.registry, d.toggle, state);
+            DrawSettingsSwitch(vm, L"detail:" + row.registry, d.toggle, state);
         } else {
             const wchar_t* why = row.locked ? (row.system_owned ? sysctx_text::SystemOwned() : sysctx_text::Protected())
                                             : sysctx_text::ReadOnly();
@@ -217,7 +220,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             state.checked = row.pulse == 1;
             state.enabled = ready;
             state.hovered = ready && hovered(kSysCtxDetailPulse);
-            DrawSettingsSwitch(L"pulse:" + row.registry, d.pulse_toggle, state);
+            DrawSettingsSwitch(vm, L"pulse:" + row.registry, d.pulse_toggle, state);
         }
         painter_.FillRoundedRect(d.method, 7 * s, subtle);
         painter_.DrawWrappedCaption(row.method, D2D1::Point2F(d.method.left + 10 * s, d.method.top + 8 * s),
@@ -240,48 +243,50 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         // 概览 row above the groups (the prototype's home scene).
         if (o.overview_row.right > o.overview_row.left) {
             const auto& r = o.overview_row;
+            const bool highlighted = high_contrast && (v->overview.shown || hovered(kSysCtxOverview));
             if (v->overview.shown) {
                 painter_.FillRoundedRect(r, 6 * s, theme.fill_selected);
-                painter_.FillRoundedRect(D2D1::RectF(r.left, r.top + 8 * s, r.left + 3 * s, r.bottom - 8 * s), 1.5f * s, theme.accent);
+                painter_.FillRoundedRect(D2D1::RectF(r.left, r.top + 8 * s, r.left + 3 * s, r.bottom - 8 * s), 1.5f * s, highlighted ? theme.text_selected : theme.accent);
             } else if (hovered(kSysCtxOverview)) {
                 painter_.FillRoundedRect(r, 6 * s, theme.fill_hover);
             }
             const float mid = (r.top + r.bottom) * 0.5f;
-            DrawIconText(r.left + 10 * s, mid - 8 * s, 16 * s, 16 * s, L"\xE80F", L"", theme.text_secondary, 0.75f);
+            DrawIconText(r.left + 10 * s, mid - 8 * s, 16 * s, 16 * s, L"\xE80F", L"", highlighted ? theme.text_selected : theme.text_secondary, 0.75f);
             DrawSysCtxLine(painter_, compositor_, sysctx_text::Overview(), D2D1::RectF(r.left + 36 * s, r.top, r.right - 10 * s, r.bottom),
-                              compositor_->TextFormat(), theme.text);
+                              compositor_->TextFormat(), highlighted ? theme.text_selected : theme.text);
         }
         for (size_t i = 0; i < o.scenes.size() && i < v->scenes.size(); ++i) {
             const auto& r = o.scenes[i];
             const auto& scene = v->scenes[i];
             const bool active = !v->overview.shown && static_cast<int>(i) == v->scene;
+            const bool highlighted = high_contrast && (active || hovered(kSysCtxSceneBase + static_cast<int>(i)));
             if (active) {
                 painter_.FillRoundedRect(r, 6 * s, theme.fill_selected);
-                painter_.FillRoundedRect(D2D1::RectF(r.left, r.top + 8 * s, r.left + 3 * s, r.bottom - 8 * s), 1.5f * s, theme.accent);
+                painter_.FillRoundedRect(D2D1::RectF(r.left, r.top + 8 * s, r.left + 3 * s, r.bottom - 8 * s), 1.5f * s, highlighted ? theme.text_selected : theme.accent);
             } else if (hovered(kSysCtxSceneBase + static_cast<int>(i))) {
                 painter_.FillRoundedRect(r, 6 * s, theme.fill_hover);
             }
             const float mid = (r.top + r.bottom) * 0.5f;
-            DrawIconText(r.left + 10 * s, mid - 8 * s, 16 * s, 16 * s, scene.glyph, L"", theme.text_secondary, 0.75f);
+            DrawIconText(r.left + 10 * s, mid - 8 * s, 16 * s, 16 * s, scene.glyph, L"", highlighted ? theme.text_selected : theme.text_secondary, 0.75f);
             // "31 · 3": the switched-off count in amber, like the prototype.
             const std::wstring off = scene.disabled > 0 ? L" · " + std::to_wstring(scene.disabled) : std::wstring();
             const std::wstring count = std::to_wstring(scene.count);
             float cr = r.right - 10 * s;
             if (scene.pending) {
-                painter_.FillRoundedRect(D2D1::RectF(cr - 6 * s, mid - 3 * s, cr, mid + 3 * s), 3 * s, theme.accent);
+                painter_.FillRoundedRect(D2D1::RectF(cr - 6 * s, mid - 3 * s, cr, mid + 3 * s), 3 * s, highlighted ? theme.text_selected : theme.accent);
                 cr -= 10 * s;
             }
             if (!off.empty()) {
                 const float w = CellTextWidth(off, true);
                 DrawSysCtxLine(painter_, compositor_, off, D2D1::RectF(cr - w - 2 * s, r.top, cr + 2 * s, r.bottom), compositor_->SmallFormat(),
-                                  amber, fluent::HorizontalAlignment::Right);
+                                  highlighted ? theme.text_selected : amber, fluent::HorizontalAlignment::Right);
                 cr -= w;
             }
             const float cw = CellTextWidth(count, true);
             DrawSysCtxLine(painter_, compositor_, count, D2D1::RectF(cr - cw - 2 * s, r.top, cr + 2 * s, r.bottom), compositor_->SmallFormat(),
-                              theme.text_secondary, fluent::HorizontalAlignment::Right);
+                              highlighted ? theme.text_selected : theme.text_secondary, fluent::HorizontalAlignment::Right);
             DrawSysCtxLine(painter_, compositor_, scene.label, D2D1::RectF(r.left + 36 * s, r.top, cr - cw - 6 * s, r.bottom),
-                              compositor_->TextFormat(), theme.text);
+                              compositor_->TextFormat(), highlighted ? theme.text_selected : theme.text);
         }
     }
 
@@ -302,15 +307,16 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             fluent::ControlState state{};
             state.enabled = ready;
             state.hovered = ready && hovered(kSysCtxRefresh);
-            painter_.DrawButton({o.refresh, {}, L"\xE72C", fluent::ButtonKind::Transparent, state, true});
+            DrawSettingsButton(vm, {o.refresh, {}, L"\xE72C", fluent::ButtonKind::Transparent, state, true});
         }
         divider(h.left, h.right, h.bottom);
         auto chip = [&](const D2D1_RECT_F& r, const std::wstring& text, bool on, int hit, float radius) {
             const bool hover = hovered(hit);
-            painter_.FillRoundedRect(r, radius, on ? WithAlpha(theme.accent, 0.16f) : hover ? theme.fill_hover
+            const bool highlighted = high_contrast && (on || hover);
+            painter_.FillRoundedRect(r, radius, high_contrast && on ? theme.fill_selected : on ? WithAlpha(theme.accent, 0.16f) : hover ? theme.fill_hover
                                                                                             : WithAlpha(theme.text, 0.0f));
-            painter_.StrokeRoundedRect(r, radius, on ? WithAlpha(theme.accent, 0.55f) : theme.stroke_card, 1);
-            DrawSysCtxLine(painter_, compositor_, text, r, compositor_->SmallFormat(), on ? theme.text : theme.text_secondary,
+            painter_.StrokeRoundedRect(r, radius, high_contrast ? theme.stroke_card : on ? WithAlpha(theme.accent, 0.55f) : theme.stroke_card, 1);
+            DrawSysCtxLine(painter_, compositor_, text, r, compositor_->SmallFormat(), highlighted ? theme.text_selected : on ? theme.text : theme.text_secondary,
                               fluent::HorizontalAlignment::Center);
         };
         for (size_t f = 0; f < o.filters.size(); ++f)
@@ -330,9 +336,9 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             // ---- 概览 cards (pulse_system_ctx_manager.html: .ov / .ovc / .stat / .rank / .mini) ----
             const SysCtxOverview& ov = v->overview;
             const SysCtxOverviewLayout& g = o.overview;
-            const D2D1_COLOR_F tile = D2D1::ColorF(0, 0, 0, dark ? 0.18f : 0.05f);
-            const D2D1_COLOR_F violet = dark ? D2D1::ColorF(0xC9B8FF) : D2D1::ColorF(0x6B4FBB);
-            const D2D1_COLOR_F salmon = dark ? D2D1::ColorF(0xFFB4AC) : red;
+            const D2D1_COLOR_F tile = high_contrast ? theme.fill_input : D2D1::ColorF(0, 0, 0, dark ? 0.18f : 0.05f);
+            const D2D1_COLOR_F violet = high_contrast ? theme.text : dark ? D2D1::ColorF(0xC9B8FF) : D2D1::ColorF(0x6B4FBB);
+            const D2D1_COLOR_F salmon = high_contrast ? theme.text : dark ? D2D1::ColorF(0xFFB4AC) : red;
             auto ov_card = [&](const D2D1_RECT_F& r, const wchar_t* title, const wchar_t* caption) {
                 if (r.right <= r.left) return;
                 painter_.FillRoundedRect(r, 10 * s, subtle);
@@ -475,24 +481,28 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             if (r.bottom < l.content.top || r.top > l.content.bottom) continue;  // off screen
             const SysCtxRowView& row = v->rows[i];
             const float mid = r.top + rh * 0.5f;
+            const bool highlighted = IsHighContrast() && (row.selected ||
+                hovered(kSysCtxSelectBase + static_cast<int>(i)) || hovered(kSysCtxRowBase + static_cast<int>(i)) ||
+                hovered(kSysCtxMoreBase + static_cast<int>(i)) || hovered(kSysCtxRemoveBase + static_cast<int>(i)));
+            const auto interaction = D2D1::RectF(r.left, r.top, r.right, high_contrast ? r.top + rh : r.bottom);
             if (row.selected) {
-                painter_.FillRoundedRect(r, 8 * s, theme.fill_selected);
+                painter_.FillRoundedRect(interaction, 8 * s, theme.fill_selected);
                 painter_.StrokeRoundedRect(r, 8 * s, theme.stroke_card, 1);
             } else if (hovered(kSysCtxSelectBase + static_cast<int>(i)) || hovered(kSysCtxRowBase + static_cast<int>(i)) ||
                        hovered(kSysCtxMoreBase + static_cast<int>(i)) || hovered(kSysCtxRemoveBase + static_cast<int>(i))) {
-                painter_.FillRoundedRect(r, 8 * s, theme.fill_hover);
+                painter_.FillRoundedRect(interaction, 8 * s, theme.fill_hover);
             }
             if (row.pending)
                 painter_.FillRoundedRect(D2D1::RectF(r.left + 2 * s, r.top + 12 * s, r.left + 5 * s, r.top + rh - 12 * s),
-                                         1.5f * s, amber);
+                                         1.5f * s, highlighted ? theme.text_selected : amber);
             const float dim = row.on ? 1.0f : 0.5f;
-            icon_box(D2D1::RectF(r.left + 10 * s, mid - 14 * s, r.left + 38 * s, mid + 14 * s), row.icon_path, row.glyph, dim);
+            icon_box(D2D1::RectF(r.left + 10 * s, mid - 14 * s, r.left + 38 * s, mid + 14 * s), row.icon_path, row.glyph, dim, true, highlighted);
 
             // Right side: "…", then the switch or why there is none, then badges.
             {
                 fluent::ControlState state{};
-                state.hovered = hovered(kSysCtxMoreBase + static_cast<int>(i));
-                painter_.DrawButton({o.more[i], {}, L"\xE712", fluent::ButtonKind::Transparent, state, true});
+                state.hovered = highlighted || hovered(kSysCtxMoreBase + static_cast<int>(i));
+                DrawSettingsButton(vm, {o.more[i], {}, L"\xE712", fluent::ButtonKind::Transparent, state, true});
             }
             float badge_right = o.switches[i].left - 10 * s;
             if (row.deletable && i < o.removes.size()) {
@@ -505,10 +515,12 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                                         row.deleting ? L"\xE7A7" : L"\xE74D",
                                         row.deleting ? fluent::ButtonKind::Standard : fluent::ButtonKind::Danger, state};
                 spec.skip_glyph = true;
-                painter_.DrawButton(spec);
+                DrawSettingsButton(vm, spec);
                 const float bm = (b.top + b.bottom) * 0.5f;
                 DrawIconText(b.left + 8 * s, bm - 10 * s, 20 * s, 20 * s, row.deleting ? L"\xE7A7" : L"\xE74D", L"",
-                             !ready ? theme.text_disabled : row.deleting ? theme.text : D2D1::ColorF(D2D1::ColorF::White),
+                             !ready ? theme.text_disabled : row.deleting
+                                 ? (high_contrast && (state.hovered || SettingsPressed(vm, b)) ? theme.text_selected : theme.text)
+                                 : AutoAccentText(theme.danger),
                              0.62f);
                 badge_right = b.left - 10 * s;
             } else if (SysCtxSwitchable(row)) {
@@ -516,16 +528,16 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 state.checked = row.on;
                 state.enabled = ready;
                 state.hovered = ready && hovered(kSysCtxRowBase + static_cast<int>(i));
-                DrawSettingsSwitch(L"row:" + row.registry, o.switches[i], state);
+                DrawSettingsSwitch(vm, L"row:" + row.registry, o.switches[i], state);
             } else {
                 const wchar_t* note = row.locked ? (row.system_owned ? sysctx_text::SystemOwned() : sysctx_text::Protected())
                                                  : sysctx_text::ReadOnly();
                 const float w = CellTextWidth(note, true);
                 const float note_right = o.switches[i].right;
                 DrawSysCtxLine(painter_, compositor_, note, D2D1::RectF(note_right - w - 2 * s, r.top, note_right + 2 * s, r.top + rh),
-                                  compositor_->SmallFormat(), theme.text_secondary);
+                                  compositor_->SmallFormat(), highlighted ? theme.text_selected : theme.text_secondary);
                 DrawIconText(note_right - w - 20 * s, mid - 8 * s, 16 * s, 16 * s, row.locked ? L"\xE72E" : L"\xE946", L"",
-                             theme.text_secondary, 0.7f);
+                             highlighted ? theme.text_selected : theme.text_secondary, 0.7f);
                 badge_right = note_right - w - 30 * s;
             }
             const float text_left = r.left + 50 * s;
@@ -551,7 +563,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             if (row.missing && !row.deleting) badge(sysctx_text::Missing(), fluent::BadgeKind::Danger);
 
             const float text_right = (std::max)(text_left + 40 * s, badge_right - 6 * s);
-            const D2D1_COLOR_F title_color = row.deleting ? theme.text_secondary : row.missing ? red
+            const D2D1_COLOR_F title_color = highlighted ? theme.text_selected : row.deleting ? theme.text_secondary : row.missing ? red
                                            : row.on ? theme.text : theme.text_secondary;
             DrawSysCtxLine(painter_, compositor_, row.title, D2D1::RectF(text_left, r.top + 7 * s, text_right, mid + 2 * s),
                               compositor_->TextFormat(), title_color);
@@ -560,10 +572,10 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 const float tw = (std::min)(CellTextWidth(row.title, false), text_right - text_left);
                 const float ty = r.top + 7 * s + (mid + 2 * s - r.top - 7 * s) * 0.5f;
                 painter_.FillRoundedRect(D2D1::RectF(text_left, ty - 0.5f * s, text_left + tw, ty + 0.5f * s), 0,
-                                         theme.text_secondary);
+                                         highlighted ? theme.text_selected : theme.text_secondary);
             }
             DrawSysCtxLine(painter_, compositor_, row.subtitle, D2D1::RectF(text_left, mid + 1 * s, text_right, r.top + rh - 6 * s),
-                              compositor_->SmallFormat(), theme.text_secondary);
+                              compositor_->SmallFormat(), highlighted ? theme.text_selected : theme.text_secondary);
             if (!o.wide && static_cast<int>(i) == v->selected) {
                 divider(r.left + 46 * s, r.right - 12 * s, r.top + rh);
                 draw_detail(row);
@@ -577,7 +589,9 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         auto tab = [&](const D2D1_RECT_F& r, const wchar_t* text, bool on, int hit) {
             if (on) painter_.FillRoundedRect(r, 6 * s, theme.fill_selected);
             else if (hovered(hit)) painter_.FillRoundedRect(r, 6 * s, theme.fill_hover);
-            DrawSysCtxLine(painter_, compositor_, text, r, compositor_->TextFormat(), on ? theme.text : theme.text_secondary,
+            const auto color = IsHighContrast() && (on || hovered(hit)) ? theme.text_selected
+                : on ? theme.text : theme.text_secondary;
+            DrawSysCtxLine(painter_, compositor_, text, r, compositor_->TextFormat(), color,
                               fluent::HorizontalAlignment::Center);
         };
         tab(o.tab_preview, sysctx_text::TabPreview(), v->side_tab == 0, kSysCtxTabPreview);
@@ -608,7 +622,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             // Head: the scene; while dragging, what the drop can do.
             const std::wstring head = held ? std::wstring(held->movable ? sysctx_text::DragHintVerb() : sysctx_text::DragHintHandler())
                                            : sysctx_text::PreviewHead(*v);
-            DrawSysCtxLine(painter_, compositor_, head, pl.head, compositor_->SmallFormat(), held ? theme.accent : theme.text_secondary);
+            DrawSysCtxLine(painter_, compositor_, head, pl.head, compositor_->SmallFormat(), held ? theme.accent_ink : theme.text_secondary);
 
             auto grip = [&](float x, float cy, const D2D1_COLOR_F& color) {
                 ComPtr<ID2D1SolidColorBrush> br;
@@ -629,25 +643,29 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(x0, y0), 3 * s, 3 * s), br.get(), 1.5f * s);
             };
             // One menu item; `shelf`: drawn dimmed on the 已隐藏 shelf.
-            auto draw_item = [&](const SysCtxPreviewItem& p, const D2D1_RECT_F& r, bool shelf) {
-                if (p.change == 1) painter_.FillRoundedRect(r, 5 * s, WithAlpha(red, 0.12f));
-                else if (p.change == 2) painter_.FillRoundedRect(r, 5 * s, WithAlpha(green, 0.12f));
-                else if (p.moved) painter_.FillRoundedRect(r, 5 * s, WithAlpha(theme.accent, 0.12f));
-                if (p.selected) painter_.StrokeRoundedRect(r, 5 * s, WithAlpha(theme.accent, 0.7f), 1);
+            auto draw_item = [&](const SysCtxPreviewItem& p, const D2D1_RECT_F& r, bool shelf, bool highlighted) {
+                if (!high_contrast) {
+                    if (p.change == 1) painter_.FillRoundedRect(r, 5 * s, WithAlpha(red, 0.12f));
+                    else if (p.change == 2) painter_.FillRoundedRect(r, 5 * s, WithAlpha(green, 0.12f));
+                    else if (p.moved) painter_.FillRoundedRect(r, 5 * s, WithAlpha(theme.accent, 0.12f));
+                }
+                if (p.selected) painter_.StrokeRoundedRect(r, 5 * s, high_contrast
+                    ? (highlighted ? theme.text_selected : theme.stroke_input_bottom) : WithAlpha(theme.accent, 0.7f), 1);
                 const float mid = (r.top + r.bottom) * 0.5f;
                 const bool dim = shelf && p.change != 1;
                 icon_box(D2D1::RectF(r.left + 12 * s, mid - 9 * s, r.left + 30 * s, mid + 9 * s), p.icon_path, p.glyph,
-                         dim || p.change == 1 ? 0.5f : 1.0f, false);
+                         dim || p.change == 1 ? 0.5f : 1.0f, false, highlighted);
                 const wchar_t* tag = p.change == 1 ? sysctx_text::WillHide()
                                    : p.change == 2 ? sysctx_text::WillShow()
                                    : p.moved       ? sysctx_text::Moved(p.moved - 1)
                                    : !shelf && p.zone != kSysCtxZoneDefault ? sysctx_text::Zone(p.zone) : L"";
-                const D2D1_COLOR_F tag_color = p.change == 1 ? red : p.change == 2 ? green : p.moved ? theme.accent : theme.text_secondary;
+                const D2D1_COLOR_F tag_color = highlighted ? theme.text_selected : high_contrast ? theme.text
+                    : p.change == 1 ? red : p.change == 2 ? green : p.moved ? theme.accent_ink : theme.text_secondary;
                 const float tag_w = *tag ? CellTextWidth(tag, true) + 10 * s : 0.0f;
                 std::wstring title = p.title;
                 if (p.extended) title += L"  \x21E7";
                 DrawSysCtxLine(painter_, compositor_, title, D2D1::RectF(r.left + 38 * s, r.top, r.right - 8 * s - tag_w, r.bottom),
-                                  compositor_->TextFormat(), dim || p.change == 1 ? theme.text_secondary : theme.text);
+                                  compositor_->TextFormat(), highlighted ? theme.text_selected : dim || p.change == 1 ? theme.text_secondary : theme.text);
                 if (*tag)
                     DrawSysCtxLine(painter_, compositor_, tag, D2D1::RectF(r.right - 8 * s - tag_w, r.top, r.right - 8 * s, r.bottom),
                                       compositor_->SmallFormat(), tag_color, fluent::HorizontalAlignment::Right);
@@ -665,7 +683,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 const wchar_t* label = sysctx_text::Zone(z);
                 const float w = CellTextWidth(label, true);
                 DrawSysCtxLine(painter_, compositor_, label, D2D1::RectF(r.left + 8 * s, r.top, r.left + 12 * s + w, r.bottom), compositor_->SmallFormat(),
-                                  target ? theme.accent : theme.text_secondary);
+                                  target ? theme.accent_ink : theme.text_secondary);
                 const float ly = (r.top + r.bottom) * 0.5f;
                 painter_.FillRoundedRect(D2D1::RectF(r.left + 18 * s + w, ly, r.right - 8 * s, ly + 1),
                                          0, target ? WithAlpha(theme.accent, 0.6f) : theme.stroke_divider);
@@ -675,11 +693,11 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                                                                    [](const SysCtxPreviewItem& p) { return p.hidden; }));
             const bool shelf_target = pl.drop_zone == kSysCtxZoneHidden;
             DrawSysCtxLine(painter_, compositor_, sysctx_text::ShelfHead(shelf_count), pl.shelf_head, compositor_->SmallFormat(),
-                              shelf_target ? theme.accent : theme.text_secondary);
-            painter_.FillRoundedRect(pl.shelf, 8 * s, shelf_target ? WithAlpha(theme.accent, 0.10f) : subtle);
-            painter_.StrokeRoundedRect(pl.shelf, 8 * s, shelf_target ? WithAlpha(theme.accent, 0.6f) : theme.stroke_card, 1);
+                              shelf_target ? theme.accent_ink : theme.text_secondary);
+            painter_.FillRoundedRect(pl.shelf, 8 * s, high_contrast && shelf_target ? theme.fill_selected : shelf_target ? WithAlpha(theme.accent, 0.10f) : subtle);
+            painter_.StrokeRoundedRect(pl.shelf, 8 * s, high_contrast ? theme.stroke_card : shelf_target ? WithAlpha(theme.accent, 0.6f) : theme.stroke_card, 1);
             if (shelf_count == 0 && !(shelf_target && pl.gap.bottom > pl.gap.top))
-                DrawSysCtxLine(painter_, compositor_, sysctx_text::ShelfEmpty(), pl.shelf, compositor_->SmallFormat(), theme.text_secondary,
+                DrawSysCtxLine(painter_, compositor_, sysctx_text::ShelfEmpty(), pl.shelf, compositor_->SmallFormat(), high_contrast && shelf_target ? theme.text_selected : theme.text_secondary,
                                   fluent::HorizontalAlignment::Center);
 
             for (size_t i = 0; i < pl.items.size() && i < v->preview.size(); ++i) {
@@ -688,8 +706,9 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 const auto& p = v->preview[i];
                 const bool hover = !pl.dragging && hovered(kSysCtxPreviewBase + static_cast<int>(i));
                 if (hover) painter_.FillRoundedRect(r, 5 * s, theme.fill_hover);
-                draw_item(p, r, p.hidden);
-                if (hover && p.draggable) grip(r.left + 3 * s, (r.top + r.bottom) * 0.5f, theme.text_secondary);
+                const bool highlighted = high_contrast && (hover || (p.hidden && shelf_target));
+                draw_item(p, r, p.hidden, highlighted);
+                if (hover && p.draggable) grip(r.left + 3 * s, (r.top + r.bottom) * 0.5f, highlighted ? theme.text_selected : theme.text_secondary);
             }
             if (pl.more_menu_count > 0)
                 DrawSysCtxLine(painter_, compositor_, sysctx_text::More(pl.more_menu_count),
@@ -698,7 +717,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             if (pl.more_shelf_count > 0)
                 DrawSysCtxLine(painter_, compositor_, sysctx_text::More(pl.more_shelf_count),
                                   D2D1::RectF(pl.more_shelf.left + 38 * s, pl.more_shelf.top, pl.more_shelf.right, pl.more_shelf.bottom),
-                                  compositor_->SmallFormat(), theme.text_secondary);
+                                  compositor_->SmallFormat(), high_contrast && shelf_target ? theme.text_selected : theme.text_secondary);
             if (held) {
                 // The landing place, then the item riding on the pointer.
                 insertion(pl.gap.left + 2 * s, pl.gap.right - 2 * s, (pl.gap.top + pl.gap.bottom) * 0.5f);
@@ -709,7 +728,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                                          D2D1::ColorF(0.16f, 0.2f, 0.35f, 0.08f));
                 painter_.FillRoundedRect(g, 6 * s, theme.surface_flyout);
                 painter_.StrokeRoundedRect(g, 6 * s, theme.stroke_card, 1);
-                draw_item(*held, g, false);
+                draw_item(*held, g, false, false);
                 grip(g.left + 3 * s, (g.top + g.bottom) * 0.5f, theme.text_secondary);
             }
 

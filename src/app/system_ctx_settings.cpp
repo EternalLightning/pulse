@@ -24,9 +24,7 @@ namespace {
 int PopupSystemContextMenu(AppState& s, std::vector<ui::FluentMenuItem> items) {
     if (!EnsureMenu(s)) return 0;
     s.menu->SetTheme(s.darkMode, s.accentColor);
-    POINT point{};
-    GetCursorPos(&point);
-    return s.menu->TrackPopup(point, std::move(items));
+    return s.menu->TrackPopup(SettingsPopupPoint(s), std::move(items));
 }
 
 std::wstring SystemContextProgramFolder(const std::wstring& file) {

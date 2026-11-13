@@ -52,6 +52,14 @@ bool Capture(HWND window, const std::filesystem::path& path, bool from_screen = 
         MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&edit_rect), 2);
         Check(GetPixel(dc, edit_rect.right - px(5), edit_rect.top + px(5)) == expected(theme.fill_input_focus),
             "PrintWindow input pixels match the actual light/dark input token");
+        const auto sheet = pulse::ui::BlendOver(theme.surface_sheet, theme.bg);
+        const auto input = pulse::ui::BlendOver(theme.fill_input_focus, sheet);
+        const auto outline = dark ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
+        Check(GetPixel(dc, px(20), px(112)) == expected(pulse::ui::BlendOver(outline, input)),
+            "PrintWindow input outline composites translucent stroke over the input fill");
+        Check(GetPixel(dc, px(50), px(127)) == expected(pulse::ui::BlendOver(
+            GetFocus() == edit ? theme.accent : theme.stroke_input_bottom, input)),
+            "settings input underline follows native editor focus");
     }
     SelectObject(dc, old);
     DeleteDC(dc);
@@ -88,10 +96,16 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     if (!dialog || !IsWindowVisible(dialog)) return;
     HWND edit = FindWindowExW(dialog, nullptr, L"EDIT", nullptr);
     if (phase == 0) {
+        RECT initial_bounds{}; GetWindowRect(dialog, &initial_bounds);
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST), &monitor);
+        Check(initial_bounds.left >= monitor.rcWork.left && initial_bounds.top >= monitor.rcWork.top &&
+            initial_bounds.right <= monitor.rcWork.right && initial_bounds.bottom <= monitor.rcWork.bottom,
+            "settings prompt clamps owner-centered bounds into the monitor work area");
         if (target_dpi != 96 && !pulse::ui::IsHighContrast()) {
             RECT resized{}; GetWindowRect(dialog, &resized);
             resized.right = resized.left + MulDiv(360, static_cast<int>(target_dpi), 96);
-            resized.bottom = resized.top + MulDiv(180, static_cast<int>(target_dpi), 96);
+            resized.bottom = resized.top + MulDiv(212, static_cast<int>(target_dpi), 96);
             SendMessageW(dialog, WM_DPICHANGED, MAKELONG(target_dpi, target_dpi), reinterpret_cast<LPARAM>(&resized));
             Check(GetWindowTextLengthW(edit) != 0,
                 "DPI change preserves input while updating caption and controls");
@@ -122,18 +136,65 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
                 rect.right <= client.right && rect.bottom <= client.bottom;
         }
         Check(contained, "caption and content controls stay inside the client bounds");
+        const auto px = [&](int dip) { return MulDiv(dip, client.right, 360); };
+        const auto child_rect = [&](int id) {
+            RECT rect{}; GetWindowRect(GetDlgItem(dialog, id), &rect);
+            MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&rect), 2);
+            return rect;
+        };
+        const RECT primary = child_rect(IDOK), cancel = child_rect(IDCANCEL);
+        Check(primary.bottom - primary.top == px(32) && primary.left - cancel.right == px(8) &&
+            client.right - primary.right == px(20) && client.bottom - primary.bottom == px(16),
+            "settings actions use 32 DIP height, right-aligned Cancel then Primary and 64 DIP footer");
+        if (!pulse::ui::IsHighContrast()) {
+            const RECT close = child_rect(101);
+            Check(close.right - close.left == px(46) && close.bottom == px(44),
+                "settings close target follows the 46 by 44 DIP modal header");
+            LOGFONTW close_font{};
+            GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 101), WM_GETFONT, 0, 0)), sizeof(close_font), &close_font);
+            Check(close_font.lfHeight == -px(12), "settings close glyph uses its own 12 DIP font");
+        }
         Check(GetFocus() == edit, "input initially owns focus");
+        wchar_t retained[128]{}; GetWindowTextW(edit, retained, ARRAYSIZE(retained));
+        {
+            pulse::ui::HighContrastFrameScope contrast(true);
+            SendMessageW(dialog, WM_SETTINGCHANGE, SPI_SETHIGHCONTRAST, 0);
+            HDC dc = GetDC(edit);
+            const auto brush = reinterpret_cast<HBRUSH>(SendMessageW(dialog, WM_CTLCOLOREDIT,
+                reinterpret_cast<WPARAM>(dc), reinterpret_cast<LPARAM>(edit)));
+            LOGBRUSH info{}; GetObjectW(brush, sizeof(info), &info);
+            Check(info.lbColor == GetSysColor(COLOR_WINDOW) && GetTextColor(dc) == GetSysColor(COLOR_WINDOWTEXT),
+                "settings prompt refreshes input to system high-contrast palette while retaining its caption style");
+            ReleaseDC(edit, dc);
+        }
+        SendMessageW(dialog, WM_THEMECHANGED, 0, 0);
+        wchar_t restored[128]{}; GetWindowTextW(edit, restored, ARRAYSIZE(restored));
+        Check(wcscmp(retained, restored) == 0, "settings theme refresh retains native input text");
         Check(HIWORD(SendMessageW(dialog, DM_GETDEFID, 0, 0)) == DC_HASDEFID &&
             LOWORD(SendMessageW(dialog, DM_GETDEFID, 0, 0)) == IDOK, "Enter defaults to Apply");
-        Check(Capture(dialog, output / (dark ? L"settings-value-dark.png" : L"settings-value-light.png")),
+        const std::wstring snapshot = std::wstring(dark ? L"settings-value-dark-" : L"settings-value-light-") +
+            std::to_wstring(target_dpi) + L"dpi";
+        Check(Capture(dialog, output / (snapshot + L".png")),
             "capture native settings prompt with PrintWindow and WIC");
-        const bool screen_capture = Capture(dialog, output / (dark ? L"settings-value-dark-screen.png" : L"settings-value-light-screen.png"), true);
+        const bool screen_capture = Capture(dialog, output / (snapshot + L"-screen.png"), true);
         printf("[INFO] composed desktop prompt capture: %s\n", screen_capture ? "saved" : "unavailable");
         SetWindowTextW(edit, L"42");
         PostMessageW(edit, WM_KEYDOWN, VK_TAB, 0);
         phase = 1;
     } else if (phase == 1) {
         Check(GetFocus() == GetDlgItem(dialog, IDOK), "Tab moves from input to Apply");
+        if (!pulse::ui::IsHighContrast()) {
+            RECT client{}; GetClientRect(dialog, &client);
+            const auto px = [&](int dip) { return MulDiv(dip, client.right, 360); };
+            const auto theme = pulse::ui::MakeTheme(dark, pulse::ui::HexColor(0x0078D4));
+            const auto input = pulse::ui::BlendOver(theme.fill_input_focus, pulse::ui::BlendOver(theme.surface_sheet, theme.bg));
+            const auto bottom = pulse::ui::BlendOver(theme.stroke_input_bottom, input);
+            RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+            HDC dc = GetDC(dialog);
+            Check(GetPixel(dc, px(50), px(127)) == RGB(static_cast<BYTE>(bottom.r * 255), static_cast<BYTE>(bottom.g * 255), static_cast<BYTE>(bottom.b * 255)),
+                "Tab away from settings editor replaces accent underline with neutral bottom stroke");
+            ReleaseDC(dialog, dc);
+        }
         SetFocus(edit);
         if (close_action) PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(101, BN_CLICKED), 0);
         else PostMessageW(edit, WM_KEYDOWN, accept ? VK_RETURN : VK_ESCAPE, 0);
@@ -141,13 +202,21 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     }
 }
 }
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    const bool style_only = argc == 2 && wcscmp(argv[1], L"--popup-style-only") == 0;
     OleInitialize(nullptr);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     wchar_t executable[MAX_PATH]{};
     GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable));
     output = std::filesystem::path(executable).parent_path().parent_path() /
         L"bench_data" / L"review-changes" / L"feedback-ui";
+    if (style_only) {
+        wchar_t fixture_root[32768]{};
+        const DWORD length = GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+        output = length > 0 && length < ARRAYSIZE(fixture_root)
+            ? std::filesystem::path(fixture_root) / L"settings-value"
+            : std::filesystem::current_path() / L"bench_data" / L"settings-value";
+    }
     std::error_code error;
     std::filesystem::create_directories(output, error);
     Check(!error, "create isolated E-drive output directory");
@@ -160,6 +229,12 @@ int wmain() {
         accept = scenario == 0;
         close_action = scenario == 2;
         target_dpi = scenario == 0 ? 96u : scenario == 1 ? 144u : 192u;
+        if (scenario == 2) {
+            MONITORINFO monitor{sizeof(monitor)};
+            GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST), &monitor);
+            SetWindowPos(owner, nullptr, monitor.rcWork.left - 600, monitor.rcWork.top - 400, 0, 0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         phase = 0;
         ticks = 0;
         std::wstring result = L"unchanged";

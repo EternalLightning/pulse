@@ -766,7 +766,13 @@ void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius) {
         return;
     }
     const float width = std::max(1.0f, Px(theme_->focus_ring));
-    StrokeRounded(Inflate(bounds, Px(1.0f)), radius + Px(1.0f), BrushId::Accent, width);
+    const auto ring = Inflate(bounds, Px(1.0f));
+    if (high_contrast_) {
+        StrokeRoundedRect(ring, radius + Px(1.0f), theme_->bg, width + Px(2.0f));
+        StrokeRoundedRect(ring, radius + Px(1.0f), theme_->text, width);
+    } else {
+        StrokeRoundedRect(ring, radius + Px(1.0f), theme_->accent_ink, width);
+    }
 }
 
 float Painter::HoverProgress(const D2D1_RECT_F& bounds, const ControlState& state) const {
@@ -806,9 +812,9 @@ void Painter::DrawButton(const ButtonSpec& spec) {
         border = theme_->stroke_card;
         edge = border;
         foreground = state.enabled
-            ? ((primary || danger) ? theme_->accent_text : theme_->text)
+            ? (primary ? theme_->accent_text : danger ? AutoAccentText(fill)
+                : (state.hovered || state.pressed) ? theme_->text_selected : theme_->text)
             : theme_->text_disabled;
-        if (danger && state.enabled) foreground = HexColor(0xFFFFFF);
     } else if (danger) {
         if (!state.enabled) {
             fill = dark_ ? HexColor(0x343434) : HexColor(0xCDCDCD);
@@ -833,29 +839,16 @@ void Painter::DrawButton(const ButtonSpec& spec) {
             border = state.pressed ? shades.dark2 : shades.light1;
             edge = state.pressed ? shades.dark2 : shades.light2;
             edge_on_top = false;
-            foreground = state.pressed ? RgbaF(0x000000, 0.63f) : HexColor(0x000000);
         } else {
             fill = state.pressed ? shades.light3 : state.hovered ? shades.light1 : theme_->accent;
             border = state.pressed ? shades.light3 : state.hovered ? shades.light2 : shades.light1;
             edge = state.pressed ? shades.light3 : shades.dark1;
             edge_on_top = false;
-            foreground = state.pressed ? RgbaF(0xFFFFFF, 0.63f) : HexColor(0xFFFFFF);
-        }
-        if (spec.kind == ButtonKind::TransparentToggle && state.enabled) {
-            foreground = state.pressed
-                ? MultiplyAlpha(theme_->accent_text, 0.63f)
-                : theme_->accent_text;
-        }
-        if (!spec.bordered && state.enabled) {
-            foreground = state.pressed
-                ? MultiplyAlpha(theme_->accent_text, 0.63f)
-                : theme_->accent_text;
         }
     } else if (transparent) {
         draw_border = false;
         draw_fill = state.enabled && (state.hovered || state.pressed);
-        fill = dark_ ? Rgba(0xFFFFFF, state.pressed ? 6 : 9)
-                     : Rgba(0x000000, state.pressed ? 6 : 9);
+        fill = state.pressed ? theme_->fill_pressed : theme_->fill_hover;
         if (!state.enabled) {
             foreground = dark_ ? RgbaF(0xFFFFFF, 0.3628f) : RgbaF(0x000000, 0.36f);
         } else if (state.pressed) {
@@ -881,10 +874,7 @@ void Painter::DrawButton(const ButtonSpec& spec) {
     }
 
     if (!high_contrast_) {
-        if (primary && state.enabled) {
-            foreground = state.pressed ? MultiplyAlpha(theme_->accent_text, 0.63f)
-                                       : theme_->accent_text;
-        } else if (danger && state.enabled) {
+        if (danger && state.enabled) {
             foreground = AutoAccentText(fill);
         } else if (!primary && !danger) {
             foreground = !state.enabled ? theme_->text_disabled
@@ -912,6 +902,9 @@ void Painter::DrawButton(const ButtonSpec& spec) {
                 resting.b + (hot.b - resting.b) * hover,
                 resting.a + (hot.a - resting.a) * hover);
         }
+    }
+    if (!high_contrast_ && primary && state.enabled) {
+        foreground = AutoAccentText(fill);
     }
     if (draw_fill) {
         FillRoundedRect(spec.bounds, radius, fill);
@@ -1144,9 +1137,10 @@ void Painter::DrawCheckBox(const D2D1_RECT_F& bounds, std::wstring_view text,
     FillRoundedRect(box, radius, fill);
     StrokeRoundedRect(box, radius, border);
     if (state.checked) {
-        D2D1_COLOR_F check_color = high_contrast_ ? theme_->accent_text
-                                                  : dark_ ? HexColor(0x000000)
-                                                          : HexColor(0xFFFFFF);
+        D2D1_COLOR_F check_color = state.enabled
+            ? (high_contrast_ ? theme_->accent_text : AutoAccentText(fill))
+            : high_contrast_ ? theme_->accent_text
+                            : dark_ ? HexColor(0x000000) : HexColor(0xFFFFFF);
         if (!state.enabled) {
             check_color = MultiplyAlpha(check_color, 0.8f);
         }
@@ -1248,7 +1242,7 @@ void Painter::DrawSwitch(const D2D1_RECT_F& bounds, std::wstring_view text,
                    : state.hovered ? shades.light1 : theme_->accent;
             border = state.enabled ? fill : Rgba(0x000000, 0);
             knob = !state.enabled ? (dark_ ? Rgba(0xFFFFFF, 77) : HexColor(0xFFFFFF))
-                                  : dark_ ? HexColor(0x000000) : HexColor(0xFFFFFF);
+                                  : AutoAccentText(fill);
         } else if (dark_) {
             fill = !state.enabled ? Rgba(0x000000, 0)
                    : state.pressed ? Rgba(0xFFFFFF, 18)
@@ -1315,6 +1309,9 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
         fill = high_contrast_ ? theme_->fill_selected
                               : dark_ ? Rgba(0xFFFFFF, 12) : Rgba(0x000000, 12);
     }
+    if (high_contrast_ && draw_fill && role != TitleBarButtonRole::Close) {
+        foreground = theme_->text_selected;
+    }
     if (draw_fill) {
         dc_->FillRectangle(bounds, ScratchBrush(fill));
     }
@@ -1326,6 +1323,9 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
     if (role == TitleBarButtonRole::Close) glyph = kClose;
     DrawGlyphWithFormat(glyph, Inset(bounds, Px(12.0f)), foreground,
                         SmallIconFormat());
+    if (state.enabled && state.keyboard_focus) {
+        DrawFocusRing(Inset(bounds, Px(3.0f)), Px(theme_->radius_control));
+    }
 }
 
 void Painter::DrawTab(const TabSpec& spec) {
@@ -1346,7 +1346,7 @@ void Painter::DrawTab(const TabSpec& spec) {
             shadow.bottom += Px(1.0f);
             FillChromeTab(dc_, ScratchBrush(Rgba(0x000000, dark_ ? 24 : 18)), shadow, shape);
         }
-        const D2D1_COLOR_F selected_fill = high_contrast_ ? theme_->fill_selected
+        const D2D1_COLOR_F selected_fill = high_contrast_ ? (spec.state.enabled ? theme_->fill_selected : theme_->fill_input_disabled)
                                            : dark_ ? HexColor(0x282828) : HexColor(0xF9F9F9);
         FillChromeTab(dc_, ScratchBrush(selected_fill), spec.bounds, shape);
     }
@@ -1360,10 +1360,13 @@ void Painter::DrawTab(const TabSpec& spec) {
         FillChromeTab(dc_, ScratchBrush(interaction), Inset(spec.bounds, 1.0f), shape);
     }
     auto content = Inset(spec.bounds, Px(10.0f));
-    const D2D1_COLOR_F text_color = spec.state.enabled ? theme_->text : theme_->text_disabled;
+    const bool highlighted = high_contrast_ && spec.state.enabled &&
+        (spec.state.selected || spec.state.hovered || spec.state.pressed);
+    const D2D1_COLOR_F text_color = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected : theme_->text;
     if (!spec.glyph.empty()) {
         const float icon_width = Px(18.0f);
-        const D2D1_COLOR_F icon_color = spec.state.selected ? text_color
+        const D2D1_COLOR_F icon_color = spec.state.selected || highlighted ? text_color
                                         : MultiplyAlpha(text_color, dark_ ? 0.79f : 0.61f);
         DrawGlyph(spec.glyph,
                   D2D1::RectF(content.left, content.top,
@@ -1375,7 +1378,7 @@ void Painter::DrawTab(const TabSpec& spec) {
         const float close_width = Px(18.0f);
         const float close_pad = Px(6.0f);
         const D2D1_COLOR_F close_color = spec.state.enabled
-                                            ? (dark_ ? HexColor(0xEAEAEA) : HexColor(0x484848))
+                                            ? highlighted ? theme_->text_selected : (dark_ ? HexColor(0xEAEAEA) : HexColor(0x484848))
                                             : theme_->text_disabled;
         DrawGlyphWithFormat(kClose,
                             D2D1::RectF(content.right - close_width - close_pad, content.top,
@@ -1622,11 +1625,15 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     if (!theme_ || !compositor_) {
         return;
     }
-    const float hover = HoverProgress(spec.bounds, spec.state);
+    const float hover = high_contrast_ ? (spec.state.enabled && (spec.state.hovered || spec.state.pressed) ? 1.0f : 0.0f)
+                                       : HoverProgress(spec.bounds, spec.state);
+    const bool highlighted = high_contrast_ && spec.state.enabled &&
+        (spec.state.selected || spec.state.hovered || spec.state.pressed);
     const float radius = Px(theme_->radius_flyout);
     if (spec.state.selected) {
         FillRoundedRect(spec.bounds, radius,
-                        dark_ ? Rgba(0xFFFFFF, 26) : Rgba(0x000000, 20));
+                        high_contrast_ ? (spec.state.enabled ? theme_->fill_selected : theme_->fill_input_disabled)
+                                       : dark_ ? Rgba(0xFFFFFF, 26) : Rgba(0x000000, 20));
     } else {
         auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
         fill.a *= hover;
@@ -1636,6 +1643,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));
     }
     const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected
         : spec.section_title ? theme_->text_secondary : theme_->text;
     const float icon_slot = Px(16.0f);
     auto content = spec.bounds;
@@ -1656,7 +1664,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
                                 (icon_rc.top + icon_rc.bottom) * 0.5f),
                    5.0f, spec.tag_color);
     } else if (!spec.skip_glyph && !spec.glyph.empty()) {
-        const D2D1_COLOR_F icon_color = spec.icon_color.a > 0.0f ? spec.icon_color : foreground;
+        const D2D1_COLOR_F icon_color = highlighted ? theme_->text_selected : spec.icon_color.a > 0.0f ? spec.icon_color : foreground;
         DrawGlyph(spec.glyph, icon_rc, icon_color);
     }
     content.left += icon_slot + Px(8.0f);
@@ -1684,7 +1692,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
         DrawText(count,
                  D2D1::RectF(content.right - count_width, content.top, content.right,
                             content.bottom),
-                 CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
+                 CaptionFormat(), highlighted ? theme_->text_selected : theme_->text_secondary, HorizontalAlignment::Right);
         content.right -= count_width + Px(6.0f);
     }
     if (spec.suppress_text) {
@@ -1702,7 +1710,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
         DrawText(spec.detail,
                  D2D1::RectF(content.right - detail_width, content.top, content.right,
                             content.bottom),
-                 CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
+                 CaptionFormat(), highlighted ? theme_->text_selected : theme_->text_secondary, HorizontalAlignment::Right);
     }
 }
 
@@ -1718,10 +1726,10 @@ void Painter::DrawTrayCard(const TrayCardSpec& spec) {
 
     auto content = Inset(spec.bounds, Px(10.0f));
     const float icon_width = Px(18.0f);
-    DrawGlyphWithBrush(spec.move_intent ? kMoveIntent : kCopyIntent,
+    DrawGlyph(spec.move_intent ? kMoveIntent : kCopyIntent,
                        D2D1::RectF(content.left, content.top,
                                   content.left + icon_width, content.bottom),
-                       spec.move_intent ? BrushId::Accent : BrushId::TextSecondary);
+                       spec.move_intent ? theme_->accent_ink : theme_->text_secondary);
     content.left += icon_width + Px(6.0f);
 
     if (spec.item_count > 0) {
@@ -1732,7 +1740,7 @@ void Painter::DrawTrayCard(const TrayCardSpec& spec) {
                                       content.top + (Height(content) + badge_size) * 0.5f);
         FillRounded(badge, badge_size * 0.5f, BrushId::Selected);
         DrawTextWithBrush(std::to_wstring(std::min(spec.item_count, 99)), badge,
-                          CaptionFormat(), BrushId::Text,
+                          CaptionFormat(), high_contrast_ ? BrushId::AccentText : BrushId::Text,
                           HorizontalAlignment::Center);
         content.right -= badge_size + Px(8.0f);
     }
@@ -1931,6 +1939,7 @@ void Painter::DrawBreadcrumbSegment(const BreadcrumbSegmentSpec& spec) {
 
     auto content = Inset(item, Px(8.0f));
     const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+                                      : high_contrast_ && (spec.state.hovered || spec.state.pressed) ? theme_->text_selected
                                       : spec.current ? theme_->text
                                                      : theme_->text_secondary;
     if (!spec.glyph.empty()) {
@@ -1948,7 +1957,8 @@ void Painter::DrawBreadcrumbSegment(const BreadcrumbSegmentSpec& spec) {
                                                   spec.bounds.top, spec.bounds.right,
                                                   spec.bounds.bottom);
         DrawGlyphWithFormat(spec.has_menu ? kChevronDown : kChevronRight,
-                            accessory_bounds, foreground, SmallIconFormat());
+                            accessory_bounds, high_contrast_ && spec.state.enabled
+                                ? (spec.current ? theme_->text : theme_->text_secondary) : foreground, SmallIconFormat());
     }
     if (spec.state.keyboard_focus) {
         DrawFocusRing(item, radius);
@@ -2023,7 +2033,8 @@ void Painter::DrawSplitButton(const SplitButtonSpec& spec) {
     if (high_contrast_ && !enabled) {
         fill = theme_->fill_input;
     }
-    const D2D1_COLOR_F foreground = enabled ? theme_->accent_text : theme_->text_disabled;
+    const D2D1_COLOR_F foreground = !enabled ? theme_->text_disabled
+        : high_contrast_ ? theme_->accent_text : AutoAccentText(fill);
     FillRoundedRect(spec.bounds, radius, fill);
     StrokeRoundedRect(spec.bounds, radius,
                       high_contrast_ ? theme_->stroke_card : MultiplyAlpha(fill, 0.86f));
@@ -2035,7 +2046,7 @@ void Painter::DrawSplitButton(const SplitButtonSpec& spec) {
                                            spec.bounds.right - Px(1.0f),
                                            spec.bounds.bottom - Px(1.0f));
         FillRoundedRect(menu_fill, radius,
-                        MultiplyAlpha(theme_->accent_text,
+                        MultiplyAlpha(foreground,
                                       spec.menu_state.pressed ? 0.16f : 0.10f));
     }
     dc_->DrawLine(D2D1::Point2F(divider_x, spec.bounds.top + Px(7.0f)),
@@ -2077,7 +2088,7 @@ void Painter::DrawSegmentedItem(const SegmentedItemSpec& spec) {
                              ? 0.0f : Px(theme_->radius_control);
     D2D1_COLOR_F fill = Rgba(0x000000, 0);
     if (spec.state.selected || spec.state.checked) {
-        fill = high_contrast_ ? theme_->fill_selected
+        fill = high_contrast_ ? (spec.state.enabled ? theme_->fill_selected : theme_->fill_input_disabled)
                               : dark_ ? Rgba(0xFFFFFF, spec.shared_track ? 40 : 22) : Rgba(0xFFFFFF, 214);
     } else if (spec.state.enabled && (spec.state.hovered || spec.state.pressed)) {
         fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
@@ -2095,8 +2106,10 @@ void Painter::DrawSegmentedItem(const SegmentedItemSpec& spec) {
                           high_contrast_ ? theme_->stroke_card : theme_->stroke_divider);
     }
 
-    const D2D1_COLOR_F foreground = spec.state.enabled ? ((spec.state.selected || spec.state.checked) ? theme_->accent : theme_->text_secondary)
-                                                        : theme_->text_disabled;
+    const bool highlighted = high_contrast_ && (spec.state.selected || spec.state.checked || spec.state.hovered || spec.state.pressed);
+    const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected
+        : (spec.state.selected || spec.state.checked) ? theme_->accent_ink : theme_->text_secondary;
     auto content = Inset(spec.bounds, Px(spec.shared_track ? 3.0f : 6.0f));
     if (!spec.glyph.empty()) {
         const float icon_width = spec.text.empty() ? Width(content) : Px(18.0f);
@@ -2314,12 +2327,14 @@ void Painter::DrawSidebarSectionHeader(const SidebarSectionHeaderSpec& spec) {
     if (!theme_ || Width(spec.bounds) <= 0.0f || Height(spec.bounds) <= 0.0f) {
         return;
     }
-    const float hover = HoverProgress(spec.bounds, spec.state);
+    const float hover = high_contrast_ ? (spec.state.enabled && (spec.state.hovered || spec.state.pressed) ? 1.0f : 0.0f)
+                                       : HoverProgress(spec.bounds, spec.state);
     auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
     fill.a *= hover;
     if (fill.a > 0.0f) FillRoundedRect(spec.bounds, Px(theme_->radius_control), fill);
-    const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text_secondary
-                                                        : theme_->text_disabled;
+    const bool highlighted = high_contrast_ && spec.state.enabled && (spec.state.hovered || spec.state.pressed);
+    const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected : theme_->text_secondary;
     // Optional leading icon; the embedded vector variant is painted by the
     // caller (skip_glyph), but the text leaves room for it either way.
     const bool has_icon = !spec.glyph.empty();
@@ -2351,11 +2366,15 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     if (!theme_ || !dc_ || Width(spec.bounds) <= 0.0f || Height(spec.bounds) <= 0.0f) {
         return;
     }
-    const float hover = HoverProgress(spec.bounds, spec.state);
+    const float hover = high_contrast_ ? (spec.state.enabled && (spec.state.hovered || spec.state.pressed) ? 1.0f : 0.0f)
+                                       : HoverProgress(spec.bounds, spec.state);
+    const bool highlighted = high_contrast_ && spec.state.enabled &&
+        (spec.state.selected || spec.state.hovered || spec.state.pressed);
     const float radius = Px(theme_->radius_flyout);
     if (spec.state.selected) {
         FillRoundedRect(spec.bounds, radius,
-                        dark_ ? Rgba(0xFFFFFF, 18) : Rgba(0x000000, 14));
+                        high_contrast_ ? (spec.state.enabled ? theme_->fill_selected : theme_->fill_input_disabled)
+                                       : dark_ ? Rgba(0xFFFFFF, 18) : Rgba(0x000000, 14));
     } else {
         auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
         fill.a *= hover;
@@ -2364,8 +2383,8 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     if (spec.drop_target) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));
     }
-    const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text
-                                                        : theme_->text_disabled;
+    const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected : theme_->text;
     auto content = spec.bounds;
     content.left += Px(10.0f);
     content.right -= Px(10.0f);
@@ -2373,7 +2392,7 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     content.bottom -= Px(8.0f);
     const float icon_slot = Px(16.0f);
     const float text_row = Px(18.0f);
-    const D2D1_COLOR_F icon_color = spec.icon_color.a > 0.0f ? spec.icon_color : foreground;
+    const D2D1_COLOR_F icon_color = highlighted ? theme_->text_selected : spec.icon_color.a > 0.0f ? spec.icon_color : foreground;
     if (!spec.skip_glyph) {
         DrawGlyph(spec.glyph,
                   D2D1::RectF(content.left, content.top,
@@ -2398,7 +2417,7 @@ void Painter::DrawDriveSidebarItem(const DriveSidebarItemSpec& spec) {
     DrawText(spec.detail,
              D2D1::RectF(content.right - detail_width, content.top, content.right,
                         content.top + text_row),
-             CaptionFormat(), theme_->text_secondary, HorizontalAlignment::Right);
+             CaptionFormat(), highlighted ? theme_->text_selected : theme_->text_secondary, HorizontalAlignment::Right);
 
     const auto track = D2D1::RectF(text_left, content.bottom - Px(4.0f), content.right,
                                    content.bottom);
@@ -2472,14 +2491,16 @@ void Painter::DrawColumnHeader(const ColumnHeaderSpec& spec) {
                     spec.state.pressed ? BrushId::Pressed : BrushId::Hover);
     }
     auto content = Inset(spec.bounds, Px(10.0f));
-    const D2D1_COLOR_F foreground = spec.state.enabled ? theme_->text_secondary
-                                                        : theme_->text_disabled;
+    const bool highlighted = high_contrast_ && spec.state.enabled && (spec.state.hovered || spec.state.pressed);
+    const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
+        : highlighted ? theme_->text_selected : theme_->text_secondary;
     if (spec.sort != SortIndicator::None) {
         const float icon_width = Px(16.0f);
         DrawGlyphWithFormat(spec.sort == SortIndicator::Ascending ? kChevronUp : kChevronDown,
                             D2D1::RectF(content.right - icon_width, content.top,
                                        content.right, content.bottom),
-                            theme_->accent, SmallIconFormat());
+                            !spec.state.enabled ? theme_->text_disabled
+                                : highlighted ? theme_->text_selected : theme_->accent_ink, SmallIconFormat());
         content.right -= icon_width + Px(2.0f);
     }
     DrawText(spec.text, content, CaptionFormat(), foreground, spec.alignment);
@@ -2501,8 +2522,11 @@ void Painter::DrawFileRowContent(const FileRowContentSpec& spec) {
 
     const float opacity = ListRowContentOpacity(row);
     const D2D1_COLOR_F foreground = MultiplyAlpha(
-        spec.state.enabled ? theme_->text : theme_->text_disabled, opacity);
-    const D2D1_COLOR_F secondary = MultiplyAlpha(theme_->text_secondary, opacity);
+        !spec.state.enabled ? theme_->text_disabled
+            : high_contrast_ && (spec.state.selected || spec.state.hovered || spec.state.pressed) ? theme_->text_selected : theme_->text, opacity);
+    const D2D1_COLOR_F secondary = high_contrast_ && spec.state.enabled &&
+        (spec.state.selected || spec.state.hovered || spec.state.pressed)
+        ? foreground : MultiplyAlpha(theme_->text_secondary, opacity);
     auto content = spec.bounds;
     content.left += Px(12.0f);
     content.right -= Px(12.0f);
@@ -2576,11 +2600,11 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
         const float action_width = Width(action_bounds);
         const D2D1_RECT_F action_rc = D2D1::RectF(action_bounds.left,
             action_bounds.top + Px(1.5f), action_bounds.right, action_bounds.bottom - Px(1.5f));
-        FillRoundedRect(action_rc, Height(action_rc) * 0.5f,
-                        spec.action_hovered ? theme_->accent_hover : theme_->accent);
+        const auto action_fill = spec.action_hovered ? theme_->accent_hover : theme_->accent;
+        FillRoundedRect(action_rc, Height(action_rc) * 0.5f, action_fill);
         const bool icon_only = action_width < Px(44.0f);
         DrawText(icon_only ? std::wstring_view(L"\xE77F") : spec.action_text, action_rc,
-                 icon_only ? SmallIconFormat() : CaptionFormat(), theme_->accent_text,
+                 icon_only ? SmallIconFormat() : CaptionFormat(), high_contrast_ ? theme_->accent_text : AutoAccentText(action_fill),
                  HorizontalAlignment::Center);
         right = action_bounds.left - (header_inset < Px(10.0f) ? Px(2.0f) : Px(6.0f));
     }
@@ -2610,7 +2634,7 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
     }
     DrawText(spec.title,
              D2D1::RectF(header.left, header.top, right, header.bottom),
-             BodyFormat(), theme_->accent);
+             BodyFormat(), theme_->accent_ink);
     if (spec.expanded && !spec.helper.empty()) {
         const float helper_left = spec.bounds.left + Px(10.0f);
         const float helper_right = spec.bounds.right - Px(10.0f);
@@ -2666,7 +2690,8 @@ void Painter::DrawStagingItem(const StagingItemSpec& spec) {
     }
     FillRoundedRect(spec.bounds, Px(theme_->radius_control), fill);
     const D2D1_COLOR_F foreground = !spec.state.enabled || spec.missing
-                                        ? theme_->text_disabled : theme_->text;
+                                        ? theme_->text_disabled
+        : high_contrast_ && (spec.state.hovered || spec.state.pressed) ? theme_->text_selected : theme_->text;
     DrawText(spec.name,
              D2D1::RectF(spec.bounds.left + Px(7.0f), spec.bounds.top,
                         spec.bounds.right - Px(28.0f), spec.bounds.bottom),
@@ -2754,7 +2779,8 @@ void Painter::DrawInfoBar(const InfoBarSpec& spec) {
         icon_fill.a = dark_ ? 0.18f : 0.10f;
         FillRoundedRect(glyph_bounds, Px(14.0f), icon_fill);
     }
-    DrawGlyph(spec.glyph.empty() ? fallback_glyph : spec.glyph, glyph_bounds, accent);
+    DrawGlyph(spec.glyph.empty() ? fallback_glyph : spec.glyph, glyph_bounds,
+              spec.kind == InfoBarKind::Informational ? theme_->accent_ink : accent);
     const float close_space = (spec.show_close ? Px(30.0f + spec.close_inset) : Px(8.0f)) + Px(spec.trailing_width);
     const auto text_bounds = D2D1::RectF(glyph_bounds.right + Px(10.0f), spec.bounds.top,
                                          spec.bounds.right - close_space, spec.bounds.bottom);
@@ -2796,7 +2822,8 @@ void Painter::DrawInfoBar(const InfoBarSpec& spec) {
         DrawGlyphWithFormat(kClose,
                             D2D1::RectF(close_right - Px(26.0f), spec.bounds.top,
                                        close_right - Px(2.0f), spec.bounds.bottom),
-                            theme_->text_secondary, MicroIconFormat());
+                            high_contrast_ && spec.state.hovered ? theme_->text_selected : theme_->text_secondary,
+                            MicroIconFormat());
     }
 }
 

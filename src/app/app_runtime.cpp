@@ -537,15 +537,14 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_index_installed = s.settings.service_installed();
             vm.settings_index_status = s.index.Status();
             vm.settings_index_migrating = s.settings.migration_pending();
-            if (vm.settings_page == 3) {
+            if (vm.settings_page == 8) {
                 const auto transfer = GetSettingsTransferView();
                 vm.settings_transfer_busy = transfer.busy;
                 vm.settings_transfer_pending = transfer.pending;
-                vm.settings_transfer_has_backup = transfer.has_backup;
                 vm.settings_transfer_status = l10n::Get(transfer.busy ? l10n::StringId::SettingsTransferring :
                     transfer.pending ? l10n::StringId::SettingsTransferPending : l10n::StringId::SettingsTransferDesc);
-                if (!transfer.busy && !transfer.pending && transfer.has_backup)
-                    vm.settings_transfer_status += L" \u00B7 " + transfer.backup_time;
+            }
+            if (vm.settings_page == 3) {
                 vm.settings_about_rows = app::BuildAboutRows(vm.settings_index_service,
                                                              vm.settings_index_installed, s.scale);
             }
@@ -2074,6 +2073,20 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.settings_accent_system = s.appPrefs.accent_follow_system;
     vm.wallpaper_blur = s.appPrefs.wallpaper_blur;
     vm.safe_mode = s.safeMode;
+    const auto* settings_tab = ActiveTab(s);
+    const auto& input = s.settings_input;
+    if (IsSettingsTab(settings_tab) && input.tab == settings_tab->network_identity && input.page == s.settings.page()) {
+        if (input.keyboard && GetFocus() == s.hwnd) {
+            vm.settings_focus_region = input.focus.region;
+            vm.settings_focus_index = input.focus.index;
+            vm.settings_focus_sub_index = input.focus.sub_index;
+            vm.settings_focus_key = input.focus.path;
+        }
+        vm.settings_pressed_region = input.pressed.region;
+        vm.settings_pressed_index = input.pressed.index;
+        vm.settings_pressed_sub_index = input.pressed.sub_index;
+        vm.settings_pressed_bounds = input.pressed.control_bounds;
+    }
     vm.archive_view = ActiveTab(s) && IsArchiveView(ActiveTab(s)->current_path);
     const auto* group_tab = ActiveTab(s);
     vm.can_group = group_tab && !group_tab->current_path.empty() &&
@@ -2188,7 +2201,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsDiagnosticsAction: {
         if (s.hoverControlIndex >= 3 && s.hoverControlIndex <= 5) {
             const I transfer[] = {I::ExportSettingsTitle, I::ImportSettingsTitle,
-                GetSettingsTransferView().pending ? I::RestartNow : I::RestoreSettingsTitle};
+                I::RestartNow};
             return text(transfer[s.hoverControlIndex - 3]);
         }
         static constexpr I actions[] = {

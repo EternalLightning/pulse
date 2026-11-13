@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <thread>
 #include <wrl/client.h>
+#include <wincodec.h>
 
 namespace {
 int failures = 0;
@@ -26,13 +27,18 @@ UINT_PTR drive_timer = 0;
 std::wstring active_class;
 HWND fixture_owner = nullptr;
 bool batch = false;
+bool dialog_buttons_only = false;
+bool color_picker_only = false;
+bool dialog_dark = false;
+bool submit_batch = false;
 void Check(bool ok, const char* text) {
     std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", text);
     if (!ok) ++failures;
 }
 std::filesystem::path output;
 bool Snapshot(HWND window, const std::wstring& name) {
-    const auto path = output / (name + L"-" + std::to_wstring(dpi) + L".png");
+    const auto path = output / (name + (dialog_buttons_only ? dialog_dark ? L"-dark" : L"-light" : L"") +
+        L"-" + std::to_wstring(dpi) + L".png");
     return SendMessageW(window, WM_APP + 0x2B5, 0, reinterpret_cast<LPARAM>(path.c_str())) != 0;
 }
 struct OwnedWindowSearch {
@@ -68,6 +74,34 @@ void ShiftTab() {
     BYTE keys[256]{}; GetKeyboardState(keys); const BYTE saved = keys[VK_SHIFT];
     keys[VK_SHIFT] = 0x80; SetKeyboardState(keys); Tab(); keys[VK_SHIFT] = saved; SetKeyboardState(keys);
 }
+LPARAM PrimaryPoint() {
+    OwnedWindowSearch search{fixture_owner, active_class.c_str(), GetCurrentProcessId(), GetCurrentThreadId()};
+    EnumThreadWindows(search.thread_id, FindOwnedWindow, reinterpret_cast<LPARAM>(&search));
+    RECT client{};
+    GetClientRect(search.result, &client);
+    return MAKELPARAM(client.right - 64 * dpi / 96, client.bottom - 32 * dpi / 96);
+}
+void PrimaryStates(HWND dialog, HWND edit, const std::wstring& name) {
+    SetFocus(edit);
+    SendMessageW(dialog, WM_MOUSELEAVE, 0, 0);
+    Check(Snapshot(dialog, name + L"-normal"), "primary normal screenshot saved");
+    SendMessageW(dialog, WM_MOUSEMOVE, 0, PrimaryPoint());
+    Check(Snapshot(dialog, name + L"-hover"), "primary hover screenshot saved");
+    SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, PrimaryPoint());
+    Check(GetCapture() == dialog, "primary press captures the pointer");
+    Check(Snapshot(dialog, name + L"-pressed"), "primary pressed screenshot saved");
+    SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(0, 0));
+    Check(IsWindow(dialog), "releasing outside the primary button leaves the dialog open");
+    SendMessageW(dialog, WM_MOUSELEAVE, 0, 0);
+    SetFocus(edit);
+    ShiftTab();
+    Check(Snapshot(dialog, name + L"-close-focus"), "close keyboard focus screenshot saved");
+    ShiftTab();
+    Check(Snapshot(dialog, name + L"-focus"), "primary keyboard focus screenshot saved");
+    ShiftTab();
+    Check(Snapshot(dialog, name + L"-cancel-focus"), "cancel keyboard focus screenshot saved");
+    SetFocus(edit);
+}
 void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     OwnedWindowSearch search{fixture_owner, active_class.c_str(), GetCurrentProcessId(), GetCurrentThreadId()};
     EnumThreadWindows(search.thread_id, FindOwnedWindow, reinterpret_cast<LPARAM>(&search));
@@ -77,7 +111,7 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     RECT bounds{}; GetWindowRect(dialog, &bounds);
     const LONG width = active_class == L"PulseConnectServerWindow" ? 520 : batch ? 620 : 560;
     const bool conflict = active_class == L"PulseFileConflictWindow";
-    const LONG height = active_class == L"PulseConnectServerWindow" ? 348 : batch ? 588 : conflict ? 428 : 500;
+    const LONG height = active_class == L"PulseConnectServerWindow" ? 380 : batch ? 588 : conflict ? 428 : 516;
     bounds.right = bounds.left + (conflict ? 480 : width) * dpi / 96;
     bounds.bottom = bounds.top + height * dpi / 96;
     SendMessageW(dialog, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&bounds));
@@ -102,6 +136,41 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     }
     const HWND first = GetFocus();
     Check(first && first != dialog && IsChild(dialog, first), "dialog starts in a real native edit control");
+    if (dialog_buttons_only) {
+        if (submit_batch) {
+            Tab(); Tab(); Tab();
+            const HWND pattern = GetFocus();
+            Check(pattern && pattern != dialog && IsChild(dialog, pattern), "batch pattern edit receives focus");
+            SetWindowTextW(pattern, L"renamed-{name}{ext}");
+            const auto deadline = GetTickCount64() + 5000;
+            while (IsWindow(dialog) && GetTickCount64() < deadline) {
+                SendMessageW(dialog, WM_TIMER, 1, 0);
+                PrimaryStates(dialog, first, L"batch-primary");
+                SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, PrimaryPoint());
+                SendMessageW(dialog, WM_LBUTTONUP, 0, PrimaryPoint());
+                if (!IsWindow(dialog)) break;
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, 50, QS_ALLINPUT);
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+            Check(!IsWindow(dialog), "batch primary accepts after its asynchronous preview becomes ready");
+            if (IsWindow(dialog)) SendMessageW(dialog, WM_CLOSE, 0, 0);
+            return;
+        }
+        if (!batch) SetWindowTextW(first, L"");
+        Check(Snapshot(dialog, batch ? L"batch-primary-disabled" : L"server-primary-disabled"),
+            "disabled primary screenshot saved");
+        SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, PrimaryPoint());
+        SendMessageW(dialog, WM_LBUTTONUP, 0, PrimaryPoint());
+        Check(IsWindow(dialog), "disabled primary click leaves the dialog open");
+        if (!batch) {
+            SetWindowTextW(first, L"\\\\fixture\\share");
+            PrimaryStates(dialog, first, L"server-primary");
+        }
+    }
     if (active_class == L"PulseConnectServerWindow") {
         MINMAXINFO minimum{}; SendMessageW(dialog, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&minimum));
         Check(minimum.ptMinTrackSize.x == width * dpi / 96 && minimum.ptMinTrackSize.y == height * dpi / 96,
@@ -125,6 +194,11 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
         wchar_t text[128]{}; GetWindowTextW(pattern, text, ARRAYSIZE(text));
         Check(std::wstring_view(text).find(L"{n}") != std::wstring_view::npos,
             "keyboard shortcut activation changes the real pattern edit");
+        if (dialog_buttons_only) {
+            Tab(); Tab();
+            Check(Snapshot(dialog, L"batch-chip-focus"), "batch shortcut keyboard focus screenshot saved");
+            ShiftTab(); ShiftTab();
+        }
         Tab(); Check(GetFocus() != dialog && GetFocus() != pattern, "index field enters the focus order when enabled");
         SendMessageW(dialog, WM_CLOSE, 0, 0);
     } else {
@@ -328,11 +402,145 @@ struct FluentMenuTestPeer {
 };
 }
 
-int wmain() {
+namespace {
+void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
+    OwnedWindowSearch search{fixture_owner, L"PulseFluentColorPicker", GetCurrentProcessId(), GetCurrentThreadId()};
+    EnumThreadWindows(search.thread_id, FindOwnedWindow, reinterpret_cast<LPARAM>(&search));
+    const HWND picker = search.result;
+    if (!MatchesOwnedWindow(picker, search)) return;
+    KillTimer(nullptr, timer);
+    SetFocus(picker);
+    SendMessageW(picker, WM_KEYDOWN, VK_TAB, 0);
+    Check(GetFocus() == picker, "Tab reaches the color mode control");
+    Check(Snapshot(picker, L"color-mode-focus"), "color mode focus screenshot saved");
+    SendMessageW(picker, WM_KEYDOWN, VK_RETURN, 0);
+    Check(IsWindow(picker) && SendMessageW(picker, WM_APP + 0x2BC, 0, 0) == 1,
+        "Enter on the mode control switches to HSV without accepting the popup");
+    Check(Snapshot(picker, L"color-hsv-focus"), "HSV mode screenshot saved");
+    SendMessageW(picker, WM_KEYDOWN, VK_SPACE, 0);
+    Check(SendMessageW(picker, WM_APP + 0x2BC, 0, 0) == 0,
+        "Space on the mode control switches back to RGB");
+    Tab();
+    Check(GetFocus() != picker && IsChild(picker, GetFocus()), "Tab reaches the native hex edit");
+    ShiftTab();
+    Check(GetFocus() == picker, "Shift+Tab returns from the hex edit to the mode control");
+    Tab();
+    for (int index = 0; index < 5; ++index) Tab();
+    Check(GetFocus() == picker, "Tab traverses all color edits and reaches Accept");
+    Check(Snapshot(picker, L"color-accept-focus"), "color Accept focus screenshot saved");
+    Tab();
+    Check(Snapshot(picker, L"color-cancel-focus"), "color Cancel focus screenshot saved");
+    SendMessageW(picker, WM_KEYDOWN, VK_SPACE, 0);
+}
+
+void PickerStyle(HWND owner) {
     using namespace pulse;
+    ui::Compositor compositor;
+    Check(compositor.Init(owner), "picker compositor initializes");
+    compositor.RecreateTextFormats(1);
+    {
+        compositor.Dc()->BeginDraw();
+        compositor.Dc()->Clear(D2D1::ColorF(0.25f, 0.5f, 0.75f, 0.5f));
+        Check(SUCCEEDED(compositor.Dc()->EndDraw()), "draw translucent snapshot color fixture");
+        const auto path = output / L"snapshot-straight-alpha.png";
+        Check(compositor.SaveSnapshot(path.c_str()), "save translucent snapshot color fixture");
+        ui::ComPtr<IWICImagingFactory> factory;
+        ui::ComPtr<IWICBitmapDecoder> decoder;
+        ui::ComPtr<IWICBitmapFrameDecode> frame;
+        ui::ComPtr<IWICFormatConverter> pixels;
+        HRESULT decoded = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&factory));
+        if (SUCCEEDED(decoded)) decoded = factory->CreateDecoderFromFilename(path.c_str(), nullptr,
+            GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder);
+        if (SUCCEEDED(decoded)) decoded = decoder->GetFrame(0, &frame);
+        if (SUCCEEDED(decoded)) decoded = factory->CreateFormatConverter(&pixels);
+        if (SUCCEEDED(decoded)) decoded = pixels->Initialize(frame.get(), GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+        BYTE color[4]{};
+        const WICRect sample{0, 0, 1, 1};
+        if (SUCCEEDED(decoded)) decoded = pixels->CopyPixels(&sample, 4, 4, color);
+        Check(SUCCEEDED(decoded) && std::abs(static_cast<int>(color[0]) - 191) <= 2 &&
+            std::abs(static_cast<int>(color[1]) - 128) <= 2 &&
+            std::abs(static_cast<int>(color[2]) - 64) <= 2 &&
+            std::abs(static_cast<int>(color[3]) - 128) <= 1,
+            "PNG round trip retains straight RGB and alpha rather than darkening translucent colors");
+    }
+    {
+        auto theme = ui::MakeHighContrastTheme();
+        theme.text_secondary = ui::HexColor(0x777777);
+        theme.fill_hover = ui::HexColor(0xAA0000);
+        theme.text_selected = ui::HexColor(0x00FF00);
+        ui::fluent::Painter painter;
+        painter.SetCompositor(&compositor);
+        ui::fluent::InfoBarSpec bar;
+        bar.bounds = D2D1::RectF(20, 20, 620, 92);
+        bar.title = L"Error notification";
+        bar.message = L"Hover the Close control";
+        bar.state.hovered = true;
+        bar.show_close = true;
+        compositor.Dc()->BeginDraw();
+        compositor.Dc()->Clear(theme.bg);
+        painter.BeginFrame(theme, true);
+        painter.DrawInfoBar(bar);
+        compositor.Dc()->EndDraw();
+        Check(compositor.SaveSnapshot((output / L"notification-close-paired-hc.png").c_str()),
+            "notification Close high-contrast screenshot saved");
+        ui::ComPtr<ID2D1Image> target;
+        ui::ComPtr<ID2D1Bitmap1> source, cpu;
+        auto* dc = compositor.Dc();
+        dc->GetTarget(&target);
+        bool readable = target.get() && SUCCEEDED(target->QueryInterface(&source));
+        if (readable) {
+            const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                source->GetPixelFormat());
+            readable = SUCCEEDED(dc->CreateBitmap(source->GetPixelSize(), nullptr, 0, properties, &cpu)) &&
+                SUCCEEDED(cpu->CopyFromBitmap(nullptr, source.get(), nullptr));
+        }
+        D2D1_MAPPED_RECT mapped{};
+        readable = readable && SUCCEEDED(cpu->Map(D2D1_MAP_OPTIONS_READ, &mapped));
+        int paired_pixels = 0;
+        if (readable) {
+            const int right = static_cast<int>(bar.bounds.right - bar.close_inset);
+            for (int y = 20; y < 92; ++y) for (int x = right - 28; x < right; ++x) {
+                const BYTE* pixel = mapped.bits + y * mapped.pitch + x * 4;
+                if (pixel[1] > 160 && pixel[2] < 80 && pixel[0] < 80) ++paired_pixels;
+            }
+            cpu->Unmap();
+        }
+        Check(readable && paired_pixels > 3,
+            "hovered high-contrast Close glyph uses the selected foreground at actual pixels");
+    }
+    for (const bool dark : {false, true}) {
+        for (const float scale : {1.0f, 1.5f}) {
+            const auto file = output / (std::wstring(L"color-picker-") + (dark ? L"dark-" : L"light-") +
+                std::to_wstring(static_cast<int>(scale * 96)) + L".png");
+            Check(ui::ColorPickerPopup::SaveDebugSnapshot(&compositor, file.c_str(), dark,
+                ui::HexColor(0x0078D4), scale), "picker theme/DPI screenshot saved");
+        }
+    }
+    const auto contrast_file = output / L"color-picker-high-contrast.png";
+    Check(ui::ColorPickerPopup::SaveDebugSnapshot(&compositor, contrast_file.c_str(), false,
+        ui::HexColor(0x0078D4), 1, true), "picker forced high-contrast hover screenshot saved");
+    drive_timer = SetTimer(nullptr, 0, 350, DrivePicker);
+    uint32_t color = 0x3574BA;
+    const bool accepted = ui::ColorPickerPopup::Pick(owner, &compositor, nullptr, 1, {100, 80},
+        color, false, color);
+    KillTimer(nullptr, drive_timer);
+    Check(!accepted && color == 0x3574BA, "keyboard Cancel preserves the original color");
+    compositor.Shutdown();
+}
+}
+
+int wmain(int argc, wchar_t** argv) {
+    using namespace pulse;
+    for (int i = 1; i < argc; ++i) {
+        if (std::wstring_view(argv[i]) == L"--dialog-buttons-only") dialog_buttons_only = true;
+        if (std::wstring_view(argv[i]) == L"--color-picker-only") color_picker_only = true;
+    }
     compat::EnableDpiAwareness(); OleInitialize(nullptr); InitCommonControls();
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    output = std::filesystem::absolute(L"bench_data/audit-fixes-20261030-remaining/ui-build/screenshots");
+    output = std::filesystem::absolute(color_picker_only ? L"bench_data/popup-style/color-picker" : dialog_buttons_only ? L"bench_data/ui-consistency-fix/dialogs"
+        : L"bench_data/audit-fixes-20261030-remaining/ui-build/screenshots");
     std::filesystem::create_directories(output);
     const auto left = output / L"left.txt", right = output / L"right.txt";
     Write(left, "alpha\nline two\n"); Write(right, "Alpha\nline three\n");
@@ -340,28 +548,61 @@ int wmain() {
         20, 20, 1000, 720, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     fixture_owner = owner;
     ShowWindow(owner, SW_SHOW);
-    for (int resolution : {96, 144}) {
-        dpi = resolution; batch = false; active_class = L"PulseAdvancedSearchWindow";
-        drive_timer = SetTimer(nullptr, 0, 220, Drive);
-        model::AdvancedSearchSpec spec; spec.current_folder = output.wstring();
-        spec.location = model::LocationScope::CurrentFolder; spec.content = L"alpha";
-        const auto search = ui::ShowAdvancedSearchDialog(owner, spec, false, ui::HexColor(0x3574BA));
-        Check(search.accepted && search.query.find(L"ww:") != std::wstring::npos &&
-            search.query.find(L"case:") != std::wstring::npos, "keyboard checkboxes affect the compiled advanced query");
-        batch = true; active_class = L"PulseBatchRenameWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
-        const auto renamed = ui::ShowBatchRenameDialog(owner, {left.wstring()}, false, ui::HexColor(0x3574BA));
-        Check(!renamed.accepted, "batch fixture closes without performing a rename");
-        batch = false; active_class = L"PulseConnectServerWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
-        ui::ConnectServerDialogSpec server; server.title = L"Connect fixture"; server.label = L"Address";
-        server.initial_text = L"\\\\fixture\\share"; server.confirm_text = L"Connect";
-        server.preview = [](const auto&) { return ui::ConnectServerPreview{true, L"Controlled preview"}; };
-        const auto connected = ui::ShowConnectServerDialog(owner, server, false, ui::HexColor(0x3574BA));
-        Check(connected.accepted && !connected.pin, "keyboard server pin activation changes the submitted result");
-        active_class = L"PulseFileConflictWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
-        ops::ConflictItemInfo conflict; conflict.source = left.wstring(); conflict.destination = right.wstring();
-        conflict.remaining = 2;
-        const auto decision = ui::ShowFileConflictDialog(owner, conflict, false, ui::HexColor(0x3574BA));
-        Check(decision.choice == ops::ConflictChoice::Cancel, "conflict fixture cancels without changing files");
+    if (color_picker_only) {
+        PickerStyle(owner);
+        DestroyWindow(owner); OleUninitialize();
+        std::printf("failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
+    for (bool dark : {false, true}) {
+        if (dark && !dialog_buttons_only) break;
+        dialog_dark = dark;
+        for (int resolution : {96, 144}) {
+            dpi = resolution;
+            if (!dialog_buttons_only) {
+                batch = false; active_class = L"PulseAdvancedSearchWindow";
+                drive_timer = SetTimer(nullptr, 0, 220, Drive);
+                model::AdvancedSearchSpec spec; spec.current_folder = output.wstring();
+                spec.location = model::LocationScope::CurrentFolder; spec.content = L"alpha";
+                const auto search = ui::ShowAdvancedSearchDialog(owner, spec, false, ui::HexColor(0x3574BA));
+                Check(search.accepted && search.query.find(L"ww:") != std::wstring::npos &&
+                    search.query.find(L"case:") != std::wstring::npos, "keyboard checkboxes affect the compiled advanced query");
+            }
+            batch = true; active_class = L"PulseBatchRenameWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
+            const auto renamed = ui::ShowBatchRenameDialog(owner, {left.wstring()}, dark,
+                ui::HexColor(dialog_buttons_only ? 0x0078D4 : 0x3574BA));
+            Check(!renamed.accepted, "batch fixture closes without performing a rename");
+            if (dialog_buttons_only) {
+                submit_batch = true;
+                drive_timer = SetTimer(nullptr, 0, 220, Drive);
+                const auto plan = ui::ShowBatchRenameDialog(owner, {left.wstring()}, dark, ui::HexColor(0x0078D4));
+                Check(plan.accepted && plan.items.size() == 1 && plan.items[0].new_name == L"renamed-left.txt",
+                    "batch primary submits the previewed rename plan without changing fixture files");
+                Check(std::filesystem::exists(left) && !std::filesystem::exists(output / L"renamed-left.txt"),
+                    "batch dialog confirmation leaves fixture files unchanged");
+                submit_batch = false;
+            }
+            batch = false; active_class = L"PulseConnectServerWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
+            ui::ConnectServerDialogSpec server; server.title = L"Connect fixture"; server.label = L"Address";
+            server.initial_text = L"\\\\fixture\\share"; server.confirm_text = L"Connect";
+            server.preview = [](const auto& text) {
+                return ui::ConnectServerPreview{!dialog_buttons_only || !text.empty(), L"Controlled preview"};
+            };
+            const auto connected = ui::ShowConnectServerDialog(owner, server, dark,
+                ui::HexColor(dialog_buttons_only ? 0x0078D4 : 0x3574BA));
+            Check(connected.accepted && !connected.pin, "keyboard server pin activation changes the submitted result");
+            if (dialog_buttons_only) continue;
+            active_class = L"PulseFileConflictWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
+            ops::ConflictItemInfo conflict; conflict.source = left.wstring(); conflict.destination = right.wstring();
+            conflict.remaining = 2;
+            const auto decision = ui::ShowFileConflictDialog(owner, conflict, false, ui::HexColor(0x3574BA));
+            Check(decision.choice == ops::ConflictChoice::Cancel, "conflict fixture cancels without changing files");
+        }
+    }
+    if (dialog_buttons_only) {
+        DestroyWindow(owner); OleUninitialize();
+        std::printf("failures=%d\n", failures);
+        return failures ? 1 : 0;
     }
     dpi = 96;
     ui::QuickPreviewPlaybackProbe::Run(owner);

@@ -651,6 +651,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         if (cmd == app::CmdSelectTextCompare) s.text_compare_selection.Select(path);
         else if (s.text_compare_selection.ready()) {
             if (!s.text_diff) s.text_diff = std::make_unique<ui::TextDiffWindow>();
+            s.text_diff->SetAppearance(s.darkMode, ui::WindowEffectFromId(s.appPrefs.window_effect), s.accentColor);
             s.text_diff->Show(s.hwnd, s.text_compare_selection.source(), path,
                              s.darkMode, s.accentColor);
         }
@@ -2024,6 +2025,9 @@ void ApplyAccentFromPrefs(AppState& s) {
     s.accentColor = ResolveAccentColor(s.appPrefs, s.darkMode);
     s.globalSearchWindow.SetAppearance(s.darkMode, ui::WindowEffectFromId(s.appPrefs.window_effect),
         s.appPrefs.background_image, s.accentColor);
+    s.quickPreview.SetAppearance(s.darkMode, ui::WindowEffectFromId(s.appPrefs.window_effect), s.accentColor);
+    if (s.text_diff) s.text_diff->SetAppearance(s.darkMode,
+        ui::WindowEffectFromId(s.appPrefs.window_effect), s.accentColor);
     if (s.menu) s.menu->SetTheme(s.darkMode, s.accentColor);
     if (s.operationWindow) s.operationWindow->SetTheme(s.darkMode, s.accentColor);
     UpdateOperationCenterTheme(s);

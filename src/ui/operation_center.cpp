@@ -517,7 +517,7 @@ bool OperationCenter::Render(bool allow_capture) {
             const float offset = top - scroll_;
             const auto type = static_cast<size_t>(task.type);
             const std::wstring type_label = type < labels_.type_names.size() ? labels_.type_names[type] : labels_.title;
-            auto state_color = theme.accent;
+            auto state_color = theme.accent_ink;
             if (task.phase == ops::OpPhase::Failed) { state_color = theme.danger; }
             else if (task.phase == ops::OpPhase::Completed) {
                 state_color = IsHighContrast() ? theme.text : dark_ ? HexColor(0x45D7A4) : HexColor(0x107C5A);

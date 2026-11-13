@@ -917,6 +917,12 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
         tab.virtual_title = l10n::Get(l10n::StringId::RecycleBin);
         tab.loading = true;
         tab.view_mode = ui::ViewMode::Details;
+        if (!s.shot.active) {
+            tab.view_mode = s.appPrefs.folder_views.Find(path).value_or(ui::ViewMode::Details);
+            const auto sort = s.appPrefs.folder_views.FindSort(path).value_or(app::FolderSortPrefs{});
+            tab.sort_column = sort.column;
+            tab.sort_direction = sort.direction;
+        }
         tab.SetSnapshot(nullptr);
         tab.SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::RecycleBin));
         tab.banner_message = RecycleOccupancyText(s.recycle_info);

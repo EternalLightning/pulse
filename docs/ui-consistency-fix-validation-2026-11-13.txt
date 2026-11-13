@@ -1,0 +1,67 @@
+Pulse UI 一致性修复与定向验证 — 2026-11-13
+
+结果
+原审查中的 8 项均已实现修复。保留工作区原有未提交修改，没有暂存、提交、打包、发布或替换已安装应用。
+当前 build-release/Pulse.exe 已成功构建，PULSE_WITH_SELFTEST=OFF。构建成功仅表示编译和链接成功，下面单独记录功能与视觉检查。
+
+八项修复
+1. 深色勾选标记和开关圆点：按实际填充色解析黑/白前景，覆盖普通、悬停和按压状态，保留禁用态。
+   位置：src/ui/fluent_components.cpp。
+2. 强调色可读性：AutoAccentText 使用线性相对亮度；accent 保留用户选色用于填充，新增 accent_ink 用于中性表面的文字/图标。
+   accent_ink 承接浅色原有压暗策略，并保证深色卡片和选中分段底板上的文字对比度；已迁移本次涉及的直接文字/图标调用方。
+   位置：src/ui/FluentTokens.h 及本次相关 UI 绘制文件。没有删除原来的对比度检查；原色保留与文字可读色分别验证。
+3. 高对比度配对：公共按钮、分段、标签、侧栏，以及设置导航、context/sysctx 自绘调用方，使用与高亮背景对应的 text_selected。
+   普通、禁用和高亮前景分开处理；高对比度焦点环使用两层系统前景/背景色，避免与选中填充融为一体。
+4. 设置页键盘操作：Tab/Shift+Tab、方向键遍历可用目标，Enter/Space 激活；显示焦点环、滚动到屏外目标，并停止残留滚轮惯性。
+   目标来自现有共享布局；覆盖设置导航、各页按钮/开关/分段/动态条目。预览排序和系统菜单预览提供键盘操作菜单。
+   位置：src/app/settings_input.h/.cpp、src/ui/ui_settings_controls.cpp 及相关状态/绘制接入。
+5. 设置动作按压：鼠标按下只记录目标，仍在同一可用目标上松开才执行。移出后释放、失去捕获、滚轮、Esc、页面切换均取消。
+   动态条目使用实际路径/注册表键等身份检查，避免后台刷新后把同一索引上的新条目当作原按压对象。
+   鼠标和键盘复用从 app_input.cpp 移出的既有动作分发，没有再维护第二套设置动作实现。
+6. 对话框主按钮：批量重命名和连接服务器使用公共 Primary，统一字体、正常/禁用/悬停/按压状态及焦点环。
+   原有按钮边界、结果提交和取消逻辑保留；其它已有焦点也继续可见。
+7. 透明按钮：公共 Transparent 改用 theme.fill_hover/fill_pressed，与主渲染器的透明命令按钮遵守相同令牌。
+8. 压缩导航热区：窄主区导航步长由 26 改为 28 DIP，点击区域至少 24×32 DIP；保留本次开始前已有的工具栏本地化宽度修改。
+
+实际构建
+使用 scripts/build.ps1，仅构建相关目标：pulse、pulse_command_icon_test、pulse_fluent_gallery、pulse_feature_sync_application_test、pulse_audit_ui_remaining_test。
+编译和链接成功，输出中未出现本次新增的编译器警告。未运行 build_release.bat、完整内嵌 selftest 或全部测试程序。
+
+实际运行结果
+- pulse_command_icon_test --theme-only：退出码 0。
+  验证强调色原色保留、黑白前景、accent_ink 对比度、系统高对比度配对，以及多个主区宽度/缩放下的导航热区和布局边界。
+- pulse_fluent_gallery：退出码 0，生成 11 张图。
+  包含自定义深色、红色、黄色的按钮/勾/圆点状态，以及合成高对比度配色的实际像素断言。
+- pulse_audit_ui_remaining_test --dialog-buttons-only：退出码 0，164 PASS，failures=0，生成 68 张截图。
+  只运行两个相关对话框，覆盖亮/暗、96/144 DPI、主按钮状态、禁用拒绝、键盘焦点、移出后松开及确认结果；不运行该程序的其它窗口测试。
+- pulse_feature_sync_application_test --settings-input-only：退出码 0，1582 PASS / 0 FAIL。
+  包含真实输入处理路径、重复按键、取消、禁用项、滚动/惯性、动态实体变化，以及 10 页设置目标和 100%/150% 窄窗口检查。
+  生成 17 张生产渲染截图，包括键盘焦点、按压和模拟高对比度下的完整/紧凑侧栏、设置导航、context/sysctx 窄/宽界面。
+- pulse_feature_sync_application_test --settings-page-only：退出码 0，3801 PASS / 0 FAIL。
+  既有设置页布局、命中、导入忙碌状态和截图检查通过。
+- pulse_feature_sync_application_test --settings-categories：退出码 1，3707 PASS / 16 FAIL。
+  失败详情见下段；本次改为按下/松开后的原有设置点击、第二次点击恢复等断言通过。
+
+保留的既有断言冲突
+16 个失败全部来自 settings_categories_cases.h 的同一个“只允许 2–3 个分节”断言。
+已加诊断并确认所有失败均为 page=8、section_count=4，分别覆盖语言、宽度、高度和缩放组合。
+该页的四个实际分节为：系统集成、启动与托盘、配置位置、配置导入导出。
+配置导入导出分节属于本次开始前已存在的未提交修改；本次没有改变该页分节布局。这里没有声称做过改动前的二进制运行对比。
+没有为了通过而删除或放宽原断言，也没有撤销用户已有的导入导出界面。该测试契约仍需另行与已有功能对齐。
+
+视觉核对与验证边界
+人工查看了颜色像素回归图、两对话框的主按钮焦点/按压/禁用代表图、窄设置页焦点、模拟高对比度导航，以及 context 窄布局和 sysctx 宽布局截图，未见本次修改导致的按钮裁切或重叠。
+模拟高对比度使用线程内 HighContrastFrameScope 和内存主题，不更改系统高对比度设置；150% 设置/对话框夹具也不等于真实跨显示器 DPI 迁移验收。
+测试使用隔离数据目录、纯内存模型及不持久化偏好。没有实际连接服务器、重命名用户文件、迁移配置、写系统菜单注册表或安装服务。
+新增设置输入夹具初次漏掉首帧文本格式初始化导致访问异常；按生产初始化顺序补齐并加入非空检查后，最终 1582 项通过。这是测试夹具修正，没有为此放宽产品行为或断言。
+未做读屏验收、完整历史回归、所有文件格式预览检查或已安装副本验收。
+
+产物与日志（均在仓库内）
+bench_data/ui-consistency-fix/controls/build-fluent-verify/ —— 控件及颜色回归 PNG。
+bench_data/ui-consistency-fix/dialogs/ —— 对话框截图与隔离 fixture。
+bench_data/ui-consistency-fix/settings-input/ —— 设置输入、焦点与模拟高对比度截图。
+bench_data/ui-consistency-fix/layout-run/ —— 既有布局测试的隔离工作目录，避免覆盖历史截图。
+bench_data/ui-consistency-fix/dialog-test.log
+bench_data/ui-consistency-fix/settings-input-test.log
+bench_data/ui-consistency-fix/settings-page-test.log
+bench_data/ui-consistency-fix/settings-categories-test.log

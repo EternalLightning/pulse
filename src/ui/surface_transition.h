@@ -78,6 +78,8 @@ public:
             static_cast<float>(now >= started_ ? now - started_ : 0) / duration, 0.0f, 1.0f);
         const float p = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
         if (t >= 1.0f) { previous_.reset(); pending = false; }
+        // The incoming half keeps moving after the outgoing content is invisible.
+        if (p >= 0.5f) previous_.reset();
 
         ComPtr<ID2D1Image> target;
         dc->GetTarget(&target);
@@ -88,6 +90,12 @@ public:
         dc->SetTarget(target.get());
         if (FAILED(incoming->Close())) { Reset(); draw(); return; }
 
+        if (!pending) {
+            dc->DrawImage(incoming.get());
+            current_ = std::move(incoming);
+            return;
+        }
+
         ComPtr<ID2D1CommandList> composed;
         if (FAILED(dc->CreateCommandList(&composed))) { Reset(); draw(); return; }
         dc->SetTarget(composed.get());
@@ -96,14 +104,13 @@ public:
             // become a double-exposed, unreadable heading during navigation.
             Image(dc, previous_.get(), bounds, std::max(0.0f, 1.0f - 2.0f * p),
                   -direction_ * distance * p);
-            Image(dc, incoming.get(), bounds, std::max(0.0f, 2.0f * p - 1.0f),
-                  direction_ * distance * (1.0f - p));
-        } else dc->DrawImage(incoming.get());
+        }
+        Image(dc, incoming.get(), bounds, std::max(0.0f, 2.0f * p - 1.0f),
+              direction_ * distance * (1.0f - p));
         dc->SetTarget(target.get());
         if (FAILED(composed->Close())) { Reset(); draw(); return; }
         dc->DrawImage(composed.get());
-        // Do not retain a chain of prior frames after a transition settles.
-        current_ = pending ? std::move(composed) : std::move(incoming);
+        current_ = std::move(composed);
     }
 
 private:
