@@ -31,6 +31,7 @@ void FillColumnStripView(ui::ColumnStripView& out, const Tab& tab) {
     out.enabled = tab.column_layout;
     out.widths_dip = tab.column_widths_dip;
     out.scroll_from_right_dip = state.scroll_from_right_dip;
+    out.ancestor_anchor_left_dip = state.ancestor_anchor_left_dip;
     out.eligible = tab.column_layout && !state.for_path.empty() &&
                    state.for_path == tab.current_path;
     out.ancestors.clear();

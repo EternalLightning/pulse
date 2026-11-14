@@ -1662,6 +1662,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     if (!s.pane) return {};
     app::VmProfileProbe vm_profile;
     s.changes.visible_paths.clear();
+    s.changes.visible_badges.clear();
     s.home_catalog.FillDriveLabels(s.sidebar);
     ui::WindowViewModel vm = app::BuildWindowViewModel(*s.pane, s.sidebar,
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,

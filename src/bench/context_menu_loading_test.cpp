@@ -30,6 +30,30 @@ struct NotificationToastTestPeer {
     static void Expire(NotificationToast& toast) { toast.remaining_ = 0; }
 };
 struct FluentMenuTestPeer {
+    static RECT LayoutAt(FluentMenu& menu, POINT anchor, std::vector<FluentMenuItem> items) {
+        menu.max_visible_rows_ = 0;
+        menu.body_limit_px_ = 0;
+        menu.model_.SetItems(std::move(items));
+        menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_, 0, menu.compositor_);
+        menu.LayoutWindow(anchor);
+        RECT bounds{};
+        GetWindowRect(menu.hwnd_, &bounds);
+        ShowWindow(menu.hwnd_, SW_HIDE);
+        return bounds;
+    }
+    static bool Scrolls(const FluentMenu& menu) {
+        return menu.max_visible_rows_ > 0 && menu.BodyHeightPx() < menu.model_.HeightPx();
+    }
+    static bool RevealLast(FluentMenu& menu) {
+        menu.UpdateHover(menu.model_.Count() - 1);
+        const float top = menu.model_.RowTopPx(menu.model_.Count() - 1) - menu.scroll_y_;
+        return top >= 0 && top + menu.model_.RowHeightPx() <= menu.BodyHeightPx() + 0.1f;
+    }
+    static HWND Window(const FluentMenu& menu) { return menu.hwnd_; }
+    static LPARAM FirstRowPoint(const FluentMenu& menu) {
+        return MAKELPARAM(40, static_cast<int>(20 + menu.FilterHeaderPx() +
+            menu.model_.RowTopPx(0) + menu.model_.RowHeightPx() * 0.5f));
+    }
     static void Begin(FluentMenu& menu, std::vector<FluentMenuItem> items) {
         menu.model_.SetItems(std::move(items));
         menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_);
@@ -79,6 +103,8 @@ void Check(bool passed, const char* name) {
     std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", name);
     if (!passed) ++failures;
 }
+
+#include "oversized_menu_cases.h"
 
 void RunToastAnimation(HWND owner, pulse::ui::Compositor& compositor, const std::filesystem::path& output) {
     using namespace pulse::ui;
@@ -504,7 +530,8 @@ int wmain(int argc, wchar_t** argv) {
         pulse::ui::Compositor compositor;
         Check(owner && compositor.Init(owner), "initialize isolated production compositor");
         if (!failures) {
-            if (argc == 3 && wcscmp(argv[1], L"--toast-animation") == 0) RunToastAnimation(owner, compositor, argv[2]);
+            if (argc == 3 && wcscmp(argv[1], L"--oversized-only") == 0) RunOversizedMenus(owner, compositor, argv[2]);
+            else if (argc == 3 && wcscmp(argv[1], L"--toast-animation") == 0) RunToastAnimation(owner, compositor, argv[2]);
             else if (argc == 3 && wcscmp(argv[1], L"--device-menus") == 0) RunDeviceMenus(owner, compositor, argv[2]);
             else if (argc == 3 && wcscmp(argv[1], L"--open-with") == 0) RunOpenWith(owner, compositor, argv[2]);
             else if (argc == 3 && wcscmp(argv[1], L"--run-as") == 0) {

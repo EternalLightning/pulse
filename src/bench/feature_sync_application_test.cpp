@@ -19,14 +19,19 @@
 #include "settings_input_cases.h"
 #include "cloud_columns_cases.h"
 #include "cloud_sidebar_cases.h"
+#include "native_material_layer_cases.h"
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "--native-material-layers-only")
+        return RunNativeMaterialLayerCases();
     if (argc > 1 && std::string_view(argv[1]) == "--settings-input-only")
         return RunSettingsInputCases();
     if (argc > 1 && std::string_view(argv[1]) == "--settings-transfer-only")
         return RunSettingsPageCases(true);
     if (argc > 1 && std::string_view(argv[1]) == "--settings-page-only")
         return RunSettingsPageCases();
+    if (argc > 1 && std::string_view(argv[1]) == "--window-effect-preview-only")
+        return RunSettingsPageCases(false, true);
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-sidebar-only")
         return RunCloudSidebarCases();
     if (argc > 1 && std::string_view(argv[1]) == "--cloud-columns-only")

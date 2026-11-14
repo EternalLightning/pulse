@@ -242,12 +242,11 @@ inline D2D1_RECT_F CtxLayerCaptionBounds(const D2D1_RECT_F& local, const D2D1_RE
 }
 
 inline float LayoutCtxLayerCards(D2D1_RECT_F& local, D2D1_RECT_F& system, float left, float right, float y,
-                                 const fluent::Painter* painter, float s, bool fill_width = false) {
+                                 const fluent::Painter* painter, float s) {
     const float width = (std::max)(1.0f, right - left);
     const float local_w = painter ? painter->MeasureButtonWidth(sysctx_text::LocalTitle()) : 170 * s;
     const float system_w = painter ? painter->MeasureButtonWidth(sysctx_text::SystemTitle()) : 170 * s;
-    const float factor = fill_width ? width / (local_w + system_w)
-                                    : (std::min)(1.0f, width / (local_w + system_w));
+    const float factor = (std::min)(1.0f, width / (local_w + system_w));
     const float start = right - (local_w + system_w) * factor;
     local = D2D1::RectF(start, y, start + local_w * factor, y + 36 * s);
     system = D2D1::RectF(local.right, y, local.right + system_w * factor, local.bottom);

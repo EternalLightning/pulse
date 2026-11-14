@@ -79,7 +79,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     // and splitter. File-pane opacity must not fade these controls.
     const float cardRadius = theme.radius_control * s;
     // Match the file pane's reading surface without fading the panel contents.
-    const D2D1_COLOR_F panel_fill = vm.dark && !IsHighContrast()
+    const D2D1_COLOR_F panel_fill = UsesNativeMica(vm) ? NativeMicaPaneFill(vm) : vm.dark && !IsHighContrast()
         ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
         : WithAlpha(theme.surface_card, card_alpha_);
     MakeBrush(dc, panel_fill, brFillHover_);

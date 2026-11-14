@@ -159,7 +159,7 @@ inline float LayoutSettingsPulseMenu(SettingsLayout& l, const WindowViewModel& v
         l.ctx_error = D2D1::RectF(left, y, right, y + error_h);
         y += error_h + 12 * s;
     }
-    y = LayoutCtxLayerCards(l.ctx_layer[0], l.ctx_layer[1], choices_left, body_right, y, painter, s, true);
+    y = LayoutCtxLayerCards(l.ctx_layer[0], l.ctx_layer[1], left, right, y, painter, s);
 
     const float top = y;
     const float restore_w = std::min(available * 0.42f, text_width(l10n::Get(I::RestoreDefaults)) - 8 * s);

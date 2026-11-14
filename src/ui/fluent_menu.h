@@ -295,6 +295,7 @@ private:
     HWND tooltip_ = nullptr;
     std::wstring tooltip_text_;
     bool open_ = false;
+    bool opening_left_button_down_ = false;
     bool animating_out_ = false;
     bool retract_on_dismiss_ = false;
     int result_ = 0;

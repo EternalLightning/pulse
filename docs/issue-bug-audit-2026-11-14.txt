@@ -1,0 +1,94 @@
+Pulse 上游 #617–#631 issue 核查与修复记录（2026-11-14）
+
+范围：初次GitHub API读取#617–#630的14条issue及全部现有评论；末尾复核发现新增#631，已读取并纳入，共15条。#632/#633页面返回404。API末次复核触发限流，改从具体GitHub issue页面确认新增项，不把缓存过旧的列表当作最新证据。
+原始资料：bench_data/issue-review-2026-11-14/issues.json（617–630），620.gif及选帧（仅用于读取录屏）。#631：https://github.com/jimmgreen/pulse/issues/631。
+
+本轮生产修复4项：
+- #617 反向编辑选区的键盘活动端交接。
+- #619 过高命令菜单覆盖触发按钮并误执行。
+- #622 分栏拖放误用最深目录作为祖先列目标。
+- #623 点击祖先列后横向位置跳变。
+
+原有17个已修改文件及原有未跟踪文件保留。改动前基线存于bench_data/issue-review-2026-11-14/baseline及baseline.diff。没有提交、推送、打包或替换安装版；不改用户偏好、真实剪贴板、浏览器、系统关联或实际安装软件。
+
+实际验证：
+1. cmake --build build-release --target pulse -j 8：通过，Release，PULSE_WITH_SELFTEST=OFF。
+2. pulse_child_edit_test --selection-motion：611 PASS/0 FAIL。新增#617断言在修复前4项失败；保留断言并修正生产选择交接后全部通过。
+3. pulse_context_menu_loading_test --oversized-only <输出目录>：45 PASS/0 FAIL，覆盖末项可达、225%及深浅主题、同一手势松键和正常点击。
+4. pulse_column_strip_test：85 PASS/0 FAIL，列布局和DPI/宽度几何。
+5. column_navigation_fixture_test：84 PASS/0 FAIL，链接本轮生产对象，真实命中/导航/拖放目标与异步结果；导出8张前后图，已查看宽/窄、150%/100%场景。
+6. column_navigation_fixture_test --scroll-only：19 PASS/0 FAIL，从build-release运行。首次在仓库根目录直接运行曾无输出并以0xC0000409退出；随后按既有fixture脚本的build目录运行通过。未推断首次退出根因，不把它描述成产品问题已修。
+7. entry_order_application_fixture_test --created-only：53项通过，链接本轮生产对象；不启动实际watch/搜索/服务。
+8. pulse_context_menu_loading_test --sevenzip-policy-only：10 PASS/0 FAIL，纯偏好/策略范围，不代替#620系统全局开关现场。
+9. pulse_shell_launch_regression_test --user-launch-only：15 PASS/0 FAIL；普通Execute/Command显示参数和740/runas/取消，API拦截无真实安装。
+10. pulse_context_session_test <pulse_context_worker_fixture.exe绝对路径> --modeless-only：正常权限3 PASS/0 FAIL；沙箱内fixture启动失败，日志分别保留。
+11. pulse_virtual_clipboard_test：正常权限14 PASS/0 FAIL；沙箱内1项Shell移动失败，同一自有夹具正常权限通过。未操作真实剪贴板。
+12. pulse_shell_icons_test --custom-folders：未通过。沙箱内Shell IPC出现0x80070005；正常权限下IPC和四档像素一致，但Windows原生自定义图标前提仍失败（native=generic=3）。该失败保留，#627不记为通过或已修。
+13. git diff --check：通过。
+
+测试实施中的修正：
+- build-release未配置完整architecture目标，直接构建pulse_pane_animation_application_test返回unknown target。改用已有test_integration_fixture.ps1链接生产对象的窄wrapper，不为此启用/运行全架构测试。
+- 初版分栏夹具只修改compositor尺寸，Render会按真实HWND还原，造成后续DPI/宽度变体失败。已同步真实窗口物理尺寸；保持全部断言并记录buffer/anchor/rect后84项通过。
+- 分栏截图明确清除停止I/O worker带来的模拟错误banner，并等待过渡结束，再进行静态布局检查；未将模拟错误画面当作最终界面。
+- desktop.ini样本按微软文档使用Unicode，未移除Windows必须先识别自定义图标的前提断言。文档：https://learn.microsoft.com/en-us/windows/win32/shell/how-to-customize-folders-with-desktop-ini。
+
+逐条结论：
+#617 [Bug] 多行文件名重命名：选中按左，扩选变减选
+https://github.com/jimmgreen/pulse/issues/617
+已修。原生EDIT会丢失反向EM_SETSEL选区的活动端；LumaText现在让原生控件从真实caret执行Shift+Left/Right/Home/End，再恢复原anchor，保留原生单词/Unicode导航。新增Shift+Up后继续Shift+Left的精确回归。当前生产重命名overlay是单行，多行问题复现在共享编辑器路径，单行鼠标反向选择也复用同一修复。
+
+#618 [Bug] 右鍵調用OpenHashTab失敗
+https://github.com/jimmgreen/pulse/issues/618
+当前已有对应处理：InvokeCommand返回后，隔离进程为仍可见的modeless窗口保留STA；UI调用后先清token，避免Close杀掉正在使用的会话。定向合成生命周期3项通过；未实际运行OpenHashTab/原Windows10环境，不称上游现场已修。
+
+#619 [BUG] 工具栏「⋯ 更多操作」菜单过高时被上抬、盖住按钮，一次点击即执行条目
+https://github.com/jimmgreen/pulse/issues/619
+已修。普通命令菜单按锚点下方空间限高并启用滚动；不足一行时仍在工作区内回退。菜单记录打开时左键是否按下，吞掉落入菜单的同一手势松键，下一次完整点击仍执行；键盘打开的首次点击也执行。225%及其他DPI、深浅主题、工作区底部、末项可达、模拟点击共45项通过。
+
+#620 [bug] 部分右键菜单项关不掉
+https://github.com/jimmgreen/pulse/issues/620
+未确认。已查看217帧GIF的起始、中间与结束画面，涉及系统扩展开关、管理员应用队列和Pulse内隐藏。当前显式7-Zip/慢扩展禁用及偏好往返10项通过；这不是原云盘/全局注册表开关的现场验收。缺相同扩展注册项、应用结果及错误日志，不擅改真实注册表。
+
+#621 【BUG】新建文件夹后排序不能自动生效，需要手动刷新才生效
+https://github.com/jimmgreen/pulse/issues/621
+本地已有排序投影。新建选择/通知刷新都使用已排序快照；created-only覆盖名称/大小/类型/时间、升降序、目录优先、异步结果及窄窗。53项通过，未复现空正文报告中的当前bug，未新增生产改动。
+
+#622 【BUG】分栏视图下的文件移动问题
+https://github.com/jimmgreen/pulse/issues/622
+已修。ColumnStripRow/Blank现在按该列解析目录，文件行落入其所在列，目录行落入目标目录；divider/滚动条/无效列不再回落最深目录。测试使用真实HitTest→ResolveDropTarget，覆盖copy/move、祖先空白和child目标，不操作用户文件。
+
+#623 【BUG】分栏视图下的多层级浏览跳变问题
+https://github.com/jimmgreen/pulse/issues/623
+已修。点击祖先目录直接进入所选分支，保留被点列的pane相对DIP锚、列宽和垂直滚动，移除放弃分支。异步/取消/过期/child出现不移动锚点。极窄窗口仍以主列表最小宽度为约束，必要时夹紧。几何85项、真实导航与拖放84项、直接依赖滚动19项通过，并检查100%/150%、760/1200 DIP前后截图。
+
+#624 [BUG] 对文件夹重命名-复制该名称-新建文件夹并以粘贴形式重命名该文件夹时异常
+https://github.com/jimmgreen/pulse/issues/624
+未复现。当前消息循环无全局accelerator抢Ctrl+C/V，RenameEditProc只接管Enter/Esc/失焦，复制粘贴交原生EDIT。没有调用用户剪贴板或创建其文件副本来试验；缺具体原版本/输入后端状态，未据GIF标题臆改文件复制流程。
+
+#625 [Bug]无法打开需二次确认的软件安装包
+https://github.com/jimmgreen/pulse/issues/625
+未确认。当前已处理740→runas、拒绝/取消和错误返回，用户启动组15项通过。原文没有安装包、返回码，无法区分UAC与SmartScreen；不执行实际安装或绕过安全确认。
+
+#626 【建议】关于顶部多行工具栏的几个建议
+https://github.com/jimmgreen/pulse/issues/626
+纯界面/快捷键建议，本轮不实现。
+
+#627 文件夹自定义图标（desktop.ini / IconResource）未被渲染，建议支持封面缩略图
+https://github.com/jimmgreen/pulse/issues/627
+未确认，测试有明确限制。当前网格目录预览已用IShellItemImageFactory ICONONLY，图标回退用真实路径，非云目录不加USEFILEATTRIBUTES。新增隔离ICO+Unicode desktop.ini样本；本机Windows原生查询仍给native=3/generic=3，自定义图标前提断言失败。正常权限下生产工作进程与Windows全部四档像素一致。保留失败，不把通用图标一致冒充自定义图标成功。未推断Windows未识别此样本的原因。
+
+#628 Windows stay hidden when Pulse launches Electron/Chromium apps via --shell-open
+https://github.com/jimmgreen/pulse/issues/628
+本地无上游--shell-open入口；Execute/Command/runas均SW_SHOWNORMAL。API拦截确认普通EXE、命令及安装包相关启动显示参数，15项用户启动检查通过；未实际运行报告者Electron应用。
+
+#629 psd缩略图超限制，无法显示，自己用大肥鱼修复，以下是过程。
+https://github.com/jimmgreen/pulse/issues/629
+报告所指模块不适用本分支。decode_memory_budget.h、decode_budget.h、preview_decoders.cpp、psd_raster.cpp均不存在；没有套用192MiB预算或抬高全局限制。未取得大PSD和第三方codec，不对本分支PSD支持范围作新承诺。
+
+#630 [Bug] Chrome 网页图片无法拖放到 Pulse，但 Windows Explorer 和 Zen 正常
+https://github.com/jimmgreen/pulse/issues/630
+当前已有FileGroupDescriptorW/FileContents虚拟文件、跨STA物化及终态等待支持。14项直接相关独立测试在正常权限下通过，含实际虚拟文件创建、取消、坏描述符和copy/move效果；不修改真实剪贴板。未在用户Chrome/Pinterest环境捕获真实IDataObject，因此不称浏览器现场已验收。
+
+#631 [建议]添加wsl虚拟机
+https://github.com/jimmgreen/pulse/issues/631
+新增WSL目录入口建议，已读正文“在分盘中加入wsl的目录”，无故障内容，本轮不实现。

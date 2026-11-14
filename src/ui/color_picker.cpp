@@ -576,6 +576,36 @@ int HitTest(const State& s, float x, float y) {
     return kPartNone;
 }
 
+void PaintEditValues(State& s) {
+    const auto old = SelectObject(s.mem_dc, s.dib);
+    const auto fg = IsHighContrast() ? s.theme.text : s.dark
+        ? D2D1::ColorF(1, 1, 1) : D2D1::ColorF(32.0f / 255, 32.0f / 255, 32.0f / 255);
+    const auto bg = IsHighContrast() ? s.theme.fill_input : s.dark
+        ? D2D1::ColorF(45.0f / 255, 45.0f / 255, 45.0f / 255) : D2D1::ColorF(1, 1, 1);
+    for (HWND edit : s.edits) {
+        if (!edit) continue;
+        RECT rect{};
+        GetWindowRect(edit, &rect);
+        MapWindowPoints(nullptr, s.hwnd, reinterpret_cast<POINT*>(&rect), 2);
+        if (rect.right <= rect.left || rect.bottom <= rect.top) continue;
+        const int saved = SaveDC(s.mem_dc);
+        SetViewportOrgEx(s.mem_dc, rect.left, rect.top, nullptr);
+        IntersectClipRect(s.mem_dc, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
+        if (!SynchronizeChildEditBackend(*s.compositor, edit) ||
+            !s.compositor->PaintLumaEdit(edit, s.mem_dc, s.body_format.get(), fg, bg)) {
+            SendMessageW(edit, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(s.mem_dc), PRF_CLIENT);
+            GdiFlush();
+        }
+        RestoreDC(s.mem_dc, saved);
+        // GDI's native fallback does not preserve the alpha channel of the DIB.
+        for (int y = rect.top; y < rect.bottom; ++y) {
+            auto* row = static_cast<BYTE*>(s.bits) + static_cast<size_t>(y) * s.win_w * 4;
+            for (int x = rect.left; x < rect.right; ++x) row[x * 4 + 3] = 255;
+        }
+    }
+    SelectObject(s.mem_dc, old);
+}
+
 bool Render(State& s) {
     ID2D1DeviceContext* dc = s.compositor ? s.compositor->Dc() : nullptr;
     if (!dc || s.win_w <= 0 || s.win_h <= 0) return false;
@@ -678,8 +708,7 @@ bool Render(State& s) {
                             s.icon_format.get(), s.theme.text_secondary, fluent::HorizontalAlignment::Center);
     }
 
-    // Hex + channel fields: D2D draws frame and value text; once the native
-    // edits appear they cover exactly the text line with a matching solid bg.
+    // During entrance, the editor renderer below replaces these fallback values.
     auto draw_field = [&](const D2D1_RECT_F& rc, const std::wstring& text, int edit_index) {
         DrawPopupField(s, dc, rc, s.focus_edit == edit_index, false);
         const float pad = Px(s, 12.0f);
@@ -803,6 +832,8 @@ bool Render(State& s) {
                     static_cast<size_t>(s.win_w) * 4);
     }
     cpu->Unmap();
+    // Keep the same editor glyphs and pixel origin throughout the entrance.
+    if (!s.edits_shown) PaintEditValues(s);
     return true;
 }
 
@@ -832,6 +863,7 @@ void HidePicker(State& s) {
     KillTimer(s.hwnd, 1);
     s.done = true;
     const BYTE from = s.present_alpha;
+    if (s.dib) PaintEditValues(s);
     s.edits_shown = false;
     for (HWND edit : s.edits) if (edit) ShowWindow(edit, SW_HIDE);
     BOOL animate = TRUE;
@@ -1070,11 +1102,20 @@ LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (!s) return DefWindowProcW(hwnd, msg, wp, lp);
     switch (msg) {
 #ifdef PULSE_UI_TEST_HOOKS
+    case WM_APP + 0x2BE:
+        if (wp) ShowEdits(*s);
+        else {
+            s->edits_shown = false;
+            for (HWND edit : s->edits) if (edit) ShowWindow(edit, SW_HIDE);
+            if (Render(*s)) Present(*s, 255, 0);
+        }
+        return 1;
     case WM_APP + 0x2BD:
         return static_cast<LRESULT>(s->present_alpha) + 1;
     case WM_APP + 0x2B5:
-        return lp && Render(*s) && SavePng(reinterpret_cast<const wchar_t*>(lp),
-            s->win_w, s->win_h, s->bits);
+        if (!lp || !Render(*s)) return false;
+        PaintEditValues(*s);
+        return SavePng(reinterpret_cast<const wchar_t*>(lp), s->win_w, s->win_h, s->bits);
     case WM_APP + 0x2BC:
         return s->hsv_mode ? 1 : 0;
 #endif
@@ -1382,6 +1423,7 @@ bool ColorPickerPopup::Pick(HWND owner, Compositor* compositor, FluentMenu* menu
     CreateBrushes(s);
     CreateEdits(s);
     SyncEdits(s, -1);
+    PlaceEdits(s);
 
     // Advance the entrance through the same message loop that handles cancellation.
     if (Render(s)) {

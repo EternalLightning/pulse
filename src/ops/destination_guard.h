@@ -508,10 +508,28 @@ private:
             owned.reset(handle);
         }
         FILE_ATTRIBUTE_TAG_INFO attributes{};
-        if (!ReadFileIdentity(handle, result.id, identity_query_) ||
-            !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes, sizeof(attributes))) {
+        if (!ReadFileIdentity(handle, result.id, identity_query_)) {
             result.error_code = GetLastError();
             return false;
+        }
+        if (!identity_query_(handle, FileAttributeTagInfo, &attributes, sizeof(attributes))) {
+            const DWORD code = GetLastError();
+            if (code != ERROR_INVALID_PARAMETER && code != ERROR_NOT_SUPPORTED &&
+                code != ERROR_INVALID_FUNCTION && code != ERROR_CALL_NOT_IMPLEMENTED) {
+                result.error_code = code;
+                return false;
+            }
+            BY_HANDLE_FILE_INFORMATION legacy{};
+            if (!GetFileInformationByHandle(handle, &legacy)) {
+                result.error_code = GetLastError();
+                return false;
+            }
+            // FAT/exFAT lack this query; never guess the tag of a reparse point.
+            if (legacy.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                result.error_code = ERROR_NOT_SUPPORTED;
+                return false;
+            }
+            attributes.FileAttributes = legacy.dwFileAttributes;
         }
         result.exists = true;
         result.directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;

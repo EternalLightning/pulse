@@ -115,3 +115,58 @@ pulse_audit_ui_remaining_test --color-picker-only：108 PASS / 0 FAIL；含原�
 动态图采样使用当前系统动画配置；未修改系统动画或主题设置。缩减动效/高对比环境会明确跳过中间动画帧要求。
 图库、像素采样对比及原始日志：bench_data/picker-exit-icons-2026-11-14/；浅深色图标和对比图已实际打开检查。
 设置主题色图库的四张浮层预览再次同步更新，旧图保留在该目录 baseline/。保留已有未提交修改，未提交或替换安装版。
+
+后续（2026-11-14）：选色器入场文字位移与窗口效果示意
+入场期间原本用 Painter 绘制数值，动画结束显示 EDIT 后改由编辑器绘制；两者内边距与基线不同。
+置顶隔离窗口的真实桌面截图已复现：RGB 数值约右移 2 像素、上移 1 像素，五个数值字段检查均失败。
+修复为预先布局 EDIT，在入场位图中使用同一编辑器渲染及实际控件坐标；退出隐藏 EDIT 前也更新保留位图。
+只在入场/退出合成编辑器像素，正常滑动交互不增加五个输入框的逐帧读回。原生 GDI 回退补齐位图 alpha。
+新增实际桌面切换前后字形边界检查，并确认采样包含真实选色器；使用置顶隔离窗口防止被其他应用遮挡。
+pulse_audit_ui_remaining_test --color-picker-only 最终 157 PASS / 0 FAIL：亮暗主题、100%/125%/150% 缩放、
+原生 EDIT 回退下的五个字段切换前后位置一致；原有 RGB/HSV、焦点遍历、取消与退出透明度/角落颜色检查通过。
+最初未置顶的屏幕采样被其他桌面窗口遮挡，保留失败日志，不作为产品缺陷或视觉通过证据；有效基线为 before-topmost.log。
+
+窗口效果原生 DWM 映射已按 Microsoft 文档核对：Acrylic=TRANSIENTWINDOW、Mica=MAINWINDOW、Mica Alt=TABBEDWINDOW。
+原示意图把 Mica Alt 画成透明、Acrylic 没有柔和背景颜色过渡；改为统一壁纸的静态示意，Mica/Alt 采用不透明壁纸取色，Alt 更强。
+真实 DWM 映射、主窗图层和自选背景图片采样配方未改；自选图片仍按既有设计替代原生桌面背景采样。
+pulse_feature_sync_application_test --window-effect-preview-only 最终 600 PASS / 0 FAIL，24 张静态示意截图；
+覆盖中英文、亮暗、100%/150%、620/1100/1600 宽和两种侧栏宽度，并检查效果卡完整可见、四项命中映射。
+新筛选初次错选页号导致 96 个命中断言失败，已修正为外观页 0、保留断言与失败记录；受限进程 0xC0000142 经同命令授权运行排除。
+最终截图已查看，未见文字或图示裁切重叠。静态示意截图不证明原生 DWM 在系统透明度、焦点或回退条件下的实际视觉效果。
+
+仅构建 pulse、pulse_audit_ui_remaining_test、pulse_feature_sync_application_test；最终构建通过，无新增 C++ warning/error。
+git diff --check 通过，PULSE_WITH_SELFTEST 与 PULSE_BUILD_ARCHITECTURE_FIXTURES 仍为 OFF。
+证据与对比图：bench_data/picker-handoff-2026-11-14/；效果预览原图：.tmp/settings-page/。
+本次开始时工作区干净；未提交、推送、打包或替换安装版，也未修改用户偏好或系统设置。
+
+后续（2026-11-14）：移除原生材质重复整窗暗层并实拍
+仅在 backdrop_enabled 且无自选背景图时，把原生 DWM 背景视为已就绪底层，取消 ComputeLayerAlphas 产生的整窗 title 色层。
+保留原有 sheet、文件面板和详情阅读层；自选图加载等待/失败、系统材质不可用时保持原来的覆盖逻辑。
+新增 --native-material-layers-only 定向入口，读取实际 MainRenderer 渲染像素的 alpha，覆盖三种材质、亮暗主题与上述回退状态。
+修复前 54 PASS / 12 FAIL；修复后 66 PASS / 0 FAIL，没有删除或放宽原失败断言。
+仅构建 pulse、pulse_feature_sync_application_test，构建通过，无新增 C++ warning/error。
+真实主窗深色实拍：Acrylic、Mica、Mica Alt，均为前台激活状态，DWM 类型分别为 3/2/4，使用无自选背景的隔离配置。
+测试窗口放在左上角 (40,40)，普通窗口不置顶；启动前隐藏背景，截图后立即收起，每个隔离进程已等待退出。
+首组右下角截图被桌面挂件遮挡，另存 first-capture-pet-occluded；最终左上角截图通过九点窗口归属检查，并已逐张打开核对。
+亚克力透底更明显，Mica/Alt 仍是本机当前深色原生取色；本次没有改系统材质配方，也未人为统一两者亮度。
+文件面板理论原生材质贡献从 12.033% 增至 42.975%，该系数不等同于屏幕整体亮度增加。
+日志、原始截图与回归基线：bench_data/native-material-scrim-fix-2026-11-14/。
+保留任务开始前已有六个未提交文件，未提交、推送、打包或替换安装版。
+
+后续（2026-11-14）：依据微软资源修正 Mica 阅读层
+查阅 Microsoft Learn 的 Mica 设计、Win32 应用和 DWM 类型文档，并查看微软官方深色及标签栏示例图。
+独立无应用叠层 Win32 窗口的真实桌面截图显示：原生 Mica 是低饱和蓝灰、Alt 是深蓝黑；浅色也正常。
+系统高对比=false、节能=false、交流电供电；本机底层材质正常，不能把颜色较淡直接当作 Mica 未启用。
+确认剩余问题：应用给 Mica/Alt 共用 55% #202020 深色 sheet，与微软各自的阅读层资源不符；浅色活动标签另强制不透明白。
+仅原生 Mica/Alt 且无自选图时改用 WinUI 资源：Mica sheet 为深色 #4C3A3A3A / 浅色 #80FFFFFF；
+Alt 命令层为深色 #733A3A3A / 浅色 #B3FFFFFF，文件、详情、设置内容层再使用普通 LayerFillColorDefault。
+Mica 本身 sheet 已含内容层，pane 保留薄白色分隔层；浅色 pane 同样避免再次叠厚色。活动标签与 sheet 共用同一 fill。
+Acrylic、自选图片、无材质和加载失败分支保留原逻辑；未更改系统原生材质配方或映射。
+资源依据：https://github.com/microsoft/microsoft-ui-xaml/blob/8463f45162149de0ec3ad7df752596893fe3e13e/controls/dev/CommonStyles/Common_themeresources_any.xaml
+设计依据：https://learn.microsoft.com/en-us/windows/apps/design/style/mica
+新增真实渲染像素的颜色/alpha、Mica与Alt内容层、活动标签与工具栏衔接检查；修复前 63 PASS / 11 FAIL，修复后含新增衔接检查为 78 PASS / 0 FAIL。
+只构建 pulse、pulse_feature_sync_application_test，构建通过，无新增 C++ warning/error，git diff --check 通过。
+实际运行隔离主窗，拍摄亮暗的 Mica、Alt，并保留 None/Acrylic 对照，共 8 张；窗口均在左上角、非置顶、确认前台激活且九点采样未遮挡。
+微软示例图、独立原生窗口对照、主窗实拍和日志均在 bench_data/mica-investigation-2026-11-14/；已查看四张 Mica/Alt 亮暗主窗实拍。
+本轮捕获曾停在 Windows“打开文件—安全警告”，当时测试背景保持隐藏；未自动操作该确认框，也未修改系统安全设置。确认解除后捕获正常完成。
+所有测试窗口已关闭，保留已有修改，未提交、推送或替换安装版。

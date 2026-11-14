@@ -9,6 +9,7 @@
 #include "../app/places.h"
 #include "../app/details_attribute_toggle.h"
 #include "../common/localization.h"
+#include "../common/drive_display_name.h"
 #include "../ipc/shell_query_client.h"
 #include <shlobj.h>
 #include <aclapi.h>
@@ -23,14 +24,17 @@ std::atomic<DWORD> volume_thread{0};
 std::atomic<int> volume_calls{0};
 HANDLE entered[2]{};
 HANDLE release_query[2]{};
+bool include_network_drive = false;
+HANDLE network_entered = nullptr;
+HANDLE release_network = nullptr;
 
 void Check(bool passed, const char* message) {
     std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", message);
     failures += !passed;
 }
 
-DWORD WINAPI TestLogicalDrives() { return 1u << 2; }
-UINT WINAPI TestDriveType(LPCWSTR) { return DRIVE_FIXED; }
+DWORD WINAPI TestLogicalDrives() { return (1u << 2) | (include_network_drive ? 1u << 25 : 0); }
+UINT WINAPI TestDriveType(LPCWSTR root) { return root[0] == L'Z' ? DRIVE_REMOTE : DRIVE_FIXED; }
 HRESULT WINAPI TestKnownFolder(REFKNOWNFOLDERID, DWORD, HANDLE, PWSTR* path) {
     *path = nullptr;
     return E_FAIL;
@@ -46,11 +50,20 @@ BOOL WINAPI TestVolumeInfo(LPCWSTR, LPWSTR label, DWORD count, LPDWORD,
     wcsncpy_s(label, count, call == 0 ? L"old" : L"new", _TRUNCATE);
     return TRUE;
 }
-BOOL WINAPI TestDiskSpace(LPCWSTR, PULARGE_INTEGER available,
+BOOL WINAPI TestDiskSpace(LPCWSTR root, PULARGE_INTEGER available,
                          PULARGE_INTEGER total, PULARGE_INTEGER free) {
+    if (root[0] == L'Z') return FALSE;
     available->QuadPart = free->QuadPart = 50;
     total->QuadPart = 1000;
     return TRUE;
+}
+}
+
+namespace pulse::path {
+std::optional<std::wstring> TestMappedDriveLabel(const std::wstring&) {
+    SetEvent(network_entered);
+    WaitForSingleObject(release_network, 5000);
+    return L"network";
 }
 }
 
@@ -61,18 +74,22 @@ BOOL WINAPI TestDiskSpace(LPCWSTR, PULARGE_INTEGER available,
 #define SHGetKnownFolderPath TestKnownFolder
 #define GetVolumeInformationW TestVolumeInfo
 #define GetDiskFreeSpaceExW TestDiskSpace
+#define ReadMappedDriveLabel TestMappedDriveLabel
 #include "../app/home_catalog.cpp"
 #undef GetLogicalDrives
 #undef GetDriveTypeW
 #undef SHGetKnownFolderPath
 #undef GetVolumeInformationW
 #undef GetDiskFreeSpaceExW
+#undef ReadMappedDriveLabel
 
 namespace pulse::l10n {
 const std::wstring& Get(StringId id) {
     static const std::wstring capacity = L"%s / %s";
+    static const std::wstring loading = L"loading";
     static const std::wstring text = L"fixture";
-    return id == StringId::HomeDriveSpaceFormat ? capacity : text;
+    if (id == StringId::HomeDriveSpaceFormat) return capacity;
+    return id == StringId::HomeLoading ? loading : text;
 }
 }
 namespace pulse::ipc {
@@ -162,6 +179,54 @@ void CatalogChecks() {
     }
 }
 
+void NetworkCatalogChecks() {
+    using namespace pulse;
+    include_network_drive = true;
+    network_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    release_network = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    app::HomeCatalog catalog;
+    catalog.Refresh();
+    Check(WaitForSingleObject(network_entered, 3000) == WAIT_OBJECT_0,
+        "mapped drive query blocks after local metadata is published");
+    const auto make_sidebar = [] {
+        app::SidebarModel sidebar;
+        for (const auto* root : {L"\\\\?\\C:\\", L"\\\\?\\Z:\\"}) {
+            app::SidebarEntry drive;
+            drive.path = root;
+            drive.detail = l10n::Get(l10n::StringId::HomeLoading);
+            sidebar.drives.push_back(std::move(drive));
+        }
+        return sidebar;
+    };
+    auto sidebar = make_sidebar();
+    catalog.FillDriveLabels(sidebar);
+    Check(sidebar.drives[0].used_ratio > 0.94f &&
+        sidebar.drives[1].detail == l10n::Get(l10n::StringId::HomeLoading),
+        "only the blocked mapped drive shows loading on initial publication");
+    catalog.Refresh();
+    sidebar = make_sidebar();
+    catalog.FillDriveLabels(sidebar);
+    ui::PaneViewModel pane;
+    pane.is_home = true;
+    catalog.Fill(pane);
+    Check(catalog.Loading() && pane.home_loading &&
+        sidebar.drives[0].used_ratio > 0.94f && sidebar.drives[0].danger &&
+        sidebar.drives[0].detail != l10n::Get(l10n::StringId::HomeLoading) &&
+        sidebar.drives[1].detail == l10n::Get(l10n::StringId::HomeLoading),
+        "refresh during blocked network I/O retains local sidebar capacity and warning");
+    SetEvent(release_network);
+    const auto deadline = GetTickCount64() + 3000;
+    while (catalog.Loading() && GetTickCount64() < deadline) Sleep(1);
+    catalog.FillDriveLabels(sidebar);
+    Check(!catalog.Loading() && sidebar.drives[0].used_ratio > 0.94f &&
+        sidebar.drives[1].detail == l10n::Get(l10n::StringId::HomeCapacityUnavailable) &&
+        sidebar.drives[1].used_ratio < 0.0f,
+        "unavailable network capacity leaves the resolved local drive intact");
+    CloseHandle(network_entered);
+    CloseHandle(release_network);
+    include_network_drive = false;
+}
+
 void AttributeChecks(const std::wstring& root) {
     using pulse::app::ToggleDetailsAttribute;
     Check(CreateDirectoryW(root.c_str(), nullptr) != FALSE, "IP01 create isolated attribute fixture");
@@ -238,6 +303,7 @@ int wmain(int argc, wchar_t** argv) {
     main_thread = GetCurrentThreadId();
     DriveChangeChecks();
     CatalogChecks();
+    NetworkCatalogChecks();
     if (wcscmp(argv[1], L"--drives-only") != 0) AttributeChecks(argv[1]);
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;

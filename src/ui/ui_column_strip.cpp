@@ -54,7 +54,7 @@ ColumnStripLayout MainRenderer::ColumnStripGeometry(const PaneViewModel& vm,
     }
     return LayoutColumnStrip(pane_bounds, pane_bounds.top + pane_header_height_,
                              cs.ancestors.size(), cs.has_child, cs.widths_dip, scale_,
-                             cs.scroll_from_right_dip);
+                             cs.scroll_from_right_dip, cs.ancestor_anchor_left_dip);
 }
 
 D2D1_RECT_F MainRenderer::PaneBodyBounds(const PaneViewModel& vm,

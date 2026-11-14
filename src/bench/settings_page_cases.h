@@ -5,7 +5,7 @@
 #include "../ui/toolbar_layout.h"
 #include "../ui/home_layout.h"
 
-int RunSettingsPageCases(bool transfer_only = false) {
+int RunSettingsPageCases(bool transfer_only = false, bool appearance_only = false) {
     using namespace pulse;
     using H = ui::HitTestResult;
     if (FAILED(OleInitialize(nullptr))) return 2;
@@ -61,6 +61,7 @@ int RunSettingsPageCases(bool transfer_only = false) {
         };
         for (int page : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}) {
             if (transfer_only && page != 8) continue;
+            if (appearance_only && page != 0) continue;
             vm.settings_transfer_status = l10n::Get(l10n::StringId::SettingsTransferDesc);
             vm.settings_page = page;
             vm.settings_scroll = 0;
@@ -182,6 +183,18 @@ int RunSettingsPageCases(bool transfer_only = false) {
             if (sidebar == 224) for (bool dark : {false, true}) {
                 vm.settings_scroll = page == 8 ? std::min(renderer.SettingsMaxScroll(vm, rect.right, rect.bottom),
                     std::max(0.0f, layout.transfer_card.top-layout.content.top-40*scale)) : 0;
+                if (appearance_only) {
+                    vm.settings_scroll = std::max(0.0f, layout.effect_card.top-layout.content.top-16*scale);
+                    const auto visible = ui::MakeSettingsLayout(vm, rect, scale, title, 28*scale, &painter, outer);
+                    check(visible.effect_card.top >= visible.content.top &&
+                        visible.effect_card.bottom <= visible.content.bottom,
+                        "the complete material illustration card is visible in its screenshot viewport");
+                    for (int i = 0; i < ui::kWindowEffectCount; ++i) {
+                        const auto effect_hit = hit(visible.effect_row[i]);
+                        check(effect_hit.region == H::SettingsEffect && effect_hit.index == i,
+                            "visible material illustrations retain their four effect hit targets");
+                    }
+                }
                 vm.dark = dark;
                 const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
                 auto* dc = compositor.Dc();
@@ -201,12 +214,12 @@ int RunSettingsPageCases(bool transfer_only = false) {
                 const auto filename = std::wstring(language)+L"-"+std::to_wstring(page)+L"-"+
                     std::to_wstring(static_cast<int>(width))+L"-"+std::to_wstring(static_cast<int>(scale*100))+
                     (dark ? L"-dark.png" : L"-light.png");
-                if (page == 3 || page == 7 || page == 8 || (width == 1100 && scale == 1))
+                if (appearance_only || page == 3 || page == 7 || page == 8 || (width == 1100 && scale == 1))
                     check(bench::SaveSnapshot(compositor, output/filename), "capture embedded settings for visual review");
             }
         }
     }
-    if (!transfer_only) {
+    if (!transfer_only && !appearance_only) {
         renderer.SetScale(1);
         renderer.SetSidebarWidthDip(224);
         compositor.RecreateTextFormats(1);

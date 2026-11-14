@@ -11,9 +11,11 @@
 #include "../ui/text_diff_window.h"
 #include "../ui/color_picker.h"
 #include "../ui/fluent_menu.h"
+#include "../ui/typography.h"
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
@@ -536,6 +538,95 @@ void CheckPickerExitSamples() {
     } else std::printf("[SKIP] intermediate exit frames: system motion disabled or high contrast enabled\n");
 }
 
+void SaveScreenBitmap(HBITMAP bitmap, const std::filesystem::path& path) {
+    Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+    Microsoft::WRL::ComPtr<IWICBitmap> source;
+    Microsoft::WRL::ComPtr<IWICStream> stream;
+    Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
+    Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
+    const bool saved = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateBitmapFromHBITMAP(bitmap, nullptr, WICBitmapIgnoreAlpha, &source)) &&
+        SUCCEEDED(factory->CreateStream(&stream)) &&
+        SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+        SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+        SUCCEEDED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+        SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr)) &&
+        SUCCEEDED(frame->WriteSource(source.Get(), nullptr)) && SUCCEEDED(frame->Commit()) &&
+        SUCCEEDED(encoder->Commit());
+    Check(saved, "actual picker handoff screen capture saved");
+}
+
+bool picker_handoff_only = false;
+bool picker_dark = false;
+bool picker_native = false;
+
+void CheckPickerHandoff(HWND picker) {
+    SetWindowPos(picker, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    RECT bounds{};
+    GetWindowRect(picker, &bounds);
+    const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+    const float scale = (width - 40) / 292.0f;
+    const auto px = [&](float value) { return 20 + static_cast<int>(std::lround(value * scale)); };
+    HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+    HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
+    const auto old = SelectObject(dc, bitmap);
+    std::vector<RECT> before;
+    for (int phase = 0; phase < 2; ++phase) {
+        SendMessageW(picker, WM_APP + 0x2BE, phase, 0);
+        RedrawWindow(picker, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+        Sleep(60);
+        DwmFlush();
+        BitBlt(dc, 0, 0, width, height, screen, bounds.left, bounds.top, SRCCOPY | CAPTUREBLT);
+        const auto field_background = GetPixel(dc, px(45), px(363));
+        const int expected_background = picker_dark ? 45 : 255;
+        const bool visible = std::abs(GetRValue(field_background) - expected_background) < 3 &&
+            std::abs(GetGValue(field_background) - expected_background) < 3 &&
+            std::abs(GetBValue(field_background) - expected_background) < 3;
+        Check(visible, "handoff capture contains the visible picker field rather than another window");
+        const auto name = std::wstring(picker_native ? L"handoff-native-" : L"handoff-") +
+            (picker_dark ? L"dark-" : L"light-") +
+            std::to_wstring(static_cast<int>(std::lround(scale * 100))) +
+            (phase ? L"-live.png" : L"-painted.png");
+        SaveScreenBitmap(bitmap, output / name);
+        // Native fields are hidden/shown exactly as at the entrance handoff.
+        // Compare actual screen glyph bounds rather than the EDIT's rectangle.
+        for (int field = 0; field < 5; ++field) {
+            const int left = px(field < 4 ? 48.0f : 120.0f);
+            const float row_top = field < 4 ? 360.0f + field * 46 : 314.0f;
+            const int top = px(row_top + 1), bottom = px(row_top + 34);
+            const int right = left + static_cast<int>(64 * scale);
+            RECT ink{right, bottom, left, top};
+            for (int y = top; y < bottom; ++y)
+                for (int x = left; x < right; ++x) {
+                    const auto pixel = GetPixel(dc, x, y);
+                    const bool text_pixel = picker_dark
+                        ? std::min({GetRValue(pixel), GetGValue(pixel), GetBValue(pixel)}) > 180
+                        : std::max({GetRValue(pixel), GetGValue(pixel), GetBValue(pixel)}) < 120;
+                    if (text_pixel) {
+                        ink.left = std::min(ink.left, static_cast<LONG>(x));
+                        ink.top = std::min(ink.top, static_cast<LONG>(y));
+                        ink.right = std::max(ink.right, static_cast<LONG>(x));
+                        ink.bottom = std::max(ink.bottom, static_cast<LONG>(y));
+                    }
+                }
+            if (!phase) before.push_back(ink);
+            else {
+                const auto& previous = before[field];
+                const bool stable = visible && ink.right >= ink.left && previous.right >= previous.left &&
+                    ink.left == previous.left && ink.top == previous.top &&
+                    ink.right == previous.right && ink.bottom == previous.bottom;
+                if (!stable) std::printf("[HANDOFF] field=%d before=%ld,%ld,%ld,%ld after=%ld,%ld,%ld,%ld\n",
+                    field, previous.left, previous.top, previous.right, previous.bottom,
+                    ink.left, ink.top, ink.right, ink.bottom);
+                Check(stable, "picker text keeps identical screen glyph bounds at entrance handoff");
+            }
+        }
+    }
+    SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc); ReleaseDC(nullptr, screen);
+}
+
 void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
     OwnedWindowSearch search{fixture_owner, L"PulseFluentColorPicker", GetCurrentProcessId(), GetCurrentThreadId()};
     EnumThreadWindows(search.thread_id, FindOwnedWindow, reinterpret_cast<LPARAM>(&search));
@@ -543,6 +634,17 @@ void CALLBACK DrivePicker(HWND, UINT, UINT_PTR timer, DWORD) {
     if (!MatchesOwnedWindow(picker, search)) return;
     KillTimer(nullptr, timer);
     SetFocus(picker);
+    if (picker_native) {
+        for (HWND edit = GetWindow(picker, GW_CHILD); edit; edit = GetWindow(edit, GW_HWNDNEXT)) {
+            SetPropW(edit, L"Pulse.NativeEditFallback", reinterpret_cast<HANDLE>(1));
+            SendMessageW(edit, pulse::ui::typography::TextBackendChangedMessage(), 0, 0);
+        }
+    }
+    CheckPickerHandoff(picker);
+    if (picker_handoff_only) {
+        SendMessageW(picker, WM_KEYDOWN, VK_ESCAPE, 0);
+        return;
+    }
     SendMessageW(picker, WM_KEYDOWN, VK_TAB, 0);
     Check(GetFocus() == picker, "Tab reaches the color mode control");
     Check(Snapshot(picker, L"color-mode-focus"), "color mode focus screenshot saved");
@@ -669,6 +771,22 @@ void PickerStyle(HWND owner) {
     CheckPickerExitSamples();
     KillTimer(nullptr, drive_timer);
     Check(!accepted && color == 0x3574BA, "keyboard Cancel preserves the original color");
+    picker_handoff_only = true;
+    for (const auto& sample : {std::pair{true, 1.0f}, std::pair{false, 1.25f}, std::pair{true, 1.5f}}) {
+        picker_dark = sample.first;
+        drive_timer = SetTimer(nullptr, 0, 350, DrivePicker);
+        const bool result = ui::ColorPickerPopup::Pick(owner, &compositor, nullptr, sample.second,
+            {100, 80}, color, picker_dark, color);
+        KillTimer(nullptr, drive_timer);
+        Check(!result && color == 0x3574BA, "theme/DPI handoff check preserves the canceled color");
+    }
+    picker_native = true;
+    picker_dark = true;
+    drive_timer = SetTimer(nullptr, 0, 350, DrivePicker);
+    const bool native_result = ui::ColorPickerPopup::Pick(owner, &compositor, nullptr, 1,
+        {100, 80}, color, picker_dark, color);
+    KillTimer(nullptr, drive_timer);
+    Check(!native_result && color == 0x3574BA, "native editor fallback handoff preserves the canceled color");
     compositor.Shutdown();
 }
 }
@@ -701,6 +819,8 @@ int wmain(int argc, wchar_t** argv) {
     fixture_owner = owner;
     ShowWindow(owner, SW_SHOW);
     if (color_picker_only) {
+        SetWindowPos(owner, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         PickerStyle(owner);
         DestroyWindow(owner);
         UnregisterClassW(backdrop.lpszClassName, backdrop.hInstance);

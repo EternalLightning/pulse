@@ -160,14 +160,34 @@ struct Fixture {
                 request, result, cancelled, error.c_str());
     }
 };
+void CheckModeless(Fixture& fixture) {
+    fixture.Query(110);
+    Check(fixture.Wait(RSP_CTX_ITEMS, 110, 5000, true, 3), "modeless command fixture publishes ready commands");
+    const DWORD modeless_pid = fixture.Worker(110);
+    Handle modeless; modeless.value = OpenProcess(SYNCHRONIZE, FALSE, modeless_pid);
+    fixture.Invoke(110, 1010, modeless_pid, false, true);
+    Check(fixture.Wait(RSP_DONE, 1010, 5000) && fixture.Succeeded(1010) && modeless.value &&
+        WaitForSingleObject(modeless.value, 1500) == WAIT_TIMEOUT,
+        "InvokeCommand completion preserves a visible modeless window and its STA");
+    const auto title = L"Pulse Context Modeless " + std::to_wstring(modeless_pid);
+    HWND modeless_window = FindWindowW(L"STATIC", title.c_str());
+    if (modeless_window) PostMessageW(modeless_window, WM_CLOSE, 0, 0);
+    Check(modeless_window && WaitForSingleObject(modeless.value, 5000) == WAIT_OBJECT_0,
+        "closing the modeless window allows physical worker reclamation");
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 2) { std::printf("Requires isolated context worker fixture executable\n"); return 2; }
+    const bool modeless_only = argc == 3 && std::wstring_view(argv[2]) == L"--modeless-only";
+    if (argc != 2 && !modeless_only) { std::printf("Requires isolated context worker fixture executable [--modeless-only]\n"); return 2; }
     Fixture fixture;
     if (!fixture.Start(argv[1])) { Check(false, "start isolated file-operation host fixture"); return 1; }
     std::printf("[DIAG] runner integrity RID=%lu, file-operation host RID=%lu\n",
         IntegrityRid(GetCurrentProcess()), IntegrityRid(fixture.process.value));
+    if (modeless_only) {
+        CheckModeless(fixture);
+        return failures ? 1 : 0;
+    }
     fixture.Query(101);
     const auto query_started = GetTickCount64();
     Check(fixture.Wait(RSP_CTX_ITEMS, 101, 5000, true, 3),
@@ -207,19 +227,7 @@ int wmain(int argc, wchar_t** argv) {
         fixture.Wait(RSP_DONE, 1003, 5000) && !fixture.Succeeded(1003),
         "close reclaims a blocked invocation and reports failure");
 
-    fixture.Query(110);
-    Check(fixture.Wait(RSP_CTX_ITEMS, 110, 5000, true, 3), "modeless command fixture publishes ready commands");
-    const DWORD modeless_pid = fixture.Worker(110);
-    Handle modeless; modeless.value = OpenProcess(SYNCHRONIZE, FALSE, modeless_pid);
-    fixture.Invoke(110, 1010, modeless_pid, false, true);
-    Check(fixture.Wait(RSP_DONE, 1010, 5000) && fixture.Succeeded(1010) && modeless.value &&
-        WaitForSingleObject(modeless.value, 1500) == WAIT_TIMEOUT,
-        "InvokeCommand completion preserves a visible modeless window and its STA");
-    const auto title = L"Pulse Context Modeless " + std::to_wstring(modeless_pid);
-    HWND modeless_window = FindWindowW(L"STATIC", title.c_str());
-    if (modeless_window) PostMessageW(modeless_window, WM_CLOSE, 0, 0);
-    Check(modeless_window && WaitForSingleObject(modeless.value, 5000) == WAIT_OBJECT_0,
-        "closing the modeless window allows physical worker reclamation");
+    CheckModeless(fixture);
 
     fixture.Query(111);
     Check(fixture.Wait(RSP_CTX_ITEMS, 111, 5000, true, 3), "application launch fixture publishes ready commands");

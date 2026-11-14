@@ -10,6 +10,7 @@
 #include "../ui/smooth_scroll.h"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,7 @@ struct ColumnStripState {
     std::vector<ColumnStripColumn> ancestors;  // farthest -> parent
     ColumnStripColumn child;                   // selected folder (path empty = none)
     float scroll_from_right_dip = 0.0f;        // ancestor strip scroll; 0 = parent visible
+    std::optional<float> ancestor_anchor_left_dip; // clicked parent stays at this pane-relative x
     ui::SmoothScroll horizontal_motion;
 
     bool Empty() const { return for_path.empty() && ancestors.empty() && child.path.empty(); }

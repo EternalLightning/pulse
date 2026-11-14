@@ -37,7 +37,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     ID2D1DeviceContext* dc = compositor_->Dc();
     const SettingsLayout lay = MakeSettingsLayout(vm, rect, scale_, title_bar_height_,
                                                   status_height_, &painter_, EffectiveSidebarWidth(rect.right));
-    const auto panel_fill = vm.dark && !IsHighContrast()
+    const auto panel_fill = UsesNativeMica(vm) ? NativeMicaPaneFill(vm) : vm.dark && !IsHighContrast()
         ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
         : WithAlpha(theme.surface_sheet, std::max(sheet_alpha_, 0.25f));
     MakeBrush(dc, panel_fill, brFillInput_);

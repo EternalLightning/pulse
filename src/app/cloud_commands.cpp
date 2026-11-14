@@ -166,20 +166,44 @@ bool TickCloudStatus(AppState& s) {
         }
         dirty = true;
     }
-    const uint64_t sync_revision = app::CloudSyncProbe::Instance().Revision();
-    if (s.cloud_sync_revision != sync_revision) {
-        s.cloud_sync_revision = sync_revision;
-        dirty = true;
-    }
+    auto& probe = app::CloudSyncProbe::Instance();
     const ULONGLONG now = GetTickCount64();
-    if (now - s.cloud_status_tick >= app::CloudSyncProbe::kSyncingRecheckMs) {
+    const uint64_t sync_revision = probe.Revision();
+    if ((now - s.cloud_status_tick >= app::CloudSyncProbe::kSyncingRecheckMs ||
+        s.cloud_sync_revision != sync_revision) &&
+        IsWindowVisible(s.hwnd) && !IsIconic(s.hwnd) && s.hitTestVmValid) {
         s.cloud_status_tick = now;
-        if (const auto* layout = s.window_tabs.Active())
-            for (const auto& pane : layout->panes)
-                if (const auto* tab = pane->ActiveTab(); tab && app::IsUnderCloudFilesRoot(tab->current_path)) {
-                    dirty = true; break;
+        for (const auto& slot : s.hitTestVm.pane_slots) {
+            const auto& pane = slot.pane;
+            if (!pane.cloud_status_column || pane.view_mode != ui::ViewMode::Details) continue;
+            const auto [first, last] = s.renderer.VisibleRangeInPane(pane, slot.rect);
+            for (int row = first; row < last && row < static_cast<int>(pane.EntryCount()); ++row) {
+                const int source = pane.SourceIndex(row);
+                if (source < 0) continue;
+                if (pane.snapshot && source < static_cast<int>(pane.snapshot->size())) {
+                    const auto& entry = (*pane.snapshot)[static_cast<size_t>(source)];
+                    if (entry.change_record_only) continue;
+                    std::wstring path = entry.full_path;
+                    if (path.empty()) {
+                        path = pane.path;
+                        if (!path.empty() && path.back() != L'\\') path += L'\\';
+                        path += entry.name;
+                    }
+                    const uint64_t modified = (static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) |
+                        entry.mtime.dwLowDateTime;
+                    probe.Lookup(path, modified, now);
+                    dirty |= probe.ChangedSince(path, s.cloud_sync_revision);
+                } else if (source < static_cast<int>(pane.entries.size())) {
+                    const auto& entry = pane.entries[static_cast<size_t>(source)];
+                    if (!entry.record_only) {
+                        probe.Lookup(entry.path, entry.modified_value, now);
+                        dirty |= probe.ChangedSince(entry.path, s.cloud_sync_revision);
+                    }
                 }
+            }
+        }
     }
+    s.cloud_sync_revision = sync_revision;
     return dirty;
 }
 

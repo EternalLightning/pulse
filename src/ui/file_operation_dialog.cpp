@@ -82,10 +82,17 @@ constexpr float kConfirmMinW = 380.0f;
 constexpr UINT_PTR kRenderTimer = 1;
 constexpr UINT_PTR kScrollTimer = 2;
 constexpr float kDlgW = 460.0f;
-constexpr float kTitleH = 36.0f;
-constexpr float kPadX = 20.0f;
-constexpr float kFooterH = 52.0f;
-constexpr float kCollapsedH = 268.0f;
+constexpr float kTitleH = dialog_style::kTitleHeight;
+constexpr float kPadX = dialog_style::kMargin;
+constexpr float kFooterH = dialog_style::kFooterHeight;
+constexpr float kSourceY = kTitleH + kPadX;
+constexpr float kFileY = kSourceY + 24.0f;
+constexpr float kProgressY = kFileY + 28.0f;
+constexpr float kStatsY = kProgressY + 22.0f;
+constexpr float kStatsH = 60.0f;
+constexpr float kDetailY = kStatsY + kStatsH + 12.0f;
+constexpr float kDetailTextY = kDetailY + 36.0f;
+constexpr float kCollapsedH = kDetailY + 12.0f + kFooterH;
 constexpr float kGraphBlockH = 156.0f;
 
 bool SameTransferPresentation(const ops::OpStatus& a, const ops::OpStatus& b) {
@@ -142,7 +149,7 @@ TransferChrome MakeTransferChrome(float scale, float width, float height,
                                   const fluent::Painter& painter, const TransferLabels& labels) {
     TransferChrome chrome;
     const float title = ScaleDip(scale, kTitleH);
-    const float caption = ScaleDip(scale, 40.0f);
+    const float caption = ScaleDip(scale, dialog_style::kCloseWidth);
     chrome.close = D2D1::RectF(width - caption, 0, width, title);
     const float footer_h = ScaleDip(scale, kFooterH);
     const float footer_top = height - footer_h;
@@ -152,10 +159,10 @@ TransferChrome MakeTransferChrome(float scale, float width, float height,
     const float y0 = footer_top + (footer_h - btn_h) * 0.5f;
     const float y1 = y0 + btn_h;
 
-    const float cancel_w = painter.MeasureButtonWidth(labels.cancel);
+    const float cancel_w = std::max(ScaleDip(scale, 80.0f), painter.MeasureButtonWidth(labels.cancel));
     chrome.cancel = D2D1::RectF(width - pad - cancel_w, y0, width - pad, y1);
     if (labels.show_pause) {
-        const float pause_w = painter.MeasureButtonWidth(labels.pause);
+        const float pause_w = std::max(ScaleDip(scale, 80.0f), painter.MeasureButtonWidth(labels.pause));
         chrome.pause = D2D1::RectF(chrome.cancel.left - gap - pause_w, y0,
                                    chrome.cancel.left - gap, y1);
     }
@@ -1343,8 +1350,8 @@ float FileOperationWindow::DetailBlockHeight() const {
     const float minimum = kGraphBlockH * scale_;
     if (status_.phase != ops::OpPhase::Failed) return minimum;
     const float width = std::max(1.0f, static_cast<float>(compositor_.Width()) - 64.0f * scale_);
-    return std::max(minimum, painter_.MeasureWrappedCaptionHeight(
-        ops::OperationFailureDetails(status_), width) + 52.0f * scale_);
+    return std::max(minimum, typography::MeasureWrapped(compositor_.DwriteFactory(), compositor_.TextFormat(),
+        ops::OperationFailureDetails(status_), width) + 48.0f * scale_);
 }
 
 void FileOperationWindow::ResizeForDetails(bool preserve_center) {
@@ -1429,6 +1436,9 @@ void FileOperationWindow::Render(bool present) {
                  scale_);
     const float width = static_cast<float>(compositor_.Width());
     const float height = static_cast<float>(compositor_.Height());
+    painter_.FillRoundedRect(D2D1::RectF(0, 0, width, ScaleDip(scale_, kTitleH)), 0, theme.surface_title);
+    painter_.FillRoundedRect(D2D1::RectF(0, ScaleDip(scale_, kTitleH), width,
+        height - ScaleDip(scale_, kFooterH)), 0, theme.surface_sheet);
     const float dip_w = width / std::max(scale_, 0.001f);
     const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
     const auto chrome = MakeTransferChrome(scale_, width, height, painter_, labels);
@@ -1446,11 +1456,13 @@ void FileOperationWindow::Render(bool present) {
                        || status_.type == ops::OpType::RealDelete;
     const bool restoring = status_.type == ops::OpType::RestoreRecycle;
     const bool emptying = status_.type == ops::OpType::EmptyRecycle;
-    const D2D1_COLOR_F sky = high_contrast ? theme.text : dark_ ? HexColor(0x38BDF8) : HexColor(0x0284C7);
+    const D2D1_COLOR_F sky = high_contrast ? theme.text : theme.accent_ink;
 
     const wchar_t* operation_glyph = (deleting || emptying) ? L"\xE74D"
         : restoring ? L"\xE777" : (moving ? L"\xE7C2" : L"\xE8C8");
-    painter_.DrawGlyph(operation_glyph, Rect(scale_, 14, 10, 16, 16), sky);
+    const auto title_icon = Rect(scale_, kPadX, (kTitleH - dialog_style::kIconSize) * 0.5f,
+        dialog_style::kIconSize, dialog_style::kIconSize);
+    painter_.DrawGlyph(operation_glyph, title_icon, sky);
     std::wstring title;
     if (options_.use_summary_title || cancelled) title = status_.summary;
     else if (emptying) {
@@ -1473,10 +1485,12 @@ void FileOperationWindow::Render(bool present) {
         title = (deleting ? l10n::Get(l10n::StringId::OpDeletingPrefix).c_str() : restoring ? l10n::Get(l10n::StringId::OpRestoringPrefix).c_str() : moving ? l10n::Get(l10n::StringId::OpMovingPrefix).c_str() : l10n::Get(l10n::StringId::OpCopyingPrefix).c_str())
               + std::to_wstring(count) + l10n::Get(l10n::StringId::OpItemsSuffix).c_str();
     }
-    painter_.DrawText(title, D2D1::RectF(ScaleDip(scale_, 36.0f), 0,
+    const auto title_bounds = D2D1::RectF(ScaleDip(scale_, 48.0f), 0,
                                          chrome.close.left - ScaleDip(scale_, 8.0f),
-                                         ScaleDip(scale_, kTitleH)),
-                      compositor_.SmallFormat(), theme.text);
+                                         ScaleDip(scale_, kTitleH));
+    auto* title_format = compositor_.HeaderFormat();
+    title_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    painter_.DrawText(title, title_bounds, title_format, theme.text);
 
     fluent::ControlState close{};
     close.hovered = hover_ == 1;
@@ -1504,14 +1518,14 @@ void FileOperationWindow::Render(bool present) {
     else subtitle = l10n::Get(l10n::StringId::OpFromPrefix).c_str() + src + l10n::Get(l10n::StringId::OpCopyTo).c_str() + dst;
     if (deleting) subtitle = FitPathMiddle(subtitle, (dip_w - kPadX * 2.0f - 72.0f) * scale_,
         [&](const std::wstring& value) {
-            return typography::MeasureLine(&compositor_, compositor_.SmallFormat(), value);
+            return typography::MeasureLine(&compositor_, compositor_.TextFormat(), value);
         });
-    DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
-        Rect(scale_, kPadX, 48, dip_w - kPadX * 2.0f - 72.0f, 18), subtitle, theme.text, theme.bg);
+    DrawEllipsizedText(compositor_, compositor_.TextFormat(),
+        Rect(scale_, kPadX, kSourceY, dip_w - kPadX * 2.0f - 72.0f, 22), subtitle, theme.text, theme.surface_sheet);
     wchar_t percent[32];
     if (status_.percent < 0.0f) percent[0] = 0;
     else swprintf_s(percent, L"%.0f%%", std::clamp(status_.percent, 0.0f, 100.0f));
-    painter_.DrawText(percent, Rect(scale_, dip_w - kPadX - 56.0f, 46, 56, 20),
+    painter_.DrawText(percent, Rect(scale_, dip_w - kPadX - 56.0f, kSourceY, 56, 22),
                       compositor_.TextFormat(), failed ? theme.danger : sky,
                       fluent::HorizontalAlignment::Right);
 
@@ -1554,13 +1568,13 @@ void FileOperationWindow::Render(bool present) {
     const float badge_w = std::max(48.0f, painter_.MeasureBadgeWidth(badge_text) / std::max(scale_, 0.001f));
     const bool fading_completion = completed && completion_reveal_.opacity < 1.0f;
     if (fading_completion) compositor_.Dc()->PushLayer(D2D1::LayerParameters(
-        Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f, 20), nullptr,
+        Rect(scale_, kPadX, kFileY, dip_w - kPadX * 2.0f, 22), nullptr,
         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(),
         completion_reveal_.opacity), nullptr);
-    DrawEllipsizedText(compositor_, compositor_.SmallFormat(),
-        Rect(scale_, kPadX, 70, dip_w - kPadX * 2.0f - badge_w - 12.0f, 20),
-        file_line, theme.text, theme.bg);
-    fluent::BadgeSpec badge{ Rect(scale_, dip_w - kPadX - badge_w, 70, badge_w, 18),
+    DrawEllipsizedText(compositor_, compositor_.TextFormat(),
+        Rect(scale_, kPadX, kFileY, dip_w - kPadX * 2.0f - badge_w - 12.0f, 22),
+        file_line, theme.text, theme.surface_sheet);
+    fluent::BadgeSpec badge{ Rect(scale_, dip_w - kPadX - badge_w, kFileY + 2, badge_w, 18),
                             badge_text, badge_kind };
     if (badge_kind == fluent::BadgeKind::Accent && !high_contrast) {
         badge.use_custom_colors = true;
@@ -1570,7 +1584,7 @@ void FileOperationWindow::Render(bool present) {
     painter_.DrawBadge(badge);
     if (fading_completion) compositor_.Dc()->PopLayer();
 
-    const auto track = Rect(scale_, kPadX, 98, dip_w - kPadX * 2.0f, 10);
+    const auto track = Rect(scale_, kPadX, kProgressY, dip_w - kPadX * 2.0f, 10);
     painter_.FillRoundedRect(track, ScaleDip(scale_, 5.0f),
         dark_ ? HexColor(0xFFFFFF, 0.10f) : HexColor(0x000000, 0.10f));
     const bool indeterminate = (emptying || scanning) && status_.active && !failed && !completed
@@ -1593,15 +1607,14 @@ void FileOperationWindow::Render(bool present) {
         fill.right = fill.left + (fill.right - fill.left) * value;
         D2D1_COLOR_F bar = failed ? theme.danger
             : (paused || waiting) ? HexColor(0xF59E0B)
-            : HexColor(0x0EA5E9);
+            : theme.accent;
         if (fill.right > fill.left) {
             painter_.FillRoundedRect(fill, ScaleDip(scale_, 3.0f), bar);
         }
     }
 
-    const auto stats = Rect(scale_, kPadX, 118, dip_w - kPadX * 2.0f, 52);
-    painter_.FillRoundedRect(stats, ScaleDip(scale_, 12.0f),
-        dark_ ? HexColor(0xFFFFFF, 0.05f) : HexColor(0x000000, 0.05f));
+    const auto stats = Rect(scale_, kPadX, kStatsY, dip_w - kPadX * 2.0f, kStatsH);
+    painter_.FillRoundedRect(stats, ScaleDip(scale_, 12.0f), theme.surface_card);
     const bool byte_transfer = status_.type == ops::OpType::Copy
         || status_.type == ops::OpType::Move;
     const std::wstring time_text = failed ? l10n::Get(l10n::StringId::OpIncomplete).c_str()
@@ -1639,38 +1652,43 @@ void FileOperationWindow::Render(bool present) {
     const auto remaining_label = l10n::Get(options_.item_progress_known
         ? l10n::StringId::OpRemainingItems : l10n::StringId::OpRemainingSize);
     const D2D1_COLOR_F time_color = failed ? theme.danger : theme.text;
-    painter_.DrawText(l10n::Get(l10n::StringId::OpRemainingTime).c_str(), Rect(scale_, 32, 124, 120, 14),
+    const float column = (dip_w - 64.0f) / 3.0f;
+    painter_.DrawText(l10n::Get(l10n::StringId::OpRemainingTime).c_str(), Rect(scale_, 32, kStatsY + 6, column - 8, 18),
                       compositor_.SmallFormat(), theme.text_secondary);
-    painter_.DrawText(remaining_label, Rect(scale_, 176, 124, 140, 14),
+    painter_.DrawText(remaining_label, Rect(scale_, 32 + column, kStatsY + 6, column - 8, 18),
                       compositor_.SmallFormat(), theme.text_secondary);
-    painter_.DrawText(l10n::Get(l10n::StringId::OpCurrentSpeed).c_str(), Rect(scale_, 328, 124, 110, 14),
+    painter_.DrawText(l10n::Get(l10n::StringId::OpCurrentSpeed).c_str(), Rect(scale_, 32 + 2 * column, kStatsY + 6, column - 8, 18),
                       compositor_.SmallFormat(), theme.text_secondary);
-    painter_.DrawText(time_text, Rect(scale_, 32, 140, 136, 22),
-                      compositor_.SmallFormat(), time_color);
-    painter_.DrawText(items_text, Rect(scale_, 176, 140, 148, 22),
-                      compositor_.SmallFormat(), theme.text);
-    painter_.DrawText(speed_text, Rect(scale_, 328, 140, 112, 22),
-                      compositor_.SmallFormat(), sky);
+    painter_.DrawText(time_text, Rect(scale_, 32, kStatsY + 26, column - 8, 24),
+                      compositor_.TextFormat(), time_color);
+    painter_.DrawText(items_text, Rect(scale_, 32 + column, kStatsY + 26, column - 8, 24),
+                      compositor_.TextFormat(), theme.text);
+    painter_.DrawText(speed_text, Rect(scale_, 32 + 2 * column, kStatsY + 26, column - 8, 24),
+                      compositor_.TextFormat(), sky);
 
     if (detailed_ && failed) {
-        const auto box = Rect(scale_, kPadX, 180, dip_w - kPadX * 2.0f,
-            std::max(kGraphBlockH, (height - kFooterH * scale_) / scale_ - 192.0f));
-        painter_.FillRoundedRect(box, ScaleDip(scale_, 12.0f),
-            dark_ ? HexColor(0xFFFFFF, 0.04f) : HexColor(0x000000, 0.03f));
-        painter_.DrawText(l10n::Get(l10n::StringId::OpErrorDetails), Rect(scale_, 32, 188, dip_w - 64, 20),
-                          compositor_.SmallFormat(), theme.text);
-        const auto text_bounds = D2D1::RectF(32 * scale_, 216 * scale_,
-            width - 32 * scale_, height - 64 * scale_);
+        const auto box = Rect(scale_, kPadX, kDetailY, dip_w - kPadX * 2.0f,
+            std::max(kGraphBlockH, height / scale_ - kFooterH - kDetailY - 12.0f));
+        painter_.FillRoundedRect(box, ScaleDip(scale_, 12.0f), theme.surface_card);
+        painter_.DrawText(l10n::Get(l10n::StringId::OpErrorDetails), Rect(scale_, 32, kDetailY + 12, dip_w - 64, 20),
+                          compositor_.HeaderFormat(), theme.text);
+        const auto text_bounds = D2D1::RectF(32 * scale_, kDetailTextY * scale_,
+            width - 32 * scale_, height - (kFooterH + 24.0f) * scale_);
+#ifdef PULSE_UI_TEST_HOOKS
+        progress_inspection_.failure_text = text_bounds;
+#endif
         const auto text = ops::OperationFailureDetails(status_);
-        const float text_height = painter_.MeasureWrappedCaptionHeight(text, text_bounds.right - text_bounds.left);
+        const float text_height = typography::MeasureWrapped(compositor_.DwriteFactory(), compositor_.TextFormat(),
+            text, text_bounds.right - text_bounds.left);
         failure_viewport_ = std::max(0.0f, text_bounds.bottom - text_bounds.top);
         failure_scroll_max_ = std::max(0.0f, text_height - failure_viewport_);
         failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(),
             animations_enabled_ && IsVisible() && !IsIconic(hwnd_));
         UpdateFailureScrollTimer();
         compositor_.Dc()->PushAxisAlignedClip(text_bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        painter_.DrawWrappedCaption(text, D2D1::Point2F(text_bounds.left, text_bounds.top - failure_scroll_),
-            text_bounds.right - text_bounds.left, theme.text_secondary);
+        DrawWrappedText(compositor_, compositor_.TextFormat(),
+            D2D1::RectF(text_bounds.left, text_bounds.top - failure_scroll_, text_bounds.right,
+                text_bounds.top - failure_scroll_ + text_height), text, theme.text_secondary);
         compositor_.Dc()->PopAxisAlignedClip();
         if (failure_scroll_max_ > 0.0f) {
             fluent::ScrollbarSpec scrollbar;
@@ -1682,20 +1700,22 @@ void FileOperationWindow::Render(bool present) {
             painter_.DrawScrollbar(scrollbar);
         }
     } else if (detailed_) {
-        const auto card = Rect(scale_, kPadX, 180, dip_w - kPadX * 2.0f, 140);
-        painter_.FillRoundedRect(card, ScaleDip(scale_, 12.0f),
-            dark_ ? HexColor(0x000000, 0.30f) : HexColor(0x000000, 0.05f));
+        const auto card = Rect(scale_, kPadX, kDetailY, dip_w - kPadX * 2.0f, 140);
+        painter_.FillRoundedRect(card, ScaleDip(scale_, 12.0f), theme.surface_card);
         painter_.StrokeRoundedRect(card, ScaleDip(scale_, 12.0f), theme.stroke_card);
-        painter_.DrawGlyph(L"\xE8F1", Rect(scale_, 30, 188, 14, 14), sky);
-        painter_.DrawText(l10n::Get(l10n::StringId::OpSpeedHistory).c_str(), Rect(scale_, 48, 186, 220, 18),
+        painter_.DrawGlyph(L"\xE8F1", Rect(scale_, 30, kDetailY + 8, 14, 14), sky);
+        painter_.DrawText(l10n::Get(l10n::StringId::OpSpeedHistory).c_str(), Rect(scale_, 48, kDetailY + 6, 220, 18),
                           compositor_.SmallFormat(), theme.text_secondary);
         const std::wstring peak = l10n::Get(l10n::StringId::OpPeak)
             + (options_.estimated_bytes ? l10n::Get(l10n::StringId::OpApprox) : L"") + pulse::format::ByteSize(
             static_cast<uint64_t>(status_.peak_bytes_per_second)) + L"/s";
-        painter_.DrawText(peak, Rect(scale_, 280, 186, 156, 18),
+        painter_.DrawText(peak, Rect(scale_, 280, kDetailY + 6, 156, 18),
                           compositor_.SmallFormat(), theme.text_secondary,
                           fluent::HorizontalAlignment::Right);
-        const auto plot = Rect(scale_, 30, 208, dip_w - kPadX * 2.0f - 20.0f, 100);
+        const auto plot = Rect(scale_, 30, kDetailY + 28, dip_w - kPadX * 2.0f - 20.0f, 100);
+#ifdef PULSE_UI_TEST_HOOKS
+        progress_inspection_.speed_plot = plot;
+#endif
         painter_.FillRoundedRect(plot, ScaleDip(scale_, 8.0f),
             dark_ ? HexColor(0x0F172A, 0.60f) : HexColor(0xFFFFFF, 0.50f));
         DrawSpeedGraph(compositor_.Dc(), plot, speed_history_, sky, scale_);
@@ -1710,7 +1730,7 @@ void FileOperationWindow::Render(bool present) {
     const auto footer_bg = D2D1::RectF(0, height - ScaleDip(scale_, kFooterH) + 1.0f,
                                        width, height);
     painter_.FillRoundedRect(footer_bg, 0,
-        high_contrast ? theme.bg : dark_ ? HexColor(0x202022, 0.92f) : HexColor(0x000000, 0.04f));
+        high_contrast ? theme.bg : theme.surface_title);
 
     fluent::ControlState detail_state{};
     detail_state.hovered = hover_ == 5;
@@ -1737,6 +1757,12 @@ void FileOperationWindow::Render(bool present) {
                           fluent::ButtonKind::Standard, cancel_state });
 #ifdef PULSE_UI_TEST_HOOKS
     progress_inspection_.title = title;
+    progress_inspection_.title_bounds = title_bounds;
+    progress_inspection_.title_icon = title_icon;
+    progress_inspection_.close = chrome.close;
+    progress_inspection_.footer = footer_bg;
+    progress_inspection_.title_font_size = title_format->GetFontSize();
+    progress_inspection_.title_weight = title_format->GetFontWeight();
     progress_inspection_.subtitle = subtitle;
     progress_inspection_.file_line = file_line;
     progress_inspection_.percent = percent;
@@ -1830,8 +1856,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
         const auto labels = MakeTransferLabels(status_, detailed_, callbacks_);
         const float controls = painter_.MeasureButtonWidth(labels.details, L"\xE70D") +
-            painter_.MeasureButtonWidth(labels.cancel) + (labels.show_pause ?
-                painter_.MeasureButtonWidth(labels.pause) + ScaleDip(scale_, 8.0f) : 0.0f);
+            std::max(ScaleDip(scale_, 80.0f), painter_.MeasureButtonWidth(labels.cancel)) + (labels.show_pause ?
+                std::max(ScaleDip(scale_, 80.0f), painter_.MeasureButtonWidth(labels.pause)) + ScaleDip(scale_, 8.0f) : 0.0f);
         info->ptMinTrackSize = {static_cast<LONG>(std::ceil(std::max(ScaleDip(scale_, kDlgW),
             controls + ScaleDip(scale_, 2 * kPadX + 8)))),
             static_cast<LONG>(std::ceil(ScaleDip(scale_, kCollapsedH + (detailed_ ? kGraphBlockH : 0.0f))))};

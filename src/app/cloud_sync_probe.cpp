@@ -106,10 +106,16 @@ uint64_t CloudSyncProbe::Revision() const {
     return revision_;
 }
 
+bool CloudSyncProbe::ChangedSince(const std::wstring& path, uint64_t revision) const {
+    std::lock_guard lock(mutex_);
+    const auto found = entries_.find(path);
+    return found != entries_.end() && found->second.revision > revision;
+}
+
 void CloudSyncProbe::Enqueue(const std::wstring& path, Entry& entry) {
     if (mode_ == Mode::Inline) {
         const fs::CloudSync state = fs::CloudSyncFromProviderState(query_(path));
-        if (!entry.known || entry.state != state) ++revision_;
+        if ((entry.known ? entry.state : fs::CloudSync::Idle) != state) entry.revision = ++revision_;
         entry.known = true;
         entry.state = state;
         entry.checked = GetTickCount64();
@@ -155,7 +161,7 @@ void CloudSyncProbe::Store(const std::wstring& path, uint64_t modified, fs::Clou
         Enqueue(path, entry);
         return;
     }
-    if (!entry.known || entry.state != state) ++revision_;
+    if ((entry.known ? entry.state : fs::CloudSync::Idle) != state) entry.revision = ++revision_;
     entry.known = true;
     entry.state = state;
 }

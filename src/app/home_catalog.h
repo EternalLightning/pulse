@@ -29,7 +29,6 @@ private:
         std::unordered_map<std::wstring, std::pair<uint64_t, uint64_t>> drive_capacity;
         std::unordered_map<std::wstring, std::wstring> label_updates;
         uint64_t generation = 0;
-        uint64_t published_generation = 0;
         bool loading = false;
         bool updated = false;
     };

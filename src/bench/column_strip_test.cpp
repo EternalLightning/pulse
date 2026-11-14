@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../ui/column_strip_layout.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -18,6 +19,18 @@ int main() {
           ColumnStripWidthSlot(kColumnStripChildId, 3) == 0, "widths follow ancestor depth and child identity");
     check(ColumnStripWidthDip({1.0f, 900.0f}, 0) == kColumnStripMinDip &&
           ColumnStripWidthDip({1.0f, 900.0f}, 1) == kColumnStripMaxDip, "stored widths respect limits");
+    for (float scale : {1.0f, 1.5f, 2.0f}) for (float width : {640.0f, 1200.0f}) {
+        for (bool child : {false, true}) for (float parent_width : {160.0f, 280.0f}) {
+            const auto anchored = LayoutColumnStrip(D2D1::RectF(10, 20, 10 + width * scale, 600 * scale),
+                80 * scale, 6, child, {220.0f, parent_width}, scale, 0, -30.0f);
+            const auto parent = std::find_if(anchored.columns.begin(), anchored.columns.end(),
+                [](const auto& col) { return col.id == 5; });
+            check(parent != anchored.columns.end() && std::abs(parent->rect.left - (10 - 30 * scale)) < .01f,
+                "clicked parent keeps its x across widths, DPI, column resize and asynchronous child visibility");
+            check(anchored.body.right - anchored.body.left >= kColumnStripCurrentMinDip * scale - .01f,
+                "anchored parent preserves the current list minimum width");
+        }
+    }
     struct Scenario { float scale; float width; };
     for (const auto [scale, width] : {Scenario{1, 200}, {1, 360}, {1, 640}, {1, 1200},
         {1.25f, 640}, {1.5f, 640}, {2, 640}}) {

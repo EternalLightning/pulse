@@ -410,7 +410,9 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
             dc, rect, vm.window_effect, vm.dark,
             (vm.window_effect == WindowEffect::None) ? std::wstring{} : vm.background_image);
     }
-    const LayerAlphas layers = ComputeLayerAlphas(image_mode, backdrop_drawn,
+    // The native DWM base needs no additional full-window title tint either.
+    const bool native_backdrop = vm.backdrop_enabled && vm.background_image.empty();
+    const LayerAlphas layers = ComputeLayerAlphas(image_mode, backdrop_drawn || native_backdrop,
         vm.backdrop_enabled, vm.dark, vm.wallpaper_visibility, vm.wallpaper_blur);
     if (!backdrop_drawn && !vm.backdrop_enabled) {
         // Lower pane opacity must reveal the theme canvas when no material or
@@ -418,7 +420,8 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
         MakeBrush(dc, theme.bg, brBg_);
         dc->FillRectangle(rect, brBg_.get());
     }
-    sheet_alpha_ = layers.sheet;
+    const auto sheet_fill = WindowSheetFill(vm, theme, layers.sheet);
+    sheet_alpha_ = sheet_fill.a;
     card_alpha_ = layers.card;
     auto tint_background = [&](D2D1_RECT_F bounds, D2D1_COLOR_F color, float alpha) {
         if (bounds.right <= bounds.left || bounds.bottom <= bounds.top || alpha <= 0) return;
@@ -437,7 +440,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     // translucent layers never double up into a seam.
     if (sheet_alpha_ > 0.0f) {
         const float sheetTop = std::round(title_bar_height_);
-        tint_background({rect.left, sheetTop, rect.right, rect.bottom}, theme.surface_sheet, sheet_alpha_);
+        tint_background({rect.left, sheetTop, rect.right, rect.bottom}, sheet_fill, sheet_alpha_);
     }
 
     paint_profile.Mark(app::PaintPhase::Backdrop);
@@ -554,11 +557,12 @@ void MainRenderer::DrawTitleBar(const WindowViewModel& vm, const D2D1_RECT_F& re
             shadow.bottom += 1.0f * scale_;
             MakeBrush(dc, D2D1::ColorF(0.0f, 0.0f, 0.0f, vm.dark ? 0.09f : 0.07f), brFillPressed_);
             FillChromeTab(dc, brFillPressed_.get(), shadow, shape);
-            MakeBrush(dc, WithAlpha(theme.surface_sheet, sheet_alpha_), brFillSelected_);
+            MakeBrush(dc, WindowSheetFill(vm, theme, sheet_alpha_), brFillSelected_);
             FillChromeTab(dc, brFillSelected_.get(), tabRc, shape);
         } else if (active) {
             // A solid light plate remains identifiable over pale chrome and wallpapers.
-            MakeBrush(dc, vm.dark ? WithAlpha(theme.surface_sheet, sheet_alpha_) : HexColor(0xFFFFFF), brFillSelected_);
+            MakeBrush(dc, vm.dark || UsesNativeMica(vm)
+                ? WindowSheetFill(vm, theme, sheet_alpha_) : HexColor(0xFFFFFF), brFillSelected_);
             FillChromeTab(dc, brFillSelected_.get(), tabRc, shape);
         } else {
             // Grouped tabs get a tinted body; ungrouped keep the stock look.

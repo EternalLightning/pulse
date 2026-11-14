@@ -68,7 +68,7 @@ LRESULT CALLBACK ButtonProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
 void LayoutDialog(HWND hwnd, DialogState& state) {
     const auto px = [&state](int dip) { return MulDiv(dip, static_cast<int>(state.dpi), 96); };
     LOGFONTW metrics{};
-    wcscpy_s(metrics.lfFaceName, L"Segoe UI");
+    wcscpy_s(metrics.lfFaceName, L"Microsoft YaHei UI");
     metrics.lfHeight = -px(14);
     const HFONT font = CreateFontIndirectW(&metrics);
     wcscpy_s(metrics.lfFaceName, L"Microsoft YaHei UI");

@@ -18,6 +18,9 @@ bool mock_process = false, mock_shell = false;
 DWORD process_error = ERROR_ELEVATION_REQUIRED, shell_error = ERROR_CANCELLED;
 bool shell_success = true;
 int shell_calls = 0, process_calls = 0;
+DWORD process_startup_flags = 0;
+WORD process_show = SW_HIDE;
+int shell_show = SW_HIDE;
 std::wstring shell_file, shell_args, shell_directory, shell_verb, process_file;
 BOOL WINAPI ProbeCreateProcess(LPCWSTR app, LPWSTR command, LPSECURITY_ATTRIBUTES process_attributes,
     LPSECURITY_ATTRIBUTES thread_attributes, BOOL inherit, DWORD flags, LPVOID environment,
@@ -26,6 +29,8 @@ BOOL WINAPI ProbeCreateProcess(LPCWSTR app, LPWSTR command, LPSECURITY_ATTRIBUTE
         inherit, flags, environment, directory, startup, process);
     ++process_calls;
     process_file = app ? app : L"";
+    process_startup_flags = startup->dwFlags;
+    process_show = startup->wShowWindow;
     if (command && command[0]) command[0] = L'\0';
     SetLastError(process_error); return FALSE;
 }
@@ -36,6 +41,7 @@ BOOL WINAPI ProbeShellExecute(SHELLEXECUTEINFOW* shell) {
     shell_args = shell->lpParameters ? shell->lpParameters : L"";
     shell_directory = shell->lpDirectory ? shell->lpDirectory : L"";
     shell_verb = shell->lpVerb ? shell->lpVerb : L"";
+    shell_show = shell->nShow;
     SetLastError(shell_error); return shell_success;
 }
 }
@@ -194,6 +200,28 @@ HRESULT Execute(const pulse::ipc::ShellLaunchRequest& request) {
     std::wstring detail;
     return pulse::shell::Execute(request, nullptr, data, sessions, detail, [] { return true; });
 }
+void UserLaunchVisibility() {
+    fixture::mock_process = fixture::mock_shell = true;
+    fixture::shell_success = true;
+    fixture::shell_calls = fixture::process_calls = 0;
+    pulse::ipc::ShellLaunchRequest request;
+    request.flags = 0;
+    request.paths = {L"C:\\fixture\\application.exe"};
+    Check(SUCCEEDED(Execute(request)) && fixture::shell_calls == 1 &&
+        fixture::shell_show == SW_SHOWNORMAL && fixture::shell_verb == L"open",
+        "628 ordinary user launch requests a visible initial window through Shell");
+    wchar_t module[32768]{};
+    GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
+    request.kind = pulse::ipc::ShellLaunchKind::Command;
+    request.executable = L"\"" + std::wstring(module) + L"\"";
+    fixture::process_error = ERROR_FILE_NOT_FOUND;
+    fixture::shell_calls = 0;
+    Check(Execute(request) == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) &&
+        fixture::process_calls == 1 && !fixture::shell_calls &&
+        (fixture::process_startup_flags & STARTF_USESHOWWINDOW) && fixture::process_show == SW_SHOWNORMAL,
+        "628 command launch sets STARTUPINFO to show normally before the intercepted process call");
+    fixture::mock_process = fixture::mock_shell = false;
+}
 void CommandExpansion() {
     const std::wstring file = L"C:\\fixture\\literal%1%L%l%V%v%*.txt";
     const auto expanded = pulse::ops::ExpandShellCommand(L"viewer.exe \"%1\" %L %*", file);
@@ -313,6 +341,8 @@ void Elevation(const std::filesystem::path& root) {
     const auto result = Execute(request);
     Check(SUCCEEDED(result) && fixture::shell_calls == 1 && fixture::shell_verb == L"runas",
         "F14 command error 740 retries exactly once through runas without real elevation");
+    Check(fixture::shell_show == SW_SHOWNORMAL,
+        "625 elevation fallback requests a visible application window");
     Check(fixture::shell_calls == 1 && fixture::shell_file == module &&
         fixture::shell_args == L"--monitor \"C:\\selected file.exe\" --extra \"literal value\"" &&
         fixture::shell_directory == request.directory,
@@ -365,8 +395,10 @@ int wmain(int argc, wchar_t** argv) {
     std::filesystem::create_directories(root.parent_path());
     if (!std::filesystem::create_directory(root)) return 2;
     const bool commands_only = argc == 2 && wcscmp(argv[1], L"--commands-only") == 0;
-    if (!commands_only) { Cache(); OpenDirectories(root); }
-    CommandExpansion(); InfInstallCommand(); Elevation(root);
+    const bool user_launch_only = argc == 2 && wcscmp(argv[1], L"--user-launch-only") == 0;
+    if (!commands_only && !user_launch_only) { Cache(); OpenDirectories(root); }
+    if (!user_launch_only) { CommandExpansion(); InfInstallCommand(); }
+    UserLaunchVisibility(); Elevation(root);
     std::error_code error;
     std::filesystem::remove_all(root, error);
     Check(!error && !std::filesystem::exists(root), "isolated launch regression fixtures are removed");

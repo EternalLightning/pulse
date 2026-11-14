@@ -1406,6 +1406,27 @@ struct LumaTextRenderer::Impl {
         if (IsWindow(hwnd)) SetMouseSelection(hwnd);
     }
 
+    bool MoveReversedSelection(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+        if (message != WM_KEYDOWN || !(GetKeyState(VK_SHIFT) & 0x8000) ||
+            (wparam != VK_LEFT && wparam != VK_RIGHT && wparam != VK_HOME && wparam != VK_END)) return false;
+        const auto saved = edit_selections.find(hwnd);
+        if (saved == edit_selections.end() || saved->second.second >= saved->second.first) return false;
+        const auto [anchor, caret] = saved->second;
+        DWORD lo = 0, hi = 0;
+        SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&lo), reinterpret_cast<LPARAM>(&hi));
+        if (lo != static_cast<DWORD>(caret) || hi != static_cast<DWORD>(anchor)) return false;
+        // Native EDIT loses the active end of a reversed EM_SETSEL range.
+        // Let it move from the caret, then restore our original anchor.
+        setting_keyboard_selection = true;
+        SendMessageW(hwnd, EM_SETSEL, caret, caret);
+        DefSubclassProc(hwnd, message, wparam, lparam);
+        SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&lo), reinterpret_cast<LPARAM>(&hi));
+        const DWORD target = lo == static_cast<DWORD>(caret) ? hi : lo;
+        SendMessageW(hwnd, EM_SETSEL, anchor, target);
+        setting_keyboard_selection = false;
+        return true;
+    }
+
     void SyncNativeEditSelection(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
         const bool navigation = message == WM_KEYDOWN && (wparam == VK_LEFT || wparam == VK_RIGHT ||
             wparam == VK_UP || wparam == VK_DOWN || wparam == VK_HOME || wparam == VK_END ||
@@ -2011,6 +2032,7 @@ LRESULT CALLBACK LumaTextRenderer::EditSelectionProc(HWND hwnd, UINT message, WP
         (GetKeyState(VK_CONTROL) & 0x8000) == 0 &&
         self->impl_->MoveEditLine(hwnd, wparam == VK_DOWN, (GetKeyState(VK_SHIFT) & 0x8000) != 0))
         return 0;
+    if (self->impl_ && self->impl_->MoveReversedSelection(hwnd, message, wparam, lparam)) return 0;
 #endif
     const LRESULT result = DefSubclassProc(hwnd, message, wparam, lparam);
     self->SyncEditSelection(hwnd, message, wparam, lparam);

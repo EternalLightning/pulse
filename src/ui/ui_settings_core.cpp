@@ -173,24 +173,43 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                 preview.bottom -= 22 * scale_;
                 const bool selected = i == static_cast<int>(vm.window_effect);
                 const bool hovered = IsHovered(vm, H::SettingsEffect, i);
-                const float tint[] = {0.0f, 0.22f, 0.065f, 0.16f};
-                auto background = BlendOver(WithAlpha(theme.accent, tint[i]), theme.surface_title);
-                MakeBrush(dc, background, brFillHover_);
+                // One fixed wallpaper makes the static material illustrations comparable.
+                const auto wallpaper_blue = HexColor(0x547BA5);
+                const auto wallpaper_purple = HexColor(0xAE80B6);
+                const auto wallpaper_teal = HexColor(0x54A8A1);
+                MakeBrush(dc, wallpaper_blue, brFillHover_);
                 dc->FillRoundedRectangle(D2D1::RoundedRect(preview, 6 * scale_, 6 * scale_), brFillHover_.get());
-                // A small window silhouette explains the material, not a fake DWM surface.
                 dc->PushAxisAlignedClip(preview, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                if (i == 1 || i == 3) {
-                    MakeBrush(dc, WithAlpha(theme.accent, vm.dark ? 0.18f : 0.13f), brFillHover_);
-                    dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(preview.right - 18 * scale_, preview.top + 11 * scale_),
-                                                  36 * scale_, 26 * scale_),
-                                    brFillHover_.get());
-                }
+                const float wallpaper_rx = (std::min)(36 * scale_, (preview.right - preview.left) * 0.32f);
+                const float wallpaper_ry = (preview.bottom - preview.top - 12 * scale_) * 0.5f;
+                MakeBrush(dc, wallpaper_purple, brFillHover_);
+                dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(preview.right - 6 * scale_ - wallpaper_rx,
+                    preview.top + 6 * scale_ + wallpaper_ry), wallpaper_rx, wallpaper_ry), brFillHover_.get());
+                MakeBrush(dc, wallpaper_teal, brFillHover_);
+                dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(preview.left + 6 * scale_ + wallpaper_rx,
+                    preview.bottom - 6 * scale_ - wallpaper_ry), wallpaper_rx, wallpaper_ry), brFillHover_.get());
                 const float inset = 10 * scale_;
                 auto window = D2D1::RectF(preview.left + inset, preview.top + 9 * scale_, preview.right - inset,
                                           preview.bottom - 9 * scale_);
-                const float plate_alpha = i == 1 ? 0.48f : i == 3 ? 0.72f : 0.96f;
-                MakeBrush(dc, WithAlpha(theme.surface_card, plate_alpha), brFillInput_);
+                MakeBrush(dc, theme.surface_title, brFillInput_);
                 dc->FillRoundedRectangle(D2D1::RoundedRect(window, 3 * scale_, 3 * scale_), brFillInput_.get());
+                // Acrylic shows softened background colors; opaque Mica uses wallpaper tint,
+                // with a stronger tint for Mica Alt. These are illustrations, not live DWM.
+                if (i != 0) {
+                    const float tint = i == 1 ? 0.52f : i == 2 ? 0.10f : 0.26f;
+                    const D2D1_GRADIENT_STOP stops[] = {
+                        {0.0f, BlendOver(WithAlpha(wallpaper_teal, tint), theme.surface_title)},
+                        {0.5f, BlendOver(WithAlpha(wallpaper_blue, tint), theme.surface_title)},
+                        {1.0f, BlendOver(WithAlpha(wallpaper_purple, tint), theme.surface_title)}};
+                    ComPtr<ID2D1GradientStopCollection> colors;
+                    ComPtr<ID2D1LinearGradientBrush> material;
+                    if (SUCCEEDED(dc->CreateGradientStopCollection(stops, ARRAYSIZE(stops), &colors)) &&
+                        SUCCEEDED(dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(
+                            D2D1::Point2F(window.left, window.bottom), D2D1::Point2F(window.right, window.top)),
+                            colors.get(), &material))) {
+                        dc->FillRoundedRectangle(D2D1::RoundedRect(window, 3 * scale_, 3 * scale_), material.get());
+                    }
+                }
                 MakeBrush(dc, WithAlpha(theme.text_secondary, 0.30f), brTextSecondary_);
                 FillRoundedRect(dc, brTextSecondary_.get(), window.left + 6 * scale_, window.top + 6 * scale_,
                                 (std::min)(18 * scale_, (window.right - window.left) * 0.18f), 2 * scale_, scale_);

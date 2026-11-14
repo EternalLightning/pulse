@@ -71,6 +71,10 @@ struct FileOperationProgressInspection {
     bool show_pause = false;
     bool indeterminate = false;
     D2D1_RECT_F details{}, pause{}, cancel{};
+    D2D1_RECT_F title_bounds{}, title_icon{}, close{}, footer{}, failure_text{};
+    D2D1_RECT_F speed_plot{};
+    float title_font_size = 0.0f;
+    DWRITE_FONT_WEIGHT title_weight = DWRITE_FONT_WEIGHT_NORMAL;
 };
 #endif
 

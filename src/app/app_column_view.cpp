@@ -181,6 +181,7 @@ void RebuildAncestors(AppState& s, app::Tab& tab) {
     for (auto& col : tab.column_strip.ancestors) col.requested = false;
     tab.column_strip.for_path = tab.current_path;
     tab.column_strip.scroll_from_right_dip = 0.0f;
+    tab.column_strip.ancestor_anchor_left_dip.reset();
     tab.column_strip.horizontal_motion.Reset();
 }
 
@@ -268,7 +269,8 @@ void SelectByName(AppState& s, app::Tab& tab, const std::wstring& name) {
     }
 }
 
-bool ClickRow(AppState& s, app::Tab& tab, int column_id, int row) {
+bool ClickRow(AppState& s, app::Tab& tab, const ui::WindowViewModel& vm,
+              int pane_index, int column_id, int row) {
     app::ColumnStripColumn* col = StripColumn(tab, column_id);
     if (!col || !col->rows || !col->rows_snapshot || row < 0 ||
         static_cast<size_t>(row) >= col->rows->size()) {
@@ -276,8 +278,42 @@ bool ClickRow(AppState& s, app::Tab& tab, int column_id, int row) {
     }
     const int source = (*col->rows)[static_cast<size_t>(row)];
     if (source < 0 || static_cast<size_t>(source) >= col->rows_snapshot->size()) return false;
-    const std::wstring name = (*col->rows_snapshot)[static_cast<size_t>(source)].name;
+    const fs::DirEntry entry = (*col->rows_snapshot)[static_cast<size_t>(source)];
+    if (entry.change_record_only) return false;
+    const std::wstring name = entry.name;
     const std::wstring folder = col->path; // col is invalidated by navigation
+    if (column_id != ui::kColumnStripChildId && entry.is_dir) {
+        ui::ColumnStripLayout layout;
+        if (!SlotLayout(s, vm, pane_index, layout)) return false;
+        const auto slot = std::find_if(layout.columns.begin(), layout.columns.end(),
+            [&](const auto& item) { return item.id == column_id; });
+        if (slot == layout.columns.end()) return false;
+        const float scale = s.scale > 0.0f ? s.scale : 1.0f;
+        const float anchor = (slot->rect.left - layout.viewport.left) / scale;
+        const float width = (slot->rect.right - slot->rect.left) / scale;
+        const auto* pane = SlotPane(vm, pane_index);
+        if (!pane || static_cast<size_t>(column_id) >= pane->column_strip.ancestors.size()) return false;
+        const float scroll = s.renderer.ColumnStripScrollPx(
+            pane->column_strip.ancestors[static_cast<size_t>(column_id)],
+            s.renderer.ColumnStripViewHeight(slot->rect)) / scale;
+        const std::wstring target = fs::NormalizePath(Join(folder, name));
+        if (!SamePath(target, tab.current_path)) NavigateTo(s, target, ui::SurfaceMotion::Backward);
+        if (app::Tab* active = ActiveTab(s); active && SamePath(active->current_path, target)) {
+            SyncTab(s, *active);
+            auto& strip = active->column_strip;
+            if (!strip.ancestors.empty() && SamePath(strip.ancestors.back().path, folder)) {
+                if (active->column_widths_dip.size() < 2) active->column_widths_dip.resize(2, 0.0f);
+                active->column_widths_dip[1] = width;
+                strip.ancestor_anchor_left_dip = anchor;
+                strip.scroll_from_right_dip = 0.0f;
+                strip.horizontal_motion.Reset();
+                strip.ancestors.back().scroll_dip = scroll;
+                strip.ancestors.back().auto_scroll = false;
+            }
+        }
+        s.stripClickTick = GetTickCount64();
+        return true;
+    }
     if (!SamePath(folder, tab.current_path)) NavigateTo(s, folder,
         column_id == ui::kColumnStripChildId ? ui::SurfaceMotion::Forward : ui::SurfaceMotion::Backward);
     if (app::Tab* active = ActiveTab(s)) SelectByName(s, *active, name);
@@ -286,6 +322,22 @@ bool ClickRow(AppState& s, app::Tab& tab, int column_id, int row) {
 }
 
 } // namespace
+
+std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row) {
+    if (!Eligible(tab) || !SamePath(tab.column_strip.for_path, tab.current_path)) return {};
+    const auto* col = StripColumn(tab, column_id);
+    if (!col) return {};
+    if (row == -1) return col->path;
+    if (!col->rows || !col->rows_snapshot || row < 0 ||
+        static_cast<size_t>(row) >= col->rows->size()) return {};
+    const int source = (*col->rows)[static_cast<size_t>(row)];
+    if (source < 0 || static_cast<size_t>(source) >= col->rows_snapshot->size()) return {};
+    const auto& entry = (*col->rows_snapshot)[static_cast<size_t>(source)];
+    if (entry.change_record_only) return {};
+    if (entry.is_dir) return fs::NormalizePath(Join(col->path, entry.name));
+    if (entry.link_target_is_dir && !entry.link_target.empty()) return fs::NormalizePath(entry.link_target);
+    return col->path;
+}
 
 void SyncColumnStrips(AppState& s) {
     ForEachPane(s, [&](app::Pane& pane) {
@@ -459,7 +511,7 @@ bool HandleColumnStripMouseDown(AppState& s, const ui::WindowViewModel& vm,
     }
     case R::ColumnStripRow: {
         app::Tab* tab = TabAtSlot(s, hit.pane_index);
-        if (tab) ClickRow(s, *tab, hit.sub_index, hit.index);
+        if (tab) ClickRow(s, *tab, vm, hit.pane_index, hit.sub_index, hit.index);
         return true;
     }
     case R::ColumnStripBlank:

@@ -321,7 +321,18 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
     if (!tab) return DROPEFFECT_NONE;
 
     std::wstring destName;
-    if (hit.region == ui::HitTestResult::Row && hit.index >= 0 &&
+    if (hit.region == ui::HitTestResult::ColumnStripRow ||
+        hit.region == ui::HitTestResult::ColumnStripBlank) {
+        if (hit.region == ui::HitTestResult::ColumnStripBlank || hit.index >= 0)
+            s.dropDestDir = ColumnStripDropDirectory(*tab, hit.sub_index,
+                hit.region == ui::HitTestResult::ColumnStripRow ? hit.index : -1);
+        s.dropPaneIndex = hit.pane_index;
+        destName = BaseName(s.dropDestDir);
+        s.springRow = -1;
+    } else if (hit.region == ui::HitTestResult::ColumnStripDivider ||
+               hit.region == ui::HitTestResult::ColumnStripHScroll) {
+        s.springRow = -1;
+    } else if (hit.region == ui::HitTestResult::Row && hit.index >= 0 &&
         tab->snapshot && hit.index < (int)tab->EntryCount() &&
         tab->EntryAt(hit.index).is_dir) {
         if (tab->EntryAt(hit.index).change_record_only) return DROPEFFECT_NONE;

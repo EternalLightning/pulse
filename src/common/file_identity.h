@@ -25,12 +25,14 @@ struct FileIdentity {
             nonzero = nonzero || value.FileId.Identifier[i] != 0;
             if (!extended && i >= sizeof(ULONGLONG) && value.FileId.Identifier[i]) return false;
         }
-        return nonzero;
+        // FAT/exFAT roots use index zero; the reader verifies the root handle.
+        return nonzero || (!extended && value.VolumeSerialNumber != 0);
     }
 };
 
 inline bool ReadFileIdentity(HANDLE handle, FileIdentity& identity,
-                            decltype(&GetFileInformationByHandleEx) query = GetFileInformationByHandleEx) {
+                            decltype(&GetFileInformationByHandleEx) query = GetFileInformationByHandleEx,
+                            decltype(&GetFileInformationByHandle) legacy_query = GetFileInformationByHandle) {
     FILE_ID_INFO extended{};
     if (query(handle, FileIdInfo, &extended, sizeof(extended))) {
         identity = {extended, true};
@@ -41,9 +43,17 @@ inline bool ReadFileIdentity(HANDLE handle, FileIdentity& identity,
         error != ERROR_INVALID_FUNCTION && error != ERROR_CALL_NOT_IMPLEMENTED) return false;
 
     BY_HANDLE_FILE_INFORMATION legacy{};
-    if (!GetFileInformationByHandle(handle, &legacy)) return false;
+    if (!legacy_query(handle, &legacy)) return false;
     const ULONGLONG index = (static_cast<ULONGLONG>(legacy.nFileIndexHigh) << 32) | legacy.nFileIndexLow;
-    if (!index) { SetLastError(ERROR_NOT_SUPPORTED); return false; }
+    if (!index) {
+        struct RootName { DWORD length; WCHAR name[2]; } root{};
+        if (!(legacy.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !legacy.dwVolumeSerialNumber ||
+            !query(handle, FileNameInfo, &root, sizeof(root)) ||
+            root.length != sizeof(WCHAR) || root.name[0] != L'\\') {
+            SetLastError(ERROR_NOT_SUPPORTED);
+            return false;
+        }
+    }
     identity = {};
     identity.value.VolumeSerialNumber = legacy.dwVolumeSerialNumber;
     std::memcpy(&identity.value.FileId, &index, sizeof(index));

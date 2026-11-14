@@ -44,6 +44,24 @@ void ClearTextWidthCache() {
     // active tab/toolbar/sidebar/status bar, and the pane/details cards. The
     // active tab and the sheet must use the same value so they read as one.
     struct LayerAlphas { float title = 1.0f, sheet = 1.0f, card = 1.0f; };
+    inline bool UsesNativeMica(const WindowViewModel& vm) noexcept {
+        return vm.backdrop_enabled && vm.background_image.empty() && !IsHighContrast() &&
+            (vm.window_effect == WindowEffect::Mica || vm.window_effect == WindowEffect::MicaAlt);
+    }
+    inline D2D1_COLOR_F NativeMicaLayerFill(bool dark, bool alt_commands) noexcept {
+        // WinUI LayerFillColorDefault / LayerOnMicaBaseAltFillColorDefault.
+        const int alpha = dark ? (alt_commands ? 115 : 76) : (alt_commands ? 179 : 128);
+        return WithAlpha(HexColor(dark ? 0x3A3A3A : 0xFFFFFF), alpha / 255.0f);
+    }
+    inline D2D1_COLOR_F WindowSheetFill(const WindowViewModel& vm, const Theme& theme, float alpha) noexcept {
+        return UsesNativeMica(vm) ? NativeMicaLayerFill(vm.dark, vm.window_effect == WindowEffect::MicaAlt)
+                                  : WithAlpha(theme.surface_sheet, alpha);
+    }
+    inline D2D1_COLOR_F NativeMicaPaneFill(const WindowViewModel& vm) noexcept {
+        // Mica already has its content layer in the sheet; Alt needs a third layer.
+        return vm.window_effect == WindowEffect::MicaAlt ? NativeMicaLayerFill(vm.dark, false)
+                                                        : WithAlpha(HexColor(0xFFFFFF), 0.045f);
+    }
     inline LayerAlphas ComputeLayerAlphas(bool image_mode, bool backdrop_drawn,
                                           bool backdrop_enabled, bool dark,
                                           int wallpaper_visibility, int wallpaper_blur) noexcept {

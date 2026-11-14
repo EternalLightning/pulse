@@ -124,6 +124,14 @@ inline void RunEditSelectionMotionChecks(HWND parent) {
                 "wrapped rename selection preserves its anchor and animates across lines");
             time += 80;
             draw(L"across-lines");
+            SendMessageW(edit, EM_SETSEL, text.size(), text.size());
+            SendMessageW(edit, WM_KEYDOWN, VK_UP, 0);
+            const auto upward = selection();
+            Check(upward.first > 0 && upward.first < upward.second && upward.second == text.size(),
+                "617 Shift+Up selects backward from the end of the wrapped filename");
+            SendMessageW(edit, WM_KEYDOWN, VK_LEFT, 0);
+            Check(selection() == std::pair<DWORD, DWORD>{upward.first - 1, upward.second},
+                "617 continuing Shift+Left extends the active beginning rather than shrinking the end");
         }
         SendMessageW(edit, EM_SETSEL, 0, 0);
         time += 80;

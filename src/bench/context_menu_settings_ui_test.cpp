@@ -514,6 +514,48 @@ std::shared_ptr<ui::SysCtxView> SystemView(int state) {
     return view;
 }
 
+void LayerSwitchChecks(Fixture& f) {
+    for (const auto* language : {L"zh-CN", L"en-US"}) for (float scale : {1.0f, 1.5f, 2.0f})
+    for (int width : {760, 1100, 1624}) for (bool dark : {false, true}) {
+        l10n::SetLanguage(language);
+        f.Resize(width, scale, dark);
+        auto pulse_vm = f.Vm();
+        pulse_vm.settings_page = 2;
+        pulse_vm.settings_scroll = 0;
+        auto system_vm = pulse_vm;
+        system_vm.settings_page = 5;
+        system_vm.settings_sysctx = SystemView(3);
+        const auto pulse = f.Layout(pulse_vm);
+        const auto system = f.Layout(system_vm);
+        const D2D1_RECT_F system_choices[] = {system.sysctx.local_card, system.sysctx.system_card};
+        const wchar_t* labels[] = {ui::sysctx_text::LocalTitle(), ui::sysctx_text::SystemTitle()};
+        for (int i = 0; i < 2; ++i) {
+            const auto& a = pulse.ctx_layer[i];
+            const auto& b = system_choices[i];
+            Check(std::abs(a.left - b.left) < 0.1f && std::abs(a.right - b.right) < 0.1f &&
+                std::abs((a.bottom - a.top) - (b.bottom - b.top)) < 0.1f,
+                "menu layer choices retain their width, height and horizontal position when switching pages");
+            Check(Within(a, pulse.content) && Within(b, system.content) &&
+                f.painter->MeasureButtonWidth(labels[i]) <= a.right - a.left + 1,
+                "both localized menu layer labels fit at every tested width and DPI");
+        }
+        f.Render(pulse_vm);
+        f.Render(system_vm);
+        f.HitCheck(pulse_vm, pulse.ctx_layer[1], H::SettingsCtxPivot, 5,
+            "shared selector geometry keeps the system menu switch clickable");
+        f.HitCheck(system_vm, system.sysctx.local_card, H::SettingsSysCtx, ui::kSysCtxLocalLayer,
+            "shared selector geometry keeps the Pulse menu switch clickable");
+        if ((width == 1624 && scale == 1.0f && language[0] == L'z') ||
+            (width == 760 && scale == 1.5f && language[0] == L'e')) {
+            const auto prefix = std::wstring(language) + L"-" + std::to_wstring(width) + L"-" +
+                std::to_wstring(static_cast<int>(scale * 100)) + (dark ? L"-dark" : L"-light");
+            f.Render(pulse_vm, prefix + L"-pulse.png");
+            f.Render(system_vm, prefix + L"-system.png");
+        }
+    }
+    Check(!f.State().settings.SystemCtxLoaded(), "layer switch checks never scan or change the registry");
+}
+
 void SystemChecks(Fixture& f, const ui::WindowViewModel& base, const std::wstring& prefix, bool save_all) {
     static constexpr const wchar_t* names[] = {L"loading", L"empty", L"error", L"ready"};
     for (int state = 0; state < 4; ++state) {
@@ -607,16 +649,18 @@ void RowActionChecks(Fixture& f) {
 
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
-    bool accent_only = false;
+    bool accent_only = false, layer_switch_only = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string_view(argv[i]) == "--screenshots-only") screenshots_only = true;
         else if (std::string_view(argv[i]) == "--accent-picker-only") accent_only = true;
+        else if (std::string_view(argv[i]) == "--layer-switch-only") layer_switch_only = true;
         else { std::printf("Unknown argument: %s\n", argv[i]); return 2; }
     }
     if (FAILED(OleInitialize(nullptr))) return 2;
     compat::EnableDpiAwareness();
     SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", L"1");
-    const auto output = std::filesystem::absolute(accent_only ? L"bench_data/settings-accent-ui" :
+    const auto output = std::filesystem::absolute(layer_switch_only ? L"bench_data/context-menu-layer-switch" :
+        accent_only ? L"bench_data/settings-accent-ui" :
         L"docs/validation/context-menu-port-20261025/screenshots");
     std::filesystem::create_directories(output);
     storage::OverrideDefaultRootForTesting((output.parent_path() / L"isolated-profile").wstring());
@@ -626,7 +670,10 @@ int main(int argc, char** argv) {
         Fixture fixture;
         const bool initialized = fixture.Init(output);
         Check(initialized, "initialize isolated hidden production renderer and controller");
-        if (initialized && accent_only) {
+        if (initialized && layer_switch_only) {
+            LayerSwitchChecks(fixture);
+            result = failures ? 1 : 0;
+        } else if (initialized && accent_only) {
             AccentPickerChecks(fixture);
             result = failures ? 1 : 0;
         } else if (initialized) {

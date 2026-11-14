@@ -11,6 +11,7 @@
 #include "../ui/fluent_menu.h"
 #include <algorithm>
 #include <cwctype>
+#include <tuple>
 #include <unordered_set>
 
 namespace pulse {
@@ -71,6 +72,16 @@ ui::ChangeBadge Badge(const index::ChangeSummary& summary, int days) {
     if (!counts.empty()) badge.tooltip += L"\n" + counts;
     return badge;
 }
+bool ChangeBadgesChanged(const AppState& s) {
+    for (const auto& [key, displayed] : s.changes.visible_badges) {
+        const auto found = s.changes.summaries.find(key);
+        const auto badge = found == s.changes.summaries.end() ? ui::ChangeBadge{} :
+            Badge(found->second, s.appPrefs.change_tracking_days);
+        if (badge.label != displayed.label || (!badge.label.empty() &&
+            (badge.status != displayed.status || badge.has_deleted != displayed.has_deleted))) return true;
+    }
+    return false;
+}
 std::wstring RootOf(const app::Tab& tab) {
     std::wstring kind, rest;
     app::ParsePulsePath(tab.current_path, &kind, &rest);
@@ -95,6 +106,7 @@ void ApplyChangeTrackingSettings(AppState& s) {
     auto& state = s.changes;
     state.client.SetEnabled(s.appPrefs.change_tracking_enabled);
     state.summaries.clear();
+    state.visible_badges.clear();
     state.requested_paths.clear();
     state.popover.visible = false;
     state.summary_request = 0;
@@ -118,7 +130,7 @@ void ApplyChangeTrackingSettings(AppState& s) {
 
 bool TickChangeTracking(AppState& s) {
     auto& state = s.changes;
-    bool changed = false;
+    bool changed = s.appPrefs.change_tracking_enabled && ChangeBadgesChanged(s);
     const bool hovering = s.hoverRegion == static_cast<int>(ui::HitTestResult::ChangeBadge) ||
         s.hoverRegion == static_cast<int>(ui::HitTestResult::ChangeOpen);
     if (state.popover.visible && !hovering && GetTickCount64() > state.hover_deadline) {
@@ -148,6 +160,8 @@ bool TickChangeTracking(AppState& s) {
             auto* tab = pane->ActiveTab();
             if (!tab || tab->loading || tab->SelectedCount() || tab->scroll_y != 0 ||
                 tab->change_cursor || RootOf(*tab).empty()) continue;
+            if (std::any_of(state.details.begin(), state.details.end(),
+                [&](const auto& item) { return item.second.tab == tab; })) continue;
             LoadChangeView(s, *tab, RootOf(*tab), false, true);
         }
     }
@@ -185,7 +199,7 @@ void LoadChangeView(AppState& s, app::Tab& tab, const std::wstring& root, bool a
         tab.scroll_y = 0;
     }
     if (!s.appPrefs.change_tracking_enabled) { tab.loading = false; return; }
-    tab.loading = true;
+    if (!refresh) tab.loading = true;
     const auto request = ++s.changes.next_request;
     std::erase_if(s.changes.details, [&](const auto& item) { return item.second.tab == &tab; });
     tab.change_request = request;
@@ -204,17 +218,24 @@ void OpenChangeView(AppState& s, const std::wstring& root) {
     NavigateTo(s, L"pulse:changes:" + fs::NormalizePath(root));
 }
 
-void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeResponse& result) {
+bool ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeResponse& result) {
     auto& state = s.changes;
     const auto pending = state.details.find(request);
-    if (pending == state.details.end()) return;
+    if (pending == state.details.end()) return false;
     const auto wanted = pending->second;
     state.details.erase(pending);
-    if (!s.appPrefs.change_tracking_enabled) return;
+    if (!s.appPrefs.change_tracking_enabled) return false;
+    bool changed = false;
     ForEachPane(s, [&](app::Pane& pane) {
         auto* tab = pane.ActiveTab();
         if (!tab || tab != wanted.tab || tab->current_path != wanted.path ||
             tab->view_generation != wanted.generation || tab->change_request != request) return;
+        const auto visible_state = [&] {
+            return std::make_tuple(tab->loading, tab->banner_title, tab->banner_message,
+                tab->snapshot && !tab->snapshot->empty() ? std::wstring{} : tab->change_empty_text,
+                tab->change_status_text, tab->change_cursor != 0);
+        };
+        const auto before = visible_state();
         tab->loading = false;
         tab->SetBannerTitle(app::BannerType::Other, Text(I::ChangeTitle));
         tab->banner_message = Text(I::ChangeScope);
@@ -224,6 +245,7 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
                 has_entries ? I::ChangeRefreshFailed : I::ChangeReadFailed;
             tab->change_empty_text = Text(message);
             tab->change_status_text = has_entries ? Text(message) : L"";
+            changed |= before != visible_state();
             return;
         }
         auto entries = std::make_shared<std::vector<fs::DirEntry>>();
@@ -245,18 +267,30 @@ void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeRespon
             entry.change_deleted = record.kind == K::Deleted;
             entries->push_back(std::move(entry));
         }
-        tab->SetSnapshot(entries);
+        const auto same_row = [](const fs::DirEntry& a, const fs::DirEntry& b) {
+            return a.name == b.name && a.full_path == b.full_path && a.is_dir == b.is_dir &&
+                a.attrs == b.attrs && CompareFileTime(&a.mtime, &b.mtime) == 0 &&
+                a.change_old_path == b.change_old_path && a.change_type_text == b.change_type_text &&
+                a.change_record_only == b.change_record_only && a.change_deleted == b.change_deleted;
+        };
+        if (!tab->snapshot || !std::equal(entries->begin(), entries->end(),
+            tab->snapshot->begin(), tab->snapshot->end(), same_row)) {
+            tab->SetSnapshot(entries);
+            changed = true;
+        }
         tab->loading = false;
         tab->change_cursor = result.next_cursor;
         tab->change_empty_text = Text(I::ChangeNoRecords);
         tab->change_status_text.clear();
+        changed |= before != visible_state();
     });
+    return changed;
 }
 
-void ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result) {
+bool ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result) {
     auto& state = s.changes;
     if (request != state.summary_request || !s.appPrefs.change_tracking_enabled ||
-        state.summary_days != s.appPrefs.change_tracking_days) return;
+        state.summary_days != s.appPrefs.change_tracking_days) return false;
     state.summary_pending = false;
     std::unordered_set<std::wstring> requested;
     for (const auto& path : state.requested_paths) requested.insert(SummaryKey(path, state.summary_days));
@@ -271,6 +305,14 @@ void ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResp
         if (!requested.contains(it->first)) it = state.summaries.erase(it);
         else ++it;
     }
+    bool changed = ChangeBadgesChanged(s);
+    if (state.popover.visible) {
+        const auto found = state.summaries.find(SummaryKey(state.hover_path, state.summary_days));
+        const auto badge = found == state.summaries.end() ? ui::ChangeBadge{} : Badge(found->second, state.summary_days);
+        if (badge.label.empty()) { state.popover.visible = false; changed = true; }
+        else if (state.popover.summary != badge.tooltip) { state.popover.summary = badge.tooltip; changed = true; }
+    }
+    return changed;
 }
 
 void ReceiveChangeTracking(AppState& s, uint32_t request, bool details) {
@@ -278,10 +320,10 @@ void ReceiveChangeTracking(AppState& s, uint32_t request, bool details) {
     auto& state = s.changes;
     if (!details) {
         if (!state.client.TakeSummary(request, result)) return;
-        ApplyChangeSummaries(s, request, result);
+        if (!ApplyChangeSummaries(s, request, result)) return;
     } else {
         if (!state.client.TakeDetails(request, result)) return;
-        ApplyChangeDetails(s, request, result);
+        if (!ApplyChangeDetails(s, request, result)) return;
     }
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
@@ -313,6 +355,7 @@ void FillChangePane(AppState& s, app::Tab& tab, ui::PaneViewModel& pane, const D
         missing.state = S::Scanning;
         const auto badge = Badge(found == s.changes.summaries.end() ? missing : found->second,
             s.appPrefs.change_tracking_days);
+        s.changes.visible_badges[SummaryKey(path, s.appPrefs.change_tracking_days)] = badge;
         if (index < 0) pane.title_change_badge = badge;
         else if (!badge.label.empty()) pane.change_badges[index] = badge;
     };

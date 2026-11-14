@@ -88,6 +88,8 @@ bool Capture(HWND window, const std::filesystem::path& path, bool from_screen = 
 }
 void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     HWND dialog = FindWindowW(L"PulseSettingsValueDialog", nullptr);
+    if (dialog && (GetWindowThreadProcessId(dialog, nullptr) != GetCurrentThreadId() ||
+        GetWindow(dialog, GW_OWNER) != owner)) dialog = nullptr;
     if (++ticks > 40) {
         Check(false, "dialog keyboard automation timed out");
         if (dialog) PostMessageW(dialog, WM_CLOSE, 0, 0);
@@ -143,6 +145,10 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
             return rect;
         };
         const RECT primary = child_rect(IDOK), cancel = child_rect(IDCANCEL);
+        LOGFONTW body_font{};
+        Check(GetObjectW(reinterpret_cast<HFONT>(SendMessageW(edit, WM_GETFONT, 0, 0)), sizeof(body_font), &body_font) &&
+            std::wcscmp(body_font.lfFaceName, L"Microsoft YaHei UI") == 0,
+            "settings input and actions share the application's text font family");
         Check(primary.bottom - primary.top == px(32) && primary.left - cancel.right == px(8) &&
             client.right - primary.right == px(20) && client.bottom - primary.bottom == px(16),
             "settings actions use 32 DIP height, right-aligned Cancel then Primary and 64 DIP footer");
@@ -240,7 +246,9 @@ int wmain(int argc, wchar_t** argv) {
         std::wstring result = L"unchanged";
         const UINT_PTR timer = SetTimer(nullptr, 0, 250, Drive);
         const bool accepted = pulse::app::PromptSettingsValue(owner,
-            mode ? L"主题色" : L"壁纸可见度", L"输入设置值", mode ? L"#0078D4" : L"85",
+            style_only ? L"背景图显示强度" : mode ? L"主题色" : L"壁纸可见度",
+            style_only ? L"输入背景图显示强度（0–100%）" : L"输入设置值",
+            style_only ? L"70" : mode ? L"#0078D4" : L"85",
             result, 32, {}, mode);
         KillTimer(nullptr, timer);
         Check(phase == 2 && accepted == accept, "Enter accepts while Escape and caption close cancel through dialog navigation");

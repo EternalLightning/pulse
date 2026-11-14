@@ -24,6 +24,7 @@
 #include <vector>
 #include <algorithm>
 #include <array>
+#include <fstream>
 
 // The private overlay fixture uses ImageList_CoCreateInstance from Comctl32 v6.
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' " \
@@ -31,6 +32,100 @@
 
 namespace pulse::ui {
 struct ShellIconCacheTestAccess {
+    static bool CustomFolders() {
+        bool ok = true;
+        const auto check = [&](bool passed, const char* label) {
+            std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+            ok &= passed;
+        };
+        wchar_t fixture_root[32768]{};
+        const DWORD length = GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root,
+            static_cast<DWORD>(std::size(fixture_root)));
+        if (length >= std::size(fixture_root)) return false;
+        const auto base = length ? std::filesystem::path(fixture_root) : std::filesystem::temp_directory_path();
+        const auto folder = base / (L"PulseCustomFolder_" + std::to_wstring(GetCurrentProcessId()) +
+            L"_" + std::to_wstring(GetTickCount64()));
+        std::error_code error;
+        std::filesystem::create_directories(folder, error);
+        check(!error, "#627 create isolated customized folder fixture");
+        if (error) return false;
+
+        const auto icon_path = folder / L".folder_icon.ico";
+        const auto ini_path = folder / L"desktop.ini";
+        constexpr DWORD image_size = sizeof(BITMAPINFOHEADER) + 256 * 256 * 4 + 32 * 256;
+        const std::array<BYTE, 22> header{0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 32, 0,
+            static_cast<BYTE>(image_size), static_cast<BYTE>(image_size >> 8),
+            static_cast<BYTE>(image_size >> 16), static_cast<BYTE>(image_size >> 24), 22, 0, 0, 0};
+        BITMAPINFOHEADER bitmap{};
+        bitmap.biSize = sizeof(bitmap); bitmap.biWidth = 256; bitmap.biHeight = 512;
+        bitmap.biPlanes = 1; bitmap.biBitCount = 32; bitmap.biSizeImage = 256 * 256 * 4;
+        const std::vector<DWORD> color(256 * 256, 0xffc42a91);
+        const std::array<BYTE, 32 * 256> mask{};
+        std::ofstream icon(icon_path, std::ios::binary);
+        icon.write(reinterpret_cast<const char*>(header.data()), header.size());
+        icon.write(reinterpret_cast<const char*>(&bitmap), sizeof(bitmap));
+        icon.write(reinterpret_cast<const char*>(color.data()), color.size() * sizeof(DWORD));
+        icon.write(reinterpret_cast<const char*>(mask.data()), mask.size());
+        const bool written = icon.good();
+        icon.close();
+        std::ofstream ini(ini_path, std::ios::binary);
+        constexpr wchar_t settings[] = L"\xFEFF[ViewState]\r\nFolderType=Generic\r\n[.ShellClassInfo]\r\n"
+            L"IconResource=.folder_icon.ico,0\r\nIconIndex=0\r\n";
+        ini.write(reinterpret_cast<const char*>(settings), sizeof(settings) - sizeof(wchar_t));
+        const bool configured = ini.good();
+        ini.close();
+        const bool attributes = SetFileAttributesW(ini_path.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) &&
+            SetFileAttributesW(folder.c_str(), FILE_ATTRIBUTE_READONLY);
+        check(written && configured && attributes, "#627 relative IconResource and Shell folder attributes configured");
+        SHFILEINFOW native{}, generic{};
+        const bool resolved = SHGetFileInfoW(folder.c_str(), 0, &native, sizeof(native),
+                SHGFI_SYSICONINDEX | SHGFI_SMALLICON) &&
+            SHGetFileInfoW(L"dummy", FILE_ATTRIBUTE_DIRECTORY, &generic, sizeof(generic),
+                SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES);
+        check(resolved && native.iIcon != generic.iIcon,
+            "#627 Windows resolves the relative ICO instead of its default folder icon");
+        std::printf("[INFO] #627 path=%ls native=%d generic=%d attrs=0x%08lX resolved=%d\n",
+            folder.c_str(), native.iIcon, generic.iIcon, GetFileAttributesW(folder.c_str()), resolved);
+        {
+            ShellIconCache cache;
+            cache.BitmapFor(folder.wstring(), folder.filename().wstring(), true, FILE_ATTRIBUTE_DIRECTORY, 256);
+            const bool completed = Wait(cache);
+            const bool matches = completed && resolved && NativePixelsMatch(cache, folder.wstring(), native.iIcon);
+            check(matches,
+                "#627 production worker matches Windows icon pixels in all four sizes");
+            if (!matches || !resolved || native.iIcon == generic.iIcon) {
+                if (cache.worker_) {
+                    std::lock_guard lock(cache.worker_->mutex);
+                    std::printf("[INFO] #627 worker completed=%d exact=%zu queued=%zu retries=%zu pixels=%zu\n",
+                        completed, cache.worker_->exact_index.size(), cache.worker_->queued.size(),
+                        cache.worker_->retry_after.size(), cache.worker_->pixels.size());
+                } else std::printf("[INFO] #627 worker creation failed: %lu\n", GetLastError());
+                ipc::ShellQueryRequest request;
+                request.kind = ipc::ShellQueryKind::Icon;
+                request.path = folder.wstring();
+                ipc::ShellQueryResult direct, remote;
+                shell::QueryShellIcons(request, direct);
+                const bool connected = ipc::QueryShell(request, remote);
+                std::printf("[INFO] #627 local_error=0x%08lX local_sizes=%zu ipc=%d remote_error=0x%08lX remote_sizes=%zu\n",
+                    static_cast<unsigned long>(direct.error), direct.icons.size(), connected,
+                    static_cast<unsigned long>(remote.error), remote.icons.size());
+                for (const auto& received : remote.icons) {
+                    const auto reference = std::find_if(direct.icons.begin(), direct.icons.end(),
+                        [&](const auto& item) { return item.list_id == received.list_id; });
+                    std::printf("[INFO] #627 list=%u remote=%ux%u local=%ux%u exact_pixels=%d\n",
+                        received.list_id, received.width, received.height,
+                        reference == direct.icons.end() ? 0u : reference->width,
+                        reference == direct.icons.end() ? 0u : reference->height,
+                        reference != direct.icons.end() && received.pixels == reference->pixels);
+                }
+            }
+        }
+        SetFileAttributesW(ini_path.c_str(), FILE_ATTRIBUTE_NORMAL);
+        SetFileAttributesW(folder.c_str(), FILE_ATTRIBUTE_NORMAL);
+        std::filesystem::remove_all(folder, error);
+        check(!error, "#627 isolated customized folder fixture removed");
+        return ok;
+    }
     static bool CloudPlaceholders() {
         std::atomic<int> exact_queries = 0;
         ShellIconCache::SetQueryHookForTest([&](const std::wstring& path) {
@@ -1045,6 +1140,9 @@ int main(int argc, char** argv) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES};
     InitCommonControlsEx(&controls);
     bool ok = false;
+    if (argc == 2 && std::strcmp(argv[1], "--custom-folders") == 0) {
+        ok = pulse::ui::ShellIconCacheTestAccess::CustomFolders();
+    } else
     if (argc == 2 && std::strcmp(argv[1], "--overlays") == 0) {
         ok = pulse::ui::ShellIconCacheTestAccess::Overlays();
     } else

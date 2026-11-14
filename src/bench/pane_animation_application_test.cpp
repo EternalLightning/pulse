@@ -17,6 +17,7 @@
 #include "address_path_animation_cases.h"
 #include "page_scroll_cases.h"
 #include "column_scroll_cases.h"
+#include "column_navigation_cases.h"
 #include "navigation_motion_cases.h"
 #include "additional_motion_cases.h"
 #include "interaction_feedback_cases.h"
@@ -75,6 +76,7 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool path_only = argc == 2 && std::string_view(argv[1]) == "--address-path-only";
     const bool page_scroll = argc == 2 && std::string_view(argv[1]) == "--page-scroll-only";
     const bool column_scroll = argc == 2 && std::string_view(argv[1]) == "--column-scroll-only";
+    const bool column_navigation = argc == 2 && std::string_view(argv[1]) == "--column-navigation-only";
     const bool navigation_motion = argc == 2 && std::string_view(argv[1]) == "--navigation-motion-only";
     const bool settings_toolbar = argc == 2 && std::string_view(argv[1]) == "--settings-toolbar-only";
     const bool empty_navigation = argc == 2 && std::string_view(argv[1]) == "--navigation-empty-viewport-only";
@@ -85,7 +87,7 @@ int RunAnimationFixture(int argc, char** argv) {
     const bool list_hover_only = argc == 2 && std::string_view(argv[1]) == "--list-hover-only";
     const bool disclosure_only = argc == 2 && std::string_view(argv[1]) == "--sidebar-disclosure-only";
     const bool feedback_only = argc == 2 && std::string_view(argv[1]) == "--interaction-feedback-only";
-    if (tooltip_only || settings_toolbar || empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || navigation_motion || additional_motion || feedback_only ||
+    if (tooltip_only || settings_toolbar || empty_navigation || disclosure_only || list_hover_only || home_hover_only || hover_only || search_only || path_only || page_scroll || column_scroll || column_navigation || navigation_motion || additional_motion || feedback_only ||
         (argc == 2 && std::string_view(argv[1]) == "--home-settings-only")) {
         const bool passed = tooltip_only ? ui::TooltipMotionUiTest::RunLayout(s.compositor, root) :
             settings_toolbar ? ui::NavigationMotionUiTest::RunSettingsToolbar(s, root) :
@@ -99,6 +101,7 @@ int RunAnimationFixture(int argc, char** argv) {
             navigation_motion ? ui::NavigationMotionUiTest::Run(s, root) :
             page_scroll ? RunPageScrollChecks(s) :
             column_scroll ? RunColumnScrollChecks(s, root) :
+            column_navigation ? RunColumnNavigationChecks(s, root) :
             path_only ? RunAddressPathAnimationChecks(s, root) :
             search_only ? RunSearchInteractionAnimationChecks(s, root) : RunHomeSettingsAnimationChecks(s, root);
         s.watches.Stop();

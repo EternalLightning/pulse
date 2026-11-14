@@ -44,6 +44,7 @@ public:
     // queues the row when it is new, modified, or a syncing row due a re-read.
     fs::CloudSync Lookup(const std::wstring& path, uint64_t modified, ULONGLONG now = GetTickCount64());
     uint64_t Revision() const;
+    bool ChangedSince(const std::wstring& path, uint64_t revision) const;
 
     // Test hooks.
     size_t RunPendingForTest();
@@ -54,6 +55,7 @@ public:
 private:
     struct Entry {
         uint64_t modified = 0;
+        uint64_t revision = 0;
         fs::CloudSync state = fs::CloudSync::Idle;
         ULONGLONG checked = 0;
         bool queued = false;

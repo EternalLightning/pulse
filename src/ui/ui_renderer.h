@@ -149,6 +149,7 @@ struct ColumnStripView {
     ColumnStripColumnView child;
     std::vector<float> widths_dip; // see ColumnStripWidthDip
     float scroll_from_right_dip = 0.0f; // ancestor strip scroll (0 = parent visible)
+    std::optional<float> ancestor_anchor_left_dip;
     int resize_column = -1;       // column id whose divider is being dragged
     bool hscroll_pressed = false; // ancestor scrollbar thumb is being dragged
 

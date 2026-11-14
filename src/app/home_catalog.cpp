@@ -118,7 +118,6 @@ void HomeCatalog::Refresh() {
                 if (state->generation != generation) return false;
                 state->cards = cards;
                 state->drive_capacity = drive_capacity;
-                state->published_generation = generation;
                 for (auto& card : state->cards) {
                     for (const auto& [root, label] : state->label_updates) {
                         if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), root))
@@ -165,7 +164,7 @@ bool HomeCatalog::Loading() const {
 }
 void HomeCatalog::FillDriveLabels(SidebarModel& sidebar) const {
     std::lock_guard lock(state_->mutex);
-    if (state_->published_generation != state_->generation) return;
+    // Keep published drive metadata usable while a newer refresh waits on network I/O.
     for (auto& drive : sidebar.drives) {
         for (const auto& card : state_->cards) {
             if (card.group != 0 && path::EqualInsensitive(

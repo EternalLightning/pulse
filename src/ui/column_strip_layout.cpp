@@ -24,7 +24,8 @@ size_t ColumnStripWidthSlot(int column_id, size_t ancestor_count) noexcept {
 ColumnStripLayout LayoutColumnStrip(const D2D1_RECT_F& pane_bounds, float top,
                                     size_t ancestor_count, bool child_slot,
                                     const std::vector<float>& widths_dip,
-                                    float scale, float scroll_from_right_dip) noexcept {
+                                    float scale, float scroll_from_right_dip,
+                                    std::optional<float> ancestor_anchor_left_dip) noexcept {
     ColumnStripLayout out;
     out.body = pane_bounds;
     const float unit = std::max(0.5f, scale);
@@ -46,7 +47,9 @@ ColumnStripLayout LayoutColumnStrip(const D2D1_RECT_F& pane_bounds, float top,
     // Ancestors get at most half of what the child column leaves (never less
     // than the parent's width); the rest scrolls so the list stays readable.
     const float share = std::max(parent_w, (width - child_w) * kColumnStripAncestorShare);
-    const float viewport_w = std::min({content, available - child_w, share});
+    const float wanted = ancestor_anchor_left_dip && ancestor_count
+        ? std::max(0.0f, *ancestor_anchor_left_dip * unit + parent_w) : share;
+    const float viewport_w = std::min({content, available - child_w, wanted});
     if (child_w <= 0.0f && viewport_w <= 0.0f) return out;
 
     out.active = true;

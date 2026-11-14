@@ -781,7 +781,7 @@ void MainRenderer::DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, 
         if (bounds.right - bounds.left <= 1.0f || bounds.bottom - bounds.top <= 1.0f) return;
         // The pane material stays visible while its title and items change.
         auto* dc = compositor_->Dc();
-        const auto pane_fill = vm.dark && !IsHighContrast()
+        const auto pane_fill = UsesNativeMica(vm) ? NativeMicaPaneFill(vm) : vm.dark && !IsHighContrast()
             ? WithAlpha(HexColor(0xFFFFFF), vm.background_image.empty() ? 0.045f : 0.09f)
             : WithAlpha(theme.surface_card, card_alpha_);
         MakeBrush(dc, pane_fill, brFillHover_);

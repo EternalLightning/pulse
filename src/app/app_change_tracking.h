@@ -20,6 +20,7 @@ struct ChangeDetailPending {
 struct ChangeTrackingUi {
     index::ChangeTrackingClient client;
     std::unordered_map<std::wstring, index::ChangeSummary> summaries;
+    std::unordered_map<std::wstring, ui::ChangeBadge> visible_badges;
     std::vector<std::wstring> visible_paths, requested_paths;
     std::unordered_map<uint32_t, ChangeDetailPending> details;
     uint32_t next_request = 1, summary_request = 0;
@@ -34,8 +35,8 @@ void StartChangeTracking(AppState& s);
 void ApplyChangeTrackingSettings(AppState& s);
 bool TickChangeTracking(AppState& s);
 void ReceiveChangeTracking(AppState& s, uint32_t request, bool details);
-void ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result);
-void ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeResponse& result);
+bool ApplyChangeSummaries(AppState& s, uint32_t request, const index::ChangeResponse& result);
+bool ApplyChangeDetails(AppState& s, uint32_t request, const index::ChangeResponse& result);
 void FillChangePane(AppState& s, app::Tab& tab, ui::PaneViewModel& pane,
                     const D2D1_RECT_F& bounds);
 void FillChangePopover(AppState& s, ui::WindowViewModel& vm);

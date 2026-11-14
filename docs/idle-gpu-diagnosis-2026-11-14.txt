@@ -1,0 +1,84 @@
+Pulse idle GPU diagnosis and targeted fix, 2026-11-14
+
+Initial diagnosis (before the fix below)
+
+Running application observation
+- PID 28096, D:\Applications\Pulse\Pulse.exe, window title: 主页 - Pulse.
+- Installed and build-release/Pulse.exe SHA256 matched:
+  D60ECBCFC10967AF45CCDDC880FDBC8373CB5DA011612B8682BEBDC105B6BE4B
+- 15:12:33 through 15:12:40, eight one-second samples of
+  GPU Engine(pid_28096_*)\Utilization Percentage.
+- Each sample matched 14 engine counters; the busiest was 0.0000% each time.
+- This sampling window did not reproduce the reported activity. It does not
+  establish the GPU load at another time or in another application state.
+
+Production-object rendering fixture
+Command (in an x64 VS developer environment):
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_integration_fixture.ps1 -Fixture idle_render_application_test -BuildDirectory build-release
+
+The fixture uses the production WndProc, renderer and compositor, a visible
+960x720 window, an isolated profile, and the normal maintenance/deadline timers.
+It waits 6.5 seconds for each visible scene before observing five seconds.
+
+Scene         WM_PAINT  BeginDraw  Presented  UI maintenance  Interval
+Folder        0         0          0          10              500 ms
+Home          0         0          0          10              500 ms
+Settings      0         0          0          10              500 ms
+Hidden (2.5s) 0         0          0          3               1000 ms
+
+All four idle checks passed. The fixture is in safe/isolated mode; change
+tracking is excluded by production policy in this mode. Shell host connections
+reported CreateFile error 5 in the sandbox, so this is not acceptance evidence
+for real Shell-provider behavior. The running installed application's GPU
+counters above were sampled separately outside the sandbox.
+
+Confirmed source paths for unnecessary periodic full-window repaint
+- src/app/cloud_commands.cpp, TickCloudStatus: every two seconds an active
+  cloud directory sets dirty even when the cached sync state did not change.
+- src/app/app_change_tracking.cpp, TickChangeTracking/ReceiveChangeTracking:
+  visible path summaries are queried every two seconds; any accepted mailbox
+  response invalidates the window without checking whether the summaries
+  changed. This path requires enabled change tracking and a response.
+
+These are source-confirmed repaint paths, not a measured explanation of the
+user's particular GPU reading. No production code was changed in this diagnosis.
+
+Authorized fix and final verification
+- Cloud status polling now visits the visible cloud detail rows from the last
+  view model without drawing. The existing asynchronous provider/cache query
+  and two-second maintenance gate remain; neutral results retain the existing
+  ten-second cache refresh cadence.
+- Cloud cache revisions now represent changes to the effective displayed
+  state, with a per-file revision so offscreen/other-window results do not
+  request a repaint of this window. A modified row whose cache became unknown
+  still receives its non-neutral status when the background answer arrives.
+- Change-summary results update the cache as before, but only changes to
+  visible badge labels, deletion markers, colours or an open popover request
+  repainting. Unchanged results, hidden tooltip-only changes, transient query
+  failures and stale responses do not repaint. Maintenance still checks badge
+  expiry independently of successful replies.
+- Detail results preserve the existing snapshot when the generated rows are
+  identical. Changed rows, visible error messages and empty states repaint;
+  identical errors/empty responses do not. Background detail refreshes retain
+  the current presentation while pending, and slow requests are not replaced
+  by the periodic maintenance query.
+
+Verification performed against the final production objects:
+  cmake --build build-release --target pulse -j 8
+  (Release, PULSE_WITH_SELFTEST=OFF, passed.)
+  scripts/test_integration_fixture.ps1 -Fixture idle_render_application_test -BuildDirectory build-release -FixtureArguments --status-changes-only
+  (43 checks passed.)
+  build-release/idle_render_application_test.exe --cloud-idle-only
+  (Visible window, controlled constant Syncing provider answer, normal timers.)
+
+Final cloud-folder observation after 6.5 seconds of settling:
+  5000 ms: WM_PAINT=0, BeginDraw=0, Presented=0, maintenance=10, interval=500 ms.
+Final hidden observation:
+  2500 ms: WM_PAINT=0, BeginDraw=0, Presented=0, maintenance=3, interval=1000 ms.
+
+The final fixture runs were outside the filesystem sandbox to permit Shell
+helper connections; no pipe-access error was reported. Profiles and files
+remained isolated under build-release/bench_data. Cloud provider transitions
+and index responses are controlled test inputs; live cloud-provider/index-
+service integration and whole-repository regression were not run. The installed
+application was not replaced.

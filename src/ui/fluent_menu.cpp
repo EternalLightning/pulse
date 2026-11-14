@@ -500,9 +500,14 @@ void FluentMenu::LayoutWindow(POINT screen_pt) {
     HMONITOR mon = MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(mon, &mi);
-    if (max_visible_rows_ > 0) {
-        body_limit_px_ = std::max(model_.RowHeightPx(),
-            static_cast<float>(mi.rcWork.bottom - mi.rcWork.top - kShadowMargin * 2) - FilterHeaderPx());
+    float available = static_cast<float>(mi.rcWork.bottom - mi.rcWork.top - kShadowMargin * 2) - FilterHeaderPx();
+    if (!dropdown_ && !anchor_to_rect_ && !top_center_ && !filter_fn_) {
+        const float below = static_cast<float>(mi.rcWork.bottom - screen_pt.y - kShadowMargin * 2) - FilterHeaderPx();
+        if (below >= model_.RowHeightPx()) available = std::min(available, below);
+    }
+    if (max_visible_rows_ > 0 || model_.HeightPx() > available) {
+        if (max_visible_rows_ <= 0) max_visible_rows_ = model_.Count();
+        body_limit_px_ = std::max(model_.RowHeightPx(), available);
         h = static_cast<int>(std::ceil(BodyHeightPx())) + static_cast<int>(FilterHeaderPx()) + kShadowMargin * 2;
     }
     int x = screen_pt.x;
@@ -1543,6 +1548,10 @@ int FluentMenu::RunModalLoop() {
                 break;
             }
             bool swallow = false;
+            if (opening_left_button_down_ && msg.message == WM_LBUTTONUP) {
+                opening_left_button_down_ = false;
+                if (IsPaletteHwnd(msg.hwnd)) continue;
+            }
             if (animating_out_ && external_edit_ && msg.hwnd == external_edit_) {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -1651,6 +1660,7 @@ int FluentMenu::TrackDropdown(RECT control_rect, std::vector<FluentMenuItem> ite
 int FluentMenu::TrackPopup(POINT screen_pt, std::vector<FluentMenuItem> items,
                            FilterFn filter, bool top_center, CommandFn command) {
     if (open_) return 0;
+    opening_left_button_down_ = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
     if (owner_ && IsWindow(owner_))
         SetScale(static_cast<float>(pulse::compat::WindowDpi(owner_)) / 96.0f);
     deferred_clicks_.clear();

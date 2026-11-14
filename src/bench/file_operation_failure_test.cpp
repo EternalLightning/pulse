@@ -11,6 +11,7 @@
 #include "../app/exit_confirmation.h"
 #include "../ui/file_operation_dialog.h"
 #include "../ui/animation_clock.h"
+#include "../ui/typography.h"
 #include "snapshot_output.h"
 #include <filesystem>
 #include <cstdio>
@@ -75,12 +76,13 @@ struct FileOperationFailureProbe {
         window.detailed_ = false;
         window.ResizeForDetails(false);
     }
-    static bool Fits(const FileOperationWindow& window) {
+    static bool Fits(FileOperationWindow& window) {
+        window.Render(false);
         const auto text = ops::OperationFailureDetails(window.status_);
-        const float text_height = window.painter_.MeasureWrappedCaptionHeight(text,
-            static_cast<float>(window.compositor_.Width()) - 64 * window.scale_);
-        return 216 * window.scale_ + text_height <=
-            static_cast<float>(window.compositor_.Height()) - 64 * window.scale_;
+        const auto& bounds = window.progress_inspection_.failure_text;
+        const float text_height = typography::MeasureWrapped(window.compositor_.DwriteFactory(),
+            window.compositor_.TextFormat(), text, bounds.right - bounds.left);
+        return bounds.top + text_height <= bounds.bottom + 1.0f;
     }
     static bool Capture(FileOperationWindow& window, const std::filesystem::path& path,
                         Pixels* captured = nullptr) {
@@ -406,18 +408,29 @@ static int RunCompletionTests(HWND owner) {
     return failures;
 }
 
-static bool ZigzagPeaksConnected(const pulse::ui::FileOperationFailureProbe::Pixels& pixels, float scale) {
+static bool ZigzagPeaksConnected(const pulse::ui::FileOperationFailureProbe::Pixels& pixels, float scale,
+                                 const D2D1_RECT_F& plot, D2D1_COLOR_F stroke) {
     if (pixels.stride < static_cast<size_t>(pixels.width) * 4 ||
         pixels.bytes.size() < static_cast<size_t>(pixels.stride) * pixels.height) return false;
-    // The outside of each sharp peak must be covered by the joined cyan stroke.
+    // The outside of each sharp peak must be covered by the joined theme stroke.
     // Separate butt-ended segments leave this row above the vertex unpainted.
-    const UINT y = static_cast<UINT>(std::floor(214.0f * scale - 0.5f * scale));
+    const UINT y = static_cast<UINT>(std::floor(plot.top + 5.5f * scale));
+    const UINT bg_x = static_cast<UINT>((plot.left + plot.right) * 0.5f);
+    const UINT bg_y = static_cast<UINT>(plot.top + 2 * scale);
+    if (bg_x >= pixels.width || bg_y >= pixels.height) return false;
+    const BYTE* background = pixels.bytes.data() + bg_y * pixels.stride + bg_x * 4;
+    const float delta[] = {stroke.b * 255 - background[0], stroke.g * 255 - background[1], stroke.r * 255 - background[2]};
+    const float length = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+    if (length < 400) return false;
     for (UINT i = 2; i < 118; i += 2) {
-        const UINT x = static_cast<UINT>((30.0f + 400.0f * i / 119.0f) * scale);
+        const UINT x = static_cast<UINT>(plot.left + (plot.right - plot.left) * i / 119.0f);
         if (x >= pixels.width || y >= pixels.height) return false;
         const auto* pixel = pixels.bytes.data() + static_cast<size_t>(y) * pixels.stride + x * 4;
-        if (static_cast<int>(pixel[0]) - pixel[2] < 50 ||
-            static_cast<int>(pixel[1]) - pixel[2] < 30) return false;
+        const float coverage = ((pixel[0] - background[0]) * delta[0] +
+            (pixel[1] - background[1]) * delta[1] + (pixel[2] - background[2]) * delta[2]) / length;
+        // The former cyan thresholds required about 25% coverage; keep that
+        // geometric requirement when light-theme ink is a darker accent shade.
+        if (coverage < 0.26f) return false;
     }
     return true;
 }
@@ -484,7 +497,9 @@ static int RunMotionTests(HWND owner) {
             const auto image = output / (std::wstring(L"rate-zigzag-") + (dark ? L"dark-" : L"light-") +
                 std::to_wstring(dpi) + L".png");
             FileOperationFailureProbe::Pixels pixels;
-            check(FileOperationFailureProbe::Capture(window, image, &pixels) && ZigzagPeaksConnected(pixels, scale),
+            check(FileOperationFailureProbe::Capture(window, image, &pixels) &&
+                ZigzagPeaksConnected(pixels, scale, FileOperationFailureProbe::Inspect(window).speed_plot,
+                    ui::MakeTheme(dark, ui::HexColor(0x69CFFF)).accent_ink),
                 "dense sharp rate peaks remain connected in the actual rendered image");
         }
     }
@@ -697,6 +712,75 @@ static int RunProgressTests(HWND owner) {
     return failures;
 }
 
+static int RunPopupStyleTests(HWND owner) {
+    using namespace pulse;
+    const auto output = std::filesystem::absolute(L"bench_data/dialog-pair/operation");
+    std::filesystem::create_directories(output);
+    int failures = 0;
+    const auto check = [&](bool ok, const char* label) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+        failures += !ok;
+    };
+    for (const auto* language : {L"zh-CN", L"en-US"}) for (bool dark : {false, true})
+    for (float scale : {1.0f, 1.5f}) {
+        l10n::SetLanguage(language);
+        ui::FileOperationWindow window;
+        check(window.Create(owner, {[] {}, [] {}, [] {}, [] {}}), "create isolated operation style fixture");
+        window.SetTheme(dark, ui::HexColor(0x87CEFA));
+        const HWND hwnd = ui::FileOperationFailureProbe::Window(window);
+        RECT bounds{40, 40, 40 + static_cast<LONG>(460 * scale), 40 + static_cast<LONG>(424 * scale)};
+        SendMessageW(hwnd, WM_DPICHANGED, MAKELONG(static_cast<WORD>(96 * scale), static_cast<WORD>(96 * scale)),
+            reinterpret_cast<LPARAM>(&bounds));
+        ops::OpStatus status;
+        status.task_id = 1;
+        status.type = ops::OpType::Copy;
+        status.phase = ops::OpPhase::Failed;
+        status.failure_hr = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+        status.last_error = l10n::Pick(L"文件所在的卷已被外部更改，因此打开的文件不再有效。", L"The volume was externally altered; the open file is no longer valid.");
+        status.source_label = L"G:\\openkylin-envs";
+        status.failed_path = status.source_label;
+        status.destination_label = L"OpenKylin";
+        window.Update(status);
+        const auto& layout = ui::FileOperationFailureProbe::Inspect(window);
+        check(std::abs(layout.title_bounds.bottom / scale - 44) < 0.1f &&
+            std::abs(layout.title_bounds.left / scale - 48) < 0.1f,
+            "operation title uses the shared 44 DIP header and 48 DIP text origin");
+        check(std::abs(layout.title_font_size / scale - 14) < 0.1f && layout.title_weight >= DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            "operation title uses the same 14 DIP bold face as settings prompts");
+        check(std::abs((layout.title_icon.right - layout.title_icon.left) / scale - 20) < 0.1f &&
+            std::abs(layout.title_icon.left / scale - 20) < 0.1f,
+            "operation title icon uses the shared 20 DIP size and margin");
+        check(std::abs((layout.close.right - layout.close.left) / scale - 46) < 0.1f,
+            "operation close target matches the shared caption control");
+        check(std::abs((layout.footer.bottom - layout.footer.top + 1) / scale - 64) < 1.1f,
+            "operation footer matches the shared 64 DIP action strip");
+        check((layout.cancel.right - layout.cancel.left) / scale >= 79.9f &&
+            std::abs((layout.cancel.bottom - layout.cancel.top) / scale - 32) < 0.1f,
+            "operation action uses the same minimum 80 by 32 DIP size as settings prompts");
+        const auto name = std::wstring(language) + (dark ? L"-dark-" : L"-light-") +
+            std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+        check(ui::FileOperationFailureProbe::Capture(window, output / name), "save actual failure dialog rendering");
+        check(ui::FileOperationFailureProbe::Fits(window), "complete failure text fits its content viewport");
+        status.task_id++;
+        status.phase = ops::OpPhase::Running;
+        status.active = true;
+        status.failure_hr = S_OK;
+        status.last_error.clear(); status.failed_path.clear();
+        status.percent = 25;
+        status.total_bytes = 4096; status.transferred_bytes = 1024;
+        status.total_items = 4; status.completed_items = 1;
+        window.Update(status);
+        ui::FileOperationFailureProbe::Collapse(window);
+        const auto& running = ui::FileOperationFailureProbe::Inspect(window);
+        check(running.show_pause && running.pause.right + 7 * scale <= running.cancel.left &&
+            running.details.right + 8 * scale <= running.pause.left,
+            "details, pause and cancel remain separate in the narrow action strip");
+        check(ui::FileOperationFailureProbe::Capture(window, output / (L"running-" + name)), "save running dialog rendering");
+    }
+    std::printf("[RESULT] failures=%d\n", failures);
+    return failures;
+}
+
 int wmain(int argc, wchar_t** argv) {
     pulse::compat::EnableDpiAwareness();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -714,6 +798,12 @@ int wmain(int argc, wchar_t** argv) {
     RegisterClassW(&wc);
     const HWND owner = CreateWindowExW(0, wc.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
         0, 0, 960, 720, nullptr, nullptr, wc.hInstance, nullptr);
+    if (argc == 2 && std::wcscmp(argv[1], L"--popup-style-only") == 0) {
+        failures = RunPopupStyleTests(owner);
+        DestroyWindow(owner);
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wcscmp(argv[1], L"--exit-preview") == 0) {
         failures = PreviewExitConfirmation(owner);
         DestroyWindow(owner);

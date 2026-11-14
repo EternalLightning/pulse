@@ -995,6 +995,20 @@ BOOL WINAPI DeniedIdentityQuery(HANDLE, FILE_INFO_BY_HANDLE_CLASS, LPVOID, DWORD
     return FALSE;
 }
 
+BOOL WINAPI ZeroIndexIdentityQuery(HANDLE handle, LPBY_HANDLE_FILE_INFORMATION data) {
+    if (!GetFileInformationByHandle(handle, data)) return FALSE;
+    data->nFileIndexHigh = data->nFileIndexLow = 0;
+    return TRUE;
+}
+
+BOOL WINAPI ExfatInformationQuery(HANDLE handle, FILE_INFO_BY_HANDLE_CLASS kind, LPVOID data, DWORD size) {
+    if (kind == FileAttributeTagInfo) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    return LegacyIdentityQuery(handle, kind, data, size);
+}
+
 int RunNetworkIdentityRegressions() {
     const auto root = SandboxRoot() + L"-identity-" + std::to_wstring(GetCurrentProcessId()) +
         L"-" + std::to_wstring(GetTickCount64());
@@ -1004,6 +1018,38 @@ int RunNetworkIdentityRegressions() {
     const auto source = root + L"\\source.bin", target = root + L"\\dst\\source.bin";
     const char payload[] = "network provider copy identity regression";
     Check(MakeFile(source, payload, sizeof(payload)), L"identity source created");
+    {
+        std::wstring error;
+        ops::DestinationGuard guard(ExfatInformationQuery);
+        Check(guard.Capture(root, error) && guard.PinDirectories(root, error) && guard.Check(root, error),
+              L"FAT/exFAT directory guard falls back when attribute-tag query is unsupported");
+    }
+    {
+        const auto volume_root = std::filesystem::path(root).root_path().wstring();
+        ops::DestinationGuard::Handle root_handle(CreateFileW(volume_root.c_str(), 0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+        ops::DestinationGuard::Handle directory(CreateFileW(root.c_str(), 0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+        ops::FileIdentity identity{};
+        Check(ops::ReadFileIdentity(root_handle.get(), identity, LegacyIdentityQuery, ZeroIndexIdentityQuery) &&
+              identity.Valid() && !identity.extended,
+              L"FAT/exFAT zero-index root retains a valid volume identity");
+        ipc::PayloadWriter writer;
+        ipc::WriteFileIdentities(writer, {identity});
+        ipc::PayloadReader reader(writer.data().data(), writer.data().size());
+        std::vector<ops::FileIdentity> decoded;
+        Check(ipc::ReadFileIdentities(reader, decoded) && decoded.size() == 1 && decoded.front() == identity,
+              L"zero-index root identity survives helper protocol round trip");
+        Check(!ops::ReadFileIdentity(directory.get(), identity, LegacyIdentityQuery, ZeroIndexIdentityQuery),
+              L"zero-index non-root directory is still refused");
+        Check(!ops::FileIdentity{}.Valid(), L"missing identity is still invalid");
+        ops::FileIdentity empty_extended{};
+        empty_extended.extended = true;
+        empty_extended.value.VolumeSerialNumber = 1;
+        Check(!empty_extended.Valid(), L"zero extended file ID is still invalid");
+    }
     {
         ops::DestinationGuard::Handle handle(CreateFileW(source.c_str(), 0,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr));
@@ -1015,6 +1061,8 @@ int RunNetworkIdentityRegressions() {
               L"access failure does not trigger identity fallback");
         Check(!ops::ReadFileIdentity(INVALID_HANDLE_VALUE, denied, LegacyIdentityQuery),
               L"failed legacy query still refuses identity");
+        Check(!ops::ReadFileIdentity(handle.get(), denied, LegacyIdentityQuery, ZeroIndexIdentityQuery),
+              L"zero-index regular file is still refused");
         auto different_format = first;
         different_format.extended = true;
         Check(!(first == different_format), L"different identity formats never compare equal");
