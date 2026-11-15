@@ -9,6 +9,7 @@
 #include <string_view>
 #include "../app/global_search_window.h"
 #include "../ui/quick_preview_window.h"
+#include "../ui/lumatext_renderer.h"
 #include "../app/global_search_window.cpp"
 #include "content_search_fixture.h"
 #include <wincodec.h>
@@ -272,11 +273,98 @@ int wmain(int argc, wchar_t** argv) {
         (argc > 2 && std::wstring_view(argv[2]) == L"--routing-only");
     const bool appearance_only = argc > 1 && std::wstring_view(argv[1]) == L"--appearance-keyboard";
     const bool smooth_only = argc > 1 && std::wstring_view(argv[1]) == L"--smooth-scroll";
+    const bool text_render_only = argc > 1 && std::wstring_view(argv[1]) == L"--text-render-only";
     const bool storage_isolation_only = argc > 1 && std::wstring_view(argv[1]) == L"--storage-isolation-only";
-    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only && !appearance_only
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only && !appearance_only && !text_render_only
         ? argv[1] : L"bench_data/global-search-window";
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
+    if (text_render_only) {
+        namespace typography = pulse::ui::typography;
+        const auto previous_mode = typography::CurrentTextRenderMode();
+        output /= L"text-render";
+        std::filesystem::create_directories(output);
+        pulse::GlobalSearchWindow window;
+        window.SetAppearance(false, pulse::ui::WindowEffect::None, L"", D2D1::ColorF(0x0078d4));
+        auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
+        WNDCLASSW cls{};
+        cls.lpfnWndProc = pulse::GlobalSearchWindowTestPeer::State::WindowProc;
+        cls.hInstance = GetModuleHandleW(nullptr);
+        cls.lpszClassName = L"Pulse.GlobalSearch.TextFixture";
+        RegisterClassW(&cls);
+        state.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP, cls.lpszClassName,
+            L"", WS_POPUP | WS_CLIPCHILDREN, -30000, -30000, 780, 488, nullptr, nullptr, cls.hInstance, &state);
+        state.edit = pulse::ui::CreateChildEdit(state.hwnd);
+        check(state.hwnd && state.edit && state.EnsureTarget(), "create search text fixture without starting workers");
+        if (state.target) {
+            check(state.compositor.LumaTextAvailable(), "search text fixture loads the real LumaText backend");
+            for (float scale : {1.0f, 1.25f, 1.5f, 1.75f}) for (bool dark : {false, true}) {
+                state.scale = scale;
+                state.dark = dark;
+                SetWindowPos(state.hwnd, nullptr, 0, 0, state.Px(780), state.Px(488), SWP_NOMOVE | SWP_NOZORDER);
+                state.Layout();
+                state.query = L"季度";
+                state.current_only = state.scope_tooltip_visible = true;
+                state.current_folder_tip = L"\\\\server\\share\\复杂汉字照耀中文路径\\资料\n第二行：季度预算 A\u0301 English";
+                state.scope_pointer_x = 180;
+                state.scope_pointer_y = 260;
+                for (auto mode : {typography::TextRenderMode::Auto, typography::TextRenderMode::Sharp,
+                                  typography::TextRenderMode::Smooth}) {
+                    typography::SetTextRenderMode(mode);
+                    auto* dc = state.compositor.Dc();
+                    dc->BeginDraw();
+                    dc->Clear(state.Theme().bg);
+                    const auto draws = [&] {
+                        const auto* stats = state.compositor.GetLumaTextStats();
+                        return stats ? stats->draw_calls : 0;
+                    };
+                    const auto expect_backend = [&](auto draw, const char* label) {
+                        const auto before = draws();
+                        draw();
+                        check(mode == typography::TextRenderMode::Auto ? draws() > before : draws() == before, label);
+                    };
+                    expect_backend([&] {
+                        state.Label(L"普通文字 照耀季度 A\u0301 English", {24, 28, 550, 64}, 17,
+                            state.Rgb(state.Theme().text));
+                    }, "DIP search label follows the selected backend");
+                    expect_backend([&] {
+                        state.Label(L"季度预算 高亮 English", {24, 84, 550, 120}, 17,
+                            state.Rgb(state.Theme().text), true, typography::FontRole::Text, true);
+                    }, "search range highlight follows the selected backend");
+                    expect_backend([&] {
+                        state.Label(L"很长的季度预算文件名照耀复杂汉字与后续内容.pdf", {24, 140, 210, 178}, 17,
+                            state.Rgb(state.Theme().text), false, typography::FontRole::Text, true);
+                    }, "narrow ellipsized search label follows the selected backend");
+                    expect_backend([&] { state.DrawScopeTooltip(state.Theme()); },
+                        "physical-pixel multiline tooltip follows the selected backend");
+                    float dpi_x = 0, dpi_y = 0;
+                    dc->GetDpi(&dpi_x, &dpi_y);
+                    check(dpi_x == 96 * scale && dpi_y == 96 * scale,
+                        "tooltip restores the search window DIP target DPI");
+                    check(SUCCEEDED(dc->EndDraw()), "search text frame completes without a D2D error");
+                    if (mode == typography::TextRenderMode::Auto) {
+                        const auto name = L"search-" + std::to_wstring(static_cast<int>(scale * 100)) +
+                            (dark ? L"-dark.png" : L"-light.png");
+                        check(state.compositor.SaveSnapshot((output / name).c_str()), "capture actual search LumaText target");
+                    }
+                }
+            }
+            typography::SetTextRenderMode(typography::TextRenderMode::Auto);
+            {
+                pulse::ui::HighContrastFrameScope hc(true);
+                const auto* stats = state.compositor.GetLumaTextStats();
+                const auto before = stats ? stats->draw_calls : 0;
+                state.Paint(false);
+                stats = state.compositor.GetLumaTextStats();
+                check(stats && stats->draw_calls == before && !state.compositor.NeedsRecovery(),
+                    "high contrast search labels and tooltip retain DirectWrite fallback");
+            }
+        }
+        window.Shutdown();
+        typography::SetTextRenderMode(previous_mode);
+        CoUninitialize();
+        return failed ? 1 : 0;
+    }
     if (appearance_only) {
         std::filesystem::create_directories(output);
         pulse::GlobalSearchWindow window;

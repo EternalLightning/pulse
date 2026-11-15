@@ -46,7 +46,7 @@ add_link_options(/guard:cf /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT)
 # Expose optional SDK COM interfaces; runtime calls are capability-checked.
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00 _WIN32_IE=0x0A00 NTDDI_VERSION=NTDDI_WIN10_NI)
 
-option(PULSE_WITH_LUMATEXT "Use LumaText for Pulse-owned single-line text" ON)
+option(PULSE_WITH_LUMATEXT "Use LumaText for Pulse-owned UI text" ON)
 set(LUMATEXT_SOURCE_DIR "" CACHE PATH
     "Optional LumaText source tree used for development builds")
 set(PULSE_LUMATEXT_TARGET "")
@@ -502,7 +502,6 @@ target_link_libraries(pulse_gif_decoder_test PRIVATE ole32 windowscodecs uuid)
 
 add_executable(pulse_ops_test
     src/bench/ops_test_main.cpp
-    src/bench/file_operation_matrix.cpp
     src/ops/ops_manager.cpp
     src/ops/clipboard.cpp
     src/shell_host/recycle_fileop.cpp
@@ -552,7 +551,6 @@ add_executable(pulse_metafile_input_test src/bench/metafile_input_test.cpp src/p
 target_link_libraries(pulse_metafile_input_test PRIVATE ole32 gdi32 gdiplus)
 
 add_executable(pulse_binary_input_boundary_test src/bench/binary_input_boundary_test.cpp)
-add_executable(pulse_permanent_fileop_console_test src/bench/permanent_fileop_console_test.cpp)
 
 # ---- Pulse.Shell.exe: COM isolation and independent Shell launch sessions ----
 file(GLOB_RECURSE PULSE_SHELL_SOURCES CONFIGURE_DEPENDS src/shell_host/*.cpp)
@@ -673,10 +671,16 @@ target_link_libraries(pulse_material_test PRIVATE
 pulse_enable_lumatext(pulse_material_test)
 
 add_executable(pulse_settings_value_ui_test
-    src/bench/settings_value_ui_test.cpp src/bench/localization_test.rc
-    src/app/settings_value_dialog.cpp src/ui/dialog_lifecycle.cpp)
+    src/bench/settings_value_ui_test.cpp src/bench/localization_test.rc src/bench/child_edit_test.rc
+    src/app/settings_value_dialog.cpp src/ui/input_dialog.cpp src/ui/edit_host.cpp
+    src/ui/fluent_components.cpp src/ui/window_helpers.cpp src/ui/tab_shape.cpp
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp)
+target_compile_definitions(pulse_settings_value_ui_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_settings_value_ui_test PRIVATE /MANIFEST:NO)
 target_link_libraries(pulse_settings_value_ui_test PRIVATE
-    pulse_localization user32 gdi32 comctl32 uxtheme dwmapi dcomp ole32 windowscodecs shcore)
+    pulse_localization user32 gdi32 comctl32 uxtheme dwmapi dcomp ole32 windowscodecs shcore
+    d3d11 d2d1 dwrite dxgi shell32 uuid)
+pulse_enable_lumatext(pulse_settings_value_ui_test)
 
 add_executable(pulse_image_open_test src/bench/image_open_test.cpp)
 target_link_libraries(pulse_image_open_test PRIVATE
@@ -723,7 +727,7 @@ target_link_libraries(pulse_shell_launch_regression_test PRIVATE pulse_localizat
     user32 shell32 ole32 oleaut32 uuid advapi32 shlwapi propsys comdlg32)
 
 # Shell-only operations (recycle bin, Explorer verbs) go through Pulse.Shell.exe.
-# Copy/move use the in-process scheduler plus CopyFile2.
+# Copy/move execute through the isolated Shell host.
 # Filename search goes through Pulse.Index.exe (never Engine::Start in the UI).
 if(TARGET pulse AND TARGET pulse_shell)
     add_dependencies(pulse pulse_shell)
@@ -759,15 +763,18 @@ target_compile_definitions(pulse_dialog_close_test PRIVATE UNICODE _UNICODE NOMI
 target_link_libraries(pulse_dialog_close_test PRIVATE dwmapi user32 comctl32)
 
 add_executable(pulse_dialog_fade_test
-    src/bench/dialog_fade_test.cpp src/bench/localization_test.rc
+    src/bench/dialog_fade_test.cpp src/bench/localization_test.rc src/bench/child_edit_test.rc
     src/app/new_item_dialog.cpp src/app/archive_dialog.cpp
     src/model/batch_rename.cpp src/fs/fs_enum.cpp
-    src/ui/dialog_lifecycle.cpp
+    src/ui/dialog_lifecycle.cpp src/ui/input_dialog.cpp src/ui/edit_host.cpp
+    src/ui/fluent_components.cpp src/ui/window_helpers.cpp src/ui/tab_shape.cpp
     src/ui/typography.cpp src/ui/ui_compositor.cpp)
+target_compile_definitions(pulse_dialog_fade_test PRIVATE PULSE_UI_TEST_HOOKS=1 PULSE_TEST_EDIT_VIEWPORT=1)
+target_link_options(pulse_dialog_fade_test PRIVATE /MANIFEST:NO)
 target_include_directories(pulse_dialog_fade_test PRIVATE src)
 target_link_libraries(pulse_dialog_fade_test PRIVATE
     pulse_localization comctl32 user32 gdi32 dwmapi dcomp d3d11 d2d1 dwrite dxgi
-    shcore ole32 shell32 uuid windowscodecs netapi32 shlwapi)
+    shcore ole32 shell32 uuid windowscodecs netapi32 shlwapi uxtheme)
 pulse_enable_lumatext(pulse_dialog_fade_test)
 
 add_executable(pulse_child_edit_test
@@ -1421,9 +1428,8 @@ if(PULSE_BUILD_PROGRESS_UI_TESTS)
     endforeach()
 endif()
 
-add_executable(pulse_copy_progress_test
-    src/bench/copy_progress_test.cpp src/bench/transfer_rate_test.cpp)
-target_include_directories(pulse_copy_progress_test PRIVATE src)
+add_executable(pulse_transfer_rate_test src/bench/transfer_rate_test.cpp)
+target_include_directories(pulse_transfer_rate_test PRIVATE src)
 
 add_executable(pulse_archive_test src/bench/archive_test.cpp src/ops/archive.cpp)
 target_include_directories(pulse_archive_test PRIVATE src)
@@ -1436,14 +1442,17 @@ target_include_directories(pulse_net_cache_test PRIVATE src)
 target_compile_definitions(pulse_net_cache_test PRIVATE PULSE_NET_CACHE_TESTING)
 target_link_libraries(pulse_net_cache_test PRIVATE shell32 shlwapi netapi32)
 add_executable(pulse_archive_dialog_test src/bench/archive_dialog_test.cpp
-    src/app/archive_dialog.cpp src/app/archive_operation_ui.cpp src/bench/localization_test.rc
+    src/app/archive_dialog.cpp src/app/archive_operation_ui.cpp src/bench/localization_test.rc src/bench/child_edit_test.rc
     src/ui/file_operation_dialog.cpp src/ui/fluent_components.cpp src/ui/window_helpers.cpp
     src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp
-    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp)
+    src/ui/typography.cpp src/ui/ui_compositor.cpp src/ops/file_lock_owner.cpp
+    src/ui/input_dialog.cpp src/ui/edit_host.cpp)
+target_compile_definitions(pulse_archive_dialog_test PRIVATE PULSE_UI_TEST_HOOKS=1)
+target_link_options(pulse_archive_dialog_test PRIVATE /MANIFEST:NO)
 target_include_directories(pulse_archive_dialog_test PRIVATE src)
 target_link_libraries(pulse_archive_dialog_test PRIVATE pulse_localization
     d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid
-    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr)
+    comctl32 user32 gdi32 windowscodecs advapi32 rstrtmgr uxtheme)
 pulse_enable_lumatext(pulse_archive_dialog_test)
 add_custom_command(TARGET pulse_archive_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -1583,13 +1592,16 @@ add_executable(pulse_thumbnail_pipeline_test EXCLUDE_FROM_ALL
 target_link_libraries(pulse_thumbnail_pipeline_test PRIVATE ole32 shell32 windowscodecs uuid)
 add_dependencies(pulse_thumbnail_pipeline_test pulse_preview)
 
-get_target_property(transfer_pipeline_sources pulse_locked_operation_test SOURCES)
-list(REMOVE_ITEM transfer_pipeline_sources src/bench/locked_operation_test.cpp)
-get_target_property(transfer_pipeline_libraries pulse_locked_operation_test LINK_LIBRARIES)
-add_executable(pulse_transfer_pipeline_test EXCLUDE_FROM_ALL
-    src/bench/transfer_pipeline_test.cpp ${transfer_pipeline_sources})
-target_include_directories(pulse_transfer_pipeline_test PRIVATE src)
-target_link_libraries(pulse_transfer_pipeline_test PRIVATE ${transfer_pipeline_libraries})
+get_target_property(operation_fixture_sources pulse_locked_operation_test SOURCES)
+list(REMOVE_ITEM operation_fixture_sources src/bench/locked_operation_test.cpp)
+get_target_property(operation_fixture_libraries pulse_locked_operation_test LINK_LIBRARIES)
+
+add_executable(pulse_file_operation_matrix_test EXCLUDE_FROM_ALL
+    src/bench/file_operation_matrix_main.cpp src/bench/file_operation_matrix.cpp
+    src/bench/localization_test.rc ${operation_fixture_sources})
+target_include_directories(pulse_file_operation_matrix_test PRIVATE src)
+target_link_libraries(pulse_file_operation_matrix_test PRIVATE ${operation_fixture_libraries} pulse_shell_file_operations)
+add_dependencies(pulse_file_operation_matrix_test pulse_shell)
 
 add_executable(pulse_transfer_hash_test EXCLUDE_FROM_ALL
     src/bench/transfer_hash_test.cpp src/bench/localization_test.rc)
@@ -1599,14 +1611,25 @@ add_executable(pulse_transfer_validation_test EXCLUDE_FROM_ALL src/bench/transfe
 target_compile_definitions(pulse_transfer_validation_test PRIVATE PULSE_DESTINATION_GUARD_TESTING)
 
 add_executable(pulse_folder_actions_test EXCLUDE_FROM_ALL
-    src/bench/folder_actions_test.cpp src/bench/localization_test.rc ${transfer_pipeline_sources})
+    src/bench/folder_actions_test.cpp src/bench/localization_test.rc ${operation_fixture_sources})
 target_include_directories(pulse_folder_actions_test PRIVATE src)
-target_link_libraries(pulse_folder_actions_test PRIVATE ${transfer_pipeline_libraries})
+target_link_libraries(pulse_folder_actions_test PRIVATE ${operation_fixture_libraries})
 
 add_executable(pulse_ops_journal_test EXCLUDE_FROM_ALL
     src/bench/ops_journal_test_main.cpp src/bench/json_undo_parser_test.cpp
-    src/ops/operation_journal_paths.cpp ${transfer_pipeline_sources})
-target_link_libraries(pulse_ops_journal_test PRIVATE ${transfer_pipeline_libraries})
+    src/ops/operation_journal_paths.cpp ${operation_fixture_sources})
+target_link_libraries(pulse_ops_journal_test PRIVATE ${operation_fixture_libraries})
+
+add_library(pulse_shell_file_operations STATIC src/shell_host/file_operations.cpp)
+target_link_libraries(pulse_shell_file_operations PUBLIC ole32 shell32 uuid user32)
+add_executable(pulse_shell_recycle_contract_test EXCLUDE_FROM_ALL src/bench/shell_recycle_contract_test.cpp)
+target_link_libraries(pulse_shell_recycle_contract_test PRIVATE ole32 shell32 uuid user32)
+add_executable(pulse_shell_operation_integration_test EXCLUDE_FROM_ALL
+    src/bench/shell_operation_integration_test.cpp src/bench/localization_test.rc ${operation_fixture_sources})
+target_include_directories(pulse_shell_operation_integration_test PRIVATE src)
+target_link_libraries(pulse_shell_operation_integration_test PRIVATE ${operation_fixture_libraries} pulse_shell_file_operations)
+add_dependencies(pulse_shell_operation_integration_test pulse_shell)
+add_dependencies(pulse_folder_actions_test pulse_shell)
 
 get_property(folder_operation_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(folder_operation_target IN LISTS folder_operation_targets)
@@ -1618,5 +1641,11 @@ foreach(folder_operation_target IN LISTS folder_operation_targets)
         if(NOT "${folder_operation_sources}" MATCHES "ops_persistence\\.cpp")
             target_sources(${folder_operation_target} PRIVATE src/ops/ops_persistence.cpp)
         endif()
+        if(NOT "${folder_operation_sources}" MATCHES "shell_transfer\\.cpp")
+            target_sources(${folder_operation_target} PRIVATE src/ops/shell_transfer.cpp)
+        endif()
+    endif()
+    if("${folder_operation_sources}" MATCHES "(recycle_fileop|audit_ops_followup_test|ops_test_main)\\.cpp")
+        target_link_libraries(${folder_operation_target} PRIVATE pulse_shell_file_operations)
     endif()
 endforeach()

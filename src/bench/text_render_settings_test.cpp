@@ -279,6 +279,8 @@ pulse::ui::WindowViewModel FileListFixture(pulse::ui::MainRenderer& renderer,
 }
 }
 
+#include "text_migration_cases.h"
+
 int main(int argc, char** argv) try {
     using namespace pulse;
     using I = l10n::StringId;
@@ -288,6 +290,12 @@ int main(int argc, char** argv) try {
     compat::EnableDpiAwareness();
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     const auto previous_mode = ui::typography::CurrentTextRenderMode();
+    if (argc == 2 && std::string_view(argv[1]) == "--migration-only") {
+        const int result = ui::FilenameRenderTest::RunMigration();
+        ui::typography::SetTextRenderMode(previous_mode);
+        OleUninitialize();
+        return result;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--tray-card-motion") {
         const int result = ui::TrayCardMotionTest::Run();
         ui::typography::SetTextRenderMode(previous_mode);

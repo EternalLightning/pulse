@@ -6,6 +6,7 @@
 #include "../ui/fluent_menu.h"
 #include "../ui/animation_clock.h"
 #include "../ui/popup_origin.h"
+#include "../ui/edit_host.h"
 #include "snapshot_output.h"
 #include "../common/localization.h"
 #include "../app/sidebar_pin_menu.h"
@@ -463,6 +464,29 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--filter-edit-colors") == 0) {
+            using Peer = FluentMenuTestPeer;
+            FluentMenu menu;
+            Check(menu.Create(owner, &compositor, 1), "create filter edit color fixture");
+            HDC dc = CreateCompatibleDC(nullptr);
+            Check(dc != nullptr, "create edit color inspection DC");
+            for (const bool dark : {false, true}) {
+                menu.SetTheme(dark, HexColor(0xD83B01));
+                for (const bool contrast : {false, true, false}) {
+                    HighContrastFrameScope scope(contrast);
+                    const HBRUSH brush = reinterpret_cast<HBRUSH>(SendMessageW(
+                        Peer::Window(menu), WM_CTLCOLOREDIT, reinterpret_cast<WPARAM>(dc), 0));
+                    LOGBRUSH fill{};
+                    Check(GetObjectW(brush, sizeof(fill), &fill) == sizeof(fill), "native edit returns a valid brush");
+                    Check(GetTextColor(dc) == ChildEditTextColor(dark), "native edit uses the matching theme foreground");
+                    Check(GetBkColor(dc) == ChildEditBackColor(dark) && fill.lbColor == ChildEditBackColor(dark),
+                        "native edit text background and returned brush agree after contrast changes");
+                }
+            }
+            DeleteDC(dc);
+            DestroyWindow(owner);
+            return failures ? 1 : 0;
+        }
         if (argc == 2 && wcscmp(argv[1], L"--animation-burst") == 0) {
             FluentMenu menu;
             Check(menu.Create(owner, &compositor, 1), "create New dropdown under async message load");

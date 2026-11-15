@@ -183,7 +183,6 @@ void PlanOp(const Roots& roots, Op& op);
 std::wstring KeyPathAfter(const Op& op);
 Op Inverse(const Op& op);
 OpResult Apply(const Roots& roots, const Op& op);
-bool CanWriteWithoutElevation(const Op& op);
 
 // Machine-wide batches go to Pulse.Integration.exe --system-ctx-apply <file>.
 std::wstring SerializeBatch(const std::vector<Op>& ops);

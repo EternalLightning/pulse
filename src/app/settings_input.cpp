@@ -147,9 +147,13 @@ bool ActivateSettingsControl(AppState& state, const ui::HitTestResult& hit, bool
     } else if (hit.region == ui::HitTestResult::SettingsToggle) {
         if (hit.index == 21) s->settings.ClearError();
         s->settings.ToggleUi(hit.index);
-        if (hit.index == 21 && !s->settings.error().empty())
-            MessageBoxW(hwnd, s->settings.error().c_str(),
-                l10n::Get(l10n::StringId::SettingsDefaultManager).c_str(), MB_OK | MB_ICONWARNING);
+        if (hit.index == 21 && !s->settings.error().empty()) {
+            ui::ConfirmDialogSpec spec;
+            spec.title = l10n::Get(l10n::StringId::SettingsDefaultManager);
+            spec.message = s->settings.error();
+            spec.hide_cancel = true;
+            ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor);
+        }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (hit.region == ui::HitTestResult::SettingsAccent) {
         if (hit.index == 1) {
@@ -186,8 +190,11 @@ bool ActivateSettingsControl(AppState& state, const ui::HitTestResult& hit, bool
                 s->settings.WallpaperVisibility(percent);
                 break;
             }
-            MessageBoxW(hwnd, l10n::Get(l10n::StringId::WallpaperPercentInvalid).c_str(),
-                l10n::Get(l10n::StringId::SettingsWallpaperLook).c_str(), MB_OK | MB_ICONWARNING);
+            ui::ConfirmDialogSpec spec;
+            spec.title = l10n::Get(l10n::StringId::SettingsWallpaperLook);
+            spec.message = l10n::Get(l10n::StringId::WallpaperPercentInvalid);
+            spec.hide_cancel = true;
+            ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (hit.region == ui::HitTestResult::SettingsWallpaperBlur) {

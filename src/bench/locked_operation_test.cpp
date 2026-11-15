@@ -8,12 +8,14 @@
 #include <fstream>
 #include <cstdio>
 #include <algorithm>
+#include <restartmanager.h>
 
 namespace pulse::ops {
 struct TransferIntegrationProbe {
     static void Initialize(OpsManager& manager) {
         manager.running_ = true;
         manager.accepting_ = true;
+        manager.StartShellClient();
         manager.notify_ = [&manager] {
             if (const auto conflict = manager.PendingConflict())
                 manager.ResolveConflict(conflict->token, ConflictChoice::KeepBoth, false);
@@ -29,9 +31,7 @@ struct TransferIntegrationProbe {
             std::printf("[DIAG] PID=%lu terminable=%d image=%ls\n", owner.pid, owner.can_terminate,
                 owner.image_path.c_str());
         if (!manager.lock_retry_) return;
-        std::printf("[DIAG] retained_plan=%zu completed=%zu endpoint_candidates=%zu\n",
-            manager.lock_retry_->retry_transfer_plan.size(), manager.lock_retry_->retry_completed_sources.size(),
-            manager.lock_retry_->retry_probe_paths.size());
+        std::printf("[DIAG] retained_plan=%zu\n", manager.lock_retry_->retry_transfer_plan.size());
     }
     static void Run(OpsManager& manager, const OpRequest& request, uint64_t id) {
         manager.RunTransfer(request, id);
@@ -94,34 +94,7 @@ struct TransferIntegrationProbe {
     static bool QueuedDeleteIsOnly(const OpsManager& manager, const std::wstring& remaining) {
         return !manager.queue_.empty() && manager.queue_.front().req.sources == std::vector<std::wstring>{remaining};
     }
-    static void InjectFailure(OpsManager& manager, const OpRequest& request,
-        const std::vector<TransferPlanEntry>& plan, const std::vector<std::wstring>& completed, uint64_t id) {
-        // Decision-only mode does not claim RM discovery. A self identity is
-        // intentionally refused by EndLockOwner's production protection checks.
-        OpsManager::QueueItem retry;
-        retry.req = request; retry.seq = id; retry.retry_transfer_plan = plan;
-        retry.retry_completed_sources = completed;
-        retry.retry_failure_hr = HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION);
-        retry.retry_failed_path = plan.empty() ? L"" : plan.back().source;
-        manager.lock_retry_ = retry;
-        LockOwner self;
-        self.pid = GetCurrentProcessId(); self.image_path = L"test-only self identity"; self.can_terminate = true;
-        FILETIME exit{}, kernel{}, user{};
-        GetProcessTimes(GetCurrentProcess(), &self.start_time, &exit, &kernel, &user);
-        manager.SetStatus([&](OpStatus& status) {
-            status.active = false; status.phase = OpPhase::Failed; status.task_id = id;
-            status.locked_path = retry.retry_failed_path; status.lock_owners = {self};
-        });
-    }
-    static bool DeleteDecisionOnly(const OpRequest& request, const std::wstring& done, const std::wstring& remaining) {
-        OpsManager::QueueItem admitted;
-        admitted.req = request;
-        DeletePlan accepted;
-        accepted.targets = {{done, {done}, DeleteDisposition::Permanent, {}},
-            {remaining, {remaining}, DeleteDisposition::Permanent, {}}};
-        const auto retry = OpsManager::RemainingDeleteRetry(admitted, accepted, {done});
-        return retry.req.sources == std::vector<std::wstring>{remaining} && retry.req.delete_targets.size() == 1;
-    }
+
 };
 }
 
@@ -194,129 +167,13 @@ private:
     PROCESS_INFORMATION process_{};
     bool launched_ = false, ready_ok_ = false;
 };
-int Decisions() {
-    using namespace pulse::ops;
-    const auto fixture = std::filesystem::current_path() / L"bench_data" /
-        (L"pulse_retry_decisions_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64()));
-    const auto source = fixture / L"source", destination = fixture / L"destination";
-    const auto subtree = source / L"tree" / L"nested", actual = destination / L"tree" / L"nested - 副本";
-    std::filesystem::create_directories(subtree);
-    std::filesystem::create_directories(actual);
-    Write(subtree / L"A.txt", "new A"); Write(subtree / L"B.txt", "pending B");
-    Write(subtree / L"new-unrelated.txt", "not selected"); Write(actual / L"A.txt", "successful A");
-    std::vector<TransferPlanEntry> plan;
-    bool identities_captured = true;
-    for (const auto& pair : {std::pair{source / L"tree", destination / L"tree"},
-            std::pair{subtree, actual}, std::pair{subtree / L"A.txt", actual / L"A.txt"},
-            std::pair{subtree / L"B.txt", actual / L"B.txt"}}) {
-        TransferPlanEntry entry;
-        entry.source = pair.first.wstring(); entry.destination = pair.second.wstring();
-        entry.directory = std::filesystem::is_directory(pair.first);
-        entry.destination_preexisting = entry.directory;
-        if (!entry.directory) entry.bytes = std::filesystem::file_size(pair.first);
-        entry.source_identity = FileObjectReference::Open(entry.source);
-        identities_captured = identities_captured && entry.source_identity.Get() && entry.source_identity.identity.Valid();
-        plan.push_back(entry);
-    }
-    Check(identities_captured, "decision-only retained plan captures real pinned source identities");
-    OpRequest request;
-    request.sources = {(source / L"tree").wstring()}; request.dest_dir = destination.wstring();
-    request.collision_policy = CollisionPolicy::KeepBoth;
-    {
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        TransferIntegrationProbe::InjectFailure(manager, request, plan, {(subtree / L"A.txt").wstring()}, 10);
-        Check(manager.RetryLockedOperation(10, false) && TransferIntegrationProbe::RunQueued(manager),
-            "decision-only plain retry executes the exact retained plan");
-        Check(manager.Status().phase == OpPhase::Completed && Read(actual / L"A.txt") == "successful A" &&
-            Read(actual / L"B.txt") == "pending B" && !std::filesystem::exists(actual / L"new-unrelated.txt"),
-            "decision-only retry preserves nested destination, completed A, and excludes new file");
-    }
-    for (const bool dequeued : {false, true}) {
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        TransferIntegrationProbe::InjectFailure(manager, request, plan, {}, 20);
-        Check(manager.RetryLockedOperation(20, true), "decision-only queue an end retry containing self-protected identity");
-        if (dequeued) {
-            Check(TransferIntegrationProbe::RunQueued(manager, true) && manager.Status().phase == OpPhase::Cancelled,
-                "decision-only generation revokes dequeue/preparation boundary through real worker path");
-        } else {
-            manager.CancelCurrent();
-            Check(TransferIntegrationProbe::QueueEmpty(manager) && !TransferIntegrationProbe::RunQueued(manager),
-                "decision-only cancel removes the queued retry before execution");
-        }
-        Check(Read(actual / L"A.txt") == "successful A", "decision-only cancellation did not replay successful A");
-    }
-    {
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        TransferIntegrationProbe::InjectFailure(manager, request, plan, {(subtree / L"A.txt").wstring()}, 30);
-        Check(manager.RetryLockedOperation(30, true) && TransferIntegrationProbe::RunQueued(manager),
-            "decision-only protected owner refusal runs on real preparation path");
-        const auto failed = manager.Status();
-        Check(failed.phase == OpPhase::Failed && manager.IsLockedFailureCurrent(failed.task_id),
-            "decision-only termination refusal re-arms plain retry even when RM returns no owners");
-        Check(manager.RetryLockedOperation(failed.task_id, false) && TransferIntegrationProbe::RunQueued(manager) &&
-            manager.Status().phase == OpPhase::Completed && Read(actual / L"A.txt") == "successful A",
-            "decision-only re-armed retry preserves completed filtering");
-    }
-    const auto replace_source = source / L"replace.txt", replace_target = destination / L"replace.txt";
-    Write(replace_source, "new replacement"); Write(replace_target, "old replacement");
-    {
-        HANDLE held = CreateFileW(replace_target.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        Check(held != INVALID_HANDLE_VALUE, "decision-only local target denies delete sharing");
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        OpRequest replace;
-        replace.sources = {replace_source.wstring()}; replace.dest_dir = destination.wstring();
-        replace.collision_policy = CollisionPolicy::Replace;
-        TransferIntegrationProbe::Run(manager, replace, 40);
-        const auto failed = manager.Status();
-        Check(failed.phase == OpPhase::Failed && failed.failure_hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) &&
-            failed.failed_path == replace_target.wstring() && Read(replace_target) == "old replacement",
-            "decision-only Replace captures exact target HRESULT/path before temporary cleanup without requiring RM");
-        if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
-    }
-    const auto changed_source = source / L"changed.txt", changed_target = destination / L"changed.txt";
-    Write(changed_source, "planned file");
-    TransferPlanEntry changed;
-    changed.source = changed_source.wstring(); changed.destination = changed_target.wstring();
-    changed.source_identity = FileObjectReference::Open(changed.source);
-    Check(changed.source_identity.Get() && changed.source_identity.identity.Valid(),
-        "decision-only changed-type fixture captures the original file identity before replacement");
-    DeleteFileW(changed_source.c_str());
-    std::filesystem::create_directory(changed_source);
-    Write(changed_source / L"unrelated-child.txt", "must remain outside operation");
-    {
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        OpRequest move;
-        move.type = OpType::Move; move.sources = {changed_source.wstring()}; move.dest_dir = destination.wstring();
-        TransferIntegrationProbe::InjectFailure(manager, move, {changed}, {}, 50);
-        Check(manager.RetryLockedOperation(50, false) && TransferIntegrationProbe::RunQueued(manager) &&
-            manager.Status().phase == OpPhase::Failed && manager.Status().failure_hr == HRESULT_FROM_WIN32(ERROR_INVALID_DATA) &&
-            std::filesystem::exists(changed_source / L"unrelated-child.txt") && !std::filesystem::exists(changed_target),
-            "decision-only retry rejects file-to-directory change rather than fast-moving an unrelated subtree");
-    }
-    OpRequest deletion;
-    deletion.type = OpType::RealDelete;
-    deletion.sources = {(subtree / L"A.txt").wstring(), (subtree / L"B.txt").wstring()};
-    Check(TransferIntegrationProbe::DeleteDecisionOnly(deletion, deletion.sources[0], deletion.sources[1]),
-        "decision-only production delete remaining filter removes successful root A");
-    const auto cleanup = std::filesystem::absolute(fixture).lexically_normal();
-    Check(cleanup.parent_path() == std::filesystem::current_path() / L"bench_data" &&
-        cleanup.filename() == fixture.filename(), "verify decision fixture cleanup target");
-    if (cleanup.parent_path() == std::filesystem::current_path() / L"bench_data" &&
-        cleanup.filename() == fixture.filename()) std::filesystem::remove_all(cleanup);
-    return failures ? 1 : 0;
-}
+
 }
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse::ops;
     if (argc > 1 && std::wstring(argv[1]) == L"--hold") return Hold(argc, argv);
-    if (argc == 2 && std::wstring(argv[1]) == L"--decisions") return Decisions();
+    if (argc != 1) return 2;
     const auto fixture = std::filesystem::current_path() / L"bench_data" /
         (L"pulse_retry_fixture_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(GetTickCount64()));
     const auto source = fixture / L"source";
@@ -370,13 +227,24 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
 
+    DWORD rm_session = 0;
+    wchar_t rm_key[CCH_RM_SESSION_KEY + 1]{};
+    const DWORD rm_error = RmStartSession(&rm_session, 0, rm_key);
+    if (rm_error != ERROR_SUCCESS) {
+        std::printf("[BLOCKED] occupancy-owner tests: RmStartSession=%lu; source retry checks above ran\n", rm_error);
+        const auto cleanup = std::filesystem::absolute(fixture).lexically_normal();
+        if (cleanup.parent_path() == std::filesystem::current_path() / L"bench_data" &&
+            cleanup.filename().wstring().starts_with(L"pulse_retry_fixture_")) std::filesystem::remove_all(cleanup);
+        return failures ? 1 : 3;
+    }
+    RmEndSession(rm_session);
     const auto holder_image = fixture / L"FixtureHolder.exe";
     std::filesystem::copy_file(Executable(), holder_image);
     const auto replace_source = source / L"replace.txt";
     const auto replace_target = destination / L"replace.txt";
     Write(replace_source, "replacement"); Write(replace_target, "old target");
     {
-        Holder holder(holder_image, replace_target, FILE_SHARE_READ | FILE_SHARE_WRITE);
+        Holder holder(holder_image, replace_target, FILE_SHARE_READ);
         Check(holder.Ready(), "destination holder is ready without delete sharing");
         OpsManager manager;
         TransferIntegrationProbe::Initialize(manager);
@@ -389,7 +257,7 @@ int wmain(int argc, wchar_t** argv) {
             failed.failed_path == replace_target.wstring() && failed.locked_path == replace_target.wstring() &&
             std::any_of(failed.lock_owners.begin(), failed.lock_owners.end(), [&](const auto& owner) {
                 return owner.pid == holder.Pid();
-            }), "Replace PinLeaf preserves target HRESULT/path and finds target owner");
+            }), "Shell destination lock reports the exact target and controlled owner");
         Check(TransferIntegrationProbe::QueueFixtureEnd(manager, 300, {holder.Pid()}), "fixture-only target owner can queue end retry");
         manager.CancelCurrent();
         Check(TransferIntegrationProbe::QueueEmpty(manager) && !TransferIntegrationProbe::RunQueued(manager) &&
@@ -397,7 +265,7 @@ int wmain(int argc, wchar_t** argv) {
             "cancel revokes queued retry without killing or replacing anything");
     }
     {
-        Holder holder(holder_image, replace_target, FILE_SHARE_READ | FILE_SHARE_WRITE);
+        Holder holder(holder_image, replace_target, FILE_SHARE_READ);
         OpsManager manager;
         TransferIntegrationProbe::Initialize(manager);
         OpRequest request;
@@ -410,7 +278,7 @@ int wmain(int argc, wchar_t** argv) {
             Read(replace_target) == "old target", "generation check uses real worker decision: no kill/no transfer");
     }
     {
-        Holder holder(holder_image, replace_target, FILE_SHARE_READ | FILE_SHARE_WRITE);
+        Holder holder(holder_image, replace_target, FILE_SHARE_READ);
         OpsManager manager;
         TransferIntegrationProbe::Initialize(manager);
         OpRequest request;
@@ -441,14 +309,13 @@ int wmain(int argc, wchar_t** argv) {
         const auto failed = manager.Status();
         Check(holder.Ready() && failed.phase == OpPhase::Failed && Read(actual / L"A.txt") == "nested A",
             "nested KeepBoth commits A to remapped subtree before locked B");
-        Write(nested / L"A.txt", "changed after failure");
-        Write(nested / L"unrelated.txt", "not in original plan");
+        const auto outcomes = manager.DrainTransferOutcomes();
+        Check(!manager.RetryLockedOperation(400, false) && !manager.CanResumeTransfer(400) &&
+            Read(actual / L"A.txt") == "nested A" && !std::filesystem::exists(actual / L"B.txt") &&
+            outcomes.size() == 1 && std::any_of(outcomes.front().items.begin(), outcomes.front().items.end(),
+                [](const auto& item) { return item.state == TransferItemState::Completed && item.destination_committed; }),
+            "partially copied Shell subtree retains confirmed output and refuses whole-root replay");
         holder.Stop();
-        Check(manager.RetryLockedOperation(400, false) && TransferIntegrationProbe::RunQueued(manager) &&
-            manager.Status().phase == OpPhase::Completed && Read(actual / L"A.txt") == "nested A" &&
-            Read(actual / L"B.txt") == "nested B" && !std::filesystem::exists(actual / L"unrelated.txt") &&
-            !std::filesystem::exists(target_tree / L"nested - 副本 (2)"),
-            "retry preserves actual nested target, skips A, and never rescans new files");
     }
 
     const auto shared = source / L"multi-owner.txt";

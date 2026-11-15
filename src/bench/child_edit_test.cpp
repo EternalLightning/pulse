@@ -88,6 +88,52 @@ bool HasRenderedText(pulse::ui::Compositor& compositor, HWND edit) {
     DeleteDC(dc);
     return painted && ink > 20;
 }
+
+void RunEditVisibilityChecks(HWND parent) {
+    using namespace pulse::ui;
+    Compositor compositor;
+    Check(parent && compositor.Init(parent), "initialize editor visibility fixture");
+    if (!compositor.Dc()) return;
+    Check(compositor.CustomEditEnabled(), "visibility fixture has the custom text backend");
+    for (float scale : {1.0f, 1.5f, 1.75f}) {
+        compositor.RecreateTextFormats(scale);
+        for (bool password : {false, true}) {
+            ShowWindow(parent, SW_HIDE);
+            HWND edit = CreateChildEdit(parent, L"initial 中文", password ? ES_PASSWORD : 0);
+            Check(edit != nullptr, "create an initially unfocused editor");
+            if (!edit) continue;
+            SetWindowSubclass(edit, EditProc, 1, reinterpret_cast<DWORD_PTR>(&compositor));
+            SetWindowPos(edit, nullptr, 20, 30, static_cast<int>(320 * scale),
+                static_cast<int>(30 * scale), SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            Check(!PresentChildEdit(compositor, compositor.TextFormat(), D2D1::ColorF(1, 1, 1),
+                D2D1::ColorF(0, 0, 0), edit) && !GetPropW(edit, L"Pulse.NativeEditFallback"),
+                "a hidden parent defers presentation without permanent native fallback");
+            ShowWindow(parent, SW_SHOWNOACTIVATE);
+            Check(GetFocus() != edit && PresentChildEdit(compositor, compositor.TextFormat(),
+                D2D1::ColorF(1, 1, 1), D2D1::ColorF(0, 0, 0), edit) &&
+                !GetPropW(edit, L"Pulse.NativeEditFallback") && HasRenderedText(compositor, edit),
+                "the first visible unfocused frame renders text or password glyphs");
+            ShowWindow(edit, SW_HIDE);
+            Check(!PresentChildEdit(compositor, compositor.TextFormat(), D2D1::ColorF(1, 1, 1),
+                D2D1::ColorF(0, 0, 0), edit) && !GetPropW(edit, L"Pulse.NativeEditFallback"),
+                "hiding just the editor also defers without changing backend");
+            ShowWindow(edit, SW_SHOWNOACTIVATE);
+            Check(PresentChildEdit(compositor, compositor.TextFormat(), D2D1::ColorF(1, 1, 1),
+                D2D1::ColorF(0, 0, 0), edit), "showing the editor again restores its bitmap");
+            force_present_failure = true;
+            SendMessageW(edit, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"fallback 中文"));
+            force_present_failure = false;
+            Check(GetPropW(edit, L"Pulse.NativeEditFallback") &&
+                !GetPropW(edit, L"Pulse.EditComposition"),
+                "a real visible presentation failure still restores native rendering");
+            SendMessageW(edit, EM_SETSEL, 0, -1);
+            SendMessageW(edit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"after failure 中文"));
+            wchar_t text[64]{}; GetWindowTextW(edit, text, ARRAYSIZE(text));
+            Check(std::wstring(text) == L"after failure 中文", "native fallback retains Unicode editing");
+            DestroyWindow(edit);
+        }
+    }
+}
 }
 #include "edit_motion_cases.h"
 #include "edit_frame_profile_cases.h"
@@ -119,6 +165,13 @@ int wmain(int argc, wchar_t** argv) {
         foreground_profile ? WS_OVERLAPPEDWINDOW : WS_POPUP,
         foreground_profile ? 100 : -30000, foreground_profile ? 100 : -30000,
         700, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--visibility") {
+        RunEditVisibilityChecks(parent);
+        DestroyWindow(parent);
+        Check(GetForegroundWindow() == foreground, "visibility checks preserve the foreground window");
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--selection-motion") {
         RunEditSelectionMotionChecks(parent);
         const HWND during = GetForegroundWindow();

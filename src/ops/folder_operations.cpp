@@ -4,7 +4,6 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "ops_manager.h"
-#include "../common/file_create.h"
 #include "../common/file_name.h"
 #include "../common/file_operation_error.h"
 #include "../common/localization.h"
@@ -111,36 +110,9 @@ void OpsManager::RunFolderAction(const OpRequest& input, uint64_t task_id) {
     });
     const auto create = [&](const OpRequest& req) {
         if (cancelled()) { failure(ERROR_CANCELLED, req.sources.front()); return false; }
-        std::wstring error;
-        DestinationGuard parent;
-        if (!parent.Capture(Parent(req.sources.front()), error) ||
-            !parent.PinDirectories(Parent(req.sources.front()), error)) {
-            failure(ERROR_FILE_INVALID, req.sources.front()); return false;
-        }
-        DestinationGuard::Handle handle(pulse::CreateDirectoryHandle(req.sources.front()));
-        if (!handle) { failure(GetLastError(), req.sources.front()); return false; }
-        FileIdentity identity;
-        if (!ReadFileIdentity(handle.get(), identity)) {
-            failure(ERROR_FILE_INVALID, req.sources.front()); return false;
-        }
-        if (req.folder_metadata && !SetFileInformationByHandle(handle.get(), FileBasicInfo,
-            const_cast<FILE_BASIC_INFO*>(&*req.folder_metadata), sizeof(FILE_BASIC_INFO))) {
-            const DWORD code = GetLastError();
-            handle.reset();
-            auto reference = FileObjectReference::Open(req.sources.front());
-            DWORD ignored = 0;
-            if (reference.identity == identity) reference.Delete(req.sources.front(), ignored);
-            failure(code, req.sources.front()); return false;
-        }
-        const auto reference = FileObjectReference::Open(req.sources.front());
-        if (!reference.Get() || reference.identity != identity) {
-            failure(ERROR_FILE_INVALID, req.sources.front()); return false;
-        }
-        handle.reset();
-        const std::vector<FileIdentity> identities{identity};
-        const std::vector<FileObjectReference> references{reference};
-        PushUndo(req, nullptr, &identities, &references);
-        return true;
+        RunShellOp(req, task_id);
+        transfer_active_.store(true);
+        return Status().phase == OpPhase::Completed;
     };
     if (input.folder_action == FolderAction::RemoveCreatedFolder) {
         bool valid = false;
@@ -206,11 +178,6 @@ void OpsManager::RunFolderAction(const OpRequest& input, uint64_t task_id) {
             !(basic.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (basic.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
             failure(ERROR_INVALID_DATA, folder); return;
         }
-        auto container = std::make_shared<DestinationGuard>(transfer_identity_query_);
-        std::wstring guard_error;
-        if (!container->PinPlainDirectory(folder, reference.identity, guard_error)) {
-            failure(ERROR_FILE_INVALID, folder); return;
-        }
         std::vector<std::wstring> names;
         DWORD error = ERROR_SUCCESS;
         if (!Children(folder, names, cancelled, error)) { failure(error, folder); return; }
@@ -224,17 +191,12 @@ void OpsManager::RunFolderAction(const OpRequest& input, uint64_t task_id) {
                 aside.clear();
             }
             if (aside.empty()) { failure(ERROR_ALREADY_EXISTS, folder); return; }
-            container->ReleaseDirectory(folder);
             OpRequest rename;
             rename.type = OpType::Rename; rename.sources = {folder}; rename.new_name = aside;
             rename.undo_group = request.undo_group; rename.undo_label = request.undo_label;
-            RunShellOp(rename, task_id, &reference.identity, false, nullptr, container.get());
+            RunShellOp(rename, task_id, &reference.identity);
             if (Status().phase != OpPhase::Completed) return;
             folder = Join(input.dest_dir, aside);
-            container->ForgetLeaf(original);
-            if (!container->PinPlainDirectory(folder, reference.identity, guard_error)) {
-                failure(ERROR_FILE_INVALID, folder); return;
-            }
         }
         if (!names.empty()) {
             OpRequest move;
@@ -242,15 +204,11 @@ void OpsManager::RunFolderAction(const OpRequest& input, uint64_t task_id) {
             move.collision_policy = CollisionPolicy::KeepBoth;
             move.undo_group = request.undo_group; move.undo_label = request.undo_label;
             for (const auto& name : names) move.sources.push_back(Join(folder, name));
-            // Source and destination must share their directory leases: the
-            // transfer temporarily admits adding a name to its pinned parent.
-            RunTransfer(move, task_id, {}, {}, container);
+            RunTransfer(move, task_id);
             transfer_active_.store(true);
             if (Status().phase != OpPhase::Completed) return;
         }
         if (cancelled()) { failure(ERROR_CANCELLED, folder); return; }
-        container->ReleaseDirectories();
-        if (before_source_cleanup_) before_source_cleanup_(folder);
         // Handle-based disposition only removes an empty, identical directory.
         // A failed/skipped move or a newly arriving child can never be recycled.
         if (!reference.Delete(folder, error)) { failure(error, folder); return; }

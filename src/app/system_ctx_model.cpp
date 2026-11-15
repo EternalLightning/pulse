@@ -308,10 +308,6 @@ std::wstring StripAccessKey(std::wstring text) {
     return text;
 }
 
-bool HasNonAscii(const std::wstring& text) {
-    return std::any_of(text.begin(), text.end(), [](wchar_t c) { return c >= 0x80; });
-}
-
 void TrimSpaces(std::wstring& text) {
     const auto blank = [](wchar_t c) { return c == L' ' || c == L'\t' || c == L'\u3000'; };
     while (!text.empty() && blank(text.back())) text.pop_back();

@@ -6,24 +6,34 @@
 param(
     [Parameter(Mandatory = $true)][string]$BinaryDirectory,
     [Parameter(Mandatory = $true)][string]$LocalParent,
-    [string]$NetworkParent = 'Z:\',
+    [string]$NetworkParent = '',
+    [switch]$AcrossOnly,
+    [string]$RuntimeParent = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),
     [Parameter(Mandatory = $true)][string]$EvidenceDirectory
 )
 
 $ErrorActionPreference = 'Stop'
-$matrixBinaryPath = (Resolve-Path -LiteralPath $BinaryDirectory).Path
-$matrixLocalPath = (Resolve-Path -LiteralPath $LocalParent).Path
+$matrixBinaryPath = (Resolve-Path -LiteralPath $BinaryDirectory).ProviderPath
+$matrixLocalPath = (Resolve-Path -LiteralPath $LocalParent).ProviderPath
+if ($AcrossOnly -and !$NetworkParent) { throw 'AcrossOnly requires an explicit second parent' }
+if ($NetworkParent) { $NetworkParent = (Resolve-Path -LiteralPath $NetworkParent).ProviderPath }
 $matrixEvidencePath = (New-Item -ItemType Directory -Path $EvidenceDirectory -Force).FullName
 $matrixRunName = 'file-operation-matrix-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
-$matrixRuntime = Join-Path $env:TEMP ('PulseFileOperationValidation-' + [guid]::NewGuid().ToString('N'))
+$matrixRuntimeParent = (Resolve-Path -LiteralPath $RuntimeParent).ProviderPath
+$matrixRuntime = Join-Path $matrixRuntimeParent ('PulseFileOperationValidation-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $matrixRuntime | Out-Null
 
 # A normal temporary runtime avoids the observed build-directory startup error.
 # The same process token runs byte-identical binaries and the production host.
-$matrixArtifacts = foreach ($matrixName in @('pulse_ops_test.exe', 'Pulse.Shell.exe')) {
+$matrixArtifacts = foreach ($matrixName in @('pulse_file_operation_matrix_test.exe', 'Pulse.Shell.exe')) {
     $matrixSource = Join-Path $matrixBinaryPath $matrixName
     $matrixCopy = Join-Path $matrixRuntime $matrixName
-    Copy-Item -LiteralPath $matrixSource -Destination $matrixCopy
+    # Create a fresh file so a Low integrity label on build outputs is not copied.
+    $matrixInput = [IO.File]::OpenRead($matrixSource)
+    try {
+        $matrixOutput = [IO.File]::Open($matrixCopy, 'CreateNew', 'Write', 'None')
+        try { $matrixInput.CopyTo($matrixOutput) } finally { $matrixOutput.Dispose() }
+    } finally { $matrixInput.Dispose() }
     $matrixSourceHash = (Get-FileHash -LiteralPath $matrixSource -Algorithm SHA256).Hash
     $matrixCopyHash = (Get-FileHash -LiteralPath $matrixCopy -Algorithm SHA256).Hash
     if ($matrixSourceHash -ne $matrixCopyHash) { throw "SHA256 mismatch: $matrixName" }
@@ -31,9 +41,10 @@ $matrixArtifacts = foreach ($matrixName in @('pulse_ops_test.exe', 'Pulse.Shell.
 }
 
 $matrixLog = Join-Path $matrixEvidencePath ($matrixRunName + '.log')
-$matrixArguments = @('--file-operation-matrix', $matrixLocalPath)
+$matrixMode = if ($AcrossOnly) { '--file-operation-matrix-pair' } else { '--file-operation-matrix' }
+$matrixArguments = @($matrixMode, $matrixLocalPath)
 if ($NetworkParent) { $matrixArguments += $NetworkParent }
-& (Join-Path $matrixRuntime 'pulse_ops_test.exe') @matrixArguments *> $matrixLog
+& (Join-Path $matrixRuntime 'pulse_file_operation_matrix_test.exe') @matrixArguments *> $matrixLog
 $matrixExit = $LASTEXITCODE
 $matrixLines = @(Get-Content -LiteralPath $matrixLog)
 $matrixSummary = [ordered]@{

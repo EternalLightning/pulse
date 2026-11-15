@@ -123,6 +123,8 @@ pwsh -NoProfile -File .\scripts\verify_release_artifacts.ps1 `
 
 更多说明：[索引存储与迁移](docs/index-migration.md)
 
+界面开发：[UI 与文字渲染规范](docs/ui-style-guide.md) · [LumaText 覆盖与迁移建议](docs/lumatext-coverage.md)
+
 ## 许可证与再分发
 
 Apache-2.0 允许在遵守条款的前提下使用、修改和分发本项目，包括商业使用。分发源码或二进制时，应向接收者提供完整的 `LICENSE`，保留适用的版权、专利、商标及归属声明，并随附 `NOTICE` 中的适用归属信息；修改过的文件应带有醒目的修改声明。仅保留 Git 提交记录不能替代文件内的修改声明。

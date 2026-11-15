@@ -410,7 +410,8 @@ public:
     void DrawSwitch(const D2D1_RECT_F& bounds, std::wstring_view text,
                     const ControlState& state);
     void DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole role,
-                            std::wstring_view custom_glyph, const ControlState& state);
+                            std::wstring_view custom_glyph, const ControlState& state,
+                            bool large_glyph = false);
     void DrawTab(const TabSpec& spec);
     void DrawMenuSurface(const D2D1_RECT_F& bounds, bool acrylic = false);
     void DrawMenuItem(const MenuItemSpec& spec);
@@ -505,8 +506,6 @@ private:
     void DrawTextWithBrush(std::wstring_view text, const D2D1_RECT_F& bounds,
                            IDWriteTextFormat* format, BrushId brush,
                            HorizontalAlignment alignment = HorizontalAlignment::Left);
-    void DrawGlyphWithBrush(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                            BrushId brush);
     bool DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
     void DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                              const D2D1_COLOR_F& color, IDWriteTextFormat* format);

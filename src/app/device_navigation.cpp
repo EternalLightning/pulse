@@ -88,8 +88,11 @@ void ApplyDeviceOperationResult(AppState& state, const DeviceOperationResult& re
     if (FAILED(result.error)) {
         wchar_t code[32]{};
         swprintf_s(code, L" (0x%08lX)", static_cast<unsigned long>(result.error));
-        MessageBoxW(state.hwnd, (l10n::Get(l10n::StringId::DeviceFailedMessage) + code).c_str(),
-            l10n::Get(l10n::StringId::DeviceFailed).c_str(), MB_OK | MB_ICONWARNING);
+        ui::ConfirmDialogSpec spec;
+        spec.title = l10n::Get(l10n::StringId::DeviceFailed);
+        spec.message = l10n::Get(l10n::StringId::DeviceFailedMessage) + code;
+        spec.hide_cancel = true;
+        ui::ShowConfirmDialog(state.hwnd, spec, state.darkMode, state.accentColor);
     }
     std::vector<std::wstring> paths;
     ForEachPane(state, [&](Pane& pane) {

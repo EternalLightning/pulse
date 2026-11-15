@@ -12,6 +12,8 @@
 
 ## 专题文档
 
+- [Pulse UI 与文字渲染规范](../ui-style-guide.md)：项目已确认的颜色、字体、控件、弹窗、材质与验收规则。
+- [LumaText 覆盖与迁移建议](../lumatext-coverage.md)：当前渲染入口、迁移结果、保留边界与定向验证。
 - [interaction-design.md](interaction-design.md)：交互成本、菲茨定律、视觉层级、F 型扫描等，含 Pulse 自查清单。
 - [ux-reference.md](ux-reference.md)：12 个 UX 维度的全景索引（反馈、错误、信息架构、搜索、列表密度、空状态、一致性、无障碍、国际化、动效、用户研究）。
 

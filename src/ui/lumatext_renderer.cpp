@@ -948,7 +948,7 @@ struct LumaTextRenderer::Impl {
     // SetDrawingEffect(ID2D1SolidColorBrush) keep their colour.
     bool DrawLayoutOn(LumaText::Renderer& destination, ID2D1DeviceContext* dc,
                       D2D1_POINT_2F origin, IDWriteTextLayout* layout,
-                    const D2D1_COLOR_F& foreground, bool clip) {
+                    const D2D1_COLOR_F& foreground, bool clip, bool optical_weight = true) {
         if (!destination || !dc || !layout) return false;
         float dpi_x = 96.0f, dpi_y = 96.0f;
         dc->GetDpi(&dpi_x, &dpi_y);
@@ -969,6 +969,10 @@ struct LumaTextRenderer::Impl {
         draw.background_type = LT_BACKGROUND_TRANSPARENT;
         draw.render_config = LumaText::Descriptor<lt_render_config>();
         ApplySharpConfig(draw.render_config, foreground);
+        if (!optical_weight) {
+            draw.render_config.dilation_per_em = 0;
+            draw.render_config.dilation_max = 0;
+        }
         const lt_result result = lt_frame_draw_layout(frame.get(), layout, &draw);
         auto frame_stats = LumaText::Descriptor<lt_frame_stats>();
         if (result == LT_OK && lt_frame_get_stats(frame.get(), &frame_stats) == LT_OK) {
@@ -982,8 +986,8 @@ struct LumaTextRenderer::Impl {
     }
 
     bool DrawLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
-                    const D2D1_COLOR_F& foreground, bool clip) {
-        return DrawLayoutOn(layout_renderer,target_dc.Get(),origin,layout,foreground,clip);
+                    const D2D1_COLOR_F& foreground, bool clip, bool optical_weight) {
+        return DrawLayoutOn(layout_renderer, target_dc.Get(), origin, layout, foreground, clip, optical_weight);
     }
 
     // Two colours in one shaped line (a dimmed file extension): the same
@@ -1099,6 +1103,10 @@ struct LumaTextRenderer::Impl {
     static std::wstring ReadEditText(HWND hwnd) {
         const int len = GetWindowTextLengthW(hwnd);
         if (len <= 0) return {};
+        if (GetWindowLongPtrW(hwnd, GWL_STYLE) & ES_PASSWORD) {
+            const wchar_t mask = static_cast<wchar_t>(SendMessageW(hwnd, EM_GETPASSWORDCHAR, 0, 0));
+            return std::wstring(static_cast<size_t>(len), mask ? mask : L'\x25CF');
+        }
         std::wstring text(static_cast<size_t>(len) + 1, L'\0');
         const int copied = GetWindowTextW(hwnd, text.data(), len + 1);
         text.resize(copied > 0 ? static_cast<size_t>(copied) : 0);
@@ -1501,13 +1509,7 @@ struct LumaTextRenderer::Impl {
 
         if (!EnsureBlit(w, h, bitmap == nullptr)) return false;
 
-        const int len = GetWindowTextLengthW(hwnd);
-        std::wstring text;
-        if (len > 0) {
-            text.resize(static_cast<size_t>(len) + 1);
-            const int copied = GetWindowTextW(hwnd, text.data(), len + 1);
-            text.resize(copied > 0 ? static_cast<size_t>(copied) : 0);
-        }
+        const std::wstring text = ReadEditText(hwnd);
 
         DWORD sel0 = 0, sel1 = 0;
         SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&sel0),
@@ -2217,14 +2219,15 @@ bool LumaTextRenderer::Draw(std::wstring_view text, IDWriteTextFormat* format,
 }
 
 bool LumaTextRenderer::DrawLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
-                                  const D2D1_COLOR_F& foreground, bool clip) {
+                                  const D2D1_COLOR_F& foreground, bool clip, bool optical_weight) {
 #if defined(PULSE_HAS_LUMATEXT)
-    return impl_ && impl_->DrawLayout(origin, layout, foreground, clip);
+    return impl_ && impl_->DrawLayout(origin, layout, foreground, clip, optical_weight);
 #else
     (void)origin;
     (void)layout;
     (void)foreground;
     (void)clip;
+    (void)optical_weight;
     return false;
 #endif
 }

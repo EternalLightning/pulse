@@ -607,21 +607,46 @@ void ClampScroll(AppState& s) {
     tab->scroll_x = std::clamp(tab->scroll_x, 0.0f, maxScrollX);
 }
 
-void EnsureRowVisible(AppState& s, app::Tab& tab, int index) {
+void EnsureRowVisible(AppState& s, app::Tab& tab, int index, bool animate) {
     if (index < 0) return;
     int viewRow = index;
     ui::PaneViewModel pane;
-    MaxScrollForActivePane(s, &pane);
+    const float maximum_y = MaxScrollForActivePane(s, &pane);
     const D2D1_RECT_F list = s.renderer.PaneListRect(pane, FocusedPaneRect(s));
     if (pane.filter_map || !pane.filter_text.empty()) {
         viewRow = pane.ViewIndex(index);
         if (viewRow < 0) return;
     }
     const D2D1_RECT_F item = s.renderer.ItemRectInPane(pane, FocusedPaneRect(s), viewRow);
-    if (item.top < list.top) tab.scroll_y += item.top - list.top;
-    else if (item.bottom > list.bottom) tab.scroll_y += item.bottom - list.bottom;
-    if (item.left < list.left) tab.scroll_x += item.left - list.left;
-    else if (item.right > list.right) tab.scroll_x += item.right - list.right;
+    float target_y = tab.scroll_y, target_x = tab.scroll_x;
+    if (item.top < list.top) target_y += item.top - list.top;
+    else if (item.bottom > list.bottom) target_y += item.bottom - list.bottom;
+    if (item.left < list.left) target_x += item.left - list.left;
+    else if (item.right > list.right) target_x += item.right - list.right;
+    const float maximum_x = s.renderer.MaxScrollXForPane(pane, FocusedPaneRect(s));
+    target_y = std::clamp(target_y, 0.0f, maximum_y);
+    target_x = std::clamp(target_x, 0.0f, maximum_x);
+    if (animate && s.renderer.MotionEnabled() && !s.shot_high_contrast) {
+        if (s.scrollAnimating && s.keyboardScroll &&
+            std::abs(target_y - s.scrollTargetY) < 0.01f &&
+            std::abs(target_x - s.keyboardScrollTargetX) < 0.01f) return;
+        s.horizontalScrollMotion.Reset();
+        CancelScrollAnimation(s);
+        s.keyboardScroll = true;
+        s.keyboardScrollFrom = {tab.scroll_x, tab.scroll_y};
+        s.keyboardScrollTargetX = target_x;
+        s.scrollTargetY = target_y;
+        s.keyboardScrollElapsedMs = 0;
+        s.scrollLastUpdateTime = std::chrono::steady_clock::now();
+        s.scrollAnimating = std::abs(target_y - tab.scroll_y) > 0.01f ||
+            std::abs(target_x - tab.scroll_x) > 0.01f;
+        if (!s.scrollAnimating) s.keyboardScroll = false;
+        if (s.scrollAnimating) MaybePrefetchSearchPage(s);
+        return;
+    }
+    if (animate || s.keyboardScroll) CancelScrollAnimation(s);
+    tab.scroll_y = target_y;
+    tab.scroll_x = target_x;
     ClampScroll(s);
 }
 
@@ -949,6 +974,7 @@ bool PointInHitItemName(AppState& s, const ui::WindowViewModel& vm,
 void CancelScrollAnimation(AppState& s) {
     s.scrollAnimating = false;
     s.scrollVelocityY = 0.0f;
+    s.keyboardScroll = false;
 }
 
 void UpdateSmoothScroll(AppState& s);
@@ -968,6 +994,7 @@ void StartSmoothScroll(AppState& s, float delta) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
     if (s.scrollAnimating) UpdateSmoothScroll(s);
+    if (s.keyboardScroll) CancelScrollAnimation(s);
     const bool settings = IsSettingsTab(tab);
     const float maxScroll = SmoothScrollMaximum(s);
     const float offset = std::clamp(settings ? s.settings.scroll() : tab->scroll_y, 0.0f, maxScroll);
@@ -1012,6 +1039,21 @@ void UpdateSmoothScroll(AppState& s) {
     float offset = std::clamp(IsSettingsTab(tab) ? s.settings.scroll() : tab->scroll_y,
         0.0f, maxScroll);
     s.scrollTargetY = std::clamp(s.scrollTargetY, 0.0f, maxScroll);
+    if (s.keyboardScroll) {
+        s.keyboardScrollElapsedMs += static_cast<float>(elapsed);
+        const float progress = !s.renderer.MotionEnabled() || s.shot_high_contrast ? 1.0f :
+            ui::fluent::EvaluateMotion({100.0f, ui::fluent::EasingCurve::OutCubic}, s.keyboardScrollElapsedMs);
+        ui::PaneViewModel pane;
+        app::FillPaneViewModel(pane, *s.pane, &s.places);
+        const float maximum_x = s.renderer.MaxScrollXForPane(pane, FocusedPaneRect(s));
+        s.keyboardScrollTargetX = std::clamp(s.keyboardScrollTargetX, 0.0f, maximum_x);
+        tab->scroll_y = std::clamp(s.keyboardScrollFrom.y + (s.scrollTargetY - s.keyboardScrollFrom.y) * progress,
+            0.0f, maxScroll);
+        tab->scroll_x = std::clamp(s.keyboardScrollFrom.x + (s.keyboardScrollTargetX - s.keyboardScrollFrom.x) * progress,
+            0.0f, maximum_x);
+        if (progress >= 1.0f) CancelScrollAnimation(s);
+        return;
+    }
     const float decay = s.renderer.MotionEnabled() && !s.shot_high_contrast
         ? static_cast<float>(std::exp(-elapsed / AppState::kScrollResponseMs)) : 0.0f;
     const float travel = s.scrollVelocityY *
@@ -2656,8 +2698,11 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 }
             }
         } else if (hit.region == ui::HitTestResult::RecentClear) {
-            if (MessageBoxW(hwnd, l10n::Get(l10n::StringId::ClearRecentPrompt).c_str(), l10n::Get(l10n::StringId::ClearRecentTitle).c_str(),
-                            MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2) == IDOK &&
+            ui::ConfirmDialogSpec spec;
+            spec.title = l10n::Get(l10n::StringId::ClearRecentTitle);
+            spec.message = l10n::Get(l10n::StringId::ClearRecentPrompt);
+            spec.cancel_is_default = true;
+            if (ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor) &&
                 s->places.ClearRecent()) {
                 RefreshRecentViews(*s);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -3609,6 +3654,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         s->viewWheelAccum = 0;
         s->viewWheelTab = nullptr;
         if (wheelTab && (wheelTab->view_mode == ui::ViewMode::List || msg == WM_MOUSEHWHEEL)) {
+            if (s->keyboardScroll) CancelScrollAnimation(*s);
             ui::PaneViewModel pane;
             app::FillPaneViewModel(pane, *s->pane, &s->places);
             const float maxX = s->renderer.MaxScrollXForPane(pane, FocusedPaneRect(*s));
@@ -3762,7 +3808,8 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             CancelScrollAnimation(*s);
         } else if (wParam == VK_DOWN || wParam == VK_UP ||
                    wParam == VK_LEFT || wParam == VK_RIGHT) {
-            CancelScrollAnimation(*s);
+            const bool animate = wParam == VK_DOWN || wParam == VK_UP;
+            if (!animate) CancelScrollAnimation(*s);
             {
                 const int n = static_cast<int>(vm.pane.EntryCount());
                 if (n > 0) {
@@ -3773,7 +3820,7 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                     const int next = s->renderer.MoveViewIndex(vm.pane, FocusedPaneRect(*s),
                                                                 view, dx, dy);
                     tab->MoveFocus(vm.pane.SourceIndex(next), shift);
-                    EnsureRowVisible(*s, *tab, tab->selected_index);
+                    EnsureRowVisible(*s, *tab, tab->selected_index, animate);
                 }
             }
         } else if (wParam == VK_NEXT) {

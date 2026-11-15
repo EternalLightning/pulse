@@ -95,11 +95,15 @@ enum MsgType : uint32_t {
     REQ_AUTHORIZED_RECYCLE = 16,
     REQ_SHELL_LAUNCH = 17, // versioned payload in shell_launch_protocol.h; never replayed
     REQ_DEVICE_OPERATION = 18, // owner(u64), verb, name, absolute Shell IDs; never replayed
+    REQ_FILE_OPERATION = 19, // versioned file_operation_protocol.h; never replayed
+    REQ_FILE_OPERATION_PAUSE = 20, // target id in header, paused(u32)
     RSP_PROGRESS = 100,
     RSP_DONE = 101,
     RSP_PONG = 102,
     RSP_CTX_ITEMS = 103,
     RSP_SHELL_LAUNCH_DONE = 104, // HRESULT(u32), cancelled(u32), error(string)
+    RSP_FILE_OPERATION_DONE = 105,
+    RSP_FILE_OPERATION_BYTES = 106, // transferred(u64), total(u64)
 };
 
 // REQ_CTX_QUERY flags.

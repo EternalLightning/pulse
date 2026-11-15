@@ -9,6 +9,15 @@
 #include <vector>
 
 namespace pulse::ui {
+inline void TrackDialogEditComposition(HWND edit, UINT message) {
+    if (message == WM_IME_STARTCOMPOSITION) SetPropW(edit, L"Pulse.DialogEditComposing", reinterpret_cast<HANDLE>(1));
+    if (message == WM_IME_ENDCOMPOSITION || message == WM_KILLFOCUS || message == WM_NCDESTROY)
+        RemovePropW(edit, L"Pulse.DialogEditComposing");
+}
+inline bool DialogEditComposing(HWND edit) {
+    return GetPropW(edit, L"Pulse.DialogEditComposing") || GetPropW(edit, L"Pulse.EditComposing");
+}
+
 struct DialogFocusTarget {
     int id;
     HWND edit = nullptr;

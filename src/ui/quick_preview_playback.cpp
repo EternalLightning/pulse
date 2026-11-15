@@ -43,13 +43,32 @@ D2D1_RECT_F QuickPreviewWindow::PlaybackRect() const {
 }
 D2D1_RECT_F QuickPreviewWindow::PlaybackButtonRect(int button) const {
     const auto bar = PlaybackRect();
-    const float x = (12.0f + 70.0f * static_cast<float>(button)) * scale_;
-    return D2D1::RectF(x, bar.top + 6.0f * scale_, x + 66.0f * scale_,
+    float x = 12.0f * scale_;
+    float width = 0.0f;
+    const int play = video_.active() ? 0 : 1;
+    const auto measure = [&](l10n::StringId id) {
+        return painter_.MeasureButtonWidth(l10n::Get(id));
+    };
+    for (int i = 0; i <= button; ++i) {
+        const float button_width = i == play
+            ? (std::max)(measure(l10n::StringId::PlaybackPlay), measure(l10n::StringId::OpPause))
+            : measure(i == 0 ? l10n::StringId::PlaybackPrevFrame : l10n::StringId::PlaybackNextFrame);
+        width = (std::max)(66.0f * scale_, button_width);
+        if (i < button) x += width + 4.0f * scale_;
+    }
+    return D2D1::RectF(x, bar.top + 6.0f * scale_, x + width,
         bar.top + 38.0f * scale_);
+}
+int QuickPreviewWindow::HitPlaybackButton(POINT point) const {
+    if (HasPlayback()) {
+        for (int i = 0; i < (video_.active() ? 2 : 3); ++i)
+            if (Contains(PlaybackButtonRect(i), point)) return i;
+    }
+    return -1;
 }
 D2D1_RECT_F QuickPreviewWindow::PlaybackTrackRect() const {
     const auto bar = PlaybackRect();
-    const float left = (video_.active() ? 164.0f : 234.0f) * scale_;
+    const float left = PlaybackButtonRect(video_.active() ? 1 : 2).right + 16.0f * scale_;
     return D2D1::RectF(left, bar.top + 6.0f * scale_,
         (std::max)(left + scale_, bar.right - 18.0f * scale_), bar.top + 38.0f * scale_);
 }
@@ -74,6 +93,7 @@ void QuickPreviewWindow::CancelPlaybackScrub() {
 }
 void QuickPreviewWindow::ResetPlayback() {
     CancelPlaybackScrub();
+    playback_hover_ = playback_pressed_ = playback_keyboard_focus_ = -1;
     if (hwnd_) {
         KillTimer(hwnd_, kVideoTimer);
         if (GetCapture() == hwnd_) ReleaseCapture();
@@ -186,6 +206,8 @@ bool QuickPreviewWindow::PlaybackMouseDown(POINT point) {
     if (video && (!state.ready || FAILED(state.error))) return true;
     const int play = video ? 0 : 1;
     const int next = video ? 1 : 2;
+    playback_keyboard_focus_ = -1;
+    const int button = HitPlaybackButton(point);
     if (Contains(PlaybackButtonRect(play), point)) TogglePlayback();
     else if (Contains(PlaybackButtonRect(next), point)) StepPlayback(1);
     else if (!video && Contains(PlaybackButtonRect(0), point)) StepPlayback(-1);
@@ -201,6 +223,11 @@ bool QuickPreviewWindow::PlaybackMouseDown(POINT point) {
         }
         SetCapture(hwnd_);
         SeekPlayback(static_cast<float>(point.x));
+    }
+    if (button >= 0) {
+        playback_hover_ = playback_pressed_ = button;
+        SetCapture(hwnd_);
+        InvalidateRect(hwnd_, nullptr, FALSE);
     }
     return true;
 }
@@ -223,6 +250,11 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
     const auto state = video_.Snapshot();
     const bool enabled = !video || (state.ready && SUCCEEDED(state.error));
     const bool playing = video ? state.playing : animation_active_;
+    const bool high_contrast = IsHighContrast();
+    const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
+    painter_.SetCompositor(&compositor_);
+    painter_.SetScale(scale_);
+    const bool painter_ok = painter_.BeginFrame(theme, high_contrast);
     const auto original = brush->GetColor();
     const auto text_background = dark_ ? D2D1::ColorF(0x151515) : D2D1::ColorF(0xF7F7F7);
     auto color = original;
@@ -231,7 +263,6 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
     dc->DrawLine(D2D1::Point2F(bar.left, bar.top), D2D1::Point2F(bar.right, bar.top), brush);
     auto* format = compositor_.SmallFormat();
     if (!format) { brush->SetColor(original); return; }
-    format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     for (int i = 0; i < (video ? 2 : 3); ++i) {
         const bool is_play = i == (video ? 0 : 1);
@@ -239,15 +270,18 @@ void QuickPreviewWindow::DrawPlayback(ID2D1DeviceContext* dc, ID2D1SolidColorBru
             ? (playing ? l10n::StringId::OpPause : l10n::StringId::PlaybackPlay)
             : (i == 0 ? l10n::StringId::PlaybackPrevFrame : l10n::StringId::PlaybackNextFrame));
         const bool available = enabled && (is_play || !video || !state.ended);
-        const auto rect = PlaybackButtonRect(i);
-        color = original; color.a = available ? 0.09f : 0.03f;
-        brush->SetColor(color);
-        dc->FillRoundedRectangle(D2D1::RoundedRect(rect, 4 * scale_, 4 * scale_), brush);
-        color = original; color.a = available ? 1.0f : 0.4f;
-        brush->SetColor(color);
-        if (!compositor_.DrawLumaText(text, format, rect, color, text_background, DWRITE_TEXT_ALIGNMENT_CENTER))
-            dc->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format, rect, brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
+        if (painter_ok) {
+            fluent::ButtonSpec button{};
+            button.bounds = PlaybackButtonRect(i);
+            button.text = text;
+            button.state.enabled = available;
+            button.state.hovered = playback_hover_ == i;
+            button.state.keyboard_focus = GetFocus() == hwnd_ && playback_keyboard_focus_ == i;
+            button.state.pressed = playback_pressed_ == i &&
+                (playback_hover_ == i || button.state.keyboard_focus);
+            button.state.focused = button.state.keyboard_focus;
+            painter_.DrawButton(button);
+        }
     }
     const auto track = PlaybackTrackRect();
     const float y = (track.top + track.bottom) * 0.5f;

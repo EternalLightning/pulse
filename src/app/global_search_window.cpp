@@ -37,6 +37,7 @@ namespace pulse {
 namespace {
 using Microsoft::WRL::ComPtr;
 using l10n::StringId;
+using ui::typography::FontRole;
 constexpr UINT kIndexStatus = WM_APP + 181, kIndexResult = WM_APP + 182, kContentResult = WM_APP + 183;
 constexpr UINT kNetworkResult = WM_APP + 184;
 constexpr UINT_PTR kDebounce = 1;
@@ -332,11 +333,10 @@ struct GlobalSearchWindow::Impl {
         if (edit_font) DeleteObject(edit_font);
         if (EnsureTarget()) {
             edit_format.Reset();
-            write_factory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 23 * scale, l10n::LocaleName(), &edit_format);
+            ui::typography::CreateTextFormat(compositor.DwriteFactory(),
+                {FontRole::Text, 23 * scale}, &edit_format);
         }
-        edit_font = CreateFontW(-Px(23), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        edit_font = ui::typography::CreateEditFont(scale, 23);
         SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(edit_font), TRUE);
         const float edit_left = kEditLeft + kEditTextInset;
         const float edit_width = width - kEditRight - edit_left;
@@ -371,10 +371,10 @@ struct GlobalSearchWindow::Impl {
         if (radius) target->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brush.Get());
         else target->FillRectangle(rect, brush.Get());
     }
-    void Label(const std::wstring& text, D2D1_RECT_F rect, float size, UINT32 color, bool bold = false, const wchar_t* face = L"Segoe UI", bool highlight = false, DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
+    void Label(const std::wstring& text, D2D1_RECT_F rect, float size, UINT32 color, bool bold = false, FontRole role = FontRole::Text, bool highlight = false, DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
         ComPtr<IDWriteTextFormat> format;
-        if (FAILED(write_factory->CreateTextFormat(face, nullptr, bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, l10n::LocaleName(), &format))) return;
+        if (FAILED(ui::typography::CreateTextFormat(compositor.DwriteFactory(),
+            {role, size, bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL}, &format))) return;
         format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         format->SetTextAlignment(alignment);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -383,16 +383,22 @@ struct GlobalSearchWindow::Impl {
         if (SUCCEEDED(write_factory->CreateEllipsisTrimmingSign(format.Get(), &ellipsis))) format->SetTrimming(&trim, ellipsis.Get());
         brush->SetColor(Color(color));
         ComPtr<IDWriteTextLayout> layout;
-        if (highlight && !query.empty() && SUCCEEDED(ui::typography::CreateTextLayout(write_factory.Get(), text.data(), static_cast<UINT32>(text.size()), format.Get(),
+        // Labels stay in DIPs; the target DPI supplies the physical glyph scale.
+        // Fluent icon glyphs keep their existing DirectWrite rendering.
+        if (role != FontRole::Icon && SUCCEEDED(ui::typography::CreateTextLayout(write_factory.Get(), text.data(), static_cast<UINT32>(text.size()), format.Get(),
             std::max(0.0f, rect.right - rect.left), std::max(0.0f, rect.bottom - rect.top), &layout, scale))) {
-            ComPtr<ID2D1SolidColorBrush> accent;
-            if (SUCCEEDED(target->CreateSolidColorBrush(Theme().accent, &accent))) {
-                for (size_t start = 0; start + query.size() <= text.size(); ++start) {
-                    if (CompareStringOrdinal(text.data() + start, static_cast<int>(query.size()), query.data(), static_cast<int>(query.size()), TRUE) == CSTR_EQUAL)
-                        layout->SetDrawingEffect(accent.Get(), {static_cast<UINT32>(start), static_cast<UINT32>(query.size())});
+            if (highlight && !query.empty()) {
+                ComPtr<ID2D1SolidColorBrush> accent;
+                if (SUCCEEDED(target->CreateSolidColorBrush(Theme().accent, &accent))) {
+                    for (size_t start = 0; start + query.size() <= text.size(); ++start) {
+                        if (CompareStringOrdinal(text.data() + start, static_cast<int>(query.size()), query.data(), static_cast<int>(query.size()), TRUE) == CSTR_EQUAL)
+                            layout->SetDrawingEffect(accent.Get(), {static_cast<UINT32>(start), static_cast<UINT32>(query.size())});
+                    }
                 }
             }
-            target->DrawTextLayout({rect.left, rect.top}, layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            if (target.Get() == compositor.Dc())
+                compositor.DrawTextLayout({rect.left, rect.top}, layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            else target->DrawTextLayout({rect.left, rect.top}, layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         } else target->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format.Get(), rect, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP, ui::typography::MeasuringMode());
     }
     void DrawLogo() {
@@ -420,8 +426,8 @@ struct GlobalSearchWindow::Impl {
         ComPtr<IDWriteTextFormat> format;
         ComPtr<IDWriteTextLayout> layout;
         DWRITE_TEXT_METRICS metrics{};
-        if (SUCCEEDED(write_factory->CreateTextFormat(L"Segoe UI", nullptr, bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, l10n::LocaleName(), &format)) &&
+        if (SUCCEEDED(ui::typography::CreateTextFormat(compositor.DwriteFactory(),
+            {FontRole::Text, size, bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL}, &format)) &&
             SUCCEEDED(ui::typography::CreateTextLayout(write_factory.Get(), text.data(), static_cast<UINT32>(text.size()), format.Get(), 2000, 40, &layout, scale)))
             layout->GetMetrics(&metrics);
         return std::ceil(metrics.widthIncludingTrailingWhitespace);
@@ -429,7 +435,7 @@ struct GlobalSearchWindow::Impl {
     void Keycap(const std::wstring& text, D2D1_RECT_F rect, UINT32 color) {
         brush->SetColor(Theme().fill_input);
         target->FillRoundedRectangle(D2D1::RoundedRect(rect, 4, 4), brush.Get());
-        Label(text, rect, 12, color, false, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
+        Label(text, rect, 12, color, false, FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_CENTER);
     }
     void DrawKeys(float bottom, UINT32 color) {
         const std::wstring keys[] = {L"↑", L"↓", L"Enter", L"Ctrl + Enter"};
@@ -474,7 +480,9 @@ struct GlobalSearchWindow::Impl {
             painter.DrawTooltip(bounds, metrics.lineCount > 1 ? std::wstring_view{} : current_folder_tip);
             if (metrics.lineCount > 1) {
                 brush->SetColor(theme.text);
-                target->DrawTextLayout({x + 8 * scale, y + 8 * scale}, layout.Get(), brush.Get());
+                if (target.Get() == compositor.Dc())
+                    compositor.DrawTextLayout({x + 8 * scale, y + 8 * scale}, layout.Get(), brush.Get());
+                else target->DrawTextLayout({x + 8 * scale, y + 8 * scale}, layout.Get(), brush.Get());
             }
         }
         target->SetDpi(96 * scale, 96 * scale);
@@ -503,7 +511,7 @@ struct GlobalSearchWindow::Impl {
             Fill({kEditLeft, 23, width - kEditRight, 58}, Rgb(theme.header_bg), kEditCornerRadius);
             DrawLogo();
             Fill({80, 24, 81, 54}, line);
-            Label(L"\xE721", {91, 22, 115, 57}, 21, muted, false, L"Segoe Fluent Icons");
+            Label(L"\xE721", {91, 22, 115, 57}, 21, muted, false, FontRole::Icon);
             Keycap(L"Esc", {width - 60, 23, width - 22, 53}, muted);
             Fill({0, kHeader, width, kHeader + 1}, line);
             Label(Text(StringId::SearchModeName), {28, 83, 110, 120}, 16, content_mode ? muted : fg, !content_mode);
@@ -513,10 +521,10 @@ struct GlobalSearchWindow::Impl {
             Fill({tab_center - 12, 124, tab_center + 12, 127}, accent, 1.5f);
             const UINT32 disabled = Rgb(theme.text_disabled);
             Label(Text(StringId::GlobalSearchEverywhere), {width - 230, 83, width - 130, 120}, 15,
-                current_only ? muted : fg, !current_only, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
+                current_only ? muted : fg, !current_only, FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_CENTER);
             Label(Text(StringId::GlobalSearchCurrentFolder), {width - 122, 83, width - 22, 120}, 15,
                 current_folder.empty() ? disabled : current_only ? fg : muted,
-                current_only && !current_folder.empty(), L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
+                current_only && !current_folder.empty(), FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_CENTER);
             const float scope_center = current_only ? width - 72 : width - 180;
             Fill({scope_center - 12, 124, scope_center + 12, 127}, accent, 1.5f);
             Fill({0, 128, width, 129}, line);
@@ -546,9 +554,9 @@ struct GlobalSearchWindow::Impl {
                             D2D1::SizeU(static_cast<UINT32>(Px(280)), static_cast<UINT32>(Px(280 * 360.0f / 512))), D2D1::SizeF(512, 360), &empty_art);
                     }
                     if (empty_art) target->DrawBitmap(empty_art.Get(), layout.art, dark ? 1.0f : 0.68f);
-                    Label(status, layout.title, 16, muted, false, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
+                    Label(status, layout.title, 16, muted, false, FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_CENTER);
                 } else {
-                    Label(status, bounds, 16, muted, false, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_CENTER);
+                    Label(status, bounds, 16, muted, false, FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_CENTER);
                 }
             }
             const int first = static_cast<int>(scroll_y / kRow);
@@ -574,10 +582,10 @@ struct GlobalSearchWindow::Impl {
                 if (!hc) Fill({29, y + 23, 58, y + 57}, icon_color, 4);
                 const UINT32 icon_fg = hc ? row_fg : 0xffffff;
                 if (excel || word || pdf || powerpoint) Label(excel ? L"X" : word ? L"W" : pdf ? L"PDF" : L"P", {33, y + 27, 58, y + 54}, pdf ? 11.0f : 19.0f, icon_fg, true);
-                else Label(row.directory ? L"\xE8B7" : L"\xE8A5", {34, y + 27, 58, y + 54}, 19, icon_fg, false, L"Segoe Fluent Icons");
-                Label(row.name, {78, y + 8, width - 30, y + 35}, 17, row_fg, true, L"Segoe UI", !hc);
+                else Label(row.directory ? L"\xE8B7" : L"\xE8A5", {34, y + 27, 58, y + 54}, 19, icon_fg, false, FontRole::Icon);
+                Label(row.name, {78, y + 8, width - 30, y + 35}, 17, row_fg, true, FontRole::Text, !hc);
                 Label(ParentPath(row.path), {78, y + 34, width - 30, y + 57}, 14, row_muted);
-                if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, row_muted, false, L"Segoe UI", !hc);
+                if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, row_muted, false, FontRole::Text, !hc);
             }
             target->PopAxisAlignedClip();
             if (MaxScroll() > 0) {
@@ -587,7 +595,7 @@ struct GlobalSearchWindow::Impl {
             }
             Fill({0, bottom, width, bottom + 1}, line);
             Label(!error.empty() ? error : busy ? Text(StringId::GlobalSearchLoading) : std::to_wstring(total) + Text(StringId::GlobalSearchResults), {25, bottom + 8, 155, height - 8}, 12, muted);
-            if (truncated) Label(Text(StringId::GlobalSearchTruncated), {165, bottom + 8, width - 22, height - 8}, 12, muted, false, L"Segoe UI", false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+            if (truncated) Label(Text(StringId::GlobalSearchTruncated), {165, bottom + 8, width - 22, height - 8}, 12, muted, false, FontRole::Text, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
             else DrawKeys(bottom, muted);
             DrawScopeTooltip(theme);
             const HRESULT rendered = target->EndDraw();

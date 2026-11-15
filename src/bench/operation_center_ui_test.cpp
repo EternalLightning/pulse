@@ -6,6 +6,8 @@
 #include "../ui/operation_center.h"
 #include "../common/localization.h"
 #include "../ui/animation_clock.h"
+#include "../ui/conflict_details.h"
+#include "../ui/lumatext_renderer.h"
 #include "snapshot_output.h"
 #include <cmath>
 #include <cstdio>
@@ -15,6 +17,56 @@
 namespace pulse::ui {
 struct OperationCenterTestPeer {
 #include "operation_center_scroll_cases.h"
+    static int RunTextRendering(OperationCenter& center, const std::filesystem::path& output) {
+        int failures = 0;
+        const auto check = [&](bool ok, const char* label) {
+            std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+            failures += !ok;
+        };
+        auto& compositor = *center.compositor_;
+        auto* dc = compositor.Dc();
+        const auto previous_mode = typography::CurrentTextRenderMode();
+        const std::wstring text = L"复制 龘照中文 English العربية e\u0301 \\\\server\\share\\长路径\\report.txt";
+        for (const float scale : {1.0f, 1.5f, 1.75f, 2.0f}) for (const bool dark : {false, true}) {
+            compositor.Resize(static_cast<int>(440 * scale), static_cast<int>(360 * scale));
+            compositor.RecreateTextFormats(scale);
+            const auto theme = MakeTheme(dark, HexColor(0x0078D4));
+            for (const auto mode : {typography::TextRenderMode::Auto, typography::TextRenderMode::Sharp,
+                                    typography::TextRenderMode::Smooth}) {
+                typography::SetTextRenderMode(mode);
+                if (mode == typography::TextRenderMode::Auto)
+                    check(compositor.LumaTextEnabled(), "Auto text fixture has the LumaText runtime");
+                dc->BeginDraw();
+                dc->Clear(theme.bg);
+                const auto draw = [&](bool conflict, bool small_text, bool wrap, float top) {
+                    const auto before = *compositor.GetLumaTextStats();
+                    const auto rect = D2D1::RectF(20 * scale, top * scale, 420 * scale, (top + 64) * scale);
+                    if (conflict) DrawConflictText(compositor, text, rect, theme.text, !small_text, wrap);
+                    else center.Text(text, rect, theme.text, small_text, wrap);
+                    const auto after = *compositor.GetLumaTextStats();
+                    if (mode == typography::TextRenderMode::Auto) {
+                        check(after.draw_calls > before.draw_calls && after.freetype_glyphs > before.freetype_glyphs &&
+                            after.fallback_draws == before.fallback_draws,
+                            conflict ? "conflict layout uses LumaText without fallback" :
+                                       "task layout uses LumaText without fallback");
+                    } else check(after.draw_calls == before.draw_calls,
+                        "explicit render mode keeps DirectWrite");
+                };
+                draw(false, false, true, 16);
+                draw(false, true, false, 90);
+                draw(true, false, true, 164);
+                draw(true, true, false, 238);
+                check(SUCCEEDED(dc->EndDraw()), "migrated text frame submits successfully");
+                if (mode == typography::TextRenderMode::Auto) {
+                    const auto filename = L"text-migration-" + std::to_wstring(static_cast<int>(scale * 96)) +
+                        (dark ? L"-dark.png" : L"-light.png");
+                    check(compositor.SaveSnapshot((output / filename).c_str()), "save original-size task and conflict text");
+                }
+            }
+        }
+        typography::SetTextRenderMode(previous_mode);
+        return failures ? 1 : 0;
+    }
     static int RunVisibilityPerformance(OperationCenter& center) {
         int failures = 0;
         const auto check = [&](bool passed, const char* label) {
@@ -55,7 +107,8 @@ struct OperationCenterTestPeer {
                 while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(600)) {
                     MSG message{};
                     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-                        if (message.hwnd == center.hwnd_ && message.message == WM_TIMER) {
+                        if (message.hwnd == center.hwnd_ &&
+                            (message.message == WM_TIMER || message.message == EditMotionFrameMessage())) {
                             // Production maintenance can notify an unchanged empty list.
                             center.Update({});
                             DispatchMessageW(&message);
@@ -460,22 +513,13 @@ struct OperationCenterTestPeer {
             auto cancelled_task = failed;
             cancelled_task.task_id = 14;
             cancelled_task.phase = ops::OpPhase::Cancelled;
-            bool tray_failed = true, continue_failed = true, continue_nested = true;
-            int tray_calls = 0, continue_calls = 0;
-            uint64_t tray_task = 0, continued_task = 0;
+            bool continue_nested = true;
+            int continue_calls = 0;
+            uint64_t continued_task = 0;
             auto recovery_callbacks = callbacks;
-            recovery_callbacks.can_return_to_tray = [&](uint64_t id) {
-                return (id == failed.task_id && tray_failed) || id == cancelled_task.task_id ||
-                    id == running.task_id || id == queued.task_id;
-            };
             recovery_callbacks.can_resume_incomplete = [&](uint64_t id) {
-                return (id == failed.task_id && continue_failed) || (id == nested.task_id && continue_nested) ||
-                    id == running.task_id || id == queued.task_id;
-            };
-            recovery_callbacks.return_to_tray = [&](uint64_t id) {
-                ++tray_calls; tray_task = id;
-                tray_failed = continue_failed = false;
-                center.Update(center.tasks_); center.Layout();
+                return id == failed.task_id || (id == nested.task_id && continue_nested) ||
+                    id == cancelled_task.task_id || id == running.task_id || id == queued.task_id;
             };
             recovery_callbacks.resume_incomplete = [&](uint64_t id) {
                 ++continue_calls; continued_task = id;
@@ -490,33 +534,22 @@ struct OperationCenterTestPeer {
                     if (center.buttons_[i].action == action && center.buttons_[i].task_id == id) return static_cast<int>(i);
                 return -1;
             };
-            check(find_recovery(OperationCenter::Action::ReturnToTray, failed.task_id) >= 0 &&
-                find_recovery(OperationCenter::Action::ReturnToTray, cancelled_task.task_id) >= 0 &&
-                find_recovery(OperationCenter::Action::ReturnToTray, unsafe.task_id) < 0 &&
+            check(find_recovery(OperationCenter::Action::ResumeIncomplete, failed.task_id) >= 0 &&
+                find_recovery(OperationCenter::Action::ResumeIncomplete, cancelled_task.task_id) >= 0 &&
                 find_recovery(OperationCenter::Action::ResumeIncomplete, unsafe.task_id) < 0 &&
-                find_recovery(OperationCenter::Action::ReturnToTray, completed.task_id) < 0 &&
                 find_recovery(OperationCenter::Action::ResumeIncomplete, completed.task_id) < 0,
                 "only terminal snapshots with a current safe recovery offer expose recovery buttons");
-            check(find_recovery(OperationCenter::Action::ReturnToTray, running.task_id) < 0 &&
-                find_recovery(OperationCenter::Action::ResumeIncomplete, running.task_id) < 0 &&
-                find_recovery(OperationCenter::Action::ReturnToTray, queued.task_id) < 0 &&
+            check(find_recovery(OperationCenter::Action::ResumeIncomplete, running.task_id) < 0 &&
                 find_recovery(OperationCenter::Action::ResumeIncomplete, queued.task_id) < 0,
                 "active and queued tasks never expose terminal recovery even when capability predicates return true");
-            check(find_recovery(OperationCenter::Action::ReturnToTray, nested.task_id) < 0 &&
-                find_recovery(OperationCenter::Action::ResumeIncomplete, nested.task_id) >= 0 &&
-                find_recovery(OperationCenter::Action::ResumeIncomplete, failed.task_id) < 0,
-                "nested unfinished items expose continue only and tray recovery takes priority when both offers are eligible");
-            const int stale_tray = find_recovery(OperationCenter::Action::ReturnToTray, failed.task_id);
-            tray_failed = false;
-            center.Invoke(stale_tray);
-            check(stale_tray >= 0 && tray_calls == 0,
-                "a previously rendered tray button rechecks live eligibility before dispatch");
+            check(find_recovery(OperationCenter::Action::ResumeIncomplete, nested.task_id) >= 0,
+                "nested unfinished items expose their preserved continuation plan");
             const int stale_continue = find_recovery(OperationCenter::Action::ResumeIncomplete, nested.task_id);
             continue_nested = false;
             center.Invoke(stale_continue);
             check(stale_continue >= 0 && continue_calls == 0,
                 "a previously rendered continue button cannot dispatch after its offer is revoked");
-            tray_failed = continue_nested = true;
+            continue_nested = true;
             center.Layout();
             for (const float scale : {1.0f, 1.5f}) {
                 center.scale_ = scale; center.painter_.SetScale(scale); center.compositor_->RecreateTextFormats(scale);
@@ -537,7 +570,7 @@ struct OperationCenterTestPeer {
                     const auto& a = center.buttons_[i].bounds; const auto& b = center.buttons_[j].bounds;
                     safe &= !(a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top);
                 }
-                check(safe, "long tray and continue actions wrap inside their cards without overlapping other controls");
+                check(safe, "long continue actions wrap inside their cards without overlapping other controls");
             }
             center.scale_ = 1; center.painter_.SetScale(1); center.compositor_->RecreateTextFormats(1);
             center.Layout();
@@ -556,12 +589,6 @@ struct OperationCenterTestPeer {
                 SendMessageW(center.hwnd_, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
                 return true;
             };
-            check(click_recovery(OperationCenter::Action::ReturnToTray, failed.task_id) && tray_calls == 1 && tray_task == failed.task_id &&
-                find_recovery(OperationCenter::Action::ReturnToTray, failed.task_id) < 0 &&
-                find_recovery(OperationCenter::Action::ResumeIncomplete, failed.task_id) < 0,
-                "one tray invocation refreshes the consumed offer away and carries the exact task ID");
-            check(!invoke(OperationCenter::Action::ReturnToTray, failed.task_id) && tray_calls == 1,
-                "consumed tray recovery cannot be invoked a second time from the refreshed panel");
             check(click_recovery(OperationCenter::Action::ResumeIncomplete, nested.task_id) && continue_calls == 1 &&
                 continued_task == nested.task_id && find_recovery(OperationCenter::Action::ResumeIncomplete, nested.task_id) < 0,
                 "one nested continuation refreshes its consumed offer away and carries the exact task ID");
@@ -836,10 +863,12 @@ int RunOperationCenterUiTest(std::string_view mode) {
             compositor.RecreateTextFormats(1);
             OperationCenter center;
             if (center.Create(owner, &compositor)) {
-                if (mode == "--clear-performance") result = OperationCenterTestPeer::RunClearPerformance(center, output);
+                if (mode == "--text-rendering") result = OperationCenterTestPeer::RunTextRendering(center, output);
+                else if (mode == "--clear-performance") result = OperationCenterTestPeer::RunClearPerformance(center, output);
                 else if (mode == "--visibility-performance") result = OperationCenterTestPeer::RunVisibilityPerformance(center);
                 else if (mode == "--smooth-scroll") result = OperationCenterTestPeer::RunSmoothScroll(center,output);
                 else if (mode == "--scroll-performance") result = OperationCenterTestPeer::RunScrollPerformance(center);
+                else if (mode == "--scroll-cadence") result = OperationCenterTestPeer::RunScrollCadence(center);
                 else result = OperationCenterTestPeer::Run(center, output);
             }
         }

@@ -1476,8 +1476,6 @@ Op Inverse(const Op& op) {
     return inv;
 }
 
-bool CanWriteWithoutElevation(const Op& op) { return op.root != Root::Machine; }
-
 OpResult Apply(const Roots& roots, const Op& op) {
     if (op.root == Root::File) return OpResult::Unsupported;
     if (op.plan_error != ERROR_SUCCESS) return FromStatus(op.plan_error);

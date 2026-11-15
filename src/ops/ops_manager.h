@@ -6,8 +6,7 @@
 // ops_manager.h — Operation queue, progress status, undo stack (UI-process side).
 //
 // Queued operations are serialized on the operation worker. Copy/move/rename
-// execute in-process with Win32 APIs; authorized delete/recycle, restore and
-// creation use Pulse.Shell.exe (ShellClient). Context menus have a separate
+// execute through IFileOperation in Pulse.Shell.exe (ShellClient). Context menus have a separate
 // client worker. Submit/Cancel/Undo/Status never run blocking operations on the UI.
 //
 // Undo model (stage 1B-1):
@@ -25,8 +24,10 @@
 #include "recycle_undo_validation.h"
 #include "file_object_reference.h"
 #include "delete_item_progress.h"
+#include "transfer_rate.h"
 #include "../common/shell_menu_item.h"
 #include "../ipc/shell_client.h"
+#include "../ipc/file_operation_protocol.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -136,19 +137,13 @@ struct OpRequest {
     std::vector<std::wstring> undo_cleanup_directories; // pending empty-directory cleanup; never rescan descendants
 };
 
-// Worker snapshot used only for an in-session retry; never journaled. Keeping
-// exact descendants and destinations avoids rescanning unrelated new files.
+// Session-only snapshot of an untouched Shell request; never journaled.
 struct TransferPlanEntry {
     std::wstring source;
     std::wstring destination;
     bool directory = false;
     bool reparse = false;
-    bool destination_preexisting = false;
-    bool directory_rename_only = false; // same-volume root admitted without retaining child handles
     uint64_t bytes = 0;
-    DWORD attributes = FILE_ATTRIBUTE_NORMAL;
-    FILETIME created{};
-    FILETIME accessed{};
     FILETIME modified{};
     FileObjectReference source_identity;
 };
@@ -203,7 +198,6 @@ struct OpStatus {
     std::wstring failed_path; // exact failing endpoint, independent of display text
     bool elevation_retry_available = false;
     std::wstring elevation_source_path;
-    std::wstring elevation_destination_path;
     bool lock_retry_available = false; // single rename can retry without Restart Manager owners
     std::vector<RestoreItemResult> restore_results; // exact selected payload and actual per-item outcome
     std::wstring locked_path;
@@ -242,7 +236,6 @@ struct TransferOutcome {
     OpPhase phase = OpPhase::Failed;
     HRESULT failure_hr = S_OK;
     bool plan_complete = false;
-    bool can_restage = false;
     bool can_resume = false; // frozen remaining plan is available through ResumeIncompleteTransfer
     std::vector<TransferItemResult> items;
     // Exact planned leaves and empty directories only; never a partially completed subtree root.
@@ -282,7 +275,6 @@ public:
     bool RetryRecovery();
     void DiscardRecovery();
     void SetVerifyCopies(bool enabled) noexcept { verify_copies_.store(enabled); }
-    bool VerifyCopies() const noexcept { return verify_copies_.load(); }
     // Owner window for the shell dialogs the open thread raises (打开方式…,
     // 属性). Explorer parents those to the folder window; passing our own HWND
     // keeps them tied to Pulse instead of whatever happens to be foreground
@@ -379,10 +371,8 @@ private:
     friend struct UndoIdentityTestProbe;
     friend struct MutationUndoTestProbe;
     friend struct NetworkUndoTestProbe;
-    friend struct SourceContractTestProbe;
     friend struct OperationJournalProbe;
     friend struct OperationRecordsTestProbe;
-    friend struct TransferBatchTestProbe;
     struct QueueItem {
         OpRequest req;
         std::wstring open_path;   // non-empty => ShellExecuteEx instead
@@ -396,19 +386,13 @@ private:
         uint64_t recovery_sequence = 0; // retained until deletion is admitted
         bool lock_retry = false;
         bool elevated_retry = false;
-        std::optional<OpStatus> retry_batch_status; // parent-only presentation of the original batch
-        bool exact_transfer_resume = false;
         uint64_t retry_generation = 0;
         HRESULT retry_failure_hr = S_OK;
         std::wstring retry_failed_path;
-        std::vector<std::wstring> retry_probe_paths; // ambiguous CopyFile2 phase: inspect both endpoints
         bool retry_rename_identity = false;
         FileIdentity rename_source_id;
         std::vector<LockOwner> close_first; // deliberately absent from persisted OpRequest
-        std::vector<std::wstring> retry_completed_sources;
         std::vector<TransferPlanEntry> retry_transfer_plan;
-        std::shared_ptr<DestinationGuard> retry_source_directories;
-        std::shared_ptr<DestinationGuard> retry_destination_guard;
         std::vector<FileObjectReference> retry_source_references;
     };
 
@@ -484,15 +468,16 @@ private:
         std::vector<std::wstring> recycled_paths;
         std::vector<std::wstring> recycle_destinations;
         std::vector<FileIdentity> produced_identities;
+        std::vector<ipc::ShellOperationItemResult> shell_items;
     };
     void OnShellDone(uint32_t id, ShellCompletion result);
     bool WaitShellDone(uint32_t id, ShellCompletion& result);
+    bool DispatchShellOperation(ipc::ShellOperationRequest request, ShellCompletion& result);
+    void RunBasicShellOperation(const OpRequest& req, uint64_t task_id,
+        const FileIdentity* rename_identity = nullptr,
+        const std::vector<FileIdentity>* continuation_identities = nullptr);
     void RunTransfer(const OpRequest& req, uint64_t task_id,
-                     const std::vector<std::wstring>& prior_completed = {},
-                     const std::vector<TransferPlanEntry>& prior_plan = {},
-                     const std::shared_ptr<DestinationGuard>& prior_source_directories = {},
-                     const std::shared_ptr<DestinationGuard>& prior_destination_guard = {},
-                     bool exact_plan = false);
+                     const std::vector<TransferPlanEntry>& prior_plan = {});
     void ExecuteFileOperation(QueueItem& item);
     void RunFolderAction(const OpRequest& req, uint64_t task_id);
     void ContinueFolderUndo(const OpRequest& req);
@@ -537,7 +522,6 @@ private:
     std::optional<QueueItem> active_item_;
     std::optional<QueueItem> lock_retry_;
     std::optional<QueueItem> elevation_retry_;
-    bool elevation_worker_ = false;
     std::atomic<bool> lock_retry_active_{false};
     std::atomic<bool> lock_retry_cancel_{false};
     std::atomic<uint64_t> lock_retry_generation_{1};
@@ -571,13 +555,10 @@ private:
     std::atomic<bool> transfer_cancel_{false};
     std::atomic<bool> transfer_pause_{false};
     std::atomic<bool> verify_copies_{false};
-    decltype(&GetFileInformationByHandleEx) transfer_identity_query_ = GetFileInformationByHandleEx;
-    decltype(&CopyFile2) transfer_copy_file_ = CopyFile2;
-    bool transfer_parallel_override_ = false; // explicit opt-in for concurrent injected copy regressions
-    std::function<void(const std::wstring&)> before_source_cleanup_; // regression gate, empty in production
-    std::function<void(const std::wstring&)> before_source_enumeration_; // regression gate, empty in production
-    bool force_copy_move_ = false; // isolated cross-volume regression without a second user volume
-
+    std::atomic<uint64_t> shell_progress_base_{0};
+    std::atomic<uint64_t> shell_progress_total_{0};
+    std::atomic<uint64_t> shell_bytes_base_{0};
+    TransferRateEstimator shell_transfer_rate_; // mutex_
     mutable std::mutex transfer_control_mutex_;
     std::condition_variable transfer_control_cv_;
     std::optional<ConflictItemInfo> pending_conflict_;

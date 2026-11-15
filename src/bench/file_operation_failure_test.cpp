@@ -759,7 +759,21 @@ static int RunPopupStyleTests(HWND owner) {
             "operation action uses the same minimum 80 by 32 DIP size as settings prompts");
         const auto name = std::wstring(language) + (dark ? L"-dark-" : L"-light-") +
             std::to_wstring(static_cast<int>(scale * 100)) + L".png";
-        check(ui::FileOperationFailureProbe::Capture(window, output / name), "save actual failure dialog rendering");
+        ui::FileOperationFailureProbe::Pixels pixels;
+        check(ui::FileOperationFailureProbe::Capture(window, output / name, &pixels), "save actual failure dialog rendering");
+        if (pixels.bytes.empty()) continue;
+        const float cx = (layout.close.left + layout.close.right) * 0.5f;
+        const float cy = (layout.close.top + layout.close.bottom) * 0.5f;
+        int left = pixels.width, top = pixels.height, right = -1, bottom = -1;
+        for (int py = static_cast<int>(cy - 12 * scale); py < cy + 12 * scale; ++py)
+            for (int px = static_cast<int>(cx - 12 * scale); px < cx + 12 * scale; ++px) {
+                const BYTE* pixel = pixels.bytes.data() + py * pixels.stride + px * 4;
+                const bool ink = dark ? std::min({pixel[0], pixel[1], pixel[2]}) > 180
+                                      : std::max({pixel[0], pixel[1], pixel[2]}) < 120;
+                if (ink) { left = std::min(left, px); top = std::min(top, py); right = std::max(right, px); bottom = std::max(bottom, py); }
+            }
+        check(right >= left && right - left + 1 >= 9.5f * scale && bottom - top + 1 >= 9.5f * scale,
+            "close glyph has the same visible size as the native settings caption");
         check(ui::FileOperationFailureProbe::Fits(window), "complete failure text fits its content viewport");
         status.task_id++;
         status.phase = ops::OpPhase::Running;
@@ -776,6 +790,27 @@ static int RunPopupStyleTests(HWND owner) {
             running.details.right + 8 * scale <= running.pause.left,
             "details, pause and cancel remain separate in the narrow action strip");
         check(ui::FileOperationFailureProbe::Capture(window, output / (L"running-" + name)), "save running dialog rendering");
+    }
+    {
+        ui::HighContrastFrameScope high_contrast(true);
+        ui::FileOperationWindow window;
+        check(window.Create(owner, {}), "create high-contrast operation style fixture");
+        window.SetTheme(true, ui::HexColor(0x87CEFA));
+        const HWND hwnd = ui::FileOperationFailureProbe::Window(window);
+        const auto& layout = ui::FileOperationFailureProbe::Inspect(window);
+        SendMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(static_cast<WORD>((layout.close.left + layout.close.right) * 0.5f),
+            static_cast<WORD>((layout.close.top + layout.close.bottom) * 0.5f)));
+        ui::FileOperationFailureProbe::Pixels pixels;
+        check(ui::FileOperationFailureProbe::Capture(window, output / L"high-contrast-close.png", &pixels),
+            "capture high-contrast operation caption");
+        if (pixels.bytes.empty()) return failures;
+        const auto theme = ui::MakeHighContrastTheme();
+        const BYTE* pixel = pixels.bytes.data() + static_cast<int>(layout.close.top + 3) * pixels.stride +
+            static_cast<int>(layout.close.left + 3) * 4;
+        check(std::abs(pixel[0] - theme.fill_selected.b * 255) <= 1 &&
+            std::abs(pixel[1] - theme.fill_selected.g * 255) <= 1 &&
+            std::abs(pixel[2] - theme.fill_selected.r * 255) <= 1,
+            "high-contrast close hover uses the selected system color");
     }
     std::printf("[RESULT] failures=%d\n", failures);
     return failures;

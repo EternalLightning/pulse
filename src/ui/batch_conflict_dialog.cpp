@@ -70,9 +70,8 @@ std::optional<std::vector<ops::ConflictResolution>> BatchConflictDialog::Show(HW
     const ops::ConflictItemInfo& conflict, const BatchConflictLabels& labels, bool dark, D2D1_COLOR_F accent) {
     if (!Initialize(owner, conflict, labels, dark, accent, true)) return std::nullopt;
     if (!Valid()) { Destroy(); return std::nullopt; }
-    OwnerDimScope dim(owner_);
-    owner_disabled_ = owner_ && IsWindowEnabled(owner_);
-    if (owner_disabled_) EnableWindow(owner_, FALSE);
+    ModalOwnerScope modal(owner_);
+    owner_disabled_ = modal.DisabledOwner() != nullptr;
     SetTimer(hwnd_, kValidityTimer, 100, nullptr);
     ShowDialogWithFade(hwnd_);
     SetForegroundWindow(hwnd_); SetFocus(hwnd_);
@@ -92,7 +91,6 @@ void BatchConflictDialog::Destroy() {
         DestroyWindow(hwnd_);
     }
     hwnd_ = nullptr;
-    if (owner_disabled_ && IsWindow(owner_)) EnableWindow(owner_, TRUE);
     owner_disabled_ = false;
     compositor_.Shutdown();
 }
@@ -106,7 +104,7 @@ void BatchConflictDialog::Layout() {
     const float row_inner_width = (std::max)(1.0f, width - 2 * pad - 24 * s);
     float choice_widths[3]{};
     for (size_t i = 0; i < 3; ++i)
-        choice_widths[i] = (std::min)(painter_.MeasureButtonWidth(names[i]) + 12 * s, row_inner_width);
+        choice_widths[i] = (std::min)((std::max)(80 * s, painter_.MeasureButtonWidth(names[i]) + 12 * s), row_inner_width);
     auto add_choices = [&](float right, float top, float available, Action action, size_t row) {
         size_t first = 0;
         while (first < 3) {
@@ -146,8 +144,8 @@ void BatchConflictDialog::Layout() {
     }
     const float button_y = height - footer_height_ + 16 * s;
     const float max_footer_width = (std::max)(1.0f, (width - 2 * pad - gap) / 2);
-    const float cancel_width = (std::min)(max_footer_width, painter_.MeasureButtonWidth(labels_.cancel) + 12 * s);
-    const float confirm_width = (std::min)(max_footer_width, painter_.MeasureButtonWidth(labels_.confirm) + 12 * s);
+    const float cancel_width = (std::min)(max_footer_width, (std::max)(80 * s, painter_.MeasureButtonWidth(labels_.cancel) + 12 * s));
+    const float confirm_width = (std::min)(max_footer_width, (std::max)(80 * s, painter_.MeasureButtonWidth(labels_.confirm) + 12 * s));
     controls_.push_back({D2D1::RectF(end - confirm_width - gap - cancel_width, button_y, end - confirm_width - gap, button_y + 32 * s), Action::Cancel, 0, {}, labels_.cancel});
     controls_.push_back({D2D1::RectF(end - confirm_width, button_y, end, button_y + 32 * s), Action::Confirm, 0, {}, labels_.confirm});
     if (focus_ < 0 || focus_ >= static_cast<int>(controls_.size()) + 1) focus_ = static_cast<int>(controls_.size()) - 2;
@@ -179,9 +177,13 @@ bool BatchConflictDialog::Render(bool present) {
     const auto theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
     const float s = scale_, width = static_cast<float>(compositor_.Width());
     BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_, s);
-    painter_.DrawGlyph(L"\xE8C8", D2D1::RectF(dialog_style::kMargin * s, 12 * s, (dialog_style::kMargin + dialog_style::kIconSize) * s, 32 * s), theme.accent_ink);
-    painter_.DrawText(labels_.title, D2D1::RectF(48 * s, 0, width - dialog_style::kCloseWidth * s, dialog_style::kTitleHeight * s), compositor_.HeaderFormat(), theme.text);
-    painter_.FillRoundedRect(D2D1::RectF(0, 43 * s, width, 44 * s), 0, theme.stroke_divider);
+    fluent::ControlState close_state{};
+    for (size_t i = 0; i < controls_.size(); ++i) if (controls_[i].action == Action::Close) {
+        close_state.hovered = static_cast<int>(i) == hover_;
+        close_state.pressed = static_cast<int>(i) == pressed_;
+        close_state.keyboard_focus = static_cast<int>(i) == focus_;
+    }
+    DrawDialogHeader(compositor_, painter_, theme, s, labels_.title, L"\xE8C8", close_state);
     Text(labels_.instruction, D2D1::RectF(20 * s, 60 * s, width - 20 * s, 92 * s), theme.text_secondary);
     const bool inline_apply = controls_[0].bounds.top == 100 * s;
     const float label_top = (inline_apply ? 106 : 96) * s;
@@ -220,17 +222,11 @@ bool BatchConflictDialog::Render(bool present) {
     }
     dc->PopAxisAlignedClip();
     const float footer_top = static_cast<float>(compositor_.Height()) - footer_height_;
-    painter_.FillRoundedRect(D2D1::RectF(0, footer_top, width, footer_top + s), 0, theme.stroke_divider);
+    DrawDialogFooter(compositor_, painter_, theme, footer_top);
     for (size_t i = 0; i < controls_.size(); ++i) {
         const auto& control = controls_[i];
         if (control.action == Action::Select) continue;
-        if (control.action == Action::Close) {
-            fluent::ControlState state;
-            state.hovered = static_cast<int>(i) == hover_; state.pressed = static_cast<int>(i) == pressed_;
-            state.keyboard_focus = static_cast<int>(i) == focus_;
-            painter_.DrawTitleBarButton(control.bounds, fluent::TitleBarButtonRole::Close, {}, state);
-            continue;
-        }
+        if (control.action == Action::Close) continue;
         fluent::ButtonSpec button;
         button.bounds = control.bounds; button.text = control.text;
         button.kind = control.action == Action::Confirm ? fluent::ButtonKind::Primary :

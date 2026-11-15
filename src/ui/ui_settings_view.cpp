@@ -145,8 +145,12 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             dc->SetTextRenderingParams(smooth.get());
         }
         dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-        painter_.DrawTextNative(title, D2D1::RectF(lay.content.left+pad,origin+pad,
-            lay.content.right-pad,origin+pad+40*scale_),title_format.get(),theme.text);
+        const auto title_bounds = D2D1::RectF(lay.content.left+pad,origin+pad,
+            lay.content.right-pad,origin+pad+40*scale_);
+        if (typography::UseLumaTextForUi())
+            painter_.DrawText(title, title_bounds, title_format.get(), theme.text);
+        else
+            painter_.DrawTextNative(title, title_bounds, title_format.get(), theme.text);
         dc->SetTextAntialiasMode(aa);
         dc->SetTextRenderingParams(previous.get());
     }

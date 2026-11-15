@@ -29,23 +29,6 @@ inline bool IsUserModeVolumeDevice(std::wstring_view target) {
                                 static_cast<int>(kPrefix.size()), TRUE) == CSTR_EQUAL;
 }
 
-// File system names (GetVolumeInformationW) of user-mode / cloud mounts.
-// Only for callers that already read the volume information: asking a stuck
-// mount for it can block, the device test above cannot.
-inline bool IsRemoteLikeFileSystemName(std::wstring_view name) {
-    constexpr std::wstring_view kNames[] = {
-        L"FUSE", L"WinFsp", L"Dokan", L"CloudDrive", L"rclone", L"Baidu", L"CBFS",
-    };
-    for (const auto needle : kNames) {
-        if (name.size() < needle.size()) continue;
-        for (size_t at = 0; at + needle.size() <= name.size(); ++at)
-            if (CompareStringOrdinal(name.data() + at, static_cast<int>(needle.size()), needle.data(),
-                                     static_cast<int>(needle.size()), TRUE) == CSTR_EQUAL)
-                return true;
-    }
-    return false;
-}
-
 // Drive letter of "X:...", "\\?\X:..." or "\\.\X:..."; 0 for anything else
 // (UNC paths are network paths in their own right).
 inline wchar_t DriveLetterOf(std::wstring_view path) {

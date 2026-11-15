@@ -15,6 +15,91 @@
 #include <algorithm>
 
 namespace {
+struct BusinessPromptCase {
+    HWND owner = nullptr;
+    int initial_focus = 0, tabs = 0, final_focus = 0;
+    UINT key = VK_RETURN;
+    bool hide_cancel = false, has_alternate = false;
+    bool seen = false, owner_disabled = false, layout_ok = false, focus_ok = false;
+};
+
+BusinessPromptCase* business_prompt_case = nullptr;
+
+void CALLBACK DriveBusinessPrompt(HWND, UINT, UINT_PTR timer, DWORD) {
+    HWND dialog = nullptr;
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND candidate, LPARAM parameter) -> BOOL {
+        wchar_t name[64]{};
+        GetClassNameW(candidate, name, ARRAYSIZE(name));
+        if (wcscmp(name, L"PulseConfirmWindow") != 0 || !IsWindowVisible(candidate)) return TRUE;
+        *reinterpret_cast<HWND*>(parameter) = candidate;
+        return FALSE;
+    }, reinterpret_cast<LPARAM>(&dialog));
+    if (!dialog) return;
+    KillTimer(nullptr, timer);
+    auto& state = *business_prompt_case;
+    state.seen = true;
+    state.owner_disabled = !IsWindowEnabled(state.owner) && GetWindow(dialog, GW_OWNER) == state.owner;
+    pulse::ui::ConfirmDialogInspection inspection;
+    state.layout_ok = SendMessageW(dialog, pulse::ui::kConfirmInspectMessage, 0, reinterpret_cast<LPARAM>(&inspection)) &&
+        inspection.primary.right > inspection.primary.left &&
+        (inspection.cancel.right > inspection.cancel.left) == !state.hide_cancel &&
+        (inspection.alternate.right > inspection.alternate.left) == state.has_alternate;
+    state.focus_ok = inspection.focus == state.initial_focus;
+    for (int i = 0; i < state.tabs; ++i) SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
+    SendMessageW(dialog, pulse::ui::kConfirmInspectMessage, 0, reinterpret_cast<LPARAM>(&inspection));
+    state.focus_ok &= inspection.focus == state.final_focus;
+    SendMessageW(dialog, WM_KEYDOWN, state.key, 0);
+}
+
+int RunBusinessPromptsOnly(bool dark) {
+    HWND owner = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Business prompt isolated fixture",
+        WS_OVERLAPPEDWINDOW, 100, 100, 640, 480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!owner) return 2;
+    int failures = 0;
+    auto run = [&](pulse::ui::ConfirmDialogSpec spec, int initial_focus, int tabs, int final_focus,
+                   UINT key, bool expected_accepted, bool expected_alternate, const char* label) {
+        bool alternate = expected_accepted ? !expected_alternate : expected_alternate;
+        spec.alternate_selected = &alternate;
+        const auto deadline = GetTickCount64() + 10000;
+        spec.still_valid = [deadline] { return GetTickCount64() < deadline; };
+        BusinessPromptCase state;
+        state.owner = owner; state.initial_focus = initial_focus; state.tabs = tabs; state.final_focus = final_focus;
+        state.key = key; state.hide_cancel = spec.hide_cancel; state.has_alternate = !spec.alternate_text.empty();
+        business_prompt_case = &state;
+        const UINT_PTR timer = SetTimer(nullptr, 0, 10, DriveBusinessPrompt);
+        const bool accepted = timer && pulse::ui::ShowConfirmDialog(owner, spec, dark, D2D1::ColorF(0x0078D4));
+        if (timer) KillTimer(nullptr, timer);
+        business_prompt_case = nullptr;
+        const bool restored = IsWindowEnabled(owner);
+        const bool ok = state.seen && state.owner_disabled && state.layout_ok && state.focus_ok &&
+            accepted == expected_accepted && alternate == expected_alternate && restored;
+        std::printf("[%s] %s (seen=%d disabled=%d layout=%d focus=%d accepted=%d alternate=%d restored=%d)\n",
+            ok ? "PASS" : "FAIL", label, state.seen, state.owner_disabled, state.layout_ok, state.focus_ok,
+            accepted, alternate, restored);
+        failures += !ok;
+    };
+    pulse::ui::ConfirmDialogSpec spec;
+    spec.title = L"Business prompt fixture";
+    spec.message = L"Isolated shared-dialog keyboard and owner behavior.";
+    spec.confirm_text = L"OK";
+    spec.hide_cancel = true;
+    run(spec, 0, 1, 0, VK_RETURN, true, false, "single OK hides Cancel and Tab retains the sole action");
+    spec.hide_cancel = false;
+    spec.confirm_text = L"Continue";
+    spec.cancel_is_default = true;
+    run(spec, 1, 0, 1, VK_RETURN, false, true, "default Cancel rejects Enter and preserves the caller's alternate value");
+    run(spec, 1, 1, 0, VK_RETURN, true, false, "Tab from default Cancel reaches Continue");
+    spec.confirm_text = L"No";
+    spec.alternate_text = L"Yes";
+    spec.cancel_is_default = false;
+    run(spec, 0, 0, 0, VK_RETURN, true, false, "default No accepts without selecting Yes");
+    run(spec, 0, 2, 2, VK_RETURN, true, true, "Tab through Cancel reaches Yes and sets the alternate result");
+    run(spec, 0, 2, 2, VK_ESCAPE, false, true, "Escape from Yes cancels and preserves the caller's alternate value");
+    DestroyWindow(owner);
+    std::printf("Business prompts: %d failure(s)\n", failures);
+    return failures ? 1 : 0;
+}
+
 bool CaptureVisibleClient(HWND dialog, const std::filesystem::path& output, bool dark) {
     RECT client{};
     POINT origin{};
@@ -59,6 +144,7 @@ int wmain(int argc, wchar_t** argv) {
     pulse::compat::EnableDpiAwareness();
     const HRESULT com = OleInitialize(nullptr);
     bool dark = true, exit_dialog = false, recycle_dialog = false, english = false, cancel = false, narrow = false;
+    bool business_prompts_only = false;
     for (int i = 1; i < argc; ++i) {
         if (wcscmp(argv[i], L"--light") == 0) dark = false;
         else if (wcscmp(argv[i], L"--exit") == 0) exit_dialog = true;
@@ -66,8 +152,14 @@ int wmain(int argc, wchar_t** argv) {
         else if (wcscmp(argv[i], L"--english") == 0) english = true;
         else if (wcscmp(argv[i], L"--cancel") == 0) cancel = true;
         else if (wcscmp(argv[i], L"--narrow") == 0) narrow = true;
+        else if (wcscmp(argv[i], L"--business-prompts-only") == 0) business_prompts_only = true;
     }
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), english ? L"en-US" : L"zh-CN");
+    if (business_prompts_only) {
+        const int result = RunBusinessPromptsOnly(dark);
+        if (SUCCEEDED(com)) OleUninitialize();
+        return result;
+    }
     const std::wstring image_name = std::wstring(recycle_dialog ? L"recycle_confirmation_" : exit_dialog ? L"exit_confirmation_" : L"link_confirmation_") +
         (dark ? L"dark" : L"light") + (english ? L"_en" : L"") +
         (narrow ? L"_144_narrow" : L"") + (cancel ? L"_cancel" : L"") + L".png";
@@ -111,6 +203,10 @@ int wmain(int argc, wchar_t** argv) {
             inspection.primary.left >= 0 && inspection.cancel.left >= 0 &&
             inspection.primary.right <= client.right && inspection.cancel.right <= client.right &&
             (inspection.primary.left >= inspection.cancel.right || inspection.cancel.left >= inspection.primary.right);
+        const float scale = (inspection.close.right - inspection.close.left) / 46.0f;
+        layout_ok = layout_ok && scale > 0 &&
+            inspection.primary.right - inspection.primary.left >= 79.9f * scale &&
+            inspection.cancel.right - inspection.cancel.left >= 79.9f * scale;
         DWORD_PTR result = 0;
         captured = SendMessageTimeoutW(dialog, pulse::ui::kConfirmSnapshotMessage, 0,
             reinterpret_cast<LPARAM>(output.c_str()), SMTO_ABORTIFHUNG, 5000, &result) && result;

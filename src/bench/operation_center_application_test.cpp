@@ -72,9 +72,14 @@ int RunOperationCenterApplicationTest() {
         const auto overlay = s.renderer.SearchBarRect(rect.right);
         check(overlay.right+7*scale <= layout.operations.left,
             "expanded search leaves operation entry available");
-        if (width*scale-left >= 700*scale)
-            check(layout.filter.right-layout.filter.left == 76*scale,
-                "filter width omits unused dropdown arrow space");
+        if (width*scale-left >= 700*scale) {
+            ui::fluent::Painter measuring(&s.compositor);
+            measuring.SetScale(scale);
+            measuring.BeginFrame(ui::MakeTheme(false, s.accentColor));
+            check(measuring.MeasureButtonWidth(l10n::Get(l10n::StringId::ToolbarFilter), L"\xE71C", false) <=
+                layout.filter.right-layout.filter.left,
+                "localized filter text and icon fit the current toolbar budget without a dropdown arrow");
+        }
         vm.address_searching = false;
         vm.details_visible = true;
         vm.details.has_selection = true;
@@ -114,7 +119,6 @@ int RunOperationCenterApplicationTest() {
         check(!l10n::Get(l10n::StringId::OperationCenter).empty() &&
             !l10n::Get(l10n::StringId::OperationCenterQueued).empty() &&
             !l10n::Get(l10n::StringId::OperationCenterDestination).empty() &&
-            !l10n::Get(l10n::StringId::ReturnUnfinishedToTray).empty() &&
             !l10n::Get(l10n::StringId::ResumeIncompleteTransfer).empty() &&
             !l10n::Get(l10n::StringId::BatchConflictInstruction).empty() &&
             !l10n::Get(l10n::StringId::GroupBy).empty() &&
@@ -194,11 +198,11 @@ int RunOperationCenterApplicationTest() {
         query.path.ends_with(L"missing.txt") ? app::TrayMetadataState::Missing : app::TrayMetadataState::Ready,
         FILE_ATTRIBUTE_NORMAL, 16});
     s.tray.ApplyMetadataResults(facts);
-    const auto before = s.trayTransfers.size();
+    const auto before = s.ops.TaskStatuses().size();
     ReleaseTrayBatch(s, 0);
-    check(s.trayTransfers.size() == before + 1 && s.tray.batches().size() == 1 &&
+    check(s.ops.TaskStatuses().size() == before + 1 && s.tray.batches().size() == 1 &&
         s.tray.batches()[0].items.size() == 1 && s.tray.batches()[0].items[0].path.ends_with(L"missing.txt"),
-        "release tracks submitted task and keeps unsubmitted missing items in tray");
+        "release submits a task and keeps unsubmitted missing items in tray");
     s.operationCenter.reset();
     s.renderer.SetCompositor(nullptr);
     s.compositor.Shutdown();

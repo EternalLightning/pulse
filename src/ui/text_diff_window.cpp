@@ -460,7 +460,7 @@ void TextDiffWindow::RecreateFormats() {
     };
     make(typography::FontRole::Monospace, DWRITE_FONT_WEIGHT_NORMAL, 13.0f, DWRITE_TEXT_ALIGNMENT_LEADING, mono_);
     make(typography::FontRole::Monospace, DWRITE_FONT_WEIGHT_NORMAL, 11.5f, DWRITE_TEXT_ALIGNMENT_TRAILING, gutter_);
-    make(typography::FontRole::Text, DWRITE_FONT_WEIGHT_NORMAL, 13.0f, DWRITE_TEXT_ALIGNMENT_LEADING, ui_);
+    make(typography::FontRole::Text, DWRITE_FONT_WEIGHT_NORMAL, 14.0f, DWRITE_TEXT_ALIGNMENT_LEADING, ui_);
     make(typography::FontRole::Text, DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.5f, DWRITE_TEXT_ALIGNMENT_LEADING,
          ui_bold_);
     make(typography::FontRole::Text, DWRITE_FONT_WEIGHT_NORMAL, 11.5f, DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -1061,7 +1061,7 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
                     }
                 }
                 brush_->SetColor(theme.text);
-                dc->DrawTextLayout(D2D1::Point2F(ox, y), layout.get(), brush_.get(),
+                compositor_.DrawTextLayout(D2D1::Point2F(ox, y), layout.get(), brush_.get(),
                                    D2D1_DRAW_TEXT_OPTIONS_NONE);
             }
             dc->PopAxisAlignedClip();

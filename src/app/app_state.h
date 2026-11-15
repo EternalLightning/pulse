@@ -499,6 +499,9 @@ struct AppState : AppCoreOwner {
     std::wstring horizontalScrollPath;
     float scrollTargetY = 0.0f;
     float scrollVelocityY = 0.0f;
+    bool keyboardScroll = false;
+    D2D1_POINT_2F keyboardScrollFrom{};
+    float keyboardScrollTargetX = 0.0f, keyboardScrollElapsedMs = 0.0f;
     std::chrono::steady_clock::time_point scrollLastUpdateTime;
     // Wheel velocity decays over this interval; no work runs after it settles.
     static constexpr double kScrollResponseMs = 105.0;
@@ -597,13 +600,6 @@ struct AppState : AppCoreOwner {
     };
     std::vector<OperationCenterTaskSource> operationCenterSources;
     uint64_t nextOperationCenterId = 1;
-    struct TrayTransferRecord {
-        bool move_intent = false;
-        bool can_restage = false;
-        bool recovery_consumed = false;
-        std::vector<std::wstring> remaining;
-    };
-    std::unordered_map<uint64_t, TrayTransferRecord> trayTransfers;
     uint64_t operationUiTaskId = 0;
     uint64_t operationDismissedTaskId = 0;
     uint64_t conflictUiToken = 0;

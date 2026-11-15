@@ -57,11 +57,4 @@ inline HWND CreateChildEdit(HWND parent, const wchar_t* text = L"", DWORD edit_s
     }
     return edit;
 }
-// Composition hosts need a redirected child surface: an uploaded layered
-// bitmap can end up behind the parent's DirectComposition surface.
-inline HWND CreateRedirectedChildEdit(HWND parent, const wchar_t* text = L"", DWORD edit_style = 0) {
-    HWND edit = CreateChildEdit(parent, text, edit_style);
-    if (edit) SetLayeredWindowAttributes(edit, 0, 255, LWA_ALPHA);
-    return edit;
-}
 }

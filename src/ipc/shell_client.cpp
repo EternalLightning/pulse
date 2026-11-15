@@ -122,6 +122,8 @@ void ShellClient::RetireConnection() {
 
 void ShellClient::Start(Callbacks cb) {
     if (running_.exchange(true)) return;
+    last_spawn_try_ = 0;
+    last_error_.clear();
     cb_ = std::move(cb);
     reader_ = std::thread([this] { ReaderThread(); });
 }
@@ -153,6 +155,9 @@ void ShellClient::Stop() {
 void ShellClient::KillChild() {
     if (child_started_) {
         TerminateProcess(child_.hProcess, 1);
+        // A new owner can immediately start another host with FIRST_PIPE_INSTANCE.
+        // Reap the old process before its pipe name is reused.
+        WaitForSingleObject(child_.hProcess, 2000);
         CloseHandle(child_.hProcess);
         CloseHandle(child_.hThread);
         child_ = {};
@@ -369,6 +374,24 @@ uint32_t ShellClient::CreateFolder(const std::wstring& path, const Owner& owner)
     return Submit(REQ_NEW_FOLDER, w.data(), {}, owner);
 }
 
+uint32_t ShellClient::RunFileOperation(const ShellOperationRequest& request, const Owner& owner,
+    const std::function<void(uint32_t)>& before_send) {
+    if (request.items.empty()) return 0;
+    return Submit(REQ_FILE_OPERATION, WriteShellOperation(request), before_send, owner);
+}
+
+void ShellClient::SetFileOperationPaused(uint32_t id, bool paused) {
+    PayloadWriter writer;
+    writer.PutU32(paused ? 1u : 0u);
+    std::unique_lock lock(send_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return;
+    const auto connection = CurrentConnection();
+    if (!connection) return;
+    const bool sent = SendFrame(REQ_FILE_OPERATION_PAUSE, id, writer.data());
+    lock.unlock();
+    if (!sent) HandleDisconnect(connection);
+}
+
 uint32_t ShellClient::CreateNewFile(const std::wstring& path, const Owner& owner) {
     PayloadWriter w;
     w.PutString(path);
@@ -476,7 +499,14 @@ void ShellClient::FireDone(uint32_t id, uint32_t hr, bool cancelled, const std::
 
 void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool cancelled,
                                   const std::wstring& error) {
-    if (type == REQ_SHELL_LAUNCH) {
+    if (type == REQ_FILE_OPERATION) {
+        ShellOperationResult result;
+        result.hr = static_cast<HRESULT>(hr); result.cancelled = cancelled;
+        Dispatch(id, true, [&](Callbacks& cb) {
+            if (cb.on_file_operation_done) cb.on_file_operation_done(id, std::move(result));
+            else if (cb.done) cb.done(id, hr, cancelled, error);
+        });
+    } else if (type == REQ_SHELL_LAUNCH) {
         LaunchReply reply;
         {
             std::lock_guard lock(launch_reply_mutex_);
@@ -534,6 +564,27 @@ void ShellClient::ReaderThread() {
                         if (cb.progress) cb.progress(h.request_id, pct, item, items_done, total_items);
                     });
                 }
+            } else if (h.type == RSP_FILE_OPERATION_BYTES) {
+                uint64_t done = 0, total = 0;
+                if (r.GetU64(done) && r.GetU64(total) && !r.remaining() && done <= total)
+                    Dispatch(h.request_id, false, [&](Callbacks& cb) {
+                        if (cb.transfer_bytes) cb.transfer_bytes(h.request_id, done, total);
+                    });
+            } else if (h.type == RSP_FILE_OPERATION_DONE) {
+                ShellOperationResult result;
+                if (!ReadShellOperationResult(r, result)) { result.hr = E_INVALIDARG; result.items.clear(); }
+                bool pending = false;
+                {
+                    std::lock_guard lock(pending_mutex_);
+                    const auto found = pending_.find(h.request_id);
+                    if (found != pending_.end() && found->second.type == REQ_FILE_OPERATION) {
+                        pending_.erase(found); pending = true;
+                    }
+                }
+                if (pending) Dispatch(h.request_id, true, [&](Callbacks& cb) {
+                    if (cb.on_file_operation_done) cb.on_file_operation_done(h.request_id, std::move(result));
+                    else if (cb.done) cb.done(h.request_id, static_cast<uint32_t>(result.hr), result.cancelled, result.failed_path);
+                });
             } else if (h.type == RSP_SHELL_LAUNCH_DONE) {
                 uint32_t hr = 0, cancelled = 0;
                 std::wstring error;
@@ -554,7 +605,7 @@ void ShellClient::ReaderThread() {
                 {
                     std::lock_guard<std::mutex> lock(pending_mutex_);
                     const auto found = pending_.find(h.request_id);
-                    if (found != pending_.end() && found->second.type != REQ_SHELL_LAUNCH) {
+                    if (found != pending_.end() && found->second.type != REQ_SHELL_LAUNCH && found->second.type != REQ_FILE_OPERATION) {
                         deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
                         pending_.erase(found);
                         pending = true;

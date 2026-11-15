@@ -211,8 +211,8 @@ void QuickPreviewWindow::RecreateFormats() {
         preview_text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         preview_text_format_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
     }
-    find_painter_.SetCompositor(&compositor_);
-    find_painter_.SetScale(scale_);
+    painter_.SetCompositor(&compositor_);
+    painter_.SetScale(scale_);
     if (find_edit_font_) {
         DeleteObject(find_edit_font_);
         find_edit_font_ = nullptr;
@@ -922,9 +922,9 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
             (value.dwFlags & HCF_HIGHCONTRASTON);
     }();
     const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
-    find_painter_.SetCompositor(&compositor_);
-    find_painter_.SetScale(scale_);
-    if (!find_painter_.BeginFrame(theme, high_contrast)) return;
+    painter_.SetCompositor(&compositor_);
+    painter_.SetScale(scale_);
+    if (!painter_.BeginFrame(theme, high_contrast)) return;
     ComPtr<ID2D1SolidColorBrush> fill;
     dc->CreateSolidColorBrush(high_contrast ? theme.bg :
         dark_ ? D2D1::ColorF(0x1F1F1F) : D2D1::ColorF(0xEDEDED), &fill);
@@ -946,7 +946,7 @@ void QuickPreviewWindow::DrawFindBar(ID2D1DeviceContext* dc, const D2D1_RECT_F& 
         count_text = count;
         field.trailing_badge = count_text;
     }
-    find_painter_.DrawTextField(field);
+    painter_.DrawTextField(field);
 }
 
 void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* text_brush) {
@@ -977,11 +977,11 @@ void QuickPreviewWindow::DrawTextPreview(ID2D1DeviceContext* dc, ID2D1SolidColor
     if (b > a) {
         ComPtr<ID2D1SolidColorBrush> sel;
         dc->CreateSolidColorBrush(high_contrast ? text_brush->GetColor() :
-            D2D1::ColorF(0x0078D4, 0.35f), &sel);
+            WithAlpha(accent_, 0.35f), &sel);
         FillHitRange(dc, text_layout_.get(), a, b - a, origin_x, origin_y, sel.get(),
             high_contrast ? 2.0f * scale_ : 0.0f);
     }
-    dc->DrawTextLayout(D2D1::Point2F(origin_x, origin_y), text_layout_.get(), text_brush,
+    compositor_.DrawTextLayout(D2D1::Point2F(origin_x, origin_y), text_layout_.get(), text_brush,
                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     dc->PopAxisAlignedClip();
 }
@@ -1089,10 +1089,7 @@ bool QuickPreviewWindow::Render(const wchar_t* snapshot_path) {
     const D2D1_RECT_F title_rect = typography::SnapVerticalBounds(D2D1::RectF(
         pad, 8.0f * scale_,
         width - (kCloseButtonWidth + kChromeButtonWidth * 3.0f + 8.0f) * scale_, header));
-    if (!compositor_.DrawLumaText(item_.name, compositor_.HeaderFormat(), title_rect, foreground, background))
-        dc->DrawTextW(item_.name.data(), static_cast<UINT32>(item_.name.size()),
-                      compositor_.HeaderFormat(), title_rect, text_brush.get(),
-                      D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
+    compositor_.DrawDialogTitle(item_.name, title_rect, foreground);
     const D2D1_RECT_F close_rect = D2D1::RectF(width - kCloseButtonWidth * scale_, 0,
                                                width, header);
     if (close_hover_) {
@@ -1445,6 +1442,11 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
     case WM_MOUSEMOVE: {
         POINT point{};
         ClientPoint(lparam, point);
+        const int playback_hover = panning_ || selecting_ ? -1 : HitPlaybackButton(point);
+        if (playback_hover != playback_hover_) {
+            playback_hover_ = playback_hover;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         if (playback_drag_) {
             SeekPlayback(static_cast<float>(point.x));
             return 0;
@@ -1476,6 +1478,10 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
     }
     case WM_MOUSELEAVE:
         mouse_tracking_ = false;
+        if (playback_hover_ != -1) {
+            playback_hover_ = -1;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         if (chrome_hover_ != ChromeButton::None) {
             chrome_hover_ = ChromeButton::None;
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -1483,6 +1489,10 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         return 0;
     case WM_LBUTTONUP:
     case WM_CAPTURECHANGED:
+        if (playback_pressed_ != -1) {
+            playback_pressed_ = -1;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
         if (message == WM_LBUTTONUP && playback_drag_)
             SeekPlayback(static_cast<float>(GET_X_LPARAM(lparam)));
         EndPlaybackDrag(message == WM_LBUTTONUP);
@@ -1639,6 +1649,18 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
             SendMessageW(find_edit_, WM_CHAR, wparam, lparam);
         }
         return 0;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        if (message == WM_KILLFOCUS)
+            playback_pressed_ = playback_keyboard_focus_ = -1;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    case WM_KEYUP:
+        if (wparam == VK_SPACE || wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD) {
+            playback_pressed_ = -1;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return 0;
     case WM_KEYDOWN: {
         const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1649,10 +1671,16 @@ LRESULT QuickPreviewWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lp
         }
         if (!find_open_ && HasPlayback() && !ctrl) {
             if (wparam == VK_SPACE) {
+                playback_keyboard_focus_ = video_.active() ? 0 : 1;
+                playback_pressed_ = playback_keyboard_focus_;
+                InvalidateRect(hwnd_, nullptr, FALSE);
                 if (!(lparam & (1LL << 30))) TogglePlayback();
                 return 0;
             }
             if (wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD) {
+                playback_keyboard_focus_ = wparam == VK_OEM_COMMA ? (video_.active() ? -1 : 0)
+                    : video_.active() ? 1 : 2;
+                playback_pressed_ = playback_keyboard_focus_;
                 StepPlayback(wparam == VK_OEM_COMMA ? -1 : 1);
                 return 0;
             }

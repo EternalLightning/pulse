@@ -26,7 +26,6 @@ void UpdateOperationCenterTheme(AppState& s) {
     labels.pause = l10n::Get(I::OpPause);
     labels.resume = l10n::Get(I::OpResume);
     labels.open_destination = l10n::Get(I::OperationCenterDestination);
-    labels.return_to_tray = l10n::Get(I::ReturnUnfinishedToTray);
     labels.resume_incomplete = l10n::Get(I::ResumeIncompleteTransfer);
     labels.remaining_time = l10n::Get(I::OpRemainingTime);
     labels.remaining_items = l10n::Get(I::OpRemainingItems);
@@ -90,16 +89,7 @@ void SyncOperationCenters(AppState& s) {
 }
 
 void UpdateOperationCenter(AppState& s) {
-    for (auto& outcome : s.ops.DrainTransferOutcomes()) {
-        const auto found = s.trayTransfers.find(outcome.task_id);
-        if (found == s.trayTransfers.end()) continue;
-        found->second.can_restage = outcome.can_restage;
-        found->second.remaining = std::move(outcome.remaining_sources);
-    }
-    const auto tasks = s.ops.TaskStatuses();
-    std::erase_if(s.trayTransfers, [&](const auto& record) {
-        return std::none_of(tasks.begin(), tasks.end(), [&](const auto& task) { return task.task_id == record.first; });
-    });
+    s.ops.DrainTransferOutcomes();
     if (s.operationCenter) s.operationCenter->Update(CollectOperationCenterTasks(s));
 }
 
@@ -115,43 +105,15 @@ void InitializeOperationCenter(AppState& s) {
     callbacks.can_resume_incomplete = [owner](uint64_t task) {
         auto* viewer = GetAppState(owner);
         const auto* state = viewer ? ResolveOperationCenterTask(*viewer, task) : nullptr;
-        if (!state) return false;
-        const auto found = state->trayTransfers.find(task);
-        return (found == state->trayTransfers.end() || !found->second.recovery_consumed) &&
-            state->ops.CanResumeTransfer(task);
+        return state && state->ops.CanResumeTransfer(task);
     };
     callbacks.resume_incomplete = [owner](uint64_t task) {
         auto* viewer = GetAppState(owner);
         if (auto* state = viewer ? ResolveOperationCenterTask(*viewer, task) : nullptr) {
-            const auto next = state->ops.ResumeIncompleteTransfer(task);
-            if (next) {
-                const auto found = state->trayTransfers.find(task);
-                if (found != state->trayTransfers.end()) state->trayTransfers[next].move_intent = found->second.move_intent;
-                state->trayTransfers.erase(task);
-            }
+            state->ops.ResumeIncompleteTransfer(task);
             SyncOperationCenters(*state);
             InvalidateRect(owner, nullptr, FALSE);
         }
-    };
-    callbacks.can_return_to_tray = [owner](uint64_t task) {
-        auto* viewer = GetAppState(owner);
-        const auto* state = viewer ? ResolveOperationCenterTask(*viewer, task) : nullptr;
-        if (!state) return false;
-        const auto found = state->trayTransfers.find(task);
-        return found != state->trayTransfers.end() && found->second.can_restage && !found->second.remaining.empty();
-    };
-    callbacks.return_to_tray = [owner](uint64_t task) {
-        auto* viewer = GetAppState(owner);
-        auto* state = viewer ? ResolveOperationCenterTask(*viewer, task) : nullptr;
-        if (!state) return;
-        const auto found = state->trayTransfers.find(task);
-        if (found == state->trayTransfers.end() || !found->second.can_restage || found->second.remaining.empty()) return;
-        state->tray.Collect(found->second.remaining, found->second.move_intent);
-        found->second.recovery_consumed = true;
-        found->second.can_restage = false;
-        found->second.remaining.clear();
-        SyncOperationCenters(*state);
-        InvalidateRect(owner, nullptr, FALSE);
     };
     callbacks.clear_finished = [owner] {
         if (auto* state = GetAppState(owner)) {

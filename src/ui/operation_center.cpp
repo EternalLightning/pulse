@@ -181,7 +181,7 @@ void OperationCenter::Update(std::vector<ops::OpStatus> tasks) {
         if (IsWindowVisible(hwnd_) && GetCursorPos(&cursor) && ScreenToClient(hwnd_, &cursor))
             hover_ = Hit(static_cast<float>(cursor.x), static_cast<float>(cursor.y));
         Redraw();
-        if(!scroll_animating_) SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
+        RequestAnimationFrame();
     }
 }
 
@@ -255,10 +255,7 @@ void OperationCenter::Layout() {
         }
         if (AbsoluteDestination(task) && callbacks_.open_destination)
             actions.push_back({{}, Action::Destination, task.task_id, labels_.open_destination, task.destination_label});
-        if (Terminal(task) && callbacks_.can_return_to_tray && callbacks_.return_to_tray &&
-            callbacks_.can_return_to_tray(task.task_id))
-            actions.push_back({{}, Action::ReturnToTray, task.task_id, labels_.return_to_tray, {}});
-        else if (Terminal(task) && callbacks_.can_resume_incomplete && callbacks_.resume_incomplete &&
+        if (Terminal(task) && callbacks_.can_resume_incomplete && callbacks_.resume_incomplete &&
             callbacks_.can_resume_incomplete(task.task_id))
             actions.push_back({{}, Action::ResumeIncomplete, task.task_id, labels_.resume_incomplete, {}});
         const float action_left = left + kCardPadding * s;
@@ -295,16 +292,7 @@ void OperationCenter::Layout() {
     content_height_ = y + 8 * s;
     const float maximum=(std::max)(0.0f,content_height_-body_height_);
     scroll_=std::clamp(scroll_,0.0f,maximum);
-    if(scroll_animating_) {
-        const float target=std::clamp(scroll_target_,0.0f,maximum);
-        if(target==scroll_) StopScroll();
-        else if(target!=scroll_target_) {
-            scroll_from_=scroll_;scroll_target_=target;scroll_started_=AnimationTimeMs();
-            scroll_velocity_=scroll_initial_velocity_=0;
-        }
-    } else {
-        scroll_from_=scroll_target_=scroll_;
-    }
+    if (scroll_motion_.Pending()) TickScroll(AnimationTimeMs());
     AnimateCardLayout();
     const float offset = margin + kHeader * s - scroll_;
     for (auto& button : buttons_) if (button.action != Action::Clear) {
@@ -347,7 +335,7 @@ void OperationCenter::UpdateHeight(bool animate) {
         target_height_ = next;
         resize_start_ = AnimationTimeMs();
         resizing_ = height_ != target_height_;
-        if (resizing_ && !scroll_animating_) SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
+        if (resizing_) RequestAnimationFrame();
     }
 }
 
@@ -388,7 +376,7 @@ void OperationCenter::Toggle(RECT anchor) {
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
-    SetTimer(hwnd_, kTimer, kAnimationIntervalMs, nullptr);
+    RequestAnimationFrame();
 }
 
 void OperationCenter::Hide(bool animate) {
@@ -400,6 +388,7 @@ void OperationCenter::Hide(bool animate) {
     }
     if (animate && closing_) return;
     KillTimer(hwnd_, kTimer);
+    frame_scheduler_.Cancel(hwnd_);
     open_ = closing_ = resizing_ = false; visibility_ = 0;
     FinishCardTransition();
     ShowWindow(hwnd_, SW_HIDE);
@@ -430,11 +419,9 @@ void OperationCenter::Text(const std::wstring& text, D2D1_RECT_F rect, D2D1_COLO
     ComPtr<IDWriteInlineObject> ellipsis;
     factory->CreateEllipsisTrimmingSign(small_text ? compositor_->SmallFormat() : compositor_->TextFormat(), &ellipsis);
     layout->SetTrimming(&trim, ellipsis.get());
-    if (small_text && !wrap && compositor_->DrawLumaText(
-            value, layout.get(), rect, color, MakeTheme(dark_, accent_).bg)) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (SUCCEEDED(compositor_->Dc()->CreateSolidColorBrush(color, &brush)))
-        compositor_->Dc()->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        compositor_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
 bool OperationCenter::Render(bool allow_capture) {
@@ -488,7 +475,9 @@ bool OperationCenter::Render(bool allow_capture) {
         painter_.DrawMenuSurface(surface, acrylic_);
         float title_right = surface.right - kContentInset * s;
         if (!buttons_.empty() && buttons_[0].action == Action::Clear) title_right = buttons_[0].bounds.left - 8 * s;
-        Text(labels_.title, D2D1::RectF(surface.left + kContentInset * s, margin + 17 * s, title_right, top - 8 * s), theme.text, false);
+        compositor_->DrawDialogTitle(labels_.title,
+            D2D1::RectF(surface.left + kContentInset * s, margin + 17 * s, title_right, top - 8 * s),
+            theme.text);
         const auto viewport = D2D1::RectF(surface.left, top, surface.right, surface.bottom);
         dc->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_ALIASED);
         if (tasks_.empty()) {
@@ -668,15 +657,15 @@ void OperationCenter::Tick() {
     if (!AnimationsEnabled()) {
         if (closing_) { Hide(false); return; }
         visibility_ = 1;
-        if(scroll_animating_) {
-            const float target=scroll_target_;
-            StopScroll();SetScrollOffset(target);
-        }
+        float next = scroll_;
+        scroll_motion_.Tick(next, content_height_ - body_height_, AnimationTimeMs(), false);
+        SetScrollOffset(next);
         FinishCardTransition();
         if (resizing_) UpdateHeight(false);
         Layout();
         Redraw();
         KillTimer(hwnd_, kTimer);
+        frame_scheduler_.Cancel(hwnd_);
         return;
     }
     const auto now = AnimationTimeMs();
@@ -714,7 +703,12 @@ void OperationCenter::Tick() {
     const bool indeterminate = std::any_of(tasks_.begin(), tasks_.end(), [](const auto& task) {
         return task.active && task.percent < 0 && task.phase != ops::OpPhase::Paused;
     });
-    if (t >= 1 && !indeterminate && !resizing_ && !cards_animating_ && !scroll_animating_) KillTimer(hwnd_, kTimer);
+    if (t >= 1 && !indeterminate && !resizing_ && !cards_animating_ && !scroll_motion_.Pending()) {
+        KillTimer(hwnd_, kTimer);
+        frame_scheduler_.Cancel(hwnd_);
+    } else {
+        RequestAnimationFrame();
+    }
 }
 
 void OperationCenter::ScrollAt(float y) {
@@ -761,10 +755,6 @@ void OperationCenter::Invoke(int index) {
     case Action::Pause: if (callbacks.pause) callbacks.pause(button.task_id); return;
     case Action::Resume: if (callbacks.resume) callbacks.resume(button.task_id); return;
     case Action::Destination: Hide(); if (callbacks.open_destination) callbacks.open_destination(button.path); return;
-    case Action::ReturnToTray:
-        if (callbacks.can_return_to_tray && callbacks.can_return_to_tray(button.task_id) && callbacks.return_to_tray)
-            callbacks.return_to_tray(button.task_id);
-        return;
     case Action::ResumeIncomplete:
         if (callbacks.can_resume_incomplete && callbacks.can_resume_incomplete(button.task_id) && callbacks.resume_incomplete)
             callbacks.resume_incomplete(button.task_id);
@@ -779,6 +769,10 @@ LRESULT CALLBACK OperationCenter::WndProc(HWND hwnd, UINT message, WPARAM wparam
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == EditMotionFrameMessage()) {
+        if (self->frame_scheduler_.Consume(hwnd, wparam)) self->Tick();
+        return 0;
+    }
     switch (message) {
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT paint{}; BeginPaint(hwnd, &paint); EndPaint(hwnd, &paint); return 0; }
@@ -831,7 +825,10 @@ LRESULT CALLBACK OperationCenter::WndProc(HWND hwnd, UINT message, WPARAM wparam
         self->Redraw(); if (pressed >= 0 && pressed == hit) self->Invoke(hit); return 0;
     }
     case WM_CAPTURECHANGED: self->dragging_scrollbar_ = false; self->pressed_ = -1; self->Redraw(); return 0;
-    case WM_NCDESTROY: SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0); return DefWindowProcW(hwnd, message, wparam, lparam);
+    case WM_NCDESTROY:
+        self->frame_scheduler_.Cancel(hwnd);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        return DefWindowProcW(hwnd, message, wparam, lparam);
     }
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }

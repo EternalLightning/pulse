@@ -12,11 +12,11 @@
 namespace pulse::ui {
 
 inline void DrawConflictText(Compositor& compositor, std::wstring_view text,
-    const D2D1_RECT_F& bounds, D2D1_COLOR_F color, bool heading = false, bool wrap = false) {
+    const D2D1_RECT_F& bounds, D2D1_COLOR_F color, bool primary = false, bool wrap = false) {
     if (text.empty() || bounds.right <= bounds.left || bounds.bottom <= bounds.top) return;
     std::wstring value(text);
     for (auto& ch : value) if (ch == L'\r' || ch == L'\n' || ch == L'\t') ch = L' ';
-    auto* format = heading ? compositor.TextFormat() : compositor.SmallFormat();
+    auto* format = primary ? compositor.TextFormat() : compositor.SmallFormat();
     ComPtr<IDWriteTextLayout> layout;
     if (FAILED(typography::CreateTextLayout(compositor.DwriteFactory(), value.c_str(), static_cast<UINT32>(value.size()),
         format, bounds.right - bounds.left, bounds.bottom - bounds.top, &layout))) return;
@@ -26,11 +26,9 @@ inline void DrawConflictText(Compositor& compositor, std::wstring_view text,
     compositor.DwriteFactory()->CreateEllipsisTrimmingSign(format, &ellipsis);
     DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
     layout->SetTrimming(&trim, ellipsis.get());
-    if (!wrap && !IsHighContrast() && compositor.DrawLumaText(value, layout.get(), bounds,
-        color, HexColor(0x000000, 0), DWRITE_TEXT_ALIGNMENT_LEADING)) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (SUCCEEDED(compositor.Dc()->CreateSolidColorBrush(color, &brush)))
-        compositor.Dc()->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        compositor.DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(), brush.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
 struct ConflictDetailsColumn {
@@ -54,8 +52,8 @@ inline void DrawConflictDetails(fluent::Painter& painter, Compositor& compositor
             is_source ? theme.accent : theme.text_secondary);
         DrawConflictText(compositor, column.metadata, D2D1::RectF(left, top + 30 * scale, right, top + 50 * scale), theme.text);
         const auto display_path = path::StripExtendedPathPrefix(column.path);
-        DrawConflictText(compositor, display_path, D2D1::RectF(left, top + 55 * scale, right, top + 93 * scale),
-            theme.text_secondary, false, true);
+        DrawConflictText(compositor, display_path, D2D1::RectF(left, top + 55 * scale, right, top + 99 * scale),
+            theme.text_secondary, true, true);
     }
 }
 

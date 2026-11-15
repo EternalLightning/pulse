@@ -67,8 +67,10 @@ public:
             CW_USEDEFAULT, CW_USEDEFAULT, width, height, owner, nullptr, wc.hInstance, this);
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
-        if (owner_) EnableWindow(owner_, FALSE);
-        ShowWindow(hwnd_, SW_SHOW);
+        ModalOwnerScope modal(owner_);
+        modal_owner_ = modal.DisabledOwner();
+        Render();
+        ShowDialogWithFade(hwnd_);
         LayoutEdit();
         SetForegroundWindow(hwnd_);
         if (edit_) {
@@ -79,18 +81,15 @@ public:
         }
 
         MSG message{};
-        BOOL received = 1;
-        while (!done_ && (received = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        while (!done_ && GetModalMessage(message)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        if (received == 0) PostQuitMessage(static_cast<int>(message.wParam));
         done_ = true;
-        if (IsWindow(hwnd_)) HideComposedDialog(hwnd_, owner_);
+        if (IsWindow(hwnd_)) HideComposedDialog(hwnd_, modal_owner_);
         DestroyEdit();
         if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
         hwnd_ = nullptr;
-        if (owner_) EnableWindow(owner_, TRUE);
         return result_;
     }
 
@@ -212,27 +211,30 @@ private:
             result_.pin = !spec_.rename && pin_;
         }
         done_ = true;
-        if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (hwnd_) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
     }
 
     static LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR ref) {
         auto* self = reinterpret_cast<ConnectServerWindow*>(ref);
         if (!self) return DefSubclassProc(hwnd, msg, wparam, lparam);
-        switch (msg) {
-        case WM_KEYDOWN:
-            if (wparam == VK_ESCAPE) {
-                if (self->selected_ >= 0) { self->selected_ = -1; InvalidateRect(self->hwnd_, nullptr, FALSE); }
-                else self->Complete(false);
-                return 0;
+        TrackDialogEditComposition(hwnd, msg);
+        if (!DialogEditComposing(hwnd)) {
+            switch (msg) {
+            case WM_KEYDOWN:
+                if (wparam == VK_ESCAPE) {
+                    if (self->selected_ >= 0) { self->selected_ = -1; InvalidateRect(self->hwnd_, nullptr, FALSE); }
+                    else self->Complete(false);
+                    return 0;
+                }
+                if (wparam == VK_RETURN) { self->Complete(true); return 0; }
+                if (wparam == VK_DOWN) { self->MoveSelection(1); return 0; }
+                if (wparam == VK_UP) { self->MoveSelection(-1); return 0; }
+                if (wparam == VK_TAB) { self->MoveFocus(GetKeyState(VK_SHIFT) < 0); return 0; }
+                break;
+            case WM_CHAR:
+                if (wparam == VK_RETURN || wparam == VK_ESCAPE || wparam == VK_TAB) return 0;
+                break;
             }
-            if (wparam == VK_RETURN) { self->Complete(true); return 0; }
-            if (wparam == VK_DOWN) { self->MoveSelection(1); return 0; }
-            if (wparam == VK_UP) { self->MoveSelection(-1); return 0; }
-            if (wparam == VK_TAB) { self->MoveFocus(GetKeyState(VK_SHIFT) < 0); return 0; }
-            break;
-        case WM_CHAR:
-            if (wparam == VK_RETURN || wparam == VK_ESCAPE || wparam == VK_TAB) return 0;
-            break;
         }
         const bool focus_ring = msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK;
         LRESULT result = 0;
@@ -273,14 +275,13 @@ private:
         const Theme theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_, scale_);
 
-        painter_.DrawGlyph(spec_.rename ? L"\xE8AC" : L"\xE968", Rect(scale_, dialog_style::kMargin, 12, dialog_style::kIconSize, dialog_style::kIconSize), theme.accent_ink);
-        painter_.DrawText(spec_.title, Rect(scale_, 48, 0, kDlgW - 48 - dialog_style::kCloseWidth, dialog_style::kTitleHeight), compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == kHitClose;
         close_state.pressed = pressed_ == kHitClose;
         close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == kHitClose;
-        painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close, {}, close_state);
-        painter_.FillRoundedRect(Rect(scale_, 0, dialog_style::kTitleHeight - 1, kDlgW, 1), 0, theme.stroke_divider);
+        DrawDialogHeader(compositor_, painter_, theme, scale_, spec_.title,
+            spec_.rename ? L"\xE8AC" : L"\xE968", close_state);
+        DrawDialogFooter(compositor_, painter_, theme, compositor_.Height() - dialog_style::kFooterHeight * scale_);
 
         painter_.DrawText(spec_.label, LabelRect(), compositor_.SmallFormat(), theme.text_secondary);
         fluent::ControlState field{};
@@ -304,7 +305,7 @@ private:
                 if (selected_ == i || hover_ == kHitSuggestion + i)
                     painter_.FillRoundedRect(row, 4.0f * scale_, selected_ == i ? theme.fill_input_hover : theme.fill_hover);
                 painter_.DrawText(item.path, D2D1::RectF(row.left + 8 * scale_, row.top, row.right - 150 * scale_, row.bottom),
-                                  compositor_.SmallFormat(), theme.text);
+                                  compositor_.TextFormat(), theme.text);
                 painter_.DrawText(item.hint, D2D1::RectF(row.right - 150 * scale_, row.top, row.right - 8 * scale_, row.bottom),
                                   compositor_.SmallFormat(), theme.text_secondary, fluent::HorizontalAlignment::Right);
             }
@@ -486,6 +487,7 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
+    HWND modal_owner_ = nullptr;
     HWND edit_ = nullptr;
     HFONT font_ = nullptr;
     HBRUSH edit_brush_ = nullptr;

@@ -341,6 +341,7 @@ void FluentMenu::SetScale(float scale) {
 }
 
 void FluentMenu::SetTheme(bool dark, D2D1_COLOR_F accent) {
+    if (dark_ != dark && edit_brush_) { DeleteObject(edit_brush_); edit_brush_ = nullptr; }
     dark_ = dark;
     accent_ = accent;
 }
@@ -455,14 +456,13 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         }
         break;
     case WM_CTLCOLOREDIT: {
-        const bool dark = self->dark_;
         HDC hdc = reinterpret_cast<HDC>(wParam);
-        SetTextColor(hdc, dark ? RGB(255, 255, 255) : RGB(26, 26, 26));
-        SetBkColor(hdc, dark ? RGB(30, 30, 30) : RGB(255, 255, 255));
+        SetTextColor(hdc, ChildEditTextColor(self->dark_));
+        SetBkColor(hdc, ChildEditBackColor(self->dark_));
         if (!self->edit_brush_) {
-            self->edit_brush_ = CreateSolidBrush(dark ? RGB(30, 30, 30) : RGB(255, 255, 255));
+            self->edit_brush_ = CreateSolidBrush(self->dark_ ? RGB(30, 30, 30) : RGB(255, 255, 255));
         }
-        return reinterpret_cast<LRESULT>(self->edit_brush_);
+        return reinterpret_cast<LRESULT>(ChildEditBackBrush(self->edit_brush_));
     }
     case WM_COMMAND:
         if (HIWORD(wParam) == EN_CHANGE && self->edit_ &&

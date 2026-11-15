@@ -132,8 +132,8 @@ public:
             owner, nullptr, wc.hInstance, this);
         if (!hwnd_) return result_;
         CenterOwnedWindow(hwnd_, owner_, width, height);
-        OwnerDimScope owner_dim(owner_);
-        if (owner_) EnableWindow(owner_, FALSE);
+        ModalOwnerScope modal(owner_);
+        modal_owner_ = modal.DisabledOwner();
         Render();
         ShowDialogWithFade(hwnd_);
         LayoutEdits();
@@ -146,13 +146,10 @@ public:
             DispatchMessageW(&message);
         }
         done_ = true;
-        if (IsWindow(hwnd_)) HideComposedDialog(hwnd_, owner_);
+        if (IsWindow(hwnd_)) HideComposedDialog(hwnd_, modal_owner_);
         DestroyEdits();
         if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
         hwnd_ = nullptr;
-        if (owner_) {
-            EnableWindow(owner_, TRUE);
-        }
         return result_;
     }
 
@@ -322,24 +319,27 @@ private:
                                      UINT_PTR, DWORD_PTR ref) {
         auto* self = reinterpret_cast<AdvancedSearchWindow*>(ref);
         if (!self) return DefSubclassProc(hwnd, msg, wparam, lparam);
-        switch (msg) {
-        case WM_KEYDOWN:
-            if (wparam == VK_ESCAPE) {
-                self->Complete(false);
-                return 0;
+        TrackDialogEditComposition(hwnd, msg);
+        if (!DialogEditComposing(hwnd)) {
+            switch (msg) {
+            case WM_KEYDOWN:
+                if (wparam == VK_ESCAPE) {
+                    self->Complete(false);
+                    return 0;
+                }
+                if (wparam == VK_RETURN) {
+                    self->Complete(true);
+                    return 0;
+                }
+                if (wparam == VK_TAB) {
+                    self->MoveFocus(GetKeyState(VK_SHIFT) < 0);
+                    return 0;
+                }
+                break;
+            case WM_CHAR:
+                if (wparam == VK_RETURN || wparam == VK_ESCAPE || wparam == VK_TAB) return 0;
+                break;
             }
-            if (wparam == VK_RETURN) {
-                self->Complete(true);
-                return 0;
-            }
-            if (wparam == VK_TAB) {
-                self->MoveFocus(GetKeyState(VK_SHIFT) < 0);
-                return 0;
-            }
-            break;
-        case WM_CHAR:
-            if (wparam == VK_RETURN || wparam == VK_ESCAPE || wparam == VK_TAB) return 0;
-            break;
         }
         LRESULT result = 0;
         if (!HandleChildEditMessage(self->compositor_, self->compositor_.TextFormat(),
@@ -375,7 +375,7 @@ private:
             result_.query = preview_;
         }
         done_ = true;
-        if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (hwnd_) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
     }
 
     int Hit(float x, float y) const {
@@ -492,10 +492,12 @@ private:
         painter_.SetScale(scale_);
         BeginSurface(compositor_, painter_, theme, dark_, IsHighContrast(), backdrop_, scale_);
 
-        painter_.DrawGlyph(L"\xE721", Rect(scale_, dialog_style::kMargin, 12, dialog_style::kIconSize, dialog_style::kIconSize), theme.accent_ink);
-        painter_.DrawText(l10n::Get(l10n::StringId::AdvancedSearch),
-                          Rect(scale_, 48, 0, kDlgW - 48 - dialog_style::kCloseWidth, dialog_style::kTitleHeight), compositor_.HeaderFormat(), theme.text);
-        painter_.FillRoundedRect(Rect(scale_, 0, dialog_style::kTitleHeight - 1, kDlgW, 1), 0, theme.stroke_divider);
+        fluent::ControlState close_state{};
+        close_state.hovered = hover_ == 3;
+        close_state.pressed = pressed_ == 3;
+        close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 3;
+        DrawDialogHeader(compositor_, painter_, theme, scale_, l10n::Get(l10n::StringId::AdvancedSearch), L"\xE721", close_state);
+        DrawDialogFooter(compositor_, painter_, theme, compositor_.Height() - dialog_style::kFooterHeight * scale_);
 
         auto label = [&](l10n::StringId id, float x, float y) {
             painter_.DrawText(l10n::Get(id), Rect(scale_, x, y, 200, 18),
@@ -578,12 +580,6 @@ private:
         search.state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 1;
         painter_.DrawButton(search);
 
-        fluent::ControlState close_state{};
-        close_state.hovered = hover_ == 3;
-        close_state.pressed = pressed_ == 3;
-        close_state.keyboard_focus = GetFocus() == hwnd_ && focus_ == 3;
-        painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
-                                    {}, close_state);
         if (present) EndSurface(compositor_);
         else compositor_.Dc()->EndDraw();
     }
@@ -748,6 +744,7 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
+    HWND modal_owner_ = nullptr;
     HWND edit_name_ = nullptr;
     HWND edit_content_ = nullptr;
     HWND edit_exclude_ = nullptr;

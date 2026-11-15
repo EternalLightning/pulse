@@ -30,4 +30,14 @@ void BeginSurface(Compositor& compositor, fluent::Painter& painter,
                   bool backdrop_enabled, float scale);
 void EndSurface(Compositor& compositor);
 
+D2D1_RECT_F DialogCloseRect(float width, float scale);
+void DrawDialogHeader(Compositor& compositor, fluent::Painter& painter,
+                      const Theme& theme, float scale, std::wstring_view title,
+                      std::wstring_view glyph, const fluent::ControlState& close);
+void DrawDialogFooter(Compositor& compositor, fluent::Painter& painter,
+                      const Theme& theme, float top);
+void LayoutDialogActions(fluent::Painter& painter, float scale, float width, float bottom,
+                         std::wstring_view primary_text, std::wstring_view cancel_text,
+                         D2D1_RECT_F& primary, D2D1_RECT_F& cancel);
+
 } // namespace pulse::ui

@@ -74,7 +74,8 @@ void Snapshot(HWND dialog, const std::filesystem::path& output) {
 }
 }
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    const bool title_only = argc == 2 && std::wcscmp(argv[1], L"--title-style-only") == 0;
     compat::EnableDpiAwareness();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -92,7 +93,8 @@ int wmain() {
     for (const wchar_t* language : {L"en-US", L"zh-CN"}) {
         l10n::SetLanguage(language);
         for (const bool dark : {false, true}) {
-            for (const int dpi : {96, 144}) {
+            for (const int dpi : {96, 144, 168, 192}) {
+                if (!title_only && dpi > 144) continue;
                 const float fixture_scale = dpi / 96.0f;
                 const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
                 const auto suffix = std::wstring(language) + (dark ? L"-dark-" : L"-light-") +
@@ -113,9 +115,13 @@ int wmain() {
                         "conflict side edge cannot start a resize");
                     ui::ConflictDialogInspection info;
                     SendMessageW(dialog, ui::kConflictInspectMessage, 0, reinterpret_cast<LPARAM>(&info));
+                    Check(Near(info.title_font_size, static_cast<float>(MulDiv(14, dpi, 96))) &&
+                        info.title_weight == DWRITE_FONT_WEIGHT_BOLD,
+                        "conflict title matches the native 14-DIP bold caption at this DPI");
                     Check(Near(info.close.right - info.close.left, 46 * scale) &&
                         Near(info.close.bottom, 44 * scale) &&
-                        Near(info.cancel.bottom - info.cancel.top, 32 * scale),
+                        Near(info.cancel.bottom - info.cancel.top, 32 * scale) &&
+                        info.cancel.right - info.cancel.left >= 79.9f * scale,
                         "conflict header close and footer use shared sizes");
                     for (int index = 0; index < 3; ++index) SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
                     Snapshot(dialog, output / (L"conflict-check-" + suffix));
@@ -144,8 +150,14 @@ int wmain() {
                     const float scale = fixture_scale;
                     ui::ConfirmDialogInspection info;
                     SendMessageW(dialog, ui::kConfirmInspectMessage, 0, reinterpret_cast<LPARAM>(&info));
+                    Check(Near(info.title_font_size, static_cast<float>(MulDiv(14, dpi, 96))) &&
+                        info.title_weight == DWRITE_FONT_WEIGHT_BOLD,
+                        "confirmation title matches the native 14-DIP bold caption at this DPI");
                     Check(Near(info.close.bottom, 44 * scale) &&
                         Near(info.primary.bottom - info.primary.top, 32 * scale) &&
+                        info.primary.right - info.primary.left >= 79.9f * scale &&
+                        info.cancel.right - info.cancel.left >= 79.9f * scale &&
+                        info.alternate.right - info.alternate.left >= 79.9f * scale &&
                         info.alternate.right < info.cancel.left && info.cancel.right < info.primary.left,
                         "confirm header and alternate-cancel-primary footer are consistent");
                     SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
@@ -165,7 +177,7 @@ int wmain() {
                     SendMessageW(dialog, WM_KEYDOWN, VK_ESCAPE, 0);
                 });
                 ui::ConfirmDialogSpec confirm;
-                confirm.title = L"Replace files?";
+                confirm.title = std::wcscmp(language, L"zh-CN") == 0 ? L"确认永久删除" : L"Replace files?";
                 confirm.message = L"The destination already contains a file with the same name.";
                 confirm.confirm_text = l10n::Get(l10n::StringId::ConfirmDefault);
                 confirm.alternate_text = l10n::Get(l10n::StringId::OpSkipFile);
@@ -195,6 +207,9 @@ int wmain() {
                 SetWindowPos(progress_hwnd, nullptr, 0, 0, minimum.ptMinTrackSize.x, minimum.ptMinTrackSize.y,
                     SWP_NOMOVE | SWP_NOZORDER);
                 const auto& chrome = ui::FileOperationFailureProbe::Inspect(progress);
+                Check(Near(chrome.title_font_size, static_cast<float>(MulDiv(14, dpi, 96))) &&
+                    chrome.title_weight == DWRITE_FONT_WEIGHT_BOLD,
+                    "progress title matches the native 14-DIP bold caption at this DPI");
                 Check(chrome.details.right + 8 * scale <= chrome.pause.left &&
                     chrome.pause.right + 7 * scale <= chrome.cancel.left,
                     "progress measured localized footer labels fit at minimum width");
@@ -214,6 +229,7 @@ int wmain() {
                         "capture high-contrast progress footer");
                 }
 
+                if (title_only) continue;
                 ui::Compositor compositor;
                 Check(compositor.Init(owner), "create isolated toast compositor");
                 if (!compositor.Dc()) continue;

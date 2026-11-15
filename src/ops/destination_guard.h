@@ -71,58 +71,6 @@ public:
         std::wstring resolved_path;
     };
 
-    struct ElevationSnapshot {
-        std::wstring path;
-        Snapshot snapshot;
-        uint64_t reference_handle = 0;
-        uint64_t resolved_reference_handle = 0;
-    };
-
-    std::vector<ElevationSnapshot> ExportForElevation() const {
-        std::vector<ElevationSnapshot> result;
-        result.reserve(snapshots_.size());
-        for (const auto& [path, snapshot] : snapshots_) {
-            ElevationSnapshot entry{path, snapshot,
-                reinterpret_cast<uint64_t>(snapshot.reference.get()),
-                reinterpret_cast<uint64_t>(snapshot.resolved_reference.get())};
-            entry.snapshot.reference.reset();
-            entry.snapshot.resolved_reference.reset();
-            result.push_back(std::move(entry));
-        }
-        return result;
-    }
-
-    bool ImportForElevation(const std::vector<ElevationSnapshot>& entries,
-        HANDLE parent_process, std::wstring& error) {
-        if (!snapshots_.empty() || entries.size() > 65536 || !parent_process) return false;
-        for (const auto& entry : entries) {
-            const auto parts = Components(entry.path);
-            if (parts.empty() || parts.back() != entry.path || snapshots_.contains(entry.path))
-                return Fail(entry.path, error);
-            Snapshot snapshot = entry.snapshot;
-            const auto duplicate = [&](uint64_t value, const FileIdentity& expected,
-                std::shared_ptr<void>& reference) {
-                if (!value) return !expected.Valid();
-                HANDLE raw = nullptr;
-                if (!DuplicateHandle(parent_process, reinterpret_cast<HANDLE>(value),
-                    GetCurrentProcess(), &raw, 0, FALSE, DUPLICATE_SAME_ACCESS)) return false;
-                reference = std::shared_ptr<void>(raw, HandleCloser{});
-                FileIdentity identity;
-                return ReadFileIdentity(raw, identity, identity_query_) && identity == expected;
-            };
-            if (snapshot.exists && (!snapshot.id.Valid() ||
-                !duplicate(entry.reference_handle, snapshot.id, snapshot.reference)))
-                return Fail(entry.path, error);
-            if (!snapshot.reparse.empty() && (!snapshot.resolved_id.Valid() ||
-                !duplicate(entry.resolved_reference_handle, snapshot.resolved_id, snapshot.resolved_reference)))
-                return Fail(entry.path, error);
-            Snapshot current;
-            if (!Read(entry.path, current) || !Same(snapshot, current)) return Fail(entry.path, error);
-            snapshots_.emplace(entry.path, std::move(snapshot));
-        }
-        return true;
-    }
-
     bool Capture(const std::wstring& path, std::wstring& error) {
         const auto parts = Components(path);
         if (parts.empty()) return Fail(path, error);
@@ -152,19 +100,6 @@ public:
 
     const std::vector<DestinationLinkImpact>& Impacts() const { return impacts_; }
 
-    bool CapturedIdentity(const std::wstring& path, FileIdentity& identity) const {
-        const auto parts = Components(path);
-        if (parts.empty()) return false;
-        const auto found = snapshots_.find(parts.back());
-        if (found == snapshots_.end() || !found->second.exists) return false;
-        identity = found->second.id;
-        if (found->second.reference && !ReadFileIdentity(found->second.reference.get(), identity, identity_query_)) {
-            identity = {};
-            return false;
-        }
-        return true;
-    }
-
     bool CapturedReference(const std::wstring& path, FileObjectReference& reference) const {
         reference = {};
         const auto parts = Components(path);
@@ -182,31 +117,6 @@ public:
             return false;
         }
         return true;
-    }
-
-    void RetireObjectReference(const FileIdentity& removed) {
-        for (auto& entry : snapshots_) {
-            auto& snapshot = entry.second;
-            const auto retire = [&](std::shared_ptr<void>& reference, FileIdentity& captured) {
-                FileIdentity live;
-                if (reference && ReadFileIdentity(reference.get(), live, identity_query_) && live == removed) {
-                    reference.reset();
-                    captured = {}; // Preserve a refusal; never readmit the pathname on retry.
-                }
-            };
-            retire(snapshot.reference, snapshot.id);
-            retire(snapshot.resolved_reference, snapshot.resolved_id);
-        }
-    }
-
-    bool PinPlainDirectory(const std::wstring& path, const FileIdentity& identity, std::wstring& error) {
-        if (!Capture(path, error)) return false;
-        const auto parts = Components(path);
-        if (parts.empty()) return Fail(path, error);
-        const auto found = snapshots_.find(parts.back());
-        if (found == snapshots_.end() || !found->second.exists || !found->second.directory ||
-            !found->second.reparse.empty() || found->second.id != identity) return Fail(path, error);
-        return PinDirectories(path, error);
     }
 
     bool PinDirectories(const std::wstring& path, std::wstring& error) {
@@ -322,47 +232,6 @@ public:
         Snapshot snapshot;
         if (!Read(parts.back(), snapshot)) return Fail(path, error);
         snapshots_[parts.back()] = std::move(snapshot);
-        return true;
-    }
-
-    bool ExpectAbsentLeaf(const std::wstring& path, std::wstring& error) {
-        const auto parts = Components(path);
-        if (parts.empty()) return Fail(path, error);
-        snapshots_[parts.back()] = {};
-        return true;
-    }
-
-    bool SetDirectoryMetadata(const std::wstring& path, const FILETIME& created,
-                              const FILETIME& accessed, const FILETIME& modified,
-                              DWORD source_attributes, std::wstring& error) {
-        const auto parts = Components(path);
-        if (parts.empty()) return Fail(path, error);
-        const auto lease = leases_->handles.find(parts.back());
-        if (lease == leases_->handles.end() || !Check(path, error)) return false;
-        if (!created_directories_.contains(parts.back())) {
-            // Do not rewrite the metadata of a preexisting merge directory (or a
-            // linked target). Its lease deliberately denies attribute/reparse writes.
-            return true;
-        }
-        HANDLE handle = lease->second.get();
-        if (!SetFileTime(handle, &created, &accessed, &modified)) return Fail(path, error);
-        FILE_BASIC_INFO basic{};
-        if (!GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic))) return Fail(path, error);
-        constexpr DWORD copied = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
-            FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
-        basic.FileAttributes = (basic.FileAttributes & ~copied) | (source_attributes & copied);
-        if (!SetFileInformationByHandle(handle, FileBasicInfo, &basic, sizeof(basic))) return Fail(path, error);
-        return true;
-    }
-
-    bool AdoptCopyLeaf(const std::wstring& path, HANDLE owned, std::wstring& error) {
-        const auto parts = Components(path);
-        if (!owned || parts.empty()) return Fail(path, error);
-        Snapshot snapshot, current;
-        if (!Read(parts.back(), snapshot, owned) || !Read(parts.back(), current) ||
-            !snapshot.exists || snapshot.directory || !snapshot.reparse.empty() || !Same(snapshot, current))
-            return Fail(path, error);
-        snapshots_[parts.back()] = std::move(current);
         return true;
     }
 

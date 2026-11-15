@@ -43,4 +43,22 @@ private:
     HWND owner_ = nullptr;
     HWND overlay_ = nullptr;
 };
+
+class ModalOwnerScope {
+public:
+    explicit ModalOwnerScope(HWND owner)
+        : owner_(owner), restore_(owner && IsWindowEnabled(owner)), dim_(owner) {
+        if (restore_) EnableWindow(owner_, FALSE);
+    }
+    ~ModalOwnerScope() {
+        if (restore_ && IsWindow(owner_)) EnableWindow(owner_, TRUE);
+    }
+    ModalOwnerScope(const ModalOwnerScope&) = delete;
+    ModalOwnerScope& operator=(const ModalOwnerScope&) = delete;
+    HWND DisabledOwner() const { return restore_ ? owner_ : nullptr; }
+private:
+    HWND owner_ = nullptr;
+    bool restore_ = false;
+    OwnerDimScope dim_;
+};
 }

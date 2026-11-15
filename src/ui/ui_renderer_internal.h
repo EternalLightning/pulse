@@ -322,8 +322,6 @@ void ClearTextWidthCache() {
                                       : group.expansion;
     }
 
-    int TrayTotalCount(const WindowViewModel& vm) { return vm.tray_deck.total_count; }
-
     // Staging tray card metrics (DIPs): 10 DIP of padding above/below the thumbnail.
     inline float TrayThumbDip(float thumb_dip) {
         return std::clamp(thumb_dip + 2.0f, 40.0f, 66.0f);

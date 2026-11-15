@@ -82,6 +82,7 @@ private:
     float PlaybackHeight() const noexcept;
     D2D1_RECT_F PlaybackRect() const;
     D2D1_RECT_F PlaybackButtonRect(int button) const;
+    int HitPlaybackButton(POINT point) const;
     D2D1_RECT_F PlaybackTrackRect() const;
     void TogglePlayback();
     void StepPlayback(int direction);
@@ -155,6 +156,9 @@ private:
     PreviewHandlerHost handler_;
     VideoPreview video_;
     bool playback_drag_ = false;
+    int playback_hover_ = -1;
+    int playback_pressed_ = -1;
+    int playback_keyboard_focus_ = -1;
     bool playback_resume_ = false;
     bool playback_scrub_pending_ = false;
     bool playback_seek_dirty_ = false;
@@ -215,7 +219,7 @@ private:
     HFONT find_edit_font_ = nullptr;
     HBRUSH find_edit_brush_ = nullptr;
     FluentMenu text_menu_;
-    fluent::Painter find_painter_;
+    fluent::Painter painter_;
 };
 
 } // namespace pulse::ui

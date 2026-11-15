@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "file_operation_matrix.h"
+#include "fixture_cleanup.h"
 #include "../ops/ops_manager.h"
 #include "../common/localization.h"
 #include <algorithm>
@@ -52,6 +53,12 @@ bool Directory(const fs::path& path) {
         !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 }
 
+UINT StorageType(const fs::path& path) {
+    wchar_t volume[32768]{};
+    return GetVolumePathNameW(path.c_str(), volume, static_cast<DWORD>(std::size(volume)))
+        ? GetDriveTypeW(volume) : GetDriveTypeW(path.root_path().c_str());
+}
+
 unsigned char Pattern(uint64_t offset, unsigned seed) {
     return static_cast<unsigned char>((offset * 131u) ^ (offset >> 11u) ^ seed);
 }
@@ -94,7 +101,10 @@ struct OwnedFixture {
     bool Create(const fs::path& requested_parent, UINT drive_type, Results& result) {
         std::error_code error;
         parent = fs::absolute(requested_parent, error).lexically_normal();
-        if (error || !Directory(parent) || GetDriveTypeW(parent.root_path().c_str()) != drive_type) {
+        if (parent.filename().empty() && parent != parent.root_path()) parent = parent.parent_path();
+        const auto actual_type = StorageType(parent);
+        if (error || !Directory(parent) || (drive_type && actual_type != drive_type) ||
+            (actual_type != DRIVE_FIXED && actual_type != DRIVE_REMOVABLE && actual_type != DRIVE_REMOTE)) {
             result.Block(L"fixture parent unavailable or wrong drive type", error ? error.value() : ERROR_BAD_PATHNAME);
             return false;
         }
@@ -141,7 +151,7 @@ struct OwnedFixture {
             return;
         }
         std::error_code error;
-        fs::remove_all(root, error);
+        RemoveFixtureTree(root, error);
         if (error) wprintf(L"[DIAG] cleanup %ls error=%d\n", root.c_str(), error.value());
         result.Check(!error && Missing(root), L"remove only the exclusive fixture directory");
         owned = false;
@@ -337,8 +347,10 @@ void Transfers(Session& session, const fs::path& source, const fs::path& destina
         L"keep-both records a distinct destination with the exact contents");
 }
 
-void Mutations(Session& session, const fs::path& root, bool network) {
+void Mutations(Session& session, const fs::path& root, UINT drive_type) {
     auto& result = session.result;
+    const bool network = drive_type == DRIVE_REMOTE;
+    const bool removable = drive_type == DRIVE_REMOVABLE;
     const auto created_folder = root / L"新建 目录", created_file = root / L"新建 文件.txt";
     session.Run(Request(OpType::CreateFolder, {created_folder}), L"create a directory through the Shell host");
     result.Check(Directory(created_folder), L"created directory is present");
@@ -390,12 +402,20 @@ void Mutations(Session& session, const fs::path& root, bool network) {
         result.Block(L"cannot prepare default deletion fixture", GetLastError());
         return;
     }
-    session.Run(Request(OpType::RecycleDelete, {ordinary}), L"default deletion", network);
-    result.Check(Missing(ordinary) && (network ? session.confirmations == 1 && session.permanent && !session.manager.CanUndo() :
-        session.confirmations == 0 && session.manager.CanUndo()),
+    if (removable) {
+        session.Run(Request(OpType::RecycleDelete, {ordinary}), L"reject removable permanent fallback", false,
+            ConflictChoice::Cancel, OpPhase::Cancelled);
+        result.Check(session.confirmations == 1 && session.permanent && PatternFile(ordinary, 8197, 101) &&
+            !session.manager.CanUndo(), L"declining removable fallback preserves the exact source and creates no Undo");
+    }
+    session.Run(Request(OpType::RecycleDelete, {ordinary}), L"default deletion", network || removable);
+    const bool recycled = session.confirmations == 0 && session.manager.CanUndo();
+    const bool confirmed_permanent = session.confirmations == 1 && session.permanent && !session.manager.CanUndo();
+    result.Check(Missing(ordinary) && (network ? confirmed_permanent : removable ? recycled || confirmed_permanent : recycled),
         network ? L"network default delete requires permanent confirmation and creates no Undo" :
+        removable ? L"removable default deletion either recycles with Undo or requires permanent confirmation" :
                   L"local default delete uses the Recycle Bin and records Undo");
-    if (!network) {
+    if (!network && recycled) {
         const bool recycle_undo = session.Undo(L"undo local Recycle Bin deletion");
         result.Check(recycle_undo && PatternFile(ordinary, 8197, 101) && !session.manager.CanUndo(),
             L"Recycle Bin Undo restores the exact owned file");
@@ -420,8 +440,7 @@ void MeasureTransfers(Session& session, const fs::path& source, const fs::path& 
         session.result.Block(L"cannot prepare performance directories", GetLastError());
         return;
     }
-    const bool remote = GetDriveTypeW(source.root_path().c_str()) == DRIVE_REMOTE ||
-        GetDriveTypeW(destination.root_path().c_str()) == DRIVE_REMOTE;
+    const bool remote = StorageType(source) == DRIVE_REMOTE || StorageType(destination) == DRIVE_REMOTE;
     std::vector<std::pair<unsigned, uint64_t>> cases;
     if (few_files) {
         cases.emplace_back(1, 64ull * 1024 * 1024 + 137);
@@ -477,22 +496,23 @@ void MeasureTransfers(Session& session, const fs::path& source, const fs::path& 
 }
 }
 
-int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent, bool performance, bool few_files) {
+int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network_parent, bool performance, bool few_files, bool across_only) {
     _setmode(_fileno(stdout), _O_U8TEXT);
     setvbuf(stdout, nullptr, _IONBF, 0);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
-    Results local{L"local"}, network{L"network"}, outward{L"local-to-network"}, inward{L"network-to-local"};
+    Results local{L"first-volume"}, network{L"second-volume"}, outward{L"first-to-second"}, inward{L"second-to-first"};
     OwnedFixture local_fixture, network_fixture;
-    const bool have_local = local_fixture.Create(local_parent, DRIVE_FIXED, local);
-    const bool have_network = !network_parent.empty() && network_fixture.Create(network_parent, DRIVE_REMOTE, network);
+    const bool have_local = local_fixture.Create(local_parent, 0, local);
+    const bool have_network = !network_parent.empty() && network_fixture.Create(network_parent, 0, network);
+    wprintf(L"[VOLUMES] first=%ls second=%ls across_only=%d\n", local_parent.c_str(), network_parent.c_str(), across_only);
     const HWND owner = CreateWindowExW(0, L"STATIC", L"Pulse file operation matrix", 0,
         0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
     const auto owner_error = owner ? ERROR_SUCCESS : GetLastError();
-    const auto within = [&](OwnedFixture& fixture, Results& result, bool remote) {
+    const auto within = [&](OwnedFixture& fixture, Results& result) {
         if (!owner) { result.Block(L"cannot create operation owner window", owner_error); return; }
         if (!performance) {
             Session session(owner, result, fixture, fixture);
-            Mutations(session, fixture.root, remote);
+            Mutations(session, fixture.root, StorageType(fixture.root));
         }
         {
             Session session(owner, result, fixture, fixture);
@@ -504,8 +524,8 @@ int RunFileOperationMatrix(const fs::path& local_parent, const fs::path& network
     };
     // With a network parent, the few-file mode reserves local storage for the
     // two transfer directions instead of repeating the local-only benchmark.
-    if (have_local && (!few_files || network_parent.empty())) within(local_fixture, local, false);
-    if (have_network) within(network_fixture, network, true);
+    if (!across_only && have_local && (!few_files || network_parent.empty())) within(local_fixture, local);
+    if (!across_only && have_network) within(network_fixture, network);
     const auto across = [&](OwnedFixture& from, OwnedFixture& to, Results& result, const wchar_t* name) {
         if (!have_local || !have_network || !owner) {
             result.Block(L"both writable roots and operation owner are required", ERROR_NOT_READY);

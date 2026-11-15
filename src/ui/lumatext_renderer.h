@@ -57,7 +57,7 @@ public:
               DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING);
     // Preserve DirectWrite shaping, trimming and colored ranges, rasterize with LumaText.
     bool DrawLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
-                    const D2D1_COLOR_F& foreground, bool clip);
+                    const D2D1_COLOR_F& foreground, bool clip, bool optical_weight = true);
     // Leading-aligned single line; text from UTF-16 index `split` on uses
     // split_foreground. False when the line would need an ellipsis.
     bool DrawSplit(std::wstring_view text, IDWriteTextFormat* format,

@@ -102,6 +102,9 @@ public:
     IDWriteTextFormat* FileNameFormat() const { return fileNameFormat_.get(); }
     IDWriteTextFormat* SmallFormat() const { return smallFormat_.get(); }
     IDWriteTextFormat* HeaderFormat() const { return headerFormat_.get(); }
+    IDWriteTextFormat* DialogTitleFormat() const { return dialogTitleFormat_.get(); }
+    bool DrawDialogTitle(std::wstring_view text, const D2D1_RECT_F& bounds,
+                         const D2D1_COLOR_F& foreground);
     IDWriteTextFormat* TabFormat() const { return tabFormat_.get(); }
     IDWriteTextFormat* AddressFormat() const { return addressFormat_.get(); }
     IDWriteTextFormat* IconFormat() const { return iconFormat_.get(); }
@@ -170,11 +173,14 @@ private:
     ComPtr<IDWriteTextFormat> fileNameFormat_;
     ComPtr<IDWriteTextFormat> smallFormat_;
     ComPtr<IDWriteTextFormat> headerFormat_;
+    ComPtr<IDWriteTextFormat> dialogTitleFormat_;
     ComPtr<IDWriteTextFormat> tabFormat_;
     ComPtr<IDWriteTextFormat> addressFormat_;
     ComPtr<IDWriteTextFormat> iconFormat_;
     std::unique_ptr<LumaTextRenderer> lumaText_;
     std::unique_ptr<EditComposition> editComposition_;
+    struct DialogTitleLayout;
+    std::unique_ptr<DialogTitleLayout> dialog_title_layout_;
     HMONITOR text_params_monitor_ = nullptr;
     int text_params_mode_ = -1;
     bool transparentComposition_ = false;

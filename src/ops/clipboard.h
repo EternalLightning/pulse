@@ -43,10 +43,6 @@ inline bool ClipboardHasShellFiles() {
            IsClipboardFormatAvailable(RegisterClipboardFormatW(L"FileGroupDescriptorW"));
 }
 
-inline bool ClipboardHasPasteableFiles() {
-    return IsClipboardFormatAvailable(CF_HDROP) || ClipboardHasShellFiles();
-}
-
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
 
 bool HasShellFileData(IDataObject* data);

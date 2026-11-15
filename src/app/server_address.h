@@ -35,11 +35,6 @@ struct ServerAddress {
 // accepted.
 ServerAddress ParseServerAddress(std::wstring_view text, bool allow_bare_host = false);
 
-// True when the text is clearly meant as a server address in the address bar:
-// a URL scheme Pulse knows (smb, cifs, http(s), ftp, ...), or a bare IPv4 host.
-// Plain \\host paths are already handled by navigation and return false.
-bool IsServerUrlText(std::wstring_view text);
-
 // "\\host\share\a\b" -> "\\host\share"; "\\host\" -> "\\host"; else empty.
 // Accepts the \\?\UNC\ prefix.
 std::wstring NetworkRecentRoot(std::wstring_view path);

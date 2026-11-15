@@ -7,6 +7,8 @@
 
 #include "fluent_components.h"
 #include "menu_backdrop.h"
+#include "edit_frame_scheduler.h"
+#include "smooth_scroll.h"
 #include "../ops/ops_manager.h"
 #include <array>
 #include <functional>
@@ -22,7 +24,6 @@ struct OperationCenterLabels {
     std::wstring clear_finished = L"Clear finished", details = L"Details";
     std::wstring cancel = L"Cancel", pause = L"Pause", resume = L"Resume";
     std::wstring open_destination = L"Open destination";
-    std::wstring return_to_tray = L"Return unfinished items to tray";
     std::wstring resume_incomplete = L"Continue unfinished items";
     std::wstring remaining_time = L"Time remaining", remaining_items = L"Items remaining";
     std::wstring remaining_size = L"Size remaining", current_speed = L"Speed", estimating = L"Calculating";
@@ -38,8 +39,6 @@ struct OperationCenterCallbacks {
     std::function<void()> clear_finished;
     std::function<void(uint64_t)> details, cancel, pause, resume;
     std::function<void(const std::wstring&)> open_destination;
-    std::function<bool(uint64_t)> can_return_to_tray;
-    std::function<void(uint64_t)> return_to_tray;
     std::function<bool(uint64_t)> can_resume_incomplete;
     std::function<void(uint64_t)> resume_incomplete;
 };
@@ -65,7 +64,7 @@ public:
     bool SaveDebugSnapshot(const wchar_t* path, int width_dip = 472, int height_dip = 600);
 
 private:
-    enum class Action { Clear, Details, Cancel, Pause, Resume, Destination, ReturnToTray, ResumeIncomplete };
+    enum class Action { Clear, Details, Cancel, Pause, Resume, Destination, ResumeIncomplete };
     struct Button {
         D2D1_RECT_F bounds{};
         Action action{};
@@ -91,7 +90,7 @@ private:
         float opacity = 1;
     };
     static constexpr float kOpenDurationMs = 200, kCloseDurationMs = 140, kCardDurationMs = 220;
-    // A 16 ms WM_TIMER request can round up to two system clock ticks.
+    // Compatibility fallback when the monitor-paced high-resolution scheduler is unavailable.
     static constexpr UINT kAnimationIntervalMs = USER_TIMER_MINIMUM;
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
     void Layout();
@@ -101,6 +100,7 @@ private:
     bool Render(bool allow_capture = true);
     void Present();
     void Tick();
+    bool RequestAnimationFrame();
     void BeginVisibility(bool closing);
     void PrepareCardTransition(const std::vector<ops::OpStatus>& next);
     void AnimateCardLayout();
@@ -144,10 +144,9 @@ private:
     float scale_ = 1, scroll_ = 0, content_height_ = 0, body_height_ = 0;
     bool dark_ = false, open_ = false, closing_ = false, snapshot_ = false, acrylic_ = false;
     bool force_solid_ = false;
-    bool dragging_scrollbar_ = false, scroll_animating_ = false;
-    float scroll_from_ = 0, scroll_target_ = 0;
-    float scroll_velocity_ = 0, scroll_initial_velocity_ = 0;
-    uint64_t scroll_started_ = 0;
+    bool dragging_scrollbar_ = false;
+    SmoothScroll scroll_motion_;
+    EditFrameScheduler frame_scheduler_;
     bool resizing_ = false;
     bool cards_animating_ = false, card_scroll_pending_ = false;
     float card_progress_ = 1, card_scroll_from_ = 0;

@@ -20,6 +20,14 @@
 
 namespace pulse::ui {
 
+struct Compositor::DialogTitleLayout {
+    ComPtr<IDWriteTextLayout> layout;
+    std::wstring text;
+    float width = 0, height = 0;
+    float baseline = 0;
+    std::uint64_t generation = 0;
+};
+
 Compositor::Compositor() = default;
 Compositor::~Compositor() { Shutdown(); }
 
@@ -75,6 +83,7 @@ void Compositor::Shutdown() {
     if (!dc_.get() && !d3dDevice_.get()) return; // already shut down
     if (lumaText_) lumaText_->Shutdown();
     editComposition_.reset();
+    dialog_title_layout_.reset();
     frame_copy_.reset();
     targetBitmap_.reset();
     if (dc_.get()) dc_->SetTarget(nullptr);
@@ -100,6 +109,7 @@ void Compositor::Shutdown() {
     fileNameFormat_.reset();
     smallFormat_.reset();
     headerFormat_.reset();
+    dialogTitleFormat_.reset();
     tabFormat_.reset();
     addressFormat_.reset();
     iconFormat_.reset();
@@ -193,6 +203,52 @@ bool Compositor::DrawLumaText(std::wstring_view text, IDWriteTextFormat* format,
     }
     lumaText_->RecordFallback();
     return false;
+}
+
+bool Compositor::DrawDialogTitle(std::wstring_view text, const D2D1_RECT_F& bounds,
+                                 const D2D1_COLOR_F& foreground) {
+    if (!dc_.get() || !dialogTitleFormat_.get() || text.empty()) return false;
+    const auto rect = D2D1::RectF(std::round(bounds.left), std::round(bounds.top),
+        std::round(bounds.right), std::round(bounds.bottom));
+    const float width = rect.right - rect.left, height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) return false;
+    const auto generation = typography::Generation();
+    const auto* cached = dialog_title_layout_.get();
+    if (!cached || cached->text != text || cached->width != width || cached->height != height ||
+        cached->generation != generation) {
+        auto title = std::make_unique<DialogTitleLayout>();
+        if (FAILED(typography::CreateTextLayout(dwriteFactory_.get(), text.data(),
+            static_cast<UINT32>(text.size()), dialogTitleFormat_.get(), width, height, &title->layout))) return false;
+        title->layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        DWRITE_TEXT_METRICS metrics{};
+        DWRITE_LINE_METRICS line{};
+        UINT32 count = 0;
+        if (FAILED(title->layout->GetMetrics(&metrics)) ||
+            FAILED(title->layout->GetLineMetrics(&line, 1, &count)) || count != 1) return false;
+        title->baseline = metrics.top + line.baseline;
+        title->text = text; title->width = width; title->height = height; title->generation = generation;
+        dialog_title_layout_ = std::move(title);
+    }
+    const auto& title = *dialog_title_layout_;
+    // Align the baseline, rather than resampling a completed text bitmap.
+    const auto origin = D2D1::Point2F(rect.left,
+        std::round(rect.top + title.baseline) - title.baseline);
+    dc_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
+    bool drawn = false;
+    if (LumaTextEnabled()) {
+        // Keep the bold face's designed weight without body-text dilation.
+        drawn = lumaText_->DrawLayout(origin, title.layout.get(), foreground, false, false);
+        if (!drawn) lumaText_->RecordFallback();
+    }
+    if (!drawn) {
+        ComPtr<ID2D1SolidColorBrush> brush;
+        if (SUCCEEDED(dc_->CreateSolidColorBrush(foreground, &brush))) {
+            dc_->DrawTextLayout(origin, title.layout.get(), brush.get());
+            drawn = true;
+        }
+    }
+    dc_->PopAxisAlignedClip();
+    return drawn;
 }
 
 void Compositor::DrawTextLayout(D2D1_POINT_2F origin, IDWriteTextLayout* layout,
@@ -675,6 +731,8 @@ void Compositor::RecreateTextFormats(float scale) {
     fileNameFormat_.reset();
     smallFormat_.reset();
     headerFormat_.reset();
+    dialog_title_layout_.reset();
+    dialogTitleFormat_.reset();
     tabFormat_.reset();
     addressFormat_.reset();
     iconFormat_.reset();
@@ -689,6 +747,18 @@ void Compositor::RecreateTextFormats(float scale) {
     if (smallFormat_.get()) smallFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     CreateFormat(dwriteFactory_.get(), 14.0f * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD,
         typography::FontRole::Display, headerFormat_);
+    const auto title = typography::kDialogTitle;
+    // Match the whole-pixel font height of the native new-item/archive captions.
+    CreateFormat(dwriteFactory_.get(), static_cast<float>(typography::EditFontPixels(scale, title.size)),
+        title.weight, title.role, dialogTitleFormat_);
+    if (dialogTitleFormat_.get()) {
+        dialogTitleFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        ComPtr<IDWriteInlineObject> ellipsis;
+        if (SUCCEEDED(dwriteFactory_->CreateEllipsisTrimmingSign(dialogTitleFormat_.get(), &ellipsis))) {
+            const DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+            dialogTitleFormat_->SetTrimming(&trim, ellipsis.get());
+        }
+    }
     CreateFormat(dwriteFactory_.get(), 13.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
         typography::FontRole::Text, tabFormat_);
     if (tabFormat_.get()) {

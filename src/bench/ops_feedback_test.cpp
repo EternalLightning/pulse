@@ -23,7 +23,7 @@
 
 namespace pulse::ops {
 struct TransferIntegrationProbe {
-    static void Initialize(OpsManager& manager) { manager.running_ = true; manager.accepting_ = true; }
+    static void Initialize(OpsManager& manager) { manager.running_ = true; manager.accepting_ = true; manager.StartShellClient(); }
     static void Rename(OpsManager& manager, const OpRequest& request, uint64_t id) {
         manager.RunShellOp(request, id);
     }
@@ -53,17 +53,6 @@ struct TransferIntegrationProbe {
         if (cancel) manager.CancelCurrent();
         manager.ExecuteFileOperation(item);
         return true;
-    }
-    static bool ElevationSnapshot(const OpsManager& manager) {
-        if (!manager.elevation_retry_) return false;
-        const auto& retry = *manager.elevation_retry_;
-        return retry.retry_source_references.size() == retry.req.sources.size() &&
-            !retry.retry_source_references.empty() && retry.retry_source_references.front().Get() &&
-            !retry.retry_transfer_plan.empty() && retry.retry_source_directories && retry.retry_destination_guard;
-    }
-    static bool ElevatedQueued(const OpsManager& manager) {
-        return manager.queue_.size() == 1 && manager.queue_.front().elevated_retry &&
-            !manager.queue_.front().lock_retry && !manager.queue_.front().retry_transfer_plan.empty();
     }
     static bool QueueEmpty(const OpsManager& manager) { return manager.queue_.empty(); }
     static void Supersede(OpsManager& manager, uint64_t task_id) {
@@ -119,182 +108,6 @@ void Index(const std::filesystem::path& index, const std::wstring& original) {
     output.write(reinterpret_cast<const char*>(&deleted), sizeof(deleted));
     output.write(reinterpret_cast<const char*>(&chars), sizeof(chars));
     output.write(reinterpret_cast<const char*>(original.c_str()), static_cast<std::streamsize>(chars * sizeof(wchar_t)));
-}
-int PermissionFeedbackFixtures() {
-    using namespace pulse::ops;
-    pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
-    const auto parent = std::filesystem::absolute(L"bench_data");
-    const auto root = parent / (L"ops-permission-feedback-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-    const auto destination = root / L"destination", source = root / L"source.txt";
-    std::filesystem::create_directories(destination);
-    Write(source, "permission versus sharing fixture");
-    struct DirectoryDacl {
-        HANDLE handle = INVALID_HANDLE_VALUE;
-        PSECURITY_DESCRIPTOR descriptor = nullptr;
-        PACL original = nullptr;
-        PACL denied = nullptr;
-        bool changed = false;
-        DWORD Restore() {
-            if (!changed) return ERROR_SUCCESS;
-            const DWORD result = SetSecurityInfo(handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                nullptr, nullptr, original, nullptr);
-            if (result == ERROR_SUCCESS) changed = false;
-            return result;
-        }
-        ~DirectoryDacl() {
-            Restore();
-            if (denied) LocalFree(denied);
-            if (descriptor) LocalFree(descriptor);
-            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
-        }
-    } dacl;
-    dacl.handle = CreateFileW(destination.c_str(), READ_CONTROL | WRITE_DAC,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    Check(dacl.handle != INVALID_HANDLE_VALUE, "permission fixture pins a DACL restoration handle for its isolated directory");
-    DWORD acl_error = dacl.handle == INVALID_HANDLE_VALUE ? GetLastError() :
-        GetSecurityInfo(dacl.handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
-            &dacl.original, nullptr, &dacl.descriptor);
-    Check(acl_error == ERROR_SUCCESS && dacl.descriptor, "permission fixture saves the original directory DACL");
-    BYTE world_sid[SECURITY_MAX_SID_SIZE]{};
-    DWORD world_bytes = sizeof(world_sid);
-    if (acl_error == ERROR_SUCCESS && !CreateWellKnownSid(WinWorldSid, nullptr, world_sid, &world_bytes)) acl_error = GetLastError();
-    if (acl_error == ERROR_SUCCESS) {
-        EXPLICIT_ACCESSW deny{};
-        deny.grfAccessPermissions = FILE_ADD_FILE;
-        deny.grfAccessMode = DENY_ACCESS;
-        deny.grfInheritance = NO_INHERITANCE;
-        deny.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-        deny.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
-        deny.Trustee.ptstrName = reinterpret_cast<LPWSTR>(world_sid);
-        acl_error = SetEntriesInAclW(1, &deny, dacl.original, &dacl.denied);
-    }
-    if (acl_error == ERROR_SUCCESS) {
-        acl_error = SetSecurityInfo(dacl.handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-            nullptr, nullptr, dacl.denied, nullptr);
-        dacl.changed = acl_error == ERROR_SUCCESS;
-    }
-    std::printf("[DIAG] deny FILE_ADD_FILE DACL result=%lu\n", acl_error);
-    Check(acl_error == ERROR_SUCCESS && dacl.changed, "permission fixture denies only file creation in its target directory");
-    if (dacl.changed) {
-        OpsManager manager;
-        TransferIntegrationProbe::Initialize(manager);
-        OpRequest request;
-        request.type = OpType::Copy; request.sources = {source.wstring()}; request.dest_dir = destination.wstring();
-        TransferIntegrationProbe::Transfer(manager, request, 201);
-        const auto status = manager.Status();
-        std::printf("[DIAG] permission Copy phase=%d hr=0x%08X retry=%d owners=%zu\n", static_cast<int>(status.phase),
-            static_cast<unsigned>(status.failure_hr), status.lock_retry_available, status.lock_owners.size());
-        Check(status.phase == OpPhase::Failed && status.failure_hr == E_ACCESSDENIED &&
-            !status.last_error.empty() && !std::filesystem::exists(destination / source.filename()),
-            "real Copy reports access denial when the target DACL rejects FILE_ADD_FILE");
-        Check(!status.lock_retry_available && status.lock_owners.empty() && status.locked_path.empty() &&
-            !manager.IsLockedFailureCurrent(201) && !manager.RetryLockedOperation(201, false),
-            "permission failure has neither occupancy dialog state nor cached lock retry");
-        Check(status.elevation_retry_available && manager.IsElevationFailureCurrent(201) &&
-            TransferIntegrationProbe::ElevationSnapshot(manager),
-            "physical permission denial retains exact unfinished plan and source leases for consent");
-        Check(status.elevation_source_path == source.wstring() &&
-            status.elevation_destination_path == (destination / source.filename()).wstring(),
-            "permission endpoints retain complete paths independently of progress labels");
-        Check(!manager.RetryElevatedOperation(200), "administrator continuation rejects a different task");
-        Check(manager.RetryElevatedOperation(201) && TransferIntegrationProbe::ElevatedQueued(manager) &&
-            !manager.RetryElevatedOperation(201), "administrator consent enqueues its exact snapshot only once");
-        manager.CancelCurrent();
-        Check(TransferIntegrationProbe::QueueEmpty(manager) && !manager.IsElevationFailureCurrent(201),
-            "cancellation revokes queued administrator continuation before any worker launch");
-        OpsManager stale; TransferIntegrationProbe::Initialize(stale);
-        TransferIntegrationProbe::Transfer(stale, request, 203);
-        TransferIntegrationProbe::Supersede(stale, 204);
-        Check(!stale.IsElevationFailureCurrent(203) && !stale.RetryElevatedOperation(203),
-            "superseding status invalidates old administrator consent");
-        OpsManager declined; TransferIntegrationProbe::Initialize(declined);
-        TransferIntegrationProbe::Transfer(declined, request, 205);
-        declined.CancelElevationRetry(205);
-        Check(!declined.Status().elevation_retry_available && !declined.RetryElevatedOperation(205) &&
-            TransferIntegrationProbe::QueueEmpty(declined), "declined permission prompt dispatches no elevated operation");
-    }
-    const DWORD restore_error = dacl.Restore();
-    std::printf("[DIAG] original DACL restoration result=%lu\n", restore_error);
-    Check(restore_error == ERROR_SUCCESS && !dacl.changed, "permission fixture restores its original DACL before sharing comparison and cleanup");
-    if (acl_error == ERROR_SUCCESS && restore_error == ERROR_SUCCESS) {
-        HANDLE held = CreateFileW(source.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        Check(held != INVALID_HANDLE_VALUE, "sharing comparison holds only the isolated source with an exclusive file handle");
-        if (held != INVALID_HANDLE_VALUE) {
-            OpsManager manager;
-            TransferIntegrationProbe::Initialize(manager);
-            OpRequest request;
-            request.type = OpType::Copy; request.sources = {source.wstring()}; request.dest_dir = destination.wstring();
-            TransferIntegrationProbe::Transfer(manager, request, 202);
-            const auto status = manager.Status();
-            std::printf("[DIAG] sharing Copy phase=%d hr=0x%08X retry=%d owners=%zu\n", static_cast<int>(status.phase),
-                static_cast<unsigned>(status.failure_hr), status.lock_retry_available, status.lock_owners.size());
-            Check(status.phase == OpPhase::Failed && IsLockFailure(status.failure_hr) &&
-                status.lock_retry_available && manager.IsLockedFailureCurrent(202),
-                "real sharing conflict retains occupancy retry state independently of Restart Manager owner discovery");
-            Check(!status.elevation_retry_available && !manager.RetryElevatedOperation(202),
-                "proven sharing conflict never requests administrator continuation");
-            CloseHandle(held);
-            Check(manager.RetryLockedOperation(202, false) && TransferIntegrationProbe::RunQueued(manager) &&
-                manager.Status().phase == OpPhase::Completed && std::filesystem::exists(destination / source.filename()),
-                "real sharing Copy succeeds through its cached plain retry after the fixture handle closes");
-        }
-    }
-    if (acl_error == ERROR_SUCCESS && !dacl.changed) {
-        DirectoryDacl deletion_file, deletion_parent;
-        const auto deny_access = [&](DirectoryDacl& fixture, const std::filesystem::path& path, DWORD access) {
-            fixture.handle = CreateFileW(path.c_str(), READ_CONTROL | WRITE_DAC,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-            if (fixture.handle == INVALID_HANDLE_VALUE) return GetLastError();
-            DWORD result = GetSecurityInfo(fixture.handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                &fixture.original, nullptr, &fixture.descriptor);
-            if (result != ERROR_SUCCESS) return result;
-            EXPLICIT_ACCESSW deny{};
-            deny.grfAccessPermissions = access; deny.grfAccessMode = DENY_ACCESS; deny.grfInheritance = NO_INHERITANCE;
-            deny.Trustee.TrusteeForm = TRUSTEE_IS_SID; deny.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
-            deny.Trustee.ptstrName = reinterpret_cast<LPWSTR>(world_sid);
-            result = SetEntriesInAclW(1, &deny, fixture.original, &fixture.denied);
-            if (result != ERROR_SUCCESS) return result;
-            result = SetSecurityInfo(fixture.handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                nullptr, nullptr, fixture.denied, nullptr);
-            fixture.changed = result == ERROR_SUCCESS;
-            return result;
-        };
-        const DWORD parent_error = deny_access(deletion_parent, root, FILE_DELETE_CHILD);
-        const DWORD file_error = deny_access(deletion_file, source, DELETE);
-        Check(parent_error == ERROR_SUCCESS && file_error == ERROR_SUCCESS,
-            "delete permission fixture denies file DELETE and parent DELETE_CHILD with pinned ACL restoration handles");
-        if (parent_error == ERROR_SUCCESS && file_error == ERROR_SUCCESS) {
-            OpsManager manager; TransferIntegrationProbe::Initialize(manager);
-            OpRequest request; request.type = OpType::RealDelete; request.sources = {source.wstring()};
-            TransferIntegrationProbe::Delete(manager, request, 203);
-            const auto status = manager.Status();
-            std::printf("[DIAG] permission Delete phase=%d hr=0x%08X lock_retry=%d owners=%zu elevation=%d\n",
-                static_cast<int>(status.phase), static_cast<unsigned>(status.failure_hr),
-                status.lock_retry_available, status.lock_owners.size(), status.elevation_retry_available);
-            Check(status.phase == OpPhase::Failed &&
-                pulse::format::FileOperationMessageCode(status.failure_hr) == ERROR_ACCESS_DENIED &&
-                std::filesystem::exists(source), "real delete permission denial preserves its exact source");
-            Check(status.lock_owners.empty() && status.locked_path.empty() && !status.lock_retry_available &&
-                !manager.IsLockedFailureCurrent(203),
-                "own identity leases never classify delete permission denial as an external file lock");
-            Check(status.elevation_retry_available && manager.IsElevationFailureCurrent(203) &&
-                status.elevation_source_path == source.wstring() && status.elevation_destination_path.empty(),
-                "real delete permission denial offers administrator continuation with a complete source-only endpoint");
-            manager.CancelElevationRetry(203);
-            Check(!manager.IsElevationFailureCurrent(203) && TransferIntegrationProbe::QueueEmpty(manager) &&
-                std::filesystem::exists(source), "declining delete elevation queues no operation and retains the source");
-        }
-        const auto file_restore = deletion_file.Restore(), parent_restore = deletion_parent.Restore();
-        Check(file_restore == ERROR_SUCCESS && parent_restore == ERROR_SUCCESS &&
-            !deletion_file.changed && !deletion_parent.changed, "delete permission fixture restores both original ACLs before cleanup");
-    }
-    Check(root.parent_path() == parent && root.filename().wstring().starts_with(L"ops-permission-feedback-"),
-        "verify permission fixture cleanup remains under bench_data");
-    if (!dacl.changed && root.parent_path() == parent && root.filename().wstring().starts_with(L"ops-permission-feedback-"))
-        std::filesystem::remove_all(root);
-    return failures ? 1 : 0;
 }
 int OperationLabelFixtures() {
     using namespace pulse;
@@ -630,7 +443,6 @@ int NoNativeShell(bool expect_refusal = false) {
 int wmain(int argc, wchar_t** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (argc == 2 && std::wstring(argv[1]) == L"--manual-restore") return ManualRestoreFixtures();
-    if (argc == 2 && std::wstring(argv[1]) == L"--permission-feedback") return PermissionFeedbackFixtures();
     if (argc == 2 && std::wstring(argv[1]) == L"--operation-labels") return OperationLabelFixtures();
     if (argc == 2 && std::wstring(argv[1]) == L"--no-native-shell") return NoNativeShell();
     if (argc == 2 && std::wstring(argv[1]) == L"--no-native-refusal") return NoNativeShell(true);

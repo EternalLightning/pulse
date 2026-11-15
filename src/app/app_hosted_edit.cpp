@@ -101,7 +101,7 @@ void PlaceHostedEdit(HWND hwnd, HWND owner, const D2D1_RECT_F& cell, float scale
 
 HWND CreateHostedEdit(AppState& s, SUBCLASSPROC proc) {
     EnsureEditVisuals(s);
-    HWND hwnd = ui::CreateRedirectedChildEdit(s.hwnd);
+    HWND hwnd = ui::CreateChildEdit(s.hwnd);
     if (!hwnd) return nullptr;
     SetWindowTheme(hwnd, L"", L"");
     // Redirected child surfaces remain visible under the parent composition.

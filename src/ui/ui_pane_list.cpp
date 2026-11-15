@@ -824,7 +824,7 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
             DWRITE_TEXT_METRICS metrics{};
             explanation->GetMetrics(&metrics);
             MakeBrush(compositor_->Dc(), theme.text_secondary, brTextSecondary_);
-            compositor_->Dc()->DrawTextLayout({bounds.left + 16 * scale_,
+            compositor_->DrawTextLayout({bounds.left + 16 * scale_,
                 bounds.top + std::max(0.0f, (bounds.bottom - bounds.top - metrics.height) * 0.5f)},
                 explanation.get(), brTextSecondary_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
@@ -1491,7 +1491,7 @@ bool MainRenderer::DrawCenteredIconName(const std::wstring& name, const D2D1_REC
     layout->SetTrimming(&trimming, ellipsis.get());
     DrawNameHighlightBackground(compositor_, layout.get(), {text_bounds.left, text_bounds.top}, text_bounds, matches, theme, scale_);
     MakeBrush(compositor_->Dc(), color, brText_);
-    compositor_->Dc()->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top), layout.get(),
+    compositor_->DrawTextLayout(D2D1::Point2F(text_bounds.left, text_bounds.top), layout.get(),
                                       brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     return truncated;
 }

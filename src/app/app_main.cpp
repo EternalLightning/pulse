@@ -563,29 +563,32 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             CreateDirectoryW(path.c_str(), nullptr);
             s->ops.OpenWith(path);
         };
-        settings_callbacks.clear_diagnostics = [hwnd](std::wstring& error) {
-            if (MessageBoxW(hwnd,
-                    l10n::Get(l10n::StringId::DiagnosticsClearConfirm).c_str(),
-                    l10n::Get(l10n::StringId::Diagnostics).c_str(),
-                    MB_ICONWARNING | MB_OKCANCEL | MB_DEFBUTTON2) != IDOK)
+        settings_callbacks.clear_diagnostics = [s, hwnd](std::wstring& error) {
+            ui::ConfirmDialogSpec spec;
+            spec.title = l10n::Get(l10n::StringId::Diagnostics);
+            spec.message = l10n::Get(l10n::StringId::DiagnosticsClearConfirm);
+            spec.cancel_is_default = true;
+            spec.danger = true;
+            if (!ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor))
                 return true;
             if (diagnostics::ClearCrashReports(app::GetPulseDataDir(), &error)) return true;
             error = l10n::Get(l10n::StringId::DiagnosticsClearFailed);
             return false;
         };
         settings_callbacks.prepare_diagnostics_export =
-            [hwnd](std::wstring& destination, bool& include_service) {
-            if (MessageBoxW(hwnd,
-                    l10n::Get(l10n::StringId::DiagnosticsPrivacyMessage).c_str(),
-                    l10n::Get(l10n::StringId::DiagnosticsPrivacyTitle).c_str(),
-                    MB_ICONWARNING | MB_OKCANCEL | MB_DEFBUTTON2) != IDOK)
+            [s, hwnd](std::wstring& destination, bool& include_service) {
+            ui::ConfirmDialogSpec spec;
+            spec.title = l10n::Get(l10n::StringId::DiagnosticsPrivacyTitle);
+            spec.message = l10n::Get(l10n::StringId::DiagnosticsPrivacyMessage);
+            spec.cancel_is_default = true;
+            if (!ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor))
                 return false;
-            const int service = MessageBoxW(hwnd,
-                l10n::Get(l10n::StringId::DiagnosticsIncludeService).c_str(),
-                l10n::Get(l10n::StringId::DiagnosticsPrivacyTitle).c_str(),
-                MB_ICONQUESTION | MB_YESNOCANCEL | MB_DEFBUTTON2);
-            if (service == IDCANCEL) return false;
-            include_service = service == IDYES;
+            spec.message = l10n::Get(l10n::StringId::DiagnosticsIncludeService);
+            spec.confirm_text = l10n::Pick(L"否", L"No");
+            spec.alternate_text = l10n::Pick(L"是", L"Yes");
+            spec.alternate_selected = &include_service;
+            spec.cancel_is_default = false;
+            if (!ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor)) return false;
             return PickFolder(hwnd, destination,
                 l10n::Get(l10n::StringId::DiagnosticsExportLocation).c_str());
         };
@@ -1238,8 +1241,13 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     std::wstring prompt = recovery_message;
                     if (recovery.has_uncertain_destructive)
                         prompt += l10n::Get(l10n::StringId::RecoveryDestructiveWarning);
-                    if (MessageBoxW(hwnd, prompt.c_str(), l10n::Get(l10n::StringId::RecoveryTitle).c_str(),
-                                    MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2) == IDYES)
+                    ui::ConfirmDialogSpec spec;
+                    spec.title = l10n::Get(l10n::StringId::RecoveryTitle);
+                    spec.message = std::move(prompt);
+                    spec.confirm_text = l10n::Pick(L"是", L"Yes");
+                    spec.cancel_text = l10n::Pick(L"否", L"No");
+                    spec.cancel_is_default = true;
+                    if (ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor))
                         s->ops.RetryRecovery();
                     else
                         s->ops.DiscardRecovery();

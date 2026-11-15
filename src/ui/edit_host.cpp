@@ -66,6 +66,8 @@ bool CustomEdit(Compositor& compositor, HWND hwnd) {
 }
 bool PresentEdit(Compositor& compositor, HWND hwnd, IDWriteTextFormat* format,
     D2D1_COLOR_F foreground, D2D1_COLOR_F background) {
+    // Layout runs before the host is shown; no surface can be presented yet.
+    if (!IsWindowVisible(hwnd)) return false;
     bool force_failure = false;
 #ifdef PULSE_WITH_SELFTEST
     force_failure = GetPropW(hwnd, L"Pulse.Test.LumaPresentFailure") != nullptr;
@@ -194,7 +196,7 @@ LRESULT DefPresentedChildEditProc(Compositor& compositor, IDWriteTextFormat* for
         msg == WM_KEYDOWN || msg == WM_CHAR || msg == WM_CUT || msg == WM_PASTE ||
         msg == WM_CLEAR || msg == WM_UNDO || msg == EM_UNDO || msg == WM_IME_COMPOSITION ||
         msg == WM_IME_ENDCOMPOSITION || msg == WM_SETFONT || msg == WM_SIZE || msg == EM_SETMARGINS ||
-        msg == EM_SETCUEBANNER;
+        msg == EM_SETCUEBANNER || msg == EM_SETPASSWORDCHAR;
     const bool custom_paint = changes_visual && CustomEdit(compositor, hwnd) && IsWindowVisible(hwnd);
     const bool suppress_native = custom_paint && !compositor.UsesComposedEdits(hwnd);
     if (suppress_native) SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);

@@ -79,13 +79,16 @@ struct BatchConflictDialogTestPeer {
             row.destination = L"D:\\fixture\\target\\report-" + std::to_wstring(id) + L".txt";
             conflict.rows.push_back(std::move(row));
         }
-        for (const float scale : {1.0f, 1.5f}) for (const int width : {760, 340}) for (const bool dark : {false, true}) {
+        for (const float scale : {1.0f, 1.5f, 1.75f, 2.0f}) for (const int width : {760, 340}) for (const bool dark : {false, true}) {
             BatchConflictDialog dialog;
             check(dialog.Initialize(owner, conflict, Labels(), dark, HexColor(0x0078D4), false), "initialize isolated batch-conflict style fixture");
             if (!dialog.hwnd_) return 2;
             dialog.scale_ = scale;
             dialog.painter_.SetScale(scale);
             dialog.compositor_.RecreateTextFormats(scale);
+            check(dialog.compositor_.DialogTitleFormat()->GetFontWeight() == DWRITE_FONT_WEIGHT_BOLD &&
+                std::abs(dialog.compositor_.DialogTitleFormat()->GetFontSize() - std::round(14 * scale)) < 0.01f,
+                "batch-conflict title matches the native bold caption and pixel height");
             dialog.compositor_.Resize(static_cast<int>(width * scale), static_cast<int>(720 * scale));
             dialog.Layout();
             const int cancel = Find(dialog, BatchConflictDialog::Action::Cancel);
@@ -98,6 +101,13 @@ struct BatchConflictDialogTestPeer {
                 std::abs(right.right - (width - 20) * scale) < 0.1f &&
                 std::abs(left.bottom - left.top - 32 * scale) < 0.1f && left.top == right.top,
                 "Cancel precedes the primary confirmation in visual and Tab order with an eight-DIP gap and twenty-DIP right margin");
+            check(left.right - left.left >= 79.9f * scale && right.right - right.left >= 79.9f * scale &&
+                left.left >= 20 * scale,
+                "footer actions retain the eighty-DIP minimum without colliding at narrow width");
+            check(std::all_of(dialog.controls_.begin(), dialog.controls_.end(), [&](const auto& control) {
+                return control.action == BatchConflictDialog::Action::Close ||
+                    control.bounds.right - control.bounds.left >= 79.9f * scale;
+            }), "batch choice and footer buttons share the eighty-DIP minimum");
             check(std::abs(title_close.right - width * scale) < 0.1f &&
                 std::abs(title_close.right - title_close.left - 46 * scale) < 0.1f &&
                 std::abs(title_close.bottom - 44 * scale) < 0.1f,

@@ -1184,7 +1184,6 @@ enum class StringId : UINT {
     OperationCenterWaiting = IDS_OPERATION_CENTER_WAITING,
     OperationCenterCancelled = IDS_OPERATION_CENTER_CANCELLED,
     OperationCenterRecycle = IDS_OPERATION_CENTER_RECYCLE,
-    ReturnUnfinishedToTray = IDS_RETURN_UNFINISHED_TO_TRAY,
     BatchConflictInstruction = IDS_BATCH_CONFLICT_INSTRUCTION,
     BatchConflictSource = IDS_BATCH_CONFLICT_SOURCE,
     BatchConflictDestination = IDS_BATCH_CONFLICT_DESTINATION,

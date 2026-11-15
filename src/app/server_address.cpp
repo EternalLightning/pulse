@@ -245,19 +245,6 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
     return out;
 }
 
-bool IsServerUrlText(std::wstring_view input) {
-    const std::wstring text = Trim(input);
-    if (const size_t sep = text.find(L"://"); sep != std::wstring::npos && sep > 0) {
-        const std::wstring scheme = Lower(text.substr(0, sep));
-        if (scheme == L"smb" || scheme == L"cifs") return true;
-        for (auto s : kUnsupported) if (scheme == s) return true;
-        return false;
-    }
-    const std::wstring slashed = Slashes(text);
-    const size_t cut = slashed.find(L'\\');
-    return IsIPv4(std::wstring_view(slashed).substr(0, cut));
-}
-
 std::wstring NetworkRecentRoot(std::wstring_view input) {
     const auto address = ParseServerAddress(input);
     if (address.kind != ServerAddressKind::Server && address.kind != ServerAddressKind::Share) return {};

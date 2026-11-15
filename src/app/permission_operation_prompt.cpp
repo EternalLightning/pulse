@@ -25,7 +25,6 @@ ui::ConfirmDialogSpec BuildPermissionOperationConfirmationSpec(const ops::OpStat
         spec.rows.push_back({path::FriendlyPathText(value), true, true});
     };
     add_path(I::PermissionOperationSourcePath, status.elevation_source_path);
-    add_path(I::PermissionOperationDestinationPath, status.elevation_destination_path);
     return spec;
 }
 
@@ -43,8 +42,6 @@ void PumpPermissionOperationPrompt(AppState& state) {
     state.operationDismissedTaskId = status.task_id;
     state.operationPinnedByUser = false;
     if (state.operationWindow) state.operationWindow->Hide();
-    if (status.type == ops::OpType::CreateFolder || status.type == ops::OpType::CreateTextFile)
-        state.pendingRenameName.clear();
     auto spec = BuildPermissionOperationConfirmationSpec(status);
     spec.still_valid = [&state, id = status.task_id] {
         return !state.exit_requested && IsWindow(state.hwnd) &&

@@ -35,7 +35,7 @@ DWORD DropExecute(AppState& s, const std::vector<std::wstring>& sources,
 void StartDragOut(AppState& s);
 float MaxScrollForActivePane(AppState& s, ui::PaneViewModel* out = nullptr);
 void ClampScroll(AppState& s);
-void EnsureRowVisible(AppState& s, app::Tab& tab, int index);
+void EnsureRowVisible(AppState& s, app::Tab& tab, int index, bool animate = false);
 bool PointInList(const AppState& s, int mx, int my);
 void ResetMarquee(AppState& s);
 void ApplyMarqueeSelection(AppState& s);

@@ -16,9 +16,6 @@
 
 namespace sysctx_text {
 inline const wchar_t* Title() { return l10n::Pick(L"系统右键菜单", L"System context menu"); }
-// The layer selector switches between Pulse's own menu (page 2) and the system
-// handlers (page 5), sharing the same sidebar entry and page heading.
-inline const wchar_t* PageTitle() { return l10n::Pick(L"右键菜单", L"Context menu"); }
 inline const wchar_t* Intro() { return l10n::Pick(
     L"Windows 开关影响使用系统菜单的应用，“只在 Pulse 隐藏”仅影响 Pulse。点击“应用更改”后生效；注册表写入前自动备份，本次会话内可撤销注册表改动。",
     L"Windows switches affect apps using the system menu; hiding in Pulse affects only Pulse. Choose Apply changes to save. "

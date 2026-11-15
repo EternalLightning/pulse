@@ -7,6 +7,12 @@
 #include "../app/archive_operation_ui.h"
 #include "../common/localization.h"
 #include "../ui/FluentTokens.h"
+#include "../ui/typography.h"
+#include "../ui/input_dialog.h"
+#include "../ui/edit_host.h"
+#include <cmath>
+#include <algorithm>
+#include <cstdint>
 #include "../common/windows_compat.h"
 #include <windows.h>
 #include <objbase.h>
@@ -32,12 +38,166 @@ void Check(bool condition, const char* description) {
     if (!condition) failures.fetch_add(1);
 }
 
+pulse::ui::InputDialogInspection Inspect(HWND dialog, bool render = false) {
+    pulse::ui::InputDialogInspection info;
+    Check(SendMessageW(dialog, pulse::ui::kInputDialogInspectMessage, render,
+        reinterpret_cast<LPARAM>(&info)) != 0, "inspect the rendered input dialog");
+    return info;
+}
+constexpr UINT kUiTestCall = WM_APP + 0x394;
+LRESULT CALLBACK UiTestProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+    UINT_PTR, DWORD_PTR) {
+    if (message == kUiTestCall) {
+        (*reinterpret_cast<std::function<void()>*>(lp))();
+        return 1;
+    }
+    return DefSubclassProc(window, message, wp, lp);
+}
+void OnUi(HWND dialog, std::function<void()> action) {
+    SendMessageW(GetWindow(dialog, GW_OWNER), kUiTestCall, 0, reinterpret_cast<LPARAM>(&action));
+}
+bool ReadPixels(HWND dialog, const std::function<bool(D2D1_SIZE_U, const D2D1_MAPPED_RECT&)>& read) {
+    bool result = false;
+    OnUi(dialog, [&] {
+        const auto info = Inspect(dialog, true);
+        if (!info.compositor || !info.compositor->CaptureFrame()) return;
+        auto* frame = info.compositor->FrameCopy();
+        if (!frame) return;
+        const auto size = frame->GetPixelSize();
+        pulse::ui::ComPtr<ID2D1Bitmap1> bitmap;
+        const auto properties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, frame->GetPixelFormat());
+        if (FAILED(info.compositor->Dc()->CreateBitmap(size, nullptr, 0, &properties, &bitmap)) ||
+            FAILED(bitmap->CopyFromBitmap(nullptr, frame, nullptr))) return;
+        D2D1_MAPPED_RECT mapped{};
+        if (FAILED(bitmap->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return;
+        result = read(size, mapped);
+        bitmap->Unmap();
+    });
+    return result;
+}
+bool Pixel(HWND dialog, float x, float y, D2D1_COLOR_F expected) {
+    return ReadPixels(dialog, [&](D2D1_SIZE_U size, const D2D1_MAPPED_RECT& mapped) {
+        const UINT px = static_cast<UINT>(x), py = static_cast<UINT>(y);
+        if (px >= size.width || py >= size.height) return false;
+        const auto* pixel = mapped.bits + py * mapped.pitch + px * 4;
+        return std::abs(pixel[2] - std::lround(expected.r * 255)) <= 1 &&
+            std::abs(pixel[1] - std::lround(expected.g * 255)) <= 1 &&
+            std::abs(pixel[0] - std::lround(expected.b * 255)) <= 1;
+    });
+}
+bool CloseGlyph(HWND dialog) {
+    const auto info = Inspect(dialog);
+    return ReadPixels(dialog, [&](D2D1_SIZE_U size, const D2D1_MAPPED_RECT& mapped) {
+        int left = static_cast<int>(size.width), top = static_cast<int>(size.height), right = -1, bottom = -1;
+        const auto* background = mapped.bits + (static_cast<int>(info.close.top) + 3) * mapped.pitch +
+            (static_cast<int>(info.close.left) + 3) * 4;
+        for (int y = static_cast<int>(info.close.top) + 3; y < info.close.bottom - 3; ++y)
+            for (int x = static_cast<int>(info.close.left) + 3; x < info.close.right - 3; ++x) {
+                const auto* pixel = mapped.bits + y * mapped.pitch + x * 4;
+                if (std::abs(pixel[0] - background[0]) + std::abs(pixel[1] - background[1]) +
+                    std::abs(pixel[2] - background[2]) < 150) continue;
+                left = (std::min)(left, x); right = (std::max)(right, x);
+                top = (std::min)(top, y); bottom = (std::max)(bottom, y);
+            }
+        return right >= left && right - left >= 8 * info.scale && right - left <= 16 * info.scale &&
+            bottom - top >= 8 * info.scale && bottom - top <= 16 * info.scale &&
+            std::abs((left + right + 1) - (info.close.left + info.close.right)) <= 3 * info.scale &&
+            std::abs((top + bottom + 1) - (info.close.top + info.close.bottom)) <= 3 * info.scale;
+    });
+}
 std::wstring Text(HWND control) {
     const int length = GetWindowTextLengthW(control);
     std::wstring value(static_cast<size_t>(length) + 1, L'\0');
     GetWindowTextW(control, value.data(), length + 1);
     value.resize(static_cast<size_t>(length));
     return value;
+}
+
+std::uint64_t EditPixels(HWND dialog, HWND edit, bool dark) {
+    const auto info = Inspect(dialog);
+    bool custom = false;
+    for (const auto& field : info.fields) if (field.edit == edit) custom = field.custom;
+    RECT bounds{}; GetClientRect(edit, &bounds);
+    BITMAPINFO bitmap_info{};
+    bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap_info.bmiHeader.biWidth = bounds.right;
+    bitmap_info.bmiHeader.biHeight = -bounds.bottom;
+    bitmap_info.bmiHeader.biPlanes = 1;
+    bitmap_info.bmiHeader.biBitCount = 32;
+    HDC source = GetDC(edit), memory = CreateCompatibleDC(source);
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(source, &bitmap_info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    std::uint64_t hash = 0;
+    if (bitmap && memory && pixels) {
+        const auto previous = SelectObject(memory, bitmap);
+        const bool rendered = custom && info.compositor
+            ? info.compositor->PaintLumaEdit(edit, memory, info.compositor->TextFormat(),
+                pulse::ui::ChildEditColor(pulse::ui::ChildEditTextColor(dark)),
+                pulse::ui::ChildEditColor(pulse::ui::ChildEditBackColor(dark)))
+            : PrintWindow(edit, memory, PW_CLIENTONLY) != FALSE;
+        if (rendered) {
+            GdiFlush();
+            hash = 14695981039346656037ull;
+            const auto* bytes = static_cast<const BYTE*>(pixels);
+            for (size_t index = 0; index < static_cast<size_t>(bounds.right) * bounds.bottom * 4; ++index)
+                if (index % 4 != 3) hash = (hash ^ bytes[index]) * 1099511628211ull;
+        }
+        SelectObject(memory, previous);
+    }
+    if (bitmap) DeleteObject(bitmap);
+    if (memory) DeleteDC(memory);
+    if (source) ReleaseDC(edit, source);
+    return hash;
+}
+
+void CheckPasswordMask(HWND dialog, bool dark) {
+    OnUi(dialog, [&] {
+        const HWND edit = GetDlgItem(dialog, kPassword);
+        const auto retained = Text(edit);
+        SetFocus(edit);
+        HideCaret(edit);
+        SetWindowTextW(edit, L"");
+        const auto blank = EditPixels(dialog, edit, dark);
+        for (const auto selection : {std::pair{0, 0}, std::pair{3, 3}, std::pair{6, 6},
+            std::pair{1, 5}, std::pair{0, 6}}) {
+            SetWindowTextW(edit, L"iii123");
+            SendMessageW(edit, EM_SETSEL, selection.first, selection.second);
+            const auto first = EditPixels(dialog, edit, dark);
+            Check(Text(edit) == L"iii123", "masked password retains its original WM_GETTEXT value");
+            SetWindowTextW(edit, L"WWWxyz");
+            SendMessageW(edit, EM_SETSEL, selection.first, selection.second);
+            DWORD start = 0, end = 0;
+            SendMessageW(edit, EM_GETSEL, reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+            const auto second = EditPixels(dialog, edit, dark);
+            Check(blank != 0 && first != blank && first == second && Text(edit) == L"WWWxyz",
+                "same-length distinct passwords render identical visible masks at caret and selection boundaries");
+            Check(start == static_cast<DWORD>(selection.first) && end == static_cast<DWORD>(selection.second),
+                "password masking preserves native caret and selection positions");
+        }
+        SetWindowTextW(edit, retained.c_str());
+        SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+        SendMessageW(edit, WM_IME_STARTCOMPOSITION, 0, 0);
+        SendMessageW(edit, WM_KEYDOWN, VK_RETURN, 0);
+        SendMessageW(edit, WM_KEYDOWN, VK_ESCAPE, 0);
+        Check(IsWindow(dialog) && Text(edit) == retained,
+            "synthetic IME composition Enter and Escape preserve the open password editor");
+        SendMessageW(edit, WM_IME_ENDCOMPOSITION, 0, 0);
+        const auto info = Inspect(dialog);
+        std::vector<int> actions;
+        if (info.browse.right > info.browse.left) actions.push_back(102);
+        if (info.checkbox.right > info.checkbox.left) actions.push_back(kCreateFolder);
+        actions.push_back(IDCANCEL); actions.push_back(IDOK); actions.push_back(104);
+        for (const int action : actions) {
+            SendMessageW(GetFocus(), WM_KEYDOWN, VK_TAB, 0);
+            Check(GetFocus() == dialog && Inspect(dialog).focus == action,
+                "archive Tab traverses browse, checkbox and shared footer actions in visual order");
+        }
+        SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
+        Check(GetFocus() == info.fields.front().edit, "archive Tab wraps from Close to the first native editor");
+        SetFocus(edit);
+        ShowCaret(edit);
+    });
 }
 
 struct Search {
@@ -80,6 +240,34 @@ void Confirm(HWND dialog) { SendMessageW(dialog, WM_COMMAND, IDOK, 0); }
 void Cancel(HWND dialog) { SendMessageW(dialog, WM_COMMAND, IDCANCEL, 0); }
 
 bool SaveScreenshot(HWND dialog, const wchar_t* name) {
+    pulse::ui::InputDialogInspection inspection;
+    if (SendMessageW(dialog, pulse::ui::kInputDialogInspectMessage, 0, reinterpret_cast<LPARAM>(&inspection))) {
+        const bool dark = std::wstring(name).find(L"dark") != std::wstring::npos;
+        const auto theme = inspection.high_contrast ? pulse::ui::MakeHighContrastTheme() :
+            pulse::ui::MakeTheme(dark, D2D1::ColorF(GetRValue(dialog_accent) / 255.0f,
+                GetGValue(dialog_accent) / 255.0f, GetBValue(dialog_accent) / 255.0f));
+        const auto input = pulse::ui::BlendOver(theme.fill_input_focus, pulse::ui::BlendOver(theme.surface_sheet, theme.bg));
+        const auto outline = inspection.high_contrast ? theme.stroke_card : dark
+            ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
+        GUITHREADINFO thread{sizeof(thread)};
+        GetGUIThreadInfo(GetWindowThreadProcessId(dialog, nullptr), &thread);
+        for (const auto& field : inspection.fields) {
+            const auto border = pulse::ui::BlendOver(outline, input);
+            Check(Pixel(dialog, field.bounds.left, field.bounds.top + 8 * inspection.scale,
+                border), "archive input outline composites over the rendered fill");
+            Check(Pixel(dialog, field.bounds.left + 30 * inspection.scale, field.bounds.bottom - 1,
+                thread.hwndFocus == field.edit ? pulse::ui::BlendOver(theme.accent, input) :
+                    pulse::ui::BlendOver(theme.stroke_input_bottom, border)),
+                "archive accent underline belongs only to the focused editor");
+        }
+        std::error_code error;
+        const auto folder = std::filesystem::path(L"bench_data/archive_ui");
+        std::filesystem::create_directories(folder, error);
+        const auto output = std::filesystem::absolute(folder / (std::wstring(name) + L"-" +
+            std::to_wstring(pulse::compat::WindowDpi(dialog)) + L"dpi.png"));
+        return !error && SendMessageW(dialog, pulse::ui::kInputDialogSnapshotMessage, 0,
+            reinterpret_cast<LPARAM>(output.c_str())) != 0;
+    }
     RECT bounds{};
     GetWindowRect(dialog, &bounds);
     const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
@@ -99,33 +287,6 @@ bool SaveScreenshot(HWND dialog, const wchar_t* name) {
         RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         // These custom windows paint WM_PAINT, so capture their displayed client pixels.
         if (BitBlt(memory, 0, 0, width, height, screen, 0, 0, SRCCOPY)) {
-            wchar_t class_name[64]{}; GetClassNameW(dialog, class_name, ARRAYSIZE(class_name));
-            if (wcscmp(class_name, L"PulseArchiveDialog") == 0) {
-                const bool dark = std::wstring(name).find(L"dark") != std::wstring::npos;
-                const auto theme = pulse::ui::IsHighContrast() ? pulse::ui::MakeHighContrastTheme() :
-                    pulse::ui::MakeTheme(dark, D2D1::ColorF(GetRValue(dialog_accent) / 255.0f,
-                        GetGValue(dialog_accent) / 255.0f, GetBValue(dialog_accent) / 255.0f));
-                const auto sheet = pulse::ui::BlendOver(theme.surface_sheet, theme.bg);
-                const auto input = pulse::ui::BlendOver(theme.fill_input_focus, sheet);
-                const auto outline = pulse::ui::IsHighContrast() ? theme.stroke_card : dark
-                    ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
-                const auto border = pulse::ui::BlendOver(outline, input);
-                const COLORREF expected = RGB(static_cast<BYTE>(border.r * 255), static_cast<BYTE>(border.g * 255), static_cast<BYTE>(border.b * 255));
-                const int dip_width = GetDlgItem(dialog, kDestination) ? 520 : 420;
-                Check(GetPixel(memory, MulDiv(20, width, dip_width), MulDiv(116, width, dip_width)) == expected,
-                    "archive input border composites translucent stroke over the input fill");
-                GUITHREADINFO thread{sizeof(thread)};
-                GetGUIThreadInfo(GetWindowThreadProcessId(dialog, nullptr), &thread);
-                for (int id : {kDestination, kPassword}) {
-                    const HWND edit = GetDlgItem(dialog, id);
-                    if (!edit) continue;
-                    const auto bottom = pulse::ui::BlendOver(thread.hwndFocus == edit ? theme.accent : theme.stroke_input_bottom, input);
-                    const int bottom_y = id == kDestination || !GetDlgItem(dialog, kDestination) ? 131 : 223;
-                    Check(GetPixel(memory, MulDiv(50, width, dip_width), MulDiv(bottom_y, width, dip_width)) ==
-                        RGB(static_cast<BYTE>(bottom.r * 255), static_cast<BYTE>(bottom.g * 255), static_cast<BYTE>(bottom.b * 255)),
-                        "archive accent underline belongs only to the focused editor");
-                }
-            }
             std::error_code error;
             const std::filesystem::path folder = L"bench_data/archive_ui";
             std::filesystem::create_directories(folder, error);
@@ -156,18 +317,11 @@ bool SaveScreenshot(HWND dialog, const wchar_t* name) {
     return saved;
 }
 
-RECT ChildBounds(HWND dialog, int id) {
-    RECT rect{};
-    GetWindowRect(GetDlgItem(dialog, id), &rect);
-    MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&rect), 2);
-    return rect;
-}
-
 void CheckArchiveStyle(HWND dialog, UINT dpi) {
     const auto px = [dpi](int dip) { return MulDiv(dip, static_cast<int>(dpi), 96); };
     RECT client{}; GetClientRect(dialog, &client);
-    const RECT primary = ChildBounds(dialog, IDOK), cancel = ChildBounds(dialog, IDCANCEL);
-    const RECT close = ChildBounds(dialog, 104);
+    const auto info = Inspect(dialog);
+    const auto primary = info.primary, cancel = info.cancel, close = info.close;
     Check(close.right - close.left == px(46) && close.bottom == px(44),
         "archive close target follows 46 by 44 DIP header contract");
     Check(primary.bottom - primary.top == px(32) && cancel.bottom == primary.bottom &&
@@ -179,15 +333,19 @@ void CheckArchiveStyle(HWND dialog, UINT dpi) {
     LOGFONTW font{};
     GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 101), WM_GETFONT, 0, 0)), sizeof(font), &font);
     Check(font.lfHeight == -px(14), "archive native input uses 14 DIP text after layout");
-    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 104), WM_GETFONT, 0, 0)), sizeof(font), &font);
-    Check(font.lfHeight == -px(12), "close glyph uses 12 DIP format independently of the semantic header icon");
+    Check(wcscmp(font.lfFaceName, pulse::ui::typography::PreferredTextFamily()) == 0,
+        "archive native input uses the shared text family");
+    Check(info.title_font_size == px(14) && info.title_weight == DWRITE_FONT_WEIGHT_BOLD,
+        "archive caption uses the shared bold DirectWrite title format");
+    Check(CloseGlyph(dialog), "archive vector Close is visible at its shared size and centered in its hit target");
 }
 
 void CheckArchiveDpi(HWND dialog, UINT dpi, bool password_only, const wchar_t* screenshot) {
     const std::wstring password = Text(GetDlgItem(dialog, kPassword));
     const HWND destination = GetDlgItem(dialog, kDestination);
     const std::wstring path = destination ? Text(destination) : L"";
-    const int height = password_only ? 224 : GetDlgItem(dialog, kCreateFolder) ? 348 : 306;
+    const auto info = Inspect(dialog);
+    const int height = password_only ? 224 : info.checkbox.right > info.checkbox.left ? 348 : 306;
     RECT rect{}; GetWindowRect(dialog, &rect);
     rect.right = rect.left + MulDiv(password_only ? 420 : 520, static_cast<int>(dpi), 96);
     rect.bottom = rect.top + MulDiv(height, static_cast<int>(dpi), 96);
@@ -222,6 +380,9 @@ void CALLBACK RefreshThemeFixture(HWND owner, UINT, UINT_PTR, DWORD) {
         Check(info.lbColor == GetSysColor(COLOR_WINDOW) && GetTextColor(dc) == GetSysColor(COLOR_WINDOWTEXT),
             "open prompt refreshes input brush and text to the system high-contrast pair");
         ReleaseDC(edit, dc);
+        Check(Inspect(dialog).high_contrast && !(GetWindowLongPtrW(dialog, GWL_STYLE) & WS_CAPTION) && CloseGlyph(dialog),
+            "high contrast keeps the shared caption and visible vector Close");
+        CheckPasswordMask(dialog, false);
     }
     {
         pulse::ui::HighContrastFrameScope contrast(system_contrast);
@@ -243,12 +404,13 @@ void RunExtractCases(HWND owner, DWORD thread) {
             }
             Check(Text(GetDlgItem(dialog, kDestination)) == L"C:\\archive-dialog-fixture",
                 "all: destination defaults to archive parent");
-            Check(GetDlgItem(dialog, kCreateFolder) != nullptr, "all: create-folder control exists");
+            Check(!Inspect(dialog).checkbox_text.empty(), "all: create-folder control exists");
             Check((GetWindowLongPtrW(GetDlgItem(dialog, kPassword), GWL_STYLE) & ES_PASSWORD) != 0,
                 "all: password edit masks text");
-            Check(Text(GetDlgItem(dialog, kCreateFolder)).find(L"example") != std::wstring::npos,
+            Check(Inspect(dialog).checkbox_text.find(L"example") != std::wstring::npos,
                 "all: folder label uses archive stem");
             CheckArchiveStyle(dialog, pulse::compat::WindowDpi(dialog));
+            CheckPasswordMask(dialog, dark);
             Check(SaveScreenshot(dialog, dark ? L"extract-dark" : L"extract-light"),
                 "extraction screenshot saved at actual monitor DPI");
             CheckArchiveDpi(dialog, dark ? 192u : 144u, false, dark ? L"extract-dark-style192" : L"extract-light-style144");
@@ -263,8 +425,12 @@ void RunExtractCases(HWND owner, DWORD thread) {
     {
         pulse::app::ArchiveExtractOptions options;
         auto helper = Automate(thread, owner, [](HWND dialog) {
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kCreateFolder, BN_CLICKED),
-                reinterpret_cast<LPARAM>(GetDlgItem(dialog, kCreateFolder)));
+            const auto checkbox = Inspect(dialog).checkbox;
+            const LPARAM point = MAKELPARAM(static_cast<int>((checkbox.left + checkbox.right) / 2),
+                static_cast<int>((checkbox.top + checkbox.bottom) / 2));
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, point);
+            SendMessageW(dialog, WM_LBUTTONUP, 0, point);
+            Check(!Inspect(dialog).checked, "create-folder checkbox toggles through actual mouse messages");
             SetWindowTextW(GetDlgItem(dialog, kPassword), L"fixture-password");
             Confirm(dialog);
         });
@@ -277,7 +443,7 @@ void RunExtractCases(HWND owner, DWORD thread) {
     {
         pulse::app::ArchiveExtractOptions options;
         auto helper = Automate(thread, owner, [](HWND dialog) {
-            Check(GetDlgItem(dialog, kCreateFolder) == nullptr, "selected: checkbox is absent");
+            Check(Inspect(dialog).checkbox_text.empty(), "selected: checkbox is absent");
             Confirm(dialog);
         });
         const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, dialog_accent,
@@ -290,8 +456,7 @@ void RunExtractCases(HWND owner, DWORD thread) {
         auto helper = Automate(thread, owner, [](HWND dialog) {
             SetWindowTextW(GetDlgItem(dialog, kDestination), L"C:\\changed");
             SetWindowTextW(GetDlgItem(dialog, kPassword), L"changed-password");
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kCreateFolder, BN_CLICKED),
-                reinterpret_cast<LPARAM>(GetDlgItem(dialog, kCreateFolder)));
+            SendMessageW(dialog, WM_COMMAND, kCreateFolder, 0);
             Cancel(dialog);
         });
         const bool accepted = pulse::app::ShowArchiveExtractDialog(owner, false, dialog_accent,
@@ -311,6 +476,7 @@ void RunPasswordCases(HWND owner, DWORD thread) {
         Check(Text(GetDlgItem(dialog, kPassword)) == L"initial", "password dialog: initial value retained");
         SetWindowTextW(GetDlgItem(dialog, kPassword), L"entered");
         CheckArchiveStyle(dialog, pulse::compat::WindowDpi(dialog));
+        CheckPasswordMask(dialog, true);
         Check(SaveScreenshot(dialog, L"password-dark"), "capture password prompt with semantic lock header");
         CheckArchiveDpi(dialog, 144u, true, L"password-dark-style144");
         Confirm(dialog);
@@ -321,6 +487,7 @@ void RunPasswordCases(HWND owner, DWORD thread) {
     helper = Automate(thread, owner, [](HWND dialog) {
         SetWindowTextW(GetDlgItem(dialog, kPassword), L"discarded");
         CheckArchiveDpi(dialog, 192u, true, L"password-light-style192");
+        CheckPasswordMask(dialog, false);
         Cancel(dialog);
     });
     const bool cancelled = pulse::app::ShowArchivePasswordDialog(owner, false, dialog_accent, password);
@@ -597,6 +764,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     ShowWindow(owner, SW_SHOWNOACTIVATE);
+    Check(SetWindowSubclass(owner, UiTestProc, 9, 0) != FALSE, "install UI-thread readback dispatch");
     const DWORD thread = GetCurrentThreadId();
     const bool failure_only = argc == 2 && std::string_view(argv[1]) == "--failure-only";
     if (argc == 2 && std::string_view(argv[1]) == "--focus-only") {

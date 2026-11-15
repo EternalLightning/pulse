@@ -215,7 +215,7 @@ void DrawWrappedText(Compositor& compositor, IDWriteTextFormat* format,
     layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(color, &brush)) || !brush.get()) return;
-    dc->DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(), brush.get());
+    compositor.DrawTextLayout(D2D1::Point2F(bounds.left, bounds.top), layout.get(), brush.get());
 }
 
 void DrawSpeedGraph(ID2D1DeviceContext* dc, const D2D1_RECT_F& plot,
@@ -356,8 +356,8 @@ public:
             wc.hInstance, this);
         if (!hwnd_) return result_;
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
-        OwnerDimScope owner_dim(owner_);
-        EnableWindow(owner_, FALSE);
+        ModalOwnerScope modal(owner_);
+        modal_owner_ = modal.DisabledOwner();
         ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
         if (conflict_.still_valid) SetTimer(hwnd_, 1, 100, nullptr);
@@ -367,9 +367,8 @@ public:
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        if (IsWindow(hwnd_)) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (IsWindow(hwnd_)) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
         hwnd_ = nullptr;
-        EnableWindow(owner_, TRUE);
         return result_;
     }
 
@@ -394,7 +393,7 @@ private:
         Rect(scale_, 20, details_ ? 490.0f : 380.0f, 0, dialog_style::kControlHeight),
         l10n::Get(details_ ? l10n::StringId::OpBrief : l10n::StringId::OpMore), L"\xE70D"); }
     D2D1_RECT_F CancelRect() const {
-        const float width = painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel));
+        const float width = std::max(ScaleDip(scale_, 80.0f), painter_.MeasureButtonWidth(l10n::Get(l10n::StringId::Cancel)));
         return D2D1::RectF(460 * scale_ - width, (details_ ? 490 : 380) * scale_,
             460 * scale_, (details_ ? 522 : 412) * scale_);
     }
@@ -413,7 +412,7 @@ private:
             ? ops::ConflictChoice::Cancel : choice;
         result_.apply_to_all = apply_all_;
         done_ = true;
-        if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (hwnd_) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
     }
 
     void ToggleDetails() {
@@ -468,16 +467,11 @@ private:
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_,
                      scale_);
 
-        painter_.DrawGlyph(L"\xE8C8", Rect(scale_, 20, 12, dialog_style::kIconSize, dialog_style::kIconSize),
-            high_contrast ? theme.text : theme.accent_ink);
-        painter_.DrawText(l10n::Get(l10n::StringId::OpConflictTitle).c_str(), Rect(scale_, 48, 0, 378, dialog_style::kTitleHeight),
-                          compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 7;
         close_state.pressed = pressed_ == 7;
-        painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
-                                    {}, close_state);
-        painter_.FillRoundedRect(Rect(scale_, 0, 43, 480, 1), 0, theme.stroke_divider);
+        DrawDialogHeader(compositor_, painter_, theme, scale_, l10n::Get(l10n::StringId::OpConflictTitle), L"\xE8C8", close_state);
+        DrawDialogFooter(compositor_, painter_, theme, compositor_.Height() - dialog_style::kFooterHeight * scale_);
 
         const std::wstring route = ParentName(conflict_.source) + L"  →  "
                                  + ParentName(conflict_.destination);
@@ -561,7 +555,8 @@ private:
         case kConflictInspectMessage:
             if (lparam) {
                 *reinterpret_cast<ConflictDialogInspection*>(lparam) =
-                    {CloseRect(), CheckRect(), DetailRect(), CancelRect(), focus_, details_};
+                    {CloseRect(), CheckRect(), DetailRect(), CancelRect(), focus_, details_,
+                     compositor_.DialogTitleFormat()->GetFontSize(), compositor_.DialogTitleFormat()->GetFontWeight()};
                 return TRUE;
             }
             return FALSE;
@@ -684,6 +679,7 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
+    HWND modal_owner_ = nullptr;
     Compositor compositor_;
     fluent::Painter painter_;
     ops::ConflictItemInfo conflict_;
@@ -738,8 +734,8 @@ public:
         GetWindowRect(hwnd_, &placed);
         pulse::ui::CenterOwnedWindow(hwnd_, owner_, placed.right - placed.left,
                           placed.bottom - placed.top);
-        OwnerDimScope owner_dim(owner_);
-        if (owner_) EnableWindow(owner_, FALSE);
+        ModalOwnerScope modal(owner_);
+        modal_owner_ = modal.DisabledOwner();
         ShowDialogWithFade(hwnd_);
         SetForegroundWindow(hwnd_);
         SetFocus(hwnd_);
@@ -750,11 +746,8 @@ public:
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        if (IsWindow(hwnd_)) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (IsWindow(hwnd_)) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
         hwnd_ = nullptr;
-        if (owner_) {
-            EnableWindow(owner_, TRUE);
-        }
         return accepted_;
     }
 
@@ -775,6 +768,10 @@ private:
     D2D1_RECT_F CancelRect() const { return cancel_rc_; }
     D2D1_RECT_F ConfirmRect() const { return confirm_rc_; }
     D2D1_RECT_F AlternateRect() const { return alternate_rc_; }
+
+    float ButtonWidth(std::wstring_view text) const {
+        return std::max(ScaleDip(scale_, 80.0f), painter_.MeasureButtonWidth(text));
+    }
 
     float MeasureContent(float width) {
         if (!compositor_.DwriteFactory() || !compositor_.TextFormat()) return 0.0f;
@@ -809,9 +806,9 @@ private:
         const float gap = ScaleDip(scale_, dialog_style::kGap);
         const float btn_h = ScaleDip(scale_, dialog_style::kControlHeight);
         close_rc_ = D2D1::RectF(width - close_w, 0, width, title_h);
-        const float cancel_w = spec_.hide_cancel ? 0.0f : painter_.MeasureButtonWidth(spec_.cancel_text);
-        const float confirm_w = painter_.MeasureButtonWidth(spec_.confirm_text);
-        const float alternate_w = spec_.alternate_text.empty() ? 0.0f : painter_.MeasureButtonWidth(spec_.alternate_text);
+        const float cancel_w = spec_.hide_cancel ? 0.0f : ButtonWidth(spec_.cancel_text);
+        const float confirm_w = ButtonWidth(spec_.confirm_text);
+        const float alternate_w = spec_.alternate_text.empty() ? 0.0f : ButtonWidth(spec_.alternate_text);
         const float buttons_width = confirm_w + (cancel_w > 0 ? gap + cancel_w : 0.0f) +
             (alternate_w > 0 ? gap + alternate_w : 0.0f);
         const bool stacked = buttons_width > width - 2.0f * pad;
@@ -845,7 +842,6 @@ private:
         KillTimer(hwnd_, kScrollTimer);
         check_rc_ = D2D1::RectF(pad, message_rc_.bottom + ScaleDip(scale_, 4.0f),
                                width - pad, message_rc_.bottom + check_h);
-        divider_top_ = title_h;
         divider_footer_ = footer_top;
         dip_w_ = width / std::max(scale_, 0.001f);
     }
@@ -856,11 +852,11 @@ private:
         const float title_h = ScaleDip(scale_, dialog_style::kTitleHeight);
         const float gap = ScaleDip(scale_, 8.0f);
         const float btn_h = ScaleDip(scale_, dialog_style::kControlHeight);
-        const float cancel_w = (spec_.hide_cancel ? 0.0f : painter_.MeasureButtonWidth(spec_.cancel_text));
-        const float confirm_w = painter_.MeasureButtonWidth(spec_.confirm_text);
+        const float cancel_w = spec_.hide_cancel ? 0.0f : ButtonWidth(spec_.cancel_text);
+        const float confirm_w = ButtonWidth(spec_.confirm_text);
         float width = std::max(ScaleDip(scale_, kConfirmMinW),
                                pad + cancel_w + (cancel_w > 0 ? gap : 0.0f) + confirm_w + pad +
-                               (spec_.alternate_text.empty() ? 0.0f : gap + painter_.MeasureButtonWidth(spec_.alternate_text)));
+                               (spec_.alternate_text.empty() ? 0.0f : gap + ButtonWidth(spec_.alternate_text)));
         RECT work{};
         MONITORINFO monitor{sizeof(monitor)};
         if (spec_.fit_to_work_area && GetMonitorInfoW(MonitorFromWindow(owner_, MONITOR_DEFAULTTONEAREST), &monitor)) {
@@ -868,7 +864,7 @@ private:
             width = std::min(width, static_cast<float>(work.right - work.left - 24));
         }
         const float buttons_width = cancel_w + (cancel_w > 0 ? gap : 0.0f) + confirm_w +
-            (spec_.alternate_text.empty() ? 0.0f : gap + painter_.MeasureButtonWidth(spec_.alternate_text));
+            (spec_.alternate_text.empty() ? 0.0f : gap + ButtonWidth(spec_.alternate_text));
         const int rows = buttons_width > width - 2.0f * pad ? (1 + (spec_.hide_cancel ? 0 : 1) + (spec_.alternate_text.empty() ? 0 : 1)) : 1;
         const float footer_h = rows * btn_h + (rows - 1) * gap + ScaleDip(scale_, 32.0f);
         const float wrap = width - pad * 2.0f;
@@ -902,7 +898,7 @@ private:
         if (accepted_ && spec_.checkbox_checked) *spec_.checkbox_checked = checked_;
         if (accepted_ && spec_.alternate_selected) *spec_.alternate_selected = alternate;
         done_ = true;
-        if (hwnd_) { HideComposedDialog(hwnd_, owner_); DestroyWindow(hwnd_); }
+        if (hwnd_) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
     }
 
     void Render(bool present = true) {
@@ -918,20 +914,10 @@ private:
         pulse::ui::BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_enabled_,
                      scale_);
 
-        const D2D1_COLOR_F warning = high_contrast ? theme.text : theme.accent_ink;
-        painter_.DrawGlyph(L"\xE7BA", Rect(scale_, 20, 12, dialog_style::kIconSize, dialog_style::kIconSize), warning);
-        painter_.DrawText(spec_.title, D2D1::RectF(ScaleDip(scale_, 48.0f), 0,
-                                                  close_rc_.left - ScaleDip(scale_, 8.0f),
-                                                  ScaleDip(scale_, dialog_style::kTitleHeight)),
-                          compositor_.HeaderFormat(), theme.text);
         fluent::ControlState close_state{};
         close_state.hovered = hover_ == 3;
         close_state.pressed = pressed_ == 3;
-        painter_.DrawTitleBarButton(CloseRect(), fluent::TitleBarButtonRole::Close,
-                                    {}, close_state);
-        painter_.FillRoundedRect(D2D1::RectF(0, divider_top_,
-                                             ScaleDip(scale_, dip_w_), divider_top_ + 1.0f),
-                                 0, theme.stroke_divider);
+        DrawDialogHeader(compositor_, painter_, theme, scale_, spec_.title, L"\xE7BA", close_state);
 
         dc_scroll_max_ = std::max(0.0f, message_height_ - (message_rc_.bottom - message_rc_.top));
         message_scroll_animation_.Tick(message_scroll_, dc_scroll_max_, AnimationTimeMs(), ScrollAnimationsEnabled());
@@ -988,9 +974,7 @@ private:
             painter_.DrawCheckBox(check_rc_, spec_.checkbox_text, check);
         }
 
-        painter_.FillRoundedRect(D2D1::RectF(0, divider_footer_,
-                                             ScaleDip(scale_, dip_w_), divider_footer_ + 1.0f),
-                                 0, theme.stroke_divider);
+        DrawDialogFooter(compositor_, painter_, theme, divider_footer_);
 
         fluent::ControlState cancel_state{};
         cancel_state.hovered = hover_ == 2;
@@ -1070,7 +1054,8 @@ private:
                 Render();
                 auto& info = *reinterpret_cast<ConfirmDialogInspection*>(lparam);
                 info = {spec_.rows.size(), message_scroll_, dc_scroll_max_, message_rc_,
-                    confirm_rc_, cancel_rc_, alternate_rc_, close_rc_, check_rc_, spec_.message, focus_};
+                    confirm_rc_, cancel_rc_, alternate_rc_, close_rc_, check_rc_, spec_.message, focus_,
+                    compositor_.DialogTitleFormat()->GetFontSize(), compositor_.DialogTitleFormat()->GetFontWeight()};
                 return TRUE;
             }
             return FALSE;
@@ -1208,6 +1193,7 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
+    HWND modal_owner_ = nullptr;
     Compositor compositor_;
     fluent::Painter painter_;
     ConfirmDialogSpec spec_;
@@ -1235,7 +1221,6 @@ private:
     SmoothScroll message_scroll_animation_;
     float message_scroll_ = 0;
     float dc_scroll_max_ = 0;
-    float divider_top_ = 36.0f;
     float divider_footer_ = 120.0f;
 };
 
@@ -1436,7 +1421,6 @@ void FileOperationWindow::Render(bool present) {
                  scale_);
     const float width = static_cast<float>(compositor_.Width());
     const float height = static_cast<float>(compositor_.Height());
-    painter_.FillRoundedRect(D2D1::RectF(0, 0, width, ScaleDip(scale_, kTitleH)), 0, theme.surface_title);
     painter_.FillRoundedRect(D2D1::RectF(0, ScaleDip(scale_, kTitleH), width,
         height - ScaleDip(scale_, kFooterH)), 0, theme.surface_sheet);
     const float dip_w = width / std::max(scale_, 0.001f);
@@ -1460,9 +1444,6 @@ void FileOperationWindow::Render(bool present) {
 
     const wchar_t* operation_glyph = (deleting || emptying) ? L"\xE74D"
         : restoring ? L"\xE777" : (moving ? L"\xE7C2" : L"\xE8C8");
-    const auto title_icon = Rect(scale_, kPadX, (kTitleH - dialog_style::kIconSize) * 0.5f,
-        dialog_style::kIconSize, dialog_style::kIconSize);
-    painter_.DrawGlyph(operation_glyph, title_icon, sky);
     std::wstring title;
     if (options_.use_summary_title || cancelled) title = status_.summary;
     else if (emptying) {
@@ -1485,20 +1466,11 @@ void FileOperationWindow::Render(bool present) {
         title = (deleting ? l10n::Get(l10n::StringId::OpDeletingPrefix).c_str() : restoring ? l10n::Get(l10n::StringId::OpRestoringPrefix).c_str() : moving ? l10n::Get(l10n::StringId::OpMovingPrefix).c_str() : l10n::Get(l10n::StringId::OpCopyingPrefix).c_str())
               + std::to_wstring(count) + l10n::Get(l10n::StringId::OpItemsSuffix).c_str();
     }
-    const auto title_bounds = D2D1::RectF(ScaleDip(scale_, 48.0f), 0,
-                                         chrome.close.left - ScaleDip(scale_, 8.0f),
-                                         ScaleDip(scale_, kTitleH));
-    auto* title_format = compositor_.HeaderFormat();
-    title_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    painter_.DrawText(title, title_bounds, title_format, theme.text);
-
     fluent::ControlState close{};
     close.hovered = hover_ == 1;
     close.pressed = pressed_ == 1;
-    painter_.DrawTitleBarButton(chrome.close, fluent::TitleBarButtonRole::Close, {}, close);
-    if (GetFocus() == hwnd_ && focus_ == 1) painter_.DrawFocusRing(chrome.close, 4.0f * scale_);
-    painter_.FillRoundedRect(D2D1::RectF(0, ScaleDip(scale_, kTitleH), width,
-                                         ScaleDip(scale_, kTitleH) + 1.0f), 0, theme.stroke_divider);
+    close.keyboard_focus = GetFocus() == hwnd_ && focus_ == 1;
+    DrawDialogHeader(compositor_, painter_, theme, scale_, title, operation_glyph, close);
 
     const std::wstring src = failed && !status_.failed_path.empty() ? path::FriendlyPathText(status_.failed_path) :
         status_.source_label.empty() ? l10n::Get(l10n::StringId::OpFilePath) : status_.source_label;
@@ -1724,13 +1696,7 @@ void FileOperationWindow::Render(bool present) {
 #endif
     }
 
-    painter_.FillRoundedRect(D2D1::RectF(0, height - ScaleDip(scale_, kFooterH), width,
-                                         height - ScaleDip(scale_, kFooterH) + 1.0f),
-                             0, theme.stroke_divider);
-    const auto footer_bg = D2D1::RectF(0, height - ScaleDip(scale_, kFooterH) + 1.0f,
-                                       width, height);
-    painter_.FillRoundedRect(footer_bg, 0,
-        high_contrast ? theme.bg : theme.surface_title);
+    DrawDialogFooter(compositor_, painter_, theme, height - ScaleDip(scale_, kFooterH));
 
     fluent::ControlState detail_state{};
     detail_state.hovered = hover_ == 5;
@@ -1757,12 +1723,13 @@ void FileOperationWindow::Render(bool present) {
                           fluent::ButtonKind::Standard, cancel_state });
 #ifdef PULSE_UI_TEST_HOOKS
     progress_inspection_.title = title;
-    progress_inspection_.title_bounds = title_bounds;
-    progress_inspection_.title_icon = title_icon;
+    progress_inspection_.title_bounds = D2D1::RectF(48 * scale_, 0, chrome.close.left - 8 * scale_, kTitleH * scale_);
+    progress_inspection_.title_icon = Rect(scale_, kPadX, (kTitleH - dialog_style::kIconSize) * 0.5f,
+        dialog_style::kIconSize, dialog_style::kIconSize);
     progress_inspection_.close = chrome.close;
-    progress_inspection_.footer = footer_bg;
-    progress_inspection_.title_font_size = title_format->GetFontSize();
-    progress_inspection_.title_weight = title_format->GetFontWeight();
+    progress_inspection_.footer = D2D1::RectF(0, height - ScaleDip(scale_, kFooterH) + 1.0f, width, height);
+    progress_inspection_.title_font_size = compositor_.DialogTitleFormat()->GetFontSize();
+    progress_inspection_.title_weight = compositor_.DialogTitleFormat()->GetFontWeight();
     progress_inspection_.subtitle = subtitle;
     progress_inspection_.file_line = file_line;
     progress_inspection_.percent = percent;

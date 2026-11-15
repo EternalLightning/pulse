@@ -34,6 +34,7 @@ std::wstring active_class;
 HWND fixture_owner = nullptr;
 bool batch = false;
 bool dialog_buttons_only = false;
+bool dialog_titles_only = false;
 bool color_picker_only = false;
 bool dialog_dark = false;
 bool submit_batch = false;
@@ -121,6 +122,12 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     bounds.right = bounds.left + (conflict ? 480 : width) * dpi / 96;
     bounds.bottom = bounds.top + height * dpi / 96;
     SendMessageW(dialog, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&bounds));
+    if (dialog_titles_only) {
+        Check(Snapshot(dialog, batch ? L"batch-title" : active_class == L"PulseConnectServerWindow"
+            ? L"server-title" : L"advanced-title"), "capture actual modal title at the requested DPI and theme");
+        SendMessageW(dialog, WM_CLOSE, 0, 0);
+        return;
+    }
     if (conflict) {
         MINMAXINFO minimum{}; SendMessageW(dialog, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&minimum));
         Check(minimum.ptMinTrackSize.x == 480 * dpi / 96 && minimum.ptMinTrackSize.y == 428 * dpi / 96,
@@ -236,6 +243,127 @@ struct ThumbnailCacheTestAccess {
     }
 };
 struct QuickPreviewPlaybackProbe {
+    static uint64_t StylePixels(QuickPreviewWindow& window, bool playback, D2D1_RECT_F area) {
+        auto* dc = window.compositor_.Dc();
+        ComPtr<ID2D1Image> previous;
+        ComPtr<ID2D1Bitmap1> target, cpu;
+        dc->GetTarget(&previous);
+        auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        const D2D1_SIZE_U size{static_cast<UINT32>(window.compositor_.Width()),
+            static_cast<UINT32>(window.compositor_.Height())};
+        bool ok = SUCCEEDED(dc->CreateBitmap(size, nullptr, 0, properties, &target));
+        if (!ok) { Check(false, "create preview style render target"); return 0; }
+        dc->SetTarget(target.get());
+        dc->BeginDraw();
+        const auto theme = IsHighContrast() ? MakeHighContrastTheme() : MakeTheme(window.dark_, window.accent_);
+        dc->Clear(window.dark_ ? HexColor(0x151515) : HexColor(0xF7F7F7));
+        ComPtr<ID2D1SolidColorBrush> ink;
+        dc->CreateSolidColorBrush(theme.text, &ink);
+        if (playback) window.DrawPlayback(dc, ink.get());
+        else window.DrawTextPreview(dc, ink.get());
+        ok = SUCCEEDED(dc->EndDraw());
+        dc->SetTarget(previous.get());
+        properties.bitmapOptions = D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+        ok = ok && SUCCEEDED(dc->CreateBitmap(size, nullptr, 0, properties, &cpu)) &&
+            SUCCEEDED(cpu->CopyFromBitmap(nullptr, target.get(), nullptr));
+        D2D1_MAPPED_RECT mapped{};
+        ok = ok && SUCCEEDED(cpu->Map(D2D1_MAP_OPTIONS_READ, &mapped));
+        Check(ok, "preview style renders and reads back without exporting images");
+        if (!ok) return 0;
+        uint64_t hash = 14695981039346656037ull;
+        for (int y = (std::max)(0, static_cast<int>(area.top));
+             y < (std::min)(static_cast<int>(size.height), static_cast<int>(area.bottom)); ++y) {
+            for (int x = (std::max)(0, static_cast<int>(area.left));
+                 x < (std::min)(static_cast<int>(size.width), static_cast<int>(area.right)); ++x) {
+                hash ^= reinterpret_cast<const uint32_t*>(mapped.bits + y * mapped.pitch)[x];
+                hash *= 1099511628211ull;
+            }
+        }
+        cpu->Unmap();
+        return hash;
+    }
+    static void Style(HWND owner) {
+        QuickPreviewWindow window;
+        Check(window.Initialize(owner, WM_APP + 1, WM_APP + 2), "preview style fixture initializes");
+        if (!window.hwnd_) return;
+        ShowWindow(window.hwnd_, SW_SHOW);
+        SetFocus(window.hwnd_);
+        Check(GetFocus() == window.hwnd_, "preview style fixture owns real keyboard focus");
+        for (const bool high_contrast : {false, true}) {
+            HighContrastFrameScope contrast(high_contrast);
+            for (const bool dark : {false, true}) for (const float scale : {1.0f, 1.5f, 2.0f}) {
+                window.dark_ = dark; window.scale_ = scale;
+                window.RecreateFormats(); window.compositor_.RecreateTextFormats(scale);
+                window.compositor_.Resize(static_cast<int>(480 * scale), static_cast<int>(320 * scale));
+                window.frame_count_ = 4;
+                window.animation_active_ = false;
+                const auto button = window.PlaybackButtonRect(1);
+                const LPARAM point = MAKELPARAM(static_cast<int>((button.left + button.right) / 2),
+                    static_cast<int>((button.top + button.bottom) / 2));
+                const auto area = D2D1::RectF(button.left - 4 * scale, button.top - 4 * scale,
+                    button.right + 4 * scale, button.bottom + 4 * scale);
+                SendMessageW(window.hwnd_, WM_MOUSELEAVE, 0, 0);
+                const auto resting = StylePixels(window, true, area);
+                SendMessageW(window.hwnd_, WM_MOUSEMOVE, 0, point);
+                Check(window.playback_hover_ == 1 && StylePixels(window, true, area) != resting,
+                    "preview playback hover changes real shared button pixels");
+                SendMessageW(window.hwnd_, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                Check(window.playback_pressed_ == 1 && GetCapture() == window.hwnd_ && window.animation_active_,
+                    "preview button press captures mouse and preserves immediate playback action");
+                const auto pressed = StylePixels(window, true, area);
+                SendMessageW(window.hwnd_, WM_LBUTTONUP, 0, point);
+                Check(window.playback_pressed_ == -1 && GetCapture() != window.hwnd_ &&
+                    window.animation_active_ && (high_contrast || StylePixels(window, true, area) != pressed),
+                    "preview mouse release clears shared pressed style without toggling twice");
+                SendMessageW(window.hwnd_, WM_KEYDOWN, VK_SPACE, 0);
+                Check(window.playback_keyboard_focus_ == 1 && !window.animation_active_,
+                    "existing playback shortcut selects the matching shared focus indicator");
+                SendMessageW(window.hwnd_, WM_KEYUP, VK_SPACE, 0);
+                const auto focused = StylePixels(window, true, area);
+                SendMessageW(window.hwnd_, WM_KILLFOCUS, reinterpret_cast<WPARAM>(owner), 0);
+                Check(window.playback_pressed_ == -1 && window.playback_keyboard_focus_ == -1 &&
+                    StylePixels(window, true, area) != focused, "preview shared focus ring clears on focus loss");
+                SendMessageW(window.hwnd_, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                SendMessageW(window.hwnd_, WM_CAPTURECHANGED, 0, 0);
+                Check(window.playback_pressed_ == -1, "preview capture loss clears the button pressed state");
+                ReleaseCapture();
+                window.ResetPlayback(); window.ResetAnimation();
+                window.EnsureTextLayout(L"MMMM selected preview text", false, 420 * scale);
+                window.sel_anchor_ = 0; window.sel_focus_ = 13;
+                window.accent_ = HexColor(0x0078D4);
+                const auto text_area = window.TextViewport();
+                const auto blue = StylePixels(window, false, text_area);
+                window.accent_ = HexColor(0xD00090);
+                const auto magenta = StylePixels(window, false, text_area);
+                Check(high_contrast ? blue == magenta : blue != magenta,
+                    "selection pixels follow the accent while high contrast keeps its readable system outline");
+                window.ResetTextState();
+            }
+        }
+        for (const wchar_t* language : {L"zh-CN", L"en-US"}) for (const float scale : {1.0f, 1.5f, 2.0f}) {
+            l10n::SetLanguage(language);
+            window.scale_ = scale;
+            window.compositor_.RecreateTextFormats(scale); window.RecreateFormats();
+            window.compositor_.Resize(static_cast<int>(480 * scale), static_cast<int>(320 * scale));
+            window.frame_count_ = 4;
+            const l10n::StringId ids[] = {l10n::StringId::PlaybackPrevFrame,
+                l10n::StringId::PlaybackPlay, l10n::StringId::PlaybackNextFrame};
+            bool fits = true;
+            for (int i = 0; i < 3; ++i) {
+                const auto rc = window.PlaybackButtonRect(i);
+                fits = fits && window.painter_.MeasureButtonWidth(l10n::Get(ids[i])) <= rc.right - rc.left &&
+                    rc.bottom - rc.top == 32 * scale && window.HitPlaybackButton(
+                        {static_cast<LONG>((rc.left + rc.right) / 2), static_cast<LONG>((rc.top + rc.bottom) / 2)}) == i;
+            }
+            const auto track = window.PlaybackTrackRect();
+            Check(fits && track.left > window.PlaybackButtonRect(2).right && track.right - track.left > 80 * scale &&
+                track.right < window.PlaybackRect().right,
+                "localized Body14 playback labels fit draw and hit bounds with a draggable timeline at minimum width");
+        }
+        l10n::SetLanguage(L"zh-CN");
+        window.Close();
+    }
     static void Run(HWND owner) {
         QuickPreviewWindow window;
         auto cache = std::make_shared<ThumbnailCache>();
@@ -793,12 +921,24 @@ void PickerStyle(HWND owner) {
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
+    bool preview_style_only = false;
     for (int i = 1; i < argc; ++i) {
+        if (std::wstring_view(argv[i]) == L"--preview-style-only") preview_style_only = true;
         if (std::wstring_view(argv[i]) == L"--dialog-buttons-only") dialog_buttons_only = true;
+        if (std::wstring_view(argv[i]) == L"--dialog-titles-only") dialog_titles_only = dialog_buttons_only = true;
         if (std::wstring_view(argv[i]) == L"--color-picker-only") color_picker_only = true;
     }
     compat::EnableDpiAwareness(); OleInitialize(nullptr); InitCommonControls();
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
+    if (preview_style_only) {
+        HWND owner = CreateWindowExW(0, L"STATIC", L"Preview style fixture", WS_OVERLAPPEDWINDOW,
+            20, 20, 1000, 720, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ShowWindow(owner, SW_SHOW);
+        ui::QuickPreviewPlaybackProbe::Style(owner);
+        DestroyWindow(owner); OleUninitialize();
+        std::printf("failures=%d\n", failures);
+        return failures ? 1 : 0;
+    }
     output = std::filesystem::absolute(color_picker_only ? L"bench_data/popup-style/color-picker" : dialog_buttons_only ? L"bench_data/ui-consistency-fix/dialogs"
         : L"bench_data/audit-fixes-20261030-remaining/ui-build/screenshots");
     std::filesystem::create_directories(output);
@@ -832,22 +972,24 @@ int wmain(int argc, wchar_t** argv) {
     for (bool dark : {false, true}) {
         if (dark && !dialog_buttons_only) break;
         dialog_dark = dark;
-        for (int resolution : {96, 144}) {
+        for (int resolution : {96, 144, 168, 192}) {
+            if (!dialog_titles_only && resolution > 144) continue;
             dpi = resolution;
-            if (!dialog_buttons_only) {
+            if (!dialog_buttons_only || dialog_titles_only) {
                 batch = false; active_class = L"PulseAdvancedSearchWindow";
                 drive_timer = SetTimer(nullptr, 0, 220, Drive);
                 model::AdvancedSearchSpec spec; spec.current_folder = output.wstring();
                 spec.location = model::LocationScope::CurrentFolder; spec.content = L"alpha";
-                const auto search = ui::ShowAdvancedSearchDialog(owner, spec, false, ui::HexColor(0x3574BA));
-                Check(search.accepted && search.query.find(L"ww:") != std::wstring::npos &&
+                const auto search = ui::ShowAdvancedSearchDialog(owner, spec, dark, ui::HexColor(0x3574BA));
+                if (dialog_titles_only) Check(!search.accepted, "title fixture closes advanced search without submitting a query");
+                else Check(search.accepted && search.query.find(L"ww:") != std::wstring::npos &&
                     search.query.find(L"case:") != std::wstring::npos, "keyboard checkboxes affect the compiled advanced query");
             }
             batch = true; active_class = L"PulseBatchRenameWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
             const auto renamed = ui::ShowBatchRenameDialog(owner, {left.wstring()}, dark,
                 ui::HexColor(dialog_buttons_only ? 0x0078D4 : 0x3574BA));
             Check(!renamed.accepted, "batch fixture closes without performing a rename");
-            if (dialog_buttons_only) {
+            if (dialog_buttons_only && !dialog_titles_only) {
                 submit_batch = true;
                 drive_timer = SetTimer(nullptr, 0, 220, Drive);
                 const auto plan = ui::ShowBatchRenameDialog(owner, {left.wstring()}, dark, ui::HexColor(0x0078D4));
@@ -865,7 +1007,8 @@ int wmain(int argc, wchar_t** argv) {
             };
             const auto connected = ui::ShowConnectServerDialog(owner, server, dark,
                 ui::HexColor(dialog_buttons_only ? 0x0078D4 : 0x3574BA));
-            Check(connected.accepted && !connected.pin, "keyboard server pin activation changes the submitted result");
+            if (dialog_titles_only) Check(!connected.accepted, "title fixture closes server dialog without connecting");
+            else Check(connected.accepted && !connected.pin, "keyboard server pin activation changes the submitted result");
             if (dialog_buttons_only) continue;
             active_class = L"PulseFileConflictWindow"; drive_timer = SetTimer(nullptr, 0, 220, Drive);
             ops::ConflictItemInfo conflict; conflict.source = left.wstring(); conflict.destination = right.wstring();

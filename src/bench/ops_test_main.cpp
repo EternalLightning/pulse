@@ -10,7 +10,6 @@
 // bench_data/opstest (created/cleaned by this test). Prints one PASS/FAIL
 // line per check; exit code 0 iff all checks pass.
 #include "../ops/ops_manager.h"
-#include "file_operation_matrix.h"
 #include "../ops/delete_operation.h"
 #include "../ops/clipboard.h"
 #include "../ops/drive_label_backend.h"
@@ -18,7 +17,6 @@
 #include "shell_completion_cases.h"
 #include "undo_identity_cases.h"
 #include "mutation_undo_cases.h"
-#include "source_contract_cases.h"
 #include "replace_running_exe_cases.h"
 #include "delete_progress_cases.h"
 #include "clipboard_isolation_cases.h"
@@ -38,13 +36,6 @@ using namespace pulse;
 
 namespace pulse::ops {
 struct TransferIntegrationProbe {
-    static void IdentityQuery(OpsManager& manager, decltype(&GetFileInformationByHandleEx) query) {
-        manager.transfer_identity_query_ = query;
-    }
-    static void SourceCleanupGate(OpsManager& manager, std::function<void(const std::wstring&)> gate) {
-        manager.before_source_cleanup_ = std::move(gate);
-        manager.force_copy_move_ = true;
-    }
     static void ExecuteDriveRequest(OpsManager& manager, OpRequest request) {
         OpsManager::QueueItem item;
         item.req = std::move(request); item.seq = 1;
@@ -1075,36 +1066,13 @@ int RunNetworkIdentityRegressions() {
               L"replace identity fixture while old object remains open");
         Check(!guard.Check(source, error), L"legacy snapshot rejects replaced object at same pathname");
     }
-    ops::TransferIntegrationProbe::IdentityQuery(g_ops, LegacyIdentityQuery);
-    g_ops.Start([] {});
-    auto status = RunOp(SimpleOp(ops::OpType::Copy, {source.c_str()}, (root + L"\\dst").c_str()));
-    Check(status.phase == ops::OpPhase::Completed && status.last_error.empty() &&
-          Exists(target) && FileHash(source) == FileHash(target),
-          L"legacy identity supports directory creation, CopyFile2 ownership and final rename");
-    auto replace = SimpleOp(ops::OpType::Copy, {source.c_str()}, (root + L"\\dst").c_str());
-    replace.collision_policy = ops::CollisionPolicy::Replace;
-    status = RunOp(std::move(replace));
-    if (status.phase != ops::OpPhase::Completed)
-        wprintf(L"[diagnostic] legacy replace phase=%d hr=0x%08lX path=%s error=%s\n",
-            static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.failed_path.c_str(), status.last_error.c_str());
-    Check(status.phase == ops::OpPhase::Completed && FileHash(source) == FileHash(target),
-          L"legacy identity supports checked replacement and backup cleanup");
-    const auto empty = root + L"\\empty.bin";
-    Check(MakeFile(empty, payload, 0), L"empty copy source created");
-    status = RunOp(SimpleOp(ops::OpType::Copy, {empty.c_str()}, (root + L"\\dst").c_str()));
-    Check(status.phase == ops::OpPhase::Completed && Exists(root + L"\\dst\\empty.bin"),
-          L"empty CopyFile2 stream retains legacy destination ownership");
-    g_ops.Stop();
     std::filesystem::remove_all(root, cleanup_error);
     Check(!cleanup_error, L"isolated identity fixture cleaned");
-    // Reuse the relevant retargeted-junction and hard-link checks with the same fallback.
-    const int result = RunReviewRegressions(L"links");
-    ops::TransferIntegrationProbe::IdentityQuery(g_ops, GetFileInformationByHandleEx);
-    return result;
+    return g_fail ? 1 : 0;
 }
 
 void TestTransferControl(const std::wstring& srcDir, const std::wstring& dstDir) {
-    // --- 12. CopyFile2 bytes, pause/resume, cancel and atomic replacement ----
+    // --- Shell pause, resume, cancellation and replacement ----
     {
         const std::wstring large_source = srcDir + L"\\large.bin";
         const std::wstring large_target = dstDir + L"\\large.bin";
@@ -1122,18 +1090,19 @@ void TestTransferControl(const std::wstring& srcDir, const std::wstring& dstDir)
             if (g_ops.Status().completed_ops > previous) break;
             Sleep(1);
         }
-        const uint64_t paused_bytes = g_ops.Status().transferred_bytes;
+        const auto paused_status = g_ops.Status();
         Sleep(120);
-        Check(paused, L"CopyFile2 acknowledges pause");
-        Check(!paused || g_ops.Status().transferred_bytes == paused_bytes,
-              L"transferred bytes remain stable while paused");
+        Check(paused, L"Shell operation acknowledges pause");
+        Check(!paused || (g_ops.Status().percent == paused_status.percent &&
+            g_ops.Status().completed_items == paused_status.completed_items),
+              L"Shell operation progress remains stable while paused");
         g_ops.ResumeCurrent();
         Check(WaitOpDone(previous), L"paused copy resumes and completes");
         const auto completed = g_ops.Status();
         if (!completed.last_error.empty()) wprintf(L"resume error: %s\n", completed.last_error.c_str());
-        Check(completed.total_bytes == large_bytes && completed.transferred_bytes == large_bytes &&
-              completed.total_items == 1 && completed.completed_items == 1,
-              L"CopyFile2 publishes real byte and item totals");
+        Check(completed.total_items == 1 && completed.completed_items == 1 &&
+              completed.phase == ops::OpPhase::Completed,
+              L"Shell copy publishes completed item counts");
         Check(FileHash(large_target) == source_hash, L"copy source and destination hashes match");
 
         DeleteFileW(large_target.c_str());
@@ -1308,160 +1277,6 @@ int RunBatchReplacementRegressions(const std::wstring& parent = {}) {
     return g_fail ? 1 : 0;
 }
 
-int RunTransferUpdateRegressions() {
-    setvbuf(stdout, nullptr, _IONBF, 0);
-    const auto root = SandboxRoot() + L"-transfer-updates-" + std::to_wstring(GetCurrentProcessId());
-    const auto src = root + L"\\src", dst = root + L"\\dst";
-    std::error_code error;
-    std::filesystem::create_directories(src, error);
-    std::filesystem::create_directories(dst, error);
-    if (error) return 2;
-    const char old_data[] = "old", new_data[] = "replacement";
-    std::atomic<int> observe{0};
-    std::atomic<bool> direct_seen{false}, temporary_seen{false}, old_target_seen{false};
-    HANDLE rollback_lock = INVALID_HANDLE_VALUE;
-    g_ops.Start([&] {
-        const auto status = g_ops.Status();
-        if (!status.active || status.phase != ops::OpPhase::Running) return;
-        const int mode = observe.load();
-        if ((mode == 1 || mode == 5) && status.current_item == L"small.bin" &&
-            status.completed_items == 0 && Exists(dst + L"\\small.bin")) {
-            direct_seen.store(true);
-            if (mode == 5) g_ops.CancelCurrent();
-        }
-        if (mode == 2 && status.current_item == L"large.bin" && status.completed_items == 0) {
-            for (const auto& entry : std::filesystem::directory_iterator(dst)) {
-                if (entry.path().filename().wstring().find(L".pulse-copy-") != std::wstring::npos &&
-                    !Exists(dst + L"\\large.bin")) temporary_seen.store(true);
-            }
-        }
-        if (mode == 3 && status.current_item == L"small.bin" && status.completed_items == 0 &&
-            FileSize(dst + L"\\small.bin") == sizeof(old_data)) old_target_seen.store(true);
-        if (mode == 4 && status.completed_items == 1 && rollback_lock == INVALID_HANDLE_VALUE) {
-            rollback_lock = CreateFileW((dst + L"\\rollback-a.txt").c_str(), GENERIC_READ,
-                FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-        }
-    });
-
-    Check(MakePatternFile(src + L"\\small.bin", 2ull << 20), L"create small direct copy fixture");
-    observe.store(1);
-    auto status = RunOp(SimpleOp(ops::OpType::Copy, {(src + L"\\small.bin").c_str()}, dst.c_str()));
-    observe.store(0);
-    Check(status.phase == ops::OpPhase::Completed && direct_seen.load() &&
-        FileHash(src + L"\\small.bin") == FileHash(dst + L"\\small.bin"),
-        L"small non-conflicting copy writes final name directly");
-    DeleteFileW((dst + L"\\small.bin").c_str());
-    direct_seen.store(false);
-    observe.store(5);
-    status = RunOp(SimpleOp(ops::OpType::Copy, {(src + L"\\small.bin").c_str()}, dst.c_str()));
-    observe.store(0);
-    Check(status.phase == ops::OpPhase::Cancelled && direct_seen.load() && !Exists(dst + L"\\small.bin"),
-        L"cancel removes only the owned partial direct copy");
-
-    Check(MakePatternFile(src + L"\\large.bin", 64ull << 20), L"create 64 MiB threshold fixture");
-    observe.store(2);
-    status = RunOp(SimpleOp(ops::OpType::Copy, {(src + L"\\large.bin").c_str()}, dst.c_str()));
-    observe.store(0);
-    Check(status.phase == ops::OpPhase::Completed && temporary_seen.load() &&
-        FileHash(src + L"\\large.bin") == FileHash(dst + L"\\large.bin"),
-        L"64 MiB copy retains temporary name until commit");
-    MakeFile(dst + L"\\small.bin", old_data, sizeof(old_data));
-    observe.store(3);
-    auto replacement = SimpleOp(ops::OpType::Copy, {(src + L"\\small.bin").c_str()}, dst.c_str());
-    replacement.collision_policy = ops::CollisionPolicy::Replace;
-    status = RunOp(std::move(replacement));
-    observe.store(0);
-    Check(status.phase == ops::OpPhase::Completed && old_target_seen.load() &&
-        FileHash(src + L"\\small.bin") == FileHash(dst + L"\\small.bin"),
-        L"small replacement retains original until temporary copy commits");
-
-    g_ops.UndoFromJson(L"[]");
-    const auto dir_a = src + L"\\move-a", dir_b = src + L"\\move-b";
-    MakeDir(dir_a); MakeDir(dir_b); MakeDir(dir_a + L"\\nested");
-    MakeFile(dir_a + L"\\nested\\leaf.txt", new_data, sizeof(new_data));
-    MakeFile(dir_b + L"\\leaf.txt", new_data, sizeof(new_data));
-    auto identity_a = ops::FileObjectReference::Open(dir_a);
-    auto identity_b = ops::FileObjectReference::Open(dir_b);
-    status = RunOp(SimpleOp(ops::OpType::Move, {dir_a.c_str(), dir_b.c_str()}, dst.c_str()));
-    if (status.phase != ops::OpPhase::Completed)
-        wprintf(L"[diagnostic] multi move: phase=%d hr=0x%08lX %s\n", static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.last_error.c_str());
-    auto moved_a = ops::FileObjectReference::Open(dst + L"\\move-a");
-    auto moved_b = ops::FileObjectReference::Open(dst + L"\\move-b");
-    Check(status.phase == ops::OpPhase::Completed && identity_a.Matches(moved_a.Get()) &&
-        identity_b.Matches(moved_b.Get()) && !Exists(dir_a) && !Exists(dir_b),
-        L"same-volume multi-directory move preserves root identities through rename");
-    auto previous = g_ops.Status().completed_ops;
-    const bool move_succeeded = status.phase == ops::OpPhase::Completed;
-    if (move_succeeded) g_ops.Undo();
-    Check(move_succeeded && WaitOpDone(previous) && g_ops.Status().phase == ops::OpPhase::Completed &&
-        Exists(dir_a + L"\\nested\\leaf.txt") && Exists(dir_b + L"\\leaf.txt") && !g_ops.CanUndo(),
-        L"same-volume multi-directory rename undo restores both roots");
-
-    const auto retry_a = src + L"\\retry-a.txt", retry_b = src + L"\\retry-b.txt";
-    MakeFile(retry_a, new_data, sizeof(new_data)); MakeFile(retry_b, new_data, sizeof(new_data));
-    HANDLE locked = CreateFileW(retry_b.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    auto retry_copy = SimpleOp(ops::OpType::Copy, {retry_a.c_str(), retry_b.c_str()}, dst.c_str());
-    retry_copy.collision_policy = ops::CollisionPolicy::KeepBoth;
-    status = RunOp(std::move(retry_copy));
-    wprintf(L"[diagnostic] locked copy: phase=%d hr=0x%08lX current=%d %s\n", static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), g_ops.IsLockedFailureCurrent(status.task_id), status.last_error.c_str());
-    Check(status.phase == ops::OpPhase::Failed && Exists(dst + L"\\retry-a.txt") &&
-        g_ops.IsLockedFailureCurrent(status.task_id), L"locked second copy retains resumable first success");
-    if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
-    MakeFile(dst + L"\\retry-a.txt", old_data, sizeof(old_data));
-    previous = g_ops.Status().completed_ops;
-    Check(g_ops.RetryLockedOperation(status.task_id, false) && WaitOpDone(previous) &&
-        g_ops.Status().phase == ops::OpPhase::Completed && Exists(dst + L"\\retry-b.txt") &&
-        FileSize(dst + L"\\retry-a.txt") == sizeof(old_data) && !Exists(dst + L"\\retry-a - 副本.txt"),
-        L"lock retry skips completed copy and does not create KeepBoth duplicate");
-
-    const auto retry_dir_a = src + L"\\retry-dir-a", retry_dir_b = src + L"\\retry-dir-b";
-    MakeDir(retry_dir_a); MakeDir(retry_dir_b);
-    MakeFile(retry_dir_a + L"\\leaf.txt", new_data, sizeof(new_data));
-    MakeFile(retry_dir_b + L"\\leaf.txt", new_data, sizeof(new_data));
-    locked = CreateFileW(retry_dir_b.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    auto retry_move = SimpleOp(ops::OpType::Move, {retry_dir_a.c_str(), retry_dir_b.c_str()}, dst.c_str());
-    retry_move.collision_policy = ops::CollisionPolicy::KeepBoth;
-    status = RunOp(std::move(retry_move));
-    Check(status.phase == ops::OpPhase::Failed && !Exists(retry_dir_a) &&
-        Exists(dst + L"\\retry-dir-a\\leaf.txt") && g_ops.IsLockedFailureCurrent(status.task_id),
-        L"locked second directory move records first atomic root as completed");
-    if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
-    previous = g_ops.Status().completed_ops;
-    Check(g_ops.RetryLockedOperation(status.task_id, false) && WaitOpDone(previous) &&
-        g_ops.Status().phase == ops::OpPhase::Completed && !Exists(retry_dir_b) &&
-        Exists(dst + L"\\retry-dir-b\\leaf.txt") && !Exists(dst + L"\\retry-dir-a - 副本"),
-        L"directory retry skips moved root instead of probing its absent descendants");
-
-    MakeFile(src + L"\\rollback-a.txt", new_data, sizeof(new_data));
-    MakeFile(src + L"\\rollback-b.txt", new_data, sizeof(new_data));
-    MakeFile(dst + L"\\rollback-a.txt", old_data, sizeof(old_data));
-    locked = CreateFileW((src + L"\\rollback-b.txt").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    observe.store(4);
-    auto rollback = SimpleOp(ops::OpType::Copy,
-        {(src + L"\\rollback-a.txt").c_str(), (src + L"\\rollback-b.txt").c_str()}, dst.c_str());
-    rollback.collision_policy = ops::CollisionPolicy::Replace;
-    status = RunOp(std::move(rollback));
-    observe.store(0);
-    std::wstring backup_path;
-    for (const auto& entry : std::filesystem::directory_iterator(dst)) {
-        if (entry.path().filename().wstring().find(L".pulse-backup-") != std::wstring::npos)
-            backup_path = entry.path().wstring();
-    }
-    Check(status.phase == ops::OpPhase::Failed && !backup_path.empty() &&
-        status.last_error.find(backup_path) != std::wstring::npos && FileSize(backup_path) == sizeof(old_data),
-        L"failed replacement rollback reports retained backup containing original data");
-    if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
-    if (rollback_lock != INVALID_HANDLE_VALUE) CloseHandle(rollback_lock);
-    g_ops.Stop();
-    identity_a.handle.reset(); identity_b.handle.reset();
-    moved_a.handle.reset(); moved_b.handle.reset();
-    std::filesystem::remove_all(root, error);
-    Check(!error && !Exists(root), L"isolated transfer update fixture cleaned");
-    wprintf(L"== transfer updates: %d passed, %d failed ==\n", g_pass, g_fail);
-    return g_fail ? 1 : 0;
-}
-
 int RunTerminalArgumentTests() {
     Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
           L"terminal command quotes a directory");
@@ -1474,20 +1289,13 @@ int RunTerminalArgumentTests() {
 }
 
 int RunOpsTests(int argc, wchar_t** argv) {
+    if (argc > 1 && std::wstring_view(argv[1]).starts_with(L"--file-operation-")) {
+        std::fprintf(stderr, "file-operation matrix/performance modes moved to pulse_file_operation_matrix_test\n");
+        return 2;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--replacement-fixture-child") return 0;
     if (argc == 3 && std::wstring_view(argv[1]) == L"--batch-replacement-parent")
         return RunBatchReplacementRegressions(argv[2]);
-    if (argc >= 2 && (std::wstring_view(argv[1]) == L"--file-operation-matrix" ||
-                      std::wstring_view(argv[1]) == L"--file-operation-perf" ||
-                      std::wstring_view(argv[1]) == L"--file-operation-perf-few")) {
-        if (argc != 3 && argc != 4) {
-            fprintf(stderr, "usage: pulse_ops_test --file-operation-matrix|--file-operation-perf|--file-operation-perf-few LOCAL_PARENT [NETWORK_PARENT]\n");
-            return 2;
-        }
-        return pulse::bench::RunFileOperationMatrix(argv[2], argc == 4 ? argv[3] : L"",
-            std::wstring_view(argv[1]) != L"--file-operation-matrix",
-            std::wstring_view(argv[1]) == L"--file-operation-perf-few");
-    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--json-parser-only")
         return RunJsonUndoParserRegressions();
     if (argc == 3 && std::wstring_view(argv[1]) == L"--network-fixture") {
@@ -1607,15 +1415,9 @@ int RunOpsTests(int argc, wchar_t** argv) {
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
         }
         if (filter == L"directory-skip") return RunDirectorySkipRegressions();
-        if (filter == L"transfer-updates") return RunTransferUpdateRegressions();
         if (filter == L"running-exe-replacement") {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return bench::RunRunningExeReplacementChecks(SandboxRoot() + L"-running-exe-" +
-                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-        }
-        if (filter == L"source-contract") {
-            setvbuf(stdout, nullptr, _IONBF, 0);
-            return ops::RunSourceContractRegressions(SandboxRoot() + L"-source-contract-" +
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
         }
         if (filter == L"shell-completion") return ops::RunShellCompletionRegressions();
@@ -1628,167 +1430,6 @@ int RunOpsTests(int argc, wchar_t** argv) {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunUndoIdentityRegressions(SandboxRoot() + L"-undo-identity-" +
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-        }
-        if (filter == L"source-reparse-identity") {
-            setvbuf(stdout, nullptr, _IONBF, 0);
-            const auto root = SandboxRoot() + L"-source-reparse-" + std::to_wstring(GetCurrentProcessId()) +
-                L"-" + std::to_wstring(GetTickCount64());
-            const auto from = root + L"\\src", target = root + L"\\dst";
-            const auto outside = root + L"\\outside", unrelated = root + L"\\unrelated";
-            const auto holdings = root + L"\\holdings";
-            std::error_code error;
-            for (const auto& path : {root, from, target, outside, unrelated, holdings})
-                std::filesystem::create_directories(path, error);
-            if (error) return 2;
-            const char payload[] = "unmodified junction target";
-            Check(MakeFile(outside + L"\\payload.txt", payload, sizeof(payload)), L"create isolated junction target bytes");
-            const auto link = from + L"\\link", held = holdings + L"\\held";
-            Check(MakeJunction(link, outside), L"create isolated source junction");
-            g_ops.Start([] {});
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            auto status = RunOp(SimpleOp(ops::OpType::Move, {link.c_str()}, target.c_str()));
-            Check(status.phase == ops::OpPhase::Completed && !Exists(link) && Exists(target + L"\\link\\payload.txt") &&
-                Exists(outside + L"\\payload.txt"), L"copied reparse move deletes only original link and retains target contents");
-            RemoveDirectoryW((target + L"\\link").c_str());
-            Check(MakeJunction(link, outside), L"recreate isolated source junction for replacement");
-            bool replaced = false;
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
-                replaced = MoveFileW(path.c_str(), held.c_str()) && MakeJunction(path, unrelated);
-            });
-            status = RunOp(SimpleOp(ops::OpType::Move, {link.c_str()}, target.c_str()));
-            Check(replaced && status.phase == ops::OpPhase::Failed && Exists(link) && Exists(held) &&
-                Exists(target + L"\\link\\payload.txt") && Exists(outside + L"\\payload.txt"),
-                L"replacement junction survives cleanup and copied link keeps original target");
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            g_ops.Stop();
-            for (const auto& path : {link, held, target + L"\\link"}) RemoveDirectoryW(path.c_str());
-            std::filesystem::remove_all(root, error);
-            Check(!error && !Exists(root), L"isolated source reparse fixture cleaned");
-            return g_fail ? 1 : 0;
-        }
-        if (filter == L"move-undo-source-identity") {
-            setvbuf(stdout, nullptr, _IONBF, 0);
-            const auto root = SandboxRoot() + L"-move-undo-source-identity-" +
-                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
-            const auto source = root + L"\\src", target = root + L"\\dst";
-            const auto original_folder = source + L"\\folder", moved_folder = target + L"\\folder";
-            const auto holdings = root + L"\\holdings";
-            const auto held_folder = holdings + L"\\original-held";
-            std::error_code error;
-            std::filesystem::create_directories(original_folder, error);
-            std::filesystem::create_directories(target, error);
-            std::filesystem::create_directories(holdings, error);
-            if (error) return 2;
-            const char payload[] = "original payload";
-            Check(MakeFile(original_folder + L"\\payload.txt", payload, sizeof(payload)),
-                L"create partial move inverse identity fixture");
-            g_ops.Start([] {});
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            auto status = RunOp(SimpleOp(ops::OpType::Move, {original_folder.c_str()}, target.c_str()));
-            Check(status.phase == ops::OpPhase::Completed && g_ops.CanUndo(),
-                L"directory move records its inverse");
-            MakeDir(original_folder); // Existing original forces a per-file merge inverse.
-            bool replaced = false;
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
-                if (path == moved_folder && !replaced)
-                    replaced = MoveFileW(path.c_str(), held_folder.c_str()) &&
-                        CreateDirectoryW(path.c_str(), nullptr);
-            });
-            const auto previous = g_ops.Status().completed_ops;
-            g_ops.Undo();
-            Check(WaitOpDone(previous), L"partial move inverse finishes after source replacement");
-            status = g_ops.Status();
-            Check(replaced && status.phase == ops::OpPhase::Failed &&
-                status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
-                status.failed_path == moved_folder,
-                L"partial move inverse rejects the replaced source directory identity");
-            Check(Exists(moved_folder) && Exists(held_folder) &&
-                FileSize(original_folder + L"\\payload.txt") == sizeof(payload),
-                L"failed inverse recovery preserves the replacement empty directory and restored file");
-            const auto unresolved = g_ops.UndoToJson();
-            Check(!g_ops.CanUndo() && unresolved.find(L"folder") != std::wstring::npos &&
-                unresolved.find(L"\"sup\":false") != std::wstring::npos,
-                L"identity rejection retains the unresolved inverse without authorizing a replacement retry");
-            const auto rejected_previous = g_ops.Status().completed_ops;
-            g_ops.Undo();
-            Check(g_ops.Status().completed_ops == rejected_previous && Exists(moved_folder),
-                L"repeating rejected Undo does not admit the replacement directory as a new source");
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            const auto ordinary_folder = source + L"\\ordinary", ordinary_moved = target + L"\\ordinary";
-            MakeDir(ordinary_folder);
-            Check(MakeFile(ordinary_folder + L"\\payload.txt", payload, sizeof(payload)),
-                L"create authenticated directory inverse control");
-            status = RunOp(SimpleOp(ops::OpType::Move, {ordinary_folder.c_str()}, target.c_str()));
-            MakeDir(ordinary_folder);
-            const auto ordinary_previous = g_ops.Status().completed_ops;
-            g_ops.Undo();
-            Check(status.phase == ops::OpPhase::Completed && WaitOpDone(ordinary_previous) &&
-                g_ops.Status().phase == ops::OpPhase::Completed && !Exists(ordinary_moved) &&
-                FileSize(ordinary_folder + L"\\payload.txt") == sizeof(payload),
-                L"authenticated directory inverse still restores files and removes its own empty source");
-            g_ops.Stop();
-            std::filesystem::remove_all(root, error);
-            Check(!error && !Exists(root), L"partial move inverse identity fixture cleaned");
-            return g_fail ? 1 : 0;
-        }
-        if (filter == L"source-identity") {
-            setvbuf(stdout, nullptr, _IONBF, 0);
-            const auto root = SandboxRoot() + L"-source-identity-" + std::to_wstring(GetCurrentProcessId()) +
-                L"-" + std::to_wstring(GetTickCount64());
-            const auto source = root + L"\\src", target = root + L"\\dst";
-            const auto holdings = root + L"\\holdings";
-            std::error_code error;
-            std::filesystem::create_directories(source, error);
-            std::filesystem::create_directories(target, error);
-            std::filesystem::create_directories(holdings, error);
-            if (error) return 2;
-            g_ops.Start([] {});
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            const char original[] = "original object", replacement[] = "unrelated replacement object";
-            for (const auto* name : {L"normal.txt", L"readonly.txt", L"empty.txt"}) {
-                const auto from = source + L"\\" + name, to = target + L"\\" + name;
-                const DWORD bytes = std::wstring_view(name) == L"empty.txt" ? 0 : sizeof(original);
-                Check(MakeFile(from, original, bytes), L"create isolated move source");
-                if (std::wstring_view(name) == L"readonly.txt")
-                    Check(SetFileAttributesW(from.c_str(), FILE_ATTRIBUTE_READONLY) != FALSE, L"mark original source readonly");
-                const auto status = RunOp(SimpleOp(ops::OpType::Move, {from.c_str()}, target.c_str()));
-                if (!status.last_error.empty()) wprintf(L"move error: %s\n", status.last_error.c_str());
-                Check(status.phase == ops::OpPhase::Completed && !Exists(from) && FileSize(to) == bytes,
-                    L"copied move removes only authenticated original, including readonly and empty files");
-            }
-            const auto from = source + L"\\replaced.txt", held = holdings + L"\\original-held.txt";
-            const auto to = target + L"\\replaced.txt";
-            Check(MakeFile(from, original, sizeof(original)), L"create replacement race fixture");
-            const auto original_hash = FileHash(from);
-            bool replaced = false;
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
-                replaced = MoveFileW(path.c_str(), held.c_str()) && MakeFile(path, replacement, sizeof(replacement)) &&
-                    SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_READONLY);
-            });
-            auto status = RunOp(SimpleOp(ops::OpType::Move, {from.c_str()}, target.c_str()));
-            Check(replaced && status.phase == ops::OpPhase::Failed && status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
-                status.failed_path == from, L"replacement after destination commit fails with exact source identity error");
-            Check(FileSize(from) == sizeof(replacement) && (GetFileAttributesW(from.c_str()) & FILE_ATTRIBUTE_READONLY) &&
-                FileHash(to) == original_hash && FileHash(held) == original_hash,
-                L"replacement content and attributes survive while committed copy retains original bytes");
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            const auto folder = source + L"\\folder", old_folder = holdings + L"\\folder-held";
-            MakeDir(folder);
-            bool folder_replaced = false;
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, [&](const std::wstring& path) {
-                if (path == folder) folder_replaced = MoveFileW(path.c_str(), old_folder.c_str()) &&
-                    CreateDirectoryW(path.c_str(), nullptr) && MakeFile(path + L"\\new.txt", replacement, sizeof(replacement));
-            });
-            status = RunOp(SimpleOp(ops::OpType::Move, {folder.c_str()}, target.c_str()));
-            Check(folder_replaced && status.phase == ops::OpPhase::Failed && Exists(folder + L"\\new.txt") &&
-                Exists(target + L"\\folder"), L"directory cleanup rejects replacement and keeps unrelated descendants");
-            ops::TransferIntegrationProbe::SourceCleanupGate(g_ops, {});
-            g_ops.Stop();
-            SetFileAttributesW(from.c_str(), FILE_ATTRIBUTE_NORMAL);
-            std::filesystem::remove_all(root, error);
-            Check(!error && !Exists(root), L"isolated source identity fixture cleaned");
-            wprintf(L"== source identity: %d passed, %d failed ==\n", g_pass, g_fail);
-            return g_fail ? 1 : 0;
         }
         if (filter == L"transfer-control") {
             setvbuf(stdout, nullptr, _IONBF, 0);

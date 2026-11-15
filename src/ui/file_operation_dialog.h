@@ -35,6 +35,8 @@ struct ConflictDialogInspection {
     D2D1_RECT_F close{}, checkbox{}, details{}, cancel{};
     int focus = 0;
     bool expanded = false;
+    float title_font_size = 0.0f;
+    DWRITE_FONT_WEIGHT title_weight = DWRITE_FONT_WEIGHT_NORMAL;
 };
 struct ConfirmDialogInspection {
     size_t row_count = 0;
@@ -48,6 +50,8 @@ struct ConfirmDialogInspection {
     D2D1_RECT_F checkbox{};
     std::wstring message;
     int focus = 0;
+    float title_font_size = 0.0f;
+    DWRITE_FONT_WEIGHT title_weight = DWRITE_FONT_WEIGHT_NORMAL;
 };
 #endif
 

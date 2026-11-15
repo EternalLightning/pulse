@@ -432,7 +432,7 @@ void OpsManager::RunDelete(const QueueItem& item,
                     !item.retry_source_references[index].Matches(reference.Get())) reference = {};
                 else reference = item.retry_source_references[index];
             }
-            if (!reference.Get()) {
+            if (!reference.Get() && (item.req.is_undo || !item.retry_source_references.empty())) {
                 finish(l10n::Get(l10n::StringId::OperationFailedMessage), {}, false, false,
                     {}, {}, false, {}, HRESULT_FROM_WIN32(ERROR_FILE_INVALID), root);
                 return;
@@ -521,12 +521,17 @@ void OpsManager::RunDelete(const QueueItem& item,
             const auto index = static_cast<size_t>(source - admitted.req.sources.begin());
             auto current = FileObjectReference::Open(path);
             if (index >= admitted.retry_source_references.size() ||
-                !admitted.retry_source_references[index].Matches(current.Get())) {
+                (admitted.retry_source_references[index].Get() &&
+                 !admitted.retry_source_references[index].Matches(current.Get()))) {
                 hr = static_cast<uint32_t>(HRESULT_FROM_WIN32(ERROR_FILE_INVALID));
                 error = l10n::Get(l10n::StringId::OperationFailedMessage); failed_path = path; break;
             }
             expected_identities.push_back(admitted.retry_source_references[index].identity);
         }
+        // Identity proof is mandatory for undo/retry. Ordinary Shell operations
+        // also work on providers that cannot expose persistent file IDs.
+        if (std::any_of(expected_identities.begin(), expected_identities.end(), [](const auto& value) { return !value.Valid(); }))
+            expected_identities.clear();
         if (FAILED(static_cast<HRESULT>(hr))) break;
         shell_activity_tick_ = GetTickCount64();
         auto& client = ipc::ShellClient::Instance();
@@ -627,7 +632,6 @@ void OpsManager::RunDelete(const QueueItem& item,
             format::FileOperationMessageCode(static_cast<HRESULT>(hr)) == ERROR_ELEVATION_REQUIRED)) {
         QueueItem retry = RemainingDeleteRetry(admitted, *accepted, actual);
         if (!retry.req.sources.empty()) {
-            CaptureElevationFailure(retry, static_cast<HRESULT>(hr), failed_path);
             if (!item.req.undo_revision) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), failed_path,
             [&] { return stopping_.load() || delete_cancel_.load(); });
         }

@@ -20,10 +20,6 @@ class SurfaceTransition {
 public:
     bool pending = false;
 
-    bool MatchesNavigation(const std::wstring& key, uint64_t owner, uint64_t revision) const {
-        return current_.get() && key == key_ && owner == owner_ && revision == revision_;
-    }
-
     void Reset() {
         current_.reset(); previous_.reset(); key_.clear(); variant_.clear(); pending = false;
         owner_ = revision_ = 0;

@@ -137,10 +137,8 @@ void ReleaseTrayBatch(AppState& s, size_t idx) {
         }
     }
     if (req.sources.empty()) return;
-    const bool move_intent = b.move_intent;
     const auto task = s.ops.Submit(std::move(req));
     if (!task) return;
-    s.trayTransfers[task].move_intent = move_intent;
     for (auto it = submitted.rbegin(); it != submitted.rend(); ++it) s.tray.RemoveItem(idx, *it);
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }

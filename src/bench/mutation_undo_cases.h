@@ -17,8 +17,8 @@
 namespace pulse::ops {
 
 struct MutationUndoTestProbe {
-    static void Execute(OpsManager& manager, OpRequest request, bool cancelled = false,
-                        bool force_copy = false) {
+    static void Execute(OpsManager& manager, OpRequest request, bool cancelled = false) {
+        if (!manager.shell_owner_) manager.StartShellClient();
         OpsManager::QueueItem item;
         {
             std::lock_guard lock(manager.mutex_);
@@ -27,7 +27,6 @@ struct MutationUndoTestProbe {
             item.seq = manager.next_seq_++;
         }
         manager.stopping_.store(cancelled);
-        manager.force_copy_move_ = force_copy;
         item.req = std::move(request);
         manager.ExecuteFileOperation(item);
         manager.stopping_.store(false);
@@ -56,6 +55,7 @@ struct MutationUndoTestProbe {
         return {manager.undo_.begin(), manager.undo_.end()};
     }
     static bool ExecuteQueued(OpsManager& manager) {
+        if (!manager.shell_owner_) manager.StartShellClient();
         OpsManager::QueueItem item;
         {
             std::lock_guard lock(manager.mutex_);
@@ -151,9 +151,9 @@ inline int RunMutationUndoRegressions(const std::wstring& fixture_root) {
         return matched == history.sources.size();
     };
     const auto execute_inverses = [](OpsManager& manager, std::vector<OpRequest> inverses,
-                                     bool cancelled = false, bool force_copy = false) {
+                                     bool cancelled = false) {
         for (auto& inverse : inverses)
-            MutationUndoTestProbe::Execute(manager, std::move(inverse), cancelled, force_copy);
+            MutationUndoTestProbe::Execute(manager, std::move(inverse), cancelled);
     };
     const std::string original_bytes = "historical mutation product";
     const std::string replacement_bytes = "same-name replacement must remain";
@@ -505,18 +505,18 @@ inline int RunMutationUndoRegressions(const std::wstring& fixture_root) {
             L"reverse batch Undo restores both dependent names and exact historical objects");
     }
 
-    for (const bool force_copy : {false, true}) {
-        const auto dir = fixture_root + (force_copy ? L"\\move-copy-delete" : L"\\move-keep-both");
+    {
+        const auto dir = fixture_root + L"\\move-keep-both";
         const auto target = dir + L"\\target", original = dir + L"\\full.original.name.txt";
         const auto occupied = target + L"\\full.original.name.txt";
         check(mkdir(target) && write(original, original_bytes) && write(occupied, replacement_bytes),
             L"Move KeepBoth identity fixture created");
-        const auto original_id = identity(original), occupied_id = identity(occupied);
+        const auto occupied_id = identity(occupied);
         OpsManager manager;
         OpRequest request;
         request.type = OpType::Move; request.sources = {original}; request.dest_dir = target;
         request.collision_policy = CollisionPolicy::KeepBoth;
-        MutationUndoTestProbe::Execute(manager, request, false, force_copy);
+        MutationUndoTestProbe::Execute(manager, request);
         const auto history = MutationUndoTestProbe::History(manager);
         const auto product = history.size() == 1 && history.front().destinations.size() == 1
             ? history.front().destinations.front() : std::wstring{};
@@ -524,21 +524,21 @@ inline int RunMutationUndoRegressions(const std::wstring& fixture_root) {
         check(manager.Status().phase == OpPhase::Completed && !exists(original) && product != occupied &&
             read(product) == original_bytes && read(occupied) == replacement_bytes && identity(occupied) == occupied_id,
             L"KeepBoth Move commits the actual distinct destination and preserves the existing file");
-        check(product_id.Valid() && (!force_copy || product_id != original_id) && history.size() == 1 &&
+        check(product_id.Valid() && history.size() == 1 &&
             history.front().produced_identities == std::vector<FileIdentity>{product_id},
-            L"native and forced copy-delete Move record destination identity rather than stale source identity");
+            L"Shell Move records its actual destination identity");
         OpsManager restored;
         check(restored.UndoFromJson(manager.UndoToJson()) && restored.CanUndo() &&
             same_mapping(history, MutationUndoTestProbe::History(restored)),
-            L"KeepBoth and forced copy-delete Move identities survive JSON persistence");
+            L"KeepBoth Move identities survive JSON persistence");
         auto inverses = MutationUndoTestProbe::TakeInverses(restored);
         check(!history.empty() && inverse_matches(inverses, history.front()),
             L"KeepBoth Move inverse restores the exact full original filename using target identity");
-        execute_inverses(restored, std::move(inverses), false, force_copy);
+        execute_inverses(restored, std::move(inverses));
         check(restored.Status().phase == OpPhase::Completed && read(original) == original_bytes && !exists(product) &&
             read(occupied) == replacement_bytes && identity(occupied) == occupied_id &&
             MutationUndoTestProbe::History(restored).empty(),
-            L"KeepBoth and forced copy-delete Move Undo restores original bytes and consumes only completed history");
+            L"KeepBoth Move Undo restores original bytes and consumes only completed history");
     }
 
     {
@@ -686,7 +686,9 @@ inline int RunMutationUndoRegressions(const std::wstring& fixture_root) {
             read(added) == replacement_bytes && identity(added) == added_id && !exists(original + L"\\unrecorded.txt"),
             L"repeating cleanup-only Undo refuses new child and retains retryable history without replaying successful leaves");
         const auto saved_original = dir + L"\\saved-original";
-        check(MoveFileExW(original.c_str(), saved_original.c_str(), 0) != FALSE,
+        const bool displaced_original = MoveFileExW(original.c_str(), saved_original.c_str(), 0) != FALSE;
+        if (!displaced_original) std::printf("[DIAG] cleanup-only original displacement Win32=%lu\n", GetLastError());
+        check(displaced_original,
             L"cleanup-only original destination displaced within the isolated fixture");
         inverses = MutationUndoTestProbe::TakeInverses(cleanup_retry);
         execute_inverses(cleanup_retry, std::move(inverses));

@@ -27,9 +27,9 @@
 #include "shell_query_worker.h"
 #include "recycle_fileop.h"
 #include "permanent_fileop.h"
+#include "file_operations.h"
 #include "../common/current_user_security.h"
 #include "../common/path_utils.h"
-#include "../common/file_create.h"
 #include "../common/file_identity.h"
 #include "../ipc/file_identity_protocol.h"
 #include "../common/crash_reporter.h"
@@ -84,6 +84,7 @@ struct Request {
     std::vector<pulse::FileIdentity> expected_identities;
     HWND owner = nullptr;
     pulse::shell::DeviceOperation device_operation;
+    ShellOperationRequest file_operation;
 };
 
 bool IsAuthorizedDeletion(uint32_t type) {
@@ -96,6 +97,8 @@ struct HostState {
     std::mutex write_mutex;      // reader thread (PONG) vs main thread (progress/done)
     HWND hwnd_msg = nullptr;
     std::atomic<uint32_t> cancel_id{0};
+    std::mutex paused_mutex;
+    std::set<uint32_t> paused_ids;
     std::atomic<bool> running{true};
 } g;
 
@@ -222,33 +225,39 @@ std::wstring DescribeCreateError(HRESULT hr) {
     return text.empty() ? L"新建失败" : text;
 }
 
-// REQ_NEW_FOLDER / REQ_NEW_FILE: plain Win32 creation (no conflict UI, the UI
-// side already picked a unique name). Runs on the STA thread like other ops.
+// Compatibility messages use the same Shell engine as the generic operation.
 HRESULT ExecuteCreate(const uint32_t type, const std::wstring& path,
                       std::vector<pulse::FileIdentity>& produced_identities) {
-    if (path.empty()) return E_INVALIDARG;
-    const std::wstring parsed = ToParsingPath(path);
-    const wchar_t* create_path = parsed.empty() ? path.c_str() : parsed.c_str();
-    if (GetFileAttributesW(create_path) != INVALID_FILE_ATTRIBUTES)
-        return HRESULT_FROM_WIN32(ERROR_FILE_EXISTS);
-    if (type == REQ_NEW_FOLDER) {
-        const HANDLE folder = pulse::CreateDirectoryHandle(create_path);
-        if (!folder) return HRESULT_FROM_WIN32(GetLastError());
+    ShellOperationRequest request;
+    request.kind = type == REQ_NEW_FOLDER ? ShellOperationKind::CreateFolder : ShellOperationKind::CreateFile;
+    request.items.push_back({{}, path, {}});
+    const auto result = pulse::shell::ExecuteFileOperation(request);
+    for (const auto& item : result.items) {
+        if (FAILED(item.hr) || item.skipped || item.destination.empty()) continue;
         pulse::FileIdentity identity;
-        if (pulse::ReadFileIdentity(folder, identity) && identity.Valid()) produced_identities.push_back(identity);
-        CloseHandle(folder);
-        return S_OK;
+        if (pulse::ReadPathFileIdentity(item.destination, identity) && identity.Valid())
+            produced_identities.push_back(identity);
     }
-    HANDLE f = CreateFileW(create_path, GENERIC_WRITE, 0, nullptr,
-                           CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (f == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
-    pulse::FileIdentity identity;
-    if (pulse::ReadFileIdentity(f, identity) && identity.Valid()) produced_identities.push_back(identity);
-    CloseHandle(f);
-    return S_OK;
+    return result.hr;
 }
-
 void ExecuteRequest(std::unique_ptr<Request> req) {
+    if (req->type == REQ_FILE_OPERATION) {
+        const auto result = pulse::shell::ExecuteFileOperation(req->file_operation, {
+            [id = req->id] { return !g.running.load() || g.cancel_id.load() == id; },
+            [id = req->id] { std::lock_guard lock(g.paused_mutex); return g.paused_ids.contains(id); },
+            [id = req->id](float percent, const std::wstring& path, size_t done, size_t total) {
+                SendProgress(id, percent, path, done, total);
+            },
+            [id = req->id](uint64_t done, uint64_t total) {
+                PayloadWriter writer;
+                writer.PutU64(done); writer.PutU64(total);
+                SendMsg(RSP_FILE_OPERATION_BYTES, id, writer.data());
+            }});
+        { std::lock_guard lock(g.paused_mutex); g.paused_ids.erase(req->id); }
+        if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
+        SendMsg(RSP_FILE_OPERATION_DONE, req->id, WriteShellOperationResult(result));
+        return;
+    }
     if (req->type == REQ_DEVICE_OPERATION) {
         const HRESULT hr = pulse::shell::ExecuteDeviceOperation(req->device_operation);
         SendDone(req->id, hr, hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), L"");
@@ -370,6 +379,34 @@ DWORD WINAPI ReaderThreadImpl() {
                 if (g_launch_processes && g_launch_processes->Cancel(h.request_id)) break;
                 if (g_interaction_processes && g_interaction_processes->Cancel(h.request_id)) break;
                 g.cancel_id.store(h.request_id);
+                break;
+            }
+            case REQ_FILE_OPERATION_PAUSE: {
+                PayloadReader reader(payload.data(), payload.size());
+                uint32_t paused = 0;
+                if (reader.GetU32(paused) && paused <= 1 && !reader.remaining()) {
+                    std::lock_guard lock(g.paused_mutex);
+                    if (paused) g.paused_ids.insert(h.request_id);
+                    else g.paused_ids.erase(h.request_id);
+                }
+                break;
+            }
+            case REQ_FILE_OPERATION: {
+                auto request = std::make_unique<Request>();
+                request->type = h.type; request->id = h.request_id;
+                const bool parsed = ReadShellOperation(payload.data(), payload.size(), request->file_operation);
+                ShellOperationResult rejected;
+                // Deletion must pass the deletion service's one-use admission.
+                if (!parsed || g_context_worker || request->file_operation.kind == ShellOperationKind::DeletePermanent ||
+                    request->file_operation.kind == ShellOperationKind::Recycle) {
+                    rejected.hr = parsed ? E_ACCESSDENIED : E_INVALIDARG;
+                    SendMsg(RSP_FILE_OPERATION_DONE, h.request_id, WriteShellOperationResult(rejected));
+                } else if (PostMessageW(g.hwnd_msg, WM_EXEC_REQUEST, 0, reinterpret_cast<LPARAM>(request.get()))) {
+                    request.release();
+                } else {
+                    rejected.hr = HRESULT_FROM_WIN32(GetLastError());
+                    SendMsg(RSP_FILE_OPERATION_DONE, h.request_id, WriteShellOperationResult(rejected));
+                }
                 break;
             }
             case REQ_SHUTDOWN: {

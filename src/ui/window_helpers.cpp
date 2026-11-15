@@ -5,6 +5,7 @@
 
 #include "../common/windows_compat.h"
 #include "window_helpers.h"
+#include "dialog_style.h"
 
 #include <algorithm>
 #include <dwmapi.h>
@@ -125,6 +126,48 @@ void EndSurface(Compositor& compositor) {
         return;
     }
     compositor.Present();
+}
+
+D2D1_RECT_F DialogCloseRect(float width, float scale) {
+    return D2D1::RectF(width - dialog_style::kCloseWidth * scale, 0, width,
+        dialog_style::kTitleHeight * scale);
+}
+
+void DrawDialogHeader(Compositor& compositor, fluent::Painter& painter,
+                      const Theme& theme, float scale, std::wstring_view title,
+                      std::wstring_view glyph, const fluent::ControlState& close) {
+    const float width = static_cast<float>(compositor.Width());
+    const auto close_rect = DialogCloseRect(width, scale);
+    painter.FillRoundedRect(D2D1::RectF(0, 0, width, close_rect.bottom), 0, theme.surface_title);
+    painter.DrawGlyph(glyph, DipRect(scale, dialog_style::kMargin, 12,
+        dialog_style::kIconSize, dialog_style::kIconSize),
+        IsHighContrast() ? theme.text : theme.accent_ink);
+    const auto title_bounds = D2D1::RectF(48 * scale, 0, close_rect.left - 8 * scale, close_rect.bottom);
+    if (!compositor.DrawDialogTitle(title, title_bounds, theme.text))
+        painter.DrawTextNative(title, title_bounds, compositor.DialogTitleFormat(), theme.text);
+    painter.DrawTitleBarButton(close_rect, fluent::TitleBarButtonRole::Close, {}, close, true);
+    painter.FillRoundedRect(D2D1::RectF(0, close_rect.bottom - 1, width, close_rect.bottom),
+        0, theme.stroke_divider);
+}
+
+void DrawDialogFooter(Compositor& compositor, fluent::Painter& painter,
+                      const Theme& theme, float top) {
+    const float width = static_cast<float>(compositor.Width());
+    painter.FillRoundedRect(D2D1::RectF(0, top, width, static_cast<float>(compositor.Height())),
+        0, IsHighContrast() ? theme.bg : theme.surface_title);
+    painter.FillRoundedRect(D2D1::RectF(0, top, width, top + 1), 0, theme.stroke_divider);
+}
+
+void LayoutDialogActions(fluent::Painter& painter, float scale, float width, float bottom,
+                         std::wstring_view primary_text, std::wstring_view cancel_text,
+                         D2D1_RECT_F& primary, D2D1_RECT_F& cancel) {
+    const float right = width - dialog_style::kMargin * scale;
+    const float height = dialog_style::kControlHeight * scale;
+    const float primary_width = (std::max)(80 * scale, painter.MeasureButtonWidth(primary_text));
+    const float cancel_width = (std::max)(80 * scale, painter.MeasureButtonWidth(cancel_text));
+    primary = D2D1::RectF(right - primary_width, bottom - height, right, bottom);
+    cancel = D2D1::RectF(primary.left - dialog_style::kGap * scale - cancel_width,
+        bottom - height, primary.left - dialog_style::kGap * scale, bottom);
 }
 
 } // namespace pulse::ui

@@ -592,22 +592,6 @@ void Painter::DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
     DrawGlyphWithFormat(glyph, bounds, color, compositor_->IconFormat());
 }
 
-void Painter::DrawGlyphWithBrush(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                                 BrushId brush) {
-    if (!compositor_) {
-        return;
-    }
-    if (glyph == L"\xE8AC" && DrawRenameResource(bounds, Brush(brush)->GetColor())) return;
-    const auto command = command_icons::FromGlyph(glyph);
-    if (command != command_icons::Icon::None) {
-        EnsureStrokeStyle();
-        const auto icon_bounds = command_icons::CenteredBounds(bounds, Px(20.0f));
-        if (command_icons::Draw(dc_, Brush(brush), round_stroke_.get(), command, icon_bounds)) return;
-    }
-    DrawTextWithBrush(glyph, bounds, compositor_->IconFormat(), brush,
-                      HorizontalAlignment::Center);
-}
-
 bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color) {
     if (!dc_ || !theme_) return false;
     if (!rename_svg_dc_.get() && FAILED(dc_->QueryInterface(IID_PPV_ARGS(&rename_svg_dc_)))) return false;
@@ -1287,7 +1271,7 @@ void Painter::DrawSwitch(const D2D1_RECT_F& bounds, std::wstring_view text,
 
 void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole role,
                                  std::wstring_view custom_glyph,
-                                 const ControlState& state) {
+                                 const ControlState& state, bool large_glyph) {
     if (!theme_) {
         return;
     }
@@ -1297,8 +1281,8 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
     if (state.enabled && (state.hovered || state.pressed)) {
         draw_fill = true;
         if (role == TitleBarButtonRole::Close) {
-            fill = HexColor(0xC42B1C);
-            foreground = HexColor(0xFFFFFF);
+            fill = high_contrast_ ? theme_->fill_selected : theme_->danger;
+            foreground = high_contrast_ ? theme_->text_selected : HexColor(0xFFFFFF);
         } else {
             fill = high_contrast_ ? (state.pressed ? theme_->fill_pressed : theme_->fill_hover)
                                   : dark_ ? Rgba(0xFFFFFF, state.pressed ? 7 : 10)
@@ -1321,8 +1305,17 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
     if (role == TitleBarButtonRole::Maximize) glyph = kMaximize;
     if (role == TitleBarButtonRole::Restore) glyph = kRestore;
     if (role == TitleBarButtonRole::Close) glyph = kClose;
-    DrawGlyphWithFormat(glyph, Inset(bounds, Px(12.0f)), foreground,
-                        SmallIconFormat());
+    if (large_glyph) {
+        const auto icon_bounds = command_icons::CenteredBounds(bounds, Px(20.0f));
+        EnsureStrokeStyle();
+        if (!command_icons::Draw(dc_, ScratchBrush(foreground), round_stroke_.get(),
+                command_icons::FromGlyph(glyph), icon_bounds)) {
+            DrawGlyph(glyph, icon_bounds, foreground);
+        }
+    } else {
+        DrawGlyphWithFormat(glyph, Inset(bounds, Px(12.0f)), foreground,
+                            SmallIconFormat());
+    }
     if (state.enabled && state.keyboard_focus) {
         DrawFocusRing(Inset(bounds, Px(3.0f)), Px(theme_->radius_control));
     }

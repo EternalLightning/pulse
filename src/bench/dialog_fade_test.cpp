@@ -10,6 +10,9 @@
 #include "../common/windows_compat.h"
 #include "../ui/dialog_lifecycle.h"
 #include "../ui/ui_compositor.h"
+#include "../ui/typography.h"
+#include "../ui/input_dialog.h"
+#include "../ui/edit_host.h"
 #include "snapshot_output.h"
 #include <windows.h>
 #include <commctrl.h>
@@ -22,6 +25,9 @@
 #include <filesystem>
 #include <thread>
 #include <vector>
+#include <functional>
+#include <cmath>
+#include <algorithm>
 
 namespace {
 std::atomic_int failures = 0;
@@ -36,6 +42,74 @@ void Check(bool condition, const char* description) {
     if (!condition) failures.fetch_add(1);
 }
 
+pulse::ui::InputDialogInspection Inspect(HWND dialog, bool render = false) {
+    pulse::ui::InputDialogInspection info;
+    Check(SendMessageW(dialog, pulse::ui::kInputDialogInspectMessage, render,
+        reinterpret_cast<LPARAM>(&info)) != 0, "inspect the rendered input dialog");
+    return info;
+}
+constexpr UINT kUiTestCall = WM_APP + 0x394;
+LRESULT CALLBACK UiTestProc(HWND window, UINT message, WPARAM wp, LPARAM lp,
+    UINT_PTR, DWORD_PTR) {
+    if (message == kUiTestCall) {
+        (*reinterpret_cast<std::function<void()>*>(lp))();
+        return 1;
+    }
+    return DefSubclassProc(window, message, wp, lp);
+}
+void OnUi(HWND dialog, std::function<void()> action) {
+    SendMessageW(GetWindow(dialog, GW_OWNER), kUiTestCall, 0, reinterpret_cast<LPARAM>(&action));
+}
+bool ReadPixels(HWND dialog, const std::function<bool(D2D1_SIZE_U, const D2D1_MAPPED_RECT&)>& read) {
+    bool result = false;
+    OnUi(dialog, [&] {
+        const auto info = Inspect(dialog, true);
+        if (!info.compositor || !info.compositor->CaptureFrame()) return;
+        auto* frame = info.compositor->FrameCopy();
+        if (!frame) return;
+        const auto size = frame->GetPixelSize();
+        pulse::ui::ComPtr<ID2D1Bitmap1> bitmap;
+        const auto properties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, frame->GetPixelFormat());
+        if (FAILED(info.compositor->Dc()->CreateBitmap(size, nullptr, 0, &properties, &bitmap)) ||
+            FAILED(bitmap->CopyFromBitmap(nullptr, frame, nullptr))) return;
+        D2D1_MAPPED_RECT mapped{};
+        if (FAILED(bitmap->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return;
+        result = read(size, mapped);
+        bitmap->Unmap();
+    });
+    return result;
+}
+bool Pixel(HWND dialog, float x, float y, D2D1_COLOR_F expected) {
+    return ReadPixels(dialog, [&](D2D1_SIZE_U size, const D2D1_MAPPED_RECT& mapped) {
+        const UINT px = static_cast<UINT>(x), py = static_cast<UINT>(y);
+        if (px >= size.width || py >= size.height) return false;
+        const auto* pixel = mapped.bits + py * mapped.pitch + px * 4;
+        return std::abs(pixel[2] - std::lround(expected.r * 255)) <= 1 &&
+            std::abs(pixel[1] - std::lround(expected.g * 255)) <= 1 &&
+            std::abs(pixel[0] - std::lround(expected.b * 255)) <= 1;
+    });
+}
+bool CloseGlyph(HWND dialog) {
+    const auto info = Inspect(dialog);
+    return ReadPixels(dialog, [&](D2D1_SIZE_U size, const D2D1_MAPPED_RECT& mapped) {
+        int left = static_cast<int>(size.width), top = static_cast<int>(size.height), right = -1, bottom = -1;
+        const auto* background = mapped.bits + (static_cast<int>(info.close.top) + 3) * mapped.pitch +
+            (static_cast<int>(info.close.left) + 3) * 4;
+        for (int y = static_cast<int>(info.close.top) + 3; y < info.close.bottom - 3; ++y)
+            for (int x = static_cast<int>(info.close.left) + 3; x < info.close.right - 3; ++x) {
+                const auto* pixel = mapped.bits + y * mapped.pitch + x * 4;
+                if (std::abs(pixel[0] - background[0]) + std::abs(pixel[1] - background[1]) +
+                    std::abs(pixel[2] - background[2]) < 150) continue;
+                left = (std::min)(left, x); right = (std::max)(right, x);
+                top = (std::min)(top, y); bottom = (std::max)(bottom, y);
+            }
+        return right >= left && right - left >= 8 * info.scale && right - left <= 16 * info.scale &&
+            bottom - top >= 8 * info.scale && bottom - top <= 16 * info.scale &&
+            std::abs((left + right + 1) - (info.close.left + info.close.right)) <= 3 * info.scale &&
+            std::abs((top + bottom + 1) - (info.close.top + info.close.bottom)) <= 3 * info.scale;
+    });
+}
 LRESULT CALLBACK FixtureProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     if (message == kResponsivenessProbe) {
         if (GetPropW(window, L"Pulse.DialogFadeState")) ++messages_during_fade;
@@ -62,6 +136,18 @@ LRESULT CALLBACK FixtureProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
 
 // Read only the fixture's client DC; never capture the desktop or another window.
 bool CaptureFixture(HWND window, const wchar_t* filename) {
+    pulse::ui::InputDialogInspection inspection;
+    if (SendMessageW(window, pulse::ui::kInputDialogInspectMessage, 0, reinterpret_cast<LPARAM>(&inspection))) {
+        wchar_t fixture_root[32768]{};
+        GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", fixture_root, ARRAYSIZE(fixture_root));
+        const auto folder = fixture_root[0] ? std::filesystem::path(fixture_root) : std::filesystem::path(L"bench_data/dialog_fade");
+        std::error_code error;
+        std::filesystem::create_directories(folder, error);
+        auto output = std::filesystem::absolute(folder / filename);
+        output.replace_extension(L".png");
+        return !error && SendMessageW(window, pulse::ui::kInputDialogSnapshotMessage, 0,
+            reinterpret_cast<LPARAM>(output.c_str())) != 0;
+    }
     RECT client{};
     if (!GetClientRect(window, &client)) return false;
     const int width = client.right, height = client.bottom;
@@ -404,18 +490,11 @@ BOOL CALLBACK FindPrompt(HWND window, LPARAM parameter) {
     return TRUE;
 }
 
-RECT ChildBounds(HWND dialog, int id) {
-    RECT rect{};
-    GetWindowRect(GetDlgItem(dialog, id), &rect);
-    MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&rect), 2);
-    return rect;
-}
-
 void CheckPromptStyle(HWND dialog, UINT dpi, bool dark) {
     const auto px = [dpi](int dip) { return MulDiv(dip, static_cast<int>(dpi), 96); };
     RECT client{}; GetClientRect(dialog, &client);
-    const RECT primary = ChildBounds(dialog, IDOK), cancel = ChildBounds(dialog, IDCANCEL);
-    const RECT close = ChildBounds(dialog, 101);
+    const auto info = Inspect(dialog);
+    const auto primary = info.primary, cancel = info.cancel, close = info.close;
     Check(close.right - close.left == px(46) && close.bottom == px(44),
         "new-item close target follows 46 by 44 DIP header contract");
     Check(primary.bottom - primary.top == px(32) && cancel.bottom == primary.bottom &&
@@ -427,8 +506,11 @@ void CheckPromptStyle(HWND dialog, UINT dpi, bool dark) {
     LOGFONTW font{};
     GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 100), WM_GETFONT, 0, 0)), sizeof(font), &font);
     Check(font.lfHeight == -px(14), "new-item native input uses 14 DIP text after layout");
-    GetObjectW(reinterpret_cast<HFONT>(SendMessageW(GetDlgItem(dialog, 101), WM_GETFONT, 0, 0)), sizeof(font), &font);
-    Check(font.lfHeight == -px(12), "close glyph uses 12 DIP format independently of the semantic header icon");
+    Check(wcscmp(font.lfFaceName, pulse::ui::typography::PreferredTextFamily()) == 0,
+        "new-item native input uses the shared text family");
+    Check(info.title_font_size == px(14) && info.title_weight == DWRITE_FONT_WEIGHT_BOLD,
+        "new-item caption uses the shared bold DirectWrite title format");
+    Check(CloseGlyph(dialog), "new-item vector Close is visible at its shared size and centered in its hit target");
     const auto theme = pulse::ui::IsHighContrast() ? pulse::ui::MakeHighContrastTheme() :
         pulse::ui::MakeTheme(dark, D2D1::ColorF(GetRValue(prompt_accent) / 255.0f,
             GetGValue(prompt_accent) / 255.0f, GetBValue(prompt_accent) / 255.0f));
@@ -437,18 +519,15 @@ void CheckPromptStyle(HWND dialog, UINT dpi, bool dark) {
     const auto outline = pulse::ui::IsHighContrast() ? theme.stroke_card : dark
         ? pulse::ui::HexColor(0xFFFFFF, 0.08f) : pulse::ui::HexColor(0x000000, 13.0f / 255.0f);
     const auto border = pulse::ui::BlendOver(outline, input);
-    const COLORREF expected = RGB(static_cast<BYTE>(border.r * 255), static_cast<BYTE>(border.g * 255), static_cast<BYTE>(border.b * 255));
-    RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-    HDC dc = GetDC(dialog);
-    Check(GetPixel(dc, px(20), px(116)) == expected,
+    const auto field = info.fields.front().bounds;
+    Check(Pixel(dialog, field.left, field.top + px(8), border),
         "new-item input border composites translucent stroke over the input fill");
     GUITHREADINFO thread{sizeof(thread)};
     GetGUIThreadInfo(GetWindowThreadProcessId(dialog, nullptr), &thread);
-    const auto bottom = pulse::ui::BlendOver(thread.hwndFocus == GetDlgItem(dialog, 100)
-        ? theme.accent : theme.stroke_input_bottom, input);
-    Check(GetPixel(dc, px(50), px(131)) == RGB(static_cast<BYTE>(bottom.r * 255), static_cast<BYTE>(bottom.g * 255), static_cast<BYTE>(bottom.b * 255)),
+    const auto bottom = thread.hwndFocus == GetDlgItem(dialog, 100)
+        ? pulse::ui::BlendOver(theme.accent, input) : pulse::ui::BlendOver(theme.stroke_input_bottom, border);
+    Check(Pixel(dialog, field.left + px(30), field.bottom - 1, bottom),
         "new-item bottom stroke uses accent only while its native editor owns focus");
-    ReleaseDC(dialog, dc);
 }
 
 std::atomic_bool theme_refresh_ran = false;
@@ -532,7 +611,7 @@ void RunPrompt(HWND owner, bool accept) {
     Check(IsWindowEnabled(owner) != FALSE, "new-item restores isolated owner after dismissal");
 }
 
-std::uint64_t ClientHash(HWND window) {
+std::uint64_t ClientHash(HWND window, bool dark) {
     RECT client{};
     GetClientRect(window, &client);
     BITMAPINFO info{};
@@ -547,7 +626,16 @@ std::uint64_t ClientHash(HWND window) {
     std::uint64_t hash = 0;
     if (source && memory && bitmap && pixels) {
         const auto previous = SelectObject(memory, bitmap);
-        if (BitBlt(memory, 0, 0, client.right, client.bottom, source, 0, 0, SRCCOPY)) {
+        const auto inspection = Inspect(GetParent(window));
+        bool custom = false;
+        for (const auto& field : inspection.fields) if (field.edit == window) custom = field.custom;
+        const bool rendered = custom && inspection.compositor
+            ? inspection.compositor->PaintLumaEdit(window, memory, inspection.compositor->TextFormat(),
+                pulse::ui::ChildEditColor(pulse::ui::ChildEditTextColor(dark)),
+                pulse::ui::ChildEditColor(pulse::ui::ChildEditBackColor(dark)))
+            : PrintWindow(window, memory, PW_CLIENTONLY) != FALSE;
+        if (rendered) {
+            GdiFlush();
             hash = 14695981039346656037ull;
             const auto* bytes = static_cast<const BYTE*>(pixels);
             for (size_t i = 0; i < static_cast<size_t>(client.right) * client.bottom * 4; ++i) {
@@ -566,7 +654,7 @@ std::uint64_t ClientHash(HWND window) {
 struct InputCase {
     HWND owner = nullptr;
     bool dark = false, ran = false;
-    int parent_paints = 0, button_paints = 0;
+    int parent_paints = 0;
 };
 InputCase* input_case = nullptr;
 constexpr UINT_PTR kInputTimer = 913;
@@ -575,7 +663,6 @@ LRESULT CALLBACK ObserveInput(HWND dialog, UINT message, WPARAM wp, LPARAM lp,
     UINT_PTR subclass, DWORD_PTR reference) {
     auto& test = *reinterpret_cast<InputCase*>(reference);
     if (message == WM_PAINT) ++test.parent_paints;
-    if (message == WM_DRAWITEM) ++test.button_paints;
     if (message == WM_NCDESTROY) RemoveWindowSubclass(dialog, ObserveInput, subclass);
     return DefSubclassProc(dialog, message, wp, lp);
 }
@@ -588,7 +675,6 @@ void CALLBACK InputTimer(HWND owner, UINT, UINT_PTR, DWORD) {
     auto& test = *input_case;
     test.ran = true;
     const HWND dialog = search.dialog, edit = GetDlgItem(dialog, 100);
-    const HWND create = GetDlgItem(dialog, IDOK);
     SetWindowTextW(edit, L"报告");
     RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     Check(SetWindowSubclass(dialog, ObserveInput, 2, reinterpret_cast<DWORD_PTR>(&test)) != FALSE,
@@ -603,54 +689,88 @@ void CALLBACK InputTimer(HWND owner, UINT, UINT_PTR, DWORD) {
     }
     Check(GetWindowTextLengthW(edit) == 66, "held-key repeat preserves every character");
     Check(test.parent_paints == 0, "valid repeat does not repaint dialog background");
-    Check(test.button_paints == 0, "valid repeat does not repaint unchanged buttons");
-    Check(IsWindowEnabled(create) != FALSE, "valid repeat leaves create enabled");
+    Check(test.parent_paints == 0, "valid repeat does not repaint unchanged Direct2D actions");
+    Check(Inspect(dialog).enabled, "valid repeat leaves create enabled");
 
     HideCaret(edit);
-    const auto before = ClientHash(edit);
+    double presentation_time = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    Check(SetPropW(edit, L"Pulse.Test.EditTime", reinterpret_cast<HANDLE>(&presentation_time)) != FALSE,
+        "hold the input animation clock still across the parent repaint");
+    const auto before = ClientHash(edit, test.dark);
     InvalidateRect(dialog, nullptr, FALSE);
     UpdateWindow(dialog);
-    Check(before != 0 && ClientHash(edit) == before, "parent repaint preserves native edit pixels");
+    const auto after = ClientHash(edit, test.dark);
+    if (!before || after != before)
+        std::printf("[INFO] input frame hashes before=%llu after=%llu\n",
+            static_cast<unsigned long long>(before), static_cast<unsigned long long>(after));
+    Check(before != 0 && after == before, "parent repaint preserves rendered native edit pixels at the same animation time");
+    RemovePropW(edit, L"Pulse.Test.EditTime");
     ShowCaret(edit);
 
-    const auto error_only = [&] {
-        RECT update{}, edit_rect{}, overlap{};
-        GetWindowRect(edit, &edit_rect);
-        MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&edit_rect), 2);
-        return GetUpdateRect(dialog, &update, FALSE) && !IntersectRect(&overlap, &update, &edit_rect)
-            && update.bottom <= MulDiv(160, pulse::compat::WindowDpi(dialog), 96);
+    const auto local_update = [&](bool error_changed) {
+        const auto info = Inspect(dialog);
+        RECT client{}; GetClientRect(dialog, &client);
+        const auto& primary = info.primary;
+        HRGN allowed = CreateRectRgn(static_cast<int>(std::floor(primary.left)), static_cast<int>(std::floor(primary.top)),
+            static_cast<int>(std::ceil(primary.right)), static_cast<int>(std::ceil(primary.bottom)));
+        if (error_changed) {
+            HRGN error = CreateRectRgn(MulDiv(20, pulse::compat::WindowDpi(dialog), 96),
+                static_cast<int>(std::floor(info.fields.front().bounds.bottom + 4 * info.scale)),
+                client.right - MulDiv(20, pulse::compat::WindowDpi(dialog), 96),
+                client.bottom - MulDiv(68, pulse::compat::WindowDpi(dialog), 96));
+            CombineRgn(allowed, allowed, error, RGN_OR); DeleteObject(error);
+        }
+        HRGN update = CreateRectRgn(0, 0, 0, 0);
+        const bool pending = GetUpdateRgn(dialog, update, FALSE) > NULLREGION;
+        const bool local = CombineRgn(update, update, allowed, RGN_DIFF) == NULLREGION;
+        DeleteObject(update); DeleteObject(allowed);
+        return pending && local;
     };
     SetWindowTextW(edit, L"bad:name");
-    Check(!IsWindowEnabled(create), "invalid name disables create");
-    Check(error_only(), "invalid transition invalidates only error area above footer");
+    Check(!Inspect(dialog).enabled && !Inspect(dialog).error.empty(), "invalid name disables create and exposes the validation error");
+    Check(local_update(true), "invalid transition invalidates only error and primary action regions");
     UpdateWindow(dialog);
-    UpdateWindow(create);
     SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
-    test.parent_paints = test.button_paints = 0;
+    test.parent_paints = 0;
     for (int i = 0; i < 16; ++i) {
         SendMessageW(edit, WM_CHAR, ':', 1);
         UpdateWindow(dialog);
         UpdateWindow(edit);
     }
-    Check(test.parent_paints == 0 && test.button_paints == 0,
+    Check(test.parent_paints == 0,
         "invalid repeat does not repaint unchanged error or buttons");
     SendMessageW(dialog, WM_COMMAND, IDOK, 0);
     Check(IsWindow(dialog), "invalid name cannot accept dialog");
 
     SetWindowTextW(edit, L"科技报告");
-    Check(IsWindowEnabled(create) && error_only(), "valid transition enables create and clears error locally");
+    Check(Inspect(dialog).enabled && Inspect(dialog).error.empty() && local_update(true),
+        "valid transition enables create and clears error locally");
     UpdateWindow(dialog);
     SetWindowTextW(edit, L"");
-    Check(!IsWindowEnabled(create) && !GetUpdateRect(dialog, nullptr, FALSE),
-        "empty name disables create without repainting error area");
+    Check(!Inspect(dialog).enabled && Inspect(dialog).error.empty() && local_update(false),
+        "empty name disables create while invalidating only its action and retaining the empty error area");
     SetWindowTextW(edit, L"科技报告");
     SendMessageW(edit, EM_SETSEL, static_cast<WPARAM>(-1), -1);
     SendMessageW(edit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"_粘贴"));
-    Check(GetWindowTextLengthW(edit) == 7 && IsWindowEnabled(create), "Unicode replacement preserves native edit validation");
+    Check(GetWindowTextLengthW(edit) == 7 && Inspect(dialog).enabled, "Unicode replacement preserves native edit validation");
     SendMessageW(edit, EM_UNDO, 0, 0);
     wchar_t value[32]{};
     GetWindowTextW(edit, value, ARRAYSIZE(value));
-    Check(wcscmp(value, L"科技报告") == 0 && IsWindowEnabled(create), "native undo restores valid Unicode name");
+    Check(wcscmp(value, L"科技报告") == 0 && Inspect(dialog).enabled, "native undo restores valid Unicode name");
+    SendMessageW(edit, WM_IME_STARTCOMPOSITION, 0, 0);
+    SendMessageW(edit, WM_KEYDOWN, VK_RETURN, 0);
+    SendMessageW(edit, WM_KEYDOWN, VK_ESCAPE, 0);
+    Check(IsWindow(dialog) && GetWindowTextLengthW(edit) == 4,
+        "synthetic IME composition Enter and Escape preserve the open new-item editor");
+    SendMessageW(edit, WM_IME_ENDCOMPOSITION, 0, 0);
+    for (const int action : {IDCANCEL, IDOK, 101}) {
+        SendMessageW(GetFocus(), WM_KEYDOWN, VK_TAB, 0);
+        Check(GetFocus() == dialog && Inspect(dialog).focus == action,
+            "new-item Tab traverses Cancel, Create and Close in the shared action order");
+    }
+    SendMessageW(dialog, WM_KEYDOWN, VK_TAB, 0);
+    Check(GetFocus() == edit, "new-item Tab wraps from Close to its native editor");
     RedrawWindow(dialog, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     Check(CaptureFixture(dialog, test.dark ? L"newitem-input-dark.bmp" : L"newitem-input-light.bmp"),
         "capture new-item dialog after repeated input and validation changes");
@@ -671,6 +791,34 @@ void RunInput(HWND owner, bool dark) {
     Check(accepted == dark && result == (dark ? L"科技报告" : L"retained-value"),
         "Enter accepts and Escape cancels without corrupting caller output");
     Check(IsWindowEnabled(owner), "repeated-input prompt restores modal owner");
+}
+
+void RunInputOwnerState(HWND owner) {
+    for (const bool initially_enabled : {true, false}) {
+        EnableWindow(owner, initially_enabled);
+        InputCase test{owner, false};
+        input_case = &test;
+        Check(SetTimer(owner, kInputTimer, 10, [](HWND timer_owner, UINT, UINT_PTR timer, DWORD) {
+            Search search{timer_owner};
+            EnumThreadWindows(GetCurrentThreadId(), FindPrompt, reinterpret_cast<LPARAM>(&search));
+            if (!search.dialog) return;
+            KillTimer(timer_owner, timer);
+            input_case->ran = true;
+            Check(!IsWindowEnabled(timer_owner), "owner remains disabled while the real new-item prompt is open");
+            PostMessageW(GetDlgItem(search.dialog, 100), WM_KEYDOWN, VK_ESCAPE, 1);
+        }) != 0, "schedule real input cancellation with the owner's original enabled state");
+        std::wstring result = L"retained-owner-state";
+        const bool accepted = pulse::app::PromptNewItemName(owner, L"Owner state fixture", false,
+            RGB(80, 180, 220), result);
+        KillTimer(owner, kInputTimer);
+        input_case = nullptr;
+        Check(test.ran && !accepted && result == L"retained-owner-state",
+            "Escape cancels the real input prompt without changing caller output");
+        Check((IsWindowEnabled(owner) != FALSE) == initially_enabled, initially_enabled
+            ? "input cancellation reenables an initially enabled owner"
+            : "input cancellation preserves an initially disabled owner");
+    }
+    EnableWindow(owner, TRUE);
 }
 
 struct EscapeCase {
@@ -784,6 +932,7 @@ int main(int argc, char** argv) {
         WS_OVERLAPPEDWINDOW, 100, 100, 640, 480, nullptr, nullptr, fixture.hInstance, nullptr);
     Check(owner != nullptr, "create isolated modal owner");
     if (!owner) return 1;
+    Check(SetWindowSubclass(owner, UiTestProc, 9, 0) != FALSE, "install UI-thread readback dispatch");
     const bool animations = AnimationsEnabled();
     if (style_only) {
         prompt_accent = RGB(0, 120, 212);
@@ -796,6 +945,7 @@ int main(int argc, char** argv) {
     } else if (input_only) {
         RunInput(owner, false);
         RunInput(owner, true);
+        RunInputOwnerState(owner);
     } else {
         RunNative(owner, animations);
         RunStyleChanges(owner, animations);
@@ -810,7 +960,7 @@ int main(int argc, char** argv) {
     DestroyWindow(owner);
     if (SUCCEEDED(com)) CoUninitialize();
     std::printf("Dialog fade tests: %d failure(s). BMPs: bench_data/dialog_fade.\n", failures.load());
-    std::printf("Client screenshots verify GDI content; desktop/compositor appearance requires visual inspection.\n");
+    std::printf("Input snapshots verify the shared Direct2D frame; native fade fixtures retain client captures.\n");
     if (animations)
         std::printf("[SKIP] Disabled-animation branch: current system animations enabled; settings were not changed.\n");
     return failures.load() == 0 ? 0 : 1;
